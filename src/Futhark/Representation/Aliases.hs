@@ -5,6 +5,9 @@ module Futhark.Representation.Aliases
        ( -- * The Lore definition
          Aliases
        , Names' (..)
+       , VarAliases
+       , ConsumedInExp
+       , BodyAliasing
        , module Futhark.Representation.AST.Attributes.Aliases
          -- * Syntax types
        , Prog
@@ -100,10 +103,20 @@ instance FreeIn Names' where
 instance PP.Pretty Names' where
   ppr = PP.commasep . map PP.ppr . HS.toList . unNames
 
+-- | The aliases of the let-bound variable.
+type VarAliases = Names'
+
+-- | Everything consumed in the expression.
+type ConsumedInExp = Names'
+
+-- | The aliases of what is returned by the 'Body', and what is
+-- consumed inside of it.
+type BodyAliasing = ([VarAliases], ConsumedInExp)
+
 instance Lore.Lore lore => Lore.Lore (Aliases lore) where
-  type LetBound (Aliases lore) = (Names', Lore.LetBound lore)
-  type Exp (Aliases lore) = (Names', Lore.Exp lore)
-  type Body (Aliases lore) = (([Names'], Names'), Lore.Body lore)
+  type LetBound (Aliases lore) = (VarAliases, Lore.LetBound lore)
+  type Exp (Aliases lore) = (ConsumedInExp, Lore.Exp lore)
+  type Body (Aliases lore) = (BodyAliasing, Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
   type RetType (Aliases lore) = Lore.RetType lore
 
@@ -207,7 +220,7 @@ mkAliasedBody innerlore bnds res =
 
 mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
                     AST.Pattern anylore -> AST.Exp lore
-                 -> [PatElemT (Names', Lore.LetBound anylore)]
+                 -> [PatElemT (VarAliases, Lore.LetBound anylore)]
 mkPatternAliases pat e =
   -- Some part of the pattern may be the context, which is not
   -- aliased.
@@ -227,7 +240,7 @@ mkPatternAliases pat e =
 mkBodyAliases :: Aliased lore =>
                  [AST.Binding lore]
               -> Result
-              -> ([Names'], Names')
+              -> BodyAliasing
 mkBodyAliases bnds res =
   -- We need to remove the names that are bound in bnds from the alias
   -- and consumption sets.  We do this by computing the transitive

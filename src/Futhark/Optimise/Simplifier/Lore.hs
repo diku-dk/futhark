@@ -19,7 +19,8 @@ import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Aliases (unNames, Names' (..))
+import Futhark.Representation.Aliases
+  (unNames, Names' (..), VarAliases, ConsumedInExp, BodyAliasing)
 import qualified Futhark.Representation.Aliases as Aliases
 import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Binder
@@ -30,9 +31,9 @@ import Futhark.Analysis.Rephrase
 data Wise lore = Wise lore
 
 instance Lore.Lore lore => Lore.Lore (Wise lore) where
-  type LetBound (Wise lore) = (Names', Lore.LetBound lore)
-  type Exp (Wise lore) = (Names', Lore.Exp lore)
-  type Body (Wise lore) = (([Names'], Names'), Lore.Body lore)
+  type LetBound (Wise lore) = (VarAliases, Lore.LetBound lore)
+  type Exp (Wise lore) = (ConsumedInExp, Lore.Exp lore)
+  type Body (Wise lore) = (BodyAliasing, Lore.Body lore)
   type FParam (Wise lore) = Lore.FParam lore
   type RetType (Wise lore) = Lore.RetType lore
 
