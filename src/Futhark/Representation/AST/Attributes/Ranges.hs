@@ -1,6 +1,7 @@
 -- | Utility declarations for performing range analysis.
 module Futhark.Representation.AST.Attributes.Ranges
        ( Range
+       , unknownRange
        , Ranged (..)
        )
        where
@@ -11,6 +12,10 @@ import Futhark.Analysis.ScalExp
 
 -- | Upper and lower bound, both inclusive.
 type Range = (Maybe ScalExp, Maybe ScalExp)
+
+-- | A range in which both upper and lower bounds are 'Nothing.
+unknownRange :: Range
+unknownRange = (Nothing, Nothing)
 
 -- | The lore has embedded range information.  Note that it may not be
 -- up to date, unless whatever maintains the syntax tree is careful.
