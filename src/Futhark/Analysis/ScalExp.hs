@@ -24,6 +24,7 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Tools
+import Futhark.Renamer
 
 -----------------------------------------------------------------
 -- BINARY OPERATORS for Numbers                                --
@@ -98,6 +99,11 @@ instance Substitute ScalExp where
               RelExp r x -> RelExp r $ substituteNames subst x
               SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
               SLogOr x y -> substituteNames subst x `SLogOr` substituteNames subst y
+
+instance Rename ScalExp where
+  rename se = do
+    substs <- renamerSubstitutions
+    return $ substituteNames substs se
 
 scalExpType :: ScalExp -> BasicType
 scalExpType (Val ( IntVal _) ) = Int
