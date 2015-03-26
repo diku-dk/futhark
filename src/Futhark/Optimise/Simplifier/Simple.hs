@@ -20,8 +20,8 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import Futhark.Optimise.Simplifier.Lore (Wise)
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Representation.Aliases (Aliases)
 
 data SimpleOps m =
   SimpleOps { mkLetS :: ST.SymbolTable (Lore m)
@@ -61,11 +61,11 @@ bindableSimpleOps =
 newtype SimpleM lore a =
   SimpleM (RWS
            (SimpleOps (SimpleM lore), Engine.Env (SimpleM lore)) -- Reader
-           (Engine.Need (Aliases lore))                             -- Writer
-           (Engine.State (SimpleM lore), NameSource VName)          -- State
+           (Engine.Need (Wise lore))                             -- Writer
+           (Engine.State (SimpleM lore), NameSource VName)       -- State
            a)
   deriving (Applicative, Functor, Monad,
-            MonadWriter (Engine.Need (Aliases lore)),
+            MonadWriter (Engine.Need (Wise lore)),
             MonadReader (SimpleOps (SimpleM lore), Engine.Env (SimpleM lore)),
             MonadState (Engine.State (SimpleM lore), NameSource VName))
 
@@ -75,7 +75,7 @@ instance MonadFreshNames (SimpleM lore) where
 
 instance Engine.Simplifiable lore =>
          MonadBinder (SimpleM lore) where
-  type Lore (SimpleM lore) = Aliases lore
+  type Lore (SimpleM lore) = Wise lore
   mkLetM pat e = do
     vtable <- Engine.getVtable
     simpl <- fst <$> ask

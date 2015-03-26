@@ -14,7 +14,7 @@
 --
 -- If you just want to run the simplifier as simply as possible, you
 -- may prefer to use the "Futhark.Optimise.Simplifier" or
--- "Futhark.Optimise.Simplifier.Simplifiable" modules.
+-- "Futhark.Optimise.Simplifier.Simplify" modules.
 --
 module Futhark.Optimise.Simplifier.Engine
        ( -- * Monadic interface
@@ -59,8 +59,6 @@ import Data.Foldable (traverse_)
 
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
-import Futhark.Representation.Aliases (Aliases)
-import qualified Futhark.Representation.Aliases as Aliases
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Rule
@@ -71,6 +69,7 @@ import Futhark.Optimise.Simplifier.Apply
 import Futhark.Tools
 import qualified Futhark.Analysis.ScalExp as SExp
 import Futhark.Optimise.Simplifier.Simplifiable
+import Futhark.Optimise.Simplifier.Lore
 
 type NeedSet lore = [Binding lore]
 
@@ -106,7 +105,7 @@ emptyState = State { stateVtable = ST.empty }
 
 class (MonadBinder m,
        Proper (Lore m),
-       Lore m ~ Aliases (InnerLore m),
+       Lore m ~ Wise (InnerLore m),
        Simplifiable (InnerLore m)) => MonadEngine m where
   type InnerLore m
   askEngineEnv :: m (Env m)
@@ -458,11 +457,11 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
                     case uniqueness $ identType p of
                       Unique    -> mkLetNamesM' [identName p] =<< eCopy (eValue v)
                       Nonunique -> mkLetNamesM' [identName p] =<< eValue v
-                  mapM_ (simplifyBinding . Aliases.removeBindingAliases) bnds
+                  mapM_ (simplifyBinding . removeBindingWisdom) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
                   pat' <- blockUsage $ simplifyPattern pat $ expExtType e'
                   inspectBinding =<<
-                    mkLetM (Aliases.addAliasesToPattern pat' e') e'
+                    mkLetM (addWisdomToPattern pat' e') e'
 
 simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
   lss' <- simplifyExp lss
@@ -482,7 +481,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
   let (_,newexps'') = unzip newpatexps'
   let newpatexps''= zip newpats'' newexps''
   _ <- mapM (\(p,e) -> inspectBinding =<<
-                        mkLetM (Aliases.addAliasesToPattern p e) e
+                        mkLetM (addWisdomToPattern p e) e
             ) newpatexps''
   return ()
     where gatherPat acc (_, Basic _, _) = return acc
@@ -509,7 +508,7 @@ simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
   pat' <- simplifyPattern pat $ expExtType e'
   inspectBinding =<<
-    mkLetM (Aliases.addAliasesToPattern pat' e') e'
+    mkLetM (addWisdomToPattern pat' e') e'
 
 defaultInspectBinding :: MonadEngine m =>
                          Binding (Lore m) -> m ()

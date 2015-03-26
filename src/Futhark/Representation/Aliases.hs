@@ -35,6 +35,8 @@ module Futhark.Representation.Aliases
        , addAliasesToPattern
        , mkAliasedLetBinding
        , mkAliasedBody
+       , mkPatternAliases
+       , mkBodyAliases
          -- * Removing aliases
        , removeProgAliases
        , removeFunDecAliases
@@ -196,11 +198,22 @@ removePatternAliases = rephrasePattern removeAliases
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore
 addAliasesToPattern pat e =
+  AST.Pattern $ mkPatternAliases pat e
+
+mkAliasedBody :: Lore.Lore lore =>
+                 Lore.Body lore -> [Binding lore] -> Result -> Body lore
+mkAliasedBody innerlore bnds res =
+  AST.Body (mkBodyAliases bnds res, innerlore) bnds res
+
+mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
+                    AST.Pattern anylore -> AST.Exp lore
+                 -> [PatElemT (Names', Lore.LetBound anylore)]
+mkPatternAliases pat e =
   -- Some part of the pattern may be the context, which is not
   -- aliased.
   let als = aliasesOf e
       als' = replicate (patternSize pat - length als) mempty <> als
-  in AST.Pattern $ zipWith annotateBindee (patternElements pat) als'
+  in zipWith annotateBindee (patternElements pat) als'
   where annotateBindee bindee names =
             bindee `setPatElemLore` (Names' names', patElemLore bindee)
           where names' =
@@ -210,9 +223,12 @@ addAliasesToPattern pat e =
                     (_, Mem _)          -> names
                     _                   -> mempty
 
-mkAliasedBody :: Lore.Lore lore =>
-                 Lore.Body lore -> [Binding lore] -> Result -> Body lore
-mkAliasedBody innerlore bnds res =
+
+mkBodyAliases :: Aliased lore =>
+                 [AST.Binding lore]
+              -> Result
+              -> ([Names'], Names')
+mkBodyAliases bnds res =
   -- We need to remove the names that are bound in bnds from the alias
   -- and consumption sets.  We do this by computing the transitive
   -- closure of the alias map (within bnds), then removing anything
@@ -223,16 +239,15 @@ mkAliasedBody innerlore bnds res =
       bound = (`HS.member` boundNames)
       aliases' = map (HS.filter (not . bound)) aliases
       consumed' = HS.filter (not . bound) consumed
-  in AST.Body ((map Names' aliases', Names' consumed'), innerlore) bnds res
+  in (map Names' aliases', Names' consumed')
   where delve (aliasmap, consumed) [] =
           (map (aliasClosure aliasmap . subExpAliases) $ resultSubExps res,
            consumed)
         delve (aliasmap, consumed) (bnd:bnds') =
           let pat = bindingPattern bnd
               e = bindingExp bnd
-              als = HM.fromList
-                    [ (patElemName patElem, unNames $ fst $ patElemLore patElem)
-                    | patElem <- patternElements pat ]
+              als = HM.fromList $
+                    zip (patternNames pat) (patternAliases pat)
               aliasmap' = als <> aliasmap
               consumed' = consumed <> aliasClosure aliasmap (consumedInExp pat e)
           in delve (aliasmap', consumed') bnds'

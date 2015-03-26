@@ -19,8 +19,8 @@ import Control.Monad
 
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
-import Futhark.Representation.Aliases
-  (removeProgAliases, removeFunDecAliases, removeLambdaAliases)
+import Futhark.Optimise.Simplifier.Lore
+  (removeProgWisdom, removeFunDecWisdom, removeLambdaWisdom)
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
@@ -33,7 +33,7 @@ simplifyProgWithRules :: Simplifiable lore =>
                       -> RuleBook (SimpleM lore)
                       -> Prog lore -> Prog lore
 simplifyProgWithRules simpl rules =
-  removeProgAliases . simplifyProg simpl rules
+  removeProgWisdom . simplifyProg simpl rules
 
 -- | Simplify just a single function declaration.
 simplifyFunWithRules :: (MonadFreshNames m, Simplifiable lore) =>
@@ -42,7 +42,7 @@ simplifyFunWithRules :: (MonadFreshNames m, Simplifiable lore) =>
                      -> FunDec lore
                      -> m (FunDec lore)
 simplifyFunWithRules simpl rules =
-  liftM removeFunDecAliases .
+  liftM removeFunDecWisdom .
   simplifyFun simpl rules
 
 -- | Simplify just a single 'Lambda'.
@@ -54,5 +54,5 @@ simplifyLambdaWithRules :: (MonadFreshNames m, Simplifiable lore) =>
                         -> [Maybe Ident]
                         -> m (Lambda lore)
 simplifyLambdaWithRules simpl rules prog lam args =
-  liftM removeLambdaAliases $
+  liftM removeLambdaWisdom $
   simplifyLambda simpl rules (Just prog) lam args

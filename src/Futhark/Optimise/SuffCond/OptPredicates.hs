@@ -38,8 +38,8 @@ import Futhark.Substitute
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Aliases
-  (Aliases, mkAliasedBody, mkAliasedLetBinding, removeExpAliases, addAliasesToPattern)
+import Futhark.Optimise.Simplifier.Lore
+  (Wise, mkWiseBody, mkWiseLetBinding, removeExpWisdom, addWisdomToPattern)
 import Futhark.Representation.AST.Attributes.Ranges
 
 import Prelude hiding (any)
@@ -285,10 +285,10 @@ instance MonadFreshNames m => MonadBinder (VariantM m) where
                   then TooVariant
                   else Invariant
         pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
-    return $ mkAliasedLetBinding pat' explore e
+    return $ mkWiseLetBinding pat' explore e
 
   mkBodyM bnds res =
-    return $ mkAliasedBody () bnds res
+    return $ mkWiseBody () bnds res
 
   addBinding      = Simplify.addBindingEngine
   collectBindings = Simplify.collectBindingsEngine
@@ -335,14 +335,14 @@ instance MonadFreshNames m =>
       else do
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
         suffe <- generating Sufficient $
-                 Simplify.simplifyExp =<< renameExp (removeExpAliases e)
+                 Simplify.simplifyExp =<< renameExp (removeExpWisdom e)
         let pat' = pat { patternElements =
                             zipWith tagPatElem (patternElements pat) vs
                        }
             tagPatElem patElem v =
               patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
             suffpat = Pattern [ S.PatElem v BindVar Nothing | v <- vs ]
-        makeSufficientBinding =<< mkLetM (addAliasesToPattern suffpat suffe) suffe
+        makeSufficientBinding =<< mkLetM (addWisdomToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
   simplifyLetBoundLore Nothing  = return Nothing
@@ -441,7 +441,7 @@ instance Renameable Invariance' where
 instance Proper Invariance' where
 instance Simplify.Simplifiable Invariance' where
 
-type Invariance = Aliases Invariance'
+type Invariance = Wise Invariance'
 
 removeInvariance :: Rephraser Invariance' Basic
 removeInvariance = Rephraser { rephraseExpLore = const ()

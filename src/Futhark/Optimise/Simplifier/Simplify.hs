@@ -12,8 +12,8 @@ module Futhark.Optimise.Simplifier.Simplify
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import Futhark.Optimise.Simplifier.Lore (Wise)
 import Futhark.Optimise.Simplifier.Rule
-import Futhark.Representation.Aliases (Aliases)
 import Futhark.Optimise.Simplifier.Simple
 
 -- | Simplify the given program.  Even if the output differs from the
@@ -23,7 +23,7 @@ simplifyProg :: Simplifiable lore =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Prog lore
-             -> Prog (Aliases lore)
+             -> Prog (Wise lore)
 simplifyProg simpl rules prog =
   Prog $ fst $ runSimpleM (mapM Engine.simplifyFun $ progFunctions prog)
                simpl (Engine.emptyEnv rules $ Just prog) namesrc
@@ -36,7 +36,7 @@ simplifyFun :: (MonadFreshNames m, Simplifiable lore) =>
                SimpleOps (SimpleM lore)
             -> RuleBook (SimpleM lore)
             -> FunDec lore
-            -> m (FunDec (Aliases lore))
+            -> m (FunDec (Wise lore))
 simplifyFun simpl rules fundec =
   modifyNameSource $ runSimpleM (Engine.simplifyFun fundec) simpl $
   Engine.emptyEnv rules Nothing
@@ -46,7 +46,7 @@ simplifyLambda :: (MonadFreshNames m, Simplifiable lore) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Maybe (Prog lore) -> Lambda lore -> [Maybe Ident]
-               -> m (Lambda (Aliases lore))
+               -> m (Lambda (Wise lore))
 simplifyLambda simpl rules prog lam args =
   modifyNameSource $ runSimpleM (Engine.simplifyLambda lam args) simpl $
   Engine.emptyEnv rules prog

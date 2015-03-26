@@ -15,12 +15,12 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
 import qualified Futhark.Representation.Basic as In
-import Futhark.Representation.Aliases
-  (Aliases,
-   mkAliasedBody,
-   mkAliasedLetBinding,
-   removeExpAliases,
-   removePatternAliases)
+import Futhark.Optimise.Simplifier.Lore
+  (Wise,
+   mkWiseBody,
+   mkWiseLetBinding,
+   removeExpWisdom,
+   removePatternWisdom)
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
@@ -381,7 +381,7 @@ allocInExtLambda lam = do
   body <- allocInBody $ extLambdaBody lam
   return $ lam { extLambdaBody = body }
 
-vtableToAllocEnv :: ST.SymbolTable (Aliases ExplicitMemory)
+vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
                  -> HM.HashMap VName MemSummary
 vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
                    HM.toList . ST.bindings
@@ -399,17 +399,17 @@ simplifiable =
   simplifyRetType'
   where mkLetS' vtable pat e = do
           Let pat' lore _ <- runAllocMWithEnv env $
-                             mkLetM (removePatternAliases pat) $
-                             removeExpAliases e
-          return $ mkAliasedLetBinding pat' lore e
+                             mkLetM (removePatternWisdom pat) $
+                             removeExpWisdom e
+          return $ mkWiseLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
 
-        mkBodyS' _ bnds res = return $ mkAliasedBody () bnds res
+        mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
         mkLetNamesS' vtable names e = do
           Let pat' lore _ <-
-            runAllocMWithEnv env $ mkLetNamesM names $ removeExpAliases e
-          return $ mkAliasedLetBinding pat' lore e
+            runAllocMWithEnv env $ mkLetNamesM names $ removeExpWisdom e
+          return $ mkWiseLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
 
         simplifyMemSummary Scalar = return Scalar
