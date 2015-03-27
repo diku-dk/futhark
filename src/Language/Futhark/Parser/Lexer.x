@@ -23,8 +23,8 @@ import Data.Bits
 
 tokens :-
 
-  $white+				;
-  "//"[^\n]*				;
+  $white+                               ;
+  "//"[^\n]*                            ;
   "&&"                     { const AND }
   "||"                     { const OR }
   ">>"                     { const SHIFTR }
@@ -32,6 +32,7 @@ tokens :-
   "=>"                     { const ARROW }
   "<-"                     { const SETTO }
   "<="                     { const LEQ }
+  ">="                     { const GEQ }
   "+"                      { const PLUS }
   "-"                      { const MINUS }
   "~"                      { const NEGATE }
@@ -53,6 +54,7 @@ tokens :-
   "}"                      { const RCURLY }
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
+  "!"                      { const BANG }
   [0-9]+                   { INTLIT . readInt }
   (([0-9]+("."[0-9]+)?))
     ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
@@ -93,7 +95,6 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
-    "rotate"       -> ROTATE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE
@@ -105,11 +106,13 @@ keyword s =
     "concat"       -> CONCAT
     "concatMap"    -> CONCATMAP
     "filter"       -> FILTER
+    "partition"    -> PARTITION
     "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY
+    "while"        -> WHILE
+    "stream"       -> STREAM
     "assert"       -> ASSERT
-    "conjoin"      -> CONJOIN
     _              -> ID $ nameFromString s
 
 type Byte = Word8
@@ -128,7 +131,7 @@ type AlexInput = (AlexPosn,     -- current position,
 alexGetByte :: AlexInput -> Maybe (Byte,AlexInput)
 alexGetByte (p,c,(b:bs),s) = Just (b,(p,c,bs,s))
 alexGetByte (p,c,[],[]) = Nothing
-alexGetByte (p,_,[],(c:s))  = let p' = alexMove p c 
+alexGetByte (p,_,[],(c:s))  = let p' = alexMove p c
                                   (b:bs) = utf8Encode c
                               in p' `seq`  Just (b, (p', c, bs, s))
 
@@ -173,7 +176,7 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
 
                 AlexSkip  inp' len     -> go inp'
                 AlexToken inp'@(pos',_,_,_) len act -> do
-                  let tok = L (loc pos pos') $ act (take len str) 
+                  let tok = L (loc pos pos') $ act (take len str)
                   toks <- go inp'
                   return $ tok : toks
         loc beg end = SrcLoc $ Loc (posnToPos beg) (posnToPos end)

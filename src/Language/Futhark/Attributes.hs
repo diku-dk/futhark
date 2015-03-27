@@ -38,7 +38,9 @@ module Language.Futhark.Attributes
   , similarTo
   , arrayRank
   , arrayDims
-  , setArrayDims
+  , setArrayShape
+  , removeShapeAnnotations
+  , vacuousShapeAnnotations
   , returnType
   , lambdaType
   , lambdaReturnType
@@ -49,6 +51,7 @@ module Language.Futhark.Attributes
   , arrayOf
   , arrayType
   , rowType
+  , toStructural
   , toDecl
   , fromDecl
   , setAliases
@@ -93,7 +96,6 @@ import Control.Monad.Writer
 import Data.Array
 import Data.Hashable
 import Data.List
-import Data.Maybe
 import qualified Data.HashSet as HS
 
 import Language.Futhark.Syntax
@@ -102,21 +104,73 @@ import Language.Futhark.Traversals
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
 -- it is two, and so forth.
-arrayRank :: TypeBase vn as -> Int
-arrayRank = length . arrayDims
+arrayRank :: ArrayShape (shape vn) =>
+             TypeBase shape as vn -> Int
+arrayRank = shapeRank . arrayShape
 
--- | Return the dimensions of a type - for non-arrays, this is the
--- empty list.
-arrayDims :: TypeBase vn as -> ArraySize as
-arrayDims (Array (BasicArray _ ds _ _)) = ds
-arrayDims (Array (TupleArray _ ds _))   = ds
-arrayDims _                             = []
+-- | Return the shape of a type - for non-arrays, this is 'mempty'.
+arrayShape :: ArrayShape (shape vn) =>
+              TypeBase shape as vn -> shape vn
+arrayShape (Array (BasicArray _ ds _ _)) = ds
+arrayShape (Array (TupleArray _ ds _))   = ds
+arrayShape _                             = mempty
+
+-- | Return the dimensions of a type with (possibly) known dimensions.
+arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
+arrayDims = shapeDims . arrayShape
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
-setArrayDims :: ArraySize as -> TypeBase vn as -> TypeBase vn as
-setArrayDims ds (Array (BasicArray et _ u as)) = Array $ BasicArray et ds u as
-setArrayDims _  t                              = t
+setArrayShape :: ArrayShape (shape vn) =>
+                 shape vn -> TypeBase shape as vn -> TypeBase shape as vn
+setArrayShape ds (Array (BasicArray et _ u as)) = Array $ BasicArray et ds u as
+setArrayShape ds (Array (TupleArray et _ u))    = Array $ TupleArray et ds u
+setArrayShape _  (Tuple ts)                     = Tuple ts
+setArrayShape _  (Basic t)                      = Basic t
+
+-- | Change the shape of a type to be just the 'Rank'.
+removeShapeAnnotations :: ArrayShape (shape vn) =>
+                          TypeBase shape as vn -> TypeBase Rank as vn
+removeShapeAnnotations = modifyShapeAnnotations $ Rank . shapeRank
+
+-- | Change the shape of a type to be a 'ShapeDecl' where all
+-- dimensions are 'Nothing'.
+vacuousShapeAnnotations :: ArrayShape (shape vn) =>
+                           TypeBase shape as vn -> TypeBase ShapeDecl as vn
+vacuousShapeAnnotations = modifyShapeAnnotations $ \shape ->
+  ShapeDecl (replicate (shapeRank shape) AnyDim)
+
+-- | Change the shape of a type.
+modifyShapeAnnotations :: (oldshape vn -> newshape vn)
+                       -> TypeBase oldshape as vn
+                       -> TypeBase newshape as vn
+modifyShapeAnnotations f (Array at) =
+  Array $ modifyShapeAnnotationsFromArray f at
+modifyShapeAnnotations f (Tuple ts) =
+  Tuple $ map (modifyShapeAnnotations f) ts
+modifyShapeAnnotations _ (Basic t) =
+  Basic t
+
+modifyShapeAnnotationsFromArray :: (oldshape vn -> newshape vn)
+                                -> ArrayTypeBase oldshape as vn
+                                -> ArrayTypeBase newshape as vn
+modifyShapeAnnotationsFromArray f (BasicArray et shape u as) =
+  BasicArray et (f shape) u as
+modifyShapeAnnotationsFromArray f (TupleArray ts shape u) =
+  TupleArray
+  (map (modifyShapeAnnotationsFromTupleArrayElem f) ts)
+  (f shape) u
+
+  -- Try saying this one three times fast.
+modifyShapeAnnotationsFromTupleArrayElem :: (oldshape vn -> newshape vn)
+                                         -> TupleArrayElemTypeBase oldshape as vn
+                                         -> TupleArrayElemTypeBase newshape as vn
+modifyShapeAnnotationsFromTupleArrayElem
+  _ (BasicArrayElem bt as) = BasicArrayElem bt as
+modifyShapeAnnotationsFromTupleArrayElem
+  f (ArrayArrayElem at) = ArrayArrayElem $ modifyShapeAnnotationsFromArray f at
+modifyShapeAnnotationsFromTupleArrayElem
+  f (TupleArrayElem ts) = TupleArrayElem $ map (modifyShapeAnnotationsFromTupleArrayElem f) ts
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -125,14 +179,14 @@ subuniqueOf _ _ = True
 
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
-subtypeOf :: (Monoid (as1 vn), Monoid (as2 vn)) =>
-             TypeBase as1 vn -> TypeBase as2 vn -> Bool
+subtypeOf :: (ArrayShape (shape vn), Monoid (as1 vn), Monoid (as2 vn)) =>
+             TypeBase shape as1 vn -> TypeBase shape as2 vn -> Bool
 subtypeOf
   (Array (BasicArray t1 dims1 u1 _))
   (Array (BasicArray t2 dims2 u2 _)) =
   u1 `subuniqueOf` u2
        && t1 == t2
-       && length dims1 == length dims2
+       && dims1 == dims2
 subtypeOf
   (Array (TupleArray et1 dims1 u1))
   (Array (TupleArray et2 dims2 u2)) =
@@ -141,7 +195,7 @@ subtypeOf
        && and (zipWith subtypeOf
                (map tupleArrayElemToType et1)
                (map tupleArrayElemToType et2))
-       && length dims1 == length dims2
+       && dims1 == dims2
 subtypeOf (Tuple ts1) (Tuple ts2) =
   length ts1 == length ts2 && and (zipWith subtypeOf ts1 ts2)
 subtypeOf (Basic bt1) (Basic bt2) = bt1 == bt2
@@ -149,29 +203,32 @@ subtypeOf _ _ = False
 
 -- | @x \`similarTo\` y@ is true if @x@ and @y@ are the same type,
 -- ignoring uniqueness.
-similarTo :: Monoid (as vn) => TypeBase as vn -> TypeBase as vn -> Bool
+similarTo :: (ArrayShape (shape vn), Monoid (as vn)) =>
+             TypeBase shape as vn
+          -> TypeBase shape as vn
+          -> Bool
 similarTo t1 t2 = t1 `subtypeOf` t2 || t2 `subtypeOf` t1
 
 -- | Return the uniqueness of a type.
-uniqueness :: TypeBase vn as -> Uniqueness
+uniqueness :: TypeBase shape as vn -> Uniqueness
 uniqueness (Array (BasicArray _ _ u _)) = u
 uniqueness (Array (TupleArray _ _ u))   = u
 uniqueness _                            = Nonunique
 
 -- | @unique t@ is 'True' if the type of the argument is unique.
-unique :: TypeBase vn as -> Bool
+unique :: TypeBase shape as vn -> Bool
 unique = (==Unique) . uniqueness
 
 -- | Return the set of all variables mentioned in the aliasing of a
 -- type.
-aliases :: Monoid (as vn) => TypeBase as vn -> as vn
+aliases :: Monoid (as vn) => TypeBase shape as vn -> as vn
 aliases (Array (BasicArray _ _ _ als)) = als
 aliases (Array (TupleArray ts _ _)) = mconcat $ map tupleArrayElemAliases ts
 aliases (Tuple et) = mconcat $ map aliases et
 aliases (Basic _) = mempty
 
 tupleArrayElemAliases :: Monoid (as vn) =>
-                         TupleArrayElemTypeBase as vn -> as vn
+                         TupleArrayElemTypeBase shape as vn -> as vn
 tupleArrayElemAliases (BasicArrayElem _ als) = als
 tupleArrayElemAliases (ArrayArrayElem (BasicArray _ _ _ als)) =
   als
@@ -182,7 +239,7 @@ tupleArrayElemAliases (TupleArrayElem ts) =
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
-diet :: TypeBase as vn -> Diet
+diet :: TypeBase shape as vn -> Diet
 diet (Tuple ets) = TupleDiet $ map diet ets
 diet (Basic _) = Observe
 diet (Array (BasicArray _ _ Unique _)) = Consume
@@ -193,7 +250,7 @@ diet (Array (TupleArray _ _ Nonunique)) = Observe
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it
 -- becomes 'Unique'.  Tuples are handled intelligently.
-dietingAs :: TypeBase as vn -> Diet -> TypeBase as vn
+dietingAs :: TypeBase shape as vn -> Diet -> TypeBase shape as vn
 Tuple ets `dietingAs` TupleDiet ds =
   Tuple $ zipWith dietingAs ets ds
 t `dietingAs` Consume =
@@ -203,19 +260,31 @@ t `dietingAs` _ =
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
-maskAliases :: Monoid (as vn) => TypeBase as vn -> Diet -> TypeBase as vn
+maskAliases :: Monoid (as vn) =>
+               TypeBase shape as vn
+            -> Diet
+            -> TypeBase shape as vn
 maskAliases t Consume = t `setAliases` mempty
 maskAliases t Observe = t
 maskAliases (Tuple ets) (TupleDiet ds) =
   Tuple $ zipWith maskAliases ets ds
 maskAliases _ _ = error "Invalid arguments passed to maskAliases."
 
+-- | Convert any type to one that has rank information, no alias
+-- information, and no embedded names.
+toStructural :: (ArrayShape (shape vn)) =>
+                TypeBase shape as vn
+             -> TypeBase Rank NoInfo ()
+toStructural = removeNames . removeShapeAnnotations
+
 -- | Remove aliasing information from a type.
-toDecl :: TypeBase as vn -> DeclTypeBase vn
+toDecl :: TypeBase shape as vn
+       -> TypeBase shape NoInfo vn
 toDecl t = t `setAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
-fromDecl :: DeclTypeBase vn -> TypeBase Names vn
+fromDecl :: TypeBase shape as vn
+         -> TypeBase shape Names vn
 fromDecl t = t `setAliases` HS.empty
 
 -- | A type box provides a way to box a 'CompTypeBase', and possibly
@@ -241,45 +310,45 @@ instance TypeBox CompTypeBase where
   boxType = id
   mapType = ($)
 
-instance TypeBox DeclTypeBase where
-  unboxType = Just . fromDecl
-  boxType = toDecl
-  mapType f x = toDecl <$> f (fromDecl x)
-
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
 -- than @n@ dimensions.
-peelArray :: Int -> TypeBase as vn -> Maybe (TypeBase as vn)
+peelArray :: ArrayShape (shape vn) =>
+             Int -> TypeBase shape as vn -> Maybe (TypeBase shape as vn)
 peelArray 0 t = Just t
-peelArray 1 (Array (BasicArray et [_] _ _)) =
-  Just $ Basic et
-peelArray 1 (Array (TupleArray ts [_] _)) =
-  Just $ Tuple $ map asType ts
+peelArray n (Array (BasicArray et shape _ _))
+  | shapeRank shape == n =
+    Just $ Basic et
+peelArray n (Array (TupleArray ts shape _))
+  | shapeRank shape == n =
+    Just $ Tuple $ map asType ts
   where asType (BasicArrayElem bt _) = Basic bt
         asType (ArrayArrayElem at)   = Array at
         asType (TupleArrayElem ts')  = Tuple $ map asType ts'
-peelArray n (Array (BasicArray et (_:shape) u als)) =
-  peelArray (n-1) $ Array $ BasicArray et shape u als
-peelArray n (Array (TupleArray et (_:shape) u)) =
-  peelArray (n-1) $ Array $ TupleArray et shape u
+peelArray n (Array (BasicArray et shape u als)) = do
+  shape' <- stripDims n shape
+  return $ Array $ BasicArray et shape' u als
+peelArray n (Array (TupleArray et shape u)) = do
+  shape' <- stripDims n shape
+  return $ Array $ TupleArray et shape' u
 peelArray _ _ = Nothing
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
 -- would be @[int]@.
-rowType :: Monoid (as vn) =>
-           TypeBase as vn -> TypeBase as vn
+rowType :: (ArrayShape (shape vn), Monoid (as vn)) =>
+           TypeBase shape as vn -> TypeBase shape as vn
 rowType = stripArray 1
 
 -- | A type is a basic type if it is not an array and any component
 -- types are basic types.
-basicType :: TypeBase vn as -> Bool
+basicType :: TypeBase shape as vn -> Bool
 basicType (Tuple ts) = all basicType ts
 basicType (Basic _) = True
 basicType (Array _) = False
 
 -- | Is the given type either unique (as per 'unique') or basic (as
 -- per 'basicType')?
-uniqueOrBasic :: TypeBase vn as -> Bool
+uniqueOrBasic :: TypeBase shape as vn -> Bool
 uniqueOrBasic x = basicType x || unique x
 
 -- $names
@@ -289,25 +358,28 @@ uniqueOrBasic x = basicType x || unique x
 -- 'ArrayVal's based on a type with a more common name representation,
 -- we need to remove the names and replace them with '()'s.  Since the
 -- only place names appear in types is in the array size annotations,
--- and those can always be replaced with 'Nothing', we can simply put
--- that in, instead of the original expression (if any).
+-- we have to replace the shape with a 'Rank'.
 
 -- | Remove names from a type - this involves removing all size
 -- annotations from arrays, as well as all aliasing.
-removeNames :: TypeBase as vn -> DeclTypeBase ()
+removeNames :: ArrayShape (shape vn) =>
+               TypeBase shape as vn
+            -> TypeBase Rank NoInfo ()
 removeNames (Basic et) = Basic et
 removeNames (Tuple ts) = Tuple $ map removeNames ts
 removeNames (Array at) = Array $ removeArrayNames at
 
-removeArrayNames :: ArrayTypeBase as vn
-                 -> DeclArrayTypeBase ()
-removeArrayNames (BasicArray et sizes u _) =
-  BasicArray et (map (const Nothing) sizes) u NoInfo
-removeArrayNames (TupleArray et sizes u) =
-  TupleArray (map removeTupleArrayElemNames et) (map (const Nothing) sizes) u
+removeArrayNames :: ArrayShape (shape vn) =>
+                    ArrayTypeBase shape as vn
+                 -> ArrayTypeBase Rank NoInfo ()
+removeArrayNames (BasicArray et shape u _) =
+  BasicArray et (Rank $ shapeRank shape) u NoInfo
+removeArrayNames (TupleArray et shape u) =
+  TupleArray (map removeTupleArrayElemNames et) (Rank $ shapeRank shape) u
 
-removeTupleArrayElemNames :: TupleArrayElemTypeBase as vn
-                          -> DeclTupleArrayElemTypeBase ()
+removeTupleArrayElemNames :: ArrayShape (shape vn) =>
+                             TupleArrayElemTypeBase shape as vn
+                          -> TupleArrayElemTypeBase Rank NoInfo ()
 removeTupleArrayElemNames (BasicArrayElem bt _) =
   BasicArrayElem bt NoInfo
 removeTupleArrayElemNames (ArrayArrayElem et) =
@@ -315,22 +387,22 @@ removeTupleArrayElemNames (ArrayArrayElem et) =
 removeTupleArrayElemNames (TupleArrayElem ts) =
   TupleArrayElem $ map removeTupleArrayElemNames ts
 
--- | Add names to a type - this replaces array sizes with 'Nothing',
--- although they probably are already, if you're using this.
-addNames :: DeclTypeBase () -> DeclTypeBase vn
+-- | Add names to a type.
+addNames :: TypeBase Rank NoInfo ()
+         -> TypeBase Rank NoInfo vn
 addNames (Basic et) = Basic et
 addNames (Tuple ts) = Tuple $ map addNames ts
 addNames (Array at) = Array $ addArrayNames at
 
-addArrayNames :: DeclArrayTypeBase ()
-              -> DeclArrayTypeBase vn
-addArrayNames (BasicArray et sizes u _) =
-  BasicArray et (map (const Nothing) sizes) u NoInfo
-addArrayNames (TupleArray et sizes u) =
-  TupleArray (map addTupleArrayElemNames et) (map (const Nothing) sizes) u
+addArrayNames :: ArrayTypeBase Rank NoInfo ()
+              -> ArrayTypeBase Rank NoInfo vn
+addArrayNames (BasicArray et (Rank n) u _) =
+  BasicArray et (Rank n) u NoInfo
+addArrayNames (TupleArray et (Rank n) u) =
+  TupleArray (map addTupleArrayElemNames et) (Rank n) u
 
-addTupleArrayElemNames :: DeclTupleArrayElemTypeBase ()
-                       -> DeclTupleArrayElemTypeBase vn
+addTupleArrayElemNames :: TupleArrayElemTypeBase Rank NoInfo ()
+                       -> TupleArrayElemTypeBase Rank NoInfo vn
 addTupleArrayElemNames (BasicArrayElem bt _) =
   BasicArrayElem bt NoInfo
 addTupleArrayElemNames (ArrayArrayElem et) =
@@ -344,25 +416,30 @@ addTupleArrayElemNames (TupleArrayElem ts) =
 -- a list of length @n@, the resulting type is of an @n+m@ dimensions.
 -- The uniqueness of the new array will be @u@, no matter the
 -- uniqueness of @t@.
-arrayOf :: Monoid (vn as) =>
-           TypeBase vn as -> ArraySize as -> Uniqueness -> TypeBase vn as
-arrayOf (Array (BasicArray et size1 _ als)) size2 u =
-  Array $ BasicArray et (size2 ++ size1) u als
-arrayOf (Array (TupleArray et size1 _)) size2 u =
-  Array $ TupleArray et (size2 ++ size1) u
-arrayOf (Basic et) size u =
-  Array $ BasicArray et size u mempty
-arrayOf (Tuple ts) size u =
-  Array $ TupleArray (map typeToTupleArrayElem ts) size u
+arrayOf :: (ArrayShape (shape vn), Monoid (as vn)) =>
+           TypeBase shape as vn
+        -> shape vn
+        -> Uniqueness
+        -> TypeBase shape as vn
+arrayOf (Array (BasicArray et shape1 _ als)) shape2 u =
+  Array $ BasicArray et (shape2 <> shape1) u als
+arrayOf (Array (TupleArray et shape1 _)) shape2 u =
+  Array $ TupleArray et (shape2 <> shape1) u
+arrayOf (Basic et) shape u =
+  Array $ BasicArray et shape u mempty
+arrayOf (Tuple ts) shape u =
+  Array $ TupleArray (map typeToTupleArrayElem ts) shape u
 
 typeToTupleArrayElem :: Monoid (as vn) =>
-                        TypeBase as vn -> TupleArrayElemTypeBase as vn
+                        TypeBase shape as vn
+                     -> TupleArrayElemTypeBase shape as vn
 typeToTupleArrayElem (Basic bt)  = BasicArrayElem bt mempty
 typeToTupleArrayElem (Tuple ts') = TupleArrayElem $ map typeToTupleArrayElem ts'
 typeToTupleArrayElem (Array at)  = ArrayArrayElem at
 
 tupleArrayElemToType :: Monoid (as vn) =>
-                        TupleArrayElemTypeBase as vn -> TypeBase as vn
+                        TupleArrayElemTypeBase shape as vn
+                     -> TypeBase shape as vn
 tupleArrayElemToType (BasicArrayElem bt _) = Basic bt
 tupleArrayElemToType (TupleArrayElem ts)   = Tuple $ map tupleArrayElemToType ts
 tupleArrayElemToType (ArrayArrayElem at)   = Array at
@@ -372,28 +449,32 @@ tupleArrayElemToType (ArrayArrayElem at)   = Array at
 -- is an @n+m@-dimensional array with the same base type as @t@.  If
 -- you need to specify size information for the array, use 'arrayOf'
 -- instead.
-arrayType :: Monoid (as vn) =>
-             Int -> TypeBase as vn -> Uniqueness -> TypeBase as vn
-arrayType 0 t _ = t
-arrayType n t u = arrayOf t ds u
-  where ds = replicate n Nothing
+arrayType :: (ArrayShape (shape vn), Monoid (as vn)) =>
+             Int
+          -> TypeBase shape as vn
+          -> Uniqueness
+          -> TypeBase Rank as vn
+arrayType 0 t _ = removeShapeAnnotations t
+arrayType n t u = arrayOf (removeShapeAnnotations t) (Rank n) u
 
 -- | @stripArray n t@ removes the @n@ outermost layers of the array.
 -- Essentially, it is the type of indexing an array of type @t@ with
 -- @n@ indexes.
-stripArray :: Monoid (as vn) =>
-              Int -> TypeBase as vn -> TypeBase as vn
-stripArray n (Array (BasicArray et ds u als))
-  | n < length ds = Array $ BasicArray et (drop n ds) u als
-  | otherwise     = Basic et
-stripArray n (Array (TupleArray et ds u))
-  | n < length ds = Array $ TupleArray et (drop n ds) u
-  | otherwise     = Tuple $ map tupleArrayElemToType et
+stripArray :: (ArrayShape (shape vn), Monoid (as vn)) =>
+              Int -> TypeBase shape as vn -> TypeBase shape as vn
+stripArray n (Array (BasicArray et shape u als))
+  | Just shape' <- stripDims n shape =
+    Array $ BasicArray et shape' u als
+  | otherwise = Basic et
+stripArray n (Array (TupleArray et shape u))
+  | Just shape' <- stripDims n shape =
+    Array $ TupleArray et shape' u
+  | otherwise = Tuple $ map tupleArrayElemToType et
 stripArray _ t = t
 
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
 -- the uniqueness of its components will be modified.
-setUniqueness :: TypeBase as vn -> Uniqueness -> TypeBase as vn
+setUniqueness :: TypeBase shape as vn -> Uniqueness -> TypeBase shape as vn
 setUniqueness (Array (BasicArray et dims _ als)) u =
   Array $ BasicArray et dims u als
 setUniqueness (Array (TupleArray et dims _)) u =
@@ -404,12 +485,13 @@ setUniqueness t _ = t
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliasing.
-setAliases :: TypeBase asf vn -> ast vn -> TypeBase ast vn
+setAliases :: TypeBase shape asf vn -> ast vn -> TypeBase shape ast vn
 setAliases t = addAliases t . const
 
 -- | @t \`addAliases\` f@ returns @t@, but with any already present
 -- aliasing replaced by @f@ applied to that aliasing.
-addAliases :: TypeBase asf vn -> (asf vn -> ast vn) -> TypeBase ast vn
+addAliases :: TypeBase shape asf vn -> (asf vn -> ast vn)
+           -> TypeBase shape ast vn
 addAliases (Array at) f =
   Array $ addArrayAliases at f
 addAliases (Tuple ts) f =
@@ -417,17 +499,17 @@ addAliases (Tuple ts) f =
 addAliases (Basic et) _ =
   Basic et
 
-addArrayAliases :: ArrayTypeBase asf vn
+addArrayAliases :: ArrayTypeBase shape asf vn
                 -> (asf vn -> ast vn)
-                -> ArrayTypeBase ast vn
+                -> ArrayTypeBase shape ast vn
 addArrayAliases (BasicArray et dims u als) f =
   BasicArray et dims u $ f als
 addArrayAliases (TupleArray et dims u) f =
   TupleArray (map (`addTupleArrayElemAliases` f) et) dims u
 
-addTupleArrayElemAliases :: TupleArrayElemTypeBase asf vn
+addTupleArrayElemAliases :: TupleArrayElemTypeBase shape asf vn
                          -> (asf vn -> ast vn)
-                         -> TupleArrayElemTypeBase ast vn
+                         -> TupleArrayElemTypeBase shape ast vn
 addTupleArrayElemAliases (BasicArrayElem bt als) f =
   BasicArrayElem bt $ f als
 addTupleArrayElemAliases (ArrayArrayElem at) f =
@@ -441,7 +523,9 @@ addTupleArrayElemAliases (TupleArrayElem ts) f =
 -- and the uniqueness will be 'Unique' only if both of the input types
 -- are unique.
 unifyUniqueness :: Monoid (as vn) =>
-                   TypeBase as vn -> TypeBase as vn -> TypeBase as vn
+                   TypeBase shape as vn
+                -> TypeBase shape as vn
+                -> TypeBase shape as vn
 unifyUniqueness (Array (BasicArray et dims u1 als1)) (Array (BasicArray _ _ u2 als2)) =
   Array $ BasicArray et dims (u1 <> u2) (als1 <> als2)
 unifyUniqueness (Array (TupleArray et dims u1)) (Array (TupleArray _ _ u2)) =
@@ -451,24 +535,26 @@ unifyUniqueness (Tuple ets1) (Tuple ets2) =
 unifyUniqueness t1 _ = t1
 
 -- | The type of an Futhark value.
-valueType :: Value -> DeclTypeBase vn
+valueType :: Value -> TypeBase Rank NoInfo vn
 valueType (BasicVal bv) = Basic $ basicValueType bv
 valueType (TupVal vs) = Tuple (map valueType vs)
 valueType (ArrayVal _ (Basic et)) =
-  Array $ BasicArray et [Nothing] Nonunique NoInfo
+  Array $ BasicArray et (Rank 1) Nonunique NoInfo
 valueType (ArrayVal _ (Tuple ts)) =
-  addNames $ Array $ TupleArray (map typeToTupleArrayElem ts) [Nothing] Nonunique
-valueType (ArrayVal _ (Array (BasicArray et ds _ _))) =
-  Array $ BasicArray et (Nothing:replicate (length ds) Nothing) Nonunique NoInfo
-valueType (ArrayVal _ (Array (TupleArray et ds _))) =
-  addNames $ Array $ TupleArray et (Nothing:replicate (length ds) Nothing) Nonunique
+  addNames $ Array $ TupleArray (map typeToTupleArrayElem ts) (Rank 1) Nonunique
+valueType (ArrayVal _ (Array (BasicArray et shape _ _))) =
+  Array $ BasicArray et (Rank $ 1 + shapeRank shape) Nonunique NoInfo
+valueType (ArrayVal _ (Array (TupleArray et shape _))) =
+  addNames $ Array $ TupleArray et (Rank $ 1 + shapeRank shape) Nonunique
 
 -- | Construct an array value containing the given elements.
-arrayVal :: [Value] -> TypeBase as vn -> Value
+arrayVal :: ArrayShape (shape vn) =>
+            [Value] -> TypeBase shape as vn -> Value
 arrayVal vs = ArrayVal (listArray (0, length vs-1) vs) . removeNames . toDecl
 
 -- | An empty array with the given row type.
-emptyArray :: TypeBase as vn -> Value
+emptyArray :: ArrayShape (shape vn) =>
+              TypeBase shape as vn -> Value
 emptyArray = arrayVal []
 
 -- | If the given value is a nonempty array containing only
@@ -483,14 +569,14 @@ arrayString _ = Nothing
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: (Eq vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
+typeOf :: (Ord vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
 typeOf (Literal val _) = fromDecl $ valueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es t _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
 typeOf (BinOp _ _ _ t _) = t
-typeOf (Not _ _) = Basic Bool
-typeOf (Negate e _) = typeOf e
+typeOf (UnOp Not _ _) = Basic Bool
+typeOf (UnOp Negate e _) = typeOf e
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
@@ -498,30 +584,25 @@ typeOf (Var ident) =
     t         -> t `addAliases` HS.insert (identName ident)
 typeOf (Apply _ _ t _) = t
 typeOf (LetPat _ _ body _) = typeOf body
-typeOf (LetWith _ _ _ _ _ _ body _) = typeOf body
-typeOf (Index _ ident _ idx _) =
+typeOf (LetWith _ _ _ _ body _) = typeOf body
+typeOf (Index ident idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
-typeOf (Iota _ _) = arrayType 1 (Basic Int) Nonunique
+typeOf (Iota _ _) = Array $ BasicArray Int (Rank 1) Nonunique mempty
 typeOf (Size {}) = Basic Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u = uniqueness $ typeOf e
-typeOf (Reshape _ shape  e _) =
-  replicate (length shape) Nothing `setArrayDims` typeOf e
-typeOf (Rearrange _ _ e _) = typeOf e
-typeOf (Rotate _ _ e _) = typeOf e
-typeOf (Transpose _ k n e _)
-  | Array (BasicArray et dims u als) <- typeOf e,
-    (pre,d:post) <- splitAt k dims,
-    (mid,end) <- splitAt n post =
-      Array $ BasicArray et (pre++mid++[d]++end) u als
-  | otherwise =
-      typeOf e
+typeOf (Reshape shape  e _) =
+  Rank (length shape) `setArrayShape` typeOf e
+typeOf (Rearrange _ e _) = typeOf e
+typeOf (Transpose _ _ e _) = typeOf e
 typeOf (Map f arr _) = arrayType 1 et $ uniqueness et
   where et = lambdaType f [rowType $ typeOf arr]
 typeOf (ConcatMap f _ _ _) =
-  fromDecl $ lambdaReturnType f
+  fromDecl $ removeShapeAnnotations t
+  where t = lambdaReturnType f
 typeOf (Reduce fun start arr _) =
+  removeShapeAnnotations $
   lambdaType fun [typeOf start, rowType (typeOf arr)]
 typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique
 typeOf (Unzip _ ts _) =
@@ -529,23 +610,34 @@ typeOf (Unzip _ ts _) =
 typeOf (Scan fun start arr _) =
   arrayType 1 et $ uniqueness et
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
-typeOf (Filter _ arr _) = typeOf arr
-typeOf (Redomap outerfun innerfun start arr _) =
-  lambdaType outerfun [innerres, innerres]
-    where innerres = lambdaType innerfun [typeOf start, rowType $ typeOf arr]
-typeOf (Split _ _ e _) =
-  Tuple [typeOf e, typeOf e]
-typeOf (Concat _ x y _) = typeOf x `setUniqueness` u
-  where u = uniqueness (typeOf x) <> uniqueness (typeOf y)
+typeOf (Filter _ arr _) =
+  typeOf arr
+typeOf (Partition funs arr _) =
+  Tuple $ replicate (length funs + 1) $ typeOf arr
+typeOf (Redomap _ innerfun start arr _) =
+  let acc_tp = typeOf start
+      res_el_tp = removeShapeAnnotations $
+                  lambdaType innerfun [typeOf start, rowType $ typeOf arr]
+  in  if res_el_tp == acc_tp
+      then res_el_tp
+      else case res_el_tp of
+             Tuple [_,el_tp] ->
+                 Tuple [acc_tp, arrayType 1 el_tp $ uniqueness el_tp]
+             _ -> acc_tp -- NOT reachable
+typeOf (Stream _ _ acc arr lam _) =
+  lambdaType lam [typeOf acc, typeOf arr]
+typeOf (Concat x ys _) = typeOf x `setUniqueness` u
+  where u = uniqueness (typeOf x) <> mconcat (map (uniqueness . typeOf) ys)
+typeOf (Split splitexps e _) =
+  Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
-typeOf (Assert _ _) = Basic Cert
-typeOf (Conjoin _ _) = Basic Cert
-typeOf (DoLoop _ _ _ _ _ body _) = typeOf body
+typeOf (DoLoop _ _ _ _ body _) = typeOf body
 
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple
 -- literal expressions into literal values instead.
-expToValue :: ExpBase (TypeBase as) vn -> Maybe Value
+expToValue :: ArrayShape (shape vn) =>
+              ExpBase (TypeBase shape as) vn -> Maybe Value
 expToValue (Literal val _) = Just val
 expToValue (TupLit es _) = do es' <- mapM expToValue es
                               Just $ TupVal es'
@@ -555,18 +647,19 @@ expToValue _ = Nothing
 
 -- | The result of applying the arguments of the given types to the
 -- given lambda function.
-lambdaType :: (Eq vn, Hashable vn) =>
-              LambdaBase CompTypeBase vn -> [CompTypeBase vn] -> CompTypeBase vn
+lambdaType :: (Ord vn, Hashable vn) =>
+              LambdaBase CompTypeBase vn -> [CompTypeBase vn]
+           -> TypeBase Rank Names vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
 -- the given diets.
-returnType :: (Eq vn, Hashable vn) =>
-              DeclTypeBase vn
+returnType :: (Ord vn, Hashable vn) =>
+              TypeBase shape NoInfo vn
            -> [Diet]
            -> [CompTypeBase vn]
-           -> CompTypeBase vn
+           -> TypeBase shape Names vn
 returnType (Array at) ds args =
   Array $ arrayReturnType at ds args
 returnType (Tuple ets) ds args =
@@ -574,10 +667,10 @@ returnType (Tuple ets) ds args =
 returnType (Basic t) _ _ = Basic t
 
 arrayReturnType :: (Eq vn, Hashable vn) =>
-                   DeclArrayTypeBase vn
+                   ArrayTypeBase shape NoInfo vn
                 -> [Diet]
                 -> [CompTypeBase vn]
-                -> ArrayTypeBase Names vn
+                -> ArrayTypeBase shape Names vn
 arrayReturnType (BasicArray bt sz Nonunique NoInfo) ds args =
   BasicArray bt sz Nonunique als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
@@ -589,10 +682,10 @@ arrayReturnType (TupleArray et sz Unique) _ _ =
   TupleArray (map (`addTupleArrayElemAliases` const mempty) et) sz Unique
 
 tupleArrayElemReturnType :: (Eq vn, Hashable vn) =>
-                            DeclTupleArrayElemTypeBase vn
+                            TupleArrayElemTypeBase shape NoInfo vn
                          -> [Diet]
                          -> [CompTypeBase vn]
-                         -> TupleArrayElemTypeBase Names vn
+                         -> TupleArrayElemTypeBase shape Names vn
 tupleArrayElemReturnType (BasicArrayElem bt NoInfo) ds args =
   BasicArrayElem bt als
   where als = mconcat $ map aliases $ zipWith maskAliases args ds
@@ -602,14 +695,23 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
   TupleArrayElem $ map (\t -> tupleArrayElemReturnType t ds args) ts
 
 -- | The specified return type of a lambda.
-lambdaReturnType :: LambdaBase CompTypeBase vn -> DeclTypeBase vn
-lambdaReturnType (AnonymFun _ _ t _) = t
+lambdaReturnType :: Ord vn =>
+                    LambdaBase CompTypeBase vn -> TypeBase Rank NoInfo vn
+lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations t
 lambdaReturnType (CurryFun _ _ t _)  = toDecl t
+lambdaReturnType (UnOpFun _ t _)  = toDecl t
+lambdaReturnType (BinOpFun _ t _)  = toDecl t
+lambdaReturnType (CurryBinOpLeft _ _ t _)  = toDecl t
+lambdaReturnType (CurryBinOpRight _ _ t _)  = toDecl t
 
 -- | The parameter 'Diet's of a lambda.
 lambdaParamDiets :: LambdaBase ty vn -> [Diet]
 lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
 lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
+lambdaParamDiets (UnOpFun {}) = [Observe]
+lambdaParamDiets (BinOpFun {}) = [Observe, Observe]
+lambdaParamDiets (CurryBinOpLeft {}) = [Observe]
+lambdaParamDiets (CurryBinOpRight {}) = [Observe]
 
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
@@ -628,16 +730,22 @@ progNames = execWriter . mapM funNames . progFunctions
         funNames (_, _, params, body, _) =
           mapM_ one params >> expNames body
 
-        expNames e@(LetWith _ dest _ _ _ _ _ _) =
+        expNames e@(LetWith dest _ _ _ _ _) =
           one dest >> walkExpM names e
-        expNames e@(DoLoop _ _ i _ _ _ _) =
+        expNames e@(DoLoop _ _ (ForLoop i _) _ _ _) =
           one i >> walkExpM names e
+        expNames e@(DoLoop {}) =
+          walkExpM names e
         expNames e = walkExpM names e
 
         lambdaNames (AnonymFun params body _ _) =
           mapM_ one params >> expNames body
         lambdaNames (CurryFun _ exps _ _) =
           mapM_ expNames exps
+        lambdaNames (UnOpFun {}) = return ()
+        lambdaNames (BinOpFun {}) = return ()
+        lambdaNames (CurryBinOpLeft _ e _ _) = expNames e
+        lambdaNames (CurryBinOpRight _ e _ _) = expNames e
 
 -- | Change those subexpressions where evaluation of the expression
 -- would stop.  Also change type annotations at branches.
@@ -645,10 +753,12 @@ mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
          -> ExpBase ty vn -> ExpBase ty vn
 mapTails f g (LetPat pat e body loc) =
   LetPat pat e (mapTails f g body) loc
-mapTails f g (LetWith cs dest src csidx idxs ve body loc) =
-  LetWith cs dest src csidx idxs ve (mapTails f g body) loc
-mapTails f g (DoLoop pat me i bound loopbody body loc) =
-  DoLoop pat me i bound loopbody (mapTails f g body) loc
+mapTails f g (LetWith dest src idxs ve body loc) =
+  LetWith dest src idxs ve (mapTails f g body) loc
+mapTails f g (DoLoop pat me (ForLoop i bound) loopbody body loc) =
+  DoLoop pat me (ForLoop i bound) loopbody (mapTails f g body) loc
+mapTails f g (DoLoop pat me (WhileLoop cond) loopbody body loc) =
+  DoLoop pat me (WhileLoop cond) loopbody (mapTails f g body) loc
 mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
@@ -661,7 +771,6 @@ freeInExp = execWriter . expFree
                   walkOnExp = expFree
                 , walkOnLambda = lambdaFree
                 , walkOnIdent = identFree
-                , walkOnCertificates = mapM_ identFree
                 }
 
         identFree ident =
@@ -670,19 +779,24 @@ freeInExp = execWriter . expFree
         expFree (LetPat pat e body _) = do
           expFree e
           binding (patIdentSet pat) $ expFree body
-        expFree (LetWith cs dest src idxcs idxs ve body _) = do
-          mapM_ identFree cs
+        expFree (LetWith dest src idxs ve body _) = do
           identFree src
-          mapM_ identFree $ fromMaybe [] idxcs
           mapM_ expFree idxs
           expFree ve
           binding (HS.singleton dest) $ expFree body
-        expFree (DoLoop pat mergeexp i boundexp loopbody letbody _) = do
+        expFree (DoLoop pat mergeexp (ForLoop i boundexp) loopbody letbody _) = do
           expFree mergeexp
           expFree boundexp
           binding (i `HS.insert` patIdentSet pat) $ do
             expFree loopbody
             expFree letbody
+        expFree (DoLoop pat mergeexp (WhileLoop cond) loopbody letbody _) = do
+          expFree mergeexp
+          binding (patIdentSet pat) $ do
+            expFree cond
+            expFree loopbody
+            expFree letbody
+
         expFree e = walkExpM names e
 
         lambdaFree = tell . freeInLambda
@@ -700,14 +814,28 @@ freeInLambda (AnonymFun params body _ _) =
     where params' = map identName params
 freeInLambda (CurryFun _ exps _ _) =
   HS.unions (map freeInExp exps)
+freeInLambda (UnOpFun {}) =
+  mempty
+freeInLambda (BinOpFun {}) =
+  mempty
+freeInLambda (CurryBinOpLeft _ e _ _) =
+  freeInExp e
+freeInLambda (CurryBinOpRight _ e _ _) =
+  freeInExp e
 
--- | Convert an identifier to a 'ParamBase'.
-toParam :: IdentBase (TypeBase as) vn -> ParamBase vn
-toParam (Ident name t loc) = Ident name (toDecl t) loc
+-- | Remove alias information from the type of an ident.
+toParam :: ArrayShape (shape vn) =>
+           IdentBase (TypeBase shape as) vn
+        -> IdentBase (TypeBase ShapeDecl NoInfo) vn
+toParam (Ident name t loc) = Ident name (vacuousShapeAnnotations $ toDecl t) loc
 
--- | Convert a 'ParamBase' to an identifier.
-fromParam :: ParamBase vn -> IdentBase CompTypeBase vn
-fromParam (Ident name t loc) = Ident name (fromDecl t) loc
+-- | Add (vacuous) alias information and remove shape annotations from
+-- the type of an identifier.
+fromParam :: ArrayShape (shape vn) =>
+             IdentBase (TypeBase shape NoInfo) vn
+          -> IdentBase (TypeBase Rank Names) vn
+fromParam (Ident name t loc) =
+  Ident name (removeShapeAnnotations $ fromDecl t) loc
 
 -- | The list of names bound in the given pattern.
 patNames :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> [vn]
@@ -732,11 +860,11 @@ patIdents (Wildcard _ _) = []
 patIdentSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBase ty vn)
 patIdentSet = HS.fromList . patIdents
 
--- | A type with no aliasing information.
-type UncheckedType = TypeBase NoInfo Name
+-- | A type with no aliasing information but shape annotations.
+type UncheckedType = TypeBase ShapeDecl NoInfo Name
 
 -- | An array type with no aliasing information.
-type UncheckedArrayType = ArrayTypeBase NoInfo Name
+type UncheckedArrayType = ArrayTypeBase ShapeDecl NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name

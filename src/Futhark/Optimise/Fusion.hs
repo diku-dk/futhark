@@ -375,12 +375,6 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res)
           (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
           greedyFuse False used_lam blres (pat, soac)
 
-        SOAC.Filter _ lam _ -> do
-          bres  <- bindingFamily pat $ fusionGatherBody fres body
-          (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-          greedyFuse False used_lam blres
-            (Pattern $ drop 1 $ patternElements pat, soac)
-
         SOAC.Reduce _ lam args -> do
           -- a reduce always starts a new kernel
           let nes = map fst args
@@ -441,11 +435,15 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ---- Index/If    ----
 -----------------------------------------
 
-fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body)) = do
+fusionGatherExp fres (LoopOp (DoLoop _ merge form loop_body)) = do
   let (merge_pat, ini_val) = unzip merge
 
   let pat_vars = map (Var . fparamIdent)  merge_pat
-  fres' <- foldM fusionGatherSubExp fres (ini_val++ub:pat_vars)
+  fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
+  fres'' <- case form of ForLoop _ bound ->
+                           fusionGatherSubExp fres' bound
+                         WhileLoop cond ->
+                           fusionGatherSubExp fres' $ Var cond
 
   let null_res = mkFreshFusionRes
   new_res <- binding (map fparamIdent merge_pat) $ fusionGatherBody null_res loop_body
@@ -453,8 +451,8 @@ fusionGatherExp fres (LoopOp (DoLoop _ merge _ ub loop_body)) = do
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res
   let new_res' = new_res { unfusable = foldl (flip HS.insert) (unfusable new_res) inp_arrs }
-  -- merge new_res with fres'
-  return $ unionFusionRes new_res' fres'
+  -- merge new_res with fres''
+  return $ unionFusionRes new_res' fres''
 
 fusionGatherExp fres (PrimOp (Index _ idd inds)) =
   foldM fusionGatherSubExp fres (Var idd : inds)
@@ -475,7 +473,6 @@ fusionGatherExp fres (If cond e_then e_else _) = do
 fusionGatherExp _ (LoopOp (Map     {})) = errorIllegal "map"
 fusionGatherExp _ (LoopOp (Reduce  {})) = errorIllegal "reduce"
 fusionGatherExp _ (LoopOp (Scan    {})) = errorIllegal "scan"
-fusionGatherExp _ (LoopOp (Filter  {})) = errorIllegal "filter"
 fusionGatherExp _ (LoopOp (Redomap {})) = errorIllegal "redomap"
 
 -----------------------------------

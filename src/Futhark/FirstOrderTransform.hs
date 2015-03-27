@@ -12,6 +12,7 @@ module Futhark.FirstOrderTransform
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import Data.List
 
 import Futhark.Representation.Basic
 import Futhark.Renamer
@@ -23,7 +24,7 @@ import Futhark.Tools
 -- renamer!
 transformProg :: Prog -> Prog
 transformProg prog =
-  {-renameProg $-} Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
+  renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
   where src = newNameSourceForProg prog
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
@@ -48,7 +49,7 @@ transformExp (LoopOp (Map cs fun arrs)) = do
     return $ resultBody $ map Var dests
   return $ LoopOp $
     DoLoop outarrs (loopMerge outarrs (map Var resarr))
-    i (isize arrs) loopbody
+    (ForLoop i (isize arrs)) loopbody
   where arrs_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
                          | v <- arrs ]
 
@@ -72,18 +73,25 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
   emptyarrs <- mapM (letExp "empty")
                [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
   let hackbody = Body () [] $ Result $ map Var emptyarrs
-      concatArrays arrs1 arrs2 = do
-        arrs1' <- mapM (letExp "concatMap_concatted_intermediate_result") arrs1
-        let ns = map (arraySize 0 . identType) arrs1'
-            ms = map (arraySize 0 . identType) arrs2
-        ks <- mapM (letSubExp "concatMap_concat_size")
-              [ PrimOp $ BinOp Plus n m Int | (n,m) <- zip ns ms ]
-        return [ PrimOp $ Concat cs arr1 arr2 k
-               | (arr1,arr2,k) <- zip3 arrs1' arrs2 ks ]
-  realbody <- runBinder $ do
-    res <- mapM (letSubExp "concatMap_concatted_result") =<<
-           foldM concatArrays (map (PrimOp . SubExp . Var) emptyarrs) arrs
-    resultBody <$> mapM (letSubExp "concatMap_copy_result" . PrimOp . Copy) res
+
+      concatArrays (arr, arrs') = do
+        let plus x y = eBinOp Plus x y Int
+        ressize <- letSubExp "concatMap_result_size" =<<
+                   foldl plus
+                   (pure $ PrimOp $ SubExp $ arraySize 0 $ identType arr)
+                   (map (pure . PrimOp . SubExp . arraySize 0 . identType) arrs')
+        res <- letSubExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
+        return $ PrimOp $ Copy res
+
+      nonempty []     = Nothing
+      nonempty (x:xs) = Just (x, xs)
+
+  realbody <- runBinder $
+    case mapM nonempty $ transpose arrs of
+      Nothing ->
+        return hackbody
+      Just arrs' ->
+        resultBody <$> mapM (letSubExp "concatMap_result" <=< concatArrays) arrs'
   return $ If (Constant $ LogVal False) hackbody realbody (loopOpExtType op)
 
 transformExp (LoopOp (Reduce cs fun args)) = do
@@ -99,7 +107,7 @@ transformExp (LoopOp (Reduce cs fun args)) = do
     return $ resultBody (map Var inarrs ++ acc')
   return $ LoopOp $
     DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
-    i (isize inarrs) loopbody
+    (ForLoop i (isize inarrs)) loopbody
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Scan cs fun args)) = do
@@ -115,70 +123,24 @@ transformExp (LoopOp (Scan cs fun args)) = do
     rowcopies <- letExps "copy" $ map (PrimOp . Copy) irows
     return $ resultBody $ map Var $ rowcopies ++ dests
   return $ LoopOp $
-    DoLoop arr (loopMerge (acc ++ arr) (initacc ++ map Var initarr)) i (isize arr) loopbody
+    DoLoop arr (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
+    (ForLoop i (isize arr)) loopbody
   where (accexps, arrexps) = unzip args
         arrexps_nonunique = [ v { identType = identType v `setUniqueness` Nonunique }
                             | v <- arrexps ]
 
-transformExp (LoopOp (Filter cs fun arrexps)) = do
-  arr <- letExps "arr" $ map (PrimOp . SubExp . Var) arrexps
-  let nv = isize arrexps
-      rowtypes = map (rowType . identType) arrexps
-  (xs, _) <- unzip <$> mapM (newVar "x") rowtypes
-  (i, iv) <- newVar "i" $ Basic Int
-  test <- insertBindingsM $ do
-   [check] <- bodyBind =<< transformLambda fun (map (PrimOp . SubExp . Var) xs) -- XXX
-   res <- letSubExp "res" $
-          If check
-             (resultBody [intconst 1])
-             (resultBody [intconst 0])
-             [Basic Int]
-   return $ resultBody [res]
-  mape <- letExp "mape" <=< transformExp $
-          LoopOp $ Map cs (Lambda xs test [Basic Int]) arr
-  plus <- do
-    (a,av) <- newVar "a" (Basic Int)
-    (b,bv) <- newVar "b" (Basic Int)
-    body <- insertBindingsM $ do
-      res <- letSubExp "sum" $ PrimOp $ BinOp Plus av bv Int
-      return $ resultBody [res]
-    return $ Lambda [a, b] body [Basic Int]
-  scan <- transformExp $ LoopOp $ Scan cs plus [(intconst 0,mape)]
-  ia <- (`setIdentUniqueness` Nonunique) <$> letExp "ia" scan
-  let indexia ind = eIndex cs ia [ind]
-      sub1 e = eBinOp Minus e (pexp $ intconst 1) Int
-      indexi = indexia $ pexp iv
-      indexin = index cs arr iv
-      indexinm1 = indexia $ sub1 $ pexp iv
-  outersize <- letSubExp "filter_result_size" =<< indexia (sub1 $ pexp nv)
-
-  resinit_presplit <- resultArray $ map identType arrexps
-  resinit <- forM resinit_presplit $ \v -> do
-    let vt = identType v
-    leftover <- letSubExp "split_leftover" $ PrimOp $
-                BinOp Minus (arraySize 0 vt) outersize Int
-    splitres <- letTupExp "filter_split_result" $
-      PrimOp $ Split cs outersize v leftover
-    case splitres of
-      [x,_] -> return x
-      _     -> fail "FirstOrderTransform filter: weird split result"
-
-  res <- forM (map identType resinit) $ \t -> newIdent "filter_result" t
-  mergesize <- newIdent "mergesize" (Basic Int)
-  let resv = resultBody (map Var $ mergesize : res)
-  loopbody <- insertBindingsM $ do
-    let update = insertBindingsM $ do
-          dest <- letwith cs res (sub1 indexi) indexin
-          return $ resultBody (map Var $ mergesize:dest)
-    eBody [eIf (eIf (pure $ PrimOp $ BinOp Equal iv (intconst 0) Bool)
-               (eBody [eBinOp Equal indexi (pexp $ intconst 0) Bool])
-               (eBody [eBinOp Equal indexi indexinm1 Bool]))
-           (pure resv) update]
-  return $ LoopOp $ DoLoop (mergesize:res)
-    (loopMerge (mergesize:res) (outersize:map Var resinit))
-    i nv loopbody
-
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
+  let outersize = arraysSize 0 (map identType arrexps)
+  -- for the MAP    part
+  let acc_num     = length accexps
+  let res_tps     = lambdaReturnType innerfun
+  let map_arr_tps = drop (length accexps) res_tps
+  maparrs <- resultArray
+               [ arrayOf t (Shape [outersize]) (uniqueness t)
+                 | t <- map_arr_tps ]
+  outarrs <- forM (map identType maparrs) $ \t ->
+             newIdent "redomap_outarr" $ t `setUniqueness` Unique
+  -- for the REDUCE part
   ((acc, initacc), (i, iv)) <- newFold accexps
   inarrs <- forM (zip
                   (map identType arrexps)
@@ -186,29 +148,19 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
                    snd $ splitAt (length accexps) $ lambdaParams innerfun)) $ \(t,u) ->
             newIdent "redomap_inarr" (setUniqueness t u)
   loopbody <- runBinder $ do
-    acc' <- bodyBind =<< transformLambda innerfun
-            (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
-    return $ resultBody (map Var inarrs ++ acc')
+    accxis<- bodyBind =<< transformLambda innerfun
+             (map (PrimOp . SubExp . Var) acc ++ index cs inarrs iv)
+    let (acc', xis) = splitAt acc_num accxis
+    dests <- letwith cs outarrs (pexp iv) $ map (PrimOp . SubExp) xis
+    return $ resultBody (map Var inarrs ++ acc' ++ map Var dests)
   return $ LoopOp $
-    DoLoop acc (loopMerge (inarrs++acc) (map Var arrexps++initacc))
-    i (isize inarrs) loopbody
+    DoLoop (acc++outarrs) (loopMerge (inarrs++acc++outarrs)
+    (map Var arrexps++initacc++map Var maparrs))
+    (ForLoop i (isize inarrs)) loopbody
 
 transformExp e = mapExpM transform e
 
 transformBinding :: Binding -> Binder Basic Binding
-transformBinding (Let pat () e@(LoopOp (Filter {})))
-  | size : rest <- patternIdents pat = do
-  -- FIXME: we need to fix the shape of the type for filter, which is
-  -- done in a hacky way here.  The better solution is to change how
-  -- filter works.
-  size':rest' <- letTupExp "filter_for" =<< transformExp e
-  addBinding $ mkLet' [size] $ PrimOp $ SubExp $ Var size'
-  let reshapeResult dest orig =
-        addBinding $ mkLet' [dest] $
-        PrimOp $ Reshape [] (arrayDims $ identType dest) orig
-  zipWithM_ reshapeResult rest rest'
-  dummy <- newVName "dummy"
-  mkLetNames' [dummy] $ PrimOp $ SubExp $ intconst 0
 transformBinding (Let pat annot e) =
   Let pat annot <$> transformExp e
 

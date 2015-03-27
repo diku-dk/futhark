@@ -61,11 +61,19 @@ freeWalker = identityWalker {
             mapM_ (tell . freeIn) $ patternElements pat
             expFree e
 
-        expFree (LoopOp (DoLoop _ merge i boundexp loopbody)) = do
+        expFree (LoopOp (DoLoop _ merge (ForLoop i boundexp) loopbody)) = do
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
           binding (i `HS.insert` HS.fromList (map fparamIdent mergepat)) $ do
+            mapM_ (tell . freeIn) mergepat
+            bodyFree loopbody
+
+        expFree (LoopOp (DoLoop _ merge (WhileLoop cond) loopbody)) = do
+          let (mergepat, mergeexps) = unzip merge
+          mapM_ subExpFree mergeexps
+          tell $ freeIn cond
+          binding (HS.fromList (map fparamIdent mergepat)) $ do
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
@@ -176,6 +184,10 @@ instance FreeIn Bindage where
 instance FreeIn ExtRetType where
   freeIn = mconcat . map freeIn . retTypeValues
 
+instance FreeIn LoopForm where
+  freeIn (ForLoop _ bound) = freeIn bound
+  freeIn (WhileLoop cond) = freeIn cond
+
 freeNamesIn :: FreeIn a => a -> Names
 freeNamesIn = HS.map identName . freeIn
 
@@ -207,10 +219,14 @@ progNames = execWriter . mapM funNames . progFunctions
         bindingNames (Let pat _ e) =
           mapM_ one (patternNames pat) >> expNames e
 
-        expNames (LoopOp (DoLoop _ pat i _ loopbody)) = do
+        expNames (LoopOp (DoLoop _ pat form loopbody)) = do
           mapM_ (one . fparamName . fst) pat
-          one $ identName i
+          case form of ForLoop i _ ->
+                         one $ identName i
+                       WhileLoop _ ->
+                         return ()
           bodyNames loopbody
+
         expNames e = walkExpM names e
 
         lambdaNames (Lambda params body _) =

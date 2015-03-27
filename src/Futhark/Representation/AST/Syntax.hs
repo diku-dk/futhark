@@ -41,10 +41,14 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
+  , BinOp (..)
   , ExpT(..)
   , Exp
+  , LoopForm (..)
   , LambdaT(..)
   , Lambda
+  , ExtLambdaT (..)
+  , ExtLambda
   , Lore.RetType
 
   -- * Definitions
@@ -114,6 +118,26 @@ deriving instance Lore lore => Eq (BodyT lore)
 
 type Body = BodyT
 
+-- | Binary operators.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | Mod
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+             deriving (Eq, Ord, Enum, Bounded, Show)
+
 data PrimOp lore
   = SubExp SubExp
     -- ^ Subexpressions, doubling as tuple literals if the
@@ -136,9 +160,6 @@ data PrimOp lore
   -- ^ Turn a boolean into a certificate, halting the
   -- program if the boolean is false.
 
-  | Conjoin [SubExp]
-  -- ^ Convert several certificates into a single certificate.
-
   -- Primitive array operations
 
   | Index Certificates
@@ -149,10 +170,14 @@ data PrimOp lore
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates SubExp Ident SubExp
-  -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+  | Split Certificates [SubExp] Ident
+  -- ^ 2nd arg is sizes of arrays you back, which is
+  -- different from what the external language does.
+  -- In the internal langauge,
+  -- @a = [1,2,3,4]@
+  -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates Ident Ident SubExp
+  | Concat Certificates Ident [Ident] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy SubExp
@@ -177,10 +202,9 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Rotate Certificates Int Ident
-  -- ^ @rotate(n,a)@ returns a new array, where the element
-  -- @a[i]@ is at position @i+n@, cycling over to the
-  -- beginning of the array.
+  | Partition Certificates Int Ident Ident
+    -- ^ First variable is the flag array, second is the element
+    -- array.
 
   | Alloc SubExp
     -- ^ Allocate a memory block.  This really should not be an
@@ -188,8 +212,8 @@ data PrimOp lore
   deriving (Eq, Ord, Show)
 
 data LoopOp lore
-  = DoLoop [Ident] [(FParam lore, SubExp)] Ident SubExp (BodyT lore)
-    -- ^ @loop {b} <- {a} = {v} for i < n do b@.
+  = DoLoop [Ident] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+    -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
 
   | Map Certificates (LambdaT lore) [Ident]
     -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
@@ -201,12 +225,16 @@ data LoopOp lore
 
   | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
   | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Filter  Certificates (LambdaT lore) [Ident]
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
+  | Stream  Certificates [SubExp] [Ident] (ExtLambdaT lore)
 
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)
 deriving instance Lore lore => Ord (LoopOp lore)
+
+data LoopForm = ForLoop Ident SubExp
+              | WhileLoop Ident
+              deriving (Eq, Show, Ord)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -238,6 +266,16 @@ data LambdaT lore =
   deriving (Eq, Ord, Show)
 
 type Lambda = LambdaT
+
+-- | Anonymous function for use in a tuple-SOAC.
+data ExtLambdaT lore =
+  ExtLambda { extLambdaParams     :: [Param]
+            , extLambdaBody       :: BodyT lore
+            , extLambdaReturnType :: [ExtType]
+            }
+  deriving (Eq, Ord, Show)
+
+type ExtLambda = ExtLambdaT
 
 type FParam lore = FParamT (Lore.FParam lore)
 

@@ -8,13 +8,10 @@ where
 -- define Arbitrary instances.
 
 import Control.Applicative
-import Control.Monad
-import Data.Array
-import Data.Loc
 
 import Test.QuickCheck
 
-import Language.Futhark.CoreTests (arbitraryBasicValOfType)
+import Language.Futhark.CoreTests ()
 import Futhark.Representation.AST.Syntax
 
 instance Arbitrary Rank where
@@ -22,7 +19,7 @@ instance Arbitrary Rank where
 
 instance Arbitrary Shape where
   arbitrary = Shape <$> map intconst <$> listOf1 (elements [1..9])
-    where intconst x = Constant (BasicVal $ IntVal x) noLoc
+    where intconst x = Constant $ IntVal x
 
 instance Arbitrary shape => Arbitrary (TypeBase shape) where
   arbitrary =
@@ -31,18 +28,7 @@ instance Arbitrary shape => Arbitrary (TypeBase shape) where
           ]
 
 instance Arbitrary Value where
-  arbitrary =
-    oneof [ BasicVal <$> arbitrary
-          , do et <- arbitrary -- Compute element type.
-               shape <- arbitrary
-               arbitraryArray shape et
-          ]
-
-arbitraryArray :: [Int] -> BasicType -> Gen Value
-arbitraryArray [] t = BasicVal <$> arbitraryBasicValOfType t
-arbitraryArray (n:ns) t = do
-  arr <- listArray (0,n-1) <$> replicateM n (arbitraryArray ns t)
-  return $ ArrayVal arr $ Array t (Rank $ length ns) Nonunique
+  arbitrary = BasicVal <$> arbitrary
 
 instance Arbitrary (IdentBase Shape) where
-  arbitrary = Ident <$> arbitrary <*> arbitrary <*> pure noLoc
+  arbitrary = Ident <$> arbitrary <*> arbitrary

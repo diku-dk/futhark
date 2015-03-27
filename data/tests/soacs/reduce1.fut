@@ -1,1 +1,1 @@
-fun int main([int] a) = reduce(op *, 1, a)
+fun int main([int] a) = reduce(*, 1, a)

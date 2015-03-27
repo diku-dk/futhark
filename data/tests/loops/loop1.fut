@@ -5,4 +5,4 @@ fun [int] main() =
   loop (outarr = outarr) = for i < n do
     let outarr[i] = arr[i]
     in  outarr
-  in map(op+, outarr)
+  in map(+, outarr)

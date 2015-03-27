@@ -8,13 +8,13 @@
 // this code path.
 
 fun [real] take(int n, [real] a) =
-  let {first, rest} = split(n, a) in
+  let {first, rest} = split( (n), a) in
   first
 
 fun [real] fftmp([[real]] md_c) =
   map( fn real (int j) =>
          let x = take(j,md_c[j])
-         in  reduce(op +, 0.0, x),
+         in  reduce(+, 0.0, x),
        iota(size(0, md_c))
      )
 

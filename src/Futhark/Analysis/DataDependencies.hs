@@ -40,13 +40,14 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                 (resultSubExps $ bodyResult fb)
           in HM.unions [branchdeps, deps, tdeps, fdeps]
 
-        grow deps (Let pat _ (LoopOp (DoLoop respat merge _ bound body))) =
+        grow deps (Let pat _ (LoopOp (DoLoop respat merge form body))) =
           let deps' = deps `HM.union` HM.fromList
                       [ (fparamName v, depsOf deps e) | (v,e) <- merge ]
               bodydeps = dataDependencies' deps' body
-              bounddeps = depsOf deps bound
+              formdeps = case form of ForLoop _ bound -> depsOf deps bound
+                                      WhileLoop _     -> HS.empty
               comb v e =
-                (identName v, HS.unions [bounddeps, depsOf bodydeps e])
+                (identName v, HS.unions [formdeps, depsOf bodydeps e])
               mergedeps = HM.fromList $ zipWith comb (map (fparamIdent . fst) merge) $
                           resultSubExps $ bodyResult body
           in HM.fromList [ (name, nameDeps (identName res) mergedeps)
@@ -60,15 +61,6 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                       lambdaBody fun
               resdeps = HM.fromList $ zip (patternNames pat) $
                         lambdaDeps deps' fun
-          in resdeps `HM.union` deps'
-
-        grow deps (Let pat _ (LoopOp (Filter cs fun arrs))) =
-          let pardeps = mkDeps (lambdaParams fun) $
-                        soacArgDeps deps cs $ map (depsOfIdent deps) arrs
-              deps' = dataDependencies' (pardeps `HM.union` deps) $
-                      lambdaBody fun
-              resdeps = mkDeps (patternIdents pat) $
-                        repeat $ HS.unions $ lambdaDeps deps' fun
           in resdeps `HM.union` deps'
 
         grow deps (Let pat _ (LoopOp (Reduce cs fun args))) =

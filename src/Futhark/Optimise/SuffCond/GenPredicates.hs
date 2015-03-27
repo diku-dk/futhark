@@ -104,13 +104,6 @@ splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args))) = do
           LoopOp $ Map cs valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Filter cs fun args))) = do
-  (predbnds, valfun, ok) <- splitMap cs fun args
-  return (predbnds ++ [bnd],
-          mkLet' (patternIdents pat) $
-          LoopOp $ Filter cs valfun args,
-          ok)
-
 splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args))) = do
   (predbody, valfun, ok) <- splitReduce cs fun args
   return (predbody ++ [bnd],
@@ -132,14 +125,14 @@ splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) = d
           LoopOp $ Redomap cs outerfun valfun acc arr,
           ok)
 
-splitBinding (Let pat _ (LoopOp (DoLoop respat merge i bound body))) = do
+splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
   (predbody, valbody) <- splitBody body
   ok <- newIdent "loop_ok" (Basic Bool)
   predbody' <- conjoinLoopBody ok predbody
   let predloop = LoopOp $ DoLoop (respat++[ok])
-                 (merge++[(FParam ok (),constant True)]) i bound
+                 (merge++[(FParam ok (),constant True)]) form
                  predbody'
-      valloop = LoopOp $ DoLoop respat merge i bound valbody
+      valloop = LoopOp $ DoLoop respat merge form valbody
   return ([mkLet' (idents<>[ok]) predloop],
           mkLet' idents valloop,
           Just $ Var ok)

@@ -92,6 +92,7 @@ data RenameEnv = RenameEnv {
   , envNameFn  :: VNameSource -> VName -> (VName, VNameSource)
   }
 
+-- | The monad in which renaming is performed.
 type RenameM = StateT VNameSource (Reader RenameEnv)
 
 -- | Produce a map of the substitutions that should be performed by
@@ -106,7 +107,11 @@ new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            put src'
            return k'
 
+-- | Members of class 'Rename' can be uniquely renamed.
 class Rename a where
+  -- | Rename the given value such that it does not contain shadowing,
+  -- and has incorporated any substitutions present in the 'RenameM'
+  -- environment.
   rename :: a -> RenameM a
 
 instance Rename VName where
@@ -189,18 +194,25 @@ instance Renameable lore => Rename (Body lore) where
       return $ Body blore' (Let pat' elore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (LoopOp (DoLoop respat merge loopvar boundexp loopbody)) = do
+  rename (LoopOp (DoLoop respat merge form loopbody)) = do
     let (mergepat, mergeexp) = unzip merge
-    boundexp' <- rename boundexp
     mergeexp' <- mapM rename mergeexp
     bind (map fparamIdent mergepat) $ do
       mergepat' <- mapM rename mergepat
       respat' <- mapM rename respat
-      bind [loopvar] $ do
-        loopvar'  <- rename loopvar
-        loopbody' <- rename loopbody
-        return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
-                          loopvar' boundexp' loopbody'
+      case form of
+        ForLoop loopvar boundexp -> do
+          boundexp' <- rename boundexp
+          bind [loopvar] $ do
+            loopvar'  <- rename loopvar
+            loopbody' <- rename loopbody
+            return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+              (ForLoop loopvar' boundexp') loopbody'
+        WhileLoop cond -> do
+          loopbody' <- rename loopbody
+          cond'     <- rename cond
+          return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+            (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnBinding = fail "Unhandled binding in Renamer"
@@ -208,6 +220,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnSubExp = rename
                     , mapOnIdent = rename
                     , mapOnLambda = rename
+                    , mapOnExtLambda = rename
                     , mapOnCertificates = mapM rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
@@ -228,6 +241,14 @@ instance Renameable lore => Rename (Lambda lore) where
       body' <- rename body
       ret' <- mapM rename ret
       return $ Lambda params' body' ret'
+
+instance Renameable lore => Rename (ExtLambda lore) where
+  rename (ExtLambda params body rettype) =
+    bind params $ do
+      params' <- mapM rename params
+      body' <- rename body
+      rettype' <- rename rettype
+      return $ ExtLambda params' body' rettype'
 
 instance Rename Names where
   rename = liftM HS.fromList . mapM rename . HS.toList

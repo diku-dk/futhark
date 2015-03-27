@@ -27,6 +27,8 @@ module Futhark.Analysis.SymbolTable
   , insertLoopVar
     -- * Bounds
   , updateBounds
+  , setUpperBound
+  , setLowerBound
   , isAtLeast
     -- * Misc
   , enclosingLoopVars
@@ -270,7 +272,7 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
             subExpRange v vtable
           PrimOp (Rearrange _ _ v) ->
             identRange v vtable
-          PrimOp (Split _ _ v _) ->
+          PrimOp (Split _ _ v) ->
             identRange v vtable
           PrimOp (Copy se) ->
             subExpRange se vtable
@@ -280,11 +282,13 @@ bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
         zero = Val $ IntVal 0
         one = Val $ IntVal 1
 -- Then, handle others.  For now, this is only filter.
-bindingEntries bnd@(Let (Pattern (x:xs)) _ (LoopOp (Filter _ _ inps))) vtable =
-  defBndEntry vtable x bnd : zipWith makeBnd xs inps
-  where makeBnd bindee v =
+bindingEntries bnd@(Let (Pattern ps) _ (PrimOp (Partition _ n _ arr))) vtable =
+  let (sizes, arrs) = splitAt n ps
+  in [ defBndEntry vtable x bnd | x <- sizes ] ++
+     map makeBnd arrs
+  where makeBnd bindee =
           (defBndEntry vtable bindee bnd) {
-            letBoundRange = lookupRange (identName v) vtable
+            letBoundRange = lookupRange (identName arr) vtable
             }
 bindingEntries bnd@(Let pat _ _) vtable =
   map (flip (defBndEntry vtable) bnd) $ patternElements pat

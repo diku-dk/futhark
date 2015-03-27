@@ -90,6 +90,7 @@ import Language.Futhark.Parser.Lexer
       '<'             { L $$ LTH }
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
+      '>='            { L $$ GEQ }
       pow             { L $$ POW }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
@@ -104,6 +105,7 @@ import Language.Futhark.Parser.Lexer
       '}'             { L $$ RCURLY }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
+      '!'             { L $$ BANG }
       fun             { L $$ FUN }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
@@ -119,7 +121,6 @@ import Language.Futhark.Parser.Lexer
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
-      rotate          { L $$ ROTATE }
       transpose       { L $$ TRANSPOSE }
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
@@ -128,6 +129,7 @@ import Language.Futhark.Parser.Lexer
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
+      partition       { L $$ PARTITION }
       redomap         { L $$ REDOMAP }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
@@ -139,14 +141,14 @@ import Language.Futhark.Parser.Lexer
       op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
-      assert          { L $$ ASSERT }
-      conjoin         { L $$ CONJOIN }
+      while           { L $$ WHILE }
+      stream          { L $$ STREAM }
 
 %nonassoc ifprec letprec
 %left '||'
 %left '&&'
 %left '&' '^' '|'
-%left '<=' '<' '=='
+%left '<=' '>=' '>' '<' '=='
 
 %left '<<' '>>'
 %left '+' '-'
@@ -161,24 +163,29 @@ Prog :: { UncheckedProg }
      :   FunDecs {- EOF -}   { Prog $1 }
 ;
 
-Ops : op '+'     { (nameFromString "op +", $1) }
-    | op '*'     { (nameFromString "op *", $1) }
-    | op '-'     { (nameFromString "op -", $1) }
-    | op '/'     { (nameFromString "op /", $1) }
-    | op '%'     { (nameFromString "op %", $1) }
-    | op '=='    { (nameFromString "op ==", $1) }
-    | op '<'     { (nameFromString "op <", $1) }
-    | op '<='    { (nameFromString "op <=", $1) }
-    | op '&&'    { (nameFromString "op &&", $1) }
-    | op '||'    { (nameFromString "op ||", $1) }
-    | op not     { (nameFromString "op not", $1) }
-    | op '~'     { (nameFromString "op ~",$1) }
-    | op pow     { (nameFromString "op pow", $1) }
-    | op '^'     { (nameFromString "op ^", $1) }
-    | op '&'     { (nameFromString "op &", $1) }
-    | op '|'     { (nameFromString "op |", $1) }
-    | op '>>'    { (nameFromString "op >>", $1) }
-    | op '<<'    { (nameFromString "op <<", $1) }
+-- Note that this production does not include Minus.
+BinOp :: { (BinOp, SrcLoc) }
+      : '+'     { (Plus, $1) }
+      | '*'     { (Times, $1) }
+      | '/'     { (Divide, $1) }
+      | '%'     { (Mod, $1) }
+      | '=='    { (Equal, $1) }
+      | '<'     { (Less, $1) }
+      | '<='    { (Leq, $1) }
+      | '>'     { (Greater, $1) }
+      | '>='    { (Geq, $1) }
+      | '&&'    { (LogAnd, $1) }
+      | '||'    { (LogOr, $1) }
+      | pow     { (Pow, $1) }
+      | '^'     { (Xor, $1) }
+      | '&'     { (Band, $1) }
+      | '|'     { (Bor, $1) }
+      | '>>'    { (ShiftR, $1) }
+      | '<<'    { (ShiftL, $1) }
+
+UnOp :: { (UnOp, SrcLoc) }
+     : not { (Not, $1) }
+     | '~' { (Negate, $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
@@ -199,21 +206,37 @@ Type :: { UncheckedType }
         | '{' Types '}' { Tuple $2 }
 ;
 
+DimDecl :: { DimDecl Name }
+        : ',' id
+          { let L _ (ID name) = $2
+            in NamedDim name }
+        | ',' '!' id
+          { let L _ (ID name) = $3
+            in KnownDim name }
+        | ',' intlit
+          { let L _ (INTLIT n) = $2
+            in ConstDim n }
+        | { AnyDim }
+
 ArrayType :: { UncheckedArrayType }
-          : Uniqueness '[' BasicArrayRowType ']'
+          : Uniqueness '[' BasicArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in BasicArray et (Nothing:ds) $1 NoInfo }
-          | Uniqueness '[' TupleArrayRowType ']'
+              in BasicArray et (ShapeDecl ($4:ds)) $1 NoInfo }
+          | Uniqueness '[' TupleArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in TupleArray et (Nothing:ds) $1 }
+              in TupleArray et (ShapeDecl ($4:ds)) $1 }
 
-BasicArrayRowType : BasicType            { ([], $1) }
-             | '[' BasicArrayRowType ']' { let (ds, et) = $2
-                                           in (Nothing:ds, et) }
+BasicArrayRowType : BasicType
+                    { ([], $1) }
+                  | '[' BasicArrayRowType DimDecl ']'
+                    { let (ds, et) = $2
+                      in ($3:ds, et) }
 
-TupleArrayRowType : '{' TupleArrayElemTypes '}' { ([], $2) }
-                  | '[' TupleArrayRowType ']'   { let (ds, et) = $2
-                                                  in (Nothing:ds, et) }
+TupleArrayRowType : '{' TupleArrayElemTypes '}'
+                     { ([], $2) }
+                  | '[' TupleArrayRowType DimDecl ']'
+                     { let (ds, et) = $2
+                       in ($3:ds, et) }
 
 TupleArrayElemTypes : TupleArrayElemType { [$1] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
@@ -258,8 +281,8 @@ Exp  :: { UncheckedExp }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
-     | '-' Exp        { Negate $2 $1 }
-     | not Exp        { Not $2 $1 }
+     | '-' Exp %prec '~' { UnOp Negate $2 $1 }
+     | not Exp        { UnOp Not $2 $1 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
@@ -272,6 +295,8 @@ Exp  :: { UncheckedExp }
      | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
      | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
+     | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }
+     | Exp '>=' Exp   { BinOp Geq  $1 $3 NoInfo $2 }
 
      | if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
@@ -284,50 +309,27 @@ Exp  :: { UncheckedExp }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
-     | Certificates size '(' NaturalInt ',' Exp ')'
-                      { Size $1 $4 $6 $2 }
-
      | size '(' NaturalInt ',' Exp ')'
-                      { Size [] $3 $5 $1 }
+                      { Size $3 $5 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
-     | Certificates reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape $1 $5 $8 $2 }
-
      | reshape '(' '(' Exps ')' ',' Exp ')'
-                      { Reshape [] $4 $7 $1 }
-
-     | Certificates rearrange '(' '(' NaturalInts ')' ',' Exp ')'
-                      { Rearrange $1 $5 $8 $2 }
+                      { Reshape $4 $7 $1 }
 
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
-                      { Rearrange [] $4 $7 $1 }
+                      { Rearrange $4 $7 $1 }
 
-     | Certificates transpose '(' Exp ')' { Transpose $1 0 1 $4 $2 }
-
-     | transpose '(' Exp ')' { Transpose [] 0 1 $3 $1 }
-
-     | Certificates transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
-                      { Transpose $1 $4 $6 $8 $2 }
+     | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
 
      | transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
-                      { Transpose [] $3 $5 $7 $1 }
+                      { Transpose $3 $5 $7 $1 }
 
-     | rotate '(' SignedInt ',' Exp ')'
-                      { Rotate [] $3 $5 $1 }
+     | split '(' '(' Exps ')' ',' Exp ')'
+                      { Split $4 $7 $1 }
 
-     | Certificates split '(' Exp ',' Exp ')'
-                      { Split $1 $4 $6 $2 }
-
-     | split '(' Exp ',' Exp ')'
-                      { Split [] $3 $5 $1 }
-
-     | Certificates concat '(' Exp ',' Exp ')'
-                      { Concat $1 $4 $6 $2 }
-
-     | concat '(' Exp ',' Exp ')'
-                      { Concat [] $3 $5 $1 }
+     | concat '(' Exp ',' Exps ')'
+                      { Concat $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce $3 $5 $7 $1 }
@@ -347,6 +349,9 @@ Exp  :: { UncheckedExp }
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 $1 }
 
+     | partition '(' FunAbstrsThenExp ')'
+                      { Partition (fst $3) (snd $3) $1 }
+
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                       { Redomap $3 $5 $7 $9 $1 }
 
@@ -361,12 +366,6 @@ Exp  :: { UncheckedExp }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 
-     | assert '(' Exp ')' { Assert $3 $1 }
-
-     | conjoin '(' Exps ')' { Conjoin $3 $1 }
-
-     | conjoin '(' ')' { Conjoin [] $1 }
-
      | '(' Exp ')' { $2 }
 
      | let Id '=' Exp in Exp %prec letprec
@@ -378,32 +377,32 @@ Exp  :: { UncheckedExp }
      | let '{' TupIds '}' '=' Exp in Exp %prec letprec
                       { LetPat (TupId $3 $1) $6 $8 $1 }
 
-     | let Certificates Id '=' Id with Index '<-' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $5 (fst $7) (snd $7) $9 $11 $1 }
      | let Id '=' Id with Index '<-' Exp in Exp %prec letprec
-                      { LetWith [] $2 $4 (fst $6) (snd $6) $8 $10 $1 }
-     | let Certificates Id Index '=' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $3 (fst $4) (snd $4) $6 $8 $1 }
+                      { LetWith $2 $4 $6 $8 $10 $1 }
+
      | let Id Index '=' Exp in Exp %prec letprec
-                      { LetWith [] $2 $2 (fst $3) (snd $3) $5 $7 $1 }
-     | let Certificates Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $3 $3 Nothing [] $7 $9 $1 }
+                      { LetWith $2 $2 $3 $5 $7 $1 }
+
      | let Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith [] $2 $2 Nothing [] $6 $8 $1 }
+                      { LetWith $2 $2 [] $6 $8 $1 }
 
      | Id Index
-                      { Index [] $1 (fst $2) (snd $2) (srclocOf $1) }
-
-     | Certificates Id Index
-                      { Index $1 $2 (fst $3) (snd $3) (srclocOf $2) }
+                      { Index $1 $2 (srclocOf $1) }
 
      | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t $7 $9 $11 $13 $1) (tupIdExp $3) }
+                      {% liftM (\t -> DoLoop $3 t (ForLoop $7 $9) $11 $13 $1) (tupIdExp $3) }
      | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 $9 $11 $13 $15 $1 }
+                      { DoLoop $3 $5 (ForLoop $9 $11) $13 $15 $1 }
 
-Index : '[' Certificates '|' Exps ']' { (Just $2, $4) }
-      | '[' Exps ']'                  { (Nothing, $2) }
+     | loop '(' TupId ')' '=' while Exp do Exp in Exp %prec letprec
+                      {% liftM (\t -> DoLoop $3 t (WhileLoop $7) $9 $11 $1) (tupIdExp $3) }
+     | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
+                      { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
+
+     | stream '(' FunAbstr ',' Id ',' Id ',' Exp ',' Exp ')'
+                      { Stream $5 $7 $9 $11 $3 $1 }
+
+Index : '[' Exps ']'                  { $2 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
@@ -417,12 +416,6 @@ TupleExp : '{' Exps '}' { ($2, $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
-Ids : Id         { [$1] }
-    | Id ',' Ids { $1 : $3 }
-
-Certificates : '<' '>'                   { [] }
-             | '<' Ids '>' { $2 }
-
 TupIds : TupId ',' TupIds  { $1 : $3 }
        | TupId             { [$1] }
        |                   { [] }
@@ -432,15 +425,34 @@ TupId : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '_' { Wildcard NoInfo $1 }
       | '{' TupIds '}' { TupId $2 $1 }
 
-FunAbstr : id { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
-         | Ops { let (name,pos) = $1 in CurryFun name [] NoInfo pos }
-         | id '(' ')' { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
-         | Ops '(' ')' { let (name,pos) = $1 in CurryFun name [] NoInfo pos }
+FunAbstr :: { UncheckedLambda }
+         : fn Type '(' TypeIds ')' '=>' Exp
+           { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
-               { let L pos (ID name) = $1 in CurryFun name $3 NoInfo pos }
-         | Ops '(' Exps ')'
-               { let (name,pos) = $1 in CurryFun name $3 NoInfo pos }
-         | fn Type '(' TypeIds ')' '=>' Exp { AnonymFun $4 $7 $2 $1 }
+           { let L pos (ID name) = $1 in CurryFun name $3 NoInfo pos }
+         | id '(' ')'
+           { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
+         | id
+           { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
+           -- Minus is handed explicitly here because I could figure
+           -- out how to resolve the ambiguity with negation.
+         | '-' Exp
+           { CurryBinOpRight Minus $2 NoInfo $1 }
+         | '-'
+           { BinOpFun Minus NoInfo $1 }
+         | Exp '-'
+           { CurryBinOpLeft Minus $1 NoInfo (srclocOf $1) }
+         | BinOp Exp
+           { CurryBinOpRight (fst $1) $2 NoInfo (snd $1) }
+         | Exp BinOp
+           { CurryBinOpLeft (fst $2) $1 NoInfo (snd $2) }
+         | BinOp
+           { BinOpFun (fst $1) NoInfo (snd $1) }
+         | UnOp
+           { UnOpFun (fst $1) NoInfo (snd $1) }
+
+FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
+                 | FunAbstr ',' FunAbstrsThenExp { ($1 : fst $3, snd $3) }
 
 Value : IntValue { $1 }
       | RealValue { $1 }
@@ -480,9 +492,8 @@ ArrayValue :  '[' Value ']'
                   Nothing -> throwError "Invalid array value"
                   Just ts -> return $ ArrayVal (arrayFromList $ $2:$4) $ removeNames ts
              }
-           | '[' ']'
-           {% return $ ArrayVal (arrayFromList []) $ toDecl $ Basic Int
-           }
+           | empty '(' Type ')'
+             { emptyArray $3 }
 TupleValue : '{' Values '}' { TupVal $2 }
 
 Values : Value ',' Values { $1 : $3 }
@@ -529,7 +540,9 @@ getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
 getNoLines (GetLine _) = Left "No extra lines"
 
-combArrayTypes :: UncheckedType -> [UncheckedType] -> Maybe UncheckedType
+combArrayTypes :: TypeBase Rank NoInfo Name
+               -> [TypeBase Rank NoInfo Name]
+               -> Maybe (TypeBase Rank NoInfo Name)
 combArrayTypes t ts = foldM comb t ts
   where comb x y
           | x == y    = Just x

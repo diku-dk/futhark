@@ -37,6 +37,7 @@ data Token = IF
            | LTH
            | GTH
            | LEQ
+           | GEQ
            | POW
            | SHIFTL
            | SHIFTR
@@ -66,7 +67,6 @@ data Token = IF
            | REDUCE
            | RESHAPE
            | REARRANGE
-           | ROTATE
            | TRANSPOSE
            | ZIPWITH
            | ZIP
@@ -75,6 +75,7 @@ data Token = IF
            | SPLIT
            | CONCAT
            | FILTER
+           | PARTITION
            | REDOMAP
            | TRUE
            | FALSE
@@ -87,6 +88,8 @@ data Token = IF
            | EMPTY
            | COPY
            | ASSERT
-           | CONJOIN
+           | WHILE
+           | STREAM
+           | BANG
            | EOF
              deriving (Show, Eq)

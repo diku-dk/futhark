@@ -5,6 +5,6 @@ fun [[int]] main([[{int,int}]] a) =
                     row),
               a) in
   let c = map(fn [int] ([{int,int}] row) =>
-                map(op+ , row),
+                map(+ , row),
               transpose(b)) in
   c

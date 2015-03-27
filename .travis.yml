@@ -1,0 +1,19 @@
+language: haskell
+
+before_install:
+  cabal install happy alex hlint
+
+ghc: 7.8
+
+script:
+  - cabal configure --enable-tests
+  - cabal build --ghc-options -Werror
+  - cabal test
+  - cabal install && PATH=dist/build/futhark/:$PATH data/runtests.sh
+  - tools/style-check.sh src
+  - cabal haddock
+
+notifications:
+  email:
+    - athas@sigkill.dk
+    - cosmin.oancea@diku.dk

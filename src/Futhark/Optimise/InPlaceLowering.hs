@@ -137,11 +137,13 @@ optimiseInBinding (Let pat attr e) = do
   return $ Let pat attr e'
 
 optimiseExp :: Exp Basic -> ForwardingM (Exp Basic)
-optimiseExp (LoopOp (DoLoop res merge i bound body)) =
-  bindingIdents [i] $
+optimiseExp (LoopOp (DoLoop res merge form body)) =
+  bindingIdents (boundInForm form) $
   bindingFParams (map fst merge) $ do
     body' <- optimiseBody body
-    return $ LoopOp $ DoLoop res merge i bound body'
+    return $ LoopOp $ DoLoop res merge form body'
+  where boundInForm (ForLoop i _) = [i]
+        boundInForm (WhileLoop _) = []
 optimiseExp e = mapExpM traverse e
   where traverse = identityMapper { mapOnBody = optimiseBody
                                   , mapOnLambda = optimiseLambda

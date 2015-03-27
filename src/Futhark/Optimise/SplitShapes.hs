@@ -82,9 +82,9 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
         shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
 
-        instantiate = do v <- lift $ newIdent "precomp_shape" (Basic Int)
-                         tell [v]
-                         return $ Var v
+        instantiate _ = do v <- lift $ newIdent "precomp_shape" (Basic Int)
+                           tell [v]
+                           return $ Var v
 
 substituteExtResultShapes :: MonadFreshNames m => [Type] -> Body -> m Body
 substituteExtResultShapes rettype (Body _ bnds res) = do

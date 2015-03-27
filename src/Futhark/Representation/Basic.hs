@@ -13,6 +13,7 @@ module Futhark.Representation.Basic
        , LoopOp
        , Exp
        , Lambda
+       , ExtLambda
        , FunDec
        , FParam
        , RetType
@@ -23,6 +24,7 @@ module Futhark.Representation.Basic
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
        , AST.LambdaT(Lambda)
+       , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
        , AST.PatElemT(PatElem)
@@ -45,7 +47,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, FParam, RetType,
+          Pattern, Lambda, ExtLambda, FunDec, FParam, RetType,
           PatElem)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
@@ -70,6 +72,9 @@ instance Lore.Lore Basic where
   loopResultContext _ res merge =
     loopShapeContext res $ map fparamIdent merge
 
+  applyRetType _ ret =
+    applyExtType ret . map fparamIdent
+
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
 type LoopOp = AST.LoopOp Basic
@@ -78,6 +83,7 @@ type Body = AST.Body Basic
 type Binding = AST.Binding Basic
 type Pattern = AST.Pattern Basic
 type Lambda = AST.Lambda Basic
+type ExtLambda = AST.ExtLambda Basic
 type FunDec = AST.FunDecT Basic
 type FParam = AST.FParam Basic
 type RetType = AST.RetType Basic
@@ -90,8 +96,8 @@ instance TypeCheck.Checkable Basic where
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern pat e =
     TypeCheck.matchExtPattern (patternElements pat) (expExtType e)
-  basicFParam name t =
-    return $ AST.FParam (Ident name (AST.Basic t)) ()
+  basicFParam _ name t =
+    AST.FParam (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name ts
 

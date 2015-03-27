@@ -7,11 +7,11 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , primOpType
        , loopOpExtType
        , mapType
-       , filterType
        , valueShapeContext
        , subExpShapeContext
        , loopShapeContext
        , loopExtType
+       , applyExtType
        , module Futhark.Representation.AST.RetType
        )
        where
@@ -20,6 +20,7 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
@@ -35,14 +36,6 @@ mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaReturnType f ]
   where outersize = arraysSize 0 arrts
-
-filterType :: Lambda lore -> [Type] -> [ExtType]
-filterType _ =
-  map extOuterDim
-  where extOuterDim t =
-          t `setArrayShape` ExtShape (extOuterDim' $ arrayShape t)
-        extOuterDim' (Shape dims) =
-          Ext 0 : map Free (drop 1 dims)
 
 primOpType :: PrimOp lore -> [Type]
 primOpType (SubExp se) =
@@ -73,25 +66,22 @@ primOpType (Reshape _ shape e) =
 primOpType (Rearrange _ perm e) =
   [identType e `setArrayShape` Shape (permuteShape perm shape)]
   where Shape shape = arrayShape $ identType e
-primOpType (Rotate _ _ e) =
-  [identType e]
-primOpType (Split _ ne e secsize) =
-  [identType e `setOuterSize` ne,
-   identType e `setOuterSize` secsize]
-primOpType (Concat _ x y ressize) =
+primOpType (Split _ sizeexps e) =
+  map (identType e `setOuterSize`) sizeexps
+primOpType (Concat _ x ys ressize) =
   [identType x `setUniqueness` u `setOuterSize` ressize]
-  where u = uniqueness (identType x) <> uniqueness (identType y)
+  where u = uniqueness (identType x) <> mconcat (map (uniqueness . identType) ys)
 primOpType (Copy e) =
   [subExpType e `setUniqueness` Unique]
 primOpType (Assert _ _) =
   [Basic Cert]
-primOpType (Conjoin _) =
-  [Basic Cert]
 primOpType (Alloc e) =
   [Mem e]
+primOpType (Partition _ n _ array) =
+  replicate n (Basic Int) ++ [identType array]
 
 loopOpExtType :: LoopOp lore -> [ExtType]
-loopOpExtType (DoLoop res merge _ _ _) =
+loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (fparamIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
   staticShapes $ mapType f $ map identType arrs
@@ -102,10 +92,40 @@ loopOpExtType (Reduce _ fun _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs) =
   staticShapes $ map (identType . snd) inputs
-loopOpExtType (Filter _ f arrs) =
-  filterType f $ map identType arrs
-loopOpExtType (Redomap _ outerfun _ _ _) =
-  staticShapes $ lambdaReturnType outerfun
+loopOpExtType (Redomap _ outerfun innerfun _ ids) =
+  let acc_tp    = lambdaReturnType outerfun
+      acc_el_tp = lambdaReturnType innerfun
+      res_el_tp = drop (length acc_tp) acc_el_tp
+  in  case res_el_tp of
+        [] -> staticShapes acc_tp
+        _  -> let outersize  = arraysSize 0 (map identType ids)
+                  res_arr_tp :: [Type]
+                  res_arr_tp = map (\eltp -> arrayOf eltp
+                                                     (Shape [outersize])
+                                                     (uniqueness eltp)
+                                   ) res_el_tp
+              in  staticShapes (acc_tp ++ res_arr_tp)
+loopOpExtType (Stream _ accs arrs lam) =
+  let (ExtLambda params _ rtp) = lam
+      nms = map identName (take (2 + length accs) params)
+      (Array _ shp _) = identType (head arrs)
+      (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
+      substs = HM.fromList $ zip nms (outersize:i0:accs)
+  in  map (substNamesInExtType substs) rtp
+    where substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
+          substNamesInExtType _ tp@(Basic _) = tp
+          substNamesInExtType subs (Mem se) =
+            Mem $ substNamesInSubExp subs se
+          substNamesInExtType subs (Array btp shp u) =
+            let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
+            in  Array btp shp' u
+          substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
+          substNamesInExtDimSize _ (Ext o) = Ext o
+          substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
+          substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
+          substNamesInSubExp _ e@(Constant _) = e
+          substNamesInSubExp subs (Var idd) =
+            fromMaybe (Var idd) (HM.lookup (identName idd) subs)
 
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
@@ -145,3 +165,32 @@ loopExtType :: [Ident] -> [Ident] -> [ExtType]
 loopExtType res merge =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType res
   where inaccessible = HS.fromList $ map identName merge
+
+applyExtType :: ExtRetType -> [Ident]
+             -> [SubExp]
+             -> Maybe ExtRetType
+applyExtType (ExtRetType extret) params args
+  | length args == length params && and (zipWith subtypeOf argtypes paramtypes) =
+    Just $ ExtRetType $ map correctDims extret
+  | otherwise =
+    Nothing
+  where paramtypes = map (toDecl . identType) params
+        argtypes   = map (toDecl . subExpType) args
+
+        parammap :: HM.HashMap VName SubExp
+        parammap = HM.fromList $
+                   zip (map identName params) args
+
+        correctDims t =
+          t `setArrayShape`
+          ExtShape (map correctDim $ extShapeDims $ arrayShape t)
+
+        correctDim (Ext i) =
+          Ext i
+        correctDim (Free (Constant v)) =
+          Free $ Constant v
+        correctDim (Free (Var v))
+          | Just se <- HM.lookup (identName v) parammap =
+            Free se
+          | otherwise =
+            Free $ Var v

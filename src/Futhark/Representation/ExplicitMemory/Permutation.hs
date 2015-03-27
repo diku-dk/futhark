@@ -12,6 +12,7 @@ module Futhark.Representation.ExplicitMemory.Permutation
          Swap (..)
        , Permutation (..)
        , apply
+       , invert
        )
        where
 
@@ -76,3 +77,13 @@ apply (from :<->: to :>>: perm) vec =
         update i (x :- xs) | i == from' = toV   :- update (i+1) xs
                            | i == to'   = fromV :- update (i+1) xs
                            | otherwise  = x     :- update (i+1) xs
+
+-- | Invert a permutation.
+invert :: Permutation n -> Permutation n
+invert Identity = Identity
+invert (swap :>>: perm) =
+  swap `snoc` invert perm
+
+snoc :: Swap n -> Permutation n -> Permutation n
+snoc swap Identity          = swap  :>>: Identity
+snoc swap (swap2 :>>: perm) = swap2 :>>: swap `snoc` perm

@@ -31,9 +31,6 @@ testBuiltins = [ testCase (nameToString f ++ " is builtin") $
                  isBuiltInFunction f @?= True
                  | f <- HM.keys builtInFunctions ]
 
-instance Arbitrary BinOp where
-  arbitrary = elements [minBound..maxBound]
-
 instance Arbitrary Uniqueness where
   arbitrary = elements [Unique, Nonunique]
 

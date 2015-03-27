@@ -77,7 +77,7 @@ import qualified Data.Sequence as Seq
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST
-  hiding (Map, Reduce, Scan, Filter, Redomap,
+  hiding (Map, Reduce, Scan, Redomap,
           Var, Iota, Rearrange, Reshape, Replicate)
 import Futhark.Substitute
 import Futhark.Tools
@@ -367,7 +367,6 @@ transposeInput k n inp =
 data SOAC lore = Map Certificates (Lambda lore) [Input]
                | Reduce  Certificates (Lambda lore) [(SubExp,Input)]
                | Scan Certificates (Lambda lore) [(SubExp,Input)]
-               | Filter Certificates (Lambda lore) [Input]
                | Redomap Certificates (Lambda lore) (Lambda lore) [SubExp] [Input]
             deriving (Show)
 
@@ -376,7 +375,6 @@ inputs :: SOAC lore -> [Input]
 inputs (Map _     _     arrs) = arrs
 inputs (Reduce  _ _     args) = map snd args
 inputs (Scan    _ _     args) = map snd args
-inputs (Filter  _ _     arrs) = arrs
 inputs (Redomap _ _ _ _ arrs) = arrs
 
 -- | Set the inputs to a SOAC.
@@ -387,8 +385,6 @@ setInputs arrs (Reduce cs lam args) =
   Reduce cs lam (zip (map fst args) arrs)
 setInputs arrs (Scan cs lam args) =
   Scan cs lam (zip (map fst args) arrs)
-setInputs arrs (Filter cs lam _) =
-  Filter cs lam arrs
 setInputs arrs (Redomap cs lam1 lam ne _) =
   Redomap cs lam1 lam ne arrs
 
@@ -397,7 +393,6 @@ lambda :: SOAC lore -> Lambda lore
 lambda (Map     _ lam _       ) = lam
 lambda (Reduce  _ lam _       ) = lam
 lambda (Scan    _ lam _       ) = lam
-lambda (Filter  _ lam _       ) = lam
 lambda (Redomap _ _   lam2 _ _) = lam2
 
 -- | Set the lambda used in the SOAC.
@@ -408,8 +403,6 @@ setLambda lam (Reduce cs _ args) =
   Reduce cs lam args
 setLambda lam (Scan cs _ args) =
   Scan cs lam args
-setLambda lam (Filter cs _ arrs) =
-  Filter cs lam arrs
 setLambda lam (Redomap cs lam1 _ ne arrs) =
   Redomap cs lam1 lam ne arrs
 
@@ -418,7 +411,6 @@ certificates :: SOAC lore -> Certificates
 certificates (Map     cs _     _) = cs
 certificates (Reduce  cs _ _    ) = cs
 certificates (Scan    cs _ _    ) = cs
-certificates (Filter  cs _   _  ) = cs
 certificates (Redomap cs _ _ _ _) = cs
 
 typeOf :: SOAC lore -> [ExtType]
@@ -430,8 +422,6 @@ typeOf (Scan _ _ input) =
   staticShapes $ map (inputType . snd) input
 typeOf (Redomap _ _ lam _ _) =
   staticShapes $ lambdaReturnType lam
-typeOf (Filter _ lam inp) =
-  filterType lam $ map inputType inp
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m) =>
@@ -444,8 +434,6 @@ toExp (Reduce cs l args) =
 toExp (Scan cs l args) =
   LoopOp <$> (Futhark.Scan cs l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
-toExp (Filter cs l as) =
-  LoopOp <$> (Futhark.Filter cs l <$> inputsToSubExps as)
 toExp (Redomap cs l1 l2 es as) =
   LoopOp <$> (Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as)
 
@@ -469,8 +457,6 @@ fromExp (LoopOp (Futhark.Reduce cs l args)) = do
 fromExp (LoopOp (Futhark.Scan cs l args)) = do
   let (es,as) = unzip args
   Right $ Scan cs l (zip es $ map inputFromIdent as)
-fromExp (LoopOp (Futhark.Filter cs l as)) =
-  Right $ Filter cs l (map inputFromIdent as)
 fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as)) =
   Right $ Redomap cs l1 l2 es (map inputFromIdent as)
 fromExp _ = Left NotSOAC

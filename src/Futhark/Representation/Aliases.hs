@@ -15,6 +15,7 @@ module Futhark.Representation.Aliases
        , LoopOp
        , Exp
        , Lambda
+       , ExtLambda
        , FunDec
        , RetType
          -- * Module re-exports
@@ -23,6 +24,7 @@ module Futhark.Representation.Aliases
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
        , AST.LambdaT(Lambda)
+       , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
@@ -55,7 +57,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, FunDec, RetType)
+          Pattern, Lambda, ExtLambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -102,10 +104,14 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type FParam (Aliases lore) = Lore.FParam lore
   type RetType (Aliases lore) = Lore.RetType lore
 
-  representative = Aliases Lore.representative
+  representative =
+    Aliases Lore.representative
 
-  loopResultContext (Aliases lore) res merge =
-    Lore.loopResultContext lore res $ map (removeFParamAliases $ Aliases lore) merge
+  loopResultContext (Aliases lore) =
+    Lore.loopResultContext lore
+
+  applyRetType (Aliases lore) =
+    Lore.applyRetType lore
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -115,6 +121,7 @@ type Body lore = AST.Body (Aliases lore)
 type Binding lore = AST.Binding (Aliases lore)
 type Pattern lore = AST.Pattern (Aliases lore)
 type Lambda lore = AST.Lambda (Aliases lore)
+type ExtLambda lore = AST.ExtLambda (Aliases lore)
 type FunDec lore = AST.FunDec (Aliases lore)
 type RetType lore = AST.RetType (Aliases lore)
 
@@ -181,10 +188,6 @@ removeLambdaAliases = rephraseLambda removeAliases
 
 removePatternAliases :: AST.Pattern (Aliases lore) -> AST.Pattern lore
 removePatternAliases = rephrasePattern removeAliases
-
-removeFParamAliases :: Aliases lore -> FParam (Aliases lore) -> FParam lore
-removeFParamAliases _ (FParam ident lore) =
-  FParam ident lore
 
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore

@@ -53,23 +53,21 @@ primOpAliases (Reshape _ _ e) =
   [identAliases e]
 primOpAliases (Rearrange _ _ e) =
   [identAliases e]
-primOpAliases (Rotate _ _ e) =
-  [identAliases e]
-primOpAliases (Split _ _ e _) =
-  [identAliases e,identAliases e]
-primOpAliases (Concat _ x y _) =
-  [identAliases x <> identAliases y]
+primOpAliases (Split _ sizeexps e) =
+  replicate (length sizeexps) (identAliases e)
+primOpAliases (Concat _ x ys _) =
+  [identAliases x <> mconcat (map identAliases ys)]
 primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =
   [mempty]
-primOpAliases (Conjoin _) =
-  [mempty]
 primOpAliases (Alloc _) =
   [mempty]
+primOpAliases (Partition _ n _ arr) =
+  replicate n mempty ++ [identAliases arr]
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
-loopOpAliases (DoLoop res merge _ _ loopbody) =
+loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
   zip (map ((`elem` res) . fparamIdent . fst) merge) (bodyAliases loopbody)
 loopOpAliases (Map _ f _) =
@@ -78,10 +76,10 @@ loopOpAliases (Reduce _ f _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Scan _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Filter _ _ arrs) =
-  map identAliases arrs
 loopOpAliases (Redomap _ outerfun _ _ _) =
   map (const mempty) $ lambdaReturnType outerfun
+loopOpAliases (Stream _ _ _ lam) =
+  bodyAliases $ extLambdaBody lam
 loopOpAliases (ConcatMap {}) =
   [mempty]
 
@@ -129,7 +127,7 @@ consumedInExp pat e =
                 consumeArg (_,   Observe) = mempty
         consumedInExp' (If _ tb fb _) =
           consumedInBody tb <> consumedInBody fb
-        consumedInExp' (LoopOp (DoLoop _ merge _ _ _)) =
+        consumedInExp' (LoopOp (DoLoop _ merge _ _)) =
           consumedInPattern pat <>
           mconcat (map (subExpAliases . snd) $
                    filter (unique . fparamType . fst) merge)

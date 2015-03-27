@@ -22,6 +22,7 @@ module Futhark.Representation.ExplicitMemory
        , LoopOp
        , Exp
        , Lambda
+       , ExtLambda
        , FunDec
        , FParam
        , RetType
@@ -31,6 +32,7 @@ module Futhark.Representation.ExplicitMemory
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
        , AST.LambdaT(Lambda)
+       , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
        , AST.PatElemT(PatElem)
        , AST.PatternT(Pattern)
@@ -57,7 +59,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, PatElem, Lambda, FunDec, FParam, RetType)
+          Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, RetType)
 import qualified Futhark.Analysis.ScalExp as SE
 
 import Futhark.TypeCheck.TypeError
@@ -81,6 +83,7 @@ type Body = AST.Body ExplicitMemory
 type Binding = AST.Binding ExplicitMemory
 type Pattern = AST.Pattern ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
+type ExtLambda = AST.ExtLambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory
@@ -118,6 +121,8 @@ instance Lore.Lore ExplicitMemory where
               Nothing
           isMergeParam ident =
             any ((==ident) . fparamIdent) mergevars
+
+  applyRetType _ = applyFunReturns
 
 data MemSummary = MemSummary Ident IxFun.IxFun
                 | Scalar
@@ -287,8 +292,8 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkBodyLore = return
   checkFParamLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  basicFParam name t =
-    return $ AST.FParam (Ident name (AST.Basic t)) Scalar
+  basicFParam _ name t =
+    AST.FParam (Ident name (AST.Basic t)) Scalar
 
   matchPattern pat e = do
     rt <- expReturns varMemSummary e
@@ -481,7 +486,7 @@ instance PrettyLore ExplicitMemory where
     case mapMaybe fparamAnnot $ funDecParams fundec of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore (AST.LoopOp (DoLoop _ merge _ _ _)) =
+  ppExpLore (AST.LoopOp (DoLoop _ merge _ _)) =
     case mapMaybe (fparamAnnot . fst) merge of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
@@ -565,17 +570,26 @@ expReturns look (AST.PrimOp (SubExp (Var v))) = do
 expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
   (et, _, u, mem, ixfun) <- arrayIdentReturns look v
   return [ReturnsArray et (ExtShape $ map Free newshape) u $
-          Just $ ReturnsInBlock mem ixfun]
+          Just $ ReturnsInBlock mem $
+          IxFun.reshape ixfun newshape]
 
-expReturns look (AST.PrimOp (Split _ n v restn)) = do
+expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
+  (et, Shape dims, u, mem, ixfun) <- arrayIdentReturns look v
+  let ixfun' = IxFun.permute ixfun perm
+      dims'  = permuteShape perm dims
+  return [ReturnsArray et (ExtShape $ map Free dims') u $
+          Just $ ReturnsInBlock mem ixfun']
+
+expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
-  let shape1 = shape `setOuterDim` n
-      shape2 = shape `setOuterDim` restn
-      offset = sliceOffset shape [SE.subExpToScalExp n]
-  return [ReturnsArray et (ExtShape $ map Free $ shapeDims shape1) u $
-          Just $ ReturnsInBlock mem ixfun,
-          ReturnsArray et (ExtShape $ map Free $ shapeDims shape2) u $
-          Just $ ReturnsInBlock mem $ IxFun.offset ixfun offset]
+  let newShapes = map (shape `setOuterDim`) sizeexps
+      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n))
+                (SE.Val $ IntVal 0) sizeexps
+      slcOffsets = map (\offset -> sliceOffset shape [offset]) offsets
+  return $ zipWith (\newShape slcOffset
+                    -> ReturnsArray et (ExtShape $ map Free $ shapeDims newShape) u $
+                       Just $ ReturnsInBlock mem $ IxFun.offset ixfun slcOffset)
+           newShapes slcOffsets
 
 expReturns look (AST.PrimOp (Index _ v is)) = do
   (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
@@ -584,8 +598,9 @@ expReturns look (AST.PrimOp (Index _ v is)) = do
       return [ReturnsScalar et]
     Shape dims ->
       return [ReturnsArray et (ExtShape $ map Free dims) u $
-             Just $ ReturnsInBlock mem $ IxFun.applyInd ixfun $
-             map SE.subExpToScalExp is]
+             Just $ ReturnsInBlock mem $
+             IxFun.applyInd ixfun
+             (map SE.subExpToScalExp is)]
 
 expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]
@@ -593,7 +608,7 @@ expReturns _ (AST.PrimOp (Alloc size)) =
 expReturns _ (AST.PrimOp op) =
   return $ extReturns $ staticShapes $ primOpType op
 
-expReturns _ (AST.LoopOp (DoLoop res merge _ _ _)) =
+expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
     return $
     evalState (mapM typeWithAttr $
                zip (map identName res) $
@@ -683,6 +698,45 @@ boundInBindings (bnd:bnds) =
           [ (patElemName bindee, bindee)
           | bindee <- patternElements $ bindingPattern bnd
           ]
+
+applyFunReturns :: [FunReturns]
+                -> [FParam]
+                -> [SubExp]
+                -> Maybe [FunReturns]
+applyFunReturns rets params args
+  | Just _ <- applyExtType rettype (map fparamIdent params) args =
+    Just $ map correctDims rets
+  | otherwise =
+    Nothing
+  where rettype = ExtRetType $ map returnsToType rets
+        parammap :: HM.HashMap VName SubExp
+        parammap = HM.fromList $
+                   zip (map fparamName params) args
+
+        substSubExp (Var v)
+          | Just se <- HM.lookup (identName v) parammap = se
+        substSubExp se = se
+
+        correctDims (ReturnsScalar t) =
+          ReturnsScalar t
+        correctDims (ReturnsMemory se) =
+          ReturnsMemory $ substSubExp se
+        correctDims (ReturnsArray et shape u memsummary) =
+          ReturnsArray et (correctExtShape shape) u $
+          correctSummary memsummary
+
+        correctExtShape = ExtShape . map correctDim . extShapeDims
+        correctDim (Ext i)   = Ext i
+        correctDim (Free se) = Free $ substSubExp se
+
+        correctSummary (ReturnsNewBlock i) =
+          ReturnsNewBlock i
+        correctSummary (ReturnsInBlock mem ixfun) =
+          -- FIXME: we should also do a replacement in ixfun here.
+          ReturnsInBlock mem' ixfun
+          where mem' = case HM.lookup (identName mem) parammap of
+                  Just (Var v) -> v
+                  _            -> mem
 
 -- | The size of a basic type in bytes.
 basicSize :: BasicType -> Int

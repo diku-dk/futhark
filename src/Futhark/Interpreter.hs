@@ -42,8 +42,9 @@ data InterpreterError lore =
       -- ^ The arguments given to a function were mistyped.
     | IndexOutOfBounds String [Int] [Int]
       -- ^ First @Int@ is array shape, second is attempted index.
-    | SplitOutOfBounds String [Int] Int
-      -- ^ First @Int@ is array shape, second is attempted split index.
+    | SplitOutOfBounds String [Int] [Int]
+      -- ^ First @[Int]@ is array shape, second is attempted split
+      -- sizes.
     | NegativeIota Int
       -- ^ Called @iota(n)@ where @n@ was negative.
     | NegativeReplicate Int
@@ -73,9 +74,9 @@ instance PrettyLore lore => Show (InterpreterError lore) where
   show (IndexOutOfBounds var arrsz i) =
     "Array index " ++ show i ++ " out of bounds in array '" ++
     var ++ "', of size " ++ show arrsz ++ "."
-  show (SplitOutOfBounds var arrsz i) =
-    "Split index " ++ show i ++ " out of bounds in array '" ++
-    var ++ "', of size " ++ show arrsz ++ "."
+  show (SplitOutOfBounds var arrsz sizes) =
+    "Split not valid for sizes " ++ show sizes ++
+    " on array '" ++ var ++ "', with shape " ++ show arrsz ++ "."
   show (NegativeIota n) =
     "Argument " ++ show n ++ " to iota at is negative."
   show (NegativeReplicate n) =
@@ -175,8 +176,8 @@ binding bnds m = do
             "checkPatSizes:\n" ++
             pretty ident ++ " is specified to have shape [" ++
             intercalate "," (zipWith ppDim vardims varshape) ++
-            "], but is being bound to value of shape [" ++
-            intercalate "," (map pretty valshape) ++ "]."
+            "], but is being bound to value " ++ pretty val ++
+            " of shape [" ++ intercalate "," (map pretty valshape) ++ "]."
         checkShape _ = return ()
 
         ppDim (Constant v) _ = pretty v
@@ -542,42 +543,41 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
 evalPrimOp (Rearrange _ perm arrexp) =
   single <$> permuteArray perm <$> lookupVar arrexp
 
-evalPrimOp (Rotate _ perm arrexp) =
-  single <$> rotateArray perm <$> lookupVar arrexp
-
-evalPrimOp (Split _ splitexp arrexp leftoverexp) = do
-  split <- evalSubExp splitexp
-  leftover <- evalSubExp leftoverexp
+evalPrimOp (Split _ sizeexps arrexp) = do
+  sizes <- mapM (asInt <=< evalSubExp) sizeexps
   arrval <- lookupVar arrexp
-  case (split, leftover, arrval) of
-    (BasicVal (IntVal i),
-     BasicVal (IntVal j),
-     ArrayVal arr bt shape@(outerdim:rowshape))
-      | i <= outerdim ->
+  case arrval of
+    (ArrayVal arr bt shape@(outerdim:rowshape))
+      | all (0<=) sizes && sum sizes <= outerdim ->
         let rowsize = product rowshape
-            bef = ArrayVal (listArray (0,rowsize*i-1) (elems arr))
-                  bt (i:rowshape)
-            aft = ArrayVal (listArray (0,rowsize*j-1)
-                            (drop (rowsize*i) $ elems arr))
-                  bt (outerdim-i:rowshape)
-        in return [bef, aft]
-      | otherwise        -> bad $ SplitOutOfBounds (pretty arrexp) shape i
+        in return $ zipWith (\beg num -> ArrayVal (listArray (0,rowsize*num-1)
+                                                   $ drop (rowsize*beg) (elems arr))
+                                         bt (num:rowshape))
+                    (scanl (+) 0 sizes) sizes
+      | otherwise        -> bad $ SplitOutOfBounds (pretty arrexp) shape sizes
     _ -> bad $ TypeError "evalPrimOp Split"
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _ = bad $ TypeError "evalPrimOp Split asInt"
 
-evalPrimOp (Concat _ arr1exp arr2exp _) = do
-  arr1 <- lookupVar arr1exp
-  arr2 <- lookupVar arr2exp
-  case (arr1, arr2) of
-    (ArrayVal arr1' bt (outerdim1:rowshape1),
-     ArrayVal arr2' _  (outerdim2:rowshape2))
-      | rowshape1 == rowshape2 ->
-        let nelems = (outerdim1 + outerdim2) * product rowshape1
-        in return $ single $
-           ArrayVal (listArray (0,nelems-1) (elems arr1' ++ elems arr2'))
-           bt (outerdim1 + outerdim2 : rowshape1)
-      | otherwise ->
-        bad $ TypeError "irregular arguments to concat"
+evalPrimOp (Concat _ arr1exp arr2exps _) = do
+  arr1  <- lookupVar arr1exp
+  arr2s <- mapM lookupVar arr2exps
+
+  case arr1 of
+    ArrayVal arr1' bt (outerdim1:rowshape1) -> do
+        (res,resouter,resshape) <- foldM concatArrVals (arr1',outerdim1,rowshape1) arr2s
+        return [ArrayVal res bt (resouter:resshape)]
     _ -> bad $ TypeError "evalPrimOp Concat"
+  where
+    concatArrVals (acc,outerdim,rowshape) (ArrayVal arr2 _ (outerdim2:rowshape2)) =
+        if rowshape == rowshape2
+        then let nelems = (outerdim+outerdim2) * product rowshape
+             in return  ( listArray (0,nelems-1) (elems acc ++ elems arr2)
+                        , outerdim+outerdim2
+                        , rowshape
+                        )
+        else bad $ TypeError "irregular arguments to concat"
+    concatArrVals _ _ = bad $ TypeError "evalPrimOp Concat"
 
 evalPrimOp (Copy e) = single <$> evalSubExp e
 
@@ -588,7 +588,29 @@ evalPrimOp (Assert e loc) = do
             _ ->
               bad $ AssertFailed loc
 
-evalPrimOp (Conjoin _) = return [BasicVal Checked]
+evalPrimOp (Partition _ n flags arr) = do
+  flags_elems <- arrToList =<< lookupVar flags
+  arrv <- lookupVar arr
+  arr_elems <- arrToList arrv
+  partitions <- partitionArray flags_elems arr_elems
+  return $
+    map (BasicVal . IntVal . length) partitions ++
+    [arrayVal (concat partitions) et (valueShape arrv)]
+  where et = elemType $ identType arr
+        partitionArray flagsv arrv =
+          map reverse <$>
+          foldM divide (replicate n []) (zip flagsv arrv)
+
+        divide partitions (BasicVal (IntVal i),v)
+          | i < 0 =
+            bad $ TypeError $ "Partition key " ++ show i ++ " is negative"
+          | i < n =
+            return $ take i partitions ++ [v : (partitions!!i)] ++ drop (i+1) partitions
+          | otherwise =
+            return partitions
+
+        divide _ (i,_) =
+          bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
 -- Alloc is not used in the interpreter, so just return whatever
 evalPrimOp (Alloc se) =
@@ -596,7 +618,7 @@ evalPrimOp (Alloc se) =
 
 evalLoopOp :: forall lore . Lore lore => LoopOp lore -> FutharkM lore [Value]
 
-evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
+evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
@@ -605,12 +627,28 @@ evalLoopOp (DoLoop respat merge loopvar boundexp loopbody) = do
       binding (zip3 (map fparamIdent mergepat) (repeat BindVar) vs) $
         mapM lookupVar $
         loopResultContext (representative :: lore) respat mergepat ++ respat
-    _ -> bad $ TypeError "evalBody DoLoop"
+    _ -> bad $ TypeError "evalBody DoLoop for"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(loopvar, BindVar, BasicVal $ IntVal i)] $
             binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
+
+evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
+  mergestart <- mapM evalSubExp mergeexp
+  iteration mergestart
+  where (mergepat, mergeexp) = unzip merge
+        iteration mergeval =
+          binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $ do
+            condv <- lookupVar cond
+            case condv of
+              BasicVal (LogVal False) ->
+                mapM lookupVar $
+                loopResultContext (representative :: lore) respat mergepat ++ respat
+              BasicVal (LogVal True) ->
+                iteration =<< evalBody loopbody
+              _ ->
+                bad $ TypeError "evalBody DoLoop while"
 
 evalLoopOp (Map _ fun arrexps) = do
   vss <- mapM (arrToList <=< lookupVar) arrexps
@@ -656,22 +694,39 @@ evalLoopOp (Scan _ fun inputs) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalLoopOp (Filter _ fun arrexp) = do
-  arrs <- mapM lookupVar arrexp
-  vss <- mapM arrToList arrs
-  vss' <- filterM filt $ transpose vss
-  (BasicVal (IntVal $ length vss'):) <$>
-    arrays (map (rowType . valueType) arrs) vss'
-  where filt x = do
-          res <- applyLambda fun x
-          case res of [BasicVal (LogVal True)] -> return True
-                      _                          -> return False
-
 evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   vss <- mapM (arrToList <=< lookupVar) arrexps
-  let foldfun acc x = applyLambda innerfun $ acc ++ x
-  foldM foldfun startaccs $ transpose vss
+  if res_len == acc_len
+  then foldM foldfun startaccs $ transpose vss
+  else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
+          (acc_res, arr_res) <- foldM foldfun' startaccs' $ transpose vss
+          arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
+          return $ acc_res ++ arr_res_fut
+    where
+        lam_ret_tp     = lambdaReturnType innerfun
+        res_len        = length lam_ret_tp
+        acc_len        = length accexp
+        lam_ret_arr_tp = drop acc_len lam_ret_tp
+        foldfun  acc x = applyLambda innerfun $ acc ++ x
+        foldfun' (acc,arr) x = do
+            res_lam <- applyLambda innerfun $ acc ++ x
+            let res_acc = take acc_len res_lam
+                res_arr = drop acc_len res_lam
+                acc_arr = zipWith (:) res_arr arr
+            return (res_acc, acc_arr)
+
+evalLoopOp (Stream _ accs arrs elam) = do
+  accvals <- mapM evalSubExp accs
+  arrvals <- mapM lookupVar  arrs
+  let (ExtLambda elam_params elam_body elam_rtp) = elam
+  let fun funargs = binding (zip3 elam_params (repeat BindVar) funargs) $
+                            evalBody elam_body
+  -- get the outersize of the input array(s), and use it as chunk!
+  let (ArrayVal _ _ (outersize:_)) = head arrvals
+  let (chunkval, ival) = (BasicVal $ IntVal outersize, BasicVal $ IntVal 0)
+  vs <- fun (chunkval:ival:accvals++arrvals)
+  return $ valueShapeContext elam_rtp vs ++ vs
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do

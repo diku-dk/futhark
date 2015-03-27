@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -w #-}
 -- | Convert an Futhark program in internal representation to a
 -- corresponding program in external representation.  No effort is
 -- made to make the external program look pretty, but correctness and
@@ -66,20 +67,15 @@ externalisePrimOp (I.ArrayLit [] et) =
 externalisePrimOp (I.ArrayLit es et) =
   E.ArrayLit (map externaliseSubExp es) (externaliseType et) noLoc
 externalisePrimOp (I.BinOp bop x y t) =
-  E.BinOp bop (externaliseSubExp x) (externaliseSubExp y)
-              (E.fromDecl $ externaliseDeclType $ I.Basic t) noLoc
+  E.BinOp (externaliseBinOp bop)
+  (externaliseSubExp x) (externaliseSubExp y)
+  (E.Basic t) noLoc
 externalisePrimOp (I.Not x) =
-  E.Not (externaliseSubExp x) noLoc
+  E.UnOp E.Not (externaliseSubExp x) noLoc
 externalisePrimOp (I.Negate x) =
-  E.Negate (externaliseSubExp x) noLoc
-externalisePrimOp (I.Assert x loc) =
-  E.Assert (externaliseSubExp x) loc
-externalisePrimOp (I.Conjoin es) =
-  E.Conjoin (map externaliseSubExp es) noLoc
-externalisePrimOp (I.Index cs src idxs) =
-  E.Index (externaliseCerts cs)
-          (externaliseIdent src)
-          (Just [])
+  E.UnOp E.Negate (externaliseSubExp x) noLoc
+externalisePrimOp (I.Index _ src idxs) =
+  E.Index (externaliseIdent src)
           (map externaliseSubExp idxs)
           noLoc
   {-
@@ -89,15 +85,16 @@ externalisePrimOp (I.Update cs src idxs ve) =
             (externaliseSubExp ve) (E.Var $ externaliseIdent src)
             noLoc
 -}
-externalisePrimOp (I.Split cs ne ae _) =
+{- TODO: Externalise Split
+externalisePrimOp (I.Split cs sizeexps ae) =
   E.Split (externaliseCerts cs)
           (externaliseSubExp ne)
           (E.Var $ externaliseIdent ae)
           noLoc
-externalisePrimOp (I.Concat cs x y _) =
-  E.Concat (externaliseCerts cs)
-           (E.Var $ externaliseIdent x)
-           (E.Var $ externaliseIdent y)
+-}
+externalisePrimOp (I.Concat _ x ys _) =
+  E.Concat (E.Var $ externaliseIdent x)
+           (map (E.Var . externaliseIdent) ys)
            noLoc
 externalisePrimOp (I.Copy e) =
   E.Copy (externaliseSubExp e) noLoc
@@ -107,31 +104,29 @@ externalisePrimOp (I.Replicate ne ve) =
   E.Replicate (externaliseSubExp ne)
               (externaliseSubExp ve)
               noLoc
-externalisePrimOp (I.Reshape cs shape e) =
-  E.Reshape (externaliseCerts cs)
-            (map externaliseSubExp shape)
+externalisePrimOp (I.Reshape _ shape e) =
+  E.Reshape (map externaliseSubExp shape)
             (E.Var $ externaliseIdent e)
             noLoc
-externalisePrimOp (I.Rearrange cs perm e) =
-  E.Rearrange (externaliseCerts cs)
-              perm
+externalisePrimOp (I.Rearrange _ perm e) =
+  E.Rearrange perm
               (E.Var $ externaliseIdent e)
               noLoc
-externalisePrimOp (I.Rotate cs n e) =
-  E.Rotate (externaliseCerts cs)
-           n
-           (E.Var $ externaliseIdent e)
-           noLoc
 
 externaliseLoopOp :: I.LoopOp -> E.Exp
 
-externaliseLoopOp (I.DoLoop respat merge i bound loopbody) =
+externaliseLoopOp (I.DoLoop respat merge form loopbody) =
   E.DoLoop (externaliseBinders (map fparamIdent mergepat))
            (externaliseSubExps mergeexp)
-           (externaliseIdent i) (externaliseSubExp bound)
+           form'
            (externaliseBody loopbody)
            (E.TupLit (map (E.Var . externaliseIdent) respat) noLoc) noLoc
   where (mergepat, mergeexp) = unzip merge
+        form' = case form of
+          I.ForLoop i bound ->
+            E.ForLoop (externaliseIdent i) (externaliseSubExp bound)
+          I.WhileLoop cond ->
+            E.WhileLoop $ E.Var $ externaliseIdent cond
 externaliseLoopOp (I.Map _ fun es) =
   maybeUnzip $ E.Map (externaliseMapLambda fun)
                (externaliseSOACArrayArgs es)
@@ -148,10 +143,6 @@ externaliseLoopOp (I.Scan _ fun inputs) =
                (externaliseSOACArrayArgs arrinputs)
                noLoc
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Filter _ fun es) =
-  maybeUnzip $ E.Filter (externaliseMapLambda fun)
-                        (externaliseSOACArrayArgs es)
-                        noLoc
 externaliseLoopOp (I.Redomap _ outerfun innerfun vs as) =
   E.Redomap (externaliseFoldLambda outerfun $ length vs)
             (externaliseFoldLambda innerfun $ length vs)
@@ -205,9 +196,6 @@ externaliseDiet :: I.Diet -> E.Diet
 externaliseDiet I.Consume = E.Consume
 externaliseDiet I.Observe = E.Observe
 
-externaliseCerts :: I.Certificates -> E.Certificates
-externaliseCerts = map externaliseIdent
-
 externalisePat :: I.Pattern -> E.TupIdent
 externalisePat = externaliseBinders . patternIdents
 
@@ -215,13 +203,32 @@ externaliseBinders :: [I.Ident] -> E.TupIdent
 externaliseBinders [v] = Id $ externaliseIdent v
 externaliseBinders vs  = TupId (map (Id . externaliseIdent) vs) noLoc
 
+externaliseBinOp :: I.BinOp -> E.BinOp
+externaliseBinOp I.Plus = E.Plus
+externaliseBinOp I.Minus = E.Minus
+externaliseBinOp I.Pow = E.Pow
+externaliseBinOp I.Times = E.Times
+externaliseBinOp I.Divide = E.Divide
+externaliseBinOp I.Mod = E.Mod
+externaliseBinOp I.ShiftR = E.ShiftR
+externaliseBinOp I.ShiftL = E.ShiftL
+externaliseBinOp I.Band = E.Band
+externaliseBinOp I.Xor = E.Xor
+externaliseBinOp I.Bor = E.Bor
+externaliseBinOp I.LogAnd = E.LogAnd
+externaliseBinOp I.LogOr = E.LogOr
+externaliseBinOp I.Less = E.Less
+externaliseBinOp I.Leq = E.Leq
+externaliseBinOp I.Equal = E.Equal
+
 externaliseDeclTypes :: [I.DeclType] -> E.DeclType
 externaliseDeclTypes ts =
   case map externaliseDeclType ts of
     [t]  -> t
     ts'  -> E.Tuple ts'
 
-externaliseTypes :: ArrayShape shape => [I.TypeBase shape] -> E.Type
+externaliseTypes :: I.ArrayShape shape =>
+                    [I.TypeBase shape] -> E.Type
 externaliseTypes ts =
   case map externaliseType ts of
     [t]  -> t
@@ -230,13 +237,13 @@ externaliseTypes ts =
 externaliseDeclType :: I.DeclType -> E.DeclType
 externaliseDeclType (I.Basic t) = E.Basic t
 externaliseDeclType (I.Array et shape u) =
-  E.Array $ E.BasicArray et (replicate (shapeRank shape) Nothing) u NoInfo
+  E.Array $ E.BasicArray et (E.ShapeDecl $ replicate (I.shapeRank shape) E.AnyDim) u NoInfo
 
-externaliseType :: ArrayShape shape =>
+externaliseType :: I.ArrayShape shape =>
                    I.TypeBase shape -> E.Type
 externaliseType (I.Basic t) = E.Basic t
 externaliseType (I.Array et shape u) =
-  E.Array $ E.BasicArray et (replicate (shapeRank shape) Nothing) u mempty
+  E.Array $ E.BasicArray et (E.Rank (I.shapeRank shape)) u mempty
 
 externaliseSOACArrayArgs :: [I.Ident] -> E.Exp
 externaliseSOACArrayArgs [e] = externaliseSubExp $ I.Var e

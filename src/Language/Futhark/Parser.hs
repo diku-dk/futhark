@@ -19,7 +19,7 @@ module Language.Futhark.Parser
   , parseExpIncr
   , parseExpIncrIO
 
-  , ParseError
+  , ParseError (..)
   )
   where
 

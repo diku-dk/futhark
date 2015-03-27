@@ -21,14 +21,13 @@ import Data.Monoid
 
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
-import qualified Data.Set          as S
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.DataDependencies
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Optimise.Simplifier.Rule
-import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
@@ -45,12 +44,10 @@ topDownRules = [ liftIdentityMapping
                , simplifyClosedFormReduce
                , simplifyClosedFormLoop
                , letRule simplifyRearrange
-               , letRule simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyNot
                , letRule simplifyNegate
                , letRule simplifyAssert
-               , letRule simplifyConjoin
                , letRule simplifyIndexing
                , evaluateBranch
                , simplifyBoolBranch
@@ -166,7 +163,7 @@ removeDeadMapping _ _ = cannotSimplify
 
 -- After removing a result, we may also have to remove some existential bindings.
 removeUnusedLoopResult :: forall m.MonadBinder m => BottomUpRule m
-removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound body)))
+removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form body)))
   | explpat' <- filter (keep . fst) explpat,
     explpat' /= explpat =
   let ctxrefs = concatMap (references . snd) explpat'
@@ -177,7 +174,7 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge i bound
       implpat' = filter keepImpl implpat
       pat' = map fst $ implpat'++explpat'
       respat' = map snd explpat'
-  in letBind_ (Pattern pat') $ LoopOp $ DoLoop respat' merge i bound body
+  in letBind_ (Pattern pat') $ LoopOp $ DoLoop respat' merge form body
   where -- | Check whether the variable binding is used afterwards OR
         -- is responsible for some used existential part.
         keep bindee =
@@ -207,7 +204,7 @@ removeUnusedLoopResult _ _ = cannotSimplify
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
-removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound body)))
+removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form body)))
   | not $ all (explicitlyReturned . fst) merge =
   let Result es = bodyResult body
       returnedResultSubExps = map snd $ filter (explicitlyReturned . fst) $ zip mergepat es
@@ -215,7 +212,8 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
       resIsNecessary ((v,_), _) =
         explicitlyReturned v ||
         fparamName v `HS.member` necessaryForReturned ||
-        referencedInPat v
+        referencedInPat v ||
+        referencedInForm v
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
       body' = body { bodyResult = Result es' }
@@ -230,13 +228,14 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge i bound 
        body'' <- insertBindingsM $ do
          mapM_ (uncurry letBindNames') $ dummyBindings discard
          return body'
-       letBind_ pat $ LoopOp $ DoLoop respat merge' i bound body''
+       letBind_ pat $ LoopOp $ DoLoop respat merge' form body''
   where (mergepat, _) = unzip merge
         explicitlyReturned = (`elem` respat) . fparamIdent
         patAnnotNames = mconcat [ freeNamesIn (fparamType bindee) <>
                                   freeNamesIn (fparamLore bindee)
                                 | bindee <- mergepat ]
         referencedInPat = (`HS.member` patAnnotNames) . fparamName
+        referencedInForm = (`HS.member` freeNamesIn form) . fparamName
 
         dummyBindings = map dummyBinding
         dummyBinding ((v,e), _)
@@ -253,7 +252,7 @@ removeRedundantMergeVariables _ _ =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: forall m.MonadBinder m => TopDownRule m
-hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n loopbody))) =
+hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form loopbody))) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
@@ -274,7 +273,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge idd n
       in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
               letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
             letBind_ (Pattern pat') $
-              LoopOp $ DoLoop respat' merge' idd n loopbody'
+              LoopOp $ DoLoop respat' merge' form loopbody'
   where Result ses = bodyResult loopbody
         taggedpat = zip (patternElements pat) $
                     loopResultContext (representative :: Lore m)
@@ -354,7 +353,7 @@ simplifyClosedFormReduce vtable (Let pat _ (LoopOp (Reduce _ fun args))) =
 simplifyClosedFormReduce _ _ = cannotSimplify
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge _ bound body))) =
+simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge (ForLoop _ bound) body))) =
   loopClosedForm pat respat merge bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
@@ -372,22 +371,6 @@ simplifyRearrange look (Rearrange cs perm v) =
     _ -> Nothing
 
 simplifyRearrange _ _ = Nothing
-
-simplifyRotate :: LetTopDownRule lore u
--- A zero-rotation is identity.
-simplifyRotate _ (Rotate _ 0 e) =
-  Just $ SubExp $ Var e
-
-simplifyRotate look (Rotate _ _ v) = do
-  bnd <- asPrimOp =<< look (identName v)
-  case bnd of
-    -- Rotating a replicate is identity.
-    Replicate {} ->
-      Just $ SubExp $ Var v
-    _ ->
-      Nothing
-
-simplifyRotate _ _ = Nothing
 
 simplifyBinOp :: LetTopDownRule lore u
 
@@ -607,25 +590,6 @@ simplifyAssert _ (Assert (Constant (LogVal True)) _) =
   Just $ SubExp $ Constant Checked
 simplifyAssert _ _ =
   Nothing
-
-simplifyConjoin :: LetTopDownRule lore u
-simplifyConjoin look (Conjoin es) =
-  -- Remove trivial certificates.
-  let check seen (Constant Checked) = seen
-      check seen (Var idd) =
-        case asPrimOp =<< look (identName idd) of
-          Just (Conjoin es2) -> seen `S.union` S.fromList es2
-          _                  -> Var idd `S.insert` seen
-      check seen e = e `S.insert` seen
-      origset = S.fromList es
-      newset = foldl check S.empty es
-      es' = S.toList newset
-  in case es' of
-       []                    -> Just $ SubExp $ Constant Checked
-       [c]                   -> Just $ SubExp c
-       _ | origset /= newset -> Just $ Conjoin es'
-         | otherwise         -> Nothing
-simplifyConjoin _ _ = Nothing
 
 simplifyIndexing :: LetTopDownRule lore u
 simplifyIndexing look (Index cs idd inds) =

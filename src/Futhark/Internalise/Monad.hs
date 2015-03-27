@@ -1,9 +1,11 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
+  , throwError
   , ShapeTable
   , FunTable
+  , VarSubstitutions
   , InternaliseEnv(..)
   , FunBinding (..)
   , lookupFunction
@@ -11,8 +13,8 @@ module Futhark.Internalise.Monad
   )
   where
 
-import Control.Arrow
 import Control.Applicative
+import Control.Monad.Except hiding (mapM)
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
 import Control.Monad.Writer hiding (mapM)
@@ -28,18 +30,22 @@ import Futhark.Tools
 
 import Prelude hiding (mapM)
 
--- | A tuple of a return type, a list of argument types, and the
--- argument types of the internalised function.
-data FunBinding = FunBinding { internalFun :: ([ExtType], [VName], [Type])
-                             , externalFun :: (E.DeclType, [E.DeclType])
-                             }
+data FunBinding = FunBinding
+                  { internalFun :: ([VName], [Type],
+                                    [SubExp] -> Maybe ExtRetType)
+                  , externalFun :: (E.DeclType, [E.DeclType])
+                  }
 
 type ShapeTable = HM.HashMap VName [SubExp]
 
 type FunTable = HM.HashMap Name FunBinding
 
+-- | A mapping from external variable names to the corresponding
+-- internalised identifiers.
+type VarSubstitutions = HM.HashMap VName [Ident]
+
 data InternaliseEnv = InternaliseEnv {
-    envSubsts :: HM.HashMap VName [Ident]
+    envSubsts :: VarSubstitutions
   , envFtable :: FunTable
   , envDoBoundsChecks :: Bool
   }
@@ -48,17 +54,26 @@ initialFtable :: FunTable
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, paramts) =
           FunBinding
-          ([Basic t], [], map Basic paramts)
+          ([], map Basic paramts,
+           const $ Just $ ExtRetType [Basic t])
           (E.Basic t, map E.Basic paramts)
 
-type InternaliseM =
-  WriterT (DL.DList Binding) (ReaderT InternaliseEnv (State VNameSource))
+newtype InternaliseM  a = InternaliseM (WriterT (DL.DList Binding)
+                                        (ReaderT InternaliseEnv
+                                         (StateT VNameSource
+                                          (Except String)))
+                                        a)
+  deriving (Functor, Applicative, Monad,
+            MonadWriter (DL.DList Binding),
+            MonadReader InternaliseEnv,
+            MonadState VNameSource,
+            MonadError String)
 
 instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
-instance BindableM InternaliseM where
+instance MonadBinder InternaliseM where
   type Lore InternaliseM = Basic
   mkLetM pat e = return $ mkLet pat' e
     where pat' = [ (ident, bindage)
@@ -67,15 +82,18 @@ instance BindableM InternaliseM where
   mkBodyM bnds res = return $ mkBody bnds res
   mkLetNamesM = mkLetNames
 
-instance MonadBinder InternaliseM where
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
 
 runInternaliseM :: MonadFreshNames m =>
-                   Bool -> FunTable -> InternaliseM a -> m a
-runInternaliseM boundsCheck ftable m =
-  modifyNameSource $
-  first fst . runState (runReaderT (runWriterT m) newEnv)
+                   Bool -> FunTable -> InternaliseM a
+                -> m (Either String a)
+runInternaliseM boundsCheck ftable (InternaliseM m) =
+  modifyNameSource $ \src ->
+  let onError e                 = (Left e, src)
+      onSuccess ((prog,_),src') = (Right prog, src')
+  in either onError onSuccess $ runExcept $
+     runStateT (runReaderT (runWriterT m) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable

@@ -1,8 +1,10 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 -- | Futhark compiler internal pipeline.
 module Futhark.Pipeline
   (
     runPasses
   , FutharkM
+  , runFutharkM
   , PipelineState (..)
   , Pass (..)
   , canFail
@@ -25,9 +27,9 @@ module Futhark.Pipeline
 where
 
 import Control.Applicative
+import Control.Exception
 import Control.Monad
-import Control.Monad.Trans
-import Control.Monad.Writer.Strict (Writer, tell)
+import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
 import Data.Maybe (isJust)
 
@@ -40,17 +42,15 @@ import Futhark.TypeCheck
 import Futhark.Analysis.Alias
 
 runPasses :: FutharkConfig -> PipelineState -> FutharkM PipelineState
-runPasses config = foldl comb return $ futharkpipeline config
-  where comb prev pass prog = do
-          prog' <- prev prog
-          when (verbose config) $ tell $ "Running " ++ passName pass ++ ".\n"
-          res <- lift $ runExceptT $ passOp pass prog'
-          case res of
-            Left err ->
-              compileError ("Error during pass '" ++ passName pass ++ "':\n" ++ errorDesc err)
-                           (Just prog')
-            Right prog'' ->
-              validateState config pass prog''
+runPasses config startprog =
+  foldM (applyPass config) startprog $ futharkpipeline config
+
+applyPass :: FutharkConfig -> PipelineState -> Pass
+          -> FutharkM PipelineState
+applyPass config prog pass = do
+  when (verbose config) $
+    tell $ "Running " ++ passName pass ++ ".\n"
+  runPass config pass prog
 
 validationError :: Pass -> PipelineState -> String -> FutharkM a
 validationError pass s err =
@@ -72,7 +72,48 @@ data CompileError = CompileError {
   , errorState :: Maybe PipelineState
   }
 
-type FutharkM = ExceptT CompileError (Writer String)
+type PassM = ExceptT CompileError (Writer String)
+
+runPassM :: PassM a -> (String, Either CompileError a)
+runPassM m = case runWriter $ runExceptT m of
+  (res, w) -> (w, res)
+
+newtype FutharkM a = FutharkM (ExceptT CompileError (WriterT String IO) a)
+                     deriving (Applicative, Functor, Monad,
+                               MonadWriter String,
+                               MonadError CompileError,
+                               MonadIO)
+
+runFutharkM :: FutharkM a -> IO (Either CompileError a, String)
+runFutharkM (FutharkM m) = runWriterT $ runExceptT m
+
+runPass :: FutharkConfig -> Pass -> PipelineState -> FutharkM PipelineState
+runPass config pass state = do
+  (w,res) <- liftIO $ handle onPassException $
+             let res = runPassM $ passOp pass state
+             in forcePassRes res `seq` case res of
+               (w, Left err) ->
+                 return (w, Left ("Error during pass '" ++
+                                  passName pass ++
+                                  "':\n" ++ errorDesc err))
+               (w, Right state') ->
+                 return (w, Right state')
+  tell w
+  case res of Left err    -> compileError err (Just state)
+              Right prog' -> validateState config pass prog'
+
+  where onPassException err =
+          return ("", Left $ "IO exception during pass '" ++
+                      passName pass ++ "':\n" ++
+                      show (err :: SomeException))
+
+        -- XXX: For lack of a deepseq instance for Futhark
+        -- programs, we prettyprint the AST to force out IO
+        -- exceptions.
+        forcePassRes
+          | isJust $ futharkverbose config = either (const "") Basic.pretty . snd
+          | otherwise                      = const ""
+
 
 data PipelineState = Basic Basic.Prog
                    | ExplicitMemory ExplicitMemory.Prog
@@ -83,7 +124,7 @@ instance PP.Pretty PipelineState where
 
 data Pass = Pass {
     passName :: String
-  , passOp :: PipelineState -> FutharkM PipelineState
+  , passOp :: PipelineState -> PassM PipelineState
   }
 
 data Action = Action String (PipelineState -> IO ())
@@ -105,7 +146,8 @@ data FutharkConfig = FutharkConfig {
 verbose :: FutharkConfig -> Bool
 verbose = isJust . futharkverbose
 
-compileError :: String -> Maybe PipelineState -> FutharkM a
+compileError :: MonadError CompileError m =>
+                String -> Maybe PipelineState -> m a
 compileError s p = throwError $ CompileError s p
 
 typeCheck :: Checkable lore => FutharkConfig -> Prog lore
@@ -115,11 +157,11 @@ typeCheck config prog = either Left (const $ Right prog) $ check prog
               | otherwise                  = checkProgNoUniqueness
 
 canFail :: Show err =>
-           String -> Maybe PipelineState -> Either err a -> FutharkM a
+           String -> Maybe PipelineState -> Either err a -> PassM a
 canFail d p (Left err) = compileError (d ++ show err) p
 canFail _ _ (Right v)  = return v
 
-basicProg :: PipelineState -> FutharkM Basic.Prog
+basicProg :: PipelineState -> PassM Basic.Prog
 basicProg (Basic p) = return p
 basicProg s         = compileError "Expected basic representation." $ Just s
 
@@ -135,7 +177,7 @@ unfailableBasicPass name f = basicPass name f'
   where f' :: Basic.Prog -> Either () Basic.Prog
         f' = Right . f
 
-polyPass :: String -> (PipelineState -> FutharkM PipelineState)
+polyPass :: String -> (PipelineState -> PassM PipelineState)
          -> Pass
 polyPass name f = Pass { passName = name
                        , passOp = f

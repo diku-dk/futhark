@@ -26,7 +26,6 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Optimise.Simplifier.Simplifiable (Simplifiable (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
@@ -38,14 +37,6 @@ newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
                            MonadWriter (DL.DList Binding))
 
 instance MonadBinder AllocM where
-  addBinding = addBindingWriter
-  collectBindings = collectBindingsWriter
-
-instance MonadFreshNames AllocM where
-  getNameSource = AllocM $ lift getNameSource
-  putNameSource = AllocM . lift . putNameSource
-
-instance BindableM AllocM where
   type Lore AllocM = ExplicitMemory
 
   mkLetM pat e = return $ Let pat () e
@@ -61,6 +52,13 @@ instance BindableM AllocM where
     basicMkLetM sizes vals e
 
   mkBodyM bnds res = return $ Body () bnds res
+
+  addBinding = addBindingWriter
+  collectBindings = collectBindingsWriter
+
+instance MonadFreshNames AllocM where
+  getNameSource = AllocM $ lift getNameSource
+  putNameSource = AllocM . lift . putNameSource
 
 basicMkLetM :: [Ident]
             -> [(Ident,Bindage)]
@@ -171,7 +169,7 @@ memForBindee ident = do
 
 directIndexFunction :: Ident -> Type -> MemSummary
 directIndexFunction mem t =
-  MemSummary mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
+  MemSummary mem $ IxFun.iota $ arrayDims t
 
 computeSize :: MonadBinder m =>
                SubExp -> [SubExp] -> m SubExp
@@ -336,45 +334,30 @@ funcallSubExps ses = map fst <$>
                      funcallArgs [ (se, Observe) | se <- ses ]
 
 allocInExp :: In.Exp -> AllocM Exp
-allocInExp (LoopOp (DoLoop res merge i bound
+allocInExp (LoopOp (DoLoop res merge form
                     (Body () bodybnds bodyres))) =
   allocInFParams mergeparams $ \mergeparams' ->
-  local (HM.singleton (identName i) Scalar<>) $ do
+  formBinds form $ do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
       ses <- funcallSubExps $ resultSubExps bodyres
       let res' = bodyres { resultSubExps = ses }
       return $ Body () bodybnds' res'
     return $ LoopOp $
-      DoLoop res (zip mergeparams' mergeinit') i bound body'
+      DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge
-allocInExp (LoopOp (Map cs f arrs)) = do
-  let size = arraysSize 0 $ map identType arrs
-  is <- letExp "is" $ PrimOp $ Iota size
-  i  <- newIdent "i" (Basic Int)
-  summaries <- liftM (HM.fromList . concat) $
-               forM (zip (lambdaParams f) arrs) $ \(p,arr) ->
-    if basicType $ identType p then return []
-    else do
-      res <- lookupSummary arr
-      case res of
-        Just (MemSummary m origfun) ->
-          return [(identName p,
-                   MemSummary m $ IxFun.applyInd origfun [SE.Id i])]
-        _ -> return []
-  f' <- local (HM.union summaries) $
-        allocInLambda
-        f { lambdaParams = i : lambdaParams f
-          }
-  return $ LoopOp $ Map cs f' (is:arrs)
+        formBinds (ForLoop i _) =
+          local (HM.singleton (identName i) Scalar<>)
+        formBinds (WhileLoop _) =
+          id
+allocInExp (LoopOp (Map {})) =
+  fail "Cannot put explicit allocations in map yet."
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
 allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
 allocInExp (LoopOp (Redomap {})) =
   fail "Cannot put explicit allocations in redomap yet."
-allocInExp (LoopOp (Filter {})) =
-  fail "Cannot put explicit allocations in filter yet."
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)
@@ -383,6 +366,7 @@ allocInExp e = mapExpM alloc e
           identityMapper { mapOnBinding = fail "Unhandled binding in ExplicitAllocations"
                          , mapOnBody = allocInBody
                          , mapOnLambda = allocInLambda
+                         , mapOnExtLambda = allocInExtLambda
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
@@ -391,6 +375,11 @@ allocInLambda :: In.Lambda -> AllocM Lambda
 allocInLambda lam = do
   body <- allocInBody $ lambdaBody lam
   return $ lam { lambdaBody = body }
+
+allocInExtLambda :: In.ExtLambda -> AllocM ExtLambda
+allocInExtLambda lam = do
+  body <- allocInBody $ extLambdaBody lam
+  return $ lam { extLambdaBody = body }
 
 vtableToAllocEnv :: ST.SymbolTable (Aliases ExplicitMemory)
                  -> HM.HashMap VName MemSummary

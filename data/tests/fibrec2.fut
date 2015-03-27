@@ -1,4 +1,4 @@
-fun *[int] fib(*[int] a, int i, int n) =
+fun *[int,!n] fib(*[int,!n] a, int i, int n) =
   if i == n
   then a
   else if i < 2 then let a[i] = 1 in fib(a,i+1,n)

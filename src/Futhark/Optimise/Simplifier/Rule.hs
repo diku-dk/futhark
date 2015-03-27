@@ -21,11 +21,11 @@ module Futhark.Optimise.Simplifier.Rule
 
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Representation.AST
 import Futhark.Binder
 
-type SimplificationRule m a = a -> Binding (Lore m) -> Simplify m ()
+type SimplificationRule m a = a -> Binding (Lore m) -> RuleM m ()
 
 -- | A rule applied during top-down traversal of the program.  Takes a
 -- symbol table as argument.

@@ -22,7 +22,7 @@ import System.Process
 -- We need some functions from Futhark itself to preprocess input
 -- values.
 import Futhark.Internalise.TypesValues (internaliseValue)
-import Language.Futhark.Parser (parseValues)
+import Language.Futhark.Parser (parseValues, ParseError (..))
 import Futhark.Representation.AST.Pretty (pretty)
 import Futhark.Representation.AST.Syntax.Core
 
@@ -47,9 +47,12 @@ io = liftIO
 readValuesFromFile :: FilePath -> TestM [Value]
 readValuesFromFile filename = do
   s <- liftIO $ readFile filename
-  case parseValues filename s of
+  case liftM concat $ mapM internalise =<< parseValues filename s of
     Left e -> throwError $ "When reading data file " ++ filename ++ ": " ++ show e
-    Right vs -> return $ concatMap internaliseValue vs
+    Right vs -> return vs
+  where internalise v =
+          maybe (Left $ ParseError $ "Invalid input value: " ++ pretty v) Right $
+          internaliseValue v
 
 data TestResult = Success
                 | Failure String
@@ -89,7 +92,7 @@ typeCheckTest f = do
 executeTest :: FilePath -> FilePath -> FilePath -> TestM ()
 executeTest f inputf outputf = do
   input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
-  (code, output, err) <- io $ readProcessWithExitCode "futhark" [futharkFlags, "-i", f] input
+  (code, output, err) <- io $ readProcessWithExitCode "futharki" [f] input
   io $ writeFile expectedOutputf output
   case code of
     ExitSuccess     -> compareResult outputf expectedOutputf
@@ -100,28 +103,20 @@ executeTest f inputf outputf = do
 compileTest :: FilePath -> FilePath -> FilePath -> TestM ()
 compileTest f inputf outputf = do
   input <- (intercalate "\n" . map pretty) <$> readValuesFromFile inputf
-  (futcode, l0prog, l0err) <-
-    io $ readProcessWithExitCode "futhark"
-    [futharkFlags, "-fs", "--in-place-lowering", "-ae", "--compile-sequential", f] ""
-  io $ writeFile cOutputf l0prog
+  (futcode, _, futerr) <-
+    io $ readProcessWithExitCode "futhark-c"
+    [f, "-o", binOutputf] ""
   case futcode of
     ExitFailure 127 -> throwError futharkNotFound
-    ExitFailure _   -> throwError l0err
+    ExitFailure _   -> throwError futerr
     ExitSuccess     -> return ()
-  (gccCode, _, gccerr) <-
-    io $ readProcessWithExitCode "gcc"
-    [cOutputf, "-o", binOutputf, "-lm", "-O3"] ""
-  case gccCode of
-    ExitFailure _ -> throwError gccerr
-    ExitSuccess   -> return ()
   (progCode, output, progerr) <-
     io $ readProcessWithExitCode binOutputf [] input
   io $ writeFile expectedOutputf output
   case progCode of
     ExitFailure _ -> throwError progerr
-    ExitSuccess -> compareResult outputf expectedOutputf
-  where cOutputf = outputf `replaceExtension` "c"
-        binOutputf = outputf `replaceExtension` "bin"
+    ExitSuccess   -> compareResult outputf expectedOutputf
+  where binOutputf = outputf `replaceExtension` "bin"
         expectedOutputf = outputf `replaceExtension` "compilerout"
 
 compareResult :: FilePath -> FilePath -> TestM ()
@@ -140,7 +135,8 @@ compareValue :: Value -> Value -> Bool
 compareValue (BasicVal bv1) (BasicVal bv2) =
   compareBasicValue bv1 bv2
 compareValue (ArrayVal vs1 _ _) (ArrayVal vs2 _ _) =
-  and $ zipWith compareBasicValue (A.elems vs1) (A.elems vs2)
+  A.bounds vs1 == A.bounds vs2 &&
+  and (zipWith compareBasicValue (A.elems vs1) (A.elems vs2))
 compareValue _ _ =
   False
 

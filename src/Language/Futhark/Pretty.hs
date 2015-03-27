@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances for the
 -- AST defined in "Language.Futhark.Syntax", but also a number of
 -- convenience functions if you don't want to use the interface from
@@ -6,6 +7,8 @@
 module Language.Futhark.Pretty
   ( ppType
   , ppValue
+  , ppUnOp
+  , ppBinOp
   , ppExp
   , ppLambda
   , ppTupId
@@ -59,30 +62,81 @@ instance Pretty Value where
     | Array {} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupleArrayElemTypeBase as vn) where
+instance Pretty Uniqueness where
+  ppr Unique    = star
+  ppr Nonunique = empty
+
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
   ppr (BasicArrayElem bt _) = ppr bt
   ppr (ArrayArrayElem at)   = ppr at
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase as vn) where
-  ppr (BasicArray et ds u _) = u' <> foldl f (ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
-          u' | Unique <- u = star
-             | otherwise = empty
-  ppr (TupleArray et ds u) = u' <> foldl f (braces $ commasep $ map ppr et) ds
-    where f s Nothing = brackets s
-          f s (Just e) = brackets $ s <> comma <> ppr e
-          u' | Unique <- u = star
-             | otherwise = empty
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (TupleArrayElemTypeBase Rank as vn) where
+  ppr (BasicArrayElem bt _) = ppr bt
+  ppr (ArrayArrayElem at)   = ppr at
+  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase as vn) where
+instance (Eq vn, Hashable vn, Pretty vn) =>
+         Pretty (ArrayTypeBase ShapeDecl as vn) where
+  ppr (BasicArray et (ShapeDecl ds) u _) =
+    ppr u <> foldl f (ppr et) ds
+    where f s AnyDim       = brackets s
+          f s (NamedDim v)   = brackets $ s <> comma <> ppr v
+          f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
+          f s (ConstDim n) = brackets $ s <> comma <> ppr n
+
+  ppr (TupleArray et (ShapeDecl ds) u) =
+    ppr u <> foldl f (braces $ commasep $ map ppr et) ds
+    where f s AnyDim       = brackets s
+          f s (NamedDim v)   = brackets $ s <> comma <> ppr v
+          f s (KnownDim v) = brackets $ s <> comma <> text "!" <> ppr v
+          f s (ConstDim n) = brackets $ s <> comma <> ppr n
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where
+  ppr (BasicArray et (Rank n) u _) =
+    ppr u <> foldl (.) id (replicate n brackets) (ppr et)
+  ppr (TupleArray ts (Rank n) u) =
+    ppr u <> foldl (.) id (replicate n brackets)
+    (braces $ commasep $ map ppr ts)
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
+  ppr (Basic et) = ppr et
+  ppr (Array at) = ppr at
+  ppr (Tuple ts) = braces $ commasep $ map ppr ts
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Basic et) = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
+
+instance Pretty UnOp where
+  ppr Not = text "not"
+  ppr Negate = text "-"
+
+instance Pretty BinOp where
+  ppr Plus = text "+"
+  ppr Minus = text "-"
+  ppr Pow = text "pow"
+  ppr Times = text "*"
+  ppr Divide = text "/"
+  ppr Mod = text "%"
+  ppr ShiftR = text ">>"
+  ppr ShiftL = text "<<"
+  ppr Band = text "&"
+  ppr Xor = text "^"
+  ppr Bor = text "|"
+  ppr LogAnd = text "&&"
+  ppr LogOr = text "||"
+  ppr Equal = text "=="
+  ppr Less = text "<"
+  ppr Leq = text "<="
+  ppr Greater = text "<="
+  ppr Geq = text "<="
 
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit (ArrayLit {}) = True
@@ -106,9 +160,9 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     case unboxType rt of
       Just (Array {}) -> brackets $ commastack $ map ppr es
       _               -> brackets $ commasep $ map ppr es
-  pprPrec p (BinOp bop x y _ _) = ppBinOp p bop x y
-  pprPrec _ (Not e _) = text "not" <+> pprPrec 9 e
-  pprPrec _ (Negate e _) = text "-" <> pprPrec 9 e
+  pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
+  pprPrec _ (UnOp Not e _) = text "not" <+> pprPrec 9 e
+  pprPrec _ (UnOp Negate e _) = text "-" <> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
@@ -135,63 +189,61 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         If {} -> True
                         ArrayLit {} -> False
                         _ -> hasArrayLit e
-  pprPrec _ (LetWith cs dest src idxcs idxs ve body _)
+  pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =
-      text "let" <+> ppCertificates cs <> ppr dest <+> list (map ppr idxs) <+>
+      text "let" <+> ppr dest <+> list (map ppr idxs) <+>
       equals <+> align (ppr ve) <+>
       text "in" </> ppr body
     | otherwise =
-      text "let" <+> ppCertificates cs <> ppr dest <+> equals <+> ppr src <+>
-      text "with" <+> brackets (ppcs <> commasep (map ppr idxs)) <+>
+      text "let" <+> ppr dest <+> equals <+> ppr src <+>
+      text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-    where ppcs = case idxcs of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
-  pprPrec _ (Index cs v csidx idxs _) =
-    ppCertificates cs <> ppr v <>
-    brackets (ppcs <> commasep (map ppr idxs))
-    where ppcs = case csidx of Nothing     -> empty
-                               Just []     -> text "<>|"
-                               Just csidx' -> ppCertificates csidx' <> text "|"
+  pprPrec _ (Index v idxs _) =
+    ppr v <> brackets (commasep (map ppr idxs))
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
-  pprPrec _ (Size cs i e _) =
-    ppCertificates cs <> text "size" <> apply [text $ show i, ppr e]
+  pprPrec _ (Size i e _) =
+    text "size" <> apply [text $ show i, ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
-  pprPrec _ (Reshape cs shape e _) =
-    ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
-  pprPrec _ (Rearrange cs perm e _) =
-    ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  pprPrec _ (Rotate cs n e _) =
-    ppCertificates cs <> text "rotate" <> apply [ppr n, ppr e]
-  pprPrec _ (Transpose cs 0 1 e _) =
-    ppCertificates cs <> text "transpose" <> apply [ppr e]
-  pprPrec _ (Transpose cs k n e _) =
-        ppCertificates cs <>
-        text "transpose" <> apply [text $ show k,
-                                   text $ show n,
-                                   ppr e]
+  pprPrec _ (Reshape shape e _) =
+    text "reshape" <> apply [apply (map ppr shape), ppr e]
+  pprPrec _ (Rearrange perm e _) =
+    text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  pprPrec _ (Transpose 0 1 e _) =
+    text "transpose" <> apply [ppr e]
+  pprPrec _ (Transpose k n e _) =
+    text "transpose" <> apply [text $ show k,
+                               text $ show n,
+                               ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
   pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap redlam maplam e a _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]
+  pprPrec _ (Stream chunk i acc arr lam _) =
+    let args = [ppr chunk, ppr i, ppr acc, ppr arr]
+    in  text "stream" <>  parens ( commasep args <> comma </>
+                                   ppList [lam] )
   pprPrec _ (Scan lam e a _) = ppSOAC "scan" [lam] [e, a]
   pprPrec _ (Filter lam a _) = ppSOAC "filter" [lam] [a]
+  pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
-  pprPrec _ (Split cs e a _) =
-    ppCertificates cs <> text "split" <> apply [ppr e, ppr a]
-  pprPrec _ (Concat cs x y _) =
-    ppCertificates cs <> text "concat" <> apply [ppr x, ppr y]
+  pprPrec _ (Split e a _) =
+    text "split" <> apply [ppr e, ppr a]
+  pprPrec _ (Concat x y _) =
+    text "concat" <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
-  pprPrec _ (Assert e _) = text "assert" <> parens (ppr e)
-  pprPrec _ (Conjoin es _) = text "conjoin" <> parens (commasep $ map ppr es)
-  pprPrec _ (DoLoop pat initexp i bound loopbody letbody _) =
+  pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     aliasComment pat $
-    text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+>
-    equals <+> text "for" <+> ppr i <+> text "<" <+> align (ppr bound) <+> text "do" </>
+    text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+> equals <+>
+    (case form of
+       ForLoop i bound ->
+         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
+       WhileLoop cond ->
+         text "while" <+> ppr cond) <+>
+    text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
 
@@ -208,6 +260,14 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
+  ppr (UnOpFun unop _ _) =
+    ppr unop
+  ppr (BinOpFun binop _ _) =
+    ppr binop
+  ppr (CurryBinOpLeft binop x _ _) =
+    ppr x <+> ppr binop
+  ppr (CurryBinOpRight binop x _ _) =
+    ppr binop <+> ppr x
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
@@ -217,14 +277,15 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) 
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
-ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn, TypeBox ty) => IdentBase ty vn -> Doc
+ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn) => IdentBase ty vn -> Doc
 ppParam param = ppr (identType param) <+> ppr param
 
-ppBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
-ppBinOp p bop x y = parensIf (p > precedence bop) $
-                    pprPrec (precedence bop) x <+/>
-                    text (opStr bop) <+>
-                    pprPrec (rprecedence bop) y
+prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) =>
+               Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
+prettyBinOp p bop x y = parensIf (p > precedence bop) $
+                        pprPrec (precedence bop) x <+/>
+                        text (ppBinOp bop) <+>
+                        pprPrec (rprecedence bop) y
   where precedence LogAnd = 0
         precedence LogOr = 0
         precedence Band = 1
@@ -233,6 +294,8 @@ ppBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Equal = 2
         precedence Less = 2
         precedence Leq = 2
+        precedence Greater = 2
+        precedence Geq = 2
         precedence ShiftL = 3
         precedence ShiftR = 3
         precedence Plus = 4
@@ -256,10 +319,6 @@ ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
-ppCertificates :: (Eq vn, Hashable vn, TypeBox ty, Pretty vn) => CertificatesBase ty vn -> Doc
-ppCertificates [] = empty
-ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
-
 render80 :: Pretty a => a -> String
 render80 = pretty 80 . ppr
 
@@ -268,8 +327,16 @@ ppValue :: Value -> String
 ppValue = render80
 
 -- | Prettyprint a type, wrapped to 80 characters.
-ppType :: (Eq vn, Hashable vn, Pretty vn) => TypeBase as vn -> String
+ppType :: Pretty (TypeBase shape as vn) => TypeBase shape as vn -> String
 ppType = render80
+
+-- | Prettyprint a unary operator, wrapped to 80 characters.
+ppUnOp :: UnOp -> String
+ppUnOp = render80
+
+-- | Prettyprint a binary operator, wrapped to 80 characters.
+ppBinOp :: BinOp -> String
+ppBinOp = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
 ppExp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => ExpBase ty vn -> String

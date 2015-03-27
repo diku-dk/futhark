@@ -29,11 +29,11 @@ updateHasValue name = (name==) . identName . updateValue
 
 lowerUpdate :: (Bindable lore, MonadFreshNames m) =>
                Binding lore -> [DesiredUpdate] -> Maybe (m [Binding lore])
-lowerUpdate (Let pat _ (LoopOp (DoLoop res merge i bound body))) updates = do
+lowerUpdate (Let pat _ (LoopOp (DoLoop res merge form body))) updates = do
   canDo <- lowerUpdateIntoLoop updates pat res merge body
   Just $ do
     (prebnds, pat', res', merge', body') <- canDo
-    return $ prebnds ++ [mkLet' pat' $ LoopOp $ DoLoop res' merge' i bound body']
+    return $ prebnds ++ [mkLet' pat' $ LoopOp $ DoLoop res' merge' form body']
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
   [DesiredUpdate bindee cs src is val]

@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -w #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, TypeFamilies #-}
 module Futhark.Optimise.SuffCond.OptPredicates
        (
@@ -7,7 +8,6 @@ module Futhark.Optimise.SuffCond.OptPredicates
 
 import Control.Applicative
 import Control.Arrow (second)
-import Data.List (isInfixOf)
 import Data.Foldable (any)
 import Data.Maybe
 import Data.Monoid
@@ -111,7 +111,7 @@ generateOptimisedPredicates'
          Simplify.simplifyBody (map diet $ retTypeValues rettype) $
          rephraseWithInvariance body
   case res of
-    (body', _) -> do
+    (body', True) -> do
       fundec <- simplifyFunWithRules bindableSimplifiable basicRules $
                 FunDec fname' rettype params (removeBodyLore body')
       return $ Just fundec
@@ -129,6 +129,7 @@ rephraseWithInvariance = rephraseBody rephraser
                               , rephraseLetBoundLore = const Nothing
                               , rephraseFParamLore = const ()
                               , rephraseBodyLore = const ()
+                              , rephraseRetType = id
                               }
 
 data SCEntry = SufficientCond [[ScalExp]]
@@ -167,13 +168,15 @@ rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
 analyseExp :: ST.SymbolTable Basic -> Exp -> Maybe SCTable
-analyseExp vtable (LoopOp (DoLoop _ _ i bound body)) =
+analyseExp vtable (LoopOp (DoLoop _ _ (ForLoop i bound) body)) =
   Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
         clampUpper = ST.insertLoopVar (identName i) bound
         -- If we enter the loop, then 'bound' is at least one.
         clampLower = case bound of Var v       -> identName v `ST.isAtLeast` 1
                                    Constant {} -> id
+analyseExp vtable (LoopOp (DoLoop _ _ _ body)) =
+  Just $ analyseExpBody vtable body
 analyseExp vtable (LoopOp (Map _ fun arrs)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
   where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $
@@ -274,6 +277,18 @@ sufficiented :: Monad m => VariantM m ()
 sufficiented = tell $ mempty { resSufficiented = Any True }
 
 instance MonadFreshNames m => MonadBinder (VariantM m) where
+  type Lore (VariantM m) = Invariance
+  mkLetM pat e = do
+    context <- getContext
+    let explore = if forbiddenExp context e
+                  then TooVariant
+                  else Invariant
+        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
+    return $ mkAliasedLetBinding pat' explore e
+
+  mkBodyM bnds res =
+    return $ mkAliasedBody () bnds res
+
   addBinding      = Simplify.addBindingEngine
   collectBindings = Simplify.collectBindingsEngine
 
@@ -328,6 +343,15 @@ instance MonadFreshNames m =>
             suffpat = Pattern [ S.PatElem v BindVar Nothing | v <- vs ]
         makeSufficientBinding =<< mkLetM (addAliasesToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
+
+  simplifyLetBoundLore Nothing  = return Nothing
+  simplifyLetBoundLore (Just v) = Just <$> Simplify.simplifyIdent v
+
+  simplifyFParamLore =
+    return
+
+  simplifyRetType    =
+    liftM ExtRetType . mapM Simplify.simplifyExtType . retTypeValues
 
 makeSufficientBinding :: MonadFreshNames m => S.Binding Invariance -> VariantM m ()
 makeSufficientBinding bnd = do
@@ -424,26 +448,16 @@ removeInvariance = Rephraser { rephraseExpLore = const ()
                              , rephraseRetType = id
                              }
 
-instance MonadFreshNames m => BindableM (VariantM m) where
-  type Lore (VariantM m) = Invariance
-  mkLetM pat e = do
-    context <- getContext
-    let explore = if forbiddenExp context e
-                  then TooVariant
-                  else Invariant
-        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
-    return $ mkAliasedLetBinding pat' explore e
-  mkBodyM bnds res =
-    return $ mkAliasedBody () bnds res
-
 forbiddenExp :: Context m -> S.Exp Invariance -> Bool
 forbiddenExp context = isNothing . walkExpM walk
   where walk = Walker { walkOnSubExp  = checkIf forbiddenSubExp
                       , walkOnBody    = checkIf forbiddenBody
                       , walkOnBinding = checkIf $ isForbidden . snd . bindingLore
                       , walkOnIdent   = checkIf forbiddenIdent
-                      , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
                       , walkOnLambda  = checkIf $ forbiddenBody . lambdaBody
+                      , walkOnRetType = checkIf forbiddenRetType
+                      , walkOnFParam  = checkIf forbiddenFParam
+                      , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
                       }
         checkIf f x = if f x
                       then Nothing
@@ -455,3 +469,6 @@ forbiddenExp context = isNothing . walkExpM walk
         forbiddenSubExp (Constant {}) = False
 
         forbiddenBody = any (isForbidden . snd . bindingLore) . bodyBindings
+
+        forbiddenRetType = any forbiddenIdent . freeIn
+        forbiddenFParam = any forbiddenIdent . freeIn

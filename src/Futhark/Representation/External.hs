@@ -14,16 +14,13 @@ module Futhark.Representation.External
   --
   -- | These types contain full type information and use tagged
   -- 'VName's for efficient symbol tables.
-  , GenIdent
   , Ident
   , Parameter
-  , Certificates
   , Exp
   , Lambda
   , TupIdent
   , FunDec
   , Prog
-  , GenType
   , Type
   , DeclType
   , ArrayType
@@ -42,42 +39,34 @@ import Futhark.FreshNames
 newNameSourceForProg :: VarName vn => ProgBase ty vn -> NameSource vn
 newNameSourceForProg = newNameSource . progNames
 
--- | A generic identifier parametrised on what aliasing information it records.
-type GenIdent as = IdentBase (TypeBase as) VName
-
 -- | An identifier with type- and aliasing information information.
-type Ident = GenIdent Names
+type Ident = IdentBase (TypeBase Rank Names) VName
 
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
-type Parameter = GenIdent NoInfo
-
--- | An list of certificates with type information.
-type Certificates = CertificatesBase (TypeBase Names) VName
+type Parameter = IdentBase (TypeBase ShapeDecl NoInfo) VName
 
 -- | An expression with type information.
-type Exp = ExpBase (TypeBase Names) VName
+type Exp = ExpBase (TypeBase Rank Names) VName
 
 -- | A lambda with type information.
-type Lambda = LambdaBase (TypeBase Names) VName
+type Lambda = LambdaBase (TypeBase Rank Names) VName
 
 -- | A pattern with type information.
-type TupIdent = TupIdentBase (TypeBase Names) VName
+type TupIdent = TupIdentBase (TypeBase Rank Names) VName
 
 -- | An function declaration with type information.
-type FunDec = FunDecBase (TypeBase Names) VName
+type FunDec = FunDecBase (TypeBase Rank Names) VName
 
 -- | An Futhark program with type information.
-type Prog = ProgBase (TypeBase Names) VName
+type Prog = ProgBase (TypeBase Rank Names) VName
 
--- | A known type parametrised over its aliasing information.
-type GenType als = TypeBase als VName
+-- | A known type with no shape annotations, but aliasing information.
+type Type = TypeBase Rank Names VName
 
--- | A known type with aliasing information.
-type Type = TypeBase Names VName
+-- | A known type with shape annotations but no aliasing information.
+type DeclType = TypeBase ShapeDecl NoInfo VName
 
--- | A known type with no aliasing information.
-type DeclType = TypeBase NoInfo VName
-
--- | A known array type with aliasing information.
-type ArrayType = ArrayTypeBase Names VName
+-- | A known array type with no shape annotations, but aliasing
+-- information.
+type ArrayType = ArrayTypeBase Rank Names VName

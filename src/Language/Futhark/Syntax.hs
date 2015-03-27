@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | This Is an ever-changing abstract syntax for Futhark.  Some types,
 -- such as @Exp@, are parametrised by type and name representation.
 -- See the @doc/@ subdirectory in the Futhark repository for a language
@@ -8,8 +9,10 @@ module Language.Futhark.Syntax
 
   -- * Types
   , Uniqueness(..)
-  , DimSize
-  , ArraySize
+  , ArrayShape (..)
+  , DimDecl (..)
+  , ShapeDecl (..)
+  , Rank (..)
   , TypeBase(..)
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
@@ -23,10 +26,12 @@ module Language.Futhark.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
+  , UnOp (..)
+  , BinOp (..)
   , IdentBase(..)
   , ParamBase
-  , CertificatesBase
   , ExpBase(..)
+  , LoopFormBase (..)
   , LambdaBase(..)
   , TupIdentBase(..)
 
@@ -57,27 +62,73 @@ instance Monoid (NoInfo vn) where
   mempty = NoInfo
   _ `mappend` _ = NoInfo
 
--- | Don't use this for anything.
-type DimSize vn = ExpBase (TypeBase Names) vn
+-- | The class of types that can represent an array size.  The
+-- 'Monoid' instance must define 'mappend' such that @dims1 `mappend`
+-- dims2@ adds @dims1@ as the outer dimensions of @dims2@.
+class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
+  -- | Number of dimensions.
+  shapeRank :: shape -> Int
+  -- | @stripDims n shape@ strips the outer @n@ dimensions from
+  -- @shape@, returning 'Nothing' if this would result in zero or
+  -- fewer dimensions.
+  stripDims :: Int -> shape -> Maybe shape
+
+-- | Declaration of a dimension size.
+data DimDecl vn = NamedDim vn
+                  -- ^ Bind the size of the dimension to
+                  -- this name.
+                | KnownDim vn
+                  -- ^ The size of the dimension is the value of a
+                  -- variable already in scope.
+                | ConstDim Int
+                  -- ^ The size is a constant.
+                | AnyDim
+                  -- ^ No dimension declaration.
+                deriving (Eq, Ord, Show)
 
 -- | The size of an array type is a list of its dimension sizes.  If
 -- 'Nothing', that dimension is of a (statically) unknown size.
-type ArraySize vn = [Maybe (DimSize vn)]
+newtype ShapeDecl vn = ShapeDecl { shapeDims :: [DimDecl vn] }
+                     deriving (Eq, Ord, Show)
+
+newtype Rank vn = Rank Int
+                deriving (Eq, Ord, Show)
+
+instance Monoid (Rank vn) where
+  mempty = Rank 0
+  Rank n `mappend` Rank m = Rank $ n + m
+
+instance ArrayShape (Rank vn) where
+  shapeRank (Rank n) = n
+  stripDims i (Rank n) | i < n     = Just $ Rank $ n - i
+                       | otherwise = Nothing
+
+instance Monoid (ShapeDecl vn) where
+  mempty = ShapeDecl []
+  ShapeDecl l1 `mappend` ShapeDecl l2 = ShapeDecl $ l1 ++ l2
+
+instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
+  shapeRank (ShapeDecl l) = length l
+  stripDims i (ShapeDecl l)
+    | i < length l = Just $ ShapeDecl $ drop i l
+    | otherwise    = Nothing
 
 -- | Types that can be elements of tuple-arrays.
-data TupleArrayElemTypeBase as vn =
+data TupleArrayElemTypeBase shape as vn =
     BasicArrayElem BasicType (as vn)
-  | ArrayArrayElem (ArrayTypeBase as vn)
-  | TupleArrayElem [TupleArrayElemTypeBase as vn]
+  | ArrayArrayElem (ArrayTypeBase shape as vn)
+  | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
   deriving (Show)
 
-instance Eq (TupleArrayElemTypeBase as vn) where
+instance Eq (shape vn) =>
+         Eq (TupleArrayElemTypeBase shape as vn) where
   BasicArrayElem bt1 _ == BasicArrayElem bt2 _ = bt1 == bt2
   ArrayArrayElem at1   == ArrayArrayElem at2   = at1 == at2
   TupleArrayElem ts1   == TupleArrayElem ts2   = ts1 == ts2
   _                    == _                    = False
 
-instance Ord (TupleArrayElemTypeBase as vn) where
+instance Ord (shape vn) =>
+         Ord (TupleArrayElemTypeBase shape as vn) where
   BasicArrayElem bt1 _ `compare` BasicArrayElem bt2 _ = bt1 `compare` bt2
   ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
   TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
@@ -89,35 +140,37 @@ instance Ord (TupleArrayElemTypeBase as vn) where
   TupleArrayElem {}    `compare` ArrayArrayElem {}    = GT
 
 -- | An array type.
-data ArrayTypeBase as vn =
-    BasicArray BasicType (ArraySize vn) Uniqueness (as vn)
+data ArrayTypeBase shape as vn =
+    BasicArray BasicType (shape vn) Uniqueness (as vn)
     -- ^ An array whose elements are basic elements.
-  | TupleArray [TupleArrayElemTypeBase as vn] (ArraySize vn) Uniqueness
+  | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
 
-instance Eq (ArrayTypeBase as vn) where
+instance Eq (shape vn) =>
+         Eq (ArrayTypeBase shape as vn) where
   BasicArray et1 dims1 u1 _ == BasicArray et2 dims2 u2 _ =
-    et1 == et2 && length dims1 == length dims2 && u1 == u2
+    et1 == et2 && dims1 == dims2 && u1 == u2
   TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
-    ts1 == ts2 && length dims1 == length dims2 && u1 == u2
+    ts1 == ts2 && dims1 == dims2 && u1 == u2
   _ == _ =
     False
 
-instance Ord (ArrayTypeBase as vn) where
+instance Ord (shape vn) =>
+         Ord (ArrayTypeBase shape as vn) where
   BasicArray et1 dims1 u1 _ <= BasicArray et2 dims2 u2 _
     | et1 < et2     = True
     | et1 > et2     = False
-    | length dims1 < length dims2 = True
-    | length dims1 > length dims2 = False
+    | dims1 < dims2 = True
+    | dims1 > dims2 = False
     | u1 < u2       = True
     | u1 > u2       = False
     | otherwise     = True
   TupleArray ts1 dims1 u1 <= TupleArray ts2 dims2 u2
     | ts1 < ts2     = True
     | ts1 > ts2     = False
-    | length dims1 < length dims2 = True
-    | length dims1 > length dims2 = False
+    | dims1 < dims2 = True
+    | dims1 > dims2 = False
     | u1 < u2       = True
     | u1 > u2       = False
     | otherwise     = True
@@ -126,27 +179,29 @@ instance Ord (ArrayTypeBase as vn) where
   TupleArray {} <= BasicArray {} =
     False
 
--- | An Futhark type is either an array or an element type.  When comparing
--- types for equality with '==', aliases are ignored, as are
--- dimension sizes (but not the number of dimensions themselves).
-data TypeBase as vn = Basic BasicType
-                    | Array (ArrayTypeBase as vn)
-                    | Tuple [TypeBase as vn]
-                    deriving (Eq, Ord, Show)
+-- | An Futhark type is either an array, a basic type, or a tuple.
+-- When comparing types for equality with '==', aliases are ignored,
+-- but dimensions much match.
+data TypeBase shape as vn = Basic BasicType
+                          | Array (ArrayTypeBase shape as vn)
+                          | Tuple [TypeBase shape as vn]
+                          deriving (Eq, Ord, Show)
 
--- | A type with aliasing information, used for describing the type of
--- a computation.
-type CompTypeBase = TypeBase Names
+-- | A type with aliasing information and no shape annotations, used
+-- for describing the type of a computation.
+type CompTypeBase = TypeBase Rank Names
 
--- | A type without aliasing information, used for declarations.
-type DeclTypeBase = TypeBase NoInfo
+-- | A type with shape annotations and no aliasing information, used
+-- for declarations.
+type DeclTypeBase = TypeBase ShapeDecl NoInfo
 
--- | An array type without aliasing information, used for declarations.
-type DeclArrayTypeBase = ArrayTypeBase NoInfo
+-- | An array type with shape annotations and no aliasing information,
+-- used for declarations.
+type DeclArrayTypeBase = ArrayTypeBase ShapeDecl NoInfo
 
--- | A tuple array element type without aliasing information, used for
--- declarations.
-type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase NoInfo
+-- | A tuple array element type with shape annotations and no aliasing
+-- information, used for declarations.
+type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type
@@ -162,7 +217,7 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 -- type is always unambiguous.
 data Value = BasicVal !BasicValue
            | TupVal ![Value]
-           | ArrayVal !(Array Int Value) (DeclTypeBase ())
+           | ArrayVal !(Array Int Value) (TypeBase Rank NoInfo ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
              deriving (Eq, Ord, Show)
@@ -191,26 +246,51 @@ instance Located (IdentBase ty vn) where
 instance Hashable vn => Hashable (IdentBase ty vn) where
   hashWithSalt salt = hashWithSalt salt . identName
 
--- | A list of identifiers used for certificates in some expressions.
-type CertificatesBase ty vn = [IdentBase ty vn]
+-- | Unary operators.
+data UnOp = Not
+          | Negate
+          deriving (Eq, Ord, Show)
+
+-- | Binary operators.
+data BinOp = Plus -- Binary Ops for Numbers
+           | Minus
+           | Pow
+           | Times
+           | Divide
+           | Mod
+           | ShiftR
+           | ShiftL
+           | Band
+           | Xor
+           | Bor
+           | LogAnd
+           | LogOr
+           -- Relational Ops for all basic types at least
+           | Equal
+           | Less
+           | Leq
+           | Greater
+           | Geq
+             deriving (Eq, Ord, Show)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
--- let + tuples (literals & identifiers) TODO: please add float,
--- double, long int, etc.
+-- let + tuples (literals & identifiers)
 --
 -- In a value of type @Exp tt@, all 'Type' values are kept as @tt@
--- values.  -- This allows us to encode whether or not the expression
--- has been type-checked in the Haskell type of the expression.
--- Specifically, the parser will produce expressions of type @Exp
--- 'NoInfo'@, and the type checker will convert these to @Exp 'Type'@,
--- in which type information is always present.
+-- values.
+--
+-- This allows us to encode whether or not the expression has been
+-- type-checked in the Haskell type of the expression.  Specifically,
+-- the parser will produce expressions of type @Exp 'NoInfo'@, and the
+-- type checker will convert these to @Exp 'Type'@, in which type
+-- information is always present.
 data ExpBase ty vn =
             -- Core language
               Literal Value SrcLoc
 
             | TupLit    [ExpBase ty vn] SrcLoc
-            -- ^ Tuple literals, e.g., (1+3, (x, y+z)).
+            -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
             | ArrayLit  [ExpBase ty vn] (ty vn) SrcLoc
 
@@ -227,8 +307,7 @@ data ExpBase ty vn =
             | DoLoop
               (TupIdentBase ty vn) -- Merge variable pattern
               (ExpBase ty vn) -- Initial values of merge variables.
-              (IdentBase ty vn) -- Iterator.
-              (ExpBase ty vn) -- Upper bound.
+              (LoopFormBase ty vn) -- Do or while loop.
               (ExpBase ty vn) -- Loop body.
               (ExpBase ty vn) -- Let-body.
               SrcLoc
@@ -237,38 +316,25 @@ data ExpBase ty vn =
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
 
             -- Unary Ops: Not for bools and Negate for ints
-            | Not    (ExpBase ty vn) SrcLoc -- ^ E.g., @not True == False@.
-            | Negate (ExpBase ty vn) SrcLoc -- ^ E.g., @~(~1) = 1@.
-
-            -- Assertion management.
-            | Assert (ExpBase ty vn) SrcLoc
-            -- ^ Turn a boolean into a certificate, halting the
-            -- program if the boolean is false.
-
-            | Conjoin [ExpBase ty vn] SrcLoc
-            -- ^ Convert several certificates into a single certificate.
+            | UnOp UnOp (ExpBase ty vn) SrcLoc
 
             -- Primitive array operations
-            | LetWith (CertificatesBase ty vn) (IdentBase ty vn) (IdentBase ty vn)
-                      (Maybe (CertificatesBase ty vn)) [ExpBase ty vn] (ExpBase ty vn)
+            | LetWith (IdentBase ty vn) (IdentBase ty vn)
+                      [ExpBase ty vn] (ExpBase ty vn)
                       (ExpBase ty vn) SrcLoc
 
-            | Index (CertificatesBase ty vn)
-                    (IdentBase ty vn)
-                    (Maybe (CertificatesBase ty vn))
+            | Index (IdentBase ty vn)
                     [ExpBase ty vn]
                     SrcLoc
-            -- ^ 3rd arg are (optional) certificates for bounds
-            -- checking.  If given (even as an empty list), no
-            -- run-time bounds checking is done.
 
-            | Size (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
+            | Size Int (ExpBase ty vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
-            | Split (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ @split(1, [ 1, 2, 3, 4 ]) = {[1],[2, 3, 4]}@.
+            | Split [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+            -- ^ @split( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2, 3], [4]}@.
+            -- Note that this is different from the internal representation
 
-            | Concat (CertificatesBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | Concat (ExpBase ty vn) [ExpBase ty vn] SrcLoc
             -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
             | Copy (ExpBase ty vn) SrcLoc
@@ -282,48 +348,77 @@ data ExpBase ty vn =
             -- ^ @replicate(3,1) = [1, 1, 1]@
 
             -- Array index space transformation.
-            | Reshape (CertificatesBase ty vn) [ExpBase ty vn] (ExpBase ty vn) SrcLoc
-             -- ^ 1st arg is the new shape, 2nd arg is the input array *)
+            | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
+             -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
-            | Transpose (CertificatesBase ty vn) Int Int (ExpBase ty vn) SrcLoc
+            | Transpose Int Int (ExpBase ty vn) SrcLoc
             -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
             -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,.., i_{k+1}
             -- , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
             -- @transpose(0,1,a)@ is the common two-dimensional
             -- transpose.
 
-            | Rearrange (CertificatesBase ty vn) [Int] (ExpBase ty vn) SrcLoc
+            | Rearrange [Int] (ExpBase ty vn) SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
             -- of integers is a list of dimensions (0-indexed), which
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
-            | Rotate (CertificatesBase ty vn) Int (ExpBase ty vn) SrcLoc
-            -- ^ @rotate(n,a)@ returns a new array, where the element
-            -- @a[i]@ is at position @i+n@, cycling over to the
-            -- beginning of the array.
-
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.  3rd arg
-             -- is the input-array row type
+             -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.
 
             | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@ 4th arg
-             -- is the input-array element type
+             -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@.
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @scan(plus, 0, [ 1, 2, 3 ]) = [ 1, 3, 6 ]@.
-             -- 4th arg is the row type of the input array
 
             | Filter (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
-            -- ^ 3rd arg is the row type of the input (and
-            -- result) array
+            -- ^ Return those elements of the array that satisfy the
+            -- predicate.
+
+            | Partition [LambdaBase ty vn] (ExpBase ty vn) SrcLoc
+            -- ^ @partition(f_1, ..., f_n, a)@ returns @n+1@ arrays, with
+            -- the @i@th array consisting of those elements for which
+            -- function @f_1@ returns 'True', and no previous function
+            -- has returned 'True'.  The @n+1@th array contains those
+            -- elements for which no function returns 'True'.
 
             | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
+
+            | Stream (IdentBase  ty vn)  (IdentBase ty vn)
+                     (ExpBase    ty vn)  (ExpBase   ty vn)
+                     (LambdaBase ty vn)  SrcLoc
+            -- ^ Streaming: intuitively, this gives a size-parameterized
+            -- composition for SOACs that cannot be fused, e.g., due to scan.
+            -- For example, assuming @A : [int], f : int->int, g : real->real@,
+            -- the code: @let x = map(f,A) in let y = scan(op+,0,x) in map(g,y)@
+            -- can be re-written (streamed) in the source-Futhark language as:
+            -- @let {acc, z} =
+            -- @stream( chunk, i, 0, A,@
+            -- @      , fn {int,[real]} (real acc, [int] a) =>@
+            -- @            let x = map (f,         A ) in@
+            -- @            let y0= scan(op +, 0,   x ) in@
+            -- @            let y = map (op +(acc), y0) in@
+            -- @            { acc+y0[chunk-1], map(g, y) }@
+            -- @      )@
+            -- where (i) @chunk@ is a symbolic int denoting the chunk
+            -- size, (ii) @i@ maps the global iteration space, hence together
+            -- with @chunk@ identify accurately the current chunk of the input
+            -- array that is being processed, (iii) @0@ is the initial value of
+            -- the accumulator, which allows the streaming of @scan@.
+            -- Finally, the unnamed function (@fn...@) implements the a fold that:
+            -- computes the accumulator of @scan@, as defined inside its body, AND
+            -- implicitly concatenates each of the result arrays across
+            -- the iteration space.
+            -- In essence, sequential codegen can choose chunk = 1 and thus
+            -- eliminate the SOACs on the outermost level, while parallel codegen
+            -- may choose the maximal chunk size that still satisfies the memory
+            -- requirements of the device.
 
             | ConcatMap (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
 
@@ -343,21 +438,19 @@ instance Located (ExpBase ty vn) where
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
-  locOf (Not _ pos) = locOf pos
-  locOf (Negate _ pos) = locOf pos
+  locOf (UnOp _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
   locOf (Var ident) = locOf ident
   locOf (Apply _ _ _ pos) = locOf pos
   locOf (LetPat _ _ _ pos) = locOf pos
-  locOf (LetWith _ _ _ _ _ _ _ pos) = locOf pos
-  locOf (Index _ _ _ _ pos) = locOf pos
+  locOf (LetWith _ _ _ _ _ pos) = locOf pos
+  locOf (Index _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
-  locOf (Size _ _ _ pos) = locOf pos
+  locOf (Size _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
-  locOf (Reshape _ _ _ pos) = locOf pos
-  locOf (Transpose _ _ _ _ pos) = locOf pos
-  locOf (Rearrange _ _ _ pos) = locOf pos
-  locOf (Rotate _ _ _ pos) = locOf pos
+  locOf (Reshape _ _ pos) = locOf pos
+  locOf (Transpose _ _ _ pos) = locOf pos
+  locOf (Rearrange _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
@@ -365,23 +458,39 @@ instance Located (ExpBase ty vn) where
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
+  locOf (Partition _ _ pos) = locOf pos
   locOf (Redomap _ _ _ _ pos) = locOf pos
-  locOf (Split _ _ _ pos) = locOf pos
-  locOf (Concat _ _ _ pos) = locOf pos
+  locOf (Split _ _ pos) = locOf pos
+  locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
-  locOf (Assert _ loc) = locOf loc
-  locOf (Conjoin _ loc) = locOf loc
-  locOf (DoLoop _ _ _ _ _ _ pos) = locOf pos
+  locOf (DoLoop _ _ _ _ _ pos) = locOf pos
+  locOf (Stream _ _ _ _ _ pos) = locOf pos
+
+data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
+                        | WhileLoop (ExpBase ty vn)
+                          deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc -- ^ @op +(4)@
+                      | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc
+                        -- ^ @f(4)@
+                      | UnOpFun UnOp (ty vn) SrcLoc
+                        -- ^ @-@.
+                      | BinOpFun BinOp (ty vn) SrcLoc
+                      | CurryBinOpLeft BinOp (ExpBase ty vn) (ty vn) SrcLoc
+                        -- ^ @2+@.
+                      | CurryBinOpRight BinOp (ExpBase ty vn) (ty vn) SrcLoc
+                        -- ^ @+2@.
                         deriving (Eq, Ord, Show)
 
 instance Located (LambdaBase ty vn) where
-  locOf (AnonymFun _ _ _ loc) = locOf loc
-  locOf (CurryFun  _ _ _ loc) = locOf loc
+  locOf (AnonymFun _ _ _ loc)       = locOf loc
+  locOf (CurryFun  _ _ _ loc)       = locOf loc
+  locOf (UnOpFun _ _ loc)           = locOf loc
+  locOf (BinOpFun _ _ loc)          = locOf loc
+  locOf (CurryBinOpLeft _ _ _ loc)  = locOf loc
+  locOf (CurryBinOpRight _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc

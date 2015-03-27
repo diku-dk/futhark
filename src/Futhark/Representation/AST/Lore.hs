@@ -41,3 +41,12 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
                     -> [Ident]
                     -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
                     -> [Ident]
+
+  -- | Given a function return type, the parameters of the function,
+  -- and the arguments for a concrete call, return the instantiated
+  -- return type for the concrete call, if valid.
+  applyRetType :: l
+               -> RetType l
+               -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
+               -> [SubExp]
+               -> Maybe (RetType l)

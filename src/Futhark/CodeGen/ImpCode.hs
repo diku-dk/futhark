@@ -22,6 +22,8 @@ import Data.List
 import Data.Loc
 
 import Language.Futhark.Core
+import Futhark.Representation.AST.Syntax (BinOp (..))
+import Futhark.Representation.AST.Pretty ()
 
 import Text.PrettyPrint.Mainland
 
@@ -54,6 +56,7 @@ data Function a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
 data Code a = Skip
             | Code a :>>: Code a
             | For VName Exp (Code a)
+            | While Exp (Code a)
             | DeclareMem VName
             | DeclareScalar VName BasicType
             | Allocate VName Exp
@@ -129,6 +132,10 @@ instance Pretty (Code op) where
     text "for" <+> ppr i <+> langle <+> ppr limit <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
+  ppr (While cond body) =
+    text "while" <+> ppr cond <+> text "{" </>
+    indent 2 (ppr body) </>
+    text "}"
   ppr (DeclareMem name) =
     text "declare" <+> ppr name <+> text "as memory block"
   ppr (DeclareScalar name t) =
@@ -166,7 +173,7 @@ instance Pretty Exp where
   pprPrec p (BinOp op x y) =
     parensIf (p >= precedence op) $
     pprPrec (precedence op) x <+/>
-    text (opStr op) <+>
+    ppr op <+>
     pprPrec (rprecedence op) y
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
