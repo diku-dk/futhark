@@ -20,7 +20,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (unNames, Names' (..), VarAliases, ConsumedInExp, BodyAliasing)
+  (unNames, Names' (..), VarAliases, ConsumedInExp)
 import qualified Futhark.Representation.Aliases as Aliases
 import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Binder
@@ -30,10 +30,19 @@ import Futhark.Analysis.Rephrase
 
 data Wise lore = Wise lore
 
+-- | The wisdom of the let-bound variable.
+type VarWisdom = (VarAliases, Range)
+
+-- | Wisdom about an expression.
+type ExpWisdom = ConsumedInExp
+
+-- | Wisdom about a body.
+type BodyWisdom = ([VarAliases], ConsumedInExp, [Range])
+
 instance Lore.Lore lore => Lore.Lore (Wise lore) where
-  type LetBound (Wise lore) = (VarAliases, Lore.LetBound lore)
-  type Exp (Wise lore) = (ConsumedInExp, Lore.Exp lore)
-  type Body (Wise lore) = (BodyAliasing, Lore.Body lore)
+  type LetBound (Wise lore) = (VarWisdom, Lore.LetBound lore)
+  type Exp (Wise lore) = (ExpWisdom, Lore.Exp lore)
+  type Body (Wise lore) = (BodyWisdom, Lore.Body lore)
   type FParam (Wise lore) = Lore.FParam lore
   type RetType (Wise lore) = Lore.RetType lore
 
@@ -50,13 +59,22 @@ instance Renameable lore => Renameable (Wise lore) where
 instance Substitutable lore => Substitutable (Wise lore) where
 instance PrettyLore lore => PrettyLore (Wise lore) where
 instance Proper lore => Proper (Wise lore) where
-instance Lore.Lore lore => Ranged (Wise lore) where
 instance Proper lore => Simplifiable (Wise lore) where
 
 instance Lore.Lore lore => Aliased (Wise lore) where
-  bodyAliases = map unNames . fst . fst . bodyLore
-  consumedInBody = unNames . snd . fst . bodyLore
-  patternAliases = map (unNames . fst . patElemLore) . patternElements
+  bodyAliases body =
+    let ((aliases, _, _) ,_) = bodyLore body
+    in map unNames aliases
+  consumedInBody body =
+    let ((_, consumed, _) ,_) = bodyLore body
+    in unNames consumed
+  patternAliases =
+    map (unNames . fst . fst . patElemLore) . patternElements
+
+instance Lore.Lore lore => Ranged (Wise lore) where
+  bodyRanges body =
+    let ((_, _, ranges) ,_) = bodyLore body
+    in ranges
 
 removeWisdom :: Rephraser (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = snd
@@ -87,12 +105,18 @@ removePatternWisdom = rephrasePattern removeWisdom
 addWisdomToPattern :: Lore.Lore lore =>
                       Pattern lore -> Exp (Wise lore) -> Pattern (Wise lore)
 addWisdomToPattern pat e =
-  Pattern $ Aliases.mkPatternAliases pat e
+  Pattern $ zipWith addRanges (Aliases.mkPatternAliases pat e) ranges
+  where addRanges patElem range =
+          let (als,innerlore) = patElemLore patElem
+          in patElem `setPatElemLore` ((als, range), innerlore)
+        ranges = replicate (length $ patternNames pat) unknownRange
 
 mkWiseBody :: Lore.Lore lore =>
               Lore.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
-    Body (Aliases.mkBodyAliases bnds res, innerlore) bnds res
+  Body ((aliases, consumed, ranges), innerlore) bnds res
+  where (aliases, consumed) = Aliases.mkBodyAliases bnds res
+        ranges = replicate (length aliases) unknownRange
 
 mkWiseLetBinding :: Lore.Lore lore =>
                     Pattern lore -> Lore.Exp lore -> Exp (Wise lore)
