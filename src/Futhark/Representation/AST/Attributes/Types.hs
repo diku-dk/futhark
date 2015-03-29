@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Types
        (
          arrayRank

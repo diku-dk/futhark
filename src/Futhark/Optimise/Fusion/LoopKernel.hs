@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer(..)
   , newKernel

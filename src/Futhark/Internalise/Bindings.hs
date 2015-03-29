@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.Bindings
   (
   -- * Internalising bindings

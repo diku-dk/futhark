@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
