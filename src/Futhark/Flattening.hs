@@ -16,14 +16,6 @@ import Futhark.Substitute
 
 --------------------------------------------------------------------------------
 
-partitionM :: Monad m => (a -> m Bool) -> [a] -> m ([a], [a])
-partitionM p xs = do
-  l <- filterM p xs
-  r <- filterM (liftM not . p) xs
-  return (l,r)
-
---------------------------------------------------------------------------------
-
 data FlatState = FlatState {
     vnameSource   :: VNameSource
   , mapLetArrays   :: M.Map Ident Ident
@@ -71,11 +63,6 @@ flatError :: Error -> FlatM a
 flatError e = FlatM . lift $ Left e
 
 --------------------------------------------------------------------------------
-
-getMapLetArray :: Ident -> FlatM (Maybe Ident)
-getMapLetArray ident = do
-  letArrs <- gets mapLetArrays
-  return $ M.lookup ident letArrs
 
 getMapLetArray' :: Ident -> FlatM Ident
 getMapLetArray' ident = do
@@ -192,7 +179,6 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
      return $ concatMap (either id (: [])) grouped' ++ resBnds
 
-
   where
     lamBnds = bodyBindings $ lambdaBody lambda
 
@@ -231,6 +217,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
       let theMapExp = LoopOp $ Map certs wrapLambda argArrs
       return $ Let pat () theMapExp
+
 transformBinding bnd = return [bnd]
 
 letBoundIdentsInLambda :: Lambda -> [Ident]
@@ -421,7 +408,6 @@ pullOutOfMap mapInfo (argsNeeded, _)
 
 
   where
-
     -- | The inner map apparently depends on some variable that does
     -- not come from the lists mapped over, so we'll need to add that
     --
@@ -468,7 +454,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
       (tod1, tod2, rest, bt, uniq) <- case target of
         (Ident _ (Array bt (Shape (tod1:tod2:rest)) uniq)) ->
                   return (tod1, tod2, rest, bt, uniq)
-        _ -> flatError $ Error "trying to flatten less than 2D array"
+        _ -> flatError $ Error $ "trying to flatten less than 2D array: " ++ show target
 
       newSize <- getFlattenedDims (tod1, tod2)
 
@@ -541,10 +527,6 @@ wrapInArrIdent mapInfo (Ident vn tp) = do
   where
     sz = mapSize mapInfo
 
-wrapInArrPat :: MapInfo -> PatElem -> FlatM PatElem
-wrapInArrPat mapInfo (PatElem i BindVar ()) = do
-  i' <- wrapInArrIdent mapInfo i
-  return $ PatElem i' BindVar ()
 replicateIdent :: MapInfo -> Ident -> FlatM (Binding, Ident)
 replicateIdent mapInfo i = do
   arrRes <- wrapInArrIdent mapInfo i
@@ -555,8 +537,6 @@ replicateIdent mapInfo i = do
 
 --------------------------------------------------------------------------------
 
-isSafeToMapLambda :: Lambda -> FlatM Bool
-isSafeToMapLambda (Lambda _ body _) = isSafeToMapBody body
 
 isSafeToMapBody :: Body -> FlatM Bool
 isSafeToMapBody (Body _ bindings _) = and <$> mapM isSafeToMapBinding bindings
