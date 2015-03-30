@@ -67,7 +67,7 @@ module Futhark.Analysis.HORepresentation.SOAC
 
 import Control.Applicative
 
-import Data.Foldable
+import Data.Foldable (foldlM)
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
