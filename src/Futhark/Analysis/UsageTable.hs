@@ -23,7 +23,7 @@ module Futhark.Analysis.UsageTable
   where
 
 import Control.Arrow (first)
-import Data.Foldable
+import qualified Data.Foldable as Foldable
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -53,10 +53,10 @@ empty :: UsageTable
 empty = UsageTable HM.empty
 
 contains :: UsageTable -> [VName] -> Bool
-contains (UsageTable table) = any (`HM.member` table)
+contains (UsageTable table) = Foldable.any (`HM.member` table)
 
 without :: UsageTable -> [VName] -> UsageTable
-without (UsageTable table) = UsageTable . foldl (flip HM.delete) table
+without (UsageTable table) = UsageTable . Foldable.foldl (flip HM.delete) table
 
 lookup :: VName -> UsageTable -> Maybe Usages
 lookup name (UsageTable table) = HM.lookup name table
