@@ -179,7 +179,7 @@ addTransform' extract add swap t ts =
 
 identityTransform :: ArrayTransform -> Bool
 identityTransform (Rearrange _ perm) =
-  and $ zipWith (==) perm [0..]
+  Foldable.and $ zipWith (==) perm [0..]
 identityTransform _ = False
 
 combineTransforms :: ArrayTransform -> ArrayTransform -> Maybe ArrayTransform
