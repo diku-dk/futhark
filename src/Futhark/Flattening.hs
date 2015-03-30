@@ -326,6 +326,9 @@ pullOutOfMap mapInfo (argsNeeded, _)
   --
   -- 2) They are also invariant in the outer loop TODO
 
+  -----------------------------------------------
+  -- Handle argument identifiers for inner map --
+  -----------------------------------------------
   (okIdents, okLambdaParams) <-
       liftM unzip
       $ filterM (\(i,_) -> isJust <$> findTarget mapInfo i)
@@ -334,7 +337,8 @@ pullOutOfMap mapInfo (argsNeeded, _)
       liftM unzip
       $ filterM (\(i,_) -> isNothing <$> findTarget mapInfo i)
               $ zip idents (lambdaParams lambda)
-  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM replicateLoopInv loopInvIdents
+  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM (replicateIdent mapInfo)
+                                                      loopInvIdents
 
   (flattenIdents, flatIdents) <- mapAndUnzipM flattenArg $
                                    (Right <$> okIdents)
@@ -343,38 +347,57 @@ pullOutOfMap mapInfo (argsNeeded, _)
   (unflattenPats, pats') <- mapAndUnzipM unflattenRes pats
 
 
-  -- Here we go with the intermediate result arrays, see note above!
+  -- We need this later on
   innerMapSize <- case idents of
                     Ident _ (Array _ (Shape (outer:_)) _):_ -> return outer
                     _ -> flatError $ Error "impossible, map argument was not a list"
 
-  let reallyNeeded = filter (\i -> not $ HS.member i $ HS.unions $ map freeIn idents) argsNeeded
-  (itmResIdents,outLoopIdents) <- partitionM (\i -> isJust <$> findTarget mapInfo i) reallyNeeded
+  -------------------------------------------------------------
+  -- Handle Idents needed by body, which are not mapped over --
+  -------------------------------------------------------------
+  let reallyNeeded = filter (\i -> not $ HS.member i $ HS.unions
+                                   $ map freeIn idents) argsNeeded
+  --
+  -- Intermediate results needed
+  --
+  itmResIdents <- filterM (\i -> isJust <$> findTarget mapInfo i) reallyNeeded
 
-  -- completly loop invariant is ok for BasicType, TODO: is this sound?
-  outLoopIdents' ::[Ident] <- filterM (\i -> case identType i of
-                                                Basic _ -> return False
-                                                Array{} -> return True
-                                                Mem{}   -> flatError MemTypeFound
-                                      ) outLoopIdents
-
-  -- FIXME: Loop Invariant Array is used somewhere down the line, but
-  -- is @`notMember` idents@
-  unless (null outLoopIdents') $ flatError $ Error $ "completely loop invariant idents " ++ show outLoopIdents'
-
-  -- Need to rename so our intermediate result will not be found in other calls
+  -- Need to rename so our intermediate result will not be found in
+  -- other calls (through mapLetArray)
   itmResIdents' <- mapM (newIdent' id) itmResIdents
   itmResArrs <- mapM (findTarget1 mapInfo) itmResIdents
 
-  (distBnds, distIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
-                                         itmResArrs
+  --
+  -- Loop invariant Idents needed
+  --
+  needInvIdents <- filterM (\i -> do
+                               ok <- isNothing <$> findTarget mapInfo i
+                               if ok
+                               then case identType i of
+                                      Basic _ -> return False
+                                      Array{} -> return True
+                                      Mem{}   -> flatError MemTypeFound
+                               else return False
+                           ) reallyNeeded
 
-  (flatDistBnds, flatDistIdents) <- mapAndUnzipM flattenArg (Left <$> distIdents)
+  (needInvRepBnds, needInvArrs) <- mapAndUnzipM (replicateIdent mapInfo)
+                                                needInvIdents
 
-  -- Merge information and update lambda
+  --
+  -- Distribute and flatten idents needed (from above)
+  --
+  let extraLamdaParams = itmResArrs ++ needInvArrs
+  (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
+                                            extraLamdaParams
+  (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM flattenArg (Left <$> distArrIdents)
 
-  let idents' = flatIdents ++ flatDistIdents
-  let lambdaParams' = okLambdaParams ++ loopInvLambdaParams  ++ itmResIdents'
+
+  -----------------------------------------
+  -- Merge information and update lambda --
+  -----------------------------------------
+  let newInnerIdents = flatIdents ++ flatDistArrIdents
+  let lambdaParams' = okLambdaParams ++ loopInvLambdaParams
+                      ++ extraLamdaParams
 
   let lambdaBody' = substituteNames
                     (HM.fromList $ zip (map identName itmResIdents)
@@ -386,21 +409,18 @@ pullOutOfMap mapInfo (argsNeeded, _)
                        }
 
   let mapBnd' = Let (Pattern pats') letlore
-                    (LoopOp (Map (certs ++ mapCerts mapInfo) lambda' idents'))
+                    (LoopOp (Map (certs ++ mapCerts mapInfo)
+                                 lambda'
+                                 newInnerIdents))
 
   mapBnd'' <- transformBinding mapBnd'
 
-  return $ distBnds ++ flatDistBnds ++ loopInvRepBnds
+  return $ needInvRepBnds ++ distBnds ++ flatDistBnds
+           ++ loopInvRepBnds
            ++ flattenIdents ++ mapBnd'' ++ unflattenPats
 
-  where
-    replicateLoopInv :: Ident -> FlatM (Binding, Ident)
-    replicateLoopInv i = do
-      arrRes <- wrapInArrIdent mapInfo i
-      let repExp = PrimOp $ Replicate (mapSize mapInfo) (Var i)
-          repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
 
-      return (repBnd, arrRes)
+  where
 
     -- | The inner map apparently depends on some variable that does
     -- not come from the lists mapped over, so we'll need to add that
@@ -525,6 +545,14 @@ wrapInArrPat :: MapInfo -> PatElem -> FlatM PatElem
 wrapInArrPat mapInfo (PatElem i BindVar ()) = do
   i' <- wrapInArrIdent mapInfo i
   return $ PatElem i' BindVar ()
+replicateIdent :: MapInfo -> Ident -> FlatM (Binding, Ident)
+replicateIdent mapInfo i = do
+  arrRes <- wrapInArrIdent mapInfo i
+  let repExp = PrimOp $ Replicate (mapSize mapInfo) (Var i)
+      repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
+
+  return (repBnd, arrRes)
+
 --------------------------------------------------------------------------------
 
 isSafeToMapLambda :: Lambda -> FlatM Bool
