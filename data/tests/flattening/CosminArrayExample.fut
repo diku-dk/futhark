@@ -5,6 +5,6 @@
 fun [int] main ([int] xs) =
   map(fn int (int x) =>
         let arr = iota(2 * x) in
-        let arr' = reshape( (x,2), arr) in
-            reduce(op+, 0, arr')
+        let arr' = reshape( (2,x), arr) in
+            reduce(op+, 0, arr'[0]) + reduce(op+, 0, arr'[1])
      , xs)
