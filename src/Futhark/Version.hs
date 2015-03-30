@@ -4,6 +4,7 @@ module Futhark.Version
        (
          commit
        , version
+       , versionString
        )
        where
 
@@ -17,9 +18,12 @@ commit :: String
 commit = Build_futhark.gitCommit
 
 -- | The version of Futhark that we are using.  This is equivalent to
--- the version defined in the .cabal file, except that the specific
--- Git revision ('commit') is added as a version tag.
+-- the version defined in the .cabal file.
 version :: Version
 version = Paths_futhark.version
-          { versionTags = versionTags Paths_futhark.version ++ [commit]
-          }
+
+-- | The version of Futhark that we are using.  This is equivalent to
+-- the version defined in the .cabal file, but with the Git commit
+-- hash appended.
+versionString :: String
+versionString = showVersion version ++ "-" ++ commit
