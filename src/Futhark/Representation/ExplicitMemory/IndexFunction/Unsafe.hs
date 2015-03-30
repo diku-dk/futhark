@@ -31,6 +31,8 @@ import Proof.Equational
 import Data.Type.Equality hiding (outer)
 import qualified Text.PrettyPrint.Mainland as PP
 
+import Prelude
+
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST.Syntax (SubExp(..))
 import Futhark.Substitute

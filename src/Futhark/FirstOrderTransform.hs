@@ -14,6 +14,8 @@ import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
 import Data.List
 
+import Prelude
+
 import Futhark.Representation.Basic
 import Futhark.Renamer
 import Futhark.MonadFreshNames

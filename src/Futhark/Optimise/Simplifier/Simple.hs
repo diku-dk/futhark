@@ -15,6 +15,8 @@ import Control.Monad.State hiding (State)
 import Control.Monad.RWS
 import Control.Arrow (second)
 
+import Prelude
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames

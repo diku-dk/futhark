@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
 module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
@@ -54,6 +54,8 @@ import Data.List
 import Data.Loc
 import Data.Monoid
 import qualified Text.PrettyPrint.Mainland as PP
+
+import Prelude
 
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST

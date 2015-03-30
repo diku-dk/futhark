@@ -38,6 +38,8 @@ import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.State
 
+import Prelude
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames

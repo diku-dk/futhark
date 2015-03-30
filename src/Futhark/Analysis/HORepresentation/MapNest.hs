@@ -12,10 +12,10 @@ where
 
 import Control.Applicative
 import Control.Monad
-
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
+import Prelude
 
 import Futhark.NeedNames
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC

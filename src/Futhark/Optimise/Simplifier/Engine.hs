@@ -57,6 +57,8 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 
+import Prelude
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases

@@ -38,6 +38,8 @@ import Data.Hashable
 import Data.Monoid
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import Language.Futhark.Core
 
 -- | The size of an array type as a list of its dimension sizes.  If a

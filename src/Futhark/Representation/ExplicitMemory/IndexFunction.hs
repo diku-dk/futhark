@@ -24,6 +24,8 @@ import Proof.Equational
 import Data.Monoid
 import Data.Type.Equality hiding (outer)
 
+import Prelude
+
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import Futhark.Renamer

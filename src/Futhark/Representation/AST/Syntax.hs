@@ -67,6 +67,8 @@ module Futhark.Representation.AST.Syntax
 import Data.Monoid
 import Data.Loc
 
+import Prelude
+
 import Language.Futhark.Core
 import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore

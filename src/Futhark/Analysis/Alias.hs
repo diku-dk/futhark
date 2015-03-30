@@ -51,8 +51,8 @@ analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
   Out.LoopOp $
   Out.Stream cs acc arr
    (analyseExtLambda lam)
-analyseExp e = Out.mapExp traverse e
-  where traverse =
+analyseExp e = Out.mapExp analyse e
+  where analyse =
           Out.Mapper { Out.mapOnSubExp = return
                      , Out.mapOnCertificates = return
                      , Out.mapOnIdent = return

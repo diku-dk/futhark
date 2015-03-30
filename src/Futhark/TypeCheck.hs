@@ -40,6 +40,8 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Text.PrettyPrint.Mainland as PP
 
+import Prelude
+
 import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST as AST

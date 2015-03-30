@@ -162,6 +162,9 @@ Library
 
   Ghc-Options:        -Wall
 
+  if impl(ghc >= 7.10.1)
+     Ghc-Options:       -Wall -fno-warn-unticked-promoted-constructors
+
   Ghc-Prof-Options:   -prof -auto-all -rtsopts
 
 

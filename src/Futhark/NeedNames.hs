@@ -11,6 +11,8 @@ module Futhark.NeedNames
   where
 
 import Control.Applicative
+import Prelude
+
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 

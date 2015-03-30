@@ -20,6 +20,8 @@ where
 
 import Control.Applicative
 
+import Prelude
+
 import Futhark.Optimise.SimpleOpts
 import Futhark.Optimise.Fusion
 import qualified Futhark.FirstOrderTransform as FOT

@@ -56,6 +56,8 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 
+import Prelude
+
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Substitute

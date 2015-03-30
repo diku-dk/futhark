@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 -- | For every function with an existential return shape, try to see
 -- if we can extract an efficient shape slice.  If so, replace every
 -- call of the original function with a function to the shape and
@@ -12,6 +13,8 @@ import Control.Monad.Writer
 
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
+
+import Prelude
 
 import Futhark.Representation.Basic
 import Futhark.Tools

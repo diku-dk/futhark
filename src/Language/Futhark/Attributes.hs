@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | This module provides various simple ways to query and manipulate
 -- fundamental Futhark terms, such as types and values.  The intent is to
 -- keep "Futhark.Language.Syntax" simple, and put whatever embellishments
@@ -97,6 +97,8 @@ import Data.Array
 import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
+
+import Prelude
 
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals

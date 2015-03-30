@@ -12,6 +12,8 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 import Control.Applicative
 import Control.Monad
 
+import Prelude
+
 import Futhark.Representation.AST
 import Futhark.Tools
 import Futhark.MonadFreshNames

@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 -- | The type checker checks whether the program is type-consistent.
 -- Whether type annotations are already present is irrelevant, but if
 -- they are, the type checker will signal an error if they are wrong.
@@ -25,6 +25,8 @@ import Data.Maybe
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
+
+import Prelude
 
 import Futhark.Representation.External
 import Futhark.Representation.External.Renamer

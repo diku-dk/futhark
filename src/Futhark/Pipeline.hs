@@ -33,6 +33,8 @@ import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
 import Data.Maybe (isJust)
 
+import Prelude
+
 import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Representation.AST (Prog)

@@ -15,6 +15,8 @@ import Data.Loc
 
 import qualified Data.HashMap.Lazy as HM
 
+import Prelude
+
 import Futhark.Representation.Basic
 import Futhark.Tools
 

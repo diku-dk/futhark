@@ -13,6 +13,8 @@ import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
+import Prelude
+
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SimpleOpts

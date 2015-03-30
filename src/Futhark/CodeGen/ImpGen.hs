@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts #-}
 module Futhark.CodeGen.ImpGen
   ( compileProg
   , compileProgSimply
@@ -22,6 +22,8 @@ import Data.Maybe
 import Data.List
 import Data.Traversable (forM)
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
+
+import Prelude
 
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.CodeGen.ImpCode as Imp

@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Types
        (
          arrayRank
@@ -53,6 +54,8 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants

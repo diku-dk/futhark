@@ -144,8 +144,8 @@ optimiseExp (LoopOp (DoLoop res merge form body)) =
     return $ LoopOp $ DoLoop res merge form body'
   where boundInForm (ForLoop i _) = [i]
         boundInForm (WhileLoop _) = []
-optimiseExp e = mapExpM traverse e
-  where traverse = identityMapper { mapOnBody = optimiseBody
+optimiseExp e = mapExpM optimise e
+  where optimise = identityMapper { mapOnBody = optimiseBody
                                   , mapOnLambda = optimiseLambda
                                   }
 

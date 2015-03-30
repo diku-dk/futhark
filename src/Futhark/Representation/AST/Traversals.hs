@@ -60,6 +60,8 @@ import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
 
+import Prelude
+
 import Futhark.Representation.AST.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element

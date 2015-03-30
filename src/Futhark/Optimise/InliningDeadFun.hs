@@ -17,6 +17,8 @@ import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
 
+import Prelude
+
 import Futhark.Representation.Basic
 import Futhark.Renamer
 import Futhark.Analysis.CallGraph

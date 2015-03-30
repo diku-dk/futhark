@@ -34,6 +34,8 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 
+import Prelude
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
