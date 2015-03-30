@@ -393,7 +393,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
                    return $ Array bt (Shape [sz]) Nonunique
                  (Array bt (Shape (out:rest)) uniq) -> do
                    when (out /= mapSize mapInfo) $ flatError $ Error "distributeExtraArg: trying to distribute array with incorrect outer size"
-                   return $ Array bt (Shape $ out:rest ++ [sz]) uniq
+                   return $ Array bt (Shape $ out:sz:rest) uniq
 
       distIdent <- newIdent (baseString vn ++ "_dist") distTp
 
