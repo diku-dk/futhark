@@ -43,6 +43,9 @@ commandLineOptions =
   , Option [] ["externalise"]
     (NoArg $ Right $ \opts -> opts { futharkaction = externaliseAction})
     "Prettyprint the resulting external representation on standard output."
+  , Option [] ["range-analysis"]
+    (NoArg $ Right $ \opts -> opts { futharkaction = rangeAction })
+    "Print the program with range annotations added."
   , Option [] ["no-bounds-checking"]
     (NoArg $ Right $ \opts -> opts { futharkboundsCheck = False })
     "Do not perform bounds checking in the generated program."

@@ -51,7 +51,7 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
-import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Representation.AST.Attributes.Ranges hiding (subExpRange)
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int

@@ -5,6 +5,7 @@ module Futhark.Actions
   , impCodeGenAction
   , seqCodegenAction
   , flowGraphAction
+  , rangeAction
   )
 where
 
@@ -16,6 +17,7 @@ import System.IO
 import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Analysis.Alias
+import Futhark.Analysis.Range
 import Futhark.Representation.AST hiding (Basic)
 import Futhark.Interpreter
 import qualified Futhark.SOACFlowGraph as FG
@@ -39,6 +41,12 @@ interpretAction = polyAction "interpreter" . act
   where act parser (ExplicitMemory prog) = interpret parser prog
         act parser (Basic prog)          = interpret parser prog
 
+rangeAction :: Action
+rangeAction = polyAction "print ranges" act
+  where act (ExplicitMemory prog) = pp prog
+        act (Basic prog) = pp prog
+        pp :: PrettyLore lore => Prog lore -> IO ()
+        pp = putStrLn . pretty . rangeAnalysis
 
 seqCodegenAction :: Action
 seqCodegenAction = explicitMemoryAction "sequential code generator" $

@@ -45,6 +45,7 @@ Library
                    Futhark.Analysis.HORepresentation.SOACNest
                    Futhark.Analysis.ScalExp
                    Futhark.Analysis.SymbolTable
+                   Futhark.Analysis.Range
                    Futhark.Analysis.Rephrase
                    Futhark.Analysis.UsageTable
                    Futhark.Analysis.Usage
@@ -127,6 +128,7 @@ Library
                    Futhark.Representation.External
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
+                   Futhark.Representation.Ranges
                    Futhark.SOACFlowGraph
                    Futhark.Substitute
                    Futhark.Tools
