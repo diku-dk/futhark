@@ -12,8 +12,3 @@ script:
   - cabal install && PATH=dist/build/futhark/:$PATH data/runtests.sh
   - tools/style-check.sh src
   - cabal haddock
-
-notifications:
-  email:
-    - athas@sigkill.dk
-    - cosmin.oancea@diku.dk
