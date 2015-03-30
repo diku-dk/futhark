@@ -323,11 +323,20 @@ pullOutOfMap mapInfo (argsNeeded, _)
   --
   -- 2) They are also invariant in the outer loop TODO
 
-  -- FIXME: Handle idents that are loop invariant (these must still be arrays)
+  (okIdents, okLambdaParams) <-
+      liftM unzip
+      $ filterM (\(i,_) -> isJust <$> findTarget mapInfo i)
+              $ zip idents (lambdaParams lambda)
+  (loopInvIdents, loopInvLambdaParams) <-
+      liftM unzip
+      $ filterM (\(i,_) -> isNothing <$> findTarget mapInfo i)
+              $ zip idents (lambdaParams lambda)
+  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM replicateLoopInv loopInvIdents
 
+  (flattenIdents, flatIdents) <- mapAndUnzipM flattenArg $
+                                   (Right <$> okIdents)
+                                   ++ (Left <$> loopInvIdentsArrs)
 
-
-  (flattenIdents, flatIdents) <- mapAndUnzipM flattenArg (Right <$> idents)
   (unflattenPats, pats') <- mapAndUnzipM unflattenRes pats
 
 
@@ -346,6 +355,8 @@ pullOutOfMap mapInfo (argsNeeded, _)
                                                 Mem{}   -> flatError MemTypeFound
                                       ) outLoopIdents
 
+  -- FIXME: Loop Invariant Array is used somewhere down the line, but
+  -- is @`notMember` idents@
   unless (null outLoopIdents') $ flatError $ Error $ "completely loop invariant idents " ++ show outLoopIdents'
 
   -- Need to rename so our intermediate result will not be found in other calls
@@ -360,7 +371,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -- Merge information and update lambda
 
   let idents' = flatIdents ++ flatDistIdents
-  let lambdaParams' = lambdaParams lambda ++ itmResIdents'
+  let lambdaParams' = okLambdaParams ++ loopInvLambdaParams  ++ itmResIdents'
 
   let lambdaBody' = substituteNames
                     (HM.fromList $ zip (map identName itmResIdents)
@@ -376,10 +387,18 @@ pullOutOfMap mapInfo (argsNeeded, _)
 
   mapBnd'' <- transformBinding mapBnd'
 
-  return $ distBnds ++ flatDistBnds
+  return $ distBnds ++ flatDistBnds ++ loopInvRepBnds
            ++ flattenIdents ++ mapBnd'' ++ unflattenPats
 
   where
+    replicateLoopInv :: Ident -> FlatM (Binding, Ident)
+    replicateLoopInv i = do
+      arrRes <- wrapInArrIdent mapInfo i
+      let repExp = PrimOp $ Replicate (mapSize mapInfo) (Var i)
+          repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
+
+      return (repBnd, arrRes)
+
     -- | The inner map apparently depends on some variable that does
     -- not come from the lists mapped over, so we'll need to add that
     --
@@ -490,8 +509,10 @@ findTarget1 mapInfo i =
                                    ++ pretty i
 
 wrapInArrIdent :: MapInfo -> Ident -> FlatM Ident
-wrapInArrIdent mapInfo i@(Ident vn (Basic bt)) = do
-  let arrtp = Array bt (Shape [sz]) Nonunique
+wrapInArrIdent mapInfo i@(Ident vn tp) = do
+  let arrtp = case tp of
+               Basic bt                   -> Array bt (Shape [sz]) Nonunique
+               Array bt (Shape rest) uniq -> Array bt (Shape $ sz:rest) uniq
   arrIdent <- newIdent (baseString vn ++ "_arr") arrtp
   addMapLetArray i arrIdent
   return arrIdent
