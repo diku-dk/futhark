@@ -30,6 +30,8 @@ import Data.Loc
 import qualified Data.HashMap.Strict as HM
 import Data.Maybe
 
+import Prelude
+
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST
 import Futhark.Util

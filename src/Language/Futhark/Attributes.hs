@@ -98,6 +98,8 @@ import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import Language.Futhark.Syntax
 import Language.Futhark.Traversals
 

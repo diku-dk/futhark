@@ -24,6 +24,8 @@ import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 
+import Prelude
+
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes (progNames)
 import qualified Futhark.FreshNames as FreshNames

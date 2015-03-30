@@ -12,6 +12,8 @@ import Control.Monad.Writer
 
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import Futhark.Representation.AST
 import Futhark.Binder
 

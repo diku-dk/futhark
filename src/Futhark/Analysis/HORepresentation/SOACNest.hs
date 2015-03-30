@@ -26,8 +26,9 @@ module Futhark.Analysis.HORepresentation.SOACNest
 
 import Control.Applicative
 import Control.Monad
-
 import Data.Maybe
+
+import Prelude
 
 import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap)
 import Futhark.MonadFreshNames

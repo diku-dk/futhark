@@ -65,8 +65,6 @@ module Futhark.Analysis.HORepresentation.SOAC
   )
   where
 
-import Prelude hiding (foldl, foldr, and)
-
 import Control.Applicative
 
 import Data.Foldable
@@ -74,6 +72,8 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Sequence as Seq
+
+import Prelude
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST

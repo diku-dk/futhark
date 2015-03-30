@@ -52,6 +52,8 @@ import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
 
+import Prelude
+
 import Language.Futhark.Syntax
 
 -- | Express a monad mapping operation on a syntax node.  Each element

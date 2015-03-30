@@ -39,6 +39,8 @@ import Data.Maybe
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import Futhark.Representation.External
 import Futhark.FreshNames
 

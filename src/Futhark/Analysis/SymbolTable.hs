@@ -35,8 +35,6 @@ module Futhark.Analysis.SymbolTable
   )
   where
 
-import Prelude hiding (elem, lookup)
-
 import Control.Applicative hiding (empty)
 import Control.Monad
 import Data.Ord
@@ -44,6 +42,8 @@ import Data.Maybe
 import Data.List hiding (elem, insert, lookup)
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude hiding (elem, lookup)
 
 import Futhark.Representation.AST hiding (FParam, FParamT (..))
 import qualified Futhark.Representation.AST as AST

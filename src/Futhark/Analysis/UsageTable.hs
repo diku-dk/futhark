@@ -22,14 +22,14 @@ module Futhark.Analysis.UsageTable
   )
   where
 
-import Prelude hiding (lookup, any, foldl)
-
 import Control.Arrow (first)
 import Data.Foldable
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Set as S
+
+import Prelude hiding (lookup)
 
 import Futhark.Substitute
 import Futhark.Representation.AST

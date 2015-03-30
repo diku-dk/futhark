@@ -23,6 +23,8 @@ import Data.List
 import Data.Traversable (forM)
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 
+import Prelude
+
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.ExplicitMemory

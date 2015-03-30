@@ -11,6 +11,8 @@ import Data.Maybe (mapMaybe)
 import Data.Either
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import Futhark.Representation.AST
 import Futhark.Tools
 import Futhark.MonadFreshNames

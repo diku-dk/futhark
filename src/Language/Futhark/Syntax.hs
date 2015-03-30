@@ -51,6 +51,8 @@ import Data.Loc
 import Data.Monoid
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import Language.Futhark.Core
 
 -- | No information.  Usually used for placeholder type- or aliasing

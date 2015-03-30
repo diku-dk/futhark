@@ -26,6 +26,8 @@ import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Maybe
 
+import Prelude
+
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
