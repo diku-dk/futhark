@@ -67,7 +67,7 @@ module Futhark.Analysis.HORepresentation.SOAC
 
 import Control.Applicative
 
-import Data.Foldable (foldlM)
+import Data.Foldable as Foldable
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
@@ -294,7 +294,7 @@ inputArrayType (Iota e) = arrayOf (Basic Int) (Shape [e]) Unique
 -- | Return the type of an input.
 inputType :: Input -> Type
 inputType (Input (ArrayTransforms ts) ia) =
-  foldl transformType (inputArrayType ia) ts
+  Foldable.foldl transformType (inputArrayType ia) ts
   where transformType t (Replicate n) =
           arrayOf t (Shape [n]) u
           where u | unique t  = Unique
@@ -323,7 +323,7 @@ inputRank = arrayRank . inputType
 -- | Apply the transformations to every row of the input.
 transformRows :: ArrayTransforms -> Input -> Input
 transformRows (ArrayTransforms ts) =
-  flip (foldl transformRows') ts
+  flip (Foldable.foldl transformRows') ts
   where transformRows' inp (Rearrange cs perm) =
           addTransform (Rearrange cs (0:map (+1) perm)) inp
         transformRows' inp (Reshape cs shape) =
@@ -341,7 +341,7 @@ transformRows (ArrayTransforms ts) =
 
 -- | Get the resulting type after transforming the rows.
 transformTypeRows :: ArrayTransforms -> Type -> Type
-transformTypeRows (ArrayTransforms ts) = flip (foldl transform) ts
+transformTypeRows (ArrayTransforms ts) = flip (Foldable.foldl transform) ts
   where transform t (Rearrange _ perm) =
           t `setArrayShape` Shape (permuteShape (0:map (+1) perm) $ arrayDims t)
         transform t (Reshape _ shape) =
