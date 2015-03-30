@@ -214,7 +214,10 @@ transformBinding topBnd@(Let (Pattern pats) ()
               Nothing -> return Nothing
 
       pat <- liftM (Pattern . map (\i -> PatElem i BindVar () ))
-             $ mapM (wrapInArrIdent mapInfo) shouldReturn
+             $ forM shouldReturn $ \i -> do
+                 iArr <- wrapInArrIdent mapInfo i
+                 addMapLetArray i iArr
+                 return iArr
 
       let lamBody = Body { bodyLore = ()
                          , bodyBindings = bnds
@@ -509,13 +512,12 @@ findTarget1 mapInfo i =
                                    ++ pretty i
 
 wrapInArrIdent :: MapInfo -> Ident -> FlatM Ident
-wrapInArrIdent mapInfo i@(Ident vn tp) = do
-  let arrtp = case tp of
-               Basic bt                   -> Array bt (Shape [sz]) Nonunique
-               Array bt (Shape rest) uniq -> Array bt (Shape $ sz:rest) uniq
-  arrIdent <- newIdent (baseString vn ++ "_arr") arrtp
-  addMapLetArray i arrIdent
-  return arrIdent
+wrapInArrIdent mapInfo (Ident vn tp) = do
+  arrtp <- case tp of
+    Basic bt                   -> return $ Array bt (Shape [sz]) Nonunique
+    Array bt (Shape rest) uniq -> return $ Array bt (Shape $ sz:rest) uniq
+    Mem _ -> flatError MemTypeFound
+  newIdent (baseString vn ++ "_arr") arrtp
   where
     sz = mapSize mapInfo
 
