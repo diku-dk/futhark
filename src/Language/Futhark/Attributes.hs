@@ -563,7 +563,7 @@ emptyArray = arrayVal []
 -- characters, return the corresponding 'String', otherwise return
 -- 'Nothing'.
 arrayString :: Value -> Maybe String
-arrayString (ArrayVal arr _)
+arrayString (ArrayVal arr (Basic Char))
   | c:cs <- elems arr = mapM asChar $ c:cs
   where asChar (BasicVal (CharVal c)) = Just c
         asChar _                      = Nothing

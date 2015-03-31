@@ -8,7 +8,9 @@ module Futhark.Representation.AST.Attributes.Names
          , freeInExp
          , freeNamesInExp
          , freeInLambda
+         , freeInExtLambda
          , freeNamesInLambda
+         , freeNamesInExtLambda
          , progNames
        )
        where
@@ -32,6 +34,7 @@ freeWalker = identityWalker {
              , walkOnBody = bodyFree
              , walkOnBinding = bindingFree
              , walkOnLambda = lambdaFree
+             , walkOnExtLambda = extLambdaFree
              , walkOnIdent = identFree
              , walkOnCertificates = mapM_ identFree
              }
@@ -40,6 +43,8 @@ freeWalker = identityWalker {
         subExpFree = tell . freeIn
 
         lambdaFree = tell . freeInLambda
+
+        extLambdaFree = tell . freeInExtLambda
 
         typeFree = tell . freeIn
 
@@ -128,6 +133,21 @@ freeInLambda (Lambda params body rettype) =
         inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
         paramnames = map identName params
 
+-- | Return the set of identifiers that are free in the given
+-- existential lambda, including shape annotations in the parameters.
+freeInExtLambda :: (FreeIn (Lore.Exp lore),
+                    FreeIn (Lore.Body lore),
+                    FreeIn (Lore.FParam lore),
+                    FreeIn (Lore.LetBound lore)) =>
+                   ExtLambda lore -> HS.HashSet Ident
+freeInExtLambda (ExtLambda params body rettype) =
+  inRet <> inParams <> inBody
+  where inRet = mconcat $ map freeIn rettype
+        inParams = mconcat $ map freeInParam params
+        freeInParam = freeIn . identType
+        inBody = HS.filter ((`notElem` paramnames) . identName) $ freeInBody body
+        paramnames = map identName params
+
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.
 class FreeIn a where
@@ -203,6 +223,16 @@ freeNamesInLambda :: (FreeIn (Lore.Exp lore),
                      Lambda lore -> Names
 freeNamesInLambda = HS.map identName . freeInLambda
 
+-- | As 'freeInExtLambda', but returns the raw names rather than
+-- 'IdentBase's.
+freeNamesInExtLambda :: (FreeIn (Lore.Exp lore),
+                         FreeIn (Lore.Body lore),
+                         FreeIn (Lore.FParam lore),
+                         FreeIn (Lore.LetBound lore)) =>
+                        ExtLambda lore -> Names
+freeNamesInExtLambda = HS.map identName . freeInExtLambda
+
+
 -- | Return the set of all variable names bound in a program.
 progNames :: Prog lore -> Names
 progNames = execWriter . mapM funNames . progFunctions
@@ -210,6 +240,7 @@ progNames = execWriter . mapM funNames . progFunctions
                   walkOnBinding = bindingNames
                 , walkOnBody = bodyNames
                 , walkOnLambda = lambdaNames
+                , walkOnExtLambda = extLambdaNames
                 }
 
         one = tell . HS.singleton
@@ -233,4 +264,7 @@ progNames = execWriter . mapM funNames . progFunctions
         expNames e = walkExpM names e
 
         lambdaNames (Lambda params body _) =
+          mapM_ (one . identName) params >> bodyNames body
+
+        extLambdaNames (ExtLambda params body _) =
           mapM_ (one . identName) params >> bodyNames body
