@@ -98,6 +98,7 @@ instance Lore.Lore lore => Lore.Lore (Ranges lore) where
 
 instance Lore.Lore lore => Ranged (Ranges lore) where
   bodyRanges = fst . bodyLore
+  letBoundRange = fst
 
 type Prog lore = AST.Prog (Ranges lore)
 type PrimOp lore = AST.PrimOp (Ranges lore)
@@ -212,16 +213,3 @@ mkAliasedLetBinding :: Lore.Lore lore =>
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addRangesToPattern pat e) explore e
-
-instance Bindable lore => Bindable (Ranges lore) where
-  mkLet pat e =
-    let Let pat' explore _ = mkLet pat $ removeExpRanges e
-    in mkAliasedLetBinding pat' explore e
-
-  mkLetNames names e = do
-    Let pat explore _ <- mkLetNames names $ removeExpRanges e
-    return $ mkAliasedLetBinding pat explore e
-
-  mkBody bnds res =
-    let AST.Body bodylore _ _ = mkBody (map removeBindingRanges bnds) res
-    in mkAliasedBody bodylore bnds res

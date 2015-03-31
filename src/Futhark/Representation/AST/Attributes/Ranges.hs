@@ -1,6 +1,8 @@
 -- | Utility declarations for performing range analysis.
 module Futhark.Representation.AST.Attributes.Ranges
        ( Bound
+       , minimumBound
+       , maximumBound
        , Range
        , unknownRange
        , Ranged (..)
@@ -12,6 +14,7 @@ module Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 
 -- | A (possibly undefined) scalar bound on a value.
@@ -45,35 +48,46 @@ class Lore lore => Ranged lore where
   bodyRanges body =
     replicate (length $ resultSubExps $ bodyResult body)
     (Nothing, Nothing)
+  -- | The range of the pattern element attribute.  The default method
+  -- returns 'unknownRange'.
+  letBoundRange :: Lore.LetBound lore -> Range
+  letBoundRange = const unknownRange
 
 -- | The range of a subexpression.
 subExpRange :: SubExp -> Range
 subExpRange se = (Just $ subExpToScalExp se,
                   Just $ subExpToScalExp se)
 
-primOpRanges :: PrimOp lore -> Range
+primOpRanges :: PrimOp lore -> [Range]
 primOpRanges (SubExp se) =
-  subExpRange se
+  [subExpRange se]
 primOpRanges (Iota n) =
-  (Just zero, Just $ subExpToScalExp n `SMinus` one)
+  [(Just zero, Just $ subExpToScalExp n `SMinus` one)]
   where zero = Val $ IntVal 0
         one = Val $ IntVal 1
 primOpRanges (Replicate _ v) =
-  subExpRange v
+  [subExpRange v]
 primOpRanges (Rearrange _ _ v) =
-  (Just $ Id v, Just $ Id v)
+  [subExpRange $ Var v]
 primOpRanges (Split _ _ v) =
-  (Just $ Id v, Just $ Id v)
+  [subExpRange $ Var v]
 primOpRanges (Copy se) =
-  subExpRange se
+  [subExpRange se]
 primOpRanges (Index _ v _) =
-  (Just (Id v), Just (Id v))
+  [subExpRange $ Var v]
+primOpRanges (Partition _ n _ arr) =
+  replicate n $ subExpRange $ Var arr
+primOpRanges (ArrayLit (e:es) _) =
+  [(bound, bound)]
+  where bound = Just $ MaxMin False $ subExpToScalExp e : map subExpToScalExp es
 primOpRanges _ =
-  (Nothing, Nothing)
+  [(Nothing, Nothing)]
 
-expRanges :: Ranged lore => Exp lore -> [Range]
+-- | Ranges of the value parts of the expression.
+expRanges :: Ranged lore =>
+             Exp lore -> [Range]
 expRanges (PrimOp op) =
-  [primOpRanges op]
+  primOpRanges op
 expRanges (If _ tbranch fbranch _) =
   zip
   (zipWith minimumBound t_lower f_lower)
