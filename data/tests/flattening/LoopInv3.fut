@@ -1,5 +1,5 @@
 fun [int] addRows ([int] xs, [int] ys) =
-  map(op+, zip (xs,ys))
+  map(+, zip (xs,ys))
 
 fun [[[[int]]]] main ([[[[int]]]] xssss, [int] ys) =
   map (fn [[[int]]] ([[[int]]] xsss) =>

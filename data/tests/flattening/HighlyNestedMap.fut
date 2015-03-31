@@ -1,5 +1,5 @@
 fun [int] add1 ([int] xs, [int] ys) =
-  map(op+, zip (xs,ys))
+  map(+, zip (xs,ys))
 
 fun [[int]] add2 ([[int]] xs, [[int]] ys) =
   map (add1, zip (xs,ys))

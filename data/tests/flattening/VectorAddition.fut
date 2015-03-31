@@ -1,2 +1,2 @@
-fun [int] main([int] A, [int] B) =
-  map(op+, zip (A,B))
+fun [int] main([int] xs, [int] ys) =
+  map(+, zip (xs,ys))
