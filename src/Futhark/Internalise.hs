@@ -291,10 +291,13 @@ internaliseExp _ (E.Zip (e:es) loc) = do
                    I.BinOp I.Equal e_outer outer I.Bool
             c   <- letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
-            letExp "zip_result" $ I.PrimOp $
+            letExp (postfix e_unchecked' "_zip_res") $ I.PrimOp $
               I.Reshape [c] (e_outer:inner) e_unchecked'
   es' <- mapM (mapM reshapeToOuter) es_unchecked'
   return $ concatMap (map I.Var) $ e' : es'
+
+  where
+    postfix i s = baseString (I.identName i) ++ s
 
 internaliseExp _ (E.Transpose k n e _) =
   internaliseOperation "transpose" e $ \v ->
