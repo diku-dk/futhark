@@ -60,6 +60,7 @@ Library
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform
+                   Futhark.Flattening
                    Futhark.FreshNames
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes
