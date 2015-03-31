@@ -521,10 +521,21 @@ simplifyScal (MaxMin _ []) =
 simplifyScal (MaxMin _ [e]) = simplifyScal e
 simplifyScal (MaxMin ismin es) = do -- helperMinMax ismin  es pos
     -- pos <- asks pos
-    es' <- mapM simplifyScal es
+    es0 <- mapM simplifyScal es
+    let evals = filter isValue         es0
+        es'   = filter (not . isValue) es0
+        mvv = case evals of
+                []   -> Nothing
+                v:vs -> let myop = if ismin then min else max
+                            myval= getValue v
+                            oneval = (foldl myop myval . map getValue) vs
+                        in  Just $ Val oneval
     -- flatten the result and remove duplicates,
     -- e.g., Max(Max(e1,e2), e1) -> Max(e1,e2,e3)
-    return $ MaxMin ismin $ remDups $ foldl flatop [] es'
+    case (es', mvv) of
+        ([], Just vv) -> return vv
+        (_,  Just vv) -> return $ MaxMin ismin $ remDups $ foldl flatop [] $ vv:es'
+        (_,  Nothing) -> return $ MaxMin ismin $ remDups $ foldl flatop [] es'
     -- ToDo: This can prove very expensive as compile time
     --       but, IF e2-e1 <= 0 simplifies to True THEN
     --       Min(e1,e2) = e2.   Code example:
@@ -536,6 +547,14 @@ simplifyScal (MaxMin ismin es) = do -- helperMinMax ismin  es pos
     --    NAnd [LogCt True  _] _ -> simplifyAlgN e1
     --    NAnd [LogCt False _] _ -> simplifyAlgN e2
     where
+        isValue :: ScalExp -> Bool
+        isValue e = case e of
+                      Val _ -> True
+                      _     -> False
+        getValue :: ScalExp -> BasicValue
+        getValue se = case se of
+                        Val v -> v
+                        _     -> IntVal 0        
         flatop :: [ScalExp] -> ScalExp -> [ScalExp]
         flatop a e@(MaxMin ismin' ses) =
             a ++ if ismin == ismin' then ses else [e]
