@@ -4,6 +4,7 @@ module Futhark.Analysis.ScalExp
   , scalExpType
   , subExpToScalExp
   , toScalExp
+  , expandScalExp
   , LookupVar
   , fromScalExp
   , fromScalExp'
@@ -16,6 +17,7 @@ import Control.Applicative
 import Control.Monad
 import Data.List
 import qualified Data.HashSet as HS
+import Data.Maybe
 import Data.Monoid
 
 import Text.PrettyPrint.Mainland hiding (pretty)
@@ -115,7 +117,7 @@ scalExpType (Val val) =
 scalExpType (Id  idd) =
   case identType idd of
     Basic bt -> bt
-    t        -> error $ "scalExpType: var in scalar exp cannot have type " ++
+    t        -> error $ "scalExpType: var " ++ pretty idd ++ " in scalar exp cannot have type " ++
                          pretty t ++ "."
 scalExpType (SNeg  e) = scalExpType e
 scalExpType (SNot  _) = Bool
@@ -159,6 +161,24 @@ toScalExp look (PrimOp (BinOp bop x y t))
   binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
 
 toScalExp _ _ = Nothing
+
+-- | If you have a scalar expression that has been created with
+-- incomplete symbol table information, you can use this function to
+-- grow its 'Id' leaves.
+expandScalExp :: LookupVar -> ScalExp -> ScalExp
+expandScalExp _ (Val v) = Val v
+expandScalExp look (Id v) = fromMaybe (Id v) $ look $ identName v
+expandScalExp look (SNeg se) = SNeg $ expandScalExp look se
+expandScalExp look (SNot se) = SNot $ expandScalExp look se
+expandScalExp look (MaxMin b ses) = MaxMin b $ map (expandScalExp look) ses
+expandScalExp look (SPlus x y) = SPlus (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SMinus x y) = SMinus (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (STimes x y) = STimes (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SDivide x y) = SDivide (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SPow x y) = SPow (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SLogAnd x y) = SLogAnd (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SLogOr x y) = SLogOr (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (RelExp relop x) = RelExp relop $ expandScalExp look x
 
 -- | "Smart constructor" that checks whether we are subtracting zero,
 -- and if so just returns the first argument.
