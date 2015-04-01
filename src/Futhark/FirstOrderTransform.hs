@@ -228,30 +228,58 @@ loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
 loopMerge vars vals = [ (FParam var (), val) | (var,val) <- zip vars vals ]
 
 
--------------------------------------------------------------
---- STREAM has a long implementation, hence it comes last ---
--------------------------------------------------------------
-  -- STREAM will be translated to a loop construct:
-  -- 1. i (2nd lam param) becomes the loop iterator
-  -- 2. substitute (chunk <- 1) in lam's body
-  -- 3. for the input/output arrays of known shapes,
-  --    lift them by a dummy, next-to-outermost
-  --    dimension of size 1, and substitute `a <- A^[i]'.
-  -- 4. outer arrays for which only an upperbound
-  --    is available, do the same, but maintain
-  --    their own induction variable modeling the
-  --    outer size
-  -- 5. the intermediate arrays are kept local at
-  --    this stage (to be optimized later via memory
-  --    blocks)
-  -- 6. also a narrowing pass would be useful later on
-  --    in order to remove the dummy dimension and to
-  --    replace the map/reduce/filter with `scalar'
-  --    operations.
-  -- THE CURRENT IMPLEMENTATION IS INCORRECT
-  --   BECAUSE CURRENTLY I AM JUST TRYING TO GET A
-  --   FEELING OF WHAT IT SHOULD BE (I.E. PLAYING)
-  --   AND WILL FIX IT LATER
+-- | Translation of STREAM is non-trivial and quite incomplete for the moment!
+-- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
+-- is purely existential, the intent is to translate a stream exp such as:
+-- @stream (fn {int,[int,m],[int,?0],[real,?1]@
+-- @           (int chunkloc, int i, int acc, [int] a) =>@
+-- @               body in {acc', x, y, z}@
+-- @       , acc0, A)@
+-- into a loop in which the input array is streamed by splitting each time
+-- chunk elements from it, and using the rest as a loop-merge variable.
+-- 1. For an array of exact upper bound @x@, we insert a prologue loop that
+--    in-place updates the local-chunk elements to a global array, which
+--    is statically allocated outside the loop. The global array needs of
+--    course to become a loop-merge variable.
+-- 2. For an array of known outermost size upper bound U, we also introduce
+--    an induction variable that is incremented at the end of the loop with
+--    the current size of the local array, and obviously the copy-back-loop
+--    counter is the size of the local array @y@.
+-- 3. Finally for a purely-existential outer size, e.g., @z@ we initialize
+--    the global array outer dimension with the outermost size of the stream,
+--    and maintain two induction variables as merge variables of the loop:
+--    one that keeps the allocated size of the outermost dimension and
+--    one that keeps the current outermost size of the array
+--    (pushback vectors)
+-- A Loop pseudocode is:
+-- @let chunkglb = 16 in@
+-- @let (Xglb0,Yglb0,Zglb0)=(scratch(N,..),scratch(U,..),scratch(N,..)) in@
+-- loop( {Aloop, A_iv, z_al, y_iv, z_iv, acc, Xglb, Yglb, Zglb} =   @
+-- @      {A,     N,    0,    0,    0,    acc0,Xglb0,Yglb0,Zglb0} )=@
+-- @  for i_chk < (N+chunkglb-1)/chunkglb do                        @
+-- @    let i        = chunkglb * i_chk          in                 @
+-- @    let A_cur_sz = N - i*chunkglb            in                 @
+-- @    let chunkloc = min(chunkglb, A_iv)       in                 @
+-- @    let A_nxt_sz = A_cur_sz - chunkloc       in                 @
+-- @    let (elms,Anxt) = split(chunkloc, Aloop) in                 @
+-- @    ... body ...                                                @
+-- @    ............                                                @
+-- @    let z_iv' = z_iv + size(0,z)             in                 @
+-- @    let {z_al',Zglb'} =                                         @
+-- @      if z_iv' <= z_al then {z_al, Zglb}                        @
+-- @      else let Znew = scratch(2*z_iv') in                       @
+-- @           loop(Znew) = for j < z_iv do                         @
+-- @               let Znew[j] = Zglb[j]                            @
+-- @               in  Znew                                         @
+-- @           in {2*z_iv', Znew}                                   @
+-- @    loop (Zglb') = for j < size(0,z) do                         @
+-- @        let Zglb'[j+z_iv] = z[j]                                @
+-- @        in  Zglb'                                               @
+-- @    in {Anxt,A_nxt_sz,z_al',y_iv',z_iv',acc',Xglb',Yglb',Zglb'} @
+-- @in                                                              @
+-- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
+--
+-- Hope you got the idea at least because the code is terrible :-)
 transformStreamExp :: Pattern -> Exp -> Binder Basic Exp
 transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
   -- 1.) trivial step: find and build some of the basic things you need
@@ -290,16 +318,16 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                 return restp
   (mexistszs,mexistinds,botharrtps) <- unzip3 <$> forM (zip assocs initrtps)
                                                         mkAllExistIdAndTypes
-  let (exszvar,             exszses) = unzip  $ catMaybes mexistszs
-      (exindvars,indvarres,exindses) = unzip3 $ catMaybes mexistinds
-      (lftedrtps, exactrtps) = unzip botharrtps
+  let (exszvar,    exszarres,  exszses  ) = unzip3 $ catMaybes mexistszs
+      (exindvars,  indvarres,  exindses ) = unzip3 $ catMaybes mexistinds
+      (lftedrtps1, lftedrtps2, exactrtps) = unzip3   botharrtps
       patarrnms = map (textual . identName) (fst $ unzip assocs)
   -- various result array identifiers
   outarrinit <- forM (zip initrtps  patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_init") $ t `setUniqueness` Unique
-  outarrloop <- forM (zip lftedrtps patarrnms) $ \(t,nm) ->
+  outarrloop <- forM (zip lftedrtps1 patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_loop") $ t `setUniqueness` Unique
-  strmresarrl<- forM (zip lftedrtps patarrnms) $ \(t,nm) ->
+  strmresarrl<- forM (zip lftedrtps2 patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_resL") $ t `setUniqueness` Unique
   strmresarr <- forM (zip exactrtps patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_resE") $ t `setUniqueness` Unique
@@ -364,7 +392,11 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
           forM_ (zip3 arrpars inarrsloop1 inarrsloop2) $
             \(param, inarr1, inarr2) -> do
                 let myarg = PrimOp $ Split [] [Var chunkloc, Var inarrNsz] inarr1
-                letBindNames' [identName param, identName inarr2] myarg
+                tmpid <- newIdent "tmpelem" $ identType param
+                _ <- letBindNames' [identName tmpid, identName inarr2] myarg
+                -- UGLY: I NEED TO COPY THE UNIQUE ARGUMENT TO MAKE IT
+                --       WORK IN SOME CASES WHERE THE ARRAY IS MODIFIED IN PLACE.
+                letBindNames' [identName param] =<< eCopy (pure (PrimOp $ SubExp $ Var tmpid))
           let fakebody = Body (bodyLore lambody) (bodyBindings lambody) (bodyResult lambody)
           transformBody fakebody
       -- make copy-out epilogue for result arrays
@@ -377,20 +409,22 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
       return $ resultBody (map Var (inarrNsz : inarrsloop2 ++ szvars ++ indvars) ++ acc' ++ map Var dests)
   -- 4.) Build the loop
   initacc0 <- letSubExps "acc" $ map maybeCopy accexps --WHY COPY???
-  let initacc = exszses ++ exindses  ++ initacc0
-      acc     = exszvar ++ exindvars ++ acc0
-  let loopres = LoopOp $
-                DoLoop (acc++outarrloop)
-                       (loopMerge (inarrVsz:inarrsloop1++acc++outarrloop)
+  let accres  = exindvars ++ acc0
+      accall  = exszvar ++ accres
+      initacc = exszses ++ exindses  ++ initacc0
+      loopres = LoopOp $
+                DoLoop (accres++outarrloop)
+                       (loopMerge (inarrVsz:inarrsloop1++accall++outarrloop)
                                   (outersz:map Var arrexps++initacc++map Var outarrinit))
                        (ForLoop loopind (Var loopcnt)) loopbody
-  let loopbnd = mkLet (map (\x->(x,BindVar)) $ indvarres++strmresacc++strmresarrl) loopres
+      loopbnd = mkLet ( map (\x->(x,BindVar)) $
+                            exszarres++indvarres++strmresacc++strmresarrl ) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
   --     IF exp to return one expression
   outarrrshpbnds<- forM (zip5 strmresarr strmresarrl exactrtps mexistszs mexistinds) $
                    \ (arr,arrl,_,malocsz,msz) ->
                      case (malocsz,msz) of
-                        (Nothing, Nothing)     ->
+                        (Nothing, Nothing)    ->
                             -- regular array case!
                             return $ myMkLet (PrimOp $ SubExp $ Var arrl) arr
                         (_, Just (_,indvar,_)) ->
@@ -444,15 +478,15 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                     let patid = patElemIdent patel
                         rtpdim= extShapeDims $ arrayShape rtp
                     case rtpdim of
-                      Ext  _:_ -> return (patid, existUpperBound True)
-                      Free s:_ -> return (patid, ExactBd s           )
+                      Ext  _:_ -> return (patid, existUpperBound withUpperBound )
+                      Free s:_ -> return (patid, ExactBd s            )
                       _        ->
                           fail "FirstOrderTrabsform(Stream), mkExistAssocs: Empty Array Shape!"
             forM (zip rtps arrpatels) processAssoc
         mkAllExistIdAndTypes :: ( (Ident, MEQType), Type )
-                             -> Binder Basic ( Maybe (Ident,SubExp), Maybe (Ident,Ident,SubExp), (Type,Type) )
+                             -> Binder Basic ( Maybe (Ident,Ident,SubExp), Maybe (Ident,Ident,SubExp), (Type,Type,Type) )
         mkAllExistIdAndTypes ((_, ExactBd _), initrtp) =
-            return ( Nothing, Nothing, (initrtp,initrtp) )
+            return ( Nothing, Nothing, (initrtp,initrtp,initrtp) )
         mkAllExistIdAndTypes ((p,UpperBd _), Array bt (Shape (d:dims)) u) = do
             idd1<- newIdent (textual (identName p)++"_outiv1") $ Basic Int
             idd2<- newIdent (textual (identName p)++"_outiv2") $ Basic Int
@@ -460,21 +494,30 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                 exacttype = Array bt (Shape $ Var idd2:dims) u
             return ( Nothing
                    , Just (idd1,idd2,intconst 0)
-                   , (initrtp,exacttype) )
+                   , (initrtp,initrtp,exacttype) )
         mkAllExistIdAndTypes ((p,UnknownBd), Array bt (Shape (_:dims)) u) = do
-            idd1<- newIdent (textual (identName p)++"_outiv1") $ Basic Int
-            idd2<- newIdent (textual (identName p)++"_outiv2") $ Basic Int
-            idal<- newIdent (textual (identName p)++"_outsz1") $ Basic Int
+            idd1 <- newIdent (textual (identName p)++"_outiv1") $ Basic Int
+            idd2 <- newIdent (textual (identName p)++"_outiv2") $ Basic Int
+            idal1<- newIdent (textual (identName p)++"_outsz1") $ Basic Int
+            idal2<- newIdent (textual (identName p)++"_outsz2") $ Basic Int
             let strmsz = arraysSize 0 (map identType arrexps)
-            let lftedtype = Array bt (Shape $ Var idal : dims) u
-            let exacttype = Array bt (Shape $ Var idd2 : dims) u
-            return ( Just (idal,strmsz)
-                   , Just (idd1,idd2,intconst 0)
-                   , (lftedtype,exacttype) )
+                lftedtype1= Array bt (Shape $ Var idal1: dims) u
+                lftedtype2= Array bt (Shape $ Var idal2: dims) u
+                exacttype = Array bt (Shape $ Var idd2 : dims) u
+            return ( Just (idal1,idal2,    strmsz)
+                   , Just (idd1, idd2, intconst 0)
+                   , (lftedtype1,lftedtype2,exacttype) )
         mkAllExistIdAndTypes _ =
             fail "FirstOrderTransform(Stream): failed in mkAllExistIdAndTypes"
+        mkNonuniqueId :: Ident -> Ident
+        mkNonuniqueId id1 =
+            let tp1 = identType id1
+            in  Ident (identName id1) $ tp1 `setUniqueness` Nonunique
         mkOutArrEpilogue :: Certificates -> SubExp
-                         -> ((Maybe (Ident,SubExp), Maybe (Ident,Ident,SubExp)), Ident, SubExp)
+                         -> ( ( Maybe (Ident,Ident,SubExp)
+                              , Maybe (Ident,Ident,SubExp) )
+                            , Ident
+                            , SubExp )
                          -> Binder Basic (Maybe Ident, Maybe Ident, Ident)
         mkOutArrEpilogue css iv ((allocvars,indvars),glboutid,locoutarr) = do
             locoutid <- case locoutarr of
@@ -483,17 +526,24 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                      " array result MUST be a Var!")
             (ivv, glboutid', mind', malloc') <-
                 case indvars of
-                  Nothing ->             -- exact-size case
+                  Nothing ->               -- exact-size case
                     return (iv, glboutid, Nothing, Nothing)
                   Just (k,_,_) -> do
                     newszid <- newIdent (textual (identName k)++"_new") $ Basic Int
                     plexp <- eBinOp Plus (pure $ PrimOp $ SubExp $ Var k)
                                          (pure $ PrimOp $ SubExp $ isize [locoutid]) Int
                     addBinding $ myMkLet plexp newszid
+                    let oldbtp = identType glboutid
+                    newallocid <- newIdent "newallocsz" $ Basic Int
+                    resallocid <- newIdent "resallocsz" $ Basic Int
+                    olddims <- case arrayDims oldbtp of
+                                 (_:dims) -> return dims
+                                 _ -> fail ("FirstOrderTransform(Stream), mkOutArrEpilogue:"++
+                                            " empty array dimensions!")
                     case allocvars of
-                      Nothing     ->     -- known-upper-bound case
+                      Nothing     ->       -- known-upper-bound case
                         return (Var k, glboutid, Just newszid, Nothing)
-                      Just (alsz,_)-> do -- fully existential case, reallocate
+                      Just (alsz,_,_)-> do -- fully existential case, reallocate
                         alloclid <- newIdent "allcloopiv" $ Basic Int
                         let isempty = eBinOp Leq (pure $ PrimOp $ SubExp $ Var newszid)
                                              (pure $ PrimOp $ SubExp $ Var alsz) Bool
@@ -501,21 +551,15 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                             otherbranch = runBinder $ do
                                 alszt2exp<- eBinOp Times (pure $ PrimOp $ SubExp $ Var newszid)
                                                          (pure $ PrimOp $ SubExp $ intconst 2 ) Int
-                                newallocid <- newIdent (textual (identName alsz)++"_new") $ Basic Int
                                 addBinding $ myMkLet alszt2exp newallocid
-                                let oldbtp = identType glboutid
-                                newbdims <- case arrayDims oldbtp of
-                                              (_:dims) -> return $ Var newallocid : dims
-                                              _ -> fail ("FirstOrderTransform(Stream), mkOutArrEpilogue:"++
-                                                         " empty array dimensions!")
                                 bnew0<- letExp (textual (identName glboutid)++"_loop0") $
-                                               PrimOp $ Scratch (elemType oldbtp) newbdims
+                                               PrimOp $ Scratch (elemType oldbtp) (Var newallocid:olddims)
                                 bnew <- newIdent (textual (identName glboutid)++"_loop") $ identType bnew0
                                 allocloopbody <- runBinder $ do
+                                    let glboutid_nu = mkNonuniqueId glboutid
                                     (aldest:_) <- letwith css [bnew] (pexp $ Var alloclid)
-                                                    [PrimOp $ Index [] glboutid [Var alloclid]]
+                                                    [PrimOp $ Index css glboutid_nu [Var alloclid]]
                                     return $ resultBody [Var aldest]
-                                --
                                 let alloopres = LoopOp $ DoLoop [bnew]
                                                   (loopMerge [bnew] [Var bnew0])
                                                   (ForLoop alloclid (Var k)) allocloopbody
@@ -523,26 +567,23 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                 addBinding $ myMkLet alloopres bnew'
                                 return $ resultBody [Var bnew']
                         allocifexp <- eIf isempty emptybranch otherbranch
-                        (exids, bnews'') <- letShapedExp (textual (identName glboutid)++"_new") allocifexp
-                        case (exids, bnews'') of
-                          ([newalid],[bnew'']) -> return (Var k, bnew'', Just newszid, Just newalid)
-                          _ -> fail ("FirstOrderTransform(Stream), mkOutArrEpilogue: "++
-                                     "different than one existential shape-id received!")
-            --
+                        bnew'' <- newIdent (textual (identName glboutid)++"_res") $
+                                           Array (elemType oldbtp) (Shape $ Var resallocid:olddims) Unique
+                        let patresbnd = mkLet ( map (\x->(x,BindVar)) [resallocid,bnew''] ) allocifexp
+                        addBinding patresbnd
+                        return (Var k, bnew'', Just newszid, Just resallocid)
             glboutLid <- newIdent (textual (identName glboutid)++"_loop") $ identType glboutid'
             glboutBdId<- newIdent (textual (identName glboutid)++"_loopbd") $ identType glboutid'
             loopid <- newIdent "j" $ Basic Int
-            -- make copy-out loop body
+            -- make copy-out what was written in the current iteration
             loopbody <- runBinder $ do
                 ivvplid <- newIdent "jj" $ Basic Int
                 ivvplidexp <- eBinOp Plus (pure $ PrimOp $ SubExp ivv)
                                           (pure $ PrimOp $ SubExp $ Var loopid) Int
                 addBinding $ myMkLet ivvplidexp ivvplid
-                --tmpid <- newIdent "tmp" $ stripArray 1 (identType locoutid)
-                --addBinding $ myMkLet (PrimOp $ Index [] locoutid [Var loopid]) tmpid
-                indexp <- eIndex [] locoutid [eSubExp $ Var loopid] --css
-                (dest:_) <- letwith [] [glboutLid] (pexp (Var ivvplid)) [indexp] --css
-                                    --[PrimOp $ SubExp $ Var tmpid]
+                let locoutid_nu = mkNonuniqueId locoutid
+                (dest:_) <- letwith css [glboutLid] (pexp (Var ivvplid))--[indexp]
+                                        [PrimOp $ Index css locoutid_nu [Var loopid]]
                 return $ resultBody [Var dest]
             -- make loop
             let loopres = LoopOp $ DoLoop [glboutLid]
@@ -553,6 +594,8 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
 transformStreamExp _ _ =
     fail "In transformStreamExp, UNREACHABLE: this function only supports stream!"
 
+withUpperBound :: Bool
+withUpperBound = False
 data MEQType = ExactBd SubExp
              | UpperBd SubExp
              | UnknownBd
