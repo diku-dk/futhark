@@ -4,6 +4,7 @@ module Futhark.Tools
   , letSubExps
   , letExp
   , letExps
+  , letShapedExp
   , letTupExp
   , letTupExp'
   , letInPlace

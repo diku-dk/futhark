@@ -471,19 +471,18 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
       argpattps   = map patElemType $ drop (length patels - length rtp) patels
   (newpats,newsubexps) <- unzip <$> reverse <$>
                           foldM gatherPat [] (zip3 rtp rtp' argpattps)
-  newexps' <- mapM (simplifyExp . PrimOp . SubExp) newsubexps
-  newpats' <- mapM (\(p,e) -> simplifyPattern p $ expExtType e) $
-                   zip newpats newexps'
+  newexps' <- forM newsubexps $ simplifyExp . PrimOp . SubExp
+  newpats' <- forM (zip newpats newexps') $ \(p,e) ->
+                    simplifyPattern p $ expExtType e
   let rmvdpatels = concatMap patternElements newpats
       patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
   pat' <- simplifyPattern (Pattern patels') $ expExtType lss'
   let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
-  newpats'' <- mapM (\(p,e)->simplifyPattern p $ expExtType e) newpatexps'
+  newpats'' <- forM newpatexps' $ \(p,e)->simplifyPattern p $ expExtType e
   let (_,newexps'') = unzip newpatexps'
   let newpatexps''= zip newpats'' newexps''
-  _ <- mapM (\(p,e) -> inspectBinding =<<
-                        mkLetM (Aliases.addAliasesToPattern p e) e
-            ) newpatexps''
+  _ <- forM newpatexps'' $ \(p,e) -> inspectBinding =<<
+                            mkLetM (Aliases.addAliasesToPattern p e) e
   return ()
     where gatherPat acc (_, Basic _, _) = return acc
           gatherPat acc (_, Mem   _, _) = return acc

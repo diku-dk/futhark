@@ -167,16 +167,12 @@ internaliseStreamLambda internaliseLambda lam accs arrtypes = do
       lam_acc_tps = take acc_len rettype
   let lam_arr_tps = drop acc_len rettype
   --
-  -- For the map part: intuitively it would seem possible to
-  --   enforce the invariant that the inner shape is invariant
-  --   to the streaming; however a slice cannot be computed
-  --   because filter can be part of the body, hence the result
-  --   array can be empty, hence inner shape is unavailable ...
-  -- It would seem this lambda requires user-level annotations!
-  --
   -- The accumulator result of the body must have the exact same
   -- shape as the initial accumulator.  We accomplish this with
-  -- an assertion and reshape().
+  -- an assertion and reshape().  For the result arrays, we allow
+  -- the outermost dimension to be existential, but we require
+  -- all inner dimensions to be specified by the user, so we can
+  -- check them with an assertion and reshape().
   --
   let assertProperShape t se =
         let name = "result_stream_proper_shape"

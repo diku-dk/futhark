@@ -12,6 +12,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , loopShapeContext
        , loopExtType
        , applyExtType
+       , substNamesInExtType
        , module Futhark.Representation.AST.RetType
        )
        where
@@ -112,20 +113,6 @@ loopOpExtType (Stream _ accs arrs lam) =
       (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
       substs = HM.fromList $ zip nms (outersize:i0:accs)
   in  map (substNamesInExtType substs) rtp
-    where substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
-          substNamesInExtType _ tp@(Basic _) = tp
-          substNamesInExtType subs (Mem se) =
-            Mem $ substNamesInSubExp subs se
-          substNamesInExtType subs (Array btp shp u) =
-            let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
-            in  Array btp shp' u
-          substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
-          substNamesInExtDimSize _ (Ext o) = Ext o
-          substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
-          substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
-          substNamesInSubExp _ e@(Constant _) = e
-          substNamesInSubExp subs (Var idd) =
-            fromMaybe (Var idd) (HM.lookup (identName idd) subs)
 
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
@@ -194,3 +181,18 @@ applyExtType (ExtRetType extret) params args
             Free se
           | otherwise =
             Free $ Var v
+
+substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
+substNamesInExtType _ tp@(Basic _) = tp
+substNamesInExtType subs (Mem se) =
+  Mem $ substNamesInSubExp subs se
+substNamesInExtType subs (Array btp shp u) =
+  let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
+  in  Array btp shp' u
+substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
+substNamesInSubExp _ e@(Constant _) = e
+substNamesInSubExp subs (Var idd) =
+  fromMaybe (Var idd) (HM.lookup (identName idd) subs)
+substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
+substNamesInExtDimSize _ (Ext o) = Ext o
+substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o

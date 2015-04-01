@@ -554,7 +554,7 @@ simplifyScal (MaxMin ismin es) = do -- helperMinMax ismin  es pos
         getValue :: ScalExp -> BasicValue
         getValue se = case se of
                         Val v -> v
-                        _     -> IntVal 0        
+                        _     -> IntVal 0
         flatop :: [ScalExp] -> ScalExp -> [ScalExp]
         flatop a e@(MaxMin ismin' ses) =
             a ++ if ismin == ismin' then ses else [e]
