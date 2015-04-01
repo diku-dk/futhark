@@ -32,6 +32,7 @@ module Futhark.Analysis.SymbolTable
   , isAtLeast
     -- * Misc
   , enclosingLoopVars
+  , rangesRep
   )
   where
 
@@ -51,7 +52,8 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
-import Futhark.Representation.AST.Attributes.Ranges hiding (subExpRange, letBoundRange)
+import Futhark.Representation.AST.Attributes.Ranges (Range, Ranged)
+import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
 
 data SymbolTable lore = SymbolTable {
     loopDepth :: Int
@@ -240,64 +242,48 @@ enclosingLoopVars free vtable =
   where fetch name = do e <- lookup name vtable
                         return (name, e)
 
-defBndEntry :: SymbolTable lore
+rangesRep :: SymbolTable lore -> AS.RangesRep
+rangesRep = HM.filter knownRange . HM.map toRep . bindings
+  where toRep entry = (bindingDepth entry, lower, upper)
+          where (lower, upper) = valueRange entry
+        knownRange (_, lower, upper) = isJust lower || isJust upper
+
+defBndEntry :: Ranged lore =>
+               SymbolTable lore
             -> PatElem lore
+            -> Range
             -> Binding lore
             -> LetBoundEntry lore
-defBndEntry vtable patElem bnd =
+defBndEntry vtable patElem range bnd =
   LetBoundEntry {
-      letBoundRange = (Nothing, Nothing)
+      letBoundRange = simplifyRange range
     , letBoundLore = patElemLore patElem
     , letBoundBinding = bnd
     , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
     , letBoundBindingDepth = 0
     , letBoundBindage = patElemBindage patElem
     }
+  where ranges :: AS.RangesRep
+        ranges = rangesRep vtable
+
+        simplifyRange :: Range -> Range
+        simplifyRange (lower, upper) =
+          (simplifyBound lower,
+           simplifyBound upper)
+
+        simplifyBound (Just se)
+          | Right se' <- AS.simplify se ranges =
+            Just se'
+        simplifyBound bound =
+          bound
 
 bindingEntries :: Ranged lore =>
-                  Binding lore
-               -> SymbolTable lore
+                  Binding lore -> SymbolTable lore
                -> [LetBoundEntry lore]
--- First, handle single-name bindings.  These are the most common.
-bindingEntries bnd@(Let (Pattern [bindee]) _ e) vtable = [entry]
-  where entry = (defBndEntry vtable bindee bnd) {
-          letBoundRange = range
-          }
-        range = case e of
-          PrimOp (SubExp se) ->
-            subExpRange se vtable
-          PrimOp (Iota n) ->
-            (Just zero, Just $ subExpToScalExp n `SMinus` one)
-          PrimOp (Replicate _ v) ->
-            subExpRange v vtable
-          PrimOp (Rearrange _ _ v) ->
-            identRange v vtable
-          PrimOp (Split _ _ v) ->
-            identRange v vtable
-          PrimOp (Copy se) ->
-            subExpRange se vtable
-          PrimOp (Index _ v _) ->
-            identRange v vtable
-          _ -> (Nothing, Nothing)
-        zero = Val $ IntVal 0
-        one = Val $ IntVal 1
--- Then, handle others.  For now, this is only filter.
-bindingEntries bnd@(Let (Pattern ps) _ (PrimOp (Partition _ n _ arr))) vtable =
-  let (sizes, arrs) = splitAt n ps
-  in [ defBndEntry vtable x bnd | x <- sizes ] ++
-     map makeBnd arrs
-  where makeBnd bindee =
-          (defBndEntry vtable bindee bnd) {
-            letBoundRange = lookupRange (identName arr) vtable
-            }
 bindingEntries bnd@(Let pat _ _) vtable =
-  map (flip (defBndEntry vtable) bnd) $ patternElements pat
-
-subExpRange :: SubExp -> SymbolTable lore -> Range
-subExpRange (Var v) vtable =
-  identRange v vtable
-subExpRange (Constant bv) _ =
-  (Just $ Val bv, Just $ Val bv)
+  [ defBndEntry vtable patElem range bnd |
+    (patElem, range) <- zip (patternElements pat) (Ranges.patternRanges pat)
+  ]
 
 identRange :: Ident -> SymbolTable lore -> Range
 identRange = lookupRange . identName

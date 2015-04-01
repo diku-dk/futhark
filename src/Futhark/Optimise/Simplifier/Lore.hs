@@ -22,6 +22,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (unNames, Names' (..), VarAliases, ConsumedInExp)
 import qualified Futhark.Representation.Aliases as Aliases
+import qualified Futhark.Representation.Ranges as Ranges
 import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Binder
 import Futhark.Renamer
@@ -75,6 +76,7 @@ instance Lore.Lore lore => Ranged (Wise lore) where
   bodyRanges body =
     let ((_, _, ranges) ,_) = bodyLore body
     in ranges
+  patternRanges = map (snd . fst . patElemLore) . patternElements
 
 removeWisdom :: Rephraser (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = snd
@@ -105,18 +107,20 @@ removePatternWisdom = rephrasePattern removeWisdom
 addWisdomToPattern :: Lore.Lore lore =>
                       Pattern lore -> Exp (Wise lore) -> Pattern (Wise lore)
 addWisdomToPattern pat e =
-  Pattern $ zipWith addRanges (Aliases.mkPatternAliases pat e) ranges
+  Pattern $ zipWith addRanges (Aliases.mkPatternAliases pat e) ranges'
   where addRanges patElem range =
           let (als,innerlore) = patElemLore patElem
           in patElem `setPatElemLore` ((als, range), innerlore)
-        ranges = replicate (length $ patternNames pat) unknownRange
+        ranges = expRanges e
+        ranges' = replicate (patternSize pat - length ranges) unknownRange ++
+                  ranges
 
 mkWiseBody :: Lore.Lore lore =>
               Lore.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
   Body ((aliases, consumed, ranges), innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
-        ranges = replicate (length aliases) unknownRange
+        ranges = Ranges.mkBodyRanges bnds res
 
 mkWiseLetBinding :: Lore.Lore lore =>
                     Pattern lore -> Lore.Exp lore -> Exp (Wise lore)

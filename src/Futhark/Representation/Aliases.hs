@@ -133,6 +133,7 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
 
 instance Ranged lore => Ranged (Aliases lore) where
   bodyRanges = bodyRanges . removeBodyAliases
+  patternRanges = patternRanges . removePatternAliases
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)

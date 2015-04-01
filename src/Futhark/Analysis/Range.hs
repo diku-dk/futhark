@@ -35,7 +35,7 @@ analyseBody :: Lore lore =>
             -> RangeM (Out.Body lore)
 analyseBody (In.Body lore origbnds result) =
   analyseBindings origbnds $ \bnds' ->
-    return $ Out.mkAliasedBody lore bnds' result
+    return $ Out.mkRangedBody lore bnds' result
 
 analyseBindings :: Lore lore =>
                    [In.Binding lore]
@@ -196,8 +196,8 @@ simplifyBound :: AS.RangesRep -> Out.Bound -> Out.Bound
 simplifyBound ranges (Just se)
   | Right se' <- AS.simplify se ranges =
     Just se'
-simplifyBound _ _ =
-  Nothing
+simplifyBound _ bound =
+  bound
 
 betterLowerBound :: Out.Bound -> RangeM Out.Bound
 betterLowerBound (Just (SE.Id v)) = do

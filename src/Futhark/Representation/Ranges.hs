@@ -34,8 +34,8 @@ module Futhark.Representation.Ranges
        , AST.FunDecT(FunDec)
          -- * Adding ranges
        , addRangesToPattern
-       , mkAliasedLetBinding
-       , mkAliasedBody
+       , mkRangedLetBinding
+       , mkRangedBody
        , mkPatternRanges
        , mkBodyRanges
          -- * Removing ranges
@@ -98,7 +98,7 @@ instance Lore.Lore lore => Lore.Lore (Ranges lore) where
 
 instance Lore.Lore lore => Ranged (Ranges lore) where
   bodyRanges = fst . bodyLore
-  letBoundRange = fst
+  patternRanges = map (fst . patElemLore) . patternElements
 
 type Prog lore = AST.Prog (Ranges lore)
 type PrimOp lore = AST.PrimOp (Ranges lore)
@@ -172,21 +172,23 @@ addRangesToPattern :: Lore.Lore lore =>
 addRangesToPattern pat e =
   AST.Pattern $ mkPatternRanges pat e
 
-mkAliasedBody :: Lore.Lore lore =>
+mkRangedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result
               -> Body lore
-mkAliasedBody innerlore bnds res =
+mkRangedBody innerlore bnds res =
   AST.Body (mkBodyRanges bnds res, innerlore) bnds res
 
 mkPatternRanges :: Lore.Lore lore =>
                    AST.Pattern lore -> Exp lore
                 -> [PatElemT (Lore.LetBound (Ranges lore))]
 mkPatternRanges pat e =
-  zipWith addRanges (patternElements pat) ranges
+  zipWith addRanges (patternElements pat) ranges'
   where addRanges patElem range =
           let innerlore = patElemLore patElem
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
+        ranges' = replicate (patternSize pat - length ranges) unknownRange ++
+                  ranges
 
 mkBodyRanges :: Lore.Lore lore =>
                 [AST.Binding lore]
@@ -208,8 +210,8 @@ mkBodyRanges bnds res =
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-mkAliasedLetBinding :: Lore.Lore lore =>
+mkRangedLetBinding :: Lore.Lore lore =>
                        AST.Pattern lore -> Lore.Exp lore -> Exp lore
                     -> Binding lore
-mkAliasedLetBinding pat explore e =
+mkRangedLetBinding pat explore e =
   Let (addRangesToPattern pat e) explore e

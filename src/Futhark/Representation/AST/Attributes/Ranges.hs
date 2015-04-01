@@ -14,7 +14,6 @@ module Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
-import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 
 -- | A (possibly undefined) scalar bound on a value.
@@ -42,16 +41,11 @@ maximumBound (Just x)  (Just y)  = Just $ MaxMin False [x, y]
 -- | The lore has embedded range information.  Note that it may not be
 -- up to date, unless whatever maintains the syntax tree is careful.
 class Lore lore => Ranged lore where
-  -- | The range of the value parts of the 'Body'.  The default method
-  -- returns empty/unknown ranges.
+  -- | The range of the value parts of the 'Body'.
   bodyRanges :: Body lore -> [Range]
-  bodyRanges body =
-    replicate (length $ resultSubExps $ bodyResult body)
-    (Nothing, Nothing)
-  -- | The range of the pattern element attribute.  The default method
-  -- returns 'unknownRange'.
-  letBoundRange :: Lore.LetBound lore -> Range
-  letBoundRange = const unknownRange
+
+  -- | The range of the pattern elements.
+  patternRanges :: Pattern lore -> [Range]
 
 -- | The range of a subexpression.
 subExpRange :: SubExp -> Range

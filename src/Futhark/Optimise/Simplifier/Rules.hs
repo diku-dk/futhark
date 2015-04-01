@@ -11,7 +11,7 @@ where
 
 import Control.Applicative
 import Control.Monad
-
+import Debug.Trace
 import Data.Bits
 import Data.Either
 import Data.Foldable (any, all)
@@ -719,15 +719,24 @@ hoistBranchInvariant _ _ = cannotSimplify
 
 simplifyScalExp :: MonadBinder m => TopDownRule m
 simplifyScalExp vtable (Let pat _ e)
-  | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e,
-    Right new@(SE.Val _) <- AS.simplify orig ranges,
-    orig /= new = do
-      e' <- SE.fromScalExp' new
-      letBind_ pat e'
-  where ranges = HM.filter nonEmptyRange $ HM.map toRep $ ST.bindings vtable
-        toRep entry = (ST.bindingDepth entry, lower, upper)
-          where (lower, upper) = ST.valueRange entry
-        nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
+  | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e =
+    case orig of
+      -- If the sufficient condition is 'True', then it statically succeeds.
+      SE.RelExp SE.LTH0 _
+        | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds orig ranges ->
+          letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
+      _
+        | Right new <- AS.simplify orig ranges,
+          SE.Val _ <- new,
+          orig /= new -> do
+            e' <- SE.fromScalExp' new
+            letBind_ pat e'
+      _ -> cannotSimplify
+  where ranges = ST.rangesRep vtable
+        mkDisj []     = SE.Val $ LogVal False
+        mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
+        mkConj []     = SE.Val $ LogVal True
+        mkConj (x:xs) = foldl SE.SLogAnd x xs
 simplifyScalExp _ _ = cannotSimplify
 
 simplifyIdentityReshape :: LetTopDownRule lore u
