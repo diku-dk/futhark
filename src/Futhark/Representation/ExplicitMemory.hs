@@ -434,7 +434,7 @@ matchPatternToReturns wrong pat rt = do
           put ctxbindees''
           case patElemType memBindee of
             Mem (Var size) ->
-              popSizeFromCtx $ identName size
+              popSizeIfInCtx $ identName size
             Mem (Constant {}) ->
               return ()
             _ ->
