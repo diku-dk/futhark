@@ -32,6 +32,7 @@ script:
  - cabal build --ghc-options -Werror
  - cabal test  # Run the Cabal test suite.
  - export PATH=dist/build/futhark:dist/build/futhark-c:dist/build/futharki:$PATH
+ - cabal install
  - data/runtests.sh # Run integration test suite.
  - tools/style-check.sh src # Check for style issues.
  - cabal haddock # Can we build the documentation?
