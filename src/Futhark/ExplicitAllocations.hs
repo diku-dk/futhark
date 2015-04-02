@@ -340,9 +340,10 @@ allocInExp (LoopOp (DoLoop res merge form
   formBinds form $ do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
-      ses <- funcallSubExps $ resultSubExps bodyres
+      (ses,retbnds) <- collectBindings $
+                       funcallSubExps $ resultSubExps bodyres
       let res' = bodyres { resultSubExps = ses }
-      return $ Body () bodybnds' res'
+      return $ Body () (bodybnds'<>retbnds) res'
     return $ LoopOp $
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge
