@@ -1,4 +1,6 @@
-# NB: don't set `language: haskell` here
+# NB: don't set `language: haskell` here.  We use 'sh' in order to get
+# a pure VM with nothing really preinstalled.
+language: sh
 
 # The following enables several GHC versions to be tested; often it's
 # enough to test only against the last release in a major GHC
