@@ -249,8 +249,7 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
-defBndEntry :: Ranged lore =>
-               SymbolTable lore
+defBndEntry :: SymbolTable lore
             -> PatElem lore
             -> Range
             -> Binding lore
