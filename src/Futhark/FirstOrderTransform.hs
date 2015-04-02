@@ -464,25 +464,24 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
         existUpperBound b =
             if not b then UnknownBd
             else UpperBd $ arraysSize 0 (map identType arrexps)
+        -- | Assumes rtps are the array result types and pat is the
+        -- pattern result of stream in let bound.  Result is a list of
+        -- tuples: (1st) the ident of the array in pattern, (2rd) the
+        -- exact/upper bound/unknown shape of the outer dim.
         mkExistAssocs :: [ExtType] -> Pattern -> Binder Basic [(Ident, MEQType)]
         mkExistAssocs rtps pat = do
-        -- ^ Assumes rtps are the array result types and
-        --   pat is the pattern result of stream in
-        --   let bound.   Result is a list of tuples:
-        --   (1st) the ident of the array in pattern,
-        --   (2rd) the exact/upper bound/unknown shape of the outer dim.
-            let patels    = patternElements pat
-                -- keep only the patterns corresponding to the array types
-                arrpatels = drop (length patels - length rtps) patels
-                processAssoc (rtp,patel) = do
-                    let patid = patElemIdent patel
-                        rtpdim= extShapeDims $ arrayShape rtp
-                    case rtpdim of
-                      Ext  _:_ -> return (patid, existUpperBound withUpperBound )
-                      Free s:_ -> return (patid, ExactBd s            )
-                      _        ->
-                          fail "FirstOrderTrabsform(Stream), mkExistAssocs: Empty Array Shape!"
-            forM (zip rtps arrpatels) processAssoc
+          let patels    = patternElements pat
+              -- keep only the patterns corresponding to the array types
+              arrpatels = drop (length patels - length rtps) patels
+              processAssoc (rtp,patel) = do
+                  let patid = patElemIdent patel
+                      rtpdim= extShapeDims $ arrayShape rtp
+                  case rtpdim of
+                    Ext  _:_ -> return (patid, existUpperBound withUpperBound )
+                    Free s:_ -> return (patid, ExactBd s            )
+                    _        ->
+                        fail "FirstOrderTrabsform(Stream), mkExistAssocs: Empty Array Shape!"
+          forM (zip rtps arrpatels) processAssoc
         mkAllExistIdAndTypes :: ( (Ident, MEQType), Type )
                              -> Binder Basic ( Maybe (Ident,Ident,SubExp), Maybe (Ident,Ident,SubExp), (Type,Type,Type) )
         mkAllExistIdAndTypes ((_, ExactBd _), initrtp) =
