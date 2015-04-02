@@ -106,7 +106,13 @@ instance TypeCheck.Checkable Basic where
 instance Renameable Basic where
 instance Substitutable Basic where
 instance Proper Basic where
+
 instance Ranged Basic where
+  bodyRanges body =
+    replicate (length $ resultSubExps $ bodyResult body) (Nothing, Nothing)
+  patternRanges pat =
+    replicate (patternSize pat) (Nothing, Nothing)
+
 instance Simplifiable Basic where
 
 instance Bindable Basic where
