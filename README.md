@@ -44,10 +44,12 @@ Hacking
 We try to make use of Github issues, which are further [organised on
 waffle.io](https://waffle.io/HIPERFIT/futhark).
 
+[![Stories in Ready](https://badge.waffle.io/hiperfit/futhark.png?label=ready&title=Ready)](https://waffle.io/hiperfit/futhark)
+
 For every commit, Futhark is automatically built and tested [on
 Travis](https://travis-ci.org/HIPERFIT/futhark).
 
-[![Stories in Ready](https://badge.waffle.io/hiperfit/futhark.png?label=ready&title=Ready)](https://waffle.io/hiperfit/futhark)
+[![Build Status](https://travis-ci.org/HIPERFIT/futhark.svg?branch=master)](https://travis-ci.org/HIPERFIT/futhark)
 
 Testing
 =======
