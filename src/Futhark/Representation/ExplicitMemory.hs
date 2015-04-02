@@ -129,6 +129,11 @@ instance Lore.Lore ExplicitMemory where
   applyRetType _ = applyFunReturns
 
 instance Ranged ExplicitMemory where
+  bodyRanges body =
+    replicate (length $ resultSubExps $ bodyResult body) (Nothing, Nothing)
+  patternRanges pat =
+    replicate (patternSize pat) (Nothing, Nothing)
+
 instance Simplifiable ExplicitMemory where
 
 data MemSummary = MemSummary Ident IxFun.IxFun
