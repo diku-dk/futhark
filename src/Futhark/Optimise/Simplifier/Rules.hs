@@ -11,7 +11,7 @@ where
 
 import Control.Applicative
 import Control.Monad
-import Debug.Trace
+
 import Data.Bits
 import Data.Either
 import Data.Foldable (any, all)
