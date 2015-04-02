@@ -1,11 +1,18 @@
 Name:                futhark
 Version:             0.1
 Synopsis:            An optimising compiler for a functional, array-oriented language.
+description:
+
+        Futhark is a data-parallel programming language intended for
+        efficient execution on GPUs.  This package implements an
+        optimising Futhark compiler.
+
 Homepage:            https://github.com/HIPERFIT/futhark
 Category:            Language
 License:             BSD3
 License-file:        LICENSE
 Build-type:          Custom
+Maintainer:          athas@sigkill.dk
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
@@ -168,9 +175,6 @@ Library
   if impl(ghc >= 7.10.1)
      Ghc-Options:       -Wall -fno-warn-unticked-promoted-constructors
 
-  Ghc-Prof-Options:   -prof -auto-all -rtsopts
-
-
 Executable futhark
   Main-is: src/futhark.hs
 
@@ -183,8 +187,6 @@ Executable futhark
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
-  Ghc-Prof-Options:   -prof -auto-all -rtsopts
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
@@ -202,8 +204,6 @@ Executable futhark-c
 
   Ghc-Options:        -Wall
 
-  Ghc-Prof-Options:   -prof -auto-all -rtsopts
-
 Executable futharki
   Main-is: src/futharki.hs
 
@@ -216,8 +216,6 @@ Executable futharki
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
-  Ghc-Prof-Options:   -prof -auto-all -rtsopts
 
 Test-suite unit
   Type:              exitcode-stdio-1.0
