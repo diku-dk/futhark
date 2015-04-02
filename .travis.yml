@@ -31,7 +31,8 @@ script:
  - cabal configure --enable-tests -v2
  - cabal build --ghc-options -Werror
  - cabal test  # Run the Cabal test suite.
- - cabal install && PATH=dist/build/futhark/:$PATH data/runtests.sh # Run integration test suite.
+ - export PATH=dist/build/futhark:dist/build/futhark-c:dist/build/futharki:$PATH
+ - data/runtests.sh # Run integration test suite.
  - tools/style-check.sh src # Check for style issues.
  - cabal haddock # Can we build the documentation?
  - cabal check # Sanity-checks the .cabal file.
