@@ -9,6 +9,8 @@ import Control.Monad.Reader
 import Data.Maybe
 import Data.List
 
+import Prelude
+
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST as In
@@ -151,7 +153,8 @@ refineDimensionRanges ranges = flip $ foldl refineShape
         refineShape env _ =
           env
         -- A dimension is never negative.
-        dimBound = (Just (SE.Val $ In.IntVal 0),
+        dimBound :: Out.Range
+        dimBound = (Just $ Out.ScalarBound $ SE.Val $ In.IntVal 0,
                     Nothing)
 
 refineRange :: AS.RangesRep -> Out.VName -> Out.Range -> RangeEnv
@@ -193,25 +196,35 @@ simplifyRange (lower, upper) = do
   return (lower', upper')
 
 simplifyBound :: AS.RangesRep -> Out.Bound -> Out.Bound
-simplifyBound ranges (Just se)
-  | Right se' <- AS.simplify se ranges =
-    Just se'
-simplifyBound _ bound =
+simplifyBound ranges = liftM $ simplifyKnownBound ranges
+
+simplifyKnownBound :: AS.RangesRep -> Out.KnownBound -> Out.KnownBound
+simplifyKnownBound ranges bound
+  | Just se <- Out.boundToScalExp bound,
+    Right se' <- AS.simplify se ranges =
+    Out.ScalarBound se'
+simplifyKnownBound ranges (Out.MinimumBound b1 b2) =
+  Out.MinimumBound (simplifyKnownBound ranges b1) (simplifyKnownBound ranges b2)
+simplifyKnownBound ranges (Out.MaximumBound b1 b2) =
+  Out.MaximumBound (simplifyKnownBound ranges b1) (simplifyKnownBound ranges b2)
+simplifyKnownBound _ bound =
   bound
 
 betterLowerBound :: Out.Bound -> RangeM Out.Bound
-betterLowerBound (Just (SE.Id v)) = do
+betterLowerBound (Just (Out.ScalarBound (SE.Id v))) = do
   range <- lookupRange $ Out.identName v
-  Just <$> case range of (Just lower, _) -> return lower
-                         _               -> return $ SE.Id v
+  return $ Just $ case range of
+    (Just lower, _) -> lower
+    _               -> Out.ScalarBound $ SE.Id v
 betterLowerBound bound =
   return bound
 
 betterUpperBound :: Out.Bound -> RangeM Out.Bound
-betterUpperBound (Just (SE.Id v)) = do
+betterUpperBound (Just (Out.ScalarBound (SE.Id v))) = do
   range <- lookupRange $ Out.identName v
-  Just <$> case range of (_, Just upper) -> return upper
-                         _               -> return $ SE.Id v
+  return $ Just $ case range of
+    (_, Just upper) -> upper
+    _               -> Out.ScalarBound $ SE.Id v
 betterUpperBound bound =
   return bound
 
@@ -220,4 +233,5 @@ betterUpperBound bound =
 -- anything in this case.
 rangesRep :: RangeM AS.RangesRep
 rangesRep = HM.map addLeadingZero <$> ask
-  where addLeadingZero (x,y) = (0,x,y)
+  where addLeadingZero (x,y) =
+          (0, Out.boundToScalExp =<< x, Out.boundToScalExp =<< y)

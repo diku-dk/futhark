@@ -52,7 +52,8 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
-import Futhark.Representation.AST.Attributes.Ranges (Range, Ranged)
+import Futhark.Representation.AST.Attributes.Ranges
+  (Range, ScalExpRange, Ranged)
 import qualified Futhark.Representation.AST.Attributes.Ranges as Ranges
 
 data SymbolTable lore = SymbolTable {
@@ -72,12 +73,12 @@ data Entry lore = LoopVar (LoopVarEntry lore)
                 | LParam (LParamEntry lore)
 
 data LoopVarEntry lore =
-  LoopVarEntry { loopVarRange        :: Range
+  LoopVarEntry { loopVarRange        :: ScalExpRange
                , loopVarBindingDepth :: Int
                }
 
 data LetBoundEntry lore =
-  LetBoundEntry { letBoundRange        :: Range
+  LetBoundEntry { letBoundRange        :: ScalExpRange
                 , letBoundLore         :: Lore.LetBound lore
                 , letBoundBinding      :: Binding lore
                 , letBoundBindingDepth :: Int
@@ -86,13 +87,13 @@ data LetBoundEntry lore =
                 }
 
 data FParamEntry lore =
-  FParamEntry { fparamRange        :: Range
+  FParamEntry { fparamRange        :: ScalExpRange
               , fparamLore         :: Lore.FParam lore
               , fparamBindingDepth :: Int
               }
 
 data LParamEntry lore =
-  LParamEntry { lparamRange        :: Range
+  LParamEntry { lparamRange        :: ScalExpRange
               , lparamBindingDepth :: Int
               }
 
@@ -122,13 +123,13 @@ setBindingDepth d (LParam entry) =
 setBindingDepth d (LoopVar entry) =
   LoopVar $ entry { loopVarBindingDepth = d }
 
-valueRange :: Entry lore -> Range
+valueRange :: Entry lore -> ScalExpRange
 valueRange (LetBound entry) = letBoundRange entry
 valueRange (FParam entry)   = fparamRange entry
 valueRange (LParam entry)   = lparamRange entry
 valueRange (LoopVar entry)  = loopVarRange entry
 
-setValueRange :: Range -> Entry lore -> Entry lore
+setValueRange :: ScalExpRange -> Entry lore -> Entry lore
 setValueRange range (LetBound entry) =
   LetBound $ entry { letBoundRange = range }
 setValueRange range (FParam entry) =
@@ -230,7 +231,7 @@ lookupVar name vtable = case lookupSubExp name vtable of
                           Just (Var v) -> Just $ identName v
                           _            -> Nothing
 
-lookupRange :: VName -> SymbolTable lore -> Range
+lookupRange :: VName -> SymbolTable lore -> ScalExpRange
 lookupRange name vtable =
   maybe (Nothing, Nothing) valueRange $ lookup name vtable
 
@@ -256,7 +257,7 @@ defBndEntry :: Ranged lore =>
             -> LetBoundEntry lore
 defBndEntry vtable patElem range bnd =
   LetBoundEntry {
-      letBoundRange = simplifyRange range
+      letBoundRange = simplifyRange $ scalExpRange range
     , letBoundLore = patElemLore patElem
     , letBoundBinding = bnd
     , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
@@ -266,7 +267,28 @@ defBndEntry vtable patElem range bnd =
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
 
-        simplifyRange :: Range -> Range
+        scalExpRange :: Range -> ScalExpRange
+        scalExpRange (lower, upper) =
+          (scalExpBound fst =<< lower,
+           scalExpBound snd =<< upper)
+
+        scalExpBound :: (ScalExpRange -> Maybe ScalExp)
+                     -> Ranges.KnownBound
+                     -> Maybe ScalExp
+        scalExpBound pick (Ranges.ElemBound v) =
+          pick $ identRange v vtable
+        scalExpBound _ (Ranges.ScalarBound se) =
+          Just se
+        scalExpBound pick (Ranges.MinimumBound b1 b2) = do
+          b1' <- scalExpBound pick b1
+          b2' <- scalExpBound pick b2
+          return $ MaxMin True [b1', b2']
+        scalExpBound pick (Ranges.MaximumBound b1 b2) = do
+          b1' <- scalExpBound pick b1
+          b2' <- scalExpBound pick b2
+          return $ MaxMin False [b1', b2']
+
+        simplifyRange :: ScalExpRange -> ScalExpRange
         simplifyRange (lower, upper) =
           (simplifyBound lower,
            simplifyBound upper)
@@ -285,7 +307,7 @@ bindingEntries bnd@(Let pat _ _) vtable =
     (patElem, range) <- zip (patternElements pat) (Ranges.patternRanges pat)
   ]
 
-identRange :: Ident -> SymbolTable lore -> Range
+identRange :: Ident -> SymbolTable lore -> ScalExpRange
 identRange = lookupRange . identName
 
 insertEntry :: VName -> Entry lore -> SymbolTable lore
@@ -324,7 +346,7 @@ insertFParams :: [AST.FParam lore] -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
-insertLParamWithRange :: Param -> Range -> SymbolTable lore
+insertLParamWithRange :: Param -> ScalExpRange -> SymbolTable lore
                      -> SymbolTable lore
 insertLParamWithRange param range vtable =
   -- We know that the sizes in the type of param are at least zero,
