@@ -14,7 +14,10 @@ module Futhark.Representation.AST.Attributes.Ranges
        )
        where
 
+import Control.Applicative
 import Data.Monoid
+
+import Prelude
 
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
