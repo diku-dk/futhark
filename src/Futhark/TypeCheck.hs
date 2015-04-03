@@ -23,9 +23,6 @@ module Futhark.TypeCheck
   , checkExtType
   , matchExtPattern
   , matchExtReturnType
-
-  , checkExtLambda -- FIXME - this export is just to silence a
-                   -- warning.
   )
   where
 
