@@ -278,13 +278,13 @@ defBndEntry vtable patElem range bnd =
           pick $ identRange v vtable
         scalExpBound _ (Ranges.ScalarBound se) =
           Just se
-        scalExpBound pick (Ranges.MinimumBound b1 b2) = do
-          b1' <- scalExpBound pick b1
-          b2' <- scalExpBound pick b2
+        scalExpBound _ (Ranges.MinimumBound b1 b2) = do
+          b1' <- scalExpBound fst b1
+          b2' <- scalExpBound fst b2
           return $ MaxMin True [b1', b2']
-        scalExpBound pick (Ranges.MaximumBound b1 b2) = do
-          b1' <- scalExpBound pick b1
-          b2' <- scalExpBound pick b2
+        scalExpBound _ (Ranges.MaximumBound b1 b2) = do
+          b1' <- scalExpBound snd b1
+          b2' <- scalExpBound snd b2
           return $ MaxMin False [b1', b2']
 
         simplifyRange :: ScalExpRange -> ScalExpRange
