@@ -601,15 +601,10 @@ insertKerSOAC names ker body = do
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
-  trns <- transformOutput (outputTransform ker) names $
-          SOAC.setLambda lam'' new_soac
-  case trns of
-    Nothing -> badFusionGM $ Error
-               ("In Fusion.hs, replaceSOAC, "
-                ++" pat does not match kernel's pat: "++pretty names)
-    Just m -> runBinder $ do
-      m
-      return body
+  runBinder $ do
+    transformOutput (outputTransform ker) names $
+      SOAC.setLambda lam'' new_soac
+    return body
 
 ---------------------------------------------------
 ---------------------------------------------------

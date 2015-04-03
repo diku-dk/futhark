@@ -413,15 +413,15 @@ certificates (Reduce  cs _ _    ) = cs
 certificates (Scan    cs _ _    ) = cs
 certificates (Redomap cs _ _ _ _) = cs
 
-typeOf :: SOAC lore -> [ExtType]
+typeOf :: SOAC lore -> [Type]
 typeOf (Map _ lam inps) =
-  staticShapes $ mapType lam $ map inputType inps
+  mapType lam $ map inputType inps
 typeOf (Reduce _ lam _) =
-  staticShapes $ lambdaReturnType lam
+  lambdaReturnType lam
 typeOf (Scan _ _ input) =
-  staticShapes $ map (inputType . snd) input
+  map (inputType . snd) input
 typeOf (Redomap _ _ lam _ _) =
-  staticShapes $ lambdaReturnType lam
+  lambdaReturnType lam
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m) =>

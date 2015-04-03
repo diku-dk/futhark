@@ -18,10 +18,10 @@ import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import qualified Data.HashSet as HS
-
 import Data.Maybe
-import Data.Monoid
 import Data.List
+
+import Prelude
 
 import Futhark.Representation.Basic
 import Futhark.Renamer (renameLambda)
@@ -38,32 +38,25 @@ type SOACNest = Nest.SOACNest Basic
 type MapNest = MapNest.MapNest Basic
 
 -- XXX: This function is very gross.
-transformOutput :: MonadFreshNames m =>
-                   SOAC.ArrayTransforms -> [VName] -> SOAC
-                -> m (Maybe (Binder Basic ()))
+transformOutput :: SOAC.ArrayTransforms -> [VName] -> SOAC
+                -> Binder Basic ()
 transformOutput ts names soac = do
-  let (ctxnames,valnames) = splitAt (shapeContextSize soact) names
-      descend ts' validents =
-        case SOAC.viewf ts' of
-          SOAC.EmptyF ->
-            forM_ (zip valnames validents) $ \(k, valident) ->
-            letBindNames' [k] $
-            PrimOp $ SubExp $ Var valident
-          t SOAC.:< ts'' -> do
-            let es = map (applyTransform t) validents
-                mkPat ident = Pattern [PatElem ident BindVar ()]
-            newIds <- forM (zip valnames $ concatMap primOpType es) $ \(k, opt) ->
-              newIdent (baseString k) opt
-            zipWithM_ letBind (map mkPat newIds) $ map PrimOp es
-            descend ts'' newIds
-  valnames' <- mapM (newVName . baseString) valnames
-  case instantiateIdents (ctxnames<>valnames') soact of
-    Nothing -> return Nothing
-    Just (ctxidents,validents) -> return $ Just $ do
-      e <- SOAC.toExp soac
-      letBind_ (basicPattern' $ ctxidents<>validents) e
-      descend ts validents
-  where soact = SOAC.typeOf soac
+  validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf soac
+  e <- SOAC.toExp soac
+  letBind_ (basicPattern' validents) e
+  descend ts validents
+  where descend ts' validents =
+          case SOAC.viewf ts' of
+            SOAC.EmptyF ->
+              forM_ (zip names validents) $ \(k, valident) ->
+              letBindNames' [k] $ PrimOp $ SubExp $ Var valident
+            t SOAC.:< ts'' -> do
+              let es = map (applyTransform t) validents
+                  mkPat ident = Pattern [PatElem ident BindVar ()]
+              newIds <- forM (zip names $ concatMap primOpType es) $ \(k, opt) ->
+                newIdent (baseString k) opt
+              zipWithM_ letBind (map mkPat newIds) $ map PrimOp es
+              descend ts'' newIds
 
 applyTransform :: SOAC.ArrayTransform -> Ident -> PrimOp
 applyTransform (SOAC.Rearrange cs perm) v =
@@ -119,7 +112,7 @@ inputs = SOAC.inputs . fsoac
 setInputs :: [SOAC.Input] -> FusedKer -> FusedKer
 setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 
-kernelType :: FusedKer -> [ExtType]
+kernelType :: FusedKer -> [Type]
 kernelType = SOAC.typeOf . fsoac
 
 tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
@@ -154,11 +147,8 @@ fixOutputTypes outIds soac =
   where fixInputType outId t =
           let outId_t = identType outId
           in outId { identType = outId_t `setArrayShape`
-                                 Shape (map fixDim $ extShapeDims $ arrayShape t)
+                                 arrayShape t
                    }
-        -- FIXME: filter sucks; get rid of it.
-        fixDim (Ext {})   = error "existential size - how did we optimise a filter?"
-        fixDim (Free dim) = dim
 
 fixInputTypes :: [Ident] -> FusedKer -> FusedKer
 fixInputTypes outIds ker =
