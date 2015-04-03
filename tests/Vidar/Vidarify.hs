@@ -33,18 +33,18 @@ vidarifyFuncBody (I.Body _lore bs res) =
     map vidarifyBinding bs ++ [vidarifyRes res]
 
 vidarifyBinding :: I.Binding -> V.Element
-vidarifyBinding (I.Let p _lore exp) = V.Binding (vidarifyPattern p) (vidarifyExp exp)
+vidarifyBinding (I.Let p _lore e) = V.Binding (vidarifyPattern p) (vidarifyExp e)
 
 vidarifyExp :: I.Exp -> V.Element
 vidarifyExp (I.PrimOp p)       = vidarifyPrimOp p
 vidarifyExp (I.LoopOp l)       = vidarifyLoopOp l
 vidarifyExp (S.If cond a b _t) =
-    V.Block (V.ExactName "If") $ V.StrictBlock $ [
+    V.Block (V.ExactName "If") $ V.StrictBlock [
         vidarifySubExp cond,
         V.SubBlock $ V.StrictBlock $ vidarifyFuncBody a,
         V.SubBlock $ V.StrictBlock $ vidarifyFuncBody b
     ]
-vidarifyExp e = V.Anything
+vidarifyExp _ = V.Anything
 
 vidarifyLambda :: I.Lambda -> V.Element
 vidarifyLambda (S.Lambda params body _rtype) =
@@ -54,7 +54,7 @@ vidarifyLambda (S.Lambda params body _rtype) =
     ]
 
 vidarifyLoopOp :: I.LoopOp -> V.Element
-vidarifyLoopOp (S.Map certs f idents) =
+vidarifyLoopOp (S.Map _ f idents) =
     V.Block (V.ExactName "Map") $ V.StrictBlock [
         vidarifyLambda f,
         V.SubBlock $ V.StrictBlock $ vidarifyIdents idents
@@ -67,7 +67,7 @@ vidarifyPrimOp (S.ArrayLit subexps _type) =
     V.Block (V.ExactName "Array") $ V.StrictBlock $
         map vidarifySubExp subexps
 vidarifyPrimOp (S.BinOp binop a b _tp) =
-    V.Block (V.ExactName $ show binop) $ V.StrictBlock $ [
+    V.Block (V.ExactName $ show binop) $ V.StrictBlock [
         vidarifySubExp a,
         vidarifySubExp b
     ]
@@ -84,13 +84,13 @@ vidarifyPrimOp (S.Assert subexp _loc) =
         vidarifySubExp subexp
     ]
 vidarifyPrimOp (S.Index certs ident subexps) =
-    V.Block (V.ExactName "Index") $ V.StrictBlock $ [
+    V.Block (V.ExactName "Index") $ V.StrictBlock [
         V.SubBlock $ V.StrictBlock $ map (V.Name . vidarifyIdent) certs,
         V.Name $ vidarifyIdent ident,
         V.SubBlock $ V.StrictBlock $ map vidarifySubExp subexps
     ]
 vidarifyPrimOp (S.Iota subexp) =
-    V.Block (V.ExactName "Iota") $ V.StrictBlock $ [
+    V.Block (V.ExactName "Iota") $ V.StrictBlock [
         vidarifySubExp subexp
     ]
 vidarifyPrimOp (S.Reshape _certs subexps ident) =
@@ -102,7 +102,7 @@ vidarifyPrimOp _ = V.Anything
 
 vidarifyPattern :: I.Pattern -> V.Name
 vidarifyPattern (S.Pattern [b]) = vidarifyPatElem b
-vidarifyPattern p = V.AnyName
+vidarifyPattern _ = V.AnyName
 
 vidarifyPatElem :: I.PatElem -> V.Name
 vidarifyPatElem (S.PatElem ident _bindage _lore) = vidarifyIdent ident
