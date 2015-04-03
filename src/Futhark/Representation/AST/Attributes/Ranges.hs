@@ -87,17 +87,22 @@ boundToScalExp (MaximumBound b1 b2) = do
 -- | A possibly undefined bound on a value.
 type Bound = Maybe KnownBound
 
+-- | Construct a 'MinimumBound' from two possibly known bounds.  The
+-- resulting bound will be unknown unless both of the given 'Bound's
+-- are known.  This may seem counterintuitive, but it actually makes
+-- sense when you consider the task of combining the lower bounds for
+-- two different flows of execution (like an @if@ expression).  If we
+-- only have knowledge about one of the branches, this means that we
+-- have no useful information about the combined lower bound, as the
+-- other branch may take any value.
 minimumBound :: Bound -> Bound -> Bound
-minimumBound Nothing   Nothing   = Nothing
-minimumBound (Just se) (Nothing) = Just se
-minimumBound Nothing   (Just se) = Just se
-minimumBound (Just x)  (Just y)  = Just $ MinimumBound x y
+minimumBound (Just x)  (Just y) = Just $ MinimumBound x y
+minimumBound _         _        = Nothing
 
+-- | Like 'minimumBound', but constructs a 'MaximumBound'.
 maximumBound :: Bound -> Bound -> Bound
-maximumBound Nothing   Nothing   = Nothing
-maximumBound (Just se) Nothing   = Just se
-maximumBound Nothing   (Just se) = Just se
-maximumBound (Just x)  (Just y)  = Just $ MaximumBound x y
+maximumBound (Just x)  (Just y) = Just $ MaximumBound x y
+maximumBound _         _        = Nothing
 
 -- | Upper and lower bound, both inclusive.
 type Range = (Bound, Bound)
