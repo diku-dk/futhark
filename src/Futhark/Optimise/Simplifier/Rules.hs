@@ -11,7 +11,6 @@ where
 
 import Control.Applicative
 import Control.Monad
-
 import Data.Bits
 import Data.Either
 import Data.Foldable (any, all)
@@ -727,10 +726,9 @@ simplifyScalExp vtable (Let pat _ e)
           letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
       _
         | Right new <- AS.simplify orig ranges,
-          SE.Val _ <- new,
-          orig /= new -> do
-            e' <- SE.fromScalExp' new
-            letBind_ pat e'
+          SE.Val val <- new,
+          orig /= new ->
+             letBind_ pat $ PrimOp $ SubExp $ Constant val
       _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
         mkDisj []     = SE.Val $ LogVal False
