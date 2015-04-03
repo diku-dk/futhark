@@ -4,11 +4,6 @@ import qualified Vidar as V
 
 import qualified Futhark.Representation.Basic as I
 import qualified Futhark.Representation.AST.Syntax as S
-import qualified Futhark.TypeCheck as I
-
-import qualified Futhark.Representation.External as E
-import qualified Futhark.Representation.External.TypeChecker as E
-import qualified Futhark.Representation.External.Renamer as E
 
 import Language.Futhark.Core
 
@@ -88,9 +83,6 @@ vidarifyPrimOp (S.Assert subexp _loc) =
     V.Block (V.ExactName "Assert") $ V.StrictBlock [
         vidarifySubExp subexp
     ]
-vidarifyPrimOp (S.Conjoin subexps) =
-    V.SubBlock $ V.StrictBlock $
-        map vidarifySubExp subexps
 vidarifyPrimOp (S.Index certs ident subexps) =
     V.Block (V.ExactName "Index") $ V.StrictBlock $ [
         V.SubBlock $ V.StrictBlock $ map (V.Name . vidarifyIdent) certs,
