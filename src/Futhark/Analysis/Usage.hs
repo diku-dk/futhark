@@ -19,8 +19,9 @@ usageInBinding (Let pat lore e) =
            usageInExp e,
            UT.usages (freeNamesInExp e)]
   where usageInPat =
-          UT.usages (HS.fromList (patternNames pat) `HS.difference`
-                     mconcat (map freeNamesIn $ patternElements pat))
+          UT.usages (mconcat (map freeNamesIn $ patternElements pat)
+                     `HS.difference`
+                     HS.fromList (patternNames pat))
           <> mconcat (map consumptionInPatElem $ patternElements pat)
         usageInExpLore =
           UT.usages $ freeNamesIn lore
