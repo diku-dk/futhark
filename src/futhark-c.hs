@@ -21,7 +21,8 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath = do
-  (_, res) <- runPipelineOnProgram (futharkConfig config) filepath
+  (msgs, res) <- runPipelineOnProgram (futharkConfig config) filepath
+  hPutStr stderr msgs
   case res of
     Left err -> do
       hPutStrLn stderr $ errorDesc err
