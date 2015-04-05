@@ -152,13 +152,13 @@ instance FreeIn MemSummary where
 
 instance Substitute MemSummary where
   substituteNames subst (MemSummary name f) =
-    MemSummary (substituteNames subst name) f
+    MemSummary (substituteNames subst name) (substituteNames subst f)
   substituteNames _ Scalar =
     Scalar
 
 instance Rename MemSummary where
   rename (MemSummary ident f) =
-    MemSummary <$> rename ident <*> pure f
+    MemSummary <$> rename ident <*> rename f
   rename Scalar =
     return Scalar
 
