@@ -53,13 +53,19 @@ commandLineOptions =
     (ReqArg (\filename -> Right $ \config -> config { compilerOutput = Just filename })
      "FILE")
     "Name of the compiled binary."
+  , Option "V" ["verbose"]
+    (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
+    "Print verbose output on standard error; wrong program to FILE."
   ]
 
 data CompilerConfig =
-  CompilerConfig { compilerOutput :: Maybe FilePath }
+  CompilerConfig { compilerOutput :: Maybe FilePath
+                 , compilerVerbose :: Maybe (Maybe FilePath)
+                 }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
+                                   , compilerVerbose = Nothing
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath
@@ -67,11 +73,11 @@ outputFilePath srcfile =
   fromMaybe (srcfile `replaceExtension` "") . compilerOutput
 
 futharkConfig :: CompilerConfig -> FutharkConfig
-futharkConfig _ =
+futharkConfig config =
   FutharkConfig { futharkpipeline = compilerPipeline
                 , futharkaction = interpretAction'
                 , futharkcheckAliases = True
-                , futharkverbose = Nothing
+                , futharkverbose = compilerVerbose config
                 , futharkboundsCheck = True
                 }
 
