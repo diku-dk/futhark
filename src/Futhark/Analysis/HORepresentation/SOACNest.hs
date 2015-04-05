@@ -218,7 +218,6 @@ nested l
     Right soac <- fromSOAC <$> SOAC.fromExp e, -- ...the bindee is a SOAC...
     resultSubExps res == map Var (patternIdents pat) =
       Just (operation soac,
-            -- ... FIXME?: need more checks here.
             Nesting { nestingParamNames = map identName $ lambdaParams l
                     , nestingInputs = inputs soac
                     , nestingResult = patternNames pat
