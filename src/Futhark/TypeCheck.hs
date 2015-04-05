@@ -1014,9 +1014,10 @@ sequentially m1 m2 = do
 
 checkPatElem :: Checkable lore =>
                 PatElem lore -> TypeM lore ()
-checkPatElem (PatElem ident bindage _) = do
+checkPatElem (PatElem ident bindage attr) = do
   checkBndSizes ident
   checkBindage bindage
+  checkLetBoundLore attr
 
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
@@ -1216,6 +1217,7 @@ class (FreeIn (Lore.Exp lore),
   checkExpLore :: Lore.Exp lore -> TypeM lore ()
   checkBodyLore :: Lore.Body lore -> TypeM lore ()
   checkFParamLore :: Lore.FParam lore -> TypeM lore ()
+  checkLetBoundLore :: Lore.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()

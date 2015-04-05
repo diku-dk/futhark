@@ -303,6 +303,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore = checkMemSummary
+  checkLetBoundLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   basicFParam _ name t =
     AST.FParam (Ident name (AST.Basic t)) Scalar
@@ -473,7 +474,8 @@ checkMemSummary :: MemSummary
 checkMemSummary Scalar = return ()
 checkMemSummary (MemSummary v ixfun) = do
   _ <- checkMemIdent v
-  traverse_ TypeCheck.checkIdent $ freeIn ixfun
+  TypeCheck.context ("in index function " ++ pretty ixfun) $
+    traverse_ (TypeCheck.requireI [Basic Int]) $ freeIn ixfun
   where checkMemIdent ident = do
           _ <- TypeCheck.checkIdent ident
           case identType ident of
