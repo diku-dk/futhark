@@ -15,7 +15,9 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
 import qualified Futhark.Representation.AST.Lore as Lore
-import Futhark.Representation.AST
+import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Traversals
+import Futhark.Representation.AST.RetType
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
