@@ -12,6 +12,7 @@ import Control.Exception hiding (try)
 import Control.Monad.Except
 import Data.Char
 import Data.List
+import Data.Monoid
 import Data.Ord
 import qualified Data.Array as A
 import qualified Data.Set as S
