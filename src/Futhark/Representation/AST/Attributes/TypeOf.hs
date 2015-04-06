@@ -157,7 +157,10 @@ applyExtType :: ExtRetType -> [Ident]
              -> [SubExp]
              -> Maybe ExtRetType
 applyExtType (ExtRetType extret) params args
-  | length args == length params && and (zipWith subtypeOf argtypes paramtypes) =
+  | length args == length params &&
+    and (zipWith subtypeOf
+         (map rankShaped argtypes)
+         (map rankShaped paramtypes)) =
     Just $ ExtRetType $ map correctDims extret
   | otherwise =
     Nothing

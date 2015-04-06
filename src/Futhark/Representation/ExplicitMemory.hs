@@ -358,13 +358,14 @@ matchPatternToReturns wrong pat rt = do
     inCtx = (`elem` map patElemName ctxbindees)
 
     matchType bindee t
-      | t `subtypeOf` bindeet =
+      | t' `subtypeOf` bindeet =
         return ()
       | otherwise =
         lift $ wrong $ "Bindee " ++ pretty bindee ++
         " has type " ++ pretty bindeet ++
         ", but expression returns " ++ pretty t ++ "."
-      where bindeet = staticShapes1 $ patElemRequires bindee
+      where bindeet = rankShaped $ patElemRequires bindee
+            t'      = rankShaped t
 
 
     matchBindee bindee (ReturnsScalar bt) =

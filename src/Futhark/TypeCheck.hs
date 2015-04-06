@@ -741,7 +741,8 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
                         loopbody) $ do
     checkFunParams funparams
     checkBody loopbody
-    unless (bodyExtType loopbody `subtypesOf` staticShapes rettype) $
+    unless (map rankShaped (bodyExtType loopbody) `subtypesOf`
+            map rankShaped (staticShapes rettype)) $
       bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
       (Several $ staticShapes rettype)
       (Several $ bodyExtType loopbody)
@@ -1115,7 +1116,7 @@ validApply :: ArrayShape shape =>
            -> Bool
 validApply expected got =
   length got == length expected &&
-  and (zipWith subtypeOf got expected)
+  and (zipWith subtypeOf (map rankShaped got) (map rankShaped expected))
 
 type Arg = (Type, Names, Dataflow)
 
@@ -1128,28 +1129,13 @@ checkArg arg = do (argt, dflow) <- collectDataflow $ checkSubExp arg
                   als <- subExpAliasesM arg
                   return (argt, als, dflow)
 
-checkFuncall :: (Checkable lore) =>
+checkFuncall :: Checkable lore =>
                 Maybe Name
              -> [Type] -> [Arg]
              -> TypeM lore ()
-checkFuncall =
-  checkGenericFuncall argType id
-
-checkLambdaCall :: (Checkable lore) =>
-                   Maybe Name
-                -> [Type] -> [Arg]
-                -> TypeM lore ()
-checkLambdaCall = checkGenericFuncall argType id
-
-checkGenericFuncall :: (Checkable lore, ArrayShape shape) =>
-                       (Arg -> TypeBase shape)
-                    -> (Type -> TypeBase shape)
-                    -> Maybe Name
-                    -> [Type] -> [Arg]
-                    -> TypeM lore ()
-checkGenericFuncall argType' paramType' fname params args = do
-  let argts = map argType' args
-      paramts = map paramType' params
+checkFuncall fname params args = do
+  let argts = map argType args
+      paramts = params
   unless (validApply paramts argts) $
     bad $ ParameterMismatch fname noLoc
           (Right $ map (justOne . staticShapes1) params) $
@@ -1166,7 +1152,7 @@ checkLambda :: Checkable lore =>
 checkLambda (Lambda params body ret) args = do
   mapM_ checkType ret
   if length params == length args then do
-    checkLambdaCall Nothing (map identType params) args
+    checkFuncall Nothing (map identType params) args
     noUnique $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
@@ -1195,7 +1181,7 @@ checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
 checkExtLambda (ExtLambda params body rettype) args =
   if length params == length args then do
-    checkLambdaCall Nothing (map identType params) args
+    checkFuncall Nothing (map identType params) args
     let fname = nameFromString "<anonymous>"
     noUnique $ checkFun' (fname,
                           rettype,

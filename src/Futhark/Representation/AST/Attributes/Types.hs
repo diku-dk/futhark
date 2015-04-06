@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Types
        (
-         arrayRank
+         rankShaped
+       , arrayRank
        , arrayShape
        , modifyArrayShape
        , setArrayShape
@@ -57,6 +58,12 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants
+
+-- | Remove shape information from a type.
+rankShaped :: ArrayShape shape => TypeBase shape -> TypeBase Rank
+rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
+rankShaped (Basic et) = Basic et
+rankShaped (Mem size) = Mem size
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
