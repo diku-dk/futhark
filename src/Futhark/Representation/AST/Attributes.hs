@@ -13,8 +13,8 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.Names
   , module Futhark.Representation.AST.RetType
 
-  , representative
-  , loopResultContext
+  , Lore.representative
+  , Lore.loopResultContext
   , Lore.applyRetType
 
   -- * Extra tools
@@ -39,18 +39,6 @@ import Futhark.Representation.AST.Syntax
 import qualified Futhark.Representation.AST.Lore as Lore
 
 import Data.List
-
--- | A constant used to disambiguate method calls.  XXX, this is a
--- hack.
-representative :: Lore.Lore l => l
-representative = Lore.representative
-
--- | A loop returns not only the values indicated in the result list
--- @res@, but may also have an existential context.  Thus,
--- @loopResult res merge@ returns those variables in @merge@ that
--- constitute the context.
-loopResultContext :: Lore.Lore l => l -> [Ident] -> [FParam l] -> [Ident]
-loopResultContext = Lore.loopResultContext
 
 -- | Figure out which parts of a loop body result correspond to which
 -- value identifiers in the pattern.
