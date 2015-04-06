@@ -17,7 +17,7 @@ before_install:
  - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
  - travis_retry cabal update
- - travis_retry cabal install happy alex hlint
+ - travis_retry cabal install happy alex hlint regex-tdfa
  - export PATH=$HOME/.cabal/bin:$PATH
 
 install:
