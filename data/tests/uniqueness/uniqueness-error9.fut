@@ -1,5 +1,7 @@
 // This test tracks whether aliasing is propagated properly when
 // tuples of differing dimensions is used as function parameters.
+// --
+// error:
 
 fun [int] f({int, int} x, {int, int, [int]} t) =
     let {x, y, a} = t in

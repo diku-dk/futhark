@@ -1,3 +1,9 @@
+// --
+// input {
+// }
+// output {
+//   70
+// }
 fun int getInt() = 10
 
 fun int myfun( {int,int,{int,int}} x ) =

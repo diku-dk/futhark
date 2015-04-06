@@ -1,5 +1,12 @@
 // This test can fail if the (consuming) calls to fib are lifted in an
 // erroneous way.
+// --
+// input {
+//   10
+// }
+// output {
+//   [42, 42, 42, 42, 42, 42, 42, 42, 42, 42]
+// }
 fun *[int] fib(*[int] a, int i, int n) =
   if i == n
   then a

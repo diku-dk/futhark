@@ -1,4 +1,6 @@
 // Test that you can't consume a free variable in a lambda.
+// --
+// error:
 
 fun int main(int n) =
   let a = copy(iota(n)) in

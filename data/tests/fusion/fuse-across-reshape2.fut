@@ -1,3 +1,9 @@
+// --
+// input {
+// }
+// output {
+//   [[0, 9, 18], [27, 36, 45], [54, 63, 72]]
+// }
 fun [[int]] main() =
   let n = 9 in
   let a = map(fn [int] (int i) =>

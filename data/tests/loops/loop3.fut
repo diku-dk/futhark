@@ -1,3 +1,10 @@
+// --
+// input {
+//   42
+// }
+// output {
+//   820
+// }
 fun int main(int n) =
   let a = iota(1) in
   loop (a) = for i < n do

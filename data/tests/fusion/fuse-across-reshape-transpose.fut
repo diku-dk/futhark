@@ -1,3 +1,9 @@
+// --
+// input {
+// }
+// output {
+//   [[2, 8, 14], [4, 10, 16], [6, 12, 18]]
+// }
 fun [[int]] main() =
   let n = 9 in
   let a = map(+1,iota(n)) in

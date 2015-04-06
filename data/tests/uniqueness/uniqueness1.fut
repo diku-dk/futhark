@@ -1,4 +1,10 @@
 // Test that simple function argument consumption works.
+// --
+// input {
+// }
+// output {
+//   0
+// }
 
 fun int f(*[int] a) = a[0]
 

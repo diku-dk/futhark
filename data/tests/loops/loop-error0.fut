@@ -1,3 +1,5 @@
+// --
+// error:
 fun {[real],[[real]]} main() =
   let e_rows = empty([real]) in
   let arr = copy(e_rows) in

@@ -1,3 +1,11 @@
+// --
+// input {
+//   [[1,2,3],[4,5,6],[7,8,9]]
+//   [[4,5,6],[7,8,9],[1,2,3]]
+// }
+// output {
+//   [[5, 9, 13], [16, 22, 28], [24, 32, 40]]
+// }
 fun [[int]] main([[int]] input1, [[int]] input2) =
   let input = map(fn [{int,int}] ([int] r1, [int] r2) =>
                     zip(r1,r2), zip(input1, input2)) in

@@ -1,3 +1,5 @@
+// --
+// error:
 fun int f({int, *[int]} t) =
     let {x, a} = t in
     x

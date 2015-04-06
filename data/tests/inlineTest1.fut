@@ -1,3 +1,11 @@
+// --
+// input {
+//   42
+//   1337
+// }
+// output {
+//   24730855
+// }
 fun int fun1(int a, int b) = a + b
 
 fun int fun2(int a, int b) = fun1(a,b) * (a+b)

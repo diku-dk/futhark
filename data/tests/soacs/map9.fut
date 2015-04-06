@@ -1,5 +1,14 @@
 // This test fails if the ISWIM transformation messes up the size
 // annotations.
+// --
+// input {
+//   [1,2,3]
+//   [[1,2,3],[4,5,6],[7,8,9],[0,1,2],[3,4,5]]
+//   [[1,2,3],[4,5,6],[7,8,9],[0,1,2],[3,4,5]]
+// }
+// output {
+//   [[3, 12, 33], [54, 324, 1254], [2754, 21384, 104082], [5508, 64152, 624492], [60588, 1154736, 16861284]]
+// }
 fun [int] combineVs([int] n_row) =
   map(*, zip(n_row, n_row))
 

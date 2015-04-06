@@ -1,5 +1,7 @@
 // Test that non-basic aliasing of an array results in an aliased
 // array.
+// --
+// error:
 
 fun [int] main() =
     let n = 10 in

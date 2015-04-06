@@ -1,5 +1,12 @@
 // Test various abuse of tuples - specifically, the flattening done by
 // internalisation.
+// --
+// input {
+// }
+// output {
+//   8
+//   11
+// }
 
 fun {int,int} f({int,int} x) = x
 

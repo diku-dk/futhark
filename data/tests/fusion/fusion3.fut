@@ -1,3 +1,10 @@
+// --
+// input {
+//   [-2.0,3.0,9.0]
+// }
+// output {
+//   56.000000
+// }
 fun real f(real a        ) = a + 3.0
 fun real g(real a        ) = a * 3.0
 fun real h(real x, {real,real} y) = let {a,b} = y in a * b - (a + b) + x

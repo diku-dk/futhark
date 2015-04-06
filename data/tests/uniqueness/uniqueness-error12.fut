@@ -1,4 +1,6 @@
 // Don't let curried mapees consume more than once.
+// --
+// error:
 
 fun [int] f(*[int] a, int i) =
   let a[i] = 0 in a

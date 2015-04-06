@@ -1,5 +1,7 @@
 // This test checks whether uniqueness is tracked properly for the map
 // SOAC.
+// --
+// error:
 
 fun [int] f ([int] x) = x
 

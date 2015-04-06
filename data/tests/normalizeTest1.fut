@@ -1,3 +1,15 @@
+// --
+// input {
+//   1
+//   2.0
+//   3
+//   4
+//   5.0
+//   6
+// }
+// output {
+//   5
+// }
 fun int tupfun( {int,{real,int}} x, {int,{real,int}} y ) =
     let {x1, x2} = x in
     let {y1, y2} = y in

@@ -1,3 +1,5 @@
+// --
+// error:
 fun *[int] main(*[[int]] a) =
   // Should be an error, because all of 'a' is consumed at the point
   // the map is invoked.

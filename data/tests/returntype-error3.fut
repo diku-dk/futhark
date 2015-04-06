@@ -1,5 +1,7 @@
 // This test demonstrates a limitation caused by the conservativity of
 // the aliasing analyser.
+// --
+// error:
 
 // The two arrays must not alias each other, because they are unique.
 fun {*[int], *[int]} main() =

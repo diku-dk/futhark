@@ -1,3 +1,10 @@
+// --
+// input {
+//   [ [3,2,1,5,3], [6,8,7,0,0] ]
+// }
+// output {
+//   [ [1,2,3,3,5], [0,0,6,7,8] ]
+// }
 fun bool isSorted ([int] xs) =
     if size(0,xs) < 2 then True
     else let bs = map (fn bool (int i) => xs[i] <= xs[i+1], iota( size(0,xs) - 1) ) in

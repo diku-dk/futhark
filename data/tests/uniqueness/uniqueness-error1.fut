@@ -1,5 +1,7 @@
 // Test whether multiple references within the same sequence are
 // detected.
+// --
+// error:
 
 fun int main() =
     let n = 10 in

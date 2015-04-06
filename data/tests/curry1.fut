@@ -1,4 +1,11 @@
 // Test that we can curry even "complex" arguments.
+// --
+// input {
+//   [1.0,6.0,3.0,4.0,1.0,0.0]
+// }
+// output {
+//   267.000000
+// }
 
 fun real f({int, real} x, real y) =
     let {a,b} = x in y*toReal(a)+b

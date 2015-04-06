@@ -1,3 +1,9 @@
+// --
+// input {
+// }
+// output {
+//   0
+// }
 fun int main() =
   let n = 10 in
   let a = copy(iota(n)) in

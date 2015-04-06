@@ -1,3 +1,10 @@
+// --
+// input {
+// }
+// output {
+//   91
+//   126
+// }
 fun int getInt ( ) = 10
 fun [int] plus1([int] x) = map(fn int(int y)=>y+1, x)
 

@@ -1,3 +1,10 @@
+// --
+// input {
+// }
+// output {
+//   8
+//   11
+// }
 fun {int,int} f({int,int} x, int y, int z) = x
 
 fun {int,int} main() =

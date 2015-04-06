@@ -1,3 +1,10 @@
+// --
+// input {
+//   10
+// }
+// output {
+//   -1
+// }
 fun int neg(int x) = -x
 
 fun int main(int a) =

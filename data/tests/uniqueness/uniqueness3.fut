@@ -1,3 +1,10 @@
+// --
+// input {
+// }
+// output {
+//   [1.000000, 0.000000]
+//   [2.000000, 0.000000]
+// }
 fun {[real],[real]} main() =
   let n = 2 in
   let arrs = {copy(replicate(n, 0.0)), copy(replicate(n, 0.0))} in

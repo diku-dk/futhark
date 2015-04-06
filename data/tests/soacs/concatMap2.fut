@@ -1,4 +1,11 @@
 // Hacky quicksort.
+// --
+// input {
+//   [3,2,1,5,3,6,8,7]
+// }
+// output {
+//   [1,2,3,3,5,6,7,8]
+// }
 fun [int] quicksort([int] xs) =
   let len = size(0,xs) in
   if len < 2

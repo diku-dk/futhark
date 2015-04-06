@@ -1,5 +1,7 @@
 // This benchmark tests whether aliasing is tracked even deep inside
 // loops.
+// --
+// error:
 
 fun [[int]] floydSbsImp(int N, *[[int]] D) =
     let DT = transpose(D) in // DT aliases D.

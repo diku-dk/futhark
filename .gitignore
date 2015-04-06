@@ -11,10 +11,10 @@
 dist
 
 # Ignore result of test suite.
-data/*interpreterout
-data/**/*interpreterout
-data/*compilerout
-data/**/*compilerout
+data/*actual-*
+data/**/*actual-*
+data/*expected-*
+data/**/*expected-*
 data/*bin
 data/**/*bin
 data/*c

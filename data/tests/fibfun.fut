@@ -1,3 +1,10 @@
+// --
+// input {
+//   10
+// }
+// output {
+//    [ 0 , 1 , 1 , 2 , 3 , 5 , 8 , 13 , 21 , 34  ]
+// }
 fun *[int] computefibs(*[int] arr) =
     let n = size(0, arr) in
     let arr[0] = 0 in

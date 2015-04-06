@@ -1,3 +1,5 @@
+// --
+// error:
 fun int f(*[[int]] a) = a[0,0]
 
 fun int main() =

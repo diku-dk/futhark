@@ -1,3 +1,9 @@
+// --
+// input {
+// }
+// output {
+//   52
+// }
 fun int getInt ( ) = if((1-1)*3 + (3/3 - 1) == 0) then (15 / 3)*2 else 10000000
 fun [int] plus1([int] x) = map(fn int(int y)=>y+1, x)
 

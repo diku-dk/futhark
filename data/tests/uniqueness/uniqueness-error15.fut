@@ -1,4 +1,6 @@
 // Test that shadowing does not break alias analysis.
+// --
+// error:
 
 fun *[int] main() =
   let n = 10 in

@@ -1,5 +1,7 @@
 // Test that consumption checking is done even with no meaningful
 // bindings.
+// --
+// error:
 
 fun int consume(*[int] a) = 0 // OK.
 

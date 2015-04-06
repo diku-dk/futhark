@@ -1,5 +1,7 @@
 // Test that aliasing is found, even if hidden inside a
 // branch.
+// --
+// error:
 
 fun int main() =
   let n = 10 in

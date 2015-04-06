@@ -1,4 +1,6 @@
 // Test that you cannot consume free variables in a loop.
+// --
+// error:
 
 fun int main() =
   let n = 10 in

@@ -1,3 +1,9 @@
+// --
+// input {
+// }
+// output {
+//   0
+// }
 fun int f(*[int] a) = a[0]
 fun int g([int] a) = a[0]
 

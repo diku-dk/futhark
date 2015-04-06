@@ -1,3 +1,4 @@
+// --
 fun real f(real   a        ) = a + 3.0
 fun real g([real] a, real b) = a[0] * b
 fun real h( real  a, real b) = a * b

@@ -1,5 +1,7 @@
 // This program tests whether the compiler catches some of the more
 // nasty side cases of aliasing in loops.
+// --
+// error:
 
 fun int main() =
   let arr = copy(iota(10)) in

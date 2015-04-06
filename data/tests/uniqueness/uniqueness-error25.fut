@@ -1,3 +1,5 @@
+// --
+// error:
 fun int f({[int],*[int]} t) =
   let {a,b} = t in
   let b[0] = 1337 in

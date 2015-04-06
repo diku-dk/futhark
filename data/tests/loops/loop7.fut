@@ -1,6 +1,7 @@
 // This loop is intended to trigger a bug in the in-place-lowering
 // optimisation.  It requires proper maintaining of the loop result
 // ordering.
+// --
 
 fun [[real]] main(int n, int i, real x) =
     let res = copy(replicate(n,(replicate(n,0.0)))) in
