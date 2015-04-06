@@ -741,8 +741,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
                         loopbody) $ do
     checkFunParams funparams
     checkBody loopbody
-    unless (map toDecl (bodyExtType loopbody) `subtypesOf`
-            map toDecl rettype) $
+    unless (bodyExtType loopbody `subtypesOf` staticShapes rettype) $
       bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
       (Several $ staticShapes rettype)
       (Several $ bodyExtType loopbody)
@@ -1134,7 +1133,7 @@ checkFuncall :: (Checkable lore) =>
              -> [Type] -> [Arg]
              -> TypeM lore ()
 checkFuncall =
-  checkGenericFuncall (toDecl . argType) toDecl
+  checkGenericFuncall argType id
 
 checkLambdaCall :: (Checkable lore) =>
                    Maybe Name

@@ -11,7 +11,6 @@ module Futhark.Representation.AST.Syntax.Core
          , ArrayShape(..)
          , TypeBase(..)
          , Type
-         , DeclType
          , ExtType
          , Diet(..)
 
@@ -121,9 +120,6 @@ data TypeBase shape = Basic BasicType
 -- | A type with shape information, used for describing the type of
 -- a computation.
 type Type = TypeBase Shape
-
--- | A type without shape information, used for declarations.
-type DeclType = TypeBase Rank
 
 -- | A type with existentially quantified shapes - used as part of
 -- function (and function-like) return types.  Generally only makes

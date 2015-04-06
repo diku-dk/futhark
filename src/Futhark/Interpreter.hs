@@ -40,7 +40,7 @@ import Futhark.Util
 data InterpreterError lore =
       MissingEntryPoint Name
       -- ^ The specified start function does not exist.
-    | InvalidFunctionArguments Name (Maybe [DeclType]) [DeclType]
+    | InvalidFunctionArguments Name (Maybe [Type]) [Type]
       -- ^ The arguments given to a function were mistyped.
     | IndexOutOfBounds String [Int] [Int]
       -- ^ First @Int@ is array shape, second is attempted index.
@@ -306,11 +306,11 @@ runThisFun (FunDec fname _ fparams _) args ftable
     runFutharkM (evalFuncall fname args) futharkenv
   | otherwise =
     (Left $ InvalidFunctionArguments fname
-     (Just (map (toDecl . fparamType) fparams))
-     (map toDecl argtypes),
+     (Just (map fparamType fparams))
+     argtypes,
      mempty)
-  where argtypes = map (toDecl . (`setUniqueness` Unique) . valueType) args
-        paramtypes = map (toDecl . fparamType) fparams
+  where argtypes = map ((`setUniqueness` Unique) . valueType) args
+        paramtypes = map fparamType fparams
         futharkenv = FutharkEnv { envVtable = HM.empty
                                 , envFtable = ftable
                                 }
@@ -359,7 +359,7 @@ builtin "op ~" [BasicVal (RealVal b)] =
   return [BasicVal $ RealVal (-b)]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
-        map (toDecl . valueType) args
+        map valueType args
 
 single :: Value -> [Value]
 single v = [v]

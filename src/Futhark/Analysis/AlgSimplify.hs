@@ -1195,23 +1195,20 @@ discriminate e@((k,v):t) (k', v') =
 --- Trivial Utility Functions                      ---
 ------------------------------------------------------
 
-ppBType :: BasicType -> String
-ppBType = pretty . basicDecl
-
 getZero :: BasicType -> AlgSimplifyM BasicValue
 getZero Int  = return $ IntVal 0
 getZero Real = return $ RealVal 0.0
-getZero tp   = badAlgSimplifyM ("getZero for type: "++ppBType tp)
+getZero tp   = badAlgSimplifyM ("getZero for type: "++pretty tp)
 
 getPos1 :: BasicType -> AlgSimplifyM BasicValue
 getPos1 Int  = return $  IntVal 1
 getPos1 Real = return $ RealVal 1.0
-getPos1 tp   = badAlgSimplifyM ("getOne for type: "++ppBType tp)
+getPos1 tp   = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 getNeg1 :: BasicType -> AlgSimplifyM BasicValue
 getNeg1 Int  = return $  IntVal (-1)
 getNeg1 Real = return $ RealVal (-1.0)
-getNeg1 tp   = badAlgSimplifyM ("getOne for type: "++ppBType tp)
+getNeg1 tp   = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 isZero :: BasicValue -> Bool
 isZero (IntVal  v) = v == 0

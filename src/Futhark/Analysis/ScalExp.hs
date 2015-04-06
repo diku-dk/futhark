@@ -113,7 +113,7 @@ scalExpType (Val (RealVal _) ) = Real
 scalExpType (Val ( LogVal _) ) = Bool
 scalExpType (Val val) =
   error $ "scalExpType: scalar exp cannot have type " ++
-          pretty (basicDecl $ basicValueType val) ++ "."
+          pretty (basicValueType val) ++ "."
 scalExpType (Id  idd) =
   case identType idd of
     Basic bt -> bt

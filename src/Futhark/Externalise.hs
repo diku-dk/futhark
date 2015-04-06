@@ -30,7 +30,7 @@ externaliseProg (I.Prog funs) =
 externaliseFunction :: I.FunDec -> E.FunDec
 externaliseFunction (FunDec fname ret params body) =
   (fname,
-   externaliseDeclTypes $ map I.toDecl $ retTypeValues ret,
+   externaliseDeclTypes $ retTypeValues ret,
    map (externaliseParam . fparamIdent) params,
    externaliseBody body,
    noLoc)
@@ -154,7 +154,7 @@ externaliseMapLambda :: I.Lambda -> E.Lambda
 externaliseMapLambda (Lambda params body ret) =
   E.AnonymFun params'
               (wrap $ externaliseBody body)
-              (externaliseDeclTypes $ map I.toDecl ret)
+              (externaliseDeclTypes ret)
               noLoc
   where (params', wrap) =
           let ps = map externaliseParam params
@@ -166,7 +166,7 @@ externaliseFoldLambda :: I.Lambda -> Int -> E.Lambda
 externaliseFoldLambda (Lambda params body ret) n =
   E.AnonymFun (accparams'++arrparams')
               (wraparr $ wrapacc $ externaliseBody body)
-              (externaliseDeclTypes $ map I.toDecl ret)
+              (externaliseDeclTypes ret)
               noLoc
   where (accparams, arrparams) = splitAt n $ map externaliseParam params
         (accparams', wrapacc) = case makeTupleParam accparams of
@@ -221,7 +221,8 @@ externaliseBinOp I.Less = E.Less
 externaliseBinOp I.Leq = E.Leq
 externaliseBinOp I.Equal = E.Equal
 
-externaliseDeclTypes :: [I.DeclType] -> E.DeclType
+externaliseDeclTypes :: I.ArrayShape shape =>
+                        [I.TypeBase shape] -> E.DeclType
 externaliseDeclTypes ts =
   case map externaliseDeclType ts of
     [t]  -> t
@@ -234,7 +235,8 @@ externaliseTypes ts =
     [t]  -> t
     ts'  -> E.Tuple ts'
 
-externaliseDeclType :: I.DeclType -> E.DeclType
+externaliseDeclType :: I.ArrayShape shape =>
+                       I.TypeBase shape -> E.DeclType
 externaliseDeclType (I.Basic t) = E.Basic t
 externaliseDeclType (I.Array et shape u) =
   E.Array $ E.BasicArray et (E.ShapeDecl $ replicate (I.shapeRank shape) E.AnyDim) u NoInfo
@@ -262,7 +264,7 @@ externaliseSubExp (I.Constant v) =
 
 externaliseParam :: I.Param -> E.Parameter
 externaliseParam (I.Ident name t) =
-  E.Ident name (externaliseDeclType $ I.toDecl t) noLoc
+  E.Ident name (externaliseDeclType t) noLoc
 
 externaliseIdent :: I.Ident -> E.Ident
 externaliseIdent (I.Ident name t) =

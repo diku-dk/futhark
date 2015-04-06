@@ -89,7 +89,7 @@ ifAliases (als1,cons1) (als2,cons2) =
   where notConsumed = not . (`HS.member` cons)
         cons = cons1 <> cons2
 
-funcallAliases :: [(SubExp, Diet)] -> [DeclType] -> [Names]
+funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
@@ -101,7 +101,7 @@ aliasesOf (If _ tb fb _) =
 aliasesOf (PrimOp op) = primOpAliases op
 aliasesOf (LoopOp op) = loopOpAliases op
 aliasesOf (Apply _ args t) =
-  funcallAliases args $ map toDecl $ retTypeValues t
+  funcallAliases args $ retTypeValues t
 
 returnAliases :: [TypeBase shape1] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts

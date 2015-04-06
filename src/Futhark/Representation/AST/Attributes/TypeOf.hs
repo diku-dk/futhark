@@ -161,8 +161,8 @@ applyExtType (ExtRetType extret) params args
     Just $ ExtRetType $ map correctDims extret
   | otherwise =
     Nothing
-  where paramtypes = map (toDecl . identType) params
-        argtypes   = map (toDecl . subExpType) args
+  where paramtypes = map identType params
+        argtypes   = map subExpType args
 
         parammap :: HM.HashMap VName SubExp
         parammap = HM.fromList $

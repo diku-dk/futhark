@@ -13,8 +13,6 @@ module Futhark.Representation.AST.Attributes.Types
        , staticShapes
        , staticShapes1
        , basicType
-       , basicDecl
-       , toDecl
 
        , arrayOf
        , setOuterSize
@@ -59,18 +57,6 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants
-
--- | Given a basic type, construct a type without aliasing and shape
--- information.  This is sometimes handy for disambiguation when
--- constructing types.
-basicDecl :: BasicType -> DeclType
-basicDecl = Basic
-
--- | Remove aliasing and shape information from a type.
-toDecl :: ArrayShape shape => TypeBase shape -> DeclType
-toDecl (Array et sz u) = Array et (Rank $ shapeRank sz) u
-toDecl (Basic et) = Basic et
-toDecl (Mem size) = Mem size
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional

@@ -16,7 +16,6 @@ module Futhark.Representation.AST.Syntax
   , ArrayShape(..)
   , TypeBase(..)
   , Type
-  , DeclType
   , ExtType
   , Diet(..)
 
