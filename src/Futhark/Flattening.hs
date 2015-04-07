@@ -273,9 +273,18 @@ pullOutOfMap :: MapInfo -> ([Ident], [Ident]) -> Binding -> FlatM [Binding]
 pullOutOfMap _ (_,[]) _ = return []
 pullOutOfMap mapInfo _
                   (Let (Pattern [PatElem resIdent BindVar patlore]) letlore
-                       (PrimOp (Reshape certs dimSes reshapeIdent))) = do
-  -- TODO: Handle reshape on loop invariant array (ie, must be replicated)
-  Just target <- findTarget mapInfo reshapeIdent
+                       (PrimOp (Reshape certs dimses reshapeident))) = do
+  Just target <- findTarget mapInfo reshapeident
+
+  loopdep_dim_subexps <- filterM (\case
+                                  Var i -> liftM isJust $ findTarget mapInfo i
+                                  Constant _ -> return False
+                               ) dimses
+
+  unless (null loopdep_dim_subexps) $
+    flatError $ Error $ "pullOutOfMap Reshape: loop dependant variable used " ++
+                       show (map pretty loopdep_dim_subexps) ++
+                       " ^ TODO: implement SegReshape thingy"
 
   newResIdent <-
     case resIdent of
@@ -458,8 +467,15 @@ pullOutOfMap mapInfo (argsNeeded, _)
       return (unflattenBnd, flatResArrPat)
     unflattenRes pe = flatError $ Error $ "unflattenRes applied to " ++ pretty pe
 
+pullOutOfMap mapinfo _ (Let (Pattern [PatElem ident1 BindVar _]) _
+                      (PrimOp (SubExp (Var ident2))))
+  | identType ident1 == identType ident2 = do
+      addMapLetArray ident1 =<< findTarget1 mapinfo ident2
+      return []
+
 pullOutOfMap _ _ binding =
-  flatError $ Error $ "pullOutOfMap not implemented for " ++ pretty binding
+  flatError $ Error $ "pullOutOfMap not implemented for " ++ pretty binding ++
+                      "\n\t" ++ show binding
 
 ----------------------------------------
 
