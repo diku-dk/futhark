@@ -401,6 +401,11 @@ Code should be compilable with `-Wall -Werror`. There should be no
 warnings.  `hlint` should not complain (except for a few rules that we
 have disabled - see `tools/style-check.sh`).
 
+### Braces and semicolons
+
+Never use braces and semicolons - always use whitespace-based layout
+instead (except for generated code).
+
 Design Rules
 ============
 
