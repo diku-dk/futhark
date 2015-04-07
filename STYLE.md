@@ -55,6 +55,10 @@ overboard.  The functions `inputs`, `lambda` and `certificates` in
 pointless use of alignment, and are retained to serve as a reminder of
 this.
 
+If in doubt, don't align.  Spurious alignment makes the code feel weird
+and off-key, and it can be remarkably ugly when not maintained.  Alignment
+in expressions is usually a bad idea.
+
 ### Blank Lines
 
 One blank line between top-level definitions.  No blank lines between
