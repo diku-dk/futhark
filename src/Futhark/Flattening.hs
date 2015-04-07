@@ -46,7 +46,6 @@ instance MonadFreshNames FlatM where
 
 --------------------------------------------------------------------------------
 
--- TODO: Add SrcLoc
 data Error = Error String
            | MemTypeFound
            | ArrayNoDims Ident
@@ -63,27 +62,30 @@ flatError :: Error -> FlatM a
 flatError e = FlatM . lift $ Left e
 
 --------------------------------------------------------------------------------
+-- Functions for working with FlatState
+--------------------------------------------------------------------------------
 
 getMapLetArray' :: Ident -> FlatM Ident
 getMapLetArray' ident = do
   letArrs <- gets mapLetArrays
   case M.lookup ident letArrs of
     Just letArr -> return letArr
-    Nothing -> flatError $ Error $ "getMapLetArray': Couldn't find Ident "
-                                   ++ show ident
-                                   ++ " in mapLetArrays table"
+    Nothing -> flatError $ Error $ "getMapLetArray': Couldn't find " ++
+                                   pretty ident ++
+                                   " in table"
 
 addMapLetArray :: Ident -> Ident -> FlatM ()
 addMapLetArray ident letArr = do
   letArrs <- gets mapLetArrays
   case M.lookup ident letArrs of
-    (Just _) -> flatError $ Error $ "addMapLetArray: Ident " ++ show ident
-                         ++ " already present in mapLetArrays table"
+    (Just _) -> flatError $ Error $ "addMapLetArray: " ++
+                                    pretty ident ++
+                                    " already present in table"
     Nothing -> do
       let letArrs' = M.insert ident letArr letArrs
       modify (\s -> s{mapLetArrays = letArrs'})
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 getFlattenedDims :: (SubExp, SubExp) -> FlatM SubExp
 getFlattenedDims (outer,inner) = do
@@ -327,9 +329,9 @@ pullOutOfMap mapInfo (argsNeeded, _)
   (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM (replicateIdent mapInfo)
                                                       loopInvIdents
 
-  (flattenIdents, flatIdents) <- mapAndUnzipM flattenArg $
-                                   (Right <$> okIdents)
-                                   ++ (Left <$> loopInvIdentsArrs)
+  (flattenIdents, flatIdents) <-
+    mapAndUnzipM (flattenArg mapInfo) $
+                 (Right <$> okIdents) ++ (Left <$> loopInvIdentsArrs)
 
   (unflattenPats, pats') <- mapAndUnzipM unflattenRes pats
 
@@ -376,7 +378,8 @@ pullOutOfMap mapInfo (argsNeeded, _)
   let extraLamdaParams = itmResArrs ++ needInvArrs
   (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
                                             extraLamdaParams
-  (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM flattenArg (Left <$> distArrIdents)
+  (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM (flattenArg mapInfo) $
+                                         Left <$> distArrIdents
 
 
   -----------------------------------------
@@ -402,9 +405,9 @@ pullOutOfMap mapInfo (argsNeeded, _)
 
   mapBnd'' <- transformBinding mapBnd'
 
-  return $ needInvRepBnds ++ distBnds ++ flatDistBnds
-           ++ loopInvRepBnds
-           ++ flattenIdents ++ mapBnd'' ++ unflattenPats
+  return $ needInvRepBnds ++ distBnds ++ flatDistBnds ++
+           loopInvRepBnds ++
+           flattenIdents ++ mapBnd'' ++ unflattenPats
 
 
   where
@@ -420,7 +423,11 @@ pullOutOfMap mapInfo (argsNeeded, _)
                  (Basic bt) ->
                    return $ Array bt (Shape [sz]) Nonunique
                  (Array bt (Shape (out:rest)) uniq) -> do
-                   when (out /= mapSize mapInfo) $ flatError $ Error "distributeExtraArg: trying to distribute array with incorrect outer size"
+                   when (out /= mapSize mapInfo) $
+                     flatError $
+                       Error $ "distributeExtraArg: " ++
+                               "trying to distribute array with incorrect outer size " ++
+                               pretty i
                    return $ Array bt (Shape $ out:sz:rest) uniq
 
       distIdent <- newIdent (baseString vn ++ "_dist") distTp
@@ -434,41 +441,6 @@ pullOutOfMap mapInfo (argsNeeded, _)
       let distBnd = Let (Pattern [PatElem distIdent BindVar ()]) () distExp
 
       return (distBnd, distIdent)
-
-
-
-    -- | preparation steps to enter nested map, meaning we
-    -- step-down/flatten/concat the outer array.
-    --
-    -- 1st arg is the parrent array for the Ident. In most cases, this
-    -- will be @Nothing@ and this function will find it itself.
-
-    -- TODO: does not currently handle loop invariant arrays
-    flattenArg :: Either Ident Ident -> FlatM (Binding, Ident)
-    flattenArg targInfo = do
-      target <- case targInfo of
-                  Left targ -> return targ
-                  Right innerMapArg -> findTarget1 mapInfo innerMapArg
-
-      -- tod = Target Outer Dimension
-      (tod1, tod2, rest, bt, uniq) <- case target of
-        (Ident _ (Array bt (Shape (tod1:tod2:rest)) uniq)) ->
-                  return (tod1, tod2, rest, bt, uniq)
-        _ -> flatError $ Error $ "trying to flatten less than 2D array: " ++ show target
-
-      newSize <- getFlattenedDims (tod1, tod2)
-
-      let flatTp = Array bt (Shape (newSize : rest)) uniq
-      flatIdent <- newIdent (baseString (identName target) ++ "_sd") flatTp
-      let flattenExp = Apply (nameFromString "stepdown")
-                             [(Var target, Observe)] -- TODO: I guess
-                                                     -- Observe is okay
-                                                     -- for now
-                             (basicRetType Int) -- FIXME
-
-      let flatBnd = Let (Pattern [PatElem flatIdent BindVar ()]) () flattenExp
-
-      return (flatBnd, flatIdent)
 
     -- | Steps for exiting a nested map, meaning we step-up/unflatten the result
     unflattenRes :: PatElem -> FlatM (Binding, PatElem)
@@ -485,20 +457,56 @@ pullOutOfMap mapInfo (argsNeeded, _)
       addMapLetArray i finalResArr
 
       let unflattenExp = Apply (nameFromString "stepup")
-                          [(Var flatResArr, Observe)] -- TODO: I guess
-                                                  -- Observe is okay
-                                                  -- for now
-                          (basicRetType Int) -- FIXME
+                          [(Var flatResArr, Observe)]
+                          --  ^ TODO: I guess Observe is okay for now
+                          (basicRetType Int)
+                          --  ^ TODO: stupid exsitensial types :(
       let unflattenBnd = Let (Pattern [PatElem finalResArr BindVar ()])
                              () unflattenExp
 
       return (unflattenBnd, flatResArrPat)
     unflattenRes pe = flatError $ Error $ "unflattenRes applied to " ++ pretty pe
 
-
 pullOutOfMap _ _ binding =
   flatError $ Error $ "pullOutOfMap not implemented for " ++ pretty binding
 
+----------------------------------------
+
+
+-- | preparation steps to enter nested map, meaning we
+    -- step-down/flatten/concat the outer array.
+    --
+    -- 1st arg is the parrent array for the Ident. In most cases, this
+    -- will be @Nothing@ and this function will find it itself.
+-- TODO: does not currently handle loop invariant arrays
+flattenArg :: MapInfo -> Either Ident Ident -> FlatM (Binding, Ident)
+flattenArg mapInfo targInfo = do
+  target <- case targInfo of
+              Left targ -> return targ
+              Right innerMapArg -> findTarget1 mapInfo innerMapArg
+
+  -- tod = Target Outer Dimension
+  (tod1, tod2, rest, bt, uniq) <- case target of
+    (Ident _ (Array bt (Shape (tod1:tod2:rest)) uniq)) ->
+              return (tod1, tod2, rest, bt, uniq)
+    _ -> flatError $ Error $ "trying to flatten less than 2D array: " ++ show target
+
+  newSize <- getFlattenedDims (tod1, tod2)
+
+  let flatTp = Array bt (Shape (newSize : rest)) uniq
+  flatIdent <- newIdent (baseString (identName target) ++ "_sd") flatTp
+
+  let flattenExp = Apply (nameFromString "stepdown")
+                         [(Var target, Observe)]
+                         --  ^ TODO: I guess Observe is okay for now
+                         (basicRetType Int)
+                         --  ^ TODO: stupid exsitensial types :(
+
+
+  let flatBnd = Let (Pattern [PatElem flatIdent BindVar ()])
+                    () flattenExp
+
+  return (flatBnd, flatIdent)
 
 -- | Find the "parent" array for a given Ident in a /specific/ map
 findTarget :: MapInfo -> Ident -> FlatM (Maybe Ident)
