@@ -136,16 +136,22 @@ transformBinding topBnd@(Let (Pattern pats) ()
                  Ident _ (Array _ (Shape (outer:_)) _):_ -> return outer
                  _ -> flatError $ Error "impossible, map argument was not a list"
 
-  let mapInfo = MapInfo { mapListArgs = idents
-                        , lamParams = lambdaParams lambda
-                        , mapLets = letBoundIdentsInLambda lambda
-                        , mapSize = outerSize
-                        , mapCerts = certs
-                        }
-
   case grouped of
    [Right _] -> return [topBnd]
    _ -> do
+     let loopinv_idents =
+           filter (`notElem` idents) $ filter (isJust . identDimentionality) $
+             HS.toList $ freeInExp (LoopOp $ Map certs lambda idents)
+     (loopinv_repbnds, loopinv_repidents) <-
+       mapAndUnzipM (replicateIdent outerSize) loopinv_idents
+
+     let mapInfo = MapInfo { mapListArgs = idents ++ loopinv_repidents
+                           , lamParams = lambdaParams lambda ++ loopinv_idents
+                           , mapLets = letBoundIdentsInLambda lambda
+                           , mapSize = outerSize
+                           , mapCerts = certs
+                           }
+
      let mapResNeed = HS.unions $ map freeIn
                    (resultSubExps $ bodyResult $ lambdaBody lambda)
      let freeIdents = flip map grouped $ \case
@@ -179,7 +185,8 @@ transformBinding topBnd@(Let (Pattern pats) ()
            zipWith (\pe se -> Let (Pattern [pe]) () (PrimOp $ SubExp se))
                    pats res'
 
-     return $ concatMap (either id (: [])) grouped' ++ resBnds
+     return $ loopinv_repbnds ++
+              concatMap (either id (: [])) grouped' ++ resBnds
 
   where
     lamBnds = bodyBindings $ lambdaBody lambda
@@ -203,7 +210,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
       pat <- liftM (Pattern . map (\i -> PatElem i BindVar () ))
              $ forM shouldReturn $ \i -> do
-                 iArr <- wrapInArrIdent mapInfo i
+                 iArr <- wrapInArrIdent (mapSize mapInfo) i
                  addMapLetArray i iArr
                  return iArr
 
@@ -280,7 +287,7 @@ pullOutOfMap mapInfo _
   addMapLetArray resIdent newResIdent
 
   let newReshape = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
-                                    (mapSize mapInfo:dimSes) target
+                                    (mapSize mapInfo:dimses) target
 
   return [Let (Pattern [PatElem newResIdent BindVar patlore])
               letlore newReshape]
@@ -326,7 +333,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
       liftM unzip
       $ filterM (\(i,_) -> isNothing <$> findTarget mapInfo i)
               $ zip idents (lambdaParams lambda)
-  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM (replicateIdent mapInfo)
+  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM (replicateIdent $ mapSize mapInfo)
                                                       loopInvIdents
 
   (flattenIdents, flatIdents) <-
@@ -357,25 +364,9 @@ pullOutOfMap mapInfo (argsNeeded, _)
   itmResArrs <- mapM (findTarget1 mapInfo) itmResIdents
 
   --
-  -- Loop invariant Idents needed
-  --
-  needInvIdents <- filterM (\i -> do
-                               ok <- isNothing <$> findTarget mapInfo i
-                               if ok
-                               then case identType i of
-                                      Basic _ -> return False
-                                      Array{} -> return True
-                                      Mem{}   -> flatError MemTypeFound
-                               else return False
-                           ) reallyNeeded
-
-  (needInvRepBnds, needInvArrs) <- mapAndUnzipM (replicateIdent mapInfo)
-                                                needInvIdents
-
-  --
   -- Distribute and flatten idents needed (from above)
   --
-  let extraLamdaParams = itmResArrs ++ needInvArrs
+  let extraLamdaParams = itmResArrs
   (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
                                             extraLamdaParams
   (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM (flattenArg mapInfo) $
@@ -405,7 +396,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
 
   mapBnd'' <- transformBinding mapBnd'
 
-  return $ needInvRepBnds ++ distBnds ++ flatDistBnds ++
+  return $ distBnds ++ flatDistBnds ++
            loopInvRepBnds ++
            flattenIdents ++ mapBnd'' ++ unflattenPats
 
@@ -525,20 +516,18 @@ findTarget1 mapInfo i =
     Nothing -> flatError $ Error $ "findTarget': couldn't find expected arr for "
                                    ++ pretty i
 
-wrapInArrIdent :: MapInfo -> Ident -> FlatM Ident
-wrapInArrIdent mapInfo (Ident vn tp) = do
+wrapInArrIdent :: SubExp -> Ident -> FlatM Ident
+wrapInArrIdent sz (Ident vn tp) = do
   arrtp <- case tp of
     Basic bt                   -> return $ Array bt (Shape [sz]) Nonunique
     Array bt (Shape rest) uniq -> return $ Array bt (Shape $ sz:rest) uniq
     Mem _ -> flatError MemTypeFound
   newIdent (baseString vn ++ "_arr") arrtp
-  where
-    sz = mapSize mapInfo
 
-replicateIdent :: MapInfo -> Ident -> FlatM (Binding, Ident)
-replicateIdent mapInfo i = do
-  arrRes <- wrapInArrIdent mapInfo i
-  let repExp = PrimOp $ Replicate (mapSize mapInfo) (Var i)
+replicateIdent :: SubExp -> Ident -> FlatM (Binding, Ident)
+replicateIdent sz i = do
+  arrRes <- wrapInArrIdent sz i
+  let repExp = PrimOp $ Replicate sz (Var i)
       repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
 
   return (repBnd, arrRes)
@@ -572,3 +561,7 @@ isSafeToMapType (Basic _) = return True
 isSafeToMapType (Array{}) = return False
 
 --------------------------------------------------------------------------------
+
+identDimentionality :: Ident -> Maybe Int
+identDimentionality (Ident _ (Array _ (Shape dims) _)) = Just $ length dims
+identDimentionality _ = Nothing
