@@ -87,7 +87,7 @@ analyseExp e = Out.mapExpM analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return
                      , Out.mapOnCertificates = return
-                     , Out.mapOnIdent = return
+                     , Out.mapOnVName = return
                      , Out.mapOnBody = analyseBody
                      , Out.mapOnBinding = analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
@@ -149,7 +149,7 @@ refineDimensionRanges :: AS.RangesRep -> [Out.SubExp]
                       -> RangeEnv -> RangeEnv
 refineDimensionRanges ranges = flip $ foldl refineShape
   where refineShape env (In.Var dim) =
-          refineRange ranges (In.identName dim) dimBound env
+          refineRange ranges dim dimBound env
         refineShape env _ =
           env
         -- A dimension is never negative.
@@ -201,8 +201,9 @@ simplifyBound ranges = liftM $ simplifyKnownBound ranges
 simplifyKnownBound :: AS.RangesRep -> Out.KnownBound -> Out.KnownBound
 simplifyKnownBound ranges bound
   | Just se <- Out.boundToScalExp bound,
-    Right se' <- AS.simplify se ranges =
+    Right se' <- AS.simplify se ranges types =
     Out.ScalarBound se'
+  where types = undefined
 simplifyKnownBound ranges (Out.MinimumBound b1 b2) =
   Out.MinimumBound (simplifyKnownBound ranges b1) (simplifyKnownBound ranges b2)
 simplifyKnownBound ranges (Out.MaximumBound b1 b2) =
@@ -212,7 +213,7 @@ simplifyKnownBound _ bound =
 
 betterLowerBound :: Out.Bound -> RangeM Out.Bound
 betterLowerBound (Just (Out.ScalarBound (SE.Id v))) = do
-  range <- lookupRange $ Out.identName v
+  range <- lookupRange v
   return $ Just $ case range of
     (Just lower, _) -> lower
     _               -> Out.ScalarBound $ SE.Id v
@@ -221,7 +222,7 @@ betterLowerBound bound =
 
 betterUpperBound :: Out.Bound -> RangeM Out.Bound
 betterUpperBound (Just (Out.ScalarBound (SE.Id v))) = do
-  range <- lookupRange $ Out.identName v
+  range <- lookupRange v
   return $ Just $ case range of
     (_, Just upper) -> upper
     _               -> Out.ScalarBound $ SE.Id v

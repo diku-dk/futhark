@@ -100,9 +100,9 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
         case body of
           Nest.NewNest n comb ->
             let n'    = substituteNames subst
-                        n { Nest.nestingParams =
-                               Nest.nestingParams n' ++
-                               newParams
+                        n { Nest.nestingParamNames =
+                               Nest.nestingParamNames n' ++
+                               (map identName newParams)
                           }
                 comb' = substituteNames subst comb
             in Nest.NewNest n' comb'
@@ -134,7 +134,7 @@ toSOACNest' cs body (nest:ns) inpts =
   let body' = toSOACNest' cs body ns (map rowType inpts)
   in Nest.Map cs (Nest.NewNest nest' body')
   where nest' = Nest.Nesting {
-                  Nest.nestingParams = newparams
+                  Nest.nestingParamNames = nestingParamNames nest
                 , Nest.nestingResult = nestingResult nest
                 , Nest.nestingReturnType = nestingReturnType nest
                 , Nest.nestingInputs = map SOAC.identInput newparams

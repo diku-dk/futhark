@@ -53,8 +53,8 @@ transformOutput ts names soac = do
             t SOAC.:< ts'' -> do
               let es = map (applyTransform t) validents
                   mkPat ident = Pattern [PatElem ident BindVar ()]
-              ts <- concat <$> mapM primOpType es
-              newIds <- forM (zip names ts) $ \(k, opt) ->
+              opts <- concat <$> mapM primOpType es
+              newIds <- forM (zip names opts) $ \(k, opt) ->
                 newIdent (baseString k) opt
               zipWithM_ letBind (map mkPat newIds) $ map PrimOp es
               descend ts'' newIds
@@ -89,7 +89,7 @@ data FusedKer = FusedKer {
   -- such that fusion is prevented to move
   -- a use of an
 
-  , fusedVars :: [Ident]
+  , fusedVars :: [VName]
   -- ^ whether at least a fusion has been performed.
 
   , outputTransform :: SOAC.ArrayTransforms
@@ -116,63 +116,56 @@ setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 kernelType :: FusedKer -> [Type]
 kernelType = SOAC.typeOf . fsoac
 
-tryOptimizeSOAC :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
-tryOptimizeSOAC outIds soac ker = do
+tryOptimizeSOAC :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
+tryOptimizeSOAC outVars soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac
   let ker' = map (SOAC.addTransforms ots) (inputs ker) `setInputs` ker
-      outIds' = fixOutputTypes outIds soac'
-      ker'' = fixInputTypes outIds' ker'
-  applyFusionRules outIds' soac' ker''
+      outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
+      ker'' = fixInputTypes outIdents ker'
+  applyFusionRules outVars soac' ker''
 
-tryOptimizeKernel :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
-tryOptimizeKernel outIds soac ker = do
-  ker' <- optimizeKernel (Just outIds) ker
-  applyFusionRules outIds soac ker'
+tryOptimizeKernel :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
+tryOptimizeKernel outVars soac ker = do
+  ker' <- optimizeKernel (Just outVars) ker
+  applyFusionRules outVars soac ker'
 
-tryExposeInputs :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
-tryExposeInputs outIds soac ker = do
-  (ker', ots) <- exposeInputs outIds ker
+tryExposeInputs :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
+tryExposeInputs outVars soac ker = do
+  (ker', ots) <- exposeInputs outVars ker
   if SOAC.nullTransforms ots
-  then fuseSOACwithKer outIds soac ker'
+  then fuseSOACwithKer outVars soac ker'
   else do
     (soac', ots') <- pullOutputTransforms soac ots
-    let outIds' = fixOutputTypes outIds soac'
-        ker'' = fixInputTypes outIds' ker'
+    let outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
+        ker'' = fixInputTypes outIdents ker'
     if SOAC.nullTransforms ots'
-    then applyFusionRules outIds' soac' ker''
+    then applyFusionRules outVars soac' ker''
     else fail "tryExposeInputs could not pull SOAC transforms"
 
-fixOutputTypes :: [Ident] -> SOAC -> [Ident]
-fixOutputTypes outIds soac =
-  zipWith fixInputType outIds $ SOAC.typeOf soac
-  where fixInputType outId t =
-          let outId_t = identType outId
-          in outId { identType = outId_t `setArrayShape`
-                                 arrayShape t
-                   }
-
 fixInputTypes :: [Ident] -> FusedKer -> FusedKer
-fixInputTypes outIds ker =
+fixInputTypes outIdents ker =
   ker { fsoac = fixInputTypes' $ fsoac ker }
   where fixInputTypes' soac =
           map fixInputType (SOAC.inputs soac) `SOAC.setInputs` soac
         fixInputType (SOAC.Input ts (SOAC.Var v _))
-          | Just v' <- find ((==v) . identName) outIds =
-            SOAC.Input ts $ SOAC.Var (identName v') (identType v')
+          | Just v' <- find ((==v) . identName) outIdents =
+            SOAC.Input ts $ SOAC.Var v $ identType v'
         fixInputType inp = inp
 
-applyFusionRules :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
-applyFusionRules outIds soac ker =
-  tryOptimizeSOAC outIds soac ker <|>
-  tryOptimizeKernel outIds soac ker <|>
-  tryExposeInputs outIds soac ker <|>
-  fuseSOACwithKer outIds soac ker
+applyFusionRules :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
+applyFusionRules outVars soac ker =
+  tryOptimizeSOAC outVars soac ker <|>
+  tryOptimizeKernel outVars soac ker <|>
+  tryExposeInputs outVars soac ker <|>
+  fuseSOACwithKer outVars soac ker
 
-attemptFusion :: MonadFreshNames m =>
-                 [Ident] -> SOAC -> FusedKer -> m (Maybe FusedKer)
-attemptFusion outIds soac ker =
+attemptFusion :: (MonadFreshNames m, HasTypeEnv m) =>
+                 [VName] -> SOAC -> FusedKer
+              -> m (Maybe FusedKer)
+attemptFusion outVars soac ker = do
+  types <- askTypeEnv
   liftM removeUnusedParamsFromKer <$>
-  tryFusion (applyFusionRules outIds soac ker)
+    tryFusion (applyFusionRules outVars soac ker) types
 
 removeUnusedParamsFromKer :: FusedKer -> FusedKer
 removeUnusedParamsFromKer ker =
@@ -202,15 +195,16 @@ removeUnusedParams l inps =
 
 -- | Check that the consumer uses at least one output of the producer
 -- unmodified.
-mapFusionOK :: [Ident] -> FusedKer -> Bool
-mapFusionOK outIds ker = any (`elem` inputs ker) (map SOAC.identInput outIds)
+mapFusionOK :: [VName] -> FusedKer -> Bool
+mapFusionOK outVars ker = any (`elem` inpIds) outVars
+  where inpIds = mapMaybe SOAC.isVarInput (inputs ker)
 
 mapOrFilter :: SOAC -> Bool
 mapOrFilter (SOAC.Map {})    = True
 mapOrFilter _                 = False
 
-fuseSOACwithKer :: [Ident] -> SOAC -> FusedKer -> TryFusion FusedKer
-fuseSOACwithKer outIds soac1 ker = do
+fuseSOACwithKer :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
+fuseSOACwithKer outVars soac1 ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
   -- into soac2.
   let soac2 = fsoac ker
@@ -221,26 +215,25 @@ fuseSOACwithKer outIds soac1 ker = do
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2
       success res_soac = do
-        let fusedVars_new = fusedVars ker++outIds
+        let fusedVars_new = fusedVars ker++outVars
         -- Avoid name duplication, because the producer lambda is not
         -- removed from the program until much later.
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
         return $ ker { fsoac = uniq_lam `SOAC.setLambda` res_soac
                      , fusedVars = fusedVars_new
                      }
-  outPairs <- forM outIds $ \outId -> do
-                outId' <- newIdent' (++"_elem") outId
-                return (identName outId,
-                        outId' { identType = rowType $ identType outId' })
+  outPairs <- forM (zip outVars $ SOAC.typeOf soac1) $ \(outVar, t) -> do
+                outVar' <- newVName $ baseString outVar ++ "_elem"
+                return (outVar, Ident outVar' t)
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
     (SOAC.Map {}, SOAC.Map    {})
-      | mapFusionOK outIds ker -> do
+      | mapFusionOK outVars ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Map (cs1++cs2) res_lam new_inp
 
     (SOAC.Redomap _ lam21 _ ne _, SOAC.Map {})
-      | mapFusionOK outIds ker -> do
+      | mapFusionOK outVars ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp
 
@@ -251,13 +244,13 @@ fuseSOACwithKer outIds soac1 ker = do
            soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs
            ker'   = ker { fsoac = soac2'
                         }
-       fuseSOACwithKer outIds soac1 ker'
+       fuseSOACwithKer outVars soac1 ker'
 
     _ -> fail "Cannot fuse"
 
 -- Here follows optimizations and transforms to expose fusability.
 
-optimizeKernel :: Maybe [Ident] -> FusedKer -> TryFusion FusedKer
+optimizeKernel :: Maybe [VName] -> FusedKer -> TryFusion FusedKer
 optimizeKernel inp ker = do
   startNest <- Nest.fromSOAC $ fsoac ker
   (resNest, resTrans) <- optimizeSOACNest inp startNest startTrans
@@ -267,14 +260,14 @@ optimizeKernel inp ker = do
                }
   where startTrans = outputTransform ker
 
-optimizeSOAC :: Maybe [Ident] -> SOAC -> TryFusion (SOAC, SOAC.ArrayTransforms)
+optimizeSOAC :: Maybe [VName] -> SOAC -> TryFusion (SOAC, SOAC.ArrayTransforms)
 optimizeSOAC inp soac = do
   nest <- Nest.fromSOAC soac
   (nest', ots) <- optimizeSOACNest inp nest $ SOAC.noTransforms
   soac' <- Nest.toSOAC nest'
   return (soac', ots)
 
-optimizeSOACNest :: Maybe [Ident] -> SOACNest -> SOAC.ArrayTransforms
+optimizeSOACNest :: Maybe [VName] -> SOACNest -> SOAC.ArrayTransforms
                  -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 optimizeSOACNest inp soac os = do
   res <- foldM comb (False, soac, os) $ reverse optimizations
@@ -286,28 +279,33 @@ optimizeSOACNest inp soac os = do
           return (True, soac'', os'')
           <|> return (changed, soac', os')
 
-type Optimization = Maybe [Ident] -> SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
+type Optimization = Maybe [VName]
+                    -> SOACNest
+                    -> SOAC.ArrayTransforms
+                    -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
 optimizations = [iswim]
 
-iswim :: Maybe [Ident] -> SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
+iswim :: Maybe [VName] -> SOACNest -> SOAC.ArrayTransforms
+      -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 iswim _ nest ots
   | Nest.Scan cs1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
     Nest.Map cs2 mb <- nn,
     Just es' <- mapM Nest.inputFromTypedSubExp es,
     Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
-    mapM isVarInput mapArrs == Just (map identName paramIds) = do
+    mapM isVarInput mapArrs == Just paramIds = do
     let newInputs :: [SOAC.Input]
         newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
         inputTypes = map SOAC.inputType newInputs
         (accsizes, arrsizes) =
           splitAt (length es) $ map rowType inputTypes
-        innerAccParams = zipWith Ident (take (length es) paramIds) accsizes
+        innerAccParams = zipWith Nest.TypedSubExp
+                         (map Var $ take (length es) paramIds) accsizes
         innerArrParams = zipWith Ident (drop (length es) paramIds) arrsizes
-    let innerScan = Nest.Scan cs2 mb (map Var innerAccParams)
+    let innerScan = Nest.Scan cs2 mb innerAccParams
         scanNest = Nest.Nesting {
-                     Nest.nestingInputs = map SOAC.varInput innerArrParams
+                     Nest.nestingInputs = map SOAC.identInput innerArrParams
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
                                               map (arraySize 0) arrsizes
                    , Nest.nestingResult = bndIds
@@ -324,7 +322,7 @@ iswim _ _ _ = fail "ISWIM does not apply"
 
 -- Now for fiddling with transpositions...
 
-commonTransforms :: [Ident] -> [SOAC.Input]
+commonTransforms :: [VName] -> [SOAC.Input]
                  -> (SOAC.ArrayTransforms, [SOAC.Input])
 commonTransforms interesting inps = commonTransforms' inps'
   where inps' = [ (maybe False (`elem` interesting) $ SOAC.inputArray inp, inp)
@@ -358,9 +356,10 @@ mapDepth (MapNest.MapNest _ body levels _) =
         minDim [] = 0
         minDim (t:ts) = foldl min (arrayRank t) $ map arrayRank ts
 
-pullRearrange :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
+pullRearrange :: SOACNest -> SOAC.ArrayTransforms
+              -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pullRearrange nest ots = do
-  nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
+  nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
   if permuteReach perm <= mapDepth nest' then
     let -- Expand perm to cover the full extent of the input dimensionality
@@ -371,10 +370,10 @@ pullRearrange nest ots = do
                ots')
   else fail "Cannot pull transpose"
 
-pushRearrange :: [Ident] -> SOACNest -> SOAC.ArrayTransforms
+pushRearrange :: [VName] -> SOACNest -> SOAC.ArrayTransforms
               -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pushRearrange inpIds nest ots = do
-  nest' <- liftMaybeNeedNames $ MapNest.fromSOACNest nest
+  nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
   if permuteReach perm <= mapDepth nest' then
     let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
@@ -398,7 +397,7 @@ rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
         setReturnType nesting t' =
           nesting { MapNest.nestingReturnType = t' }
 
-fixupInputs :: [Ident] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
+fixupInputs :: [VName] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
   case mapMaybe inputRearrange $ filter exposable inps of
     perm:_ -> do inps' <- mapM (fixupInput (permuteReach perm) perm) inps
@@ -438,7 +437,7 @@ pullReshape nest ots
 
         let nesting = Nest.Nesting {
                         Nest.nestingParamNames = map identName ps
-                      , Nest.nestingInputs = map SOAC.varInput ps
+                      , Nest.nestingInputs = map SOAC.identInput ps
                       , Nest.nestingResult = bnds
                       , Nest.nestingReturnType = retTypes
                       }
@@ -460,21 +459,21 @@ pullReshape _ _ = fail "Cannot pull reshape"
 -- consumer available) and pullOutputTransforms (for moving
 -- output-transforms of a producer to its inputs instead).
 
-exposeInputs :: [Ident] -> FusedKer
+exposeInputs :: [VName] -> FusedKer
              -> TryFusion (FusedKer, SOAC.ArrayTransforms)
-exposeInputs inpIds ker =
-  (exposeInputs' =<< pushRearrange') <|>
-  (exposeInputs' =<< pullRearrange') <|>
-  exposeInputs' ker
-  where nest = Nest.fromSOAC $ fsoac ker
-        ot = outputTransform ker
+exposeInputs inpIds ker = do
+  nest <- Nest.fromSOAC $ fsoac ker
+  id $ (exposeInputs' =<< pushRearrange' nest) <|>
+       (exposeInputs' =<< pullRearrange' nest) <|>
+       exposeInputs' ker
+  where ot = outputTransform ker
 
-        pushRearrange' = do
+        pushRearrange' nest = do
           (nest', ot') <- pushRearrange inpIds nest ot
           soac         <- Nest.toSOAC nest'
           return ker { fsoac = soac, outputTransform = ot' }
 
-        pullRearrange' = do
+        pullRearrange' nest = do
           (nest',ot') <- pullRearrange nest ot
           unless (SOAC.nullTransforms ot') $
             fail "pullRearrange was not enough"
@@ -489,17 +488,19 @@ exposeInputs inpIds ker =
               return (ker' { fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
             _ -> fail "Cannot expose"
 
-        exposed (SOAC.Input ts (SOAC.Var _))
+        exposed (SOAC.Input ts (SOAC.Var {}))
           | SOAC.nullTransforms ts = True
         exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
 
 outputTransformPullers :: [SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)]
 outputTransformPullers = [pullRearrange, pullReshape]
 
-pullOutputTransforms :: SOAC -> SOAC.ArrayTransforms -> TryFusion (SOAC, SOAC.ArrayTransforms)
+pullOutputTransforms :: SOAC -> SOAC.ArrayTransforms
+                     -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullOutputTransforms soac origOts = do
-  (nest, ots') <- attemptAll (Nest.fromSOAC soac) origOts
-  soac' <- Nest.toSOAC nest
+  nest <- Nest.fromSOAC soac
+  (nest', ots') <- attemptAll nest origOts
+  soac' <- Nest.toSOAC nest'
   return (soac', ots')
   where attemptAll nest ots = attempt nest ots outputTransformPullers
         attempt _ _ [] = fail "Cannot pull anything"

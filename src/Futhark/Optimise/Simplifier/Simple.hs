@@ -76,6 +76,10 @@ instance MonadFreshNames (SimpleM lore) where
   putNameSource y = modify $ \(x, _) -> (x,y)
 
 instance Engine.Simplifiable lore =>
+         HasTypeEnv (SimpleM lore) where
+  askTypeEnv = ST.typeEnv <$> Engine.getVtable
+
+instance Engine.Simplifiable lore =>
          MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Wise lore
   mkLetM pat e = do

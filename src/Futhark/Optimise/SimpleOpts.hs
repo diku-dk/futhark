@@ -44,6 +44,6 @@ simpleOpts simpl rules prog = do
 normCopyOneLambda :: MonadFreshNames m =>
                      Basic.Prog
                   -> Basic.Lambda
-                  -> [Maybe Ident]
+                  -> [Maybe VName]
                   -> m Basic.Lambda
 normCopyOneLambda = simplifyLambdaWithRules bindableSimpleOps basicRules

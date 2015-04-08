@@ -25,8 +25,12 @@ module Futhark.Representation.AST.Attributes
   , asLoopOp
   , safeExp
   , loopResultValues
+  , typeEnvFromBindings
   )
   where
+
+import Data.List
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
@@ -37,8 +41,6 @@ import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.Representation.AST.Lore as Lore
-
-import Data.List
 
 -- | Figure out which parts of a loop body result correspond to which
 -- value identifiers in the pattern.
@@ -113,3 +115,12 @@ safeExp (Apply {}) = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
   all (safeExp . bindingExp) (bodyBindings fbranch)
+
+-- | Create a type environment consisting of the names bound in the
+-- list of bindings.
+typeEnvFromBindings :: [Binding lore] -> TypeEnv
+typeEnvFromBindings = HM.fromList . concatMap assoc
+  where assoc bnd =
+          [ (identName ident, identType ident)
+          | ident <- patternIdents $ bindingPattern bnd
+          ]

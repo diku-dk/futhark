@@ -143,19 +143,24 @@ inlineInBody
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
-        (withShapes $ resultSubExps res')
+        (runReader (withShapes $ resultSubExps res') $
+         typeEnvFromBindings callbnds)
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
        FunDec _ _ fargs body:_ ->
          let revbnds = zip (map fparamIdent fargs) $ map fst args
          in  continue' $ foldr addArgBnd body revbnds
   where
+
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
         reshapeIfNecessary farg aarg `insertBinding` body
 
-      withShapes ses = extractShapeContext (retTypeValues rtp)
-                       (map (arrayDims . subExpType) ses) ++ ses
+      withShapes ses = do
+        ts <- mapM subExpType ses
+        return $
+          extractShapeContext (retTypeValues rtp) (map arrayDims ts) ++
+          ses
 
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,

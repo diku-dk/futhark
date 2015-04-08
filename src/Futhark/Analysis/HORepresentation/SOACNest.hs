@@ -57,7 +57,9 @@ data Nesting lore = Nesting {
   } deriving (Eq, Ord, Show)
 
 nestingParams :: Nesting lore -> [Param]
-nestingParams = 
+nestingParams nest = zipWith Ident names types
+  where names = nestingParamNames nest
+        types = map SOAC.inputType $ nestingInputs nest
 
 data NestBody lore = Fun (Lambda lore)
                    | NewNest (Nesting lore) (Combinator lore)
