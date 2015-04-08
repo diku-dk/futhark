@@ -231,12 +231,23 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
 
+instance PrettyLore lore => Pretty (SegOp lore) where
+  ppr (SegReduce cs lam inputs descp) =
+    ppCertificates' cs <> text "segreduce" <>
+    parens (ppr lam <> comma </>
+            ppTuple' nes <> comma <+>
+            ppTuple' flatarrs <> comma <+>
+            ppr descp)
+    where
+      (nes, flatarrs) = unzip inputs
+
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
                      text "then" <+> align (ppr t) </>
                      text "else" <+> align (ppr f)
   ppr (PrimOp op) = ppr op
   ppr (LoopOp op) = ppr op
+  ppr (SegOp op) = ppr op
   ppr (Apply fname args _) = text (nameToString fname) <>
                              apply (map (align . ppr . fst) args)
 

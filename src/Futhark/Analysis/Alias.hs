@@ -51,6 +51,9 @@ analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
   Out.LoopOp $
   Out.Stream cs acc arr
    (analyseExtLambda lam)
+analyseExp (Out.SegOp (In.SegReduce cs lam input descp)) =
+  Out.SegOp $
+  Out.SegReduce cs (analyseLambda lam) input descp
 analyseExp e = Out.mapExp analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return

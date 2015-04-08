@@ -293,6 +293,10 @@ defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
 defCompileExp targets (LoopOp op) = defCompileLoopOp targets op
 
+defCompileExp _ (SegOp op) =
+  fail $ "ImpGen called on Segmented Operator, this is not supported. " ++
+         pretty (SegOp op)
+
 defCompilePrimOp :: Destination -> PrimOp -> ImpM op ()
 
 defCompilePrimOp (Destination [target]) (SubExp se) =

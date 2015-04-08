@@ -40,6 +40,7 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
+  , SegOp (..)
   , BinOp (..)
   , ExpT(..)
   , Exp
@@ -229,6 +230,30 @@ data LoopOp lore
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
   | Stream  Certificates [SubExp] [Ident] (ExtLambdaT lore)
 
+-- | Segmented version of SOACS that use flat array representation.
+-- This means a /single/ flat array for data, and segment descriptors
+-- (integer arrays) for each dimension of the array.
+--
+-- For example the array
+-- @ [ [ [1,2] , [3,4,5] ]
+--   , [ [6]             ]
+--   , []
+--   ]
+-- @
+--
+-- Can be represented as
+-- @ data  = [1,2, 3,4,5, 6    ]
+--   seg_1 = [2,   3,     1,0  ]
+--   seg_0 = [2,          1,  0]
+-- @
+data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, Ident)] Ident
+                  -- ^ @map (\xs -> reduce(op,ne,xs), xss@ can loosely
+                  -- be transformed into
+                  -- @segreduce(op,ne, xss_flat, xss_descpritor)@
+                  --
+                  -- Note that this requires the neutral element to be constant
+                deriving (Eq, Ord, Show)
+
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)
 deriving instance Lore lore => Ord (LoopOp lore)
@@ -246,6 +271,8 @@ data ExpT lore
     -- ^ A simple (non-recursive) operation.
 
   | LoopOp (LoopOp lore)
+
+  | SegOp (SegOp lore)
 
   | Apply  Name [(SubExp, Diet)] (Lore.RetType lore)
 

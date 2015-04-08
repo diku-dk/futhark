@@ -114,10 +114,15 @@ loopOpExtType (Stream _ accs arrs lam) =
       substs = HM.fromList $ zip nms (outersize:i0:accs)
   in  map (substNamesInExtType substs) rtp
 
+segOpExtType :: SegOp lore -> [ExtType]
+segOpExtType (SegReduce _ fun _ descp) =
+  staticShapes $ mapType fun [identType descp]
+
 expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
 expExtType (Apply _ _ rt) = retTypeValues rt
 expExtType (If _ _ _ rt)  = rt
 expExtType (LoopOp op)    = loopOpExtType op
+expExtType (SegOp op)    = segOpExtType op
 expExtType (PrimOp op)    = staticShapes $ primOpType op
 
 bodyExtType :: Body lore -> [ExtType]

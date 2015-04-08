@@ -202,6 +202,14 @@ mapExpM tv (LoopOp (Stream cs accs arrs lam)) =
   LoopOp <$> (pure Stream <*> mapOnCertificates tv cs <*>
               mapM (mapOnSubExp tv) accs <*>
               mapM (mapOnIdent  tv) arrs <*> mapOnExtLambda tv lam)
+mapExpM tv (SegOp (SegReduce cs fun inputs descp_exp)) =
+  SegOp <$> (pure SegReduce <*> mapOnCertificates tv cs <*>
+              mapOnLambda tv fun <*>
+              (zip <$> mapM (mapOnSubExp tv) startexps <*>
+                        mapM (mapOnIdent tv) flatarr_exps) <*>
+              mapOnIdent tv descp_exp)
+    where (startexps, flatarr_exps) = unzip inputs
+
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType

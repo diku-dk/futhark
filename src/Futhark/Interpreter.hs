@@ -400,6 +400,7 @@ evalExp (Apply fname args rettype) = do
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
+evalExp (SegOp op) = evalSegOp op
 
 evalPrimOp :: Lore lore => PrimOp lore -> FutharkM lore [Value]
 
@@ -729,6 +730,35 @@ evalLoopOp (Stream _ accs arrs elam) = do
   let (chunkval, ival) = (BasicVal $ IntVal outersize, BasicVal $ IntVal 0)
   vs <- fun (chunkval:ival:accvals++arrvals)
   return $ valueShapeContext elam_rtp vs ++ vs
+
+evalSegOp :: forall lore . Lore lore => SegOp lore -> FutharkM lore [Value]
+
+evalSegOp (SegReduce _ fun inputs descparr_exp) = do
+  let (ne_exps, flatarr_exps) = unzip inputs
+  startaccs <- mapM evalSubExp ne_exps
+  segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp
+  vss <- mapM (arrToList <=< lookupVar) flatarr_exps
+  let vss' = transpose vss
+
+  when (any (<0) segments) $ bad . TypeError $
+    "evalSegOp SegReduce segment with negative length"
+  unless (length vss' == sum segments) $ bad . TypeError $
+    unwords["evalSegOp SegReduce segment size (", show $ sum segments, ")"
+           ,"was not equal to array length (", show $ length vss', ")"
+           ]
+
+  let segmented_arrs =
+        reverse $ fst $
+                  foldl (\(res,rest) n -> (take n rest : res, drop n rest))
+                        ([], vss') segments
+
+  let foldfun acc x = applyLambda fun $ acc ++ x
+  let runReduce = foldM foldfun startaccs
+  res <- mapM runReduce segmented_arrs
+  arrays (map valueType startaccs) res
+
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do

@@ -39,6 +39,7 @@ module Futhark.Representation.ExplicitMemory
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
+       , AST.ExpT(SegOp)
        , AST.FunDecT(FunDec)
        , AST.FParamT(FParam)
        )
@@ -60,7 +61,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, RetType)
 import qualified Futhark.Analysis.ScalExp as SE
 
@@ -649,6 +650,10 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
 
 expReturns _ (AST.LoopOp op) =
   return $ extReturns $ loopOpExtType op
+
+expReturns _ (AST.SegOp op) =
+  fail $ "ExplicitMemory called on Segmented Operator, this is not supported. " ++
+         pretty (AST.SegOp op)
 
 expReturns _ (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret

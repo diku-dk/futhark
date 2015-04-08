@@ -537,7 +537,6 @@ replicateIdent mapInfo i = do
 
 --------------------------------------------------------------------------------
 
-
 isSafeToMapBody :: Body -> FlatM Bool
 isSafeToMapBody (Body _ bindings _) = and <$> mapM isSafeToMapBinding bindings
 
@@ -553,6 +552,7 @@ isSafeToMapExp (PrimOp po) = do
   and <$> mapM isSafeToMapType ts
 -- DoLoop/Map/ConcatMap/Reduce/Scan/Filter/Redomap
 isSafeToMapExp (LoopOp _) = return False
+isSafeToMapExp (SegOp _) = return False
 isSafeToMapExp (If _ e1 e2 _) =
   liftM2 (&&) (isSafeToMapBody e1) (isSafeToMapBody e2)
 isSafeToMapExp (Apply{}) =
