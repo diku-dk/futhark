@@ -423,6 +423,20 @@ runTests mode files = do
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
 
+runProgram :: FilePath -> IO ()
+runProgram file = do
+  spec <- testSpecFromFile file
+  case testAction spec of
+    RunCases [run] -> do
+      (code, output, err) <-
+        readProcessWithExitCode "futharki" [file] $
+        unlines $ map pretty $ runInput run
+      hPutStr stderr err
+      putStr output
+      exitWith code
+    _ ->
+      error "No input data"
+
 data TestMode = OnlyTypeCheck
               | OnlyCompile
               | OnlyInterpret
@@ -432,6 +446,7 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
+    ["--run", program] -> runProgram program
     "-t" : args' -> runTests OnlyTypeCheck args'
     "-c" : args' -> runTests OnlyCompile args'
     "-i" : args' -> runTests OnlyInterpret args'
