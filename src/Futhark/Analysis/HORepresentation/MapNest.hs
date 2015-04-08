@@ -94,7 +94,7 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
   let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
       size  = arraysSize 0 $ map SOAC.inputType inps
       inps' = map (substituteNames subst) inps ++
-              map (SOAC.addTransform (SOAC.Replicate size) . identInput)
+              map (SOAC.addTransform (SOAC.Replicate size) . SOAC.identInput)
               boundUsedInBody
       body' =
         case body of
@@ -137,7 +137,7 @@ toSOACNest' cs body (nest:ns) inpts =
                   Nest.nestingParams = newparams
                 , Nest.nestingResult = nestingResult nest
                 , Nest.nestingReturnType = nestingReturnType nest
-                , Nest.nestingInputs = map identInput newparams
+                , Nest.nestingInputs = map SOAC.identInput newparams
                 }
         newparams = zipWith Ident (nestingParamNames nest) $
                     map rowType inpts
@@ -184,7 +184,3 @@ fixInputs ourInps childInps =
           newParam <- newNameFromString (baseString param ++ "_rep")
           return (remPs, (newParam,
                           SOAC.Input (ts SOAC.|> SOAC.Replicate ourSize) ia) : newInps)
-
-identInput :: Ident -> SOAC.Input
-identInput ident =
-  SOAC.Input mempty $ SOAC.Var (identName ident) (identType ident)

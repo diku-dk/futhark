@@ -1,6 +1,8 @@
 module Futhark.Analysis.HORepresentation.SOACNest
   ( SOACNest (..)
-  , nestingParamNames
+  , nestingParams
+  , TypedSubExp (..)
+  , inputFromTypedSubExp
   , Combinator (..)
   , body
   , setBody
@@ -48,14 +50,14 @@ import Futhark.Substitute
 -- proper nest!  (I think...)
 
 data Nesting lore = Nesting {
-    nestingParams     :: [Ident]
+    nestingParamNames :: [VName]
   , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [VName]
   , nestingReturnType :: [Type]
   } deriving (Eq, Ord, Show)
 
-nestingParamNames :: Nesting lore -> [VName]
-nestingParamNames = map identName . nestingParams
+nestingParams :: Nesting lore -> [Param]
+nestingParams = 
 
 data NestBody lore = Fun (Lambda lore)
                    | NewNest (Nesting lore) (Combinator lore)
@@ -99,7 +101,7 @@ bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
   (e,f) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   bnd <- mkLetNames' bndIds e
   return
-    Lambda { lambdaParams = zipWith Ident (map identName ps) pts
+    Lambda { lambdaParams = zipWith Ident ps pts
            , lambdaReturnType = retTypes
            , lambdaBody = f $ mkBody [bnd] $
                           Result $ map Var bndIds
@@ -114,6 +116,10 @@ data TypedSubExp = TypedSubExp { subExpExp :: SubExp
                                , subExpType :: Type
                                }
                    deriving (Show)
+
+inputFromTypedSubExp :: TypedSubExp -> Maybe SOAC.Input
+inputFromTypedSubExp (TypedSubExp (Var v) t) = Just $ SOAC.identInput $ Ident v t
+inputFromTypedSubExp _                       = Nothing
 
 typedSubExp :: HasTypeEnv f => SubExp -> f TypedSubExp
 typedSubExp se = TypedSubExp se <$> AST.subExpType se
@@ -235,7 +241,7 @@ nested l
       Right soac -- ...the bindee is a SOAC...
         | resultSubExps res == map Var (patternNames pat) ->
           return $ Just (operation soac,
-                         Nesting { nestingParams = lambdaParams l
+                         Nesting { nestingParamNames = map identName $ lambdaParams l
                                  , nestingInputs = inputs soac
                                  , nestingResult = patternNames pat
                                  , nestingReturnType = lambdaReturnType l

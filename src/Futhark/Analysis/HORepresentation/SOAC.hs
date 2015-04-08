@@ -35,6 +35,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   -- * SOAC inputs
   , Input (..)
   , varInput
+  , identInput
   , isVarInput
   , addTransform
   , addTransforms
@@ -247,6 +248,10 @@ instance Substitute Input where
 varInput :: HasTypeEnv f => VName -> f Input
 varInput v = withType <$> lookupTypeM v
   where withType t = Input (ArrayTransforms Seq.empty) $ Var v t
+
+-- | Create a plain array variable input with no transformations, from an 'Ident'.
+identInput :: Ident -> Input
+identInput v = Input (ArrayTransforms Seq.empty) $ Var (identName v) (identType v)
 
 -- | If the given input is a plain variable input, with no transforms,
 -- return the variable.
