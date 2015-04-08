@@ -109,12 +109,12 @@ instance Lore.Lore ExplicitMemory where
     let shapeContextIdents = loopShapeContext res $ map fparamIdent mergevars
         memContextIdents = nub $ mapMaybe memIfNecessary res
         memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
-    in memSizeContextIdents <> memContextIdents <> shapeContextIdents
-    where memIfNecessary ident =
-            case find ((==ident) . fparamIdent) mergevars of
+    in memSizeContextIdents <> map identName memContextIdents <> shapeContextIdents
+    where memIfNecessary var =
+            case find ((==var) . fparamName) mergevars of
               Just fparam | MemSummary mem _ <- fparamLore fparam,
-                            isMergeParam mem ->
-                Just mem
+                            isMergeParam (identName mem) ->
+                Just $ fparamIdent fparam
               _ ->
                 Nothing
           memSizeIfNecessary ident
@@ -123,8 +123,8 @@ instance Lore.Lore ExplicitMemory where
               Just sizeident
             | otherwise =
               Nothing
-          isMergeParam ident =
-            any ((==ident) . fparamIdent) mergevars
+          isMergeParam var =
+            var `elem` map fparamName mergevars
 
   applyRetType _ = applyFunReturns
 
@@ -323,7 +323,7 @@ instance TypeCheck.Checkable ExplicitMemory where
           checkResultSubExp (Constant {}) =
             return ()
           checkResultSubExp (Var v) = do
-            attr <- lookupSummary $ identName v
+            attr <- lookupSummary v
             case attr of
               Scalar -> return ()
               MemSummary _ ixfun
@@ -373,13 +373,13 @@ matchPatternToReturns wrong pat rt = do
     matchBindee bindee (ReturnsMemory size@(Constant {})) =
       matchType bindee $ Mem size
     matchBindee bindee (ReturnsMemory (Var size)) = do
-      popSizeIfInCtx $ identName size
+      popSizeIfInCtx size
       matchType bindee $ Mem $ Var size
     matchBindee bindee (ReturnsArray et shape u rets)
       | MemSummary mem bindeeIxFun <- patElemLore bindee,
         Mem size <- identType mem = do
           case size of
-            Var size' -> popSizeIfInCtx $ identName size'
+            Var size' -> popSizeIfInCtx size'
             _         -> return ()
           case rets of
             Nothing -> return ()
@@ -440,7 +440,7 @@ matchPatternToReturns wrong pat rt = do
           put ctxbindees''
           case patElemType memBindee of
             Mem (Var size) ->
-              popSizeIfInCtx $ identName size
+              popSizeIfInCtx size
             Mem (Constant {}) ->
               return ()
             _ ->
@@ -449,9 +449,9 @@ matchPatternToReturns wrong pat rt = do
           return () -- OK, already seen.
 
     matchArrayDim (Var v) (Free _) =
-      popSizeIfInCtx $ identName v --  *May* be bound here.
+      popSizeIfInCtx v --  *May* be bound here.
     matchArrayDim (Var v) (Ext _) =
-      popSizeFromCtx $ identName v --  *Has* to be bound here.
+      popSizeFromCtx v --  *Has* to be bound here.
     matchArrayDim (Constant {}) (Free _) =
       return ()
     matchArrayDim (Constant {}) (Ext _) =
@@ -548,23 +548,28 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-arrayIdentReturns :: Monad m => (VName -> m MemSummary)
-                  -> Ident -> m (BasicType, Shape, Uniqueness,
-                                 Ident, IxFun.IxFun)
+arrayIdentReturns :: (Monad m, HasTypeEnv m) =>
+                     (VName -> m MemSummary)
+                  -> VName
+                  -> m (BasicType, Shape, Uniqueness,
+                        Ident, IxFun.IxFun)
 arrayIdentReturns look v = do
-  summary <- look $ identName v
-  case (summary, identType v) of
+  summary <- look v
+  t <- lookupTypeM v
+  case (summary, t) of
     (MemSummary mem ixfun, Array et shape u) ->
       return (et, Shape $ shapeDims shape, u,
               mem, ixfun)
     _ ->
       fail $ "arrayIdentReturns: " ++ pretty v ++ " is not an array."
 
-identReturns :: Monad m => (VName -> m MemSummary)
-             -> Ident -> m ExpReturns
-identReturns look v = do
-  summary <- look $ identName v
-  case (summary, identType v) of
+varReturns :: (Monad m, HasTypeEnv m) =>
+              (VName -> m MemSummary)
+           -> VName -> m ExpReturns
+varReturns look v = do
+  summary <- look v
+  t <- lookupTypeM v
+  case (summary, t) of
     (Scalar, Basic bt) ->
       return $ ReturnsScalar bt
     (MemSummary mem ixfun, Array et shape u) ->
@@ -573,12 +578,13 @@ identReturns look v = do
     (Scalar, Mem size) ->
       return $ ReturnsMemory size
     _ ->
-      fail "Something went very wrong in identReturns."
+      fail "Something went very wrong in varReturns."
 
-expReturns :: Monad m => (VName -> m MemSummary) -> Exp -> m [ExpReturns]
+expReturns :: (Monad m, HasTypeEnv m) =>
+              (VName -> m MemSummary) -> Exp -> m [ExpReturns]
 
 expReturns look (AST.PrimOp (SubExp (Var v))) = do
-  r <- identReturns look v
+  r <- varReturns look v
   return [r]
 
 expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
@@ -620,12 +626,12 @@ expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]
 
 expReturns _ (AST.PrimOp op) =
-  return $ extReturns $ staticShapes $ primOpType op
+  extReturns <$> staticShapes <$> primOpType op
 
 expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
     return $
     evalState (mapM typeWithAttr $
-               zip (map identName res) $
+               zip res $
                loopExtType res $ map fparamIdent mergevars) 0
     where typeWithAttr (resname, t) =
             case (t,
@@ -648,7 +654,7 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
           mergevars = map fst merge
 
 expReturns _ (AST.LoopOp op) =
-  return $ extReturns $ loopOpExtType op
+  extReturns <$> loopOpExtType op
 
 expReturns _ (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret
@@ -674,11 +680,10 @@ bodyReturns look ts (AST.Body _ bnds res) = do
         -- FIXME
         fail "bodyReturns: cannot handle bodies returning memory yet."
       inspect (Array et shape u) (Var v) = do
-        let name = identName v
 
         memsummary <- do
-          summary <- case HM.lookup name boundHere of
-            Nothing -> lift $ look name
+          summary <- case HM.lookup v boundHere of
+            Nothing -> lift $ look v
             Just bindee -> return $ patElemLore bindee
 
           case summary of
@@ -687,7 +692,6 @@ bodyReturns look ts (AST.Body _ bnds res) = do
 
             MemSummary mem ixfun -> do
               let memname = identName mem
-
               if memname `HM.member` boundHere then do
                 (i, memmap) <- get
 
@@ -715,7 +719,7 @@ boundInBindings (bnd:bnds) =
 
 applyFunReturns :: [FunReturns]
                 -> [FParam]
-                -> [SubExp]
+                -> [(SubExp,Type)]
                 -> Maybe [FunReturns]
 applyFunReturns rets params args
   | Just _ <- applyExtType rettype (map fparamIdent params) args =
@@ -723,12 +727,12 @@ applyFunReturns rets params args
   | otherwise =
     Nothing
   where rettype = ExtRetType $ map returnsToType rets
-        parammap :: HM.HashMap VName SubExp
+        parammap :: HM.HashMap VName (SubExp, Type)
         parammap = HM.fromList $
                    zip (map fparamName params) args
 
         substSubExp (Var v)
-          | Just se <- HM.lookup (identName v) parammap = se
+          | Just (se,_) <- HM.lookup v parammap = se
         substSubExp se = se
 
         correctDims (ReturnsScalar t) =
@@ -749,8 +753,8 @@ applyFunReturns rets params args
           -- FIXME: we should also do a replacement in ixfun here.
           ReturnsInBlock mem' ixfun
           where mem' = case HM.lookup (identName mem) parammap of
-                  Just (Var v) -> v
-                  _            -> mem
+                  Just (Var v, t) -> Ident v t
+                  _               -> mem
 
 -- | The size of a basic type in bytes.
 basicSize :: BasicType -> Int

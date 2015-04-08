@@ -42,19 +42,22 @@ instance MonadBinder AllocM where
   mkLetM pat e = return $ Let pat () e
 
   mkLetNamesM names e = do
-    (ts',sizes) <- instantiateShapes' $ expExtType e
+    (ts',sizes) <- instantiateShapes' =<< expExtType e
     let identForBindage name t BindVar =
-          (Ident name t, BindVar)
-        identForBindage name _ bindage@(BindInPlace _ src _) =
-          (Ident name (identType src), bindage)
-        vals = [ identForBindage name t bindage  |
-                 ((name,bindage), t) <- zip names ts' ]
+          pure (Ident name t, BindVar)
+        identForBindage name _ bindage@(BindInPlace _ src _) = do
+          t <- lookupTypeM src
+          pure (Ident name t, bindage)
+    vals <- sequence [ identForBindage name t bindage  |
+                       ((name,bindage), t) <- zip names ts' ]
     basicMkLetM sizes vals e
 
   mkBodyM bnds res = return $ Body () bnds res
 
   addBinding = addBindingWriter
   collectBindings = collectBindingsWriter
+
+instance HasTypeEnv AllocM where
 
 instance MonadFreshNames AllocM where
   getNameSource = AllocM $ lift getNameSource
@@ -77,7 +80,7 @@ allocForArray t = do
     (intconst (basicSize $ elemType t)) $
     arrayDims t
   m <- letExp "mem" $ PrimOp $ Alloc size
-  return (size, m)
+  return (size, Ident m $ Mem size)
 
 allocsForBinding :: [Ident] -> [(Ident,Bindage)] -> Exp
                  -> AllocM (Binding, [Binding])
@@ -106,7 +109,7 @@ allocsForPattern sizeidents validents rts = do
           BindVar ->
             return $ PatElem ident bindage $ MemSummary mem ixfun
           BindInPlace _ src is -> do
-            (destmem,destixfun) <- lift $ lookupArraySummary' $ identName src
+            (destmem,destixfun) <- lift $ lookupArraySummary' src
             if destmem ==  mem && destixfun == ixfun then
               return $ PatElem ident bindage $ MemSummary mem ixfun
               else do
@@ -121,7 +124,7 @@ allocsForPattern sizeidents validents rts = do
               tell ([], [],
                     [Let (Pattern [PatElem ident bindage $
                                    MemSummary destmem destixfun]) () $
-                     PrimOp $ Copy $ Var ident'])
+                     PrimOp $ Copy $ Var $ identName ident'])
               return $ PatElem ident' BindVar $
                 MemSummary mem ixfun
 
@@ -151,7 +154,7 @@ summaryForBindage t BindVar
     (_, m) <- allocForArray t
     return $ directIndexFunction m t
 summaryForBindage _ (BindInPlace _ src _) =
-  lookupSummary' $ identName src
+  lookupSummary' src
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
@@ -160,7 +163,7 @@ memForBindee :: (MonadFreshNames m) =>
                    (Ident, MemSummary))
 memForBindee ident = do
   size <- newIdent (memname <> "_size") (Basic Int)
-  mem <- newIdent memname $ Mem $ Var size
+  mem <- newIdent memname $ Mem $ Var $ identName size
   return (size,
           mem,
           (ident, directIndexFunction mem t))
@@ -180,8 +183,8 @@ computeSize current (x:xs) = do
   v <- letSubExp "x" e
   computeSize v xs
 
-lookupSummary :: Ident -> AllocM (Maybe MemSummary)
-lookupSummary = asks . HM.lookup . identName
+lookupSummary :: VName -> AllocM (Maybe MemSummary)
+lookupSummary = asks . HM.lookup
 
 lookupSummary' :: VName -> AllocM MemSummary
 lookupSummary' name = do
@@ -232,7 +235,7 @@ allocInFParams params m = do
       params' = memsizeparams <> memparams <> valparams
   local (summary `HM.union`) $ m params'
 
-ensureDirectArray :: Ident -> AllocM (SubExp, Ident, SubExp)
+ensureDirectArray :: VName -> AllocM (SubExp, Ident, SubExp)
 ensureDirectArray v = do
   res <- lookupSummary v
   case res of
@@ -243,17 +246,17 @@ ensureDirectArray v = do
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
-      allocLinearArray (baseString $ identName v) $ Var v
+      allocLinearArray (baseString v) $ Var v
 
 allocLinearArray :: String
                  -> SubExp -> AllocM (SubExp, Ident, SubExp)
 allocLinearArray s se = do
+  t <- subExpType se
   (size, mem) <- allocForArray t
   v' <- newIdent s t
   let pat = Pattern [PatElem v' BindVar $ directIndexFunction mem t]
   addBinding $ Let pat () $ PrimOp $ Copy se
-  return (size, mem, Var v')
-  where t = subExpType se
+  return (size, mem, Var $ identName v')
 
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
 funcallArgs args = do
@@ -261,7 +264,7 @@ funcallArgs args = do
     case (arg, subExpType arg) of
       (Var v, Array {}) -> do
         (size, mem, arg') <- lift $ ensureDirectArray v
-        tell ([(size, Observe)], [(Var mem, Observe)])
+        tell ([(size, Observe)], [(Var $ identName mem, Observe)])
         return (arg', d)
       _ ->
         return (arg, d)
@@ -297,10 +300,12 @@ allocInBody (Body _ bnds res) =
     (ses, allocs) <- collectBindings $ mapM ensureDirect $ resultSubExps res
     return $ Body () (bnds'<>allocs) res { resultSubExps = ses }
   where ensureDirect se@(Constant {}) = return se
-        ensureDirect (Var v)
-          | basicType $ identType v = return $ Var v
-          | otherwise = do (_, _, v') <- ensureDirectArray v
-                           return v'
+        ensureDirect (Var v) = do
+          bt <- basicType <$> lookupTypeM v
+          if bt
+            then return $ Var v
+            else do (_, _, v') <- ensureDirectArray v
+                    return v'
 
 allocInBindings :: [In.Binding] -> ([Binding] -> AllocM a)
                 -> AllocM a
@@ -348,7 +353,7 @@ allocInExp (LoopOp (DoLoop res merge form
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge
         formBinds (ForLoop i _) =
-          local (HM.singleton (identName i) Scalar<>)
+          local (HM.singleton i Scalar<>)
         formBinds (WhileLoop _) =
           id
 allocInExp (LoopOp (Map {})) =
@@ -413,9 +418,10 @@ simplifiable =
           return $ mkWiseLetBinding pat' lore e
           where env = vtableToAllocEnv vtable
 
-        simplifyMemSummary Scalar = return Scalar
+        simplifyMemSummary Scalar =
+          return Scalar
         simplifyMemSummary (MemSummary ident ixfun) =
-          MemSummary <$> Engine.simplifyIdent ident <*> pure ixfun
+          MemSummary <$> Engine.simplifyVName ident <*> pure ixfun
 
         simplifyRetType' = mapM simplifyReturns
           where simplifyReturns (ReturnsScalar bt) =
@@ -430,5 +436,5 @@ simplifiable =
                 simplifyMemReturn (ReturnsNewBlock i) =
                   return $ ReturnsNewBlock i
                 simplifyMemReturn (ReturnsInBlock v ixfun) =
-                  ReturnsInBlock <$> Engine.simplifyIdent v <*>
+                  ReturnsInBlock <$> Engine.simplifyVName v <*>
                   pure ixfun
