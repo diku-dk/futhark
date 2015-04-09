@@ -16,6 +16,7 @@ module Futhark.Representation.Aliases
        , Pattern
        , PrimOp
        , LoopOp
+       , SegOp
        , Exp
        , Lambda
        , ExtLambda
@@ -33,6 +34,7 @@ module Futhark.Representation.Aliases
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
+       , AST.ExpT(SegOp)
        , AST.FunDecT(FunDec)
          -- * Adding aliases
        , addAliasesToPattern
@@ -63,7 +65,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
@@ -138,6 +140,7 @@ instance Ranged lore => Ranged (Aliases lore) where
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
 type LoopOp lore = AST.LoopOp (Aliases lore)
+type SegOp lore = AST.SegOp (Aliases lore)
 type Exp lore = AST.Exp (Aliases lore)
 type Body lore = AST.Body (Aliases lore)
 type Binding lore = AST.Binding (Aliases lore)

@@ -894,12 +894,26 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
                                    " cannot specify an inner result shape"
                 _ -> return True
 
+checkSegOp :: Checkable lore =>
+              SegOp lore -> TypeM lore ()
+
+checkSegOp (SegReduce ass fun inputs descp_exp) = do
+  descp_arg <- checkArg $ Var descp_exp
+  let descp_tp = argType descp_arg
+  unless (elemType descp_tp == Int) $
+    bad $ TypeError noLoc $
+    "Array descriptor is of type " ++ pretty descp_tp ++
+    ", but should be [Int]"
+  checkLoopOp $ Reduce ass fun inputs
+
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()
 
 checkExp (PrimOp op) = checkPrimOp op
 
 checkExp (LoopOp op) = checkLoopOp op
+
+checkExp (SegOp op) = checkSegOp op
 
 checkExp (If e1 e2 e3 ts) = do
   require [Basic Bool] e1

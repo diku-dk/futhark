@@ -540,6 +540,8 @@ simplifyExp (If cond tbranch fbranch ts) = do
 
 simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
 
+simplifyExp (SegOp op) = SegOp <$> simplifySegOp op
+
 simplifyExp e = simplifyExpBase e
 
 simplifyExpBase :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
@@ -677,6 +679,16 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
                (arrparams', arrinps') ->
                  return (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
           | otherwise = return (lam, arrinps)
+
+simplifySegOp :: MonadEngine m => SegOp (InnerLore m) -> m (SegOp (Lore m))
+simplifySegOp (SegReduce cs fun input descp) = do
+  let (acc, arrs) = unzip input
+  cs' <- simplifyCerts cs
+  acc' <- mapM simplifySubExp acc
+  arrs' <- mapM simplifyIdent arrs
+  fun' <- simplifyLambda fun $ map Just arrs'
+  descp' <- simplifyIdent descp
+  return $ SegReduce cs' fun' (zip acc' arrs') descp'
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
 simplifySubExp (Var name) = do

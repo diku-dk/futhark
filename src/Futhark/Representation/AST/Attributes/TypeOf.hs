@@ -131,12 +131,17 @@ loopOpExtType (Stream _ accs arrs lam) =
         result _ =
           error "loopOpExtType for Stream went wrong.  Ask Cosmin why."
 
+segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
+segOpExtType (SegReduce _ fun _ descp) =
+  staticShapes <$> mapType fun <$> pure <$> lookupTypeM descp
+
 expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
 expExtType (LoopOp op)    = loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
+expExtType (SegOp op)    = segOpExtType op
 
 expExtTypeSize :: Exp lore -> Int
 expExtTypeSize = undefined

@@ -55,6 +55,10 @@ overboard.  The functions `inputs`, `lambda` and `certificates` in
 pointless use of alignment, and are retained to serve as a reminder of
 this.
 
+If in doubt, don't align.  Spurious alignment makes the code feel weird
+and off-key, and it can be remarkably ugly when not maintained.  Alignment
+in expressions is usually a bad idea.
+
 ### Blank Lines
 
 One blank line between top-level definitions.  No blank lines between
@@ -400,6 +404,11 @@ Never use Literate Haskell.
 Code should be compilable with `-Wall -Werror`. There should be no
 warnings.  `hlint` should not complain (except for a few rules that we
 have disabled - see `tools/style-check.sh`).
+
+### Braces and semicolons
+
+Never use braces and semicolons - always use whitespace-based layout
+instead (except for generated code).
 
 Design Rules
 ============
