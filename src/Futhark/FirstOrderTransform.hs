@@ -83,7 +83,7 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
         ms <- mapM (liftM (arraySize 0) . lookupType) arrs'
         ressize <- letSubExp "concatMap_result_size" =<<
                    foldl plus
-                   (pure $ PrimOp $ SubExp $ n)
+                   (pure $ PrimOp $ SubExp n)
                    (map (pure . PrimOp . SubExp) ms)
         res <- letSubExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
         return $ PrimOp $ Copy res
@@ -192,7 +192,7 @@ newFold :: [SubExp]
 newFold accexps = do
   i <- newVName "i"
   initacc <- letSubExps "acc" $ map (PrimOp . Copy) accexps
-  acc <- forM accexps $ \e -> newIdent "acc" =<< subExpType e
+  acc <- mapM (newIdent "acc" <=< subExpType) accexps
   return ((acc, initacc), i)
 
 index :: Certificates -> [VName] -> SubExp -> [Exp]
@@ -333,8 +333,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                     newIdent (nm++"_resL") $ t `setUniqueness` Unique
   strmresarr <- forM (zip exactrtps patarrnms) $ \(t,nm) ->
                     newIdent (nm++"_resE") $ t `setUniqueness` Unique
-  strmresacc <- forM accexps $ \a ->
-                    newIdent "stream_accres" =<< subExpType a
+  strmresacc <- mapM (newIdent "stream_accres" <=< subExpType) accexps
   -- various stream array identifiers and outer sizes
   inarrVsz <- newIdent "stream_cursize" $ Basic Int
   inarrNsz <- newIdent "stream_nxtsize" $ Basic Int
@@ -350,7 +349,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
           id2 <- newIdent (anm++"_inloop2") t2
           return (id1, id2)
   let (inarrsloop1, inarrsloop2) = unzip bothinarrsloop
-  acc0     <- forM accexps $ \e -> newIdent "acc" =<< subExpType e
+  acc0     <- mapM (newIdent "acc" <=< subExpType) accexps
   loopind  <- newVName "stream_i"
   loopcnt  <- newIdent "stream_N" $ Basic Int
   -- 3.) Transform the stream's lambda to a loop body
@@ -600,7 +599,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
             -- make loop
             let loopres = LoopOp $ DoLoop [identName glboutLid]
                                     (loopMerge [glboutLid] [Var $ identName glboutid'])
-                                    (ForLoop loopid (locoutid_size)) loopbody
+                                    (ForLoop loopid locoutid_size) loopbody
             addBinding $ myMkLet loopres glboutBdId
             return (malloc', mind', glboutBdId)
 transformStreamExp _ _ =
