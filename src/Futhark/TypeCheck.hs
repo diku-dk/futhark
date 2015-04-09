@@ -241,11 +241,22 @@ alternative m1 m2 = pass $ do
   let usage = Dataflow $ occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
 
--- | Make all bindings nonunique.
-noUnique :: TypeM lore a -> TypeM lore a
-noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
-  where f (Bound t attr names) = Bound (t `setUniqueness` Nonunique) attr names
-        f WasConsumed          = WasConsumed
+-- | Ban consumption of anything free.
+noConsume :: TypeM lore a -> TypeM lore a
+noConsume m = do
+  (x, dflow) <- collectDataflow m
+  tell dflow
+  mapM_ nothingConsumed $ usageOccurences dflow
+  return x
+  where nothingConsumed occurence
+          | HS.null cons =
+            return ()
+          | otherwise =
+              bad $ TypeError noLoc $
+              "Variables " ++
+              intercalate ", " (map pretty $ HS.toList cons) ++
+              " consumed inside loop."
+          where cons = consumed occurence
 
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
@@ -735,7 +746,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
 
   let rettype   = map fparamType mergepat
 
-  noUnique $ checkFun' (nameFromString "<loop body>",
+  noConsume $ checkFun' (nameFromString "<loop body>",
                         staticShapes rettype,
                         funParamsToIdentsAndLores funparams,
                         loopbody) $ do
@@ -1167,7 +1178,7 @@ checkLambda (Lambda params body ret) args = do
   mapM_ checkType ret
   if length params == length args then do
     checkFuncall Nothing (map identType params) args
-    noUnique $ checkAnonymousFun
+    noConsume $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
@@ -1182,7 +1193,7 @@ checkConcatMapLambda (Lambda params body rettype) args = do
                  | t <- staticShapes rettype ]
   if length elemparams == length args then do
     checkFuncall Nothing (map identType elemparams) args
-    noUnique $ checkFun' (fname,
+    noConsume $ checkFun' (fname,
                           rettype',
                           [ (param, LambdaBound) | param <- params ],
                           body) $
@@ -1197,7 +1208,7 @@ checkExtLambda (ExtLambda params body rettype) args =
   if length params == length args then do
     checkFuncall Nothing (map identType params) args
     let fname = nameFromString "<anonymous>"
-    noUnique $ checkFun' (fname,
+    noConsume $ checkFun' (fname,
                           rettype,
                           [ (param, LambdaBound) | param <- params ],
                           body) $

@@ -171,7 +171,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
   mergeparams <- map E.toParam <$> flattenPattern mergepat
   (form', loopbody', shapepat, mergepat', res, mergeinit') <-
-    withNonuniqueReplacements $ bindingParams mergeparams $ \shapepat mergepat' -> do
+    bindingParams mergeparams $ \shapepat mergepat' -> do
       loopbody' <- internaliseBody loopbody
       let Result ses = bodyResult loopbody'
           shapeargs = argShapes
@@ -374,8 +374,7 @@ internaliseExp desc (E.Concat x ys loc) = do
 
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToIdents "map_arr" arr
-  lam' <- withNonuniqueReplacements $
-          internaliseMapLambda internaliseLambda lam $ map I.Var arrs
+  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs
   letTupExp' desc $ I.LoopOp $ I.Map [] lam' arrs
 
 internaliseExp desc (E.Reduce lam ne arr loc) = do
@@ -384,8 +383,7 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   nes' <- forM (zip nes arrs) $ \(ne', arr') ->
     ensureShape loc (I.stripArray 1 $ I.identType arr')
       "scan_ne_right_shape" ne'
-  lam' <- withNonuniqueReplacements $
-          internaliseFoldLambda internaliseLambda lam
+  lam' <- internaliseFoldLambda internaliseLambda lam
           (map I.subExpType nes') (map I.identType arrs)
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Reduce [] lam' input
@@ -396,16 +394,14 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   nes' <- forM (zip nes arrs) $ \(ne', arr') ->
     ensureShape loc (I.stripArray 1 $ I.identType arr')
       "scan_ne_right_shape" ne'
-  lam' <- withNonuniqueReplacements $
-          internaliseFoldLambda internaliseLambda lam
+  lam' <- internaliseFoldLambda internaliseLambda lam
           (map I.subExpType nes') (map I.identType arrs)
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Scan [] lam' input
 
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToIdents "filter_input" arr
-  lam' <- withNonuniqueReplacements $
-           internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
+  lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   forM arrs $ \arr' -> do
     filter_size <- newIdent "filter_size" $ I.Basic Int
@@ -417,8 +413,7 @@ internaliseExp desc (E.Filter lam arr _) = do
 
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToIdents "partition_input" arr
-  lam' <- withNonuniqueReplacements $
-           internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
+  lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
@@ -436,11 +431,9 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   let outersize   = arraysSize 0 $ map I.identType arrs'
   let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
                         | t <- acc_tps ]
-  lam1' <- withNonuniqueReplacements $
-           internaliseFoldLambda internaliseLambda lam1
+  lam1' <- internaliseFoldLambda internaliseLambda lam1
            (map I.subExpType nes) acc_arr_tps
-  lam2' <- withNonuniqueReplacements $
-           internaliseRedomapInnerLambda internaliseLambda lam2
+  lam2' <- internaliseRedomapInnerLambda internaliseLambda lam2
            nes (map I.Var arrs')
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
@@ -450,16 +443,15 @@ internaliseExp desc (E.Stream chunk i acc arr lam _) = do
   accs' <- internaliseExp "stream_accs" acc
   let chunkiparams = map E.toParam [chunk,i]
   (lam', chunk', i') <-
-      withNonuniqueReplacements $ bindingParams chunkiparams $ \_ mergepat' -> do
+      bindingParams chunkiparams $ \_ mergepat' -> do
             let [chunk'', i'']  = mergepat'
             let lam_arrs' = [ I.arrayOf t (Shape [I.Var chunk'']) (I.uniqueness t)
                               | t <- map (\aar-> let (I.Array bt s u) = I.identType aar
                                                  in  I.Array bt (I.stripDims 1 s) u
                                          ) arrs'
                             ]
-            lam'' <- withNonuniqueReplacements $
-                        internaliseStreamLambda internaliseLambda lam
-                        accs' lam_arrs'
+            lam'' <- internaliseStreamLambda internaliseLambda lam
+                     accs' lam_arrs'
             return (lam'', chunk'', i'')
   let params' = extLambdaParams lam'
   let res_lam = ExtLambda (chunk':i':params') (I.extLambdaBody lam') (I.extLambdaReturnType lam')
@@ -469,8 +461,7 @@ internaliseExp desc (E.Stream chunk i acc arr lam _) = do
 internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arr' <- internaliseExpToIdents "concatMap_arr" arr
   arrs' <- mapM (internaliseExpToIdents "concatMap_arr") arrs
-  lam' <- withNonuniqueReplacements $
-          internaliseConcatMapLambda internaliseLambda lam
+  lam' <- internaliseConcatMapLambda internaliseLambda lam
   letTupExp' desc $ I.LoopOp $ I.ConcatMap [] lam' $ arr':arrs'
 
 

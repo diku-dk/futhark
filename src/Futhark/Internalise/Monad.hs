@@ -9,7 +9,6 @@ module Futhark.Internalise.Monad
   , InternaliseEnv(..)
   , FunBinding (..)
   , lookupFunction
-  , withNonuniqueReplacements
   )
   where
 
@@ -105,8 +104,3 @@ lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
   case fun of Nothing   -> fail $ "Function '" ++ nameToString fname ++ "' not found"
               Just fun' -> return fun'
-
-withNonuniqueReplacements :: InternaliseM a -> InternaliseM a
-withNonuniqueReplacements = local $ \env ->
-  env { envSubsts = HM.map (map makeNonunique) $ envSubsts env }
-  where makeNonunique = (`setIdentUniqueness` Nonunique)
