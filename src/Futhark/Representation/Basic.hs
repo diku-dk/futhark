@@ -132,7 +132,7 @@ instance Bindable Basic where
         mkValElem (name, BindVar) t =
           return $ AST.PatElem (Ident name t) BindVar ()
         mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
-          srct <- lookupTypeM src
+          srct <- lookupType src
           return $ AST.PatElem (Ident name srct) bindage ()
     valElems <- zipWithM mkValElem names ts
     return $ AST.Let (AST.Pattern $ shapeElems++valElems) () e

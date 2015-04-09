@@ -76,8 +76,8 @@ ensureShapeVar :: MonadBinder m =>
                  -> m VName
 ensureShapeVar loc t name v
   | Array{} <- t = do
-    newshape <- arrayDims <$> removeExistentials t <$> lookupTypeM v
-    oldshape <- arrayDims <$> lookupTypeM v
+    newshape <- arrayDims <$> removeExistentials t <$> lookupType v
+    oldshape <- arrayDims <$> lookupType v
     let checkDim desired has =
           letExp "shape_cert" =<<
           eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc

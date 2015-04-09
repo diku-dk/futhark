@@ -313,7 +313,7 @@ externaliseIdent (I.Ident name t) =
 
 externaliseVar :: I.VName -> ExternaliseM E.Ident
 externaliseVar name = do
-  t <- lookupTypeM name
+  t <- lookupType name
   return $ E.Ident name (externaliseType t) noLoc
 
 maybeUnzip :: E.Exp -> E.Exp

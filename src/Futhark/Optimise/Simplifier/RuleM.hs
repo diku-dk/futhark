@@ -26,7 +26,7 @@ instance MonadFreshNames m => MonadFreshNames (RuleM m) where
   putNameSource = RuleM . lift . putNameSource
 
 instance (Monad m, HasTypeEnv m) => HasTypeEnv (RuleM m) where
-  lookupTypeM = RuleM . lift . lookupTypeM
+  lookupType = RuleM . lift . lookupType
   askTypeEnv  = RuleM . lift $ askTypeEnv
 
 instance MonadBinder m => MonadBinder (RuleM m) where

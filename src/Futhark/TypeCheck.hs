@@ -14,7 +14,6 @@ module Futhark.TypeCheck
   , Checkable (..)
   , module Futhark.TypeCheck.TypeError
   , lookupVar
-  , lookupType
   , VarBindingLore (..)
     -- * Checkers
   , require
@@ -172,7 +171,8 @@ newtype TypeM lore a = TypeM (RWST
             MonadState VNameSource)
 
 instance HasTypeEnv (TypeM lore) where
-  lookupTypeM = lookupType
+  lookupType name = do (t, _, _) <- lookupVar name
+                       return t
   askTypeEnv = undefined
 
 runTypeM :: TypeEnv lore -> NameSource VName -> TypeM lore a
@@ -328,10 +328,6 @@ lookupVar name = do
     Nothing -> bad $ UnknownVariableError name noLoc
     Just (Bound t lore names) -> return (t, lore, names)
     Just WasConsumed          -> bad $ UseAfterConsume name noLoc noLoc
-
-lookupType :: VName -> TypeM lore Type
-lookupType name = do (t, _, _) <- lookupVar name
-                     return t
 
 lookupAliases :: VName -> TypeM lore Names
 lookupAliases name = do (_, _, als) <- lookupVar name

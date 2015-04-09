@@ -246,7 +246,7 @@ instance Substitute Input where
 
 -- | Create a plain array variable input with no transformations.
 varInput :: HasTypeEnv f => VName -> f Input
-varInput v = withType <$> lookupTypeM v
+varInput v = withType <$> lookupType v
   where withType t = Input (ArrayTransforms Seq.empty) $ Var v t
 
 -- | Create a plain array variable input with no transformations, from an 'Ident'.
@@ -293,11 +293,11 @@ inputsToSubExps = mapM inputToExp'
           letExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia
 
         transform ia (ReshapeOuter cs shape) = do
-          shape' <- reshapeOuter shape 1 <$> arrayShape <$> lookupTypeM ia
+          shape' <- reshapeOuter shape 1 <$> arrayShape <$> lookupType ia
           letExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia
 
         transform ia (ReshapeInner cs shape) = do
-          shape' <- reshapeInner shape 1 <$> arrayShape <$> lookupTypeM ia
+          shape' <- reshapeInner shape 1 <$> arrayShape <$> lookupType ia
           letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia
 
 -- | If the input is a (possibly rearranged, reshaped or otherwise

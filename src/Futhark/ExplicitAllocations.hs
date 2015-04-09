@@ -46,7 +46,7 @@ instance MonadBinder AllocM where
     let identForBindage name t BindVar =
           pure (Ident name t, BindVar)
         identForBindage name _ bindage@(BindInPlace _ src _) = do
-          t <- lookupTypeM src
+          t <- lookupType src
           pure (Ident name t, bindage)
     vals <- sequence [ identForBindage name t bindage  |
                        ((name,bindage), t) <- zip names ts' ]
@@ -242,7 +242,7 @@ isArray (Constant _) = return False
 ensureDirectArray :: VName -> AllocM (SubExp, VName, SubExp)
 ensureDirectArray v = do
   res <- lookupSummary v
-  t <- lookupTypeM v
+  t <- lookupType v
   case (res, t) of
     (Just (MemSummary mem ixfun), Mem size)
       | IxFun.isDirect ixfun ->
@@ -306,7 +306,7 @@ allocInBody (Body _ bnds res) =
     return $ Body () (bnds'<>allocs) res { resultSubExps = ses }
   where ensureDirect se@(Constant {}) = return se
         ensureDirect (Var v) = do
-          bt <- basicType <$> lookupTypeM v
+          bt <- basicType <$> lookupType v
           if bt
             then return $ Var v
             else do (_, _, v') <- ensureDirectArray v

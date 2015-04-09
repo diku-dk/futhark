@@ -17,10 +17,10 @@ import Futhark.Representation.AST.Syntax.Core
 type TypeEnv = HM.HashMap VName Type
 
 class Applicative m => HasTypeEnv m where
-  lookupTypeM :: VName -> m Type
-  lookupTypeM name =
+  lookupType :: VName -> m Type
+  lookupType name =
     maybe notFound id <$> HM.lookup name <$> askTypeEnv
-    where notFound = error $ "lookupTypeM: Name " ++ textual name ++
+    where notFound = error $ "lookupType: Name " ++ textual name ++
                      " not found in type environment."
 
   askTypeEnv :: m TypeEnv

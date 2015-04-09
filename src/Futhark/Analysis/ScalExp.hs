@@ -116,7 +116,7 @@ scalExpType (Val val) =
   error $ "scalExpType: scalar exp cannot have type " ++
           pretty (basicValueType val) ++ "."
 scalExpType (Id idd) =
-  withType <$> lookupTypeM idd
+  withType <$> lookupType idd
   where withType (Basic bt) = bt
         withType t          = error $ "scalExpType: var " ++ pretty idd ++
                               " in scalar exp cannot have type " ++

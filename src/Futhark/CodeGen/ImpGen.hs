@@ -325,7 +325,7 @@ defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e) = do
   where e' = compileSubExp e
 
 defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
-  t <- lookupTypeM src
+  t <- lookupType src
   when (length idxs == arrayRank t ) $ do
     (srcmem, srcoffset) <-
       fullyIndexArray src $ map SE.subExpToScalExp idxs
@@ -376,7 +376,7 @@ defCompilePrimOp _ (Split {}) =
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory (MemLocation destmem destshape destixfun)) _])
   (Concat _ x ys _) = do
-    et <- elemType <$> lookupTypeM x
+    et <- elemType <$> lookupType x
     offs_glb <- newVName "tmp_offs"
     emit $ Imp.DeclareScalar offs_glb Int
     emit $ Imp.SetScalar offs_glb $ Imp.Constant $ IntVal 0
@@ -421,8 +421,8 @@ defCompilePrimOp (Destination dests) (Partition _ n flags values)
     Just sizenames <- mapM fromScalarDestination sizedests,
     [ArrayDestination (CopyIntoMemory destloc) _] <- arrdest = do
   i <- newVName "i"
-  et <- elemType <$> lookupTypeM values
-  outer_dim <- compileSubExp <$> arraySize 0 <$> lookupTypeM flags
+  et <- elemType <$> lookupType values
+  outer_dim <- compileSubExp <$> arraySize 0 <$> lookupType flags
   -- We will use 'i' to index the flag array and the value array.
   -- Note that they have the same outer size ('outer_dim').
   srcloc <- arrayLocation values
@@ -660,7 +660,7 @@ compileResultSubExp (MemoryDestination {}) (Constant {}) =
   fail "Memory destination result subexpression cannot be a constant."
 
 compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
-  et <- elemType <$> lookupTypeM v
+  et <- elemType <$> lookupType v
   arr <- lookupArray v
   let MemLocation srcmem srcshape srcixfun = entryArrayLocation arr
       arrsize = arrayByteSizeExp arr

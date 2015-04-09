@@ -607,7 +607,7 @@ simplifyLoopOp (Stream cs acc arr lam) = do
   acc' <- mapM simplifySubExp acc
   arr' <- mapM simplifyVName  arr
   vtab <- getVtable
-  outerdim <- arraysSize 0 <$> mapM lookupTypeM arr
+  outerdim <- arraysSize 0 <$> mapM lookupType arr
   let (chunk:i:_) = extLambdaParams lam
       se_outer = case outerdim of
                     Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp idd vtab)
@@ -668,7 +668,7 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
                  -- changing semantics.  Ideally, we should pick the
                  -- "simplest" size instead of just the one of the
                  -- first array, but I do not think it matters much.
-                 outerSize <- arraySize 0 <$> lookupTypeM firstarr
+                 outerSize <- arraySize 0 <$> lookupType firstarr
                  input <- newVName "unused_input"
                  letBindNames'_ [input] $
                    PrimOp $ Iota outerSize

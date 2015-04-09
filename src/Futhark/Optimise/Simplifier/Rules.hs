@@ -76,7 +76,7 @@ basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 liftIdentityMapping :: MonadBinder m => TopDownRule m
 liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
-  outersize <- arraysSize 0 <$> mapM lookupTypeM arrs
+  outersize <- arraysSize 0 <$> mapM lookupType arrs
   case foldr (checkInvariance outersize) ([], [], []) $
        zip3 (patternElements pat) ses rettype of
     ([], _, _) -> cannotSimplify
@@ -123,7 +123,7 @@ liftIdentityMapping _ _ = cannotSimplify
 removeReplicateMapping :: MonadBinder m => TopDownRule m
 removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
   | not $ null parameterBnds = do
-  n <- arraysSize 0 <$> mapM lookupTypeM arrs
+  n <- arraysSize 0 <$> mapM lookupType arrs
   let (params, arrs') = unzip paramsAndArrs
       fun' = fun { lambdaParams = params }
       -- Empty maps are not permitted, so if that would be the result,

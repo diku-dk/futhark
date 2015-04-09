@@ -199,10 +199,10 @@ instance MonadFreshNames ForwardingM where
   putNameSource = put
 
 instance HasTypeEnv ForwardingM where
-  lookupTypeM name = do
+  lookupType name = do
     res <- liftM entryType <$> asks (HM.lookup name . topDownTable)
     case res of
-      Nothing -> fail $ "lookupTypeM: variable " ++ pretty name ++ " not found."
+      Nothing -> fail $ "lookupType: variable " ++ pretty name ++ " not found."
       Just t  -> return t
 
 runForwardingM :: VNameSource -> ForwardingM a -> a
@@ -300,7 +300,7 @@ maybeForward v dest cs src i = do
   samebody <- isInCurrentBody v
   -- Check condition (6)
   optimisable <- isOptimisable v
-  not_basic <- not <$> basicType <$> lookupTypeM v
+  not_basic <- not <$> basicType <$> lookupType v
   if available && certs_available && samebody && optimisable && not_basic then do
     let fwd = DesiredUpdate dest cs src [i] v
     tell mempty { forwardThese = [fwd] }

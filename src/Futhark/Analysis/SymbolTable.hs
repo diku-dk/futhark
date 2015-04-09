@@ -49,7 +49,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (elem, lookup)
 
-import Futhark.Representation.AST hiding (FParam, FParamT (..), fparamType)
+import Futhark.Representation.AST hiding (FParam, FParamT (..), fparamType, lookupType)
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp

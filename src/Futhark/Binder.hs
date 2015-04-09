@@ -65,7 +65,7 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   putNameSource = lift . putNameSource
 
 instance MonadFreshNames m => HasTypeEnv (BinderT lore m) where
-  lookupTypeM name = do
+  lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
     case t of
       Nothing -> fail $ "Unknown variable " ++ pretty name

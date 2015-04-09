@@ -470,7 +470,7 @@ checkMemSummary :: MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()
 checkMemSummary Scalar = return ()
 checkMemSummary (MemSummary v ixfun) = do
-  t <- TypeCheck.lookupType v
+  t <- lookupType v
   case t of
     Mem size ->
       TypeCheck.require [Basic Int] size
@@ -551,7 +551,7 @@ arrayVarReturns :: (Monad m, HasTypeEnv m) =>
                         VName, IxFun.IxFun)
 arrayVarReturns look v = do
   summary <- look v
-  t <- lookupTypeM v
+  t <- lookupType v
   case (summary, t) of
     (MemSummary mem ixfun, Array et shape u) ->
       return (et, Shape $ shapeDims shape, u,
@@ -564,7 +564,7 @@ varReturns :: (Monad m, HasTypeEnv m) =>
            -> VName -> m ExpReturns
 varReturns look v = do
   summary <- look v
-  t <- lookupTypeM v
+  t <- lookupType v
   case (summary, t) of
     (Scalar, Basic bt) ->
       return $ ReturnsScalar bt

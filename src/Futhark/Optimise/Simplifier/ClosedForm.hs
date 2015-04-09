@@ -54,7 +54,7 @@ foldClosedForm look pat lam accs arrs = do
   closedBody <- checkResults (patternNames pat) knownBindings
                 (lambdaParams lam) (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
-  inputsize <- arraysSize 0 <$> mapM lookupTypeM arrs
+  inputsize <- arraysSize 0 <$> mapM lookupType arrs
   letBindNames'_ [isEmpty] $
     PrimOp $ BinOp Equal inputsize (intconst 0) Bool
   letBind_ pat =<<

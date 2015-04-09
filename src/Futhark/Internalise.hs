@@ -124,7 +124,7 @@ internaliseExp desc (E.ArrayLit [] et _) =
 internaliseExp desc (E.ArrayLit es rowtype _) = do
   aes <- mapM (internaliseExpToVars "arr_elem") es
   let es'@((e':_):_) = aes --- XXX, ugh.
-  Shape rowshape <- arrayShape <$> lookupTypeM e'
+  Shape rowshape <- arrayShape <$> lookupType e'
   case internaliseType rowtype of
     [et] -> letTupExp' desc $ I.PrimOp $
             I.ArrayLit (map I.Var $ concat es')
@@ -251,12 +251,12 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   ves <- internaliseExp "lw_val" ve
   idxcs' <- boundsChecks loc srcs idxs'
   let comb sname ve' = do
-        rowtype <- I.stripArray (length idxs) <$> lookupTypeM sname
+        rowtype <- I.stripArray (length idxs) <$> lookupType sname
         ve'' <- ensureShape loc rowtype "lw_val_correct_shape" ve'
         letInPlace "letwith_dst" idxcs' sname idxs' $
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
-  dstt <- I.staticShapes <$> mapM lookupTypeM dsts
+  dstt <- I.staticShapes <$> mapM lookupType dsts
   bindingTupIdent (E.Id name) dstt $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
       letBind (basicPattern' [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
@@ -287,9 +287,9 @@ internaliseExp _ (E.Zip (e:es) loc) = do
   -- size as e'.  We will not change any of the outer dimensions.
   -- This will cause a runtime error if the outer sizes do not match,
   -- thus preserving the semantics of zip().
-  e_outer <- arraysSize 0 <$> mapM lookupTypeM e'
+  e_outer <- arraysSize 0 <$> mapM lookupType e'
   let reshapeToOuter e_unchecked' = do
-        unchecked_t <- lookupTypeM e_unchecked'
+        unchecked_t <- lookupType e_unchecked'
         case I.arrayDims unchecked_t of
           []      -> return e_unchecked' -- Probably type error
           outer:inner -> do
@@ -307,7 +307,7 @@ internaliseExp _ (E.Zip (e:es) loc) = do
 
 internaliseExp _ (E.Transpose k n e _) =
   internaliseOperation "transpose" e $ \v -> do
-    rank <- I.arrayRank <$> lookupTypeM v
+    rank <- I.arrayRank <$> lookupType v
     let perm = I.transposeIndex k n [0..rank-1]
     return $ I.Rearrange [] perm v
 
@@ -320,7 +320,7 @@ internaliseExp _ (E.Reshape shape e loc) = do
   internaliseOperation "reshape" e $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
-    dims <- I.arrayDims <$> lookupTypeM v
+    dims <- I.arrayDims <$> lookupType v
     shapeOk <- letExp "shape_ok" =<<
                eAssert (eBinOp I.Equal (prod dims) (prod shape') I.Bool)
                loc
@@ -331,7 +331,7 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
   splits' <- mapM (internaliseExp1 "n") splitexps
   -- Note that @arrs@ is an array, because of array-of-tuples transformation
   arrs <- internaliseExpToVars "split_arr" arrexp
-  arrayOuterdim <- arraysSize 0 <$> mapM lookupTypeM arrs
+  arrayOuterdim <- arraysSize 0 <$> mapM lookupType arrs
 
   -- Assertions
   let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
@@ -352,14 +352,14 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
 internaliseExp desc (E.Concat x ys loc) = do
   xs  <- internaliseExpToVars "concat_x" x
   yss <- mapM (internaliseExpToVars "concat_y") ys
-  outer_size <- arraysSize 0 <$> mapM lookupTypeM xs
+  outer_size <- arraysSize 0 <$> mapM lookupType xs
   ressize <- foldM sumdims outer_size =<<
-             mapM (liftM (arraysSize 0) . mapM lookupTypeM) yss
+             mapM (liftM (arraysSize 0) . mapM lookupType) yss
 
   let conc xarr yarrs = do
         -- The inner sizes must match.
-        xt  <- lookupTypeM xarr
-        yts <- mapM lookupTypeM yarrs
+        xt  <- lookupType xarr
+        yts <- mapM lookupType yarrs
         let matches n m =
               letExp "match" =<<
               eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m I.Bool) loc
@@ -367,7 +367,7 @@ internaliseExp desc (E.Concat x ys loc) = do
             ys_inner_dims = map (drop 1 . I.arrayDims) yts
         matchcs <- concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
-                        yt <- lookupTypeM yarr
+                        yt <- lookupType yarr
                         letExp "concat_y_reshaped" $ I.PrimOp $
                           I.Reshape matchcs (arraySize 0 yt : x_inner_dims) yarr
         return $ I.PrimOp $ I.Concat [] xarr yarrs' ressize
@@ -386,10 +386,10 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   arrs <- internaliseExpToVars "reduce_arr" arr
   nes <- internaliseExp "reduce_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
-    rowtype <- I.stripArray 1 <$> lookupTypeM arr'
+    rowtype <- I.stripArray 1 <$> lookupType arr'
     ensureShape loc rowtype "reduce_ne_right_shape" ne'
   nests <- mapM I.subExpType nes'
-  arrts <- mapM lookupTypeM arrs
+  arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Reduce [] lam' input
@@ -398,10 +398,10 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   arrs <- internaliseExpToVars "scan_arr" arr
   nes <- internaliseExp "scan_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
-    rowtype <- I.stripArray 1 <$> lookupTypeM arr'
+    rowtype <- I.stripArray 1 <$> lookupType arr'
     ensureShape loc rowtype "scan_ne_right_shape" ne'
   nests <- mapM I.subExpType nes'
-  arrts <- mapM lookupTypeM arrs
+  arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   let input = zip nes' arrs
   letTupExp' desc $ I.LoopOp $ I.Scan [] lam' input
@@ -412,7 +412,7 @@ internaliseExp desc (E.Filter lam arr _) = do
   flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   forM arrs $ \arr' -> do
     filter_size <- newIdent "filter_size" $ I.Basic Int
-    filter_perm <- newIdent "filter_perm" =<< lookupTypeM arr'
+    filter_perm <- newIdent "filter_perm" =<< lookupType arr'
     addBinding $ mkLet' [filter_size,filter_perm] $
       I.PrimOp $ I.Partition [] 1 flags arr'
     letSubExp desc $
@@ -425,7 +425,7 @@ internaliseExp desc (E.Partition lams arr _) = do
   flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
-    partition_perm <- newIdent "partition_perm" =<< lookupTypeM arr'
+    partition_perm <- newIdent "partition_perm" =<< lookupType arr'
     addBinding $ mkLet' (partition_sizes++[partition_perm]) $
       I.PrimOp $ I.Partition [] n flags arr'
     letTupExp desc $
@@ -437,7 +437,7 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   arrs' <- internaliseExpToVars "redomap_arr" arrs
   nes <- internaliseExp "redomap_ne" ne
   acc_tps <- mapM I.subExpType nes
-  outersize <- arraysSize 0 <$> mapM lookupTypeM arrs'
+  outersize <- arraysSize 0 <$> mapM lookupType arrs'
   let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
                         | t <- acc_tps ]
   nests <- mapM I.subExpType nes
@@ -454,7 +454,7 @@ internaliseExp desc (E.Stream chunk i acc arr lam _) = do
   (lam', chunk', i') <-
       bindingParams chunkiparams $ \_ mergepat' -> do
             let [chunk'', i'']  = mergepat'
-            rowts <- mapM (liftM (I.stripArray 1) . lookupTypeM) arrs'
+            rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
             let lam_arrs' = [ I.arrayOf t
                               (Shape [I.Var $ I.identName chunk''])
                               (I.uniqueness t)
@@ -723,7 +723,7 @@ boundsChecks loc (v:_) es = do
 
 boundsCheck :: SrcLoc -> VName -> Int -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc v i e = do
-  size <- arraySize i <$> lookupTypeM v
+  size <- arraySize i <$> lookupType v
   let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound) I.Bool
       lowerBound = I.PrimOp $
                    I.BinOp I.Leq (I.intconst 0) e I.Bool

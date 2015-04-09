@@ -38,7 +38,7 @@ import Futhark.Representation.AST.Attributes.TypeEnv
 
 subExpType :: HasTypeEnv m => SubExp -> m Type
 subExpType (Constant val) = pure $ Basic $ basicValueType val
-subExpType (Var name)     = lookupTypeM name
+subExpType (Var name)     = lookupType name
 
 mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
@@ -60,7 +60,7 @@ primOpType (Not _) =
 primOpType (Negate e) =
   pure <$> subExpType e
 primOpType (Index _ ident idx) =
-  result <$> lookupTypeM ident
+  result <$> lookupType ident
   where result t = [stripArray (length idx) t]
 primOpType (Iota ne) =
   pure [arrayOf (Basic Int) (Shape [ne]) Nonunique]
@@ -70,19 +70,19 @@ primOpType (Replicate ne e) =
 primOpType (Scratch t shape) =
   pure [arrayOf (Basic t) (Shape shape) Unique]
 primOpType (Reshape _ [] e) =
-  result <$> lookupTypeM e
+  result <$> lookupType e
   where result t = [Basic $ elemType t]
 primOpType (Reshape _ shape e) =
-  result <$> lookupTypeM e
+  result <$> lookupType e
   where result t = [t `setArrayShape` Shape shape]
 primOpType (Rearrange _ perm e) =
-  result <$> lookupTypeM e
+  result <$> lookupType e
   where result t = [t `setArrayShape` Shape (permuteShape perm $ arrayDims t)]
 primOpType (Split _ sizeexps e) =
-  result <$> lookupTypeM e
+  result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps
 primOpType (Concat _ x ys ressize) =
-  result <$> lookupTypeM x <*> traverse lookupTypeM ys
+  result <$> lookupType x <*> traverse lookupType ys
   where result xt yts =
           let u = uniqueness xt <> mconcat (map uniqueness yts)
           in [xt `setUniqueness` u `setOuterSize` ressize]
@@ -94,7 +94,7 @@ primOpType (Assert _ _) =
 primOpType (Alloc e) =
   pure [Mem e]
 primOpType (Partition _ n _ array) =
-  result <$> lookupTypeM array
+  result <$> lookupType array
   where result t = replicate n (Basic Int) ++ [t]
 
 loopOpExtType :: HasTypeEnv m =>
@@ -102,14 +102,14 @@ loopOpExtType :: HasTypeEnv m =>
 loopOpExtType (DoLoop res merge _ _) =
   pure $ loopExtType res $ map (fparamIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
-  staticShapes <$> mapType f <$> traverse lookupTypeM arrs
+  staticShapes <$> mapType f <$> traverse lookupType arrs
 loopOpExtType (ConcatMap _ f _) =
   pure [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
          | t <- lambdaReturnType f ]
 loopOpExtType (Reduce _ fun _) =
   pure $ staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs) =
-  staticShapes <$> traverse (lookupTypeM . snd) inputs
+  staticShapes <$> traverse (lookupType . snd) inputs
 loopOpExtType (Redomap _ outerfun innerfun _ ids) =
   let acc_tp    = lambdaReturnType outerfun
       acc_el_tp = lambdaReturnType innerfun
@@ -119,9 +119,9 @@ loopOpExtType (Redomap _ outerfun innerfun _ ids) =
                     eltp <- res_el_tp ]
   in  case res_el_tp of
         [] -> pure $ staticShapes acc_tp
-        _  -> staticShapes <$> result <$> arraysSize 0 <$> traverse lookupTypeM ids
+        _  -> staticShapes <$> result <$> arraysSize 0 <$> traverse lookupType ids
 loopOpExtType (Stream _ accs arrs lam) =
-  result <$> lookupTypeM (head arrs)
+  result <$> lookupType (head arrs)
   where result (Array _ shp _) =
           let ExtLambda params _ rtp = lam
               nms = map identName $ take (2 + length accs) params
@@ -133,7 +133,7 @@ loopOpExtType (Stream _ accs arrs lam) =
 
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
 segOpExtType (SegReduce _ fun _ descp) =
-  staticShapes <$> mapType fun <$> pure <$> lookupTypeM descp
+  staticShapes <$> mapType fun <$> pure <$> lookupType descp
 
 expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>
               Exp lore -> m [ExtType]

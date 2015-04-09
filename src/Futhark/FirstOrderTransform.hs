@@ -43,7 +43,7 @@ transformExp :: Exp -> Binder Basic Exp
 
 transformExp (LoopOp (Map cs fun arrs)) = do
   i <- newVName "i"
-  out_ts <- mapType fun <$> mapM lookupTypeM arrs
+  out_ts <- mapType fun <$> mapM lookupType arrs
   resarr <- resultArray out_ts
   outarrs <- forM out_ts $ \t ->
              newIdent "map_outarr" $ t `setUniqueness` Unique
@@ -64,7 +64,7 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
           splitAt (length funparams-length input) funparams
         fun'' = fun' { lambdaParams = valparams }
     shapemap <- shapeMapping (map identType valparams) <$>
-                mapM lookupTypeM input
+                mapM lookupType input
     forM_ (HM.toList shapemap) $ \(size,se) ->
       when (size `elem` map identName ctxparams) $
         letBindNames'_ [size] $ PrimOp $ SubExp se
@@ -79,8 +79,8 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
 
       concatArrays (arr, arrs') = do
         let plus x y = eBinOp Plus x y Int
-        n <- arraySize 0 <$> lookupTypeM arr
-        ms <- mapM (liftM (arraySize 0) . lookupTypeM) arrs'
+        n <- arraySize 0 <$> lookupType arr
+        ms <- mapM (liftM (arraySize 0) . lookupType) arrs'
         ressize <- letSubExp "concatMap_result_size" =<<
                    foldl plus
                    (pure $ PrimOp $ SubExp $ n)
@@ -103,7 +103,7 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
 
 transformExp (LoopOp (Reduce cs fun args)) = do
   ((acc, initacc), i) <- newFold accexps
-  arrts <- mapM lookupTypeM arrexps
+  arrts <- mapM lookupType arrexps
   let arrus = map (uniqueness . identType) $
               snd $ splitAt (length args) $ lambdaParams fun
   inarrs <- forM (zip arrts arrus) $ \(t,u) ->
@@ -120,7 +120,7 @@ transformExp (LoopOp (Reduce cs fun args)) = do
 
 transformExp (LoopOp (Scan cs fun args)) = do
   ((acc, initacc), i) <- newFold accexps
-  arrts <- mapM lookupTypeM arrexps
+  arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
   arr <- forM arrts $ \t ->
     newIdent "scan_arr" $ t `setUniqueness` Unique
@@ -139,7 +139,7 @@ transformExp (LoopOp (Scan cs fun args)) = do
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
-  arrts <- mapM lookupTypeM arrexps
+  arrts <- mapM lookupType arrexps
   let outersize = arraysSize 0 arrts
   -- for the MAP    part
   let acc_num     = length accexps
@@ -296,7 +296,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                     chnk:iorig:_ -> return (chnk,iorig)
                     _ -> fail "FirstOrderTransform Stream: chunk or i error!"
   chunkglb <- newIdent (textual (identName chunkloc) ++"_glb") $ Basic Int
-  outersz <- arraysSize 0 <$> mapM lookupTypeM arrexps
+  outersz <- arraysSize 0 <$> mapM lookupType arrexps
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
       sub_chko= HM.fromList [(identName chunkloc, outersz)]
@@ -339,7 +339,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
   inarrVsz <- newIdent "stream_cursize" $ Basic Int
   inarrNsz <- newIdent "stream_nxtsize" $ Basic Int
   bothinarrsloop <- forM (zip arrexps arruniq) $ \(aid,u) -> do
-          atp <- lookupTypeM aid
+          atp <- lookupType aid
           let anm = textual aid
           (t1,t2) <- case atp of
               Array bt (Shape (_:dims)) _ ->
@@ -534,7 +534,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                           Var idd -> return idd
                           _ -> fail ("FirstOrderTransform(Stream), mkOutArrEpilogue:"++
                                      " array result MUST be a Var!")
-            locoutid_size <- arraySize 0 <$> lookupTypeM locoutid
+            locoutid_size <- arraySize 0 <$> lookupType locoutid
             (ivv, glboutid', mind', malloc') <-
                 case indvars of
                   Nothing ->               -- exact-size case
@@ -566,7 +566,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                 bnew0<- letExp (textual (identName glboutid)++"_loop0") $
                                                PrimOp $ Scratch (elemType oldbtp) (Var (identName newallocid):olddims)
                                 bnew <- newIdent (textual (identName glboutid)++"_loop") =<<
-                                        lookupTypeM bnew0
+                                        lookupType bnew0
                                 allocloopbody <- runBinder $ do
                                     (aldest:_) <- letwith css [identName bnew] (pexp $ Var alloclid)
                                                   [PrimOp $ Index css (identName glboutid) [Var alloclid]]
@@ -575,7 +575,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                                   (loopMerge [bnew] [Var bnew0])
                                                   (ForLoop alloclid (Var $ identName k)) allocloopbody
                                 bnew' <- newIdent (textual (identName glboutid)++"_new0") =<<
-                                         lookupTypeM bnew0
+                                         lookupType bnew0
                                 addBinding $ myMkLet alloopres bnew'
                                 return $ resultBody [Var $ identName bnew']
                         allocifexp <- eIf isempty emptybranch otherbranch
