@@ -57,6 +57,7 @@ Library
                    Futhark.Analysis.UsageTable
                    Futhark.Analysis.Usage
                    Futhark.Binder
+                   Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading

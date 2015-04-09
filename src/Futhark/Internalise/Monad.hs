@@ -57,7 +57,7 @@ initialFtable = HM.map addBuiltin builtInFunctions
            const $ Just $ ExtRetType [Basic t])
           (E.Basic t, map E.Basic paramts)
 
-newtype InternaliseM  a = InternaliseM (WriterT (DL.DList Binding)
+newtype InternaliseM  a = InternaliseM (BinderT Basic
                                         (ReaderT InternaliseEnv
                                          (StateT VNameSource
                                           (Except String)))
@@ -73,15 +73,13 @@ instance MonadFreshNames InternaliseM where
   putNameSource = put
 
 instance HasTypeEnv InternaliseM where
+  askTypeEnv = InternaliseM askTypeEnv
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = Basic
-  mkLetM pat e = return $ mkLet pat' e
-    where pat' = [ (ident, bindage)
-                 | PatElem ident bindage _ <- patternElements pat
-                 ]
-  mkBodyM bnds res = return $ mkBody bnds res
-  mkLetNamesM = mkLetNames
+  mkLetM pat e = InternaliseM $ mkLetM pat e
+  mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
+  mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
   addBinding      = addBindingWriter
   collectBindings = collectBindingsWriter
@@ -94,7 +92,7 @@ runInternaliseM boundsCheck ftable (InternaliseM m) =
   let onError e                 = (Left e, src)
       onSuccess ((prog,_),src') = (Right prog, src')
   in either onError onSuccess $ runExcept $
-     runStateT (runReaderT (runWriterT m) newEnv) src
+     runStateT (runReaderT (runBinderT m) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable

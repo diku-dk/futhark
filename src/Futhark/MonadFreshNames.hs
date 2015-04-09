@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
 -- | This module provides a monadic facility similar (and built on top
 -- of) "Futhark.FreshNames".  The removes the need for a (small) amount of
 -- boilerplate, at the cost of using some GHC extensions.  The idea is
@@ -23,6 +23,7 @@ module Futhark.MonadFreshNames
 import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
+import Control.Monad.Reader
 
 import Prelude
 
@@ -106,3 +107,9 @@ newIdents = mapM . newIdent
 -- names used as variables in the given program.
 newNameSourceForProg :: Prog lore -> VNameSource
 newNameSourceForProg = newNameSource . progNames
+
+-- Utility instance defintions for MTL classes.  This requires
+-- UndecidableInstances, but save on typing elsewhere.
+instance MonadFreshNames m => MonadFreshNames (ReaderT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource

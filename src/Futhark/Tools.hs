@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
 module Futhark.Tools
   ( letSubExp
   , letSubExps
@@ -217,7 +217,8 @@ foldBinOp bop ne (e:es) t =
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
-binOpLambda :: (MonadFreshNames m, Bindable lore) =>
+binOpLambda :: forall m lore.
+               (MonadFreshNames m, Bindable lore) =>
                BinOp -> BasicType -> m (Lambda lore)
 binOpLambda bop t = do
   x   <- newVName "x"

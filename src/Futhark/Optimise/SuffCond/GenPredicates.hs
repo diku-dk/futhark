@@ -32,10 +32,6 @@ type GenM = ReaderT GenEnv (State VNameSource)
 runGenM :: MonadFreshNames m => GenEnv -> GenM a -> m a
 runGenM env m = modifyNameSource $ runState (runReaderT m env)
 
-instance MonadFreshNames GenM where
-  getNameSource = get
-  putNameSource = put
-
 banning :: Names -> GenM a -> GenM a
 banning = local . banning'
   where banning' names (GenEnv cert deps blacklist) =
