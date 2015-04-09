@@ -96,7 +96,7 @@ internaliseDeclType' (E.Array at) =
         internaliseDim (KnownDim name) = do
           subst <- asks $ HM.lookup name . envSubsts
           return $ I.Free $ I.Var $ case subst of
-            Just [v] -> I.identName v
+            Just [v] -> v
             _        -> name
 
 internaliseType :: Ord vn =>

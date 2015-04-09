@@ -66,7 +66,7 @@ internaliseFunParams params = do
           [ new_param { I.identType = t } |
             (new_param, t) <- zip params' instantiated_param_types ]
     return (param_implicit_shapes, instantiated_params)
-  let subst = HM.fromList $ zip (map E.identName params) value_params
+  let subst = HM.fromList $ zip (map E.identName params) (map (map I.identName) value_params)
   return (declared_shape_params ++ concat implicit_shape_params,
           concat value_params,
           subst <> shapesubst)
@@ -92,7 +92,7 @@ bindingFlatPattern = bindingFlatPattern' []
 
     bindingFlatPattern' pat (p:rest) ts m = do
       (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee p
-      bindingFlatPattern' ((ps, (E.identName p, subst)) : pat) rest rest_ts m
+      bindingFlatPattern' ((ps, (E.identName p, map I.identName subst)) : pat) rest rest_ts m
 
     handleMapping ts [] =
       ([], [], ts)
@@ -140,7 +140,7 @@ makeShapeIdentsFromContext :: MonadFreshNames m =>
 makeShapeIdentsFromContext ctx = do
   (ctx', substs) <- liftM unzip $ forM (HM.toList ctx) $ \(name, i) -> do
     v <- newIdent (baseString name) $ I.Basic Int
-    return ((i, v), (name, [v]))
+    return ((i, v), (name, [I.identName v]))
   return (HM.fromList ctx', HM.fromList substs)
 
 instantiateShapesWithDecls :: MonadFreshNames m =>

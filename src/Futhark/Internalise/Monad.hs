@@ -31,7 +31,7 @@ import Prelude hiding (mapM)
 
 data FunBinding = FunBinding
                   { internalFun :: ([VName], [Type],
-                                    [SubExp] -> Maybe ExtRetType)
+                                    [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.DeclType, [E.DeclType])
                   }
 
@@ -41,7 +41,7 @@ type FunTable = HM.HashMap Name FunBinding
 
 -- | A mapping from external variable names to the corresponding
 -- internalised identifiers.
-type VarSubstitutions = HM.HashMap VName [Ident]
+type VarSubstitutions = HM.HashMap VName [VName]
 
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
