@@ -157,7 +157,8 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnd
   in analyseBody vtable' sctable' $ Body bodylore bnds res
   where name = patElemName patElem
         ranges = rangesRep vtable
-        simplify se = AS.simplify se ranges
+        types = undefined
+        simplify se = AS.simplify se ranges undefined
 analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
   analyseBody (ST.insertBinding bnd vtable) sctable $ Body bodylore bnds res
 
@@ -172,9 +173,9 @@ analyseExp :: ST.SymbolTable Basic -> Exp -> Maybe SCTable
 analyseExp vtable (LoopOp (DoLoop _ _ (ForLoop i bound) body)) =
   Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
-        clampUpper = ST.insertLoopVar (identName i) bound
+        clampUpper = ST.insertLoopVar i bound
         -- If we enter the loop, then 'bound' is at least one.
-        clampLower = case bound of Var v       -> identName v `ST.isAtLeast` 1
+        clampLower = case bound of Var v       -> v `ST.isAtLeast` 1
                                    Constant {} -> id
 analyseExp vtable (LoopOp (DoLoop _ _ _ body)) =
   Just $ analyseExpBody vtable body
@@ -265,6 +266,8 @@ instance MonadFreshNames m => MonadFreshNames (VariantM m) where
   getNameSource = VariantM . lift $ getNameSource
   putNameSource = VariantM . lift . putNameSource
 
+instance Monad m => HasTypeEnv (VariantM m) where
+
 runVariantM :: (Functor m, Monad m) =>
                Env m -> VariantM m a -> m (a, Bool)
 runVariantM env (VariantM m) =
@@ -337,7 +340,8 @@ instance MonadFreshNames m =>
         suffe <- generating Sufficient $
                  Simplify.simplifyExp =<< renameExp (removeExpWisdom e)
         let pat' = pat { patternElements =
-                            zipWith tagPatElem (patternElements pat) vs
+                            zipWith tagPatElem (patternElements pat) $
+                            map identName vs
                        }
             tagPatElem patElem v =
               patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
@@ -346,7 +350,7 @@ instance MonadFreshNames m =>
         Simplify.defaultInspectBinding $ Let pat' lore e
 
   simplifyLetBoundLore Nothing  = return Nothing
-  simplifyLetBoundLore (Just v) = Just <$> Simplify.simplifyIdent v
+  simplifyLetBoundLore (Just v) = Just <$> Simplify.simplifyVName v
 
   simplifyFParamLore =
     return
@@ -364,12 +368,13 @@ makeSufficientBinding' context@(_,vtable) (Let pat _ e)
   | Just (Right se@(SE.RelExp SE.LTH0 ine)) <-
       simplify <$> SE.toScalExp (`suffScalExp` vtable) e,
     Int <- SE.scalExpType ine,
-    Right suff <- AS.mkSuffConds se ranges,
+    Right suff <- AS.mkSuffConds se ranges types,
     x:xs <- filter (scalExpUsesNoForbidden context) $ map mkConj suff = do
   suffe <- SE.fromScalExp' $ foldl SE.SLogOr x xs
   letBind_ pat suffe
   where ranges = rangesRep vtable
-        simplify se = AS.simplify se ranges
+        types = undefined
+        simplify se = AS.simplify se ranges types
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
 makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t))) = do
@@ -377,7 +382,7 @@ makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t))) = do
   y' <- sufficientSubExp y
   letBind_ pat $ PrimOp $ BinOp LogAnd x' y' t
 makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _))
-  | identName v `forbiddenIn` env,
+  | v `forbiddenIn` env,
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
@@ -397,7 +402,7 @@ suffScalExp :: VName -> ST.SymbolTable Invariance -> Maybe ScalExp
 suffScalExp name vtable = asSuffScalExp =<< ST.lookup name vtable
   where asSuffScalExp entry
           | Just (_, Just suff) <- ST.entryLetBoundLore entry,
-            Just se             <- suffScalExp (identName suff) vtable =
+            Just se             <- suffScalExp suff vtable =
               Just se
           | otherwise = ST.asScalExp entry
 
@@ -405,12 +410,12 @@ sufficientSubExp :: MonadFreshNames m => SubExp -> VariantM m SubExp
 sufficientSubExp se@(Constant {}) = return se
 sufficientSubExp (Var v) =
   maybe (Var v) Var .
-  (snd <=< ST.entryLetBoundLore <=< ST.lookup (identName v)) <$>
+  (snd <=< ST.entryLetBoundLore <=< ST.lookup v) <$>
   Simplify.getVtable
 
 scalExpUsesNoForbidden :: Context m -> ScalExp -> Bool
 scalExpUsesNoForbidden context =
-  not . any (`forbiddenIn` context) . freeNamesIn
+  not . any (`forbiddenIn` context) . freeIn
 
 -- | The lore containing invariance information.
 data Variance = Invariant
@@ -430,7 +435,7 @@ isForbidden TooVariant = True
 
 data Invariance' = Invariance'
 instance Lore.Lore Invariance' where
-  type LetBound Invariance' = Maybe Ident
+  type LetBound Invariance' = Maybe VName
   type Exp Invariance' = Variance
   representative = Invariance'
   loopResultContext _ = loopResultContext (representative :: Basic)
@@ -456,22 +461,22 @@ forbiddenExp context = isNothing . walkExpM walk
   where walk = Walker { walkOnSubExp  = checkIf forbiddenSubExp
                       , walkOnBody    = checkIf forbiddenBody
                       , walkOnBinding = checkIf $ isForbidden . snd . bindingLore
-                      , walkOnIdent   = checkIf forbiddenIdent
+                      , walkOnVName   = checkIf forbiddenVar
                       , walkOnLambda  = checkIf $ forbiddenBody . lambdaBody
                       , walkOnRetType = checkIf forbiddenRetType
                       , walkOnFParam  = checkIf forbiddenFParam
-                      , walkOnCertificates = mapM_ $ checkIf forbiddenIdent
+                      , walkOnCertificates = mapM_ $ checkIf forbiddenVar
                       }
         checkIf f x = if f x
                       then Nothing
                       else Just ()
 
-        forbiddenIdent = (`forbiddenIn` context) . identName
+        forbiddenVar = (`forbiddenIn` context)
 
-        forbiddenSubExp (Var v) = identName v `forbiddenIn` context
+        forbiddenSubExp (Var v) = v `forbiddenIn` context
         forbiddenSubExp (Constant {}) = False
 
         forbiddenBody = any (isForbidden . snd . bindingLore) . bodyBindings
 
-        forbiddenRetType = any forbiddenIdent . freeIn
-        forbiddenFParam = any forbiddenIdent . freeIn
+        forbiddenRetType = any forbiddenVar . freeIn
+        forbiddenFParam = any forbiddenVar . freeIn

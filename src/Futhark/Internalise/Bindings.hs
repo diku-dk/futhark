@@ -151,9 +151,9 @@ instantiateShapesWithDecls ctx ts =
   runWriterT $ I.instantiateShapes instantiate ts
   where instantiate x
           | Just v <- HM.lookup x ctx =
-            return $ I.Var v
+            return $ I.Var $ I.identName v
 
           | otherwise = do
             v <- lift $ newIdent "size" (I.Basic Int)
             tell [v]
-            return $ I.Var v
+            return $ I.Var $ I.identName v

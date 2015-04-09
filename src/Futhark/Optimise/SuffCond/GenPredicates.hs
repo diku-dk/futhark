@@ -52,11 +52,11 @@ genPredicate (FunDec fname rettype params body) = do
   let env = GenEnv cert_ident (dataDependencies body) mempty
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
   let mkFParam = flip FParam ()
-      pred_args = [ (Var arg, Observe) | arg <- map fparamIdent params ]
+      pred_args = [ (Var arg, Observe) | arg <- map fparamName params ]
       pred_bnd = mkLet' [pred_ident] $
                  Apply predFname pred_args $ basicRetType Bool
       cert_bnd = mkLet' [cert_ident] $
-                 PrimOp $ Assert (Var pred_ident) noLoc
+                 PrimOp $ Assert (Var $ identName pred_ident) noLoc
       val_fun = FunDec fname rettype params
                 (mkBody (pred_bnd:cert_bnd:val_bnds) val_res)
       pred_fun = FunDec predFname (basicRetType Bool)
@@ -93,10 +93,10 @@ splitBinding bnd@(Let pat _ (PrimOp (Assert (Var v) _))) = do
   GenEnv cert_ident deps blacklist <- ask
   let forbidden =
         not $ HS.null $ maybe HS.empty (HS.intersection blacklist) $
-        HM.lookup (identName v) deps
+        HM.lookup v deps
   return $ if forbidden then ([bnd], bnd, Nothing)
            else ([bnd],
-                 mkLet' (patternIdents pat) $ PrimOp $ SubExp (Var cert_ident),
+                 mkLet' (patternIdents pat) $ PrimOp $ SubExp (Var $ identName cert_ident),
                  Just $ Var v)
 
 splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args))) = do
@@ -130,14 +130,14 @@ splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) = d
 splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
   (predbody, valbody) <- splitBody body
   ok <- newIdent "loop_ok" (Basic Bool)
-  predbody' <- conjoinLoopBody ok predbody
-  let predloop = LoopOp $ DoLoop (respat++[ok])
+  predbody' <- conjoinLoopBody (identName ok) predbody
+  let predloop = LoopOp $ DoLoop (respat++[identName ok])
                  (merge++[(FParam ok (),constant True)]) form
                  predbody'
       valloop = LoopOp $ DoLoop respat merge form valbody
   return ([mkLet' (idents<>[ok]) predloop],
           mkLet' idents valloop,
-          Just $ Var ok)
+          Just $ Var $ identName ok)
   where
     idents = patternIdents pat
     conjoinLoopBody ok (Body _ bnds res) = do
@@ -145,7 +145,7 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
       case reverse $ resultSubExps res of
         []   -> fail "conjoinLoopBody: null loop"
         x:xs ->
-          let res' = res { resultSubExps = reverse $ Var ok':xs }
+          let res' = res { resultSubExps = reverse $ Var (identName ok'):xs }
               bnds' = bnds ++
                       [mkLet' [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) Bool]
           in return $ mkBody bnds' res'
@@ -158,12 +158,12 @@ splitBinding (Let pat _ (If cond tbranch fbranch t)) = do
            If cond tbranch_pred fbranch_pred
            (t<>[Basic Bool])],
           mkLet' idents $ If cond tbranch_val fbranch_val t,
-          Just $ Var ok)
+          Just $ Var $ identName ok)
   where idents = patternIdents pat
 
 splitBinding bnd = return ([bnd], bnd, Nothing)
 
-splitMap :: [Ident] -> Lambda -> [Ident]
+splitMap :: Certificates -> Lambda -> [VName]
          -> GenM ([Binding], Lambda, Maybe SubExp)
 splitMap cs fun args = do
   (predfun, valfun) <- splitMapLambda fun
@@ -172,7 +172,7 @@ splitMap cs fun args = do
           valfun,
           Just andcheck)
 
-splitReduce :: [Ident] -> Lambda -> [(SubExp,Ident)]
+splitReduce :: Certificates -> Lambda -> [(SubExp,VName)]
             -> GenM ([Binding], Lambda, Maybe SubExp)
 splitReduce cs fun args = do
   (predfun, valfun) <- splitFoldLambda fun $ map fst args
@@ -181,7 +181,7 @@ splitReduce cs fun args = do
           valfun,
           Just andcheck)
 
-splitRedomap :: [Ident] -> Lambda -> [SubExp] -> [Ident]
+splitRedomap :: Certificates -> Lambda -> [SubExp] -> [VName]
              -> GenM ([Binding], Lambda, Maybe SubExp)
 splitRedomap cs fun acc arr = do
   (predfun, valfun) <- splitFoldLambda fun acc
@@ -219,7 +219,7 @@ splitFoldLambda lam acc = do
         accbnds = [ mkLet' [p] $ PrimOp $ SubExp e
                   | (p,e) <- zip accParams acc ]
 
-allTrue :: Certificates -> Lambda -> [Ident]
+allTrue :: Certificates -> Lambda -> [VName]
         -> GenM (Binding, SubExp)
 allTrue cs predfun args = do
   andchecks <- newIdent "allTrue" (Basic Bool)
@@ -228,13 +228,13 @@ allTrue cs predfun args = do
   let andbnd = mkLet' [andchecks] $ LoopOp $
                Redomap cs andfun innerfun [constant True] args
   return (andbnd,
-          Var andchecks)
+          Var $ identName andchecks)
   where predConjFun = do
           acc <- newIdent "acc" (Basic Bool)
           res <- newIdent "res" (Basic Bool)
           let Body _ predbnds (Result [se]) = lambdaBody predfun -- XXX
-              andbnd = mkLet' [res] $ PrimOp $ BinOp LogAnd (Var acc) se Bool
-              body = mkBody (predbnds++[andbnd]) $ Result [Var res]
+              andbnd = mkLet' [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
+              body = mkBody (predbnds++[andbnd]) $ Result [Var $ identName res]
           return Lambda { lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body

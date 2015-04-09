@@ -142,7 +142,7 @@ compileInParam fparam = case t of
   Array bt shape _ -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
-      MemLocation (identName mem) shape' ixfun
+      MemLocation mem shape' ixfun
   where name = fparamName fparam
         t    = fparamType fparam
         MemSummary mem ixfun = fparamLore fparam
@@ -199,10 +199,10 @@ compileOutParams rts = do
               tell [Imp.MemParam memout $ Imp.VarSize sizeout]
               return (memout, const $ SetMemory memout destmemsize)
             ReturnsInBlock memout ixfun ->
-              return (identName memout,
+              return (memout,
                       \resultshape ->
                       CopyIntoMemory $
-                      MemLocation (identName memout) resultshape ixfun)
+                      MemLocation memout resultshape ixfun)
           (resultshape, destresultshape) <-
             mapAndUnzipM inspectExtDimSize $ extShapeDims shape
           let memdest = memdestf resultshape
@@ -592,7 +592,7 @@ declaringVar patElem m =
     Array bt shape _ -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
       let MemSummary mem ixfun = patElemLore patElem
-          location = MemLocation (identName mem) shape' ixfun
+          location = MemLocation mem shape' ixfun
           entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt

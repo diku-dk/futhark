@@ -73,14 +73,14 @@ basicMkLetM shapes validents e = do
     [] -> return bnd
     _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
 
-allocForArray :: Type -> AllocM (SubExp, Ident)
+allocForArray :: Type -> AllocM (SubExp, VName)
 allocForArray t = do
   size <-
     computeSize
     (intconst (basicSize $ elemType t)) $
     arrayDims t
   m <- letExp "mem" $ PrimOp $ Alloc size
-  return (size, Ident m $ Mem size)
+  return (size, m)
 
 allocsForBinding :: [Ident] -> [(Ident,Bindage)] -> Exp
                  -> AllocM (Binding, [Binding])
@@ -110,7 +110,7 @@ allocsForPattern sizeidents validents rts = do
             return $ PatElem ident bindage $ MemSummary mem ixfun
           BindInPlace _ src is -> do
             (destmem,destixfun) <- lift $ lookupArraySummary' src
-            if destmem ==  mem && destixfun == ixfun then
+            if destmem == mem && destixfun == ixfun then
               return $ PatElem ident bindage $ MemSummary mem ixfun
               else do
               -- The expression returns in some memory, but we want to
@@ -166,11 +166,11 @@ memForBindee ident = do
   mem <- newIdent memname $ Mem $ Var $ identName size
   return (size,
           mem,
-          (ident, directIndexFunction mem t))
+          (ident, directIndexFunction (identName mem) t))
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
 
-directIndexFunction :: Ident -> Type -> MemSummary
+directIndexFunction :: VName -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ arrayDims t
 
@@ -194,7 +194,7 @@ lookupSummary' name = do
     Nothing ->
       fail $ "No memory summary for variable " ++ pretty name
 
-lookupArraySummary' :: VName -> AllocM (Ident, IxFun.IxFun)
+lookupArraySummary' :: VName -> AllocM (VName, IxFun.IxFun)
 lookupArraySummary' name = do
   summary <- lookupSummary' name
   case summary of MemSummary mem ixfun ->
@@ -235,21 +235,25 @@ allocInFParams params m = do
       params' = memsizeparams <> memparams <> valparams
   local (summary `HM.union`) $ m params'
 
-ensureDirectArray :: VName -> AllocM (SubExp, Ident, SubExp)
+isArray :: SubExp -> AllocM Bool
+isArray (Var v) = not <$> (==Scalar) <$> lookupSummary' v
+isArray (Constant _) = return False
+
+ensureDirectArray :: VName -> AllocM (SubExp, VName, SubExp)
 ensureDirectArray v = do
   res <- lookupSummary v
-  case res of
-    Just (MemSummary mem ixfun)
-      | Mem size <- identType mem,
-        IxFun.isDirect ixfun ->
-      return (size, mem, Var v)
+  t <- lookupTypeM v
+  case (res, t) of
+    (Just (MemSummary mem ixfun), Mem size)
+      | IxFun.isDirect ixfun ->
+        return (size, mem, Var v)
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
       allocLinearArray (baseString v) $ Var v
 
 allocLinearArray :: String
-                 -> SubExp -> AllocM (SubExp, Ident, SubExp)
+                 -> SubExp -> AllocM (SubExp, VName, SubExp)
 allocLinearArray s se = do
   t <- subExpType se
   (size, mem) <- allocForArray t
@@ -260,11 +264,12 @@ allocLinearArray s se = do
 
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
 funcallArgs args = do
-  (valargs, (memsizeargs, memargs)) <- runWriterT $ forM args $ \(arg,d) ->
-    case (arg, subExpType arg) of
-      (Var v, Array {}) -> do
+  (valargs, (memsizeargs, memargs)) <- runWriterT $ forM args $ \(arg,d) -> do
+    array <- lift $ isArray arg
+    case (arg, array) of
+      (Var v, True) -> do
         (size, mem, arg') <- lift $ ensureDirectArray v
-        tell ([(size, Observe)], [(Var $ identName mem, Observe)])
+        tell ([(size, Observe)], [(Var mem, Observe)])
         return (arg', d)
       _ ->
         return (arg, d)
@@ -327,7 +332,7 @@ allocInBinding :: In.Binding -> AllocM ()
 allocInBinding (Let pat _ e) = do
   e' <- allocInExp e
   let (sizeidents, validents) =
-        splitAt (patternSize pat - length (expExtType e)) $
+        splitAt (patternSize pat - expExtTypeSize e') $
         patternElements pat
       sizeidents' = map patElemIdent sizeidents
       validents' = [ (ident, bindage) | PatElem ident bindage () <- validents ]

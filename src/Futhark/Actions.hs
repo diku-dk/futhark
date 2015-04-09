@@ -4,7 +4,6 @@ module Futhark.Actions
   , interpretAction
   , impCodeGenAction
   , seqCodegenAction
-  , flowGraphAction
   , rangeAction
   )
 where
@@ -20,7 +19,6 @@ import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
 import Futhark.Representation.AST hiding (Basic)
 import Futhark.Interpreter
-import qualified Futhark.SOACFlowGraph as FG
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 
@@ -55,10 +53,6 @@ seqCodegenAction = explicitMemoryAction "sequential code generator" $
 impCodeGenAction :: Action
 impCodeGenAction = explicitMemoryAction "imperative code generator" $
                    either error (putStrLn . pretty) . ImpGen.compileProgSimply
-
-flowGraphAction :: Action
-flowGraphAction = basicAction "SOAC flow graph" $
-                  putStrLn . FG.makeFlowGraphString
 
 interpret :: (Show error, PrettyLore lore) =>
              (FilePath -> String -> Either error [Value])

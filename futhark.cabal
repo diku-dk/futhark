@@ -138,7 +138,6 @@ Library
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
                    Futhark.Representation.Ranges
-                   Futhark.SOACFlowGraph
                    Futhark.Substitute
                    Futhark.Tools
                    Futhark.TypeCheck

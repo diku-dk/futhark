@@ -113,7 +113,7 @@ instance Lore.Lore ExplicitMemory where
     where memIfNecessary var =
             case find ((==var) . fparamName) mergevars of
               Just fparam | MemSummary mem _ <- fparamLore fparam,
-                            isMergeParam (identName mem) ->
+                            isMergeParam mem ->
                 Just $ fparamIdent fparam
               _ ->
                 Nothing
@@ -136,7 +136,7 @@ instance Ranged ExplicitMemory where
 
 instance Simplifiable ExplicitMemory where
 
-data MemSummary = MemSummary Ident IxFun.IxFun
+data MemSummary = MemSummary VName IxFun.IxFun
                 | Scalar
                 deriving (Show)
 
@@ -165,9 +165,9 @@ instance Rename MemSummary where
 instance PP.Pretty MemSummary where
   ppr Scalar = PP.text "scalar"
   ppr (MemSummary mem ixfun) =
-    PP.ppr (identName mem) <> PP.text "->" <> PP.ppr ixfun
+    PP.ppr mem <> PP.text "->" <> PP.ppr ixfun
 
-data MemReturn = ReturnsInBlock Ident IxFun.IxFun
+data MemReturn = ReturnsInBlock VName IxFun.IxFun
                | ReturnsNewBlock Int
                deriving (Show)
 
@@ -376,17 +376,13 @@ matchPatternToReturns wrong pat rt = do
       popSizeIfInCtx size
       matchType bindee $ Mem $ Var size
     matchBindee bindee (ReturnsArray et shape u rets)
-      | MemSummary mem bindeeIxFun <- patElemLore bindee,
-        Mem size <- identType mem = do
-          case size of
-            Var size' -> popSizeIfInCtx size'
-            _         -> return ()
+      | MemSummary mem bindeeIxFun <- patElemLore bindee = do
           case rets of
             Nothing -> return ()
             Just (ReturnsInBlock retmem retIxFun) -> do
               when (mem /= retmem) $
-                if inCtx $ identName mem then
-                  popMemFromCtx $ identName mem
+                if inCtx mem then
+                  popMemFromCtx mem
                 else
                   lift $ wrong $ "Array " ++ pretty bindee ++
                   " returned in memory block " ++ pretty retmem ++
@@ -398,7 +394,7 @@ matchPatternToReturns wrong pat rt = do
                 pretty retIxFun ++ "."
 
             Just (ReturnsNewBlock _) ->
-              popMemFromCtx $ identName mem
+              popMemFromCtx mem
           zipWithM_ matchArrayDim (arrayDims $ patElemType bindee) $
             extShapeDims shape
           matchType bindee $ Array et shape u
@@ -473,19 +469,18 @@ checkMemSummary :: MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()
 checkMemSummary Scalar = return ()
 checkMemSummary (MemSummary v ixfun) = do
-  _ <- checkMemIdent v
+  t <- TypeCheck.lookupType v
+  case t of
+    Mem size ->
+      TypeCheck.require [Basic Int] size
+    _        ->
+      TypeCheck.bad $ TypeCheck.TypeError noLoc $
+      "Variable " ++ textual v ++
+      " used as memory block, but is of type " ++
+      pretty t ++ "."
+
   TypeCheck.context ("in index function " ++ pretty ixfun) $
     traverse_ (TypeCheck.requireI [Basic Int]) $ freeIn ixfun
-  where checkMemIdent ident = do
-          _ <- TypeCheck.checkIdent ident
-          case identType ident of
-            Mem size ->
-              TypeCheck.require [Basic Int] size
-            t        ->
-              TypeCheck.bad $ TypeCheck.TypeError noLoc $
-              "Variable " ++ textual (identName v) ++
-              " used as memory block, but is of type " ++
-              pretty t ++ "."
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where
@@ -515,7 +510,7 @@ bindeeAnnot bindeeName bindeeLore bindee =
       PP.text "// " <>
       PP.ppr (bindeeName bindee) <>
       PP.text "@" <>
-      PP.ppr (identName ident) <>
+      PP.ppr ident <>
       PP.text "->" <>
       PP.ppr fun
     Scalar ->
@@ -548,12 +543,12 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-arrayIdentReturns :: (Monad m, HasTypeEnv m) =>
+arrayVarReturns :: (Monad m, HasTypeEnv m) =>
                      (VName -> m MemSummary)
                   -> VName
                   -> m (BasicType, Shape, Uniqueness,
-                        Ident, IxFun.IxFun)
-arrayIdentReturns look v = do
+                        VName, IxFun.IxFun)
+arrayVarReturns look v = do
   summary <- look v
   t <- lookupTypeM v
   case (summary, t) of
@@ -561,7 +556,7 @@ arrayIdentReturns look v = do
       return (et, Shape $ shapeDims shape, u,
               mem, ixfun)
     _ ->
-      fail $ "arrayIdentReturns: " ++ pretty v ++ " is not an array."
+      fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
 varReturns :: (Monad m, HasTypeEnv m) =>
               (VName -> m MemSummary)
@@ -588,20 +583,20 @@ expReturns look (AST.PrimOp (SubExp (Var v))) = do
   return [r]
 
 expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
-  (et, _, u, mem, ixfun) <- arrayIdentReturns look v
+  (et, _, u, mem, ixfun) <- arrayVarReturns look v
   return [ReturnsArray et (ExtShape $ map Free newshape) u $
           Just $ ReturnsInBlock mem $
           IxFun.reshape ixfun newshape]
 
 expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
-  (et, Shape dims, u, mem, ixfun) <- arrayIdentReturns look v
+  (et, Shape dims, u, mem, ixfun) <- arrayVarReturns look v
   let ixfun' = IxFun.permute ixfun perm
       dims'  = permuteShape perm dims
   return [ReturnsArray et (ExtShape $ map Free dims') u $
           Just $ ReturnsInBlock mem ixfun']
 
 expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
-  (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
+  (et, shape, u, mem, ixfun) <- arrayVarReturns look v
   let newShapes = map (shape `setOuterDim`) sizeexps
       offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n))
                 (SE.Val $ IntVal 0) sizeexps
@@ -612,7 +607,7 @@ expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
            newShapes slcOffsets
 
 expReturns look (AST.PrimOp (Index _ v is)) = do
-  (et, shape, u, mem, ixfun) <- arrayIdentReturns look v
+  (et, shape, u, mem, ixfun) <- arrayVarReturns look v
   case stripDims (length is) shape of
     Shape []     ->
       return [ReturnsScalar et]
@@ -637,7 +632,7 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
             case (t,
                   fparamLore <$> find ((==resname) . fparamName) mergevars) of
               (Array bt shape u, Just (MemSummary mem ixfun))
-                | isMergeVar $ identName mem -> do
+                | isMergeVar mem -> do
                   i <- get
                   put $ i + 1
                   return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i
@@ -690,19 +685,19 @@ bodyReturns look ts (AST.Body _ bnds res) = do
             Scalar ->
               fail "bodyReturns: inconsistent memory summary"
 
-            MemSummary mem ixfun -> do
-              let memname = identName mem
-              if memname `HM.member` boundHere then do
+            MemSummary mem ixfun
+              | mem `HM.member` boundHere -> do
                 (i, memmap) <- get
 
-                case HM.lookup memname memmap of
+                case HM.lookup mem memmap of
                   Nothing -> do
-                    put (i+1, HM.insert memname (i+1) memmap)
+                    put (i+1, HM.insert mem (i+1) memmap)
                     return $ ReturnsNewBlock i
 
                   Just _ ->
                     fail "bodyReturns: same memory block used multiple times."
-              else return $ ReturnsInBlock mem ixfun
+              | otherwise ->
+                  return $ ReturnsInBlock mem ixfun
         return $ ReturnsArray et shape u memsummary
   evalStateT (zipWithM inspect ts $ resultSubExps res)
     (0, HM.empty)
@@ -752,8 +747,8 @@ applyFunReturns rets params args
         correctSummary (ReturnsInBlock mem ixfun) =
           -- FIXME: we should also do a replacement in ixfun here.
           ReturnsInBlock mem' ixfun
-          where mem' = case HM.lookup (identName mem) parammap of
-                  Just (Var v, t) -> Ident v t
+          where mem' = case HM.lookup mem parammap of
+                  Just (Var v, _) -> v
                   _               -> mem
 
 -- | The size of a basic type in bytes.

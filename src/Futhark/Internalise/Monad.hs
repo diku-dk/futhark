@@ -73,6 +73,8 @@ instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
+instance HasTypeEnv InternaliseM where
+
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = Basic
   mkLetM pat e = return $ mkLet pat' e

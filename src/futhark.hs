@@ -28,9 +28,6 @@ commandLineOptions =
   , Option [] ["compile-sequential"]
     (NoArg $ Right $ \opts -> opts { futharkaction = seqCodegenAction })
     "Translate program into sequential C and write it on standard output."
-  , Option [] ["generate-flow-graph"]
-    (NoArg $ Right $ \opts -> opts { futharkaction = flowGraphAction })
-    "Print the SOAC flow graph of the final program."
   , Option [] ["compile-imperative"]
     (NoArg $ Right $ \opts -> opts { futharkaction = impCodeGenAction })
     "Translate program into the imperative IL and write it on standard output."

@@ -14,12 +14,12 @@ module Futhark.TypeCheck
   , Checkable (..)
   , module Futhark.TypeCheck.TypeError
   , lookupVar
+  , lookupType
   , VarBindingLore (..)
     -- * Checkers
   , require
   , requireI
   , checkSubExp
-  , checkIdent
   , checkExtType
   , matchExtPattern
   , matchExtReturnType
@@ -964,16 +964,6 @@ checkExtType :: Checkable lore =>
 checkExtType t = mapM_ checkExtDim $ extShapeDims $ arrayShape t
   where checkExtDim (Free se) = void $ checkSubExp se
         checkExtDim (Ext _)   = return ()
-
-checkIdent :: Checkable lore =>
-              Ident -> TypeM lore Type
-checkIdent (Ident name t) =
-  context ("In ident " ++ pretty t ++ " " ++ pretty name) $ do
-    derived <- lookupType name
-    unless (derived `subtypeOf` t) $
-      bad $ BadAnnotation noLoc "ident"
-      (justOne $ staticShapes1 t) (justOne $ staticShapes1 derived)
-    return t
 
 checkBinOp :: Checkable lore =>
               BinOp -> SubExp -> SubExp -> BasicType
