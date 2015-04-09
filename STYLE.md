@@ -174,6 +174,18 @@ someAtrociouslyLongVariableName <-
                  map somethingElse
 ```
 
+### Long Type Signatures
+
+Formatting of long type signature are different from long expressions,
+and should be done as
+
+```haskell
+analyseBindings :: Lore lore =>
+                   [In.Binding lore]
+                -> ([Out.Binding lore] -> RangeM a)
+                -> RangeM a
+```
+
 ### Hanging Lambdas
 
 You may or may not indent the code following a "hanging" lambda.  Use
