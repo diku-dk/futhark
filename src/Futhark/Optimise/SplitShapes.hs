@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleContexts, GeneralizedNewtypeDeriving #-}
 -- | For every function with an existential return shape, try to see
 -- if we can extract an efficient shape slice.  If so, replace every
 -- call of the original function with a function to the shape and
@@ -10,6 +10,7 @@ where
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Writer
+import Control.Monad.Reader
 
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
@@ -28,7 +29,7 @@ import Futhark.Optimise.DeadVarElim
 -- | Perform the transformation on a program.
 splitShapes :: Prog -> Prog
 splitShapes prog =
-  Prog { progFunctions = evalState m (newNameSourceForProg prog) }
+  Prog { progFunctions = runSplitM m HM.empty $ newNameSourceForProg prog }
   where m = do let origfuns = progFunctions prog
                (substs, newfuns) <-
                  unzip <$> map extract <$>
@@ -39,7 +40,23 @@ splitShapes prog =
                     funDecName valfun, funDecRetType valfun)),
            [shapefun, valfun])
 
-makeFunSubsts :: MonadFreshNames m =>
+newtype SplitM a = SplitM (ReaderT TypeEnv
+                           (State VNameSource)
+                           a)
+                 deriving (Applicative, Functor, Monad,
+                           MonadReader TypeEnv,
+                           MonadState VNameSource,
+                           HasTypeEnv)
+
+instance MonadFreshNames SplitM where
+  getNameSource = get
+  putNameSource = put
+
+runSplitM :: SplitM a -> TypeEnv -> VNameSource -> a
+runSplitM (SplitM m) env src =
+  evalState (runReaderT m env) src
+
+makeFunSubsts :: (MonadFreshNames m, HasTypeEnv m) =>
                  [FunDec] -> m [(Name, (FunDec, FunDec))]
 makeFunSubsts fundecs =
   cheapSubsts <$>
@@ -52,7 +69,8 @@ makeFunSubsts fundecs =
 -- | Returns shape slice and value slice.  The shape slice duplicates
 -- the entire value slice - you should try to simplify it, and see if
 -- it's "cheap", in some sense.
-functionSlices :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
+functionSlices :: (MonadFreshNames m, HasTypeEnv m) =>
+                  FunDec -> m (FunDec, FunDec)
 functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
@@ -64,6 +82,10 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   (staticRettype, shapeidents) <-
     runWriterT $
     instantiateShapes instantiate $ retTypeValues rettype
+
+  shapes <- subExpShapeContext (retTypeValues rettype) $
+            resultSubExps bodyres
+  shapetypes <- mapM subExpType shapes
 
   valueBody <- substituteExtResultShapes staticRettype body
 
@@ -79,35 +101,31 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
                (map mkFParam valueParams)
                valueBody
   return (fShape, fValue)
-  where shapes = subExpShapeContext (retTypeValues rettype) $
-                 resultSubExps bodyres
-        shapetypes = map subExpType shapes
-        shapeFname = fname <> nameFromString "_shape"
+  where shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
 
         instantiate _ = do v <- lift $ newIdent "precomp_shape" (Basic Int)
                            tell [v]
-                           return $ Var v
+                           return $ Var $ identName v
 
-substituteExtResultShapes :: MonadFreshNames m => [Type] -> Body -> m Body
+substituteExtResultShapes :: (MonadFreshNames m, HasTypeEnv m) =>
+                             [Type] -> Body -> m Body
 substituteExtResultShapes rettype (Body _ bnds res) = do
-  bnds' <- mapM substInBnd bnds
+  compshapes <- typesShapes <$> mapM subExpType (resultSubExps res)
+  let subst = HM.fromList $ mapMaybe isSubst $ zip compshapes $ typesShapes rettype
+  bnds' <- mapM (substInBnd subst) bnds
   let res' = res { resultSubExps = map (substituteNames subst) $
                                    resultSubExps res
                  }
   return $ mkBody bnds' res'
   where typesShapes = concatMap (shapeDims . arrayShape)
-        compshapes =
-          typesShapes $ map subExpType $ resultSubExps res
-        subst =
-          HM.fromList $ mapMaybe isSubst $ zip compshapes (typesShapes rettype)
-        isSubst (Var v1, Var v2) = Just (identName v1, identName v2)
+        isSubst (Var v1, Var v2) = Just (v1, v2)
         isSubst _                = Nothing
 
-        substInBnd (Let pat _ e) =
-          mkLet' <$> mapM substInBnd' (patternIdents pat) <*>
+        substInBnd subst (Let pat _ e) =
+          mkLet' <$> mapM (substInBnd' subst) (patternIdents pat) <*>
           pure (substituteNames subst e)
-        substInBnd' v
+        substInBnd' subst v
           | identName v' `HM.member` subst = newIdent' (<>"unused") v'
           | otherwise                      = return v'
           where v' = v { identType = substituteNames subst $ identType v }
@@ -157,7 +175,7 @@ substCalls subst fundec = do
               letBind_ (Pattern vs) $
                 Apply shapefun args shapetype
               letBind_ (Pattern vals) $
-                Apply valfun ([(Var $ patElemIdent v,Observe) | v <- vs]++args)
+                Apply valfun ([(Var $ patElemName v,Observe) | v <- vs]++args)
                 (ExtRetType $ staticShapes $ map patElemType vals)
 
         treatBinding (Let pat _ e) = do

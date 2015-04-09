@@ -2,6 +2,8 @@
 module Futhark.Flattening ( flattenProg )
   where
 
+{-
+
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.Map as M
@@ -13,6 +15,14 @@ import qualified Data.List as L
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
 import Futhark.Substitute
+
+-}
+
+import Futhark.Representation.Basic
+
+flattenProg :: Prog -> Either String Prog
+flattenProg = undefined
+{-
 
 --------------------------------------------------------------------------------
 
@@ -581,3 +591,4 @@ isSafeToMapType (Array{}) = return False
 identDimentionality :: Ident -> Maybe Int
 identDimentionality (Ident _ (Array _ (Shape dims) _)) = Just $ length dims
 identDimentionality _ = Nothing
+-}

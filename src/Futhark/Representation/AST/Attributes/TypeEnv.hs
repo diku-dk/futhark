@@ -25,5 +25,5 @@ class Applicative m => HasTypeEnv m where
 
   askTypeEnv :: m TypeEnv
 
-instance HasTypeEnv (Reader TypeEnv) where
+instance (Applicative m, Monad m) => HasTypeEnv (ReaderT TypeEnv m) where
   askTypeEnv = ask

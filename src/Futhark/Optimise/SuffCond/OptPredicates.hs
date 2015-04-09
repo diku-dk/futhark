@@ -148,8 +148,8 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnd
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
         (Nothing, Just (Right se@(SE.RelExp SE.LTH0 ine)))
-          | Int <- SE.scalExpType ine ->
-          case AS.mkSuffConds se ranges of
+          | Int <- runReader (SE.scalExpType ine) types ->
+          case AS.mkSuffConds se ranges types of
             Left err  -> error $ show err -- Why can this even fail?
             Right ses -> HM.insert name (SufficientCond ses) sctable
         (Just eSCTable, _) -> sctable <> eSCTable
@@ -157,7 +157,7 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnd
   in analyseBody vtable' sctable' $ Body bodylore bnds res
   where name = patElemName patElem
         ranges = rangesRep vtable
-        types = undefined
+        types = ST.typeEnv vtable
         simplify se = AS.simplify se ranges undefined
 analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
   analyseBody (ST.insertBinding bnd vtable) sctable $ Body bodylore bnds res
@@ -367,13 +367,13 @@ makeSufficientBinding' :: MonadFreshNames m => Context m -> S.Binding Invariance
 makeSufficientBinding' context@(_,vtable) (Let pat _ e)
   | Just (Right se@(SE.RelExp SE.LTH0 ine)) <-
       simplify <$> SE.toScalExp (`suffScalExp` vtable) e,
-    Int <- SE.scalExpType ine,
+    Int <- runReader (SE.scalExpType ine) types,
     Right suff <- AS.mkSuffConds se ranges types,
     x:xs <- filter (scalExpUsesNoForbidden context) $ map mkConj suff = do
   suffe <- SE.fromScalExp' $ foldl SE.SLogOr x xs
   letBind_ pat suffe
   where ranges = rangesRep vtable
-        types = undefined
+        types = ST.typeEnv vtable
         simplify se = AS.simplify se ranges types
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
@@ -381,15 +381,13 @@ makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t))) = do
   x' <- sufficientSubExp x
   y' <- sufficientSubExp y
   letBind_ pat $ PrimOp $ BinOp LogAnd x' y' t
-makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch _))
+makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch [Basic Bool]))
   | v `forbiddenIn` env,
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
     Body _ tbnds (Result [tres]) <- tbranch,
     Body _ fbnds (Result [fres]) <- fbranch,
-    Basic Bool <- subExpType tres,
-    Basic Bool <- subExpType fres,
     all safeBnd tbnds, all safeBnd fbnds = do
   mapM_ addBinding tbnds
   mapM_ addBinding fbnds

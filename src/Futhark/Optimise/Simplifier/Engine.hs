@@ -685,9 +685,9 @@ simplifySegOp (SegReduce cs fun input descp) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
   acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyIdent arrs
+  arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  descp' <- simplifyIdent descp
+  descp' <- simplifyVName descp
   return $ SegReduce cs' fun' (zip acc' arrs') descp'
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
