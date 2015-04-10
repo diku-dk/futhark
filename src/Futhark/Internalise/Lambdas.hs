@@ -8,7 +8,7 @@ module Futhark.Internalise.Lambdas
   , internalisePartitionLambdas
   )
   where
-import Debug.Trace
+
 import Control.Applicative
 import Control.Monad
 import Data.List
