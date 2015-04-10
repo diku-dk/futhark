@@ -78,6 +78,13 @@ instance MonadFreshNames (SimpleM lore) where
 instance Engine.Simplifiable lore =>
          HasTypeEnv (SimpleM lore) where
   askTypeEnv = ST.typeEnv <$> Engine.getVtable
+  lookupType name = do
+    vtable <- Engine.getVtable
+    case ST.lookupType name vtable of
+      Just t -> return t
+      Nothing -> fail $
+                 "SimpleM.lookupType: cannot find variable " ++
+                 pretty name ++ " in symbol table."
 
 instance Engine.Simplifiable lore =>
          MonadBinder (SimpleM lore) where

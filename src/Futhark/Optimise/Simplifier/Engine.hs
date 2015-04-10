@@ -263,6 +263,7 @@ hoistBindings :: MonadEngine m =>
                     UT.UsageTable)
 hoistBindings rules block vtable uses needs result = do
   (uses', blocked, hoisted) <- simplifyBindings vtable uses needs
+  mapM_ addBinding blocked
   body <- mkBodyM blocked result
   return (body, hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
@@ -407,7 +408,6 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
     hoistBindings rules block vtable (usageTable needs2)
     (needBindings needs2) body2
   let hoistable = safe1 <> safe2
-  putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return ((body1', body2'),
           const Need { needBindings = hoistable
                      , usageTable = f1 <> f2
@@ -795,9 +795,11 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
            blockIf (hasFree paramnames `orIf` isUnique) $
            bindLParams params' $
            localVtable extendSymTab $
-               simplifyBody (map diet rettype) body
-  let bodyres   = resultSubExps $ bodyResult body'
-  rettype'' <- zipWithM (refineArrType params') bodyres rettype'
+           simplifyBody (map diet rettype) body
+  let bodyres = resultSubExps $ bodyResult body'
+      bodyenv = typeEnvFromBindings $ bodyBindings body'
+  rettype'' <- bindLParams params' $
+               zipWithM (refineArrType bodyenv params') bodyres rettype'
   return $ ExtLambda params' body' rettype''
     where extendSymTab vtb =
             foldl (\ vt (i,l,u) ->
@@ -806,10 +808,11 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
                             ST.setLowerBound i_name l vt
                   ) vtb parbnds
           refineArrType :: MonadEngine m =>
-                           [Ident] -> SubExp -> ExtType -> m ExtType
-          refineArrType pars x (Array btp shp u) = do
+                           TypeEnv -> [Ident] -> SubExp -> ExtType -> m ExtType
+          refineArrType bodyenv pars x (Array btp shp u) = do
             vtab <- ST.bindings <$> getVtable
-            dsx <- shapeDims <$> arrayShape <$> subExpType x
+            dsx <- flip extendedTypeEnv bodyenv $
+                   shapeDims <$> arrayShape <$> subExpType x
             let parnms = map identName pars
                 dsrtpx =  extShapeDims shp
                 (resdims,_) =
@@ -829,7 +832,7 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
                                 else (lst ++ [Ext i],        i+1)
                           ) ([],0) (zip dsrtpx dsx)
             return $ Array btp (ExtShape resdims) u
-          refineArrType _ _ tp = return tp
+          refineArrType _ _ _ tp = return tp
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()
@@ -854,6 +857,6 @@ simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body) = do
   rettype' <- simplifyRetType rettype
-  body' <- insertAllBindings $ bindFParams params $
+  body' <- bindFParams params $ insertAllBindings $
            simplifyBody (map diet $ retTypeValues rettype') body
   return $ FunDec fname rettype' params body'

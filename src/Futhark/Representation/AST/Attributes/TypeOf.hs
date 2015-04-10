@@ -1,9 +1,7 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
 module Futhark.Representation.AST.Attributes.TypeOf
        (
-         HasTypeEnv (..)
-       , TypeEnv
-       , expExtType
+         expExtType
        , expExtTypeSize
        , subExpType
        , bodyExtType
@@ -18,6 +16,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , substNamesInExtType
        , module Futhark.Representation.AST.RetType
        , typeEnvFromBindings
+       , module Futhark.Representation.AST.Attributes.TypeEnv
        )
        where
 
@@ -123,14 +122,14 @@ loopOpExtType (Redomap _ outerfun innerfun _ ids) =
         _  -> staticShapes <$> result <$> arraysSize 0 <$> traverse lookupType ids
 loopOpExtType (Stream _ accs arrs lam) =
   result <$> lookupType (head arrs)
-  where result (Array _ shp _) =
-          let ExtLambda params _ rtp = lam
-              nms = map identName $ take (2 + length accs) params
+  where ExtLambda params _ rtp = lam
+        result (Array _ shp _) =
+          let nms = map identName $ take (2 + length accs) params
               (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
               substs = HM.fromList $ zip nms (outersize:i0:accs)
           in map (substNamesInExtType substs) rtp
         result _ =
-          error "loopOpExtType for Stream went wrong.  Ask Cosmin why."
+          rtp
 
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
 segOpExtType (SegReduce _ fun _ descp) =
