@@ -24,7 +24,6 @@ import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
 import Futhark.Renamer as I
 import Futhark.MonadFreshNames
-import Futhark.Tools
 import Futhark.Substitute
 
 import Futhark.Internalise.Monad
@@ -179,9 +178,17 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit <- internaliseExp "loop_init" mergeexp
   mergeinit_ts <- mapM subExpType mergeinit
 
+  (wrap, form_contents) <- case form of
+    E.ForLoop i bound -> do
+      bound' <- internaliseExp1 "bound" bound
+      i' <- internaliseIdent i
+      return (bindingIdentTypes [I.Ident i' $ I.Basic I.Int], Left (i', bound'))
+    E.WhileLoop cond ->
+      return (id, Right cond)
+
   mergeparams <- map E.toParam <$> flattenPattern mergepat
   (loopbody', (form', shapepat, mergepat', res, mergeinit', pre_bnds)) <-
-    bindingParams mergeparams $ \shapepat mergepat' ->
+    wrap $ bindingParams mergeparams $ \shapepat mergepat' ->
     internaliseBodyBindings loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let shapeinit = argShapes
@@ -192,19 +199,16 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                       (map I.identName shapepat)
                       (map I.identType mergepat')
                       sets
-      case form of
-        E.ForLoop i bound -> do
-          (bound', bound_bnds) <-
-            collectBindings $ internaliseExp1 "bound" bound
-          i' <- internaliseIdent i
+      case form_contents of
+        Left (i', bound') ->
           return (resultBody $ shapeargs ++ ses,
                   (I.ForLoop i' bound',
                    shapepat,
                    mergepat',
                    map I.identName mergepat',
                    mergeinit,
-                  bound_bnds))
-        E.WhileLoop cond -> do
+                   []))
+        Right cond -> do
           -- We need to insert 'cond' twice - once for the initial
           -- condition (do we enter the loop at all?), and once with
           -- the result values of the loop (do we continue into the
@@ -212,6 +216,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           -- the external language guarantees that 'cond' does not
           -- consume anything.
           loop_while <- newIdent "loop_while" $ I.Basic Bool
+          (loop_cond, loop_cond_bnds) <-
+            collectBindings $ internaliseExp1 "loop_cond" cond
           let initsubst = [ (I.identName mergeparam, initval)
                             | (mergeparam, initval) <-
                                zip (shapepat++mergepat') (shapeinit++mergeinit)
@@ -220,8 +226,6 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                          | (mergeparam, endval) <-
                               zip (shapepat++mergepat') (shapeargs++ses)
                          ]
-          (loop_cond, loop_cond_bnds) <-
-            collectBindings $ internaliseExp1 "loop_cond" cond
           (loop_initial_cond, init_loop_cond_bnds) <-
             collectBindings $
             shadowIdentsInExp initsubst loop_cond_bnds loop_cond
