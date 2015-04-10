@@ -172,6 +172,8 @@ Library
 
   Ghc-Options:        -Wall
 
+  Ghc-prof-options:   -fprof-auto
+
   if impl(ghc >= 7.10.1)
      Ghc-Options:       -Wall -fno-warn-unticked-promoted-constructors
 
@@ -187,6 +189,8 @@ Executable futhark
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+  Ghc-prof-options:   -fprof-auto
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
