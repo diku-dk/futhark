@@ -44,7 +44,7 @@ genPredicate :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
 genPredicate (FunDec fname rettype params body) = do
   pred_ident <- newIdent "pred" $ Basic Bool
   cert_ident <- newIdent "pred_cert" $ Basic Cert
-  (pred_params, bnds) <- nonuniqueParams $ map fparamIdent params
+  ((pred_params, bnds),_) <- runBinderEmptyEnv $ nonuniqueParams $ map fparamIdent params
   let env = GenEnv cert_ident (dataDependencies body) mempty
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
   let mkFParam = flip FParam ()
@@ -74,7 +74,7 @@ splitBody :: Body -> GenM (Body, Body)
 splitBody (Body _ bnds valres) = do
   (pred_bnds, val_bnds, preds) <- unzip3 <$> mapM splitBinding bnds
   (conjoined_preds, conj_bnds) <-
-    runBinder'' $ letSubExp "conjPreds" =<<
+    runBinderEmptyEnv $ letSubExp "conjPreds" =<<
     foldBinOp LogAnd (constant True) (catMaybes preds) Bool
   let predbody = mkBody (concat pred_bnds <> conj_bnds) $
                  valres { resultSubExps =

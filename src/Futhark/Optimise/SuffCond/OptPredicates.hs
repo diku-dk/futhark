@@ -73,7 +73,7 @@ insertPredicateCalls subst prog =
           return $ bnds ++ [Let pat () e']
         treatExp e@(Apply predf predargs predt)
           | Just preds <- HM.lookup predf subst =
-            runBinder'' $ callPreds predt preds e $ \predf' ->
+            runBinderEmptyEnv $ callPreds predt preds e $ \predf' ->
             Apply predf' predargs predt
         treatExp e = do
           e' <- mapExpM mapper e

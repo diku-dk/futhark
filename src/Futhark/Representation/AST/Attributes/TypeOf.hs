@@ -17,6 +17,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , applyExtType
        , substNamesInExtType
        , module Futhark.Representation.AST.RetType
+       , typeEnvFromBindings
        )
        where
 
@@ -143,16 +144,35 @@ expExtType (LoopOp op)    = loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
 expExtType (SegOp op)    = segOpExtType op
 
-expExtTypeSize :: Exp lore -> Int
-expExtTypeSize = undefined
+expExtTypeSize :: IsRetType (RetType lore) => Exp lore -> Int
+expExtTypeSize = length . feelBad . expExtType
 
-bodyExtType :: HasTypeEnv m =>
-               Body lore -> m [ExtType]
-bodyExtType (Body _ bnds res) =
-  existentialiseExtTypes bound <$>
-  staticShapes <$> traverse subExpType (resultSubExps res)
+-- FIXME, this is a horrible quick hack.
+newtype FeelBad a = FeelBad { feelBad :: a }
+
+instance Functor FeelBad where
+  fmap f = FeelBad . f . feelBad
+
+instance Applicative FeelBad where
+  pure = FeelBad
+  f <*> x = FeelBad $ feelBad f $ feelBad x
+
+instance HasTypeEnv FeelBad where
+  lookupType = const $ pure $ Basic Int
+  askTypeEnv = pure mempty
+
+bodyExtType' :: [Binding lore] -> [Type] -> [ExtType]
+bodyExtType' bnds sets =
+  existentialiseExtTypes bound $ staticShapes sets
   where boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
+
+bodyExtType :: (HasTypeEnv m, Monad m) =>
+               Body lore -> m [ExtType]
+bodyExtType (Body _ bnds res) =
+  bodyExtType' bnds <$>
+  extendedTypeEnv (mapM subExpType (resultSubExps res)) bndtypes
+  where bndtypes = typeEnvFromBindings bnds
 
 valueShapeContext :: [ExtType] -> [Value] -> [Value]
 valueShapeContext rettype values =
@@ -214,6 +234,15 @@ applyExtType (ExtRetType extret) params args =
             Free se
           | otherwise =
             Free $ Var v
+
+-- | Create a type environment consisting of the names bound in the
+-- list of bindings.
+typeEnvFromBindings :: [Binding lore] -> TypeEnv
+typeEnvFromBindings = HM.fromList . concatMap assoc
+  where assoc bnd =
+          [ (identName ident, identType ident)
+          | ident <- patternIdents $ bindingPattern bnd
+          ]
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Basic _) = tp

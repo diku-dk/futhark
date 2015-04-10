@@ -8,17 +8,15 @@ module Futhark.Internalise.Lambdas
   , internalisePartitionLambdas
   )
   where
-
+import Debug.Trace
 import Control.Applicative
 import Control.Monad
-
 import Data.List
 import Data.Loc
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
 import Futhark.MonadFreshNames
-import Futhark.Tools
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -39,10 +37,12 @@ internaliseMapLambda internaliseLambda lam args = do
   (params, body, rettype) <- internaliseLambda lam $ Just rowtypes
   (rettype', inner_shapes) <- instantiateShapes' rettype
   let outer_shape = arraysSize 0 argtypes
-  shape_body <- shapeBody (map I.identName inner_shapes) rettype' body
+  shape_body <- bindingIdentTypes params $
+                shapeBody (map I.identName inner_shapes) rettype' body
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
-  body' <- ensureResultShape (srclocOf lam) rettype' body
+  body' <- bindingIdentTypes params $
+           ensureResultShape (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 internaliseConcatMapLambda :: InternaliseLambda
@@ -101,7 +101,8 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
-  body' <- ensureResultShape (srclocOf lam) rettype' body
+  body' <- bindingIdentTypes params $
+           ensureResultShape (srclocOf lam) rettype' body
 
   return $ I.Lambda params body' rettype'
 
@@ -138,7 +139,8 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
       map_bindings= acc_bindings ++ bodyBindings body
       map_lore    = bodyLore body
       map_body = I.Body map_lore map_bindings map_bodyres
-  shape_body <- shapeBody (map I.identName inner_shapes) rettypearr' map_body
+  shape_body <- bindingIdentTypes params $
+                shapeBody (map I.identName inner_shapes) rettypearr' map_body
   shapefun <- makeShapeFun (drop acc_len params) shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun arr_args outer_shape
   --
@@ -150,7 +152,8 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   -- an assertion and reshape().
   --
   -- finally, place assertions and return result
-  body' <- ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
+  body' <- bindingIdentTypes params $
+           ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda

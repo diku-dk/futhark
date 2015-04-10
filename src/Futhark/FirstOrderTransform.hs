@@ -32,7 +32,11 @@ transformProg prog =
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec (FunDec fname rettype params body) = do
-  body' <- runBinder $ transformBody body
+  (body',_) <-
+    runBinderEmptyEnv $
+    insertBindingsM $
+    bindingIdentTypes (map fparamIdent params) $
+    transformBody body
   return $ FunDec fname rettype params body'
 
 transformBody :: Body -> Binder Basic Body

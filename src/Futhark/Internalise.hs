@@ -14,9 +14,9 @@ module Futhark.Internalise
 import Control.Applicative
 import Control.Monad.State  hiding (mapM)
 import Control.Monad.Reader hiding (mapM)
-
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
+import Data.Monoid
 import Data.List
 import Data.Traversable (mapM)
 import Data.Loc
@@ -71,8 +71,8 @@ internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseDeclType rettype
-    body' <- ensureResultExtShape loc rettype' =<<
-             internaliseBody body
+    firstbody <- internaliseBody body
+    body' <- ensureResultExtShape loc rettype' firstbody
     let mkFParam = flip FParam ()
     return $ FunDec
       fname (ExtRetType rettype')
@@ -92,7 +92,10 @@ internaliseBody e = insertBindingsM $ do
 
 internaliseBodyBindings :: E.Exp -> ([SubExp] -> InternaliseM (Body, a))
                         -> InternaliseM (Body, a)
-internaliseBodyBindings = undefined
+internaliseBodyBindings e m = do
+  ((Body _ bnds res,x), otherbnds) <-
+    collectBindings $ m =<< internaliseExp "res" e
+  (,x) <$> mkBodyM (otherbnds <> bnds) res
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
@@ -177,7 +180,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit_ts <- mapM subExpType mergeinit
 
   mergeparams <- map E.toParam <$> flattenPattern mergepat
-  (loopbody', (form', shapepat, mergepat', res, mergeinit')) <-
+  (loopbody', (form', shapepat, mergepat', res, mergeinit', pre_bnds)) <-
     bindingParams mergeparams $ \shapepat mergepat' ->
     internaliseBodyBindings loopbody $ \ses -> do
       sets <- mapM subExpType ses
@@ -191,14 +194,16 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                       sets
       case form of
         E.ForLoop i bound -> do
-          bound' <- internaliseExp1 "bound" bound
+          (bound', bound_bnds) <-
+            collectBindings $ internaliseExp1 "bound" bound
           i' <- internaliseIdent i
           return (resultBody $ shapeargs ++ ses,
                   (I.ForLoop i' bound',
                    shapepat,
                    mergepat',
                    map I.identName mergepat',
-                   mergeinit))
+                   mergeinit,
+                  bound_bnds))
         E.WhileLoop cond -> do
           -- We need to insert 'cond' twice - once for the initial
           -- condition (do we enter the loop at all?), and once with
@@ -217,7 +222,8 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                          ]
           (loop_cond, loop_cond_bnds) <-
             collectBindings $ internaliseExp1 "loop_cond" cond
-          loop_initial_cond <-
+          (loop_initial_cond, init_loop_cond_bnds) <-
+            collectBindings $
             shadowIdentsInExp initsubst loop_cond_bnds loop_cond
           (loop_end_cond, loop_end_cond_bnds) <-
             collectBindings $
@@ -228,7 +234,10 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                    shapepat,
                    loop_while : mergepat',
                    map I.identName mergepat',
-                   loop_initial_cond : mergeinit))
+                   loop_initial_cond : mergeinit,
+                   init_loop_cond_bnds))
+
+  mapM_ addBinding pre_bnds
 
   mergeinit_ts' <- mapM subExpType mergeinit'
 

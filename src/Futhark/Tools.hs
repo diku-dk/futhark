@@ -217,17 +217,14 @@ foldBinOp bop ne (e:es) t =
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
-binOpLambda :: forall m lore.
-               (MonadFreshNames m, Bindable lore) =>
+binOpLambda :: (MonadFreshNames m, Bindable lore) =>
                BinOp -> BasicType -> m (Lambda lore)
 binOpLambda bop t = do
   x   <- newVName "x"
   y   <- newVName "y"
-  res <- newVName "res"
-  body <- runBinder $ do
-    bnds <- mkLetNamesM [(res,BindVar)] $
-            PrimOp $ BinOp bop (Var x) (Var y) t
-    mkBodyM [bnds] $ Result [Var res]
+  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
+    res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y) t
+    return $ resultBody [res]
   return Lambda {
              lambdaParams     = [Ident x (Basic t), Ident y (Basic t)]
            , lambdaReturnType = [Basic t]
@@ -290,14 +287,17 @@ mapResult f (Body _ bnds res) =
 
 nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
                    [Param] -> m ([Param], [Binding lore])
-nonuniqueParams params = runBinder'' $ forM params $ \param ->
-  if unique $ identType param then do
-    param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-    letBindNames_ [(identName param,BindVar)] $
-      PrimOp $ Copy $ Var $ identName param'
-    return param'
-  else
-    return param
+nonuniqueParams params =
+  modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
+  collectBindings $ forM params $ \param ->
+    if unique $ identType param then do
+      param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
+      bindingIdentTypes [param'] $
+        letBindNames_ [(identName param,BindVar)] $
+        PrimOp $ Copy $ Var $ identName param'
+      return param'
+    else
+      return param
   where nonuniqueParam param =
           param { identType = identType param `setUniqueness` Nonunique }
 

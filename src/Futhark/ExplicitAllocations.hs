@@ -29,8 +29,9 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplifier.Simplify (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
-newtype AllocM a = AllocM (ReaderT (HM.HashMap VName MemSummary)
-                           (Binder ExplicitMemory)
+newtype AllocM a = AllocM (BinderT ExplicitMemory
+                           (ReaderT (HM.HashMap VName MemSummary)
+                            (State VNameSource))
                            a)
                  deriving (Applicative, Functor, Monad,
                            MonadReader (HM.HashMap VName MemSummary),
@@ -54,8 +55,10 @@ instance MonadBinder AllocM where
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addBinding = addBindingWriter
-  collectBindings = collectBindingsWriter
+  addBinding =
+    AllocM . addBinderBinding
+  collectBindings (AllocM m) =
+    AllocM $ collectBinderBindings m
 
 instance HasTypeEnv AllocM where
 
@@ -219,7 +222,8 @@ runAllocMWithEnv :: MonadFreshNames m =>
                     HM.HashMap VName MemSummary
                  -> AllocM a
                  -> m a
-runAllocMWithEnv env (AllocM m) = liftM fst $ runBinder'' $ runReaderT m env
+runAllocMWithEnv env (AllocM m) =
+  fst <$> modifyNameSource (runState (runReaderT (runBinderT m mempty) env))
 
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a

@@ -11,22 +11,23 @@ module Futhark.Internalise.AccurateSizes
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Reader
 import Data.Loc
-
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 import Futhark.Tools
+import Futhark.MonadFreshNames
 
-shapeBody :: (HasTypeEnv m, Monad m) => [VName] -> [Type] -> Body -> m Body
-shapeBody shapenames ts (Body () bnds (Result ses)) = do
-  types <- askTypeEnv
-  let types' = typeEnvFromBindings bnds `HM.union` types
-      sets = runReader (mapM subExpType ses) types'
-  return $ Body () bnds $ Result $ argShapes shapenames ts sets
+shapeBody :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+             [VName] -> [Type] -> Body lore
+          -> m (Body lore)
+shapeBody shapenames ts body =
+  runBinder $ do
+    ses <- bodyBind body
+    sets <- mapM subExpType ses
+    return $ resultBody $ argShapes shapenames ts sets
 
 annotateArrayShape :: ArrayShape shape =>
                       TypeBase shape -> [Int] -> TypeBase Shape
@@ -41,22 +42,23 @@ argShapes shapes valts valargts =
           | Just se <- HM.lookup name mapping = se
           | otherwise                         = Constant (IntVal 0)
 
-ensureResultShape :: MonadBinder m =>
-                     SrcLoc -> [Type] -> Body
-                  -> m Body
+ensureResultShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+                     SrcLoc -> [Type] -> Body lore
+                  -> m (Body lore)
 ensureResultShape loc =
   ensureResultExtShape loc . staticShapes
 
-ensureResultExtShape :: MonadBinder m =>
-                        SrcLoc -> [ExtType] -> Body
-                     -> m Body
-ensureResultExtShape loc rettype body = runBinder $ do
-  es <- bodyBind body
-  let assertProperShape t se =
-        let name = "result_proper_shape"
-        in ensureExtShape loc t name se
-  reses <- zipWithM assertProperShape rettype es
-  return $ resultBody reses
+ensureResultExtShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+                        SrcLoc -> [ExtType] -> Body lore
+                     -> m (Body lore)
+ensureResultExtShape loc rettype body =
+  runBinder $ insertBindingsM $ do
+    es <- bodyBind body
+    let assertProperShape t se =
+          let name = "result_proper_shape"
+          in ensureExtShape loc t name se
+    reses <- zipWithM assertProperShape rettype es
+    mkBodyM [] $ Result reses
 
 ensureExtShape :: MonadBinder m =>
                   SrcLoc -> ExtType -> String -> SubExp

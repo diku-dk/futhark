@@ -109,7 +109,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
                  -> m ([(FParamT (), SubExp)], [Binding lore])
         mkMerges summaries = do
           ((origmerge, extramerge), prebnds) <-
-            runBinderT $ partitionEithers <$> mapM mkMerge summaries
+            runBinderEmptyEnv $ partitionEithers <$> mapM mkMerge summaries
           return (origmerge ++ extramerge, prebnds)
 
         mkMerge summary

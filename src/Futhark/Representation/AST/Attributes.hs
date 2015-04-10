@@ -26,12 +26,10 @@ module Futhark.Representation.AST.Attributes
   , asSegOp
   , safeExp
   , loopResultValues
-  , typeEnvFromBindings
   )
   where
 
 import Data.List
-import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
@@ -122,12 +120,3 @@ safeExp (Apply {}) = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
   all (safeExp . bindingExp) (bodyBindings fbranch)
-
--- | Create a type environment consisting of the names bound in the
--- list of bindings.
-typeEnvFromBindings :: [Binding lore] -> TypeEnv
-typeEnvFromBindings = HM.fromList . concatMap assoc
-  where assoc bnd =
-          [ (identName ident, identType ident)
-          | ident <- patternIdents $ bindingPattern bnd
-          ]

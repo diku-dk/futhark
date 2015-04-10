@@ -46,15 +46,12 @@ newtype SplitM a = SplitM (ReaderT TypeEnv
                  deriving (Applicative, Functor, Monad,
                            MonadReader TypeEnv,
                            MonadState VNameSource,
+                           MonadFreshNames,
                            HasTypeEnv)
 
-instance MonadFreshNames SplitM where
-  getNameSource = get
-  putNameSource = put
-
 runSplitM :: SplitM a -> TypeEnv -> VNameSource -> a
-runSplitM (SplitM m) env src =
-  evalState (runReaderT m env) src
+runSplitM (SplitM m) =
+  evalState . runReaderT m
 
 makeFunSubsts :: (MonadFreshNames m, HasTypeEnv m) =>
                  [FunDec] -> m [(Name, (FunDec, FunDec))]
@@ -75,7 +72,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
-  (shapeParams, cpybnds) <- nonuniqueParams $ map fparamIdent params
+  ((shapeParams, cpybnds),_) <- runBinderEmptyEnv $ nonuniqueParams $ map fparamIdent params
 
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
@@ -168,7 +165,7 @@ substCalls subst fundec = do
 
         treatBinding (Let pat _ (Apply fname args _))
           | Just (shapefun,shapetype,valfun,_) <- lookup fname subst =
-            liftM snd . runBinder'' $ do
+            liftM snd . runBinderEmptyEnv $ do
               let (vs,vals) =
                     splitAt (length $ retTypeValues shapetype) $
                     patternElements pat

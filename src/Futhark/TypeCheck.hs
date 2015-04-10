@@ -173,7 +173,9 @@ newtype TypeM lore a = TypeM (RWST
 instance HasTypeEnv (TypeM lore) where
   lookupType name = do (t, _, _) <- lookupVar name
                        return t
-  askTypeEnv = undefined
+  askTypeEnv = asks $ HM.fromList . mapMaybe varType . HM.toList . envVtable
+    where varType (name, Bound t _ _ ) = Just (name, t)
+          varType (_,    WasConsumed)  = Nothing
 
 runTypeM :: TypeEnv lore -> NameSource VName -> TypeM lore a
          -> Either (TypeError lore) a
@@ -752,20 +754,21 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
       checkFuncall Nothing paramts mergeargs
       return funparams
 
-  let rettype   = map fparamType mergepat
+  let rettype = map fparamType mergepat
 
-  noConsume $ checkFun' (nameFromString "<loop body>",
-                        staticShapes rettype,
-                        funParamsToIdentsAndLores funparams,
-                        loopbody) $ do
-    checkFunParams funparams
-    checkBody loopbody
-    bodyt <- bodyExtType loopbody
-    unless (map rankShaped bodyt `subtypesOf`
-            map rankShaped (staticShapes rettype)) $
-      bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
-      (Several $ staticShapes rettype)
-      (Several bodyt)
+  context "Inside the loop body" $ noConsume $
+    checkFun' (nameFromString "<loop body>",
+               staticShapes rettype,
+               funParamsToIdentsAndLores funparams,
+               loopbody) $ do
+      checkFunParams funparams
+      checkBody loopbody
+      bodyt <- bodyExtType loopbody
+      unless (map rankShaped bodyt `subtypesOf`
+              map rankShaped (staticShapes rettype)) $
+        bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
+        (Several $ staticShapes rettype)
+        (Several bodyt)
   forM_ respat $ \res ->
     case find ((==res) . fparamName) mergepat of
       Nothing -> bad $ TypeError noLoc $

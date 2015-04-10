@@ -22,7 +22,6 @@ import Data.Traversable (mapM)
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
-import Futhark.Tools as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
@@ -77,7 +76,9 @@ bindingParams :: [E.Parameter]
 bindingParams params m = do
   (shapeparams, valueparams, substs) <- internaliseFunParams params
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
-  local bind $ m shapeparams valueparams
+  local bind $
+    bindingIdentTypes (shapeparams++valueparams) $
+    m shapeparams valueparams
 
 bindingFlatPattern :: [E.Ident] -> [I.Type]
                    -> ([I.Ident] -> InternaliseM a)
@@ -87,8 +88,9 @@ bindingFlatPattern = bindingFlatPattern' []
     bindingFlatPattern' pat []       _  m = do
       let (vs, substs) = unzip pat
           substs' = HM.fromList substs
-      local (\env -> env { envSubsts = substs' `HM.union` envSubsts env})
-              $ m $ concat $ reverse vs
+          idents = concat $ reverse vs
+      local (\env -> env { envSubsts = substs' `HM.union` envSubsts env}) $
+        m idents
 
     bindingFlatPattern' pat (p:rest) ts m = do
       (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee p
@@ -121,7 +123,7 @@ bindingTupIdent :: E.TupIdent -> [ExtType] -> (I.Pattern -> InternaliseM a)
                 -> InternaliseM a
 bindingTupIdent pat ts m = do
   pat' <- flattenPattern pat
-  (ts',shapes) <- I.instantiateShapes' ts
+  (ts',shapes) <- instantiateShapes' ts
   let addShapeBindings pat'' = m $ I.basicPattern' $ shapes ++ pat''
   bindingFlatPattern pat' ts' addShapeBindings
 
@@ -129,7 +131,8 @@ bindingLambdaParams :: [E.Parameter] -> [I.Type]
                     -> InternaliseM I.Body
                     -> InternaliseM (I.Body, [I.Param])
 bindingLambdaParams params ts m =
-  bindingFlatPattern (map E.fromParam params) ts $ \params' -> do
+  bindingFlatPattern (map E.fromParam params) ts $ \params' ->
+  bindingIdentTypes params' $ do
     body <- m
     return (body, params')
 
@@ -148,7 +151,7 @@ instantiateShapesWithDecls :: MonadFreshNames m =>
                            -> [I.ExtType]
                            -> m ([I.Type], [I.Ident])
 instantiateShapesWithDecls ctx ts =
-  runWriterT $ I.instantiateShapes instantiate ts
+  runWriterT $ instantiateShapes instantiate ts
   where instantiate x
           | Just v <- HM.lookup x ctx =
             return $ I.Var $ I.identName v

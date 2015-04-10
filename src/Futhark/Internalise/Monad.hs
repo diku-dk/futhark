@@ -9,6 +9,9 @@ module Futhark.Internalise.Monad
   , InternaliseEnv(..)
   , FunBinding (..)
   , lookupFunction
+  , bindingIdentTypes
+    -- * Convenient reexports
+  , module Futhark.Tools
   )
   where
 
@@ -25,7 +28,8 @@ import Data.List
 import qualified Futhark.Representation.External as E
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Tools
+import Futhark.Tools hiding (bindingIdentTypes)
+import qualified Futhark.Tools as F
 
 import Prelude hiding (mapM)
 
@@ -81,8 +85,10 @@ instance MonadBinder InternaliseM where
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
-  addBinding      = addBindingWriter
-  collectBindings = collectBindingsWriter
+  addBinding =
+    InternaliseM . addBinding
+  collectBindings (InternaliseM m) =
+    InternaliseM $ collectBindings m
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> FunTable -> InternaliseM a
@@ -92,7 +98,7 @@ runInternaliseM boundsCheck ftable (InternaliseM m) =
   let onError e                 = (Left e, src)
       onSuccess ((prog,_),src') = (Right prog, src')
   in either onError onSuccess $ runExcept $
-     runStateT (runReaderT (runBinderT m) newEnv) src
+     runStateT (runReaderT (runBinderT m mempty) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable
@@ -104,3 +110,8 @@ lookupFunction fname = do
   fun <- HM.lookup fname <$> asks envFtable
   case fun of Nothing   -> fail $ "Function '" ++ nameToString fname ++ "' not found"
               Just fun' -> return fun'
+
+bindingIdentTypes :: [Ident] -> InternaliseM a
+                  -> InternaliseM a
+bindingIdentTypes idents (InternaliseM m) =
+  InternaliseM $ F.bindingIdentTypes idents m

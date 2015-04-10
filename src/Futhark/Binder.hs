@@ -8,11 +8,11 @@ module Futhark.Binder
   , Binder
   , runBinder
   , runBinder'
-  , runBinder''
-  , runBinderWithNameSource
-  -- * Writer convenience interface
-  , addBindingWriter
-  , collectBindingsWriter
+  , runBinderEmptyEnv
+  , bindingIdentTypes
+  -- * Non-class interface
+  , addBinderBinding
+  , collectBinderBindings
   -- * The 'MonadBinder' typeclass
   , module Futhark.Binder.Class
   )
@@ -20,6 +20,7 @@ where
 
 import qualified Data.DList as DL
 import Control.Applicative
+import Control.Arrow ((&&&))
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.Reader
@@ -31,18 +32,6 @@ import Prelude
 import Futhark.Binder.Class
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
-
-addBindingWriter :: (MonadFreshNames m, Applicative m, MonadWriter (DL.DList (Binding lore)) m) =>
-                    Binding lore -> m ()
-addBindingWriter = tell . DL.singleton
-
-collectBindingsWriter :: (MonadFreshNames m,
-                          Applicative m,
-                          MonadWriter (DL.DList (Binding lore)) m) =>
-                         m a -> m (a, [Binding lore])
-collectBindingsWriter m = pass $ do
-                            (x, bnds) <- listen m
-                            return ((x, DL.toList bnds), const DL.empty)
 
 newtype BinderT lore m a = BinderT (StateT
                                     TypeEnv
@@ -68,7 +57,7 @@ instance MonadFreshNames m => HasTypeEnv (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
     case t of
-      Nothing -> fail $ "Unknown variable " ++ pretty name
+      Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
       Just t' -> return t'
   askTypeEnv = BinderT get
 
@@ -81,33 +70,61 @@ instance (Proper lore, Bindable lore, MonadFreshNames m) =>
                  | patElem <- patternElements pat ]
   mkLetNamesM = mkLetNames
 
-  addBinding      = addBindingWriter
-  collectBindings = collectBindingsWriter
+  addBinding      = addBinderBinding
+  collectBindings = collectBinderBindings
 
 runBinderT :: Monad m =>
               BinderT lore m a
+           -> TypeEnv
            -> m (a, [Binding lore])
-runBinderT (BinderT m) = do (x, bnds) <- runWriterT $ evalStateT m HM.empty
-                            return (x, DL.toList bnds)
+runBinderT (BinderT m) types = do
+  (x, bnds) <- runWriterT $ evalStateT m types
+  return (x, DL.toList bnds)
 
-runBinder :: (Bindable lore, MonadFreshNames m) =>
+runBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
              Binder lore (Body lore) -> m (Body lore)
-runBinder m = do
-  (b, f) <- runBinder' m
-  return $ f b
+runBinder = liftM (uncurry (flip ($))) . runBinder'
 
-runBinder' :: (MonadFreshNames m, Bindable lore) =>
-              Binder lore a -> m (a, Body lore -> Body lore)
+runBinder' :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
+              Binder lore a
+           -> m (a, Body lore -> Body lore)
 runBinder' m = do
-  (x, bnds) <- runBinder'' m
+  types <- askTypeEnv
+  (x, bnds) <- modifyNameSource $ runState $ runBinderT m types
   return (x, insertBindings bnds)
 
-runBinder'' :: MonadFreshNames m => Binder lore a -> m (a, [Binding lore])
-runBinder'' = modifyNameSource . runBinderWithNameSource
+runBinderEmptyEnv :: MonadFreshNames m =>
+                     Binder lore a -> m (a, [Binding lore])
+runBinderEmptyEnv m =
+  modifyNameSource $ runState $ runBinderT m mempty
 
-runBinderWithNameSource :: Binder lore a -> VNameSource
-                        -> ((a, [Binding lore]), VNameSource)
-runBinderWithNameSource = runState . runBinderT
+addBinderBinding :: Monad m =>
+                    Binding lore -> BinderT lore m ()
+addBinderBinding binding = do
+  tell $ DL.singleton binding
+  BinderT $ modify (`HM.union` typeEnvFromBindings [binding])
+
+collectBinderBindings :: Monad m =>
+                         BinderT lore m a
+                      -> BinderT lore m (a, [Binding lore])
+collectBinderBindings m = pass $ do
+  (x, bnds) <- listen m
+  let bnds' = DL.toList bnds
+  BinderT $ modify (`HM.difference` typeEnvFromBindings bnds')
+  return ((x, bnds'), const DL.empty)
+
+-- | Add the names and types from the given list of 'Ident's to the
+-- type environment while executing the given action.  This is used to
+-- deal with function parameters and loop merge variables.
+bindingIdentTypes :: Monad m =>
+                     [Ident] -> BinderT lore m a
+                  -> BinderT lore m a
+bindingIdentTypes idents (BinderT m) = BinderT $ do
+  modify (`HM.union` types)
+  x <- m
+  modify (`HM.difference` types)
+  return x
+  where types = HM.fromList $ map (identName &&& identType) idents
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

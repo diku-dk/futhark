@@ -24,7 +24,6 @@ import Data.Monoid
 import Text.PrettyPrint.Mainland hiding (pretty)
 
 import Futhark.Representation.AST
-import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Tools
 import Futhark.Renamer
@@ -218,10 +217,10 @@ toScalExp' look (Var v) =
 toScalExp' _ (Constant val) =
   Just $ Val val
 
-fromScalExp :: (Proper lore, Bindable lore, MonadFreshNames m) =>
+fromScalExp :: MonadBinder m =>
                ScalExp
-            -> m (Exp lore, [Binding lore])
-fromScalExp = runBinder'' . fromScalExp'
+            -> m (Exp (Lore m), [Binding (Lore m)])
+fromScalExp = collectBindings . fromScalExp'
 
 fromScalExp' :: MonadBinder m => ScalExp
              -> m (Exp (Lore m))

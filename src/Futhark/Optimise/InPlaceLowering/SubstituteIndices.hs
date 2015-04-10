@@ -27,7 +27,7 @@ substituteIndices :: (MonadFreshNames m, Bindable lore) =>
                   -> m ([IndexSubstitution], [Binding lore])
 substituteIndices substs bnds = do
   (substs', bnds') <-
-    runBinder'' $ substituteIndicesInBindings substs bnds
+    runBinderEmptyEnv $ substituteIndicesInBindings substs bnds
   return (map snd substs', bnds')
 
 substituteIndicesInBindings :: MonadBinder m =>
