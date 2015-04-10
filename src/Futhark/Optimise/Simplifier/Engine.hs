@@ -98,7 +98,6 @@ emptyEnv rules prog =
       , envRules = rules
       , envAliases = mempty
       }
-
 data State m = State { stateVtable :: ST.SymbolTable (Lore m)
                      }
 

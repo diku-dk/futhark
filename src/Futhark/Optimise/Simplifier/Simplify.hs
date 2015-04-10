@@ -9,9 +9,12 @@ module Futhark.Optimise.Simplifier.Simplify
   )
   where
 
+import Data.Monoid
+
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplifier.Lore (Wise)
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simple
@@ -42,11 +45,15 @@ simplifyFun simpl rules fundec =
   Engine.emptyEnv rules Nothing
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, Simplifiable lore) =>
+simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Maybe (Prog lore) -> Lambda lore -> [Maybe VName]
                -> m (Lambda (Wise lore))
-simplifyLambda simpl rules prog lam args =
-  modifyNameSource $ runSimpleM (Engine.simplifyLambda lam args) simpl $
-  Engine.emptyEnv rules prog
+simplifyLambda simpl rules prog lam args = do
+  types <- askTypeEnv
+  let m =
+        Engine.localVtable (<> ST.fromTypeEnv types) $
+          Engine.simplifyLambda lam args
+  modifyNameSource $ runSimpleM m simpl $
+    Engine.emptyEnv rules prog

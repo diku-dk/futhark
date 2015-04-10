@@ -23,13 +23,25 @@ import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Renamer
 
+data VarEntry = IsArray Ident SOAC.ArrayTransforms
+              | IsNotArray Ident
+
+varEntryType :: VarEntry -> Type
+varEntryType (IsArray ident _) = identType ident
+varEntryType (IsNotArray ident) = identType ident
+
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
   -- ^ Mapping from variable name to its entire family.
-  , arrsInScope:: HM.HashMap VName (Ident, SOAC.ArrayTransforms)
+  , varsInScope:: HM.HashMap VName VarEntry
   , fusedRes   :: FusedRes
   , program    :: Prog
   }
+
+arrsInScope :: FusionGEnv -> HM.HashMap VName (Ident, SOAC.ArrayTransforms)
+arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
+  where asArray (name, IsArray ident ts) = Just (name, (ident, ts))
+        asArray (_, IsNotArray _)        = Nothing
 
 newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either Error)) a)
   deriving (Monad, Applicative, Functor,
@@ -40,8 +52,8 @@ instance MonadFreshNames FusionGM where
   putNameSource = put
 
 instance HasTypeEnv FusionGM where
-  askTypeEnv = toTypeEnv <$> asks arrsInScope
-    where toTypeEnv = HM.map $ identType . fst
+  askTypeEnv = toTypeEnv <$> asks varsInScope
+    where toTypeEnv = HM.map varEntryType
 
 ------------------------------------------------------------------------
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
@@ -56,26 +68,35 @@ arrayTransforms name t = do
 -- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> Ident -> FusionGEnv
 bindVar env name =
-  env { arrsInScope = HM.insert (identName name) (name, mempty) $
-                      arrsInScope env }
+  env { varsInScope = HM.insert (identName name) entry $
+                      varsInScope env }
+  where entry = case identType name of
+          Array {} -> IsArray name mempty
+          _        -> IsNotArray name
+
 
 bindVars :: FusionGEnv -> [Ident] -> FusionGEnv
 bindVars = foldl bindVar
 
 binding :: [Ident] -> FusionGM a -> FusionGM a
-binding vs = local (`bindVars` namesOfArrays vs)
-  where namesOfArrays = filter (not . basicType . identType)
+binding vs = local (`bindVars` vs)
 
-bindingPat :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
-bindingPat pat m = do
+gatherBindingPattern :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
+gatherBindingPattern pat m = do
   res <- binding (patternIdents pat) m
   checkForUpdates pat res
+
+bindingPat :: Pattern -> FusionGM a -> FusionGM a
+bindingPat = binding . patternIdents
+
+bindingFParams :: [FParam] -> FusionGM a -> FusionGM a
+bindingFParams = binding  . map fparamIdent
 
 -- | Binds an array name to the set of soac-produced vars
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
 bindingFamilyVar faml env nm =
-  env { soacs       = HM.insert (identName nm) faml         $ soacs env
-      , arrsInScope = HM.insert (identName nm) (nm, mempty) $ arrsInScope env
+  env { soacs       = HM.insert (identName nm) faml $ soacs env
+      , varsInScope = HM.insert (identName nm) (IsArray nm mempty) $ varsInScope env
       }
 
 checkForUpdates :: Pattern -> FusedRes -> FusionGM FusedRes
@@ -100,13 +121,13 @@ bindingFamily pat m = do
 
 bindingTransform :: Ident -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform v srcname trns = local $ \env ->
-  case HM.lookup srcname $ arrsInScope env of
-    Just (src', ts) ->
-      env { arrsInScope =
-              HM.insert vname (src', ts SOAC.|> trns) $
-              arrsInScope env
+  case HM.lookup srcname $ varsInScope env of
+    Just (IsArray src' ts) ->
+      env { varsInScope =
+              HM.insert vname (IsArray src' $ ts SOAC.|> trns) $
+              varsInScope env
           }
-    Nothing -> bindVar env v
+    _ -> bindVar env v
   where vname = identName v
 
 -- | Binds the fusion result to the environment.
@@ -132,7 +153,7 @@ badFusionGM = FusionGM . lift . lift . Left
 fuseProg :: Prog -> Either Error Prog
 fuseProg prog = do
   let env  = FusionGEnv { soacs = HM.empty
-                        , arrsInScope = HM.empty
+                        , varsInScope = HM.empty
                         , fusedRes = mkFreshFusionRes
                         , program = prog
                         }
@@ -147,11 +168,15 @@ fuseProg prog = do
           return $ renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
-fusionGatherFun = fusionGatherBody mkFreshFusionRes . funDecBody
+fusionGatherFun fundec =
+  bindingFParams (funDecParams fundec) $
+  fusionGatherBody mkFreshFusionRes $ funDecBody fundec
 
 fuseInFun :: FusedRes -> FunDec -> FusionGM FunDec
 fuseInFun res fundec = do
-  body' <- bindRes res $ fuseInBody $ funDecBody fundec
+  body' <- bindingFParams (funDecParams fundec) $
+           bindRes res $
+           fuseInBody $ funDecBody fundec
   return $ fundec { funDecBody = body' }
 
 ---------------------------------------------------
@@ -426,7 +451,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
 
     _ -> do
       let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
-      bres <- bindingPat pat $ fusionGatherBody fres $ mkBody bnds res
+      bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
       foldM fusionGatherExp bres (e:pat_vars)
 
 fusionGatherBody fres (Body _ [] _) =
@@ -510,7 +535,7 @@ fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     -- cannot be fused from outside the lambda:
     let inp_arrs = HS.fromList $ HM.keys $ inpArr new_res
     let unfus = unfusable new_res `HS.union` inp_arrs
-    bnds <- HM.keys <$> asks arrsInScope
+    bnds <- HM.keys <$> asks varsInScope
     let unfus'  = unfus `HS.intersection` HS.fromList bnds
     -- merge fres with new_res'
     let new_res' = new_res { unfusable = unfus' }
@@ -544,9 +569,10 @@ fuseInBody (Body _ (Let pat lore e:bnds) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
     Right soac ->
-      replaceSOAC pat soac =<< fuseInBody (mkBody bnds res)
+      bindingPat pat (fuseInBody (mkBody bnds res)) >>=
+      replaceSOAC pat soac
     _ -> do
-      Body _ bnds' res' <- fuseInBody $ mkBody bnds res
+      Body _ bnds' res' <- bindingPat pat $ fuseInBody $ mkBody bnds res
       e'                <- fuseInExp e
       return $ mkBody (Let pat lore e':bnds') res'
 
@@ -567,7 +593,7 @@ fuseIn = identityMapper {
 
 fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda params body rtp) = do
-  body' <- fuseInBody body
+  body' <- binding params $ fuseInBody body
   return $ Lambda params body' rtp
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body

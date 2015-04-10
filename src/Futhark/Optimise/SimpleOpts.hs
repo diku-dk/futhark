@@ -41,7 +41,7 @@ simpleOpts simpl rules prog = do
   return $ pass prog_flat_opt
   where pass = deadCodeElim . simplifyProgWithRules simpl rules
 
-normCopyOneLambda :: MonadFreshNames m =>
+normCopyOneLambda :: (MonadFreshNames m, HasTypeEnv m) =>
                      Basic.Prog
                   -> Basic.Lambda
                   -> [Maybe VName]

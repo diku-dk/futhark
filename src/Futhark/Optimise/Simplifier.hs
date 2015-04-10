@@ -46,7 +46,7 @@ simplifyFunWithRules simpl rules =
   simplifyFun simpl rules
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambdaWithRules :: (MonadFreshNames m, Simplifiable lore) =>
+simplifyLambdaWithRules :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
                            SimpleOps (SimpleM lore)
                         -> RuleBook (SimpleM lore)
                         -> Prog lore
