@@ -585,10 +585,10 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
   loopbody' <- enterBody $
+               bindFParams mergepat' $
                blockIf
                (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
                enterLoop $
-               bindFParams mergepat' $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
