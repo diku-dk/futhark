@@ -407,6 +407,7 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
     hoistBindings rules block vtable (usageTable needs2)
     (needBindings needs2) body2
   let hoistable = safe1 <> safe2
+  putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return ((body1', body2'),
           const Need { needBindings = hoistable
                      , usageTable = f1 <> f2
