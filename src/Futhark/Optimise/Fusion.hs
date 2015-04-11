@@ -582,7 +582,15 @@ fuseInBinding :: Binding -> FusionGM Binding
 fuseInBinding (Let pat lore e) = Let pat lore <$> fuseInExp e
 
 fuseInExp :: Exp -> FusionGM Exp
-fuseInExp = mapExpM fuseIn
+
+-- Handle loop specially because we need to bind the types of the
+-- merge variables.
+fuseInExp (LoopOp (DoLoop res mergepat form loopbody)) =
+  bindingFParams (map fst mergepat) $ do
+    loopbody' <- fuseInBody loopbody
+    return $ LoopOp $ DoLoop res mergepat form loopbody'
+
+fuseInExp e = mapExpM fuseIn e
 
 fuseIn :: Mapper Basic Basic FusionGM
 fuseIn = identityMapper {
