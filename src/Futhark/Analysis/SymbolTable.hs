@@ -11,6 +11,7 @@ module Futhark.Analysis.SymbolTable
   , entryBinding
   , entryLetBoundLore
   , entryFParamLore
+  , entryType
   , asScalExp
     -- * Lookup
   , elem
