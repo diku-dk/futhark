@@ -29,7 +29,6 @@ module Futhark.Representation.AST.Traversals
   -- * Mapping
     Mapper(..)
   , identityMapper
-  , mapBodyM
   , mapBody
   , mapExpM
   , mapExp
