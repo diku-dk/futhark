@@ -29,12 +29,16 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Optimise.Simplifier.Simplify (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
+data Entry = Entry { entryMemSummary :: MemSummary
+                   , entryType :: Type
+                   }
+
 newtype AllocM a = AllocM (BinderT ExplicitMemory
-                           (ReaderT (HM.HashMap VName MemSummary)
+                           (ReaderT (HM.HashMap VName Entry)
                             (State VNameSource))
                            a)
                  deriving (Applicative, Functor, Monad,
-                           MonadReader (HM.HashMap VName MemSummary),
+                           MonadReader (HM.HashMap VName Entry),
                            MonadWriter (DL.DList Binding))
 
 instance MonadBinder AllocM where
@@ -61,6 +65,7 @@ instance MonadBinder AllocM where
     AllocM $ collectBinderBindings m
 
 instance HasTypeEnv AllocM where
+  askTypeEnv = HM.map entryType <$> ask
 
 instance MonadFreshNames AllocM where
   getNameSource = AllocM $ lift getNameSource
@@ -187,11 +192,11 @@ computeSize current (x:xs) = do
   computeSize v xs
 
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
-lookupSummary = asks . HM.lookup
+lookupSummary name = asks $ fmap entryMemSummary . HM.lookup name
 
 lookupSummary' :: VName -> AllocM MemSummary
 lookupSummary' name = do
-  res <- asks $ HM.lookup name
+  res <- asks $ fmap entryMemSummary . HM.lookup name
   case res of
     Just summary -> return summary
     Nothing ->
@@ -205,21 +210,23 @@ lookupArraySummary' name = do
                   Scalar ->
                     fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
-bindeeSummary :: PatElem -> (VName, MemSummary)
-bindeeSummary bindee = (patElemName bindee, patElemLore bindee)
+bindeeSummary :: PatElem -> (VName, Entry)
+bindeeSummary bindee = (patElemName bindee,
+                        Entry (patElemLore bindee) (patElemType bindee))
 
-bindeesSummary :: [PatElem] -> HM.HashMap VName MemSummary
+bindeesSummary :: [PatElem] -> HM.HashMap VName Entry
 bindeesSummary = HM.fromList . map bindeeSummary
 
-fparamsSummary :: [FParam] -> HM.HashMap VName MemSummary
+fparamsSummary :: [FParam] -> HM.HashMap VName Entry
 fparamsSummary = HM.fromList . map fparamSummary
-  where fparamSummary fparam = (fparamName fparam, fparamLore fparam)
+  where fparamSummary fparam = (fparamName fparam,
+                                Entry (fparamLore fparam) (fparamType fparam))
 
 runAllocM :: MonadFreshNames m => AllocM a -> m a
 runAllocM = runAllocMWithEnv HM.empty
 
 runAllocMWithEnv :: MonadFreshNames m =>
-                    HM.HashMap VName MemSummary
+                    HM.HashMap VName Entry
                  -> AllocM a
                  -> m a
 runAllocMWithEnv env (AllocM m) =
@@ -362,7 +369,7 @@ allocInExp (LoopOp (DoLoop res merge form
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge
         formBinds (ForLoop i _) =
-          local (HM.singleton i Scalar<>)
+          local (HM.singleton i (Entry Scalar $ Basic Int)<>)
         formBinds (WhileLoop _) =
           id
 allocInExp (LoopOp (Map {})) =
@@ -397,13 +404,13 @@ allocInExtLambda lam = do
   return $ lam { extLambdaBody = body }
 
 vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
-                 -> HM.HashMap VName MemSummary
+                 -> HM.HashMap VName Entry
 vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
                    HM.toList . ST.bindings
   where entryToMemSummary (k,entry) = do
           summary <- (snd <$> ST.entryLetBoundLore entry) <|>
                      ST.entryFParamLore entry
-          return (k, summary)
+          return (k, Entry summary $ ST.entryType entry)
 
 simplifiable :: (Engine.MonadEngine m,
                  Engine.InnerLore m ~ ExplicitMemory) =>
