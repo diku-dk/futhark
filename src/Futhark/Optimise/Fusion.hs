@@ -576,7 +576,8 @@ fuseInBody (Body _ (Let pat lore e:bnds) res) = do
       e'                <- fuseInExp e
       return $ mkBody (Let pat lore e':bnds') res'
 
-fuseInBody b = mapBodyM fuseIn b
+fuseInBody (Body () [] res) =
+  return $ Body () [] res
 
 fuseInBinding :: Binding -> FusionGM Binding
 fuseInBinding (Let pat lore e) = Let pat lore <$> fuseInExp e
