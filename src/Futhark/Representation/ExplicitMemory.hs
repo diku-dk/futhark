@@ -137,15 +137,15 @@ instance Ranged ExplicitMemory where
 
 instance Simplifiable ExplicitMemory where
 
-data MemSummary = MemSummary VName IxFun.IxFun
-                | Scalar
-                deriving (Show)
-
-instance Eq MemSummary where
-  _ == _ = True
+data MemSummary = Scalar
+                | MemSummary VName IxFun.IxFun
+                deriving (Eq, Show)
 
 instance Ord MemSummary where
-  _ `compare` _ = EQ
+  Scalar <= Scalar = True
+  Scalar <= MemSummary {} = True
+  MemSummary x _ <= MemSummary y _ = x <= y
+  MemSummary {} <= Scalar = False
 
 instance FreeIn MemSummary where
   freeIn (MemSummary ident ixfun) = freeIn ident <> freeIn ixfun
