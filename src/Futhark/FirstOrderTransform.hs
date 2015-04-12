@@ -34,13 +34,15 @@ transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec (FunDec fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
-    insertBindingsM $
     bindingIdentTypes (map fparamIdent params) $
+    insertBindingsM $
     transformBody body
   return $ FunDec fname rettype params body'
 
 transformBody :: Body -> Binder Basic Body
-transformBody = mapBodyM transform
+transformBody (Body () bnds res) = insertBindingsM $ do
+  mapM_ (addBinding <=< transformBinding) bnds
+  return $ resultBody $ resultSubExps res
 
 -- | Transform a single expression.
 transformExp :: Exp -> Binder Basic Exp
@@ -52,7 +54,8 @@ transformExp (LoopOp (Map cs fun arrs)) = do
   outarrs <- forM out_ts $ \t ->
              newIdent "map_outarr" $ t `setUniqueness` Unique
   let outarrs_names = map identName outarrs
-  loopbody <- runBinder $ do
+      i_ident = Ident i $ Basic Int
+  loopbody <- runBinder $ bindingIdentTypes (i_ident:outarrs) $ do
     x <- bodyBind =<< transformLambda fun (index cs arrs (Var i))
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
@@ -106,13 +109,13 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
   return $ If (Constant $ LogVal False) hackbody realbody opt
 
 transformExp (LoopOp (Reduce cs fun args)) = do
-  ((acc, initacc), i) <- newFold accexps
+  ((acc, initacc), (i, i_ident)) <- newFold accexps
   arrts <- mapM lookupType arrexps
   let arrus = map (uniqueness . identType) $
               snd $ splitAt (length args) $ lambdaParams fun
   inarrs <- forM (zip arrts arrus) $ \(t,u) ->
             newIdent "reduce_inarr" (setUniqueness t u)
-  loopbody <- runBinder $ do
+  loopbody <- runBinder $ bindingIdentTypes (i_ident:inarrs++acc) $ do
     acc' <- bodyBind =<< transformLambda fun
             (map (PrimOp . SubExp . Var . identName) acc ++
              index cs (map identName inarrs) (Var i))
@@ -123,13 +126,13 @@ transformExp (LoopOp (Reduce cs fun args)) = do
   where (accexps, arrexps) = unzip args
 
 transformExp (LoopOp (Scan cs fun args)) = do
-  ((acc, initacc), i) <- newFold accexps
+  ((acc, initacc), (i, i_ident)) <- newFold accexps
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
   arr <- forM arrts $ \t ->
     newIdent "scan_arr" $ t `setUniqueness` Unique
   let arr_names = map identName arr
-  loopbody <- insertBindingsM $ do
+  loopbody <- insertBindingsM $ bindingIdentTypes (i_ident:acc++arr) $ do
     x <- bodyBind =<<
          transformLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
                               index cs arrexps (Var i))
@@ -157,10 +160,9 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
   outarrs <- forM res_ts $ \t ->
              newIdent "redomap_outarr" $ t `setUniqueness` Unique
   -- for the REDUCE part
-  ((acc, initacc), i) <- newFold accexps
-  inarrs <- forM (zip arrts arrus) $ \(t,u) ->
-            newIdent "redomap_inarr" (setUniqueness t u)
-  loopbody <- runBinder $ do
+  ((acc, initacc), (i, i_ident)) <- newFold accexps
+  inarrs <- mapM (newIdent "redomap_inarr") $ zipWith setUniqueness arrts arrus
+  loopbody <- runBinder $ bindingIdentTypes (i_ident:inarrs++acc++outarrs) $ do
     accxis<- bodyBind =<< transformLambda innerfun
              (map (PrimOp . SubExp . Var . identName) acc ++
               index cs (map identName inarrs) (Var i))
@@ -177,6 +179,15 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
 transformExp (LoopOp Stream{}) =
     fail "transformExp (Stream): Unreachable case reached!"
 
+transformExp (LoopOp (DoLoop res merge form body)) = do
+  body' <- bindingIdentTypes (formIdents form ++ map (fparamIdent . fst) merge) $
+           transformBody body
+  return $ LoopOp $ DoLoop res merge form body'
+  where formIdents (ForLoop i _) =
+          [Ident i $ Basic Int]
+        formIdents (WhileLoop _) =
+          []
+
 transformExp e = mapExpM transform e
 
 transformBinding :: Binding -> Binder Basic Binding
@@ -192,12 +203,12 @@ transform = identityMapper {
             }
 
 newFold :: [SubExp]
-        -> Binder Basic (([Ident], [SubExp]), VName)
+        -> Binder Basic (([Ident], [SubExp]), (VName, Ident))
 newFold accexps = do
   i <- newVName "i"
   initacc <- letSubExps "acc" $ map (PrimOp . Copy) accexps
   acc <- mapM (newIdent "acc" <=< subExpType) accexps
-  return ((acc, initacc), i)
+  return ((acc, initacc), (i, Ident i $ Basic Int))
 
 index :: Certificates -> [VName] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
@@ -299,7 +310,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
   (chunkloc,ilam) <- case lampars of
                     chnk:iorig:_ -> return (chnk,iorig)
                     _ -> fail "FirstOrderTransform Stream: chunk or i error!"
-  chunkglb <- newIdent (textual (identName chunkloc) ++"_glb") $ Basic Int
+  chunkglb <- letExp (baseString $ identName chunkloc) $ PrimOp $ SubExp $ intconst 1
   outersz <- arraysSize 0 <$> mapM lookupType arrexps
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
@@ -355,9 +366,12 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
   let (inarrsloop1, inarrsloop2) = unzip bothinarrsloop
   acc0     <- mapM (newIdent "acc" <=< subExpType) accexps
   loopind  <- newVName "stream_i"
+  let loopind_ident = Ident loopind $ Basic Int
   loopcnt  <- newIdent "stream_N" $ Basic Int
   -- 3.) Transform the stream's lambda to a loop body
-  loopbody <- runBinder $ do
+  loopbody <- runBinder $ bindingIdentTypes (loopind_ident:inarrVsz:
+                                             inarrsloop1++ exszvar ++ exindvars ++
+                                             acc0++outarrloop) $ do
       let argsacc = map (PrimOp . SubExp . Var . identName) acc0
           accpars = take acc_num $ drop 2 lampars
           arrpars = drop (2 + acc_num) lampars
@@ -373,7 +387,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
           -- remaining stream in `inarrNsz'
           ilamexp <- eBinOp Times
                             (pure $ PrimOp $ SubExp $ Var loopind)
-                            (pure $ PrimOp $ SubExp $ Var $ identName chunkglb)
+                            (pure $ PrimOp $ SubExp $ Var chunkglb)
                             Int
           addBinding $ myMkLet ilamexp ilam
           -- inarrtmpsz := total_stream_size - ilam
@@ -384,10 +398,10 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                            Int
           addBinding $ myMkLet subexp inarrtmpsz
           -- chunk_loc = min chunk_glb inarrtmpsz
-          ifexp <- eIf (eBinOp Leq (pure $ PrimOp $ SubExp $ Var $ identName chunkglb)
+          ifexp <- eIf (eBinOp Leq (pure $ PrimOp $ SubExp $ Var chunkglb)
                                    (pure $ PrimOp $ SubExp $ Var $ identName inarrtmpsz)
                                Bool)
-                       (pure $ resultBody [Var $ identName chunkglb])
+                       (pure $ resultBody [Var chunkglb])
                        (pure $ resultBody [Var $ identName inarrtmpsz])
           addBinding $ myMkLet ifexp chunkloc
           -- inarrNsz := inarrtmpsz - chunk_loc, i.e., the size of
@@ -450,13 +464,12 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   thenbody <- runBinder $ do
-      addBinding $ myMkLet (PrimOp $ SubExp $ intconst 1) chunkglb
       lUBexp <- eBinOp Divide
                        (eBinOp Plus (pure $ PrimOp $ SubExp outersz)
-                                    (eBinOp Minus (pure $ PrimOp $ SubExp $ Var $ identName chunkglb)
+                                    (eBinOp Minus (pure $ PrimOp $ SubExp $ Var chunkglb)
                                                   (pure $ PrimOp $ SubExp $ intconst 1) Int)
                                     Int)
-                       (pure $ PrimOp $ SubExp $ Var $ identName chunkglb)
+                       (pure $ PrimOp $ SubExp $ Var chunkglb)
                        Int
       addBinding $ myMkLet lUBexp loopcnt
       let outinibds= zipWith (\ idd tp ->
@@ -559,7 +572,8 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                         return (Var $ identName k, glboutid, Just newszid, Nothing)
                       Just (alsz,_,_)-> do -- fully existential case, reallocate
                         alloclid <- newVName "allcloopiv"
-                        let isempty = eBinOp Leq (pure $ PrimOp $ SubExp $ Var $ identName newszid)
+                        let alloclid_ident = Ident alloclid $ Basic Int
+                            isempty = eBinOp Leq (pure $ PrimOp $ SubExp $ Var $ identName newszid)
                                              (pure $ PrimOp $ SubExp $ Var $ identName alsz) Bool
                             emptybranch = pure $ resultBody [Var $ identName glboutid]
                             otherbranch = runBinder $ do
@@ -570,7 +584,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                                PrimOp $ Scratch (elemType oldbtp) (Var (identName newallocid):olddims)
                                 bnew <- newIdent (textual (identName glboutid)++"_loop") =<<
                                         lookupType bnew0
-                                allocloopbody <- runBinder $ do
+                                allocloopbody <- runBinder $ bindingIdentTypes [alloclid_ident, bnew] $ do
                                     (aldest:_) <- letwith css [identName bnew] (pexp $ Var alloclid)
                                                   [PrimOp $ Index css (identName glboutid) [Var alloclid]]
                                     return $ resultBody [Var aldest]
@@ -591,8 +605,9 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
             glboutLid <- newIdent (textual (identName glboutid)++"_loop") $ identType glboutid'
             glboutBdId<- newIdent (textual (identName glboutid)++"_loopbd") $ identType glboutid'
             loopid <- newVName "j"
+            let loopid_ident = Ident loopid $ Basic Int
             -- make copy-out what was written in the current iteration
-            loopbody <- runBinder $ do
+            loopbody <- runBinder $ bindingIdentTypes [loopid_ident, glboutLid] $ do
                 ivvplid <- newIdent "jj" $ Basic Int
                 ivvplidexp <- eBinOp Plus (pure $ PrimOp $ SubExp ivv)
                                           (pure $ PrimOp $ SubExp $ Var loopid) Int
