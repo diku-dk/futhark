@@ -89,7 +89,6 @@ analyseExp e = Out.mapExpM analyse e
                      , Out.mapOnCertificates = return
                      , Out.mapOnVName = return
                      , Out.mapOnBody = analyseBody
-                     , Out.mapOnBinding = analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
                      , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
                      , Out.mapOnRetType = return

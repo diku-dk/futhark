@@ -66,7 +66,6 @@ import Futhark.Representation.AST.Syntax
 data Mapper flore tlore m = Mapper {
     mapOnSubExp :: SubExp -> m SubExp
   , mapOnBody :: Body flore -> m (Body tlore)
-  , mapOnBinding :: Binding flore -> m (Binding tlore)
   , mapOnLambda :: Lambda flore -> m (Lambda tlore)
   , mapOnExtLambda :: ExtLambda flore -> m (ExtLambda tlore)
   , mapOnVName :: VName -> m VName
@@ -79,7 +78,6 @@ data Mapper flore tlore m = Mapper {
 identityMapper :: Monad m => Mapper lore lore m
 identityMapper = Mapper {
                    mapOnSubExp = return
-                 , mapOnBinding = return
                  , mapOnBody = return
                  , mapOnLambda = return
                  , mapOnExtLambda = return
@@ -253,7 +251,6 @@ foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
 foldMapper f = Mapper {
                  mapOnSubExp = wrap foldOnSubExp
                , mapOnBody = wrap foldOnBody
-               , mapOnBinding = wrap foldOnBinding
                , mapOnLambda = wrap foldOnLambda
                , mapOnExtLambda = wrap foldOnExtLambda
                , mapOnVName = wrap foldOnVName
@@ -314,7 +311,6 @@ walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
 walkMapper f = Mapper {
                  mapOnSubExp = wrap walkOnSubExp
                , mapOnBody = wrap walkOnBody
-               , mapOnBinding = wrap walkOnBinding
                , mapOnLambda = wrap walkOnLambda
                , mapOnExtLambda = wrap walkOnExtLambda
                , mapOnVName = wrap walkOnVName

@@ -385,8 +385,7 @@ allocInExp (Apply fname args rettype) = do
   return $ Apply fname args' (memoryInRetType rettype)
 allocInExp e = mapExpM alloc e
   where alloc =
-          identityMapper { mapOnBinding = fail "Unhandled binding in ExplicitAllocations"
-                         , mapOnBody = allocInBody
+          identityMapper { mapOnBody = allocInBody
                          , mapOnLambda = allocInLambda
                          , mapOnExtLambda = allocInExtLambda
                          , mapOnRetType = return . memoryInRetType

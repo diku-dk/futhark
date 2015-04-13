@@ -77,8 +77,7 @@ rephraseExtLambda rephraser lam =
 
 mapper :: Rephraser from to -> Mapper from to Identity
 mapper rephraser = identityMapper {
-    mapOnBinding = return . rephraseBinding rephraser
-  , mapOnBody = return . rephraseBody rephraser
+    mapOnBody = return . rephraseBody rephraser
   , mapOnLambda = return . rephraseLambda rephraser
   , mapOnExtLambda = return . rephraseExtLambda rephraser
   , mapOnRetType = return . rephraseRetType rephraser

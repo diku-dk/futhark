@@ -223,8 +223,7 @@ instance Renameable lore => Rename (Exp lore) where
             (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where mapper = Mapper {
-                      mapOnBinding = fail "Unhandled binding in Renamer"
-                    , mapOnBody = rename
+                      mapOnBody = rename
                     , mapOnSubExp = rename
                     , mapOnVName = rename
                     , mapOnLambda = rename

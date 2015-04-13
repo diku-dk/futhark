@@ -198,8 +198,7 @@ transformBinding (Let pat annot e) =
 
 transform :: Mapper Basic Basic (Binder Basic)
 transform = identityMapper {
-              mapOnBinding = transformBinding
-            , mapOnBody = insertBindingsM . transformBody
+              mapOnBody = insertBindingsM . transformBody
             }
 
 newFold :: [SubExp]

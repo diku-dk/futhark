@@ -113,8 +113,7 @@ deadCodeElimExp (LoopOp (DoLoop respat merge form body)) = do
   return $ LoopOp $ DoLoop respat merge form body'
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
-                   mapOnBinding = return -- Handled in case for Body.
-                 , mapOnBody = deadCodeElimBodyM
+                   mapOnBody = deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnExtLambda = deadCodeElimExtLambda

@@ -547,10 +547,9 @@ simplifyExp e = simplifyExpBase e
 simplifyExpBase :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
 simplifyExpBase = mapExpM hoist
   where hoist = Mapper {
-                  mapOnBinding = fail "Unhandled binding in simplification engine"
                 -- Bodies are handled explicitly because we need to
                 -- provide their result diet.
-                , mapOnBody = fail "Unhandled body in simplification engine."
+                  mapOnBody = fail "Unhandled body in simplification engine."
                 , mapOnSubExp = simplifySubExp
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.

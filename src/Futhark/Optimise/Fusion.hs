@@ -579,9 +579,6 @@ fuseInBody (Body _ (Let pat lore e:bnds) res) = do
 fuseInBody (Body () [] res) =
   return $ Body () [] res
 
-fuseInBinding :: Binding -> FusionGM Binding
-fuseInBinding (Let pat lore e) = Let pat lore <$> fuseInExp e
-
 fuseInExp :: Exp -> FusionGM Exp
 
 -- Handle loop specially because we need to bind the types of the
@@ -595,8 +592,7 @@ fuseInExp e = mapExpM fuseIn e
 
 fuseIn :: Mapper Basic Basic FusionGM
 fuseIn = identityMapper {
-           mapOnBinding = fuseInBinding
-         , mapOnBody    = fuseInBody
+           mapOnBody    = fuseInBody
          , mapOnLambda  = fuseInLambda
          }
 

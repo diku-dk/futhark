@@ -174,7 +174,6 @@ inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
 inliner funs = identityMapper {
                  mapOnLambda = return . inlineInLambda funs
                , mapOnBody = return . inlineInBody funs
-               , mapOnBinding = return . inlineInBinding funs
                }
 
 inlineInBinding :: [FunDec] -> Binding -> Binding
