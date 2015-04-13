@@ -114,18 +114,18 @@ instance Lore.Lore ExplicitMemory where
     where memIfNecessary var =
             case find ((==var) . fparamName) mergevars of
               Just fparam | MemSummary mem _ <- fparamLore fparam,
-                            isMergeParam mem ->
-                Just $ fparamIdent fparam
+                            Just memparam    <- isMergeParam mem ->
+                Just $ fparamIdent memparam
               _ ->
                 Nothing
           memSizeIfNecessary ident
-            | Mem (Var sizeident) <- identType ident,
-              isMergeParam sizeident =
-              Just sizeident
+            | Mem (Var sizevar) <- identType ident,
+              isJust $ isMergeParam sizevar =
+              Just sizevar
             | otherwise =
               Nothing
           isMergeParam var =
-            var `elem` map fparamName mergevars
+            find ((==var) . fparamName) mergevars
 
   applyRetType _ = applyFunReturns
 
