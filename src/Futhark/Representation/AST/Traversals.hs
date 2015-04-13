@@ -35,8 +35,6 @@ module Futhark.Representation.AST.Traversals
 
   -- * Folding
   , Folder(..)
-  , foldBodyM
-  , foldBody
   , foldExpM
   , foldExp
   , identityFolder
@@ -46,7 +44,6 @@ module Futhark.Representation.AST.Traversals
   , identityWalker
   , walkExpM
   , walkExp
-  , walkBodyM
   , mapOnExtType
   -- * Simple wrappers
   , foldlPattern
@@ -92,21 +89,9 @@ identityMapper = Mapper {
                  , mapOnFParam = return
                  }
 
--- | Map a monadic action across the immediate children of a body.
--- Importantly, the 'mapOnBody' action is not invoked for the body
--- itself.  The mapping is done left-to-right.
-mapBodyM :: (Applicative m, Monad m) =>
-            Mapper lore lore m -> Body lore -> m (Body lore)
-mapBodyM tv (Body lore [] (Result ses)) =
-  Body lore [] <$> (Result <$> mapM (mapOnSubExp tv) ses)
-mapBodyM tv (Body lore (bnd:bnds) res) = do
-  bnd' <- mapOnBinding tv bnd
-  Body lore' bnds' res' <- mapOnBody tv $ Body lore bnds res
-  return $ Body lore' (bnd':bnds') res'
-
--- | Like 'mapBodyM', but in the 'Identity' monad.
-mapBody :: Mapper lore lore Identity -> Body lore -> Body lore
-mapBody m = runIdentity . mapBodyM m
+-- | Map across the bindings of a 'Body'.
+mapBody :: (Binding lore -> Binding lore) -> Body lore -> Body lore
+mapBody f (Body attr bnds res) = Body attr (map f bnds) res
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
@@ -281,18 +266,14 @@ foldMapper f = Mapper {
           put =<< lift (op f v k)
           return k
 
--- | Perform a left-reduction across the immediate children of a
--- body.  Importantly, the 'foldOnExp' action is not invoked for
--- the body itself, and the reduction does not descend recursively
--- into subterms.  The reduction is done left-to-right.
-foldBodyM :: (Monad m, Functor m) => Folder a lore m -> a -> Body lore -> m a
-foldBodyM f x e = execStateT (mapBodyM (foldMapper f) e) x
+-- | Perform a left-reduction across the bindings of a
+-- body.
+foldBody :: (a -> Binding lore -> a) -> a -> Body lore -> a
+foldBody f a = foldl f a . bodyBindings
 
--- | As 'foldBodyM', but in the 'Identity' monad.
-foldBody :: Folder a lore Identity -> a -> Body lore -> a
-foldBody m x = runIdentity . foldBodyM m x
-
--- | As 'foldBodyM', but for expressions.
+-- | Perform a left-reduction across the immediate children of a body.
+-- The reduction does not descend recursively into subterms and is
+-- done left-to-right.
 foldExpM :: (Monad m, Functor m) => Folder a lore m -> a -> Exp lore -> m a
 foldExpM f x e = execStateT (mapExpM (foldMapper f) e) x
 
@@ -343,15 +324,6 @@ walkMapper f = Mapper {
                }
   where wrap op k = op f k >> return k
 
--- | Perform a monadic action on each of the immediate children of an
--- expression.  Importantly, the 'walkOnExp' action is not invoked for
--- the expression itself, and the traversal does not descend
--- recursively into subexpressions.  The traversal is done
--- left-to-right.
-walkBodyM :: (Monad m, Applicative m) => Walker lore m -> Body lore -> m ()
-walkBodyM f = void . mapBodyM m
-  where m = walkMapper f
-
 -- | As 'walkBodyM', but for expressions.
 walkExpM :: (Monad m, Applicative m) => Walker lore m -> Exp lore -> m ()
 walkExpM f = void . mapExpM m
@@ -361,16 +333,16 @@ walkExpM f = void . mapExpM m
 walkExp :: Walker lore Identity -> Exp lore -> ()
 walkExp f = runIdentity . walkExpM f
 
--- | Common case of 'foldExp', where only 'Exp's and 'Lambda's are
--- taken into account.
+-- | Common case of 'foldExp', where only 'Exp's are taken into
+-- account.
 foldlPattern :: (a -> Exp lore -> a) ->
-                (a -> Lambda lore -> a) ->
                 a -> Exp lore -> a
-foldlPattern expf lamf = foldExp m
+foldlPattern expf = foldExp m
   where m = identityFolder {
               foldOnBinding = \x (Let _ _ e) -> return $ expf x e
-            , foldOnBody = \x -> return . foldBody m x
+            , foldOnBody = \x -> return . foldBody onBinding x
             , foldOnLambda =
-              \x lam@(Lambda _ body _) ->
-                return $ foldBody m (lamf x lam) body
+              \x (Lambda _ body _) ->
+                return $ foldBody onBinding x body
             }
+        onBinding x (Let _ _ e) = expf x e

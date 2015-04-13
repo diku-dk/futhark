@@ -83,11 +83,7 @@ buildCGfun cg fname  = do
   where
 
 buildCGbody :: ([Name],[Name]) -> Body -> ([Name],[Name])
-buildCGbody = foldBody build
-  where build = identityFolder {
-                  foldOnBody = \x -> return . buildCGbody x
-                , foldOnBinding  = \x -> return . buildCGexp x . bindingExp
-                }
+buildCGbody callees = foldl (\x -> buildCGexp x . bindingExp) callees . bodyBindings
 
 buildCGexp :: ([Name],[Name]) -> Exp -> ([Name],[Name])
 
@@ -97,7 +93,4 @@ buildCGexp callees@(fs, soacfs) (Apply fname _ _)  =
     else (fname:fs, soacfs)
 
 buildCGexp callees e =
-    foldlPattern buildCGexp addLamFun callees e
-
-addLamFun :: ([Name],[Name]) -> Lambda -> ([Name],[Name])
-addLamFun callees _ = callees
+    foldlPattern buildCGexp callees e

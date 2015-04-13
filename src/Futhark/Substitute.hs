@@ -95,7 +95,7 @@ instance Substitutable lore => Substitute (Binding lore) where
     (substituteNames substs e)
 
 instance Substitutable lore => Substitute (Body lore) where
-  substituteNames substs = mapBody $ replace substs
+  substituteNames substs = mapBody $ substituteNames substs
 
 instance Substitute Result where
   substituteNames substs (Result ses) =

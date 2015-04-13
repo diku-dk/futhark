@@ -168,7 +168,7 @@ inlineInBody
             mkLet' [ident] $ PrimOp $ Reshape [] (arrayDims t) v
         | otherwise =
           mkLet' [ident] $ PrimOp $ SubExp se
-inlineInBody inlcallees b = mapBody (inliner inlcallees) b
+inlineInBody inlcallees b = mapBody (inlineInBinding inlcallees) b
 
 inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
 inliner funs = identityMapper {
