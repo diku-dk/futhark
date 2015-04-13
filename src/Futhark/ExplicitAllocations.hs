@@ -418,12 +418,8 @@ simplifiable =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
   simplifyMemSummary simplifyMemSummary
   simplifyRetType'
-  where mkLetS' vtable pat e = do
-          Let pat' lore _ <- runAllocMWithEnv env $
-                             mkLetM (removePatternWisdom pat) $
-                             removeExpWisdom e
-          return $ mkWiseLetBinding pat' lore e
-          where env = vtableToAllocEnv vtable
+  where mkLetS' _ pat e =
+          return $ mkWiseLetBinding (removePatternWisdom pat) () e
 
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
