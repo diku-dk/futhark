@@ -762,11 +762,9 @@ simplifyReshapeReshape _ _ _ = Nothing
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
 removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se))) = do
   t <- subExpType se
-  if basicType t
+  if basicType t || (unique t && not (any (`UT.used` used) $ subExpAliases se))
     then letBind_ (Pattern [v]) $ PrimOp $ SubExp se
-    else if unique t && not (any (`UT.used` used) $ subExpAliases se)
-         then letBind_ (Pattern [v]) $ PrimOp $ SubExp se
-         else cannotSimplify
+    else cannotSimplify
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 removeScratchValue :: MonadBinder m => TopDownRule m
