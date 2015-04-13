@@ -6,7 +6,6 @@ module Futhark.Optimise.Simplifier.Rules
   ( standardRules
   , basicRules
   )
-
 where
 
 import Control.Applicative
@@ -261,7 +260,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
     ([], _, _, _) ->
       -- Nothing is invariant.
       cannotSimplify
-    (invariant, explpat', merge', ses') ->
+    (invariant, explpat', merge', ses') -> do
       -- We have moved something invariant out of the loop.
       let loopbody' = loopbody { bodyResult = Result ses' }
           invariantShape :: (a, VName) -> Bool
@@ -271,10 +270,10 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
           implinvariant' = [ (patElemIdent p, Var v) | (p,v) <- implinvariant ]
           pat' = map fst $ implpat'++explpat'
           respat' = map snd explpat'
-      in do forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
-              letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
-            letBind_ (Pattern pat') $
-              LoopOp $ DoLoop respat' merge' form loopbody'
+      forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
+        letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
+      letBind_ (Pattern pat') $
+        LoopOp $ DoLoop respat' merge' form loopbody'
   where Result ses = bodyResult loopbody
         taggedpat = zip (patternElements pat) $
                     loopResultContext (representative :: Lore m)
