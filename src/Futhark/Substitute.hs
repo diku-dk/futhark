@@ -95,7 +95,11 @@ instance Substitutable lore => Substitute (Binding lore) where
     (substituteNames substs e)
 
 instance Substitutable lore => Substitute (Body lore) where
-  substituteNames substs = mapBody $ substituteNames substs
+  substituteNames substs (Body attr bnds res) =
+    Body
+    (substituteNames substs attr)
+    (substituteNames substs bnds)
+    (substituteNames substs res)
 
 instance Substitute Result where
   substituteNames substs (Result ses) =
@@ -168,6 +172,7 @@ instance Substitute ExtRetType where
 -- | The class of lores in which all annotations support name
 -- substitution.
 class (Substitute (Lore.Exp lore),
+       Substitute (Lore.Body lore),
        Substitute (Lore.LetBound lore),
        Substitute (Lore.FParam lore),
        Substitute (Lore.RetType lore)) =>
