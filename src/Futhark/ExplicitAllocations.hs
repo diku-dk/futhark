@@ -86,9 +86,7 @@ instance MonadBinder AllocM where
   mkLetM pat e = return $ Let pat () e
 
   mkLetNamesM names e = do
-    memoryMap <- ask
-    types <- askTypeEnv
-    pat <- patternWithAllocations memoryMap types names e
+    pat <- patternWithAllocations names e
     return $ Let pat () e
 
   mkBodyM bnds res = return $ Body () bnds res
@@ -123,28 +121,27 @@ runAllocMWithEnv env (AllocM m) =
 
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM a = PatAllocM (WriterT [AllocBinding]
-                                 (ReaderT (MemoryMap, TypeEnv)
+                                 (ReaderT MemoryMap
                                   (State VNameSource))
                                  a)
                     deriving (Applicative, Functor, Monad,
-                              MonadReader (MemoryMap, TypeEnv),
+                              MonadReader MemoryMap,
                               MonadWriter [AllocBinding],
                               MonadFreshNames)
 
 instance Allocator PatAllocM where
-  askMemoryMap = fst <$> ask
+  askMemoryMap = ask
 
   addAllocBinding = tell . pure
 
 instance HasTypeEnv PatAllocM where
-  askTypeEnv = do
-    (memoryMap, types) <- ask
-    return $ HM.map entryType memoryMap <> types
+  askTypeEnv =
+    HM.map entryType <$> ask
 
 runPatAllocM :: MonadFreshNames m =>
-                PatAllocM a -> MemoryMap -> TypeEnv -> m (a, [AllocBinding])
-runPatAllocM (PatAllocM m) memoryMap types =
-  modifyNameSource $ runState $ runReaderT (runWriterT m) (memoryMap, types)
+                PatAllocM a -> MemoryMap -> m (a, [AllocBinding])
+runPatAllocM (PatAllocM m) memoryMap =
+  modifyNameSource $ runState $ runReaderT (runWriterT m) memoryMap
 
 allocForArray :: Allocator m =>
                  Type -> m (SubExp, VName)
@@ -166,26 +163,23 @@ allocsForBinding sizeidents validents e = do
   return (Let (Pattern patElems) () e,
           postbnds)
 
-patternWithAllocations :: MonadBinder m =>
-                          MemoryMap -> TypeEnv -> [(VName, Bindage)] -> Exp
-                       -> m Pattern
-patternWithAllocations memoryMap types names e = do
-  (patElems,prebnds) <- runPatAllocM m memoryMap types
-  mapM_ bindAllocBinding prebnds
-  return $ Pattern patElems
-  where m = do
-          (ts',sizes) <- instantiateShapes' =<< expExtType e
-          let identForBindage name t BindVar =
-                pure (Ident name t, BindVar)
-              identForBindage name _ bindage@(BindInPlace _ src _) = do
-                t <- lookupType src
-                pure (Ident name t, bindage)
-          vals <- sequence [ identForBindage name t bindage  |
-                             ((name,bindage), t) <- zip names ts' ]
-          (Let (Pattern patElems) _ _, extrabnds) <- allocsForBinding sizes vals e
-          case extrabnds of
-            [] -> return patElems
-            _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
+patternWithAllocations :: Allocator m =>
+                           [(VName, Bindage)]
+                        -> Exp
+                        -> m Pattern
+patternWithAllocations names e = do
+  (ts',sizes) <- instantiateShapes' =<< expExtType e
+  let identForBindage name t BindVar =
+        pure (Ident name t, BindVar)
+      identForBindage name _ bindage@(BindInPlace _ src _) = do
+        t <- lookupType src
+        pure (Ident name t, bindage)
+  vals <- sequence [ identForBindage name t bindage  |
+                     ((name,bindage), t) <- zip names ts' ]
+  (Let pat _ _, extrabnds) <- allocsForBinding sizes vals e
+  case extrabnds of
+    [] -> return pat
+    _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
 
 allocsForPattern :: Allocator m =>
                     [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
@@ -497,11 +491,10 @@ simplifiable =
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
         mkLetNamesS' vtable names e = do
-          pat' <- patternWithAllocations env types names $
+          pat' <- bindPatternWithAllocations env names $
                   removeExpWisdom e
           return $ mkWiseLetBinding pat' () e
           where env = vtableToAllocEnv vtable
-                types = ST.typeEnv vtable
 
         simplifyMemSummary Scalar =
           return Scalar
@@ -523,3 +516,11 @@ simplifiable =
                 simplifyMemReturn (ReturnsInBlock v ixfun) =
                   ReturnsInBlock <$> Engine.simplifyVName v <*>
                   pure ixfun
+
+bindPatternWithAllocations :: MonadBinder m =>
+                              MemoryMap -> [(VName, Bindage)] -> Exp
+                           -> m Pattern
+bindPatternWithAllocations memoryMap names e = do
+  (pat,prebnds) <- runPatAllocM (patternWithAllocations names e) memoryMap
+  mapM_ bindAllocBinding prebnds
+  return pat
