@@ -14,7 +14,6 @@ import Control.Applicative
 import Control.Monad.RWS    hiding (forM)
 import Control.Monad.State  hiding (forM)
 import Control.Monad.Writer hiding (forM)
-
 import Data.Either
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -114,6 +113,21 @@ instance MonadFreshNames (ImpM op) where
   putNameSource = put
 
 instance HasTypeEnv (ImpM op) where
+  askTypeEnv = HM.map entryType <$> asks envVtable
+    where entryType (MemVar memEntry) =
+            Mem $ dimSizeToSubExp $ entryMemSize memEntry
+          entryType (ArrayVar arrayEntry) =
+            Array
+            (entryArrayElemType arrayEntry)
+            (Shape $ map dimSizeToSubExp $ entryArrayShape arrayEntry)
+            Nonunique -- Arbitrary
+          entryType (ScalarVar scalarEntry) =
+            Basic $ entryScalarType scalarEntry
+
+          dimSizeToSubExp (Imp.ConstSize n) =
+            Constant $ IntVal n
+          dimSizeToSubExp (Imp.VarSize v) =
+            Var v
 
 runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> Either String (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) = runRWST m . newEnv
@@ -337,23 +351,24 @@ defCompilePrimOp
     set <- subExpType se
     let elemt = elemType set
     i <- newVName "i"
-    let shape' = map (elements . compileSubExp) $ n : arrayDims set
-    if basicType set then do
-      (targetmem, targetoffset) <-
-        fullyIndexArray' destlocation [varIndex i]
-      emit $ Imp.For i (compileSubExp n) $
-        write targetmem targetoffset (elemType set) $ compileSubExp se
-      else case se of
-      Constant {} ->
-        fail "Array value in replicate cannot be constant."
-      Var v -> do
-        targetloc <-
-          indexArray destlocation [varIndex i]
-        srcloc <- arrayLocation v
-        let rowsize = impProduct (drop 1 shape')
-                      `withElemType` elemt
-        emit =<< (Imp.For i (compileSubExp n) <$>
-          copyIxFun elemt targetloc srcloc rowsize)
+    declaringLoopVar i $ do
+      let shape' = map (elements . compileSubExp) $ n : arrayDims set
+      if basicType set then do
+        (targetmem, targetoffset) <-
+          fullyIndexArray' destlocation [varIndex i]
+        emit $ Imp.For i (compileSubExp n) $
+          write targetmem targetoffset (elemType set) $ compileSubExp se
+        else case se of
+        Constant {} ->
+          fail "Array value in replicate cannot be constant."
+        Var v -> do
+          targetloc <-
+            indexArray destlocation [varIndex i]
+          srcloc <- arrayLocation v
+          let rowsize = impProduct (drop 1 shape')
+                        `withElemType` elemt
+          emit =<< (Imp.For i (compileSubExp n) <$>
+            copyIxFun elemt targetloc srcloc rowsize)
 
 defCompilePrimOp (Destination [_]) (Scratch {}) =
   return ()
@@ -362,10 +377,11 @@ defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
   (Iota n) = do
     i <- newVName "i"
-    (targetmem, targetoffset) <-
-      fullyIndexArray' memlocation [varIndex i]
-    emit $ Imp.For i (compileSubExp n) $
-      write targetmem targetoffset Int $ Imp.ScalarVar i
+    declaringLoopVar i $ do
+      (targetmem, targetoffset) <-
+        fullyIndexArray' memlocation [varIndex i]
+      emit $ Imp.For i (compileSubExp n) $
+        write targetmem targetoffset Int $ Imp.ScalarVar i
 
 defCompilePrimOp (Destination [target]) (Copy src) =
   compileResultSubExp target src
@@ -421,78 +437,79 @@ defCompilePrimOp (Destination dests) (Partition _ n flags values)
     Just sizenames <- mapM fromScalarDestination sizedests,
     [ArrayDestination (CopyIntoMemory destloc) _] <- arrdest = do
   i <- newVName "i"
-  et <- elemType <$> lookupType values
-  outer_dim <- compileSubExp <$> arraySize 0 <$> lookupType flags
-  -- We will use 'i' to index the flag array and the value array.
-  -- Note that they have the same outer size ('outer_dim').
-  srcloc <- arrayLocation values
-  (flagmem, flagoffset) <- fullyIndexArray flags [varIndex i]
+  declaringLoopVar i $ do
+    et <- elemType <$> lookupType values
+    outer_dim <- compileSubExp <$> arraySize 0 <$> lookupType flags
+    -- We will use 'i' to index the flag array and the value array.
+    -- Note that they have the same outer size ('outer_dim').
+    srcloc <- arrayLocation values
+    (flagmem, flagoffset) <- fullyIndexArray flags [varIndex i]
 
-  -- First, for each of the 'n' output arrays, we compute the final
-  -- size.  This is done by iterating through the flag array, but
-  -- first we declare scalars to hold the size.  We do this by
-  -- creating a mapping from equivalence classes to the name of the
-  -- scalar holding the size.
-  let sizes = HM.fromList $ zip [0..n-1] sizenames
+    -- First, for each of the 'n' output arrays, we compute the final
+    -- size.  This is done by iterating through the flag array, but
+    -- first we declare scalars to hold the size.  We do this by
+    -- creating a mapping from equivalence classes to the name of the
+    -- scalar holding the size.
+    let sizes = HM.fromList $ zip [0..n-1] sizenames
 
-  -- We initialise ecah size to zero.
-  forM_ sizenames $ \sizename ->
-    emit $ Imp.SetScalar sizename $ Imp.Constant $ IntVal 0
+    -- We initialise ecah size to zero.
+    forM_ sizenames $ \sizename ->
+      emit $ Imp.SetScalar sizename $ Imp.Constant $ IntVal 0
 
-  -- Now iterate across the flag array, storing each element in
-  -- 'eqclass', then comparing it to the known classes and increasing
-  -- the appropriate size variable.
-  eqclass <- newVName "eqclass"
-  emit $ Imp.DeclareScalar eqclass Int
-  let mkSizeLoopBody code c sizevar =
-        Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
-        (Imp.SetScalar sizevar
-         (Imp.BinOp Plus (Imp.ScalarVar sizevar) (Imp.Constant (IntVal 1))))
-        code
-      sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
-  emit $ Imp.For i outer_dim $
-    Imp.SetScalar eqclass (index flagmem flagoffset Int) <>
-    sizeLoopBody
+    -- Now iterate across the flag array, storing each element in
+    -- 'eqclass', then comparing it to the known classes and increasing
+    -- the appropriate size variable.
+    eqclass <- newVName "eqclass"
+    emit $ Imp.DeclareScalar eqclass Int
+    let mkSizeLoopBody code c sizevar =
+          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
+          (Imp.SetScalar sizevar
+           (Imp.BinOp Plus (Imp.ScalarVar sizevar) (Imp.Constant (IntVal 1))))
+          code
+        sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
+    emit $ Imp.For i outer_dim $
+      Imp.SetScalar eqclass (index flagmem flagoffset Int) <>
+      sizeLoopBody
 
-  -- We can now compute the starting offsets of each of the
-  -- partitions, creating a map from equivalence class to its
-  -- corresponding offset.
-  offsets <- flip evalStateT (Imp.Constant $ IntVal 0) $ forM sizes $ \size -> do
-    cur_offset <- get
-    partition_offset <- lift $ newVName "partition_offset"
-    lift $ emit $ Imp.DeclareScalar partition_offset Int
-    lift $ emit $ Imp.SetScalar partition_offset cur_offset
-    put $ Imp.BinOp Plus (Imp.ScalarVar partition_offset) (Imp.ScalarVar size)
-    return partition_offset
+    -- We can now compute the starting offsets of each of the
+    -- partitions, creating a map from equivalence class to its
+    -- corresponding offset.
+    offsets <- flip evalStateT (Imp.Constant $ IntVal 0) $ forM sizes $ \size -> do
+      cur_offset <- get
+      partition_offset <- lift $ newVName "partition_offset"
+      lift $ emit $ Imp.DeclareScalar partition_offset Int
+      lift $ emit $ Imp.SetScalar partition_offset cur_offset
+      put $ Imp.BinOp Plus (Imp.ScalarVar partition_offset) (Imp.ScalarVar size)
+      return partition_offset
 
-  -- We create the memory location we use when writing a result
-  -- element.  This is basically the index function of 'destloc', but
-  -- with a dynamic offset, stored in 'partition_cur_offset'.
-  partition_cur_offset <- newVName "partition_cur_offset"
-  emit $ Imp.DeclareScalar partition_cur_offset Int
+    -- We create the memory location we use when writing a result
+    -- element.  This is basically the index function of 'destloc', but
+    -- with a dynamic offset, stored in 'partition_cur_offset'.
+    partition_cur_offset <- newVName "partition_cur_offset"
+    emit $ Imp.DeclareScalar partition_cur_offset Int
 
-  -- Finally, we iterate through the data array and flag array in
-  -- parallel, and put each element where it is supposed to go.  Note
-  -- that after writing to a partition, we increase the corresponding
-  -- offset.
-  copy_element <- copyElem et
-                  destloc [varIndex partition_cur_offset]
-                  srcloc [varIndex i]
-  let mkWriteLoopBody code c offsetvar =
-        Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
-        (Imp.SetScalar partition_cur_offset
-           (Imp.ScalarVar offsetvar)
-         <>
-         copy_element
-         <>
-         Imp.SetScalar offsetvar
-           (Imp.BinOp Plus (Imp.ScalarVar offsetvar) (Imp.Constant (IntVal 1))))
-        code
-      writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
-  emit $ Imp.For i outer_dim $
-    Imp.SetScalar eqclass (index flagmem flagoffset Int) <>
-    writeLoopBody
-  return ()
+    -- Finally, we iterate through the data array and flag array in
+    -- parallel, and put each element where it is supposed to go.  Note
+    -- that after writing to a partition, we increase the corresponding
+    -- offset.
+    copy_element <- copyElem et
+                    destloc [varIndex partition_cur_offset]
+                    srcloc [varIndex i]
+    let mkWriteLoopBody code c offsetvar =
+          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
+          (Imp.SetScalar partition_cur_offset
+             (Imp.ScalarVar offsetvar)
+           <>
+           copy_element
+           <>
+           Imp.SetScalar offsetvar
+             (Imp.BinOp Plus (Imp.ScalarVar offsetvar) (Imp.Constant (IntVal 1))))
+          code
+        writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
+    emit $ Imp.For i outer_dim $
+      Imp.SetScalar eqclass (index flagmem flagoffset Int) <>
+      writeLoopBody
+    return ()
 
 defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 
@@ -508,12 +525,18 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
       na <- subExpNotArray se
       when na $
         compileScalarSubExpTo (ScalarDestination $ fparamName p) se
-    body' <- collect $ compileLoopBody mergenames body
-    case form of
-      ForLoop i bound ->
-        emit $ Imp.For i (compileSubExp bound) body'
-      WhileLoop cond ->
-        emit $ Imp.While (Imp.ScalarVar cond) body'
+    let (bindForm, emitForm) =
+          case form of
+            ForLoop i bound ->
+              (declaringLoopVar i,
+               emit . Imp.For i (compileSubExp bound))
+            WhileLoop cond ->
+              (id,
+               emit . Imp.While (Imp.ScalarVar cond))
+
+    bindForm $ do
+      body' <- collect $ compileLoopBody mergenames body
+      emitForm body'
     zipWithM_ compileResultSubExp dest $ map Var res
     where mergepat = map fst merge
           mergenames = map fparamName mergepat
@@ -604,6 +627,17 @@ declaringVar patElem m =
             }
       local (insertInVtable name entry) m
   where name = patElemName patElem
+
+declaringBasicVar :: VName -> BasicType -> ImpM op a -> ImpM op a
+declaringBasicVar name bt =
+  local (insertInVtable name $ ScalarVar $ ScalarEntry bt)
+
+declaringLoopVars :: [VName] -> ImpM op a -> ImpM op a
+declaringLoopVars = flip $ foldr declaringLoopVar
+
+declaringLoopVar :: VName -> ImpM op a -> ImpM op a
+declaringLoopVar name =
+  declaringBasicVar name Int
 
 -- | Remove the array targets.
 funcallTargets :: Destination -> ImpM op [VName]
@@ -872,15 +906,14 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ src
         n
   | otherwise = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
-    let ivars = map varIndex is
-        destidx =
-          simplifyScalExp $ IxFun.index destIxFun ivars
-        srcidx =
-          simplifyScalExp $ IxFun.index srcIxFun ivars
-    return $ foldl (.) id (zipWith Imp.For is $
-                                   map (innerExp . dimSizeToExp) destshape) $
-      write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt $
-      index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt
+    declaringLoopVars is $ do
+      let ivars = map varIndex is
+      destidx <- simplifyScalExp $ IxFun.index destIxFun ivars
+      srcidx <- simplifyScalExp $ IxFun.index srcIxFun ivars
+      return $ foldl (.) id (zipWith Imp.For is $
+                                     map (innerExp . dimSizeToExp) destshape) $
+        write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt $
+        index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt
 
 memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
@@ -924,8 +957,9 @@ scalExpToImpExp (SE.SDivide e1 e2) =
 scalExpToImpExp _ =
   Nothing
 
-simplifyScalExp :: ScalExp -> ScalExp
-simplifyScalExp se = case AlgSimplify.simplify se mempty types of
-  Left err  -> error $ show err
-  Right se' -> se'
-  where types = undefined
+simplifyScalExp :: (HasTypeEnv m, Monad m) => ScalExp -> m ScalExp
+simplifyScalExp se = do
+  types <- askTypeEnv
+  case AlgSimplify.simplify se mempty types of
+    Left err  -> fail $ show err
+    Right se' -> pure se'
