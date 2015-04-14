@@ -23,6 +23,8 @@ module Futhark.MonadFreshNames
 import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
+import qualified Control.Monad.Writer.Lazy
+import qualified Control.Monad.Writer.Strict
 import Control.Monad.Reader
 
 import Prelude
@@ -109,7 +111,18 @@ newNameSourceForProg :: Prog lore -> VNameSource
 newNameSourceForProg = newNameSource . progNames
 
 -- Utility instance defintions for MTL classes.  This requires
--- UndecidableInstances, but save on typing elsewhere.
+-- UndecidableInstances, but saves on typing elsewhere.
+
 instance MonadFreshNames m => MonadFreshNames (ReaderT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance (MonadFreshNames m, Monoid s) =>
+         MonadFreshNames (Control.Monad.Writer.Lazy.WriterT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance (MonadFreshNames m, Monoid s) =>
+         MonadFreshNames (Control.Monad.Writer.Strict.WriterT s m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
