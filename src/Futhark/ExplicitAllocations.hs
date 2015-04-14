@@ -162,11 +162,7 @@ allocsForBinding :: Allocator m =>
                  -> m (Binding, [AllocBinding])
 allocsForBinding sizeidents validents e = do
   rts <- expReturns lookupSummary' e
-  types <- askTypeEnv
-  memoryMap <- askMemoryMap
-  ((patElems, postbnds),prebnds) <-
-    runPatAllocM (allocsForPattern sizeidents validents rts) memoryMap types
-  mapM_ addAllocBinding prebnds
+  (patElems, postbnds) <- allocsForPattern sizeidents validents rts
   return (Let (Pattern patElems) () e,
           postbnds)
 
@@ -191,8 +187,9 @@ patternWithAllocations memoryMap types names e = do
             [] -> return patElems
             _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
 
-allocsForPattern :: [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
-                 -> PatAllocM ([PatElem], [AllocBinding])
+allocsForPattern :: Allocator m =>
+                    [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
+                 -> m ([PatElem], [AllocBinding])
 allocsForPattern sizeidents validents rts = do
   let sizes' = [ PatElem size BindVar Scalar | size <- sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
