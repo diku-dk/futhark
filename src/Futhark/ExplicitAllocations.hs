@@ -9,7 +9,6 @@ import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
-import qualified Data.DList as DL
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -26,6 +25,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Optimise.Simplifier.Simplify (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
@@ -33,13 +33,52 @@ data Entry = Entry { entryMemSummary :: MemSummary
                    , entryType :: Type
                    }
 
+type MemoryMap = HM.HashMap VName Entry
+
+data AllocBinding = SizeComputation VName SE.ScalExp
+                  | Allocation VName SubExp
+                  | ArrayCopy VName Bindage VName
+                    deriving (Eq, Ord, Show)
+
+bindAllocBinding :: MonadBinder m => AllocBinding -> m ()
+bindAllocBinding (SizeComputation name se) = do
+  e <- SE.fromScalExp' se
+  letBindNames'_ [name] e
+bindAllocBinding (Allocation name size) =
+  letBindNames'_ [name] $ PrimOp $ Alloc size
+bindAllocBinding (ArrayCopy name bindage src) =
+  letBindNames_ [(name,bindage)] $ PrimOp $ Copy $ Var src
+
+class (MonadFreshNames m, HasTypeEnv m) => Allocator m where
+  addAllocBinding :: AllocBinding -> m ()
+
+  askMemoryMap :: m MemoryMap
+
+  asksMemoryMap :: (MemoryMap -> a) -> m a
+  asksMemoryMap f = f <$> askMemoryMap
+
+allocateMemory :: Allocator m =>
+                  String -> SubExp -> m VName
+allocateMemory desc size = do
+  v <- newVName desc
+  addAllocBinding $ Allocation v size
+  return v
+
+computeSize :: Allocator m =>
+               String -> SE.ScalExp -> m SubExp
+computeSize desc se = do
+  v <- newVName desc
+  addAllocBinding $ SizeComputation v se
+  return $ Var v
+
+-- | Monad for adding allocations to an entire program.
 newtype AllocM a = AllocM (BinderT ExplicitMemory
-                           (ReaderT (HM.HashMap VName Entry)
+                           (ReaderT MemoryMap
                             (State VNameSource))
                            a)
                  deriving (Applicative, Functor, Monad,
-                           MonadReader (HM.HashMap VName Entry),
-                           MonadWriter (DL.DList Binding))
+                           MonadReader MemoryMap,
+                           MonadFreshNames)
 
 instance MonadBinder AllocM where
   type Lore AllocM = ExplicitMemory
@@ -47,15 +86,10 @@ instance MonadBinder AllocM where
   mkLetM pat e = return $ Let pat () e
 
   mkLetNamesM names e = do
-    (ts',sizes) <- instantiateShapes' =<< expExtType e
-    let identForBindage name t BindVar =
-          pure (Ident name t, BindVar)
-        identForBindage name _ bindage@(BindInPlace _ src _) = do
-          t <- lookupType src
-          pure (Ident name t, bindage)
-    vals <- sequence [ identForBindage name t bindage  |
-                       ((name,bindage), t) <- zip names ts' ]
-    basicMkLetM sizes vals e
+    memoryMap <- ask
+    types <- askTypeEnv
+    pat <- patternWithAllocations memoryMap types names e
+    return $ Let pat () e
 
   mkBodyM bnds res = return $ Body () bnds res
 
@@ -65,44 +99,103 @@ instance MonadBinder AllocM where
     AllocM $ collectBinderBindings m
 
 instance HasTypeEnv AllocM where
-  askTypeEnv = HM.map entryType <$> ask
+  askTypeEnv = liftM2 HM.union (AllocM askTypeEnv) (HM.map entryType <$> ask)
 
-instance MonadFreshNames AllocM where
-  getNameSource = AllocM $ lift getNameSource
-  putNameSource = AllocM . lift . putNameSource
+instance Allocator AllocM where
+  askMemoryMap = ask
 
-basicMkLetM :: [Ident]
-            -> [(Ident,Bindage)]
-            -> Exp
-            -> AllocM Binding
-basicMkLetM shapes validents e = do
-  (bnd, extrabnds) <- allocsForBinding shapes validents e
-  case extrabnds of
-    [] -> return bnd
-    _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
+  addAllocBinding (SizeComputation name se) =
+    letBindNames'_ [name] =<< SE.fromScalExp' se
+  addAllocBinding (Allocation name size) =
+    letBindNames'_ [name] $ PrimOp $ Alloc size
+  addAllocBinding (ArrayCopy name bindage src) =
+    letBindNames_ [(name, bindage)] $ PrimOp $ SubExp $ Var src
 
-allocForArray :: Type -> AllocM (SubExp, VName)
+runAllocM :: MonadFreshNames m => AllocM a -> m a
+runAllocM = runAllocMWithEnv HM.empty
+
+runAllocMWithEnv :: MonadFreshNames m =>
+                    MemoryMap
+                 -> AllocM a
+                 -> m a
+runAllocMWithEnv env (AllocM m) =
+  fst <$> modifyNameSource (runState (runReaderT (runBinderT m mempty) env))
+
+-- | Monad for adding allocations to a single pattern.
+newtype PatAllocM a = PatAllocM (WriterT [AllocBinding]
+                                 (ReaderT (MemoryMap, TypeEnv)
+                                  (State VNameSource))
+                                 a)
+                    deriving (Applicative, Functor, Monad,
+                              MonadReader (MemoryMap, TypeEnv),
+                              MonadWriter [AllocBinding],
+                              MonadFreshNames)
+
+instance Allocator PatAllocM where
+  askMemoryMap = fst <$> ask
+
+  addAllocBinding = tell . pure
+
+instance HasTypeEnv PatAllocM where
+  askTypeEnv = do
+    (memoryMap, types) <- ask
+    return $ HM.map entryType memoryMap <> types
+
+runPatAllocM :: MonadFreshNames m =>
+                PatAllocM a -> MemoryMap -> TypeEnv -> m (a, [AllocBinding])
+runPatAllocM (PatAllocM m) memoryMap types =
+  modifyNameSource $ runState $ runReaderT (runWriterT m) (memoryMap, types)
+
+allocForArray :: Allocator m =>
+                 Type -> m (SubExp, VName)
 allocForArray t = do
   size <-
-    computeSize
-    (intconst (basicSize $ elemType t)) $
-    arrayDims t
-  m <- letExp "mem" $ PrimOp $ Alloc size
+    computeSize "bytes" $
+    SE.sproduct $
+    (SE.Val $ IntVal $ basicSize $ elemType t) :
+    map SE.subExpToScalExp (arrayDims t)
+  m <- allocateMemory "mem" size
   return (size, m)
 
-allocsForBinding :: [Ident] -> [(Ident,Bindage)] -> Exp
-                 -> AllocM (Binding, [Binding])
+allocsForBinding :: Allocator m =>
+                    [Ident] -> [(Ident,Bindage)] -> Exp
+                 -> m (Binding, [AllocBinding])
 allocsForBinding sizeidents validents e = do
   rts <- expReturns lookupSummary' e
-  (patElems, extrabnds) <- allocsForPattern sizeidents validents rts
+  types <- askTypeEnv
+  memoryMap <- askMemoryMap
+  ((patElems, postbnds),prebnds) <-
+    runPatAllocM (allocsForPattern sizeidents validents rts) memoryMap types
+  mapM_ addAllocBinding prebnds
   return (Let (Pattern patElems) () e,
-          extrabnds)
+          postbnds)
+
+patternWithAllocations :: MonadBinder m =>
+                          MemoryMap -> TypeEnv -> [(VName, Bindage)] -> Exp
+                       -> m Pattern
+patternWithAllocations memoryMap types names e = do
+  (patElems,prebnds) <- runPatAllocM m memoryMap types
+  mapM_ bindAllocBinding prebnds
+  return $ Pattern patElems
+  where m = do
+          (ts',sizes) <- instantiateShapes' =<< expExtType e
+          let identForBindage name t BindVar =
+                pure (Ident name t, BindVar)
+              identForBindage name _ bindage@(BindInPlace _ src _) = do
+                t <- lookupType src
+                pure (Ident name t, bindage)
+          vals <- sequence [ identForBindage name t bindage  |
+                             ((name,bindage), t) <- zip names ts' ]
+          (Let (Pattern patElems) _ _, extrabnds) <- allocsForBinding sizes vals e
+          case extrabnds of
+            [] -> return patElems
+            _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
 
 allocsForPattern :: [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
-                 -> AllocM ([PatElem], [Binding])
+                 -> PatAllocM ([PatElem], [AllocBinding])
 allocsForPattern sizeidents validents rts = do
   let sizes' = [ PatElem size BindVar Scalar | size <- sizeidents ]
-  (vals,(memsizes, mems, extrabnds)) <-
+  (vals,(memsizes, mems, postbnds)) <-
     runWriterT $ forM (zip validents rts) $ \((ident,bindage), rt) ->
     case rt of
       ReturnsScalar _ -> do
@@ -124,16 +217,15 @@ allocsForPattern sizeidents validents rts = do
               -- The expression returns in some memory, but we want to
               -- put the result somewhere else.  This means we need to
               -- store it in the memory it wants to first, then copy
-              -- it elsewhere in an extra binding.
-              ident' <- lift $
-                        newIdent (baseString (identName ident)<>"_buffer")
-                        (stripArray (length is) $ identType ident
-                         `setUniqueness` u)
+              -- it to our intended destination in an extra binding.
+              tmp_buffer <- lift $
+                            newIdent (baseString (identName ident)<>"_buffer")
+                            (stripArray (length is) $ identType ident
+                             `setUniqueness` u)
               tell ([], [],
-                    [Let (Pattern [PatElem ident bindage $
-                                   MemSummary destmem destixfun]) () $
-                     PrimOp $ Copy $ Var $ identName ident'])
-              return $ PatElem ident' BindVar $
+                    [ArrayCopy (identName ident) bindage $
+                     identName tmp_buffer])
+              return $ PatElem tmp_buffer BindVar $
                 MemSummary mem ixfun
 
       ReturnsArray _ extshape _ Nothing
@@ -148,13 +240,14 @@ allocsForPattern sizeidents validents rts = do
               [])
         return $ PatElem ident' bindage lore
   return (memsizes <> mems <> sizes' <> vals,
-          extrabnds)
+          postbnds)
   where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
         known (Ext {}) = Nothing
 
-summaryForBindage :: Type -> Bindage
-                  -> AllocM MemSummary
+summaryForBindage :: Allocator m =>
+                     Type -> Bindage
+                  -> m MemSummary
 summaryForBindage t BindVar
   | basicType t =
     return Scalar
@@ -182,27 +275,19 @@ directIndexFunction :: VName -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ arrayDims t
 
-computeSize :: MonadBinder m =>
-               SubExp -> [SubExp] -> m SubExp
-computeSize current [] = return current
-computeSize current (x:xs) = do
-  let pexp = pure . PrimOp . SubExp
-  e <- eBinOp Times (pexp current) (pexp x) Int
-  v <- letSubExp "x" e
-  computeSize v xs
-
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
 lookupSummary name = asks $ fmap entryMemSummary . HM.lookup name
 
-lookupSummary' :: VName -> AllocM MemSummary
+lookupSummary' :: Allocator m =>
+                  VName -> m MemSummary
 lookupSummary' name = do
-  res <- asks $ fmap entryMemSummary . HM.lookup name
+  res <- asksMemoryMap $ fmap entryMemSummary . HM.lookup name
   case res of
     Just summary -> return summary
     Nothing ->
       fail $ "No memory summary for variable " ++ pretty name
 
-lookupArraySummary' :: VName -> AllocM (VName, IxFun.IxFun)
+lookupArraySummary' :: Allocator m => VName -> m (VName, IxFun.IxFun)
 lookupArraySummary' name = do
   summary <- lookupSummary' name
   case summary of MemSummary mem ixfun ->
@@ -214,23 +299,13 @@ bindeeSummary :: PatElem -> (VName, Entry)
 bindeeSummary bindee = (patElemName bindee,
                         Entry (patElemLore bindee) (patElemType bindee))
 
-bindeesSummary :: [PatElem] -> HM.HashMap VName Entry
+bindeesSummary :: [PatElem] -> MemoryMap
 bindeesSummary = HM.fromList . map bindeeSummary
 
-fparamsSummary :: [FParam] -> HM.HashMap VName Entry
+fparamsSummary :: [FParam] -> MemoryMap
 fparamsSummary = HM.fromList . map fparamSummary
   where fparamSummary fparam = (fparamName fparam,
                                 Entry (fparamLore fparam) (fparamType fparam))
-
-runAllocM :: MonadFreshNames m => AllocM a -> m a
-runAllocM = runAllocMWithEnv HM.empty
-
-runAllocMWithEnv :: MonadFreshNames m =>
-                    HM.HashMap VName Entry
-                 -> AllocM a
-                 -> m a
-runAllocMWithEnv env (AllocM m) =
-  fst <$> modifyNameSource (runState (runReaderT (runBinderT m mempty) env))
 
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
@@ -348,7 +423,8 @@ allocInBinding (Let pat _ e) = do
       sizeidents' = map patElemIdent sizeidents
       validents' = [ (ident, bindage) | PatElem ident bindage () <- validents ]
   (bnd, bnds) <- allocsForBinding sizeidents' validents' e'
-  mapM_ addBinding $ bnd:bnds
+  addBinding bnd
+  mapM_ bindAllocBinding bnds
 
 funcallSubExps :: [SubExp] -> AllocM [SubExp]
 funcallSubExps ses = map fst <$>
@@ -403,7 +479,7 @@ allocInExtLambda lam = do
   return $ lam { extLambdaBody = body }
 
 vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
-                 -> HM.HashMap VName Entry
+                 -> MemoryMap
 vtableToAllocEnv = HM.fromList . mapMaybe entryToMemSummary .
                    HM.toList . ST.bindings
   where entryToMemSummary (k,entry) = do
@@ -424,10 +500,11 @@ simplifiable =
         mkBodyS' _ bnds res = return $ mkWiseBody () bnds res
 
         mkLetNamesS' vtable names e = do
-          Let pat' lore _ <-
-            runAllocMWithEnv env $ mkLetNamesM names $ removeExpWisdom e
-          return $ mkWiseLetBinding pat' lore e
+          pat' <- patternWithAllocations env types names $
+                  removeExpWisdom e
+          return $ mkWiseLetBinding pat' () e
           where env = vtableToAllocEnv vtable
+                types = ST.typeEnv vtable
 
         simplifyMemSummary Scalar =
           return Scalar
