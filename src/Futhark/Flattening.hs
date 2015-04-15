@@ -108,14 +108,18 @@ addMapLetArray vn letArr = do
 
 ----------------------------------------
 
-getFlattenedDims :: (SubExp, SubExp) -> FlatM SubExp
-getFlattenedDims (outer,inner) = do
+getFlattenedDims1 :: (SubExp, SubExp) -> FlatM SubExp
+getFlattenedDims1 (outer,inner) = do
   fds <- gets flattenedDims
   case M.lookup (outer,inner) fds of
     Just sz -> return sz
     Nothing -> flatError $ Error $ "getFlattenedDims not created for" ++
                                     show (pretty outer, pretty inner)
 
+getFlattenedDims :: (SubExp, SubExp) -> FlatM (Maybe SubExp)
+getFlattenedDims (outer,inner) = do
+  fds <- gets flattenedDims
+  return $ M.lookup (outer,inner) fds
 ----------------------------------------
 
 getSegDescriptors1Ident :: Ident -> FlatM [SegDescp]
@@ -544,7 +548,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
     unflattenRes :: PatElem -> FlatM (Binding, PatElem)
     unflattenRes (PatElem (Ident vn (Array bt (Shape (outer:rest)) uniq))
                           BindVar ()) = do
-      flatSize <- getFlattenedDims (mapSize mapInfo, outer)
+      flatSize <- getFlattenedDims1 (mapSize mapInfo, outer)
       let flatTp = Array bt (Shape $ flatSize:rest) uniq
       flatResArr <- newIdent (baseString vn ++ "_sd") flatTp
       let flatResArrPat = PatElem flatResArr BindVar ()
@@ -596,7 +600,7 @@ flattenArg mapInfo targInfo = do
               return (tod1, tod2, rest, bt, uniq)
     _ -> flatError $ Error $ "trying to flatten less than 2D array: " ++ show target
 
-  newSize <- getFlattenedDims (tod1, tod2)
+  newSize <- getFlattenedDims1 (tod1, tod2)
 
   let flatTp = Array bt (Shape (newSize : rest)) uniq
   flatIdent <- newIdent (baseString (identName target) ++ "_sd") flatTp
