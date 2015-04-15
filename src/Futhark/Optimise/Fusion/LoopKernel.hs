@@ -463,9 +463,9 @@ exposeInputs :: [VName] -> FusedKer
              -> TryFusion (FusedKer, SOAC.ArrayTransforms)
 exposeInputs inpIds ker = do
   nest <- Nest.fromSOAC $ fsoac ker
-  id $ (exposeInputs' =<< pushRearrange' nest) <|>
-       (exposeInputs' =<< pullRearrange' nest) <|>
-       exposeInputs' ker
+  (exposeInputs' =<< pushRearrange' nest) <|>
+    (exposeInputs' =<< pullRearrange' nest) <|>
+    exposeInputs' ker
   where ot = outputTransform ker
 
         pushRearrange' nest = do
