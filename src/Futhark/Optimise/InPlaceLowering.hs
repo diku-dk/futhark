@@ -199,11 +199,7 @@ instance MonadFreshNames ForwardingM where
   putNameSource = put
 
 instance HasTypeEnv ForwardingM where
-  lookupType name = do
-    res <- liftM entryType <$> asks (HM.lookup name . topDownTable)
-    case res of
-      Nothing -> fail $ "lookupType: variable " ++ pretty name ++ " not found."
-      Just t  -> return t
+  askTypeEnv = HM.map entryType <$> asks topDownTable
 
 runForwardingM :: VNameSource -> ForwardingM a -> a
 runForwardingM src (ForwardingM m) = fst $ evalRWS m emptyTopDown src
