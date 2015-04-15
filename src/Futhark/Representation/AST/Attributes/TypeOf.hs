@@ -26,6 +26,7 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
+import Data.Traversable
 
 import Prelude
 

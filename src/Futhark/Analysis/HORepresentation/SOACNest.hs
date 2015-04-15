@@ -30,6 +30,7 @@ module Futhark.Analysis.HORepresentation.SOACNest
 import Control.Applicative
 import Control.Monad
 import Data.Maybe
+import Data.Traversable
 
 import Prelude
 

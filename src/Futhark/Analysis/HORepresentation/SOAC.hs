@@ -72,6 +72,7 @@ import Data.Foldable as Foldable
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Sequence as Seq
+import Data.Traversable
 
 import Prelude
 
