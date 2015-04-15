@@ -112,7 +112,7 @@ bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
 
 lambdaToBody :: (HasTypeEnv m, Monad m, Bindable lore) =>
                 Lambda lore -> m (NestBody lore)
-lambdaToBody l = do
+lambdaToBody l =
   maybe (Fun l) (uncurry $ flip NewNest) <$> nested l
 
 data TypedSubExp = TypedSubExp { subExpExp :: SubExp
