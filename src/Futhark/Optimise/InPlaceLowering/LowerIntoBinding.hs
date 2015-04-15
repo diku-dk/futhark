@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Optimise.InPlaceLowering.LowerIntoBinding
        (
          lowerUpdate
@@ -6,6 +7,7 @@ module Futhark.Optimise.InPlaceLowering.LowerIntoBinding
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Writer
 import Data.List (find)
 import Data.Maybe (mapMaybe)
 import Data.Either
@@ -109,16 +111,18 @@ lowerUpdateIntoLoop updates pat res merge body = do
                  -> m ([(FParamT (), SubExp)], [Binding lore])
         mkMerges summaries = do
           ((origmerge, extramerge), prebnds) <-
-            runBinderEmptyEnv $ partitionEithers <$> mapM mkMerge summaries
+            runWriterT $ partitionEithers <$> mapM mkMerge summaries
           return (origmerge ++ extramerge, prebnds)
 
         mkMerge summary
           | Just (update, mergeident) <- relatedUpdate summary = do
-            source <- letInPlace "modified_source"
-                      (updateCertificates update)
-                      (updateSource update)
-                      (updateIndices update)
-                      $ PrimOp $ SubExp $ snd $ mergeParam summary
+            source <- newVName "modified_source"
+            let updpat = [((updateBindee update) { identName = source },
+                           BindInPlace
+                           (updateCertificates update)
+                           (updateSource update)
+                           (updateIndices update))]
+            tell [mkLet updpat $ PrimOp $ SubExp $ snd $ mergeParam summary]
             return $ Right (FParam mergeident (), Var source)
           | otherwise = return $ Left $ mergeParam summary
 
