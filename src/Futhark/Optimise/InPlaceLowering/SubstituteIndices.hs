@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module exports facilities for transforming array accesses in
 -- a list of 'Binding's (intended to be the bindings in a body).  The
 -- idea is that you can state that some variable @x@ is in fact an
@@ -11,6 +12,7 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 import Control.Applicative
 import Control.Monad
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -22,13 +24,19 @@ import Futhark.Util
 type IndexSubstitution = (Certificates, Ident, [SubExp])
 type IndexSubstitutions = [(VName, IndexSubstitution)]
 
+typeEnvFromSubstitutions :: IndexSubstitutions -> TypeEnv
+typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution. snd)
+  where fromSubstitution (_, ident, _) =
+          (identName ident, identType ident)
+
 substituteIndices :: (MonadFreshNames m, Bindable lore) =>
                      IndexSubstitutions -> [Binding lore]
                   -> m ([IndexSubstitution], [Binding lore])
 substituteIndices substs bnds = do
   (substs', bnds') <-
-    runBinderEmptyEnv $ substituteIndicesInBindings substs bnds
+    runBinderT (substituteIndicesInBindings substs bnds) types
   return (map snd substs', bnds')
+  where types = typeEnvFromSubstitutions substs
 
 substituteIndicesInBindings :: MonadBinder m =>
                                IndexSubstitutions
