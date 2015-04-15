@@ -263,7 +263,7 @@ optimizeKernel inp ker = do
 optimizeSOAC :: Maybe [VName] -> SOAC -> TryFusion (SOAC, SOAC.ArrayTransforms)
 optimizeSOAC inp soac = do
   nest <- Nest.fromSOAC soac
-  (nest', ots) <- optimizeSOACNest inp nest $ SOAC.noTransforms
+  (nest', ots) <- optimizeSOACNest inp nest SOAC.noTransforms
   soac' <- Nest.toSOAC nest'
   return (soac', ots)
 

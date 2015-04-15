@@ -102,7 +102,7 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
             let n'    = substituteNames subst
                         n { Nest.nestingParamNames =
                                Nest.nestingParamNames n' ++
-                               (map identName newParams)
+                               map identName newParams
                           }
                 comb' = substituteNames subst comb
             in Nest.NewNest n' comb'

@@ -29,7 +29,7 @@ instance MonadFreshNames TryFusion where
   putNameSource = put
 
 instance HasTypeEnv TryFusion where
-  lookupType name = do
+  lookupType name =
     maybe notFound return =<< asks (HM.lookup name)
     where notFound =
             fail $ "Variable " ++ pretty name ++ " not found in symbol table"

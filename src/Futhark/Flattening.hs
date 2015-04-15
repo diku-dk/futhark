@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables #-}
+-- {-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables #-}
 module Futhark.Flattening ( flattenProg )
   where
 
