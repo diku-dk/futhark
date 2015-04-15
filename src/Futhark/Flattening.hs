@@ -213,7 +213,7 @@ flattenProg p@(Prog funs) = do
 transformFun :: FunDec -> FlatM FunDec
 transformFun (FunDec name retType params body) = do
   mapM_ createSegDescsForArray $
-    filter (maybe False (>=2) . identDimentionality)
+    filter (maybe False (>=2) . dimentionality . identType)
            (map fparamIdent params)
   body' <- transformBody body
   return $ FunDec name' retType params body'
@@ -230,45 +230,44 @@ transformBody (Body () bindings (Result ses)) = do
 transformBinding :: Binding -> FlatM [Binding]
 transformBinding topBnd@(Let (Pattern pats) ()
                              (LoopOp (Map certs lambda arrs))) = do
-  idents <- mapM toIdent arrs
   okLamBnds <- mapM isSafeToMapBinding lamBnds
   let grouped = foldr group [] $ zip okLamBnds lamBnds
 
-  outerSize <- case idents of
-                 Ident _ (Array _ (Shape (outer:_)) _):_ -> return outer
+  arrtps <- mapM lookupType arrs
+  outerSize <- case arrtps of
+                 Array _ (Shape (outer:_)) _:_ -> return outer
                  _ -> flatError $ Error "impossible, map argument was not a list"
 
   case grouped of
    [Right _] -> return [topBnd]
    _ -> do
-     loopinv_idents <-
-       filter (`notElem` idents) <$> filter (isJust . identDimentionality) <$>
-       mapM toIdent (HS.toList $ freeInExp (LoopOp $ Map certs lambda arrs))
+     loopinv_vns <-
+       filter (`notElem` arrs) <$> filterM (liftM isJust . vnDimentionality)
+       (HS.toList $ freeInExp (LoopOp $ Map certs lambda arrs))
      (loopinv_repbnds, loopinv_repidents) <-
-       mapAndUnzipM (replicateIdent outerSize) loopinv_idents
+       mapAndUnzipM (replicateVName outerSize) loopinv_vns
 
-     let mapInfo = MapInfo { mapListArgs = idents ++ loopinv_repidents
-                           , lamParams = lambdaParams lambda ++ loopinv_idents
+     let mapInfo = MapInfo { mapListArgs = arrs ++ map identName loopinv_repidents
+                           , lamParamVNs = lambdaParamVNs ++ loopinv_vns
                            , mapLets = letBoundIdentsInLambda
                            , mapSize = outerSize
                            , mapCerts = certs
                            }
 
-     mapResNeed <- liftM HS.fromList $ mapM toIdent $ HS.toList $
-                   HS.unions $ map freeIn
-                   (resultSubExps $ bodyResult $ lambdaBody lambda)
-     freeIdents <- liftM (map HS.fromList) $ mapM (mapM toIdent . HS.toList) $
-                   flip map grouped $ \case
-       Right bnds -> HS.unions $ map (freeInExp . bindingExp) bnds
-       Left bnd -> freeInExp $ bindingExp bnd
+     let mapResNeed = HS.unions $ map freeIn
+                      (resultSubExps $ bodyResult $ lambdaBody lambda)
+     let freeIdents = flip map grouped $ \case
+                Right bnds -> HS.unions $ map (freeInExp . bindingExp) bnds
+                Left bnd -> freeInExp $ bindingExp bnd
      let _:needed = scanr HS.union mapResNeed freeIdents
      let defining = flip map grouped $ \case
                       -- TODO: assuming Bindage == BindVar (which is ok?)
-           Right bnds -> concatMap (map patElemIdent
+           Right bnds -> concatMap (map (identName . patElemIdent)
                                     . patternElements
                                     . bindingPattern
                                    ) bnds
-           Left bnd -> map patElemIdent $ patternElements $ bindingPattern bnd
+           Left bnd -> map (identName . patElemIdent) $
+                            patternElements $ bindingPattern bnd
      let shouldReturn = zipWith (\def need -> filter (`HS.member` need ) def)
                                 defining needed
      let argsNeeded = zipWith (\def freeIds -> filter (`notElem` def) freeIds)
@@ -295,8 +294,10 @@ transformBinding topBnd@(Let (Pattern pats) ()
   where
     lamBnds = bodyBindings $ lambdaBody lambda
     letBoundIdentsInLambda =
-      concatMap (map patElemIdent . patternElements . bindingPattern)
+      concatMap (map (identName . patElemIdent) . patternElements . bindingPattern)
                 (bodyBindings $ lambdaBody lambda)
+
+    lambdaParamVNs = map identName $ lambdaParams lambda
 
     group :: (Bool, Binding)
              -> [Either Binding [Binding]]
@@ -305,33 +306,35 @@ transformBinding topBnd@(Let (Pattern pats) ()
     group (True, bnd) list                = Right [bnd] : list
     group (False, bnd) list               = Left bnd : list
 
-    wrapRightInMap :: MapInfo -> ([Ident], [Ident]) -> [Binding] -> FlatM Binding
-    wrapRightInMap mapInfo (argsNeeded, shouldReturn) bnds = do
-
-      (mapIdents, argArrs) <- liftM (unzip . catMaybes)
-        $ forM argsNeeded $ \arg -> do
-            argArr <- findTarget mapInfo $ identName arg
-            case argArr of
-              Just val -> return $ Just (arg, val)
+    wrapRightInMap :: MapInfo -> ([VName], [VName]) -> [Binding] -> FlatM Binding
+    wrapRightInMap mapInfo (argsneeded, toreturn_vns) bnds = do
+      (mapparams, argarrs) <- liftM (unzip . catMaybes)
+        $ forM argsneeded $ \arg -> do
+            argarr <- findTarget mapInfo arg
+            case argarr of
+              Just val -> do
+                val_tp <- lookupType arg
+                return $ Just (Ident arg val_tp, identName val)
               Nothing -> return Nothing
 
       pat <- liftM (Pattern . map (\i -> PatElem i BindVar () ))
-             $ forM shouldReturn $ \i -> do
-                 iArr <- wrapInArrIdent (mapSize mapInfo) i
-                 addMapLetArray (identName i) iArr
-                 return iArr
+             $ forM toreturn_vns $ \sr -> do
+                 iarr <- wrapInArrVName (mapSize mapInfo) sr
+                 addMapLetArray sr iarr
+                 return iarr
 
-      let lamBody = Body { bodyLore = ()
+      let lambody = Body { bodyLore = ()
                          , bodyBindings = bnds
-                         , bodyResult = Result $ map (Var . identName) shouldReturn
+                         , bodyResult = Result $ map Var toreturn_vns
                          }
 
-      let wrapLambda = Lambda { lambdaParams = mapIdents
-                              , lambdaBody = lamBody
-                              , lambdaReturnType = map identType shouldReturn
-                              }
+      toreturn_tps <- mapM lookupType toreturn_vns
+      let wrappedlambda = Lambda { lambdaParams = mapparams
+                                 , lambdaBody = lambody
+                                 , lambdaReturnType = toreturn_tps
+                                 }
 
-      let theMapExp = LoopOp $ Map certs wrapLambda $ map identName argArrs
+      let theMapExp = LoopOp $ Map certs wrappedlambda argarrs
       return $ Let pat () theMapExp
 
 transformBinding bnd = return [bnd]
@@ -339,13 +342,13 @@ transformBinding bnd = return [bnd]
 --------------------------------------------------------------------------------
 
 data MapInfo = MapInfo {
-    mapListArgs :: [Ident]
+    mapListArgs :: [VName]
     -- ^ the lists supplied to the map, ie [xs,ys] in
     -- @map f {xs,ys}@
-  , lamParams :: [Ident]
+  , lamParamVNs :: [VName]
     -- ^ the idents parmas in the map, ie [x,y] in
     -- @map (\x y -> let z = x+y in z) {xs,ys}@
-  , mapLets :: [Ident]
+  , mapLets :: [VName]
     -- ^ the idents that are bound in the outermost level of the map,
     -- ie [z] in @map (\x y -> let z = x+y in z) {xs,ys}@
   , mapSize :: SubExp
@@ -369,7 +372,7 @@ data MapInfo = MapInfo {
 -- @ys = segreduce(+,0,xss)@
 -- we must add the mapping @y |-> ys@ so that we can find the correct array
 -- for @y@ when processing @z = iota(y)@
-pullOutOfMap :: MapInfo -> ([Ident], [Ident]) -> Binding -> FlatM [Binding]
+pullOutOfMap :: MapInfo -> ([VName], [VName]) -> Binding -> FlatM [Binding]
 -- If no expressions is needed, do nothing (this case should be
 -- covered by other optimisations
 pullOutOfMap _ (_,[]) _ = return []
@@ -402,10 +405,9 @@ pullOutOfMap mapInfo _
 
   return [Let (Pattern [PatElem newResIdent BindVar ()]) () newReshape]
 
-pullOutOfMap mapInfo (argsNeeded, _)
+pullOutOfMap mapInfo (argsneeded, _)
                      (Let (Pattern pats) ()
                           (LoopOp (Map certs lambda arrs))) = do
-  idents <- mapM toIdent arrs
   -- For all argNeeded that are not already being mapped over:
   --
   -- 1) if they where created as an intermediate result in the outer map,
@@ -437,14 +439,14 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -----------------------------------------------
   (okIdents, okLambdaParams) <-
       liftM unzip
-      $ filterM (\(i,_) -> isJust <$> findTarget mapInfo (identName i))
-              $ zip idents (lambdaParams lambda)
+      $ filterM (\(vn,_) -> isJust <$> findTarget mapInfo vn)
+              $ zip arrs (lambdaParams lambda)
   (loopInvIdents, loopInvLambdaParams) <-
       liftM unzip
-      $ filterM (\(i,_) -> isNothing <$> findTarget mapInfo (identName i))
-              $ zip idents (lambdaParams lambda)
-  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM (replicateIdent $ mapSize mapInfo)
-                                                      loopInvIdents
+      $ filterM (\(vn,_) -> isNothing <$> findTarget mapInfo vn)
+              $ zip arrs (lambdaParams lambda)
+  (loopInvRepBnds, loopInvIdentsArrs) <-
+    mapAndUnzipM (replicateVName $ mapSize mapInfo) loopInvIdents
 
   (flattenIdents, flatIdents) <-
     mapAndUnzipM (flattenArg mapInfo) $
@@ -454,8 +456,9 @@ pullOutOfMap mapInfo (argsNeeded, _)
 
 
   -- We need this later on
-  innerMapSize <- case idents of
-                    Ident _ (Array _ (Shape (outer:_)) _):_ -> return outer
+  arrs_tps <- mapM lookupType arrs
+  innerMapSize <- case arrs_tps of
+                    Array _ (Shape (outer:_)) _:_ -> return outer
                     _ -> flatError $ Error "impossible, map argument was not a list"
 
   -------------------------------------------------------------
@@ -463,22 +466,24 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -------------------------------------------------------------
 
   -- TODO: This will lead to size variables been mapeed over :(
-  let reallyNeeded = filter (`notElem` idents) argsNeeded
+  let reallyNeeded = filter (`notElem` arrs) argsneeded
   --
   -- Intermediate results needed
   --
-  itmResIdents <- filterM (\i -> isJust <$> findTarget mapInfo (identName i)) reallyNeeded
+  intmres_vns <- filterM (liftM isJust . findTarget mapInfo) reallyNeeded
 
   -- Need to rename so our intermediate result will not be found in
   -- other calls (through mapLetArray)
-  itmResIdents' <- mapM (newIdent' id) itmResIdents
-  itmResArrs <- mapM (findTarget1 mapInfo) itmResIdents
+  intmres_vns' <- mapM newName intmres_vns
+  intmres_tps <- mapM lookupType intmres_vns
+  let intmres_params = zipWith Ident intmres_vns' intmres_tps
+  intmres_arrs <- mapM (findTarget1 mapInfo) intmres_vns
 
   --
   -- Distribute and flatten idents needed (from above)
   --
   (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
-                                            itmResArrs
+                                            intmres_arrs
   (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM (flattenArg mapInfo) $
                                          Left <$> distArrIdents
 
@@ -488,11 +493,11 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -----------------------------------------
   let newInnerIdents = flatIdents ++ flatDistArrIdents
   let lambdaParams' = okLambdaParams ++ loopInvLambdaParams
-                      ++ itmResIdents'
+                      ++ intmres_params
 
   let lambdaBody' = substituteNames
-                    (HM.fromList $ zip (map identName itmResIdents)
-                                       (map identName itmResIdents'))
+                    (HM.fromList $ zip intmres_vns
+                                       intmres_vns')
                     $ lambdaBody lambda
 
   let lambda' = lambda { lambdaParams = lambdaParams'
@@ -571,8 +576,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
 
 pullOutOfMap mapinfo _ (Let (Pattern [PatElem ident1 BindVar _]) _
                       (PrimOp (SubExp (Var name)))) = do
-  ident2 <- toIdent name
-  addMapLetArray (identName ident1) =<< findTarget1 mapinfo ident2
+  addMapLetArray (identName ident1) =<< findTarget1 mapinfo name
   return []
 
 pullOutOfMap _ _ binding =
@@ -588,7 +592,7 @@ pullOutOfMap _ _ binding =
     -- 1st arg is the parrent array for the Ident. In most cases, this
     -- will be @Nothing@ and this function will find it itself.
 -- TODO: does not currently handle loop invariant arrays
-flattenArg :: MapInfo -> Either Ident Ident -> FlatM (Binding, Ident)
+flattenArg :: MapInfo -> Either Ident VName -> FlatM (Binding, Ident)
 flattenArg mapInfo targInfo = do
   target <- case targInfo of
               Left targ -> return targ
@@ -620,19 +624,22 @@ flattenArg mapInfo targInfo = do
 -- | Find the "parent" array for a given Ident in a /specific/ map
 findTarget :: MapInfo -> VName -> FlatM (Maybe Ident)
 findTarget mapInfo vn =
-  case L.elemIndex vn $ map identName $ lamParams mapInfo of
-    Just n -> return . Just $ mapListArgs mapInfo !! n
-    Nothing -> if vn `notElem` map identName (mapLets mapInfo)
+  case L.elemIndex vn $ lamParamVNs mapInfo of
+    Just n -> do
+      let target_vn = mapListArgs mapInfo !! n
+      target_tp <- lookupType target_vn
+      return . Just $ Ident target_vn target_tp
+    Nothing -> if vn `notElem` mapLets mapInfo
                -- this argument is loop invariant
                then return Nothing
                else liftM Just $ getMapLetArray' vn
 
-findTarget1 :: MapInfo -> Ident -> FlatM Ident
-findTarget1 mapInfo i =
-  findTarget mapInfo (identName i) >>= \case
-    Just iArr -> return iArr
+findTarget1 :: MapInfo -> VName -> FlatM Ident
+findTarget1 mapInfo vn =
+  findTarget mapInfo vn >>= \case
+    Just arr -> return arr
     Nothing -> flatError $ Error $ "findTarget': couldn't find expected arr for "
-                                   ++ pretty i
+                                   ++ pretty vn
 
 wrapInArrIdent :: SubExp -> Ident -> FlatM Ident
 wrapInArrIdent sz (Ident vn tp) = do
@@ -647,8 +654,18 @@ replicateIdent sz i = do
   arrRes <- wrapInArrIdent sz i
   let repExp = PrimOp $ Replicate sz $ Var $ identName i
       repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
-
   return (repBnd, arrRes)
+
+
+wrapInArrVName :: SubExp -> VName -> FlatM Ident
+wrapInArrVName sz vn = do
+  tp <- lookupType vn
+  wrapInArrIdent sz $ Ident vn tp
+
+replicateVName :: SubExp -> VName -> FlatM (Binding, Ident)
+replicateVName sz vn = do
+  tp <- lookupType vn
+  replicateIdent sz $ Ident vn tp
 
 --------------------------------------------------------------------------------
 
@@ -680,11 +697,10 @@ isSafeToMapType (Array{}) = return False
 
 --------------------------------------------------------------------------------
 
-identDimentionality :: Ident -> Maybe Int
-identDimentionality (Ident _ (Array _ (Shape dims) _)) = Just $ length dims
-identDimentionality _ = Nothing
+dimentionality :: Type -> Maybe Int
+dimentionality (Array _ (Shape dims) _) = Just $ length dims
+dimentionality _ = Nothing
 
--- XXX: use of this function probably means that there is a design
--- flaw.
-toIdent :: HasTypeEnv m => VName -> m Ident
-toIdent name = Ident name <$> lookupType name
+vnDimentionality :: VName -> FlatM (Maybe Int)
+vnDimentionality vn =
+  liftM dimentionality $ lookupType vn
