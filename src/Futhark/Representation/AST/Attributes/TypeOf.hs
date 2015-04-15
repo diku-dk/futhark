@@ -41,6 +41,9 @@ subExpType :: HasTypeEnv m => SubExp -> m Type
 subExpType (Constant val) = pure $ Basic $ basicValueType val
 subExpType (Var name)     = lookupType name
 
+-- | @mapType f arrts@ wraps each element in the return type of @f@ in
+-- an array with size equal to the outermost dimension of the first
+-- element of @arrts@.
 mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaReturnType f ]
