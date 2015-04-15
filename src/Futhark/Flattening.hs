@@ -35,7 +35,23 @@ data FlatState = FlatState {
   -- creating the mapping [y -> ys, z -> zs]
 
   , flattenedDims :: M.Map (SubExp,SubExp) SubExp
+
+  , segDescriptors :: M.Map [SubExp] [SegDescp]
+    -- ^ segment descriptors for arrays. This is a should not be
+    -- empty. First element represents the outermost
+    -- dimension. (sometimes called segment descriptor 0 -- as it
+    -- belong to dimension 0)
+    --
+    -- [SubExp] should always contain at least two elements (a 1D
+    -- array has no segment descriptor)
   }
+
+data Regularity = Regular
+                | Irregular
+                deriving(Show, Eq)
+
+type SegDescp = (Ident, Regularity)
+
 
 newtype FlatM a = FlatM (StateT FlatState (Either Error) a)
                 deriving ( MonadState FlatState
@@ -97,28 +113,104 @@ getFlattenedDims (outer,inner) = do
   fds <- gets flattenedDims
   case M.lookup (outer,inner) fds of
     Just sz -> return sz
+    Nothing -> flatError $ Error $ "getFlattenedDims not created for" ++
+                                    show (pretty outer, pretty inner)
+
+----------------------------------------
+
+getSegDescriptors1Ident :: Ident -> FlatM [SegDescp]
+getSegDescriptors1Ident (Ident _ (Array _ (Shape subs) _)) =
+  getSegDescriptors1 subs
+getSegDescriptors1Ident i =
+  flatError $ Error $ "getSegDescriptors1Ident, not an array " ++ show i
+
+getSegDescriptors1 :: [SubExp] -> FlatM [SegDescp]
+getSegDescriptors1 subs = do
+  segmap <- gets segDescriptors
+  case M.lookup subs segmap of
+    Just segs -> return segs
+    Nothing   -> flatError $ Error $ "getSegDescriptors: Couldn't find " ++
+                                      show subs ++
+                                      " in table"
+
+getSegDescriptors :: [SubExp] -> FlatM (Maybe [SegDescp])
+getSegDescriptors subs = do
+  segmap <- gets segDescriptors
+  return $ M.lookup subs segmap
+
+addSegDescriptors :: [SubExp] -> [SegDescp] -> FlatM ()
+addSegDescriptors [] segs =
+  flatError $ Error $ "addSegDescriptors: subexpressions empty for " ++ show segs
+addSegDescriptors subs [] =
+  flatError $ Error $ "addSegDescriptors: empty seg array for " ++ show subs
+addSegDescriptors subs segs = do
+  segmap <- gets segDescriptors
+  case M.lookup subs segmap of
+    (Just _) -> flatError $ Error $ "addSegDescriptors:  " ++ show subs ++
+                                    " already present in table"
     Nothing -> do
-      new <- Var <$> newVName "size"
-      let fds' = M.insert (outer,inner) new fds
-      modify (\s -> s{flattenedDims = fds'})
-      return new
+      let segmap' = M.insert subs segs segmap
+      modify (\s -> s{segDescriptors = segmap'})
+
+-- A list of subexps (defining shape of array), will define the segment descriptor
+createSegDescsForArray :: Ident -> FlatM ()
+createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
+  alreadyCreated <- liftM isJust $ getSegDescriptors (dim0:dims)
+
+  unless alreadyCreated $ do
+    (sizes, singlesegs) :: ([[SubExp]], [SegDescp]) <-
+      liftM (unzip . reverse . (\(res,_,_,_) -> res)) $
+        foldM  (\(res,dimouter,n::Int,_:dimrest) diminner -> do
+                   segsize <- createFlattenedDims n (dimouter, diminner)
+                   let segname = baseString vn ++ "_seg" ++ show n
+                   seg <- newIdent segname (Array Int (Shape [segsize]) Nonunique)
+                   return ((dimouter:dimrest, (seg, Regular)):res, segsize, n+1, dimrest)
+               )
+               ([],dim0,0,dim0:dims) dims
+
+    let segs = map (`drop` singlesegs) [0..length singlesegs]
+    zipWithM_ addSegDescriptors sizes segs
+
+  where
+    createFlattenedDims :: Int -> (SubExp, SubExp) -> FlatM SubExp
+    createFlattenedDims n (outer,inner) = do
+      fds <- gets flattenedDims
+      case M.lookup (outer,inner) fds of
+           Just sz -> return sz
+           Nothing -> do
+             new_subexp <- Var <$> newVName ("fakesize" ++ show n)
+             let fds' = M.insert (outer,inner) new_subexp fds
+             modify (\s -> s{flattenedDims = fds'})
+             return new_subexp
+
+createSegDescsForArray i = flatError . Error $ "createSegDescsForArray on non 2D array: " ++
+                                               show i
 
 --------------------------------------------------------------------------------
 
 flattenProg :: Prog -> Either Error Prog
 flattenProg p@(Prog funs) = do
-  (funs', _) <- runFlatM initState (mapM transformFun funs)
-  return $ Prog (funs ++ funs')
+  let funs' = map renameToOld funs
+  (funsTrans,_) <- mapAndUnzipM (runFlatM initState . transformFun) funs
+  return $ Prog (funsTrans ++ funs')
   where
     initState = FlatState { vnameSource = newNameSourceForProg p
                           , mapLetArrays = M.empty
                           , flattenedDims = M.empty
+                          , segDescriptors = M.empty
                           }
+    renameToOld (FunDec name retType params body) =
+      FunDec name' retType params body
+      where
+        name' = nameFromString $ nameToString name ++ "_orig"
 
 --------------------------------------------------------------------------------
 
 transformFun :: FunDec -> FlatM FunDec
 transformFun (FunDec name retType params body) = do
+  mapM_ createSegDescsForArray $
+    filter (maybe False (>=2) . identDimentionality)
+           (map fparamIdent params)
   body' <- transformBody body
   return $ FunDec name' retType params body'
   where
@@ -441,9 +533,10 @@ pullOutOfMap mapInfo (argsNeeded, _)
       distIdent <- newIdent (baseString vn ++ "_dist") distTp
 
       let distExp = Apply (nameFromString "distribute")
-                             [(Var vn, Observe), (sz, Observe)]
-           -- TODO: I guess  Observe is okay for now
-                             (basicRetType Int) -- FIXME
+                          [(Var vn, Observe), (sz, Observe)]
+                          --  ^ TODO: I guess  Observe is okay for now
+                          (basicRetType Int)
+                          --  ^ TODO: stupid exsitensial types :(
 
 
       let distBnd = Let (Pattern [PatElem distIdent BindVar ()]) () distExp
