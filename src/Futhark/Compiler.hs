@@ -10,7 +10,7 @@ where
 import Control.Monad
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
-import Debug.Trace
+
 import Language.Futhark.Parser
 import Futhark.Internalise
 import Futhark.Pipeline
