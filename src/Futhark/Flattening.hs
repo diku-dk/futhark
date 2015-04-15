@@ -87,23 +87,23 @@ flatError e = FlatM . lift $ Left e
 --------------------------------------------------------------------------------
 
 getMapLetArray' :: VName -> FlatM Ident
-getMapLetArray' ident = do
+getMapLetArray' vn = do
   letArrs <- gets mapLetArrays
-  case M.lookup ident letArrs of
+  case M.lookup vn letArrs of
     Just letArr -> return letArr
     Nothing -> flatError $ Error $ "getMapLetArray': Couldn't find " ++
-                                   pretty ident ++
+                                   pretty vn ++
                                    " in table"
 
 addMapLetArray :: VName -> Ident -> FlatM ()
-addMapLetArray ident letArr = do
+addMapLetArray vn letArr = do
   letArrs <- gets mapLetArrays
-  case M.lookup ident letArrs of
+  case M.lookup vn letArrs of
     (Just _) -> flatError $ Error $ "addMapLetArray: " ++
-                                    pretty ident ++
+                                    pretty vn ++
                                     " already present in table"
     Nothing -> do
-      let letArrs' = M.insert ident letArr letArrs
+      let letArrs' = M.insert vn letArr letArrs
       modify (\s -> s{mapLetArrays = letArrs'})
 
 ----------------------------------------
@@ -279,7 +279,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
      res' <- forM (resultSubExps . bodyResult $ lambdaBody lambda) $
              \se -> case se of
                       (Constant bv) -> return $ Constant bv
-                      (Var ident) -> Var <$> identName <$> getMapLetArray' ident
+                      (Var vn) -> Var <$> identName <$> getMapLetArray' vn
 
      let resBnds =
            zipWith (\pe se -> Let (Pattern [pe]) () (PrimOp $ SubExp se))
@@ -618,13 +618,13 @@ flattenArg mapInfo targInfo = do
 
 -- | Find the "parent" array for a given Ident in a /specific/ map
 findTarget :: MapInfo -> VName -> FlatM (Maybe Ident)
-findTarget mapInfo i =
-  case L.elemIndex i $ map identName $ lamParams mapInfo of
+findTarget mapInfo vn =
+  case L.elemIndex vn $ map identName $ lamParams mapInfo of
     Just n -> return . Just $ mapListArgs mapInfo !! n
-    Nothing -> if i `notElem` map identName (mapLets mapInfo)
+    Nothing -> if vn `notElem` map identName (mapLets mapInfo)
                -- this argument is loop invariant
                then return Nothing
-               else liftM Just $ getMapLetArray' i
+               else liftM Just $ getMapLetArray' vn
 
 findTarget1 :: MapInfo -> Ident -> FlatM Ident
 findTarget1 mapInfo i =
