@@ -461,8 +461,9 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -------------------------------------------------------------
   -- Handle Idents needed by body, which are not mapped over --
   -------------------------------------------------------------
-  let reallyNeeded = filter (\i -> not $ HS.member (identName i) $
-                                   HS.unions $ map freeIn idents) argsNeeded
+
+  -- TODO: This will lead to size variables been mapeed over :(
+  let reallyNeeded = filter (`notElem` idents) argsNeeded
   --
   -- Intermediate results needed
   --
@@ -476,9 +477,8 @@ pullOutOfMap mapInfo (argsNeeded, _)
   --
   -- Distribute and flatten idents needed (from above)
   --
-  let extraLamdaParams = itmResArrs
   (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
-                                            extraLamdaParams
+                                            itmResArrs
   (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM (flattenArg mapInfo) $
                                          Left <$> distArrIdents
 
@@ -488,7 +488,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -----------------------------------------
   let newInnerIdents = flatIdents ++ flatDistArrIdents
   let lambdaParams' = okLambdaParams ++ loopInvLambdaParams
-                      ++ extraLamdaParams
+                      ++ itmResIdents'
 
   let lambdaBody' = substituteNames
                     (HM.fromList $ zip (map identName itmResIdents)
