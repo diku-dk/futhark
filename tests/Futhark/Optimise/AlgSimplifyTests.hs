@@ -8,6 +8,7 @@ import Test.Framework.Providers.HUnit
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
+import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST
 import Futhark.Analysis.ScalExp
@@ -90,19 +91,21 @@ instantiateRanges varinfo r =
         fixBound s  = Just $ parseScalExp' varinfo s
 
 simplify' :: VarInfo -> String -> RangesRep' -> ScalExp
-simplify' varinfo s r = case simplify e r' of
+simplify' varinfo s r = case simplify e r' types of
   Left err -> error $ show err
   Right e' -> e'
   where e = parseScalExp' varinfo s
         r' = instantiateRanges varinfo r
+        types = HM.fromList $ zip (HS.toList $ freeIn e) $ repeat $ Basic Int
 
 mkSuffConds' :: VarInfo -> String -> RangesRep' -> [[ScalExp]]
 mkSuffConds' varinfo s r =
-  case simplify e r' of
+  case simplify e r' types of
     Left err -> error $ show err
     Right e' ->
-      case mkSuffConds e' r' of
+      case mkSuffConds e' r' types of
         Left _ -> [[e']]
         Right sc -> sc
   where e = parseScalExp' varinfo s
         r' = instantiateRanges varinfo r
+        types = HM.fromList $ zip (HS.toList $ freeIn e) $ repeat $ Basic Int

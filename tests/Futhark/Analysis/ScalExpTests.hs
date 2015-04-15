@@ -97,7 +97,7 @@ prim = parens expr <|>
        constant <|>
        maxapp <|>
        minapp <|>
-       (Id <$> identifier)
+       (Id <$> identName <$> identifier)
   where maxapp = reserved "max" >> MaxMin False <$> parens (expr `sepBy` comma)
         minapp = reserved "min" >> MaxMin True <$> parens (expr `sepBy` comma)
         comma = Token.comma lexer
