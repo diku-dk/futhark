@@ -308,8 +308,8 @@ allocInFParams params m = do
         tell ([FParam memsize Scalar], [FParam mem Scalar])
         return $ FParam param' paramlore
       _ -> return param { fparamLore = Scalar }
-  let summary = fparamsSummary valparams
-      params' = memsizeparams <> memparams <> valparams
+  let params' = memsizeparams <> memparams <> valparams
+      summary = fparamsSummary params'
   local (summary `HM.union`) $ m params'
 
 isArray :: SubExp -> AllocM Bool
@@ -319,11 +319,16 @@ isArray (Constant _) = return False
 ensureDirectArray :: VName -> AllocM (SubExp, VName, SubExp)
 ensureDirectArray v = do
   res <- lookupSummary v
-  t <- lookupType v
-  case (res, t) of
-    (Just (MemSummary mem ixfun), Mem size)
-      | IxFun.isDirect ixfun ->
-        return (size, mem, Var v)
+  case res of
+    Just (MemSummary mem ixfun)
+      | IxFun.isDirect ixfun -> do
+        memt <- lookupType mem
+        case memt of
+          Mem size -> return (size, mem, Var v)
+          _        -> fail $
+                      pretty mem ++
+                      " should be a memory block but has type " ++
+                      pretty memt
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
