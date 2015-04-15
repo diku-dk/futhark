@@ -217,9 +217,9 @@ transformFun (FunDec name retType params body) = do
     name' = nameFromString $ nameToString name ++ "_flattrans"
 
 transformBody :: Body -> FlatM Body
-transformBody (Body lore bindings (Result ses)) = do
+transformBody (Body () bindings (Result ses)) = do
   bindings' <- concat <$> mapM transformBinding bindings
-  return $ Body lore bindings' (Result ses)
+  return $ Body () bindings' (Result ses)
 
 -- | Transform a function to use parallel operations.
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
@@ -370,7 +370,7 @@ pullOutOfMap :: MapInfo -> ([Ident], [Ident]) -> Binding -> FlatM [Binding]
 -- covered by other optimisations
 pullOutOfMap _ (_,[]) _ = return []
 pullOutOfMap mapInfo _
-                  (Let (Pattern [PatElem resIdent BindVar patlore]) letlore
+                  (Let (Pattern [PatElem resIdent BindVar ()]) ()
                        (PrimOp (Reshape certs dimses reshapearr))) = do
   Just target <- findTarget mapInfo reshapearr
 
@@ -396,11 +396,10 @@ pullOutOfMap mapInfo _
   let newReshape = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
                                     (mapSize mapInfo:dimses) $ identName target
 
-  return [Let (Pattern [PatElem newResIdent BindVar patlore])
-              letlore newReshape]
+  return [Let (Pattern [PatElem newResIdent BindVar ()]) () newReshape]
 
 pullOutOfMap mapInfo (argsNeeded, _)
-                     (Let (Pattern pats) letlore
+                     (Let (Pattern pats) ()
                           (LoopOp (Map certs lambda arrs))) = do
   idents <- mapM toIdent arrs
   -- For all argNeeded that are not already being mapped over:
@@ -496,7 +495,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
                        , lambdaBody = lambdaBody'
                        }
 
-  let mapBnd' = Let (Pattern pats') letlore
+  let mapBnd' = Let (Pattern pats') ()
                     (LoopOp (Map (certs ++ mapCerts mapInfo)
                                  lambda' $
                                  map identName newInnerIdents))
@@ -544,11 +543,11 @@ pullOutOfMap mapInfo (argsNeeded, _)
     -- | Steps for exiting a nested map, meaning we step-up/unflatten the result
     unflattenRes :: PatElem -> FlatM (Binding, PatElem)
     unflattenRes (PatElem (Ident vn (Array bt (Shape (outer:rest)) uniq))
-                          BindVar patLore) = do
+                          BindVar ()) = do
       flatSize <- getFlattenedDims (mapSize mapInfo, outer)
       let flatTp = Array bt (Shape $ flatSize:rest) uniq
       flatResArr <- newIdent (baseString vn ++ "_sd") flatTp
-      let flatResArrPat = PatElem flatResArr BindVar patLore
+      let flatResArrPat = PatElem flatResArr BindVar ()
 
       let finalTp = Array bt (Shape $ mapSize mapInfo :outer:rest) uniq
       finalResArr <- newIdent (baseString vn) finalTp
