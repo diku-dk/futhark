@@ -245,7 +245,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
      let mapInfo = MapInfo { mapListArgs = idents ++ loopinv_repidents
                            , lamParams = lambdaParams lambda ++ loopinv_idents
-                           , mapLets = letBoundIdentsInLambda lambda
+                           , mapLets = letBoundIdentsInLambda
                            , mapSize = outerSize
                            , mapCerts = certs
                            }
@@ -290,6 +290,9 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
   where
     lamBnds = bodyBindings $ lambdaBody lambda
+    letBoundIdentsInLambda =
+      concatMap (map patElemIdent . patternElements . bindingPattern)
+                (bodyBindings $ lambdaBody lambda)
 
     group :: (Bool, Binding)
              -> [Either Binding [Binding]]
@@ -328,11 +331,6 @@ transformBinding topBnd@(Let (Pattern pats) ()
       return $ Let pat () theMapExp
 
 transformBinding bnd = return [bnd]
-
-letBoundIdentsInLambda :: Lambda -> [Ident]
-letBoundIdentsInLambda lambda =
-   concatMap (\(Let (Pattern pats) _ _) ->map (\(PatElem i _ _) -> i)  pats)
-             (bodyBindings $ lambdaBody lambda)
 
 --------------------------------------------------------------------------------
 
