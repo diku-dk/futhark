@@ -54,3 +54,11 @@ script:
 #       echo "expected '$SRC_TGZ' not found";
 #       exit 1;
 #    fi
+
+# Tell #diku-vip about builds.
+notifications:
+  irc:
+    channels:
+      - "chat.freenode.net#diku-vip"
+    on_success: always
+    on_failure: always
