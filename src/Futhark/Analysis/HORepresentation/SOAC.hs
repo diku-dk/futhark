@@ -74,7 +74,7 @@ import Data.Monoid
 import qualified Data.Sequence as Seq
 import Data.Traversable
 
-import Prelude
+import Prelude hiding (mapM)
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST

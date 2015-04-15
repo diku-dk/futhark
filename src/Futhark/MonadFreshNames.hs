@@ -26,6 +26,7 @@ import qualified Control.Monad.State.Strict
 import qualified Control.Monad.Writer.Lazy
 import qualified Control.Monad.Writer.Strict
 import Control.Monad.Reader
+import Data.Monoid
 
 import Prelude
 

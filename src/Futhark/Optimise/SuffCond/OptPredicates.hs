@@ -266,7 +266,7 @@ instance MonadFreshNames m => MonadFreshNames (VariantM m) where
   getNameSource = VariantM . lift $ getNameSource
   putNameSource = VariantM . lift . putNameSource
 
-instance Monad m => HasTypeEnv (VariantM m) where
+instance (Functor m, Monad m) => HasTypeEnv (VariantM m) where
 
 runVariantM :: (Functor m, Monad m) =>
                Env m -> VariantM m a -> m (a, Bool)

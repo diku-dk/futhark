@@ -14,11 +14,14 @@ module Futhark.Externalise
   )
   where
 
+import Control.Applicative
 import Control.Arrow ((&&&))
 import Control.Monad.Reader
 import Data.Loc
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I

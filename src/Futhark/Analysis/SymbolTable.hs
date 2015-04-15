@@ -45,6 +45,7 @@ import Control.Monad
 import Control.Monad.Reader
 import Data.Ord
 import Data.Maybe
+import Data.Monoid
 import Data.List hiding (elem, insert, lookup)
 import qualified Data.Set as S
 import qualified Data.HashMap.Lazy as HM

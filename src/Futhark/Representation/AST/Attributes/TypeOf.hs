@@ -28,7 +28,7 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Traversable
 
-import Prelude
+import Prelude hiding (mapM)
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types

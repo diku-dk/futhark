@@ -10,6 +10,7 @@ module Futhark.Analysis.AlgSimplify
   )
   where
 
+import Control.Applicative
 import qualified Data.Set as S
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM

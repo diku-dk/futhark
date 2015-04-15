@@ -13,11 +13,13 @@ module Futhark.Optimise.Simplifier.ClosedForm
 where
 
 import Control.Monad
-
+import Control.Applicative
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Monoid
+
+import Prelude
 
 import Futhark.Tools
 import Futhark.Representation.AST
