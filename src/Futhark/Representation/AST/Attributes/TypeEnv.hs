@@ -1,4 +1,8 @@
-{-# LANGUAGE FlexibleInstances, TypeSynonymInstances, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances, GeneralizedNewtypeDeriving #-}
+-- | This module defines the concept of a type environment as a
+-- mapping from variable names to 'Type's.  Convenience facilities are
+-- also provided to communicate that some monad or applicative functor
+-- maintains type information.
 module Futhark.Representation.AST.Attributes.TypeEnv
        ( HasTypeEnv (..)
        , TypeEnv
@@ -17,9 +21,17 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 
+-- | A type environment is a mapping from variable names to types.
 type TypeEnv = HM.HashMap VName Type
 
+-- | The class of applicative functors (or more common in practice:
+-- monads) that permit the lookup of variable types.  A default method
+-- for 'lookupType' exists, which is sufficient (if not always
+-- maximally efficient, and using 'error' to fail) when 'askTypeEnv'
+-- is defined.
 class Applicative m => HasTypeEnv m where
+  -- | Return the type of the given variable, or fail if it is not in
+  -- the type environment.
   lookupType :: VName -> m Type
   lookupType name =
     fromMaybe notFound <$> HM.lookup name <$> askTypeEnv
@@ -27,6 +39,8 @@ class Applicative m => HasTypeEnv m where
             error $ "TypeEnv.lookupType: Name " ++ textual name ++
             " not found in type environment."
 
+  -- | Return the type environment contained in the applicative
+  -- functor.
   askTypeEnv :: m TypeEnv
 
 instance (Applicative m, Monad m) => HasTypeEnv (ReaderT TypeEnv m) where
@@ -45,6 +59,6 @@ instance (HasTypeEnv m, Monad m) => HasTypeEnv (ExtendedTypeEnv m) where
     maybe (ExtendedTypeEnv $ lift $ lookupType name) return res
   askTypeEnv = HM.union <$> ask <*> ExtendedTypeEnv (lift askTypeEnv)
 
--- Run a computation in the extended type environment.
+-- | Run a computation in the extended type environment.
 extendedTypeEnv :: ExtendedTypeEnv m a -> TypeEnv -> m a
 extendedTypeEnv (ExtendedTypeEnv m) = runReaderT m
