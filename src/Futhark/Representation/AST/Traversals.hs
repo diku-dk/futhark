@@ -191,6 +191,13 @@ mapExpM tv (SegOp (SegReduce cs fun inputs descp_exp)) =
                         mapM (mapOnVName tv) flatarr_exps) <*>
               mapOnVName tv descp_exp)
     where (startexps, flatarr_exps) = unzip inputs
+mapExpM tv (SegOp (SegScan cs fun inputs descp_exp)) =
+  SegOp <$> (pure SegScan <*> mapOnCertificates tv cs <*>
+              mapOnLambda tv fun <*>
+              (zip <$> mapM (mapOnSubExp tv) startexps <*>
+                        mapM (mapOnVName tv) flatarr_exps) <*>
+              mapOnVName tv descp_exp)
+    where (startexps, flatarr_exps) = unzip inputs
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType

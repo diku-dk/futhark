@@ -251,7 +251,10 @@ data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, VName)] VName
                   -- be transformed into
                   -- @segreduce(op,ne, xss_flat, xss_descpritor)@
                   --
-                  -- Note that this requires the neutral element to be constant
+                  -- Note that this requires the neutral element to be constantc
+                | SegScan Certificates (LambdaT lore) [(SubExp, VName)] VName
+                  -- ^ Identical to 'Scan', except that the last arg
+                  -- is a segment descriptor
                 deriving (Eq, Ord, Show)
 
 deriving instance Lore lore => Eq (LoopOp lore)

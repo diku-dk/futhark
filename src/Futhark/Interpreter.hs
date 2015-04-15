@@ -761,6 +761,9 @@ evalSegOp (SegReduce _ fun inputs descparr_exp) = do
   where asInt (BasicVal (IntVal x)) = return x
         asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
 
+evalSegOp (SegScan _ fun inputs descparr_exp) =
+  bad . TypeError $ "evalSegOp SegScan not implemented TODO"
+
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do
   fun <- lookupFun fname

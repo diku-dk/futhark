@@ -689,6 +689,15 @@ simplifySegOp (SegReduce cs fun input descp) = do
   descp' <- simplifyVName descp
   return $ SegReduce cs' fun' (zip acc' arrs') descp'
 
+simplifySegOp (SegScan cs fun input descp) = do
+  let (acc, arrs) = unzip input
+  cs' <- simplifyCerts cs
+  acc' <- mapM simplifySubExp acc
+  arrs' <- mapM simplifyVName arrs
+  fun' <- simplifyLambda fun $ map Just arrs'
+  descp' <- simplifyVName descp
+  return $ SegScan cs' fun' (zip acc' arrs') descp'
+
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
 simplifySubExp (Var name) = do
   bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable

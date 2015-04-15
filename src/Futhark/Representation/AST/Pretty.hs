@@ -240,6 +240,14 @@ instance PrettyLore lore => Pretty (SegOp lore) where
             ppr descp)
     where
       (nes, flatarrs) = unzip inputs
+  ppr (SegScan cs lam inputs descp) =
+    ppCertificates' cs <> text "segscan" <>
+    parens (ppr lam <> comma </>
+            ppTuple' nes <> comma <+>
+            ppTuple' flatarrs <> comma <+>
+            ppr descp)
+    where
+      (nes, flatarrs) = unzip inputs
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
