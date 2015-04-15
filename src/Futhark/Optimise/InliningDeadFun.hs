@@ -14,7 +14,6 @@ import Control.Monad.Reader
 
 import Data.List
 import Data.Maybe
-
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
@@ -168,7 +167,12 @@ inlineInBody
             mkLet' [ident] $ PrimOp $ Reshape [] (arrayDims t) v
         | otherwise =
           mkLet' [ident] $ PrimOp $ SubExp se
-inlineInBody inlcallees b = mapBody (inlineInBinding inlcallees) b
+inlineInBody inlcallees (Body () (bnd:bnds) res) =
+  let bnd' = inlineInBinding inlcallees bnd
+      Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res
+  in Body () (bnd':bnds') res'
+inlineInBody _ (Body () [] res) =
+  Body () [] res
 
 inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
 inliner funs = identityMapper {
