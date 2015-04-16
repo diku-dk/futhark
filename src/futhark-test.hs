@@ -273,7 +273,7 @@ getValues dir (InFile file) = do
 
 getExpectedResult :: MonadIO m =>
                      FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
-getExpectedResult dir (Succeeds vals)      = Succeeds <$> getValues dir vals
+getExpectedResult dir (Succeeds vals)      = liftM Succeeds $ getValues dir vals
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: FilePath -> TestRun -> TestM ()
