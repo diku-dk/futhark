@@ -4,10 +4,14 @@ module Futhark.Representation.AST.Syntax.CoreTests
        ( tests )
        where
 
+import Control.Applicative
+
 import Test.HUnit hiding (Test)
 import Test.Framework
 import Test.Framework.Providers.HUnit
 import Test.QuickCheck
+
+import Prelude
 
 import Language.Futhark.CoreTests ()
 import Futhark.Representation.AST.Syntax.Core
