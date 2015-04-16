@@ -44,7 +44,6 @@ module Futhark.Representation.AST.Traversals
   , identityWalker
   , walkExpM
   , walkExp
-  , mapOnExtType
   -- * Simple wrappers
   , foldlPattern
   )

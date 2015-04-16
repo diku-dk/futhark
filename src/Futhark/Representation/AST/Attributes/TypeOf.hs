@@ -1,4 +1,17 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
+-- | This module provides facilities for obtaining the types of
+-- various Futhark constructs.  Typically, you will need to execute
+-- these in a context where type information is available as a
+-- 'TypeEnv'; usually by using a monad that is an instance of
+-- 'HasTypeEnv'.  The information is returned as a list of 'ExtType'
+-- values - one for each of the values the Futhark construct returns.
+-- Some constructs (such as subexpressions) can produce only a single
+-- value, and their typing functions hence do not return a list.
+--
+-- Some representations may have more specialised facilities enabling
+-- even more information - for example,
+-- "Futhark.Representation.ExplicitMemory" exposes functionality for
+-- also obtaining information about the storage location of results.
 module Futhark.Representation.AST.Attributes.TypeOf
        (
          expExtType
@@ -14,9 +27,12 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , loopExtType
        , applyExtType
        , substNamesInExtType
+
+       -- * Return type
        , module Futhark.Representation.AST.RetType
-       , typeEnvFromBindings
+       -- * Type environment
        , module Futhark.Representation.AST.Attributes.TypeEnv
+       , typeEnvFromBindings
        )
        where
 
@@ -37,6 +53,7 @@ import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.TypeEnv
 
+-- | The type of a subexpression.
 subExpType :: HasTypeEnv m => SubExp -> m Type
 subExpType (Constant val) = pure $ Basic $ basicValueType val
 subExpType (Var name)     = lookupType name
@@ -49,6 +66,7 @@ mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaReturnType f ]
   where outersize = arraysSize 0 arrts
 
+-- | The type of a primitive operation.
 primOpType :: HasTypeEnv m =>
               PrimOp lore -> m [Type]
 primOpType (SubExp se) =
@@ -101,6 +119,7 @@ primOpType (Partition _ n _ array) =
   result <$> lookupType array
   where result t = replicate n (Basic Int) ++ [t]
 
+-- | The type of a loop operation.
 loopOpExtType :: HasTypeEnv m =>
                  LoopOp lore -> m [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
@@ -135,10 +154,12 @@ loopOpExtType (Stream _ accs arrs lam) =
         result _ =
           rtp
 
+-- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
 segOpExtType (SegReduce _ fun _ descp) =
   staticShapes <$> mapType fun <$> pure <$> lookupType descp
 
+-- | The type of an expression.
 expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ retTypeValues rt
@@ -147,6 +168,7 @@ expExtType (LoopOp op)    = loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
 expExtType (SegOp op)    = segOpExtType op
 
+-- | The number of values returned by an expression.
 expExtTypeSize :: IsRetType (RetType lore) => Exp lore -> Int
 expExtTypeSize = length . feelBad . expExtType
 
@@ -164,23 +186,24 @@ instance HasTypeEnv FeelBad where
   lookupType = const $ pure $ Basic Int
   askTypeEnv = pure mempty
 
-bodyExtType' :: [Binding lore] -> [Type] -> [ExtType]
-bodyExtType' bnds sets =
-  existentialiseExtTypes bound $ staticShapes sets
-  where boundInLet (Let pat _ _) = patternNames pat
-        bound = HS.fromList $ concatMap boundInLet bnds
-
+-- | The type of a body.
 bodyExtType :: (HasTypeEnv m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
-  bodyExtType' bnds <$>
+  existentialiseExtTypes bound <$> staticShapes <$>
   extendedTypeEnv (mapM subExpType (resultSubExps res)) bndtypes
   where bndtypes = typeEnvFromBindings bnds
+        boundInLet (Let pat _ _) = patternNames pat
+        bound = HS.fromList $ concatMap boundInLet bnds
 
+-- | Given an the return type of a function and the values returned by
+-- that function, return the size context.
 valueShapeContext :: [ExtType] -> [Value] -> [Value]
 valueShapeContext rettype values =
   map (BasicVal . value) $ extractShapeContext rettype $ map valueShape values
 
+-- | Given the return type of a function and the subexpressions
+-- returned by that function, return the size context.
 subExpShapeContext :: HasTypeEnv m =>
                       [ExtType] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
@@ -201,12 +224,18 @@ loopShapeContext res merge = resShapes
         mergenames = map identName merge
         res' = mapMaybe (\name -> find ((==name) . identName) merge) res
 
+-- | Given the result list and the merge parameters of a Futhark
+-- @loop@, produce the return type.
 loopExtType :: [VName] -> [Ident] -> [ExtType]
 loopExtType res merge =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType res'
   where inaccessible = HS.fromList $ map identName merge
         res' = mapMaybe (\name -> find ((==name) . identName) merge) res
 
+-- | Produce the return type resulting from providing the given
+-- subexpressions (with associated type) as arguments to a function of
+-- the given return type and parameters.  Returns 'Nothing' if the
+-- application is invalid.
 applyExtType :: ExtRetType -> [Ident]
              -> [(SubExp,Type)]
              -> Maybe ExtRetType
