@@ -6,7 +6,6 @@ module Futhark.Analysis.AlgSimplify
   , RangesRep
   , linFormScalE
   , pickSymToElim
---  , canSimplify
   )
   where
 
@@ -24,8 +23,6 @@ import Prelude
 import Futhark.Representation.AST
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
-
---import Debug.Trace
 
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
@@ -58,7 +55,6 @@ markInSolve env =
 
 markGaussLTH0 :: AlgSimplifyM a -> AlgSimplifyM a
 markGaussLTH0 = local markInSolve
---  where namesOfArrays = map identName . filter (not . basicType . identType)
 
 -----------------------------------------------------------
 -- A Scalar Expression, i.e., ScalExp, is simplified to: --
