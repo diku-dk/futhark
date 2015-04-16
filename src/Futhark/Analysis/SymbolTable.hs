@@ -319,7 +319,7 @@ defBndEntry vtable patElem range bnd =
     , letBoundLore = patElemLore patElem
     , letBoundBinding = bnd
     , letBoundScalExp =
-      (`runReader` types) <$> toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
+      runReader (toScalExp' (`lookupScalExp` vtable) (bindingExp bnd)) types
     , letBoundBindingDepth = 0
     , letBoundBindage = patElemBindage patElem
     , letBoundType = patElemType patElem
@@ -460,11 +460,11 @@ insertFreeVar name t = insertEntry name entry
 
 updateBounds :: Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
-  case toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond of
+  case runReader (toScalExp' (`lookupScalExp` vtable) $ PrimOp $ SubExp cond) types of
     Nothing    -> vtable
     Just cond' ->
-      let cond'' | isTrue    = runReader cond' types
-                 | otherwise = SNot $ runReader cond' types
+      let cond'' | isTrue    = cond'
+                 | otherwise = SNot cond'
       in updateBounds' cond'' vtable
   where types = typeEnv vtable
 
