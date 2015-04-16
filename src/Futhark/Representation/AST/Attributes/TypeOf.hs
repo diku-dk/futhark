@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module provides facilities for obtaining the types of
 -- various Futhark constructs.  Typically, you will need to execute
 -- these in a context where type information is available as a
