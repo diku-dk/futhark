@@ -148,8 +148,8 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnd
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
         (Nothing, Just (Right se@(SE.RelExp SE.LTH0 ine)))
-          | Int <- runReader (SE.scalExpType ine) types ->
-          case AS.mkSuffConds se ranges types of
+          | Int <- SE.scalExpType ine ->
+          case AS.mkSuffConds se ranges of
             Left err  -> error $ show err -- Why can this even fail?
             Right ses -> HM.insert name (SufficientCond ses) sctable
         (Just eSCTable, _) -> sctable <> eSCTable
@@ -158,7 +158,7 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnd
   where name = patElemName patElem
         ranges = rangesRep vtable
         types = ST.typeEnv vtable
-        simplify se = AS.simplify se ranges undefined
+        simplify se = AS.simplify se ranges
 analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
   analyseBody (ST.insertBinding bnd vtable) sctable $ Body bodylore bnds res
 
@@ -366,15 +366,15 @@ makeSufficientBinding bnd = do
 makeSufficientBinding' :: MonadFreshNames m => Context m -> S.Binding Invariance -> VariantM m ()
 makeSufficientBinding' context@(_,vtable) (Let pat _ e)
   | Just (Right se@(SE.RelExp SE.LTH0 ine)) <-
-      simplify <$> SE.toScalExp (`suffScalExp` vtable) e,
-    Int <- runReader (SE.scalExpType ine) types,
-    Right suff <- AS.mkSuffConds se ranges types,
+      simplify <$> runReader (SE.toScalExp' (`suffScalExp` vtable) e) types,
+    Int <- SE.scalExpType ine,
+    Right suff <- AS.mkSuffConds se ranges,
     x:xs <- filter (scalExpUsesNoForbidden context) $ map mkConj suff = do
   suffe <- SE.fromScalExp' $ foldl SE.SLogOr x xs
   letBind_ pat suffe
   where ranges = rangesRep vtable
         types = ST.typeEnv vtable
-        simplify se = AS.simplify se ranges types
+        simplify se = AS.simplify se ranges
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
 makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t))) = do

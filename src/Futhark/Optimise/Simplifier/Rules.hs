@@ -726,20 +726,20 @@ hoistBranchInvariant _ _ = cannotSimplify
 
 simplifyScalExp :: MonadBinder m => TopDownRule m
 simplifyScalExp vtable (Let pat _ e)
-  | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e =
+  | Just forig <- SE.toScalExp (`ST.lookupScalExp` vtable) e = do
+    orig <- forig
     case orig of
       -- If the sufficient condition is 'True', then it statically succeeds.
       SE.RelExp SE.LTH0 _
-        | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds orig ranges types ->
+        | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds orig ranges ->
           letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
       _
-        | Right new <- AS.simplify orig ranges types,
+        | Right new <- AS.simplify orig ranges,
           SE.Val val <- new,
           orig /= new ->
              letBind_ pat $ PrimOp $ SubExp $ Constant val
       _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
-        types = ST.typeEnv vtable
         mkDisj []     = SE.Val $ LogVal False
         mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
         mkConj []     = SE.Val $ LogVal True

@@ -134,18 +134,21 @@ subExpKnownRange :: SubExp -> (KnownBound, KnownBound)
 subExpKnownRange (Var v) =
   (VarBound v,
    VarBound v)
-subExpKnownRange se =
-  (ScalarBound $ subExpToScalExp se,
-   ScalarBound $ subExpToScalExp se)
+subExpKnownRange (Constant val) =
+  (ScalarBound $ Val val,
+   ScalarBound $ Val val)
 
 primOpRanges :: PrimOp lore -> [Range]
 primOpRanges (SubExp se) =
   [subExpRange se]
 primOpRanges (Iota n) =
   [(Just $ ScalarBound zero,
-    Just $ ScalarBound $ subExpToScalExp n `SMinus` one)]
+    Just $ ScalarBound $ n' `SMinus` one)]
   where zero = Val $ IntVal 0
         one = Val $ IntVal 1
+        n' = case n of
+          Var v        -> Id v Int
+          Constant val -> Val val
 primOpRanges (Replicate _ v) =
   [subExpRange v]
 primOpRanges (Rearrange _ _ v) =

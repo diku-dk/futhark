@@ -609,7 +609,7 @@ simplifyLoopOp (Stream cs acc arr lam) = do
   outerdim <- arraysSize 0 <$> mapM lookupType arr
   let (chunk:i:_) = extLambdaParams lam
       se_outer = case outerdim of
-                    Var idd    -> fromMaybe (SExp.Id idd) (ST.lookupScalExp idd vtab)
+                    Var idd    -> fromMaybe (SExp.Id idd Int) (ST.lookupScalExp idd vtab)
                     Constant c -> SExp.Val c
       (se_0, se_1) = (SExp.Val $ IntVal 0, SExp.Val $ IntVal 1)
       se_outerm1 = SExp.SMinus se_outer se_1

@@ -648,7 +648,7 @@ expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
 expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, u, mem, ixfun) <- arrayVarReturns look v
   let newShapes = map (shape `setOuterDim`) sizeexps
-      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n))
+      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n Int))
                 (SE.Val $ IntVal 0) sizeexps
       slcOffsets = map (\offset -> sliceOffset shape [offset]) offsets
   return $ zipWith (\newShape slcOffset
@@ -665,7 +665,7 @@ expReturns look (AST.PrimOp (Index _ v is)) = do
       return [ReturnsArray et (ExtShape $ map Free dims) u $
              Just $ ReturnsInBlock mem $
              IxFun.applyInd ixfun
-             (map SE.subExpToScalExp is)]
+             (map (`SE.subExpToScalExp` Int) is)]
 
 expReturns _ (AST.PrimOp (Alloc size)) =
   return [ReturnsMemory size]
@@ -821,4 +821,4 @@ sliceOffset shape is =
   SE.ssum $ zipWith SE.STimes is sliceSizes
   where sliceSizes =
           map SE.sproduct $
-          drop 1 $ tails $ map SE.subExpToScalExp $ shapeDims shape
+          drop 1 $ tails $ map (`SE.subExpToScalExp` Int) $ shapeDims shape

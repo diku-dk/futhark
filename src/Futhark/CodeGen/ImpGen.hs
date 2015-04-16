@@ -342,7 +342,7 @@ defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
   t <- lookupType src
   when (length idxs == arrayRank t ) $ do
     (srcmem, srcoffset) <-
-      fullyIndexArray src $ map SE.subExpToScalExp idxs
+      fullyIndexArray src $ map (`SE.subExpToScalExp` Int) idxs
     writeExp target $ index srcmem srcoffset $ elemType t
 
 defCompilePrimOp
@@ -397,7 +397,7 @@ defCompilePrimOp
     emit $ Imp.DeclareScalar offs_glb Int
     emit $ Imp.SetScalar offs_glb $ Imp.Constant $ IntVal 0
     let destloc = MemLocation destmem destshape
-                  (IxFun.offset destixfun $ SE.Id offs_glb)
+                  (IxFun.offset destixfun $ SE.Id offs_glb Int)
 
     forM_ (x:ys) $ \y -> do
         yentry <- lookupArray y
@@ -734,7 +734,7 @@ compileSubExp (Var v) =
   Imp.ScalarVar v
 
 varIndex :: VName -> SE.ScalExp
-varIndex = SE.Id
+varIndex name = SE.Id name Int
 
 constIndex :: Int -> SE.ScalExp
 constIndex = SE.Val . IntVal
@@ -785,11 +785,11 @@ destinationFromPattern (Pattern patElems) ts =
                       (_, elemOffset) <-
                         fullyIndexArray'
                         (MemLocation mem shape ixfun)
-                        (map SE.subExpToScalExp is)
+                        (map (`SE.subExpToScalExp` Int) is)
                       return $ ArrayElemDestination mem bt elemOffset
                     Array _ shape' _ ->
                       let memdest = sliceArray (MemLocation mem shape ixfun) $
-                                    map SE.subExpToScalExp is
+                                    map (`SE.subExpToScalExp` Int) is
                       in return $
                          ArrayDestination (CopyIntoMemory memdest) $
                          replicate (shapeRank shape') Nothing
@@ -944,7 +944,7 @@ copyElem bt
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =
   Just $ Imp.Constant x
-scalExpToImpExp (SE.Id v) =
+scalExpToImpExp (SE.Id v _) =
   Just $ Imp.ScalarVar v
 scalExpToImpExp (SE.SPlus e1 e2) =
   Imp.BinOp Plus <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
@@ -957,9 +957,8 @@ scalExpToImpExp (SE.SDivide e1 e2) =
 scalExpToImpExp _ =
   Nothing
 
-simplifyScalExp :: (HasTypeEnv m, Monad m) => ScalExp -> m ScalExp
-simplifyScalExp se = do
-  types <- askTypeEnv
-  case AlgSimplify.simplify se mempty types of
+simplifyScalExp :: Monad m => ScalExp -> m ScalExp
+simplifyScalExp se =
+  case AlgSimplify.simplify se mempty of
     Left err  -> fail $ show err
     Right se' -> pure se'

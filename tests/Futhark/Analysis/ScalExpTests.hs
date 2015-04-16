@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Futhark.Analysis.ScalExpTests
   ( tests
@@ -97,10 +97,14 @@ prim = parens expr <|>
        constant <|>
        maxapp <|>
        minapp <|>
-       (Id <$> identName <$> identifier)
+       (scalExpId <$> identifier)
   where maxapp = reserved "max" >> MaxMin False <$> parens (expr `sepBy` comma)
         minapp = reserved "min" >> MaxMin True <$> parens (expr `sepBy` comma)
         comma = Token.comma lexer
+        scalExpId (Ident name (Basic t)) = Id name t
+        scalExpId (Ident name t) = error $
+                                   pretty name ++ " is of type " ++ pretty t ++
+                                   " but supposed to be a ScalExp."
 
 operators :: [[Operator String ParserState Identity ScalExp]]
 operators = [ [Prefix (reservedOp "-"   >> return SNeg)          ]

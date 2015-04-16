@@ -150,7 +150,7 @@ allocForArray t = do
     computeSize "bytes" $
     SE.sproduct $
     (SE.Val $ IntVal $ basicSize $ elemType t) :
-    map SE.subExpToScalExp (arrayDims t)
+    map (`SE.subExpToScalExp` Int) (arrayDims t)
   m <- allocateMemory "mem" size
   return (size, m)
 
