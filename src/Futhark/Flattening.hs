@@ -574,6 +574,42 @@ pullOutOfMap mapInfo (argsneeded, _)
       return (unflattenBnd, flatResArrPat)
     unflattenRes pe = flatError $ Error $ "unflattenRes applied to " ++ pretty pe
 
+pullOutOfMap mapInfo _
+                     topBnd@(Let (Pattern pats) letlore
+                                 (LoopOp (Reduce certs lambda args))) = do
+  ok <- isSafeToMapBody $ lambdaBody lambda
+  if not ok
+  then flatError . Error $ "map of reduce with \"advanced\" operator"
+                           ++ pretty topBnd
+  else do
+    -- Create new PatElems and Idents to hold result (now arrays)
+
+    pats' <- forM pats $ \(PatElem i BindVar ()) -> do
+      let vn = identName i
+      arr <- wrapInArrIdent (mapSize mapInfo) i
+      addMapLetArray vn arr
+      return $ PatElem arr BindVar ()
+
+    -- FIXME: This does not handle completely loop invariant things
+    (flatBnds, flatargs) <- liftM unzip $
+      forM args $ \(ne,i) -> do
+        (bnd, flatArr) <- flattenArg mapInfo $ Right i
+        return (bnd, (ne, identName flatArr))
+
+    seginfo <- case args of
+                 (_,argarr):_ ->
+                   getSegDescriptors1Ident =<< findTarget1 mapInfo argarr
+                 [] -> flatError $ Error "Reduce on empty array, not possible"
+    segdescp <- case seginfo of
+                  [(descp,_)] -> return $ identName descp
+                  _ -> flatError $ Error $ "pullOutOfMap Reduce: argument array was not two dimensional"
+                                         ++ pretty topBnd
+
+    let redBnd' = Let (Pattern pats') letlore
+                      (SegOp (SegReduce certs lambda flatargs segdescp))
+
+    return $ flatBnds ++ [redBnd']
+
 pullOutOfMap mapinfo _ (Let (Pattern [PatElem ident1 BindVar _]) _
                       (PrimOp (SubExp (Var name)))) = do
   addMapLetArray (identName ident1) =<< findTarget1 mapinfo name
