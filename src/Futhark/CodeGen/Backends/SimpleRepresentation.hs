@@ -2,7 +2,6 @@
 -- | Simple C runtime representation.
 module Futhark.CodeGen.Backends.SimpleRepresentation
   ( sameRepresentation
-  , sameRepresentation'
   , tupleField
   , tupleFieldExp
   , funName

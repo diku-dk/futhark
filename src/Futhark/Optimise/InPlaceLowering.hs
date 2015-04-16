@@ -73,6 +73,7 @@ import Futhark.Binder
 
 import Prelude hiding (any, mapM_, elem, all)
 
+-- | Apply the in-place lowering optimisation to the given program.
 optimiseProgram :: Basic.Prog -> Basic.Prog
 optimiseProgram prog =
   runForwardingM src $

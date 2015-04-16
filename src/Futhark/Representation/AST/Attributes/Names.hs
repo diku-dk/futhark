@@ -1,11 +1,18 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+-- | Facilities for determining which names are used in some syntactic
+-- construct.  The most important interface is the 'FreeIn' class and
+-- its instances, but for reasons related to the Haskell type system,
+-- some constructs have specialised functions.
 module Futhark.Representation.AST.Attributes.Names
        (
+         -- * Class
            FreeIn (..)
+         -- * Specialised Functions
          , freeInBody
          , freeInExp
          , freeInLambda
          , freeInExtLambda
+         -- * Bound Names
          , progNames
        )
        where
