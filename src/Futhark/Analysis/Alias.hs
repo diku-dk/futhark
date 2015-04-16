@@ -1,3 +1,9 @@
+-- | Alias analysis of a full Futhark program.  Takes as input a
+-- program with an arbitrary lore and produces one with aliases.  This
+-- module does not implement the aliasing logic itself, and derives
+-- its information from definitions in
+-- "Futhark.Representation.AST.Attributes.Aliases" and
+-- "Futhark.Representation.Aliases".
 module Futhark.Analysis.Alias
        ( aliasAnalysis
        )
@@ -7,6 +13,7 @@ import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Syntax as In
 import qualified Futhark.Representation.Aliases as Out
 
+-- | Perform alias analysis on a Futhark program.
 aliasAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
