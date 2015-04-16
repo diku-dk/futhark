@@ -74,13 +74,17 @@ data RunMode
 
 data TestRun = TestRun
                { runMode :: RunMode
-               , runInput :: [Value]
-               , runExpectedResult :: ExpectedResult
+               , runInput :: Values
+               , runExpectedResult :: ExpectedResult Values
                }
              deriving (Show)
 
-data ExpectedResult
-  = Succeeds [Value]
+data Values = Values [Value]
+            | InFile FilePath
+            deriving (Show)
+
+data ExpectedResult values
+  = Succeeds values
   | RunTimeFailure ExpectedError
   deriving (Show)
 
@@ -110,7 +114,7 @@ parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
 parseRunCases :: Parser [TestRun]
 parseRunCases = many $ TestRun <$> parseRunMode <*> parseInput <*> parseExpectedResult
 
-parseExpectedResult :: Parser ExpectedResult
+parseExpectedResult :: Parser (ExpectedResult Values)
 parseExpectedResult = (Succeeds <$> (lexstr "output" *> parseValues)) <|>
                  (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError))
 
@@ -123,15 +127,15 @@ parseExpectedError = lexeme $ do
          -- newlines like ordinary characters, which is what we want.
     else ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
 
-parseInput :: Parser [Value]
+parseInput :: Parser Values
 parseInput = lexstr "input" *> parseValues
 
-parseValues :: Parser [Value]
-parseValues = do
-  s <- parseBlock
-  case parseValuesFromString $ T.unpack s of
-    Left err -> fail $ show err
-    Right vs -> return vs
+parseValues :: Parser Values
+parseValues = do s <- parseBlock
+                 case parseValuesFromString $ T.unpack s of
+                   Left err -> fail $ show err
+                   Right vs -> return $ Values vs
+              <|> lexstr "@" *> lexeme (InFile <$> T.unpack <$> restOfLine)
 
 parseValuesFromString :: String -> Either F.ParseError [Value]
 parseValuesFromString s =
@@ -258,22 +262,39 @@ runResult ExitSuccess stdout_s _ =
 runResult (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
+getValues :: MonadIO m => FilePath -> Values -> m [Value]
+getValues _ (Values vs) =
+  return vs
+getValues dir (InFile file) = do
+  s <- liftIO $ readFile $ dir </> file
+  case parseValuesFromString s of
+    Left e   -> fail $ show e
+    Right vs -> return vs
+
+getExpectedResult :: MonadIO m =>
+                     FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
+getExpectedResult dir (Succeeds vals)      = Succeeds <$> getValues dir vals
+getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
+
 interpretTestProgram :: FilePath -> TestRun -> TestM ()
 interpretTestProgram program (TestRun _ inputValues expectedResult) =
   withExceptT interpreting $ do
-    let input = intercalate "\n" $ map pretty inputValues
+    input <- intercalate "\n" <$> map pretty <$> getValues dir inputValues
+    expectedResult' <- getExpectedResult dir expectedResult
     (code, output, err) <- io $ readProcessWithExitCode "futharki" [program] input
     case code of
       ExitFailure 127 ->
         throwError futharkiNotFound
       _               ->
-        compareResult program expectedResult =<< runResult code output err
+        compareResult program expectedResult' =<< runResult code output err
   where interpreting = ("interpreting:\n"++)
+        dir = takeDirectory program
 
 compileTestProgram :: FilePath -> TestRun -> TestM ()
 compileTestProgram program (TestRun _ inputValues expectedResult) =
   withExceptT compiling $ do
-    let input = intercalate "\n" $ map pretty inputValues
+    input <- intercalate "\n" <$> map pretty <$> getValues dir inputValues
+    expectedResult' <- getExpectedResult dir expectedResult
     (futcode, _, futerr) <-
       io $ readProcessWithExitCode "futhark-c"
       [program, "-o", binOutputf] ""
@@ -283,12 +304,13 @@ compileTestProgram program (TestRun _ inputValues expectedResult) =
       ExitSuccess     -> return ()
     (progCode, output, progerr) <-
       io $ readProcessWithExitCode binOutputf [] input
-    compareResult program expectedResult =<< runResult progCode output progerr
+    compareResult program expectedResult' =<< runResult progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
+        dir = takeDirectory program
 
         compiling = ("compiling:\n"++)
 
-compareResult :: FilePath -> ExpectedResult -> RunResult -> TestM ()
+compareResult :: FilePath -> ExpectedResult [Value] -> RunResult -> TestM ()
 compareResult program (Succeeds expectedResult) (SuccessResult actualResult) =
   unless (compareValues actualResult expectedResult) $ do
     actualf <-
@@ -430,13 +452,14 @@ runProgram file = do
   case testAction spec of
     RunCases [run] -> do
       (code, output, err) <-
-        readProcessWithExitCode "futharki" [file] $
-        unlines $ map pretty $ runInput run
+        readProcessWithExitCode "futharki" [file] =<<
+        unlines <$> map pretty <$> getValues dir (runInput run)
       hPutStr stderr err
       putStr output
       exitWith code
     _ ->
       error "No input data"
+  where dir = takeDirectory file
 
 data TestMode = OnlyTypeCheck
               | OnlyCompile
