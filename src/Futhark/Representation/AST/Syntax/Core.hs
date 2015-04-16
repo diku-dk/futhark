@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Representation.AST.Syntax.Core
        (
          module Language.Futhark.Core
@@ -32,10 +33,12 @@ module Futhark.Representation.AST.Syntax.Core
          , Names
          ) where
 
+import Control.Monad.State
 import Data.Array
 import Data.Hashable
 import Data.Monoid
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -89,14 +92,19 @@ instance ArrayShape ExtShape where
   stripDims n (ExtShape dims) = ExtShape $ drop n dims
   subShapeOf (ExtShape ds1) (ExtShape ds2) =
     -- Must agree on Free dimensions, and ds1 may not be existential
-    -- where ds2 is Free.
-    --
-    -- FIXME: also check that existentials are
-    -- congruent.
-    and $ zipWith subDimOf ds1 ds2
-    where subDimOf (Free se1) (Free se2) = se1 == se2
-          subDimOf (Ext _)    (Free _)   = False
-          subDimOf _          _          = True
+    -- where ds2 is Free.  Existentials must also be congruent.
+    length ds1 == length ds2 &&
+    evalState (and <$> zipWithM subDimOf ds1 ds2) HM.empty
+    where subDimOf (Free se1) (Free se2) = return $ se1 == se2
+          subDimOf (Ext _)    (Free _)   = return False
+          subDimOf (Free _)   (Ext _)    = return True
+          subDimOf (Ext x)    (Ext y)    = do
+            extmap <- get
+            case HM.lookup y extmap of
+              Just ywas | ywas == x -> return True
+                        | otherwise -> return False
+              Nothing -> do put $ HM.insert y x extmap
+                            return True
 
 instance Monoid Rank where
   mempty = Rank 0
