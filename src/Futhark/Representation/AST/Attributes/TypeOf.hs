@@ -26,7 +26,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , loopShapeContext
        , loopExtType
        , applyExtType
-       , substNamesInExtType
 
        -- * Return type
        , module Futhark.Representation.AST.RetType
