@@ -1,4 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | The most primitive ("core") aspects of the AST.  Split out of
+-- "Futhark.Representation.AST.Syntax" in order for
+-- "Futhark.Representation.AST.Lore" to use these definitions.  This
+-- module is re-exported from "Futhark.Representation.AST.Syntax" and
+-- there should be no reason to include it explicitly.
 module Futhark.Representation.AST.Syntax.Core
        (
          module Language.Futhark.Core
@@ -191,8 +196,17 @@ data FParamT attr = FParam
                     }
                     deriving (Ord, Show, Eq)
 
-data Bindage = BindVar
+-- | How a name in a let-binding is bound - either as a plain
+-- variable, or in the form of an in-place update.
+data Bindage = BindVar -- ^ Bind as normal.
              | BindInPlace Certificates VName [SubExp]
+               -- ^ Perform an in-place update, in which the value
+               -- being bound is inserted at the given index in the
+               -- array referenced by the 'VName'.  Note that the
+               -- result of the binding is the entire array, not just
+               -- the value that has been inserted..  The
+               -- 'Certificates' contain bounds checking certificates
+               -- (if necessary).
                   deriving (Ord, Show, Eq)
 
 data PatElemT attr = PatElem { patElemIdent :: Ident
