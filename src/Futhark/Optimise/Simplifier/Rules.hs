@@ -725,26 +725,24 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
 hoistBranchInvariant _ _ = cannotSimplify
 
 simplifyScalExp :: MonadBinder m => TopDownRule m
-simplifyScalExp vtable (Let pat _ e)
-  | Just forig <- SE.toScalExp (`ST.lookupScalExp` vtable) e = do
-    orig <- forig
-    case orig of
-      -- If the sufficient condition is 'True', then it statically succeeds.
-      SE.RelExp SE.LTH0 _
-        | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds orig ranges ->
-          letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
-      _
-        | Right new <- AS.simplify orig ranges,
-          SE.Val val <- new,
-          orig /= new ->
-             letBind_ pat $ PrimOp $ SubExp $ Constant val
-      _ -> cannotSimplify
+simplifyScalExp vtable (Let pat _ e) = do
+  res <- SE.toScalExp (`ST.lookupScalExp` vtable) e
+  case res of
+    -- If the sufficient condition is 'True', then it statically succeeds.
+    Just se@(SE.RelExp SE.LTH0 _)
+      | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
+        letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
+    Just se
+      | Right new <- AS.simplify se ranges,
+        SE.Val val <- new,
+        se /= new ->
+           letBind_ pat $ PrimOp $ SubExp $ Constant val
+    _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
         mkDisj []     = SE.Val $ LogVal False
         mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
-simplifyScalExp _ _ = cannotSimplify
 
 simplifyIdentityReshape :: LetTopDownRule lore u
 simplifyIdentityReshape _ typeOf (Reshape _ newshape v)

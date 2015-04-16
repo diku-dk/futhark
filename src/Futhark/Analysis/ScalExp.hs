@@ -5,7 +5,6 @@ module Futhark.Analysis.ScalExp
   , scalExpType
   , subExpToScalExp
   , toScalExp
-  , toScalExp'
   , expandScalExp
   , LookupVar
   , fromScalExp
@@ -15,11 +14,14 @@ module Futhark.Analysis.ScalExp
   )
 where
 
+import Control.Applicative
 import Control.Monad
 import Data.List
 import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.Monoid
+
+import Prelude
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 
@@ -140,27 +142,35 @@ subExpToScalExp (Var v) t        = Id v t
 subExpToScalExp (Constant val) _ = Val val
 
 toScalExp :: (HasTypeEnv f, Monad f) =>
-             LookupVar -> Exp lore -> Maybe (f ScalExp)
-toScalExp look (PrimOp (SubExp se))    =
-  Just $ subExpToScalExp' look se
+             LookupVar -> Exp lore -> f (Maybe ScalExp)
+toScalExp look (PrimOp (SubExp (Var v)))
+  | Just se <- look v =
+    return $ Just se
+  | otherwise = do
+    t <- lookupType v
+    case t of
+      Basic bt -> return $ Just $ Id v bt
+      _        -> return Nothing
+toScalExp _ (PrimOp (SubExp (Constant val))) =
+  return $ Just $ Val val
 toScalExp look (PrimOp (BinOp Less x y _)) =
-  Just $ RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
+  Just <$> RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (BinOp Leq x y _)) =
-  Just $ RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (PrimOp (BinOp Equal x y Int)) = Just $ do
+  Just <$> RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
+toScalExp look (PrimOp (BinOp Equal x y Int)) = do
   x' <- subExpToScalExp' look x
   y' <- subExpToScalExp' look y
-  return $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
+  return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
 toScalExp look (PrimOp (Negate e)) =
-  Just $ SNeg <$> subExpToScalExp' look e
+  Just <$> SNeg <$> subExpToScalExp' look e
 toScalExp look (PrimOp (Not e)) =
-  Just $ SNot <$> subExpToScalExp' look e
+  Just <$> SNot <$> subExpToScalExp' look e
 toScalExp look (PrimOp (BinOp bop x y t))
   | t `elem` [Int, Bool],
     Just f <- binOpScalExp bop = -- XXX: Only integers and booleans, OK?
-  Just $ f <$> subExpToScalExp' look x <*> subExpToScalExp' look y
+  Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 
-toScalExp _ _ = Nothing
+toScalExp _ _ = return Nothing
 
 subExpToScalExp' :: HasTypeEnv f => LookupVar -> SubExp -> f ScalExp
 subExpToScalExp' look (Var v)
@@ -175,14 +185,6 @@ subExpToScalExp' look (Var v)
             " of type " ++ pretty t
 subExpToScalExp' _ (Constant val) =
   pure $ Val val
-
--- | As 'toScalExp', but flips the functor and the 'Maybe'
-toScalExp' :: (HasTypeEnv f, Monad f) =>
-              LookupVar -> Exp lore -> f (Maybe ScalExp)
-toScalExp' look e =
-  case toScalExp look e of
-    Nothing -> pure Nothing
-    Just fe -> Just <$> fe
 
 -- | If you have a scalar expression that has been created with
 -- incomplete symbol table information, you can use this function to

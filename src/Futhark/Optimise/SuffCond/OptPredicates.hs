@@ -366,7 +366,7 @@ makeSufficientBinding bnd = do
 makeSufficientBinding' :: MonadFreshNames m => Context m -> S.Binding Invariance -> VariantM m ()
 makeSufficientBinding' context@(_,vtable) (Let pat _ e)
   | Just (Right se@(SE.RelExp SE.LTH0 ine)) <-
-      simplify <$> runReader (SE.toScalExp' (`suffScalExp` vtable) e) types,
+      simplify <$> runReader (SE.toScalExp (`suffScalExp` vtable) e) types,
     Int <- SE.scalExpType ine,
     Right suff <- AS.mkSuffConds se ranges,
     x:xs <- filter (scalExpUsesNoForbidden context) $ map mkConj suff = do

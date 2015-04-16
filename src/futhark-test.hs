@@ -132,14 +132,14 @@ parseInput = lexstr "input" *> parseValues
 
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
-                 case parseValuesFromString $ T.unpack s of
+                 case parseValuesFromString "input" $ T.unpack s of
                    Left err -> fail $ show err
                    Right vs -> return $ Values vs
               <|> lexstr "@" *> lexeme (InFile <$> T.unpack <$> restOfLine)
 
-parseValuesFromString :: String -> Either F.ParseError [Value]
-parseValuesFromString s =
-  liftM concat $ mapM internalise =<< F.parseValues "input" s
+parseValuesFromString :: SourceName -> String -> Either F.ParseError [Value]
+parseValuesFromString srcname s =
+  liftM concat $ mapM internalise =<< F.parseValues srcname s
   where internalise v =
           maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
           internaliseValue v
@@ -259,7 +259,7 @@ executeTestProgram program run = do
 
 runResult :: ExitCode -> String -> String -> TestM RunResult
 runResult ExitSuccess stdout_s _ =
-  case parseValuesFromString stdout_s of
+  case parseValuesFromString "stdout" stdout_s of
     Left e   -> throwError $ show e
     Right vs -> return $ SuccessResult vs
 runResult (ExitFailure code) _ stderr_s =
@@ -269,10 +269,11 @@ getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
 getValues dir (InFile file) = do
-  s <- liftIO $ readFile $ dir </> file
-  case parseValuesFromString s of
+  s <- liftIO $ readFile file'
+  case parseValuesFromString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
+  where file' = dir </> file
 
 getExpectedResult :: MonadIO m =>
                      FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
