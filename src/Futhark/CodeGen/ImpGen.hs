@@ -961,4 +961,4 @@ simplifyScalExp :: Monad m => ScalExp -> m ScalExp
 simplifyScalExp se =
   case AlgSimplify.simplify se mempty of
     Left err  -> fail $ show err
-    Right se' -> pure se'
+    Right se' -> return se'
