@@ -1,4 +1,8 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts #-}
+-- | This representation requires that every array is given
+-- information about which memory block is it based in, and how array
+-- elements map to memory block offsets.  SOACs are not supported, so
+-- you will have to convert them to explicit loops first.
 module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
@@ -137,8 +141,18 @@ instance Ranged ExplicitMemory where
 
 instance Simplifiable ExplicitMemory where
 
+-- | A summary of the memory information for every let-bound identifier
+-- and function parameter.
 data MemSummary = Scalar
+                  -- ^ The corresponding identifier is a
+                  -- scalar.  It must not be of array type.
                 | MemSummary VName IxFun.IxFun
+                  -- ^ The array is stored in the named memory block,
+                  -- and with the given index function.  The index
+                  -- function maps indices in the array to /element/
+                  -- offset, /not/ byte offsets!  To translate to byte
+                  -- offsets, multiply the offset with the size of the
+                  -- array element type.
                 deriving (Eq, Show)
 
 instance Ord MemSummary where
@@ -168,8 +182,16 @@ instance PP.Pretty MemSummary where
   ppr (MemSummary mem ixfun) =
     PP.ppr mem <> PP.text "->" <> PP.ppr ixfun
 
+-- | A description of the memory properties of an array being returned
+-- by an operation.  Note that the 'Eq' and 'Ord' instances are
+-- useless (everything is equal).  This type is merely a building
+-- block for 'Returns'.
 data MemReturn = ReturnsInBlock VName IxFun.IxFun
+                 -- ^ The array is located in a memory block that is
+                 -- already in scope.
                | ReturnsNewBlock Int
+                 -- ^ The operation returns a new (existential) block,
+                 -- with an existential size.
                deriving (Show)
 
 instance Eq MemReturn where
@@ -190,9 +212,15 @@ instance Substitute MemReturn where
   substituteNames _ (ReturnsNewBlock i) =
     ReturnsNewBlock i
 
+-- | A description of a value being returned from a construct,
+-- parametrised across extra information stored for arrays.
 data Returns a = ReturnsArray BasicType ExtShape Uniqueness a
+                 -- ^ Returns an array of the given element type,
+                 -- (existential) shape, and uniqueness.
                | ReturnsScalar BasicType
+                 -- ^ Returns a scalar of the given type.
                | ReturnsMemory SubExp
+                 -- ^ Returns a memory block of the given size.
                deriving (Eq, Ord, Show)
 
 instance FreeIn MemReturn where
@@ -242,7 +270,22 @@ instance Rename a => Rename (Returns a) where
 instance PP.Pretty (Returns MemReturn) where
   ppr = PP.ppr . funReturnsToExpReturns
 
+-- | The memory return of an expression.  An array is annotated with
+-- @Maybe MemReturn@, which can be interpreted as the expression
+-- either dictating exactly where the array is located when it is
+-- returned (if 'Just'), or able to put it whereever the binding
+-- prefers (if 'Nothing').
+--
+-- This is necessary to capture the difference between an expression
+-- that is just an array-typed variable, in which the array being
+-- "returned" is located where it already is, and a @copy@ expression,
+-- whose entire purpose is to store an existing array in some
+-- arbitrary location.  This is a consequence of the design decision
+-- never to have implicit memory copies.
 type ExpReturns = Returns (Maybe MemReturn)
+
+-- | The memory return of a function, which must always indicate where
+-- returned arrays are located.
 type FunReturns = Returns MemReturn
 
 funReturnsToExpReturns :: FunReturns -> ExpReturns
@@ -253,6 +296,8 @@ funReturnsToExpReturns (ReturnsScalar bt) =
 funReturnsToExpReturns (ReturnsMemory size) =
   ReturnsMemory size
 
+-- | Similar to 'generaliseExtTypes', but also generalises the
+-- existentiality of memory returns.
 generaliseReturns :: [FunReturns] -> [FunReturns] -> [FunReturns]
 generaliseReturns r1s r2s =
   evalState (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
@@ -523,6 +568,8 @@ fparamAnnot = bindeeAnnot fparamName fparamLore
 patElemAnnot :: PatElem -> Maybe PP.Doc
 patElemAnnot = bindeeAnnot patElemName patElemLore
 
+-- | Convet a 'Returns' to an 'ExtType' by throwing away memory
+-- information.
 returnsToType :: Returns a -> ExtType
 returnsToType (ReturnsScalar bt) = Basic bt
 returnsToType (ReturnsMemory size) = Mem size
@@ -576,6 +623,8 @@ varReturns look v = do
     _ ->
       fail "Something went very wrong in varReturns."
 
+-- | The return information of an expression.  This can be seen as the
+-- "return type with memory annotations" of the expression.
 expReturns :: (Monad m, HasTypeEnv m) =>
               (VName -> m MemSummary) -> Exp -> m [ExpReturns]
 
@@ -666,6 +715,8 @@ expReturns look (If _ b1 b2 ts) = do
     map funReturnsToExpReturns $
     generaliseReturns b1t b2t
 
+-- | The return information of a body.  This can be seen as the
+-- "return type with memory annotations" of the body.
 bodyReturns :: Monad m =>
                (VName -> m MemSummary)
             -> [ExtType] -> Body
