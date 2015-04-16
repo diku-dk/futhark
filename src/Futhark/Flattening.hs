@@ -35,6 +35,8 @@ data FlatState = FlatState {
   -- so we would need to know that what the array for @y@ and @z@ was,
   -- creating the mapping [y -> ys, z -> zs]
 
+  , typetab :: HM.HashMap VName Type
+
   , flattenedDims :: M.Map (SubExp,SubExp) SubExp
 
   , segDescriptors :: M.Map [SubExp] [SegDescp]
@@ -64,7 +66,7 @@ instance MonadFreshNames FlatM where
   putNameSource newSrc = modify $ \s -> s { vnameSource = newSrc }
 
 instance HasTypeEnv FlatM where
-  askTypeEnv = error "Please give Futhark.Flattening a proper type environment."
+  askTypeEnv = gets typetab
 
 --------------------------------------------------------------------------------
 
@@ -106,6 +108,28 @@ addMapLetArray vn letArr = do
     Nothing -> do
       let letArrs' = M.insert vn letArr letArrs
       modify (\s -> s{mapLetArrays = letArrs'})
+
+----------------------------------------
+
+addType :: VName -> Type -> FlatM ()
+addType vn tp = do
+  tt <- gets typetab
+  case HM.lookup vn tt of
+    (Just _) -> flatError $ Error $ "addType: " ++
+                                    pretty vn ++
+                                    " already present in table"
+    Nothing -> do
+      let tt' = HM.insert vn tp tt
+      modify (\s -> s{typetab = tt'})
+
+addTypeIdent :: Ident -> FlatM ()
+addTypeIdent (Ident vn tp) = addType vn tp
+
+addTypePatElem :: PatElem -> FlatM ()
+addTypePatElem (PatElem i BindVar _) = addTypeIdent i
+addTypePatElem pat =
+  flatError . Error $ "addTypePatElem: cannot handle other than BindVar " ++
+                      pretty pat
 
 ----------------------------------------
 
@@ -181,6 +205,7 @@ createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
                    segsize <- createFlattenedDims n (dimouter, diminner)
                    let segname = baseString vn ++ "_seg" ++ show n
                    seg <- newIdent segname (Array Int (Shape [segsize]) Nonunique)
+                   addTypeIdent seg
                    return ((dimouter:dimrest, (seg, Regular)):res, segsize, n+1, dimrest)
                )
                ([],dim0,0,dim0:dims) dims
@@ -214,6 +239,7 @@ flattenProg p@(Prog funs) = do
                           , mapLetArrays = M.empty
                           , flattenedDims = M.empty
                           , segDescriptors = M.empty
+                          , typetab = HM.empty
                           }
     renameToOld (FunDec name retType params body) =
       FunDec name' retType params body
@@ -224,6 +250,7 @@ flattenProg p@(Prog funs) = do
 
 transformFun :: FunDec -> FlatM FunDec
 transformFun (FunDec name retType params body) = do
+  mapM_ (addTypeIdent . fparamIdent) params
   mapM_ createSegDescsForArray $
     filter (maybe False (>=2) . dimentionality . identType)
            (map fparamIdent params)
@@ -242,6 +269,11 @@ transformBody (Body () bindings (Result ses)) = do
 transformBinding :: Binding -> FlatM [Binding]
 transformBinding topBnd@(Let (Pattern pats) ()
                              (LoopOp (Map certs lambda arrs))) = do
+  -- Checking if a Variable use is safe requires knowledge of the type
+  -- Consider writing isSafeToMap??? differently. TODO
+  mapM_ addTypePatElem $ concatMap (patternElements . bindingPattern) lamBnds
+  mapM_ addTypeIdent $ lambdaParams lambda
+
   okLamBnds <- mapM isSafeToMapBinding lamBnds
   let grouped = foldr group [] $ zip okLamBnds lamBnds
 
@@ -299,6 +331,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
      let resBnds =
            zipWith (\pe se -> Let (Pattern [pe]) () (PrimOp $ SubExp se))
                    pats res'
+     mapM_ addTypePatElem pats
 
      return $ loopinv_repbnds ++
               concatMap (either id (: [])) grouped' ++ resBnds
@@ -349,7 +382,10 @@ transformBinding topBnd@(Let (Pattern pats) ()
       let theMapExp = LoopOp $ Map certs wrappedlambda argarrs
       return $ Let pat () theMapExp
 
-transformBinding bnd = return [bnd]
+transformBinding bnd@(Let (Pattern pats) () _) = do
+  -- FIXME: magically construct segment descriptors as needed
+  mapM_ addTypePatElem pats
+  return [bnd]
 
 --------------------------------------------------------------------------------
 
@@ -411,6 +447,7 @@ pullOutOfMap mapInfo _
       _ -> flatError $ Error "impossible, result of reshape not list"
 
   addMapLetArray (identName resIdent) newResIdent
+  addTypeIdent newResIdent
 
   let newReshape = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
                                     (mapSize mapInfo:dimses) $ identName target
@@ -549,6 +586,7 @@ pullOutOfMap mapInfo (argsneeded, _)
                    return $ Array bt (Shape $ out:sz:rest) uniq
 
       distIdent <- newIdent (baseString vn ++ "_dist") distTp
+      addTypeIdent distIdent
 
       let distExp = Apply (nameFromString "distribute")
                           [(Var vn, Observe), (sz, Observe)]
@@ -568,10 +606,12 @@ pullOutOfMap mapInfo (argsneeded, _)
       flatSize <- getFlattenedDims1 (mapSize mapInfo, outer)
       let flatTp = Array bt (Shape $ flatSize:rest) uniq
       flatResArr <- newIdent (baseString vn ++ "_sd") flatTp
+      addTypeIdent flatResArr
       let flatResArrPat = PatElem flatResArr BindVar ()
 
       let finalTp = Array bt (Shape $ mapSize mapInfo :outer:rest) uniq
       finalResArr <- newIdent (baseString vn) finalTp
+      addTypeIdent finalResArr
 
       -- FIXME: add segment descriptors
       addMapLetArray vn finalResArr
@@ -636,6 +676,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
       Just i -> return (i, [])
       Nothing -> do
         sumident <- newIdent "segiota_sum" (Basic Int)
+        addTypeIdent sumident
         sumexp <- reducePlus (identName segdescp)
         let sumbnd = Let (Pattern [PatElem sumident BindVar ()]) () sumexp
 
@@ -665,6 +706,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
   let stepupbnd = Let (Pattern [PatElem resarr BindVar ()]) () stepupexp
 
   addMapLetArray (identName resident) resarr
+  addTypeIdent resarr
 
   return $ sumbnd ++ [repbnd, scanbnd, stepupbnd]
 
@@ -702,6 +744,7 @@ flattenArg mapInfo targInfo = do
 
   let flatTp = Array bt (Shape (newSize : rest)) uniq
   flatIdent <- newIdent (baseString (identName target) ++ "_sd") flatTp
+  addTypeIdent flatIdent
 
   let flattenExp = Apply (nameFromString "stepdown")
                          [(Var $ identName target, Observe)]
@@ -741,7 +784,9 @@ wrapInArrIdent sz (Ident vn tp) = do
     Basic bt                   -> return $ Array bt (Shape [sz]) Nonunique
     Array bt (Shape rest) uniq -> return $ Array bt (Shape $ sz:rest) uniq
     Mem _ -> flatError MemTypeFound
-  newIdent (baseString vn ++ "_arr") arrtp
+  i <- newIdent (baseString vn ++ "_arr") arrtp
+  addTypeIdent i
+  return i
 
 replicateIdent :: SubExp -> Ident -> FlatM (Binding, Ident)
 replicateIdent sz i = do
@@ -749,7 +794,6 @@ replicateIdent sz i = do
   let repExp = PrimOp $ Replicate sz $ Var $ identName i
       repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
   return (repBnd, arrRes)
-
 
 wrapInArrVName :: SubExp -> VName -> FlatM Ident
 wrapInArrVName sz vn = do
