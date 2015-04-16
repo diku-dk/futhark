@@ -15,6 +15,7 @@ import Prelude
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
 import Futhark.Substitute
+import Futhark.Tools
 
 --------------------------------------------------------------------------------
 
@@ -120,6 +121,18 @@ getFlattenedDims :: (SubExp, SubExp) -> FlatM (Maybe SubExp)
 getFlattenedDims (outer,inner) = do
   fds <- gets flattenedDims
   return $ M.lookup (outer,inner) fds
+
+addFlattenedDims :: (SubExp, SubExp) -> SubExp -> FlatM ()
+addFlattenedDims key val = do
+  fds <- gets flattenedDims
+  case M.lookup key fds of
+    Just _ -> flatError $ Error $ "addFlattenedDims: " ++
+                                  pretty key ++
+                                  " already present in table"
+    Nothing -> do
+      let fds' = M.insert key val fds
+      modify (\s -> s{flattenedDims = fds'})
+
 ----------------------------------------
 
 getSegDescriptors1Ident :: Ident -> FlatM [SegDescp]
@@ -183,8 +196,7 @@ createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
            Just sz -> return sz
            Nothing -> do
              new_subexp <- Var <$> newVName ("fakesize" ++ show n)
-             let fds' = M.insert (outer,inner) new_subexp fds
-             modify (\s -> s{flattenedDims = fds'})
+             addFlattenedDims (outer,inner) new_subexp
              return new_subexp
 
 createSegDescsForArray i = flatError . Error $ "createSegDescsForArray on non 2D array: " ++
@@ -561,6 +573,7 @@ pullOutOfMap mapInfo (argsneeded, _)
       let finalTp = Array bt (Shape $ mapSize mapInfo :outer:rest) uniq
       finalResArr <- newIdent (baseString vn) finalTp
 
+      -- FIXME: add segment descriptors
       addMapLetArray vn finalResArr
 
       let unflattenExp = Apply (nameFromString "stepup")
@@ -609,6 +622,51 @@ pullOutOfMap mapInfo _
                       (SegOp (SegReduce certs lambda flatargs segdescp))
 
     return $ flatBnds ++ [redBnd']
+
+pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
+                            (PrimOp (Iota subexp))) = do
+  segdescp <- case subexp of
+                Constant _ ->
+                  flatError $ Error "FIXME: replicate that son of a bitch"
+                Var ident ->
+                  findTarget1 mapinfo ident
+
+  (segsum, sumbnd) <- getFlattenedDims (mapSize mapinfo, subexp) >>= (\mbi ->
+    case mbi of
+      Just i -> return (i, [])
+      Nothing -> do
+        sumident <- newIdent "segiota_sum" (Basic Int)
+        sumexp <- reducePlus (identName segdescp)
+        let sumbnd = Let (Pattern [PatElem sumident BindVar ()]) () sumexp
+
+        addFlattenedDims (mapSize mapinfo, subexp) (Var $ identName sumident)
+        addSegDescriptors [mapSize mapinfo, subexp] [(segdescp, Irregular)]
+
+        return (Var $ identName sumident, [sumbnd]))
+
+  let tmptp = Array Int (Shape [segsum]) Nonunique
+
+  repident <- newIdent "segiota_rep" tmptp
+  let repexp = PrimOp $ Replicate segsum (Constant $ IntVal 1)
+  let repbnd = Let (Pattern [PatElem repident BindVar ()]) () repexp
+
+  scanident <- newIdent "segiota_segscan" tmptp
+  scanexp <- segscanPlus (identName repident) (identName segdescp)
+  let scanbnd = Let (Pattern [PatElem scanident BindVar ()]) () scanexp
+
+  resarr <- newIdent (baseString (identName resident) ++ "_arr")
+                     (Array Int (Shape [mapSize mapinfo, subexp]) Nonunique)
+
+  let stepupexp = Apply (nameFromString "stepup")
+                     [(Var $ identName scanident, Observe)]
+                     --  ^ TODO: I guess Observe is okay for now
+                     (basicRetType Int)
+                     --  ^ TODO: stupid exsitensial types :(
+  let stepupbnd = Let (Pattern [PatElem resarr BindVar ()]) () stepupexp
+
+  addMapLetArray (identName resident) resarr
+
+  return $ sumbnd ++ [repbnd, scanbnd, stepupbnd]
 
 pullOutOfMap mapinfo _ (Let (Pattern [PatElem ident1 BindVar _]) _
                       (PrimOp (SubExp (Var name)))) = do
@@ -740,3 +798,13 @@ dimentionality _ = Nothing
 vnDimentionality :: VName -> FlatM (Maybe Int)
 vnDimentionality vn =
   liftM dimentionality $ lookupType vn
+
+segscanPlus :: VName -> VName -> FlatM Exp
+segscanPlus arr segdescp = do
+  lambda <- binOpLambda Plus Int
+  return $ SegOp $ SegScan [] lambda [(Constant $ IntVal 0, arr)] segdescp
+
+reducePlus :: VName -> FlatM Exp
+reducePlus arr = do
+  lambda <- binOpLambda Plus Int
+  return $ LoopOp $ Reduce [] lambda [(Constant $ IntVal 0, arr)]
