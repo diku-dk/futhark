@@ -33,6 +33,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Names
          ) where
 
+import Control.Applicative
 import Control.Monad.State
 import Data.Array
 import Data.Hashable
