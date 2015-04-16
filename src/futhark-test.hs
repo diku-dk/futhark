@@ -236,6 +236,9 @@ runTestCase (TestCase program testcase) =
         ExitFailure 1 -> throwError err
         ExitFailure _ -> checkError expected_error err
 
+    RunCases [] ->
+      justCompileTestProgram program
+
     RunCases run_cases ->
       mapM_ (executeTestProgram program) run_cases
 
@@ -307,6 +310,20 @@ compileTestProgram program (TestRun _ inputValues expectedResult) =
     compareResult program expectedResult' =<< runResult progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
+
+        compiling = ("compiling:\n"++)
+
+justCompileTestProgram :: FilePath -> TestM ()
+justCompileTestProgram program =
+  withExceptT compiling $ do
+    (futcode, _, futerr) <-
+      io $ readProcessWithExitCode "futhark-c"
+      [program, "-o", binOutputf] ""
+    case futcode of
+      ExitFailure 127 -> throwError futharkcNotFound
+      ExitFailure _   -> throwError futerr
+      ExitSuccess     -> return ()
+  where binOutputf = program `replaceExtension` "bin"
 
         compiling = ("compiling:\n"++)
 
