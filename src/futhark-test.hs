@@ -306,8 +306,11 @@ compileTestProgram program (TestRun _ inputValues expectedResult) =
       ExitFailure 127 -> throwError futharkcNotFound
       ExitFailure _   -> throwError futerr
       ExitSuccess     -> return ()
+    -- Explicitly prefixing the current directory is necessary for
+    -- readProcessWithExitCode to find the binary when binOutputf has
+    -- no path component.
     (progCode, output, progerr) <-
-      io $ readProcessWithExitCode binOutputf [] input
+      io $ readProcessWithExitCode ("." </> binOutputf) [] input
     compareResult program expectedResult' =<< runResult progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
