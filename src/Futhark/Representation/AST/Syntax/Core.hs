@@ -209,6 +209,9 @@ data Bindage = BindVar -- ^ Bind as normal.
                -- (if necessary).
                   deriving (Ord, Show, Eq)
 
+-- | An element of a pattern - consisting of an 'Ident' (essentially a
+-- pair of the name andtype), a 'Bindage', and an addditional
+-- parametric attribute.
 data PatElemT attr = PatElem { patElemIdent :: Ident
                                -- ^ The ident bound by a 'PatElem'.
                              , patElemBindage :: Bindage
