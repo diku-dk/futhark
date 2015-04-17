@@ -225,10 +225,10 @@ createSegDescsForArray (Ident vn tp@(Array _ (Shape (dim0:dims@(_:_))) _)) = do
     (sizes, singlesegs) :: ([[SubExp]], [SegDescp]) <-
       liftM (unzip . reverse . (\(res,_,_,_) -> res)) $
         foldM  (\(res,dimouter,n::Int,_:dimrest) diminner -> do
-                   segsize <- createFlattenedDims n (dimouter, diminner)
                    let segname = baseString vn ++ "_seg" ++ show n
-                   seg <- newIdent segname (Array Int (Shape [segsize]) Nonunique)
+                   seg <- newIdent segname (Array Int (Shape [dimouter]) Nonunique)
                    addTypeIdent seg
+                   segsize <- createFlattenedDims (n+1) (dimouter, diminner)
                    return ((dimouter:dimrest, (seg, Regular)):res, segsize, n+1, dimrest)
                )
                ([],dim0,0,dim0:dims) dims
