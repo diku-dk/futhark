@@ -39,6 +39,8 @@ data FlatState = FlatState {
 
   , flattenedDims :: M.Map (SubExp,SubExp) SubExp
 
+  , dataArrays :: M.Map VName Ident
+
   , segDescriptors :: M.Map [SubExp] [SegDescp]
     -- ^ segment descriptors for arrays. This is a should not be
     -- empty. First element represents the outermost
@@ -159,6 +161,27 @@ addFlattenedDims key val = do
 
 ----------------------------------------
 
+getDataArray1 :: VName -> FlatM Ident
+getDataArray1 vn = do
+  da <- gets dataArrays
+  case M.lookup vn da of
+    Just sz -> return sz
+    Nothing -> flatError $ Error $ "getDataArray1 not created for" ++
+                                    show vn
+
+addDataArray :: VName -> Ident -> FlatM ()
+addDataArray key val = do
+  da <- gets dataArrays
+  case M.lookup key da of
+    Just _ -> flatError $ Error $ "addDataArray: " ++
+                                  pretty key ++
+                                  " already present in table"
+    Nothing -> do
+      let da' = M.insert key val da
+      modify (\s -> s{dataArrays = da'})
+
+----------------------------------------
+
 getSegDescriptors1Ident :: Ident -> FlatM [SegDescp]
 getSegDescriptors1Ident (Ident _ (Array _ (Shape subs) _)) =
   getSegDescriptors1 subs
@@ -195,7 +218,7 @@ addSegDescriptors subs segs = do
 
 -- A list of subexps (defining shape of array), will define the segment descriptor
 createSegDescsForArray :: Ident -> FlatM ()
-createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
+createSegDescsForArray (Ident vn tp@(Array _ (Shape (dim0:dims@(_:_))) _)) = do
   alreadyCreated <- liftM isJust $ getSegDescriptors (dim0:dims)
 
   unless alreadyCreated $ do
@@ -212,6 +235,11 @@ createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
 
     let segs = map (`drop` singlesegs) [0..length singlesegs]
     zipWithM_ addSegDescriptors sizes segs
+
+    data_size <- foldM (curry getFlattenedDims1) dim0 dims
+    let data_tp = setArrayDims tp [data_size]
+    data_ident <- newIdent (baseString vn ++ "_data") data_tp
+    addDataArray vn data_ident
 
   where
     createFlattenedDims :: Int -> (SubExp, SubExp) -> FlatM SubExp
@@ -238,6 +266,7 @@ flattenProg p@(Prog funs) = do
     initState = FlatState { vnameSource = newNameSourceForProg p
                           , mapLetArrays = M.empty
                           , flattenedDims = M.empty
+                          , dataArrays = M.empty
                           , segDescriptors = M.empty
                           , typetab = HM.empty
                           }
