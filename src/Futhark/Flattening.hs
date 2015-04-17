@@ -261,7 +261,9 @@ flattenProg :: Prog -> Either Error Prog
 flattenProg p@(Prog funs) = do
   let funs' = map renameToOld funs
   (funsTrans,_) <- mapAndUnzipM (runFlatM initState . transformFun) funs
-  return $ Prog (funsTrans ++ funs')
+  let Just main = funDecByName defaultEntryPoint p
+  (main',_) <- runFlatM initState $ transformMain main
+  return $ Prog (main' : funsTrans ++ funs')
   where
     initState = FlatState { vnameSource = newNameSourceForProg p
                           , mapLetArrays = M.empty
@@ -277,16 +279,214 @@ flattenProg p@(Prog funs) = do
 
 --------------------------------------------------------------------------------
 
+convertToFlat :: [Ident] -> FlatM [Ident]
+convertToFlat idents = do
+  --let orig_arr_sizes = concat $ mapMaybe (variableDimensionsAsIdents . identType) idents
+  --let idents' = filter (`notElem` orig_arr_sizes) idents
+
+  (sizes, arrs) <- liftM unzip $ forM idents $ \i@(Ident vn tp) ->
+    if not $ maybe False (>=2) $ dimentionality tp
+    then return ([], [i])
+    else do
+      (segdescp_arrs,_) <- liftM unzip $ getSegDescriptors1Ident i
+      dataarr <- getDataArray1 vn
+      let arrs = segdescp_arrs ++ [dataarr]
+      let sizes = mapMaybe ( (\case
+                                [Var szvn] -> Just $ Ident szvn (Basic Int)
+                                _ -> Nothing
+                             ) . arrayDims . identType)
+                           (drop 1 arrs)
+      return (sizes, arrs)
+
+  return $ concat sizes ++ concat arrs
+
+convertExtRetType :: ExtRetType -> ExtRetType
+convertExtRetType (ExtRetType ex_tps) =
+  let tmp = concatMap convertExtType ex_tps
+  in ExtRetType $ zipWith changeToUniqFree tmp [0..]
+  where
+    -- If we already know the sizes of the resulting segment
+    -- descriptos, use those otherwise just create a not of free
+    -- stuff.
+    --
+    -- If we know input is [[int,n],m] and output is [[int,m],n] we
+    -- are not able to keep that information, and will generate
+    -- [[int,?1],?0]
+    --
+    -- However, input [[[int,x],y],z] and output [[int,x],y] should
+    -- work TODO ^^ not implemented
+    convertExtType (Array bt (ExtShape extshps) uniq) =
+      let segs = replicate (length extshps -1)
+                           (Array Int (ExtShape [Ext 0]) Nonunique)
+          datatp = Array bt (ExtShape [Ext 0]) uniq
+      in segs ++ [datatp]
+    convertExtType tp = [tp]
+
+    changeToUniqFree (Array bt _ uniq) free =
+      Array bt (ExtShape [Ext free]) uniq
+    changeToUniqFree tp _ = tp
+
+
+-- | Transform the entry function so it converts array arguments to
+-- flat representation, calls the flattening transformed version, and
+-- finally converts the flat representation back to normal
+-- representation
+transformMain :: FunDec -> FlatM FunDec
+transformMain (FunDec name (ExtRetType rettypes) params _) = do
+  let arr_params = filter (maybe False (>=2) . dimentionality . identType)
+                          (map fparamIdent params)
+
+  mapM_ createSegDescsForArray arr_params
+
+  toflat_bnds <- mapM toFlat arr_params
+
+  flat_params <- convertToFlat $ map fparamIdent params
+  let flat_args = map ((\vn -> (Var vn, Observe)) . identName) flat_params
+  let (ExtRetType flatex_tps) = convertExtRetType (ExtRetType rettypes)
+  let call_exp = Apply (transformFunName name)
+                       flat_args
+                       (ExtRetType flatex_tps)
+  (flatrestps, extra_sizes) <- instantiateShapes' flatex_tps
+  callresidents <- mapM (newIdent "tmpres") flatrestps
+  let callpat = patternFromIdents (extra_sizes ++ callresidents)
+  let call_bnd = Let callpat () call_exp
+
+  (realrestps, _) <- instantiateShapes' rettypes
+  realresidents <- mapM (newIdent "res") realrestps
+  -- This groups the flattened results returned from the function
+  -- call, putting segment descriptors and data arrays together in one group
+  let callresidents_grouped =
+        reverse $ snd $
+          foldl (\(takefrom,res) n -> (drop n takefrom, take n takefrom : res))
+                (callresidents,[])
+                (map (fromMaybe 1 . dimentionality) realrestps)
+  fromflat_bnds <-
+    liftM concat $ zipWithM fromFlat realresidents callresidents_grouped
+
+  let body' = Body { bodyLore = ()
+                   , bodyBindings = concat toflat_bnds ++ [call_bnd] ++ fromflat_bnds
+                   , bodyResult = Result $ map (Var . identName) realresidents
+                   }
+  return $ FunDec name (ExtRetType rettypes) params body'
+
+  where
+
+    -- | @toFlat ident@ creates the bindings for initializing the
+    -- segment descriptors (and their size variable) belonging to
+    -- @ident@. Must be called on a multidimensional array.
+    toFlat :: Ident -> FlatM [Binding]
+    toFlat ident = do
+      let vn = identName ident
+      let dim0:dims = arrayDims $ identType ident
+      segdescps <- getSegDescriptors1Ident ident
+      mult_bnds <-
+        liftM (reverse . concat . snd) $ foldM makeMult (dim0, []) dims
+      rep_bnds <-
+        liftM reverse $ foldM makeRep [] $ zip dims segdescps
+      data_ident <- getDataArray1 vn
+      let [data_size] = arrayDims $ identType data_ident
+      let data_exp = PrimOp $ Reshape [] [data_size] vn
+      let data_bnd = Let (Pattern [PatElem data_ident BindVar()]) () data_exp
+      return $ mult_bnds ++ rep_bnds ++ [data_bnd]
+      where
+        -- | Folding function which creates a binding for
+        -- @'getFlattenedDims1 (outer,inner)@ by multiplying @outer@
+        -- and @inner@
+        makeMult (outer, res) inner = do
+          merged <- getFlattenedDims1 (outer,inner)
+          merge_bnd <- case merged of
+                         Constant _ -> return Nothing
+                         Var vn -> do
+                           let i = Ident vn (Basic Int)
+                           let i_exp = PrimOp $ BinOp Times outer inner Int
+                           let i_bnd = Let (Pattern [PatElem i BindVar ()]) () i_exp
+                           return $ Just i_bnd
+
+          return (merged, catMaybes [merge_bnd] : res)
+
+        makeRep res (content, (seg, Regular)) = do
+          let [count] = arrayDims $ identType seg
+          let rep_exp = PrimOp $ Replicate count content
+          let bnd = Let (Pattern [PatElem seg BindVar()]) () rep_exp
+          return $ bnd : res
+        makeRep _ _ =
+          flatError $ Error "transformMain, makeRep: SegDescriptor was not Regular"
+
+    -- | @fromFlat res tmps@ create a binding for the result to be
+    -- returned @res@, from the arrays (segs + data) in @tmps@. For
+    -- multidimentional arrays, this will end in a 'Reshape'
+    fromFlat :: Ident -> [Ident] -> FlatM [Binding]
+    fromFlat _ [] =
+      error "transformMain fromFlat: callresidents_grouped gave an empty list"
+    fromFlat res [tmp] = do
+      let e = PrimOp $ SubExp $ Var $ identName tmp
+      return [Let (Pattern [PatElem res BindVar ()]) () e]
+    fromFlat res tmps = do
+      let (segs,dataarr) = (\(d:sgs) -> (reverse sgs, d)) $ reverse tmps
+      let [datasize] = arrayDims $ identType dataarr
+
+      cmp_i <- newIdent "cmp" (Basic Bool)
+      let cmp_exp = PrimOp $ BinOp Equal datasize (Constant $ IntVal 0) Bool
+      let cmp_bnd = Let (Pattern [PatElem cmp_i BindVar ()]) () cmp_exp
+
+      let resdimidents = mapMaybe (\case
+                                      Var vn -> Just $ Ident vn (Basic Int)
+                                      Constant _ -> error "transformMain, fromFlat: size of a result array was constant"
+                                  ) (arrayDims $ identType res)
+      let truebody = Body { bodyLore = ()
+                          , bodyBindings = []
+                          , bodyResult = Result $ replicate (length resdimidents)
+                                                            (Constant $ IntVal 0)
+                          }
+      falsebody <- createFalseBody segs
+      let if_exp = If (Var $ identName cmp_i)
+                   truebody
+                   falsebody
+                   (replicate (length resdimidents) (Basic Int))
+      let if_bnd = Let (patternFromIdents resdimidents) () if_exp
+
+      let reshape_e = PrimOp $ Reshape [] (arrayDims $ identType res) (identName dataarr)
+      let reshape_bnd = Let (Pattern [PatElem res BindVar ()]) () reshape_e
+
+      return [cmp_bnd, if_bnd, reshape_bnd]
+      where
+        createFalseBody :: [Ident] -> FlatM Body
+        createFalseBody [] =
+          flatError $ Error "transformMain, createFalseBody: called on empty array"
+        createFalseBody (seg0:segs) = do
+          tmpids <- mapM (\_ -> newIdent "tmp" (Basic Int)) (seg0:segs)
+          let bnds :: [Binding] =
+                zipWith (\i seg -> Let (Pattern [PatElem i BindVar()]) ()
+                                       (PrimOp $ Index [] (identName seg)
+                                                       [Constant $ IntVal 0])
+                        )  tmpids (seg0:segs)
+          let [seg0sz] = arrayDims $ identType seg0
+          return Body { bodyLore = ()
+                      , bodyBindings = bnds
+                      , bodyResult = Result $ seg0sz : map (Var . identName) tmpids
+                      }
+
+--------------------------------------------------------------------------------
+
+transformFunName :: Name -> Name
+transformFunName name = nameFromString $ nameToString name ++ "_flattrans"
+
 transformFun :: FunDec -> FlatM FunDec
-transformFun (FunDec name retType params body) = do
+transformFun (FunDec name rettype params body) = do
   mapM_ (addTypeIdent . fparamIdent) params
   mapM_ createSegDescsForArray $
     filter (maybe False (>=2) . dimentionality . identType)
            (map fparamIdent params)
   body' <- transformBody body
-  return $ FunDec name' retType params body'
+  idents' <- convertToFlat $ map fparamIdent params
+  let params' = map (\i -> FParam { fparamIdent = i
+                                  , fparamLore = ()
+                                  }
+                    ) idents'
+  return $ FunDec name' rettype' params' body'
   where
-    name' = nameFromString $ nameToString name ++ "_flattrans"
+    rettype' = convertExtRetType rettype
+    name' = transformFunName name
 
 transformBody :: Body -> FlatM Body
 transformBody (Body () bindings (Result ses)) = do
@@ -872,6 +1072,8 @@ vnDimentionality :: VName -> FlatM (Maybe Int)
 vnDimentionality vn =
   liftM dimentionality $ lookupType vn
 
+--------------------------------------------------------------------------------
+
 segscanPlus :: VName -> VName -> FlatM Exp
 segscanPlus arr segdescp = do
   lambda <- binOpLambda Plus Int
@@ -881,3 +1083,9 @@ reducePlus :: VName -> FlatM Exp
 reducePlus arr = do
   lambda <- binOpLambda Plus Int
   return $ LoopOp $ Reduce [] lambda [(Constant $ IntVal 0, arr)]
+
+--------------------------------------------------------------------------------
+
+patternFromIdents :: [Ident] -> Pattern
+patternFromIdents idents =
+  Pattern $ map (\i -> PatElem i BindVar ()) idents
