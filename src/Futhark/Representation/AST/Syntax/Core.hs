@@ -192,7 +192,9 @@ data SubExp = Constant BasicValue
 -- | A (non-lambda) function parameter.
 data FParamT attr = FParam
                     { fparamIdent :: Ident
+                      -- ^ Name and type of the function parameter.
                     , fparamLore :: attr
+                      -- ^ Function parameter attribute.
                     }
                     deriving (Ord, Show, Eq)
 
@@ -216,6 +218,7 @@ data PatElemT attr = PatElem { patElemIdent :: Ident
                                -- ^ The ident bound by a 'PatElem'.
                              , patElemBindage :: Bindage
                              , patElemLore :: attr
+                               -- ^ Pattern element attribute.
                              }
                    deriving (Ord, Show, Eq)
 

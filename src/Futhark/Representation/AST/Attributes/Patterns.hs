@@ -1,3 +1,5 @@
+-- | Inspecing and modifying 'Pattern's, function parameters and
+-- pattern elements.
 module Futhark.Representation.AST.Attributes.Patterns
        (
          -- * Function parameters
