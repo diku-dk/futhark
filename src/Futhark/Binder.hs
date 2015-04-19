@@ -83,15 +83,14 @@ runBinderT (BinderT m) types = do
 
 runBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
              Binder lore (Body lore) -> m (Body lore)
-runBinder = liftM (uncurry (flip ($))) . runBinder'
+runBinder = liftM (uncurry $ flip insertBindings) . runBinder'
 
 runBinder' :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
               Binder lore a
-           -> m (a, Body lore -> Body lore)
+           -> m (a, [Binding lore])
 runBinder' m = do
   types <- askTypeEnv
-  (x, bnds) <- modifyNameSource $ runState $ runBinderT m types
-  return (x, insertBindings bnds)
+  modifyNameSource $ runState $ runBinderT m types
 
 runBinderEmptyEnv :: MonadFreshNames m =>
                      Binder lore a -> m (a, [Binding lore])

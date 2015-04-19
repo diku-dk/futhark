@@ -609,9 +609,9 @@ replaceSOAC pat@(Pattern (patElem : _)) soac body = do
       names  = patternIdents pat
   case HM.lookup pat_nm (outArr fres) of
     Nothing  -> do
-      (e,f) <- runBinder' $ SOAC.toExp soac
+      (e,bnds) <- runBinder' $ SOAC.toExp soac
       e'    <- fuseInExp e
-      return $ f $ mkLet' names e' `insertBinding` body
+      return $ insertBindings bnds $ mkLet' names e' `insertBinding` body
     Just knm ->
       case HM.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error
