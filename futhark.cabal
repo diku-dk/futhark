@@ -160,7 +160,6 @@ Library
                  Language.Futhark.Parser.Lexer
                  Language.Futhark.Parser.Tokens
                  Paths_futhark
-                 Build_futhark
 
 
   -- Directories other than the root containing source files.
