@@ -101,7 +101,7 @@ bodyToLambda :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
 bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
-  (e,bnds) <- runBinder' $ SOAC.toExp =<< toSOAC (SOACNest inps op)
+  (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   bnd <- mkLetNames' bndIds e
   return
     Lambda { lambdaParams = zipWith Ident ps pts

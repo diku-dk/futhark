@@ -24,7 +24,7 @@ shapeBody :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
              [VName] -> [Type] -> Body lore
           -> m (Body lore)
 shapeBody shapenames ts body =
-  runBinder $ do
+  runBodyBinder $ do
     ses <- bodyBind body
     sets <- mapM subExpType ses
     return $ resultBody $ argShapes shapenames ts sets
@@ -52,7 +52,7 @@ ensureResultExtShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
                         SrcLoc -> [ExtType] -> Body lore
                      -> m (Body lore)
 ensureResultExtShape loc rettype body =
-  runBinder $ insertBindingsM $ do
+  runBodyBinder $ insertBindingsM $ do
     es <- bodyBind body
     let assertProperShape t se =
           let name = "result_proper_shape"

@@ -609,7 +609,7 @@ replaceSOAC pat@(Pattern (patElem : _)) soac body = do
       names  = patternIdents pat
   case HM.lookup pat_nm (outArr fres) of
     Nothing  -> do
-      (e,bnds) <- runBinder' $ SOAC.toExp soac
+      (e,bnds) <- runBinder $ SOAC.toExp soac
       e'    <- fuseInExp e
       return $ insertBindings bnds $ mkLet' names e' `insertBinding` body
     Just knm ->
@@ -634,7 +634,7 @@ insertKerSOAC names ker body = do
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
-  runBinder $ do
+  runBodyBinder $ do
     transformOutput (outputTransform ker) names $
       SOAC.setLambda lam'' new_soac
     return body

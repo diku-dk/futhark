@@ -7,7 +7,7 @@ module Futhark.Binder
   , runBinderT
   , Binder
   , runBinder
-  , runBinder'
+  , runBodyBinder
   , runBinderEmptyEnv
   , bindingIdentTypes
   -- * Non-class interface
@@ -81,16 +81,16 @@ runBinderT (BinderT m) types = do
   (x, bnds) <- runWriterT $ evalStateT m types
   return (x, DL.toList bnds)
 
-runBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
-             Binder lore (Body lore) -> m (Body lore)
-runBinder = liftM (uncurry $ flip insertBindings) . runBinder'
-
-runBinder' :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
+runBinder :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
               Binder lore a
            -> m (a, [Binding lore])
-runBinder' m = do
+runBinder m = do
   types <- askTypeEnv
   modifyNameSource $ runState $ runBinderT m types
+
+runBodyBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+                 Binder lore (Body lore) -> m (Body lore)
+runBodyBinder = liftM (uncurry $ flip insertBindings) . runBinder
 
 runBinderEmptyEnv :: MonadFreshNames m =>
                      Binder lore a -> m (a, [Binding lore])
