@@ -107,13 +107,14 @@ removePatternWisdom = rephrasePattern removeWisdom
 addWisdomToPattern :: Lore.Lore lore =>
                       Pattern lore -> Exp (Wise lore) -> Pattern (Wise lore)
 addWisdomToPattern pat e =
-  Pattern $ zipWith addRanges (Aliases.mkPatternAliases pat e) ranges'
-  where addRanges patElem range =
+  Pattern
+  (map (`addRanges` unknownRange) ctxals)
+  (zipWith addRanges valals ranges)
+  where (ctxals, valals) = Aliases.mkPatternAliases pat e
+        addRanges patElem range =
           let (als,innerlore) = patElemLore patElem
           in patElem `setPatElemLore` ((als, range), innerlore)
         ranges = expRanges e
-        ranges' = replicate (patternSize pat - length ranges) unknownRange ++
-                  ranges
 
 mkWiseBody :: Lore.Lore lore =>
               Lore.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
@@ -131,8 +132,8 @@ mkWiseLetBinding pat explore e =
   e
 
 instance Bindable lore => Bindable (Wise lore) where
-  mkLet pat e =
-    let Let pat' explore _ = mkLet pat $ removeExpWisdom e
+  mkLet context values e =
+    let Let pat' explore _ = mkLet context values $ removeExpWisdom e
     in mkWiseLetBinding pat' explore e
 
   mkLetNames names e = do

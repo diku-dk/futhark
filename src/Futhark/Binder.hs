@@ -7,7 +7,7 @@ module Futhark.Binder
   , runBinderT
   , Binder
   , runBinder
-  , runBinder'
+  , runBodyBinder
   , runBinderEmptyEnv
   , bindingIdentTypes
   -- * Non-class interface
@@ -65,9 +65,12 @@ instance (Proper lore, Bindable lore, MonadFreshNames m) =>
          MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
   mkBodyM bnds res = return $ mkBody bnds res
-  mkLetM pat e = return $ mkLet pat' e
-    where pat' = [ (patElemIdent patElem, patElemBindage patElem)
-                 | patElem <- patternElements pat ]
+  mkLetM pat e =
+    return $ mkLet
+    (map asPair $ patternContextElements pat)
+    (map asPair $ patternValueElements pat)
+    e
+    where asPair patElem = (patElemIdent patElem, patElemBindage patElem)
   mkLetNamesM = mkLetNames
 
   addBinding      = addBinderBinding
@@ -81,17 +84,16 @@ runBinderT (BinderT m) types = do
   (x, bnds) <- runWriterT $ evalStateT m types
   return (x, DL.toList bnds)
 
-runBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
-             Binder lore (Body lore) -> m (Body lore)
-runBinder = liftM (uncurry (flip ($))) . runBinder'
-
-runBinder' :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
+runBinder :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
               Binder lore a
-           -> m (a, Body lore -> Body lore)
-runBinder' m = do
+           -> m (a, [Binding lore])
+runBinder m = do
   types <- askTypeEnv
-  (x, bnds) <- modifyNameSource $ runState $ runBinderT m types
-  return (x, insertBindings bnds)
+  modifyNameSource $ runState $ runBinderT m types
+
+runBodyBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+                 Binder lore (Body lore) -> m (Body lore)
+runBodyBinder = liftM (uncurry $ flip insertBindings) . runBinder
 
 runBinderEmptyEnv :: MonadFreshNames m =>
                      Binder lore a -> m (a, [Binding lore])

@@ -1,3 +1,4 @@
+-- | Module defining type errors.
 module Futhark.TypeCheck.TypeError
   ( GenTypeError(..)
   , Several(..)

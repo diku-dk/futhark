@@ -160,7 +160,6 @@ Library
                  Language.Futhark.Parser.Lexer
                  Language.Futhark.Parser.Tokens
                  Paths_futhark
-                 Build_futhark
 
 
   -- Directories other than the root containing source files.
@@ -222,6 +221,27 @@ Executable futharki
 
   Ghc-Options:        -Wall
 
+Executable futhark-test
+  Main-is: src/futhark-test.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 containers >= 0.5,
+                 directory,
+                 filepath,
+                 process,
+                 transformers,
+                 parsec >= 3,
+                 regex-tdfa >= 1.2,
+                 text,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
 Test-suite unit
   Type:              exitcode-stdio-1.0
 
@@ -242,3 +262,13 @@ Test-suite unit
                      mtl >= 2.2.1,
                      containers >= 0.5,
                      futhark
+
+  Other-Modules: Futhark.Analysis.ScalExpTests
+                 Futhark.Optimise.AlgSimplifyTests
+                 Futhark.Representation.AST.AttributesTests
+                 Futhark.Representation.AST.Attributes.ValuesTests
+                 Futhark.Representation.AST.Syntax.CoreTests
+                 Futhark.Representation.AST.SyntaxTests
+                 Futhark.Representation.AttributesTests
+                 Language.Futhark.CoreTests
+                 Language.Futhark.SyntaxTests

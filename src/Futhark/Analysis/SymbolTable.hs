@@ -318,7 +318,8 @@ defBndEntry vtable patElem range bnd =
       letBoundRange = simplifyRange $ scalExpRange range
     , letBoundLore = patElemLore patElem
     , letBoundBinding = bnd
-    , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
+    , letBoundScalExp =
+      runReader (toScalExp (`lookupScalExp` vtable) (bindingExp bnd)) types
     , letBoundBindingDepth = 0
     , letBoundBindage = patElemBindage patElem
     , letBoundType = patElemType patElem
@@ -355,7 +356,7 @@ defBndEntry vtable patElem range bnd =
            simplifyBound upper)
 
         simplifyBound (Just se)
-          | Right se' <- AS.simplify se ranges types =
+          | Right se' <- AS.simplify se ranges =
             Just se'
         simplifyBound bound =
           bound
@@ -440,14 +441,14 @@ insertArrayLParam param Nothing vtable =
   insertLParam param vtable
 
 insertLoopVar :: VName -> SubExp -> SymbolTable lore -> SymbolTable lore
-insertLoopVar name bound vtable = insertEntry name bind vtable
+insertLoopVar name bound = insertEntry name bind
   where bind = LoopVar LoopVarEntry {
             loopVarRange = (Just (Val (IntVal 0)),
-                            minus1 <$> toScalExp look (PrimOp $ SubExp bound))
+                            Just $
+                              subExpToScalExp bound Int `SMinus`
+                              Val (IntVal 1))
           , loopVarBindingDepth = 0
           }
-        look = (`lookupScalExp` vtable)
-        minus1 = (`SMinus` Val (IntVal 1))
 
 insertFreeVar :: VName -> Type -> SymbolTable lore -> SymbolTable lore
 insertFreeVar name t = insertEntry name entry
@@ -459,12 +460,13 @@ insertFreeVar name t = insertEntry name entry
 
 updateBounds :: Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
-  case toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond of
+  case runReader (toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond) types of
     Nothing    -> vtable
     Just cond' ->
       let cond'' | isTrue    = cond'
                  | otherwise = SNot cond'
       in updateBounds' cond'' vtable
+  where types = typeEnv vtable
 
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
@@ -473,10 +475,8 @@ updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
 updateBounds' cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
   either (const []) getNotFactorsLEQ0 $
-  AS.simplify (SNot cond) ranges types
+  AS.simplify (SNot cond) ranges
     where
-      types = typeEnv sym_tab
-
       updateBound (sym,True ,bound) = setUpperBound sym bound
       updateBound (sym,False,bound) = setLowerBound sym bound
 
@@ -493,12 +493,12 @@ updateBounds' cond sym_tab =
       --   of `not cond' in CNF form: not cond = (not c1) && ... && (not cn)
       getNotFactorsLEQ0 :: ScalExp -> [ScalExp]
       getNotFactorsLEQ0 (RelExp rel e_scal) =
-          if runReader (scalExpType e_scal) types /= Int then []
+          if scalExpType e_scal /= Int then []
           else let leq0_escal = if rel == LTH0
                                 then SMinus (Val (IntVal 0)) e_scal
                                 else SMinus (Val (IntVal 1)) e_scal
 
-               in  either (const []) (:[]) $ AS.simplify leq0_escal ranges types
+               in  either (const []) (:[]) $ AS.simplify leq0_escal ranges
       getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
       getNotFactorsLEQ0 _ = []
 
@@ -514,12 +514,12 @@ updateBounds' cond sym_tab =
       solve_leq0 :: ScalExp -> Maybe (VName, Bool, ScalExp)
       solve_leq0 e_scal = do
         sym <- AS.pickSymToElim ranges S.empty e_scal
-        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges types
+        (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
         case a of
           Val (IntVal (-1)) -> Just (sym, False, b)
           Val (IntVal 1)    -> do
             mb <- either (const Nothing) Just $
-                  AS.simplify (SMinus (Val (IntVal 0)) b) ranges types
+                  AS.simplify (SMinus (Val (IntVal 0)) b) ranges
             Just (sym, True, mb)
           _ -> Nothing
 

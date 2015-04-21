@@ -49,11 +49,11 @@ eotransform = polyPass "enabling optimations" op
   where op (Basic prog)          =
           canFail "" (Just $ Basic prog) $
           Basic <$>
-          simpleOpts bindableSimpleOps basicRules prog
+          simpleOptProg bindableSimpleOps basicRules prog
         op (ExplicitMemory prog) =
           canFail "" (Just $ ExplicitMemory prog) $
           ExplicitMemory <$>
-          simpleOpts Futhark.ExplicitAllocations.simplifiable standardRules prog
+          simpleOptProg Futhark.ExplicitAllocations.simplifiable standardRules prog
 
 hotransform :: Pass
 hotransform = basicPass "higher-order optimisations"

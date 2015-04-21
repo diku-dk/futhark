@@ -172,7 +172,7 @@ computeFlatIndex dims is =
 sliceSizes :: Shape m -> Vector ScalExp (S m)
 sliceSizes Nil = singleton $ Val $ IntVal 1
 sliceSizes (n :- ns) =
-  sproduct (map subExpToScalExp $ n : Vec.toList ns) :-
+  sproduct (map (`subExpToScalExp` Int) $ n : Vec.toList ns) :-
   sliceSizes ns
 
 iota :: Shape n -> IxFun n

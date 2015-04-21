@@ -74,7 +74,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
-                 let bnds res = [ mkLet' [p] $ PrimOp $ SubExp e
+                 let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
                                 | (p,e) <- zip pat $ resultSubExps res]
                      bindLambda res =
                        bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
@@ -143,5 +143,5 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
             Just par' -> ((parmap, inner . forward par par'),
                           arrmap)
         forward to from b =
-          mkLet' [to] (PrimOp $ SubExp $ Var from)
+          mkLet' [] [to] (PrimOp $ SubExp $ Var from)
           `insertBinding` b

@@ -1,3 +1,9 @@
+{-# LANGUAGE FlexibleContexts #-}
+-- | The most primitive ("core") aspects of the AST.  Split out of
+-- "Futhark.Representation.AST.Syntax" in order for
+-- "Futhark.Representation.AST.Lore" to use these definitions.  This
+-- module is re-exported from "Futhark.Representation.AST.Syntax" and
+-- there should be no reason to include it explicitly.
 module Futhark.Representation.AST.Syntax.Core
        (
          module Language.Futhark.Core
@@ -32,10 +38,13 @@ module Futhark.Representation.AST.Syntax.Core
          , Names
          ) where
 
+import Control.Applicative
+import Control.Monad.State
 import Data.Array
 import Data.Hashable
 import Data.Monoid
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -89,14 +98,19 @@ instance ArrayShape ExtShape where
   stripDims n (ExtShape dims) = ExtShape $ drop n dims
   subShapeOf (ExtShape ds1) (ExtShape ds2) =
     -- Must agree on Free dimensions, and ds1 may not be existential
-    -- where ds2 is Free.
-    --
-    -- FIXME: also check that existentials are
-    -- congruent.
-    and $ zipWith subDimOf ds1 ds2
-    where subDimOf (Free se1) (Free se2) = se1 == se2
-          subDimOf (Ext _)    (Free _)   = False
-          subDimOf _          _          = True
+    -- where ds2 is Free.  Existentials must also be congruent.
+    length ds1 == length ds2 &&
+    evalState (and <$> zipWithM subDimOf ds1 ds2) HM.empty
+    where subDimOf (Free se1) (Free se2) = return $ se1 == se2
+          subDimOf (Ext _)    (Free _)   = return False
+          subDimOf (Free _)   (Ext _)    = return True
+          subDimOf (Ext x)    (Ext y)    = do
+            extmap <- get
+            case HM.lookup y extmap of
+              Just ywas | ywas == x -> return True
+                        | otherwise -> return False
+              Nothing -> do put $ HM.insert y x extmap
+                            return True
 
 instance Monoid Rank where
   mempty = Rank 0
@@ -178,18 +192,33 @@ data SubExp = Constant BasicValue
 -- | A (non-lambda) function parameter.
 data FParamT attr = FParam
                     { fparamIdent :: Ident
+                      -- ^ Name and type of the function parameter.
                     , fparamLore :: attr
+                      -- ^ Function parameter attribute.
                     }
                     deriving (Ord, Show, Eq)
 
-data Bindage = BindVar
+-- | How a name in a let-binding is bound - either as a plain
+-- variable, or in the form of an in-place update.
+data Bindage = BindVar -- ^ Bind as normal.
              | BindInPlace Certificates VName [SubExp]
+               -- ^ Perform an in-place update, in which the value
+               -- being bound is inserted at the given index in the
+               -- array referenced by the 'VName'.  Note that the
+               -- result of the binding is the entire array, not just
+               -- the value that has been inserted..  The
+               -- 'Certificates' contain bounds checking certificates
+               -- (if necessary).
                   deriving (Ord, Show, Eq)
 
+-- | An element of a pattern - consisting of an 'Ident' (essentially a
+-- pair of the name andtype), a 'Bindage', and an addditional
+-- parametric attribute.
 data PatElemT attr = PatElem { patElemIdent :: Ident
                                -- ^ The ident bound by a 'PatElem'.
                              , patElemBindage :: Bindage
                              , patElemLore :: attr
+                               -- ^ Pattern element attribute.
                              }
                    deriving (Ord, Show, Eq)
 

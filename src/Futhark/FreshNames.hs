@@ -8,11 +8,10 @@
 -- >>>> nameToString name2
 -- "bar_1"
 module Futhark.FreshNames
-  ( NameSource(NameSource)
+  ( NameSource (..)
   , VNameSource
   , blankNameSource
   , newNameSource
-  , newName
   , newID
   , newVName
   ) where

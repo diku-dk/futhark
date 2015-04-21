@@ -61,6 +61,16 @@ instance Pretty Value where
   ppr (ArrayVal a _ _) =
     brackets $ commasep $ map ppr $ elems a
 
+instance Pretty Shape where
+  ppr = brackets . commasep . map ppr . shapeDims
+
+instance Pretty ExtDimSize where
+  ppr (Free e) = ppr e
+  ppr (Ext x)  = text "?" <> text (show x)
+
+instance Pretty ExtShape where
+  ppr = brackets . commasep . map ppr . extShapeDims
+
 instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
@@ -70,9 +80,7 @@ instance Pretty (TypeBase Shape) where
 instance Pretty (TypeBase ExtShape) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
-    where f (Free e) s = brackets $ s <> comma <> ppr e
-          f (Ext x)  s = brackets $ s <> comma <>
-                         text "?" <> text (show x)
+    where f dim s = brackets $ s <> comma <> ppr dim
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
 instance Pretty (TypeBase Rank) where

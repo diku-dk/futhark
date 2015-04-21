@@ -360,7 +360,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
                        (ExtRetType flatex_tps)
   (flatrestps, extra_sizes) <- instantiateShapes' flatex_tps
   callresidents <- mapM (newIdent "tmpres") flatrestps
-  let callpat = patternFromIdents (extra_sizes ++ callresidents)
+  let callpat = patternFromIdents extra_sizes callresidents
   let call_bnd = Let callpat () call_exp
 
   (realrestps, _) <- instantiateShapes' rettypes
@@ -398,7 +398,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
       data_ident <- getDataArray1 vn
       let [data_size] = arrayDims $ identType data_ident
       let data_exp = PrimOp $ Reshape [] [data_size] vn
-      let data_bnd = Let (Pattern [PatElem data_ident BindVar()]) () data_exp
+      let data_bnd = Let (Pattern [] [PatElem data_ident BindVar()]) () data_exp
       return $ mult_bnds ++ rep_bnds ++ [data_bnd]
       where
         -- | Folding function which creates a binding for
@@ -412,14 +412,14 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
                   Var vn ->
                     let i = Ident vn (Basic Int)
                         i_exp = PrimOp $ BinOp Times outer inner Int
-                        i_bnd = Let (Pattern [PatElem i BindVar ()]) () i_exp
+                        i_bnd = Let (Pattern [] [PatElem i BindVar ()]) () i_exp
                     in Just i_bnd
           return (merged, catMaybes [merge_bnd] : res)
 
         makeRep res (content, (seg, Regular)) = do
           let [count] = arrayDims $ identType seg
           let rep_exp = PrimOp $ Replicate count content
-          let bnd = Let (Pattern [PatElem seg BindVar()]) () rep_exp
+          let bnd = Let (Pattern [] [PatElem seg BindVar()]) () rep_exp
           return $ bnd : res
         makeRep _ _ =
           flatError $ Error "transformMain, makeRep: SegDescriptor was not Regular"
@@ -432,14 +432,14 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
       error "transformMain fromFlat: callresidents_grouped gave an empty list"
     fromFlat res [tmp] = do
       let e = PrimOp $ SubExp $ Var $ identName tmp
-      return [Let (Pattern [PatElem res BindVar ()]) () e]
+      return [Let (Pattern [] [PatElem res BindVar ()]) () e]
     fromFlat res tmps = do
       let (segs,dataarr) = (\(d:sgs) -> (reverse sgs, d)) $ reverse tmps
       let [datasize] = arrayDims $ identType dataarr
 
       cmp_i <- newIdent "cmp" (Basic Bool)
       let cmp_exp = PrimOp $ BinOp Equal datasize (Constant $ IntVal 0) Bool
-      let cmp_bnd = Let (Pattern [PatElem cmp_i BindVar ()]) () cmp_exp
+      let cmp_bnd = Let (Pattern [] [PatElem cmp_i BindVar ()]) () cmp_exp
 
       let resdimidents = mapMaybe (\case
                                       Var vn -> Just $ Ident vn (Basic Int)
@@ -455,10 +455,10 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
                    truebody
                    falsebody
                    (replicate (length resdimidents) (Basic Int))
-      let if_bnd = Let (patternFromIdents resdimidents) () if_exp
+      let if_bnd = Let (patternFromIdents [] resdimidents) () if_exp
 
       let reshape_e = PrimOp $ Reshape [] (arrayDims $ identType res) (identName dataarr)
-      let reshape_bnd = Let (Pattern [PatElem res BindVar ()]) () reshape_e
+      let reshape_bnd = Let (Pattern [] [PatElem res BindVar ()]) () reshape_e
 
       return [cmp_bnd, if_bnd, reshape_bnd]
       where
@@ -468,7 +468,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
         createFalseBody (seg0:segs) = do
           tmpids <- mapM (\_ -> newIdent "tmp" (Basic Int)) (seg0:segs)
           let bnds :: [Binding] =
-                zipWith (\i seg -> Let (Pattern [PatElem i BindVar()]) ()
+                zipWith (\i seg -> Let (Pattern [] [PatElem i BindVar()]) ()
                                        (PrimOp $ Index [] (identName seg)
                                                        [Constant $ IntVal 0])
                         )  tmpids (seg0:segs)
@@ -518,7 +518,7 @@ transformBody (Body () bindings (Result ses)) = do
 -- | Transform a function to use parallel operations.
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
 transformBinding :: Binding -> FlatM [Binding]
-transformBinding topBnd@(Let (Pattern pats) ()
+transformBinding topBnd@(Let (Pattern [] pats) ()
                              (LoopOp (Map certs lambda arrs))) = do
   -- Checking if a Variable use is safe requires knowledge of the type
   -- Consider writing isSafeToMap??? differently. TODO
@@ -617,7 +617,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
                 return $ Just (Ident arg val_tp, identName val)
               Nothing -> return Nothing
 
-      pat <- liftM (Pattern . map (\i -> PatElem i BindVar () ))
+      pat <- liftM (Pattern [] . map (\i -> PatElem i BindVar () ))
              $ forM toreturn_vns $ \sr -> do
                  iarr <- wrapInArrVName (mapSize mapInfo) sr
                  addMapLetArray sr iarr
@@ -636,7 +636,8 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
       let theMapExp = LoopOp $ Map certs wrappedlambda argarrs
       return $ Let pat () theMapExp
-transformBinding (Let (Pattern [PatElem resident BindVar ()]) ()
+
+transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
                        (PrimOp (Reshape certs (dim0:dims) reshapearr))) = do
   -- FIXME: For the case where reshape is only to check map sizes,
   -- where will those certifications go once we remove this reshape?
@@ -671,7 +672,7 @@ transformBinding (Let (Pattern [PatElem resident BindVar ()]) ()
   addDataArray (identName resident) newdata_ident
 
   let reshape_exp' = PrimOp $ Reshape certs [newdata_size] data_identvn
-  let reshape_bnd = Let (Pattern [PatElem newdata_ident BindVar ()]) () reshape_exp'
+  let reshape_bnd = Let (Pattern [] [PatElem newdata_ident BindVar ()]) () reshape_exp'
   return $ extra_bnds ++ [reshape_bnd]
   where
     makeMult (_, res) (_, Just oldmerged) = return (oldmerged, res)
@@ -683,13 +684,13 @@ transformBinding (Let (Pattern [PatElem resident BindVar ()]) ()
               Var vn ->
                 let i = Ident vn (Basic Int)
                     i_exp = PrimOp $ BinOp Times outer inner Int
-                    i_bnd = Let (Pattern [PatElem i BindVar ()]) () i_exp
+                    i_bnd = Let (Pattern [] [PatElem i BindVar ()]) () i_exp
                 in Just i_bnd
       return (merged, catMaybes [merge_bnd] : res)
 
 
 
-transformBinding bnd@(Let (Pattern pats) () _) = do
+transformBinding bnd@(Let (Pattern _ pats) () _) = do
   -- FIXME: magically construct segment descriptors as needed
   mapM_ addTypePatElem pats
   return [bnd]
@@ -732,7 +733,7 @@ pullOutOfMap :: MapInfo -> ([VName], [VName]) -> Binding -> FlatM [Binding]
 -- covered by other optimisations
 pullOutOfMap _ (_,[]) _ = return []
 pullOutOfMap mapInfo _
-                  (Let (Pattern [PatElem resident BindVar ()]) ()
+                  (Let (Pattern [] [PatElem resident BindVar ()]) ()
                        (PrimOp (Reshape certs dimses reshapearr))) = do
   Just target <- findTarget mapInfo reshapearr
 
@@ -757,14 +758,14 @@ pullOutOfMap mapInfo _
 
   let reshape_exp = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
                                      (mapSize mapInfo:dimses) $ identName target
-  let reshape_bnd = Let (Pattern [PatElem newresident BindVar ()]) () reshape_exp
+  let reshape_bnd = Let (Pattern [] [PatElem newresident BindVar ()]) () reshape_exp
   -- TODO: this trick probably only works for regular arrays
   -- ... unless we specifically create the segment descriptors
   -- beforehand, then it will probably work
   transformBinding reshape_bnd
 
 pullOutOfMap mapInfo (argsneeded, _)
-                     (Let (Pattern pats) ()
+                     (Let (Pattern [] pats) ()
                           (LoopOp (Map certs lambda arrs))) = do
   -- For all argNeeded that are not already being mapped over:
   --
@@ -861,7 +862,7 @@ pullOutOfMap mapInfo (argsneeded, _)
   -- FIXME: Should call transformBinding on inner before calling unflattenRes
   pats' <- mapM unflattenRes pats
 
-  let mapBnd' = Let (Pattern pats') ()
+  let mapBnd' = Let (Pattern [] pats') ()
                     (LoopOp (Map (certs ++ mapCerts mapInfo)
                                  lambda'
                                  (map identName newInnerIdents)))
@@ -903,7 +904,7 @@ pullOutOfMap mapInfo (argsneeded, _)
                           --  ^ TODO: stupid exsitensial types :(
 
 
-      let distBnd = Let (Pattern [PatElem distIdent BindVar ()]) () distExp
+      let distBnd = Let (Pattern [] [PatElem distIdent BindVar ()]) () distExp
 
       return (distBnd, distIdent)
 
@@ -934,7 +935,7 @@ pullOutOfMap mapInfo (argsneeded, _)
     unflattenRes pe = flatError $ Error $ "unflattenRes applied to " ++ pretty pe
 
 pullOutOfMap mapInfo _
-                     topBnd@(Let (Pattern pats) letlore
+                     topBnd@(Let (Pattern [] pats) letlore
                                  (LoopOp (Reduce certs lambda args))) = do
   ok <- isSafeToMapBody $ lambdaBody lambda
   if not ok
@@ -964,12 +965,12 @@ pullOutOfMap mapInfo _
                   _ -> flatError $ Error $ "pullOutOfMap Reduce: argument array was not two dimensional"
                                          ++ pretty topBnd
 
-    let redBnd' = Let (Pattern pats') letlore
+    let redBnd' = Let (Pattern [] pats') letlore
                       (SegOp (SegReduce certs lambda flatargs segdescp))
 
     return [redBnd']
 
-pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
+pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
                             (PrimOp (Iota subexp))) = do
   segdescp <- case subexp of
                 Constant _ ->
@@ -984,7 +985,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
         sumident <- newIdent "segiota_sum" (Basic Int)
         addTypeIdent sumident
         sumexp <- reducePlus (identName segdescp)
-        let sumbnd = Let (Pattern [PatElem sumident BindVar ()]) () sumexp
+        let sumbnd = Let (Pattern [] [PatElem sumident BindVar ()]) () sumexp
 
         addFlattenedDims (mapSize mapinfo, subexp) (Var $ identName sumident)
         addSegDescriptors [mapSize mapinfo, subexp] [(segdescp, Irregular)]
@@ -995,11 +996,11 @@ pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
 
   repident <- newIdent "segiota_rep" tmptp
   let repexp = PrimOp $ Replicate segsum (Constant $ IntVal 1)
-  let repbnd = Let (Pattern [PatElem repident BindVar ()]) () repexp
+  let repbnd = Let (Pattern [] [PatElem repident BindVar ()]) () repexp
 
   scanident <- newIdent "segiota_segscan" tmptp
   scanexp <- segscanPlus (identName repident) (identName segdescp)
-  let scanbnd = Let (Pattern [PatElem scanident BindVar ()]) () scanexp
+  let scanbnd = Let (Pattern [] [PatElem scanident BindVar ()]) () scanexp
 
   resarr <- newIdent (baseString (identName resident) ++ "_arr")
                      (Array Int (Shape [mapSize mapinfo, subexp]) Nonunique)
@@ -1009,15 +1010,15 @@ pullOutOfMap mapinfo _ (Let (Pattern [PatElem resident BindVar ()]) ()
                      --  ^ TODO: I guess Observe is okay for now
                      (basicRetType Int)
                      --  ^ TODO: stupid exsitensial types :(
-  let stepupbnd = Let (Pattern [PatElem resarr BindVar ()]) () stepupexp
+  let stepupbnd = Let (Pattern [] [PatElem resarr BindVar ()]) () stepupexp
 
   addMapLetArray (identName resident) resarr
   addTypeIdent resarr
 
   return $ sumbnd ++ [repbnd, scanbnd, stepupbnd]
 
-pullOutOfMap mapinfo _ (Let (Pattern [PatElem ident1 BindVar _]) _
-                      (PrimOp (SubExp (Var name)))) = do
+pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem ident1 BindVar _]) _
+                        (PrimOp (SubExp (Var name)))) = do
   target <- findTarget1 mapinfo name
   addMapLetArray (identName ident1) target
   addDataArray (identName ident1) =<< getDataArray1 (identName target)
@@ -1090,7 +1091,7 @@ replicateIdent :: SubExp -> Ident -> FlatM (Binding, Ident)
 replicateIdent sz i = do
   arrRes <- wrapInArrIdent sz i
   let repExp = PrimOp $ Replicate sz $ Var $ identName i
-      repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
+      repBnd = Let (Pattern [] [PatElem arrRes BindVar ()]) () repExp
   return (repBnd, arrRes)
 
 wrapInArrVName :: SubExp -> VName -> FlatM Ident
@@ -1155,6 +1156,7 @@ reducePlus arr = do
 
 --------------------------------------------------------------------------------
 
-patternFromIdents :: [Ident] -> Pattern
-patternFromIdents idents =
-  Pattern $ map (\i -> PatElem i BindVar ()) idents
+patternFromIdents :: [Ident] -> [Ident] -> Pattern
+patternFromIdents ctx vals =
+  Pattern (map addBindVar ctx) (map addBindVar vals)
+  where addBindVar i = PatElem i BindVar ()

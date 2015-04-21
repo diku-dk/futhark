@@ -433,6 +433,7 @@ certificates (Reduce  cs _ _    ) = cs
 certificates (Scan    cs _ _    ) = cs
 certificates (Redomap cs _ _ _ _) = cs
 
+-- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
 typeOf (Map _ lam inps) =
   mapType lam $ map inputType inps

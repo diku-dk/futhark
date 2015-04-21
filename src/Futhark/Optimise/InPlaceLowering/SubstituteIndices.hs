@@ -63,8 +63,9 @@ substituteIndicesInPattern :: MonadBinder m =>
                            -> Pattern (Lore m)
                            -> m (IndexSubstitutions, Pattern (Lore m))
 substituteIndicesInPattern substs pat = do
-  (substs', patElems) <- mapAccumLM sub substs $ patternElements pat
-  return (substs', Pattern patElems)
+  (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
+  (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
+  return (substs'', Pattern context values)
   where sub substs' (PatElem ident (BindInPlace cs src is) attr)
           | Just (cs2, src2, is2) <- lookup src substs =
             let ident' = ident { identType = identType src2 }

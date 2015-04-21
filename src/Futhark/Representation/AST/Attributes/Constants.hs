@@ -1,3 +1,4 @@
+-- | Possibly convenient facilities for constructing constants.
 module Futhark.Representation.AST.Attributes.Constants
        (
          IsValue (..)

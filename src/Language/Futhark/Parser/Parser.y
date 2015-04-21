@@ -1,4 +1,5 @@
 {
+-- | Futhark parser written with Happy.
 module Language.Futhark.Parser.Parser
   ( prog
   , expression
@@ -31,7 +32,7 @@ import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
-import Data.Loc hiding (L, unLoc) -- Lexer has replacements.
+import Data.Loc hiding (L) -- Lexer has replacements.
 
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes
@@ -160,7 +161,7 @@ import Language.Futhark.Parser.Lexer
 %%
 
 Prog :: { UncheckedProg }
-     :   FunDecs {- EOF -}   { Prog $1 }
+     :   FunDecs { Prog $1 }
 ;
 
 -- Note that this production does not include Minus.

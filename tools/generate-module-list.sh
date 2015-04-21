@@ -6,9 +6,9 @@
 # under the assumption that these don't change much.  Run it from the
 # root of the directory.
 
-find src/ -type f \
+find ${1:-src} -type f \
     | grep -v '#' \
     | grep -v '~' \
     | egrep -v 'Language.Futhark.Parser.(Parser|Lexer|Tokens)|futhark|futharki' \
-    | sed -e s/.hs$// -e s_src/__ -e s_/_._g \
+    | sed -e s/.hs$// -e s_${1:-src}/__ -e s_/_._g \
     | sort

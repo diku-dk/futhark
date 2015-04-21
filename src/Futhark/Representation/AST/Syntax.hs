@@ -77,16 +77,18 @@ import Futhark.Representation.AST.Syntax.Core
 type PatElem lore = PatElemT (Lore.LetBound lore)
 
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatternT lore =
-  Pattern { patternElements :: [PatElem lore] }
+data PatternT lore =
+  Pattern { patternContextElements :: [PatElem lore]
+          , patternValueElements   :: [PatElem lore]
+          }
 
 deriving instance Lore lore => Ord (PatternT lore)
 deriving instance Lore lore => Show (PatternT lore)
 deriving instance Lore lore => Eq (PatternT lore)
 
 instance Monoid (PatternT lore) where
-  mempty = Pattern []
-  Pattern l1 `mappend` Pattern l2 = Pattern $ l1 ++ l2
+  mempty = Pattern [] []
+  Pattern cs1 vs1 `mappend` Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 -- | A type alias for namespace control.
 type Pattern = PatternT

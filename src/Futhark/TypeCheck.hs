@@ -697,8 +697,12 @@ checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
   mapM_ (requireI [Basic Cert]) cs
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
-  let success = all (== stripArray 1 arr1t) $
-                    map (stripArray 1) arr2ts
+  -- The arguments to concat need not have the same uniqueness, so set
+  -- it all to nonunique before comparing.
+  let arr1t' = setUniqueness arr1t Nonunique
+      arr2ts' = map (`setUniqueness` Nonunique) arr2ts
+      success = all (== stripArray 1 arr1t') $
+                map (stripArray 1) arr2ts'
   unless success $
     bad $ TypeError noLoc $
     "Types of arguments to concat do not match.  Got " ++

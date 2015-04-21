@@ -21,6 +21,8 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.Monoid
 
+import Prelude
+
 import Text.PrettyPrint.Mainland hiding (pretty)
 
 import Futhark.Representation.AST
@@ -48,7 +50,7 @@ data RelOp0 = LTH0
 --
 --  (iii) a logical expression: e1 and (not (a+b>5)
 data ScalExp= Val     BasicValue
-            | Id      VName
+            | Id      VName BasicType
             | SNeg    ScalExp
             | SNot    ScalExp
             | SPlus   ScalExp ScalExp
@@ -64,7 +66,7 @@ data ScalExp= Val     BasicValue
 
 instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ BasicVal val
-  pprPrec _ (Id v) = ppr v
+  pprPrec _ (Id v _) = ppr v
   pprPrec _ (SNeg e) = text "-" <> pprPrec 9 e
   pprPrec _ (SNot e) = text "not" <+> pprPrec 9 e
   pprPrec prec (SPlus x y) = ppBinOp prec "+" 4 4 x y
@@ -88,7 +90,7 @@ ppBinOp p bop precedence rprecedence x y =
 
 instance Substitute ScalExp where
   substituteNames subst e =
-    case e of Id v -> Id $ substituteNames subst v
+    case e of Id v t -> Id (substituteNames subst v) t
               Val v -> Val v
               SNeg x -> SNeg $ substituteNames subst x
               SNot x -> SNot $ substituteNames subst x
@@ -107,68 +109,89 @@ instance Rename ScalExp where
     substs <- renamerSubstitutions
     return $ substituteNames substs se
 
-scalExpType :: HasTypeEnv f => ScalExp -> f BasicType
-scalExpType (Val ( IntVal _) ) = pure Int
-scalExpType (Val (RealVal _) ) = pure Real
-scalExpType (Val ( LogVal _) ) = pure Bool
+scalExpType :: ScalExp -> BasicType
+scalExpType (Val ( IntVal _) ) = Int
+scalExpType (Val (RealVal _) ) = Real
+scalExpType (Val ( LogVal _) ) = Bool
 scalExpType (Val val) =
   error $ "scalExpType: scalar exp cannot have type " ++
           pretty (basicValueType val) ++ "."
-scalExpType (Id idd) =
-  withType <$> lookupType idd
-  where withType (Basic bt) = bt
-        withType t          = error $ "scalExpType: var " ++ pretty idd ++
-                              " in scalar exp cannot have type " ++
-                              pretty t ++ "."
+scalExpType (Id _ t) =
+  t
 scalExpType (SNeg  e) = scalExpType e
-scalExpType (SNot  _) = pure Bool
+scalExpType (SNot  _) = Bool
 scalExpType (SPlus   e _) = scalExpType e
 scalExpType (SMinus  e _) = scalExpType e
 scalExpType (STimes  e _) = scalExpType e
 scalExpType (SDivide e _) = scalExpType e
 scalExpType (SPow    e _) = scalExpType e
-scalExpType (SLogAnd _ _) = pure Bool
-scalExpType (SLogOr  _ _) = pure Bool
-scalExpType (RelExp  _ _) = pure Bool
-scalExpType (MaxMin _ []) = pure Int
+scalExpType (SLogAnd _ _) = Bool
+scalExpType (SLogOr  _ _) = Bool
+scalExpType (RelExp  _ _) = Bool
+scalExpType (MaxMin _ []) = Int
 scalExpType (MaxMin _ (e:_)) = scalExpType e
 
 -- | A function that checks whether a variable name corresponds to a
 -- scalar expression.
 type LookupVar = VName -> Maybe ScalExp
 
--- | Non-recursively convert a subexpression to a 'ScalExp'.
-subExpToScalExp :: SubExp -> ScalExp
-subExpToScalExp (Var v)        = Id v
-subExpToScalExp (Constant val) = Val val
+-- | Non-recursively convert a subexpression to a 'ScalExp'.  The
+-- (scalar) type of the subexpression must be given in advance.
+subExpToScalExp :: SubExp -> BasicType -> ScalExp
+subExpToScalExp (Var v) t        = Id v t
+subExpToScalExp (Constant val) _ = Val val
 
-toScalExp :: LookupVar -> Exp lore -> Maybe ScalExp
-toScalExp look (PrimOp (SubExp se))    =
-  toScalExp' look se
+toScalExp :: (HasTypeEnv f, Monad f) =>
+             LookupVar -> Exp lore -> f (Maybe ScalExp)
+toScalExp look (PrimOp (SubExp (Var v)))
+  | Just se <- look v =
+    return $ Just se
+  | otherwise = do
+    t <- lookupType v
+    case t of
+      Basic bt -> return $ Just $ Id v bt
+      _        -> return Nothing
+toScalExp _ (PrimOp (SubExp (Constant val))) =
+  return $ Just $ Val val
 toScalExp look (PrimOp (BinOp Less x y _)) =
-  RelExp LTH0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
+  Just <$> RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (BinOp Leq x y _)) =
-  RelExp LEQ0 <$> (sminus <$> toScalExp' look x <*> toScalExp' look y)
+  Just <$> RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (BinOp Equal x y Int)) = do
-  x' <- toScalExp' look x
-  y' <- toScalExp' look y
-  return $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
+  x' <- subExpToScalExp' look x
+  y' <- subExpToScalExp' look y
+  return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
 toScalExp look (PrimOp (Negate e)) =
-  SNeg <$> toScalExp' look e
+  Just <$> SNeg <$> subExpToScalExp' look e
 toScalExp look (PrimOp (Not e)) =
-  SNot <$> toScalExp' look e
+  Just <$> SNot <$> subExpToScalExp' look e
 toScalExp look (PrimOp (BinOp bop x y t))
-  | t `elem` [Int, Bool] = -- XXX: Only integers and booleans, OK?
-  binOpScalExp bop <*> toScalExp' look x <*> toScalExp' look y
+  | t `elem` [Int, Bool],
+    Just f <- binOpScalExp bop = -- XXX: Only integers and booleans, OK?
+  Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 
-toScalExp _ _ = Nothing
+toScalExp _ _ = return Nothing
+
+subExpToScalExp' :: HasTypeEnv f => LookupVar -> SubExp -> f ScalExp
+subExpToScalExp' look (Var v)
+  | Just se <- look v =
+    pure se
+  | otherwise =
+    withType <$> lookupType v
+    where withType (Basic t) =
+            subExpToScalExp (Var v) t
+          withType t =
+            error $ "Cannot create ScalExp from variable " ++ pretty v ++
+            " of type " ++ pretty t
+subExpToScalExp' _ (Constant val) =
+  pure $ Val val
 
 -- | If you have a scalar expression that has been created with
 -- incomplete symbol table information, you can use this function to
 -- grow its 'Id' leaves.
 expandScalExp :: LookupVar -> ScalExp -> ScalExp
 expandScalExp _ (Val v) = Val v
-expandScalExp look (Id v) = fromMaybe (Id v) $ look v
+expandScalExp look (Id v t) = fromMaybe (Id v t) $ look v
 expandScalExp look (SNeg se) = SNeg $ expandScalExp look se
 expandScalExp look (SNot se) = SNot $ expandScalExp look se
 expandScalExp look (MaxMin b ses) = MaxMin b $ map (expandScalExp look) ses
@@ -211,12 +234,6 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
                    , (LogOr, SLogOr)
                    ]
 
-toScalExp' :: LookupVar -> SubExp -> Maybe ScalExp
-toScalExp' look (Var v) =
-  look v <|> Just (Id v)
-toScalExp' _ (Constant val) =
-  Just $ Val val
-
 fromScalExp :: MonadBinder m =>
                ScalExp
             -> m (Exp (Lore m), [Binding (Lore m)])
@@ -226,7 +243,7 @@ fromScalExp' :: MonadBinder m => ScalExp
              -> m (Exp (Lore m))
 fromScalExp' = convert
   where convert (Val val) = return $ PrimOp $ SubExp $ Constant val
-        convert (Id v)    = return $ PrimOp $ SubExp $ Var v
+        convert (Id v _)  = return $ PrimOp $ SubExp $ Var v
         convert (SNeg se) = eNegate $ convert se
         convert (SNot se) = eNot $ convert se
         convert (SPlus x y) = arithBinOp Plus x y
@@ -236,8 +253,8 @@ fromScalExp' = convert
         convert (SPow x y) = arithBinOp Pow x y
         convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) Bool
         convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) Bool
-        convert (RelExp LTH0 x) = eBinOp Less (convert x) (zero <$> scalExpType x) Bool
-        convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (zero <$> scalExpType x) Bool
+        convert (RelExp LTH0 x) = eBinOp Less (convert x) (pure $ zero $ scalExpType x) Bool
+        convert (RelExp LEQ0 x) = eBinOp Leq (convert x) (pure $ zero $ scalExpType x) Bool
         convert (MaxMin _ []) = fail "ScalExp.fromScalExp: MaxMin empty list"
         convert (MaxMin isMin (e:es)) = do
           e'  <- convert e
@@ -245,7 +262,7 @@ fromScalExp' = convert
           foldM (select isMin) e' es'
 
         arithBinOp bop x y =
-          eBinOp bop (convert x) (convert y) =<< scalExpType x
+          eBinOp bop (convert x) (convert y) $ scalExpType x
 
         select isMin cur next =
           let cmp = eBinOp Less (pure cur) (pure next) Bool
@@ -259,7 +276,7 @@ fromScalExp' = convert
 
 instance FreeIn ScalExp where
   freeIn (Val   _) = mempty
-  freeIn (Id    i) = HS.singleton i
+  freeIn (Id i _)  = HS.singleton i
   freeIn (SNeg  e) = freeIn e
   freeIn (SNot  e) = freeIn e
   freeIn (SPlus x y)   = freeIn x <> freeIn y

@@ -39,11 +39,11 @@ else
 fi
 
 if [ "$onlytypecheck" = true ]; then
-    $testdir/Runtests.hs -t $tests
+    futhark-test -t $tests
 elif [ "$onlycompile" = true ]; then
-    $testdir/Runtests.hs -c $tests
+    futhark-test -c $tests
 elif [ "$onlyinterpret" = true ]; then
-    $testdir/Runtests.hs -i $tests
+    futhark-test -i $tests
 else
-    $testdir/Runtests.hs $tests
+    futhark-test $tests
 fi
