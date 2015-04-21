@@ -172,9 +172,10 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form bo
       mergeParamUsed = (`elem` ctxrefs)
       keepImpl (bindee,ident) = bindeeUsed bindee || mergeParamUsed ident
       implpat' = filter keepImpl implpat
-      pat' = map fst $ implpat'++explpat'
+      implpat'' = map fst implpat'
+      explpat'' = map fst explpat'
       respat' = map snd explpat'
-  in letBind_ (Pattern [] pat') $ LoopOp $ DoLoop respat' merge form body
+  in letBind_ (Pattern implpat'' explpat'') $ LoopOp $ DoLoop respat' merge form body
   where -- | Check whether the variable binding is used afterwards OR
         -- is responsible for some used existential part.
         keep bindee =
