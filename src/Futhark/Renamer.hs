@@ -175,7 +175,7 @@ instance Rename attr => Rename (FParamT attr) where
   rename (FParam ident attr) = FParam <$> rename ident <*> rename attr
 
 instance Renameable lore => Rename (Pattern lore) where
-  rename (Pattern l) = Pattern <$> rename l
+  rename (Pattern context values) = Pattern <$> rename context <*> rename values
 
 instance Rename attr => Rename (PatElemT attr) where
   rename (PatElem ident bindage attr) =

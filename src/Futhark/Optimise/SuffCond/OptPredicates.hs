@@ -142,7 +142,7 @@ analyseBody :: ST.SymbolTable Basic -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body _ [] _) =
   sctable
 
-analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnds) res) =
+analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [] [patElem]) _ e):bnds) res) =
   let vtable' = ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
@@ -287,7 +287,7 @@ instance MonadFreshNames m => MonadBinder (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
+        pat' = Pattern [] [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
     return $ mkWiseLetBinding pat' explore e
 
   mkBodyM bnds res =
@@ -339,13 +339,13 @@ instance MonadFreshNames m =>
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
         suffe <- generating Sufficient $
                  Simplify.simplifyExp =<< renameExp (removeExpWisdom e)
-        let pat' = pat { patternElements =
-                            zipWith tagPatElem (patternElements pat) $
+        let pat' = pat { patternValueElements =
+                            zipWith tagPatElem (patternValueElements pat) $
                             map identName vs
                        }
             tagPatElem patElem v =
               patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
-            suffpat = Pattern [ S.PatElem v BindVar Nothing | v <- vs ]
+            suffpat = Pattern [] [ S.PatElem v BindVar Nothing | v <- vs ]
         makeSufficientBinding =<< mkLetM (addWisdomToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 

@@ -65,7 +65,7 @@ cseInBinding (Let pat eattr e) m = do
         local (addNameSubst pat' subpat) $ do
           CSEState (_, nsubsts') <- ask
           let lets =
-                [ Let (Pattern [patElem']) eattr $ PrimOp $ SubExp $ Var v
+                [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var v
                 | (patElem,v) <- zip (patternElements pat') $ patternNames subpat,
                   let patElem' = setPatElemName (substituteNames nsubsts' patElem) $
                                  patElemName patElem

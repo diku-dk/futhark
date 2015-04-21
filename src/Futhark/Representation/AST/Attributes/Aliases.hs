@@ -35,7 +35,7 @@ subExpAliases (Var v)       = vnameAliases v
 
 primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
-primOpAliases (ArrayLit es _) = map subExpAliases es
+primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
 primOpAliases (BinOp {}) = [mempty]
 primOpAliases (Not {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
@@ -74,8 +74,8 @@ loopOpAliases (Reduce _ f _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Scan _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Redomap _ outerfun _ _ _) =
-  map (const mempty) $ lambdaReturnType outerfun
+loopOpAliases (Redomap _ _ innerfun _ _) =
+  map (const mempty) $ lambdaReturnType innerfun
 loopOpAliases (Stream _ _ _ lam) =
   bodyAliases $ extLambdaBody lam
 loopOpAliases (ConcatMap {}) =
@@ -139,6 +139,6 @@ consumedInExp pat e =
 consumedInPattern :: Pattern lore -> Names
 consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
-           patternElements pat)
+           patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
         consumedInBindage (BindInPlace _ src _) = vnameAliases src

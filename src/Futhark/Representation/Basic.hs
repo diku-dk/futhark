@@ -121,30 +121,32 @@ instance Simplifiable Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()
-  mkLet pat =
-    AST.Let (basicPattern pat) ()
+  mkLet context values =
+    AST.Let (basicPattern context values) ()
   mkLetNames names e = do
     et <- expExtType e
     (ts, shapes) <- instantiateShapes' et
     let shapeElems = [ AST.PatElem shapeident BindVar ()
-                  | shapeident <- shapes
-                  ]
+                     | shapeident <- shapes
+                     ]
         mkValElem (name, BindVar) t =
           return $ AST.PatElem (Ident name t) BindVar ()
         mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
           srct <- lookupType src
           return $ AST.PatElem (Ident name srct) bindage ()
     valElems <- zipWithM mkValElem names ts
-    return $ AST.Let (AST.Pattern $ shapeElems++valElems) () e
+    return $ AST.Let (AST.Pattern shapeElems valElems) () e
 
 instance PrettyLore Basic where
 
-basicPattern :: [(Ident,Bindage)] -> Pattern
-basicPattern idents =
-  AST.Pattern [ AST.PatElem ident bindage () | (ident,bindage) <- idents ]
+basicPattern :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Pattern
+basicPattern context values =
+  AST.Pattern (map patElem context) (map patElem values)
+  where patElem (ident,bindage) = AST.PatElem ident bindage ()
 
-basicPattern' :: [Ident] -> Pattern
-basicPattern' = basicPattern . map addBindVar
+basicPattern' :: [Ident] -> [Ident] -> Pattern
+basicPattern' context values =
+  basicPattern (map addBindVar context) (map addBindVar values)
     where addBindVar name = (name, BindVar)
 
 removeLore :: Lore.Lore lore => Rephraser lore Basic

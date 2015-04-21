@@ -602,8 +602,8 @@ fuseInLambda (Lambda params body rtp) = do
   return $ Lambda params body' rtp
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
-replaceSOAC (Pattern []) _ body = return body
-replaceSOAC pat@(Pattern (patElem : _)) soac body = do
+replaceSOAC (Pattern _ []) _ body = return body
+replaceSOAC pat@(Pattern [] (patElem : _)) soac body = do
   fres  <- asks fusedRes
   let pat_nm = patElemName patElem
       names  = patternIdents pat
@@ -611,7 +611,7 @@ replaceSOAC pat@(Pattern (patElem : _)) soac body = do
     Nothing  -> do
       (e,bnds) <- runBinder $ SOAC.toExp soac
       e'    <- fuseInExp e
-      return $ insertBindings bnds $ mkLet' names e' `insertBinding` body
+      return $ insertBindings bnds $ mkLet' [] names e' `insertBinding` body
     Just knm ->
       case HM.lookup knm (kernels fres) of
         Nothing  -> badFusionGM $ Error

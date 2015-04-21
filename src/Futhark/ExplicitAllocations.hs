@@ -159,8 +159,8 @@ allocsForBinding :: Allocator m =>
                  -> m (Binding, [AllocBinding])
 allocsForBinding sizeidents validents e = do
   rts <- expReturns lookupSummary' e
-  (patElems, postbnds) <- allocsForPattern sizeidents validents rts
-  return (Let (Pattern patElems) () e,
+  (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts
+  return (Let (Pattern ctxElems valElems) () e,
           postbnds)
 
 patternWithAllocations :: Allocator m =>
@@ -183,7 +183,7 @@ patternWithAllocations names e = do
 
 allocsForPattern :: Allocator m =>
                     [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
-                 -> m ([PatElem], [AllocBinding])
+                 -> m ([PatElem], [PatElem], [AllocBinding])
 allocsForPattern sizeidents validents rts = do
   let sizes' = [ PatElem size BindVar Scalar | size <- sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
@@ -230,7 +230,8 @@ allocsForPattern sizeidents validents rts = do
               [PatElem mem     BindVar Scalar],
               [])
         return $ PatElem ident' bindage lore
-  return (memsizes <> mems <> sizes' <> vals,
+  return (memsizes <> mems <> sizes',
+          vals,
           postbnds)
   where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
@@ -340,7 +341,7 @@ allocLinearArray s se = do
   t <- subExpType se
   (size, mem) <- allocForArray t
   v' <- newIdent s t
-  let pat = Pattern [PatElem v' BindVar $ directIndexFunction mem t]
+  let pat = Pattern [] [PatElem v' BindVar $ directIndexFunction mem t]
   addBinding $ Let pat () $ PrimOp $ Copy se
   return (size, mem, Var $ identName v')
 
@@ -411,14 +412,11 @@ allocInBindings origbnds m = allocInBindings' origbnds []
           return bnds'
 
 allocInBinding :: In.Binding -> AllocM ()
-allocInBinding (Let pat _ e) = do
+allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
   e' <- allocInExp e
-  let (sizeidents, validents) =
-        splitAt (patternSize pat - expExtTypeSize e') $
-        patternElements pat
-      sizeidents' = map patElemIdent sizeidents
-      validents' = [ (ident, bindage) | PatElem ident bindage () <- validents ]
-  (bnd, bnds) <- allocsForBinding sizeidents' validents' e'
+  let sizeidents = map patElemIdent sizeElems
+      validents = [ (ident, bindage) | PatElem ident bindage () <- valElems ]
+  (bnd, bnds) <- allocsForBinding sizeidents validents e'
   addBinding bnd
   mapM_ bindAllocBinding bnds
 

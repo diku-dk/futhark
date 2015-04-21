@@ -14,11 +14,13 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patElemRequires
        , patElemLore
        , setPatElemLore
+       , patternElements
        , patternIdents
+       , patternContextIdents
+       , patternValueIdents
        , patternNames
        , patternTypes
        , patternSize
-       , splitPattern
          -- * Bindage
        , bindageRequires
        )
@@ -61,9 +63,21 @@ setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
 setPatElemLore (PatElem ident bindage _) =
   PatElem ident bindage
 
+-- | All pattern elements in the pattern - context first, then values.
+patternElements :: Pattern lore -> [PatElem lore]
+patternElements pat = patternContextElements pat ++ patternValueElements pat
+
 -- | Return a list of the 'Ident's bound by the 'Pattern'.
 patternIdents :: Pattern lore -> [Ident]
-patternIdents (Pattern xs) = map patElemIdent xs
+patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
+
+-- | Return a list of the context 'Ident's bound by the 'Pattern'.
+patternContextIdents :: Pattern lore -> [Ident]
+patternContextIdents = map patElemIdent . patternContextElements
+
+-- | Return a list of the value 'Ident's bound by the 'Pattern'.
+patternValueIdents :: Pattern lore -> [Ident]
+patternValueIdents = map patElemIdent . patternValueElements
 
 -- | Return a list of the 'Name's bound by the 'Pattern'.
 patternNames :: Pattern lore -> [VName]
@@ -75,9 +89,4 @@ patternTypes = map identType . patternIdents
 
 -- | Return the number of names bound by the 'Pattern'.
 patternSize :: Pattern lore -> Int
-patternSize = length . patternElements
-
--- | Split given pattern into a list of single-bindee patterns.  Do
--- not do this if the pattern has an existential context.
-splitPattern :: Pattern lore -> [Pattern lore]
-splitPattern = map (Pattern . (:[])) . patternElements
+patternSize (Pattern context values) = length context + length values

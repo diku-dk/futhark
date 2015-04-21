@@ -280,7 +280,7 @@ compileBindings :: [Binding] -> ImpM op a -> ImpM op a
 compileBindings []     m = m
 compileBindings (Let pat _ e:bs) m =
   declaringVars (patternElements pat) $ do
-    dest <- destinationFromPattern pat =<< expExtType e
+    dest <- destinationFromPattern pat
     compileExp dest e $ compileBindings bs m
 
 compileExp :: Destination -> Exp -> ImpM op a -> ImpM op a
@@ -756,11 +756,10 @@ lookupMemory name = do
     Just (MemVar entry) -> return entry
     _                   -> fail $ "Unknown memory block: " ++ textual name
 
-destinationFromPattern :: Pattern -> [ExtType] -> ImpM op Destination
-destinationFromPattern (Pattern patElems) ts =
+destinationFromPattern :: Pattern -> ImpM op Destination
+destinationFromPattern (Pattern ctxElems valElems) =
   Destination <$> mapM inspect valElems
-  where (ctxElems, valElems) = splitAt (length patElems - length ts) patElems
-        ctxNames = map patElemName ctxElems
+  where ctxNames = map patElemName ctxElems
         isctx = (`elem` ctxNames)
         inspect patElem = do
           let name = patElemName patElem

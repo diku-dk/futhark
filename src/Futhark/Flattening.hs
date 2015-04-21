@@ -132,7 +132,7 @@ transformBody (Body lore bindings (Result ses)) = do
 -- | Transform a function to use parallel operations.
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
 transformBinding :: Binding -> FlatM [Binding]
-transformBinding topBnd@(Let (Pattern pats) ()
+transformBinding topBnd@(Let (Pattern [] pats) ()
                              (LoopOp (Map certs lambda arrs))) = do
   idents <- mapM toIdent arrs
   okLamBnds <- mapM isSafeToMapBinding lamBnds
@@ -190,7 +190,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
                       (Var ident) -> Var <$> identName <$> getMapLetArray' ident
 
      let resBnds =
-           zipWith (\pe se -> Let (Pattern [pe]) () (PrimOp $ SubExp se))
+           zipWith (\pe se -> Let (Pattern [] [pe]) () (PrimOp $ SubExp se))
                    pats res'
 
      return $ loopinv_repbnds ++
@@ -216,7 +216,7 @@ transformBinding topBnd@(Let (Pattern pats) ()
               Just val -> return $ Just (arg, val)
               Nothing -> return Nothing
 
-      pat <- liftM (Pattern . map (\i -> PatElem i BindVar () ))
+      pat <- liftM (Pattern [] . map (\i -> PatElem i BindVar () ))
              $ forM shouldReturn $ \i -> do
                  iArr <- wrapInArrIdent (mapSize mapInfo) i
                  addMapLetArray (identName i) iArr
@@ -239,7 +239,7 @@ transformBinding bnd = return [bnd]
 
 letBoundIdentsInLambda :: Lambda -> [Ident]
 letBoundIdentsInLambda lambda =
-   concatMap (\(Let (Pattern pats) _ _) ->map (\(PatElem i _ _) -> i)  pats)
+   concatMap (patternIdents . bindingPattern)
              (bodyBindings $ lambdaBody lambda)
 
 --------------------------------------------------------------------------------
@@ -280,7 +280,7 @@ pullOutOfMap :: MapInfo -> ([Ident], [Ident]) -> Binding -> FlatM [Binding]
 -- covered by other optimisations
 pullOutOfMap _ (_,[]) _ = return []
 pullOutOfMap mapInfo _
-                  (Let (Pattern [PatElem resIdent BindVar patlore]) letlore
+                  (Let (Pattern [] [PatElem resIdent BindVar patlore]) letlore
                        (PrimOp (Reshape certs dimses reshapearr))) = do
   Just target <- findTarget mapInfo reshapearr
 
@@ -306,11 +306,11 @@ pullOutOfMap mapInfo _
   let newReshape = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
                                     (mapSize mapInfo:dimses) $ identName target
 
-  return [Let (Pattern [PatElem newResIdent BindVar patlore])
+  return [Let (Pattern [] [PatElem newResIdent BindVar patlore])
               letlore newReshape]
 
 pullOutOfMap mapInfo (argsNeeded, _)
-                     (Let (Pattern pats) letlore
+                     (Let (Pattern [] pats) letlore
                           (LoopOp (Map certs lambda arrs))) = do
   idents <- mapM toIdent arrs
   -- For all argNeeded that are not already being mapped over:
@@ -406,7 +406,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
                        , lambdaBody = lambdaBody'
                        }
 
-  let mapBnd' = Let (Pattern pats') letlore
+  let mapBnd' = Let (Pattern [] pats') letlore
                     (LoopOp (Map (certs ++ mapCerts mapInfo)
                                  lambda' $
                                  map identName newInnerIdents))
@@ -446,7 +446,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
                              (basicRetType Int) -- FIXME
 
 
-      let distBnd = Let (Pattern [PatElem distIdent BindVar ()]) () distExp
+      let distBnd = Let (Pattern [] [PatElem distIdent BindVar ()]) () distExp
 
       return (distBnd, distIdent)
 
@@ -469,13 +469,13 @@ pullOutOfMap mapInfo (argsNeeded, _)
                           --  ^ TODO: I guess Observe is okay for now
                           (basicRetType Int)
                           --  ^ TODO: stupid exsitensial types :(
-      let unflattenBnd = Let (Pattern [PatElem finalResArr BindVar ()])
+      let unflattenBnd = Let (Pattern [] [PatElem finalResArr BindVar ()])
                              () unflattenExp
 
       return (unflattenBnd, flatResArrPat)
     unflattenRes pe = flatError $ Error $ "unflattenRes applied to " ++ pretty pe
 
-pullOutOfMap mapinfo _ (Let (Pattern [PatElem ident1 BindVar _]) _
+pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem ident1 BindVar _]) _
                       (PrimOp (SubExp (Var name)))) = do
   ident2 <- toIdent name
   addMapLetArray (identName ident1) =<< findTarget1 mapinfo ident2
@@ -518,7 +518,7 @@ flattenArg mapInfo targInfo = do
                          --  ^ TODO: stupid exsitensial types :(
 
 
-  let flatBnd = Let (Pattern [PatElem flatIdent BindVar ()])
+  let flatBnd = Let (Pattern [] [PatElem flatIdent BindVar ()])
                     () flattenExp
 
   return (flatBnd, flatIdent)
@@ -552,7 +552,7 @@ replicateIdent :: SubExp -> Ident -> FlatM (Binding, Ident)
 replicateIdent sz i = do
   arrRes <- wrapInArrIdent sz i
   let repExp = PrimOp $ Replicate sz $ Var $ identName i
-      repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
+      repBnd = Let (Pattern [] [PatElem arrRes BindVar ()]) () repExp
 
   return (repBnd, arrRes)
 

@@ -446,8 +446,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                   (outersz:map Var arrexps++initacc++
                                    map (Var . identName) outarrinit))
                        (ForLoop loopind (Var $ identName loopcnt)) loopbody
-      loopbnd = mkLet ( map (\x->(x,BindVar)) $
-                        exszarres++indvarres++strmresacc++strmresarrl ) loopres
+      loopbnd = mkLet' exszarres (indvarres++strmresacc++strmresarrl) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
   --     IF exp to return one expression
   outarrrshpbnds <-
@@ -484,7 +483,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
       (pure thenbody)
       (pure elsebody)
   where myMkLet :: Exp -> Ident -> Binding
-        myMkLet e idd = mkLet [(idd,BindVar)] e
+        myMkLet e idd = mkLet' [] [idd] e
         exToNormShapeDim :: SubExp -> HM.HashMap VName SubExp -> ExtDimSize -> SubExp
         exToNormShapeDim d _ (Ext   _) = d
         exToNormShapeDim _ _ (Free c@(Constant _)) = c
@@ -598,7 +597,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                         bnew'' <- newIdent (textual (identName glboutid)++"_res") $
                                            Array (elemType oldbtp)
                                            (Shape $ Var (identName resallocid):olddims) Unique
-                        let patresbnd = mkLet ( map (\x->(x,BindVar)) [resallocid,bnew''] ) allocifexp
+                        let patresbnd = mkLet' [resallocid] [bnew''] allocifexp
                         addBinding patresbnd
                         return (Var $ identName k, bnew'', Just newszid, Just resallocid)
             glboutLid <- newIdent (textual (identName glboutid)++"_loop") $ identType glboutid'
