@@ -603,7 +603,7 @@ fuseInLambda (Lambda params body rtp) = do
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern _ []) _ body = return body
-replaceSOAC pat@(Pattern [] (patElem : _)) soac body = do
+replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
   fres  <- asks fusedRes
   let pat_nm = patElemName patElem
       names  = patternIdents pat
