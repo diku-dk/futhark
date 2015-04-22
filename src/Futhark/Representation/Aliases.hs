@@ -217,7 +217,7 @@ removePatternAliases = rephrasePattern removeAliases
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore
 addAliasesToPattern pat e =
-  AST.Pattern $ mkPatternAliases pat e
+  uncurry AST.Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result -> Body lore
@@ -226,13 +226,14 @@ mkAliasedBody innerlore bnds res =
 
 mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
                     AST.Pattern anylore -> AST.Exp lore
-                 -> [PatElemT (VarAliases, Lore.LetBound anylore)]
+                 -> ([PatElemT (VarAliases, Lore.LetBound anylore)],
+                     [PatElemT (VarAliases, Lore.LetBound anylore)])
 mkPatternAliases pat e =
   -- Some part of the pattern may be the context, which is not
   -- aliased.
   let als = aliasesOf e
-      als' = replicate (patternSize pat - length als) mempty <> als
-  in zipWith annotateBindee (patternElements pat) als'
+  in (map (`annotateBindee` mempty) $ patternContextElements pat,
+      zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
             bindee `setPatElemLore` (Names' names', patElemLore bindee)
           where names' =
@@ -283,8 +284,8 @@ mkAliasedLetBinding pat explore e =
   e
 
 instance Bindable lore => Bindable (Aliases lore) where
-  mkLet pat e =
-    let Let pat' explore _ = mkLet pat $ removeExpAliases e
+  mkLet context values e =
+    let Let pat' explore _ = mkLet context values $ removeExpAliases e
     in mkAliasedLetBinding pat' explore e
 
   mkLetNames names e = do

@@ -180,8 +180,8 @@ lookupRange = liftM (fromMaybe Out.unknownRange) . asks . HM.lookup
 
 simplifyPatRanges :: Out.Pattern lore
                   -> RangeM (Out.Pattern lore)
-simplifyPatRanges (Out.Pattern patElems) =
-  Out.Pattern <$> mapM simplifyPatElemRange patElems
+simplifyPatRanges (Out.Pattern context values) =
+  Out.Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do
           let (range, innerattr) = Out.patElemLore patElem
           range' <- simplifyRange range

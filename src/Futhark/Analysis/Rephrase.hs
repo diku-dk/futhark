@@ -45,10 +45,9 @@ rephraseBinding rephraser (Let pat lore e) =
   (rephraseExp rephraser e)
 
 rephrasePattern :: Rephraser from to -> Pattern from -> Pattern to
-rephrasePattern rephraser =
-  Pattern .
-  map (rephrasePatElem $ rephraseLetBoundLore rephraser) .
-  patternElements
+rephrasePattern rephraser (Pattern context values) =
+  Pattern (rephrase context) (rephrase values)
+  where rephrase = map (rephrasePatElem $ rephraseLetBoundLore rephraser)
 
 rephrasePatElem :: (from -> to) -> PatElemT from -> PatElemT to
 rephrasePatElem rephraser (PatElem ident BindVar from) =

@@ -290,8 +290,7 @@ hoistBindings rules block vtable uses needs result = do
                 | otherwise ->
                   return (expandUsage uses' bnd, Right bnd : bnds)
               Just optimbnds -> do
-                (uses'',bnds') <-
-                  simplifyBindings' vtable' uses' optimbnds
+                (uses'',bnds') <- simplifyBindings' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
 
 blockUnhoistedDeps :: Proper lore =>
@@ -377,7 +376,7 @@ isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
 isAlloc _ _                             = False
 
 isResultAlloc :: BlockPred lore
-isResultAlloc usage (Let (Pattern [bindee]) _
+isResultAlloc usage (Let (Pattern [] [bindee]) _
                      (PrimOp (Alloc {}))) =
   UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ = False
@@ -479,7 +478,8 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
                     simplifyPattern p =<< expExtType e
   let rmvdpatels = concatMap patternElements newpats
       patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
-  pat' <- simplifyPattern (Pattern patels') rtp'
+  pat' <- let (ctx,vals) = splitAt (length patels' - length rtp') patels'
+          in simplifyPattern (Pattern ctx vals) rtp'
   let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
   newpats'' <- forM newpatexps' $ \(p,e)->simplifyPattern p =<< expExtType e
   let (_,newexps'') = unzip newpatexps'
@@ -498,7 +498,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
             let patind  = elemIndex pid $
                           map patElemName $ patternElements pat
             case patind of
-              Just k -> return $ (Pattern [patternElements pat !! k], se') : acc
+              Just k -> return $ (Pattern [] [patternElements pat !! k], se') : acc
               Nothing-> fail $ "In simplifyBinding \"let pat = stream()\": pat "++
                                "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
           gatherShape _ (Free se, Ext i', _) =
@@ -705,11 +705,10 @@ simplifyPattern :: MonadEngine m =>
                 -> [ExtType]
                 -> m (Pattern (InnerLore m))
 simplifyPattern pat ets =
-  Pattern <$> zipWithM inspect patElems us
-  where us = replicate (length patElems - length ets) Nonunique ++
-             map uniqueness ets
-        patElems = patternElements pat
-        inspect (PatElem ident bindage lore) u = do
+  Pattern <$>
+  zipWithM inspect (patternContextElements pat) (repeat Nonunique) <*>
+  zipWithM inspect (patternValueElements pat) (map uniqueness ets)
+  where inspect (PatElem ident bindage lore) u = do
           t <- simplifyType $ identType ident
           let ident' =
                 case bindage of

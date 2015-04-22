@@ -153,14 +153,14 @@ primOpRanges (Replicate _ v) =
   [subExpRange v]
 primOpRanges (Rearrange _ _ v) =
   [subExpRange $ Var v]
-primOpRanges (Split _ _ v) =
-  [subExpRange $ Var v]
+primOpRanges (Split _ sizeexps v) =
+  replicate (length sizeexps) $ subExpRange $ Var v
 primOpRanges (Copy se) =
   [subExpRange se]
 primOpRanges (Index _ v _) =
   [subExpRange $ Var v]
 primOpRanges (Partition _ n _ arr) =
-  replicate n $ subExpRange $ Var arr
+  replicate n unknownRange ++ [subExpRange $ Var arr]
 primOpRanges (ArrayLit (e:es) _) =
   [(Just lower, Just upper)]
   where (e_lower, e_upper) = subExpKnownRange e

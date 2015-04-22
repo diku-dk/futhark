@@ -47,10 +47,10 @@ import qualified Futhark.Representation.AST.Lore as Lore
 -- The result of @loopResultValues patidents res mergeparams
 -- loopresult@ is a mapping from elements of @loopresult@ to elements
 -- of @patidents@.  Here, @patidents@ must be the identifiers of the
--- pattern storing the result of the loop (_including_ any existential
--- context), @res@ the names of the loop result list, @vname@ the
--- names of the merge parameters, and @loopresult@ the result of the
--- loop body - typically, a list of 'SubExp's.
+-- value part of the pattern storing the result of the loop, @res@ the
+-- names of the loop result list, @vname@ the names of the merge
+-- parameters, and @loopresult@ the result of the loop body -
+-- typically, a list of 'SubExp's.
 loopResultValues :: [Ident] -> [VName] -> [VName] -> [a]
                  -> [(a, Maybe Ident)]
 loopResultValues patidents res mergeparams ses =

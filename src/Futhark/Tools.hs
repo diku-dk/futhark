@@ -4,7 +4,6 @@ module Futhark.Tools
   , letSubExps
   , letExp
   , letExps
-  , letShapedExp
   , letTupExp
   , letTupExp'
   , letInPlace
@@ -101,21 +100,15 @@ letExps :: MonadBinder m =>
            String -> [Exp (Lore m)] -> m [VName]
 letExps desc = mapM $ letExp desc
 
-letShapedExp :: (MonadBinder m) =>
-                String -> Exp (Lore m)
-             -> m ([VName], [VName])
-letShapedExp _ (PrimOp (SubExp (Var v))) =
-  return ([], [v])
-letShapedExp name e = do
-  numValues <- length <$> expExtType e
-  names <- replicateM numValues $ newVName name
-  idents <- letBindNames' names e
-  return $ splitAt (length idents - numValues) $ map identName idents
-
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
           -> m [VName]
-letTupExp name e = snd <$> letShapedExp name e
+letTupExp _ (PrimOp (SubExp (Var v))) =
+  return [v]
+letTupExp name e = do
+  numValues <- length <$> expExtType e
+  names <- replicateM numValues $ newVName name
+  map identName <$> letBindNames' names e
 
 letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)

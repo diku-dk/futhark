@@ -182,11 +182,11 @@ instance Monoid BottomUp where
 
 updateBinding :: DesiredUpdate -> Binding Basic
 updateBinding fwd =
-  mkLet [(updateBindee fwd,
-          BindInPlace
-          (updateCertificates fwd)
-          (updateSource fwd)
-          (updateIndices fwd))] $
+  mkLet [] [(updateBindee fwd,
+             BindInPlace
+             (updateCertificates fwd)
+             (updateSource fwd)
+             (updateIndices fwd))] $
   PrimOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)

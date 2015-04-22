@@ -63,7 +63,7 @@ freeWalker = identityWalker {
         bindingFree (Let pat annot e) = do
           tell $ freeIn annot
           binding (HS.fromList $ patternNames pat) $ do
-            mapM_ (tell . freeIn) $ patternElements pat
+            tell $ freeInPattern pat
             expFree e
 
         expFree (LoopOp (DoLoop _ merge (ForLoop i boundexp) loopbody)) = do
@@ -130,6 +130,10 @@ freeInExtLambda (ExtLambda params body rettype) =
         freeInParam = freeIn . identType
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
         paramnames = map identName params
+
+freeInPattern :: FreeIn (Lore.LetBound lore) => Pattern lore -> Names
+freeInPattern (Pattern context values) =
+  mconcat $ map freeIn $ context ++ values
 
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.

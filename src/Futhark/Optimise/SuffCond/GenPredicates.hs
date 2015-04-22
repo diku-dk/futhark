@@ -49,9 +49,9 @@ genPredicate (FunDec fname rettype params body) = do
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
   let mkFParam = flip FParam ()
       pred_args = [ (Var arg, Observe) | arg <- map fparamName params ]
-      pred_bnd = mkLet' [pred_ident] $
+      pred_bnd = mkLet' [] [pred_ident] $
                  Apply predFname pred_args $ basicRetType Bool
-      cert_bnd = mkLet' [cert_ident] $
+      cert_bnd = mkLet' [] [cert_ident] $
                  PrimOp $ Assert (Var $ identName pred_ident) noLoc
       val_fun = FunDec fname rettype params
                 (mkBody (pred_bnd:cert_bnd:val_bnds) val_res)
@@ -92,34 +92,35 @@ splitBinding bnd@(Let pat _ (PrimOp (Assert (Var v) _))) = do
         HM.lookup v deps
   return $ if forbidden then ([bnd], bnd, Nothing)
            else ([bnd],
-                 mkLet' (patternIdents pat) $ PrimOp $ SubExp (Var $ identName cert_ident),
+                 mkLet' [] (patternIdents pat) $
+                 PrimOp $ SubExp (Var $ identName cert_ident),
                  Just $ Var v)
 
 splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args))) = do
   (predbody, valfun, ok) <- splitMap cs fun args
   return (predbody ++ [bnd],
-          mkLet' (patternIdents pat) $
+          mkLet' [] (patternIdents pat) $
           LoopOp $ Map cs valfun args,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args))) = do
   (predbody, valfun, ok) <- splitReduce cs fun args
   return (predbody ++ [bnd],
-          mkLet' (patternIdents pat) $
+          mkLet' [] (patternIdents pat) $
           LoopOp $ Reduce cs valfun args,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Scan cs fun args))) = do
   (predbody, valfun, ok) <- splitReduce cs fun args
   return (predbody ++ [bnd],
-          mkLet' (patternIdents pat) $
+          mkLet' [] (patternIdents pat) $
           LoopOp $ Scan cs valfun args,
           ok)
 
 splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) = do
   (predbody, valfun, ok) <- splitRedomap cs innerfun acc arr
   return (predbody ++ [bnd],
-          mkLet' (patternIdents pat) $
+          mkLet' [] (patternIdents pat) $
           LoopOp $ Redomap cs outerfun valfun acc arr,
           ok)
 
@@ -131,8 +132,8 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
                  (merge++[(FParam ok (),constant True)]) form
                  predbody'
       valloop = LoopOp $ DoLoop respat merge form valbody
-  return ([mkLet' (idents<>[ok]) predloop],
-          mkLet' idents valloop,
+  return ([mkLet' [] (idents<>[ok]) predloop],
+          mkLet' [] idents valloop,
           Just $ Var $ identName ok)
   where
     idents = patternIdents pat
@@ -143,17 +144,17 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
         x:xs ->
           let res' = res { resultSubExps = reverse $ Var (identName ok'):xs }
               bnds' = bnds ++
-                      [mkLet' [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) Bool]
+                      [mkLet' [] [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) Bool]
           in return $ mkBody bnds' res'
 
 splitBinding (Let pat _ (If cond tbranch fbranch t)) = do
   (tbranch_pred, tbranch_val) <- splitBody tbranch
   (fbranch_pred, fbranch_val) <- splitBody fbranch
   ok <- newIdent "if_ok"  $ Basic Bool
-  return ([mkLet' (idents<>[ok]) $
+  return ([mkLet' [] (idents<>[ok]) $
            If cond tbranch_pred fbranch_pred
            (t<>[Basic Bool])],
-          mkLet' idents $ If cond tbranch_val fbranch_val t,
+          mkLet' [] idents $ If cond tbranch_val fbranch_val t,
           Just $ Var $ identName ok)
   where idents = patternIdents pat
 
@@ -212,7 +213,7 @@ splitFoldLambda lam acc = do
       vallam = lam { lambdaBody = valbody }
   return (predlam, vallam)
   where (accParams,arrParams) = splitAt (length acc) $ lambdaParams lam
-        accbnds = [ mkLet' [p] $ PrimOp $ SubExp e
+        accbnds = [ mkLet' [] [p] $ PrimOp $ SubExp e
                   | (p,e) <- zip accParams acc ]
 
 allTrue :: Certificates -> Lambda -> [VName]
@@ -221,7 +222,7 @@ allTrue cs predfun args = do
   andchecks <- newIdent "allTrue" (Basic Bool)
   andfun <- binOpLambda LogAnd Bool
   innerfun <- predConjFun
-  let andbnd = mkLet' [andchecks] $ LoopOp $
+  let andbnd = mkLet' [] [andchecks] $ LoopOp $
                Redomap cs andfun innerfun [constant True] args
   return (andbnd,
           Var $ identName andchecks)
@@ -229,7 +230,7 @@ allTrue cs predfun args = do
           acc <- newIdent "acc" (Basic Bool)
           res <- newIdent "res" (Basic Bool)
           let Body _ predbnds (Result [se]) = lambdaBody predfun -- XXX
-              andbnd = mkLet' [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
+              andbnd = mkLet' [] [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
               body = mkBody (predbnds++[andbnd]) $ Result [Var $ identName res]
           return Lambda { lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]

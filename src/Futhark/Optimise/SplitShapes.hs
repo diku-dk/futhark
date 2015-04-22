@@ -120,7 +120,7 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
         isSubst _                = Nothing
 
         substInBnd subst (Let pat _ e) =
-          mkLet' <$> mapM (substInBnd' subst) (patternIdents pat) <*>
+          mkLet' [] <$> mapM (substInBnd' subst) (patternIdents pat) <*>
           pure (substituteNames subst e)
         substInBnd' subst v
           | identName v' `HM.member` subst = newIdent' (<>"unused") v'
@@ -169,15 +169,15 @@ substCalls subst fundec = do
               let (vs,vals) =
                     splitAt (length $ retTypeValues shapetype) $
                     patternElements pat
-              letBind_ (Pattern vs) $
+              letBind_ (Pattern [] vs) $
                 Apply shapefun args shapetype
-              letBind_ (Pattern vals) $
+              letBind_ (Pattern [] vals) $
                 Apply valfun ([(Var $ patElemName v,Observe) | v <- vs]++args)
                 (ExtRetType $ staticShapes $ map patElemType vals)
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e
-          return [mkLet' (patternIdents pat) e']
+          return [mkLet' [] (patternIdents pat) e']
           where mapper = identityMapper { mapOnBody = treatBody
                                         , mapOnLambda = treatLambda
                                         }

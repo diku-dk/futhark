@@ -49,7 +49,7 @@ class (Lore.Lore lore, PrettyLore lore,
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
 class (Proper lore, Lore.FParam lore ~ ()) => Bindable lore where
-  mkLet :: [(Ident,Bindage)] -> Exp lore -> Binding lore
+  mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasTypeEnv m) =>
                 [(VName, Bindage)] -> Exp lore -> m (Binding lore)
@@ -74,27 +74,20 @@ class (Proper (Lore m),
   addBinding      :: Binding (Lore m) -> m ()
   collectBindings :: m a -> m (a, [Binding (Lore m)])
 
-valueIdents :: (Proper lore, HasTypeEnv m) =>
-               Pattern lore -> Exp lore -> m [Ident]
-valueIdents pat e =
-  withExpType <$> expExtType e
-  where withExpType t =
-          snd $ splitAt (patternSize pat - length t) $ patternIdents pat
-
 letBind :: MonadBinder m =>
            Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
 letBind pat e = do
   bnd <- mkLetM pat e
   addBinding bnd
-  valueIdents (bindingPattern bnd) e
+  return $ patternValueIdents $ bindingPattern bnd
 
 letBind_ :: MonadBinder m =>
             Pattern (Lore m) -> Exp (Lore m) -> m ()
 letBind_ pat e = void $ letBind pat e
 
 mkLet' :: Bindable lore =>
-          [Ident] -> Exp lore -> Binding lore
-mkLet' = mkLet . map addBindVar
+          [Ident] -> [Ident] -> Exp lore -> Binding lore
+mkLet' context values = mkLet (map addBindVar context) (map addBindVar values)
   where addBindVar name = (name, BindVar)
 
 mkLetNamesM' :: MonadBinder m =>
@@ -112,7 +105,7 @@ letBindNames :: MonadBinder m =>
 letBindNames names e = do
   bnd <- mkLetNamesM names e
   addBinding bnd
-  valueIdents (bindingPattern bnd) e
+  return $ patternValueIdents $ bindingPattern bnd
 
 letBindNames' :: MonadBinder m =>
                  [VName] -> Exp (Lore m) -> m [Ident]

@@ -1,3 +1,5 @@
+-- | Queries and operations on values.  Useful for the interpreter and
+-- constant folding.
 module Futhark.Representation.AST.Attributes.Values
        (
          valueType
@@ -54,6 +56,9 @@ valueShape _ = []
 permuteShape :: [Int] -> [a] -> [a]
 permuteShape perm l = map (l!!) perm
 
+-- | Permute the dimensions of an array value.  If the given value is
+-- not an array, it is returned unchanged.  The length of the
+-- permutation must be equal to the rank of the value.
 permuteArray :: [Int] -> Value -> Value
 permuteArray perm (ArrayVal inarr et oldshape) =
   let newshape = move oldshape
