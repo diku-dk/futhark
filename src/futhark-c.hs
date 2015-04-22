@@ -99,4 +99,6 @@ compilerPipeline =
   , eotransform
   , commonSubexpressionElimination
   , eotransform
+  , doubleBuffer
+  , eotransform
   ]
