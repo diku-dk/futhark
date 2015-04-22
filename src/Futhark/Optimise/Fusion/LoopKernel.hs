@@ -33,8 +33,6 @@ import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools
 
-import Debug.Trace
-
 type SOAC = SOAC.SOAC Basic
 type SOACNest = Nest.SOACNest Basic
 type MapNest = MapNest.MapNest Basic
@@ -121,7 +119,7 @@ setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 kernelType :: FusedKer -> [Type]
 kernelType = SOAC.typeOf . fsoac
 
-tryOptimizeSOAC :: Names -> [VName] -> SOAC -> FusedKer 
+tryOptimizeSOAC :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 tryOptimizeSOAC unfus_nms outVars soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac
@@ -130,13 +128,13 @@ tryOptimizeSOAC unfus_nms outVars soac ker = do
       ker'' = fixInputTypes outIdents ker'
   applyFusionRules unfus_nms outVars soac' ker''
 
-tryOptimizeKernel :: Names -> [VName] -> SOAC -> FusedKer 
+tryOptimizeKernel :: Names -> [VName] -> SOAC -> FusedKer
                   -> TryFusion FusedKer
 tryOptimizeKernel unfus_nms outVars soac ker = do
   ker' <- optimizeKernel (Just outVars) ker
   applyFusionRules unfus_nms outVars soac ker'
 
-tryExposeInputs :: Names -> [VName] -> SOAC -> FusedKer 
+tryExposeInputs :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 tryExposeInputs unfus_nms outVars soac ker = do
   (ker', ots) <- exposeInputs outVars ker
@@ -160,7 +158,7 @@ fixInputTypes outIdents ker =
             SOAC.Input ts $ SOAC.Var v $ identType v'
         fixInputType inp = inp
 
-applyFusionRules :: Names -> [VName] -> SOAC -> FusedKer 
+applyFusionRules :: Names -> [VName] -> SOAC -> FusedKer
                  -> TryFusion FusedKer
 applyFusionRules    unfus_nms outVars soac ker =
   tryOptimizeSOAC   unfus_nms outVars soac ker <|>
@@ -212,7 +210,7 @@ mapOrFilter :: SOAC -> Bool
 mapOrFilter (SOAC.Map {}) = True
 mapOrFilter _             = False
 
-fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer 
+fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 fuseSOACwithKer unfus_set outVars soac1 ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
@@ -258,8 +256,8 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
           lam1_body   = lambdaBody lam1
           lam1_accres = take acc_len $ resultSubExps $ bodyResult lam1_body
           lam1_arrres = drop acc_len $ resultSubExps $ bodyResult lam1_body
-          lam1_hacked = lam1 { lambdaParams = drop acc_len $ lambdaParams lam1 
-                             , lambdaBody   = lam1_body { bodyResult = Result $ lam1_arrres } }
+          lam1_hacked = lam1 { lambdaParams = drop acc_len $ lambdaParams lam1
+                             , lambdaBody   = lam1_body { bodyResult = Result lam1_arrres } }
           (res_lam, new_inp) = fuseMaps unfus_nms' lam1_hacked inp1_arr (tail outPairs) lam2 inp2_arr
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms') $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
@@ -277,10 +275,10 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Redomap _ lam21 _ nes _, SOAC.Map {})
       | mapFusionOK (outVars++inp1_idds) ker -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
-          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $ 
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ unfus_nms) $ 
+      success (outNames ker ++ unfus_nms) $
               SOAC.Redomap (cs1++cs2) lam21 res_lam' nes new_inp
 {-
     (SOAC.Redomap _ lam21 _ ne _, SOAC.Map {})

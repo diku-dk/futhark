@@ -24,8 +24,6 @@ import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Renamer
 
---import Debug.Trace
-
 data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
 
@@ -118,7 +116,7 @@ checkForUpdates pat res = foldM checkForUpdate res $ patternElements pat
 --   element identifier to all pattern elements (identifiers) and (ii) the
 --   @arrsInScope@ (map) by inserting each (pattern-array) name.
 --   Finally, if the binding is an in-place update, then the @inplace@ field
---   of each (result) kernel is updated with the new in-place updates. 
+--   of each (result) kernel is updated with the new in-place updates.
 bindingFamily :: Pattern -> FusionGM FusedRes -> FusionGM FusedRes
 bindingFamily pat m = do
   res <- local bind m
@@ -260,13 +258,14 @@ soacInputs soac = do
   other_nms <- expandSoacInpArr other_nms0
   return (inp_nms, other_nms)
 
+{-
 addNewKer :: FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
 addNewKer res (idd, soac) = do
   (inp_nms, other_nms) <- soacInputs soac
   let used_inps = filter (isInpArrInResModKers res HS.empty) inp_nms
   let ufs = HS.unions [unfusable res, HS.fromList used_inps, HS.fromList other_nms]
   addNewKerWithUnfusable res (idd, soac) ufs
-
+-}
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
@@ -318,7 +317,7 @@ greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- ELSE try applying horizontal        fusion
   -- (without duplicating computation in both cases)
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-        if   (not is_repl) && (is_redomap || any isUnfusable out_nms)
+        if   not is_repl && (is_redomap || any isUnfusable out_nms)
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
         else prodconsGreedyFuse          res (out_idds, soac)
   --
@@ -432,19 +431,19 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                     curker_outset  = HS.fromList curker_outnms
                     new_ufus_nms   = HS.fromList $ outNames ker ++ HS.toList ufus_nms
                     interm_bnds_ok = cur_ok &&
-                      foldl (\ok bnd-> if not ok
-                                       then False -- hardwired to False after first fail
-                                            -- (i) check that the in-between bindings do
-                                            --     not use the result of current kernel OR
-                                            --(ii) that the pattern-binding corresponds to
-                                            --     the result of the consumer kernel; in the
-                                            --     latter case it means it corresponds to a
-                                            --     kernel that has been fused in the consumer,
-                                            --     hence it should be ignored (?)
-                                       else ( HS.null $ HS.intersection curker_outset $
-                                                           freeInExp (bindingExp bnd) ) ||
-                                            ( not $ null $ curker_outnms `L.intersect`
+                      foldl (\ok bnd-> ok && -- hardwired to False after first fail
+                                       HS.null ( HS.intersection curker_outset $
+                                                      freeInExp (bindingExp bnd) ) ||
+                                         not ( null $ curker_outnms `L.intersect`
                                                            patternNames (bindingPattern bnd) )
+
+                                              -- (i) check that the in-between bindings do
+                                              --     not use the result of current kernel OR
+                                              --(ii) that the pattern-binding corresponds to
+                                              --     the result of the consumer kernel; in the
+                                              --     latter case it means it corresponds to a
+                                              --     kernel that has been fused in the consumer,
+                                              --     hence it should be ignored (?)
                             ) True (drop (prev_ind+1) $ take bnd_ind rem_bnds)
                 if not interm_bnds_ok then return (False,n,bnd_ind,cur_ker,HS.empty)
                 else do new_ker <- attemptFusion ufus_nms (outNames cur_ker) (fsoac cur_ker) ker
@@ -453,7 +452,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                           Just krn-> return (True,n+1,bnd_ind,krn,new_ufus_nms)
             ) (True,0,0,soac_kernel,unfusable_nms) kernminds'
   let (to_fuse_kers',to_fuse_knms',_) = unzip3 $ take ok_ind kernminds'
-      new_kernms = if ok_ind > 0 then [to_fuse_knms' !! (ok_ind-1)] else []
+      new_kernms = [to_fuse_knms' !! (ok_ind - 1) | ok_ind > 0]
   return (ok_ind>0, [fused_ker], new_kernms, to_fuse_kers', to_fuse_knms')
 
 ------------------------------------------------------------------------
@@ -498,7 +497,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
     Right soac@(SOAC.Redomap _ outer_red inner_red nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
-      -- can be fused into a redomap that replaces the @map@, if @a@ 
+      -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
       (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
