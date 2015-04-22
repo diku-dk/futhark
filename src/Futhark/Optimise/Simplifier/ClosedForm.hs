@@ -97,8 +97,8 @@ checkResults :: MonadBinder m =>
              -> RuleM m (Body (Lore m))
 checkResults pat knownBindings params body accs = do
   ((), bnds) <- collectBindings $
-                zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)
-  mkBodyM bnds $ Result (map Var pat)
+                zipWithM_ checkResult (zip pat res) (zip accparams accs)
+  mkBodyM bnds $ map Var pat
 
   where bndMap = makeBindMap body
         (accparams, _) = splitAt (length accs) params

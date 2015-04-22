@@ -105,7 +105,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
         resmap = loopResultValues
                  (patternValueIdents pat) res
                  (map fparamName mergeparams) $
-                 resultSubExps $ bodyResult body
+                 bodyResult body
 
         mkMerges :: (MonadFreshNames m, Bindable lore) =>
                     [LoopResultSummary]
@@ -199,7 +199,7 @@ manipulateResult :: [LoopResultSummary]
 manipulateResult summaries substs =
   let orig_ses = mapMaybe unchangedRes summaries
       subst_ses = map (\(_,v,_) -> Var $ identName v) substs
-  in Result $ orig_ses ++ subst_ses
+  in orig_ses ++ subst_ses
   where
     unchangedRes summary =
       case relatedUpdate summary of

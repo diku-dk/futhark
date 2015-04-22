@@ -320,8 +320,8 @@ instance MonadFreshNames m =>
             | True = liftM pure $ sufficientSubExp se
             | otherwise = do se' <- sufficientSubExp se
                              return [se, se']
-      ses <- liftM concat $ mapM inspect $ resultSubExps res
-      Simplify.simplifyResult ds res' { resultSubExps = ses }
+      ses <- liftM concat $ mapM inspect res
+      Simplify.simplifyResult ds ses
 
   simplifyBody ds (Body bodylore (bnd:bnds) res) = do
     --trace ("body " ++ show (patternIdents $ bindingPattern bnd)) $
@@ -386,8 +386,8 @@ makeSufficientBinding' env (Let pat _ (If (Var v) tbranch fbranch [Basic Bool]))
     -- FIXME: Check that tbranch and fbranch are safe.  We can do
     -- something smarter if 'v' actually comes from an 'or'.  Also,
     -- currently only handles case where pat is a singleton boolean.
-    Body _ tbnds (Result [tres]) <- tbranch,
-    Body _ fbnds (Result [fres]) <- fbranch,
+    Body _ tbnds [tres] <- tbranch,
+    Body _ fbnds [fres] <- fbranch,
     all safeBnd tbnds, all safeBnd fbnds = do
   mapM_ addBinding tbnds
   mapM_ addBinding fbnds

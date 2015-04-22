@@ -427,14 +427,14 @@ defaultSimplifyBody ds (Body lore (bnd:bnds) res) = do
 simplifyResult :: MonadEngine m =>
                   [Diet] -> Result -> m Result
 
-simplifyResult ds (Result es) = do
+simplifyResult ds es = do
   es' <- mapM simplifySubExp es
   consumeResult $ zip ds es'
-  return $ Result es'
+  return es'
 
 isDoLoopResult :: MonadEngine m =>
                   Result -> m ()
-isDoLoopResult = mapM_ checkForVar . resultSubExps
+isDoLoopResult = mapM_ checkForVar
   where checkForVar (Var ident) =
           inResultName ident
         checkForVar _ =
@@ -794,7 +794,7 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
            bindLParams params' $
            localVtable extendSymTab $
            simplifyBody (map diet rettype) body
-  let bodyres = resultSubExps $ bodyResult body'
+  let bodyres = bodyResult body'
       bodyenv = typeEnvFromBindings $ bodyBindings body'
   rettype'' <- bindLParams params' $
                zipWithM (refineArrType bodyenv params') bodyres rettype'

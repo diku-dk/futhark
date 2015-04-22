@@ -50,7 +50,7 @@ freeWalker = identityWalker {
 
         binding bound = censor (`HS.difference` bound)
 
-        bodyFree (Body lore [] (Result ses)) = do
+        bodyFree (Body lore [] ses) = do
           tell $ freeIn lore
           mapM_ subExpFree ses
         bodyFree (Body lore (Let pat annot e:bnds) res) = do

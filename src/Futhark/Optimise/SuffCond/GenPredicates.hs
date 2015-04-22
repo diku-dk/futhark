@@ -64,9 +64,9 @@ genPredicate (FunDec fname rettype params body) = do
 splitFunBody :: Body -> GenM (Body, Body)
 splitFunBody body = do
   (pred_body, val_body) <- splitBody body
-  let onlyCert res = mkBody [] $ case reverse $ resultSubExps res of
+  let onlyCert res = mkBody [] $ case reverse res of
         []  -> res  -- Does this ever happen?
-        c:_ -> res { resultSubExps = [c] }
+        c:_ -> [c]
   return (mapResult onlyCert pred_body,
           val_body)
 
@@ -77,9 +77,7 @@ splitBody (Body _ bnds valres) = do
     runBinderEmptyEnv $ letSubExp "conjPreds" =<<
     foldBinOp LogAnd (constant True) (catMaybes preds) Bool
   let predbody = mkBody (concat pred_bnds <> conj_bnds) $
-                 valres { resultSubExps =
-                             resultSubExps valres ++ [conjoined_preds]
-                        }
+                 valres ++ [conjoined_preds]
       valbody = mkBody val_bnds valres
   return (predbody, valbody)
 
@@ -139,10 +137,10 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
     idents = patternIdents pat
     conjoinLoopBody ok (Body _ bnds res) = do
       ok' <- newIdent "loop_ok_res" (Basic Bool)
-      case reverse $ resultSubExps res of
+      case reverse res of
         []   -> fail "conjoinLoopBody: null loop"
         x:xs ->
-          let res' = res { resultSubExps = reverse $ Var (identName ok'):xs }
+          let res' = reverse $ Var (identName ok'):xs
               bnds' = bnds ++
                       [mkLet' [] [ok'] $ PrimOp $ BinOp LogAnd x (Var ok) Bool]
           in return $ mkBody bnds' res'
@@ -229,9 +227,9 @@ allTrue cs predfun args = do
   where predConjFun = do
           acc <- newIdent "acc" (Basic Bool)
           res <- newIdent "res" (Basic Bool)
-          let Body _ predbnds (Result [se]) = lambdaBody predfun -- XXX
+          let Body _ predbnds [se] = lambdaBody predfun -- XXX
               andbnd = mkLet' [] [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
-              body = mkBody (predbnds++[andbnd]) $ Result [Var $ identName res]
+              body = mkBody (predbnds++[andbnd]) [Var $ identName res]
           return Lambda { lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body

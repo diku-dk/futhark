@@ -59,7 +59,7 @@ bindIdents :: [I.Ident] -> ExternaliseM a
 bindIdents = local . HM.union . HM.fromList . map (I.identName &&& I.identType)
 
 externaliseBody :: I.Body -> ExternaliseM E.Exp
-externaliseBody (I.Body _ [] (I.Result es)) =
+externaliseBody (I.Body _ [] es) =
   externaliseSubExps es
 externaliseBody (I.Body lore (I.Let pat _ e:bnds) res) =
   E.LetPat (externalisePat pat) <$>

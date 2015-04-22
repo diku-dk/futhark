@@ -101,8 +101,8 @@ substituteIndicesInBody substs body = do
   (substs', bnds) <-
     collectBindings $ substituteIndicesInBindings substs $ bodyBindings body
   ses <-
-    mapM (substituteIndicesInSubExp substs') $ resultSubExps $ bodyResult body
-  mkBodyM bnds $ Result ses
+    mapM (substituteIndicesInSubExp substs') $ bodyResult body
+  mkBodyM bnds ses
 
 update :: VName -> VName -> IndexSubstitution -> IndexSubstitutions
        -> IndexSubstitutions

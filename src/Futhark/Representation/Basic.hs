@@ -113,7 +113,7 @@ instance Proper Basic where
 
 instance Ranged Basic where
   bodyRanges body =
-    replicate (length $ resultSubExps $ bodyResult body) (Nothing, Nothing)
+    replicate (length $ bodyResult body) (Nothing, Nothing)
   patternRanges pat =
     replicate (patternSize pat) (Nothing, Nothing)
 

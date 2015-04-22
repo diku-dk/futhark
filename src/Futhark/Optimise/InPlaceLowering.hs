@@ -91,7 +91,7 @@ optimiseFunDec fundec =
 optimiseBody :: Body Basic -> ForwardingM (Body Basic)
 optimiseBody (Body als bnds res) = do
   bnds' <- deepen $ optimiseBindings bnds $
-    mapM_ seen $ resultSubExps res
+    mapM_ seen res
   return $ Body als bnds' res
   where seen (Constant {}) = return ()
         seen (Var v)       = seenVar v

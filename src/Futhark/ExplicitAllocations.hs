@@ -385,8 +385,8 @@ allocInFun (In.FunDec fname rettype params body) =
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
   allocInBindings bnds $ \bnds' -> do
-    (ses, allocs) <- collectBindings $ mapM ensureDirect $ resultSubExps res
-    return $ Body () (bnds'<>allocs) res { resultSubExps = ses }
+    (ses, allocs) <- collectBindings $ mapM ensureDirect res
+    return $ Body () (bnds'<>allocs) ses
   where ensureDirect se@(Constant {}) = return se
         ensureDirect (Var v) = do
           bt <- basicType <$> lookupType v
@@ -431,10 +431,8 @@ allocInExp (LoopOp (DoLoop res merge form
   formBinds form $ do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
-      (ses,retbnds) <- collectBindings $
-                       funcallSubExps $ resultSubExps bodyres
-      let res' = bodyres { resultSubExps = ses }
-      return $ Body () (bodybnds'<>retbnds) res'
+      (ses,retbnds) <- collectBindings $ funcallSubExps bodyres
+      return $ Body () (bodybnds'<>retbnds) ses
     return $ LoopOp $
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge

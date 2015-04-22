@@ -265,11 +265,11 @@ compileFunDec ec src (FunDec fname rettype params body) = do
           return (outparams, inparams, results, args)
 
 compileExtBody :: Destination -> Body -> ImpM op ()
-compileExtBody (Destination dest) (Body _ bnds (Result ses)) =
+compileExtBody (Destination dest) (Body _ bnds ses) =
   compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
 
 compileLoopBody :: [VName] -> Body -> ImpM op ()
-compileLoopBody targets (Body _ bnds (Result ses)) =
+compileLoopBody targets (Body _ bnds ses) =
   compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
     subExpType se >>= \case
       Basic _  -> compileScalarSubExpTo (ScalarDestination d) se

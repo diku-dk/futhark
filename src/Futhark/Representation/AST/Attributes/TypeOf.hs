@@ -190,7 +190,7 @@ bodyExtType :: (HasTypeEnv m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound <$> staticShapes <$>
-  extendedTypeEnv (mapM subExpType (resultSubExps res)) bndtypes
+  extendedTypeEnv (mapM subExpType res) bndtypes
   where bndtypes = typeEnvFromBindings bnds
         boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds

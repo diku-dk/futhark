@@ -81,8 +81,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
     ([], _, _) -> cannotSimplify
     (invariant, mapresult, rettype') -> do
       let (pat', ses') = unzip mapresult
-          lambdaRes = Result ses'
-          fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = lambdaRes }
+          fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = ses' }
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
@@ -90,7 +89,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
   where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
-        Result ses = bodyResult $ lambdaBody fun
+        ses = bodyResult $ lambdaBody fun
 
         freeOrConst (Var v)       = v `HS.member` free
         freeOrConst (Constant {}) = True
@@ -127,7 +126,7 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
       fun' = fun { lambdaParams = params }
       -- Empty maps are not permitted, so if that would be the result,
       -- turn the entire map into a replicate.
-      Result ses = bodyResult $ lambdaBody fun
+      ses = bodyResult $ lambdaBody fun
       mapres = bodyBindings $ lambdaBody fun
   mapM_ (uncurry letBindNames') parameterBnds
   case arrs' of
@@ -149,11 +148,11 @@ removeReplicateMapping _ _ = cannotSimplify
 
 removeDeadMapping :: MonadBinder m => BottomUpRule m
 removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs))) =
-  let Result ses = bodyResult $ lambdaBody fun
+  let ses = bodyResult $ lambdaBody fun
       isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
       (pat',ses', ts') = unzip3 $ filter isUsed $
                          zip3 (patternElements pat) ses $ lambdaReturnType fun
-      fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = Result ses' }
+      fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = ses' }
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern [] pat'
@@ -207,7 +206,7 @@ removeUnusedLoopResult _ _ = cannotSimplify
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
 removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form body)))
   | not $ all (explicitlyReturned . fst) merge =
-  let Result es = bodyResult body
+  let es = bodyResult body
       returnedResultSubExps = map snd $ filter (explicitlyReturned . fst) $ zip mergepat es
       necessaryForReturned = mconcat $ map dependencies returnedResultSubExps
       resIsNecessary ((v,_), _) =
@@ -217,7 +216,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
         referencedInForm v
       (keep, discard) = partition resIsNecessary $ zip merge es
       (merge', es') = unzip keep
-      body' = body { bodyResult = Result es' }
+      body' = body { bodyResult = es' }
   in if merge == merge'
      then cannotSimplify
      else do
@@ -263,7 +262,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
       cannotSimplify
     (invariant, explpat', merge', ses') -> do
       -- We have moved something invariant out of the loop.
-      let loopbody' = loopbody { bodyResult = Result ses' }
+      let loopbody' = loopbody { bodyResult = ses' }
           invariantShape :: (a, VName) -> Bool
           invariantShape (_, shapemerge) = shapemerge `elem`
                                            map (fparamName . fst) merge'
@@ -276,7 +275,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
         letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
       letBind_ (Pattern implpat'' explpat'') $
         LoopOp $ DoLoop respat' merge' form loopbody'
-  where Result ses = bodyResult loopbody
+  where ses = bodyResult loopbody
         taggedpat = zip (patternElements pat) $
                     loopResultContext (representative :: Lore m)
                     respat (map fst merge) ++ respat
@@ -640,7 +639,7 @@ simplifyIndexing _ _ _ = Nothing
 evaluateBranch :: MonadBinder m => TopDownRule m
 evaluateBranch _ (Let pat _ (If e1 tb fb t))
   | Just branch <- checkBranch = do
-  let ses = resultSubExps $ bodyResult branch
+  let ses = bodyResult branch
   mapM_ addBinding $ bodyBindings branch
   ctx <- subExpShapeContext t ses
   let ses' = ctx ++ ses
@@ -660,14 +659,14 @@ simplifyBoolBranch :: MonadBinder m => TopDownRule m
 simplifyBoolBranch _
   (Let pat _
    (If cond
-    (Body _ [] (Result [Constant (LogVal True)]))
-    (Body _ [] (Result [Constant (LogVal False)]))
+    (Body _ [] [Constant (LogVal True)])
+    (Body _ [] [Constant (LogVal False)])
     _)) =
   letBind_ pat $ PrimOp $ SubExp cond
 -- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
-  | Body _ [] (Result [tres]) <- tb,
-    Body _ [] (Result [fres]) <- fb,
+  | Body _ [] [tres] <- tb,
+    Body _ [] [fres] <- fb,
     patternSize pat == length ts,
     all (==Basic Bool) ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
@@ -687,12 +686,12 @@ hackilySimplifyBranch :: MonadBinder m => TopDownRule m
 hackilySimplifyBranch vtable
   (Let pat _
    (If (Var cond_a)
-    (Body _ [] (Result [se1_a]))
-    (Body _ [] (Result [Var v]))
+    (Body _ [] [se1_a])
+    (Body _ [] [Var v])
     _))
   | Just (If (Var cond_b)
-           (Body _ [] (Result [se1_b]))
-           (Body _ [] (Result [_]))
+           (Body _ [] [se1_b])
+           (Body _ [] [_])
            _) <- ST.lookupExp v vtable,
     let cond_a_e = ST.lookupExp cond_a vtable,
     let cond_b_e = ST.lookupExp cond_b vtable,
@@ -706,14 +705,14 @@ hackilySimplifyBranch _ _ =
 hoistBranchInvariant :: MonadBinder m => TopDownRule m
 hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
   | patternSize pat == length ret = do
-  let Result tses = bodyResult tb
-      Result fses = bodyResult fb
+  let tses = bodyResult tb
+      fses = bodyResult fb
   (pat', res, invariant) <-
     foldM branchInvariant ([], [], False) $
     zip (patternElements pat) (zip tses fses)
   let (tses', fses') = unzip res
-      tb' = tb { bodyResult = Result tses' }
-      fb' = fb { bodyResult = Result fses' }
+      tb' = tb { bodyResult = tses' }
+      fb' = fb { bodyResult = fses' }
   if invariant -- Was something hoisted?
      then letBind_ (Pattern [] pat') =<<
           eIf (eSubExp e1) (pure tb') (pure fb')
@@ -791,11 +790,11 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
   -- Remove the parts of the branch-results that correspond to dead
   -- return value bindings.  Note that this leaves dead code in the
   -- branch bodies, but that will be removed later.
-  let Result tses = bodyResult tb
-      Result fses = bodyResult fb
+  let tses = bodyResult tb
+      fses = bodyResult fb
       pick = map snd . filter fst . zip patused
-      tb' = tb { bodyResult = Result (pick tses) }
-      fb' = fb { bodyResult = Result (pick fses) }
+      tb' = tb { bodyResult = pick tses }
+      fb' = fb { bodyResult = pick fses }
       pat' = pick $ patternElements pat
   in letBind_ (Pattern [] pat') =<<
      eIf (eSubExp e1) (pure tb') (pure fb')
@@ -818,11 +817,11 @@ simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
       mapM_ mkSimplified simplified
       let (bindees,tses',fses',rettype') = unzip4 orig
           pat' = Pattern [] bindees
-          tb' = tb { bodyResult = Result tses' }
-          fb' = fb { bodyResult = Result fses' }
+          tb' = tb { bodyResult = tses' }
+          fb' = fb { bodyResult = fses' }
       letBind_ pat' $ If e1 tb' fb' rettype'
-  where tses = resultSubExps $ bodyResult tb
-        fses = resultSubExps $ bodyResult fb
+  where tses = bodyResult tb
+        fses = bodyResult fb
         isActually (bindee, se1, se2, t)
           | UT.isEqualTo se1 name used =
               Left (bindee, se1)

@@ -233,7 +233,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
             collectBindings $
             shadowIdentsInExp endsubst loop_cond_bnds loop_cond
           return (mkBody loop_end_cond_bnds $
-                  Result $ shapeargs++[loop_end_cond]++ses,
+                  shapeargs++[loop_end_cond]++ses,
                   (I.WhileLoop $ I.identName loop_while,
                    shapepat,
                    loop_while : mergepat',

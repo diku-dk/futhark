@@ -101,8 +101,8 @@ allocBindings = mapMaybe allocation
 doubleBufferResult :: [FParam] -> [DoubleBuffer] -> Body -> Body
 doubleBufferResult mergeparams buffered (Body () bnds res) =
   let (copybnds,ses) =
-        unzip $ zipWith3 buffer mergeparams buffered $ resultSubExps res
-  in Body () (bnds++catMaybes copybnds) $ Result ses
+        unzip $ zipWith3 buffer mergeparams buffered res
+  in Body () (bnds++catMaybes copybnds) ses
   where buffer _ (BufferAlloc bufname _) _ =
           (Nothing, Var bufname)
 
@@ -119,7 +119,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
         buffer _ _ se =
           (Nothing, se)
 
-        parammap = HM.fromList $ zip (map fparamName mergeparams) $ resultSubExps res
+        parammap = HM.fromList $ zip (map fparamName mergeparams) res
 
         resultType t = t `setArrayDims` map substitute (arrayDims t)
 

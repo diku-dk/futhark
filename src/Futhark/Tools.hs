@@ -189,7 +189,7 @@ eBody :: (MonadBinder m) =>
 eBody es = insertBindingsM $ do
              es' <- sequence es
              xs <- mapM (letTupExp "x") es'
-             mkBodyM [] $ Result $ map Var $ concat xs
+             mkBodyM [] $ map Var $ concat xs
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
@@ -243,15 +243,14 @@ makeLambda params body = do
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
-resultBody ses = mkBody [] $ Result ses
+resultBody = mkBody []
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
 resultBodyM :: MonadBinder m =>
                [SubExp]
             -> m (Body (Lore m))
-resultBodyM ses =
-  mkBodyM [] $ Result ses
+resultBodyM = mkBodyM []
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addBinding'.

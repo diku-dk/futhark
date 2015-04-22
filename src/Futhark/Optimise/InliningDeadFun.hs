@@ -142,7 +142,7 @@ inlineInBody
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
-        (runReader (withShapes $ resultSubExps res') $
+        (runReader (withShapes res') $
          typeEnvFromBindings callbnds)
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]

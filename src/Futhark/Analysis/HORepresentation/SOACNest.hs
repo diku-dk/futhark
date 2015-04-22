@@ -107,7 +107,7 @@ bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
     Lambda { lambdaParams = zipWith Ident ps pts
            , lambdaReturnType = retTypes
            , lambdaBody = mkBody (bnds++[bnd]) $
-                          Result $ map Var bndIds
+                          map Var bndIds
            }
 
 lambdaToBody :: (HasTypeEnv m, Monad m, Bindable lore) =>
@@ -242,7 +242,7 @@ nested l
     maybesoac <- either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
     case maybesoac of
       Right soac -- ...the bindee is a SOAC...
-        | resultSubExps res == map Var (patternNames pat) ->
+        | res == map Var (patternNames pat) ->
           return $ Just (operation soac,
                          Nesting { nestingParamNames = map identName $ lambdaParams l
                                  , nestingInputs = inputs soac

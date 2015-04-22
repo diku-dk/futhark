@@ -125,9 +125,9 @@ transformFun (FunDec name retType params body) = do
     name' = nameFromString $ nameToString name ++ "_flattrans"
 
 transformBody :: Body -> FlatM Body
-transformBody (Body lore bindings (Result ses)) = do
+transformBody (Body lore bindings ses) = do
   bindings' <- concat <$> mapM transformBinding bindings
-  return $ Body lore bindings' (Result ses)
+  return $ Body lore bindings' ses
 
 -- | Transform a function to use parallel operations.
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
@@ -160,7 +160,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
 
      mapResNeed <- liftM HS.fromList $ mapM toIdent $ HS.toList $
                    HS.unions $ map freeIn
-                   (resultSubExps $ bodyResult $ lambdaBody lambda)
+                   (bodyResult $ lambdaBody lambda)
      freeIdents <- liftM (map HS.fromList) $ mapM (mapM toIdent . HS.toList) $
                    flip map grouped $ \case
        Right bnds -> HS.unions $ map (freeInExp . bindingExp) bnds
@@ -184,7 +184,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                 Left bnd ->  liftM Left $ pullOutOfMap mapInfo bndInfo bnd
        ) grouped (zip argsNeeded shouldReturn)
 
-     res' <- forM (resultSubExps . bodyResult $ lambdaBody lambda) $
+     res' <- forM (bodyResult $ lambdaBody lambda) $
              \se -> case se of
                       (Constant bv) -> return $ Constant bv
                       (Var ident) -> Var <$> identName <$> getMapLetArray' ident
@@ -224,7 +224,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
 
       let lamBody = Body { bodyLore = ()
                          , bodyBindings = bnds
-                         , bodyResult = Result $ map (Var . identName) shouldReturn
+                         , bodyResult = map (Var . identName) shouldReturn
                          }
 
       let wrapLambda = Lambda { lambdaParams = mapIdents

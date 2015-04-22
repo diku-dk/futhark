@@ -80,16 +80,14 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
     runWriterT $
     instantiateShapes instantiate $ retTypeValues rettype
 
-  shapes <- subExpShapeContext (retTypeValues rettype) $
-            resultSubExps bodyres
+  shapes <- subExpShapeContext (retTypeValues rettype) bodyres
   shapetypes <- mapM subExpType shapes
 
   valueBody <- substituteExtResultShapes staticRettype body
 
   let valueRettype = ExtRetType $ staticShapes staticRettype
       valueParams = shapeidents ++ map fparamIdent params
-      shapeBody = mkBody (cpybnds <> bodybnds)
-                  bodyres { resultSubExps = shapes }
+      shapeBody = mkBody (cpybnds <> bodybnds) shapes
       mkFParam = flip FParam ()
       fShape = FunDec shapeFname (ExtRetType $ staticShapes shapetypes)
                (map mkFParam shapeParams)
@@ -108,12 +106,10 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
 substituteExtResultShapes :: (MonadFreshNames m, HasTypeEnv m) =>
                              [Type] -> Body -> m Body
 substituteExtResultShapes rettype (Body _ bnds res) = do
-  compshapes <- typesShapes <$> mapM subExpType (resultSubExps res)
+  compshapes <- typesShapes <$> mapM subExpType res
   let subst = HM.fromList $ mapMaybe isSubst $ zip compshapes $ typesShapes rettype
   bnds' <- mapM (substInBnd subst) bnds
-  let res' = res { resultSubExps = map (substituteNames subst) $
-                                   resultSubExps res
-                 }
+  let res' = map (substituteNames subst) res
   return $ mkBody bnds' res'
   where typesShapes = concatMap (shapeDims . arrayShape)
         isSubst (Var v1, Var v2) = Just (v1, v2)

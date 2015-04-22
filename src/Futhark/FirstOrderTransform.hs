@@ -42,7 +42,7 @@ transformFunDec (FunDec fname rettype params body) = do
 transformBody :: Body -> Binder Basic Body
 transformBody (Body () bnds res) = insertBindingsM $ do
   mapM_ (addBinding <=< transformBinding) bnds
-  return $ resultBody $ resultSubExps res
+  return $ resultBody res
 
 -- | Transform a single expression.
 transformExp :: Exp -> Binder Basic Exp
@@ -82,7 +82,7 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
     mapM (letExp "concatMap_fun_res" . PrimOp . SubExp) vs
   emptyarrs <- mapM (letExp "empty")
                [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
-  let hackbody = Body () [] $ Result $ map Var emptyarrs
+  let hackbody = Body () [] $ map Var emptyarrs
 
       concatArrays (arr, arrs') = do
         let plus x y = eBinOp Plus x y Int

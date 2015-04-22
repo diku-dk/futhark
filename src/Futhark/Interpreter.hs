@@ -370,7 +370,7 @@ evalSubExp (Constant v) = return $ BasicVal v
 
 evalBody :: Lore lore => Body lore -> FutharkM lore [Value]
 
-evalBody (Body _ [] (Result es)) =
+evalBody (Body _ [] es) =
   mapM evalSubExp es
 
 evalBody (Body lore (Let pat _ e:bnds) res) = do

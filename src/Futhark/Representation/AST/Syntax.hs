@@ -35,7 +35,7 @@ module Futhark.Representation.AST.Syntax
   , PatternT (..)
   , Pattern
   , Binding(..)
-  , Result(..)
+  , Result
   , BodyT(..)
   , Body
   , PrimOp (..)
@@ -103,11 +103,8 @@ deriving instance Lore lore => Ord (Binding lore)
 deriving instance Lore lore => Show (Binding lore)
 deriving instance Lore lore => Eq (Binding lore)
 
--- | The result of a body - a sequence of subexpressions, possibly
--- predicated on one or more certificates.
-data Result = Result { resultSubExps :: [SubExp]
-                     }
-                   deriving (Eq, Ord, Show)
+-- | The result of a body is a sequence of subexpressions.
+type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
