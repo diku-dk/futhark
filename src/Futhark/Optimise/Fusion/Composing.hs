@@ -59,7 +59,8 @@ instance (Show a, Ord a, Input inp) => Input (a, inp) where
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
 fuseMaps :: (Input input, Bindable lore) =>
-            Lambda lore -- ^ Function of SOAC to be fused.
+            [VName]     -- ^ The producer var names that still need to be returned
+         -> Lambda lore -- ^ Function of SOAC to be fused.
          -> [input] -- ^ Input of SOAC to be fused.
          -> [(VName,Ident)] -- ^ Output of SOAC to be fused.  The
                             -- first identifier is the name of the
@@ -69,41 +70,52 @@ fuseMaps :: (Input input, Bindable lore) =>
          -> Lambda lore -- ^ Function to be fused with.
          -> [input] -- ^ Input of SOAC to be fused with.
          -> (Lambda lore, [input]) -- ^ The fused lambda and the inputs of
-                              -- the resulting SOAC.
-fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
+                                   -- the resulting SOAC.
+fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
-               , lambdaBody =
-                 let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
-                                | (p,e) <- zip pat $ resultSubExps res]
-                     bindLambda res =
-                       bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
-                 in makeCopies $ mapResult bindLambda $ lambdaBody lam1
+               , lambdaBody   = new_body2'
                }
-
-        (lam2redparams, pat, inputmap, makeCopies, makeCopiesInner) =
-          fuseInputs lam1 inp1 out1 lam2 inp2
+        new_body2 = let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
+                                | (p,e) <- zip pat $ resultSubExps res]
+                        bindLambda res =
+                            bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
+                    in makeCopies $ mapResult bindLambda $ lambdaBody lam1
+        new_body2_rses = resultSubExps (bodyResult new_body2)
+        new_body2'= new_body2 { bodyResult = Result $ new_body2_rses ++
+                                                      map (Var . identName) unfus_pat  }
+        -- unfusable variables are added at the end of the result/pattern/type
+        (lam2redparams, unfus_pat, pat, inputmap, makeCopies, makeCopiesInner) =
+          fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2
+        --(unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
 
 fuseInputs :: (Input input, Bindable lore) =>
-              Lambda lore -> [input] -> [(VName,Ident)]
+              [VName]
+           -> Lambda lore -> [input] -> [(VName,Ident)]
            -> Lambda lore -> [input]
-           -> ([Param],
+           -> ([Param], [Param],
                [Ident],
                HM.HashMap Param input,
                Body lore -> Body lore, Body lore -> Body lore)
-fuseInputs lam1 inp1 out1 lam2 inp2 =
-  (lam2redparams, outbnds, inputmap, makeCopies, makeCopiesInner)
+fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
+  (lam2redparams, unfus_vars, outbnds, inputmap, makeCopies, makeCopiesInner)
   where (lam2redparams, lam2arrparams) =
           splitAt (length (lambdaParams lam2) - length inp2) $ lambdaParams lam2
         lam1inputmap = HM.fromList $ zip (lambdaParams lam1) inp1
-        lam2inputmap = HM.fromList $ zip lam2arrparams            inp2
+        lam2inputmap = HM.fromList $ zip lam2arrparams       inp2
         (lam2inputmap', makeCopiesInner) = removeDuplicateInputs lam2inputmap
         originputmap = lam1inputmap `HM.union` lam2inputmap'
         outins = uncurry (outParams $ map fst out1) $
                  unzip $ HM.toList lam2inputmap'
-        outbnds = filterOutParams out1 outins
+        outbnds= filterOutParams out1 outins
         (inputmap, makeCopies) =
           removeDuplicateInputs $ originputmap `HM.difference` outins
+        -- Cosmin: @unfus_vars@ is supposed to be the lam2 vars corresponding to unfus_nms (?)
+        getVarParPair x = case isVarInput (snd x) of
+                            Just nm -> Just (nm, fst x)
+                            Nothing -> Nothing --should not be reached!
+        outinsrev = HM.fromList $ mapMaybe getVarParPair $ HM.toList outins
+        unfus_vars= mapMaybe (`HM.lookup` (HM.union outinsrev $ HM.fromList out1)) unfus_nms
 
 outParams :: Input input =>
              [VName] -> [Param] -> [input]

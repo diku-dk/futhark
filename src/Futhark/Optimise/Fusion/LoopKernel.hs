@@ -33,6 +33,8 @@ import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools
 
+import Debug.Trace
+
 type SOAC = SOAC.SOAC Basic
 type SOACNest = Nest.SOACNest Basic
 type MapNest = MapNest.MapNest Basic
@@ -93,15 +95,18 @@ data FusedKer = FusedKer {
   -- ^ whether at least a fusion has been performed.
 
   , outputTransform :: SOAC.ArrayTransforms
+  , outNames :: [VName]
+  -- ^ the names of the kernel's results
   }
                 deriving (Show)
 
-newKernel :: SOAC -> FusedKer
-newKernel soac =
+newKernel :: SOAC -> [VName] -> FusedKer
+newKernel soac out_nms =
   FusedKer { fsoac = soac
            , inplace = HS.empty
            , fusedVars = []
            , outputTransform = SOAC.noTransforms
+           , outNames = out_nms
            }
 
 arrInputs :: FusedKer -> HS.HashSet VName
@@ -116,30 +121,33 @@ setInputs inps ker = ker { fsoac = inps `SOAC.setInputs` fsoac ker }
 kernelType :: FusedKer -> [Type]
 kernelType = SOAC.typeOf . fsoac
 
-tryOptimizeSOAC :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
-tryOptimizeSOAC outVars soac ker = do
+tryOptimizeSOAC :: Names -> [VName] -> SOAC -> FusedKer 
+                -> TryFusion FusedKer
+tryOptimizeSOAC unfus_nms outVars soac ker = do
   (soac', ots) <- optimizeSOAC Nothing soac
   let ker' = map (SOAC.addTransforms ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
-  applyFusionRules outVars soac' ker''
+  applyFusionRules unfus_nms outVars soac' ker''
 
-tryOptimizeKernel :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
-tryOptimizeKernel outVars soac ker = do
+tryOptimizeKernel :: Names -> [VName] -> SOAC -> FusedKer 
+                  -> TryFusion FusedKer
+tryOptimizeKernel unfus_nms outVars soac ker = do
   ker' <- optimizeKernel (Just outVars) ker
-  applyFusionRules outVars soac ker'
+  applyFusionRules unfus_nms outVars soac ker'
 
-tryExposeInputs :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
-tryExposeInputs outVars soac ker = do
+tryExposeInputs :: Names -> [VName] -> SOAC -> FusedKer 
+                -> TryFusion FusedKer
+tryExposeInputs unfus_nms outVars soac ker = do
   (ker', ots) <- exposeInputs outVars ker
   if SOAC.nullTransforms ots
-  then fuseSOACwithKer outVars soac ker'
+  then fuseSOACwithKer unfus_nms outVars soac ker'
   else do
     (soac', ots') <- pullOutputTransforms soac ots
     let outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
         ker'' = fixInputTypes outIdents ker'
     if SOAC.nullTransforms ots'
-    then applyFusionRules outVars soac' ker''
+    then applyFusionRules unfus_nms outVars soac' ker''
     else fail "tryExposeInputs could not pull SOAC transforms"
 
 fixInputTypes :: [Ident] -> FusedKer -> FusedKer
@@ -152,20 +160,21 @@ fixInputTypes outIdents ker =
             SOAC.Input ts $ SOAC.Var v $ identType v'
         fixInputType inp = inp
 
-applyFusionRules :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
-applyFusionRules outVars soac ker =
-  tryOptimizeSOAC outVars soac ker <|>
-  tryOptimizeKernel outVars soac ker <|>
-  tryExposeInputs outVars soac ker <|>
-  fuseSOACwithKer outVars soac ker
+applyFusionRules :: Names -> [VName] -> SOAC -> FusedKer 
+                 -> TryFusion FusedKer
+applyFusionRules    unfus_nms outVars soac ker =
+  tryOptimizeSOAC   unfus_nms outVars soac ker <|>
+  tryOptimizeKernel unfus_nms outVars soac ker <|>
+  tryExposeInputs   unfus_nms outVars soac ker <|>
+  fuseSOACwithKer   unfus_nms outVars soac ker
 
 attemptFusion :: (MonadFreshNames m, HasTypeEnv m) =>
-                 [VName] -> SOAC -> FusedKer
+                 Names -> [VName] -> SOAC -> FusedKer
               -> m (Maybe FusedKer)
-attemptFusion outVars soac ker = do
+attemptFusion unfus_nms outVars soac ker = do
   types <- askTypeEnv
   liftM removeUnusedParamsFromKer <$>
-    tryFusion (applyFusionRules outVars soac ker) types
+    tryFusion (applyFusionRules unfus_nms outVars soac ker) types
 
 removeUnusedParamsFromKer :: FusedKer -> FusedKer
 removeUnusedParamsFromKer ker =
@@ -200,27 +209,31 @@ mapFusionOK outVars ker = any (`elem` inpIds) outVars
   where inpIds = mapMaybe SOAC.isVarInput (inputs ker)
 
 mapOrFilter :: SOAC -> Bool
-mapOrFilter (SOAC.Map {})    = True
-mapOrFilter _                 = False
+mapOrFilter (SOAC.Map {}) = True
+mapOrFilter _             = False
 
-fuseSOACwithKer :: [VName] -> SOAC -> FusedKer -> TryFusion FusedKer
-fuseSOACwithKer outVars soac1 ker = do
+fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer 
+                -> TryFusion FusedKer
+fuseSOACwithKer unfus_set outVars soac1 ker = do
   -- We are fusing soac1 into soac2, i.e, the output of soac1 is going
   -- into soac2.
-  let soac2 = fsoac ker
+  let soac2    = fsoac ker
       cs1      = SOAC.certificates soac1
       cs2      = SOAC.certificates soac2
       inp1_arr = SOAC.inputs soac1
+      inp1_idds= mapMaybe SOAC.isVarInput inp1_arr
       inp2_arr = SOAC.inputs soac2
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2
-      success res_soac = do
+      unfus_nms= HS.toList unfus_set
+      success res_outnms res_soac = do
         let fusedVars_new = fusedVars ker++outVars
         -- Avoid name duplication, because the producer lambda is not
         -- removed from the program until much later.
         uniq_lam <- renameLambda $ SOAC.lambda res_soac
         return $ ker { fsoac = uniq_lam `SOAC.setLambda` res_soac
                      , fusedVars = fusedVars_new
+                     , outNames = res_outnms
                      }
   outPairs <- forM (zip outVars $ SOAC.typeOf soac1) $ \(outVar, t) -> do
                 outVar' <- newVName $ baseString outVar ++ "_elem"
@@ -228,23 +241,61 @@ fuseSOACwithKer outVars soac1 ker = do
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
     (SOAC.Map {}, SOAC.Map    {})
-      | mapFusionOK outVars ker -> do
-      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
-      success $ SOAC.Map (cs1++cs2) res_lam new_inp
+      | mapFusionOK (outVars++inp1_idds) ker -> do
+      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+      success (outNames ker ++ unfus_nms) $
+              SOAC.Map (cs1++cs2) res_lam' new_inp
 
+    -- Cosmin added case: CURRENTLY IMPLEMENTING THIS
+    (SOAC.Map {}, SOAC.Redomap _ lam11 _ nes _)
+      | mapFusionOK (outVars++inp1_idds) ker -> do
+      let acc_len     = length nes
+          unfus_acc   = take acc_len outVars
+          unfus_nms'  = unfus_nms \\ unfus_acc
+          lam1_body   = lambdaBody lam1
+          lam1_accres = take acc_len $ resultSubExps $ bodyResult lam1_body
+          lam1_arrres = drop acc_len $ resultSubExps $ bodyResult lam1_body
+          lam1_hacked = lam1 { lambdaParams = drop acc_len $ lambdaParams lam1 
+                             , lambdaBody   = lam1_body { bodyResult = Result $ lam1_arrres } }
+          (res_lam, new_inp) = fuseMaps unfus_nms' lam1_hacked inp1_arr (tail outPairs) lam2 inp2_arr
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms') $
+                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          (accrtps, accpars)  = (lambdaReturnType lam11, take acc_len $ lambdaParams lam1)
+          res_body    = lambdaBody res_lam
+          res_bodyrses= resultSubExps (bodyResult res_body)
+          res_body'   = res_body { bodyResult = Result $ lam1_accres ++ res_bodyrses }
+          res_lam' = res_lam { lambdaParams     = accpars ++ lambdaParams res_lam
+                             , lambdaBody       = res_body'
+                             , lambdaReturnType = accrtps ++ lambdaReturnType res_lam ++ extra_rtps
+                             }
+      success (unfus_acc ++ outNames ker ++ unfus_nms') $
+              SOAC.Redomap (cs1++cs2) lam11 res_lam' nes new_inp
+
+    (SOAC.Redomap _ lam21 _ nes _, SOAC.Map {})
+      | mapFusionOK (outVars++inp1_idds) ker -> do
+      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $ 
+                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+      success (outNames ker ++ unfus_nms) $ 
+              SOAC.Redomap (cs1++cs2) lam21 res_lam' nes new_inp
+{-
     (SOAC.Redomap _ lam21 _ ne _, SOAC.Map {})
       | mapFusionOK outVars ker -> do
       let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
       success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp
-
+-}
     -- Nothing else worked, so mkLets try rewriting to redomap if
-    -- possible.
+    -- possible. (Should not be reached anymore ... remove when safe)
     (SOAC.Reduce _ lam args, _) | mapOrFilter soac1 -> do
        let (ne, arrs) = unzip args
            soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs
            ker'   = ker { fsoac = soac2'
                         }
-       fuseSOACwithKer outVars soac1 ker'
+       fuseSOACwithKer unfus_set outVars soac1 ker'
 
     _ -> fail "Cannot fuse"
 
