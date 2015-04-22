@@ -105,11 +105,11 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
                             [Type])
         checkInvariance _ (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup v inputMap =
-            ((Pattern [outId], PrimOp $ SubExp $ Var inp) : invariant,
+            ((Pattern [] [outId], PrimOp $ SubExp $ Var inp) : invariant,
              mapresult,
              rettype')
         checkInvariance outersize (outId, e, t) (invariant, mapresult, rettype')
-          | freeOrConst e = ((Pattern [outId], PrimOp $ Replicate outersize e) : invariant,
+          | freeOrConst e = ((Pattern [] [outId], PrimOp $ Replicate outersize e) : invariant,
                              mapresult,
                              rettype')
           | otherwise = (invariant,
@@ -132,8 +132,8 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
   mapM_ (uncurry letBindNames') parameterBnds
   case arrs' of
     [] -> do mapM_ addBinding mapres
-             sequence_ [ letBind p $ PrimOp $ Replicate n e
-                       | (p,e) <- zip (splitPattern pat) ses ]
+             sequence_ [ letBind (Pattern [] [p]) $ PrimOp $ Replicate n e
+                       | (p,e) <- zip (patternValueElements pat) ses ]
     _  -> letBind_ pat $ LoopOp $ Map cs fun' arrs'
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
@@ -156,8 +156,8 @@ removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs))) =
       fun' = fun { lambdaBody = (lambdaBody fun) { bodyResult = Result ses' }
                  , lambdaReturnType = ts'
                  }
-  in if pat /= Pattern pat'
-     then letBind_ (Pattern pat') $ LoopOp $ Map cs fun' arrs
+  in if pat /= Pattern [] pat'
+     then letBind_ (Pattern [] pat') $ LoopOp $ Map cs fun' arrs
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
@@ -172,9 +172,10 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form bo
       mergeParamUsed = (`elem` ctxrefs)
       keepImpl (bindee,ident) = bindeeUsed bindee || mergeParamUsed ident
       implpat' = filter keepImpl implpat
-      pat' = map fst $ implpat'++explpat'
+      implpat'' = map fst implpat'
+      explpat'' = map fst explpat'
       respat' = map snd explpat'
-  in letBind_ (Pattern pat') $ LoopOp $ DoLoop respat' merge form body
+  in letBind_ (Pattern implpat'' explpat'') $ LoopOp $ DoLoop respat' merge form body
   where -- | Check whether the variable binding is used afterwards OR
         -- is responsible for some used existential part.
         keep bindee =
@@ -268,11 +269,12 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
                                            map (fparamName . fst) merge'
           (implpat',implinvariant) = partition invariantShape implpat
           implinvariant' = [ (patElemIdent p, Var v) | (p,v) <- implinvariant ]
-          pat' = map fst $ implpat'++explpat'
+          implpat'' = map fst implpat'
+          explpat'' = map fst explpat'
           respat' = map snd explpat'
       forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
         letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
-      letBind_ (Pattern pat') $
+      letBind_ (Pattern implpat'' explpat'') $
         LoopOp $ DoLoop respat' merge' form loopbody'
   where Result ses = bodyResult loopbody
         taggedpat = zip (patternElements pat) $
@@ -642,7 +644,7 @@ evaluateBranch _ (Let pat _ (If e1 tb fb t))
   mapM_ addBinding $ bodyBindings branch
   ctx <- subExpShapeContext t ses
   let ses' = ctx ++ ses
-  sequence_ [ letBind (Pattern [p]) $ PrimOp $ SubExp se
+  sequence_ [ letBind (Pattern [] [p]) $ PrimOp $ SubExp se
             | (p,se) <- zip (patternElements pat) ses']
   where checkBranch
           | isCt1 e1  = Just tb
@@ -713,38 +715,36 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
       tb' = tb { bodyResult = Result tses' }
       fb' = fb { bodyResult = Result fses' }
   if invariant -- Was something hoisted?
-     then letBind_ (Pattern pat') =<<
+     then letBind_ (Pattern [] pat') =<<
           eIf (eSubExp e1) (pure tb') (pure fb')
      else cannotSimplify
   where branchInvariant (pat', res, invariant) (v, (tse, fse))
           | tse == fse = do
-            letBind_ (Pattern [v]) $ PrimOp $ SubExp tse
+            letBind_ (Pattern [] [v]) $ PrimOp $ SubExp tse
             return (pat', res, True)
           | otherwise  =
             return (v:pat', (tse,fse):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
 
 simplifyScalExp :: MonadBinder m => TopDownRule m
-simplifyScalExp vtable (Let pat _ e)
-  | Just orig <- SE.toScalExp (`ST.lookupScalExp` vtable) e =
-    case orig of
-      -- If the sufficient condition is 'True', then it statically succeeds.
-      SE.RelExp SE.LTH0 _
-        | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds orig ranges types ->
-          letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
-      _
-        | Right new <- AS.simplify orig ranges types,
-          SE.Val val <- new,
-          orig /= new ->
-             letBind_ pat $ PrimOp $ SubExp $ Constant val
-      _ -> cannotSimplify
+simplifyScalExp vtable (Let pat _ e) = do
+  res <- SE.toScalExp (`ST.lookupScalExp` vtable) e
+  case res of
+    -- If the sufficient condition is 'True', then it statically succeeds.
+    Just se@(SE.RelExp SE.LTH0 _)
+      | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
+        letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
+    Just se
+      | Right new <- AS.simplify se ranges,
+        SE.Val val <- new,
+        se /= new ->
+           letBind_ pat $ PrimOp $ SubExp $ Constant val
+    _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
-        types = ST.typeEnv vtable
         mkDisj []     = SE.Val $ LogVal False
         mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
-simplifyScalExp _ _ = cannotSimplify
 
 simplifyIdentityReshape :: LetTopDownRule lore u
 simplifyIdentityReshape _ typeOf (Reshape _ newshape v)
@@ -760,16 +760,16 @@ simplifyReshapeReshape defOf _ (Reshape cs newshape v)
 simplifyReshapeReshape _ _ _ = Nothing
 
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [v]) _ (PrimOp (Copy se))) = do
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [v]) _ (PrimOp (Copy se))) = do
   t <- subExpType se
   if basicType t || (unique t && not (any (`UT.used` used) $ subExpAliases se))
-    then letBind_ (Pattern [v]) $ PrimOp $ SubExp se
+    then letBind_ (Pattern [] [v]) $ PrimOp $ SubExp se
     else cannotSimplify
 removeUnnecessaryCopy _ _ = cannotSimplify
 
 removeScratchValue :: MonadBinder m => TopDownRule m
 removeScratchValue _ (Let
-                      (Pattern [PatElem v (BindInPlace _ src _) _])
+                      (Pattern [] [PatElem v (BindInPlace _ src _) _])
                       _
                       (PrimOp (Scratch {}))) =
     letBindNames'_ [identName v] $ PrimOp $ SubExp $ Var src
@@ -797,7 +797,7 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
       tb' = tb { bodyResult = Result (pick tses) }
       fb' = fb { bodyResult = Result (pick fses) }
       pat' = pick $ patternElements pat
-  in letBind_ (Pattern pat') =<<
+  in letBind_ (Pattern [] pat') =<<
      eIf (eSubExp e1) (pure tb') (pure fb')
 removeDeadBranchResult _ _ = cannotSimplify
 
@@ -814,10 +814,10 @@ simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
                             zip4 (patternElements pat) tses fses rettype,
     not (null simplified) = do
       let mkSimplified (bindee, se) =
-            letBind_ (Pattern [bindee]) $ PrimOp $ SubExp se
+            letBind_ (Pattern [] [bindee]) $ PrimOp $ SubExp se
       mapM_ mkSimplified simplified
       let (bindees,tses',fses',rettype') = unzip4 orig
-          pat' = Pattern bindees
+          pat' = Pattern [] bindees
           tb' = tb { bodyResult = Result tses' }
           fb' = fb { bodyResult = Result fses' }
       letBind_ pat' $ If e1 tb' fb' rettype'

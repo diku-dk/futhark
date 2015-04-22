@@ -36,20 +36,20 @@ lowerUpdate :: (Bindable lore, MonadFreshNames m) =>
 lowerUpdate (Let pat _ (LoopOp (DoLoop res merge form body))) updates = do
   canDo <- lowerUpdateIntoLoop updates pat res merge body
   Just $ do
-    (prebnds, pat', res', merge', body') <- canDo
-    return $ prebnds ++ [mkLet' pat' $ LoopOp $ DoLoop res' merge' form body']
+    (prebnds, ctxpat, valpat, res', merge', body') <- canDo
+    return $ prebnds ++ [mkLet' ctxpat valpat $ LoopOp $ DoLoop res' merge' form body']
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
   [DesiredUpdate bindee cs src is val]
   | patternNames pat == [src] =
-    Just $ return [mkLet [(bindee,BindInPlace cs v is)] $
+    Just $ return [mkLet [] [(bindee,BindInPlace cs v is)] $
                    PrimOp $ SubExp $ Var val]
 lowerUpdate
-  (Let (Pattern [PatElem v BindVar _]) _ e)
+  (Let (Pattern [] [PatElem v BindVar _]) _ e)
   [DesiredUpdate bindee cs src is val]
   | identName v == val =
-    Just $ return [mkLet [(bindee,BindInPlace cs src is)] e,
-                   mkLet' [v] $ PrimOp $ Index cs (identName bindee) is]
+    Just $ return [mkLet [] [(bindee,BindInPlace cs src is)] e,
+                   mkLet' [] [v] $ PrimOp $ Index cs (identName bindee) is]
 lowerUpdate _ _ =
   Nothing
 
@@ -60,6 +60,7 @@ lowerUpdateIntoLoop :: (Bindable lore, MonadFreshNames m) =>
                     -> [(FParam lore, SubExp)]
                     -> Body lore
                     -> Maybe (m ([Binding lore],
+                                 [Ident],
                                  [Ident],
                                  [VName],
                                  [(FParam lore, SubExp)],
@@ -94,15 +95,15 @@ lowerUpdateIntoLoop updates pat res merge body = do
   Just $ do
     in_place_map <- mk_in_place_map
     (merge',prebnds) <- mkMerges in_place_map
-    let (pat',res') = mkResAndPat in_place_map
+    let (ctxpat,valpat,res') = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
     let body' = mkBody newbnds $ manipulateResult in_place_map idxsubsts'
-    return (prebnds, pat', map identName res', merge', body')
+    return (prebnds, ctxpat, valpat, map identName res', merge', body')
   where mergeparams = map fst merge
         usedInBody = freeInBody body
         resmap = loopResultValues
-                 (patternIdents pat) res
+                 (patternValueIdents pat) res
                  (map fparamName mergeparams) $
                  resultSubExps $ bodyResult body
 
@@ -122,7 +123,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
                            (updateCertificates update)
                            (updateSource update)
                            (updateIndices update))]
-            tell [mkLet updpat $ PrimOp $ SubExp $ snd $ mergeParam summary]
+            tell [mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary]
             return $ Right (FParam mergeident (), Var source)
           | otherwise = return $ Left $ mergeParam summary
 
@@ -130,7 +131,9 @@ lowerUpdateIntoLoop updates pat res merge body = do
           let (orig,extra) = partitionEithers $ mapMaybe mkResAndPat' summaries
               (origpat, origres) = unzip orig
               (extrapat, extrares) = unzip extra
-          in (origpat ++ extrapat, origres ++ extrares)
+          in (patternContextIdents pat,
+              origpat ++ extrapat,
+              origres ++ extrares)
 
         mkResAndPat' summary
           | Just (update, mergeident) <- relatedUpdate summary =

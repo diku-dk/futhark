@@ -84,8 +84,8 @@ instance Substitute attr => Substitute (FParamT attr) where
     FParam (substituteNames substs ident) (substituteNames substs attr)
 
 instance Substitutable lore => Substitute (Pattern lore) where
-  substituteNames substs (Pattern l) =
-    Pattern $ substituteNames substs l
+  substituteNames substs (Pattern context values) =
+    Pattern (substituteNames substs context) (substituteNames substs values)
 
 instance Substitutable lore => Substitute (Binding lore) where
   substituteNames substs (Let pat annot e) =

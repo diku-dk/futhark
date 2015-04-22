@@ -180,8 +180,8 @@ lookupRange = liftM (fromMaybe Out.unknownRange) . asks . HM.lookup
 
 simplifyPatRanges :: Out.Pattern lore
                   -> RangeM (Out.Pattern lore)
-simplifyPatRanges (Out.Pattern patElems) =
-  Out.Pattern <$> mapM simplifyPatElemRange patElems
+simplifyPatRanges (Out.Pattern context values) =
+  Out.Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do
           let (range, innerattr) = Out.patElemLore patElem
           range' <- simplifyRange range
@@ -200,9 +200,8 @@ simplifyBound ranges = liftM $ simplifyKnownBound ranges
 simplifyKnownBound :: AS.RangesRep -> Out.KnownBound -> Out.KnownBound
 simplifyKnownBound ranges bound
   | Just se <- Out.boundToScalExp bound,
-    Right se' <- AS.simplify se ranges types =
+    Right se' <- AS.simplify se ranges =
     Out.ScalarBound se'
-  where types = undefined
 simplifyKnownBound ranges (Out.MinimumBound b1 b2) =
   Out.MinimumBound (simplifyKnownBound ranges b1) (simplifyKnownBound ranges b2)
 simplifyKnownBound ranges (Out.MaximumBound b1 b2) =
@@ -211,20 +210,20 @@ simplifyKnownBound _ bound =
   bound
 
 betterLowerBound :: Out.Bound -> RangeM Out.Bound
-betterLowerBound (Just (Out.ScalarBound (SE.Id v))) = do
+betterLowerBound (Just (Out.ScalarBound (SE.Id v t))) = do
   range <- lookupRange v
   return $ Just $ case range of
     (Just lower, _) -> lower
-    _               -> Out.ScalarBound $ SE.Id v
+    _               -> Out.ScalarBound $ SE.Id v t
 betterLowerBound bound =
   return bound
 
 betterUpperBound :: Out.Bound -> RangeM Out.Bound
-betterUpperBound (Just (Out.ScalarBound (SE.Id v))) = do
+betterUpperBound (Just (Out.ScalarBound (SE.Id v t))) = do
   range <- lookupRange v
   return $ Just $ case range of
     (_, Just upper) -> upper
-    _               -> Out.ScalarBound $ SE.Id v
+    _               -> Out.ScalarBound $ SE.Id v t
 betterUpperBound bound =
   return bound
 

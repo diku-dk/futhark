@@ -170,7 +170,7 @@ removePatternRanges = rephrasePattern removeRanges
 addRangesToPattern :: Lore.Lore lore =>
                       AST.Pattern lore -> Exp lore -> Pattern lore
 addRangesToPattern pat e =
-  AST.Pattern $ mkPatternRanges pat e
+  uncurry AST.Pattern $ mkPatternRanges pat e
 
 mkRangedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result
@@ -180,15 +180,15 @@ mkRangedBody innerlore bnds res =
 
 mkPatternRanges :: Lore.Lore lore =>
                    AST.Pattern lore -> Exp lore
-                -> [PatElemT (Lore.LetBound (Ranges lore))]
+                -> ([PatElemT (Lore.LetBound (Ranges lore))],
+                    [PatElemT (Lore.LetBound (Ranges lore))])
 mkPatternRanges pat e =
-  zipWith addRanges (patternElements pat) ranges'
+  (map (`addRanges` unknownRange) $ patternContextElements pat,
+   zipWith addRanges (patternValueElements pat) ranges)
   where addRanges patElem range =
           let innerlore = patElemLore patElem
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
-        ranges' = replicate (patternSize pat - length ranges) unknownRange ++
-                  ranges
 
 mkBodyRanges :: Lore.Lore lore =>
                 [AST.Binding lore]

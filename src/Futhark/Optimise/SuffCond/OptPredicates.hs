@@ -142,14 +142,14 @@ analyseBody :: ST.SymbolTable Basic -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body _ [] _) =
   sctable
 
-analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnds) res) =
+analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [] [patElem]) _ e):bnds) res) =
   let vtable' = ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
         (Nothing, Just (Right se@(SE.RelExp SE.LTH0 ine)))
-          | Int <- runReader (SE.scalExpType ine) types ->
-          case AS.mkSuffConds se ranges types of
+          | Int <- SE.scalExpType ine ->
+          case AS.mkSuffConds se ranges of
             Left err  -> error $ show err -- Why can this even fail?
             Right ses -> HM.insert name (SufficientCond ses) sctable
         (Just eSCTable, _) -> sctable <> eSCTable
@@ -158,7 +158,7 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [patElem]) _ e):bnd
   where name = patElemName patElem
         ranges = rangesRep vtable
         types = ST.typeEnv vtable
-        simplify se = AS.simplify se ranges undefined
+        simplify se = AS.simplify se ranges
 analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
   analyseBody (ST.insertBinding bnd vtable) sctable $ Body bodylore bnds res
 
@@ -287,7 +287,7 @@ instance MonadFreshNames m => MonadBinder (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
+        pat' = Pattern [] [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
     return $ mkWiseLetBinding pat' explore e
 
   mkBodyM bnds res =
@@ -339,13 +339,13 @@ instance MonadFreshNames m =>
         vs <- mapM (newIdent' (<>"_suff")) $ patternIdents pat
         suffe <- generating Sufficient $
                  Simplify.simplifyExp =<< renameExp (removeExpWisdom e)
-        let pat' = pat { patternElements =
-                            zipWith tagPatElem (patternElements pat) $
+        let pat' = pat { patternValueElements =
+                            zipWith tagPatElem (patternValueElements pat) $
                             map identName vs
                        }
             tagPatElem patElem v =
               patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
-            suffpat = Pattern [ S.PatElem v BindVar Nothing | v <- vs ]
+            suffpat = Pattern [] [ S.PatElem v BindVar Nothing | v <- vs ]
         makeSufficientBinding =<< mkLetM (addWisdomToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
@@ -366,15 +366,15 @@ makeSufficientBinding bnd = do
 makeSufficientBinding' :: MonadFreshNames m => Context m -> S.Binding Invariance -> VariantM m ()
 makeSufficientBinding' context@(_,vtable) (Let pat _ e)
   | Just (Right se@(SE.RelExp SE.LTH0 ine)) <-
-      simplify <$> SE.toScalExp (`suffScalExp` vtable) e,
-    Int <- runReader (SE.scalExpType ine) types,
-    Right suff <- AS.mkSuffConds se ranges types,
+      simplify <$> runReader (SE.toScalExp (`suffScalExp` vtable) e) types,
+    Int <- SE.scalExpType ine,
+    Right suff <- AS.mkSuffConds se ranges,
     x:xs <- filter (scalExpUsesNoForbidden context) $ map mkConj suff = do
   suffe <- SE.fromScalExp' $ foldl SE.SLogOr x xs
   letBind_ pat suffe
   where ranges = rangesRep vtable
         types = ST.typeEnv vtable
-        simplify se = AS.simplify se ranges types
+        simplify se = AS.simplify se ranges
         mkConj []     = SE.Val $ LogVal True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
 makeSufficientBinding' _ (Let pat _ (PrimOp (BinOp LogAnd x y t))) = do

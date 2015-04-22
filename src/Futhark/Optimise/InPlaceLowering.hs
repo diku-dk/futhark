@@ -73,6 +73,7 @@ import Futhark.Binder
 
 import Prelude hiding (any, mapM_, elem, all)
 
+-- | Apply the in-place lowering optimisation to the given program.
 optimiseProgram :: Basic.Prog -> Basic.Prog
 optimiseProgram prog =
   runForwardingM src $
@@ -181,11 +182,11 @@ instance Monoid BottomUp where
 
 updateBinding :: DesiredUpdate -> Binding Basic
 updateBinding fwd =
-  mkLet [(updateBindee fwd,
-          BindInPlace
-          (updateCertificates fwd)
-          (updateSource fwd)
-          (updateIndices fwd))] $
+  mkLet [] [(updateBindee fwd,
+             BindInPlace
+             (updateCertificates fwd)
+             (updateSource fwd)
+             (updateIndices fwd))] $
   PrimOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)

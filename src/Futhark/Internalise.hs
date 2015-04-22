@@ -171,7 +171,7 @@ internaliseExp desc (E.LetPat pat e body _) = do
   t <- I.staticShapes <$> mapM I.subExpType ses
   bindingTupIdent pat t $ \pat' -> do
     forM_ (zip (patternIdents pat') ses) $ \(p,se) ->
-      letBind (basicPattern' [p]) $ I.PrimOp $ I.SubExp se
+      letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp se
     internaliseExp desc body
 
 internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
@@ -272,7 +272,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   dstt <- I.staticShapes <$> mapM lookupType dsts
   bindingTupIdent (E.Id name) dstt $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
-      letBind (basicPattern' [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
+      letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body
 
 internaliseExp desc (E.Replicate ne ve _) = do
@@ -426,7 +426,7 @@ internaliseExp desc (E.Filter lam arr _) = do
   forM arrs $ \arr' -> do
     filter_size <- newIdent "filter_size" $ I.Basic Int
     filter_perm <- newIdent "filter_perm" =<< lookupType arr'
-    addBinding $ mkLet' [filter_size,filter_perm] $
+    addBinding $ mkLet' [] [filter_size,filter_perm] $
       I.PrimOp $ I.Partition [] 1 flags arr'
     letSubExp desc $
       I.PrimOp $ I.Split [] [I.Var $ I.identName filter_size] $
@@ -439,7 +439,7 @@ internaliseExp desc (E.Partition lams arr _) = do
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
-    addBinding $ mkLet' (partition_sizes++[partition_perm]) $
+    addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
       I.PrimOp $ I.Partition [] n flags arr'
     letTupExp desc $
       I.PrimOp $ I.Split [] (map (I.Var . I.identName) partition_sizes) $

@@ -1,3 +1,11 @@
+-- | Non-Futhark-specific utilities.  If you find yourself writing
+-- general functions on generic data structures, consider putting them
+-- here.
+--
+-- Sometimes it is also preferable to copy a small function rather
+-- than introducing a large dependency.  In this case, make sure to
+-- note where you got it from (and make sure that the license is
+-- compatible).
 module Futhark.Util
        (mapAccumLM,
         chunk)

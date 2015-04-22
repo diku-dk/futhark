@@ -7,19 +7,12 @@ module Futhark.Util.Truths
        , plusMinusSwapR
        , plusMinusSwapL
        , minusPlusEqR
-         -- * Comparisons
-       , Cmp (..)
-       , CompareTrueInstance
-       , propToClassCmp
-       , compareNats
        )
 where
 
-import Data.Singletons.Prelude
 import Data.Constraint (Dict(..))
 import Data.Type.Natural
 import Proof.Equational
-import Proof.Propositional
 
 -- | @(m + (n - m)) = n@.
 minusPlusEqR :: (m :<<= n) ~ True =>
@@ -84,21 +77,3 @@ plusMinusSwapL n (SS (m' :: SNat m')) k =
   where prop :: Leq k (n :+: m')
         prop = plusLeqL k sZero `leqTrans`
                plusMonotone (boolToPropLeq k n) (ZeroLeq m')
-
-data Cmp n m where
-  LeqN :: Leq n m     -> Cmp n m
-  LeqM :: Leq (S m) n -> Cmp n m
-
-type CompareTrueInstance n m =
-  LeqTrueInstance n m \/ LeqTrueInstance (S m) n
-
-propToClassCmp :: Cmp n m -> CompareTrueInstance n m
-propToClassCmp (LeqN leq) = Left $ propToBoolLeq leq
-propToClassCmp (LeqM leq) = Right $ propToBoolLeq leq
-
-compareNats :: SNat n -> SNat m
-            -> Cmp n m
-compareNats n m = case (n %:<<= m, SS m %:<<= n) of
-  (STrue,SFalse) -> LeqN $ boolToPropLeq n m
-  (SFalse,STrue) -> LeqM $ boolToPropLeq (SS m) n
-  _              -> error "compareNats: Bug in mathematics"

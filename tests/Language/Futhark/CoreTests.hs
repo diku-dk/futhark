@@ -8,6 +8,8 @@ where
 
 import Control.Applicative
 
+import Prelude
+
 import Test.QuickCheck
 import Test.HUnit hiding (Test)
 import Test.Framework

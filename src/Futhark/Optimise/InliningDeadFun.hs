@@ -164,9 +164,9 @@ inlineInBody
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,
           Var v <- se =
-            mkLet' [ident] $ PrimOp $ Reshape [] (arrayDims t) v
+            mkLet' [] [ident] $ PrimOp $ Reshape [] (arrayDims t) v
         | otherwise =
-          mkLet' [ident] $ PrimOp $ SubExp se
+          mkLet' [] [ident] $ PrimOp $ SubExp se
 inlineInBody inlcallees (Body () (bnd:bnds) res) =
   let bnd' = inlineInBinding inlcallees bnd
       Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res

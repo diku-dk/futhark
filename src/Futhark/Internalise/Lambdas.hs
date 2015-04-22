@@ -73,7 +73,7 @@ bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
 bindMapShapes inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
   | otherwise =
-    letBind_ (basicPattern' inner_shapes) =<<
+    letBind_ (basicPattern' [] inner_shapes) =<<
     eIf isempty emptybranch nonemptybranch
   where zero = intconst 0
         isempty = eBinOp I.Equal
@@ -133,7 +133,7 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
       acc_params  = take acc_len params
       map_bodyres = I.Result $ drop acc_len $ I.resultSubExps $ I.bodyResult body
       acc_bindings= map (\(ac_var,ac_val) ->
-                            mkLet' [ac_var] (PrimOp $ SubExp ac_val)
+                            mkLet' [] [ac_var] (PrimOp $ SubExp ac_val)
                         ) (zip acc_params nes)
 
       map_bindings= acc_bindings ++ bodyBindings body
@@ -238,9 +238,9 @@ internalisePartitionLambdas internaliseLambda lams args = do
               next_lam_body <-
                 mkCombinedLambdaBody lam_params (i+1) lams'
               let parambnds =
-                    [ mkLet' [top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
+                    [ mkLet' [] [top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
-                  branchbnd = mkLet' [intres] $ I.If boolres
+                  branchbnd = mkLet' [] [intres] $ I.If boolres
                               (resultBody [intconst i])
                               next_lam_body
                               [I.Basic Int]
