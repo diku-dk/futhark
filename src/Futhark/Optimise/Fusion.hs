@@ -372,9 +372,11 @@ greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
                              `comb` inpa'
                          )
                    inpArr' fused_ker_nms
-     -- Update the kernels map
+     -- Update the kernels map (why not delete the ones that have been fused?)
      let kernels' = HM.fromList fused_ker_nms `HM.union` kernels res
      -- nothing to do for `outArr' (since we have not added a new kernel)
+     -- DO IMPROVEMENT: attempt to fuse the resulting kernel AGAIN until it fails,
+     --                 but make sure NOT to add a new kernel!
      return $ FusedRes True (outArr res) inpArr'' ufs kernels'
 
 prodconsGreedyFuse :: FusedRes -> (Pattern, SOAC)
@@ -404,7 +406,12 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   (inp_nms, _) <- soacInputs soac
   let out_nms        = patternNames out_idds
       unfusable_nms  = HS.fromList $ filter (`HS.member` unfusable res) out_nms
-      to_fuse_knms   = HS.toList $ getKersWithInpArrs res (out_nms++inp_nms)
+      out_arr_nms    = case soac of
+                        SOAC.Redomap _ _ _ nes _ ->
+                             -- the accumulator result cannot be fused!
+                             drop (length nes) out_nms
+                        _ -> out_nms
+      to_fuse_knms   = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
       lookup_kern k  = case HM.lookup k (kernels res) of
                          Nothing  -> badFusionGM $ Error
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
@@ -445,6 +452,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                                               --     kernel that has been fused in the consumer,
                                               --     hence it should be ignored (?)
                             ) True (drop (prev_ind+1) $ take bnd_ind rem_bnds)
+                                -- HUGE BUG 1: need to check also the consumer SOAC
+                                --   LAMBDA BODY to not contain any of the outpus!!!!!
+                                --   (see noFusion3.fut)
                 if not interm_bnds_ok then return (False,n,bnd_ind,cur_ker,HS.empty)
                 else do new_ker <- attemptFusion ufus_nms (outNames cur_ker) (fsoac cur_ker) ker
                         case new_ker of
