@@ -181,9 +181,8 @@ data PrimOp lore
   | Concat Certificates VName [VName] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
-  | Copy SubExp
-  -- ^ Copy the value return by the expression.  This only
-  -- makes a difference in do-loops with merge variables.
+  | Copy VName
+  -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.
   | Iota SubExp

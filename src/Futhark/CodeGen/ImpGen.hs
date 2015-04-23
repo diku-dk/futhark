@@ -384,7 +384,7 @@ defCompilePrimOp
         write targetmem targetoffset Int $ Imp.ScalarVar i
 
 defCompilePrimOp (Destination [target]) (Copy src) =
-  compileResultSubExp target src
+  compileResultSubExp target $ Var src
 
 defCompilePrimOp _ (Split {}) =
   return () -- Yes, really.

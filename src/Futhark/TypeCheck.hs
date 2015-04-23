@@ -709,7 +709,7 @@ checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
   require [Basic Int] ressize
 
 checkPrimOp (Copy e) =
-  void $ checkSubExp e
+  void $ checkArrIdent e
 
 checkPrimOp (Assert e _) =
   require [Basic Bool] e

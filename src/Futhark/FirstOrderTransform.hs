@@ -92,7 +92,7 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
                    foldl plus
                    (pure $ PrimOp $ SubExp n)
                    (map (pure . PrimOp . SubExp) ms)
-        res <- letSubExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
+        res <- letExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
         return $ PrimOp $ Copy res
 
       nonempty :: [VName] -> Maybe (VName, [VName])
@@ -138,8 +138,8 @@ transformExp (LoopOp (Scan cs fun args)) = do
                               index cs arrexps (Var i))
     dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) x
     irows <- letSubExps "row" $ index cs dests $ Var i
-    rowcopies <- letExps "copy" $ map (PrimOp . Copy) irows
-    return $ resultBody $ map Var $ rowcopies ++ dests
+    rowcopies <- mapM copyIfArray irows
+    return $ resultBody $ rowcopies ++ map Var dests
   return $ LoopOp $
     DoLoop (map identName arr) (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
     (ForLoop i (isize arr)) loopbody
@@ -205,9 +205,17 @@ newFold :: [SubExp]
         -> Binder Basic (([Ident], [SubExp]), (VName, Ident))
 newFold accexps = do
   i <- newVName "i"
-  initacc <- letSubExps "acc" $ map (PrimOp . Copy) accexps
+  initacc <- mapM copyIfArray accexps
   acc <- mapM (newIdent "acc" <=< subExpType) accexps
   return ((acc, initacc), (i, Ident i $ Basic Int))
+
+copyIfArray :: SubExp -> Binder Basic SubExp
+copyIfArray (Constant v) = return $ Constant v
+copyIfArray (Var v) = do
+  t <- lookupType v
+  case t of
+   Array {} -> letSubExp (baseString v ++ "_copy") $ PrimOp $ Copy v
+   _        -> return $ Var v
 
 index :: Certificates -> [VName] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
@@ -436,7 +444,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                     acc' ++
                     map (Var . identName) dests)
   -- 4.) Build the loop
-  initacc0 <- letSubExps "acc" $ map (PrimOp . Copy) accexps --WHY COPY???
+  initacc0 <- mapM copyIfArray accexps --WHY COPY???
   let accres  = exindvars ++ acc0
       accall  = exszvar ++ accres
       initacc = exszses ++ exindses  ++ initacc0

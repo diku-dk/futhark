@@ -522,7 +522,7 @@ internaliseExp desc (E.UnOp E.Negate e _) = do
   letTupExp' desc $ I.PrimOp $ I.Negate e'
 
 internaliseExp desc (E.Copy e _) = do
-  ses <- internaliseExp "copy_arg" e
+  ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp

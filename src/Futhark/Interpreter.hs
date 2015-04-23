@@ -582,7 +582,7 @@ evalPrimOp (Concat _ arr1exp arr2exps _) = do
         else bad $ TypeError "irregular arguments to concat"
     concatArrVals _ _ = bad $ TypeError "evalPrimOp Concat"
 
-evalPrimOp (Copy e) = single <$> evalSubExp e
+evalPrimOp (Copy v) = single <$> lookupVar v
 
 evalPrimOp (Assert e loc) = do
   v <- evalSubExp e

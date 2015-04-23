@@ -238,9 +238,10 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
         referencedInForm = (`HS.member` freeIn form) . fparamName
 
         dummyBindings = map dummyBinding
-        dummyBinding ((v,e), _)
-          | unique (fparamType v) = ([fparamName v], PrimOp $ Copy e)
-          | otherwise             = ([fparamName v], PrimOp $ SubExp e)
+        dummyBinding ((p,e), _)
+          | unique (fparamType p),
+            Var v <- e            = ([fparamName p], PrimOp $ Copy v)
+          | otherwise             = ([fparamName p], PrimOp $ SubExp e)
 
         allDependencies = dataDependencies body
         dependencies (Constant _) = HS.empty
@@ -759,10 +760,10 @@ simplifyReshapeReshape defOf _ (Reshape cs newshape v)
 simplifyReshapeReshape _ _ _ = Nothing
 
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [] [v]) _ (PrimOp (Copy se))) = do
-  t <- subExpType se
-  if basicType t || (unique t && not (any (`UT.used` used) $ subExpAliases se))
-    then letBind_ (Pattern [] [v]) $ PrimOp $ SubExp se
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
+  t <- lookupType v
+  if basicType t || (unique t && not (any (`UT.used` used) $ vnameAliases v))
+    then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
     else cannotSimplify
 removeUnnecessaryCopy _ _ = cannotSimplify
 

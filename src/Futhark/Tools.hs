@@ -160,7 +160,7 @@ eIndex cs a idxs = do
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
-eCopy e = do e' <- letSubExp "copy_arg" =<< e
+eCopy e = do e' <- letExp "copy_arg" =<< e
              return $ PrimOp $ Copy e'
 
 eAssert :: MonadBinder m =>
@@ -286,7 +286,7 @@ nonuniqueParams params =
       param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
       bindingIdentTypes [param'] $
         letBindNames_ [(identName param,BindVar)] $
-        PrimOp $ Copy $ Var $ identName param'
+        PrimOp $ Copy $ identName param'
       return param'
     else
       return param

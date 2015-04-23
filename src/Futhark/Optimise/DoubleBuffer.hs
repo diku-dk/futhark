@@ -113,7 +113,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
               ident = Ident copyname t
               summary = MemSummary bufname ixfun
               copybnd = Let (Pattern [] [PatElem ident BindVar summary]) () $
-                        PrimOp $ Copy $ Var v
+                        PrimOp $ Copy v
           in (Just copybnd, Var copyname)
 
         buffer _ _ se =
