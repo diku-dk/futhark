@@ -7,6 +7,7 @@ module Futhark.CodeGen.ImpGen
   , ExpCompilerResult (..)
   -- * Monadic compiler interface
   , ImpM
+  , emit
   )
   where
 
@@ -146,7 +147,7 @@ compileProg ec prog =
   where src = newNameSourceForProg prog
 
 -- | 'compileProg' with an 'ExpCompiler' that always returns 'CompileExp'.
-compileProgSimply :: Prog -> Either String (Imp.Program op)
+compileProgSimply :: Prog -> Either String (Imp.Program ())
 compileProgSimply = compileProg $ const $ return . CompileExp
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
