@@ -177,7 +177,7 @@ Library
   Ghc-prof-options:   -fprof-auto
 
   if impl(ghc >= 7.10.1)
-     Ghc-Options:       -Wall -fno-warn-unticked-promoted-constructors
+     Ghc-Options:       -Wall
 
 Executable futhark
   Main-is: src/futhark.hs
