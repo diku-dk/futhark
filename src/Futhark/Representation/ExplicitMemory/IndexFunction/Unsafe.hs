@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables, DataKinds, FlexibleContexts, ExistentialQuantification, TypeOperators, TypeFamilies #-}
-{-# OPTIONS_GHC -fno-warn-unticked-promoted-constructors #-}
 module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        (
          IxFun

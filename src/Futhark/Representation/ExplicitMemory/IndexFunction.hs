@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs, DataKinds, TypeOperators, KindSignatures, ScopedTypeVariables #-}
-{-# OPTIONS_GHC -fno-warn-unticked-promoted-constructors #-}
 module Futhark.Representation.ExplicitMemory.IndexFunction
        (
          IxFun

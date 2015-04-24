@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables, DataKinds, TypeOperators, GADTs #-}
-{-# OPTIONS_GHC -fno-warn-unticked-promoted-constructors #-}
 -- | Truths about the universe that may come in handy while doing
 -- compiler hacking.
 module Futhark.Util.Truths
