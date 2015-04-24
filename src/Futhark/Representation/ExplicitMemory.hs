@@ -389,8 +389,7 @@ instance TypeCheck.Checkable ExplicitMemory where
             case attr of
               TypeCheck.LetBound summary -> return summary
               TypeCheck.FunBound summary -> return summary
-              TypeCheck.LambdaBound      ->
-                fail "ExplicitMemory.matchReturnType: asked to return something lambda-bound from a function.\nThis implies a bug in the type checker."
+              TypeCheck.LambdaBound summary -> return summary
 
 matchPatternToReturns :: Monad m =>
                          (String -> m ())
@@ -510,10 +509,7 @@ varMemSummary name = do
   case attr of
     TypeCheck.LetBound summary -> return summary
     TypeCheck.FunBound summary -> return summary
-    TypeCheck.LambdaBound ->
-      TypeCheck.bad $ TypeError noLoc $
-      "Variable " ++ pretty name ++
-      " is lambda-bound.\nI cannot deal with this yet."
+    TypeCheck.LambdaBound summary -> return summary
 
 checkMemSummary :: MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()

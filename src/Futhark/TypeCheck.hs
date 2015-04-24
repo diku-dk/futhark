@@ -66,7 +66,7 @@ type FunBinding lore = (RetType lore, [FParam lore])
 
 data VarBindingLore lore = LetBound (Lore.LetBound lore)
                          | FunBound (Lore.FParam lore)
-                         | LambdaBound
+                         | LambdaBound (Lore.LParam lore)
 
 data VarBinding lore = Bound Type (VarBindingLore lore) Names
                      | WasConsumed
@@ -505,7 +505,7 @@ checkAnonymousFun :: Checkable lore =>
 checkAnonymousFun (fname, rettype, params, body) =
   checkFun' (fname,
              staticShapes rettype,
-             [ (paramIdent param, LambdaBound) | param <- params ],
+             [ (paramIdent param, LambdaBound $ paramLore param) | param <- params ],
              body) $ do
     mapM_ checkType rettype
     checkLambdaBody rettype body
@@ -1199,7 +1199,7 @@ checkConcatMapLambda (Lambda params body rettype) args = do
     checkFuncall Nothing (map paramType elemparams) args
     noConsume $ checkFun' (fname,
                           rettype',
-                          [ (paramIdent param, LambdaBound) | param <- params ],
+                          [ (paramIdent param, LambdaBound $ paramLore param) | param <- params ],
                           body) $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
@@ -1214,7 +1214,7 @@ checkExtLambda (ExtLambda params body rettype) args =
     let fname = nameFromString "<anonymous>"
     noConsume $ checkFun' (fname,
                           rettype,
-                          [ (paramIdent param, LambdaBound) | param <- params ],
+                          [ (paramIdent param, LambdaBound $ paramLore param) | param <- params ],
                           body) $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
