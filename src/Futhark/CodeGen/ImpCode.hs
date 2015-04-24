@@ -92,12 +92,12 @@ instance Monoid (Code a) where
 
 -- Prettyprinting definitions.
 
-instance Pretty (Program op) where
+instance Pretty op => Pretty (Program op) where
   ppr (Program funs) = stack $ intersperse mempty $ map ppFun funs
     where ppFun (name, fun) =
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
-instance Pretty (Function op) where
+instance Pretty op => Pretty (Function op) where
   ppr (Function outs ins body results args) =
     text "Inputs:" </> block ins </>
     text "Outputs:" </> block outs </>
@@ -124,8 +124,8 @@ instance Pretty Size where
   ppr (ConstSize x) = ppr x
   ppr (VarSize v)   = ppr v
 
-instance Pretty (Code op) where
-  ppr (Op _) = text "#<foreign operation>"
+instance Pretty op => Pretty (Code op) where
+  ppr (Op op) = ppr op
   ppr Skip   = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i limit body) =
