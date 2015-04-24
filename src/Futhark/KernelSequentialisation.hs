@@ -2,9 +2,11 @@ module Futhark.KernelSequentialisation
        ( sequentialiseKernels )
        where
 
+import Control.Applicative
 import Control.Monad.State
-
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
