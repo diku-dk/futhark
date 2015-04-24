@@ -103,7 +103,7 @@ deadCodeElimBodyM (Body bodylore [] es) = do
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge form body)) = do
   let (mergepat, mergeexp) = unzip merge
-  mapM_ deadCodeElimFParam mergepat
+  mapM_ deadCodeElimParam mergepat
   mapM_ deadCodeElimSubExp mergeexp
   body' <- deadCodeElimBodyM body
   case form of
@@ -138,13 +138,9 @@ deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()
 deadCodeElimPatElem patelem =
   seen $ patElemName patelem `HS.delete` freeIn patelem
 
-deadCodeElimFParam :: FreeIn attr => FParamT attr -> DCElimM ()
-deadCodeElimFParam fparam =
-  seen $ fparamName fparam `HS.delete` freeIn fparam
-
-
-deadCodeElimBnd :: Ident -> DCElimM ()
-deadCodeElimBnd = void . deadCodeElimType . identType
+deadCodeElimParam :: FreeIn attr => ParamT attr -> DCElimM ()
+deadCodeElimParam fparam =
+  seen $ paramName fparam `HS.delete` freeIn fparam
 
 deadCodeElimType :: Type -> DCElimM Type
 deadCodeElimType t = do
@@ -155,7 +151,7 @@ deadCodeElimLambda :: Proper lore =>
                       Lambda lore -> DCElimM (Lambda lore)
 deadCodeElimLambda (Lambda params body rettype) = do
   body' <- deadCodeElimBodyM body
-  mapM_ deadCodeElimBnd params
+  mapM_ deadCodeElimParam params
   mapM_ deadCodeElimType rettype
   return $ Lambda params body' rettype
 
@@ -163,7 +159,7 @@ deadCodeElimExtLambda :: Proper lore =>
                          ExtLambda lore -> DCElimM (ExtLambda lore)
 deadCodeElimExtLambda (ExtLambda params body rettype) = do
   body' <- deadCodeElimBodyM body
-  mapM_ deadCodeElimBnd params
+  mapM_ deadCodeElimParam params
   seen $ freeIn rettype
   return $ ExtLambda params body' rettype
 

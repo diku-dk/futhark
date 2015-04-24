@@ -10,6 +10,7 @@ module Futhark.Binder
   , runBodyBinder
   , runBinderEmptyEnv
   , bindingIdentTypes
+  , bindingParamTypes
   -- * Non-class interface
   , addBinderBinding
   , collectBinderBindings
@@ -127,6 +128,13 @@ bindingIdentTypes idents (BinderT m) = BinderT $ do
   modify (`HM.difference` types)
   return x
   where types = HM.fromList $ map (identName &&& identType) idents
+
+-- | Add the names and types from the given list of 'Param's to the
+-- type environment while executing the given action.
+bindingParamTypes :: Monad m =>
+                     [ParamT attr] -> BinderT lore m a
+                  -> BinderT lore m a
+bindingParamTypes = bindingIdentTypes . map paramIdent
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

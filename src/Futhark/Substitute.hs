@@ -79,9 +79,9 @@ instance Substitute Bindage where
     (substituteNames substs src)
     (map (substituteNames substs) is)
 
-instance Substitute attr => Substitute (FParamT attr) where
-  substituteNames substs (FParam ident attr) =
-    FParam (substituteNames substs ident) (substituteNames substs attr)
+instance Substitute attr => Substitute (ParamT attr) where
+  substituteNames substs (Param ident attr) =
+    Param (substituteNames substs ident) (substituteNames substs attr)
 
 instance Substitutable lore => Substitute (Pattern lore) where
   substituteNames substs (Pattern context values) =
@@ -171,5 +171,6 @@ class (Substitute (Lore.Exp lore),
        Substitute (Lore.Body lore),
        Substitute (Lore.LetBound lore),
        Substitute (Lore.FParam lore),
+       Substitute (Lore.LParam lore),
        Substitute (Lore.RetType lore)) =>
       Substitutable lore where

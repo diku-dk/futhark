@@ -85,6 +85,7 @@ instance Lore.Lore lore => Lore.Lore (Ranges lore) where
   type Exp (Ranges lore) = Lore.Exp lore
   type Body (Ranges lore) = (BodyRanges, Lore.Body lore)
   type FParam (Ranges lore) = Lore.FParam lore
+  type LParam (Ranges lore) = Lore.LParam lore
   type RetType (Ranges lore) = Lore.RetType lore
 
   representative =
@@ -143,6 +144,7 @@ removeRanges = Rephraser { rephraseExpLore = id
                          , rephraseLetBoundLore = snd
                          , rephraseBodyLore = snd
                          , rephraseFParamLore = id
+                         , rephraseLParamLore = id
                          , rephraseRetType = id
                          }
 

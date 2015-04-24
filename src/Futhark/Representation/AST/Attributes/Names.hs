@@ -29,6 +29,7 @@ import Futhark.Representation.AST.RetType
 freeWalker :: (FreeIn (Lore.Exp lore),
                FreeIn (Lore.Body lore),
                FreeIn (Lore.FParam lore),
+               FreeIn (Lore.LParam lore),
                FreeIn (Lore.LetBound lore)) =>
               Walker lore (Writer Names)
 freeWalker = identityWalker {
@@ -70,7 +71,7 @@ freeWalker = identityWalker {
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           subExpFree boundexp
-          binding (i `HS.insert` HS.fromList (map fparamName mergepat)) $ do
+          binding (i `HS.insert` HS.fromList (map paramName mergepat)) $ do
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
@@ -78,7 +79,7 @@ freeWalker = identityWalker {
           let (mergepat, mergeexps) = unzip merge
           mapM_ subExpFree mergeexps
           tell $ freeIn cond
-          binding (HS.fromList (map fparamName mergepat)) $ do
+          binding (HS.fromList (map paramName mergepat)) $ do
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
@@ -88,6 +89,7 @@ freeWalker = identityWalker {
 freeInBody :: (FreeIn (Lore.Exp lore),
                FreeIn (Lore.Body lore),
                FreeIn (Lore.FParam lore),
+               FreeIn (Lore.LParam lore),
                FreeIn (Lore.LetBound lore)) =>
               Body lore -> Names
 freeInBody = execWriter . walkOnBody freeWalker
@@ -97,6 +99,7 @@ freeInBody = execWriter . walkOnBody freeWalker
 freeInExp :: (FreeIn (Lore.Exp lore),
               FreeIn (Lore.Body lore),
               FreeIn (Lore.FParam lore),
+              FreeIn (Lore.LParam lore),
               FreeIn (Lore.LetBound lore)) =>
              Exp lore -> Names
 freeInExp = execWriter . walkExpM freeWalker
@@ -106,30 +109,30 @@ freeInExp = execWriter . walkExpM freeWalker
 freeInLambda :: (FreeIn (Lore.Exp lore),
                  FreeIn (Lore.Body lore),
                  FreeIn (Lore.FParam lore),
+                 FreeIn (Lore.LParam lore),
                  FreeIn (Lore.LetBound lore)) =>
                 Lambda lore -> Names
 freeInLambda (Lambda params body rettype) =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
-        inParams = mconcat $ map freeInParam params
-        freeInParam = freeIn . identType
+        inParams = mconcat $ map freeIn params
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = map identName params
+        paramnames = map paramName params
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
 freeInExtLambda :: (FreeIn (Lore.Exp lore),
                     FreeIn (Lore.Body lore),
                     FreeIn (Lore.FParam lore),
+                    FreeIn (Lore.LParam lore),
                     FreeIn (Lore.LetBound lore)) =>
                    ExtLambda lore -> Names
 freeInExtLambda (ExtLambda params body rettype) =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
-        inParams = mconcat $ map freeInParam params
-        freeInParam = freeIn . identType
+        inParams = mconcat $ map freeIn params
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = map identName params
+        paramnames = map paramName params
 
 freeInPattern :: FreeIn (Lore.LetBound lore) => Pattern lore -> Names
 freeInPattern (Pattern context values) =
@@ -181,8 +184,8 @@ instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
   freeIn (Mem size)        = freeIn size
   freeIn (Basic _)         = mempty
 
-instance FreeIn attr => FreeIn (FParamT attr) where
-  freeIn (FParam ident attr) =
+instance FreeIn attr => FreeIn (ParamT attr) where
+  freeIn (Param ident attr) =
     freeIn ident <> freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where
@@ -213,7 +216,7 @@ progNames = execWriter . mapM funNames . progFunctions
 
         one = tell . HS.singleton
         funNames fundec = do
-          mapM_ (one . fparamName) $ funDecParams fundec
+          mapM_ (one . paramName) $ funDecParams fundec
           bodyNames $ funDecBody fundec
 
         bodyNames = mapM_ bindingNames . bodyBindings
@@ -222,7 +225,7 @@ progNames = execWriter . mapM funNames . progFunctions
           mapM_ one (patternNames pat) >> expNames e
 
         expNames (LoopOp (DoLoop _ pat form loopbody)) = do
-          mapM_ (one . fparamName . fst) pat
+          mapM_ (one . paramName . fst) pat
           case form of ForLoop i _ ->
                          one i
                        WhileLoop _ ->
@@ -232,7 +235,7 @@ progNames = execWriter . mapM funNames . progFunctions
         expNames e = walkExpM names e
 
         lambdaNames (Lambda params body _) =
-          mapM_ (one . identName) params >> bodyNames body
+          mapM_ (one . paramName) params >> bodyNames body
 
         extLambdaNames (ExtLambda params body _) =
-          mapM_ (one . identName) params >> bodyNames body
+          mapM_ (one . paramName) params >> bodyNames body

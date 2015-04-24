@@ -22,7 +22,7 @@ transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = do
   (body', _) <- modifyNameSource $ runState (runBinderT m HM.empty)
   return fundec { funDecBody = body' }
-  where m = bindingIdentTypes (map fparamIdent $ funDecParams fundec) $
+  where m = bindingIdentTypes (map paramIdent $ funDecParams fundec) $
             transformBody $ funDecBody fundec
 
 type SequentialiseM = Binder Basic
@@ -48,6 +48,6 @@ transformBinding (Let pat () e) = do
 
 transformLambda :: Lambda -> SequentialiseM Lambda
 transformLambda lam = do
-  body' <- bindingIdentTypes (lambdaParams lam) $
+  body' <- bindingParamTypes (lambdaParams lam) $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }

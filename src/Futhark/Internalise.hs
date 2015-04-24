@@ -72,7 +72,7 @@ internaliseFun (fname,rettype,params,body,loc) =
     (rettype', _) <- internaliseDeclType rettype
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape loc rettype' firstbody
-    let mkFParam = flip FParam ()
+    let mkFParam = flip Param ()
     return $ FunDec
       fname (ExtRetType rettype')
       (map mkFParam $ shapeparams ++ params')
@@ -250,7 +250,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                   (map I.identType mergepat')
                   mergeinit_ts' ++
                   mergeinit'
-      merge = [ (FParam ident (), e) |
+      merge = [ (Param ident (), e) |
                 (ident, e) <- zip (shapepat ++ mergepat') mergeexp' ]
       loop = I.LoopOp $ I.DoLoop res merge form' loopbody'
   loopt <- I.expExtType loop
@@ -477,7 +477,11 @@ internaliseExp desc (E.Stream chunk i acc arr lam _) = do
                      accs' lam_arrs'
             return (lam'', chunk'', i'')
   let params' = extLambdaParams lam'
-  let res_lam = ExtLambda (chunk':i':params') (I.extLambdaBody lam') (I.extLambdaReturnType lam')
+  let res_lam = ExtLambda (Param chunk' () :
+                           Param i' () :
+                           params')
+                (I.extLambdaBody lam')
+                (I.extLambdaReturnType lam')
   letTupExp' desc $
     I.LoopOp $ I.Stream [] accs' arrs' res_lam
 
@@ -601,14 +605,14 @@ internaliseLambda (E.AnonymFun params body rettype _) (Just rowtypes) = do
   (body', params') <- bindingLambdaParams params rowtypes $
                       internaliseBody body
   (rettype', _) <- internaliseDeclType rettype
-  return (params', body', rettype')
+  return (map (`Param` ()) params', body', rettype')
 
 internaliseLambda (E.AnonymFun params body rettype _) Nothing = do
   (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
     body' <- internaliseBody body
     (rettype', _) <- internaliseDeclType rettype
     return (body', shapeparams ++ valparams, rettype')
-  return (params', body', rettype')
+  return (map (`Param` ()) params', body', rettype')
 
 internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
   fun_entry <- lookupFunction fname
@@ -632,7 +636,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
         res <- letTupExp "curried_fun_result" $
                I.Apply fname allargs $ ExtRetType ts
         resultBodyM $ map I.Var res
-      return (params, funbody, ts)
+      return (map (`Param` ()) params, funbody, ts)
 
 internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
   fun_entry <- lookupFunction fname
@@ -664,7 +668,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
           res <- letTupExp "curried_fun_result" $
                  I.Apply fname allargs $ ExtRetType ts
           resultBodyM $ map I.Var res
-        return (params, funbody, ts)
+        return (map (`Param` ()) params, funbody, ts)
 
 internaliseLambda (E.UnOpFun unop t loc) rowts = do
   (params, body, rettype) <- unOpFunToLambda unop t

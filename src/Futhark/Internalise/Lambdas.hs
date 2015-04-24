@@ -25,7 +25,7 @@ import Prelude hiding (mapM)
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
-  E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.Param], I.Body, [I.ExtType])
+  E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 
 internaliseMapLambda :: InternaliseLambda
                      -> E.Lambda
@@ -37,11 +37,11 @@ internaliseMapLambda internaliseLambda lam args = do
   (params, body, rettype) <- internaliseLambda lam $ Just rowtypes
   (rettype', inner_shapes) <- instantiateShapes' rettype
   let outer_shape = arraysSize 0 argtypes
-  shape_body <- bindingIdentTypes params $
+  shape_body <- bindingParamTypes params $
                 shapeBody (map I.identName inner_shapes) rettype' body
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
-  body' <- bindingIdentTypes params $
+  body' <- bindingParamTypes params $
            ensureResultShape (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
@@ -56,7 +56,7 @@ internaliseConcatMapLambda internaliseLambda lam = do
     _ ->
       fail "concatMap lambda does not return a single-dimensional array"
 
-makeShapeFun :: [I.Param] -> I.Body -> Int
+makeShapeFun :: [I.LParam] -> I.Body -> Int
              -> InternaliseM I.Lambda
 makeShapeFun params body n = do
   -- Some of 'params' may be unique, which means that the shape slice
@@ -101,7 +101,7 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
-  body' <- bindingIdentTypes params $
+  body' <- bindingParamTypes params $
            ensureResultShape (srclocOf lam) rettype' body
 
   return $ I.Lambda params body' rettype'
@@ -133,13 +133,13 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
       acc_params  = take acc_len params
       map_bodyres = drop acc_len $ I.bodyResult body
       acc_bindings= map (\(ac_var,ac_val) ->
-                            mkLet' [] [ac_var] (PrimOp $ SubExp ac_val)
+                            mkLet' [] [paramIdent ac_var] (PrimOp $ SubExp ac_val)
                         ) (zip acc_params nes)
 
       map_bindings= acc_bindings ++ bodyBindings body
       map_lore    = bodyLore body
       map_body = I.Body map_lore map_bindings map_bodyres
-  shape_body <- bindingIdentTypes params $
+  shape_body <- bindingParamTypes params $
                 shapeBody (map I.identName inner_shapes) rettypearr' map_body
   shapefun <- makeShapeFun (drop acc_len params) shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun arr_args outer_shape
@@ -152,7 +152,7 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   -- an assertion and reshape().
   --
   -- finally, place assertions and return result
-  body' <- bindingIdentTypes params $
+  body' <- bindingParamTypes params $
            ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
@@ -224,10 +224,10 @@ internalisePartitionLambdas internaliseLambda lams args = do
     return (params, body)
   params <- newIdents "partition_param" rowtypes
   body <- mkCombinedLambdaBody params 0 lams'
-  return $ I.Lambda params body [I.Basic Int]
-  where mkCombinedLambdaBody :: [I.Param]
+  return $ I.Lambda (map (`Param` ()) params) body [I.Basic Int]
+  where mkCombinedLambdaBody :: [I.Ident]
                              -> Int
-                             -> [([I.Param], I.Body)]
+                             -> [([I.LParam], I.Body)]
                              -> InternaliseM I.Body
         mkCombinedLambdaBody _      i [] =
           return $ resultBody [intconst i]
@@ -236,9 +236,9 @@ internalisePartitionLambdas internaliseLambda lams args = do
             Body () bodybnds [boolres] -> do
               intres <- newIdent "partition_equivalence_class" $ I.Basic Int
               next_lam_body <-
-                mkCombinedLambdaBody lam_params (i+1) lams'
+                mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
               let parambnds =
-                    [ mkLet' [] [top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
+                    [ mkLet' [] [paramIdent top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
                   branchbnd = mkLet' [] [intres] $ I.If boolres
                               (resultBody [intconst i])

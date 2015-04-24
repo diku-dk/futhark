@@ -100,14 +100,18 @@ analyseLambda :: Lore lore =>
               -> RangeM (Out.Lambda lore)
 analyseLambda lam = do
   body <- analyseBody $ In.lambdaBody lam
-  return $ lam { Out.lambdaBody = body }
+  return $ lam { Out.lambdaBody = body
+               , Out.lambdaParams = In.lambdaParams lam
+               }
 
 analyseExtLambda :: Lore lore =>
                     In.ExtLambda lore
                  -> RangeM (Out.ExtLambda lore)
 analyseExtLambda lam = do
   body <- analyseBody $ In.extLambdaBody lam
-  return $ lam { Out.extLambdaBody = body }
+  return $ lam { Out.extLambdaBody = body
+               , Out.extLambdaParams = In.extLambdaParams lam
+               }
 
 -- Monad and utility definitions
 
@@ -121,7 +125,7 @@ type RangeM = Reader RangeEnv
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 
-bindFunParams :: [Out.FParamT attr] -> RangeM a -> RangeM a
+bindFunParams :: [Out.ParamT attr] -> RangeM a -> RangeM a
 bindFunParams []             m =
   m
 bindFunParams (param:params) m = do
@@ -129,8 +133,8 @@ bindFunParams (param:params) m = do
   local bindFunParam $
     local (refineDimensionRanges ranges dims) $
     bindFunParams params m
-  where bindFunParam = HM.insert (In.fparamName param) Out.unknownRange
-        dims = In.arrayDims $ In.fparamType param
+  where bindFunParam = HM.insert (In.paramName param) Out.unknownRange
+        dims = In.arrayDims $ In.paramType param
 
 bindPattern :: Out.Pattern lore -> RangeM a -> RangeM a
 bindPattern pat m = do

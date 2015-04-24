@@ -353,10 +353,10 @@ lookupFun fname args = do
            zip args argts of
         Nothing ->
           bad $ ParameterMismatch (Just fname) noLoc
-          (Right $ map (justOne . staticShapes1 . fparamType) params) $
+          (Right $ map (justOne . staticShapes1 . paramType) params) $
           map (justOne . staticShapes1) argts
         Just rt ->
-          return (rt, map fparamType params)
+          return (rt, map paramType params)
 
 -- | @t1 `unifyTypes` t2@ attempts to unify @t2@ and @t2@.  If
 -- unification cannot happen, 'Nothing' is returned, otherwise a type
@@ -490,22 +490,22 @@ funParamsToIdentsAndLores :: Checkable lore =>
                              [FParam lore]
                           -> [(Ident, VarBindingLore lore)]
 funParamsToIdentsAndLores = map identAndLore
-  where identAndLore fparam = (fparamIdent fparam,
-                               FunBound $ fparamLore fparam)
+  where identAndLore fparam = (paramIdent fparam,
+                               FunBound $ paramLore fparam)
 
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
 checkFunParams = mapM_ $ \param ->
   context ("In function parameter " ++ pretty param) $
-  checkFParamLore $ fparamLore param
+  checkFParamLore $ paramLore param
 
 checkAnonymousFun :: Checkable lore =>
-                     (Name, [Type], [Ident], BodyT (Aliases lore))
+                     (Name, [Type], [LParam (Aliases lore)], BodyT (Aliases lore))
                   -> TypeM lore ()
 checkAnonymousFun (fname, rettype, params, body) =
   checkFun' (fname,
              staticShapes rettype,
-             [ (param, LambdaBound) | param <- params ],
+             [ (paramIdent param, LambdaBound) | param <- params ],
              body) $ do
     mapM_ checkType rettype
     checkLambdaBody rettype body
@@ -737,27 +737,27 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
     ForLoop loopvar boundexp -> do
       iparam <- basicFParamM loopvar Int
       let funparams = iparam : mergepat
-          paramts   = map fparamType funparams
+          paramts   = map paramType funparams
 
       boundarg <- checkArg boundexp
       checkFuncall Nothing paramts $ boundarg : mergeargs
       return funparams
     WhileLoop cond -> do
-      case find ((==cond) . fparamName . fst) merge of
+      case find ((==cond) . paramName . fst) merge of
         Just (condparam,_) ->
-          unless (fparamType condparam == Basic Bool) $
+          unless (paramType condparam == Basic Bool) $
           bad $ TypeError noLoc $
           "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but " ++
-          pretty (fparamType condparam) ++ "."
+          pretty (paramType condparam) ++ "."
         Nothing ->
           bad $ TypeError noLoc $
           "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge varible."
       let funparams = mergepat
-          paramts   = map fparamType funparams
+          paramts   = map paramType funparams
       checkFuncall Nothing paramts mergeargs
       return funparams
 
-  let rettype = map fparamType mergepat
+  let rettype = map paramType mergepat
 
   context "Inside the loop body" $ noConsume $
     checkFun' (nameFromString "<loop body>",
@@ -773,7 +773,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
         (Several $ staticShapes rettype)
         (Several bodyt)
   forM_ respat $ \res ->
-    case find ((==res) . fparamName) mergepat of
+    case find ((==res) . paramName) mergepat of
       Nothing -> bad $ TypeError noLoc $
                  "Loop result variable " ++
                  textual res ++
@@ -854,7 +854,7 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
   let chunk = head $ extLambdaParams lam
   let asArg t = (t, mempty, mempty)
       inttp   = Basic Int
-      lamarrs'= [ arrayOf t (Shape [Var $ identName chunk]) (uniqueness t)
+      lamarrs'= [ arrayOf t (Shape [Var $ paramName chunk]) (uniqueness t)
                    | t <- map (\(Array bt s u)->Array bt (stripDims 1 s) u)
                               arrargs ]
   checkExtLambda lam $ asArg inttp : asArg inttp :
@@ -879,9 +879,9 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!
   let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
-      lamarr_ptp = map identType $ drop (acc_len+2) $ extLambdaParams lam
-      names_lamparams = HS.fromList $ map identName $ extLambdaParams lam
-  _ <- mapM (checkOuterDim (identName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
+      lamarr_ptp = map paramType $ drop (acc_len+2) $ extLambdaParams lam
+      names_lamparams = HS.fromList $ map paramName $ extLambdaParams lam
+  _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
   _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
   return ()
     where checkOuterDim chunknm outdim = do
@@ -1181,7 +1181,7 @@ checkLambda :: Checkable lore =>
 checkLambda (Lambda params body ret) args = do
   mapM_ checkType ret
   if length params == length args then do
-    checkFuncall Nothing (map identType params) args
+    checkFuncall Nothing (map paramType params) args
     noConsume $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
@@ -1196,10 +1196,10 @@ checkConcatMapLambda (Lambda params body rettype) args = do
       rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
                  | t <- staticShapes rettype ]
   if length elemparams == length args then do
-    checkFuncall Nothing (map identType elemparams) args
+    checkFuncall Nothing (map paramType elemparams) args
     noConsume $ checkFun' (fname,
                           rettype',
-                          [ (param, LambdaBound) | param <- params ],
+                          [ (paramIdent param, LambdaBound) | param <- params ],
                           body) $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
@@ -1210,11 +1210,11 @@ checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
 checkExtLambda (ExtLambda params body rettype) args =
   if length params == length args then do
-    checkFuncall Nothing (map identType params) args
+    checkFuncall Nothing (map paramType params) args
     let fname = nameFromString "<anonymous>"
     noConsume $ checkFun' (fname,
                           rettype,
-                          [ (param, LambdaBound) | param <- params ],
+                          [ (paramIdent param, LambdaBound) | param <- params ],
                           body) $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body

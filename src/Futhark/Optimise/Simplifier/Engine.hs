@@ -125,6 +125,8 @@ class (MonadBinder m,
                        -> m (Lore.LetBound (InnerLore m))
   simplifyFParamLore :: Lore.FParam (InnerLore m)
                      -> m (Lore.FParam (InnerLore m))
+  simplifyLParamLore :: Lore.LParam (InnerLore m)
+                     -> m (Lore.LParam (InnerLore m))
   simplifyRetType :: Lore.RetType (InnerLore m)
                   -> m (Lore.RetType (InnerLore m))
 
@@ -234,13 +236,13 @@ bindFParams params =
   localVtable $ ST.insertFParams params
 
 bindLParams :: MonadEngine m =>
-               [Param] -> m a -> m a
+               [LParam (Lore m)] -> m a -> m a
 bindLParams params =
   localVtable $ \vtable ->
     foldr ST.insertLParam vtable params
 
 bindArrayLParams :: MonadEngine m =>
-                    [(Param,Maybe VName)] -> m a -> m a
+                    [(LParam (Lore m),Maybe VName)] -> m a -> m a
 bindArrayLParams params =
   localVtable $ \vtable ->
     foldr (uncurry ST.insertArrayLParam) vtable params
@@ -566,9 +568,9 @@ simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
 simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexp) = unzip merge
-  mergepat' <- mapM simplifyFParam mergepat
+  mergepat' <- mapM (simplifyParam simplifyFParamLore) mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
-  let diets = map (diet . fparamType) mergepat'
+  let diets = map (diet . paramType) mergepat'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar boundexp -> do
       boundexp' <- simplifySubExp boundexp
@@ -595,11 +597,7 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let merge' = zip mergepat' mergeexp'
   consumeResult $ zip diets mergeexp'
   return $ DoLoop respat merge' form' loopbody'
-  where fparamnames = HS.fromList (map (fparamName . fst) merge)
-        simplifyFParam (FParam ident lore) = do
-          ident' <- simplifyIdentBinding ident
-          lore' <- simplifyFParamLore lore
-          return $ FParam ident' lore'
+  where fparamnames = HS.fromList (map (paramName . fst) merge)
 
 simplifyLoopOp (Stream cs acc arr lam) = do
   cs'  <- simplifyCerts  cs
@@ -659,7 +657,7 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
           | (accparams, arrparams@(firstparam:_)) <-
             splitAt (length acc) $ lambdaParams lam,
             firstarr : _ <- arrinps =
-              case unzip $ filter ((`UT.used` used) . identName . fst) $
+              case unzip $ filter ((`UT.used` used) . paramName . fst) $
                    zip arrparams arrinps of
                ([],[]) -> do
                  -- Avoid having zero inputs to redomap, as that would
@@ -673,7 +671,15 @@ simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
                    PrimOp $ Iota outerSize
                  return (lam { lambdaParams =
                                   accparams ++
-                                  [firstparam { identType = Basic Int }] },
+                                  -- FIXME: this is not sound if the
+                                  -- removed parameter is non-scalar
+                                  -- and we are in ExplicitMemory
+                                  -- representation.
+                                  [firstparam { paramIdent =
+                                                   (paramIdent firstparam)
+                                                   { identType = Basic Int }
+                                              }]
+                             },
                          [input])
                (arrparams', arrinps') ->
                  return (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
@@ -734,6 +740,13 @@ simplifyIdentBinding v = do
   t' <- simplifyType $ identType v
   return v { identType = t' }
 
+simplifyParam :: MonadEngine m =>
+                 (attr -> m attr) -> ParamT attr -> m (ParamT attr)
+simplifyParam simplifyAttribute (Param ident attr) = do
+  ident' <- simplifyIdentBinding ident
+  attr' <- simplifyAttribute attr
+  return $ Param ident' attr'
+
 simplifyVName :: MonadEngine m => VName -> m VName
 simplifyVName v = do
   se <- ST.lookupSubExp v <$> getVtable
@@ -767,10 +780,10 @@ simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m) -> [Maybe VName]
                -> m (Lambda (Lore m))
 simplifyLambda (Lambda params body rettype) arrs = do
-  params' <- mapM simplifyIdentBinding params
+  params' <- mapM (simplifyParam simplifyLParamLore) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
-      paramnames = HS.fromList $ map identName params'
+      paramnames = HS.fromList $ map paramName params'
   body' <-
     enterBody $
     blockIf (hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
@@ -782,12 +795,12 @@ simplifyLambda (Lambda params body rettype) arrs = do
   return $ Lambda params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
-                    [(Ident, SExp.ScalExp, SExp.ScalExp)]
+                    [(LParam (Lore m), SExp.ScalExp, SExp.ScalExp)]
                ->    ExtLambda (InnerLore m)
                -> m (ExtLambda (Lore m))
 simplifyExtLambda parbnds (ExtLambda params body rettype) = do
-  params' <- mapM simplifyIdentBinding params
-  let paramnames = HS.fromList $ map identName params'
+  params' <- mapM (simplifyParam simplifyLParamLore) params
+  let paramnames = HS.fromList $ map paramName params'
   rettype' <- mapM simplifyExtType rettype
   body' <- enterBody $
            blockIf (hasFree paramnames `orIf` isUnique) $
@@ -801,17 +814,17 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
   return $ ExtLambda params' body' rettype''
     where extendSymTab vtb =
             foldl (\ vt (i,l,u) ->
-                        let i_name = identName i
+                        let i_name = paramName i
                         in  ST.setUpperBound i_name u $
                             ST.setLowerBound i_name l vt
                   ) vtb parbnds
           refineArrType :: MonadEngine m =>
-                           TypeEnv -> [Ident] -> SubExp -> ExtType -> m ExtType
+                           TypeEnv -> [LParam (Lore m)] -> SubExp -> ExtType -> m ExtType
           refineArrType bodyenv pars x (Array btp shp u) = do
             vtab <- ST.bindings <$> getVtable
             dsx <- flip extendedTypeEnv bodyenv $
                    shapeDims <$> arrayShape <$> subExpType x
-            let parnms = map identName pars
+            let parnms = map paramName pars
                 dsrtpx =  extShapeDims shp
                 (resdims,_) =
                     foldl (\ (lst,i) el ->

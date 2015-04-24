@@ -122,7 +122,7 @@ primOpType (Partition _ n _ array) =
 loopOpExtType :: HasTypeEnv m =>
                  LoopOp lore -> m [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
-  pure $ loopExtType res $ map (fparamIdent . fst) merge
+  pure $ loopExtType res $ map (paramIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
   staticShapes <$> mapType f <$> traverse lookupType arrs
 loopOpExtType (ConcatMap _ f _) =
@@ -146,7 +146,7 @@ loopOpExtType (Stream _ accs arrs lam) =
   result <$> lookupType (head arrs)
   where ExtLambda params _ rtp = lam
         result (Array _ shp _) =
-          let nms = map identName $ take (2 + length accs) params
+          let nms = map paramName $ take (2 + length accs) params
               (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
               substs = HM.fromList $ zip nms (outersize:i0:accs)
           in map (substNamesInExtType substs) rtp

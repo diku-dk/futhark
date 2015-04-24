@@ -29,6 +29,7 @@ module Futhark.Representation.ExplicitMemory
        , ExtLambda
        , FunDec
        , FParam
+       , LParam
        , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
@@ -45,7 +46,7 @@ module Futhark.Representation.ExplicitMemory
        , AST.ExpT(LoopOp)
        , AST.ExpT(SegOp)
        , AST.FunDecT(FunDec)
-       , AST.FParamT(FParam)
+       , AST.ParamT(Param)
        )
 where
 
@@ -66,7 +67,8 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
-          Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, RetType)
+          Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
+          RetType)
 import qualified Futhark.Analysis.ScalExp as SE
 
 import Futhark.TypeCheck.TypeError
@@ -95,6 +97,7 @@ type Lambda = AST.Lambda ExplicitMemory
 type ExtLambda = AST.ExtLambda ExplicitMemory
 type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
+type LParam = AST.FParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory
 type PatElem = AST.PatElem ExplicitMemory
 
@@ -106,20 +109,21 @@ instance IsRetType [FunReturns] where
 instance Lore.Lore ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
   type FParam   ExplicitMemory = MemSummary
+  type LParam   ExplicitMemory = MemSummary
   type RetType  ExplicitMemory = [FunReturns]
 
   representative = ExplicitMemory
 
   loopResultContext _ res mergevars =
-    let shapeContextIdents = loopShapeContext res $ map fparamIdent mergevars
+    let shapeContextIdents = loopShapeContext res $ map paramIdent mergevars
         memContextIdents = nub $ mapMaybe memIfNecessary res
         memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
     in memSizeContextIdents <> map identName memContextIdents <> shapeContextIdents
     where memIfNecessary var =
-            case find ((==var) . fparamName) mergevars of
-              Just fparam | MemSummary mem _ <- fparamLore fparam,
+            case find ((==var) . paramName) mergevars of
+              Just fparam | MemSummary mem _ <- paramLore fparam,
                             Just memparam    <- isMergeParam mem ->
-                Just $ fparamIdent memparam
+                Just $ paramIdent memparam
               _ ->
                 Nothing
           memSizeIfNecessary ident
@@ -129,7 +133,7 @@ instance Lore.Lore ExplicitMemory where
             | otherwise =
               Nothing
           isMergeParam var =
-            find ((==var) . fparamName) mergevars
+            find ((==var) . paramName) mergevars
 
   applyRetType _ = applyFunReturns
 
@@ -352,7 +356,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkLetBoundLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   basicFParam _ name t =
-    AST.FParam (Ident name (AST.Basic t)) Scalar
+    AST.Param (Ident name (AST.Basic t)) Scalar
 
   matchPattern pat e = do
     rt <- expReturns varMemSummary e
@@ -563,7 +567,7 @@ bindeeAnnot bindeeName bindeeLore bindee =
       Nothing
 
 fparamAnnot :: FParam -> Maybe PP.Doc
-fparamAnnot = bindeeAnnot fparamName fparamLore
+fparamAnnot = bindeeAnnot paramName paramLore
 
 patElemAnnot :: PatElem -> Maybe PP.Doc
 patElemAnnot = bindeeAnnot patElemName patElemLore
@@ -677,10 +681,10 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
     return $
     evalState (mapM typeWithAttr $
                zip res $
-               loopExtType res $ map fparamIdent mergevars) 0
+               loopExtType res $ map paramIdent mergevars) 0
     where typeWithAttr (resname, t) =
             case (t,
-                  fparamLore <$> find ((==resname) . fparamName) mergevars) of
+                  paramLore <$> find ((==resname) . paramName) mergevars) of
               (Array bt shape u, Just (MemSummary mem ixfun))
                 | isMergeVar mem -> do
                   i <- get
@@ -695,7 +699,7 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
                 return $ ReturnsScalar bt
               (Mem _, _) ->
                 fail "expReturns: loop returns memory block explicitly."
-          isMergeVar = flip elem $ map fparamName mergevars
+          isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst merge
 
 expReturns _ (AST.LoopOp op) =
@@ -773,14 +777,14 @@ applyFunReturns :: [FunReturns]
                 -> [(SubExp,Type)]
                 -> Maybe [FunReturns]
 applyFunReturns rets params args
-  | Just _ <- applyExtType rettype (map fparamIdent params) args =
+  | Just _ <- applyExtType rettype (map paramIdent params) args =
     Just $ map correctDims rets
   | otherwise =
     Nothing
   where rettype = ExtRetType $ map returnsToType rets
         parammap :: HM.HashMap VName (SubExp, Type)
         parammap = HM.fromList $
-                   zip (map fparamName params) args
+                   zip (map paramName params) args
 
         substSubExp (Var v)
           | Just (se,_) <- HM.lookup v parammap = se

@@ -45,6 +45,7 @@ instance Lore.Lore lore => Lore.Lore (Wise lore) where
   type Exp (Wise lore) = (ExpWisdom, Lore.Exp lore)
   type Body (Wise lore) = (BodyWisdom, Lore.Body lore)
   type FParam (Wise lore) = Lore.FParam lore
+  type LParam (Wise lore) = Lore.LParam lore
   type RetType (Wise lore) = Lore.RetType lore
 
   representative =
@@ -83,6 +84,7 @@ removeWisdom = Rephraser { rephraseExpLore = snd
                          , rephraseLetBoundLore = snd
                          , rephraseBodyLore = snd
                          , rephraseFParamLore = id
+                         , rephraseLParamLore = id
                          , rephraseRetType = id
                          }
 

@@ -44,11 +44,10 @@ genPredicate :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
 genPredicate (FunDec fname rettype params body) = do
   pred_ident <- newIdent "pred" $ Basic Bool
   cert_ident <- newIdent "pred_cert" $ Basic Cert
-  ((pred_params, bnds),_) <- runBinderEmptyEnv $ nonuniqueParams $ map fparamIdent params
+  ((pred_params, bnds),_) <- runBinderEmptyEnv $ nonuniqueParams params
   let env = GenEnv cert_ident (dataDependencies body) mempty
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
-  let mkFParam = flip FParam ()
-      pred_args = [ (Var arg, Observe) | arg <- map fparamName params ]
+  let pred_args = [ (Var arg, Observe) | arg <- map paramName params ]
       pred_bnd = mkLet' [] [pred_ident] $
                  Apply predFname pred_args $ basicRetType Bool
       cert_bnd = mkLet' [] [cert_ident] $
@@ -56,7 +55,7 @@ genPredicate (FunDec fname rettype params body) = do
       val_fun = FunDec fname rettype params
                 (mkBody (pred_bnd:cert_bnd:val_bnds) val_res)
       pred_fun = FunDec predFname (basicRetType Bool)
-                 (map mkFParam pred_params)
+                 pred_params
                  (bnds `insertBindings` pred_body)
   return (pred_fun, val_fun)
   where predFname = predicateFunctionName fname
@@ -127,7 +126,7 @@ splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
   ok <- newIdent "loop_ok" (Basic Bool)
   predbody' <- conjoinLoopBody (identName ok) predbody
   let predloop = LoopOp $ DoLoop (respat++[identName ok])
-                 (merge++[(FParam ok (),constant True)]) form
+                 (merge++[(Param ok (),constant True)]) form
                  predbody'
       valloop = LoopOp $ DoLoop respat merge form valbody
   return ([mkLet' [] (idents<>[ok]) predloop],
@@ -200,7 +199,7 @@ splitMapLambda lam = do
 splitFoldLambda :: Lambda -> [SubExp] -> GenM (Lambda, Lambda)
 splitFoldLambda lam acc = do
   (Body _ predbnds predres, valbody) <-
-    banning (HS.fromList $ map identName accParams) $
+    banning (HS.fromList $ map paramName accParams) $
     splitFunBody $ lambdaBody lam
   (pred_params, cpybnds) <- nonuniqueParams arrParams
   let predbody = mkBody (accbnds <> cpybnds <> predbnds) predres
@@ -211,7 +210,7 @@ splitFoldLambda lam acc = do
       vallam = lam { lambdaBody = valbody }
   return (predlam, vallam)
   where (accParams,arrParams) = splitAt (length acc) $ lambdaParams lam
-        accbnds = [ mkLet' [] [p] $ PrimOp $ SubExp e
+        accbnds = [ mkLet' [] [paramIdent p] $ PrimOp $ SubExp e
                   | (p,e) <- zip accParams acc ]
 
 allTrue :: Certificates -> Lambda -> [VName]
@@ -230,7 +229,7 @@ allTrue cs predfun args = do
           let Body _ predbnds [se] = lambdaBody predfun -- XXX
               andbnd = mkLet' [] [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
               body = mkBody (predbnds++[andbnd]) [Var $ identName res]
-          return Lambda { lambdaParams = acc : lambdaParams predfun
+          return Lambda { lambdaParams = Param acc () : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body
                         }

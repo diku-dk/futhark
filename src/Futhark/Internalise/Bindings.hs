@@ -71,7 +71,7 @@ internaliseFunParams params = do
           subst <> shapesubst)
 
 bindingParams :: [E.Parameter]
-              -> ([I.Param] -> [I.Param] -> InternaliseM a)
+              -> ([I.Ident] -> [I.Ident] -> InternaliseM a)
               -> InternaliseM a
 bindingParams params m = do
   (shapeparams, valueparams, substs) <- internaliseFunParams params
@@ -129,7 +129,7 @@ bindingTupIdent pat ts m = do
 
 bindingLambdaParams :: [E.Parameter] -> [I.Type]
                     -> InternaliseM I.Body
-                    -> InternaliseM (I.Body, [I.Param])
+                    -> InternaliseM (I.Body, [I.Ident])
 bindingLambdaParams params ts m =
   bindingFlatPattern (map E.fromParam params) ts $ \params' ->
   bindingIdentTypes params' $ do

@@ -90,7 +90,7 @@ bindingPat :: Pattern -> FusionGM a -> FusionGM a
 bindingPat = binding . patternIdents
 
 bindingFParams :: [FParam] -> FusionGM a -> FusionGM a
-bindingFParams = binding  . map fparamIdent
+bindingFParams = binding  . map paramIdent
 
 -- | Binds an array name to the set of soac-produced vars
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
@@ -443,7 +443,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       (used_set, bres') <-
         getUnfusableSet bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
       repl_idnm <- newVName "repl_x"
-      let repl_id = Ident repl_idnm (Basic Int)
+      let repl_id = Param (Ident repl_idnm (Basic Int)) ()
           repl_lam = Lambda [repl_id] (mkBody [] [el])
                      [rowType $ identType v]
           soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
@@ -466,7 +466,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 fusionGatherExp fres (LoopOp (DoLoop _ merge form loop_body)) = do
   let (merge_pat, ini_val) = unzip merge
 
-  let pat_vars = map (Var . fparamName)  merge_pat
+  let pat_vars = map (Var . paramName)  merge_pat
   fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
   fres'' <- case form of ForLoop _ bound ->
                            fusionGatherSubExp fres' bound
@@ -474,7 +474,7 @@ fusionGatherExp fres (LoopOp (DoLoop _ merge form loop_body)) = do
                            fusionGatherSubExp fres' $ Var cond
 
   let null_res = mkFreshFusionRes
-  new_res <- binding (map fparamIdent merge_pat) $ fusionGatherBody null_res loop_body
+  new_res <- binding (map paramIdent merge_pat) $ fusionGatherBody null_res loop_body
   -- make the inpArr unfusable, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res
@@ -530,7 +530,8 @@ addVarToUnfusable fres name = do
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
 fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     let null_res = mkFreshFusionRes
-    new_res <- binding idds $ fusionGatherBody null_res body
+    new_res <- binding (map paramIdent idds) $
+               fusionGatherBody null_res body
     -- make the inpArr unfusable, so that they
     -- cannot be fused from outside the lambda:
     let inp_arrs = HS.fromList $ HM.keys $ inpArr new_res
@@ -598,7 +599,7 @@ fuseIn = identityMapper {
 
 fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda params body rtp) = do
-  body' <- binding params $ fuseInBody body
+  body' <- binding (map paramIdent params) $ fuseInBody body
   return $ Lambda params body' rtp
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body

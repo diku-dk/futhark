@@ -27,7 +27,8 @@ class (Lore lore,
        Pretty (RetType lore),
        Pretty (Pattern lore),
        Pretty (Lore.LetBound lore),
-       Pretty (Lore.FParam lore)) => PrettyLore lore where
+       Pretty (Lore.FParam lore),
+       Pretty (Lore.LParam lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -138,8 +139,8 @@ instance Pretty attr => Pretty (PatElemT attr) where
             parens (ppr attr)) <>
     brackets (commasep $ map ppr is)
 
-instance Pretty attr => Pretty (FParamT attr) where
-  ppr (FParam ident attr) =
+instance Pretty attr => Pretty (ParamT attr) where
+  ppr (Param ident attr) =
     ppr (identType ident) <+>
     ppr (identName ident) <+>
     parens (ppr attr)
@@ -200,7 +201,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =
     text "loop" <+> braces (commasep $ map ppr res) <+>
-    text "<-" <+> ppPattern (map fparamIdent pat) <+> equals <+> ppTuple' initexp </>
+    text "<-" <+> ppPattern (map paramIdent pat) <+> equals <+> ppTuple' initexp </>
     (case form of
       ForLoop i bound ->
         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
@@ -218,7 +219,7 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     where pprConcatLam (Lambda params body rettype) =
             text "fn" <+>
             braces (commasep $ map (brackets . ppr) rettype) <+>
-            apply (map ppParam params) <+>
+            apply (map ppr params) <+>
             text "=>" </> indent 2 (ppr body)
   ppr (Reduce cs lam inputs) =
     ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
@@ -258,13 +259,13 @@ instance PrettyLore lore => Pretty (Exp lore) where
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    apply (map ppParam params) <+>
+    apply (map ppr params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
   ppr (ExtLambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    apply (map ppParam params) <+>
+    apply (map ppr params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where
@@ -275,14 +276,11 @@ instance PrettyLore lore => Pretty (FunDec lore) where
     maybe id (</>) (ppFunDecLore fundec) $
     text "fun" <+> ppr rettype <+>
     text (nameToString name) <//>
-    apply (map (ppParam . fparamIdent) args) <+>
+    apply (map (ppr . paramIdent) args) <+>
     equals </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions
-
-ppParam :: Param -> Doc
-ppParam param = ppr (identType param) <+> ppr param
 
 instance Pretty BinOp where
   ppr Plus = text "+"

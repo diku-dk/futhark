@@ -26,7 +26,6 @@ module Futhark.Representation.AST.Syntax
   -- * Abstract syntax tree
   , IdentBase(..)
   , Ident
-  , Param
   , Certificates
   , SubExp(..)
   , Bindage (..)
@@ -52,8 +51,9 @@ module Futhark.Representation.AST.Syntax
   , Lore.RetType
 
   -- * Definitions
-  , FParamT (..)
+  , ParamT (..)
   , FParam
+  , LParam
   , FunDecT (..)
   , FunDec
   , ProgT(..)
@@ -285,25 +285,33 @@ type Exp = ExpT
 
 -- | Anonymous function for use in a tuple-SOAC.
 data LambdaT lore =
-  Lambda { lambdaParams     :: [Param]
+  Lambda { lambdaParams     :: [LParam lore]
          , lambdaBody       :: BodyT lore
          , lambdaReturnType :: [Type]
          }
-  deriving (Eq, Ord, Show)
+
+deriving instance Lore lore => Eq (LambdaT lore)
+deriving instance Lore lore => Show (LambdaT lore)
+deriving instance Lore lore => Ord (LambdaT lore)
 
 type Lambda = LambdaT
 
 -- | Anonymous function for use in a tuple-SOAC.
 data ExtLambdaT lore =
-  ExtLambda { extLambdaParams     :: [Param]
+  ExtLambda { extLambdaParams     :: [LParam lore]
             , extLambdaBody       :: BodyT lore
             , extLambdaReturnType :: [ExtType]
             }
-  deriving (Eq, Ord, Show)
+
+deriving instance Lore lore => Eq (ExtLambdaT lore)
+deriving instance Lore lore => Show (ExtLambdaT lore)
+deriving instance Lore lore => Ord (ExtLambdaT lore)
 
 type ExtLambda = ExtLambdaT
 
-type FParam lore = FParamT (Lore.FParam lore)
+type FParam lore = ParamT (Lore.FParam lore)
+
+type LParam lore = ParamT (Lore.LParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name

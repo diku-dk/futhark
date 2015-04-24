@@ -27,10 +27,9 @@ module Futhark.Representation.AST.Syntax.Core
          -- * Abstract syntax tree
          , IdentBase(..)
          , Ident
-         , Param
          , Certificates
          , SubExp(..)
-         , FParamT (..)
+         , ParamT (..)
          , Bindage (..)
          , PatElemT (..)
 
@@ -166,10 +165,6 @@ data IdentBase shape = Ident { identName :: VName
 -- | A name with type information.  Used for let-binding normal variables.
 type Ident = IdentBase Shape
 
--- | A name with type information.  These are used for function
--- parameters.
-type Param = IdentBase Shape
-
 instance Eq (IdentBase shape) where
   x == y = identName x == identName y
 
@@ -189,14 +184,14 @@ data SubExp = Constant BasicValue
             | Var      VName
             deriving (Show, Eq, Ord)
 
--- | A (non-lambda) function parameter.
-data FParamT attr = FParam
-                    { fparamIdent :: Ident
-                      -- ^ Name and type of the function parameter.
-                    , fparamLore :: attr
-                      -- ^ Function parameter attribute.
-                    }
-                    deriving (Ord, Show, Eq)
+-- | A function parameter.
+data ParamT attr = Param
+                   { paramIdent :: Ident
+                     -- ^ Name and type of the function parameter.
+                   , paramLore :: attr
+                     -- ^ Function parameter attribute.
+                   }
+                   deriving (Ord, Show, Eq)
 
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.

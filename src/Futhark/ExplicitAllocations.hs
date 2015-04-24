@@ -296,19 +296,19 @@ bindeesSummary = HM.fromList . map bindeeSummary
 
 fparamsSummary :: [FParam] -> MemoryMap
 fparamsSummary = HM.fromList . map fparamSummary
-  where fparamSummary fparam = (fparamName fparam,
-                                Entry (fparamLore fparam) (fparamType fparam))
+  where fparamSummary fparam = (paramName fparam,
+                                Entry (paramLore fparam) (paramType fparam))
 
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
 allocInFParams params m = do
   (valparams, (memsizeparams, memparams)) <- runWriterT $ forM params $ \param ->
-    case fparamType param of
+    case paramType param of
       Array {} -> do
-        (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ fparamIdent param
-        tell ([FParam memsize Scalar], [FParam mem Scalar])
-        return $ FParam param' paramlore
-      _ -> return param { fparamLore = Scalar }
+        (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ paramIdent param
+        tell ([Param memsize Scalar], [Param mem Scalar])
+        return $ Param param' paramlore
+      _ -> return param { paramLore = Scalar }
   let params' = memsizeparams <> memparams <> valparams
       summary = fparamsSummary params'
   local (summary `HM.union`) $ m params'
@@ -454,21 +454,11 @@ allocInExp (Apply fname args rettype) = do
 allocInExp e = mapExpM alloc e
   where alloc =
           identityMapper { mapOnBody = allocInBody
-                         , mapOnLambda = allocInLambda
-                         , mapOnExtLambda = allocInExtLambda
+                         , mapOnLambda = fail "Unhandled lambda in ExplicitAllocations"
+                         , mapOnExtLambda = fail "Unhandled ext lambda in ExplicitAllocations"
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
-
-allocInLambda :: In.Lambda -> AllocM Lambda
-allocInLambda lam = do
-  body <- allocInBody $ lambdaBody lam
-  return $ lam { lambdaBody = body }
-
-allocInExtLambda :: In.ExtLambda -> AllocM ExtLambda
-allocInExtLambda lam = do
-  body <- allocInBody $ extLambdaBody lam
-  return $ lam { extLambdaBody = body }
 
 vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
                  -> MemoryMap
@@ -484,7 +474,7 @@ simplifiable :: (Engine.MonadEngine m,
                 SimpleOps m
 simplifiable =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  simplifyMemSummary simplifyMemSummary
+  simplifyMemSummary simplifyMemSummary simplifyMemSummary
   simplifyRetType'
   where mkLetS' _ pat e =
           return $ mkWiseLetBinding (removePatternWisdom pat) () e

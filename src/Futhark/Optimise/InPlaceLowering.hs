@@ -153,7 +153,7 @@ optimiseExp e = mapExpM optimise e
 optimiseLambda :: Lambda Basic
                -> ForwardingM (Lambda Basic)
 optimiseLambda lam =
-  bindingIdents (lambdaParams lam) $ do
+  bindingIdents (map paramIdent $ lambdaParams lam) $ do
     optbody <- optimiseBody $ lambdaBody lam
     return $ lam { lambdaBody = optbody }
 
@@ -214,8 +214,8 @@ bindingFParams :: [FParam Basic]
                -> ForwardingM a
 bindingFParams fparams = local $ \(TopDown n vtable d) ->
   let entry fparam =
-        (fparamName fparam,
-         Entry n mempty d False $ fparamType fparam)
+        (paramName fparam,
+         Entry n mempty d False $ paramType fparam)
       entries = HM.fromList $ map entry fparams
   in TopDown (n+1) (HM.union entries vtable) d
 

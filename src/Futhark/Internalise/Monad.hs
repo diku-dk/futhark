@@ -10,6 +10,7 @@ module Futhark.Internalise.Monad
   , FunBinding (..)
   , lookupFunction
   , bindingIdentTypes
+  , bindingParamTypes
     -- * Convenient reexports
   , module Futhark.Tools
   )
@@ -28,7 +29,7 @@ import Data.List
 import qualified Futhark.Representation.External as E
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Tools hiding (bindingIdentTypes)
+import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
 import qualified Futhark.Tools as F
 
 import Prelude hiding (mapM)
@@ -115,3 +116,7 @@ bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
 bindingIdentTypes idents (InternaliseM m) =
   InternaliseM $ F.bindingIdentTypes idents m
+
+bindingParamTypes :: [LParam] -> InternaliseM a
+                  -> InternaliseM a
+bindingParamTypes = bindingIdentTypes . map paramIdent

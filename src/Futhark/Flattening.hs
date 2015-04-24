@@ -152,7 +152,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
        mapAndUnzipM (replicateIdent outerSize) loopinv_idents
 
      let mapInfo = MapInfo { mapListArgs = idents ++ loopinv_repidents
-                           , lamParams = lambdaParams lambda ++ loopinv_idents
+                           , lamParams = map paramIdent (lambdaParams lambda) ++ loopinv_idents
                            , mapLets = letBoundIdentsInLambda lambda
                            , mapSize = outerSize
                            , mapCerts = certs
@@ -227,7 +227,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                          , bodyResult = map (Var . identName) shouldReturn
                          }
 
-      let wrapLambda = Lambda { lambdaParams = mapIdents
+      let wrapLambda = Lambda { lambdaParams = map (`Param` ()) mapIdents
                               , lambdaBody = lamBody
                               , lambdaReturnType = map identType shouldReturn
                               }
@@ -395,7 +395,7 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -----------------------------------------
   let newInnerIdents = flatIdents ++ flatDistArrIdents
   let lambdaParams' = okLambdaParams ++ loopInvLambdaParams
-                      ++ extraLamdaParams
+                      ++ map (`Param` ()) extraLamdaParams
 
   let lambdaBody' = substituteNames
                     (HM.fromList $ zip (map identName itmResIdents)

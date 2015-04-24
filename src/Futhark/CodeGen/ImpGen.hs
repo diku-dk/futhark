@@ -157,16 +157,16 @@ compileInParam fparam = case t of
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
       MemLocation mem shape' ixfun
-  where name = fparamName fparam
-        t    = fparamType fparam
-        MemSummary mem ixfun = fparamLore fparam
+  where name = paramName fparam
+        t    = paramType fparam
+        MemSummary mem ixfun = paramLore fparam
 
 data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] MemLocation
 
 fparamSizes :: FParam -> HS.HashSet VName
 fparamSizes fparam
-  | Mem (Var size) <- fparamType fparam = HS.singleton size
-  | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ fparamType fparam
+  | Mem (Var size) <- paramType fparam = HS.singleton size
+  | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ paramType fparam
   where name (Var v) = Just v
         name _       = Nothing
 
@@ -177,14 +177,14 @@ compileInParams params = do
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes params
       mkArg fparam =
-        case (findArray $ fparamName fparam, fparamType fparam) of
+        case (findArray $ paramName fparam, paramType fparam) of
           (Just (ArrayDecl _ bt shape (MemLocation mem _ _)), _) ->
             Just $ Imp.ArrayValue mem bt shape
           (_, Basic bt)
-            | fparamName fparam `HS.member` sizes ->
+            | paramName fparam `HS.member` sizes ->
               Nothing
             | otherwise ->
-              Just $ Imp.ScalarValue bt $ fparamName fparam
+              Just $ Imp.ScalarValue bt $ paramName fparam
           _ ->
             Nothing
       args = mapMaybe mkArg params
@@ -524,7 +524,7 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
     forM_ merge $ \(p, se) -> do
       na <- subExpNotArray se
       when na $
-        compileScalarSubExpTo (ScalarDestination $ fparamName p) se
+        compileScalarSubExpTo (ScalarDestination $ paramName p) se
     let (bindForm, emitForm) =
           case form of
             ForLoop i bound ->
@@ -539,7 +539,7 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
       emitForm body'
     zipWithM_ compileResultSubExp dest $ map Var res
     where mergepat = map fst merge
-          mergenames = map fparamName mergepat
+          mergenames = map paramName mergepat
 
 defCompileLoopOp _ (Map {}) = soacError
 
@@ -599,7 +599,7 @@ declaringVars = flip $ foldr declaringVar
 
 declaringFParams :: [FParam] -> ImpM op a -> ImpM op a
 declaringFParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (fparamIdent fparam) BindVar (fparamLore fparam)
+  where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramLore fparam)
 
 declaringVar :: PatElem -> ImpM op a -> ImpM op a
 declaringVar patElem m =

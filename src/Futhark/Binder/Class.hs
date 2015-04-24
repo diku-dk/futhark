@@ -39,6 +39,7 @@ class (Lore.Lore lore, PrettyLore lore,
        FreeIn (Lore.LetBound lore),
        FreeIn (Lore.Body lore),
        FreeIn (Lore.FParam lore),
+       FreeIn (Lore.LParam lore),
        FreeIn (Lore.RetType lore),
        IsRetType (RetType lore)) => Proper lore where
 
@@ -48,7 +49,7 @@ class (Lore.Lore lore, PrettyLore lore,
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Proper lore, Lore.FParam lore ~ ()) => Bindable lore where
+class (Proper lore, Lore.FParam lore ~ (), Lore.LParam lore ~ ()) => Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasTypeEnv m) =>
