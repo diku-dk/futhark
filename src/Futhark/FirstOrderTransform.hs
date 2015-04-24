@@ -7,6 +7,7 @@ module Futhark.FirstOrderTransform
   ( transformProg
   , transformBinding
   , transformBindingRecursively
+  , transformLambda
   )
   where
 
@@ -574,6 +575,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
 
 transformBinding bnd = addBinding bnd
 
+-- | Recursively first-order-transform a lambda.
 transformLambda :: Lambda -> Binder Basic Lambda
 transformLambda (Lambda params body rettype) = do
   body' <- bindingIdentTypes params $ transformBody body

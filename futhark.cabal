@@ -78,6 +78,7 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
+                   Futhark.KernelSequentialisation
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
                    Futhark.Optimise.DoubleBuffer
