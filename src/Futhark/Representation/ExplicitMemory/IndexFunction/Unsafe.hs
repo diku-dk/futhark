@@ -11,6 +11,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , permute
        , reshape
        , applyInd
+       , offsetUnderlying
        , codomain
        , linearWithOffset
        , isDirect
@@ -155,6 +156,10 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
                    "  Indices" ++ pretty is]
   where nnat :: SNat n
         nnat = snnat %- sOne
+
+offsetUnderlying :: IxFun -> ScalExp -> IxFun
+offsetUnderlying (IxFun snnat f) k =
+  IxFun snnat $ Safe.offsetUnderlying f k
 
 codomain :: IxFun -> SymSet
 codomain (IxFun n f) =

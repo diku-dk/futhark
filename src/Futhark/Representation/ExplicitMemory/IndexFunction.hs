@@ -10,6 +10,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , permute
        , reshape
        , applyInd
+       , offsetUnderlying
        , codomain
        , shape
        , linearWithOffset
@@ -189,6 +190,18 @@ reshape = Reshape
 
 applyInd :: SNat n -> IxFun (m:+:n) -> Indices m -> IxFun n
 applyInd = Index
+
+offsetUnderlying :: IxFun n -> ScalExp -> IxFun n
+offsetUnderlying (Direct dims) k =
+  Offset (Direct dims) k
+offsetUnderlying (Offset ixfun m) k =
+  Offset (offsetUnderlying ixfun k) m
+offsetUnderlying (Permute ixfun perm) k =
+  Permute (offsetUnderlying ixfun k) perm
+offsetUnderlying (Index n ixfun is) k =
+  Index n (offsetUnderlying ixfun k) is
+offsetUnderlying (Reshape ixfun dims) k =
+  Reshape (offsetUnderlying ixfun k) dims
 
 codomain :: IxFun n -> SymSet n
 codomain = undefined
