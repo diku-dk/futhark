@@ -757,12 +757,39 @@ evalSegOp (SegReduce _ fun inputs descparr_exp) = do
   let runReduce = foldM foldfun startaccs
   res <- mapM runReduce segmented_arrs
   arrays (map valueType startaccs) res
-
   where asInt (BasicVal (IntVal x)) = return x
         asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
 
-evalSegOp (SegScan _ fun inputs descparr_exp) =
-  bad . TypeError $ "evalSegOp SegScan not implemented TODO"
+evalSegOp (SegScan _ fun inputs descparr_exp) = do
+  let (ne_exps, flatarr_exps) = unzip inputs
+  startaccs <- mapM evalSubExp ne_exps
+  segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp
+  vss <- mapM (arrToList <=< lookupVar) flatarr_exps
+  let vss' = transpose vss
+
+  when (any (<0) segments) $ bad . TypeError $
+    "evalSegOp SegScan segment with negative length"
+  unless (length vss' == sum segments) $ bad . TypeError $
+    unwords["evalSegOp SegScan segment size (", show $ sum segments, ")"
+           ,"was not equal to array length (", show $ length vss', ")"
+           ]
+
+  let segmented_arrs =
+        reverse $ fst $
+                  foldl (\(res,rest) n -> (take n rest : res, drop n rest))
+                        ([], vss') segments
+
+  let runscan segarr =
+        liftM (reverse . snd) $ foldM scanfun (startaccs, []) segarr
+  res <- liftM concat $ mapM runscan segmented_arrs
+  arrays (map valueType startaccs) res
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _ = bad $ TypeError "evalSegOp SegScan asInt"
+
+        scanfun (acc, l) x = do
+            acc' <- applyLambda fun $ acc ++ x
+            return (acc', acc' : l)
+
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do
