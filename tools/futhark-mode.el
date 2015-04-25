@@ -47,10 +47,19 @@
   '("int" "real" "bool" "char")
   "A list of Futhark types.")
 
+(defconst futhark-vars
+  "\\b[_'[:alnum:]]+\\b"
+  "A regex descriping Futhark variables.")
+
 (defconst futhark-font-lock-keywords-1
-  `((,(concat "\\<" (regexp-opt futhark-keywords t) "\\>") . font-lock-builtin-face)
-    (,(concat "\\<" (regexp-opt futhark-types t) "\\>") . font-lock-type-face)
-    ("\\<\\w*\\>" . font-lock-variable-name-face)
+  `(
+    ;; to recognize the whole of xs_zip_res as a variable
+    (,(concat futhark-vars (regexp-opt futhark-keywords t) futhark-vars) . font-lock-variable-name-face)
+    (,(concat futhark-vars (regexp-opt futhark-keywords t)             ) . font-lock-variable-name-face)
+    (,(concat              (regexp-opt futhark-keywords t) futhark-vars) . font-lock-variable-name-face)
+    (,(concat "\\b" (regexp-opt futhark-keywords t) "\\b") . font-lock-builtin-face)
+    (,(concat "\\b" (regexp-opt futhark-types t) "\\b") . font-lock-type-face)
+    (,(concat futhark-vars) . font-lock-variable-name-face)
     )
   "Minimal highlighting expressions for Futhark mode.")
 
@@ -74,6 +83,8 @@
     ;; Define the // line comment syntax.
     (modify-syntax-entry ?/ ". 124b" st)
     (modify-syntax-entry ?\n "> b" st)
+    ;; apostrophe can be used in variable names, should be in symbol class
+    (modify-syntax-entry ?' "_" st)
     st)
   "Syntax table used in `futhark-mode'.")
 
