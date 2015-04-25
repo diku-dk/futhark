@@ -1,9 +1,11 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables, TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables, TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
 module Futhark.Flattening ( flattenProg )
   where
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Writer
+import Control.Monad.Trans.Either
 import qualified Data.Map as M
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
@@ -58,10 +60,17 @@ data Regularity = Regular
 type SegDescp = (Ident, Regularity)
 
 
-newtype FlatM a = FlatM (StateT FlatState (Either Error) a)
+newtype FlatM a = FlatM (StateT FlatState (EitherT Error (Writer FlatLog)) a)
                 deriving ( MonadState FlatState
                          , Monad, Applicative, Functor
                          )
+
+instance MonadWriter [FlatMsg] FlatM where
+  tell = FlatM . lift . lift . tell
+
+  -- listen :: m a -> m (a, w)
+
+  -- pass :: m (a, w -> w) -> m a
 
 instance MonadFreshNames FlatM where
   getNameSource = gets vnameSource
@@ -69,6 +78,18 @@ instance MonadFreshNames FlatM where
 
 instance HasTypeEnv FlatM where
   askTypeEnv = gets typetab
+
+----------------------------------------
+
+runFlatM :: FlatState -> FlatM a -> Either (Error,FlatLog) a
+runFlatM s (FlatM a) =
+  let (res,flatlog) = runWriter $ runEitherT $ runStateT a s
+  in case res of
+       Left e -> Left (e, flatlog)
+       Right (v,_) -> Right v
+
+flatError :: Error -> FlatM a
+flatError e = FlatM . lift $ left e
 
 --------------------------------------------------------------------------------
 
@@ -81,11 +102,28 @@ instance Show Error where
   show MemTypeFound = "encountered Mem as Type"
   show (ArrayNoDims i) = "found array without any dimensions " ++ pretty i
 
-runFlatM :: FlatState -> FlatM a -> Either Error (a, FlatState)
-runFlatM s (FlatM a) = runStateT a s
+data FlatMsg = TransformsBinding Binding [Binding]
+             | Message String
+             | StartFun Name
+             | StartBnd Binding
+             deriving (Eq)
 
-flatError :: Error -> FlatM a
-flatError e = FlatM . lift $ Left e
+type FlatLog = [FlatMsg]
+
+instance Show FlatMsg where
+  show (TransformsBinding origbnd newbnds) =
+    pretty origbnd ++ "=>" ++ pretty newbnds
+  show (Message msg) = msg
+  show (StartFun name) = "Start function " ++ show name
+  show (StartBnd bnd) = "Start binding " ++ pretty bnd
+
+
+prettyLog :: FlatLog -> PlainString
+prettyLog flog = PlainString $ "\n" ++ unlines (map show flog)
+
+newtype PlainString = PlainString String
+instance Show PlainString where
+  show (PlainString s) = s
 
 --------------------------------------------------------------------------------
 -- Functions for working with FlatState
@@ -263,12 +301,18 @@ setupDataArray i =
 
 --------------------------------------------------------------------------------
 
-flattenProg :: Prog -> Either Error Prog
-flattenProg p@(Prog funs) = do
+flattenProg :: Prog -> Either (Error, PlainString) Prog
+flattenProg p =
+  case flattenProg' p of
+    Right p' -> Right p'
+    Left (e,fl) -> Left (e, prettyLog fl)
+
+flattenProg' :: Prog -> Either (Error,FlatLog) Prog
+flattenProg' p@(Prog funs) = do
   let funs' = map renameToOld funs
-  (funsTrans,_) <- mapAndUnzipM (runFlatM initState . transformFun) funs
+  funsTrans <- mapM (runFlatM initState . transformFun) funs
   let Just main = funDecByName defaultEntryPoint p
-  (main',_) <- runFlatM initState $ transformMain main
+  main' <- runFlatM initState $ transformMain main
   return $ Prog (main' : funsTrans ++ funs')
   where
     initState = FlatState { vnameSource = newNameSourceForProg p
@@ -485,6 +529,7 @@ transformFunName name = nameFromString $ nameToString name ++ "_flattrans"
 
 transformFun :: FunDec -> FlatM FunDec
 transformFun (FunDec name rettype params body) = do
+  tell [StartFun name]
   mapM_ (addTypeIdent . fparamIdent) params
   mapM_ createSegDescsForArray $
     filter (maybe False (>=2) . dimentionality . identType)
@@ -571,7 +616,9 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
      grouped' <- zipWithM
        (\v bndInfo -> case v of
                 Right bnds -> liftM Right $ wrapRightInMap mapInfo bndInfo bnds
-                Left bnd ->  liftM Left $ pullOutOfMap mapInfo bndInfo bnd
+                Left bnd ->  do
+                  tell [StartBnd bnd]
+                  liftM Left $ pullOutOfMap mapInfo bndInfo bnd
        ) grouped (zip argsNeeded shouldReturn)
 
      res' <- forM (resultSubExps . bodyResult $ lambdaBody lambda) $
