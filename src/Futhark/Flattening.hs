@@ -1089,15 +1089,22 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
   scanexp <- segscanPlus (identName repident) (identName segdescp)
   let scanbnd = Let (Pattern [] [PatElem scanident BindVar ()]) () scanexp
 
+  -- Futhark scans are inclusive, but we need exslusive scan for this to work.
+  -- Hacky fixaround is to minus all array elements with one afterwards.
+  -- TODO ^^ discuss with troels/cosmin if we should have both inc/exc.
+  fixident <- newIdent "turn_into_exclusive" tmptp
+  fixexp <- minusOneMap (identName scanident)
+  let fixbnd = Let (patternFromIdents [] [fixident]) () fixexp
+
   resarr <- newIdent (baseString (identName resident) ++ "_arr")
                      (Array Int (Shape [mapSize mapinfo, subexp]) Nonunique)
 
   addMapLetArray (identName resident) resarr
   addTypeIdent resarr
-  addDataArray (identName resarr) scanident
+  addDataArray (identName resarr) fixident
   addTypeIdent scanident
 
-  return $ sumbnd ++ [repbnd, scanbnd]
+  return $ sumbnd ++ [repbnd, scanbnd, fixbnd]
 
 pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem ident1 BindVar _]) _
                         (PrimOp (SubExp (Var name)))) = do
@@ -1239,6 +1246,20 @@ reducePlus :: VName -> FlatM Exp
 reducePlus arr = do
   lambda <- binOpLambda Plus Int
   return $ LoopOp $ Reduce [] lambda [(Constant $ IntVal 0, arr)]
+
+minusOneMap :: VName -> FlatM Exp
+minusOneMap arr = do
+  x   <- newVName "x"
+  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
+    res <- letSubExp "res" $ PrimOp $ BinOp Minus (Var x) (Constant $ IntVal 1) Int
+    return $ resultBody [res]
+  let lambda = Lambda {
+             lambdaParams     = [Ident x (Basic Int)]
+           , lambdaReturnType = [Basic Int]
+           , lambdaBody       = body
+           }
+  return $ LoopOp $ Map [] lambda [arr]
+
 
 --------------------------------------------------------------------------------
 
