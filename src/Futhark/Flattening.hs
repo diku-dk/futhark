@@ -3,14 +3,14 @@ module Futhark.Flattening ( flattenProg )
   where
 
 import Control.Applicative
+import Control.Monad.Except
 import Control.Monad.State
 import Control.Monad.Writer
-import Control.Monad.Trans.Either
-import qualified Data.Map as M
-import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Maybe
 
 import Prelude
 
@@ -60,17 +60,11 @@ data Regularity = Regular
 type SegDescp = (Ident, Regularity)
 
 
-newtype FlatM a = FlatM (StateT FlatState (EitherT Error (Writer FlatLog)) a)
+newtype FlatM a = FlatM (StateT FlatState (ExceptT Error (Writer FlatLog)) a)
                 deriving ( MonadState FlatState
+                         , MonadWriter FlatLog
                          , Monad, Applicative, Functor
                          )
-
-instance MonadWriter [FlatMsg] FlatM where
-  tell = FlatM . lift . lift . tell
-
-  -- listen :: m a -> m (a, w)
-
-  -- pass :: m (a, w -> w) -> m a
 
 instance MonadFreshNames FlatM where
   getNameSource = gets vnameSource
@@ -83,13 +77,13 @@ instance HasTypeEnv FlatM where
 
 runFlatM :: FlatState -> FlatM a -> Either (Error,FlatLog) a
 runFlatM s (FlatM a) =
-  let (res,flatlog) = runWriter $ runEitherT $ runStateT a s
+  let (res,flatlog) = runWriter $ runExceptT $ runStateT a s
   in case res of
        Left e -> Left (e, flatlog)
        Right (v,_) -> Right v
 
 flatError :: Error -> FlatM a
-flatError e = FlatM . lift $ left e
+flatError e = FlatM . lift $ throwError e
 
 ----------------------------------------
 
