@@ -3,6 +3,7 @@ module Futhark.Actions
   , externaliseAction
   , interpretAction
   , impCodeGenAction
+  , kernelImpCodeGenAction
   , seqCodegenAction
   , rangeAction
   )
@@ -20,6 +21,7 @@ import Futhark.Analysis.Range
 import Futhark.Representation.AST hiding (Basic)
 import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen as ImpGen
+import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 
 printAction :: Action
@@ -53,6 +55,10 @@ seqCodegenAction = explicitMemoryAction "sequential code generator" $
 impCodeGenAction :: Action
 impCodeGenAction = explicitMemoryAction "imperative code generator" $
                    either error (putStrLn . pretty) . ImpGen.compileProgSimply
+
+kernelImpCodeGenAction :: Action
+kernelImpCodeGenAction = explicitMemoryAction "imperative code with kernels generator" $
+                         either error (putStrLn . pretty) . KernelImpGen.compileProg
 
 interpret :: (Show error, PrettyLore lore) =>
              (FilePath -> String -> Either error [Value])

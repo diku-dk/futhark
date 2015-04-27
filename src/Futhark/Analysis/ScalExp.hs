@@ -4,6 +4,7 @@ module Futhark.Analysis.ScalExp
   , ScalExp(..)
   , scalExpType
   , subExpToScalExp
+  , intSubExpToScalExp
   , toScalExp
   , expandScalExp
   , LookupVar
@@ -140,6 +141,10 @@ type LookupVar = VName -> Maybe ScalExp
 subExpToScalExp :: SubExp -> BasicType -> ScalExp
 subExpToScalExp (Var v) t        = Id v t
 subExpToScalExp (Constant val) _ = Val val
+
+-- | Non-recursively convert an integral subexpression to a 'ScalExp'.
+intSubExpToScalExp :: SubExp -> ScalExp
+intSubExpToScalExp se = subExpToScalExp se Int
 
 toScalExp :: (HasTypeEnv f, Monad f) =>
              LookupVar -> Exp lore -> f (Maybe ScalExp)

@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.GenericC
   , OpCompilerResult(..)
   -- * Monadic compiler interface
   , CompilerM
+  , compileCode
   , compileExp
   , item
   , stm
@@ -337,8 +338,10 @@ mainCall fname (Function outputs inputs _ results args) = do
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
-compileProg :: OpCompiler op -> Program op -> String
-compileProg ec prog@(Program funs) =
+compileProg :: OpCompiler op -> [C.Definition] -> [C.Stm]
+            -> Program op
+            -> String
+compileProg ec decls mainstms prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ec blankNameSource compileProg'
       funName' = funName . nameFromString
@@ -391,10 +394,13 @@ $edecls:readerFunctions
 
 $edecls:(map funcToDef definitions)
 
+$edecls:decls
+
 int main(int argc, char** argv) {
   struct timeval t_start, t_end, t_diff;
   unsigned long int elapsed_usec;
   $stms:(compInit endstate)
+  $stms:mainstms
   $stm:main;
   if (argc == 3 && strcmp(argv[1], "-t") == 0) {
     FILE* runtime_file;

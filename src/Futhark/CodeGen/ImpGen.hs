@@ -1,13 +1,44 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase #-}
 module Futhark.CodeGen.ImpGen
-  ( compileProg
+  ( -- * Entry Points
+    compileProg
   , compileProgSimply
-  -- * Pluggable compiler
+
+    -- * Pluggable Compiler
   , ExpCompiler
   , ExpCompilerResult (..)
-  -- * Monadic compiler interface
+  , Destination (..)
+  , ValueDestination (..)
+  , ArrayMemoryDestination (..)
+  , MemLocation (..)
+  , MemEntry (..)
+
+    -- * Monadic Compiler Interface
   , ImpM
   , emit
+  , collect
+
+    -- * Lookups
+  , lookupArray
+  , arrayLocation
+  , lookupMemory
+
+    -- * Building Blocks
+  , compileSubExp
+  , compileResultSubExp
+  , subExpToDimSize
+  , declaringLParams
+  , compileBindings
+  , writeExp
+  , fullyIndexArray
+
+    -- * Typed enumerations
+  , Count (..)
+  , Bytes
+  , Elements
+  , elements
+  , bytes
+  , index
   )
   where
 
@@ -133,11 +164,14 @@ instance HasTypeEnv (ImpM op) where
 runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> Either String (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) = runRWST m . newEnv
 
+-- | Execute a code generation action, returning the code that was
+-- emitted.
 collect :: ImpM op () -> ImpM op (Imp.Code op)
 collect m = pass $ do
   ((), code) <- listen m
   return (code, const mempty)
 
+-- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM op ()
 emit = tell
 
@@ -269,9 +303,9 @@ compileExtBody :: Destination -> Body -> ImpM op ()
 compileExtBody (Destination dest) (Body _ bnds ses) =
   compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
 
-compileLoopBody :: [VName] -> Body -> ImpM op ()
+compileLoopBody :: [VName] -> Body -> ImpM op (Imp.Code op)
 compileLoopBody targets (Body _ bnds ses) =
-  compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
+  collect $ compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
     subExpType se >>= \case
       Basic _  -> compileScalarSubExpTo (ScalarDestination d) se
       Mem _    -> compileResultSubExp (MemoryDestination d Nothing) se
@@ -536,7 +570,7 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
                emit . Imp.While (Imp.ScalarVar cond))
 
     bindForm $ do
-      body' <- collect $ compileLoopBody mergenames body
+      body' <- compileLoopBody mergenames body
       emitForm body'
     zipWithM_ compileResultSubExp dest $ map Var res
     where mergepat = map fst merge
@@ -600,6 +634,10 @@ declaringVars = flip $ foldr declaringVar
 
 declaringFParams :: [FParam] -> ImpM op a -> ImpM op a
 declaringFParams = flip $ foldr $ declaringVar . toPatElem
+  where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramLore fparam)
+
+declaringLParams :: [LParam] -> ImpM op a -> ImpM op a
+declaringLParams = flip $ foldr $ declaringVar . toPatElem
   where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramLore fparam)
 
 declaringVar :: PatElem -> ImpM op a -> ImpM op a

@@ -31,6 +31,9 @@ commandLineOptions =
   , Option [] ["compile-imperative"]
     (NoArg $ Right $ \opts -> opts { futharkaction = impCodeGenAction })
     "Translate program into the imperative IL and write it on standard output."
+  , Option [] ["compile-imperative-kernels"]
+    (NoArg $ Right $ \opts -> opts { futharkaction = kernelImpCodeGenAction })
+    "Translate program into the imperative IL with kernels and write it on standard output."
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
