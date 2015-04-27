@@ -114,7 +114,10 @@ instance Show FlatMsg where
     pretty origbnds ++ "=>" ++ pretty newbnds
   show (LogMsg msg) = msg
   show (StartFun name) = "Start function " ++ show name
-  show (StartBnd fname bnd) = unwords ["Start binding in", fname, pretty bnd]
+  show (StartBnd fname bnd) =
+    unwords [ "Start binding in", fname
+            , "let", pretty $ bindingPattern bnd, "= ..."
+            ]
 
 
 prettyLog :: FlatLog -> PlainString
