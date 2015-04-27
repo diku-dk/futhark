@@ -1,35 +1,56 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, FlexibleContexts #-}
 module Futhark.CodeGen.Backends.OpenCL
   ( compileProg
   ) where
 
+import Control.Monad
+import Control.Monad.Writer
+
+
+
+import Prelude
+
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.C as C
 
-import Futhark.Representation.ExplicitMemory
-
+import Futhark.Representation.ExplicitMemory (Prog, pretty)
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.KernelImp
 import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
-import Futhark.MonadFreshNames
+
 
 compileProg :: Prog -> Either String String
-compileProg = fmap (("#include <CL/cl.h>\n" ++) .
-                    GenericC.compileProg kernelCompiler openClDecls openClInit) .
-              KernelImpGen.compileProg
+compileProg prog = do
+  prog' <- KernelImpGen.compileProg prog
+  kernels <- forM (getKernels prog') $ \kernel -> do
+    kernel' <- compileKernel kernel
+    return (kernelName kernel, [C.cinit|$string:(pretty kernel')|])
+  return $
+    "#include <CL/cl.h>\n" ++
+    GenericC.compileProg callKernels (openClDecls kernels) openClInit prog'
 
-kernelCompiler :: GenericC.OpCompiler Kernel
-kernelCompiler kernel = do
+callKernels :: GenericC.OpCompiler Kernel
+callKernels kernel = do
+  _ <- fail $ "Pretend that I call " ++ kernelName kernel ++ " here"
   return GenericC.Done
 
-openClDecls :: [C.Definition]
-openClDecls = [
-    [C.cedecl|typename cl_context fut_cl_context;|]
+compileKernel :: Kernel -> Either String C.Func
+compileKernel = undefined
 
-  , [C.cedecl|typename cl_command_queue fut_cl_queue;|]
+openClDecls :: [(String, C.Initializer)] -> [C.Definition]
+openClDecls kernels =
+  clGlobals ++ kernelDeclarations ++ [setupFunction]
+  where clGlobals =
+          [ [C.cedecl|typename cl_context fut_cl_context;|]
+          , [C.cedecl|typename cl_command_queue fut_cl_queue;|]
+          ]
 
-  , [C.cedecl|
-void setup_opencl_trivially() {
+        kernelDeclarations =
+          [ [C.cedecl|typename cl_kernel $id:name = $init:kernel;|]
+          | (name, kernel) <- kernels ]
+
+        setupFunction = [C.cedecl|
+void setup_opencl() {
   typename cl_int error;
   typename cl_platform_id platform;
   typename cl_device_id device;
@@ -47,8 +68,18 @@ void setup_opencl_trivially() {
   fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
 }
     |]
-  ]
 
 openClInit :: [C.Stm]
 openClInit =
   [[C.cstm|setup_opencl_trivially();|]]
+
+kernelId :: Kernel -> Int
+kernelId = baseTag . kernelThreadNum
+
+kernelName :: Kernel -> String
+kernelName = ("kernel_"++) . show . kernelId
+
+getKernels :: Program -> [Kernel]
+getKernels = execWriter . traverse getFunKernels
+  where getFunKernels kernel =
+          tell [kernel] >> return kernel

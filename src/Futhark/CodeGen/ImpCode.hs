@@ -1,7 +1,10 @@
+{-# LANGUAGE TupleSections #-}
 -- | Inspired by the paper "Defunctionalizing Push Arrays".
 module Futhark.CodeGen.ImpCode
-  ( Program (..)
-  , Function (..)
+  ( Program
+  , ProgramT (..)
+  , Function
+  , FunctionT (..)
   , ValueDecl (..)
   , Param (..)
   , paramName
@@ -20,6 +23,7 @@ module Futhark.CodeGen.ImpCode
 import Data.Monoid
 import Data.List
 import Data.Loc
+import Data.Traversable
 
 import Language.Futhark.Core
 import Futhark.Representation.AST.Syntax (BinOp (..))
@@ -44,14 +48,18 @@ paramName :: Param -> VName
 paramName (MemParam name _) = name
 paramName (ScalarParam name _) = name
 
-newtype Program a = Program [(Name, Function a)]
+newtype ProgramT a = Program [(Name, Function a)]
+
+type Program = ProgramT
 
 data ValueDecl = ArrayValue VName BasicType [DimSize]
                | ScalarValue BasicType VName
                deriving (Show)
 
-data Function a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
-                  deriving (Show)
+data FunctionT a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
+                 deriving (Show)
+
+type Function = FunctionT
 
 data Code a = Skip
             | Code a :>>: Code a
@@ -92,12 +100,12 @@ instance Monoid (Code a) where
 
 -- Prettyprinting definitions.
 
-instance Pretty op => Pretty (Program op) where
+instance Pretty op => Pretty (ProgramT op) where
   ppr (Program funs) = stack $ intersperse mempty $ map ppFun funs
     where ppFun (name, fun) =
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
-instance Pretty op => Pretty (Function op) where
+instance Pretty op => Pretty (FunctionT op) where
   ppr (Function outs ins body results args) =
     text "Inputs:" </> block ins </>
     text "Outputs:" </> block outs </>
@@ -208,3 +216,62 @@ rprecedence :: BinOp -> Int
 rprecedence Minus = 10
 rprecedence Divide = 10
 rprecedence op = precedence op
+
+instance Functor ProgramT where
+  fmap = fmapDefault
+
+instance Foldable ProgramT where
+  foldMap = foldMapDefault
+
+instance Traversable ProgramT where
+  traverse f (Program funs) =
+    Program <$> traverse f' funs
+    where f' (name, fun) = (name,) <$> traverse f fun
+
+instance Functor FunctionT where
+  fmap = fmapDefault
+
+instance Foldable FunctionT where
+  foldMap = foldMapDefault
+
+instance Traversable FunctionT where
+  traverse f (Function outs ins body results args) =
+    Function outs ins <$> traverse f body <*> pure results <*> pure args
+
+instance Functor Code where
+  fmap = fmapDefault
+
+instance Foldable Code where
+  foldMap = foldMapDefault
+
+instance Traversable Code where
+  traverse f (x :>>: y) =
+    (:>>:) <$> traverse f x <*> traverse f y
+  traverse f (For i bound code) =
+    For i bound <$> traverse f code
+  traverse f (While cond code) =
+    While cond <$> traverse f code
+  traverse f (If cond x y) =
+    If cond <$> traverse f x <*> traverse f y
+  traverse f (Op kernel) =
+    Op <$> f kernel
+  traverse _ Skip =
+    pure Skip
+  traverse _ (DeclareMem name) =
+    pure $ DeclareMem name
+  traverse _ (DeclareScalar name bt) =
+    pure $ DeclareScalar name bt
+  traverse _ (Allocate name size) =
+    pure $ Allocate name size
+  traverse _ (Copy dest destoffset src srcoffset size) =
+    pure $ Copy dest destoffset src srcoffset size
+  traverse _ (Write name i bt val) =
+    pure $ Write name i bt val
+  traverse _ (SetScalar name val) =
+    pure $ SetScalar name val
+  traverse _ (SetMem dest from) =
+    pure $ SetMem dest from
+  traverse _ (Assert e loc) =
+    pure $ Assert e loc
+  traverse _ (Call dests fname args) =
+    pure $ Call dests fname args

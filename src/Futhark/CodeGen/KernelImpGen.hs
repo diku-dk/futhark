@@ -52,11 +52,17 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
                   ImpGen.compileBindings (bodyBindings body') $
                     zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
 
+  unless (null expanded_allocs) $
+    fail "Free array variables not implemented."
+
+  -- Compute what memory to allocate on device and copy in.
   arrs_copy_in <- liftM nub $ forM arrs $ \arr -> do
     ImpGen.MemLocation mem _ _ <- ImpGen.arrayLocation arr
     memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
     return $ Imp.CopyMemory mem memsize
 
+  -- Copy what memory to copy out.  Must be allocated on device before
+  -- kernel execution anyway.
   copy_out <- liftM catMaybes $ forM dest $ \case
     (ImpGen.ArrayDestination
      (ImpGen.CopyIntoMemory
@@ -67,7 +73,7 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
       return Nothing
 
   ImpGen.emit $ Imp.Op Imp.Kernel {
-      Imp.kernelThreadIdx = thread_num
+      Imp.kernelThreadNum = thread_num
     , Imp.kernelBody = kernelbody
     , Imp.kernelCopyIn = arrs_copy_in
     , Imp.kernelCopyOut = copy_out
@@ -82,11 +88,16 @@ writeThreadResult :: VName -> ImpGen.ValueDestination -> SubExp
 writeThreadResult thread_num
   (ImpGen.ArrayDestination
    (ImpGen.CopyIntoMemory
-    (ImpGen.MemLocation mem shape ixfun)) _) se = do
+    (ImpGen.MemLocation mem _ _)) _) se = do
   set <- subExpType se
   let i = ImpGen.elements $ Imp.ScalarVar thread_num
   case set of
-    Basic bt -> ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt i) se
+    Basic bt ->
+      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt i) se
+    _ ->
+      fail "Cannot handle non-basic kernel thread result."
+writeThreadResult _ _ _ =
+  fail "Cannot handle kernel that does not return an array."
 
 readThreadParams :: VName -> LParam -> VName
                  -> ImpGen.ImpM Imp.Kernel ()
