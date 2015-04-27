@@ -470,13 +470,15 @@ allocInMapLambda lam input_summaries = do
   i <- newVName "i"
   params' <-
     forM (zip (lambdaParams lam) input_summaries) $ \(p,summary) ->
-    case summary of
-     Scalar ->
+    case (paramType p, summary) of
+     (_, Scalar) ->
        fail $ "Passed a scalar for lambda parameter " ++ pretty p
-     MemSummary mem ixfun ->
+     (Array {}, MemSummary mem ixfun) ->
        return p { paramLore =
                      MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
                 }
+     (Basic _, _) ->
+       return p { paramLore = Scalar }
   let param_summaries = paramsSummary params'
       all_summaries = HM.insert i (Entry Scalar $ Basic Int) param_summaries
   body' <- local (HM.union all_summaries) $
