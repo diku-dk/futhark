@@ -52,7 +52,7 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
                   ImpGen.compileBindings (bodyBindings body') $
                     zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
 
-  unless (null expanded_allocs) $
+  unless (HM.null expanded_allocs) $
     fail "Free array variables not implemented."
 
   -- Compute what memory to allocate on device and copy in.

@@ -5,8 +5,7 @@ module Futhark.CodeGen.Backends.OpenCL
 
 import Control.Monad
 import Control.Monad.Writer
-
-
+import Data.Traversable hiding (forM)
 
 import Prelude
 

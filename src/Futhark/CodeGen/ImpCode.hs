@@ -20,10 +20,14 @@ module Futhark.CodeGen.ImpCode
   )
   where
 
+import Control.Applicative
 import Data.Monoid
-import Data.List
+import Data.List hiding (foldr)
 import Data.Loc
 import Data.Traversable
+import Data.Foldable
+
+import Prelude hiding (foldr)
 
 import Language.Futhark.Core
 import Futhark.Representation.AST.Syntax (BinOp (..))
