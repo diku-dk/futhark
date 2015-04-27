@@ -477,7 +477,7 @@ allocInMapLambda lam input_summaries = do
        return p { paramLore =
                      MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
                 }
-     (Basic _, _) ->
+     _ ->
        return p { paramLore = Scalar }
   let param_summaries = paramsSummary params'
       all_summaries = HM.insert i (Entry Scalar $ Basic Int) param_summaries
