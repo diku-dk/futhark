@@ -8,13 +8,17 @@ module Futhark.CodeGen.Backends.GenericC
   , OpCompilerResult(..)
   -- * Monadic compiler interface
   , CompilerM
+  , runCompilerM
+  , collect
+  , compileFun
   , compileCode
   , compileExp
   , item
   , stm
   , stms
   , decl
-  -- * General utilities
+  -- * Building Blocks
+  , valueTypeToCType
   ) where
 
 import Control.Applicative
@@ -104,7 +108,7 @@ runCompilerM prog ec src (CompilerM m) =
   let (x, s, _) = runRWS m (newCompilerEnv prog ec) (newCompilerState src)
   in (x, s)
 
-collect :: MonadWriter w m => m () -> m w
+collect :: CompilerM op () -> CompilerM op [C.BlockItem]
 collect m = pass $ do
   ((), w) <- listen m
   return (w, const mempty)
@@ -354,6 +358,7 @@ $esc:("#include <math.h>")
 $esc:("#include <sys/time.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
+$esc:("#include <assert.h>")
 
 $edecls:(typeDefinitions endstate)
 
@@ -392,9 +397,9 @@ int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval 
 
 $edecls:readerFunctions
 
-$edecls:(map funcToDef definitions)
-
 $edecls:decls
+
+$edecls:(map funcToDef definitions)
 
 int main(int argc, char** argv) {
   struct timeval t_start, t_end, t_diff;
