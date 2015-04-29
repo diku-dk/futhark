@@ -48,15 +48,15 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
         HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp) thread_allocs
       body' = offsetMemorySummariesInBody alloc_offsets body
 
+  unless (HM.null expanded_allocs) $
+    fail "Free array variables not implemented."
+
   kernelbody <- ImpGen.collect $
                 ImpGen.declaringLParams (lambdaParams lam) $
                 makeAllMemoryGlobal $ do
                   zipWithM_ (readThreadParams thread_num) (lambdaParams lam) arrs
                   ImpGen.compileBindings (bodyBindings body') $
                     zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
-
-  unless (HM.null expanded_allocs) $
-    fail "Free array variables not implemented."
 
   arr_mems <- forM arrs $ \arr -> do
     ImpGen.MemLocation mem _ _ <- ImpGen.arrayLocation arr
