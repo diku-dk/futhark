@@ -58,10 +58,20 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
     fail "Free array variables not implemented."
 
   -- Compute what memory to allocate on device and copy in.
-  arrs_copy_in <- liftM nub $ forM arrs $ \arr -> do
+  arrs_copy_in <- forM arrs $ \arr -> do
     ImpGen.MemLocation mem _ _ <- ImpGen.arrayLocation arr
     memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
     return $ Imp.CopyMemory mem memsize
+
+  free_copy_in <- liftM catMaybes $ forM (HS.toList $ freeInBody body) $ \var ->
+    if var `elem` map paramName (lambdaParams lam)
+      then return Nothing
+      else do
+      t <- lookupType var
+      case t of
+        Array {} -> return Nothing
+        Mem memsize -> Just <$> Imp.CopyMemory var <$> ImpGen.subExpToDimSize memsize
+        Basic bt -> return $ Just $ Imp.CopyScalar var bt
 
   -- Copy what memory to copy out.  Must be allocated on device before
   -- kernel execution anyway.
@@ -79,7 +89,7 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
   ImpGen.emit $ Imp.Op Imp.Kernel {
       Imp.kernelThreadNum = thread_num
     , Imp.kernelBody = kernelbody
-    , Imp.kernelCopyIn = arrs_copy_in
+    , Imp.kernelCopyIn = arrs_copy_in ++ free_copy_in
     , Imp.kernelCopyOut = copy_out
     , Imp.kernelSize = kernel_size
     }
