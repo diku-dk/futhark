@@ -6,6 +6,7 @@ module Futhark.CodeGen.Backends.OpenCL
 import Control.Monad
 import Control.Monad.Writer
 import Data.Traversable hiding (forM)
+import Data.Loc (noLoc)
 
 import Prelude
 
@@ -26,20 +27,34 @@ compileProg prog = do
     return (kernelName kernel, [C.cinit|$string:(pretty kernel')|])
   return $
     "#include <CL/cl.h>\n" ++
-    GenericC.compileProg callKernels (openClDecls kernels) openClInit prog'
+    GenericC.compileProg callKernels pointerQuals (openClDecls kernels) openClInit prog'
 
 callKernels :: GenericC.OpCompiler Kernel
 callKernels kernel = do
---  _ <- fail $ "Pretend that I call " ++ kernelName kernel ++ " here"
+  _ <- fail $ "Pretend that I call " ++ kernelName kernel ++ " here"
   return GenericC.Done
+
+failOnKernels :: GenericC.OpCompiler Kernel
+failOnKernels kernel = do
+  fail $ "Asked to call kernel " ++ kernelName kernel ++ " while already inside a kernel"
+
+pointerQuals ::  GenericC.PointerQuals Kernel
+pointerQuals "global"    = return [C.TCLglobal noLoc]
+pointerQuals "local"     = return [C.TCLlocal noLoc]
+pointerQuals "private"   = return [C.TCLprivate noLoc]
+pointerQuals "constant"  = return [C.TCLconstant noLoc]
+pointerQuals "writeonly" = return [C.TCLconstant noLoc]
+pointerQuals "readonly"  = return [C.TCLconstant noLoc]
+pointerQuals "kernel"    = return [C.TCLkernel noLoc]
+pointerQuals s           = fail $ "'" ++ s ++ "' is not an OpenCL address space."
 
 compileKernel :: Kernel -> Either String C.Func
 compileKernel kernel =
-  let (funbody,_) = GenericC.runCompilerM (Program []) callKernels blankNameSource $
+  let (funbody,_) = GenericC.runCompilerM (Program []) failOnKernels pointerQuals blankNameSource $
                     GenericC.collect $ GenericC.compileCode $ kernelBody kernel
 
       asParam (CopyScalar name bt) =
-        let ctp = GenericC.valueTypeToCType $ Scalar bt
+        let ctp = GenericC.scalarTypeToCType bt
         in [C.cparam|$ty:ctp $id:name|]
       asParam (CopyMemory name _) =
         [C.cparam|__global unsigned char *$id:name|]
@@ -137,7 +152,7 @@ loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
   size_t src_size;
   typename cl_program prog;
-  printf("look at me, loading this kernel:\n%s", $id:srcname);
+  printf("look at me, loading this kernel:\n%s\n", $id:srcname);
   error = 0;
   src_size = sizeof($id:srcname);
   const char* src_ptr[] = {$id:srcname};

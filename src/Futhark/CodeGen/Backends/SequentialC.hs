@@ -12,8 +12,11 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 
 compileProg :: Prog -> Either String String
-compileProg = fmap (GenericC.compileProg codeCompiler [] []) . ImpGen.compileProg firstOrderSOACS
+compileProg = fmap (GenericC.compileProg codeCompiler noQuals [] []) .
+              ImpGen.compileProg firstOrderSOACS
   where codeCompiler :: GenericC.OpCompiler ()
         codeCompiler () = return GenericC.Done
+        noQuals :: GenericC.PointerQuals ()
+        noQuals s = fail $ "Sequential C does not support the address space '" ++ s ++ "'"
         firstOrderSOACS :: ImpGen.ExpCompiler ()
         firstOrderSOACS _ = return . ImpGen.CompileExp

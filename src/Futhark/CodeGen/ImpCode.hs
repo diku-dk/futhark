@@ -12,6 +12,7 @@ module Futhark.CodeGen.ImpCode
   , MemSize
   , DimSize
   , Type (..)
+  , Space
   , Code (..)
   , Exp (..)
   , UnOp (..)
@@ -33,7 +34,7 @@ import Language.Futhark.Core
 import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.Representation.AST.Pretty ()
 
-import Text.PrettyPrint.Mainland
+import Text.PrettyPrint.Mainland hiding (space)
 
 data Size = ConstSize Int
           | VarSize VName
@@ -42,14 +43,20 @@ data Size = ConstSize Int
 type MemSize = Size
 type DimSize = Size
 
-data Type = Scalar BasicType | Mem DimSize
+-- | The memory space of a block.  If 'Nothing', this is the "default"
+-- space, whatever that is.  The exact meaning of the string depends
+-- on the backend used.  On the GPU, for example, this is used to
+-- distinguish between constant, global and shared memory spaces.
+type Space = Maybe String
 
-data Param = MemParam VName DimSize
+data Type = Scalar BasicType | Mem DimSize Space
+
+data Param = MemParam VName DimSize Space
            | ScalarParam VName BasicType
              deriving (Show)
 
 paramName :: Param -> VName
-paramName (MemParam name _) = name
+paramName (MemParam name _ _) = name
 paramName (ScalarParam name _) = name
 
 newtype ProgramT a = Program [(Name, Function a)]
@@ -69,13 +76,13 @@ data Code a = Skip
             | Code a :>>: Code a
             | For VName Exp (Code a)
             | While Exp (Code a)
-            | DeclareMem VName
+            | DeclareMem VName Space
             | DeclareScalar VName BasicType
             | Allocate VName Exp
             | Copy VName Exp VName Exp Exp
               -- ^ Destination, offset in destination, source, offset
               -- in source, number of bytes.
-            | Write VName Exp BasicType Exp
+            | Write VName Exp BasicType Space Exp
             | SetScalar VName Exp
             | SetMem VName VName
             | Call [VName] Name [Exp]
@@ -87,7 +94,7 @@ data Code a = Skip
 data Exp = Constant BasicValue
          | BinOp BinOp Exp Exp
          | UnOp UnOp Exp
-         | Index VName Exp BasicType
+         | Index VName Exp BasicType Space
          | ScalarVar VName
          | SizeOf BasicType
            deriving (Eq, Show)
@@ -122,8 +129,10 @@ instance Pretty op => Pretty (FunctionT op) where
 instance Pretty Param where
   ppr (ScalarParam name ptype) =
     ppr ptype <+> ppr name
-  ppr (MemParam name size) =
-    text "mem" <> parens (ppr size) <+> ppr name
+  ppr (MemParam name size space) =
+    text "mem" <> parens (ppr size) <> space' <+> ppr name
+    where space' = case space of Just s -> text "@" <> text s
+                                 Nothing -> mempty
 
 instance Pretty ValueDecl where
   ppr (ScalarValue t name) =
@@ -148,15 +157,19 @@ instance Pretty op => Pretty (Code op) where
     text "while" <+> ppr cond <+> text "{" </>
     indent 2 (ppr body) </>
     text "}"
-  ppr (DeclareMem name) =
-    text "declare" <+> ppr name <+> text "as memory block"
+  ppr (DeclareMem name space) =
+    text "declare" <+> ppr name <+> text "as memory block" <>
+    case space of Nothing -> mempty
+                  Just s  -> text " at" <+> text s
   ppr (DeclareScalar name t) =
     text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
   ppr (Allocate name e) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e)
-  ppr (Write name i bt val) =
-    ppr name <> langle <> ppr bt <> rangle <> brackets (ppr i) <+>
+  ppr (Write name i bt space val) =
+    ppr name <> langle <> ppr bt <> space' <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
+    where space' = case space of Nothing -> mempty
+                                 Just s -> text "@" <> text s
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from) =
@@ -193,8 +206,10 @@ instance Pretty Exp where
     text "-" <+> ppr x
   pprPrec _ (ScalarVar v) =
     ppr v
-  pprPrec _ (Index v is bt) =
-    ppr v <> langle <> ppr bt <> rangle <> brackets (ppr is)
+  pprPrec _ (Index v is bt space) =
+    ppr v <> langle <> ppr bt <> space' <> rangle <> brackets (ppr is)
+    where space' = case space of Nothing -> mempty
+                                 Just s -> text "@" <> text s
   pprPrec _ (SizeOf t) =
     text "sizeof" <> parens (ppr t)
 
@@ -261,16 +276,16 @@ instance Traversable Code where
     Op <$> f kernel
   traverse _ Skip =
     pure Skip
-  traverse _ (DeclareMem name) =
-    pure $ DeclareMem name
+  traverse _ (DeclareMem name space) =
+    pure $ DeclareMem name space
   traverse _ (DeclareScalar name bt) =
     pure $ DeclareScalar name bt
   traverse _ (Allocate name size) =
     pure $ Allocate name size
   traverse _ (Copy dest destoffset src srcoffset size) =
     pure $ Copy dest destoffset src srcoffset size
-  traverse _ (Write name i bt val) =
-    pure $ Write name i bt val
+  traverse _ (Write name i bt val space) =
+    pure $ Write name i bt val space
   traverse _ (SetScalar name val) =
     pure $ SetScalar name val
   traverse _ (SetMem dest from) =

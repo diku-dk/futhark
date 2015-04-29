@@ -107,7 +107,7 @@ readThreadParams thread_num param arr = do
     (srcmem, srcoffset) <-
       ImpGen.fullyIndexArray arr [SE.Id thread_num Int]
     ImpGen.emit $ Imp.SetScalar (paramName param) $
-      ImpGen.index srcmem srcoffset $ elemType t
+      ImpGen.index srcmem srcoffset (elemType t) Nothing
 
 -- | Returns a map from memory block names to their size in bytes,
 -- as well as the lambda body where all the allocations have been removed.

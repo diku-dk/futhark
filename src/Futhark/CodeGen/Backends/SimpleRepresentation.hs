@@ -24,7 +24,7 @@ sameRepresentation ets1 ets2
 sameRepresentation' :: Type -> Type -> Bool
 sameRepresentation' (Scalar t1) (Scalar t2) =
   t1 == t2
-sameRepresentation' (Mem _) (Mem _) = True
+sameRepresentation' (Mem _ space1) (Mem _ space2) = space1 == space2
 sameRepresentation' _ _ = False
 
 -- | @tupleField i@ is the name of field number @i@ in a tuple.
