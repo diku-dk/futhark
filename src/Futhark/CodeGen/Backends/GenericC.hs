@@ -14,6 +14,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileFun
   , compileCode
   , compileExp
+  , dimSizeToExp
   , item
   , stm
   , stms

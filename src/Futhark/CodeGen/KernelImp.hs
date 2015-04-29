@@ -28,7 +28,9 @@ data Kernel = Kernel { kernelThreadNum :: VName
                      , kernelBody :: Code
                      , kernelCopyIn :: [KernelCopy]
                      , kernelCopyOut :: [KernelCopy]
+                     , kernelSize :: DimSize
                      }
+            deriving (Show)
 
 data KernelCopy = CopyScalar VName BasicType
                 | CopyMemory VName Imp.DimSize

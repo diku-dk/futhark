@@ -31,8 +31,62 @@ compileProg prog = do
 
 callKernels :: GenericC.OpCompiler Kernel
 callKernels kernel = do
-  _ <- fail $ "Pretend that I call " ++ kernelName kernel ++ " here"
+  inbufs <- zipWithM mkBuffer [(0::Int)..] $ kernelCopyIn kernel
+  outbufs <- zipWithM mkBuffer [length inbufs..] $ kernelCopyOut kernel
+  zipWithM_ writeInput inbufs $ kernelCopyIn kernel
+  worksize <- newVName "worksize"
+  let kernel_size = GenericC.dimSizeToExp $ kernelSize kernel
+
+  GenericC.stm [C.cstm|{
+    size_t $id:worksize = $exp:kernel_size;
+    assert(clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, 1, NULL,
+                                  &$id:worksize, &$id:worksize,
+                                  0, NULL, NULL)
+           == CL_SUCCESS);
+    }|]
+
+  zipWithM_ readOutput outbufs $ kernelCopyOut kernel
+  GenericC.stm [C.cstm|assert(clFinish(fut_cl_queue) == CL_SUCCESS);|]
   return GenericC.Done
+  where mkBuffer i (CopyMemory name size) = do
+          let size' = GenericC.dimSizeToExp size
+          bufname <- newVName $ baseString name ++ "_dev"
+          errorname <- newVName "error"
+          GenericC.decl [C.cdecl|typename cl_mem $id:bufname;|]
+          GenericC.stm [C.cstm|{
+            typename cl_int $id:errorname;
+            $id:bufname = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE, $exp:size', NULL, &$id:errorname);
+            assert($id:errorname == 0);
+            assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:bufname), &$id:bufname)
+                   == CL_SUCCESS);
+            }|]
+          return bufname
+        mkBuffer _ _ =
+          fail "mkBuffer cannot handle scalars yet."
+
+        writeInput devbuf (CopyMemory hostbuf size) = do
+          let size' = GenericC.dimSizeToExp size
+          GenericC.stm [C.cstm|{
+            assert(clEnqueueWriteBuffer(fut_cl_queue, $id:devbuf,
+                                        CL_FALSE, 0, $exp:size', $id:hostbuf,
+                                        0, NULL, NULL)
+                    == CL_SUCCESS);
+            }|]
+        writeInput _ _ =
+          fail "writeInput cannot handle scalars yet."
+
+        readOutput devbuf (CopyMemory hostbuf size) = do
+          let size' = GenericC.dimSizeToExp size
+          GenericC.stm [C.cstm|
+              assert(clEnqueueReadBuffer(fut_cl_queue, $id:devbuf,
+                                         CL_FALSE, 0, $exp:size', $id:hostbuf,
+                                         0, NULL, NULL)
+                     == CL_SUCCESS);
+            |]
+        readOutput _ _ =
+          fail "readOutput cannot handle scalars and probably never will."
+
+        kernel_name = kernelName kernel
 
 failOnKernels :: GenericC.OpCompiler Kernel
 failOnKernels kernel = do
@@ -62,7 +116,7 @@ compileKernel kernel =
       inparams = map asParam $ kernelCopyIn kernel
       outparams = map asParam $ kernelCopyOut kernel
   in Right [C.cfun|__kernel void $id:(kernelName kernel) ($params:(inparams++outparams)) {
-               const uint $id:(kernelThreadNum kernel) = get_global_id(0) * get_local_size(0) + get_local_id(0);
+               const uint $id:(kernelThreadNum kernel) = get_global_id(0);
                $items:funbody
 }|]
 

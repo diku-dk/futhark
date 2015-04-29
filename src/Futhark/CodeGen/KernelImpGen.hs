@@ -74,11 +74,14 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
     _ ->
       return Nothing
 
+  kernel_size <- ImpGen.subExpToDimSize =<< (arraysSize 0 <$> mapM lookupType arrs)
+
   ImpGen.emit $ Imp.Op Imp.Kernel {
       Imp.kernelThreadNum = thread_num
     , Imp.kernelBody = kernelbody
     , Imp.kernelCopyIn = arrs_copy_in
     , Imp.kernelCopyOut = copy_out
+    , Imp.kernelSize = kernel_size
     }
   return ImpGen.Done
 
