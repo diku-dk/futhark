@@ -5,6 +5,7 @@ module Futhark.CodeGen.KernelImpGen
   where
 
 import Control.Monad.Except
+import Control.Monad.Reader
 import Control.Applicative
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
@@ -47,7 +48,8 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
       body' = offsetMemorySummariesInBody alloc_offsets body
 
   kernelbody <- ImpGen.collect $
-                ImpGen.declaringLParams (lambdaParams lam) $ do
+                ImpGen.declaringLParams (lambdaParams lam) $
+                makeAllMemoryGlobal $ do
                   zipWithM_ (readThreadParams thread_num) (lambdaParams lam) arrs
                   ImpGen.compileBindings (bodyBindings body') $
                     zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
@@ -83,6 +85,21 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
 
+-- | Change every memory block to be in the global address space.
+-- This is fairly hacky and can be improved once the Futhark-level
+-- memory representation supports address spaces.  This only affects
+-- generated code - we still need to make sure that the memory is
+-- actually present on the device (and declared as variables in the
+-- kernel).
+makeAllMemoryGlobal :: ImpGen.ImpM Imp.Kernel a
+                    -> ImpGen.ImpM Imp.Kernel a
+makeAllMemoryGlobal =
+  local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env }
+  where globalMemory (ImpGen.MemVar entry) =
+          ImpGen.MemVar entry { ImpGen.entryMemSpace = Just "global" }
+        globalMemory entry =
+          entry
+
 writeThreadResult :: VName -> ImpGen.ValueDestination -> SubExp
                   -> ImpGen.ImpM Imp.Kernel ()
 writeThreadResult thread_num
@@ -90,10 +107,11 @@ writeThreadResult thread_num
    (ImpGen.CopyIntoMemory
     (ImpGen.MemLocation mem _ _)) _) se = do
   set <- subExpType se
+  space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let i = ImpGen.elements $ Imp.ScalarVar thread_num
   case set of
     Basic bt ->
-      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt i) se
+      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space i) se
     _ ->
       fail "Cannot handle non-basic kernel thread result."
 writeThreadResult _ _ _ =
@@ -104,10 +122,10 @@ readThreadParams :: VName -> LParam -> VName
 readThreadParams thread_num param arr = do
   t <- lookupType arr
   when (arrayRank t == 1) $ do
-    (srcmem, srcoffset) <-
+    (srcmem, space, srcoffset) <-
       ImpGen.fullyIndexArray arr [SE.Id thread_num Int]
     ImpGen.emit $ Imp.SetScalar (paramName param) $
-      ImpGen.index srcmem srcoffset (elemType t) Nothing
+      ImpGen.index srcmem srcoffset (elemType t) space
 
 -- | Returns a map from memory block names to their size in bytes,
 -- as well as the lambda body where all the allocations have been removed.
