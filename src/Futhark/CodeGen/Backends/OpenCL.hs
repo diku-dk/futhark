@@ -183,7 +183,7 @@ typename cl_build_status build_opencl_kernel(typename cl_program program, typena
     // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
     build_log[ret_val_size] = '\0';
 
-    printf("Build log:\n%s", build_log);
+    fprintf(stderr, "Build log:\n%s", build_log);
 
     free(build_log);
   }
@@ -196,7 +196,7 @@ loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
   size_t src_size;
   typename cl_program prog;
-  printf("look at me, loading this kernel:\n%s\n", $id:srcname);
+  fprintf(stderr, "look at me, loading this kernel:\n%s\n", $id:srcname);
   error = 0;
   src_size = sizeof($id:srcname);
   const char* src_ptr[] = {$id:srcname};
@@ -205,7 +205,7 @@ loadKernelByName name = [C.cstm|{
   assert(build_opencl_kernel(prog, device, "") == CL_SUCCESS);
   $id:name = clCreateKernel(prog, $string:name, &error);
   assert(error == 0);
-  printf("I guess it worked.\n");
+  fprintf(stderr, "I guess it worked.\n");
   }|]
   where srcname = name ++ "_src"
 
