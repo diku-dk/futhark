@@ -12,6 +12,7 @@ module Futhark.CodeGen.ImpGen
   , ArrayMemoryDestination (..)
   , MemLocation (..)
   , MemEntry (..)
+  , ScalarEntry (..)
 
     -- * Monadic Compiler Interface
   , ImpM
@@ -30,9 +31,12 @@ module Futhark.CodeGen.ImpGen
   , compileResultSubExp
   , subExpToDimSize
   , declaringLParams
+  , declaringVarEntry
   , compileBindings
   , writeExp
+  , indexArray
   , fullyIndexArray
+  , varIndex
 
     -- * Typed enumerations
   , Count (..)

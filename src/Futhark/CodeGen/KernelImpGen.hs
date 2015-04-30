@@ -48,55 +48,53 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
         HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp) thread_allocs
       body' = offsetMemorySummariesInBody alloc_offsets body
 
-  unless (HM.null expanded_allocs) $
-    fail "Free array variables not implemented."
+  allocMemoryBlocks expanded_allocs $ do
+    kernelbody <- ImpGen.collect $
+                  ImpGen.declaringLParams (lambdaParams lam) $
+                  makeAllMemoryGlobal $ do
+                    zipWithM_ (readThreadParams thread_num) (lambdaParams lam) arrs
+                    ImpGen.compileBindings (bodyBindings body') $
+                      zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
 
-  kernelbody <- ImpGen.collect $
-                ImpGen.declaringLParams (lambdaParams lam) $
-                makeAllMemoryGlobal $ do
-                  zipWithM_ (readThreadParams thread_num) (lambdaParams lam) arrs
-                  ImpGen.compileBindings (bodyBindings body') $
-                    zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
+    arr_mems <- forM arrs $ \arr -> do
+      ImpGen.MemLocation mem _ _ <- ImpGen.arrayLocation arr
+      return mem
 
-  arr_mems <- forM arrs $ \arr -> do
-    ImpGen.MemLocation mem _ _ <- ImpGen.arrayLocation arr
-    return mem
+    copy_in <- liftM catMaybes $
+               forM (HS.toList $ HS.fromList arr_mems <> freeInBody body <>
+                     mconcat (map freeIn $ lambdaParams lam)) $ \var ->
+      if var `elem` map paramName (lambdaParams lam)
+        then return Nothing
+        else do t <- lookupType var
+                case t of
+                  Array {} -> return Nothing
+                  Mem memsize -> Just <$> Imp.CopyMemory var <$> ImpGen.subExpToDimSize memsize
+                  Basic bt ->
+                    if bt == Cert
+                    then return Nothing
+                    else return $ Just $ Imp.CopyScalar var bt
 
-  copy_in <- liftM catMaybes $
-             forM (HS.toList $ HS.fromList arr_mems <> freeInBody body <>
-                   mconcat (map freeIn $ lambdaParams lam)) $ \var ->
-    if var `elem` map paramName (lambdaParams lam)
-      then return Nothing
-      else do t <- lookupType var
-              case t of
-                Array {} -> return Nothing
-                Mem memsize -> Just <$> Imp.CopyMemory var <$> ImpGen.subExpToDimSize memsize
-                Basic bt ->
-                  if bt == Cert
-                  then return Nothing
-                  else return $ Just $ Imp.CopyScalar var bt
+    -- Copy what memory to copy out.  Must be allocated on device before
+    -- kernel execution anyway.
+    copy_out <- liftM catMaybes $ forM dest $ \case
+      (ImpGen.ArrayDestination
+       (ImpGen.CopyIntoMemory
+        (ImpGen.MemLocation mem _ _)) _) -> do
+        memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
+        return $ Just $ Imp.CopyMemory mem memsize
+      _ ->
+        return Nothing
 
-  -- Copy what memory to copy out.  Must be allocated on device before
-  -- kernel execution anyway.
-  copy_out <- liftM catMaybes $ forM dest $ \case
-    (ImpGen.ArrayDestination
-     (ImpGen.CopyIntoMemory
-      (ImpGen.MemLocation mem _ _)) _) -> do
-      memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
-      return $ Just $ Imp.CopyMemory mem memsize
-    _ ->
-      return Nothing
+    kernel_size <- ImpGen.subExpToDimSize =<< (arraysSize 0 <$> mapM lookupType arrs)
 
-  kernel_size <- ImpGen.subExpToDimSize =<< (arraysSize 0 <$> mapM lookupType arrs)
-
-  ImpGen.emit $ Imp.Op Imp.Kernel {
-      Imp.kernelThreadNum = thread_num
-    , Imp.kernelBody = kernelbody
-    , Imp.kernelCopyIn = copy_in
-    , Imp.kernelCopyOut = copy_out
-    , Imp.kernelSize = kernel_size
-    }
-  return ImpGen.Done
+    ImpGen.emit $ Imp.Op Imp.Kernel {
+        Imp.kernelThreadNum = thread_num
+      , Imp.kernelBody = kernelbody
+      , Imp.kernelCopyIn = copy_in
+      , Imp.kernelCopyOut = copy_out
+      , Imp.kernelSize = kernel_size
+      }
+    return ImpGen.Done
 
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
@@ -116,20 +114,40 @@ makeAllMemoryGlobal =
         globalMemory entry =
           entry
 
+allocMemoryBlocks :: HM.HashMap VName Imp.Exp -> ImpGen.ImpM Imp.Kernel a
+                  -> ImpGen.ImpM Imp.Kernel a
+allocMemoryBlocks = allocMemoryBlocks' . HM.toList
+  where allocMemoryBlocks' [] m = m
+        allocMemoryBlocks' ((memname, size):allocs) m = do
+          sizename <- newVName "size"
+          let sizeentry = ImpGen.ScalarVar $ ImpGen.ScalarEntry Int
+              mementry = ImpGen.MemVar ImpGen.MemEntry {
+                  ImpGen.entryMemSize = Imp.VarSize sizename
+                , ImpGen.entryMemSpace = Nothing
+                }
+          ImpGen.declaringVarEntry sizename sizeentry $ do
+            ImpGen.emit $ Imp.SetScalar sizename size
+            ImpGen.declaringVarEntry memname mementry $ do
+              ImpGen.emit $ Imp.Allocate memname $ Imp.ScalarVar sizename
+              allocMemoryBlocks' allocs m
+
 writeThreadResult :: VName -> ImpGen.ValueDestination -> SubExp
                   -> ImpGen.ImpM Imp.Kernel ()
 writeThreadResult thread_num
   (ImpGen.ArrayDestination
    (ImpGen.CopyIntoMemory
-    (ImpGen.MemLocation mem _ _)) _) se = do
+    destloc@(ImpGen.MemLocation mem _ _)) _) se = do
   set <- subExpType se
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let i = ImpGen.elements $ Imp.ScalarVar thread_num
   case set of
     Basic bt ->
       ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space i) se
-    _ ->
-      fail "Cannot handle non-basic kernel thread result."
+    _ -> do
+      memloc <- ImpGen.indexArray destloc [ImpGen.varIndex thread_num]
+      let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
+                 replicate (arrayRank set) Nothing
+      ImpGen.compileResultSubExp dest se
 writeThreadResult _ _ _ =
   fail "Cannot handle kernel that does not return an array."
 
