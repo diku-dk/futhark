@@ -34,6 +34,8 @@ module Futhark.Tools
 
   , module Futhark.Binder
 
+  , redomapToMapAndReduce
+
   -- * Result types
   , instantiateShapes
   , instantiateShapes'
@@ -55,6 +57,7 @@ import Control.Monad.Writer
 import Prelude
 
 import Futhark.Representation.AST
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Util
@@ -358,3 +361,47 @@ instantiateIdents names ts
       runStateT (instantiateShapes nextShape ts) ([],context)
     return (context', zipWith Ident vals ts')
   | otherwise = Nothing
+
+-- | Turns a binding of a @redomap@ into two seperate bindings, a
+-- @map@ binding and a @reduce@ binding (returned in that order).
+--
+-- Reuses the original pattern for the @reduce@, and creates a new
+-- pattern with new 'Ident's for the result of the @map@. Does /not/
+-- add the new idents to the 'TypeEnv'.
+--
+-- Only handles a 'Pattern' with an empty 'patternContextElements'
+redomapToMapAndReduce :: (MonadFreshNames m, HasTypeEnv m, Bindable lore) =>
+                         PatternT lore -> Lore.Exp lore
+                      -> ( Certificates, LambdaT lore, LambdaT lore, [SubExp]
+                         , [VName])
+                      -> m (Binding lore, Binding lore)
+redomapToMapAndReduce (Pattern [] patelems) lore
+                      (certs, redlam, redmap_lam, accs, arrs) = do
+  -- Remember that a reduce function must have the type @a -> a -> a@.
+  -- This means that the result of the map must be of type @a@.
+  arrs_tps <- mapM lookupType arrs
+  let outersz = arraysSize 0 arrs_tps
+  (map_patidents, map_patbindages) <- liftM unzip $
+    forM patelems $ \pe -> do
+      let (Ident vn tp) = patElemIdent pe
+      let tp' = arrayOf tp (Shape [outersz]) (uniqueness tp)
+      i <- newIdent (baseString vn ++ "_maptmp") tp'
+      return (i, patElemBindage pe)
+  let map_bnd = mkLet [] (zip map_patidents map_patbindages)
+                      (LoopOp $ Map certs newmap_lam arrs)
+  let red_args = zip accs (map identName map_patidents)
+  let red_bnd = Let (Pattern [] patelems) lore
+                    (LoopOp $ Reduce certs redlam red_args)
+  return (map_bnd, red_bnd)
+  where
+    newmap_lam =
+      let tobnd = take (length accs) $ lambdaParams redmap_lam
+          params' = drop (length accs) $ lambdaParams redmap_lam
+          bndaccs = zipWith (\i acc -> mkLet' []  [i] (PrimOp $ SubExp acc))
+                            tobnd accs
+          body = lambdaBody redmap_lam
+          bnds' = bndaccs ++ bodyBindings body
+          body' = body {bodyBindings = bnds'}
+      in redmap_lam { lambdaBody = body', lambdaParams = params' }
+redomapToMapAndReduce _ _ _ =
+  error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
