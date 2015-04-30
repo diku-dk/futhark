@@ -347,6 +347,9 @@ flattenProg' p@(Prog funs) = do
 
 --------------------------------------------------------------------------------
 
+-- | @convertToFlat idents@ transforms multidimensional arrays into
+-- their flat representation. Used when calling functions. Returns
+-- size- and array idents seperately.
 convertToFlat :: [Ident] -> FlatM ([Ident],[Ident])
 convertToFlat idents = do
   --let orig_arr_sizes = concat $ mapMaybe (variableDimensionsAsIdents . identType) idents
@@ -369,7 +372,7 @@ convertToFlat idents = do
                              (drop 1 arrs)
         return (sizes, arrs)
 
-  return (concat sizes, concat arrs)
+  return (removeDuplicates $ concat sizes, removeDuplicates $ concat arrs)
 
 convertExtRetType :: ExtRetType -> ExtRetType
 convertExtRetType (ExtRetType ex_tps) =
@@ -411,7 +414,8 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
   mapM_ setupDataArray $ filter (isJust . dimentionality . identType)
                                 (map fparamIdent params)
 
-  toflat_bnds <- mapM toFlat arr_params
+  multandsegs_bnds <- mkMultAndSegs arr_params
+  reshape_bnds <- mapM mkDataReshape arr_params
 
   flat_params <-
     liftM (uncurry (++)) $ convertToFlat $ map fparamIdent params
@@ -438,31 +442,34 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
     liftM concat $ zipWithM fromFlat realresidents callresidents_grouped
 
   let body' = Body { bodyLore = ()
-                   , bodyBindings = concat toflat_bnds ++ [call_bnd] ++ fromflat_bnds
+                   , bodyBindings = multandsegs_bnds ++ reshape_bnds ++
+                                    [call_bnd] ++ fromflat_bnds
                    , bodyResult = map (Var . identName) realresidents
                    }
   return $ FunDec name (ExtRetType rettypes) params body'
 
   where
-
-    -- | @toFlat ident@ creates the bindings for initializing the
+    -- | @mkMultAndSegs [idents]@ creates the bindings for initializing the
     -- segment descriptors (and their size variable) belonging to
-    -- @ident@. Must be called on a multidimensional array.
-    toFlat :: Ident -> FlatM [Binding]
-    toFlat ident = do
-      let vn = identName ident
-      let dim0:dims = arrayDims $ identType ident
-      segdescps <- getSegDescriptors1Ident ident
-      mult_bnds <-
-        liftM (reverse . concat . snd) $ foldM makeMult (dim0, []) dims
-      rep_bnds <-
-        liftM reverse $ foldM makeRep [] $ zip dims segdescps
-      data_ident <- getDataArray1 vn
-      let [data_size] = arrayDims $ identType data_ident
-      let data_exp = PrimOp $ Reshape [] [data_size] vn
-      let data_bnd = Let (Pattern [] [PatElem data_ident BindVar()]) () data_exp
-      return $ mult_bnds ++ rep_bnds ++ [data_bnd]
+    -- @ident \in idents@. Must be called on a multidimensional array.
+    --
+    -- Makes sure to /only/ create each binding /once/.
+    mkMultAndSegs :: [Ident] -> FlatM [Binding]
+    mkMultAndSegs arr_params = do
+      (all_mult_bnds, all_segbnds) <- liftM unzip $
+        forM arr_params $ \ident -> do
+          let dim0:dims = arrayDims $ identType ident
+          mult_bnds <-
+            liftM (reverse . concat . snd) $ foldM makeMult (dim0, []) dims
+          segdescps <- getSegDescriptors1Ident ident
+          rep_bnds <-
+            liftM reverse $ foldM makeRep [] $ zip dims segdescps
+          return (mult_bnds, rep_bnds)
+      return $ removeDuplicates (concat all_mult_bnds) ++
+               removeDuplicates (concat all_segbnds)
       where
+
+
         -- | Folding function which creates a binding for
         -- @'getFlattenedDims1 (outer,inner)@ by multiplying @outer@
         -- and @inner@
@@ -485,6 +492,15 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
           return $ bnd : res
         makeRep _ _ =
           flatError $ Error "transformMain, makeRep: SegDescriptor was not Regular"
+
+    -- | @mkDataReshape ident@ created the @reshape@ for the data array.
+    mkDataReshape :: Ident -> FlatM Binding
+    mkDataReshape (Ident vn _) = do
+      data_ident <- getDataArray1 vn
+      let [data_size] = arrayDims $ identType data_ident
+      let data_exp = PrimOp $ Reshape [] [data_size] vn
+      let data_bnd = Let (Pattern [] [PatElem data_ident BindVar()]) () data_exp
+      return data_bnd
 
     -- | @fromFlat res tmps@ create a binding for the result to be
     -- returned @res@, from the arrays (segs + data) in @tmps@. For
@@ -1300,3 +1316,13 @@ patternFromIdents :: [Ident] -> [Ident] -> Pattern
 patternFromIdents ctx vals =
   Pattern (map addBindVar ctx) (map addBindVar vals)
   where addBindVar i = PatElem i BindVar ()
+
+--------------------------------------------------------------------------------
+
+removeDuplicates :: Eq a => [a] -> [a]
+removeDuplicates ys = removeDuplicates' ys []
+  where
+   removeDuplicates' [] acc  = reverse acc
+   removeDuplicates' (x:xs) acc
+     | x `elem` acc = removeDuplicates' xs acc
+     | otherwise    = removeDuplicates' xs (x:acc)
