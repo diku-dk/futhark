@@ -765,6 +765,12 @@ transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
       return (merged, catMaybes [merge_bnd] : res)
 
 
+transformBinding (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+  (map_bnd, red_bnd) <-
+    redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
+  map_bnd' <- transformBinding map_bnd
+  red_bnd' <- transformBinding red_bnd
+  return $ map_bnd' ++ red_bnd'
 
 transformBinding bnd@(Let (Pattern _ pats) () _) = do
   -- FIXME: magically construct segment descriptors as needed
@@ -1102,6 +1108,21 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
   addTypeIdent scanident
 
   return $ sumbnd ++ [repbnd, scanbnd, fixbnd]
+
+
+pullOutOfMap mapinfo bndinfo
+             (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+  -- Remember that reduce function must be @a -> a -> a@
+  -- This means that the result of the map must be of type @a@.
+  (map_bnd, red_bnd) <-
+    redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
+
+  let newidents = patternValueIdents $ bindingPattern map_bnd
+  mapM_ addTypeIdent newidents
+  let mapinfo' = mapinfo{ mapLets = mapLets mapinfo ++ map identName newidents }
+  map_bnds' <- pullOutOfMap mapinfo' bndinfo map_bnd
+  red_bnds' <- pullOutOfMap mapinfo' bndinfo red_bnd
+  return $ map_bnds' ++ red_bnds'
 
 pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem ident1 BindVar _]) _
                         (PrimOp (SubExp (Var name)))) = do
