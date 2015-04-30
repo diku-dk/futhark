@@ -135,7 +135,7 @@ instance Lore.Lore ExplicitMemory where
 
 instance Ranged ExplicitMemory where
   bodyRanges body =
-    replicate (length $ resultSubExps $ bodyResult body) (Nothing, Nothing)
+    replicate (length $ bodyResult body) (Nothing, Nothing)
   patternRanges pat =
     replicate (patternSize pat) (Nothing, Nothing)
 
@@ -364,7 +364,7 @@ instance TypeCheck.Checkable ExplicitMemory where
 
   matchReturnType fname rettype result = do
     TypeCheck.matchExtReturnType fname ts result
-    mapM_ checkResultSubExp $ resultSubExps result
+    mapM_ checkResultSubExp result
     where ts = map returnsToType rettype
           checkResultSubExp (Constant {}) =
             return ()
@@ -755,7 +755,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
               | otherwise ->
                   return $ ReturnsInBlock mem ixfun
         return $ ReturnsArray et shape u memsummary
-  evalStateT (zipWithM inspect ts $ resultSubExps res)
+  evalStateT (zipWithM inspect ts res)
     (0, HM.empty)
 
 boundInBindings :: [Binding] -> HM.HashMap VName PatElem

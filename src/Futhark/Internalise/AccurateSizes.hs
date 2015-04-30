@@ -58,7 +58,7 @@ ensureResultExtShape loc rettype body =
           let name = "result_proper_shape"
           in ensureExtShape loc t name se
     reses <- zipWithM assertProperShape rettype es
-    mkBodyM [] $ Result reses
+    mkBodyM [] reses
 
 ensureExtShape :: MonadBinder m =>
                   SrcLoc -> ExtType -> String -> SubExp

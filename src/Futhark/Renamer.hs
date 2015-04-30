@@ -167,10 +167,6 @@ instance Rename SubExp where
   rename (Var v)      = Var <$> rename v
   rename (Constant v) = return $ Constant v
 
-instance Rename Result where
-  rename (Result ses) =
-    Result <$> mapM rename ses
-
 instance Rename attr => Rename (FParamT attr) where
   rename (FParam ident attr) = FParam <$> rename ident <*> rename attr
 

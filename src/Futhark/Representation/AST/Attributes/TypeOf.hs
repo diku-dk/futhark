@@ -107,8 +107,8 @@ primOpType (Concat _ x ys ressize) =
   where result xt yts =
           let u = uniqueness xt <> mconcat (map uniqueness yts)
           in [xt `setUniqueness` u `setOuterSize` ressize]
-primOpType (Copy e) =
-  result <$> subExpType e
+primOpType (Copy v) =
+  result <$> lookupType v
   where result t = [t `setUniqueness` Unique]
 primOpType (Assert _ _) =
   pure [Basic Cert]
@@ -192,7 +192,7 @@ bodyExtType :: (HasTypeEnv m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound <$> staticShapes <$>
-  extendedTypeEnv (mapM subExpType (resultSubExps res)) bndtypes
+  extendedTypeEnv (mapM subExpType res) bndtypes
   where bndtypes = typeEnvFromBindings bnds
         boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds

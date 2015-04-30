@@ -650,7 +650,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                   return $ Left bnd'
        ) grouped (zip argsNeeded shouldReturn)
 
-     res' <- forM (resultSubExps . bodyResult $ lambdaBody lambda) $
+     res' <- forM (bodyResult $ lambdaBody lambda) $
              \se -> case se of
                       (Constant bv) -> return $ Constant bv
                       (Var vn) -> Var <$> identName <$> getMapLetArray' vn

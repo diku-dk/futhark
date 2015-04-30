@@ -96,10 +96,9 @@ deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
           return $ Body bodylore
                    (Let pat explore e':bnds') res'
 
-deadCodeElimBodyM (Body bodylore [] (Result es)) = do
+deadCodeElimBodyM (Body bodylore [] es) = do
   seen $ freeIn bodylore
-  Body bodylore [] <$>
-    (Result <$> mapM deadCodeElimSubExp es)
+  Body bodylore [] <$> mapM deadCodeElimSubExp es
 
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge form body)) = do

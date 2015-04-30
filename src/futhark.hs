@@ -70,6 +70,8 @@ commandLineOptions =
     [] ["cse"]
   , passoption "Flattening" flattening
     [] ["flattening"]
+  , passoption "Double-buffering" doubleBuffer
+    [] ["double-buffer"]
   , Option "s" ["standard"]
     (NoArg $ Right $ \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
     "Use the recommended optimised pipeline."

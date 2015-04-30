@@ -1,11 +1,12 @@
 -- | The code generator cannot handle the array combinators (@map@ and
 -- friends), so this module was written to transform them into the
--- equivalent do-loops.  The transformation is currently rather naive
--- - it's certainly worth considering when we can express such
--- transformations in-place.  This module should be run very late in
--- the compilation pipeline, ideally just before the code generator.
+-- equivalent do-loops.  The transformation is currently rather naive,
+-- and - it's certainly worth considering when we can express such
+-- transformations in-place.
 module Futhark.FirstOrderTransform
   ( transformProg
+  , transformBinding
+  , transformBindingRecursively
   )
   where
 
@@ -22,9 +23,7 @@ import Futhark.Renamer
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
--- | Perform the first-order transformation on an Futhark program.  The
--- resulting program is not uniquely named, so make sure to run the
--- renamer!
+-- | Perform the first-order transformation on an Futhark program.
 transformProg :: Prog -> Prog
 transformProg prog =
   renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
@@ -41,13 +40,35 @@ transformFunDec (FunDec fname rettype params body) = do
 
 transformBody :: Body -> Binder Basic Body
 transformBody (Body () bnds res) = insertBindingsM $ do
-  mapM_ (addBinding <=< transformBinding) bnds
-  return $ resultBody $ resultSubExps res
+  mapM_ transformBindingRecursively bnds
+  return $ resultBody res
 
--- | Transform a single expression.
-transformExp :: Exp -> Binder Basic Exp
+-- | First transform any nested 'Body' or 'Lambda' elements, then
+-- apply 'transformBinding'.
+transformBindingRecursively :: Binding -> Binder Basic ()
 
-transformExp (LoopOp (Map cs fun arrs)) = do
+transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) = do
+  body' <- bindingIdentTypes (formIdents form ++ map (fparamIdent . fst) merge) $
+           transformBody body
+  addBinding $ Let pat () $ LoopOp $ DoLoop res merge form body'
+  where formIdents (ForLoop i _) =
+          [Ident i $ Basic Int]
+        formIdents (WhileLoop _) =
+          []
+
+transformBindingRecursively (Let pat () e) =
+  transformBinding =<< liftM (Let pat ()) (mapExpM transform e)
+  where transform = identityMapper { mapOnBody = transformBody
+                                   , mapOnLambda = transformLambda
+                                   }
+
+-- | Transform a single binding _without_ recursing further.  This
+-- means that if called on a 'Map' binding, the resulting loop may
+-- still contain SOACs in its body.  Use 'transformBindingRecursively'
+-- if this is not what you want.
+transformBinding :: Binding -> Binder Basic ()
+
+transformBinding (Let pat () (LoopOp (Map cs fun arrs))) = do
   i <- newVName "i"
   out_ts <- mapType fun <$> mapM lookupType arrs
   resarr <- resultArray out_ts
@@ -56,14 +77,14 @@ transformExp (LoopOp (Map cs fun arrs)) = do
   let outarrs_names = map identName outarrs
       i_ident = Ident i $ Basic Int
   loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:outarrs) $ do
-    x <- bodyBind =<< transformLambda fun (index cs arrs (Var i))
+    x <- bindLambda fun (index cs arrs (Var i))
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
-  return $ LoopOp $
+  addBinding $ Let pat () $ LoopOp $
     DoLoop outarrs_names (loopMerge outarrs (map Var resarr))
     (ForLoop i (arraysSize 0 out_ts)) loopbody
 
-transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
+transformBinding (Let pat () (LoopOp (ConcatMap cs fun inputs))) = do
   arrs <- forM inputs $ \input -> do
     fun' <- renameLambda fun
     let funparams = lambdaParams fun'
@@ -78,13 +99,11 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
     input' <- forM (zip valparams input) $ \(p,v) ->
       letExp "concatMap_reshaped_input" $
       PrimOp $ Reshape [] (arrayDims $ identType p) v
-    vs <- bodyBind =<< transformLambda fun'' (map (PrimOp . SubExp . Var) input')
+    vs <- bindLambda fun'' (map (PrimOp . SubExp . Var) input')
     mapM (letExp "concatMap_fun_res" . PrimOp . SubExp) vs
   emptyarrs <- mapM (letExp "empty")
                [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
-  let hackbody = Body () [] $ Result $ map Var emptyarrs
-
-      concatArrays (arr, arrs') = do
+  let concatArrays (arr, arrs') = do
         let plus x y = eBinOp Plus x y Int
         n <- arraySize 0 <$> lookupType arr
         ms <- mapM (liftM (arraySize 0) . lookupType) arrs'
@@ -92,23 +111,24 @@ transformExp (LoopOp op@(ConcatMap cs fun inputs)) = do
                    foldl plus
                    (pure $ PrimOp $ SubExp n)
                    (map (pure . PrimOp . SubExp) ms)
-        res <- letSubExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
+        res <- letExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
         return $ PrimOp $ Copy res
 
       nonempty :: [VName] -> Maybe (VName, [VName])
       nonempty []     = Nothing
       nonempty (x:xs) = Just (x, xs)
 
-  realbody <- runBodyBinder $
-    case mapM nonempty $ transpose arrs of
-      Nothing ->
-        return hackbody
-      Just arrs' ->
-        resultBody <$> mapM (letSubExp "concatMap_result" <=< concatArrays) arrs'
-  opt <- loopOpExtType op
-  return $ If (Constant $ LogVal False) hackbody realbody opt
+  ses <-case mapM nonempty $ transpose arrs of
+          Nothing ->
+            return $ Constant (IntVal 0) : map Var emptyarrs
+          Just arrs' -> do
+            concatted_arrs <- mapM (letSubExp "concatMap_result" <=< concatArrays) arrs'
+            arrts <- mapM subExpType concatted_arrs
+            return $ arraysSize 0 arrts : concatted_arrs
+  forM_ (zip (patternNames pat) ses) $ \(name, se) ->
+    letBindNames' [name] $ PrimOp $ SubExp se
 
-transformExp (LoopOp (Reduce cs fun args)) = do
+transformBinding (Let pat () (LoopOp (Reduce cs fun args))) = do
   ((acc, initacc), (i, i_ident)) <- newFold accexps
   arrts <- mapM lookupType arrexps
   let arrus = map (uniqueness . identType) $
@@ -116,16 +136,16 @@ transformExp (LoopOp (Reduce cs fun args)) = do
   inarrs <- forM (zip arrts arrus) $ \(t,u) ->
             newIdent "reduce_inarr" (setUniqueness t u)
   loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:inarrs++acc) $ do
-    acc' <- bodyBind =<< transformLambda fun
+    acc' <- bindLambda fun
             (map (PrimOp . SubExp . Var . identName) acc ++
              index cs (map identName inarrs) (Var i))
     return $ resultBody (map (Var . identName) inarrs ++ acc')
-  return $ LoopOp $
+  addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName acc) (loopMerge (inarrs++acc) (map Var arrexps++initacc))
     (ForLoop i (isize inarrs)) loopbody
   where (accexps, arrexps) = unzip args
 
-transformExp (LoopOp (Scan cs fun args)) = do
+transformBinding (Let pat () (LoopOp (Scan cs fun args))) = do
   ((acc, initacc), (i, i_ident)) <- newFold accexps
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
@@ -133,19 +153,18 @@ transformExp (LoopOp (Scan cs fun args)) = do
     newIdent "scan_arr" $ t `setUniqueness` Unique
   let arr_names = map identName arr
   loopbody <- insertBindingsM $ bindingIdentTypes (i_ident:acc++arr) $ do
-    x <- bodyBind =<<
-         transformLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
+    x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
                               index cs arrexps (Var i))
     dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) x
     irows <- letSubExps "row" $ index cs dests $ Var i
-    rowcopies <- letExps "copy" $ map (PrimOp . Copy) irows
-    return $ resultBody $ map Var $ rowcopies ++ dests
-  return $ LoopOp $
+    rowcopies <- mapM copyIfArray irows
+    return $ resultBody $ rowcopies ++ map Var dests
+  addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName arr) (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
     (ForLoop i (isize arr)) loopbody
   where (accexps, arrexps) = unzip args
 
-transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
+transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) = do
   arrts <- mapM lookupType arrexps
   let outersize = arraysSize 0 arrts
   -- for the MAP    part
@@ -163,85 +182,18 @@ transformExp (LoopOp (Redomap cs _ innerfun accexps arrexps)) = do
   ((acc, initacc), (i, i_ident)) <- newFold accexps
   inarrs <- mapM (newIdent "redomap_inarr") $ zipWith setUniqueness arrts arrus
   loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:inarrs++acc++outarrs) $ do
-    accxis<- bodyBind =<< transformLambda innerfun
+    accxis<- bindLambda innerfun
              (map (PrimOp . SubExp . Var . identName) acc ++
               index cs (map identName inarrs) (Var i))
     let (acc', xis) = splitAt acc_num accxis
     dests <- letwith cs (map identName outarrs) (pexp (Var i)) $
              map (PrimOp . SubExp) xis
     return $ resultBody (map (Var . identName) inarrs ++ acc' ++ map Var dests)
-  return $ LoopOp $
+  addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName $ acc++outarrs)
     (loopMerge (inarrs++acc++outarrs)
      (map Var arrexps++initacc++map Var maparrs))
     (ForLoop i (isize inarrs)) loopbody
-
-transformExp (LoopOp Stream{}) =
-    fail "transformExp (Stream): Unreachable case reached!"
-
-transformExp (LoopOp (DoLoop res merge form body)) = do
-  body' <- bindingIdentTypes (formIdents form ++ map (fparamIdent . fst) merge) $
-           transformBody body
-  return $ LoopOp $ DoLoop res merge form body'
-  where formIdents (ForLoop i _) =
-          [Ident i $ Basic Int]
-        formIdents (WhileLoop _) =
-          []
-
-transformExp e = mapExpM transform e
-
-transformBinding :: Binding -> Binder Basic Binding
-transformBinding (Let pat annot e@(LoopOp Stream{})) =
-  Let pat annot <$> transformStreamExp pat e
-transformBinding (Let pat annot e) =
-  Let pat annot <$> transformExp e
-
-transform :: Mapper Basic Basic (Binder Basic)
-transform = identityMapper {
-              mapOnBody = insertBindingsM . transformBody
-            }
-
-newFold :: [SubExp]
-        -> Binder Basic (([Ident], [SubExp]), (VName, Ident))
-newFold accexps = do
-  i <- newVName "i"
-  initacc <- letSubExps "acc" $ map (PrimOp . Copy) accexps
-  acc <- mapM (newIdent "acc" <=< subExpType) accexps
-  return ((acc, initacc), (i, Ident i $ Basic Int))
-
-index :: Certificates -> [VName] -> SubExp -> [Exp]
-index cs arrs i = flip map arrs $ \arr ->
-  PrimOp $ Index cs arr [i]
-
-resultArray :: [TypeBase Shape] -> Binder Basic [VName]
-resultArray = mapM arrayOfShape
-  where arrayOfShape t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
-
-letwith :: Certificates -> [VName] -> Binder Basic Exp -> [Exp] -> Binder Basic [VName]
-letwith cs ks i vs = do
-  vs' <- letSubExps "values" vs
-  i' <- letSubExp "i" =<< i
-  let update k v =
-        letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
-  zipWithM update ks vs'
-
-isize :: [Ident] -> SubExp
-isize = arraysSize 0 . map identType
-
-pexp :: Applicative f => SubExp -> f Exp
-pexp = pure . PrimOp . SubExp
-
-transformLambda :: Lambda -> [Exp] -> Binder Basic Body
-transformLambda (Lambda params body _) args = do
-  forM_ (zip params args) $ \(param, arg) ->
-    if unique (identType param) then
-      letBindNames' [identName param] =<< eCopy (pure arg)
-    else
-      letBindNames' [identName param] arg
-  transformBody body
-
-loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
-loopMerge vars vals = [ (FParam var (), val) | (var,val) <- zip vars vals ]
 
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
@@ -296,8 +248,8 @@ loopMerge vars vals = [ (FParam var (), val) | (var,val) <- zip vars vals ]
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-transformStreamExp :: Pattern -> Exp -> Binder Basic Exp
-transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
+
+transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
   -- 1.) trivial step: find and build some of the basic things you need
   let lampars = extLambdaParams     lam
       lamrtps = extLambdaReturnType lam
@@ -436,7 +388,7 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                     acc' ++
                     map (Var . identName) dests)
   -- 4.) Build the loop
-  initacc0 <- letSubExps "acc" $ map (PrimOp . Copy) accexps --WHY COPY???
+  initacc0 <- mapM copyIfArray accexps --WHY COPY???
   let accres  = exindvars ++ acc0
       accall  = exszvar ++ accres
       initacc = exszses ++ exindses  ++ initacc0
@@ -479,9 +431,9 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
   elsebody <- runBodyBinder $ do
       fakeoutarrs <- resultArray  initrtps
       return $ resultBody (accexps ++ map Var fakeoutarrs)
-  eIf (pure $ PrimOp $ SubExp $ Constant $ LogVal True)
-      (pure thenbody)
-      (pure elsebody)
+  addBinding =<< liftM (Let pattern ()) (eIf (pure $ PrimOp $ SubExp $ Constant $ LogVal True)
+                                         (pure thenbody)
+                                         (pure elsebody))
   where myMkLet :: Exp -> Ident -> Binding
         myMkLet e idd = mkLet' [] [idd] e
         exToNormShapeDim :: SubExp -> HM.HashMap VName SubExp -> ExtDimSize -> SubExp
@@ -619,8 +571,64 @@ transformStreamExp pattern (LoopOp (Stream cs accexps arrexps lam)) = do
                                     (ForLoop loopid locoutid_size) loopbody
             addBinding $ myMkLet loopres glboutBdId
             return (malloc', mind', glboutBdId)
-transformStreamExp _ _ =
-    fail "In transformStreamExp, UNREACHABLE: this function only supports stream!"
+
+transformBinding bnd = addBinding bnd
+
+transformLambda :: Lambda -> Binder Basic Lambda
+transformLambda (Lambda params body rettype) = do
+  body' <- bindingIdentTypes params $ transformBody body
+  return $ Lambda params body' rettype
+
+newFold :: [SubExp]
+        -> Binder Basic (([Ident], [SubExp]), (VName, Ident))
+newFold accexps = do
+  i <- newVName "i"
+  initacc <- mapM copyIfArray accexps
+  acc <- mapM (newIdent "acc" <=< subExpType) accexps
+  return ((acc, initacc), (i, Ident i $ Basic Int))
+
+copyIfArray :: SubExp -> Binder Basic SubExp
+copyIfArray (Constant v) = return $ Constant v
+copyIfArray (Var v) = do
+  t <- lookupType v
+  case t of
+   Array {} -> letSubExp (baseString v ++ "_copy") $ PrimOp $ Copy v
+   _        -> return $ Var v
+
+index :: Certificates -> [VName] -> SubExp -> [Exp]
+index cs arrs i = flip map arrs $ \arr ->
+  PrimOp $ Index cs arr [i]
+
+resultArray :: [TypeBase Shape] -> Binder Basic [VName]
+resultArray = mapM arrayOfShape
+  where arrayOfShape t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
+
+letwith :: Certificates -> [VName] -> Binder Basic Exp -> [Exp] -> Binder Basic [VName]
+letwith cs ks i vs = do
+  vs' <- letSubExps "values" vs
+  i' <- letSubExp "i" =<< i
+  let update k v =
+        letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
+  zipWithM update ks vs'
+
+isize :: [Ident] -> SubExp
+isize = arraysSize 0 . map identType
+
+pexp :: Applicative f => SubExp -> f Exp
+pexp = pure . PrimOp . SubExp
+
+bindLambda :: Lambda -> [Exp] -> Binder Basic [SubExp]
+bindLambda (Lambda params body _) args = do
+  forM_ (zip params args) $ \(param, arg) ->
+    if unique (identType param) then
+      letBindNames' [identName param] =<< eCopy (pure arg)
+    else
+      letBindNames' [identName param] arg
+  bodyBind body
+
+loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
+loopMerge vars vals = [ (FParam var (), val) | (var,val) <- zip vars vals ]
+
 
 withUpperBound :: Bool
 withUpperBound = False

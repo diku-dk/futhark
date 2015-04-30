@@ -587,8 +587,7 @@ checkBindings origbnds m = delve origbnds
 
 checkResult :: Checkable lore =>
                Result -> TypeM lore ()
-checkResult (Result es) =
-  mapM_ checkSubExp es
+checkResult = mapM_ checkSubExp
 
 checkFunBody :: Checkable lore =>
                 Name
@@ -609,7 +608,7 @@ checkLambdaBody ret (Body (_,lore) bnds res) = do
 
 checkLambdaResult :: Checkable lore =>
                      [Type] -> Result -> TypeM lore ()
-checkLambdaResult ts (Result es) =
+checkLambdaResult ts es =
   forM_ (zip ts es) $ \(t, e) -> do
     et <- checkSubExp e
     unless (et `subtypeOf` t) $
@@ -710,7 +709,7 @@ checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
   require [Basic Int] ressize
 
 checkPrimOp (Copy e) =
-  void $ checkSubExp e
+  void $ checkArrIdent e
 
 checkPrimOp (Assert e _) =
   require [Basic Bool] e
@@ -1116,7 +1115,7 @@ matchExtPattern pat ts = do
 
 matchExtReturnType :: Name -> [ExtType] -> Result
                    -> TypeM lore ()
-matchExtReturnType fname rettype (Result ses) = do
+matchExtReturnType fname rettype ses = do
   ts <- staticShapes <$> mapM subExpType ses
   unless (ts `subtypesOf` rettype) $
     bad $ ReturnTypeError noLoc fname

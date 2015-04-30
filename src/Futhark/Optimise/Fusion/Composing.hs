@@ -75,7 +75,7 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
           lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
                , lambdaBody =
                  let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
-                                | (p,e) <- zip pat $ resultSubExps res]
+                                | (p,e) <- zip pat res]
                      bindLambda res =
                        bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
                  in makeCopies $ mapResult bindLambda $ lambdaBody lam1

@@ -12,6 +12,9 @@ module Futhark.Pipeline
   , basicPass
   , unfailableBasicPass
   , basicProg
+  , explicitMemoryPass
+  , unfailableExplicitMemoryPass
+  , explicitMemoryProg
   , CompileError(..)
   , compileError
   , Action
@@ -177,6 +180,22 @@ unfailableBasicPass :: String -> (Basic.Prog -> Basic.Prog)
                     -> Pass
 unfailableBasicPass name f = basicPass name f'
   where f' :: Basic.Prog -> Either () Basic.Prog
+        f' = Right . f
+
+explicitMemoryProg :: PipelineState -> PassM ExplicitMemory.Prog
+explicitMemoryProg (ExplicitMemory p) = return p
+explicitMemoryProg s                  = compileError "Expected explicit memory representation." $ Just s
+
+explicitMemoryPass :: Show err =>
+                      String -> (ExplicitMemory.Prog -> Either err ExplicitMemory.Prog)
+                   -> Pass
+explicitMemoryPass name f = polyPass name op
+  where op s = ExplicitMemory <$> (canFail "" (Just s) =<< (f <$> explicitMemoryProg s))
+
+unfailableExplicitMemoryPass :: String -> (ExplicitMemory.Prog -> ExplicitMemory.Prog)
+                    -> Pass
+unfailableExplicitMemoryPass name f = explicitMemoryPass name f'
+  where f' :: ExplicitMemory.Prog -> Either () ExplicitMemory.Prog
         f' = Right . f
 
 polyPass :: String -> (PipelineState -> PassM PipelineState)

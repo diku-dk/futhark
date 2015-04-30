@@ -131,7 +131,7 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   (rettypearr', inner_shapes) <- instantiateShapes' res_el_tps
   let outer_shape = arraysSize 0 arrtypes
       acc_params  = take acc_len params
-      map_bodyres = I.Result $ drop acc_len $ I.resultSubExps $ I.bodyResult body
+      map_bodyres = drop acc_len $ I.bodyResult body
       acc_bindings= map (\(ac_var,ac_val) ->
                             mkLet' [] [ac_var] (PrimOp $ SubExp ac_val)
                         ) (zip acc_params nes)
@@ -233,7 +233,7 @@ internalisePartitionLambdas internaliseLambda lams args = do
           return $ resultBody [intconst i]
         mkCombinedLambdaBody params i ((lam_params,lam_body):lams') =
           case lam_body of
-            Body () bodybnds (Result [boolres]) -> do
+            Body () bodybnds [boolres] -> do
               intres <- newIdent "partition_equivalence_class" $ I.Basic Int
               next_lam_body <-
                 mkCombinedLambdaBody lam_params (i+1) lams'
@@ -246,6 +246,6 @@ internalisePartitionLambdas internaliseLambda lams args = do
                               [I.Basic Int]
               return $ mkBody
                 (parambnds++bodybnds++[branchbnd])
-                (Result [I.Var $ I.identName intres])
+                [I.Var $ I.identName intres]
             _ ->
               fail "Partition lambda returns too many values."

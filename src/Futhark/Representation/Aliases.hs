@@ -261,7 +261,7 @@ mkBodyAliases bnds res =
       consumed' = HS.filter (not . bound) consumed
   in (map Names' aliases', Names' consumed')
   where delve (aliasmap, consumed) [] =
-          (map (aliasClosure aliasmap . subExpAliases) $ resultSubExps res,
+          (map (aliasClosure aliasmap . subExpAliases) res,
            consumed)
         delve (aliasmap, consumed) (bnd:bnds') =
           let pat = bindingPattern bnd

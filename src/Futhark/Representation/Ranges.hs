@@ -194,8 +194,7 @@ mkBodyRanges :: Lore.Lore lore =>
                 [AST.Binding lore]
              -> Result
              -> BodyRanges
-mkBodyRanges bnds res =
-  map (removeUnknownBounds . subExpRange) $ resultSubExps res
+mkBodyRanges bnds = map $ removeUnknownBounds . subExpRange
   where boundInBnds =
           mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
         removeUnknownBounds (lower,upper) =

@@ -156,7 +156,7 @@ primOpRanges (Rearrange _ _ v) =
 primOpRanges (Split _ sizeexps v) =
   replicate (length sizeexps) $ subExpRange $ Var v
 primOpRanges (Copy se) =
-  [subExpRange se]
+  [subExpRange $ Var se]
 primOpRanges (Index _ v _) =
   [subExpRange $ Var v]
 primOpRanges (Partition _ n _ arr) =

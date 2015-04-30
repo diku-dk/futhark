@@ -36,8 +36,8 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                 (identName v, HS.unions [cdeps, depsOf tdeps tres, depsOf fdeps fres])
               branchdeps =
                 HM.fromList $ map comb $ zip3 (patternIdents pat)
-                (resultSubExps $ bodyResult tb)
-                (resultSubExps $ bodyResult fb)
+                (bodyResult tb)
+                (bodyResult fb)
           in HM.unions [branchdeps, deps, tdeps, fdeps]
 
         grow deps (Let pat _ (LoopOp (Map cs fun arrs))) =
@@ -95,7 +95,7 @@ foldDeps deps pat cs fun acc arr =
 
 lambdaDeps :: FreeIn (Lore.Exp lore) => Dependencies -> Lambda lore -> [Names]
 lambdaDeps deps fun =
-  map (depsOf deps) $ resultSubExps $ bodyResult $ lambdaBody fun
+  map (depsOf deps) $ bodyResult $ lambdaBody fun
 
 soacArgDeps :: Dependencies
             -> [VName] -> [Names] -> [HS.HashSet VName]

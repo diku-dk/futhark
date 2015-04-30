@@ -444,7 +444,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
         getUnfusableSet bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
       repl_idnm <- newVName "repl_x"
       let repl_id = Ident repl_idnm (Basic Int)
-          repl_lam = Lambda [repl_id] (mkBody [] $ Result [el])
+          repl_lam = Lambda [repl_id] (mkBody [] [el])
                      [rowType $ identType v]
           soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
       greedyFuse True used_set bres' (pat, soac_repl)

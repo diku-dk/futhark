@@ -47,7 +47,7 @@ bindAllocBinding (SizeComputation name se) = do
 bindAllocBinding (Allocation name size) =
   letBindNames'_ [name] $ PrimOp $ Alloc size
 bindAllocBinding (ArrayCopy name bindage src) =
-  letBindNames_ [(name,bindage)] $ PrimOp $ Copy $ Var src
+  letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
 
 class (MonadFreshNames m, HasTypeEnv m) => Allocator m where
   addAllocBinding :: AllocBinding -> m ()
@@ -333,16 +333,16 @@ ensureDirectArray v = do
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
-      allocLinearArray (baseString v) $ Var v
+      allocLinearArray (baseString v) v
 
 allocLinearArray :: String
-                 -> SubExp -> AllocM (SubExp, VName, SubExp)
-allocLinearArray s se = do
-  t <- subExpType se
+                 -> VName -> AllocM (SubExp, VName, SubExp)
+allocLinearArray s v = do
+  t <- lookupType v
   (size, mem) <- allocForArray t
   v' <- newIdent s t
   let pat = Pattern [] [PatElem v' BindVar $ directIndexFunction mem t]
-  addBinding $ Let pat () $ PrimOp $ Copy se
+  addBinding $ Let pat () $ PrimOp $ Copy v
   return (size, mem, Var $ identName v')
 
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
@@ -385,8 +385,8 @@ allocInFun (In.FunDec fname rettype params body) =
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =
   allocInBindings bnds $ \bnds' -> do
-    (ses, allocs) <- collectBindings $ mapM ensureDirect $ resultSubExps res
-    return $ Body () (bnds'<>allocs) res { resultSubExps = ses }
+    (ses, allocs) <- collectBindings $ mapM ensureDirect res
+    return $ Body () (bnds'<>allocs) ses
   where ensureDirect se@(Constant {}) = return se
         ensureDirect (Var v) = do
           bt <- basicType <$> lookupType v
@@ -431,10 +431,8 @@ allocInExp (LoopOp (DoLoop res merge form
   formBinds form $ do
     mergeinit' <- funcallSubExps mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
-      (ses,retbnds) <- collectBindings $
-                       funcallSubExps $ resultSubExps bodyres
-      let res' = bodyres { resultSubExps = ses }
-      return $ Body () (bodybnds'<>retbnds) res'
+      (ses,retbnds) <- collectBindings $ funcallSubExps bodyres
+      return $ Body () (bodybnds'<>retbnds) ses
     return $ LoopOp $
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge

@@ -441,8 +441,10 @@ typeOf (Reduce _ lam _) =
   lambdaReturnType lam
 typeOf (Scan _ _ input) =
   map (inputType . snd) input
-typeOf (Redomap _ _ lam _ _) =
-  lambdaReturnType lam
+typeOf (Redomap _ outlam inlam nes inps) =
+  let accrtps = lambdaReturnType outlam
+      arrrtps = drop (length nes) $ mapType inlam $ map inputType inps
+  in  accrtps ++ arrrtps
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m) =>

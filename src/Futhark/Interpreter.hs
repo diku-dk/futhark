@@ -370,7 +370,7 @@ evalSubExp (Constant v) = return $ BasicVal v
 
 evalBody :: Lore lore => Body lore -> FutharkM lore [Value]
 
-evalBody (Body _ [] (Result es)) =
+evalBody (Body _ [] es) =
   mapM evalSubExp es
 
 evalBody (Body lore (Let pat _ e:bnds) res) = do
@@ -582,7 +582,7 @@ evalPrimOp (Concat _ arr1exp arr2exps _) = do
         else bad $ TypeError "irregular arguments to concat"
     concatArrVals _ _ = bad $ TypeError "evalPrimOp Concat"
 
-evalPrimOp (Copy e) = single <$> evalSubExp e
+evalPrimOp (Copy v) = single <$> lookupVar v
 
 evalPrimOp (Assert e loc) = do
   v <- evalSubExp e
