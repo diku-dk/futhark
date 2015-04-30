@@ -653,7 +653,7 @@ expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
       slcOffsets = map (\offset -> sliceOffset shape [offset]) offsets
   return $ zipWith (\newShape slcOffset
                     -> ReturnsArray et (ExtShape $ map Free $ shapeDims newShape) u $
-                       Just $ ReturnsInBlock mem $ IxFun.offset ixfun slcOffset)
+                       Just $ ReturnsInBlock mem $ IxFun.offsetIndex ixfun slcOffset)
            newShapes slcOffsets
 
 expReturns look (AST.PrimOp (Index _ v is)) = do

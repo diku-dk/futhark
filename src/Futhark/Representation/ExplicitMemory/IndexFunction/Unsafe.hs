@@ -7,7 +7,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , rank
        , index
        , iota
-       , offset
+       , offsetIndex
        , permute
        , reshape
        , applyInd
@@ -88,9 +88,9 @@ iota shape = case toSing (intToNat $ n-1) of
     IxFun (SS sb) $ Safe.iota $ unsafeFromList (SS sb) shape
   where n = Prelude.length shape
 
-offset :: IxFun -> ScalExp -> IxFun
-offset (IxFun n f) se =
-  IxFun n $ Safe.offset f se
+offsetIndex :: IxFun -> ScalExp -> IxFun
+offsetIndex (IxFun n f) se =
+  IxFun n $ Safe.offsetIndex f se
 
 permute :: IxFun -> [Int] -> IxFun
 permute (IxFun (n::SNat (S n)) f) perm

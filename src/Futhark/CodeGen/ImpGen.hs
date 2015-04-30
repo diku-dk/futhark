@@ -439,7 +439,7 @@ defCompilePrimOp
     emit $ Imp.DeclareScalar offs_glb Int
     emit $ Imp.SetScalar offs_glb $ Imp.Constant $ IntVal 0
     let destloc = MemLocation destmem destshape
-                  (IxFun.offset destixfun $ SE.Id offs_glb Int)
+                  (IxFun.offsetIndex destixfun $ SE.Id offs_glb Int)
 
     forM_ (x:ys) $ \y -> do
         yentry <- lookupArray y
