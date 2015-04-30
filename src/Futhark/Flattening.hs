@@ -71,6 +71,13 @@ instance MonadFreshNames FlatM where
   putNameSource newSrc = modify $ \s -> s { vnameSource = newSrc }
 
 instance HasTypeEnv FlatM where
+  lookupType name = do
+    val <- HM.lookup name <$> askTypeEnv
+    case val of
+      Nothing -> flatError $ Error $
+                             "TypeEnv.lookupType: Name " ++ textual name ++
+                             " not found in type environment."
+      Just tp -> return tp
   askTypeEnv = gets typetab
 
 ----------------------------------------
@@ -206,7 +213,7 @@ getDataArray1 :: VName -> FlatM Ident
 getDataArray1 vn = do
   da <- gets dataArrays
   case M.lookup vn da of
-    Just sz -> return sz
+    Just val -> return val
     Nothing -> flatError $ Error $ "getDataArray1 not created for" ++
                                     show vn
 
@@ -220,7 +227,12 @@ addDataArray key val = do
                                   " already present in table"
     Nothing -> do
       let da' = M.insert key val da
-      modify (\s -> s{dataArrays = da'})
+      -- Automatically make a data array point to itself
+      let da'' = case M.lookup (identName val) da' of
+                   Just _ -> da'
+                   Nothing ->
+                     M.insert (identName val) val da'
+      modify (\s -> s{dataArrays = da''})
 
 ----------------------------------------
 
@@ -601,9 +613,12 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
 
   case grouped of
    [Right _] -> do
-     forM_ pats $ \(PatElem i _ ()) ->
+     forM_ pats $ \(PatElem i _ ()) -> do
+       addTypeIdent i
        addDataArray (identName i) i
-     return [topBnd]
+     arrs' <- mapM (liftM identName . getDataArray1) arrs
+     return [Let (Pattern [] pats) ()
+                 (LoopOp (Map certs lambda arrs'))]
    _ -> do
      loopinv_vns <-
        filter (`notElem` arrs) <$> filterM (liftM isJust . vnDimentionality)
@@ -744,6 +759,7 @@ transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
   let newdata_tp = setArrayDims data_identtp [newdata_size]
   newdata_ident <-
     newIdent (baseString (identName resident) ++ "_data") newdata_tp
+  addTypeIdent newdata_ident
   addDataArray (identName resident) newdata_ident
 
   let reshape_exp' = PrimOp $ Reshape certs [newdata_size] data_identvn
@@ -999,7 +1015,6 @@ pullOutOfMap mapInfo (argsneeded, _)
       flatSize <- getFlattenedDims1 (mapSize mapInfo, outer)
       let flatTp = Array bt (Shape $ flatSize:rest) uniq
       flatResArr <- newIdent (textual vn ++ "_sd") flatTp
-      addTypeIdent flatResArr
       let flatResArrPat = PatElem flatResArr BindVar ()
       let finalTp = Array bt (Shape $ mapSize mapInfo :outer:rest) uniq
       finalResArr <- newIdent (baseString vn) finalTp
@@ -1138,10 +1153,10 @@ pullOutOfMap _ _ binding =
 
 
 -- | preparation steps to enter nested map, meaning we
-    -- step-down/flatten/concat the outer array.
-    --
-    -- 1st arg is the parrent array for the Ident. In most cases, this
-    -- will be @Nothing@ and this function will find it itself.
+-- step-down/flatten/concat the outer array.
+--
+-- 1st arg is the parrent array for the Ident. In most cases, this
+-- will be @Nothing@ and this function will find it itself.
 flattenArg :: MapInfo -> Either Ident VName -> FlatM Ident
 flattenArg mapInfo targInfo = do
   target <- case targInfo of
@@ -1161,8 +1176,9 @@ flattenArg mapInfo targInfo = do
     [] -> getDataArray1 $ identName target
     _ -> do let flatTp = Array bt (Shape (newsize : rest)) uniq
             i <- newIdent (baseString (identName target) ++ "_sd") flatTp
-            addTypeIdent i
             logMsg $ unwords ["flattenArg", "created new ident", pretty i]
+            addTypeIdent i
+            addDataArray (identName i) =<< getDataArray1 (identName target)
             return i
 
 
