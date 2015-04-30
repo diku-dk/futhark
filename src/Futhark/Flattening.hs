@@ -427,7 +427,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
 
   let body' = Body { bodyLore = ()
                    , bodyBindings = concat toflat_bnds ++ [call_bnd] ++ fromflat_bnds
-                   , bodyResult = Result $ map (Var . identName) realresidents
+                   , bodyResult = map (Var . identName) realresidents
                    }
   return $ FunDec name (ExtRetType rettypes) params body'
 
@@ -511,8 +511,8 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
                                   ) (arrayDims $ identType res)
       let truebody = Body { bodyLore = ()
                           , bodyBindings = []
-                          , bodyResult = Result $ replicate (length resdimidents)
-                                                            (Constant $ IntVal 0)
+                          , bodyResult = replicate (length resdimidents)
+                                                   (Constant $ IntVal 0)
                           }
       falsebody <- createFalseBody segs
       let if_exp = If (Var $ identName cmp_i)
@@ -539,7 +539,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
           let [seg0sz] = arrayDims $ identType seg0
           return Body { bodyLore = ()
                       , bodyBindings = bnds
-                      , bodyResult = Result $ seg0sz : map (Var . identName) tmpids
+                      , bodyResult = seg0sz : map (Var . identName) tmpids
                       }
 
 --------------------------------------------------------------------------------
@@ -568,10 +568,10 @@ transformFun (FunDec name rettype params body) = do
     name' = transformFunName name
 
 transformBody :: Body -> FlatM Body
-transformBody (Body () bindings (Result ses)) = do
+transformBody (Body () bindings ses) = do
   bindings' <- concat <$> mapM transformBinding bindings
   ses' <- concat <$> mapM subexpToFlatrepresentation ses
-  return $ Body () bindings' (Result ses')
+  return $ Body () bindings' ses'
   where
     subexpToFlatrepresentation (Constant v) =
       return [Constant v]
@@ -618,8 +618,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                            , mapCerts = certs
                            }
 
-     let mapResNeed = HS.unions $ map freeIn
-                      (resultSubExps $ bodyResult $ lambdaBody lambda)
+     let mapResNeed = HS.unions $ map freeIn $ bodyResult $ lambdaBody lambda
      let freeIdents = flip map grouped $ \case
                 Right bnds -> HS.unions $ map (freeInExp . bindingExp) bnds
                 Left bnd -> freeInExp $ bindingExp bnd
@@ -701,7 +700,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
 
       let lambody = Body { bodyLore = ()
                          , bodyBindings = bnds
-                         , bodyResult = Result $ map Var toreturn_vns
+                         , bodyResult = map Var toreturn_vns
                          }
 
       toreturn_tps <- mapM lookupType toreturn_vns
