@@ -213,7 +213,6 @@ instance Show FlatMsg where
             , "let", pretty $ bindingPattern bnd, "= ..."
             ]
 
-
 prettyLog :: FlatLog -> PlainString
 prettyLog flog = PlainString $ "\n" ++ unlines (map show flog)
 
@@ -1150,7 +1149,6 @@ pullOutOfMap mapInfo _
                            ++ pretty topBnd
   else do
     -- Create new PatElems and Idents to hold result (now arrays)
-
     pats' <- forM pats $ \(PatElem i BindVar ()) -> do
       let vn = identName i
       arr <- wrapInArrIdent (mapSize mapInfo) i
@@ -1207,25 +1205,18 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
   let repbnd = Let (Pattern [] [PatElem repident BindVar ()]) () repexp
 
   scanident <- newIdent "segiota_segscan" tmptp
-  scanexp <- segscanPlus (identName repident) (identName segdescp)
+  scanexp <- segscanPlus ScanExclusive (identName repident) (identName segdescp)
   let scanbnd = Let (Pattern [] [PatElem scanident BindVar ()]) () scanexp
-
-  -- Futhark scans are inclusive, but we need exslusive scan for this to work.
-  -- Hacky fixaround is to minus all array elements with one afterwards.
-  -- TODO ^^ discuss with troels/cosmin if we should have both inc/exc.
-  fixident <- newIdent "turn_into_exclusive" tmptp
-  fixexp <- minusOneMap (identName scanident)
-  let fixbnd = Let (patternFromIdents [] [fixident]) () fixexp
 
   resarr <- newIdent (baseString (identName resident) ++ "_arr")
                      (Array Int (Shape [mapSize mapinfo, subexp]) Nonunique)
 
   addMapLetArray (identName resident) resarr
   addTypeIdent resarr
-  addDataArray (identName resarr) fixident
+  addDataArray (identName resarr) scanident
   addTypeIdent scanident
 
-  return $ sumbnd ++ [repbnd, scanbnd, fixbnd]
+  return $ sumbnd ++ [repbnd, scanbnd]
 
 
 pullOutOfMap mapinfo bndinfo
@@ -1374,29 +1365,15 @@ vnDimentionality vn =
 
 --------------------------------------------------------------------------------
 
-segscanPlus :: VName -> VName -> FlatM Exp
-segscanPlus arr segdescp = do
+segscanPlus :: ScanType -> VName -> VName -> FlatM Exp
+segscanPlus st arr segdescp = do
   lambda <- binOpLambda Plus Int
-  return $ SegOp $ SegScan [] lambda [(Constant $ IntVal 0, arr)] segdescp
+  return $ SegOp $ SegScan [] st lambda [(Constant $ IntVal 0, arr)] segdescp
 
 reducePlus :: VName -> FlatM Exp
 reducePlus arr = do
   lambda <- binOpLambda Plus Int
   return $ LoopOp $ Reduce [] lambda [(Constant $ IntVal 0, arr)]
-
-minusOneMap :: VName -> FlatM Exp
-minusOneMap arr = do
-  x   <- newVName "x"
-  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
-    res <- letSubExp "res" $ PrimOp $ BinOp Minus (Var x) (Constant $ IntVal 1) Int
-    return $ resultBody [res]
-  let lambda = Lambda {
-             lambdaParams     = [Ident x (Basic Int)]
-           , lambdaReturnType = [Basic Int]
-           , lambdaBody       = body
-           }
-  return $ LoopOp $ Map [] lambda [arr]
-
 
 --------------------------------------------------------------------------------
 
