@@ -1,4 +1,31 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables, TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
+-- | This module performs flattening, which is a transformation aimed
+-- at making data-level paralleisation easy.
+--
+-- It relies heavily on dark magic, so please familarise yourself with
+-- this before trying to understand the code.
+--
+-- The main feature is that we can turn @map (scan + 0) xss@ into a
+-- single data-parallel operation.
+--
+-- This is achived by representing @n@-dimensional array by a /flat/
+-- (single dimensional) data array, and @n-1@ segment descriptors.
+--
+-- For example the array
+-- @ [ [ [1,2] , [3,4,5] ]
+--   , [ [6]             ]
+--   , []
+--   ]
+-- @
+--
+-- Can be represented as
+-- @ data  = [1,2, 3,4,5, 6    ]
+--   seg_1 = [2,   3,     1    ]
+--   seg_0 = [2,          1,  0]
+-- @
+--
+-- If you are interested in knowing more details, see futher comments
+-- in the source code!
 module Futhark.Flattening ( flattenProg )
   where
 
@@ -19,6 +46,61 @@ import Futhark.Representation.Basic
 import Futhark.Substitute
 import Futhark.Tools
 
+
+{- -----------------------------------------------------------------------------
+                       Understanding the code / transformation
+
+1. Segment descriptors
+
+  If we have the variables
+    cs = [[[char,k],n],m]
+    xs = [[int,n],m]
+    ys = [[int,k],n]
+
+  @cs@ and @xs@ should share segments descriptor for the outer
+  dimension (m,n), however @cs@ and @ys@ should /not/ share the segment
+  descriptor for (k,n)!
+
+  The way this is handled is by doing the following:
+    xs = { [int,m]xs_seg0, [int,n*m]xs_data }
+
+      added SegDescriptors
+      [m*n] -> [xs_seg0]
+
+    cs = { [int,m]xs_seg0, [int,m*n]cs_seg1, [char,m*n*k]cs_data }
+
+      added SegDescriptors
+      [m,n,k] -> [xs_seg0, cs_seg1]
+      [m*n,k] -> [cs_seg1]
+
+    ys = { [int,n]ys_seg0, [int,k]ys_data }
+
+      added SegDescriptors
+      [n,k] -> [ys_seg0]
+
+1.b Data arrays
+
+  Every array (also flat) points to its data array (through FlatState)
+
+2. Overview of how the code works
+
+  We transform function from the outside in. We go through each top level
+  binding, transforming them so they do not use multidimensional arrays, but
+  instead segment descriptors and data array. A @map f {xs_1,..,xs_n}@ will be
+  transformed by specific rules, covered later. Most other types of bindings
+  are not so bad. For example will @let [[char,n],m] ys = reshape (m,n) xs@
+  need to be turned into
+
+  @ let mn = m*n
+    let [int,m] ys_seg0 = replicate m n
+    let [char,mn] ys_data = reshape (mn) xs
+  @
+
+  ---
+
+  To be continued ... FIXME
+
+----------------------------------------------------------------------------- -}
 --------------------------------------------------------------------------------
 
 data FlatState = FlatState {
