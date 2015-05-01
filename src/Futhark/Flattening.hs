@@ -38,6 +38,7 @@ import qualified Data.HashSet as HS
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe
+import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -138,6 +139,10 @@ data FlatState = FlatState {
 data Regularity = Regular
                 | Irregular
                 deriving(Show, Eq)
+
+instance PP.Pretty Regularity where
+  ppr Regular = PP.text "Regular"
+  ppr Irregular = PP.text "Irregular"
 
 type SegDescp = (Ident, Regularity)
 
@@ -344,6 +349,7 @@ addSegDescriptors [] segs =
 addSegDescriptors subs [] =
   flatError $ Error $ "addSegDescriptors: empty seg array for " ++ show subs
 addSegDescriptors subs segs = do
+  logMsg $ unwords ["addSegDescriptors", pretty subs, pretty segs]
   segmap <- gets segDescriptors
   case M.lookup subs segmap of
     (Just _) -> flatError $ Error $ "addSegDescriptors:  " ++ show subs ++
