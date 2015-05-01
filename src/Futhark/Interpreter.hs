@@ -760,7 +760,7 @@ evalSegOp (SegReduce _ fun inputs descparr_exp) = do
   where asInt (BasicVal (IntVal x)) = return x
         asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
 
-evalSegOp (SegScan _ fun inputs descparr_exp) = do
+evalSegOp (SegScan _ st fun inputs descparr_exp) = do
   let (ne_exps, flatarr_exps) = unzip inputs
   startaccs <- mapM evalSubExp ne_exps
   segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp
@@ -788,7 +788,10 @@ evalSegOp (SegScan _ fun inputs descparr_exp) = do
 
         scanfun (acc, l) x = do
             acc' <- applyLambda fun $ acc ++ x
-            return (acc', acc' : l)
+            let l' = case st of
+                       ScanInclusive -> acc' : l
+                       ScanExclusive -> acc  : l
+            return (acc', l')
 
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]

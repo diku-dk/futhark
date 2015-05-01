@@ -84,7 +84,7 @@ loopOpAliases (ConcatMap {}) =
 segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
 segOpAliases (SegReduce _ f _ _) =
   map (const mempty) $ lambdaReturnType f
-segOpAliases (SegScan _ f _ _) =
+segOpAliases (SegScan _ _ f _ _) =
   map (const mempty) $ lambdaReturnType f
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]

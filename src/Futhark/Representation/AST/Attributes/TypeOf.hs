@@ -157,7 +157,7 @@ loopOpExtType (Stream _ accs arrs lam) =
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
 segOpExtType (SegReduce _ fun _ descp) =
   staticShapes <$> mapType fun <$> pure <$> lookupType descp
-segOpExtType (SegScan _ _ inputs _) =
+segOpExtType (SegScan _ _ _ inputs _) =
   staticShapes <$> traverse (lookupType . snd) inputs
 
 -- | The type of an expression.

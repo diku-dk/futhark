@@ -41,6 +41,7 @@ module Futhark.Representation.AST.Syntax
   , PrimOp (..)
   , LoopOp (..)
   , SegOp (..)
+  , ScanType(..)
   , BinOp (..)
   , ExpT(..)
   , Exp
@@ -228,6 +229,19 @@ data LoopOp lore
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
 
+-- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
+-- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@
+-- Exclusive = @[ ne, ne `op` x_1, ... , ne `op` x_1 ... `op` x_{n-1} ]@
+--
+-- Both versions generate arrays of the same size as @xs@ (this is not
+-- always the semantics).
+--
+-- An easy way to remember which is which, is that inclusive /includes/
+-- the last element in the calculation, whereas the exclusive does not
+data ScanType = ScanInclusive
+              | ScanExclusive
+              deriving(Eq, Ord, Show)
+
 -- | Segmented version of SOACS that use flat array representation.
 -- This means a /single/ flat array for data, and segment descriptors
 -- (integer arrays) for each dimension of the array.
@@ -241,18 +255,18 @@ data LoopOp lore
 --
 -- Can be represented as
 -- @ data  = [1,2, 3,4,5, 6    ]
---   seg_1 = [2,   3,     1,0  ]
+--   seg_1 = [2,   3,     1,   ]
 --   seg_0 = [2,          1,  0]
 -- @
 data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, VName)] VName
                   -- ^ @map (\xs -> reduce(op,ne,xs), xss@ can loosely
                   -- be transformed into
-                  -- @segreduce(op,ne, xss_flat, xss_descpritor)@
+                  -- @segreduce(op, ne, xss_flat, xss_descpritor)@
                   --
-                  -- Note that this requires the neutral element to be constantc
-                | SegScan Certificates (LambdaT lore) [(SubExp, VName)] VName
+                  -- Note that this requires the neutral element to be constant
+                | SegScan Certificates ScanType (LambdaT lore) [(SubExp, VName)] VName
                   -- ^ Identical to 'Scan', except that the last arg
-                  -- is a segment descriptor
+                  -- is a segment descriptor.
                 deriving (Eq, Ord, Show)
 
 deriving instance Lore lore => Eq (LoopOp lore)

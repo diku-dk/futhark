@@ -920,7 +920,7 @@ checkSegOp (SegReduce ass fun inputs descp_exp) = do
   checkLoopOp $ Reduce ass fun inputs
 
 -- SegScan is mostly identical to SegReduced. Duplicated for clarity.
-checkSegOp (SegScan ass fun inputs descp_exp) = do
+checkSegOp (SegScan ass _ fun inputs descp_exp) = do
   descp_arg <- checkArg $ Var descp_exp
   let descp_tp = argType descp_arg
   unless (elemType descp_tp == Int) $
