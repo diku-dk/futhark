@@ -967,10 +967,12 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ src
       let ivars = map varIndex is
       destidx <- simplifyScalExp $ IxFun.index destIxFun ivars
       srcidx <- simplifyScalExp $ IxFun.index srcIxFun ivars
+      srcspace <- entryMemSpace <$> lookupMemory srcmem
+      destspace <- entryMemSpace <$> lookupMemory destmem
       return $ foldl (.) id (zipWith Imp.For is $
                                      map (innerExp . dimSizeToExp) destshape) $
-        write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt Nothing $
-        index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt Nothing
+        write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt destspace $
+        index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt srcspace
 
 memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
