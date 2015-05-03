@@ -786,10 +786,10 @@ simplifyLambda (Lambda params body rettype) arrs = do
       paramnames = HS.fromList $ map paramName params'
   body' <-
     enterBody $
-    blockIf (hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
-    enterLoop $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
+    blockIf (hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
+    enterLoop $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params' body' rettype'
@@ -803,8 +803,8 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
   let paramnames = HS.fromList $ map paramName params'
   rettype' <- mapM simplifyExtType rettype
   body' <- enterBody $
-           blockIf (hasFree paramnames `orIf` isUnique) $
            bindLParams params' $
+           blockIf (hasFree paramnames `orIf` isUnique) $
            localVtable extendSymTab $
            simplifyBody (map diet rettype) body
   let bodyres = bodyResult body'
