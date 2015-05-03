@@ -65,10 +65,9 @@ cseInBinding (Let pat eattr e) m = do
         local (addNameSubst pat' subpat) $ do
           CSEState (_, nsubsts') <- ask
           let lets =
-                [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var v
-                | (patElem,v) <- zip (patternElements pat') $ patternNames subpat,
-                  let patElem' = setPatElemName (substituteNames nsubsts' patElem) $
-                                 patElemName patElem
+                [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var $ patElemName patElem
+                | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
+                  let patElem' = setPatElemName patElem name
                 ]
           m lets
   where bad (Array _ _ Unique) = True
@@ -77,8 +76,10 @@ cseInBinding (Let pat eattr e) m = do
         setPatElemName patElem name =
           patElem { patElemIdent = Ident name $ identType $ patElemIdent patElem }
 
-newtype CSEState lore =
-  CSEState (M.Map (Lore.Exp lore, Exp lore) (Pattern lore), HM.HashMap VName VName)
+type ExpressionSubstitutions lore = M.Map (Lore.Exp lore, Exp lore) (Pattern lore)
+type NameSubstitutions = HM.HashMap VName VName
+
+newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitutions)
 
 newCSEState :: CSEState lore
 newCSEState = CSEState (M.empty, HM.empty)
