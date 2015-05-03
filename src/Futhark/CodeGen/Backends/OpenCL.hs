@@ -87,7 +87,7 @@ callKernels kernel = do
         kernel_name = kernelName kernel
 
 failOnKernels :: GenericC.OpCompiler Kernel
-failOnKernels kernel = do
+failOnKernels kernel =
   fail $ "Asked to call kernel " ++ kernelName kernel ++ " while already inside a kernel"
 
 pointerQuals ::  GenericC.PointerQuals Kernel
