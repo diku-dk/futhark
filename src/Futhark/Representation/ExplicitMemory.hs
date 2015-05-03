@@ -813,11 +813,3 @@ basicSize Bool = 1
 basicSize Char = 1
 basicSize Real = 8
 basicSize Cert = 1
-
--- | The size of an array slice in elements.
-sliceOffset :: Shape -> [SE.ScalExp] -> SE.ScalExp
-sliceOffset shape is =
-  SE.ssum $ zipWith SE.STimes is sliceSizes
-  where sliceSizes =
-          map SE.sproduct $
-          drop 1 $ tails $ map (`SE.subExpToScalExp` Int) $ shapeDims shape
