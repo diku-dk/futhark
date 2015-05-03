@@ -7,6 +7,7 @@ module Futhark.Representation.AST.Attributes.Names
        (
          -- * Class
            FreeIn (..)
+         , Names
          -- * Specialised Functions
          , freeInBody
          , freeInExp

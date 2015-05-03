@@ -174,7 +174,7 @@ computeFlatIndex dims is =
 sliceSizes :: Shape m -> Vector ScalExp (S m)
 sliceSizes Nil = singleton $ Val $ IntVal 1
 sliceSizes (n :- ns) =
-  sproduct (map (`subExpToScalExp` Int) $ n : Vec.toList ns) :-
+  sproduct (map intSubExpToScalExp $ n : Vec.toList ns) :-
   sliceSizes ns
 
 iota :: Shape n -> IxFun n
@@ -242,14 +242,17 @@ shape (Reshape _ dims) =
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.  We really miss a case for Index, though.
 linearWithOffset :: forall n.
-                    IxFun n -> Maybe ScalExp
-linearWithOffset (Direct offset _) = Just offset
-linearWithOffset (Offset ixfun n) = do
-  inner_offset <- linearWithOffset ixfun
-  return $ inner_offset `SPlus` n
-linearWithOffset (Reshape ixfun _) =
-  linearWithOffset ixfun
-linearWithOffset _ = Nothing
+                    IxFun n -> ScalExp -> Maybe ScalExp
+linearWithOffset (Direct offset _) _ = Just offset
+linearWithOffset (Offset ixfun n) element_size = do
+  inner_offset <- linearWithOffset ixfun element_size
+  case Vec.tail $ sliceSizes $ shape ixfun of
+    Nil -> Nothing
+    rowslice :- _ ->
+      return $ inner_offset `SPlus` (n `STimes` rowslice `STimes` element_size)
+linearWithOffset (Reshape ixfun _) element_size =
+ linearWithOffset ixfun element_size
+linearWithOffset _ _ = Nothing
 
 instance FreeIn (IxFun n) where
   freeIn (Direct offset dims) = freeIn offset <> freeIn (Vec.toList dims)

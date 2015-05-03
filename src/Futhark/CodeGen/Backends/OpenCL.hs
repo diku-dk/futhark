@@ -31,11 +31,9 @@ compileProg prog = do
 
 callKernels :: GenericC.OpCompiler Kernel
 callKernels kernel = do
-  devWrites <- zipWithM (mkBuffer "clEnqueueWriteBuffer")
-               [(0::Int)..] $ kernelCopyIn kernel
-  devReads <- zipWithM (mkBuffer "clEnqueueReadBuffer")
-              [length devWrites..] $ kernelCopyOut kernel
-  sequence_ devWrites
+  zipWithM_ mkBuffer [(0::Int)..] $ kernelCopyIn kernel
+  devReads <-
+    zipWithM mkBuffer [length (kernelCopyIn kernel)..] $ kernelCopyOut kernel
   worksize <- newVName "worksize"
   let kernel_size = GenericC.dimSizeToExp $ kernelSize kernel
 
@@ -51,7 +49,7 @@ callKernels kernel = do
   GenericC.stm [C.cstm|assert(clFinish(fut_cl_queue) == CL_SUCCESS);|]
   return GenericC.Done
 
-  where mkBuffer readwrite i (CopyMemory hostbuf size) = do
+  where mkBuffer i (CopyMemory hostbuf size copy_before) = do
           let size' = GenericC.dimSizeToExp size
           devbuf <- newVName $ baseString hostbuf ++ "_dev"
           errorname <- newVName "error"
@@ -63,17 +61,23 @@ callKernels kernel = do
             assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:devbuf), &$id:devbuf)
                    == CL_SUCCESS);
             }|]
-          return $ GenericC.stm [C.cstm|{
-            assert($id:readwrite(fut_cl_queue, $id:devbuf,
-                                 CL_FALSE, 0, $exp:size', $id:hostbuf,
-                                 0, NULL, NULL)
-                    == CL_SUCCESS);
-            }|]
+          when copy_before $
+            readOrWriteBuffer "clEnqueueWriteBuffer" hostbuf devbuf size'
+          return $ readOrWriteBuffer "clEnqueueReadBuffer" hostbuf devbuf size'
 
-        mkBuffer _ i (CopyScalar hostvar _) = do
-          return $ GenericC.stm [C.cstm|{
+        mkBuffer i (CopyScalar hostvar _) = do
+          GenericC.stm [C.cstm|{
             assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:hostvar), &$id:hostvar)
                    == CL_SUCCESS);
+            }|]
+          return $ return ()
+
+        readOrWriteBuffer readwrite hostbuf devbuf size =
+          GenericC.stm [C.cstm|{
+            assert($id:readwrite(fut_cl_queue, $id:devbuf,
+                                 CL_FALSE, 0, $exp:size, $id:hostbuf,
+                                 0, NULL, NULL)
+                    == CL_SUCCESS);
             }|]
 
         kernel_name = kernelName kernel
@@ -100,7 +104,7 @@ compileKernel kernel =
       asParam (CopyScalar name bt) =
         let ctp = GenericC.scalarTypeToCType bt
         in [C.cparam|$ty:ctp $id:name|]
-      asParam (CopyMemory name _) =
+      asParam (CopyMemory name _ _) =
         [C.cparam|__global unsigned char *$id:name|]
 
       inparams = map asParam $ kernelCopyIn kernel

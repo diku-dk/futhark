@@ -167,9 +167,11 @@ codomain (IxFun n f) =
 
 isDirect :: IxFun -> Bool
 isDirect =
-  maybe False (==Val (IntVal 0)) . linearWithOffset
+  maybe False (==zeroscal) . flip linearWithOffset onescal
+  where zeroscal = Val (IntVal 0)
+        onescal = Val (IntVal 1)
 
-linearWithOffset :: IxFun -> Maybe ScalExp
+linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ ixfun) =
   Safe.linearWithOffset ixfun
 

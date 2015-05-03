@@ -445,10 +445,12 @@ defCompilePrimOp
     forM_ (x:ys) $ \y -> do
         yentry <- lookupArray y
         let srcloc = entryArrayLocation yentry
+            rows = case entryArrayShape yentry of
+                    []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
+                    r:_ -> innerExp $ dimSizeToExp r
         emit =<< copyIxFun et destloc srcloc (arrayByteSizeExp yentry)
         emit $ Imp.SetScalar offs_glb $
-               Imp.BinOp Plus (Imp.ScalarVar offs_glb) $
-               innerExp (arrayElemSizeExp yentry)
+               Imp.BinOp Plus (Imp.ScalarVar offs_glb) rows
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
@@ -876,7 +878,7 @@ fullyIndexArray' :: MemLocation -> [ScalExp] -> BasicType
                  -> ImpM op (VName, Imp.Space, Count Bytes)
 fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
   space <- entryMemSpace <$> lookupMemory mem
-  case scalExpToImpExp $ IxFun.index ixfun indices $ SE.Val $ IntVal $ basicSize bt of
+  case scalExpToImpExp $ IxFun.index ixfun indices $ basicScalarSize bt of
     Nothing -> fail "fullyIndexArray': Cannot turn scalexp into impexp"
     Just e -> return (mem, space, bytes e)
 
@@ -955,13 +957,13 @@ copyIxFun :: BasicType
 copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ srcIxFun) n
   | Just destoffset <-
       scalExpToImpExp =<<
-      IxFun.linearWithOffset destIxFun,
+      IxFun.linearWithOffset destIxFun bt_size ,
     Just srcoffset  <-
       scalExpToImpExp =<<
-      IxFun.linearWithOffset srcIxFun =
+      IxFun.linearWithOffset srcIxFun bt_size =
         return $ memCopy
-        destmem (elements destoffset `withElemType` bt)
-        srcmem (elements srcoffset `withElemType` bt)
+        destmem (bytes destoffset)
+        srcmem (bytes srcoffset)
         n
   | otherwise = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
@@ -975,7 +977,7 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ src
                                      map (innerExp . dimSizeToExp) destshape) $
         write destmem (bytes $ fromJust $ scalExpToImpExp destidx) bt destspace $
         index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
-  where bt_size = SE.Val $ IntVal $ basicSize bt
+  where bt_size = basicScalarSize bt
 
 memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
@@ -1024,3 +1026,6 @@ simplifyScalExp se =
   case AlgSimplify.simplify se mempty of
     Left err  -> fail $ show err
     Right se' -> return se'
+
+basicScalarSize :: BasicType -> ScalExp
+basicScalarSize = SE.Val . IntVal . basicSize

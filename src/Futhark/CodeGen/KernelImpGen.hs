@@ -11,7 +11,6 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.List
-import Data.Monoid
 
 import Prelude
 
@@ -55,32 +54,40 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
                     ImpGen.compileBindings (bodyBindings body') $
                       zipWithM_ (writeThreadResult thread_num) dest $ bodyResult body'
 
-    arr_mems <- forM arrs $ \arr -> do
-      ImpGen.MemLocation mem _ _ <- ImpGen.arrayLocation arr
-      return mem
+    -- Find the memory blocks containing the output arrays.
+    let dest_mems = mapMaybe destMem dest
+        destMem (ImpGen.ArrayDestination
+                 (ImpGen.CopyIntoMemory
+                  (ImpGen.MemLocation mem _ _)) _) =
+          Just mem
+        destMem _ =
+          Nothing
 
+    -- Compute the variables that we need to pass to the kernel.
     copy_in <- liftM catMaybes $
-               forM (HS.toList $ HS.fromList arr_mems <> freeInBody body <>
-                     mconcat (map freeIn $ lambdaParams lam)) $ \var ->
-      if var `elem` map paramName (lambdaParams lam)
+               forM (HS.toList $ freeIn kernelbody) $ \var ->
+      if var `elem` thread_num : dest_mems ++ map paramName (lambdaParams lam)
         then return Nothing
         else do t <- lookupType var
                 case t of
                   Array {} -> return Nothing
-                  Mem memsize -> Just <$> Imp.CopyMemory var <$> ImpGen.subExpToDimSize memsize
+                  Mem memsize -> Just <$> (Imp.CopyMemory var <$>
+                                           ImpGen.subExpToDimSize memsize <*>
+                                           pure True)
                   Basic bt ->
                     if bt == Cert
                     then return Nothing
                     else return $ Just $ Imp.CopyScalar var bt
 
-    -- Copy what memory to copy out.  Must be allocated on device before
-    -- kernel execution anyway.
+    -- Compute what memory to copy out.  Must be allocated on device
+    -- before kernel execution anyway.
     copy_out <- liftM catMaybes $ forM dest $ \case
       (ImpGen.ArrayDestination
        (ImpGen.CopyIntoMemory
-        (ImpGen.MemLocation mem _ _)) _) -> do
+        (ImpGen.MemLocation mem _ ixfun)) _) -> do
         memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
-        return $ Just $ Imp.CopyMemory mem memsize
+        let copy_before = not $ IxFun.isDirect ixfun
+        return $ Just $ Imp.CopyMemory mem memsize copy_before
       _ ->
         return Nothing
 

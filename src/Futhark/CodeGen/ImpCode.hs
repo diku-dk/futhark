@@ -27,11 +27,13 @@ import Data.List hiding (foldr)
 import Data.Loc
 import Data.Traversable
 import Data.Foldable
+import qualified Data.HashSet as HS
 
 import Prelude hiding (foldr)
 
 import Language.Futhark.Core
 import Futhark.Representation.AST.Syntax (BinOp (..))
+import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 
 import Text.PrettyPrint.Mainland hiding (space)
@@ -294,3 +296,52 @@ instance Traversable Code where
     pure $ Assert e loc
   traverse _ (Call dests fname args) =
     pure $ Call dests fname args
+
+declaredIn :: Code a -> Names
+declaredIn (DeclareMem name _) = HS.singleton name
+declaredIn (DeclareScalar name _) = HS.singleton name
+declaredIn (If _ t f) = declaredIn t <> declaredIn f
+declaredIn (x :>>: y) = declaredIn x <> declaredIn y
+declaredIn (For i _ body) = HS.singleton i <> declaredIn body
+declaredIn (While _ body) = declaredIn body
+declaredIn _ = mempty
+
+instance FreeIn a => FreeIn (Code a) where
+  freeIn (x :>>: y) =
+    freeIn x <> freeIn y `HS.difference` declaredIn x
+  freeIn Skip =
+    mempty
+  freeIn (For i bound body) =
+    i `HS.delete` (freeIn bound <> freeIn body)
+  freeIn (While cond body) =
+    freeIn cond <> freeIn body
+  freeIn (DeclareMem {}) =
+    mempty
+  freeIn (DeclareScalar {}) =
+    mempty
+  freeIn (Allocate name size) =
+    freeIn name <> freeIn size
+  freeIn (Copy dest x src y n) =
+    freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
+  freeIn (SetMem x y) =
+    freeIn x <> freeIn y
+  freeIn (Write v i _ _ e) =
+    freeIn v <> freeIn i <> freeIn e
+  freeIn (SetScalar x y) =
+    freeIn x <> freeIn y
+  freeIn (Call dests _ args) =
+    freeIn dests <> freeIn args
+  freeIn (If cond t f) =
+    freeIn cond <> freeIn t <> freeIn f
+  freeIn (Assert e _) =
+    freeIn e
+  freeIn (Op op) =
+    freeIn op
+
+instance FreeIn Exp where
+  freeIn (Constant _) = mempty
+  freeIn (BinOp _ x y) = freeIn x <> freeIn y
+  freeIn (UnOp _ x) = freeIn x
+  freeIn (Index v e _ _) = freeIn v <> freeIn e
+  freeIn (ScalarVar v) = freeIn v
+  freeIn (SizeOf _) = mempty

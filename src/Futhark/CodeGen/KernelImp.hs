@@ -12,10 +12,12 @@ module Futhark.CodeGen.KernelImp
   )
   where
 
+import qualified Data.HashSet as HS
 import Text.PrettyPrint.Mainland
 
 import Futhark.CodeGen.ImpCode hiding (Program, Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
+import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 
 type Program = Imp.Program Kernel
@@ -33,14 +35,16 @@ data Kernel = Kernel { kernelThreadNum :: VName
             deriving (Show)
 
 data KernelCopy = CopyScalar VName BasicType
-                | CopyMemory VName Imp.DimSize
+                | CopyMemory VName Imp.DimSize Bool
                 deriving (Eq, Show)
 
 instance Pretty KernelCopy where
   ppr (CopyScalar name t) =
     text "scalar_copy" <> parens (commasep [ppr name, ppr t])
-  ppr (CopyMemory name size) =
+  ppr (CopyMemory name size False) =
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
+  ppr (CopyMemory name size True) =
+    text "mem_copy_before" <> parens (commasep [ppr name, ppr size])
 
 instance Pretty Kernel where
   ppr kernel =
@@ -50,6 +54,10 @@ instance Pretty Kernel where
                             text "<- get_thread_number()" </>
                             ppr (kernelBody kernel)) </>
      text "copy-out" <+> brace (commasep $ map ppr $ kernelCopyOut kernel))
+
+instance FreeIn Kernel where
+  freeIn kernel =
+    kernelThreadNum kernel `HS.delete` freeIn (kernelBody kernel)
 
 brace :: Doc -> Doc
 brace body = text " {" </> indent 2 body </> text "}"
