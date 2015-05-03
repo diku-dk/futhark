@@ -15,6 +15,7 @@ import qualified Language.C.Quote.OpenCL as C
 
 import Futhark.Representation.ExplicitMemory (Prog, pretty)
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.KernelImp
 import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
 import Futhark.MonadFreshNames
@@ -22,11 +23,14 @@ import Futhark.MonadFreshNames
 compileProg :: Prog -> Either String String
 compileProg prog = do
   prog' <- KernelImpGen.compileProg prog
+  let header = unlines [ "#include <CL/cl.h>\n" ]
   kernels <- forM (getKernels prog') $ \kernel -> do
     kernel' <- compileKernel kernel
-    return (kernelName kernel, [C.cinit|$string:(pretty kernel')|])
+    return (kernelName kernel, [C.cinit|$string:(openClKernelHeader ++
+                                                 "\n" ++
+                                                 pretty kernel')|])
   return $
-    "#include <CL/cl.h>\n" ++
+    header ++
     GenericC.compileProg callKernels pointerQuals (openClDecls kernels) openClInit prog'
 
 callKernels :: GenericC.OpCompiler Kernel
@@ -227,3 +231,7 @@ getKernels :: Program -> [Kernel]
 getKernels = execWriter . traverse getFunKernels
   where getFunKernels kernel =
           tell [kernel] >> return kernel
+
+openClKernelHeader :: String
+openClKernelHeader = unlines $ "#pragma OPENCL EXTENSION cl_khr_fp64 : enable" :
+                     map pretty builtInFunctionDefs

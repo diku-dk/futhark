@@ -390,7 +390,6 @@ compileProg :: OpCompiler op -> PointerQuals op
 compileProg ec pc decls mainstms prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ec pc blankNameSource compileProg'
-      funName' = funName . nameFromString
   in pretty 80 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
@@ -408,25 +407,7 @@ $edecls:(compVarDefinitions endstate)
 
 $edecls:prototypes
 
-double $id:(funName' "toReal")(int x) {
-  return x;
-}
-
-int $id:(funName' "trunc")(double x) {
-  return x;
-}
-
-double $id:(funName' "log")(double x) {
-  return log(x);
-}
-
-double $id:(funName' "sqrt")(double x) {
-  return sqrt(x);
-}
-
-double $id:(funName' "exp")(double x) {
-return exp(x);
-}
+$edecls:builtin
 
 int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval *t1)
 {
@@ -476,6 +457,9 @@ int main(int argc, char** argv) {
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l
                         C.Func _ _ _ _ _ l      -> l
+
+        builtin = map asDecl builtInFunctionDefs
+          where asDecl fun = [C.cedecl|$func:fun|]
 
 compileFun :: (Name, Function op) -> CompilerM op (C.Definition, C.Func)
 compileFun (fname, Function outputs inputs body _ _) = do

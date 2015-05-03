@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleField
   , tupleFieldExp
   , funName
+  , builtInFunctionDefs
   )
   where
 
@@ -41,3 +42,37 @@ tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 -- the Futhark function @f@.
 funName :: Name -> String
 funName = ("futhark_"++) . nameToString
+
+-- | C definitions of the Futhark "standard library".
+builtInFunctionDefs :: [C.Func]
+builtInFunctionDefs =
+  [[C.cfun|
+    double $id:(funName' "toReal")(int x) {
+      return x;
+    }
+   |],
+
+   [C.cfun|
+    int $id:(funName' "trunc")(double x) {
+      return x;
+    }
+   |],
+
+   [C.cfun|
+    double $id:(funName' "log")(double x) {
+      return log(x);
+    }
+    |],
+
+   [C.cfun|
+    double $id:(funName' "sqrt")(double x) {
+      return sqrt(x);
+    }
+    |],
+
+   [C.cfun|
+    double $id:(funName' "exp")(double x) {
+      return exp(x);
+    }
+  |]]
+  where funName' = funName . nameFromString
