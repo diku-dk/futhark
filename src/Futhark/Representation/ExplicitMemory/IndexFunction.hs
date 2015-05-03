@@ -120,21 +120,21 @@ instance Rename (IxFun n) where
     return $ substituteNames subst ixfun
 
 index :: forall (n::Nat).
-         IxFun (S n) -> Indices (S n) -> ScalExp
+         IxFun (S n) -> Indices (S n) -> ScalExp -> ScalExp
 
-index (Direct offset dims) is =
-  ssum (Vec.toList $ Vec.zipWithSame STimes is slicesizes) `SPlus` offset
+index (Direct offset dims) is element_size =
+  (ssum (Vec.toList $ Vec.zipWithSame STimes is slicesizes) `STimes` element_size) `SPlus` offset
   where slicesizes :: Vector ScalExp (S n)
         slicesizes = Vec.tail $ sliceSizes dims
 
-index (Offset fun offset) (i :- is) =
-  index fun $ (i `SPlus` offset) :- is
+index (Offset fun offset) (i :- is) element_size =
+  index fun ((i `SPlus` offset) :- is) element_size
 
-index (Permute fun perm) is_new =
-  index fun is_old
+index (Permute fun perm) is_new element_size =
+  index fun is_old element_size
   where is_old   = Perm.apply (Perm.invert perm) is_new
 
-index (Index _ fun (is1::Indices m)) is2 =
+index (Index _ fun (is1::Indices m)) is2 element_size =
   case (singInstance $ sLength is1,
         singInstance $ sLength is2 %:- sOne) of
     (SingInstance,SingInstance) ->
@@ -145,9 +145,9 @@ index (Index _ fun (is1::Indices m)) is2 =
           proof = succPlusR (sing :: SNat m) (sing :: SNat n)
       in case singInstance $ coerce proof (sLength is) %:- sOne of
         SingInstance ->
-          index (coerce outer fun) (coerce outer is)
+          index (coerce outer fun) (coerce outer is) element_size
 
-index (Reshape (fun :: IxFun (S m)) newshape) is =
+index (Reshape (fun :: IxFun (S m)) newshape) is element_size =
   -- First, compute a flat index based on the new shape.  Then, turn
   -- that into an index set for the inner index function and apply the
   -- inner index function to that set.
@@ -157,7 +157,7 @@ index (Reshape (fun :: IxFun (S m)) newshape) is =
       innerslicesizes = Vec.tail $ sliceSizes oldshape
       new_indices :: Indices (S m)
       new_indices = computeNewIndices innerslicesizes flatidx
-  in index fun new_indices
+  in index fun new_indices element_size
 
 computeNewIndices :: Vector ScalExp k -> ScalExp -> Indices k
 computeNewIndices Nil _ =

@@ -78,9 +78,9 @@ shapeFromInts = map (Constant . IntVal)
 rank :: IxFun -> Int
 rank (IxFun n _) = sNatToInt n
 
-index :: IxFun -> Indices -> ScalExp
-index f is = case f of
-  IxFun n f' -> Safe.index f' (unsafeFromList n is)
+index :: IxFun -> Indices -> ScalExp -> ScalExp
+index f is element_size = case f of
+  IxFun n f' -> Safe.index f' (unsafeFromList n is) element_size
 
 iota :: Shape -> IxFun
 iota shape = case toSing (intToNat $ n-1) of

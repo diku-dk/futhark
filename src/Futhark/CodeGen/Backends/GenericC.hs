@@ -533,7 +533,7 @@ compileExp (ScalarVar src) =
 compileExp (Index src iexp restype space) = do
   iexp' <- compileExp iexp
   ty <- pointerType restype space
-  return [C.cexp|(($ty:ty)$id:src)[$exp:iexp']|]
+  return [C.cexp|*(($ty:ty)&($id:src[$exp:iexp']))|]
 
 compileExp (UnOp Negate x) = do
   x' <- compileExp x
@@ -627,7 +627,7 @@ compileCode (Write dest idx elemtype space elemexp) = do
   idx' <- compileExp idx
   elemexp' <- compileExp elemexp
   ty <- pointerType elemtype space
-  stm [C.cstm|(($ty:ty)$id:dest)[$exp:idx'] = $exp:elemexp';|]
+  stm [C.cstm|*(($ty:ty)&($id:dest[$exp:idx'])) = $exp:elemexp';|]
 
 compileCode (DeclareMem name space) = do
   ty <- memToCType space

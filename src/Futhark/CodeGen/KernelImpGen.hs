@@ -138,12 +138,14 @@ writeThreadResult thread_num
     destloc@(ImpGen.MemLocation mem _ _)) _) se = do
   set <- subExpType se
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
-  let i = ImpGen.elements $ Imp.ScalarVar thread_num
+  let i = ImpGen.varIndex thread_num
   case set of
-    Basic bt ->
-      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space i) se
+    Basic bt -> do
+      (_, _, elemOffset) <-
+        ImpGen.fullyIndexArray' destloc [i] bt
+      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space elemOffset) se
     _ -> do
-      memloc <- ImpGen.indexArray destloc [ImpGen.varIndex thread_num]
+      memloc <- ImpGen.indexArray destloc [i]
       let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
                  replicate (arrayRank set) Nothing
       ImpGen.compileResultSubExp dest se

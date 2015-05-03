@@ -36,6 +36,7 @@ module Futhark.CodeGen.ImpGen
   , writeExp
   , indexArray
   , fullyIndexArray
+  , fullyIndexArray'
   , varIndex
 
     -- * Typed enumerations
@@ -116,7 +117,7 @@ newtype Destination = Destination [ValueDestination]
                     deriving (Show)
 
 data ValueDestination = ScalarDestination VName
-                      | ArrayElemDestination VName BasicType Imp.Space (Count Elements)
+                      | ArrayElemDestination VName BasicType Imp.Space (Count Bytes)
                       | MemoryDestination VName (Maybe VName)
                       | ArrayDestination ArrayMemoryDestination [Maybe VName]
                       deriving (Show)
@@ -397,7 +398,7 @@ defCompilePrimOp
       let shape' = map (elements . compileSubExp) $ n : arrayDims set
       if basicType set then do
         (targetmem, space, targetoffset) <-
-          fullyIndexArray' destlocation [varIndex i]
+          fullyIndexArray' destlocation [varIndex i] $ elemType set
         emit $ Imp.For i (compileSubExp n) $
           write targetmem targetoffset (elemType set) space $ compileSubExp se
         else case se of
@@ -421,7 +422,7 @@ defCompilePrimOp
     i <- newVName "i"
     declaringLoopVar i $ do
       (targetmem, space, targetoffset) <-
-        fullyIndexArray' memlocation [varIndex i]
+        fullyIndexArray' memlocation [varIndex i] Int
       emit $ Imp.For i (compileSubExp n) $
         write targetmem targetoffset Int space $ Imp.ScalarVar i
 
@@ -457,7 +458,7 @@ defCompilePrimOp
     forM_ (zip [0..] es) $ \(i,e) ->
       if basicType rt then do
         (targetmem, space, targetoffset) <-
-          fullyIndexArray' memlocation [constIndex i]
+          fullyIndexArray' memlocation [constIndex i] $ elemType rt
         emit $ write targetmem targetoffset et space $ compileSubExp e
       else case e of
         Constant {} ->
@@ -842,6 +843,7 @@ destinationFromPattern (Pattern ctxElems valElems) =
                         fullyIndexArray'
                         (MemLocation mem shape ixfun)
                         (map (`SE.subExpToScalExp` Int) is)
+                        bt
                       return $ ArrayElemDestination mem bt space elemOffset
                     Array _ shape' _ ->
                       let memdest = sliceArray (MemLocation mem shape ixfun) $
@@ -865,18 +867,18 @@ destinationFromPattern (Pattern ctxElems valElems) =
               fail $ "destinationFromPattern: unknown target " ++ pretty name
 
 fullyIndexArray :: VName -> [ScalExp]
-                -> ImpM op (VName, Imp.Space, Count Elements)
+                -> ImpM op (VName, Imp.Space, Count Bytes)
 fullyIndexArray name indices = do
-  loc <- arrayLocation name
-  fullyIndexArray' loc indices
+  arr <- lookupArray name
+  fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
 
-fullyIndexArray' :: MemLocation -> [ScalExp]
-                 -> ImpM op (VName, Imp.Space, Count Elements)
-fullyIndexArray' (MemLocation mem _ ixfun) indices = do
+fullyIndexArray' :: MemLocation -> [ScalExp] -> BasicType
+                 -> ImpM op (VName, Imp.Space, Count Bytes)
+fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
   space <- entryMemSpace <$> lookupMemory mem
-  case scalExpToImpExp $ IxFun.index ixfun indices of
+  case scalExpToImpExp $ IxFun.index ixfun indices $ SE.Val $ IntVal $ basicSize bt of
     Nothing -> fail "fullyIndexArray': Cannot turn scalexp into impexp"
-    Just e -> return (mem, space, elements e)
+    Just e -> return (mem, space, bytes e)
 
 indexArray :: MemLocation -> [ScalExp]
            -> ImpM op MemLocation
@@ -924,10 +926,10 @@ bytes = Count
 withElemType :: Count Elements -> BasicType -> Count Bytes
 withElemType (Count e) t = bytes $ e `times'` Imp.SizeOf t
 
-index :: VName -> Count Elements -> BasicType -> Imp.Space -> Imp.Exp
+index :: VName -> Count Bytes -> BasicType -> Imp.Space -> Imp.Exp
 index name (Count e) = Imp.Index name e
 
-write :: VName -> Count Elements -> BasicType -> Imp.Space -> Imp.Exp -> Imp.Code a
+write :: VName -> Count Bytes -> BasicType -> Imp.Space -> Imp.Exp -> Imp.Code a
 write name (Count i) = Imp.Write name i
 
 times :: Count u -> Count u -> Count u
@@ -965,14 +967,15 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ src
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     declaringLoopVars is $ do
       let ivars = map varIndex is
-      destidx <- simplifyScalExp $ IxFun.index destIxFun ivars
-      srcidx <- simplifyScalExp $ IxFun.index srcIxFun ivars
+      destidx <- simplifyScalExp $ IxFun.index destIxFun ivars bt_size
+      srcidx <- simplifyScalExp $ IxFun.index srcIxFun ivars bt_size
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       return $ foldl (.) id (zipWith Imp.For is $
                                      map (innerExp . dimSizeToExp) destshape) $
-        write destmem (elements $ fromJust $ scalExpToImpExp destidx) bt destspace $
-        index srcmem (elements $ fromJust $ scalExpToImpExp srcidx) bt srcspace
+        write destmem (bytes $ fromJust $ scalExpToImpExp destidx) bt destspace $
+        index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
+  where bt_size = SE.Val $ IntVal $ basicSize bt
 
 memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
         -> Imp.Code a
@@ -989,9 +992,9 @@ copyElem bt
 
   | length srcis == length srcshape, length destis == length destshape = do
   (targetmem, destspace, targetoffset) <-
-    fullyIndexArray' destlocation destis
+    fullyIndexArray' destlocation destis bt
   (srcmem, srcspace, srcoffset) <-
-    fullyIndexArray' srclocation srcis
+    fullyIndexArray' srclocation srcis bt
   return $ write targetmem targetoffset bt destspace $ index srcmem srcoffset bt srcspace
 
   | otherwise = do
