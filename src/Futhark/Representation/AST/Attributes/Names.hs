@@ -166,7 +166,7 @@ instance FreeIn VName where
   freeIn = HS.singleton
 
 instance FreeIn Ident where
-  freeIn ident = identName ident `HS.insert` freeIn (identType ident)
+  freeIn = freeIn . identType
 
 instance FreeIn SubExp where
   freeIn (Var v) = freeIn v
