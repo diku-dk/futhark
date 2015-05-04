@@ -95,8 +95,8 @@ pointerQuals "global"    = return [C.TCLglobal noLoc]
 pointerQuals "local"     = return [C.TCLlocal noLoc]
 pointerQuals "private"   = return [C.TCLprivate noLoc]
 pointerQuals "constant"  = return [C.TCLconstant noLoc]
-pointerQuals "writeonly" = return [C.TCLconstant noLoc]
-pointerQuals "readonly"  = return [C.TCLconstant noLoc]
+pointerQuals "writeonly" = return [C.TCLwriteonly noLoc]
+pointerQuals "readonly"  = return [C.TCLreadonly noLoc]
 pointerQuals "kernel"    = return [C.TCLkernel noLoc]
 pointerQuals s           = fail $ "'" ++ s ++ "' is not an OpenCL address space."
 
