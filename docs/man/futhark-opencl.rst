@@ -2,9 +2,9 @@
 
 .. _futhark-opencl(1):
 
-==========
+==============
 futhark-opencl
-==========
+==============
 
 SYNOPSIS
 ========
@@ -21,7 +21,7 @@ is used, and GCC is invoked with ``-O3``.  The first device of the
 first OpenCL platform is used.
 
 The resulting program will otherwise behave exactly as one compiled
-with ``futhark-c``(1).
+with ``futhark-c``.
 
 OPTIONS
 =======
