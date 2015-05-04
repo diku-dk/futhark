@@ -31,20 +31,23 @@ import Prelude hiding (mapM)
 
 internaliseParams :: [E.Parameter]
                   -> InternaliseM (HM.HashMap VName Int,
-                                   [[I.IdentBase I.ExtShape]])
+                                   [[(VName, I.ExtType)]])
 internaliseParams params = do
   (param_ts, ctx) <- internaliseDeclTypes $ map E.identType params
   vss <- forM (zip params param_ts) $ \(param, ts) -> do
     let base = nameToString $ baseName $ E.identName param
-    mapM (newIdent base) ts
+    forM ts $ \t -> do
+      name <- newVName base
+      return (name, t)
   return (ctx, vss)
 
 internaliseBindee :: MonadFreshNames m =>
                      E.Ident
-                  -> m [I.IdentBase I.ExtShape]
+                  -> m [(VName, I.ExtType)]
 internaliseBindee bindee =
-  forM (internaliseType $ E.identType bindee) $ \t ->
-    newIdent base t
+  forM (internaliseType $ E.identType bindee) $ \t -> do
+    name <- newVName base
+    return (name, t)
   where base = nameToString $ baseName $ E.identName bindee
 
 internaliseFunParams :: [E.Parameter]
@@ -60,10 +63,10 @@ internaliseFunParams params = do
   (implicit_shape_params, value_params) <-
     liftM unzip $ forM param_params $ \params' -> do
     (instantiated_param_types, param_implicit_shapes) <-
-      instantiateShapesWithDecls shapectx' $ map I.identType params'
+      instantiateShapesWithDecls shapectx' $ map snd params'
     let instantiated_params =
-          [ new_param { I.identType = t } |
-            (new_param, t) <- zip params' instantiated_param_types ]
+          [ I.Ident new_param_name t |
+            ((new_param_name, _), t) <- zip params' instantiated_param_types ]
     return (param_implicit_shapes, instantiated_params)
   let subst = HM.fromList $ zip (map E.identName params) (map (map I.identName) value_params)
   return (declared_shape_params ++ concat implicit_shape_params,
@@ -103,9 +106,9 @@ bindingFlatPattern = bindingFlatPattern' []
             (pss, repss, ts'') = handleMapping ts' rs
         in (ps++pss, reps:repss, ts'')
 
-    handleMapping' (t:ts) v =
-      let u = I.uniqueness $ I.identType v
-          v' = v { I.identType = t `I.setUniqueness` u }
+    handleMapping' (t:ts) (vname,vt) =
+      let u = I.uniqueness vt
+          v' = I.Ident vname $ t `I.setUniqueness` u
       in ([v'], v', ts)
     handleMapping' [] _ =
       error "bindingFlatPattern: insufficient identifiers in pattern."

@@ -24,8 +24,7 @@ module Futhark.Representation.AST.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
-  , IdentBase(..)
-  , Ident
+  , Ident (..)
   , Certificates
   , SubExp(..)
   , Bindage (..)

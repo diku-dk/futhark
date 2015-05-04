@@ -139,8 +139,7 @@ instance Rename a => Rename (Maybe a) where
 instance Rename Bool where
   rename = return
 
-instance (Rename shape) =>
-         Rename (IdentBase shape) where
+instance Rename Ident where
   rename (Ident name tp) = do
     name' <- rename name
     tp' <- rename tp

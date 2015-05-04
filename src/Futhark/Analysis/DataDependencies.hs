@@ -110,5 +110,5 @@ depsOf deps (Var v)   = depsOfVar deps v
 depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = HS.insert name $ fromMaybe HS.empty $ HM.lookup name deps
 
-mkDeps :: [IdentBase shape] -> [Names] -> Dependencies
+mkDeps :: [Ident] -> [Names] -> Dependencies
 mkDeps idents names = HM.fromList $ zip (map identName idents) names

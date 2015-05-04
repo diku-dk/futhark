@@ -86,7 +86,7 @@ newVName = newID . nameFromString
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
-            String -> TypeBase shape -> m (IdentBase shape)
+            String -> Type -> m Ident
 newIdent s t = do
   s' <- newID $ varName s Nothing
   return $ Ident s' t
@@ -95,7 +95,7 @@ newIdent s t = do
 -- but possibly modifying the name.
 newIdent' :: MonadFreshNames m =>
              (String -> String)
-          -> IdentBase shape -> m (IdentBase shape)
+          -> Ident -> m Ident
 newIdent' f ident =
   newIdent (f $ nameToString $ baseName $ identName ident)
            (identType ident)
@@ -103,7 +103,7 @@ newIdent' f ident =
 -- | Produce several 'Ident's, using the given name as a template,
 -- based on a list of types.
 newIdents :: MonadFreshNames m =>
-             String -> [TypeBase shape] -> m [IdentBase shape]
+             String -> [Type] -> m [Ident]
 newIdents = mapM . newIdent
 
 -- | Create a new 'NameSource' that will never produce any of the

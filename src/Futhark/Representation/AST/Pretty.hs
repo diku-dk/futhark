@@ -92,7 +92,7 @@ instance Pretty (TypeBase Rank) where
              | otherwise = empty
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
-instance Pretty (IdentBase shape) where
+instance Pretty Ident where
   ppr = text . textual . identName
 
 instance Pretty SubExp where

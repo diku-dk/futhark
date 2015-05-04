@@ -57,7 +57,7 @@ instance Arbitrary shape => Arbitrary (TypeBase shape) where
 instance Arbitrary Value where
   arbitrary = BasicVal <$> arbitrary
 
-instance Arbitrary (IdentBase Shape) where
+instance Arbitrary Ident where
   arbitrary = Ident <$> arbitrary <*> arbitrary
 
 instance Arbitrary Rank where

@@ -25,8 +25,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Value(..)
 
          -- * Abstract syntax tree
-         , IdentBase(..)
-         , Ident
+         , Ident (..)
          , Certificates
          , SubExp(..)
          , ParamT (..)
@@ -157,21 +156,18 @@ data Value = BasicVal BasicValue
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
-data IdentBase shape = Ident { identName :: VName
-                             , identType :: TypeBase shape
-                             }
-                    deriving (Show)
+data Ident = Ident { identName :: VName
+                   , identType :: Type
+                   }
+               deriving (Show)
 
--- | A name with type information.  Used for let-binding normal variables.
-type Ident = IdentBase Shape
-
-instance Eq (IdentBase shape) where
+instance Eq Ident where
   x == y = identName x == identName y
 
-instance Ord (IdentBase shape) where
+instance Ord Ident where
   x `compare` y = identName x `compare` identName y
 
-instance Hashable (IdentBase shape) where
+instance Hashable Ident where
   hashWithSalt salt = hashWithSalt salt . identName
 
 -- | A list of names used for certificates in some expressions.

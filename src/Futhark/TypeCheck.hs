@@ -1144,7 +1144,7 @@ patternContext pat rt = do
               lift $ Left "Pattern cannot match context"
 
 checkBndSizes :: Checkable lore =>
-                 IdentBase Shape -> TypeM lore ()
+                 Ident -> TypeM lore ()
 checkBndSizes (Ident _ t) = do
   let dims = arrayDims t
   mapM_ (require [Basic Int]) dims
