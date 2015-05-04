@@ -10,8 +10,8 @@ Installation
 You will need GHC 7.8 to compile Futhark.
 
 Just run `cabal install` and executables by the names of `futhark`,
-``futhark-c` and `futharki` will be installed in your Cabal bin
-directory, most likely $HOME/.cabal/bin.
+`futhark-c`, `futhark-opencl` and `futharki` will be installed in your
+Cabal bin directory, most likely $HOME/.cabal/bin.
 
 Otherwise, just run `cabal configure`, followed by `cabal build`, 
 and the executable can be found in `dist/build/futhark/futhark`.
