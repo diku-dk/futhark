@@ -54,7 +54,7 @@ foldClosedForm :: MonadBinder m =>
 
 foldClosedForm look pat lam accs arrs = do
   closedBody <- checkResults (patternNames pat) knownBindings
-                (lambdaParams lam) (lambdaBody lam) accs
+                (map paramIdent $ lambdaParams lam) (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
   letBindNames'_ [isEmpty] $
@@ -84,7 +84,7 @@ loopClosedForm pat respat merge bound body
       (renameBody closedBody)
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
-        mergeidents = map fparamIdent mergepat
+        mergeidents = map paramIdent mergepat
         mergenames = map identName mergeidents
         knownBindings = HM.fromList $ zip mergenames mergeexp
 
@@ -140,9 +140,9 @@ determineKnownBindings look lam accs arrs =
   where (accparams, arrparams) =
           splitAt (length accs) $ lambdaParams lam
         accBindings = HM.fromList $
-                      zip (map identName accparams) accs
+                      zip (map paramName accparams) accs
         arrBindings = HM.fromList $ mapMaybe isReplicate $
-                      zip (map identName arrparams) arrs
+                      zip (map paramName arrparams) arrs
 
         isReplicate (p, v)
           | Just (PrimOp (Replicate _ ve)) <- look v = Just (p, ve)

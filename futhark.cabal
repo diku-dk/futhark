@@ -61,10 +61,13 @@ Library
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
+                   Futhark.CodeGen.Backends.OpenCL
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
+                   Futhark.CodeGen.KernelImp
                    Futhark.CodeGen.ImpGen
+                   Futhark.CodeGen.KernelImpGen
                    Futhark.Compiler
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
@@ -78,6 +81,7 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
+                   Futhark.KernelSequentialisation
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
                    Futhark.Optimise.DoubleBuffer
@@ -242,6 +246,23 @@ Executable futhark-test
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+Executable futhark-opencl
+  Main-is: src/futhark-opencl.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 filepath,
+                 process,
+                 transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
 
 Test-suite unit
   Type:              exitcode-stdio-1.0

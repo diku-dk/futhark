@@ -86,7 +86,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
                      }
       mapM_ (uncurry letBind) invariant
       letBindNames'_ (map patElemName pat') $ LoopOp $ Map cs fun' arrs
-  where inputMap = HM.fromList $ zip (map identName $ lambdaParams fun) arrs
+  where inputMap = HM.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
         ses = bodyResult $ lambdaBody fun
@@ -140,7 +140,7 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
         isReplicate p v
           | Just (Replicate _ e) <-
             asPrimOp =<< ST.lookupExp v vtable =
-              Right ([identName p], PrimOp $ SubExp e)
+              Right ([paramName p], PrimOp $ SubExp e)
           | otherwise =
               Left (p, v)
 
@@ -190,8 +190,8 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form bo
                     loopResultContext (representative :: Lore m) respat (map fst merge) ++
                     respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
-        references name = maybe [] (HS.toList . freeIn . fparamLore) $
-                          find ((name==) . fparamName) $
+        references name = maybe [] (HS.toList . freeIn . paramLore) $
+                          find ((name==) . paramName) $
                           map fst merge
 removeUnusedLoopResult _ _ = cannotSimplify
 
@@ -211,7 +211,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
       necessaryForReturned = mconcat $ map dependencies returnedResultSubExps
       resIsNecessary ((v,_), _) =
         explicitlyReturned v ||
-        fparamName v `HS.member` necessaryForReturned ||
+        paramName v `HS.member` necessaryForReturned ||
         referencedInPat v ||
         referencedInForm v
       (keep, discard) = partition resIsNecessary $ zip merge es
@@ -230,18 +230,18 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
          return body'
        letBind_ pat $ LoopOp $ DoLoop respat merge' form body''
   where (mergepat, _) = unzip merge
-        explicitlyReturned = (`elem` respat) . fparamName
-        patAnnotNames = mconcat [ freeIn (fparamType bindee) <>
-                                  freeIn (fparamLore bindee)
+        explicitlyReturned = (`elem` respat) . paramName
+        patAnnotNames = mconcat [ freeIn (paramType bindee) <>
+                                  freeIn (paramLore bindee)
                                 | bindee <- mergepat ]
-        referencedInPat = (`HS.member` patAnnotNames) . fparamName
-        referencedInForm = (`HS.member` freeIn form) . fparamName
+        referencedInPat = (`HS.member` patAnnotNames) . paramName
+        referencedInForm = (`HS.member` freeIn form) . paramName
 
         dummyBindings = map dummyBinding
         dummyBinding ((p,e), _)
-          | unique (fparamType p),
-            Var v <- e            = ([fparamName p], PrimOp $ Copy v)
-          | otherwise             = ([fparamName p], PrimOp $ SubExp e)
+          | unique (paramType p),
+            Var v <- e            = ([paramName p], PrimOp $ Copy v)
+          | otherwise             = ([paramName p], PrimOp $ SubExp e)
 
         allDependencies = dataDependencies body
         dependencies (Constant _) = HS.empty
@@ -266,7 +266,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
       let loopbody' = loopbody { bodyResult = ses' }
           invariantShape :: (a, VName) -> Bool
           invariantShape (_, shapemerge) = shapemerge `elem`
-                                           map (fparamName . fst) merge'
+                                           map (paramName . fst) merge'
           (implpat',implinvariant) = partition invariantShape implpat
           implinvariant' = [ (patElemIdent p, Var v) | (p,v) <- implinvariant ]
           implpat'' = map fst implpat'
@@ -282,10 +282,10 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
                     respat (map fst merge) ++ respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
 
-        namesOfMergeParams = HS.fromList $ map (fparamName . fst) merge
+        namesOfMergeParams = HS.fromList $ map (paramName . fst) merge
 
         removeFromResult (mergeParam,mergeInit) explpat' =
-          case partition ((==fparamName mergeParam) . snd) explpat' of
+          case partition ((==paramName mergeParam) . snd) explpat' of
             ([(patelem,_)], rest) ->
               (Just (patElemIdent patelem, mergeInit), rest)
             (_,      _) ->
@@ -299,11 +299,11 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)
-          | not (unique (fparamType mergeParam)),
+          | not (unique (paramType mergeParam)),
             isInvariant resExp =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
-          in (maybe id (:) bnd $ (fparamIdent mergeParam, mergeInit) : invariant,
+          in (maybe id (:) bnd $ (paramIdent mergeParam, mergeInit) : invariant,
               explpat'', merge', resExps)
           where
             -- A non-unique merge variable is invariant if the corresponding
@@ -313,7 +313,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
             --  all existential parameters are already known to be
             --  invariant
             isInvariant (Var v2)
-              | fparamName mergeParam == v2 =
+              | paramName mergeParam == v2 =
                 allExistentialInvariant
                 (HS.fromList $ map (identName . fst) invariant) mergeParam
             --  (1) or identical to the initial value of the parameter.
@@ -324,7 +324,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
 
         allExistentialInvariant namesOfInvariant mergeParam =
           all (invariantOrNotMergeParam namesOfInvariant)
-          (fparamName mergeParam `HS.delete` freeIn mergeParam)
+          (paramName mergeParam `HS.delete` freeIn mergeParam)
         invariantOrNotMergeParam namesOfInvariant name =
           not (name `HS.member` namesOfMergeParams) ||
           name `HS.member` namesOfInvariant

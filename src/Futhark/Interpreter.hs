@@ -286,11 +286,11 @@ runFunWithShapes fname valargs prog = do
           let (shapeparams, valparams) =
                 splitAt (length params - length valargs) params
               shapemap = shapeMapping'
-                         (map fparamType valparams)
+                         (map paramType valparams)
                          (map valueShape valargs)
           in map (BasicVal . IntVal . fromMaybe 0 .
                   flip HM.lookup shapemap .
-                  fparamName)
+                  paramName)
              shapeparams
 
 -- | As 'runFun', but throws away the trace.
@@ -310,7 +310,7 @@ runThisFun (FunDec fname _ fparams _) args ftable
      argtypes,
      mempty)
   where argtypes = map (rankShaped . (`setUniqueness` Unique) . valueType) args
-        paramtypes = map (rankShaped . fparamType) fparams
+        paramtypes = map (rankShaped . paramType) fparams
         futharkenv = FutharkEnv { envVtable = HM.empty
                                 , envFtable = ftable
                                 }
@@ -321,7 +321,7 @@ buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
         expand ftable' (FunDec name _ params body) =
-          let fun funargs = binding (zip3 (map fparamIdent params) (repeat BindVar) funargs) $
+          let fun funargs = binding (zip3 (map paramIdent params) (repeat BindVar) funargs) $
                             evalBody body
           in HM.insert name fun ftable'
 
@@ -627,14 +627,14 @@ evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
   case bound of
     BasicVal (IntVal n) -> do
       vs <- foldM iteration mergestart [0..n-1]
-      binding (zip3 (map fparamIdent mergepat) (repeat BindVar) vs) $
+      binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
         mapM lookupVar $
         loopResultContext (representative :: lore) respat mergepat ++ respat
     _ -> bad $ TypeError "evalBody DoLoop for"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(Ident loopvar $ Basic Int, BindVar, BasicVal $ IntVal i)] $
-            binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $
+            binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 
 evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
@@ -642,7 +642,7 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
   iteration mergestart
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval =
-          binding (zip3 (map fparamIdent mergepat) (repeat BindVar) mergeval) $ do
+          binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $ do
             condv <- lookupVar cond
             case condv of
               BasicVal (LogVal False) ->
@@ -724,7 +724,7 @@ evalLoopOp (Stream _ accs arrs elam) = do
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
   let (ExtLambda elam_params elam_body elam_rtp) = elam
-  let fun funargs = binding (zip3 elam_params (repeat BindVar) funargs) $
+  let fun funargs = binding (zip3 (map paramIdent elam_params) (repeat BindVar) funargs) $
                             evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   let (ArrayVal _ _ (outersize:_)) = head arrvals
@@ -847,13 +847,13 @@ evalBoolBinOp op e1 e2 = do
 
 applyLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
 applyLambda (Lambda params body rettype) args =
-  do v <- binding (zip3 params (repeat BindVar) args) $ evalBody body
+  do v <- binding (zip3 (map paramIdent params) (repeat BindVar) args) $ evalBody body
      checkReturnShapes (staticShapes rettype) v
      return v
 
 applyConcatMapLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
 applyConcatMapLambda (Lambda params body rettype) valargs = do
-  v <- binding (zip3 params (repeat BindVar) $ shapes ++ valargs) $
+  v <- binding (zip3 (map paramIdent params) (repeat BindVar) $ shapes ++ valargs) $
        evalBody body
   let rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
                  | t <- staticShapes rettype ]
@@ -863,11 +863,11 @@ applyConcatMapLambda (Lambda params body rettype) valargs = do
           let (shapeparams, valparams) =
                 splitAt (length params - length valargs) params
               shapemap = shapeMapping'
-                         (map identType valparams)
+                         (map paramType valparams)
                          (map valueShape valargs)
           in map (BasicVal . IntVal . fromMaybe 0 .
                   flip HM.lookup shapemap .
-                  identName)
+                  paramName)
              shapeparams
 
 checkReturnShapes :: [ExtType] -> [Value] -> FutharkM lore ()

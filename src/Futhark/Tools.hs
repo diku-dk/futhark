@@ -200,7 +200,7 @@ eLambda lam args = do zipWithM_ letBindNames params $
                         map (PrimOp . SubExp) args
                       bodyBind $ lambdaBody lam
   where params = [ [(param, BindVar)] |
-                   param <- map identName $ lambdaParams lam ]
+                   param <- map paramName $ lambdaParams lam ]
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
@@ -222,13 +222,14 @@ binOpLambda bop t = do
     res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y) t
     return $ resultBody [res]
   return Lambda {
-             lambdaParams     = [Ident x (Basic t), Ident y (Basic t)]
+             lambdaParams     = [Param (Ident x (Basic t)) (),
+                                 Param (Ident y (Basic t)) ()]
            , lambdaReturnType = [Basic t]
            , lambdaBody       = body
            }
 
 makeLambda :: (Bindable (Lore m), MonadBinder m) =>
-              [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
+              [LParam (Lore m)] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
   bodyt <- bodyExtType body'
@@ -281,20 +282,22 @@ mapResult f (Body _ bnds res) =
   in mkBody (bnds<>bnds2) newres
 
 nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
-                   [Param] -> m ([Param], [Binding lore])
+                   [LParam lore] -> m ([LParam lore], [Binding lore])
 nonuniqueParams params =
   modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
   collectBindings $ forM params $ \param ->
-    if unique $ identType param then do
-      param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-      bindingIdentTypes [param'] $
-        letBindNames_ [(identName param,BindVar)] $
-        PrimOp $ Copy $ identName param'
+    if unique $ paramType param then do
+      param' <- Param <$>
+                (nonuniqueParam <$> newIdent' (++"_nonunique") (paramIdent param)) <*>
+                pure ()
+      bindingIdentTypes [paramIdent param'] $
+        letBindNames_ [(paramName param,BindVar)] $
+        PrimOp $ Copy $ paramName param'
       return param'
     else
       return param
-  where nonuniqueParam param =
-          param { identType = identType param `setUniqueness` Nonunique }
+  where nonuniqueParam ident =
+          ident { identType = identType ident `setUniqueness` Nonunique }
 
 -- | Instantiate all existential parts dimensions of the given
 -- 'RetType', using a monadic action to create the necessary
@@ -394,7 +397,7 @@ redomapToMapAndReduce (Pattern [] patelems) lore
   return (map_bnd, red_bnd)
   where
     newmap_lam =
-      let tobnd = take (length accs) $ lambdaParams redmap_lam
+      let tobnd = take (length accs) $ map paramIdent $ lambdaParams redmap_lam
           params' = drop (length accs) $ lambdaParams redmap_lam
           bndaccs = zipWith (\i acc -> mkLet' []  [i] (PrimOp $ SubExp acc))
                             tobnd accs

@@ -37,7 +37,7 @@ externaliseFunction :: I.FunDec -> E.FunDec
 externaliseFunction (FunDec fname ret params body) =
   (fname,
    externaliseDeclTypes $ retTypeValues ret,
-   map (externaliseParam . fparamIdent) params,
+   map externaliseParam params,
    runExternaliseM $ bindFParams params $ externaliseBody body,
    noLoc)
 
@@ -48,7 +48,7 @@ runExternaliseM = flip runReader HM.empty
 
 bindFParams :: [I.FParam] -> ExternaliseM a
             -> ExternaliseM a
-bindFParams = bindIdents . map fparamIdent
+bindFParams = bindIdents . map paramIdent
 
 bindPattern :: I.Pattern -> ExternaliseM a
             -> ExternaliseM a
@@ -151,7 +151,7 @@ externaliseLoopOp :: I.LoopOp -> ExternaliseM E.Exp
 
 externaliseLoopOp (I.DoLoop respat merge form loopbody) =
   bindFParams mergepat $
-  E.DoLoop (externaliseBinders (map fparamIdent mergepat)) <$>
+  E.DoLoop (externaliseBinders (map paramIdent mergepat)) <$>
   externaliseSubExps mergeexp <*>
   form' <*>
   externaliseBody loopbody <*>
@@ -306,8 +306,8 @@ externaliseSubExp (I.Var v) =
 externaliseSubExp (I.Constant v) =
   return $ E.Literal (E.BasicVal v) noLoc
 
-externaliseParam :: I.Param -> E.Parameter
-externaliseParam (I.Ident name t) =
+externaliseParam :: I.ParamT attr -> E.Parameter
+externaliseParam (I.Param (I.Ident name t) _) =
   E.Ident name (externaliseDeclType t) noLoc
 
 externaliseIdent :: I.Ident -> E.Ident

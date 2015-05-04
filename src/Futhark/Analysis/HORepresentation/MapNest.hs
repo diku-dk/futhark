@@ -108,9 +108,9 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
             in Nest.NewNest n' comb'
           Nest.Fun l ->
             Nest.Fun l { lambdaBody =
-                           substituteNames subst $ lambdaBody l
+                            substituteNames subst $ lambdaBody l
                        , lambdaParams =
-                         lambdaParams l ++ newParams
+                         lambdaParams l ++ map (`Param` ()) newParams
                        }
   return $ Just $
          if HM.null subst

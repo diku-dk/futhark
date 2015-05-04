@@ -72,7 +72,7 @@ fuseMaps :: (Input input, Bindable lore) =>
                               -- the resulting SOAC.
 fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
-          lam2 { lambdaParams = lam2redparams ++ HM.keys inputmap
+          lam2 { lambdaParams = map (`Param` ()) $ lam2redparams ++ HM.keys inputmap
                , lambdaBody =
                  let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
                                 | (p,e) <- zip pat res]
@@ -87,15 +87,17 @@ fuseMaps lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
 fuseInputs :: (Input input, Bindable lore) =>
               Lambda lore -> [input] -> [(VName,Ident)]
            -> Lambda lore -> [input]
-           -> ([Param],
+           -> ([Ident],
                [Ident],
-               HM.HashMap Param input,
+               HM.HashMap Ident input,
                Body lore -> Body lore, Body lore -> Body lore)
 fuseInputs lam1 inp1 out1 lam2 inp2 =
   (lam2redparams, outbnds, inputmap, makeCopies, makeCopiesInner)
   where (lam2redparams, lam2arrparams) =
-          splitAt (length (lambdaParams lam2) - length inp2) $ lambdaParams lam2
-        lam1inputmap = HM.fromList $ zip (lambdaParams lam1) inp1
+          splitAt (length lam2params - length inp2) lam2params
+        lam1params = map paramIdent $ lambdaParams lam1
+        lam2params = map paramIdent $ lambdaParams lam2
+        lam1inputmap = HM.fromList $ zip lam1params inp1
         lam2inputmap = HM.fromList $ zip lam2arrparams            inp2
         (lam2inputmap', makeCopiesInner) = removeDuplicateInputs lam2inputmap
         originputmap = lam1inputmap `HM.union` lam2inputmap'
@@ -106,8 +108,8 @@ fuseInputs lam1 inp1 out1 lam2 inp2 =
           removeDuplicateInputs $ originputmap `HM.difference` outins
 
 outParams :: Input input =>
-             [VName] -> [Param] -> [input]
-          -> HM.HashMap Param input
+             [VName] -> [Ident] -> [input]
+          -> HM.HashMap Ident input
 outParams out1 lam2arrparams inp2 =
   HM.fromList $ mapMaybe isOutParam $ zip lam2arrparams inp2
   where isOutParam (p, inp)
@@ -117,7 +119,7 @@ outParams out1 lam2arrparams inp2 =
 
 filterOutParams :: Input input =>
                    [(VName,Ident)]
-                -> HM.HashMap Param input
+                -> HM.HashMap Ident input
                 -> [Ident]
 filterOutParams out1 outins =
   snd $ mapAccumL checkUsed outUsage out1
@@ -133,8 +135,8 @@ filterOutParams out1 outins =
             _           -> (m, ra)
 
 removeDuplicateInputs :: (Input input, Bindable lore) =>
-                         HM.HashMap Param input
-                      -> (HM.HashMap Param input, Body lore -> Body lore)
+                         HM.HashMap Ident input
+                      -> (HM.HashMap Ident input, Body lore -> Body lore)
 removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
   where comb ((parmap, inner), arrmap) par arr =
           case M.lookup arr arrmap of

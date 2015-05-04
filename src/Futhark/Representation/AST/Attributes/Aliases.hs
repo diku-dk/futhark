@@ -67,7 +67,7 @@ primOpAliases (Partition _ n _ arr) =
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
-  zip (map (((`elem` res) . identName) . fparamIdent . fst) merge) (bodyAliases loopbody)
+  zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
 loopOpAliases (Map _ f _) =
   bodyAliases $ lambdaBody f
 loopOpAliases (Reduce _ f _) =
@@ -135,7 +135,7 @@ consumedInExp pat e =
         consumedInExp' (LoopOp (DoLoop _ merge _ _)) =
           consumedInPattern pat <>
           mconcat (map (subExpAliases . snd) $
-                   filter (unique . fparamType . fst) merge)
+                   filter (unique . paramType . fst) merge)
         consumedInExp' _ = mempty
 
 consumedInPattern :: Pattern lore -> Names

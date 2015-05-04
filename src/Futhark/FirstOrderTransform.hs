@@ -7,6 +7,7 @@ module Futhark.FirstOrderTransform
   ( transformProg
   , transformBinding
   , transformBindingRecursively
+  , transformLambda
   )
   where
 
@@ -33,7 +34,7 @@ transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec (FunDec fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
-    bindingIdentTypes (map fparamIdent params) $
+    bindingIdentTypes (map paramIdent params) $
     insertBindingsM $
     transformBody body
   return $ FunDec fname rettype params body'
@@ -48,7 +49,7 @@ transformBody (Body () bnds res) = insertBindingsM $ do
 transformBindingRecursively :: Binding -> Binder Basic ()
 
 transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) = do
-  body' <- bindingIdentTypes (formIdents form ++ map (fparamIdent . fst) merge) $
+  body' <- bindingIdentTypes (formIdents form ++ map (paramIdent . fst) merge) $
            transformBody body
   addBinding $ Let pat () $ LoopOp $ DoLoop res merge form body'
   where formIdents (ForLoop i _) =
@@ -91,14 +92,14 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs fun inputs))) = do
         (ctxparams, valparams) =
           splitAt (length funparams-length input) funparams
         fun'' = fun' { lambdaParams = valparams }
-    shapemap <- shapeMapping (map identType valparams) <$>
+    shapemap <- shapeMapping (map paramType valparams) <$>
                 mapM lookupType input
     forM_ (HM.toList shapemap) $ \(size,se) ->
-      when (size `elem` map identName ctxparams) $
+      when (size `elem` map paramName ctxparams) $
         letBindNames'_ [size] $ PrimOp $ SubExp se
     input' <- forM (zip valparams input) $ \(p,v) ->
       letExp "concatMap_reshaped_input" $
-      PrimOp $ Reshape [] (arrayDims $ identType p) v
+      PrimOp $ Reshape [] (arrayDims $ paramType p) v
     vs <- bindLambda fun'' (map (PrimOp . SubExp . Var) input')
     mapM (letExp "concatMap_fun_res" . PrimOp . SubExp) vs
   emptyarrs <- mapM (letExp "empty")
@@ -131,7 +132,7 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs fun inputs))) = do
 transformBinding (Let pat () (LoopOp (Reduce cs fun args))) = do
   ((acc, initacc), (i, i_ident)) <- newFold accexps
   arrts <- mapM lookupType arrexps
-  let arrus = map (uniqueness . identType) $
+  let arrus = map (uniqueness . paramType) $
               snd $ splitAt (length args) $ lambdaParams fun
   inarrs <- forM (zip arrts arrus) $ \(t,u) ->
             newIdent "reduce_inarr" (setUniqueness t u)
@@ -173,7 +174,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
   let map_arr_tps = drop acc_num res_tps
   let res_ts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                | t <- map_arr_tps ]
-  let arrus = map (uniqueness . identType) $
+  let arrus = map (uniqueness . paramType) $
               snd $ splitAt acc_num $ lambdaParams innerfun
   maparrs <- resultArray res_ts
   outarrs <- forM res_ts $ \t ->
@@ -261,12 +262,12 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
   (chunkloc,ilam) <- case lampars of
                     chnk:iorig:_ -> return (chnk,iorig)
                     _ -> fail "FirstOrderTransform Stream: chunk or i error!"
-  chunkglb <- letExp (baseString $ identName chunkloc) $ PrimOp $ SubExp $ intconst 1
+  chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp $ intconst 1
   outersz <- arraysSize 0 <$> mapM lookupType arrexps
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
-      sub_chko= HM.fromList [(identName chunkloc, outersz)]
-      arruniq = map (uniqueness . identType)
+      sub_chko= HM.fromList [(paramName chunkloc, outersz)]
+      arruniq = map (uniqueness . paramType)
                     (snd $ splitAt (acc_num+2) lampars)
   -- 2.) Make the existential induction variables, allocated-size variables,
   --       and all possible instantiations of the existential types, i.e.,
@@ -277,7 +278,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
                               UnknownBd -> outersz
                               UpperBd s -> s
                               ExactBd s -> s
-                    deflt = if deflt0 == Var (identName chunkloc)
+                    deflt = if deflt0 == Var (paramName chunkloc)
                             then outersz else deflt0
                     dims  = extShapeDims $ arrayShape tp
                     dims' = map (exToNormShapeDim deflt sub_chko) dims
@@ -329,10 +330,10 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
       accxis <- bodyBind =<< do
           -- for accumulators:
           forM_ (zip accpars argsacc) $ \(param, arg) ->
-            if unique (identType param) then
-              letBindNames' [identName param] =<< eCopy (pure arg)
+            if unique (paramType param) then
+              letBindNames' [paramName param] =<< eCopy (pure arg)
             else
-              letBindNames' [identName param] arg
+              letBindNames' [paramName param] arg
           -- ilam := i*chunk_glb, the local chunk
           -- inside the loop, together with the size of the
           -- remaining stream in `inarrNsz'
@@ -340,12 +341,12 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
                             (pure $ PrimOp $ SubExp $ Var loopind)
                             (pure $ PrimOp $ SubExp $ Var chunkglb)
                             Int
-          addBinding $ myMkLet ilamexp ilam
+          addBinding $ myMkLet ilamexp $ paramIdent ilam
           -- inarrtmpsz := total_stream_size - ilam
           inarrtmpsz <- newIdent "stream_curszind" $ Basic Int
           subexp <- eBinOp Minus
                            ( pure $ PrimOp $ SubExp outersz )
-                           ( pure $ PrimOp $ SubExp $ Var $ identName ilam )
+                           ( pure $ PrimOp $ SubExp $ Var $ paramName ilam )
                            Int
           addBinding $ myMkLet subexp inarrtmpsz
           -- chunk_loc = min chunk_glb inarrtmpsz
@@ -354,25 +355,25 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
                                Bool)
                        (pure $ resultBody [Var chunkglb])
                        (pure $ resultBody [Var $ identName inarrtmpsz])
-          addBinding $ myMkLet ifexp chunkloc
+          addBinding $ myMkLet ifexp $ paramIdent chunkloc
           -- inarrNsz := inarrtmpsz - chunk_loc, i.e., the size of
           -- the remaining stream after consuming the current chunk.
           remstrmszexp <-
             eBinOp Minus (pure $ PrimOp $ SubExp $ Var $ identName inarrtmpsz)
-                         (pure $ PrimOp $ SubExp $ Var $ identName chunkloc)
+                         (pure $ PrimOp $ SubExp $ Var $ paramName chunkloc)
                          Int
           addBinding $ myMkLet remstrmszexp inarrNsz
           -- split input streams into current chunk and rest of stream
           forM_ (zip3 arrpars inarrsloop1 inarrsloop2) $
             \(param, inarr1, inarr2) -> do
-                let myarg = PrimOp $ Split [] [Var $ identName chunkloc,
+                let myarg = PrimOp $ Split [] [Var $ paramName chunkloc,
                                                Var $ identName inarrNsz] $
                                      identName inarr1
-                tmpid <- newIdent "tmpelem" $ identType param
+                tmpid <- newIdent "tmpelem" $ paramType param
                 _ <- letBindNames' [identName tmpid, identName inarr2] myarg
                 -- UGLY: I NEED TO COPY THE UNIQUE ARGUMENT TO MAKE IT
                 --       WORK IN SOME CASES WHERE THE ARRAY IS MODIFIED IN PLACE.
-                letBindNames' [identName param] =<<
+                letBindNames' [paramName param] =<<
                   eCopy (pure (PrimOp $ SubExp $ Var $ identName tmpid))
           let fakebody = Body (bodyLore lambody) (bodyBindings lambody) (bodyResult lambody)
           transformBody fakebody
@@ -380,7 +381,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
       let (acc', xis) = splitAt acc_num accxis
           indszids = zip mexistszs mexistinds
       epilogue <- forM (zip3 indszids outarrloop xis) $
-                       mkOutArrEpilogue cs (Var $ identName ilam)
+                       mkOutArrEpilogue cs (Var $ paramName ilam)
       let (mszvars,mindvars,dests) = unzip3 epilogue
           (indvars,szvars) = (catMaybes mindvars, catMaybes mszvars)
       return $
@@ -574,9 +575,10 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
 
 transformBinding bnd = addBinding bnd
 
+-- | Recursively first-order-transform a lambda.
 transformLambda :: Lambda -> Binder Basic Lambda
 transformLambda (Lambda params body rettype) = do
-  body' <- bindingIdentTypes params $ transformBody body
+  body' <- bindingParamTypes params $ transformBody body
   return $ Lambda params body' rettype
 
 newFold :: [SubExp]
@@ -620,14 +622,14 @@ pexp = pure . PrimOp . SubExp
 bindLambda :: Lambda -> [Exp] -> Binder Basic [SubExp]
 bindLambda (Lambda params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
-    if unique (identType param) then
-      letBindNames' [identName param] =<< eCopy (pure arg)
+    if unique (paramType param) then
+      letBindNames' [paramName param] =<< eCopy (pure arg)
     else
-      letBindNames' [identName param] arg
+      letBindNames' [paramName param] arg
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
-loopMerge vars vals = [ (FParam var (), val) | (var,val) <- zip vars vals ]
+loopMerge vars vals = [ (Param var (), val) | (var,val) <- zip vars vals ]
 
 
 withUpperBound :: Bool

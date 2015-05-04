@@ -52,7 +52,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (elem, lookup)
 
-import Futhark.Representation.AST hiding (FParam, FParamT (..), fparamType, lookupType)
+import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, paramLore, lookupType)
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
@@ -107,9 +107,9 @@ data LetBoundEntry lore =
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
-              , fparamLore         :: Lore.FParam lore
+              , paramLore         :: Lore.FParam lore
               , fparamBindingDepth :: Int
-              , fparamType         :: Type
+              , paramType         :: Type
               }
 
 data LParamEntry lore =
@@ -181,7 +181,7 @@ entryLetBoundLore (LetBound entry) = Just $ letBoundLore entry
 entryLetBoundLore _                = Nothing
 
 entryFParamLore :: Entry lore -> Maybe (Lore.FParam lore)
-entryFParamLore (FParam entry) = Just $ fparamLore entry
+entryFParamLore (FParam entry) = Just $ paramLore entry
 entryFParamLore _              = Nothing
 
 loopVariable :: Entry lore -> Bool
@@ -194,7 +194,7 @@ asExp = liftM (bindingExp . letBoundBinding) . isVarBound
 entryType :: Entry lore -> Type
 entryType (LetBound entry) = letBoundType entry
 entryType (LParam entry)   = lparamType entry
-entryType (FParam entry)   = fparamType entry
+entryType (FParam entry)   = paramType entry
 entryType (LoopVar _)      = Basic Int
 entryType (FreeVar entry)  = freeVarType entry
 
@@ -214,9 +214,9 @@ instance Substitutable lore => Substitute (FParamEntry lore) where
   substituteNames substs entry =
     FParamEntry {
           fparamRange = substituteNames substs $ fparamRange entry
-        , fparamLore = substituteNames substs $ fparamLore entry
+        , paramLore = substituteNames substs $ paramLore entry
         , fparamBindingDepth = fparamBindingDepth entry
-        , fparamType = substituteNames substs $ fparamType entry
+        , paramType = substituteNames substs $ paramType entry
       }
 
 instance Substitutable lore => Substitute (LParamEntry lore) where
@@ -395,19 +395,19 @@ insertFParam :: AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
 insertFParam fparam = insertEntry name entry
-  where name = fparamName fparam
+  where name = paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
-                                   , fparamLore = AST.fparamLore fparam
+                                   , paramLore = AST.paramLore fparam
                                    , fparamBindingDepth = 0
-                                   , fparamType = AST.fparamType fparam
+                                   , paramType = AST.paramType fparam
                                    }
 
 insertFParams :: [AST.FParam lore] -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
-insertLParamWithRange :: Param -> ScalExpRange -> SymbolTable lore
-                     -> SymbolTable lore
+insertLParamWithRange :: LParam lore -> ScalExpRange -> SymbolTable lore
+                      -> SymbolTable lore
 insertLParamWithRange param range vtable =
   -- We know that the sizes in the type of param are at least zero,
   -- since they are array sizes.
@@ -415,18 +415,18 @@ insertLParamWithRange param range vtable =
   in foldr (`isAtLeast` 0) vtable' sizevars
   where bind = LParam LParamEntry { lparamRange = range
                                   , lparamBindingDepth = 0
-                                  , lparamType = identType param
+                                  , lparamType = AST.paramType param
                                   }
-        name = identName param
-        sizevars = mapMaybe isVar $ arrayDims $ identType param
+        name = paramName param
+        sizevars = mapMaybe isVar $ arrayDims $ AST.paramType param
         isVar (Var v) = Just v
         isVar _       = Nothing
 
-insertLParam :: Param -> SymbolTable lore -> SymbolTable lore
+insertLParam :: LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing)
 
-insertArrayLParam :: Param -> Maybe VName -> SymbolTable lore
+insertArrayLParam :: LParam lore -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and

@@ -7,10 +7,11 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , rank
        , index
        , iota
-       , offset
+       , offsetIndex
        , permute
        , reshape
        , applyInd
+       , offsetUnderlying
        , codomain
        , linearWithOffset
        , isDirect
@@ -77,9 +78,9 @@ shapeFromInts = map (Constant . IntVal)
 rank :: IxFun -> Int
 rank (IxFun n _) = sNatToInt n
 
-index :: IxFun -> Indices -> ScalExp
-index f is = case f of
-  IxFun n f' -> Safe.index f' (unsafeFromList n is)
+index :: IxFun -> Indices -> ScalExp -> ScalExp
+index f is element_size = case f of
+  IxFun n f' -> Safe.index f' (unsafeFromList n is) element_size
 
 iota :: Shape -> IxFun
 iota shape = case toSing (intToNat $ n-1) of
@@ -87,9 +88,9 @@ iota shape = case toSing (intToNat $ n-1) of
     IxFun (SS sb) $ Safe.iota $ unsafeFromList (SS sb) shape
   where n = Prelude.length shape
 
-offset :: IxFun -> ScalExp -> IxFun
-offset (IxFun n f) se =
-  IxFun n $ Safe.offset f se
+offsetIndex :: IxFun -> ScalExp -> IxFun
+offsetIndex (IxFun n f) se =
+  IxFun n $ Safe.offsetIndex f se
 
 permute :: IxFun -> [Int] -> IxFun
 permute (IxFun (n::SNat (S n)) f) perm
@@ -156,15 +157,21 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
   where nnat :: SNat n
         nnat = snnat %- sOne
 
+offsetUnderlying :: IxFun -> ScalExp -> IxFun
+offsetUnderlying (IxFun snnat f) k =
+  IxFun snnat $ Safe.offsetUnderlying f k
+
 codomain :: IxFun -> SymSet
 codomain (IxFun n f) =
   SymSet n $ Safe.codomain f
 
 isDirect :: IxFun -> Bool
 isDirect =
-  maybe False (==Val (IntVal 0)) . linearWithOffset
+  maybe False (==zeroscal) . flip linearWithOffset onescal
+  where zeroscal = Val (IntVal 0)
+        onescal = Val (IntVal 1)
 
-linearWithOffset :: IxFun -> Maybe ScalExp
+linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ ixfun) =
   Safe.linearWithOffset ixfun
 

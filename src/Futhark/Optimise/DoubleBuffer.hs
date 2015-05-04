@@ -68,18 +68,18 @@ data DoubleBuffer = BufferAlloc VName SubExp
 doubleBufferMergeParams :: MonadFreshNames m =>
                            [FParam] -> m [DoubleBuffer]
 doubleBufferMergeParams params = evalStateT (mapM buffer params) HM.empty
-  where paramnames = map fparamName params
+  where paramnames = map paramName params
         loopInvariantSize (Constant _) = True
         loopInvariantSize (Var v)      = v `notElem` paramnames
-        buffer fparam = case fparamType fparam of
+        buffer fparam = case paramType fparam of
           Mem size
             | loopInvariantSize size -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
-                modify $ HM.insert (fparamName fparam) bufname
+                modify $ HM.insert (paramName fparam) bufname
                 return $ BufferAlloc bufname size
           Array {}
-            | MemSummary mem ixfun <- fparamLore fparam -> do
+            | MemSummary mem ixfun <- paramLore fparam -> do
                 buffered <- gets $ HM.lookup mem
                 case buffered of
                   Just bufname -> do
@@ -109,7 +109,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
         buffer fparam (BufferCopy bufname ixfun copyname) (Var v) =
           -- To construct the copy we will need to figure out its type
           -- based on the type of the function parameter.
-          let t = resultType $ fparamType fparam
+          let t = resultType $ paramType fparam
               ident = Ident copyname t
               summary = MemSummary bufname ixfun
               copybnd = Let (Pattern [] [PatElem ident BindVar summary]) () $
@@ -119,7 +119,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
         buffer _ _ se =
           (Nothing, se)
 
-        parammap = HM.fromList $ zip (map fparamName mergeparams) res
+        parammap = HM.fromList $ zip (map paramName mergeparams) res
 
         resultType t = t `setArrayDims` map substitute (arrayDims t)
 

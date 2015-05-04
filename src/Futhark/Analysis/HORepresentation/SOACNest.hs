@@ -57,7 +57,7 @@ data Nesting lore = Nesting {
   , nestingReturnType :: [Type]
   } deriving (Eq, Ord, Show)
 
-nestingParams :: Nesting lore -> [Param]
+nestingParams :: Nesting lore -> [Ident]
 nestingParams nest = zipWith Ident names types
   where names = nestingParamNames nest
         types = map SOAC.inputType $ nestingInputs nest
@@ -70,8 +70,9 @@ nestBodyReturnType :: NestBody lore -> [Type]
 nestBodyReturnType (Fun lam)           = lambdaReturnType lam
 nestBodyReturnType (NewNest nesting _) = nestingReturnType nesting
 
-nestBodyParams :: NestBody lore -> [Param]
-nestBodyParams (Fun lam) = lambdaParams lam
+nestBodyParams :: NestBody lore -> [Ident]
+nestBodyParams (Fun lam) =
+  map paramIdent $ lambdaParams lam
 nestBodyParams (NewNest nesting (Reduce _ _ acc)) =
   foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting (Scan _ _ acc)) =
@@ -104,7 +105,7 @@ bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
   (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
   bnd <- mkLetNames' bndIds e
   return
-    Lambda { lambdaParams = zipWith Ident ps pts
+    Lambda { lambdaParams = map (`Param` ()) $ zipWith Ident ps pts
            , lambdaReturnType = retTypes
            , lambdaBody = mkBody (bnds++[bnd]) $
                           map Var bndIds
@@ -153,14 +154,14 @@ setBody b (Reduce cs _ es) = Reduce cs b es
 setBody b (Scan cs _ es) = Scan cs b es
 setBody b (Redomap cs l _ es) = Redomap cs l b es
 
-combinatorFirstLoop :: Combinator lore -> ([Param], [Type])
+combinatorFirstLoop :: Combinator lore -> ([Ident], [Type])
 combinatorFirstLoop comb =
   (nestBodyParams $ body comb,
    case body comb of
      Fun l          -> lambdaReturnType l
      NewNest nest _ -> nestingReturnType nest)
 
-params :: Combinator lore -> [Param]
+params :: Combinator lore -> [Ident]
 params = fst . combinatorFirstLoop
 
 returnType :: Combinator lore -> [Type]
@@ -244,7 +245,7 @@ nested l
       Right soac -- ...the bindee is a SOAC...
         | res == map Var (patternNames pat) ->
           return $ Just (operation soac,
-                         Nesting { nestingParamNames = map identName $ lambdaParams l
+                         Nesting { nestingParamNames = map paramName $ lambdaParams l
                                  , nestingInputs = inputs soac
                                  , nestingResult = patternNames pat
                                  , nestingReturnType = lambdaReturnType l

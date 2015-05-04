@@ -35,6 +35,7 @@ Manual pages:
    :maxdepth: 1
 
    man/futhark-c.rst
+   man/futhark-opencl.rst
    man/futharki.rst
    man/futhark-test.rst
 

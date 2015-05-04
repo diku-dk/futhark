@@ -19,6 +19,7 @@ data Rephraser from to
   = Rephraser { rephraseExpLore :: Lore.Exp from -> Lore.Exp to
               , rephraseLetBoundLore :: Lore.LetBound from -> Lore.LetBound to
               , rephraseFParamLore :: Lore.FParam from -> Lore.FParam to
+              , rephraseLParamLore :: Lore.LParam from -> Lore.LParam to
               , rephraseBodyLore :: Lore.Body from -> Lore.Body to
               , rephraseRetType :: RetType from -> RetType to
               }
@@ -29,7 +30,7 @@ rephraseProg rephraser = Prog . map (rephraseFunDec rephraser) . progFunctions
 rephraseFunDec :: Rephraser from to -> FunDec from -> FunDec to
 rephraseFunDec rephraser fundec =
   fundec { funDecBody = rephraseBody rephraser $ funDecBody fundec
-         , funDecParams = map (rephraseFParam $ rephraseFParamLore rephraser) $
+         , funDecParams = map (rephraseParam $ rephraseFParamLore rephraser) $
                           funDecParams fundec
          , funDecRetType = rephraseRetType rephraser $ funDecRetType fundec
          }
@@ -55,9 +56,9 @@ rephrasePatElem rephraser (PatElem ident BindVar from) =
 rephrasePatElem rephraser (PatElem ident (BindInPlace cs src is) from) =
   PatElem ident (BindInPlace cs src is) $ rephraser from
 
-rephraseFParam :: (from -> to) -> FParamT from -> FParamT to
-rephraseFParam rephraser (FParam ident from) =
-  FParam ident $ rephraser from
+rephraseParam :: (from -> to) -> ParamT from -> ParamT to
+rephraseParam rephraser (Param ident from) =
+  Param ident $ rephraser from
 
 rephraseBody :: Rephraser from to -> Body from -> Body to
 rephraseBody rephraser (Body lore bnds res) =
@@ -68,11 +69,17 @@ rephraseBody rephraser (Body lore bnds res) =
 
 rephraseLambda :: Rephraser from to -> Lambda from -> Lambda to
 rephraseLambda rephraser lam =
-  lam { lambdaBody = rephraseBody rephraser $ lambdaBody lam }
+  lam { lambdaBody = rephraseBody rephraser $ lambdaBody lam
+      , lambdaParams = map (rephraseParam $ rephraseLParamLore rephraser) $
+                       lambdaParams lam
+      }
 
 rephraseExtLambda :: Rephraser from to -> ExtLambda from -> ExtLambda to
 rephraseExtLambda rephraser lam =
-  lam { extLambdaBody = rephraseBody rephraser $ extLambdaBody lam }
+  lam { extLambdaBody = rephraseBody rephraser $ extLambdaBody lam
+      , extLambdaParams = map (rephraseParam $ rephraseLParamLore rephraser) $
+                          extLambdaParams lam
+      }
 
 mapper :: Rephraser from to -> Mapper from to Identity
 mapper rephraser = identityMapper {
@@ -80,5 +87,5 @@ mapper rephraser = identityMapper {
   , mapOnLambda = return . rephraseLambda rephraser
   , mapOnExtLambda = return . rephraseExtLambda rephraser
   , mapOnRetType = return . rephraseRetType rephraser
-  , mapOnFParam = return . rephraseFParam (rephraseFParamLore rephraser)
+  , mapOnFParam = return . rephraseParam (rephraseFParamLore rephraser)
   }

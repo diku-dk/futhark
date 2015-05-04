@@ -79,8 +79,12 @@ analyseExp e = Out.mapExp analyse e
 analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore
 analyseLambda lam =
   let body = analyseBody $ In.lambdaBody lam
-  in lam { Out.lambdaBody = body }
+  in lam { Out.lambdaBody = body
+         , Out.lambdaParams = In.lambdaParams lam
+         }
 analyseExtLambda :: Lore lore => In.ExtLambda lore -> Out.ExtLambda lore
 analyseExtLambda lam =
   let body = analyseBody $ In.extLambdaBody lam
-  in lam { Out.extLambdaBody = body }
+  in lam { Out.extLambdaBody = body
+         , Out.extLambdaParams = In.extLambdaParams lam
+         }

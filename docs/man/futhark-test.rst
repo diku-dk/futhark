@@ -2,9 +2,9 @@
 
 .. _futhark-test(1):
 
-==========
+============
 futhark-test
-==========
+============
 
 SYNOPSIS
 ========
@@ -64,13 +64,29 @@ OPTIONS
 =======
 
 -c
-  Only compile - do not run the interpreter.
+  Only compile - do not run any interpreters.
 
 -i
-  Only interpret - do not run the code generator.
+  Only interpret - do not run any code generators.
 
 -t
   Only type-check - do not run programs at all.
+
+--compiler=program
+
+  The program used to compile Futhark programs.  This option can be
+  passed multiple times, resulting in multiple compilers being used
+  for each test case.  The specified program must support the same
+  interface as ``futhark-c``.
+
+--interpreter=program
+
+  Like ``--compiler``, but for interpretation.
+
+--typechecker=program
+
+  Like ``--compiler``, but for when execution has been disabled with
+  ``-t``.
 
 EXAMPLES
 ========

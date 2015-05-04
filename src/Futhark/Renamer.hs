@@ -157,7 +157,7 @@ bind vars body = do
 
 instance Renameable lore => Rename (FunDec lore) where
   rename (FunDec fname ret params body) =
-    bind (map fparamName params) $ do
+    bind (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
@@ -167,8 +167,8 @@ instance Rename SubExp where
   rename (Var v)      = Var <$> rename v
   rename (Constant v) = return $ Constant v
 
-instance Rename attr => Rename (FParamT attr) where
-  rename (FParam ident attr) = FParam <$> rename ident <*> rename attr
+instance Rename attr => Rename (ParamT attr) where
+  rename (Param ident attr) = Param <$> rename ident <*> rename attr
 
 instance Renameable lore => Rename (Pattern lore) where
   rename (Pattern context values) = Pattern <$> rename context <*> rename values
@@ -201,7 +201,7 @@ instance Renameable lore => Rename (Exp lore) where
   rename (LoopOp (DoLoop respat merge form loopbody)) = do
     let (mergepat, mergeexp) = unzip merge
     mergeexp' <- mapM rename mergeexp
-    bind (map fparamName mergepat) $ do
+    bind (map paramName mergepat) $ do
       mergepat' <- mapM rename mergepat
       respat' <- mapM rename respat
       case form of
@@ -239,7 +239,7 @@ instance (Rename shape) =>
 
 instance Renameable lore => Rename (Lambda lore) where
   rename (Lambda params body ret) =
-    bind (map identName params) $ do
+    bind (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- mapM rename ret
@@ -247,7 +247,7 @@ instance Renameable lore => Rename (Lambda lore) where
 
 instance Renameable lore => Rename (ExtLambda lore) where
   rename (ExtLambda params body rettype) =
-    bind (map identName params) $ do
+    bind (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       rettype' <- rename rettype
@@ -280,5 +280,6 @@ class (Rename (Lore.LetBound lore),
        Rename (Lore.Exp lore),
        Rename (Lore.Body lore),
        Rename (Lore.FParam lore),
+       Rename (Lore.LParam lore),
        Rename (Lore.RetType lore)) =>
       Renameable lore where

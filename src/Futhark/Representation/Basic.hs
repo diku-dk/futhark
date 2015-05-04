@@ -16,6 +16,7 @@ module Futhark.Representation.Basic
        , ExtLambda
        , FunDec
        , FParam
+       , LParam
        , RetType
        , PatElem
          -- * Module re-exports
@@ -32,7 +33,7 @@ module Futhark.Representation.Basic
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
-       , AST.FParamT(FParam)
+       , AST.ParamT(Param)
          -- Utility
        , basicPattern
        , basicPattern'
@@ -49,8 +50,8 @@ import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDec, FParam, RetType,
-          PatElem)
+          Pattern, Lambda, ExtLambda, FunDec, FParam, LParam,
+          RetType, PatElem)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -74,10 +75,10 @@ instance Lore.Lore Basic where
   representative = Futhark.Representation.Basic.Basic
 
   loopResultContext _ res merge =
-    loopShapeContext res $ map fparamIdent merge
+    loopShapeContext res $ map paramIdent merge
 
   applyRetType _ ret =
-    applyExtType ret . map fparamIdent
+    applyExtType ret . map paramIdent
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
@@ -90,6 +91,7 @@ type Lambda = AST.Lambda Basic
 type ExtLambda = AST.ExtLambda Basic
 type FunDec = AST.FunDecT Basic
 type FParam = AST.FParam Basic
+type LParam = AST.LParam Basic
 type RetType = AST.RetType Basic
 type PatElem = AST.PatElem Basic
 
@@ -103,7 +105,7 @@ instance TypeCheck.Checkable Basic where
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
   basicFParam _ name t =
-    AST.FParam (Ident name (AST.Basic t)) ()
+    AST.Param (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name ts
 
@@ -155,6 +157,7 @@ removeLore =
             , rephraseLetBoundLore = const ()
             , rephraseBodyLore = const ()
             , rephraseFParamLore = const ()
+            , rephraseLParamLore = const ()
             , rephraseRetType = removeRetTypeLore
             }
 

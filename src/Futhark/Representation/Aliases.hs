@@ -122,6 +122,7 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Exp (Aliases lore) = (ConsumedInExp, Lore.Exp lore)
   type Body (Aliases lore) = (BodyAliasing, Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
+  type LParam (Aliases lore) = Lore.LParam lore
   type RetType (Aliases lore) = Lore.RetType lore
 
   representative =
@@ -190,6 +191,7 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseLetBoundLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
+                          , rephraseLParamLore = id
                           , rephraseRetType = id
                           }
 

@@ -232,6 +232,8 @@ latex_documents = [
 man_pages = [
     ('man/futhark-c', 'futhark-c', 'Compile Futhark to sequential C',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
+    ('man/futhark-opencl', 'futhark-opencl', 'Compile Futhark to OpenCL',
+     ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futharki', 'futharki', 'Futhark interpreter',
      ['Troels Henriksen (athas@sigkill.dk)'], 1),
     ('man/futhark-test', 'futhark-test', 'Futhark testing tool',

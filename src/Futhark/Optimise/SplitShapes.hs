@@ -72,7 +72,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
-  ((shapeParams, cpybnds),_) <- runBinderEmptyEnv $ nonuniqueParams $ map fparamIdent params
+  ((shapeParams, cpybnds),_) <- runBinderEmptyEnv $ nonuniqueParams params
 
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
@@ -86,11 +86,11 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   valueBody <- substituteExtResultShapes staticRettype body
 
   let valueRettype = ExtRetType $ staticShapes staticRettype
-      valueParams = shapeidents ++ map fparamIdent params
+      valueParams = shapeidents ++ map paramIdent params
       shapeBody = mkBody (cpybnds <> bodybnds) shapes
-      mkFParam = flip FParam ()
+      mkFParam = flip Param ()
       fShape = FunDec shapeFname (ExtRetType $ staticShapes shapetypes)
-               (map mkFParam shapeParams)
+               shapeParams
                shapeBody
       fValue = FunDec valueFname valueRettype
                (map mkFParam valueParams)

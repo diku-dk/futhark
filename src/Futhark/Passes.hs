@@ -17,6 +17,7 @@ module Futhark.Passes
   , commonSubexpressionElimination
   , flattening
   , doubleBuffer
+  , sequentialiseKernels
   )
 where
 
@@ -37,6 +38,7 @@ import qualified Futhark.Optimise.InPlaceLowering
 import qualified Futhark.Optimise.CSE
 import qualified Futhark.Flattening
 import qualified Futhark.Optimise.DoubleBuffer
+import qualified Futhark.KernelSequentialisation
 
 fotransform :: Pass
 fotransform = unfailableBasicPass "first-order transform"
@@ -102,3 +104,7 @@ flattening = basicPass "Flattening"
 doubleBuffer :: Pass
 doubleBuffer = unfailableExplicitMemoryPass "double buffering"
                Futhark.Optimise.DoubleBuffer.optimiseProg
+
+sequentialiseKernels :: Pass
+sequentialiseKernels = unfailableBasicPass "sequentialise kernels"
+                       Futhark.KernelSequentialisation.sequentialiseKernels

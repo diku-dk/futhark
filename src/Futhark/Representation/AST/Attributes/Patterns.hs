@@ -3,10 +3,10 @@
 module Futhark.Representation.AST.Attributes.Patterns
        (
          -- * Function parameters
-         fparamIdent
-       , fparamName
-       , fparamType
-       , fparamLore
+         paramIdent
+       , paramName
+       , paramType
+       , paramLore
          -- * Pattern elements
        , patElemIdent
        , patElemName
@@ -30,12 +30,12 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types (stripArray, setUniqueness)
 
 -- | The name of the 'Ident' bound by an 'FParam'.
-fparamName :: FParamT attr -> VName
-fparamName = identName . fparamIdent
+paramName :: ParamT attr -> VName
+paramName = identName . paramIdent
 
 -- | The type of the 'Ident' bound by an 'FParam'.
-fparamType :: FParamT attr -> Type
-fparamType = identType . fparamIdent
+paramType :: ParamT attr -> Type
+paramType = identType . paramIdent
 
 -- | The name of the ident bound by a 'PatElem'.
 patElemName :: PatElemT attr -> VName

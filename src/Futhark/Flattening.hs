@@ -495,17 +495,17 @@ convertExtRetType (ExtRetType ex_tps) =
 transformMain :: FunDec -> FlatM FunDec
 transformMain (FunDec name (ExtRetType rettypes) params _) = do
   let arr_params = filter (maybe False (>=2) . dimentionality . identType)
-                          (map fparamIdent params)
+                          (map paramIdent params)
 
   mapM_ createSegDescsForArray arr_params
   mapM_ setupDataArray $ filter (isJust . dimentionality . identType)
-                                (map fparamIdent params)
+                                (map paramIdent params)
 
   multandsegs_bnds <- mkMultAndSegs arr_params
   reshape_bnds <- mapM mkDataReshape arr_params
 
   flat_params <-
-    liftM (uncurry (++)) $ convertToFlat $ map fparamIdent params
+    liftM (uncurry (++)) $ convertToFlat $ map paramIdent params
   let flat_args = map ((\vn -> (Var vn, Observe)) . identName) flat_params
   let (ExtRetType flatex_tps) = convertExtRetType (ExtRetType rettypes)
   let call_exp = Apply (transformFunName name)
@@ -665,17 +665,17 @@ transformFunName name = nameFromString $ nameToString name ++ "_flattrans"
 transformFun :: FunDec -> FlatM FunDec
 transformFun (FunDec name rettype params body) = do
   tell [StartFun name]
-  mapM_ (addTypeIdent . fparamIdent) params
+  mapM_ (addTypeIdent . paramIdent) params
   mapM_ createSegDescsForArray $
     filter (maybe False (>=2) . dimentionality . identType)
-           (map fparamIdent params)
+           (map paramIdent params)
   mapM_ setupDataArray $ filter (isJust . dimentionality . identType)
-                                (map fparamIdent params)
+                                (map paramIdent params)
   body' <- transformBody body
-  idents' <- liftM (uncurry (++)) $ convertToFlat $ map fparamIdent params
-  let params' = map (\i -> FParam { fparamIdent = i
-                                  , fparamLore = ()
-                                  }
+  idents' <- liftM (uncurry (++)) $ convertToFlat $ map paramIdent params
+  let params' = map (\i -> Param { paramIdent = i
+                                 , paramLore = ()
+                                 }
                     ) idents'
   return $ FunDec name' rettype' params' body'
   where
@@ -704,7 +704,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
   -- Checking if a Variable use is safe requires knowledge of the type
   -- Consider writing isSafeToMap??? differently. TODO
   mapM_ addTypePatElem $ concatMap (patternElements . bindingPattern) lamBnds
-  mapM_ addTypeIdent $ lambdaParams lambda
+  mapM_ (addTypeIdent . paramIdent) $ lambdaParams lambda
 
   okLamBnds <- mapM isSafeToMapBinding lamBnds
   let grouped = foldr group [] $ zip okLamBnds lamBnds
@@ -790,7 +790,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
       concatMap (map (identName . patElemIdent) . patternElements . bindingPattern)
                 (bodyBindings $ lambdaBody lambda)
 
-    lambdaParamVNs = map identName $ lambdaParams lambda
+    lambdaParamVNs = map paramName $ lambdaParams lambda
 
     group :: (Bool, Binding)
              -> [Either Binding [Binding]]
@@ -807,7 +807,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
             case argarr of
               Just val -> do
                 val_tp <- lookupType arg
-                return $ Just (Ident arg val_tp, identName val)
+                return $ Just (Param (Ident arg val_tp) (), identName val)
               Nothing -> return Nothing
 
       pat <- liftM (Pattern [] . map (\i -> PatElem i BindVar () ))
@@ -1032,7 +1032,7 @@ pullOutOfMap mapInfo (argsneeded, _)
   -- other calls (through mapLetArray)
   intmres_vns' <- mapM newName intmres_vns
   intmres_tps <- mapM lookupType intmres_vns
-  let intmres_params = zipWith Ident intmres_vns' intmres_tps
+  let intmres_params = map (`Param` ()) $ zipWith Ident intmres_vns' intmres_tps
   intmres_arrs <- mapM (findTarget1 mapInfo) intmres_vns
 
   --

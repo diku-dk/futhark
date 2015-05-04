@@ -41,7 +41,7 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
           in HM.unions [branchdeps, deps, tdeps, fdeps]
 
         grow deps (Let pat _ (LoopOp (Map cs fun arrs))) =
-          let pardeps = mkDeps (lambdaParams fun) $
+          let pardeps = mkDeps (map paramIdent $ lambdaParams fun) $
                         soacArgDeps deps cs $ map (depsOfVar deps) arrs
               deps' = dataDependencies' (pardeps `HM.union` deps) $
                       lambdaBody fun
@@ -75,7 +75,7 @@ foldDeps' :: Proper lore =>
           -> Certificates -> Lambda lore -> [Names] -> [Names]
           -> (Dependencies, [Names])
 foldDeps' deps cs fun acc arr =
-  let pardeps = HM.fromList $ zip (map identName $ lambdaParams fun) $
+  let pardeps = HM.fromList $ zip (map paramName $ lambdaParams fun) $
                 soacArgDeps deps cs $ acc++arr
       deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun
   in (deps', lambdaDeps deps' fun)
@@ -85,7 +85,7 @@ foldDeps :: Proper lore =>
          -> Pattern lore -> Certificates -> Lambda lore -> [SubExp] -> [VName]
          -> HM.HashMap VName Names
 foldDeps deps pat cs fun acc arr =
-  let pardeps = HM.fromList $ zip (map identName $ lambdaParams fun) $
+  let pardeps = HM.fromList $ zip (map paramName $ lambdaParams fun) $
                 soacArgDeps deps cs $
                 map (depsOf deps) acc ++ map (depsOfVar deps) arr
       deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun

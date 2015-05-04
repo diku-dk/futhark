@@ -294,23 +294,23 @@ bindeeSummary bindee = (patElemName bindee,
 bindeesSummary :: [PatElem] -> MemoryMap
 bindeesSummary = HM.fromList . map bindeeSummary
 
-fparamsSummary :: [FParam] -> MemoryMap
-fparamsSummary = HM.fromList . map fparamSummary
-  where fparamSummary fparam = (fparamName fparam,
-                                Entry (fparamLore fparam) (fparamType fparam))
+paramsSummary :: [ParamT MemSummary] -> MemoryMap
+paramsSummary = HM.fromList . map paramSummary
+  where paramSummary fparam = (paramName fparam,
+                               Entry (paramLore fparam) (paramType fparam))
 
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
 allocInFParams params m = do
   (valparams, (memsizeparams, memparams)) <- runWriterT $ forM params $ \param ->
-    case fparamType param of
+    case paramType param of
       Array {} -> do
-        (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ fparamIdent param
-        tell ([FParam memsize Scalar], [FParam mem Scalar])
-        return $ FParam param' paramlore
-      _ -> return param { fparamLore = Scalar }
+        (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ paramIdent param
+        tell ([Param memsize Scalar], [Param mem Scalar])
+        return $ Param param' paramlore
+      _ -> return param { paramLore = Scalar }
   let params' = memsizeparams <> memparams <> valparams
-      summary = fparamsSummary params'
+      summary = paramsSummary params'
   local (summary `HM.union`) $ m params'
 
 isArray :: SubExp -> AllocM Bool
@@ -440,8 +440,13 @@ allocInExp (LoopOp (DoLoop res merge form
           local (HM.singleton i (Entry Scalar $ Basic Int)<>)
         formBinds (WhileLoop _) =
           id
-allocInExp (LoopOp (Map {})) =
-  fail "Cannot put explicit allocations in map yet."
+
+allocInExp (LoopOp (Map cs f arrs)) = do
+  size <- arraysSize 0 <$> mapM lookupType arrs
+  is <- letExp "is" $ PrimOp $ Iota size
+  f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
+  return $ LoopOp $ Map cs f' $ is:arrs
+
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
 allocInExp (LoopOp (Scan {})) =
@@ -454,21 +459,33 @@ allocInExp (Apply fname args rettype) = do
 allocInExp e = mapExpM alloc e
   where alloc =
           identityMapper { mapOnBody = allocInBody
-                         , mapOnLambda = allocInLambda
-                         , mapOnExtLambda = allocInExtLambda
+                         , mapOnLambda = fail "Unhandled lambda in ExplicitAllocations"
+                         , mapOnExtLambda = fail "Unhandled ext lambda in ExplicitAllocations"
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
 
-allocInLambda :: In.Lambda -> AllocM Lambda
-allocInLambda lam = do
-  body <- allocInBody $ lambdaBody lam
-  return $ lam { lambdaBody = body }
-
-allocInExtLambda :: In.ExtLambda -> AllocM ExtLambda
-allocInExtLambda lam = do
-  body <- allocInBody $ extLambdaBody lam
-  return $ lam { extLambdaBody = body }
+allocInMapLambda :: In.Lambda -> [MemSummary] -> AllocM Lambda
+allocInMapLambda lam input_summaries = do
+  i <- newVName "i"
+  params' <-
+    forM (zip (lambdaParams lam) input_summaries) $ \(p,summary) ->
+    case (paramType p, summary) of
+     (_, Scalar) ->
+       fail $ "Passed a scalar for lambda parameter " ++ pretty p
+     (Array {}, MemSummary mem ixfun) ->
+       return p { paramLore =
+                     MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
+                }
+     _ ->
+       return p { paramLore = Scalar }
+  let param_summaries = paramsSummary params'
+      all_summaries = HM.insert i (Entry Scalar $ Basic Int) param_summaries
+  body' <- local (HM.union all_summaries) $
+           allocInBody $ lambdaBody lam
+  return lam { lambdaBody = body'
+             , lambdaParams = Param (Ident i $ Basic Int) Scalar : params'
+             }
 
 vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
                  -> MemoryMap
@@ -484,7 +501,7 @@ simplifiable :: (Engine.MonadEngine m,
                 SimpleOps m
 simplifiable =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  simplifyMemSummary simplifyMemSummary
+  simplifyMemSummary simplifyMemSummary simplifyMemSummary
   simplifyRetType'
   where mkLetS' _ pat e =
           return $ mkWiseLetBinding (removePatternWisdom pat) () e
