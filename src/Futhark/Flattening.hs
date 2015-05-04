@@ -459,7 +459,7 @@ convertToFlat idents = do
                              (drop 1 arrs)
         return (sizes, arrs)
 
-  return (removeDuplicates $ concat sizes, removeDuplicates $ concat arrs)
+  return (L.nub $ concat sizes, L.nub $ concat arrs)
 
 convertExtRetType :: ExtRetType -> ExtRetType
 convertExtRetType (ExtRetType ex_tps) =
@@ -552,8 +552,8 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
           rep_bnds <-
             liftM reverse $ foldM makeRep [] $ zip dims segdescps
           return (mult_bnds, rep_bnds)
-      return $ removeDuplicates (concat all_mult_bnds) ++
-               removeDuplicates (concat all_segbnds)
+      return $ L.nub (concat all_mult_bnds) ++
+               L.nub (concat all_segbnds)
       where
 
 
@@ -1383,11 +1383,3 @@ patternFromIdents ctx vals =
   where addBindVar i = PatElem i BindVar ()
 
 --------------------------------------------------------------------------------
-
-removeDuplicates :: Eq a => [a] -> [a]
-removeDuplicates ys = removeDuplicates' ys []
-  where
-   removeDuplicates' [] acc  = reverse acc
-   removeDuplicates' (x:xs) acc
-     | x `elem` acc = removeDuplicates' xs acc
-     | otherwise    = removeDuplicates' xs (x:acc)
