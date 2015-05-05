@@ -78,6 +78,8 @@ primOpType (BinOp _ _ _ t) =
   pure [Basic t]
 primOpType (Not _) =
   pure [Basic Bool]
+primOpType (Complement _) =
+  pure [Basic Int]
 primOpType (Negate e) =
   pure <$> subExpType e
 primOpType (Index _ ident idx) =

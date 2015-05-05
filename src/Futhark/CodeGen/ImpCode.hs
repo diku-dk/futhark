@@ -102,6 +102,7 @@ data Exp = Constant BasicValue
            deriving (Eq, Show)
 
 data UnOp = Not
+          | Complement
           | Negate
             deriving (Eq, Show)
 
@@ -203,6 +204,8 @@ instance Pretty Exp where
     ppr op <+>
     pprPrec (rprecedence op) y
   pprPrec _ (UnOp Not x) =
+    text "not" <+> ppr x
+  pprPrec _ (UnOp Complement x) =
     text "not" <+> ppr x
   pprPrec _ (UnOp Negate x) =
     text "-" <+> ppr x

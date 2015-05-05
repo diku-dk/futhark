@@ -607,6 +607,10 @@ checkExp (UnOp Not e pos) = do
   e' <- require [Basic Bool] =<< checkExp e
   return $ UnOp Not e' pos
 
+checkExp (UnOp Complement e loc) = do
+  e' <- require [Basic Int] =<< checkExp e
+  return $ UnOp Complement e' loc
+
 checkExp (UnOp Negate e loc) = do
   e' <- require [Basic Int, Basic Real] =<< checkExp e
   return $ UnOp Negate e' loc

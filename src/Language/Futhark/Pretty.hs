@@ -115,8 +115,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where
-  ppr Not = text "not"
+  ppr Not = text "!"
   ppr Negate = text "-"
+  ppr Complement = text "~"
 
 instance Pretty BinOp where
   ppr Plus = text "+"
@@ -161,8 +162,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
       Just (Array {}) -> brackets $ commastack $ map ppr es
       _               -> brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
-  pprPrec _ (UnOp Not e _) = text "not" <+> pprPrec 9 e
-  pprPrec _ (UnOp Negate e _) = text "-" <> pprPrec 9 e
+  pprPrec _ (UnOp op e _) = ppr op <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)

@@ -468,6 +468,11 @@ evalPrimOp (Not e) = do
   case v of BasicVal (LogVal b) -> return [BasicVal $ LogVal (not b)]
             _                     -> bad $ TypeError "evalPrimOp Not"
 
+evalPrimOp (Complement e) = do
+  v <- evalSubExp e
+  case v of BasicVal (IntVal x) -> return [BasicVal $ IntVal $ complement x]
+            _                   -> bad $ TypeError "evalPrimOp Not"
+
 evalPrimOp (Negate e) = do
   v <- evalSubExp e
   case v of BasicVal (IntVal x)  -> return [BasicVal $ IntVal (-x)]

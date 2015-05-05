@@ -38,6 +38,7 @@ primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
 primOpAliases (BinOp {}) = [mempty]
 primOpAliases (Not {}) = [mempty]
+primOpAliases (Complement {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
 primOpAliases (Index _ ident _) =
   [vnameAliases ident]

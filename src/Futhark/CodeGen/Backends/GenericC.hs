@@ -523,6 +523,10 @@ compileExp (UnOp Negate x) = do
   x' <- compileExp x
   return [C.cexp|-$exp:x'|]
 
+compileExp (UnOp Complement x) = do
+  x' <- compileExp x
+  return [C.cexp|~$exp:x'|]
+
 compileExp (UnOp Not x) = do
   x' <- compileExp x
   return [C.cexp|!$exp:x'|]

@@ -35,7 +35,7 @@ tokens :-
   ">="                     { const GEQ }
   "+"                      { const PLUS }
   "-"                      { const MINUS }
-  "~"                      { const NEGATE }
+  "~"                      { const TILDE }
   "*"                      { const TIMES }
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
@@ -85,7 +85,6 @@ keyword s =
     "for"          -> FOR
     "do"           -> DO
     "op"           -> OP
-    "not"          -> NOT
     "True"         -> TRUE
     "False"        -> FALSE
     "Checked"      -> CHECKED

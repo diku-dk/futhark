@@ -521,6 +521,10 @@ internaliseExp desc (E.UnOp E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
   letTupExp' desc $ I.PrimOp $ I.Not e'
 
+internaliseExp desc (E.UnOp E.Complement e _) = do
+  e' <- internaliseExp1 "complement_arg" e
+  letTupExp' desc $ I.PrimOp $ I.Complement e'
+
 internaliseExp desc (E.UnOp E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   letTupExp' desc $ I.PrimOp $ I.Negate e'

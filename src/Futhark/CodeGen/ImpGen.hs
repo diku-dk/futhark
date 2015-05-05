@@ -366,6 +366,9 @@ defCompilePrimOp (Destination [target]) (SubExp se) =
 defCompilePrimOp (Destination [target]) (Not e) =
   writeExp target $ Imp.UnOp Imp.Not $ compileSubExp e
 
+defCompilePrimOp (Destination [target]) (Complement e) =
+  writeExp target $ Imp.UnOp Imp.Complement $ compileSubExp e
+
 defCompilePrimOp (Destination [target]) (Negate e) =
   writeExp target $ Imp.UnOp Imp.Negate $ compileSubExp e
 

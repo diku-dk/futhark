@@ -106,6 +106,8 @@ mapExpM tv (PrimOp (BinOp bop x y t)) =
                  pure t)
 mapExpM tv (PrimOp (Not x)) =
   PrimOp <$> (Not <$> mapOnSubExp tv x)
+mapExpM tv (PrimOp (Complement x)) =
+  PrimOp <$> (Complement <$> mapOnSubExp tv x)
 mapExpM tv (PrimOp (Negate x)) =
   PrimOp <$> (Negate <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp ts) =

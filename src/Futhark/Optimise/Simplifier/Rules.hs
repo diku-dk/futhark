@@ -44,6 +44,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyRearrange
                , letRule simplifyBinOp
                , letRule simplifyNot
+               , letRule simplifyComplement
                , letRule simplifyNegate
                , letRule simplifyAssert
                , letRule simplifyIndexing
@@ -584,6 +585,11 @@ simplifyNot :: LetTopDownRule lore u
 simplifyNot _ _ (Not (Constant (LogVal v))) =
   Just $ SubExp $ constant (not v)
 simplifyNot _ _ _ = Nothing
+
+simplifyComplement :: LetTopDownRule lore u
+simplifyComplement _ _ (Complement (Constant (IntVal v))) =
+  Just $ SubExp $ constant $ complement v
+simplifyComplement _ _ _ = Nothing
 
 simplifyNegate :: LetTopDownRule lore u
 simplifyNegate _ _ (Negate (Constant (IntVal v))) =

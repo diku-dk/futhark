@@ -80,8 +80,7 @@ data Token = IF
            | TRUE
            | FALSE
            | CHECKED
-           | NOT
-           | NEGATE
+           | TILDE
            | AND
            | OR
            | OP

@@ -653,6 +653,9 @@ checkPrimOp (BinOp op e1 e2 t) = checkBinOp op e1 e2 t
 checkPrimOp (Not e) =
   require [Basic Bool] e
 
+checkPrimOp (Complement e) =
+  require [Basic Int] e
+
 checkPrimOp (Negate e) =
   require [Basic Int, Basic Real] e
 

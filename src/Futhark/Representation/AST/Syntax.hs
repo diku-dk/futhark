@@ -152,9 +152,10 @@ data PrimOp lore
   | BinOp BinOp SubExp SubExp BasicType
     -- ^ The type is the result type.
 
-  -- Unary Ops: Not for bools and Negate for ints
-  | Not    SubExp -- ^ E.g., @not True == False@.
-  | Negate SubExp -- ^ E.g., @~(~1) = 1@.
+  -- Unary Ops: Not for bools and Negate and Complement for ints
+  | Not SubExp -- ^ E.g., @! True == False@.
+  | Negate SubExp -- ^ E.g., @-(-1) = 1@.
+  | Complement SubExp -- ^ E.g., @~(~1) = 1@.
 
   -- Assertion management.
   | Assert SubExp SrcLoc
