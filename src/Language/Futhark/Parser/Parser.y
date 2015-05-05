@@ -283,6 +283,7 @@ Exp  :: { UncheckedExp }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
      | '-' Exp %prec '~' { UnOp Negate $2 $1 }
      | '!' Exp        { UnOp Not $2 $1 }
+     | '~' Exp        { UnOp Complement $2 $1 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
