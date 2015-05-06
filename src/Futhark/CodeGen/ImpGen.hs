@@ -312,12 +312,28 @@ compileExtBody (Destination dest) (Body _ bnds ses) =
   compileBindings bnds $ zipWithM_ compileResultSubExp dest ses
 
 compileLoopBody :: [VName] -> Body -> ImpM op (Imp.Code op)
-compileLoopBody targets (Body _ bnds ses) =
-  collect $ compileBindings bnds $ forM_ (zip targets ses) $ \(d,se) ->
-    subExpType se >>= \case
-      Basic _  -> compileScalarSubExpTo (ScalarDestination d) se
-      Mem _    -> compileResultSubExp (MemoryDestination d Nothing) se
-      Array {} -> return ()
+compileLoopBody mergenames (Body _ bnds ses) = do
+  -- We cannot write the results to the merge parameters immediately,
+  -- as some of the results may actually *be* merge parameters, and
+  -- would thus be clobbered.  Therefore, we first copy to new
+  -- variables mirroring the merge parameters, and then copy this
+  -- buffer to the merge parameters.  This is efficient, because the
+  -- operations are all scalar operations.
+  tmpnames <- mapM (newVName . (++"_tmp") . baseString) mergenames
+  collect $ compileBindings bnds $ do
+    copy_to_merge_params <- forM (zip3 mergenames tmpnames ses) $ \(d,tmp,se) ->
+      subExpType se >>= \case
+        Basic bt  -> do
+          emit $ Imp.DeclareScalar tmp bt
+          emit $ Imp.SetScalar tmp $ compileSubExp se
+          return $ emit $ Imp.SetScalar d $ Imp.ScalarVar tmp
+        Mem _ | Var v <- se -> do
+          space <- entryMemSpace <$> lookupMemory v
+          emit $ Imp.DeclareMem tmp space
+          emit $ Imp.SetMem tmp v
+          return $ emit $ Imp.SetMem d tmp
+        _ -> return $ return ()
+    sequence_ copy_to_merge_params
 
 compileBindings :: [Binding] -> ImpM op a -> ImpM op a
 compileBindings []     m = m
