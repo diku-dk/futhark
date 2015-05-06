@@ -816,7 +816,7 @@ arrLitInd (ArrayLit els _) (i:is)
   | i >= 0, i < genericLength els = arrLitInd (SubExp $ els !! fromIntegral i) is
 arrLitInd _ _ = Nothing
 
-ordBinOp :: Monad m =>
+ordBinOp :: (Functor m, Monad m) =>
             (forall a. Ord a => a -> a -> m Bool)
          -> SubExp -> SubExp -> m SubExp
 ordBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
@@ -832,7 +832,7 @@ ordBinOp op (Constant (LogVal x)) (Constant (LogVal y)) =
 ordBinOp _ _ _ =
   fail "ordBinOp: operands not of appropriate type."
 
-numBinOp :: Monad m =>
+numBinOp :: (Functor m, Monad m) =>
             (forall num. Num num => num -> num -> m num)
          -> SubExp -> SubExp -> m SubExp
 numBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
@@ -844,7 +844,7 @@ numBinOp op (Constant (Float64Val x)) (Constant (Float64Val y)) =
 numBinOp _ _ _ =
   fail "numBinOp: operands not of appropriate type."
 
-intBinOp :: Monad m =>
+intBinOp :: (Functor m, Monad m) =>
             (forall int. Integral int => int -> int -> m int)
          -> SubExp -> SubExp -> m SubExp
 intBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
@@ -852,7 +852,7 @@ intBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
 intBinOp _ _ _ =
   fail "intBinOp: operands not of appropriate type."
 
-intFloatBinOp :: Monad m =>
+intFloatBinOp :: (Functor m, Monad m) =>
                  (forall int. Integral int => int -> int -> m int)
               -> (forall float. Floating float => float -> float -> m float)
               -> SubExp -> SubExp -> m SubExp
