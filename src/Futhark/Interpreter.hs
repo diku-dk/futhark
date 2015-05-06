@@ -333,30 +333,40 @@ buildFunTable = foldl expand builtins . progFunctions
 
 builtins :: HM.HashMap Name ([Value] -> FutharkM lore [Value])
 builtins = HM.fromList $ map namify
-           [("toReal", builtin "toReal")
-           ,("trunc", builtin "trunc")
-           ,("sqrt", builtin "sqrt")
-           ,("log", builtin "log")
-           ,("exp", builtin "exp")
-           ,("op not", builtin "op not")
-           ,("op ~", builtin "op ~")]
+           [("toFloat32", builtin "toFloat32")
+           ,("trunc32", builtin "trunc32")
+           ,("sqrt32", builtin "sqrt32")
+           ,("log32", builtin "log32")
+           ,("exp32", builtin "exp32")
+
+           ,("toFloat64", builtin "toFloat64")
+           ,("trunc64", builtin "trunc64")
+           ,("sqrt64", builtin "sqrt64")
+           ,("log64", builtin "log64")
+           ,("exp64", builtin "exp64")]
   where namify (k,v) = (nameFromString k, v)
 
 builtin :: String -> [Value] -> FutharkM lore [Value]
-builtin "toReal" [BasicVal (IntVal x)] =
-  return [BasicVal $ RealVal (fromIntegral x)]
-builtin "trunc" [BasicVal (RealVal x)] =
-  return [BasicVal $ IntVal (truncate x)]
-builtin "sqrt" [BasicVal (RealVal x)] =
-  return [BasicVal $ RealVal (sqrt x)]
-builtin "log" [BasicVal (RealVal x)] =
-  return [BasicVal $ RealVal (log x)]
-builtin "exp" [BasicVal (RealVal x)] =
-  return [BasicVal $ RealVal (exp x)]
-builtin "op not" [BasicVal (LogVal b)] =
-  return [BasicVal $ LogVal (not b)]
-builtin "op ~" [BasicVal (RealVal b)] =
-  return [BasicVal $ RealVal (-b)]
+builtin "toFloat32" [BasicVal (IntVal x)] =
+  return [BasicVal $ Float32Val $ fromIntegral x]
+builtin "trunc32" [BasicVal (Float32Val x)] =
+  return [BasicVal $ IntVal $ truncate x]
+builtin "sqrt32" [BasicVal (Float32Val x)] =
+  return [BasicVal $ Float32Val $ sqrt x]
+builtin "log32" [BasicVal (Float32Val x)] =
+  return [BasicVal $ Float32Val $ log x]
+builtin "exp32" [BasicVal (Float32Val x)] =
+  return [BasicVal $ Float32Val $ exp x]
+builtin "toFloat64" [BasicVal (IntVal x)] =
+  return [BasicVal $ Float64Val $ fromIntegral x]
+builtin "trunc64" [BasicVal (Float64Val x)] =
+  return [BasicVal $ IntVal $ truncate x]
+builtin "sqrt64" [BasicVal (Float64Val x)] =
+  return [BasicVal $ Float64Val $ sqrt x]
+builtin "log64" [BasicVal (Float64Val x)] =
+  return [BasicVal $ Float64Val $ log x]
+builtin "exp64" [BasicVal (Float64Val x)] =
+  return [BasicVal $ Float64Val $ exp x]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (rankShaped . valueType) args
@@ -417,25 +427,32 @@ evalPrimOp (ArrayLit es rt) = do
         asInt _                     = bad $ TypeError "evalPrimOp ArrayLit asInt"
 
 evalPrimOp (BinOp Plus e1 e2 Int) = evalIntBinOp (+) e1 e2
-evalPrimOp (BinOp Plus e1 e2 Real) = evalRealBinOp (+) e1 e2
+evalPrimOp (BinOp Plus e1 e2 Float32) = evalFloat32BinOp (+) e1 e2
+evalPrimOp (BinOp Plus e1 e2 Float64) = evalFloat64BinOp (+) e1 e2
 evalPrimOp (BinOp Minus e1 e2 Int) = evalIntBinOp (-) e1 e2
-evalPrimOp (BinOp Minus e1 e2 Real) = evalRealBinOp (-) e1 e2
+evalPrimOp (BinOp Minus e1 e2 Float32) = evalFloat32BinOp (-) e1 e2
+evalPrimOp (BinOp Minus e1 e2 Float64) = evalFloat64BinOp (-) e1 e2
 evalPrimOp (BinOp Pow e1 e2 Int) = evalIntBinOpM pow e1 e2
   -- Haskell (^) cannot handle negative exponents, so check for that
   -- explicitly.
   where pow x y | y < 0, x == 0 = bad DivisionByZero
                 | y < 0         = return $ 1 `div` (x ^ (-y))
                 | otherwise     = return $ x ^ y
-evalPrimOp (BinOp Pow e1 e2 Real) = evalRealBinOp (**) e1 e2
+evalPrimOp (BinOp Pow e1 e2 Float32) = evalFloat32BinOp (**) e1 e2
+evalPrimOp (BinOp Pow e1 e2 Float64) = evalFloat64BinOp (**) e1 e2
 evalPrimOp (BinOp Times e1 e2 Int) = evalIntBinOp (*) e1 e2
-evalPrimOp (BinOp Times e1 e2 Real) = evalRealBinOp (*) e1 e2
+evalPrimOp (BinOp Times e1 e2 Float32) = evalFloat32BinOp (*) e1 e2
+evalPrimOp (BinOp Times e1 e2 Float64) = evalFloat64BinOp (*) e1 e2
 evalPrimOp (BinOp Divide e1 e2 Int) = evalIntBinOpM div' e1 e2
   where div' _ 0 = bad DivisionByZero
         div' x y = return $ x `div` y
 evalPrimOp (BinOp Mod e1 e2 Int) = evalIntBinOpM mod' e1 e2
   where mod' _ 0 = bad DivisionByZero
         mod' x y = return $ x `mod` y
-evalPrimOp (BinOp Divide e1 e2 Real) = evalRealBinOpM div' e1 e2
+evalPrimOp (BinOp Divide e1 e2 Float32) = evalFloat32BinOpM div' e1 e2
+  where div' _ 0 = bad  DivisionByZero
+        div' x y = return $ x / y
+evalPrimOp (BinOp Divide e1 e2 Float64) = evalFloat64BinOpM div' e1 e2
   where div' _ 0 = bad  DivisionByZero
         div' x y = return $ x / y
 evalPrimOp (BinOp ShiftR e1 e2 _) = evalIntBinOp shiftR' e1 e2
@@ -477,9 +494,10 @@ evalPrimOp (Complement e) = do
 
 evalPrimOp (Negate e) = do
   v <- evalSubExp e
-  case v of BasicVal (IntVal x)  -> return [BasicVal $ IntVal (-x)]
-            BasicVal (RealVal x) -> return [BasicVal $ RealVal (-x)]
-            _                      -> bad $ TypeError "evalPrimOp Negate"
+  case v of BasicVal (IntVal x)     -> return [BasicVal $ IntVal (-x)]
+            BasicVal (Float32Val x) -> return [BasicVal $ Float32Val (-x)]
+            BasicVal (Float64Val x) -> return [BasicVal $ Float64Val (-x)]
+            _                       -> bad $ TypeError "evalPrimOp Negate"
 
 evalPrimOp (Index _ ident idxs) = do
   v <- lookupVar ident
@@ -826,23 +844,41 @@ evalIntBinOpM op e1 e2 = do
     _ ->
       bad $ TypeError "evalIntBinOpM"
 
-evalRealBinOp :: (Double -> Double -> Double) -> SubExp -> SubExp
-             -> FutharkM lore [Value]
-evalRealBinOp op = evalRealBinOpM $ \x y -> return $ op x y
+evalFloat32BinOp :: (Float -> Float -> Float) -> SubExp -> SubExp
+                 -> FutharkM lore [Value]
+evalFloat32BinOp op = evalFloat32BinOpM $ \x y -> return $ op x y
 
-evalRealBinOpM :: (Double -> Double -> FutharkM lore Double)
-               -> SubExp
-               -> SubExp
-               -> FutharkM lore [Value]
-evalRealBinOpM op e1 e2 = do
+evalFloat32BinOpM :: (Float -> Float -> FutharkM lore Float)
+                  -> SubExp
+                  -> SubExp
+                  -> FutharkM lore [Value]
+evalFloat32BinOpM op e1 e2 = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
   case (v1, v2) of
-    (BasicVal (RealVal x), BasicVal (RealVal y)) -> do
+    (BasicVal (Float32Val x), BasicVal (Float32Val y)) -> do
       result <- op x y
-      return [BasicVal $ RealVal result]
+      return [BasicVal $ Float32Val result]
     _ ->
-      bad $ TypeError $ "evalRealBinOpM " ++ pretty v1 ++ " " ++ pretty v2
+      bad $ TypeError $ "evalFloat32BinOpM " ++ pretty v1 ++ " " ++ pretty v2
+
+evalFloat64BinOp :: (Double -> Double -> Double) -> SubExp -> SubExp
+                 -> FutharkM lore [Value]
+evalFloat64BinOp op = evalFloat64BinOpM $ \x y -> return $ op x y
+
+evalFloat64BinOpM :: (Double -> Double -> FutharkM lore Double)
+                  -> SubExp
+                  -> SubExp
+                  -> FutharkM lore [Value]
+evalFloat64BinOpM op e1 e2 = do
+  v1 <- evalSubExp e1
+  v2 <- evalSubExp e2
+  case (v1, v2) of
+    (BasicVal (Float64Val x), BasicVal (Float64Val y)) -> do
+      result <- op x y
+      return [BasicVal $ Float64Val result]
+    _ ->
+      bad $ TypeError $ "evalFloat64BinOpM " ++ pretty v1 ++ " " ++ pretty v2
 
 evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> FutharkM lore [Value]
 evalBoolBinOp op e1 e2 = do

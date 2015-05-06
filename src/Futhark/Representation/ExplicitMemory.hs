@@ -811,5 +811,6 @@ basicSize :: BasicType -> Int
 basicSize Int = 4
 basicSize Bool = 1
 basicSize Char = 1
-basicSize Real = 8
+basicSize Float64 = 8
+basicSize Float32 = 4
 basicSize Cert = 1

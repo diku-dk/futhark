@@ -8,7 +8,7 @@
 // }
 
 fun real f({int, real} x, real y) =
-    let {a,b} = x in y*toReal(a)+b
+    let {a,b} = x in y*toFloat(a)+b
 
 fun real g([{real, real}] x, real y) =
     let {a,b} = unzip(x) in

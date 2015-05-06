@@ -66,13 +66,15 @@ instance Hashable Uniqueness where
 data BasicType = Int
                | Bool
                | Char
-               | Real
+               | Float32
+               | Float64
                | Cert
                  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Non-array values.
 data BasicValue = IntVal !Int32
-                | RealVal !Double
+                | Float32Val !Float
+                | Float64Val !Double
                 | LogVal !Bool
                 | CharVal !Char
                 | Checked -- ^ The only value of type @cert@.
@@ -81,7 +83,8 @@ data BasicValue = IntVal !Int32
 -- | The type of a basic value.
 basicValueType :: BasicValue -> BasicType
 basicValueType (IntVal _) = Int
-basicValueType (RealVal _) = Real
+basicValueType (Float32Val _) = Float32
+basicValueType (Float64Val _) = Float64
 basicValueType (LogVal _) = Bool
 basicValueType (CharVal _) = Char
 basicValueType Checked = Cert
@@ -91,7 +94,8 @@ basicValueType Checked = Cert
 -- for e.g. creating arrays to be populated by do-loops.
 blankBasicValue :: BasicType -> BasicValue
 blankBasicValue Int = IntVal 0
-blankBasicValue Real = RealVal 0.0
+blankBasicValue Float32 = Float32Val 0.0
+blankBasicValue Float64 = Float64Val 0.0
 blankBasicValue Bool = LogVal False
 blankBasicValue Char = CharVal '\0'
 blankBasicValue Cert = Checked
@@ -100,14 +104,16 @@ instance Pretty BasicType where
   ppr Int = text "int"
   ppr Char = text "char"
   ppr Bool = text "bool"
-  ppr Real = text "real"
+  ppr Float32 = text "float32"
+  ppr Float64 = text "float64"
   ppr Cert = text "cert"
 
 instance Pretty BasicValue where
   ppr (IntVal x) = text $ show x
   ppr (CharVal c) = text $ show c
   ppr (LogVal b) = text $ show b
-  ppr (RealVal x) = text $ printf "%f" x
+  ppr (Float32Val x) = text $ printf "%f" x
+  ppr (Float64Val x) = text $ printf "%f" x
   ppr Checked = text "Checked"
 
 -- | The name of the default program entry point (main).
@@ -121,11 +127,18 @@ isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
 -- | A map of all built-in functions and their types.
 builtInFunctions :: HM.HashMap Name (BasicType,[BasicType])
 builtInFunctions = HM.fromList $ map namify
-                   [("toReal", (Real, [Int]))
-                   ,("trunc", (Int, [Real]))
-                   ,("sqrt", (Real, [Real]))
-                   ,("log", (Real, [Real]))
-                   ,("exp", (Real, [Real]))]
+                   [("toFloat32", (Float32, [Int]))
+                   ,("trunc32", (Int, [Float32]))
+                   ,("sqrt32", (Float32, [Float32]))
+                   ,("log32", (Float32, [Float32]))
+                   ,("exp32", (Float64, [Float64]))
+
+                   ,("toFloat64", (Float64, [Int]))
+                   ,("trunc64", (Int, [Float64]))
+                   ,("sqrt64", (Float64, [Float64]))
+                   ,("log64", (Float64, [Float64]))
+                   ,("exp64", (Float64, [Float64]))
+                   ]
   where namify (k,v) = (nameFromString k, v)
 
 -- | The abstract (not really) type representing names in the Futhark

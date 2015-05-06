@@ -32,7 +32,7 @@ fun {{int,[int]},[[int]],[real],[real],[int]} main(int m, *[int,n] A) =
                                 , Y0 )                    in
                     let Z = map ( fn real ([int] y) =>
                                     let rs = map( fn real (int u) =>
-                                                    toReal(3*u)
+                                                    toFloat(3*u)
                                                 , y )
                                     in  reduce(+, 0.0, rs )
                                 , Y )                     in

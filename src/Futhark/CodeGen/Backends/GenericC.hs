@@ -156,7 +156,8 @@ valueTypeName :: Type -> String
 valueTypeName (Scalar Int)  = "int"
 valueTypeName (Scalar Bool) = "bool"
 valueTypeName (Scalar Char) = "char"
-valueTypeName (Scalar Real) = "real"
+valueTypeName (Scalar Float32) = "float"
+valueTypeName (Scalar Float64) = "double"
 valueTypeName (Scalar Cert) = "cert"
 valueTypeName (Mem _ (Just space)) = space ++ "_mem"
 valueTypeName (Mem _ Nothing) = "mem"
@@ -175,7 +176,8 @@ scalarTypeToCTypeSpec :: BasicType -> C.TypeSpec
 scalarTypeToCTypeSpec Int  = C.Tint Nothing noLoc
 scalarTypeToCTypeSpec Bool = C.Tint Nothing noLoc
 scalarTypeToCTypeSpec Char = C.Tchar Nothing noLoc
-scalarTypeToCTypeSpec Real = C.Tdouble noLoc
+scalarTypeToCTypeSpec Float64 = C.Tdouble noLoc
+scalarTypeToCTypeSpec Float32 = C.Tfloat noLoc
 scalarTypeToCTypeSpec Cert = C.Tint Nothing noLoc
 
 qualsFromSpace :: Space -> CompilerM op [C.TypeQual]
@@ -222,7 +224,8 @@ printBasicStm :: C.Exp -> BasicType -> C.Stm
 printBasicStm val Int = [C.cstm|printf("%d", $exp:val);|]
 printBasicStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
 printBasicStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
-printBasicStm val Real = [C.cstm|printf("%.6f", $exp:val);|]
+printBasicStm val Float32 = [C.cstm|printf("%.6f", $exp:val);|]
+printBasicStm val Float64 = [C.cstm|printf("%.6f", $exp:val);|]
 printBasicStm _ Cert = [C.cstm|printf("Checked");|]
 
 -- | Return a statement printing the given value.
@@ -270,7 +273,8 @@ printStm (ArrayValue mem bt (dim:shape)) = do
 readFun :: BasicType -> Maybe String
 readFun Int  = Just "read_int"
 readFun Char = Just "read_char"
-readFun Real = Just "read_double"
+readFun Float32 = Just "read_float"
+readFun Float64 = Just "read_double"
 readFun _    = Nothing
 
 paramsTypes :: [Param] -> [Type]
@@ -493,8 +497,11 @@ compileBasicValue :: BasicValue -> C.Exp
 compileBasicValue (IntVal k) =
   [C.cexp|$int:k|]
 
-compileBasicValue (RealVal x) =
+compileBasicValue (Float64Val x) =
   [C.cexp|$double:(toRational x)|]
+
+compileBasicValue (Float32Val x) =
+  [C.cexp|$float:(toRational x)|]
 
 compileBasicValue (LogVal b) =
   [C.cexp|$int:b'|]

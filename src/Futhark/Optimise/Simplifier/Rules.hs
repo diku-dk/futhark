@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | This module defines a collection of simplification rules, as per
 -- "Futhark.Optimise.Simplifier.Rule".  They are used in the
@@ -387,68 +388,44 @@ simplifyBinOp :: LetTopDownRule lore u
 simplifyBinOp _ _ (BinOp Plus e1 e2 _)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1),  Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1+v2
-      (Constant (RealVal v1), Constant (RealVal v2)) ->
-        binOpRes $ RealVal $ v1+v2
-      _ -> Nothing
+  | otherwise = SubExp <$> numBinOp op e1 e2
+    where op x y = Just $ x + y
 
 simplifyBinOp _ _ (BinOp Minus e1 e2 _)
   | isCt0 e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1-v2
-      (Constant (RealVal v1), Constant (RealVal v2)) ->
-        binOpRes $ RealVal $ v1-v2
-      _ -> Nothing
+  | otherwise = SubExp <$> numBinOp op e1 e2
+    where op x y = Just $ x - y
 
 simplifyBinOp _ _ (BinOp Times e1 e2 _)
   | isCt0 e1 = Just $ SubExp e1
   | isCt0 e2 = Just $ SubExp e2
   | isCt1 e1 = Just $ SubExp e2
   | isCt1 e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1*v2
-      (Constant (RealVal v1), Constant (RealVal v2)) ->
-        binOpRes $ RealVal $ v1*v2
-      _ -> Nothing
+  | otherwise = SubExp <$> numBinOp op e1 e2
+    where op x y = Just $ x * y
 
 simplifyBinOp _ _ (BinOp Divide e1 e2 _)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 `div` v2
-      (Constant (RealVal v1), Constant (RealVal v2)) ->
-        binOpRes $ RealVal $ v1 / v2
-      _ -> Nothing
+  | otherwise = SubExp <$> intFloatBinOp intop floatop e1 e2
+  where intop x y = return $ x `div` y
+        floatop x y = return $ x / y
 
 simplifyBinOp _ _ (BinOp Mod e1 e2 _) =
-  case (e1, e2) of
-    (Constant (IntVal v1), Constant (IntVal v2)) ->
-      binOpRes $ IntVal $ v1 `mod` v2
-    _ -> Nothing
+  SubExp <$> intBinOp op e1 e2
+  where op x y = Just $ x `mod` y
 
 simplifyBinOp _ typeOf (BinOp Pow e1 e2 _)
   | isCt0 e2 =
     case typeOf e1 of
-      Just (Basic Int)  -> binOpRes $ IntVal 1
-      Just (Basic Real) -> binOpRes $ RealVal 1.0
-      _                 -> Nothing
+      Just (Basic Int)     -> binOpRes $ IntVal 1
+      Just (Basic Float32) -> binOpRes $ Float32Val 1.0
+      Just (Basic Float64) -> binOpRes $ Float64Val 1.0
+      _                    -> Nothing
   | isCt0 e1 || isCt1 e1 || isCt1 e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 ^ v2
-      (Constant (RealVal v1), Constant (RealVal v2)) ->
-        binOpRes $ RealVal $ v1**v2
-      _ -> Nothing
+  | otherwise = SubExp <$> intFloatBinOp intop floatop e1 e2
+  where intop x y = return $ x ^ y
+        floatop x y = return $ x ** y
 
 simplifyBinOp _ _ (BinOp ShiftL e1 e2 _)
   | isCt0 e2 = Just $ SubExp e1
@@ -533,48 +510,16 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2 _)
 
 simplifyBinOp _ _ (BinOp Equal e1 e2 _)
   | e1 == e2 = binOpRes $ LogVal True
-  | otherwise =
-    case (e1, e2) of
-      -- for numerals we could build node e1-e2, simplify and test equality with 0 or 0.0!
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ LogVal $ v1==v2
-      (Constant (RealVal v1), Constant (RealVal v2)) ->
-        binOpRes $ LogVal $ v1==v2
-      (Constant (LogVal  v1), Constant (LogVal v2)) ->
-        binOpRes $ LogVal $ v1==v2
-      (Constant (CharVal v1), Constant (CharVal v2)) ->
-        binOpRes $ LogVal $ v1==v2
-      _ -> Nothing
 
 simplifyBinOp _ _ (BinOp Less e1 e2 _)
   | e1 == e2 = binOpRes $ LogVal False
-  | otherwise =
-  case (e1, e2) of
-    -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-    (Constant (IntVal v1), Constant (IntVal v2)) ->
-      binOpRes $ LogVal $ v1<v2
-    (Constant (RealVal v1), Constant (RealVal v2)) ->
-      binOpRes $ LogVal $ v1<v2
-    (Constant (LogVal  v1), Constant (LogVal v2)) ->
-      binOpRes $ LogVal $ v1<v2
-    (Constant (CharVal v1), Constant (CharVal v2)) ->
-      binOpRes $ LogVal $ v1<v2
-    _ -> Nothing
+  | otherwise = SubExp <$> ordBinOp op e1 e2
+  where op x y = return $ x < y
 
 simplifyBinOp _ _ (BinOp Leq e1 e2 _)
   | e1 == e2 = binOpRes $ LogVal True
-  | otherwise =
-  case (e1, e2) of
-    -- for numerals we could build node e1-e2, simplify and compare with 0 or 0.0!
-    (Constant (IntVal  v1), Constant (IntVal  v2)) ->
-      binOpRes $ LogVal $ v1<=v2
-    (Constant (RealVal v1), Constant (RealVal v2)) ->
-      binOpRes $ LogVal $ v1<=v2
-    (Constant (LogVal  v1), Constant (LogVal  v2)) ->
-      binOpRes $ LogVal $ v1<=v2
-    (Constant (CharVal v1), Constant (CharVal v2 )) ->
-      binOpRes $ LogVal $ v1<=v2
-    _ -> Nothing
+  | otherwise = SubExp <$> ordBinOp op e1 e2
+  where op x y = return $ x <= y
 
 simplifyBinOp _ _ _ = Nothing
 
@@ -594,7 +539,9 @@ simplifyComplement _ _ _ = Nothing
 simplifyNegate :: LetTopDownRule lore u
 simplifyNegate _ _ (Negate (Constant (IntVal v))) =
   Just $ SubExp $ constant $ negate v
-simplifyNegate _ _ (Negate (Constant (RealVal v))) =
+simplifyNegate _ _ (Negate (Constant (Float32Val v))) =
+  Just $ SubExp $ constant $ negate v
+simplifyNegate _ _ (Negate (Constant (Float64Val v))) =
   Just $ SubExp $ constant $ negate v
 simplifyNegate _ _ _ =
   Nothing
@@ -842,16 +789,18 @@ simplifyEqualBranchResult _ _ = cannotSimplify
 -- Some helper functions
 
 isCt1 :: SubExp -> Bool
-isCt1 (Constant (IntVal x))  = x == 1
-isCt1 (Constant (RealVal x)) = x == 1
-isCt1 (Constant (LogVal x))  = x
-isCt1 _                      = False
+isCt1 (Constant (IntVal x))     = x == 1
+isCt1 (Constant (Float32Val x)) = x == 1
+isCt1 (Constant (Float64Val x)) = x == 1
+isCt1 (Constant (LogVal x))     = x
+isCt1 _                         = False
 
 isCt0 :: SubExp -> Bool
-isCt0 (Constant (IntVal x))  = x == 0
-isCt0 (Constant (RealVal x)) = x == 0
-isCt0 (Constant (LogVal x))  = not x
-isCt0 _                      = False
+isCt0 (Constant (IntVal x))     = x == 0
+isCt0 (Constant (Float32Val x)) = x == 0
+isCt0 (Constant (Float64Val x)) = x == 0
+isCt0 (Constant (LogVal x))     = not x
+isCt0 _                         = False
 
 ctIndex :: [SubExp] -> Maybe [Int32]
 ctIndex [] = Just []
@@ -866,3 +815,52 @@ arrLitInd e [] = Just e
 arrLitInd (ArrayLit els _) (i:is)
   | i >= 0, i < genericLength els = arrLitInd (SubExp $ els !! fromIntegral i) is
 arrLitInd _ _ = Nothing
+
+ordBinOp :: Monad m =>
+            (forall a. Ord a => a -> a -> m Bool)
+         -> SubExp -> SubExp -> m SubExp
+ordBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
+  Constant <$> LogVal <$> x `op` y
+ordBinOp op (Constant (CharVal x)) (Constant (CharVal y)) =
+  Constant <$> LogVal <$> x `op` y
+ordBinOp op (Constant (Float32Val x)) (Constant (Float32Val y)) =
+  Constant <$> LogVal <$> x `op` y
+ordBinOp op (Constant (Float64Val x)) (Constant (Float64Val y)) =
+  Constant <$> LogVal <$> x `op` y
+ordBinOp op (Constant (LogVal x)) (Constant (LogVal y)) =
+  Constant <$> LogVal <$> x `op` y
+ordBinOp _ _ _ =
+  fail "ordBinOp: operands not of appropriate type."
+
+numBinOp :: Monad m =>
+            (forall num. Num num => num -> num -> m num)
+         -> SubExp -> SubExp -> m SubExp
+numBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
+  Constant <$> IntVal <$> x `op` y
+numBinOp op (Constant (Float32Val x)) (Constant (Float32Val y)) =
+  Constant <$> Float32Val <$> x `op` y
+numBinOp op (Constant (Float64Val x)) (Constant (Float64Val y)) =
+  Constant <$> Float64Val <$> x `op` y
+numBinOp _ _ _ =
+  fail "numBinOp: operands not of appropriate type."
+
+intBinOp :: Monad m =>
+            (forall int. Integral int => int -> int -> m int)
+         -> SubExp -> SubExp -> m SubExp
+intBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
+  Constant <$> IntVal <$> x `op` y
+intBinOp _ _ _ =
+  fail "intBinOp: operands not of appropriate type."
+
+intFloatBinOp :: Monad m =>
+                 (forall int. Integral int => int -> int -> m int)
+              -> (forall float. Floating float => float -> float -> m float)
+              -> SubExp -> SubExp -> m SubExp
+intFloatBinOp intop _ (Constant (IntVal x)) (Constant (IntVal y)) =
+  Constant <$> IntVal <$> x `intop` y
+intFloatBinOp _ floatop (Constant (Float32Val x)) (Constant (Float32Val y)) =
+  Constant <$> Float32Val <$> x `floatop` y
+intFloatBinOp _ floatop (Constant (Float64Val x)) (Constant (Float64Val y)) =
+  Constant <$> Float64Val <$> x `floatop` y
+intFloatBinOp _ _ _ _ =
+  fail "intFloatBinOp: operands not of appropriate type."

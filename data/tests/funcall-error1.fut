@@ -2,6 +2,6 @@
 // --
 // error: In call of function f.*expecting 2 argument\(s\).*but got 3 arguments
 
-fun real f(int x, real y) = toReal(x) + y
+fun real f(int x, real y) = toFloat(x) + y
 
 fun real main() = f(2, 2.0, 3)

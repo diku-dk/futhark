@@ -24,6 +24,7 @@ module Futhark.Pipeline
   , basicAction
   , explicitMemoryAction
   , FutharkConfig(..)
+  , module Language.Futhark.Parser.RealConfiguration
   , verbose
   )
 
@@ -45,6 +46,7 @@ import qualified Futhark.Representation.Basic as Basic
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.TypeCheck
 import Futhark.Analysis.Alias
+import Language.Futhark.Parser.RealConfiguration
 
 runPasses :: FutharkConfig -> PipelineState -> FutharkM PipelineState
 runPasses config startprog =
@@ -146,6 +148,7 @@ data FutharkConfig = FutharkConfig {
   , futharkcheckAliases :: Bool
   , futharkverbose :: Maybe (Maybe FilePath)
   , futharkboundsCheck :: Bool
+  , futharkRealConfiguration :: RealConfiguration
 }
 
 verbose :: FutharkConfig -> Bool

@@ -7,7 +7,6 @@ module Language.Futhark.Parser.Parser
   , lambda
   , futharktype
   , intValue
-  , realValue
   , boolValue
   , charValue
   , stringValue
@@ -16,6 +15,7 @@ module Language.Futhark.Parser.Parser
   , tupleValue
   , anyValue
   , anyValues
+  , ParserEnv (..)
   , ParserMonad
   , ReadLineMonad(..)
   , getLinesFromIO
@@ -32,8 +32,9 @@ import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
+import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
-import Data.Int (Int32)
+import qualified Data.HashMap.Lazy as HM
 
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes
@@ -47,7 +48,6 @@ import Language.Futhark.Parser.Lexer
 %name lambda FunAbstr
 %name futharktype Type
 %name intValue IntValue
-%name realValue RealValue
 %name boolValue LogValue
 %name charValue CharValue
 %name certValue CertValue
@@ -248,7 +248,7 @@ TupleArrayElemType : BasicType                   { BasicArrayElem $1 NoInfo }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
 BasicType : int           { Int }
-          | real          { Real }
+          | real          {% getRealType }
           | bool          { Bool }
           | cert          { Cert }
           | char          { Char }
@@ -265,7 +265,7 @@ TypeIds : Type id ',' TypeIds
 
 Exp  :: { UncheckedExp }
      : intlit         { let L pos (INTLIT num) = $1 in Literal (BasicVal $ IntVal num) pos }
-     | reallit        { let L pos (REALLIT num) = $1 in Literal (BasicVal $ RealVal num) pos }
+     | reallit        {% let L pos (REALLIT num) = $1 in (liftM2 (Literal . BasicVal) (getRealValue num) (pure pos)) }
      | charlit        { let L pos (CHARLIT char) = $1 in Literal (BasicVal $ CharVal char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
                         in Literal (ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Basic Char) pos }
@@ -304,10 +304,12 @@ Exp  :: { UncheckedExp }
                       { If $2 $4 $6 NoInfo $1 }
 
      | id '(' Exps ')'
-                      { let L pos (ID name) = $1
-                        in Apply name [ (arg, Observe) | arg <- $3 ] NoInfo pos }
-     | id '(' ')'     { let L pos (ID name) = $1
-                        in Apply name [] NoInfo pos }
+                      {% let L pos (ID name) = $1 in do{
+                            name' <- getFunName name;
+                            return (Apply name' [ (arg, Observe) | arg <- $3 ] NoInfo pos)}
+                      }
+     | id '(' ')'     {% let L pos (ID name) = $1
+                        in do { name' <- getFunName name; return (Apply name' [] NoInfo pos) } }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
@@ -431,11 +433,14 @@ FunAbstr :: { UncheckedLambda }
          : fn Type '(' TypeIds ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
-           { let L pos (ID name) = $1 in CurryFun name $3 NoInfo pos }
+           {% let L pos (ID name) = $1 in do {
+             name' <- getFunName name; return (CurryFun name' $3 NoInfo pos) } }
          | id '(' ')'
-           { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
+           {% let L pos (ID name) = $1 in do {
+             name' <- getFunName name; return (CurryFun name' [] NoInfo pos) } }
          | id
-           { let L pos (ID name) = $1 in CurryFun name [] NoInfo pos }
+           {% let L pos (ID name) = $1 in do {
+             name' <- getFunName name; return (CurryFun name' [] NoInfo pos ) } }
            -- Minus is handed explicitly here because I could figure
            -- out how to resolve the ambiguity with negation.
          | '-' Exp
@@ -480,8 +485,8 @@ NaturalInts :: { [Int] }
 
 IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num }
          | '-' intlit    { let L pos (INTLIT num) = $2 in BasicVal $ IntVal (-num) }
-RealValue : reallit      { let L pos (REALLIT num) = $1 in BasicVal $ RealVal num }
-          | '-' reallit      { let L pos (REALLIT num) = $2 in BasicVal $ RealVal (-num) }
+RealValue : reallit      {% let L pos (REALLIT num) = $1 in liftM BasicVal (getRealValue num) }
+          | '-' reallit  {% let L pos (REALLIT num) = $2 in liftM BasicVal (getRealValue (-num)) }
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in BasicVal $ CharVal char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Basic Char }
 LogValue : true          { BasicVal $ LogVal True }
@@ -505,9 +510,16 @@ Values : Value ',' Values { $1 : $3 }
 
 {
 
+data ParserEnv = ParserEnv {
+                 parserFile :: FilePath
+               , parserRealType :: BasicType
+               , parserRealFun :: Double -> BasicValue
+               , parserFunMap :: HM.HashMap Name Name
+               }
+
 type ParserMonad a =
   ExceptT String (
-    ReaderT FilePath (
+    ReaderT ParserEnv (
        StateT [L Token] ReadLineMonad)) a
 
 data ReadLineMonad a = Value a
@@ -569,7 +581,18 @@ putTokens :: [L Token] -> ParserMonad ()
 putTokens ts = lift $ lift $ put ts
 
 getFilename :: ParserMonad FilePath
-getFilename = lift ask
+getFilename = lift $ asks parserFile
+
+getRealType :: ParserMonad BasicType
+getRealType = lift $ asks parserRealType
+
+getRealValue :: Double -> ParserMonad BasicValue
+getRealValue x = do f <- lift $ asks parserRealFun
+                    return $ f x
+
+getFunName :: Name -> ParserMonad Name
+getFunName name = do substs <- lift $ asks parserFunMap
+                     return $ fromMaybe name $ HM.lookup name substs
 
 readLine :: ParserMonad String
 readLine = lift $ lift $ lift readLineFromMonad

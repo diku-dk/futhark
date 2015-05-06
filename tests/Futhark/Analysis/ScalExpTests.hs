@@ -79,7 +79,8 @@ identifier = do s <- (:) <$> letter <*> many alphaNum
   where varDecl s = do
           t <- parens $
                (reserved "int" >> pure (Basic Int)) <|>
-               (reserved "real" >> pure (Basic Real)) <|>
+               (reserved "float32" >> pure (Basic Float32)) <|>
+               (reserved "float64" >> pure (Basic Float64)) <|>
                (reserved "bool" >> pure (Basic Bool))
           newVar s t
 

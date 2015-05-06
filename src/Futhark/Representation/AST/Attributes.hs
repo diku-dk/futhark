@@ -102,10 +102,12 @@ asSegOp _          = Nothing
 safeExp :: Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
   where safePrimOp (BinOp Divide _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (RealVal k)) _) = k /= 0
+        safePrimOp (BinOp Divide _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp Divide _ (Constant (Float64Val k)) _) = k /= 0
         safePrimOp (BinOp Divide _ _ _) = False
         safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Mod _ (Constant (RealVal k)) _) = k /= 0
+        safePrimOp (BinOp Mod _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0
         safePrimOp (BinOp Mod _ _ _) = False
         safePrimOp (BinOp Pow _ _ _) = False
         safePrimOp (BinOp {}) = True

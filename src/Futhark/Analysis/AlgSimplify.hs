@@ -738,7 +738,8 @@ simplifyScal (SPow e1 e2) = do
             | v2 < 0, v1 == 0 = badAlgSimplifyM "powVals: Negative exponential with zero base"
             | v2 < 0          = return $ IntVal ( 1 `div` (v1 ^ (-v2)) )
             | otherwise       = return $ IntVal ( v1 ^ v2 )
-        powVals (RealVal v1) (RealVal v2) = return $ RealVal (v1 ** v2)
+        powVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1 ** v2)
+        powVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1 ** v2)
         powVals _ _ = badAlgSimplifyM  "powVals: operands not of (the same) numeral type! "
 
 -----------------------------------------------------
@@ -994,7 +995,7 @@ simplifyAndOr is_and fs =
                         diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1
                         return $ diffrel == LogCt True
                     (_, _, Int) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
-                    (_, _, Real)-> do
+                    (_, _, t) | t `elem` [Float32, Float64] -> do
                         e2me1 <- toNumSofP =<< simplifyScal (SMinus e2' e1')
                         let rel = if (rel1,rel2) == (LEQ0, LTH0) then LTH0 else LEQ0
                         diffrel <- simplifyNRel $ NRelExp rel e2me1
@@ -1195,67 +1196,79 @@ discriminate e@((k,v):t) (k', v') =
 ------------------------------------------------------
 
 getZero :: BasicType -> AlgSimplifyM BasicValue
-getZero Int  = return $ IntVal 0
-getZero Real = return $ RealVal 0.0
-getZero tp   = badAlgSimplifyM ("getZero for type: "++pretty tp)
+getZero Int     = return $ IntVal 0
+getZero Float32 = return $ Float32Val 0.0
+getZero Float64 = return $ Float64Val 0.0
+getZero tp      = badAlgSimplifyM ("getZero for type: "++pretty tp)
 
 getPos1 :: BasicType -> AlgSimplifyM BasicValue
-getPos1 Int  = return $  IntVal 1
-getPos1 Real = return $ RealVal 1.0
-getPos1 tp   = badAlgSimplifyM ("getOne for type: "++pretty tp)
+getPos1 Int     = return $ IntVal 1
+getPos1 Float32 = return $ Float32Val 1
+getPos1 Float64 = return $ Float64Val 1.0
+getPos1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 getNeg1 :: BasicType -> AlgSimplifyM BasicValue
-getNeg1 Int  = return $  IntVal (-1)
-getNeg1 Real = return $ RealVal (-1.0)
-getNeg1 tp   = badAlgSimplifyM ("getOne for type: "++pretty tp)
+getNeg1 Int     = return $  IntVal (-1)
+getNeg1 Float32 = return $ Float32Val (-1.0)
+getNeg1 Float64 = return $ Float64Val (-1.0)
+getNeg1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 isZero :: BasicValue -> Bool
-isZero (IntVal  v) = v == 0
-isZero (RealVal v) = v == 0.0
-isZero (_)         = False
+isZero (IntVal  v)    = v == 0
+isZero (Float32Val v) = v == 0.0
+isZero (Float64Val v) = v == 0.0
+isZero (_)            = False
 
 valLTHEQ0 :: RelOp0 -> BasicValue -> AlgSimplifyM Bool
-valLTHEQ0 rel ( IntVal v) = return $ if rel==LEQ0 then v <= 0   else v < 0
-valLTHEQ0 rel (RealVal v) = return $ if rel==LEQ0 then v <= 0.0 else v < 0.0
+valLTHEQ0 rel ( IntVal v)    = return $ if rel==LEQ0 then v <= 0   else v < 0
+valLTHEQ0 rel (Float32Val v) = return $ if rel==LEQ0 then v <= 0.0 else v < 0.0
+valLTHEQ0 rel (Float64Val v) = return $ if rel==LEQ0 then v <= 0.0 else v < 0.0
 valLTHEQ0 _ _ = badAlgSimplifyM "valLTHEQ0 for non-numeric type!"
 
 isOne :: BasicValue -> Bool
-isOne (IntVal  v) = v == 1
-isOne (RealVal v) = v == 1.0
-isOne (_)         = False
+isOne (IntVal  v)    = v == 1
+isOne (Float32Val v) = v == 1.0
+isOne (Float64Val v) = v == 1.0
+isOne (_)            = False
 
 isCt1 :: ScalExp -> Bool
-isCt1 (Val (IntVal  one)) = one == 1
-isCt1 (Val (RealVal one)) = one == 1.0
-isCt1 _                   = False
+isCt1 (Val (IntVal  one))    = one == 1
+isCt1 (Val (Float32Val one)) = one == 1.0
+isCt1 (Val (Float64Val one)) = one == 1.0
+isCt1 _                     = False
 
 isCt0 :: ScalExp -> Bool
-isCt0 (Val (IntVal  zr)) = zr == 0
-isCt0 (Val (RealVal zr)) = zr == 0.0
-isCt0 __                 = False
+isCt0 (Val (IntVal  zr))    = zr == 0
+isCt0 (Val (Float32Val zr)) = zr == 0.0
+isCt0 (Val (Float64Val zr)) = zr == 0.0
+isCt0 __                    = False
 
 
 addVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
-addVals (IntVal v1)  (IntVal v2)  = return $  IntVal (v1+v2)
-addVals (RealVal v1) (RealVal v2) = return $ RealVal (v1+v2)
+addVals (IntVal v1)     (IntVal v2)  = return $  IntVal (v1+v2)
+addVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1+v2)
+addVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1+v2)
 addVals _ _ =
   badAlgSimplifyM "addVals: operands not of (the same) numeral type! "
 
 mulVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
-mulVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1*v2)
-mulVals (RealVal v1) (RealVal v2) = return $ RealVal (v1*v2)
+mulVals (IntVal v1)     (IntVal v2)  = return $ IntVal (v1*v2)
+mulVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1*v2)
+mulVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1*v2)
 mulVals v1 v2 =
   badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++pretty (BasicVal v1)++" "++pretty (BasicVal v2)
 
 divVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
-divVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1 `div` v2)
-divVals (RealVal v1) (RealVal v2) = return $ RealVal (v1/v2)
+divVals (IntVal v1)     (IntVal v2)  = return $ IntVal (v1 `div` v2)
+divVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1/v2)
+divVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1/v2)
 divVals _ _ =
   badAlgSimplifyM "divVals: operands not of (the same) numeral type! "
 
 canDivValsEvenly :: BasicValue -> BasicValue -> AlgSimplifyM Bool
-canDivValsEvenly (IntVal v1)  (IntVal v2) = return $ v1 `mod` v2 == 0
-canDivValsEvenly (RealVal _) (RealVal _) = return True
+canDivValsEvenly (IntVal v1)    (IntVal v2) = return $ v1 `mod` v2 == 0
+canDivValsEvenly (Float32Val _) (Float32Val _) = return True
+canDivValsEvenly (Float64Val _) (Float64Val _) = return True
 canDivValsEvenly _ _ =
   badAlgSimplifyM "canDivValsEvenly: operands not of (the same) numeral type!"
 
@@ -1344,9 +1357,12 @@ tryDivTriv (SPow a e1) (SPow d e2)
                                     then (True,  SPow a e1me2)
                                     else (False, SDivide (SPow a e1) (SPow d e2))
 
-            (Real, Val (RealVal 0.0))   -> return (True, Val one)
-            (Real, Val (RealVal 1.0))   -> return (True, a)
-            (Real, Val (RealVal (-1.0)))-> return (True, SDivide (Val $ RealVal 1.0) a)
+            (Float32, Val (Float32Val 0.0))   -> return (True, Val one)
+            (Float32, Val (Float32Val 1.0))   -> return (True, a)
+            (Float32, Val (Float32Val (-1.0)))-> return (True, SDivide (Val $ Float32Val 1.0) a)
+            (Float64, Val (Float64Val 0.0))   -> return (True, Val one)
+            (Float64, Val (Float64Val 1.0))   -> return (True, a)
+            (Float64, Val (Float64Val (-1.0)))-> return (True, SDivide (Val $ Float64Val 1.0) a)
             (_, _) -> return (False, SDivide (SPow a e1) (SPow d e2))
 
     | otherwise = return (False, SDivide (SPow a e1) (SPow d e2))

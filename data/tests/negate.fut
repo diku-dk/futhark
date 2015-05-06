@@ -8,4 +8,4 @@
 //   [-1.000000, -2.000000, -3.000000]
 // }
 fun {[int],[real]} main([int] a) =
-    {map(0-, a), map(0.0-, map(toReal, a))}
+    {map(0-, a), map(0.0-, map(toFloat, a))}

@@ -41,7 +41,8 @@ instance Arbitrary BasicType where
 
 instance Arbitrary BasicValue where
   arbitrary = oneof [ IntVal <$> arbitrary
-                    , RealVal <$> arbitrary
+                    , Float32Val <$> arbitrary
+                    , Float64Val <$> arbitrary
                     , LogVal <$> arbitrary
                     , CharVal <$> arbitrary
                     , pure Checked]
@@ -54,7 +55,8 @@ instance Arbitrary VName where
 
 arbitraryBasicValOfType :: BasicType -> Gen BasicValue
 arbitraryBasicValOfType Int  = IntVal <$> arbitrary
-arbitraryBasicValOfType Real = RealVal <$> arbitrary
+arbitraryBasicValOfType Float32 = Float32Val <$> arbitrary
+arbitraryBasicValOfType Float64 = Float64Val <$> arbitrary
 arbitraryBasicValOfType Bool = LogVal <$> arbitrary
 arbitraryBasicValOfType Char = CharVal <$> arbitrary
 arbitraryBasicValOfType Cert = return Checked

@@ -29,6 +29,7 @@ newFutharkConfig = FutharkConfig { futharkpipeline = []
                                  , futharkcheckAliases = True
                                  , futharkverbose = Nothing
                                  , futharkboundsCheck = True
+                                 , futharkRealConfiguration = RealAsFloat64
                                  }
 
 runCompilerOnProgram :: FutharkConfig -> FilePath -> IO ()
@@ -63,7 +64,7 @@ runPipelineOnSource config filename srccode = do
   case res of (Left err, msgs)  -> return (msgs, Left err)
               (Right prog, msgs) -> return (msgs, Right prog)
   where futharkc' = do
-          parsed_prog <- parseSourceProgram filename srccode
+          parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
           ext_prog    <- typeCheckSourceProgram config parsed_prog
           case internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog of
             Left err ->
@@ -80,10 +81,10 @@ typeCheck checkProg checkProgNoUniqueness config
   | futharkcheckAliases config = checkProg
   | otherwise                  = checkProgNoUniqueness
 
-parseSourceProgram :: FilePath -> String
+parseSourceProgram :: RealConfiguration -> FilePath -> String
                    -> FutharkM E.UncheckedProg
-parseSourceProgram filename file_contents =
-  case parseFuthark filename file_contents of
+parseSourceProgram rconf filename file_contents =
+  case parseFuthark rconf filename file_contents of
     Left err   -> compileError (show err) Nothing
     Right prog -> return prog
 
@@ -102,11 +103,11 @@ typeCheckInternalProgram config prog =
                 Just $ Basic prog
     Right () -> return ()
 
-interpretAction' :: Action
-interpretAction' = interpretAction parseValues'
+interpretAction' :: RealConfiguration -> Action
+interpretAction' rconf = interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
-          liftM concat $ mapM internalise =<< parseValues path s
+          liftM concat $ mapM internalise =<< parseValues rconf path s
         internalise v =
           maybe (Left $ ParseError $ "Invalid input value: " ++ I.pretty v) Right $
           internaliseValue v

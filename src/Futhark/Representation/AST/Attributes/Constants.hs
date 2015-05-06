@@ -24,7 +24,10 @@ instance IsValue Int32 where
   value = IntVal
 
 instance IsValue Double where
-  value = RealVal
+  value = Float64Val
+
+instance IsValue Float where
+  value = Float32Val
 
 instance IsValue Bool where
   value = LogVal

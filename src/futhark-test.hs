@@ -140,7 +140,7 @@ parseValues = do s <- parseBlock
 
 parseValuesFromString :: SourceName -> String -> Either F.ParseError [Value]
 parseValuesFromString srcname s =
-  liftM concat $ mapM internalise =<< F.parseValues srcname s
+  liftM concat $ mapM internalise =<< F.parseValues F.RealAsFloat64 srcname s
   where internalise v =
           maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
           internaliseValue v
@@ -376,9 +376,19 @@ compareValue _ _ =
   False
 
 compareBasicValue :: BasicValue -> BasicValue -> Bool
-compareBasicValue (RealVal x) (RealVal y) = abs (x - y) < epsilon
-  where epsilon = 0.0001
+compareBasicValue (Float32Val x) (Float32Val y) = floatToDouble (abs (x - y)) < epsilon
+compareBasicValue (Float64Val x) (Float64Val y) = abs (x - y) < epsilon
+compareBasicValue (Float64Val x) (Float32Val y) = abs (x - floatToDouble y) < epsilon
+compareBasicValue (Float32Val x) (Float64Val y) = abs (floatToDouble x - y) < epsilon
 compareBasicValue x y = x == y
+
+epsilon :: Double
+epsilon = 0.001
+
+floatToDouble :: Float -> Double
+floatToDouble x =
+  let (m,n) = decodeFloat x
+  in encodeFloat m n
 
 ---
 --- Test manager

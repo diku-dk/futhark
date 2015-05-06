@@ -6,6 +6,9 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleFieldExp
   , funName
   , builtInFunctionDefs
+    -- * Specific builtin functions
+  , c_toFloat32, c_trunc32, c_log32, c_sqrt32, c_exp32
+  , c_toFloat64, c_trunc64, c_log64, c_sqrt64, c_exp64
   )
   where
 
@@ -43,36 +46,82 @@ tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 funName :: Name -> String
 funName = ("futhark_"++) . nameToString
 
+funName' :: String -> String
+funName' = funName . nameFromString
+
+c_toFloat32 :: C.Func
+c_toFloat32 = [C.cfun|
+              float $id:(funName' "toFloat32")(int x) {
+                return x;
+              }
+             |]
+
+c_trunc32 :: C.Func
+c_trunc32 = [C.cfun|
+    int $id:(funName' "trunc32")(float x) {
+      return x;
+    }
+   |]
+
+c_log32 :: C.Func
+c_log32 = [C.cfun|
+    float $id:(funName' "log32")(float x) {
+      return log(x);
+    }
+    |]
+
+c_sqrt32 :: C.Func
+c_sqrt32 = [C.cfun|
+    float $id:(funName' "sqrt32")(float x) {
+      return sqrt(x);
+    }
+    |]
+
+c_exp32 ::C.Func
+c_exp32 = [C.cfun|
+    float $id:(funName' "exp32")(float x) {
+      return exp(x);
+    }
+  |]
+
+c_toFloat64 :: C.Func
+c_toFloat64 = [C.cfun|
+              double $id:(funName' "toFloat64")(int x) {
+                return x;
+              }
+             |]
+
+c_trunc64 :: C.Func
+c_trunc64 = [C.cfun|
+    int $id:(funName' "trunc64")(double x) {
+      return x;
+    }
+   |]
+
+c_log64 :: C.Func
+c_log64 = [C.cfun|
+    double $id:(funName' "log64")(double x) {
+      return log(x);
+    }
+    |]
+
+c_sqrt64 :: C.Func
+c_sqrt64 = [C.cfun|
+    double $id:(funName' "sqrt64")(double x) {
+      return sqrt(x);
+    }
+    |]
+
+c_exp64 ::C.Func
+c_exp64 = [C.cfun|
+    double $id:(funName' "exp64")(double x) {
+      return exp(x);
+    }
+  |]
+
+
 -- | C definitions of the Futhark "standard library".
 builtInFunctionDefs :: [C.Func]
 builtInFunctionDefs =
-  [[C.cfun|
-    double $id:(funName' "toReal")(int x) {
-      return x;
-    }
-   |],
-
-   [C.cfun|
-    int $id:(funName' "trunc")(double x) {
-      return x;
-    }
-   |],
-
-   [C.cfun|
-    double $id:(funName' "log")(double x) {
-      return log(x);
-    }
-    |],
-
-   [C.cfun|
-    double $id:(funName' "sqrt")(double x) {
-      return sqrt(x);
-    }
-    |],
-
-   [C.cfun|
-    double $id:(funName' "exp")(double x) {
-      return exp(x);
-    }
-  |]]
-  where funName' = funName . nameFromString
+  [c_toFloat32, c_trunc32, c_log32, c_sqrt32, c_exp32,
+   c_toFloat64, c_trunc64, c_log64, c_sqrt64, c_exp64]

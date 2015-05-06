@@ -657,7 +657,7 @@ checkPrimOp (Complement e) =
   require [Basic Int] e
 
 checkPrimOp (Negate e) =
-  require [Basic Int, Basic Real] e
+  require [Basic Int, Basic Float32, Basic Float64] e
 
 checkPrimOp (Index cs ident idxes) = do
   mapM_ (requireI [Basic Cert]) cs
@@ -1008,11 +1008,11 @@ checkExtType t = mapM_ checkExtDim $ extShapeDims $ arrayShape t
 checkBinOp :: Checkable lore =>
               BinOp -> SubExp -> SubExp -> BasicType
            -> TypeM lore ()
-checkBinOp Plus e1 e2 t = checkPolyBinOp Plus [Real, Int] e1 e2 t
-checkBinOp Minus e1 e2 t = checkPolyBinOp Minus [Real, Int] e1 e2 t
-checkBinOp Pow e1 e2 t = checkPolyBinOp Pow [Real, Int] e1 e2 t
-checkBinOp Times e1 e2 t = checkPolyBinOp Times [Real, Int] e1 e2 t
-checkBinOp Divide e1 e2 t = checkPolyBinOp Divide [Real, Int] e1 e2 t
+checkBinOp Plus e1 e2 t = checkPolyBinOp Plus [Float32, Float64, Int] e1 e2 t
+checkBinOp Minus e1 e2 t = checkPolyBinOp Minus [Float32, Float64, Int] e1 e2 t
+checkBinOp Pow e1 e2 t = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t
+checkBinOp Times e1 e2 t = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t
+checkBinOp Divide e1 e2 t = checkPolyBinOp Divide [Float32, Float64, Int] e1 e2 t
 checkBinOp Mod e1 e2 t = checkPolyBinOp Mod [Int] e1 e2 t
 checkBinOp ShiftR e1 e2 t = checkPolyBinOp ShiftR [Int] e1 e2 t
 checkBinOp ShiftL e1 e2 t = checkPolyBinOp ShiftL [Int] e1 e2 t
@@ -1021,9 +1021,9 @@ checkBinOp Xor e1 e2 t = checkPolyBinOp Xor [Int] e1 e2 t
 checkBinOp Bor e1 e2 t = checkPolyBinOp Bor [Int] e1 e2 t
 checkBinOp LogAnd e1 e2 t = checkPolyBinOp LogAnd [Bool] e1 e2 t
 checkBinOp LogOr e1 e2 t = checkPolyBinOp LogOr [Bool] e1 e2 t
-checkBinOp Equal e1 e2 t = checkRelOp Equal [Int, Real] e1 e2 t
-checkBinOp Less e1 e2 t = checkRelOp Less [Int, Real] e1 e2 t
-checkBinOp Leq e1 e2 t = checkRelOp Leq [Int, Real] e1 e2 t
+checkBinOp Equal e1 e2 t = checkRelOp Equal [Int, Float32, Float64] e1 e2 t
+checkBinOp Less e1 e2 t = checkRelOp Less [Int, Float32, Float64] e1 e2 t
+checkBinOp Leq e1 e2 t = checkRelOp Leq [Int, Float32, Float64] e1 e2 t
 
 checkRelOp :: Checkable lore =>
               BinOp -> [BasicType]

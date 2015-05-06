@@ -111,12 +111,7 @@ instance Rename ScalExp where
     return $ substituteNames substs se
 
 scalExpType :: ScalExp -> BasicType
-scalExpType (Val ( IntVal _) ) = Int
-scalExpType (Val (RealVal _) ) = Real
-scalExpType (Val ( LogVal _) ) = Bool
-scalExpType (Val val) =
-  error $ "scalExpType: scalar exp cannot have type " ++
-          pretty (basicValueType val) ++ "."
+scalExpType (Val v) = basicValueType v
 scalExpType (Id _ t) =
   t
 scalExpType (SNeg  e) = scalExpType e
@@ -213,8 +208,9 @@ expandScalExp look (RelExp relop x) = RelExp relop $ expandScalExp look x
 -- and if so just returns the first argument.
 sminus :: ScalExp -> ScalExp -> ScalExp
 sminus x (Val (IntVal 0))  = x
-sminus x (Val (RealVal 0)) = x
-sminus x y                 = x `SMinus` y
+sminus x (Val (Float32Val 0)) = x
+sminus x (Val (Float64Val 0)) = x
+sminus x y = x `SMinus` y
 
 -- | Take the product of a list of 'ScalExp's, or the integer @1@ if
 -- the list is empty.

@@ -38,7 +38,8 @@ commandLineOptions =
     (NoArg $ Right $ \opts -> opts { futharkaction = printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
   , Option "i" ["interpret"]
-    (NoArg $ Right $ \opts -> opts { futharkaction = interpretAction' })
+    (NoArg $ Right $ \opts -> opts { futharkaction = interpretAction' $
+                                                     futharkRealConfiguration opts })
     "Run the program via an interpreter."
   , Option [] ["externalise"]
     (NoArg $ Right $ \opts -> opts { futharkaction = externaliseAction})
@@ -49,6 +50,12 @@ commandLineOptions =
   , Option [] ["no-bounds-checking"]
     (NoArg $ Right $ \opts -> opts { futharkboundsCheck = False })
     "Do not perform bounds checking in the generated program."
+  , Option [] ["real-as-single"]
+    (NoArg $ Right $ \config -> config { futharkRealConfiguration = RealAsFloat32 } )
+    "Map 'real' to 32-bit floating point."
+  , Option [] ["real-as-double"]
+    (NoArg $ Right $ \config -> config { futharkRealConfiguration = RealAsFloat64 } )
+    "Map 'real' to 64-bit floating point (the default)."
   , passoption "Remove debugging annotations from program." uttransform
     "u" ["untrace"]
   , passoption "Transform all second-order array combinators to for-loops." fotransform
