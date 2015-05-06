@@ -149,7 +149,7 @@ allocForArray t = do
   size <-
     computeSize "bytes" $
     SE.sproduct $
-    (SE.Val $ IntVal $ basicSize $ elemType t) :
+    (SE.Val $ IntVal $ fromIntegral $ basicSize $ elemType t) :
     map (`SE.subExpToScalExp` Int) (arrayDims t)
   m <- allocateMemory "mem" size
   return (size, m)

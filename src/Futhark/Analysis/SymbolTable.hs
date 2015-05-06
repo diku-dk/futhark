@@ -546,4 +546,4 @@ setLowerBound name bound vtable =
 
 isAtLeast :: VName -> Int -> SymbolTable lore -> SymbolTable lore
 isAtLeast name x =
-  setLowerBound name $ Val $ IntVal x
+  setLowerBound name $ Val $ IntVal $ fromIntegral x

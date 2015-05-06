@@ -727,7 +727,7 @@ simplifyScal (SPow e1 e2) = do
             (_, Val (IntVal n)) ->
                 if n >= 1
                 then -- simplifyScal =<< fromNumSofP $ NProd (replicate n e1') tp
-                        do new_e <- fromNumSofP $ NProd (replicate n e1') tp
+                        do new_e <- fromNumSofP $ NProd (genericReplicate n e1') tp
                            simplifyScal new_e
                 else return $ SPow e1' e2'
             (_, _) -> return $ SPow e1' e2'

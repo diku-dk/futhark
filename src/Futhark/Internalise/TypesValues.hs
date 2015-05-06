@@ -90,7 +90,7 @@ internaliseDeclType' (E.Array at) =
         internaliseDim AnyDim =
           Ext <$> newId
         internaliseDim (ConstDim n) =
-          return $ Free $ Constant $ IntVal n
+          return $ Free $ Constant $ IntVal $ fromIntegral n
         internaliseDim (NamedDim name) =
           Ext <$> knownOrNewId name
         internaliseDim (KnownDim name) = do

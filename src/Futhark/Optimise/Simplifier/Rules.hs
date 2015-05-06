@@ -456,7 +456,7 @@ simplifyBinOp _ _ (BinOp ShiftL e1 e2 _)
   | otherwise =
     case (e1, e2) of
       (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 `shiftL` v2
+        binOpRes $ IntVal $ v1 `shiftL` fromIntegral v2
       _ -> Nothing
 
 simplifyBinOp _ _ (BinOp ShiftR e1 e2 _)
@@ -464,7 +464,7 @@ simplifyBinOp _ _ (BinOp ShiftR e1 e2 _)
   | otherwise =
     case (e1, e2) of
       (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 `shiftR` v2
+        binOpRes $ IntVal $ v1 `shiftR` fromIntegral v2
       _ -> Nothing
 
 simplifyBinOp _ _ (BinOp Band e1 e2 _)
@@ -853,7 +853,7 @@ isCt0 (Constant (RealVal x)) = x == 0
 isCt0 (Constant (LogVal x))  = not x
 isCt0 _                      = False
 
-ctIndex :: [SubExp] -> Maybe [Int]
+ctIndex :: [SubExp] -> Maybe [Int32]
 ctIndex [] = Just []
 ctIndex (Constant (IntVal ii):is) =
   case ctIndex is of
@@ -861,8 +861,8 @@ ctIndex (Constant (IntVal ii):is) =
     Just y  -> Just (ii:y)
 ctIndex _ = Nothing
 
-arrLitInd :: PrimOp lore -> [Int] -> Maybe (PrimOp lore)
+arrLitInd :: PrimOp lore -> [Int32] -> Maybe (PrimOp lore)
 arrLitInd e [] = Just e
 arrLitInd (ArrayLit els _) (i:is)
-  | i >= 0, i < length els = arrLitInd (SubExp $ els !! i) is
+  | i >= 0, i < genericLength els = arrLitInd (SubExp $ els !! fromIntegral i) is
 arrLitInd _ _ = Nothing

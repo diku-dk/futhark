@@ -165,7 +165,7 @@ instance HasTypeEnv (ImpM op) where
             Basic $ entryScalarType scalarEntry
 
           dimSizeToSubExp (Imp.ConstSize n) =
-            Constant $ IntVal n
+            Constant $ IntVal $ fromIntegral n
           dimSizeToSubExp (Imp.VarSize v) =
             Var v
 
@@ -469,7 +469,7 @@ defCompilePrimOp
         Constant {} ->
           fail "defCompilePrimOp ArrayLit: Cannot have array constants."
         Var v -> do
-          targetloc <- indexArray memlocation [SE.Val $ IntVal i]
+          targetloc <- indexArray memlocation [SE.Val $ IntVal $ fromIntegral i]
           srcloc <- arrayLocation v
           emit =<< copyIxFun et targetloc srcloc rowsize
   where et = elemType rt
@@ -510,7 +510,9 @@ defCompilePrimOp (Destination dests) (Partition _ n flags values)
     eqclass <- newVName "eqclass"
     emit $ Imp.DeclareScalar eqclass Int
     let mkSizeLoopBody code c sizevar =
-          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
+          Imp.If (Imp.BinOp Equal
+                  (Imp.ScalarVar eqclass)
+                  (Imp.Constant (IntVal $ fromIntegral c)))
           (Imp.SetScalar sizevar
            (Imp.BinOp Plus (Imp.ScalarVar sizevar) (Imp.Constant (IntVal 1))))
           code
@@ -544,7 +546,8 @@ defCompilePrimOp (Destination dests) (Partition _ n flags values)
                     destloc [varIndex partition_cur_offset]
                     srcloc [varIndex i]
     let mkWriteLoopBody code c offsetvar =
-          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (Imp.Constant (IntVal c)))
+          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass)
+                  (Imp.Constant $ IntVal $ fromIntegral c))
           (Imp.SetScalar partition_cur_offset
              (Imp.ScalarVar offsetvar)
            <>
@@ -721,7 +724,7 @@ subExpToDimSize :: SubExp -> ImpM op Imp.DimSize
 subExpToDimSize (Var v) =
   return $ Imp.VarSize v
 subExpToDimSize (Constant (IntVal i)) =
-  return $ Imp.ConstSize i
+  return $ Imp.ConstSize $ fromIntegral i
 subExpToDimSize (Constant {}) =
   fail "Size subexp is not a non-integer constant."
 
@@ -733,7 +736,7 @@ memSizeToExp = bytes . sizeToExp
 
 sizeToExp :: Imp.Size -> Imp.Exp
 sizeToExp (Imp.VarSize v)   = Imp.ScalarVar v
-sizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal x
+sizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal $ fromIntegral x
 
 compileResultSubExp :: ValueDestination -> SubExp -> ImpM op ()
 
@@ -800,7 +803,7 @@ varIndex :: VName -> SE.ScalExp
 varIndex name = SE.Id name Int
 
 constIndex :: Int -> SE.ScalExp
-constIndex = SE.Val . IntVal
+constIndex = SE.Val . IntVal . fromIntegral
 
 lookupArray :: VName -> ImpM op ArrayEntry
 lookupArray name = do
@@ -1031,4 +1034,4 @@ simplifyScalExp se =
     Right se' -> return se'
 
 basicScalarSize :: BasicType -> ScalExp
-basicScalarSize = SE.Val . IntVal . basicSize
+basicScalarSize = SE.Val . IntVal . fromIntegral . basicSize

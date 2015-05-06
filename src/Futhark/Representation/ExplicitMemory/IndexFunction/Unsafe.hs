@@ -73,7 +73,7 @@ type Indices = [ScalExp]
 type Shape   = [SubExp]
 
 shapeFromInts :: [Int] -> Shape
-shapeFromInts = map (Constant . IntVal)
+shapeFromInts = map $ Constant . IntVal . fromIntegral
 
 rank :: IxFun -> Int
 rank (IxFun n _) = sNatToInt n

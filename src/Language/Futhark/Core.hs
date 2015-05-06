@@ -26,12 +26,16 @@ module Language.Futhark.Core
   , defaultEntryPoint
   , isBuiltInFunction
   , builtInFunctions
+
+    -- * Integer re-export
+  , Int32
   )
 
 where
 
 import Data.Char
 import Data.Hashable
+import Data.Int (Int32)
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
@@ -67,7 +71,7 @@ data BasicType = Int
                  deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Non-array values.
-data BasicValue = IntVal !Int
+data BasicValue = IntVal !Int32
                 | RealVal !Double
                 | LogVal !Bool
                 | CharVal !Char

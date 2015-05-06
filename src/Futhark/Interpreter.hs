@@ -148,7 +148,7 @@ bindVar (BindInPlace _ src is) val = do
             bad $ TypeError "bindVar BindInPlace, incomplete indices given, but replacement value is not array"
     _ ->
       bad $ TypeError "bindVar BindInPlace, source is not array"
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
 bindVars :: [(Ident, Bindage, Value)]
@@ -220,7 +220,7 @@ arrays ts vs = zipWithM arrays' ts vs'
           _  -> transpose vs
         arrays' rt r = do
           rowshape <- mapM (asInt <=< evalSubExp) $ arrayDims rt
-          return $ arrayVal r (elemType rt) $ length r : rowshape
+          return $ arrayVal r (elemType rt) $ length r : map fromIntegral rowshape
         asInt (BasicVal (IntVal x)) = return x
         asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
@@ -288,7 +288,7 @@ runFunWithShapes fname valargs prog = do
               shapemap = shapeMapping'
                          (map paramType valparams)
                          (map valueShape valargs)
-          in map (BasicVal . IntVal . fromMaybe 0 .
+          in map (BasicVal . IntVal . fromIntegral . fromMaybe 0 .
                   flip HM.lookup shapemap .
                   paramName)
              shapeparams
@@ -413,7 +413,7 @@ evalPrimOp (ArrayLit es rt) = do
               mapM evalSubExp es <*>
               pure (elemType rt) <*>
               pure (length es : rowshape))
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _                     = bad $ TypeError "evalPrimOp ArrayLit asInt"
 
 evalPrimOp (BinOp Plus e1 e2 Int) = evalIntBinOp (+) e1 e2
@@ -438,8 +438,10 @@ evalPrimOp (BinOp Mod e1 e2 Int) = evalIntBinOpM mod' e1 e2
 evalPrimOp (BinOp Divide e1 e2 Real) = evalRealBinOpM div' e1 e2
   where div' _ 0 = bad  DivisionByZero
         div' x y = return $ x / y
-evalPrimOp (BinOp ShiftR e1 e2 _) = evalIntBinOp shiftR e1 e2
-evalPrimOp (BinOp ShiftL e1 e2 _) = evalIntBinOp shiftL e1 e2
+evalPrimOp (BinOp ShiftR e1 e2 _) = evalIntBinOp shiftR' e1 e2
+  where shiftR' x = shiftR x . fromIntegral
+evalPrimOp (BinOp ShiftL e1 e2 _) = evalIntBinOp shiftL' e1 e2
+  where shiftL' x = shiftL x . fromIntegral
 evalPrimOp (BinOp Band e1 e2 _) = evalIntBinOp (.&.) e1 e2
 evalPrimOp (BinOp Xor e1 e2 _) = evalIntBinOp xor e1 e2
 evalPrimOp (BinOp Bor e1 e2 _) = evalIntBinOp (.|.) e1 e2
@@ -493,7 +495,7 @@ evalPrimOp (Index _ ident idxs) = do
                                   [ arr ! (flatidx+i) | i <- [0..ressize-1] ])
                         bt resshape]
     _ -> bad $ TypeError "evalPrimOp Index: ident is not an array"
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _                     = bad $ TypeError "evalPrimOp Index asInt"
 
 evalPrimOp (Iota e) = do
@@ -501,10 +503,10 @@ evalPrimOp (Iota e) = do
   case v of
     BasicVal (IntVal x)
       | x >= 0    ->
-        return [ArrayVal (listArray (0,x-1) $ map IntVal [0..x-1])
-                Int [x]]
+        return [ArrayVal (listArray (0,fromIntegral x-1) $ map IntVal [0..x-1])
+                Int [fromIntegral x]]
       | otherwise ->
-        bad $ NegativeIota x
+        bad $ NegativeIota $ fromIntegral x
     _ -> bad $ TypeError "evalPrimOp Iota"
 
 evalPrimOp (Replicate e1 e2) = do
@@ -515,23 +517,23 @@ evalPrimOp (Replicate e1 e2) = do
       | x >= 0    ->
         case v2 of
           BasicVal bv ->
-            return [ArrayVal (listArray (0,x-1) (replicate x bv))
+            return [ArrayVal (listArray (0,fromIntegral x-1) (genericReplicate x bv))
                     (basicValueType bv)
-                    [x]]
+                    [fromIntegral x]]
           ArrayVal arr bt shape ->
-            return [ArrayVal (listArray (0,x*product shape-1)
-                              (concat $ replicate x $ elems arr))
-                    bt (x:shape)]
-      | otherwise -> bad $ NegativeReplicate x
+            return [ArrayVal (listArray (0,fromIntegral x*product shape-1)
+                              (concat $ genericReplicate x $ elems arr))
+                    bt (fromIntegral x:shape)]
+      | otherwise -> bad $ NegativeReplicate $ fromIntegral x
     _   -> bad $ TypeError "evalPrimOp Replicate"
 
 evalPrimOp (Scratch bt shape) = do
   shape' <- mapM (asInt <=< evalSubExp) shape
   let nelems = product shape'
-      vals = replicate nelems v
-  return [ArrayVal (listArray (0,nelems-1) vals) bt shape']
+      vals = genericReplicate nelems v
+  return [ArrayVal (listArray (0,fromIntegral nelems-1) vals) bt shape']
   where v = blankBasicValue bt
-        asInt (BasicVal (IntVal x)) = return x
+        asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _                     = bad $ TypeError "evalPrimOp Scratch asInt"
 
 evalPrimOp e@(Reshape _ shapeexp arrexp) = do
@@ -545,7 +547,7 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
         bad $ InvalidArrayShape (PrimOp e) oldshape shape
     _ ->
       bad $ TypeError "Reshape given a non-array argument"
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalPrimOp Reshape asInt"
 
 evalPrimOp (Rearrange _ perm arrexp) =
@@ -564,7 +566,7 @@ evalPrimOp (Split _ sizeexps arrexp) = do
                     (scanl (+) 0 sizes) sizes
       | otherwise        -> bad $ SplitOutOfBounds (pretty arrexp) shape sizes
     _ -> bad $ TypeError "evalPrimOp Split"
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalPrimOp Split asInt"
 
 evalPrimOp (Concat _ arr1exp arr2exps _) = do
@@ -603,19 +605,20 @@ evalPrimOp (Partition _ n flags arr) = do
   arr_elems <- arrToList arrv
   partitions <- partitionArray flags_elems arr_elems
   return $
-    map (BasicVal . IntVal . length) partitions ++
+    map (BasicVal . IntVal . genericLength) partitions ++
     [arrayVal (concat partitions) et (valueShape arrv)]
   where partitionArray flagsv arrv =
           map reverse <$>
           foldM divide (replicate n []) (zip flagsv arrv)
 
         divide partitions (BasicVal (IntVal i),v)
-          | i < 0 =
+          | i' < 0 =
             bad $ TypeError $ "Partition key " ++ show i ++ " is negative"
-          | i < n =
-            return $ take i partitions ++ [v : (partitions!!i)] ++ drop (i+1) partitions
+          | i' < n =
+            return $ genericTake i partitions ++ [v : (partitions!!i')] ++ genericDrop (i'+1) partitions
           | otherwise =
             return partitions
+          where i' = fromIntegral i
 
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
@@ -676,12 +679,12 @@ evalLoopOp (ConcatMap _ fun inputs) = do
         (listArray (0,n1+n2-1) (elems arr1 ++ elems arr2), n1+n2)
       arrs = foldl (zipWith concatArrays) (replicate numTs emptyArray) vss
       (ctx,vs) = unzip
-                 [ (BasicVal $ IntVal n,
+                 [ (BasicVal $ IntVal $ fromIntegral n,
                     ArrayVal arr (elemType t) (n:innershape))
                  | (innershape,(arr,n),t) <-
                       zip3 innershapes arrs $ lambdaReturnType fun ]
   return $ ctx ++ vs
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _                     = bad $ TypeError "evalLoopOp asInt"
         asArray (ArrayVal a _ (n:_)) = return (a, n)
         asArray _                    = bad $ TypeError "evalLoopOp asArray"
@@ -733,7 +736,8 @@ evalLoopOp (Stream _ accs arrs elam) = do
                             evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   let (ArrayVal _ _ (outersize:_)) = head arrvals
-  let (chunkval, ival) = (BasicVal $ IntVal outersize, BasicVal $ IntVal 0)
+  let (chunkval, ival) = (BasicVal $ IntVal $ fromIntegral outersize,
+                          BasicVal $ IntVal 0)
   vs <- fun (chunkval:ival:accvals++arrvals)
   return $ valueShapeContext elam_rtp vs ++ vs
 
@@ -762,7 +766,7 @@ evalSegOp (SegReduce _ fun inputs descparr_exp) = do
   let runReduce = foldM foldfun startaccs
   res <- mapM runReduce segmented_arrs
   arrays (map valueType startaccs) res
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
 
 evalSegOp (SegScan _ st fun inputs descparr_exp) = do
@@ -788,7 +792,7 @@ evalSegOp (SegScan _ st fun inputs descparr_exp) = do
         liftM (reverse . snd) $ foldM scanfun (startaccs, []) segarr
   res <- liftM concat $ mapM runscan segmented_arrs
   arrays (map valueType startaccs) res
-  where asInt (BasicVal (IntVal x)) = return x
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalSegOp SegScan asInt"
 
         scanfun (acc, l) x = do
@@ -804,11 +808,11 @@ evalFuncall fname args = do
   fun <- lookupFun fname
   fun args
 
-evalIntBinOp :: (Int -> Int -> Int) -> SubExp -> SubExp
+evalIntBinOp :: (Int32 -> Int32 -> Int32) -> SubExp -> SubExp
              -> FutharkM lore [Value]
 evalIntBinOp op = evalIntBinOpM $ \x y -> return $ op x y
 
-evalIntBinOpM :: (Int -> Int -> FutharkM lore Int)
+evalIntBinOpM :: (Int32 -> Int32 -> FutharkM lore Int32)
               -> SubExp
               -> SubExp
               -> FutharkM lore [Value]
@@ -870,7 +874,7 @@ applyConcatMapLambda (Lambda params body rettype) valargs = do
               shapemap = shapeMapping'
                          (map paramType valparams)
                          (map valueShape valargs)
-          in map (BasicVal . IntVal . fromMaybe 0 .
+          in map (BasicVal . IntVal . fromIntegral . fromMaybe 0 .
                   flip HM.lookup shapemap .
                   paramName)
              shapeparams
@@ -878,7 +882,7 @@ applyConcatMapLambda (Lambda params body rettype) valargs = do
 checkReturnShapes :: [ExtType] -> [Value] -> FutharkM lore ()
 checkReturnShapes = zipWithM_ checkShape
   where checkShape t val = do
-          let valshape = map (BasicVal . IntVal) $ valueShape val
+          let valshape = map (BasicVal . IntVal . fromIntegral) $ valueShape val
               retdims = extShapeDims $ arrayShape t
               evalExtDim (Free se) = do v <- evalSubExp se
                                         return $ Just (se, v)

@@ -33,6 +33,7 @@ import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
 import Data.Loc hiding (L) -- Lexer has replacements.
+import Data.Int (Int32)
 
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes
@@ -215,7 +216,7 @@ DimDecl :: { DimDecl Name }
             in KnownDim name }
         | ',' intlit
           { let L _ (INTLIT n) = $2
-            in ConstDim n }
+            in ConstDim (fromIntegral n) }
         | { AnyDim }
 
 ArrayType :: { UncheckedArrayType }
@@ -466,15 +467,16 @@ Value : IntValue { $1 }
 CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
 
-SignedInt :     intlit { let L _ (INTLIT num) = $1 in num  }
-          | '-' intlit { let L _ (INTLIT num) = $2 in -num }
+SignedInt :: { Int }
+          :     intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }
+          | '-' intlit { let L _ (INTLIT num) = $2 in fromIntegral (-num) }
 
 NaturalInt :: { Int }
-           :  intlit { let L _ (INTLIT num) = $1 in num  }
+           :  intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }
 
 NaturalInts :: { [Int] }
-           : intlit                 { let L _ (INTLIT num) = $1 in [num] }
-           | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in num : $3  }
+           : intlit                 { let L _ (INTLIT num) = $1 in [fromIntegral num] }
+           | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in fromIntegral num : $3  }
 
 IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num }
          | '-' intlit    { let L pos (INTLIT num) = $2 in BasicVal $ IntVal (-num) }

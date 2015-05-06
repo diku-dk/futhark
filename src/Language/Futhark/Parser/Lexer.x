@@ -8,6 +8,7 @@ module Language.Futhark.Parser.Lexer
   ) where
 
 import Data.Loc hiding (L)
+import Data.Int (Int32)
 
 import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser.Tokens
@@ -55,8 +56,8 @@ tokens :-
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
   "!"                      { const BANG }
-  0[xX][0-9a-fA-F]*        { INTLIT . readInt }
-  [0-9]+                   { INTLIT . readInt }
+  0[xX][0-9a-fA-F]*        { INTLIT . readInt32 }
+  [0-9]+                   { INTLIT . readInt32 }
   (([0-9]+("."[0-9]+)?))
     ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
   [a-zA-Z] [a-zA-Z0-9_']* { keyword }
@@ -189,8 +190,8 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
 readReal :: String -> Double
 readReal = read
 
-readInt :: String -> Int
-readInt = read
+readInt32 :: String -> Int32
+readInt32 = read
 
 -- | A value tagged with a source location.
 data L a = L SrcLoc a

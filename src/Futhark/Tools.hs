@@ -182,7 +182,7 @@ eValue (ArrayVal a bt shape) = do
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (Constant . IntVal) rowshape) Nonunique
+      rowtype = Array bt (Shape $ map (Constant . IntVal . fromIntegral) rowshape) Nonunique
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ PrimOp $ ArrayLit ses rowtype
 

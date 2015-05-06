@@ -18,6 +18,9 @@ class IsValue a where
   value :: a -> BasicValue
 
 instance IsValue Int where
+  value = IntVal . fromIntegral
+
+instance IsValue Int32 where
   value = IntVal
 
 instance IsValue Double where

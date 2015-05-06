@@ -33,7 +33,7 @@ subShapeTests =
         shape = ExtShape
 
         free :: Int -> ExtDimSize
-        free = Free . Constant . IntVal
+        free = Free . Constant . IntVal . fromIntegral
 
         isSubShapeOf shape1 shape2 =
           subShapeTest shape1 shape2 True
