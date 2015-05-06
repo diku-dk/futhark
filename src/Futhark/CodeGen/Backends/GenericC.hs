@@ -135,7 +135,11 @@ item :: C.BlockItem -> CompilerM op ()
 item x = tell [x]
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . textual
+  toIdent = C.toIdent . sanitise . textual
+  -- FIXME: this sanitising is incomplete.
+    where sanitise = map sanitise'
+          sanitise' '\'' = '_'
+          sanitise' c    = c
 
 stm :: C.Stm -> CompilerM op ()
 stm (C.Block items _) = mapM_ item items
