@@ -733,7 +733,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simpleOptLambda prog (SOAC.lambda new_soac) args
+  lam' <- simpleOptLambda prog (SOAC.lambda new_soac) args --return lam
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
@@ -741,7 +741,8 @@ insertKerSOAC names ker body = do
     transformOutput (outputTransform ker) names $
       SOAC.setLambda lam'' new_soac
     return body
-
+-- futhark-test -c ../futhark-benchmarks/CalibVolDiff.fut
+-- futhark -e --inline-functions --cse -e -o ../futhark-benchmarks/CalibVolDiff.fut > good.fut
 ---------------------------------------------------
 ---------------------------------------------------
 ---- HELPERS
