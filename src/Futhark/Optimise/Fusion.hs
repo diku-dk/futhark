@@ -24,6 +24,8 @@ import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Renamer
 
+--import Debug.Trace
+
 data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
 
@@ -437,24 +439,28 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                 let curker_outnms  = outNames cur_ker
                     curker_outset  = HS.fromList curker_outnms
                     new_ufus_nms   = HS.fromList $ outNames ker ++ HS.toList ufus_nms
-                    interm_bnds_ok = cur_ok &&
+                consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
+                                    maybesoac <- SOAC.fromExp $ bindingExp consumer_bnd
+                                    case maybesoac of
+                                      -- check that consumer's lambda body does not use
+                                      -- directly the produced arrays (e.g., see noFusion3.fut).
+                                      Right conssoac -> return $ HS.null $ HS.intersection curker_outset $
+                                                                 freeInBody $ lambdaBody $ SOAC.lambda conssoac
+                                      Left _         -> return True
+                let interm_bnds_ok = cur_ok && consumer_ok &&
                       foldl (\ok bnd-> ok && -- hardwired to False after first fail
+                                       -- (i) check that the in-between bindings do
+                                       --     not use the result of current kernel OR
                                        HS.null ( HS.intersection curker_outset $
                                                       freeInExp (bindingExp bnd) ) ||
-                                         not ( null $ curker_outnms `L.intersect`
-                                                           patternNames (bindingPattern bnd) )
-
-                                              -- (i) check that the in-between bindings do
-                                              --     not use the result of current kernel OR
-                                              --(ii) that the pattern-binding corresponds to
-                                              --     the result of the consumer kernel; in the
-                                              --     latter case it means it corresponds to a
-                                              --     kernel that has been fused in the consumer,
-                                              --     hence it should be ignored (?)
+                                       --(ii) that the pattern-binding corresponds to
+                                       --     the result of the consumer kernel; in the
+                                       --     latter case it means it corresponds to a
+                                       --     kernel that has been fused in the consumer,
+                                       --     hence it should be ignored
+                                       not ( null $ curker_outnms `L.intersect`
+                                                         patternNames (bindingPattern bnd) )
                             ) True (drop (prev_ind+1) $ take bnd_ind rem_bnds)
-                                -- HUGE BUG 1: need to check also the consumer SOAC
-                                --   LAMBDA BODY to not contain any of the outpus!!!!!
-                                --   (see noFusion3.fut)
                 if not interm_bnds_ok then return (False,n,bnd_ind,cur_ker,HS.empty)
                 else do new_ker <- attemptFusion ufus_nms (outNames cur_ker) (fsoac cur_ker) ker
                         case new_ker of
