@@ -93,7 +93,7 @@ instance Pretty (TypeBase Rank) where
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
 instance Pretty Ident where
-  ppr = text . textual . identName
+  ppr ident = ppr (identType ident) <+> ppr (identName ident)
 
 instance Pretty SubExp where
   ppr (Var v)      = ppr v
