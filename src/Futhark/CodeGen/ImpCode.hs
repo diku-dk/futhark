@@ -16,7 +16,9 @@ module Futhark.CodeGen.ImpCode
   , Code (..)
   , Exp (..)
   , UnOp (..)
-  -- * Re-exports from other modules.
+    -- * Analysis
+  , functionsCalled
+    -- * Re-exports from other modules.
   , module Language.Futhark.Core
   )
   where
@@ -348,3 +350,11 @@ instance FreeIn Exp where
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
+
+functionsCalled :: Code a -> HS.HashSet Name
+functionsCalled (If _ t f) = functionsCalled t <> functionsCalled f
+functionsCalled (x :>>: y) = functionsCalled x <> functionsCalled y
+functionsCalled (For _ _ body) = functionsCalled body
+functionsCalled (While _ body) = functionsCalled body
+functionsCalled (Call _ fname _) = HS.singleton fname
+functionsCalled _ = mempty

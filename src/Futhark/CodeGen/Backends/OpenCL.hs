@@ -7,6 +7,7 @@ import Control.Monad
 import Control.Monad.Writer
 import Data.Traversable hiding (forM)
 import Data.Loc (noLoc)
+import qualified Data.HashSet as HS
 
 import Prelude
 
@@ -26,7 +27,7 @@ compileProg prog = do
   let header = unlines [ "#include <CL/cl.h>\n" ]
   kernels <- forM (getKernels prog') $ \kernel -> do
     kernel' <- compileKernel kernel
-    return (kernelName kernel, [C.cinit|$string:(openClKernelHeader ++
+    return (kernelName kernel, [C.cinit|$string:(openClKernelHeader kernel ++
                                                  "\n" ++
                                                  pretty kernel')|])
   return $
@@ -232,6 +233,25 @@ getKernels = execWriter . traverse getFunKernels
   where getFunKernels kernel =
           tell [kernel] >> return kernel
 
-openClKernelHeader :: String
-openClKernelHeader = unlines $ "#pragma OPENCL EXTENSION cl_khr_fp64 : enable" :
-                     map pretty builtInFunctionDefs
+openClKernelHeader :: Kernel -> String
+openClKernelHeader kernel =
+  unlines $ pragmas ++ map pretty (funs32_used ++ funs64_used)
+  where kernel_funs = functionsCalled $ kernelBody kernel
+        used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
+        funs32_used = map snd $ filter used_in_kernel funs32
+        funs64_used = map snd $ filter used_in_kernel funs64
+        pragmas = if null funs64_used
+                  then []
+                  else ["#pragma OPENCL EXTENSION cl_khr_fp64 : enable"]
+
+        funs32 = [("toFloat32", c_toFloat32),
+                  ("trunc32", c_trunc32),
+                  ("log32", c_log32),
+                  ("sqrt32", c_sqrt32),
+                  ("exp32", c_exp32)]
+
+        funs64 = [("toFloat64", c_toFloat64),
+                  ("trunc64", c_trunc64),
+                  ("log64", c_log64),
+                  ("sqrt64", c_sqrt64),
+                  ("exp64", c_exp64)]
