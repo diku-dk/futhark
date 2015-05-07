@@ -32,10 +32,13 @@ module Futhark.Representation.AST.Attributes.TypeOf
        -- * Type environment
        , module Futhark.Representation.AST.Attributes.TypeEnv
        , typeEnvFromBindings
+       , typeEnvFromParams
+       , expandTypeEnv
        )
        where
 
 import Control.Applicative
+import Control.Monad.Reader
 import Data.List
 import Data.Maybe
 import Data.Monoid
@@ -278,6 +281,15 @@ typeEnvFromBindings = HM.fromList . concatMap assoc
           [ (identName ident, identType ident)
           | ident <- patternIdents $ bindingPattern bnd
           ]
+
+-- | Create a type environment from function parameters.
+typeEnvFromParams :: [Param attr] -> TypeEnv
+typeEnvFromParams = HM.fromList . map assoc
+  where assoc param = (paramName param, paramType param)
+
+-- | Expand the type environment while executing some computation.
+expandTypeEnv :: MonadReader TypeEnv m => TypeEnv -> m a -> m a
+expandTypeEnv env = local (<>env)
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Basic _) = tp
