@@ -122,14 +122,7 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
           pure () <*>
           pure (substituteNames subst e)
         substInPatElem subst patElem = return $ substituteNames subst patElem
-{-
-          | patElemName v' `HM.member` subst = do
-              ident <- newIdent' (<>"unused") $ patElemIdent patElem
-              return patElem { patElemIdent = ident }
-          | otherwise                        =
-              return patElem
-          where v' = v { identType = substituteNames subst $ identType v }
--}
+
 simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
 simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun' =<<
                           return . deadCodeElimFun =<< simplifyFun' =<<
