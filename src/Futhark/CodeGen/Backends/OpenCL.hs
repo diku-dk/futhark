@@ -39,13 +39,13 @@ callKernels kernel = do
   zipWithM_ mkBuffer [(0::Int)..] $ kernelCopyIn kernel
   devReads <-
     zipWithM mkBuffer [length (kernelCopyIn kernel)..] $ kernelCopyOut kernel
-  worksize <- newVName "worksize"
+  global_work_size <- newVName "global_work_size"
   let kernel_size = GenericC.dimSizeToExp $ kernelSize kernel
 
   GenericC.stm [C.cstm|{
-    size_t $id:worksize = $exp:kernel_size;
+    size_t $id:global_work_size = $exp:kernel_size;
     assert(clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, 1, NULL,
-                                  &$id:worksize, &$id:worksize,
+                                  &$id:global_work_size, NULL,
                                   0, NULL, NULL)
            == CL_SUCCESS);
     }|]
