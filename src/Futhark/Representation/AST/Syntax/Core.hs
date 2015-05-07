@@ -29,6 +29,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Certificates
          , SubExp(..)
          , ParamT (..)
+         , Param
          , Bindage (..)
          , PatElemT (..)
 
@@ -188,6 +189,9 @@ data ParamT attr = Param
                      -- ^ Function parameter attribute.
                    }
                    deriving (Ord, Show, Eq)
+
+-- | A type alias for namespace control.
+type Param = ParamT
 
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.

@@ -52,6 +52,7 @@ module Futhark.Representation.AST.Syntax
 
   -- * Definitions
   , ParamT (..)
+  , Param
   , FParam
   , LParam
   , FunDecT (..)
