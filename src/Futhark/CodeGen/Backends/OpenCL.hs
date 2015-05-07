@@ -235,7 +235,8 @@ getKernels = execWriter . traverse getFunKernels
 
 openClKernelHeader :: Kernel -> String
 openClKernelHeader kernel =
-  unlines $ pragmas ++ map pretty (funs32_used ++ funs64_used)
+  unlines $
+  pragmas ++ map pretty (utilityFunctions ++ funs32_used ++ funs64_used)
   where kernel_funs = functionsCalled $ kernelBody kernel
         used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
         funs32_used = map snd $ filter used_in_kernel funs32
@@ -255,3 +256,73 @@ openClKernelHeader kernel =
                   ("log64", c_log64),
                   ("sqrt64", c_sqrt64),
                   ("exp64", c_exp64)]
+
+utilityFunctions :: [C.Func]
+utilityFunctions = [
+  [C.cfun|
+  // From musl.
+  __global void *memcpy(__global void *restrict dest, __global const void *restrict src, size_t n)
+  {
+    __global unsigned char *d = dest;
+    __global const unsigned char *s = src;
+    // These were #defines in the musl source code.
+    size_t SS = sizeof(size_t), ALIGN = sizeof(size_t)-1, ONES=((size_t)-1/UCHAR_MAX);
+    if (((typename uintptr_t)d & ALIGN) != ((typename uintptr_t)s & ALIGN)) {
+      goto misaligned;
+    }
+    for (; ((typename uintptr_t)d & ALIGN) && n; n--) {
+      *d++ = *s++;
+    }
+    if (n) {
+      __global size_t *wd = (__global void *)d;
+      __global const size_t *ws = (__global const void *)s;
+      for (; n>=SS; n-=SS) *wd++ = *ws++;
+      d = (__global void *)wd;
+      s = (__global const void *)ws;
+
+      misaligned:
+      for (; n; n--) {
+        *d++ = *s++;
+      }
+    }
+    return dest;
+  }
+   |],
+
+  [C.cfun|
+  // From musl.
+  __global void *memmove(__global void *dest, __global const void *src, size_t n)
+  {
+    __global char *d = dest;
+    __global const char *s = src;
+    size_t WS = sizeof(size_t);
+    if (d==s) { return d; }
+    if (s+n <= d || d+n <= s) { return memcpy(d, s, n); }
+    if (d<s) {
+      if ((typename uintptr_t)s % WS == (typename uintptr_t)d % WS) {
+        while ((typename uintptr_t)d % WS) {
+        if (!n--) { return dest; }
+          *d++ = *s++;
+        }
+        for (; n>=WS; n-=WS, d+=WS, s+=WS) {
+          *(__global size_t *)d = *(__global size_t *)s;
+        }
+      }
+      for (; n; n--) { *d++ = *s++; }
+    } else {
+      if ((typename uintptr_t)s % WS == (typename uintptr_t)d % WS) {
+        while ((typename uintptr_t)(d+n) % WS) {
+          if (!n--) { return dest; }
+          d[n] = s[n];
+        }
+        while (n>=WS) {
+          n-=WS;
+          *(__global size_t *)(d+n) = *(__global size_t *)(s+n);
+        }
+      }
+      while (n) { n--, d[n] = s[n]; }
+    }
+    return dest;
+  }
+   |]
+                   ]
