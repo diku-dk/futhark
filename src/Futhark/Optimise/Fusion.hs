@@ -439,6 +439,13 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                 let curker_outnms  = outNames cur_ker
                     curker_outset  = HS.fromList curker_outnms
                     new_ufus_nms   = HS.fromList $ outNames ker ++ HS.toList ufus_nms
+                    -- disable horizontal fusion in the case when an output array of
+                    -- producer SOAC is a non-trivially transformed input of the consumer
+                    out_transf_ok  = let ker_inp = SOAC.inputs $ fsoac ker
+                                         unfuse1 = (HS.fromList $ catMaybes $ map SOAC.inputArray ker_inp) `HS.difference`
+                                                   (HS.fromList $ catMaybes $ map SOAC.isVarInput ker_inp)
+                                         unfuse2 = HS.intersection curker_outset ufus_nms
+                                     in  HS.null $ HS.intersection unfuse1 unfuse2
                 consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
                                     maybesoac <- SOAC.fromExp $ bindingExp consumer_bnd
                                     case maybesoac of
@@ -447,7 +454,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                                       Right conssoac -> return $ HS.null $ HS.intersection curker_outset $
                                                                  freeInBody $ lambdaBody $ SOAC.lambda conssoac
                                       Left _         -> return True
-                let interm_bnds_ok = cur_ok && consumer_ok &&
+                let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok &&
                       foldl (\ok bnd-> ok && -- hardwired to False after first fail
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
