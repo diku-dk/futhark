@@ -131,7 +131,7 @@ builtInFunctions = HM.fromList $ map namify
                    ,("trunc32", (Int, [Float32]))
                    ,("sqrt32", (Float32, [Float32]))
                    ,("log32", (Float32, [Float32]))
-                   ,("exp32", (Float64, [Float64]))
+                   ,("exp32", (Float32, [Float32]))
 
                    ,("toFloat64", (Float64, [Int]))
                    ,("trunc64", (Int, [Float64]))
