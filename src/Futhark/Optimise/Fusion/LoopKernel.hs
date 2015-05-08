@@ -219,7 +219,8 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       cs1      = SOAC.certificates soac1
       cs2      = SOAC.certificates soac2
       inp1_arr = SOAC.inputs soac1
-      inp1_idds= mapMaybe SOAC.isVarInput inp1_arr
+      inp1_idds= if HS.null unfus_set then []
+                 else mapMaybe SOAC.isVarInput inp1_arr
       inp2_arr = SOAC.inputs soac2
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2

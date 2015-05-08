@@ -24,7 +24,7 @@ import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Renamer
 
---import Debug.Trace
+import Debug.Trace
 
 data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
@@ -732,7 +732,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
             badFusionGM $ Error
             ("In Fusion.hs, replaceSOAC, unfused kernel "
              ++"still in result: "++pretty names)
-          insertKerSOAC (outNames ker) ker body
+          trace ("AHAHAHA!!!: "++show (fusedVars ker)++" ~~~~~ "++show names) $ insertKerSOAC (outNames ker) ker body
 
 insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
 insertKerSOAC names ker body = do
@@ -740,8 +740,8 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simpleOptLambda prog (SOAC.lambda new_soac) args --return lam
-  (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
+  lam' <- trace ("FUSED LAMBDA: "++pretty lam) $ simpleOptLambda prog lam args
+  (_, nfres) <- trace ("FUSED SIMPLIFIED LAMBDA: "++pretty lam') $ fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
   runBodyBinder $ do
