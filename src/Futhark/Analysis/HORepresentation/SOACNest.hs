@@ -98,22 +98,25 @@ instance Substitutable lore => Substitute (NestBody lore) where
               substituteNames m $ lambdaBody l
           }
 
-bodyToLambda :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+bodyToLambda :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
-bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) = do
-  (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
-  bnd <- mkLetNames' bndIds e
-  return
-    Lambda { lambdaParams = map (`Param` ()) $ zipWith Ident ps pts
-           , lambdaReturnType = retTypes
-           , lambdaBody = mkBody (bnds++[bnd]) $
-                          map Var bndIds
-           }
+bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) =
+  withParamTypes lparams $ do
+    (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
+    bnd <- mkLetNames' bndIds e
+    return
+      Lambda { lambdaParams = lparams
+             , lambdaReturnType = retTypes
+             , lambdaBody = mkBody (bnds++[bnd]) $
+                            map Var bndIds
+             }
+  where lparams = map (`Param` ()) $ zipWith Ident ps pts
 
-lambdaToBody :: (HasTypeEnv m, Monad m, Bindable lore) =>
+lambdaToBody :: (LocalTypeEnv m, Monad m, Bindable lore) =>
                 Lambda lore -> m (NestBody lore)
 lambdaToBody l =
+  withParamTypes (lambdaParams l) $
   maybe (Fun l) (uncurry $ flip NewNest) <$> nested l
 
 data TypedSubExp = TypedSubExp { subExpExp :: SubExp
@@ -125,7 +128,7 @@ inputFromTypedSubExp :: TypedSubExp -> Maybe SOAC.Input
 inputFromTypedSubExp (TypedSubExp (Var v) t) = Just $ SOAC.identInput $ Ident v t
 inputFromTypedSubExp _                       = Nothing
 
-typedSubExp :: HasTypeEnv f => SubExp -> f TypedSubExp
+typedSubExp :: LocalTypeEnv f => SubExp -> f TypedSubExp
 typedSubExp se = TypedSubExp se <$> AST.subExpType se
 
 data Combinator lore = Map Certificates (NestBody lore)
@@ -214,14 +217,14 @@ typeOf (SOACNest inps (Scan _ _ accinit)) =
                | t <- map subExpType accinit ]
   where outersize = arraysSize 0 $ map SOAC.inputType inps
 
-fromExp :: (Bindable lore, HasTypeEnv f, Monad f) =>
+fromExp :: (Bindable lore, LocalTypeEnv f, Monad f) =>
            Exp lore -> f (Either SOAC.NotSOAC (SOACNest lore))
 fromExp e = either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
 
 toExp :: Bindable lore => SOACNest lore -> Binder lore (Exp lore)
 toExp = SOAC.toExp <=< toSOAC
 
-fromSOAC :: (Bindable lore, HasTypeEnv m, Monad m) =>
+fromSOAC :: (Bindable lore, LocalTypeEnv m, Monad m) =>
             SOAC lore -> m (SOACNest lore)
 fromSOAC (SOAC.Map cs l as) =
   SOACNest as <$> Map cs <$> lambdaToBody l
@@ -236,7 +239,7 @@ fromSOAC (SOAC.Redomap cs ol l es as) =
   -- the outer combining function.
   SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*> traverse typedSubExp es)
 
-nested :: (HasTypeEnv m, Monad m, Bindable lore) =>
+nested :: (LocalTypeEnv m, Monad m, Bindable lore) =>
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
 nested l
   | Body _ [Let pat _ e] res <- lambdaBody l = do -- Is a let-binding...
@@ -253,7 +256,7 @@ nested l
       _ -> pure Nothing
   | otherwise = pure Nothing
 
-toSOAC :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+toSOAC :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m) =>
           SOACNest lore -> m (SOAC lore)
 toSOAC (SOACNest as (Map cs b)) =
   SOAC.Map cs <$>
