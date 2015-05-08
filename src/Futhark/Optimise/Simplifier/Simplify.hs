@@ -52,8 +52,7 @@ simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
                -> m (Lambda (Wise lore))
 simplifyLambda simpl rules prog lam args = do
   types <- askTypeEnv
-  let m =
-        Engine.localVtable (<> ST.fromTypeEnv types) $
-          Engine.simplifyLambda lam args
+  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+          Engine.simplifyLambdaNoHoisting lam args
   modifyNameSource $ runSimpleM m simpl $
     Engine.emptyEnv rules prog
