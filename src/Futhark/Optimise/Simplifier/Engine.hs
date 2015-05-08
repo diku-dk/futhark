@@ -39,6 +39,7 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyExp
        , simplifyFun
        , simplifyLambda
+       , simplifyLambdaNoHoisting
        , simplifyExtLambda
        , simplifySubExp
        , simplifyVName
@@ -331,6 +332,9 @@ intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
 type BlockPred lore = UT.UsageTable -> Binding lore -> Bool
+
+isFalse :: Bool -> BlockPred lore
+isFalse b _ _ = not b
 
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
@@ -788,7 +792,17 @@ simplifyType (Basic bt) =
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m) -> [Maybe VName]
                -> m (Lambda (Lore m))
-simplifyLambda (Lambda params body rettype) arrs = do
+simplifyLambda = simplifyLambdaMaybeHoist False
+
+simplifyLambdaNoHoisting :: MonadEngine m =>
+                            Lambda (InnerLore m) -> [Maybe VName]
+                         -> m (Lambda (Lore m))
+simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist False
+
+simplifyLambdaMaybeHoist :: MonadEngine m =>
+                            Bool -> Lambda (InnerLore m) -> [Maybe VName]
+                         -> m (Lambda (Lore m))
+simplifyLambdaMaybeHoist hoisting (Lambda params body rettype) arrs = do
   params' <- mapM (simplifyParam simplifyLParamLore) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
@@ -797,11 +811,12 @@ simplifyLambda (Lambda params body rettype) arrs = do
     enterBody $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
+    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
     enterLoop $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params' body' rettype'
+
 
 simplifyExtLambda :: MonadEngine m =>
                     [(LParam (Lore m), SExp.ScalExp, SExp.ScalExp)]
