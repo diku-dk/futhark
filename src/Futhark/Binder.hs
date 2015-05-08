@@ -54,13 +54,20 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance MonadFreshNames m => HasTypeEnv (BinderT lore m) where
+instance Monad m => HasTypeEnv (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
     case t of
       Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
       Just t' -> return t'
   askTypeEnv = BinderT get
+
+instance Monad m => LocalTypeEnv (BinderT lore m) where
+  localTypeEnv types (BinderT m) = BinderT $ do
+    modify (`HM.union` types)
+    x <- m
+    modify (`HM.difference` types)
+    return x
 
 instance (Proper lore, Bindable lore, MonadFreshNames m) =>
          MonadBinder (BinderT lore m) where
@@ -122,11 +129,7 @@ collectBinderBindings m = pass $ do
 bindingIdentTypes :: Monad m =>
                      [Ident] -> BinderT lore m a
                   -> BinderT lore m a
-bindingIdentTypes idents (BinderT m) = BinderT $ do
-  modify (`HM.union` types)
-  x <- m
-  modify (`HM.difference` types)
-  return x
+bindingIdentTypes idents = localTypeEnv types
   where types = HM.fromList $ map (identName &&& identType) idents
 
 -- | Add the names and types from the given list of 'Param's to the

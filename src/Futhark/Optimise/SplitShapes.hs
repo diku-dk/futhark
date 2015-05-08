@@ -47,7 +47,7 @@ newtype SplitM a = SplitM (ReaderT TypeEnv
                            MonadReader TypeEnv,
                            MonadState VNameSource,
                            MonadFreshNames,
-                           HasTypeEnv)
+                           HasTypeEnv, LocalTypeEnv)
 
 runSplitM :: SplitM a -> TypeEnv -> VNameSource -> a
 runSplitM (SplitM m) =
@@ -81,8 +81,8 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
       valueParams = valueShapeParams ++ params
       valueRettype = ExtRetType $ staticShapes staticRettype
 
-  expandTypeEnv (typeEnvFromBindings bodybnds <>
-                 typeEnvFromParams valueParams) $ do
+  localTypeEnv (typeEnvFromBindings bodybnds <>
+                typeEnvFromParams valueParams) $ do
     shapes <- subExpShapeContext (retTypeValues rettype) bodyres
     shapetypes <- mapM subExpType shapes
 

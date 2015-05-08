@@ -5,6 +5,7 @@
 -- maintains type information.
 module Futhark.Representation.AST.Attributes.TypeEnv
        ( HasTypeEnv (..)
+       , LocalTypeEnv (..)
        , TypeEnv
          -- * Extended type environment
        , ExtendedTypeEnv
@@ -45,6 +46,16 @@ class Applicative m => HasTypeEnv m where
 
 instance (Applicative m, Monad m) => HasTypeEnv (ReaderT TypeEnv m) where
   askTypeEnv = ask
+
+-- | The class of monads that not only provide a 'TypeEnv', but also
+-- the ability to locally extend it.  A 'Reader' containing a
+-- 'TypeEnv' is the prototypical example of such a monad.
+class (HasTypeEnv m, Monad m) => LocalTypeEnv m where
+  -- | Run a computation with an extended type environment.
+  localTypeEnv :: TypeEnv -> m a -> m a
+
+instance (Applicative m, Monad m) => LocalTypeEnv (ReaderT TypeEnv m) where
+  localTypeEnv = local . HM.union
 
 -- | A monad transformer that carries around an extended 'TypeEnv'.
 -- Its 'lookupType' method will first look in the extended 'TypeEnv',

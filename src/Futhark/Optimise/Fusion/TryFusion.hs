@@ -35,6 +35,9 @@ instance HasTypeEnv TryFusion where
             fail $ "Variable " ++ pretty name ++ " not found in symbol table"
   askTypeEnv = ask
 
+instance LocalTypeEnv TryFusion where
+  localTypeEnv = local . mappend
+
 tryFusion :: MonadFreshNames m =>
              TryFusion a -> TypeEnv -> m (Maybe a)
 tryFusion (TryFusion m) types = modifyNameSource $ \src ->

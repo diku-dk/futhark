@@ -33,7 +33,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , module Futhark.Representation.AST.Attributes.TypeEnv
        , typeEnvFromBindings
        , typeEnvFromParams
-       , expandTypeEnv
+       , withParamTypes
        )
        where
 
@@ -287,9 +287,10 @@ typeEnvFromParams :: [Param attr] -> TypeEnv
 typeEnvFromParams = HM.fromList . map assoc
   where assoc param = (paramName param, paramType param)
 
--- | Expand the type environment while executing some computation.
-expandTypeEnv :: MonadReader TypeEnv m => TypeEnv -> m a -> m a
-expandTypeEnv env = local (<>env)
+-- | Execute an action with a locally extended type environment.
+withParamTypes :: LocalTypeEnv m =>
+                  [Param attr] -> m a -> m a
+withParamTypes = localTypeEnv . typeEnvFromParams
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Basic _) = tp
