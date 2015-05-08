@@ -11,7 +11,10 @@ module Futhark.Optimise.Fusion.TryFusion
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.Representation.Basic
 import Futhark.NeedNames

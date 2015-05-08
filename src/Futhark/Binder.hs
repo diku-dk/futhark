@@ -54,7 +54,7 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance Monad m => HasTypeEnv (BinderT lore m) where
+instance (Applicative m, Monad m) => HasTypeEnv (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
     case t of
@@ -62,7 +62,7 @@ instance Monad m => HasTypeEnv (BinderT lore m) where
       Just t' -> return t'
   askTypeEnv = BinderT get
 
-instance Monad m => LocalTypeEnv (BinderT lore m) where
+instance (Applicative m, Monad m) => LocalTypeEnv (BinderT lore m) where
   localTypeEnv types (BinderT m) = BinderT $ do
     modify (`HM.union` types)
     x <- m
@@ -126,7 +126,7 @@ collectBinderBindings m = pass $ do
 -- | Add the names and types from the given list of 'Ident's to the
 -- type environment while executing the given action.  This is used to
 -- deal with function parameters and loop merge variables.
-bindingIdentTypes :: Monad m =>
+bindingIdentTypes :: (Applicative m, Monad m) =>
                      [Ident] -> BinderT lore m a
                   -> BinderT lore m a
 bindingIdentTypes idents = localTypeEnv types
@@ -134,7 +134,7 @@ bindingIdentTypes idents = localTypeEnv types
 
 -- | Add the names and types from the given list of 'Param's to the
 -- type environment while executing the given action.
-bindingParamTypes :: Monad m =>
+bindingParamTypes :: (Applicative m, Monad m) =>
                      [ParamT attr] -> BinderT lore m a
                   -> BinderT lore m a
 bindingParamTypes = bindingIdentTypes . map paramIdent
