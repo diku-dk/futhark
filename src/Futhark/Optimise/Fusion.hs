@@ -27,8 +27,10 @@ data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
 
 varEntryType :: VarEntry -> Type
-varEntryType (IsArray ident _) = identType ident
-varEntryType (IsNotArray ident) = identType ident
+varEntryType (IsArray ident trns) =
+  SOAC.inputType $ SOAC.addTransforms trns $ SOAC.identInput ident
+varEntryType (IsNotArray ident) =
+  identType ident
 
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
