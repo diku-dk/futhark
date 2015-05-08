@@ -24,7 +24,7 @@ import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Renamer
 
-import Debug.Trace
+--import Debug.Trace
 
 data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
@@ -442,8 +442,8 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                     -- disable horizontal fusion in the case when an output array of
                     -- producer SOAC is a non-trivially transformed input of the consumer
                     out_transf_ok  = let ker_inp = SOAC.inputs $ fsoac ker
-                                         unfuse1 = (HS.fromList $ catMaybes $ map SOAC.inputArray ker_inp) `HS.difference`
-                                                   (HS.fromList $ catMaybes $ map SOAC.isVarInput ker_inp)
+                                         unfuse1 = HS.fromList (mapMaybe SOAC.inputArray ker_inp) `HS.difference`
+                                                   HS.fromList (mapMaybe SOAC.isVarInput ker_inp)
                                          unfuse2 = HS.intersection curker_outset ufus_nms
                                      in  HS.null $ HS.intersection unfuse1 unfuse2
                 consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
@@ -732,7 +732,7 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
             badFusionGM $ Error
             ("In Fusion.hs, replaceSOAC, unfused kernel "
              ++"still in result: "++pretty names)
-          trace ("AHAHAHA!!!: "++show (fusedVars ker)++" ~~~~~ "++show names) $ insertKerSOAC (outNames ker) ker body
+          insertKerSOAC (outNames ker) ker body
 
 insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
 insertKerSOAC names ker body = do
@@ -740,8 +740,8 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- trace ("FUSED LAMBDA: "++pretty lam) $ simpleOptLambda prog lam args
-  (_, nfres) <- trace ("FUSED SIMPLIFIED LAMBDA: "++pretty lam') $ fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
+  lam' <- simpleOptLambda prog lam args
+  (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
   runBodyBinder $ do
