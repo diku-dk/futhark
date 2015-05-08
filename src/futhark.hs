@@ -89,19 +89,6 @@ commandLineOptions =
     "Use the recommended optimised pipeline."
   ]
 
-standardPipeline :: [Pass]
-standardPipeline =
-  [ uttransform
-  , eotransform
-  , inlinetransform
-  , commonSubexpressionElimination
-  , eotransform
-  , hotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , removeDeadFunctions
-  ]
-
 -- | Entry point.  Non-interactive, except when reading interpreter
 -- input from standard input.
 main :: IO ()

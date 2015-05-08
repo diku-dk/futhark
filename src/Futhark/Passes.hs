@@ -18,6 +18,7 @@ module Futhark.Passes
   , flattening
   , doubleBuffer
   , sequentialiseKernels
+  , standardPipeline
   )
 where
 
@@ -108,3 +109,16 @@ doubleBuffer = unfailableExplicitMemoryPass "double buffering"
 sequentialiseKernels :: Pass
 sequentialiseKernels = unfailableBasicPass "sequentialise kernels"
                        Futhark.KernelSequentialisation.sequentialiseKernels
+
+standardPipeline :: [Pass]
+standardPipeline =
+  [ uttransform
+  , eotransform
+  , inlinetransform
+  , commonSubexpressionElimination
+  , eotransform
+  , hotransform
+  , commonSubexpressionElimination
+  , eotransform
+  , removeDeadFunctions
+  ]

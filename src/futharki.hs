@@ -37,23 +37,10 @@ interpret :: FutharkConfig -> FilePath -> IO ()
 interpret = runCompilerOnProgram
 
 interpreterConfig :: FutharkConfig
-interpreterConfig = FutharkConfig { futharkpipeline = interpreterPipeline
+interpreterConfig = FutharkConfig { futharkpipeline = standardPipeline
                                   , futharkaction = interpretAction' RealAsFloat64
                                   , futharkcheckAliases = True
                                   , futharkverbose = Nothing
                                   , futharkboundsCheck = True
                                   , futharkRealConfiguration = RealAsFloat64
                                   }
-
-interpreterPipeline :: [Pass]
-interpreterPipeline =
-  [ uttransform
-  , eotransform
-  , inlinetransform
-  , commonSubexpressionElimination
-  , eotransform
-  , hotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , removeDeadFunctions
-  ]

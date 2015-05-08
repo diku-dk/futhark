@@ -92,16 +92,8 @@ futharkConfig config =
 
 compilerPipeline :: [Pass]
 compilerPipeline =
-  [ uttransform
-  , eotransform
-  , inlinetransform
-  , commonSubexpressionElimination
-  , eotransform
-  , hotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , removeDeadFunctions
-  , fotransform
+  standardPipeline ++
+  [ fotransform
   , eotransform
   , inPlaceLowering
   , explicitMemory
