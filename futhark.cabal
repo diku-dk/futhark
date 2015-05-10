@@ -82,6 +82,7 @@ Library
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
                    Futhark.KernelSequentialisation
+                   Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
                    Futhark.Optimise.DoubleBuffer
@@ -241,6 +242,7 @@ Executable futhark-test
                  transformers,
                  parsec >= 3,
                  regex-tdfa >= 1.2,
+                 unordered-containers,
                  text,
                  futhark
 

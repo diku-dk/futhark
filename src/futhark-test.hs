@@ -8,17 +8,19 @@ module Main ( ProgramTest (..)
 
 import Control.Applicative
 import Control.Concurrent
-import Control.Monad
+import Control.Monad hiding (forM_)
 import Control.Exception hiding (try)
-import Control.Monad.Except
+import Control.Monad.Except hiding (forM_)
 import Data.Char
 import Data.List
 import Data.Monoid
 import Data.Ord
+import Data.Foldable (forM_)
 import qualified Data.Array as A
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.HashMap.Lazy as HM
 import System.Console.GetOpt
 import System.Directory
 import System.Process
@@ -26,7 +28,7 @@ import System.Exit
 import System.IO
 import System.FilePath
 
-import Text.Parsec hiding ((<|>), many)
+import Text.Parsec hiding ((<|>), many, optional)
 import Text.Parsec.Text
 import Text.Parsec.Error
 import Text.Regex.TDFA
@@ -34,9 +36,14 @@ import Text.Regex.TDFA
 import Prelude
 
 import Futhark.Representation.AST.Pretty (pretty)
-import Futhark.Representation.AST.Syntax.Core
+import Futhark.Representation.AST.Syntax.Core hiding (Basic)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
+import Futhark.Metrics
+import Futhark.Pipeline
+import Futhark.Compiler
+import Futhark.Passes (standardPipeline)
+
 import Futhark.Util.Options
 
 -- | Number of tests to run concurrently.
@@ -50,8 +57,12 @@ concurrency = 8
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
 data ProgramTest =
-  ProgramTest { testDescription :: T.Text
-              , testAction      :: TestAction
+  ProgramTest { testDescription ::
+                   T.Text
+              , testAction ::
+                   TestAction
+              , testExpectedStructure ::
+                   Maybe AstMetrics
               }
   deriving (Show)
 
@@ -97,6 +108,11 @@ lexstr = void . lexeme . string
 
 braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
+
+parseNatural :: Parser Int
+parseNatural = lexeme $ foldl (\acc x -> acc * 10 + x) 0 <$>
+               map num <$> some digit
+  where num c = ord c - ord '0'
 
 parseDescription :: Parser T.Text
 parseDescription = lexeme $ T.pack <$> (anyChar `manyTill` descriptionSeparator)
@@ -160,9 +176,15 @@ parseBlockBody n = do
 restOfLine :: Parser T.Text
 restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
 
+parseExpectedStructure :: Parser AstMetrics
+parseExpectedStructure = do
+  lexstr "structure"
+  braces $ liftM HM.fromList $ many $
+    (,) <$> (T.pack <$> lexeme (many1 (satisfy isAlpha))) <*> parseNatural
+
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseAction
+  ProgramTest <$> parseDescription <*> parseAction <*> optional parseExpectedStructure
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
@@ -223,8 +245,45 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
+optimisedProgramMetrics :: FilePath -> TestM AstMetrics
+optimisedProgramMetrics program = do
+  res <- io $ runPipelineOnProgram futharkConfig program
+  case res of
+    (_, Left err) ->
+      throwError $ show $ errorDesc err
+    (_, Right (Basic prog)) ->
+      return $ progMetrics prog
+    (_, Right (ExplicitMemory _)) ->
+      throwError "Compiling for metrics resulted in non-basic program"
+  where futharkConfig =
+          FutharkConfig { futharkpipeline = standardPipeline
+                        , futharkaction = error "No action here"
+                        , futharkcheckAliases = True
+                        , futharkverbose = Nothing
+                        , futharkboundsCheck = True
+                        , futharkRealConfiguration = RealAsFloat64
+                        }
+
+testMetrics :: FilePath -> AstMetrics -> TestM ()
+testMetrics program expected = context "Checking metrics" $ do
+  actual <- optimisedProgramMetrics program
+  mapM_ (ok actual) $ HM.toList expected
+  where ok metrics (name, expected_occurences) =
+          case HM.lookup name metrics of
+            Nothing
+              | expected_occurences > 0 ->
+              throwError $ T.unpack name ++ " should have occurred " ++ show expected_occurences ++
+              " times, but did not occur at all in optimised program."
+            Just actual_occurences
+              | expected_occurences /= actual_occurences ->
+                throwError $ T.unpack name ++ " should have occurred " ++ show expected_occurences ++
+              " times, but occured " ++ show actual_occurences ++ " times."
+            _ -> return ()
+
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase program testcase progs) =
+runTestCase (TestCase program testcase progs) = do
+  forM_ (testExpectedStructure testcase) $ testMetrics program
+
   case testAction testcase of
 
     CompileTimeFailure expected_error ->
