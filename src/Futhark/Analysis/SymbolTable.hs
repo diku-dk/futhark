@@ -47,7 +47,8 @@ import Data.Ord
 import Data.Maybe
 import Data.Monoid
 import Data.List hiding (elem, insert, lookup)
-import qualified Data.Set as S
+import qualified Data.Set          as S
+import qualified Data.HashSet      as HS
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (elem, lookup)
@@ -513,7 +514,7 @@ updateBounds' cond sym_tab =
       --  Just (i, a == 1, -a*b), i.e., (symbol, isUpperBound, bound)
       solve_leq0 :: ScalExp -> Maybe (VName, Bool, ScalExp)
       solve_leq0 e_scal = do
-        sym <- AS.pickSymToElim ranges S.empty e_scal
+        sym <- pickRefinedSym S.empty e_scal
         (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
         case a of
           Val (IntVal (-1)) -> Just (sym, False, b)
@@ -522,6 +523,34 @@ updateBounds' cond sym_tab =
                   AS.simplify (SMinus (Val (IntVal 0)) b) ranges
             Just (sym, True, mb)
           _ -> Nothing
+
+      -- When picking a symbols, @sym@ whose bound it is to be refined:
+      -- make sure that @sym@ does not belong to the transitive closure
+      -- of the symbols apearing in the ranges of all the other symbols
+      -- in the sclar expression (themselves included).
+      -- If this does not hold, pick another symbol, rinse and repeat.
+      pickRefinedSym :: S.Set VName -> ScalExp -> Maybe VName
+      pickRefinedSym elsyms0 e_scal = do
+        let candidates = freeIn e_scal
+            sym0 = AS.pickSymToElim ranges elsyms0 e_scal
+        case sym0 of
+            Just sy -> let trclsyms = foldl trClSymsInRange HS.empty $ HS.toList $
+                                        candidates `HS.difference` HS.singleton sy
+                       in  if   HS.member sy trclsyms
+                           then pickRefinedSym (S.insert sy elsyms0) e_scal
+                           else sym0
+            Nothing -> sym0
+      -- computes the transitive closure of the symbols appearing
+      -- in the ranges of a symbol
+      trClSymsInRange :: HS.HashSet VName -> VName -> HS.HashSet VName
+      trClSymsInRange cur_syms sym =
+        if HS.member sym cur_syms then cur_syms
+        else case HM.lookup sym ranges of
+               Just (_,lb,ub) -> let sym_bds = concatMap (HS.toList . freeIn) (catMaybes [lb, ub])
+                                 in  foldl trClSymsInRange
+                                           (HS.insert sym cur_syms)
+                                           (HS.toList $ HS.fromList sym_bds)
+               Nothing        -> HS.insert sym cur_syms
 
 setUpperBound :: VName -> ScalExp -> SymbolTable lore
               -> SymbolTable lore
