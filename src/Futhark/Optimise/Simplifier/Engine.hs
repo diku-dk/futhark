@@ -589,11 +589,10 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   -- Blocking hoisting of all unique bindings is probably too
   -- conservative, but there is currently no nice way to mark
   -- consumption of the loop body result.
-  loopbody' <- enterBody $
+  loopbody' <- enterLoop $ enterBody $
                bindFParams mergepat' $
                blockIf
                (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
-               enterLoop $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
@@ -808,11 +807,10 @@ simplifyLambdaMaybeHoist hoisting (Lambda params body rettype) arrs = do
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ map paramName params'
   body' <-
-    enterBody $
+    enterLoop $ enterBody $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
     blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
-    enterLoop $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda params' body' rettype'
@@ -826,7 +824,7 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
   params' <- mapM (simplifyParam simplifyLParamLore) params
   let paramnames = HS.fromList $ map paramName params'
   rettype' <- mapM simplifyExtType rettype
-  body' <- enterBody $
+  body' <- enterLoop $ enterBody $
            bindLParams params' $
            blockIf (hasFree paramnames `orIf` isUnique) $
            localVtable extendSymTab $
