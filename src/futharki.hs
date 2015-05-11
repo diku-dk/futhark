@@ -6,7 +6,6 @@ import Control.Monad
 import Language.Futhark.Parser
 import Futhark.Version
 import Futhark.Pipeline
-import Futhark.Passes
 import Futhark.Compiler
 import Futhark.Util.Options
 

@@ -247,7 +247,7 @@ progNotFound s = s ++ ": command not found"
 
 optimisedProgramMetrics :: FilePath -> TestM AstMetrics
 optimisedProgramMetrics program = do
-  res <- io $ runPipelineOnProgram newFutharkConfig program
+  res <- io $ runPipelineOnProgram futharkConfig program
   case res of
     (_, Left err) ->
       throwError $ show $ errorDesc err
@@ -255,6 +255,8 @@ optimisedProgramMetrics program = do
       return $ progMetrics prog
     (_, Right (ExplicitMemory _)) ->
       throwError "Compiling for metrics resulted in non-basic program"
+  where futharkConfig =
+          newFutharkConfig { futharkpipeline = standardPipeline }
 
 testMetrics :: FilePath -> AstMetrics -> TestM ()
 testMetrics program expected = context "Checking metrics" $ do
