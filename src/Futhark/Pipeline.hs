@@ -144,7 +144,6 @@ applyAction (Action _ f) = f
 
 data FutharkConfig = FutharkConfig {
     futharkpipeline :: [Pass]
-  , futharkaction :: Action
   , futharkcheckAliases :: Bool
   , futharkverbose :: Maybe (Maybe FilePath)
   , futharkboundsCheck :: Bool

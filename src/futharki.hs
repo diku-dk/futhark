@@ -34,13 +34,8 @@ repl = do
   forever $ print =<< parseExpIncrIO RealAsFloat64 "input" ""
 
 interpret :: FutharkConfig -> FilePath -> IO ()
-interpret = runCompilerOnProgram
+interpret config =
+  runCompilerOnProgram config $ interpretAction' $ futharkRealConfiguration config
 
 interpreterConfig :: FutharkConfig
-interpreterConfig = FutharkConfig { futharkpipeline = standardPipeline
-                                  , futharkaction = interpretAction' RealAsFloat64
-                                  , futharkcheckAliases = True
-                                  , futharkverbose = Nothing
-                                  , futharkboundsCheck = True
-                                  , futharkRealConfiguration = RealAsFloat64
-                                  }
+interpreterConfig = newFutharkConfig

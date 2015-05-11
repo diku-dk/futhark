@@ -25,15 +25,14 @@ import qualified Futhark.TypeCheck as I
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkpipeline = []
-                                 , futharkaction = printAction
                                  , futharkcheckAliases = True
                                  , futharkverbose = Nothing
                                  , futharkboundsCheck = True
                                  , futharkRealConfiguration = RealAsFloat64
                                  }
 
-runCompilerOnProgram :: FutharkConfig -> FilePath -> IO ()
-runCompilerOnProgram config file = do
+runCompilerOnProgram :: FutharkConfig -> Action -> FilePath -> IO ()
+runCompilerOnProgram config action file = do
   (msgs, res) <- runPipelineOnProgram config file
   hPutStr stderr msgs
   case res of
@@ -46,7 +45,6 @@ runCompilerOnProgram config file = do
         _ -> return ()
       exitWith $ ExitFailure 2
     Right s -> do
-      let action = futharkaction config
       when (verbose config) $
         hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
       applyAction action s

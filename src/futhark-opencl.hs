@@ -82,13 +82,10 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  FutharkConfig { futharkpipeline = compilerPipeline
-                , futharkaction = error "invalid action"
-                , futharkcheckAliases = True
-                , futharkverbose = compilerVerbose config
-                , futharkboundsCheck = True
-                , futharkRealConfiguration = compilerRealConfiguration config
-                }
+  newFutharkConfig { futharkpipeline = compilerPipeline
+                   , futharkverbose = compilerVerbose config
+                   , futharkRealConfiguration = compilerRealConfiguration config
+                   }
 
 compilerPipeline :: [Pass]
 compilerPipeline =
