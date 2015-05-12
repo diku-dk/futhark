@@ -23,6 +23,7 @@
 --     let x[k,i] = a * i in
 --     x
 --     in
+--   let r = x[y] in
 --   ...
 -- @
 --

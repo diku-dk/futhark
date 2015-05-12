@@ -36,8 +36,11 @@ lowerUpdate :: (Bindable lore, MonadFreshNames m) =>
 lowerUpdate (Let pat _ (LoopOp (DoLoop res merge form body))) updates = do
   canDo <- lowerUpdateIntoLoop updates pat res merge body
   Just $ do
-    (prebnds, ctxpat, valpat, res', merge', body') <- canDo
-    return $ prebnds ++ [mkLet' ctxpat valpat $ LoopOp $ DoLoop res' merge' form body']
+    (prebnds, postbnds, ctxpat, valpat, res', merge', body') <- canDo
+    return $
+      prebnds ++
+      [mkLet' ctxpat valpat $ LoopOp $ DoLoop res' merge' form body'] ++
+      postbnds
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
   [DesiredUpdate bindee cs src is val]
@@ -60,6 +63,7 @@ lowerUpdateIntoLoop :: (Bindable lore, MonadFreshNames m) =>
                     -> [(FParam lore, SubExp)]
                     -> Body lore
                     -> Maybe (m ([Binding lore],
+                                 [Binding lore],
                                  [Ident],
                                  [Ident],
                                  [VName],
@@ -94,12 +98,12 @@ lowerUpdateIntoLoop updates pat res merge body = do
   mk_in_place_map <- summariseLoop updates usedInBody resmap merge
   Just $ do
     in_place_map <- mk_in_place_map
-    (merge',prebnds) <- mkMerges in_place_map
+    (merge',prebnds,postbnds) <- mkMerges in_place_map
     let (ctxpat,valpat,res') = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
     let body' = mkBody newbnds $ manipulateResult in_place_map idxsubsts'
-    return (prebnds, ctxpat, valpat, map identName res', merge', body')
+    return (prebnds, postbnds, ctxpat, valpat, map identName res', merge', body')
   where mergeparams = map fst merge
         usedInBody = freeInBody body
         resmap = loopResultValues
@@ -109,11 +113,11 @@ lowerUpdateIntoLoop updates pat res merge body = do
 
         mkMerges :: (MonadFreshNames m, Bindable lore) =>
                     [LoopResultSummary]
-                 -> m ([(ParamT (), SubExp)], [Binding lore])
+                 -> m ([(ParamT (), SubExp)], [Binding lore], [Binding lore])
         mkMerges summaries = do
-          ((origmerge, extramerge), prebnds) <-
+          ((origmerge, extramerge), (prebnds, postbnds)) <-
             runWriterT $ partitionEithers <$> mapM mkMerge summaries
-          return (origmerge ++ extramerge, prebnds)
+          return (origmerge ++ extramerge, prebnds, postbnds)
 
         mkMerge summary
           | Just (update, mergeident) <- relatedUpdate summary = do
@@ -123,7 +127,11 @@ lowerUpdateIntoLoop updates pat res merge body = do
                            (updateCertificates update)
                            (updateSource update)
                            (updateIndices update))]
-            tell [mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary]
+                elmident = Ident (updateValue update) $
+                           rowType $ identType $ updateBindee update
+            tell ([mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary],
+                  [mkLet' [] [elmident] $ PrimOp $ Index []
+                   (identName $ updateBindee update) (updateIndices update)])
             return $ Right (Param mergeident (), Var source)
           | otherwise = return $ Left $ mergeParam summary
 
