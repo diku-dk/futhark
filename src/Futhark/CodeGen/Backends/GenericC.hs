@@ -174,7 +174,7 @@ scalarTypeToCType bt =
 
 scalarTypeToCTypeSpec :: BasicType -> C.TypeSpec
 scalarTypeToCTypeSpec Int  = C.Tint Nothing noLoc
-scalarTypeToCTypeSpec Bool = C.Tint Nothing noLoc
+scalarTypeToCTypeSpec Bool = C.Tchar Nothing noLoc
 scalarTypeToCTypeSpec Char = C.Tchar Nothing noLoc
 scalarTypeToCTypeSpec Float64 = C.Tdouble noLoc
 scalarTypeToCTypeSpec Float32 = C.Tfloat noLoc
