@@ -119,7 +119,6 @@ c_exp64 = [C.cfun|
     }
   |]
 
-
 -- | C definitions of the Futhark "standard library".
 builtInFunctionDefs :: [C.Func]
 builtInFunctionDefs =

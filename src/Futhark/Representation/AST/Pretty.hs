@@ -299,6 +299,7 @@ instance Pretty BinOp where
   ppr Pow = text "pow"
   ppr Times = text "*"
   ppr Divide = text "/"
+  ppr IntDivide = text "mod"
   ppr Mod = text "%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"

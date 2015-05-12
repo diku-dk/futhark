@@ -230,6 +230,7 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
                    , (Minus, SMinus)
                    , (Times, STimes)
                    , (Divide, SDivide)
+                   , (IntDivide, SDivide)
                    , (Pow, SPow)
                    , (LogAnd, SLogAnd)
                    , (LogOr, SLogOr)
@@ -250,7 +251,9 @@ fromScalExp' = convert
         convert (SPlus x y) = arithBinOp Plus x y
         convert (SMinus x y) = arithBinOp Minus x y
         convert (STimes x y) = arithBinOp Times x y
-        convert (SDivide x y) = arithBinOp Divide x y
+        convert (SDivide x y)
+          | scalExpType x == Int = arithBinOp IntDivide x y
+          | otherwise            = arithBinOp Divide x y
         convert (SPow x y) = arithBinOp Pow x y
         convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) Bool
         convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) Bool

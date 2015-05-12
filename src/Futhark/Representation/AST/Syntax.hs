@@ -126,6 +126,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Pow
            | Times
            | Divide
+           | IntDivide -- ^ Rounds towards negative infinity.
            | Mod
            | ShiftR
            | ShiftL

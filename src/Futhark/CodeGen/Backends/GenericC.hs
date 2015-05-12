@@ -550,7 +550,6 @@ compileExp (BinOp bop x y) = do
              Minus -> [C.cexp|$exp:x' - $exp:y'|]
              Times -> [C.cexp|$exp:x' * $exp:y'|]
              Divide -> [C.cexp|$exp:x' / $exp:y'|]
-             Mod -> [C.cexp|$exp:x' % $exp:y'|]
              Pow -> [C.cexp|powl($exp:x',$exp:y')|]
              ShiftR -> [C.cexp|$exp:x' >> $exp:y'|]
              ShiftL -> [C.cexp|$exp:x' << $exp:y'|]
@@ -562,6 +561,19 @@ compileExp (BinOp bop x y) = do
              Equal -> [C.cexp|$exp:x' == $exp:y'|]
              Less -> [C.cexp|$exp:x' < $exp:y'|]
              Leq -> [C.cexp|$exp:x' <= $exp:y'|]
+             IntDivide ->
+               let q = [C.cexp|$exp:x' / $exp:y'|]
+                   r = [C.cexp|$exp:x' % $exp:y'|]
+               in [C.cexp|$exp:q -
+                   ((($exp:r != 0) &&
+                     (($exp:r < 0) != ($exp:y' < 0))) ?
+                    1 : 0)|]
+             Mod ->
+               let r = [C.cexp|$exp:x' % $exp:y'|]
+               in [C.cexp|$exp:r +
+                   ((($exp:r != 0) &&
+                     (($exp:r < 0) != ($exp:y' < 0))) ?
+                    $exp:y' : 0)|]
 
 compileExp (SizeOf t) =
   return [C.cexp|(sizeof($ty:t'))|]
