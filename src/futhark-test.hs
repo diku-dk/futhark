@@ -301,12 +301,12 @@ runTestCase (TestCase program testcase progs) = do
         unless (runMode run == CompiledOnly) $
           forM_ (configInterpreters progs) $ \interpreter ->
             context ("Interpreting with " ++ interpreter) $
-              mapM (interpretTestProgram interpreter program) run_cases
+              interpretTestProgram interpreter program run
 
         unless (runMode run == InterpretedOnly) $
           forM_ (configCompilers progs) $ \compiler ->
             context ("Compiling with " ++ compiler) $
-              mapM (compileTestProgram compiler program) run_cases
+              compileTestProgram compiler program run
 
 checkError :: ExpectedError -> String -> TestM ()
 checkError (ThisError regex_s regex) err
