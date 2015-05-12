@@ -791,7 +791,7 @@ simplifyType (Basic bt) =
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m) -> [Maybe VName]
                -> m (Lambda (Lore m))
-simplifyLambda = simplifyLambdaMaybeHoist False
+simplifyLambda = simplifyLambdaMaybeHoist True
 
 simplifyLambdaNoHoisting :: MonadEngine m =>
                             Lambda (InnerLore m) -> [Maybe VName]
