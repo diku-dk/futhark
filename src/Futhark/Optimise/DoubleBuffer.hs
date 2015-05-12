@@ -40,11 +40,19 @@ optimiseBody body = do
 
 optimiseBinding :: MonadFreshNames m => Binding -> m [Binding]
 optimiseBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
-  (bnds, merge', body') <- optimiseLoop merge body
-  return $ bnds ++ [Let pat () $ LoopOp $ DoLoop res merge' form body']
+  body' <- optimiseBody body
+  (bnds, merge', body'') <- optimiseLoop merge body'
+  return $ bnds ++ [Let pat () $ LoopOp $ DoLoop res merge' form body'']
 optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
+                                  , mapOnLambda = optimiseLambda
                                   }
+
+optimiseLambda :: MonadFreshNames m =>
+                  Lambda -> m Lambda
+optimiseLambda lambda = do
+  body' <- optimiseBody $ lambdaBody lambda
+  return lambda { lambdaBody = body' }
 
 optimiseLoop :: MonadFreshNames m =>
                 [(FParam, SubExp)] -> Body
