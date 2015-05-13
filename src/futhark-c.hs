@@ -82,8 +82,8 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkpipeline = compilerPipeline
-                   , futharkverbose = compilerVerbose config
+  newFutharkConfig { futharkPipeline = compilerPipeline
+                   , futharkVerbose = compilerVerbose config
                    , futharkRealConfiguration = compilerRealConfiguration config
                    }
 

@@ -26,22 +26,22 @@ passoption :: String -> Pass -> String -> [String] -> FutharkOption
 passoption desc pass short long =
   Option short long
   (NoArg $ Right $ changeFutharkConfig $
-   \opts -> opts { futharkpipeline = pass : futharkpipeline opts })
+   \opts -> opts { futharkPipeline = pass : futharkPipeline opts })
   desc
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
   [ Option "V" ["verbose"]
     (OptArg (\file -> Right $ changeFutharkConfig $
-                      \opts -> opts { futharkverbose = Just file }) "FILE")
+                      \opts -> opts { futharkVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
   , Option [] ["inhibit-uniqueness-checking"]
     (NoArg $ Right $ changeFutharkConfig $
-     \opts -> opts { futharkcheckAliases = False })
+     \opts -> opts { futharkCheckAliases = False })
     "Don't check that uniqueness constraints are being upheld."
   , Option [] ["no-bounds-checking"]
     (NoArg $ Right $ changeFutharkConfig $
-     \opts -> opts { futharkboundsCheck = False })
+     \opts -> opts { futharkBoundsCheck = False })
     "Do not perform bounds checking in the generated program."
 
   , Option [] ["compile-sequential"]
@@ -108,7 +108,7 @@ commandLineOptions =
 
   , Option "s" ["standard"]
     (NoArg $ Right $ changeFutharkConfig $
-     \opts -> opts { futharkpipeline = standardPipeline ++ futharkpipeline opts })
+     \opts -> opts { futharkPipeline = standardPipeline ++ futharkPipeline opts })
     "Use the recommended optimised pipeline."
   ]
 
