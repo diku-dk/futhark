@@ -2,7 +2,6 @@ module Futhark.KernelSequentialisation
        ( sequentialiseKernels )
        where
 
-import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
 
@@ -14,9 +13,7 @@ import Futhark.Tools
 import qualified Futhark.FirstOrderTransform as FOT
 
 sequentialiseKernels :: Prog -> Prog
-sequentialiseKernels prog =
-  evalState (Prog <$> mapM transformFunDec (progFunctions prog)) src
-  where src = newNameSourceForProg prog
+sequentialiseKernels = intraproceduralTransformation transformFunDec
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = do

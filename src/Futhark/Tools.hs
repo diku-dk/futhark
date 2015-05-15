@@ -35,6 +35,7 @@ module Futhark.Tools
   , module Futhark.Binder
 
   , redomapToMapAndReduce
+  , intraproceduralTransformation
 
   -- * Result types
   , instantiateShapes
@@ -407,3 +408,9 @@ redomapToMapAndReduce (Pattern [] patelems) lore
       in redmap_lam { lambdaBody = body', lambdaParams = params' }
 redomapToMapAndReduce _ _ _ =
   error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
+
+intraproceduralTransformation :: (FunDec lore -> State VNameSource (FunDec lore))
+                              -> Prog lore -> Prog lore
+intraproceduralTransformation ft prog =
+  evalState (Prog <$> mapM ft (progFunctions prog)) src
+  where src = newNameSourceForProg prog
