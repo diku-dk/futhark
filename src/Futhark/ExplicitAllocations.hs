@@ -359,9 +359,7 @@ funcallArgs args = do
   return $ memsizeargs <> memargs <> valargs
 
 explicitAllocations :: In.Prog -> Prog
-explicitAllocations prog =
-  Prog $ evalState (mapM allocInFun $ In.progFunctions prog) free
-  where free = newNameSourceForProg prog
+explicitAllocations = intraproceduralTransformation allocInFun
 
 memoryInRetType :: In.RetType -> RetType
 memoryInRetType (ExtRetType ts) =
