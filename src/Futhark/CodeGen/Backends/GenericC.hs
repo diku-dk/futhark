@@ -273,6 +273,7 @@ printStm (ArrayValue mem bt (dim:shape)) = do
 readFun :: BasicType -> Maybe String
 readFun Int  = Just "read_int"
 readFun Char = Just "read_char"
+readFun Bool = Just "read_bool"
 readFun Float32 = Just "read_float"
 readFun Float64 = Just "read_double"
 readFun _    = Nothing
