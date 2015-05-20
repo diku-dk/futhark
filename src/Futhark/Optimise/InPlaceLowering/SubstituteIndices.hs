@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module exports facilities for transforming array accesses in
 -- a list of 'Binding's (intended to be the bindings in a body).  The
 -- idea is that you can state that some variable @x@ is in fact an
@@ -11,6 +12,7 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 import Control.Applicative
 import Control.Monad
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -22,13 +24,19 @@ import Futhark.Util
 type IndexSubstitution = (Certificates, Ident, [SubExp])
 type IndexSubstitutions = [(VName, IndexSubstitution)]
 
+typeEnvFromSubstitutions :: IndexSubstitutions -> TypeEnv
+typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution. snd)
+  where fromSubstitution (_, ident, _) =
+          (identName ident, identType ident)
+
 substituteIndices :: (MonadFreshNames m, Bindable lore) =>
                      IndexSubstitutions -> [Binding lore]
                   -> m ([IndexSubstitution], [Binding lore])
 substituteIndices substs bnds = do
   (substs', bnds') <-
-    runBinder'' $ substituteIndicesInBindings substs bnds
+    runBinderT (substituteIndicesInBindings substs bnds) types
   return (map snd substs', bnds')
+  where types = typeEnvFromSubstitutions substs
 
 substituteIndicesInBindings :: MonadBinder m =>
                                IndexSubstitutions
@@ -46,7 +54,7 @@ substituteIndicesInBinding substs (Let pat lore e) = do
   addBinding $ Let pat' lore e'
   return substs'
   where substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs
-                                    , mapOnIdent  = substituteIndicesInIdent substs
+                                    , mapOnVName  = substituteIndicesInVar substs
                                     , mapOnBody   = substituteIndicesInBody substs
                                     }
 
@@ -55,15 +63,15 @@ substituteIndicesInPattern :: MonadBinder m =>
                            -> Pattern (Lore m)
                            -> m (IndexSubstitutions, Pattern (Lore m))
 substituteIndicesInPattern substs pat = do
-  (substs', patElems) <- mapAccumLM sub substs $ patternElements pat
-  return (substs', Pattern patElems)
+  (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
+  (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat
+  return (substs'', Pattern context values)
   where sub substs' (PatElem ident (BindInPlace cs src is) attr)
-          | Just (cs2, src2, is2) <- lookup srcname substs =
+          | Just (cs2, src2, is2) <- lookup src substs =
             let ident' = ident { identType = identType src2 }
-            in return (update srcname name (cs2, ident', is2) substs',
-                       PatElem ident' (BindInPlace (cs++cs2) src2 (is2++is)) attr)
-          where srcname = identName src
-                name    = identName ident
+            in return (update src name (cs2, ident', is2) substs',
+                       PatElem ident' (BindInPlace (cs++cs2) (identName src2) (is2++is)) attr)
+          where name    = identName ident
         sub substs' patElem =
           return (substs', patElem)
 
@@ -71,17 +79,17 @@ substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions
                           -> SubExp
                           -> m SubExp
-substituteIndicesInSubExp substs (Var v) = Var <$> substituteIndicesInIdent substs v
+substituteIndicesInSubExp substs (Var v) = Var <$> substituteIndicesInVar substs v
 substituteIndicesInSubExp _      se      = return se
 
 
-substituteIndicesInIdent :: MonadBinder m =>
-                            IndexSubstitutions
-                         -> Ident
-                         -> m Ident
-substituteIndicesInIdent substs v
-  | Just (cs2, src2, is2) <- lookup (identName v) substs =
-    letExp "idx" $ PrimOp $ Index cs2 src2 is2
+substituteIndicesInVar :: MonadBinder m =>
+                          IndexSubstitutions
+                       -> VName
+                       -> m VName
+substituteIndicesInVar substs v
+  | Just (cs2, src2, is2) <- lookup v substs =
+    letExp "idx" $ PrimOp $ Index cs2 (identName src2) is2
   | otherwise =
     return v
 
@@ -93,8 +101,8 @@ substituteIndicesInBody substs body = do
   (substs', bnds) <-
     collectBindings $ substituteIndicesInBindings substs $ bodyBindings body
   ses <-
-    mapM (substituteIndicesInSubExp substs') $ resultSubExps $ bodyResult body
-  mkBodyM bnds $ Result ses
+    mapM (substituteIndicesInSubExp substs') $ bodyResult body
+  mkBodyM bnds ses
 
 update :: VName -> VName -> IndexSubstitution -> IndexSubstitutions
        -> IndexSubstitutions

@@ -18,10 +18,9 @@ untraceFun (FunDec fname ret params body) =
   FunDec fname ret params (untraceBody body)
 
 untraceBody :: Body -> Body
-untraceBody = mapBody untrace
+untraceBody = mapBody untraceBinding
   where untrace = identityMapper {
-                    mapOnBinding = return . untraceBinding
-                  , mapOnBody = return .untraceBody
+                    mapOnBody = return .untraceBody
                   , mapOnLambda = return . untraceLambda
                   }
         untraceBinding bnd@(Let _ _ (PrimOp _)) = bnd

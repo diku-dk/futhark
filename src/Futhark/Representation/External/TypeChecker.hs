@@ -607,8 +607,12 @@ checkExp (UnOp Not e pos) = do
   e' <- require [Basic Bool] =<< checkExp e
   return $ UnOp Not e' pos
 
+checkExp (UnOp Complement e loc) = do
+  e' <- require [Basic Int] =<< checkExp e
+  return $ UnOp Complement e' loc
+
 checkExp (UnOp Negate e loc) = do
-  e' <- require [Basic Int, Basic Real] =<< checkExp e
+  e' <- require [Basic Int, Basic Float32, Basic Float64] =<< checkExp e
   return $ UnOp Negate e' loc
 
 checkExp (If e1 e2 e3 t pos) = do
@@ -1063,11 +1067,11 @@ checkIdent (Ident name t pos) = do
 checkBinOp :: (TypeBox ty, VarName vn) =>
               BinOp -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
            -> TypeM vn (TaggedExp CompTypeBase vn)
-checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Real, Int] e1 e2 t pos
-checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus [Real, Int] e1 e2 t pos
-checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow [Real, Int] e1 e2 t pos
-checkBinOp Times e1 e2 t pos = checkPolyBinOp Times [Real, Int] e1 e2 t pos
-checkBinOp Divide e1 e2 t pos = checkPolyBinOp Divide [Real, Int] e1 e2 t pos
+checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus [Float32, Float64, Int] e1 e2 t pos
+checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus [Float32, Float64, Int] e1 e2 t pos
+checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t pos
+checkBinOp Times e1 e2 t pos = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t pos
+checkBinOp Divide e1 e2 t pos = checkPolyBinOp Divide [Float32, Float64, Int] e1 e2 t pos
 checkBinOp Mod e1 e2 t pos = checkPolyBinOp Mod [Int] e1 e2 t pos
 checkBinOp ShiftR e1 e2 t pos = checkPolyBinOp ShiftR [Int] e1 e2 t pos
 checkBinOp ShiftL e1 e2 t pos = checkPolyBinOp ShiftL [Int] e1 e2 t pos
@@ -1076,11 +1080,11 @@ checkBinOp Xor e1 e2 t pos = checkPolyBinOp Xor [Int] e1 e2 t pos
 checkBinOp Bor e1 e2 t pos = checkPolyBinOp Bor [Int] e1 e2 t pos
 checkBinOp LogAnd e1 e2 t pos = checkPolyBinOp LogAnd [Bool] e1 e2 t pos
 checkBinOp LogOr e1 e2 t pos = checkPolyBinOp LogOr [Bool] e1 e2 t pos
-checkBinOp Equal e1 e2 t pos = checkRelOp Equal [Int, Real] e1 e2 t pos
-checkBinOp Less e1 e2 t pos = checkRelOp Less [Int, Real] e1 e2 t pos
-checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Real] e1 e2 t pos
-checkBinOp Greater e1 e2 t pos = checkRelOp Greater [Int, Real] e1 e2 t pos
-checkBinOp Geq e1 e2 t pos = checkRelOp Geq [Int, Real] e1 e2 t pos
+checkBinOp Equal e1 e2 t pos = checkRelOp Equal [Int, Float32, Float64] e1 e2 t pos
+checkBinOp Less e1 e2 t pos = checkRelOp Less [Int, Float32, Float64] e1 e2 t pos
+checkBinOp Leq e1 e2 t pos = checkRelOp Leq [Int, Float32, Float64] e1 e2 t pos
+checkBinOp Greater e1 e2 t pos = checkRelOp Greater [Int, Float32, Float64] e1 e2 t pos
+checkBinOp Geq e1 e2 t pos = checkRelOp Geq [Int, Float32, Float64] e1 e2 t pos
 
 checkRelOp :: (TypeBox ty, VarName vn) =>
               BinOp -> [BasicType]

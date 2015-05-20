@@ -24,7 +24,7 @@ data Token = IF
            | REAL
            | ID { idName :: Name }
            | STRINGLIT { stringLit :: String }
-           | INTLIT { intLit :: Int }
+           | INTLIT { intLit :: Int32 }
            | REALLIT { realLit :: Double }
            | CHARLIT { charLit :: Char }
            | PLUS
@@ -80,8 +80,7 @@ data Token = IF
            | TRUE
            | FALSE
            | CHECKED
-           | NOT
-           | NEGATE
+           | TILDE
            | AND
            | OR
            | OP

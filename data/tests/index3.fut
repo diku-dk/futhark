@@ -2,6 +2,9 @@
 // intent here is to make sure that the bounds check can still be
 // optimised away.
 // --
+// structure {
+//   Assert 0
+// }
 
 fun int main(bool b) =
   let a = [1,2,3] in

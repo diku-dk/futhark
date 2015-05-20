@@ -5,62 +5,67 @@ module Futhark.Internalise.AccurateSizes
   , ensureResultShape
   , ensureResultExtShape
   , ensureShape
-  , ensureShapeIdent
+  , ensureShapeVar
   )
   where
 
 import Control.Applicative
 import Control.Monad
 import Data.Loc
-
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.AST
 import Futhark.Tools
+import Futhark.MonadFreshNames
 
-shapeBody :: [VName] -> [Type] -> Body -> Body
-shapeBody shapenames ts (Body () bnds (Result ses)) =
-  Body () bnds $ Result shapes
-  where shapes = argShapes shapenames ts ses
+shapeBody :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+             [VName] -> [Type] -> Body lore
+          -> m (Body lore)
+shapeBody shapenames ts body =
+  runBodyBinder $ do
+    ses <- bodyBind body
+    sets <- mapM subExpType ses
+    return $ resultBody $ argShapes shapenames ts sets
 
 annotateArrayShape :: ArrayShape shape =>
                       TypeBase shape -> [Int] -> TypeBase Shape
 annotateArrayShape t newshape =
   t `setArrayShape` Shape (take (arrayRank t) (map intconst $ newshape ++ repeat 0))
 
-argShapes :: [VName] -> [Type] -> [SubExp] -> [SubExp]
-argShapes shapes valts valargs =
+argShapes :: [VName] -> [Type] -> [Type] -> [SubExp]
+argShapes shapes valts valargts =
   map addShape shapes
-  where mapping = shapeMapping valts $ map subExpType valargs
+  where mapping = shapeMapping valts valargts
         addShape name
           | Just se <- HM.lookup name mapping = se
           | otherwise                         = Constant (IntVal 0)
 
-ensureResultShape :: MonadBinder m =>
-                     SrcLoc -> [Type] -> Body
-                  -> m Body
+ensureResultShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+                     SrcLoc -> [Type] -> Body lore
+                  -> m (Body lore)
 ensureResultShape loc =
   ensureResultExtShape loc . staticShapes
 
-ensureResultExtShape :: MonadBinder m =>
-                        SrcLoc -> [ExtType] -> Body
-                     -> m Body
-ensureResultExtShape loc rettype body = runBinder $ do
-  es <- bodyBind body
-  let assertProperShape t se =
-        let name = "result_proper_shape"
-        in ensureExtShape loc t name se
-  reses <- zipWithM assertProperShape rettype es
-  return $ resultBody reses
+ensureResultExtShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+                        SrcLoc -> [ExtType] -> Body lore
+                     -> m (Body lore)
+ensureResultExtShape loc rettype body =
+  runBodyBinder $ insertBindingsM $ do
+    es <- bodyBind body
+    let assertProperShape t se =
+          let name = "result_proper_shape"
+          in ensureExtShape loc t name se
+    reses <- zipWithM assertProperShape rettype es
+    mkBodyM [] reses
 
 ensureExtShape :: MonadBinder m =>
-               SrcLoc -> ExtType -> String -> SubExp
-            -> m SubExp
+                  SrcLoc -> ExtType -> String -> SubExp
+               -> m SubExp
 ensureExtShape loc t name orig
   | Array{} <- t, Var v <- orig =
-    Var <$> ensureShapeIdent loc t name v
+    Var <$> ensureShapeVar loc t name v
   | otherwise = return orig
 
 ensureShape :: MonadBinder m =>
@@ -68,19 +73,19 @@ ensureShape :: MonadBinder m =>
             -> m SubExp
 ensureShape loc = ensureExtShape loc . staticShapes1
 
-ensureShapeIdent :: MonadBinder m =>
-                    SrcLoc -> ExtType -> String -> Ident
-                 -> m Ident
-ensureShapeIdent loc t name v
+ensureShapeVar :: MonadBinder m =>
+                    SrcLoc -> ExtType -> String -> VName
+                 -> m VName
+ensureShapeVar loc t name v
   | Array{} <- t = do
-      let checkDim desired has =
-            letExp "shape_cert" =<<
-            eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
-      certs <- zipWithM checkDim newshape oldshape
-      letExp name $ PrimOp $ Reshape certs newshape v
+    newshape <- arrayDims <$> removeExistentials t <$> lookupType v
+    oldshape <- arrayDims <$> lookupType v
+    let checkDim desired has =
+          letExp "shape_cert" =<<
+          eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
+    certs <- zipWithM checkDim newshape oldshape
+    letExp name $ PrimOp $ Reshape certs newshape v
   | otherwise = return v
-  where newshape = arrayDims $ removeExistentials t $ identType v
-        oldshape = arrayDims $ identType v
 
 removeExistentials :: ExtType -> Type -> Type
 removeExistentials t1 t2 =

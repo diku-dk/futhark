@@ -1,24 +1,112 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, LambdaCase, ScopedTypeVariables, TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
+-- | This module performs flattening, which is a transformation aimed
+-- at making data-level paralleisation easy.
+--
+-- It relies heavily on dark magic, so please familarise yourself with
+-- this before trying to understand the code.
+--
+-- The main feature is that we can turn @map (scan + 0) xss@ into a
+-- single data-parallel operation.
+--
+-- This is achived by representing @n@-dimensional array by a /flat/
+-- (single dimensional) data array, and @n-1@ segment descriptors.
+--
+-- For example the array
+-- @ [ [ [1,2] , [3,4,5] ]
+--   , [ [6]             ]
+--   , []
+--   ]
+-- @
+--
+-- Can be represented as
+-- @ data  = [1,2, 3,4,5, 6    ]
+--   seg_1 = [2,   3,     1    ]
+--   seg_0 = [2,          1,  0]
+-- @
+--
+-- If you are interested in knowing more details, see futher comments
+-- in the source code!
 module Futhark.Flattening ( flattenProg )
   where
 
 import Control.Applicative
+import Control.Monad.Except
 import Control.Monad.State
-import qualified Data.Map as M
-import Data.Maybe
+import Control.Monad.Writer
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Maybe
+import qualified Text.PrettyPrint.Mainland as PP
+
+import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
 import Futhark.Substitute
+import Futhark.Tools
 
+
+{- -----------------------------------------------------------------------------
+                       Understanding the code / transformation
+
+1. Segment descriptors
+
+  If we have the variables
+    cs = [[[char,k],n],m]
+    xs = [[int,n],m]
+    ys = [[int,k],n]
+
+  @cs@ and @xs@ should share segments descriptor for the outer
+  dimension (m,n), however @cs@ and @ys@ should /not/ share the segment
+  descriptor for (k,n)!
+
+  The way this is handled is by doing the following:
+    xs = { [int,m]xs_seg0, [int,n*m]xs_data }
+
+      added SegDescriptors
+      [m*n] -> [xs_seg0]
+
+    cs = { [int,m]xs_seg0, [int,m*n]cs_seg1, [char,m*n*k]cs_data }
+
+      added SegDescriptors
+      [m,n,k] -> [xs_seg0, cs_seg1]
+      [m*n,k] -> [cs_seg1]
+
+    ys = { [int,n]ys_seg0, [int,k]ys_data }
+
+      added SegDescriptors
+      [n,k] -> [ys_seg0]
+
+1.b Data arrays
+
+  Every array (also flat) points to its data array (through FlatState)
+
+2. Overview of how the code works
+
+  We transform function from the outside in. We go through each top level
+  binding, transforming them so they do not use multidimensional arrays, but
+  instead segment descriptors and data array. A @map f {xs_1,..,xs_n}@ will be
+  transformed by specific rules, covered later. Most other types of bindings
+  are not so bad. For example will @let [[char,n],m] ys = reshape (m,n) xs@
+  need to be turned into
+
+  @ let mn = m*n
+    let [int,m] ys_seg0 = replicate m n
+    let [char,mn] ys_data = reshape (mn) xs
+  @
+
+  ---
+
+  To be continued ... FIXME
+
+----------------------------------------------------------------------------- -}
 --------------------------------------------------------------------------------
 
 data FlatState = FlatState {
     vnameSource   :: VNameSource
-  , mapLetArrays   :: M.Map Ident Ident
+  , mapLetArrays   :: M.Map VName Ident
   -- ^ arrays for let values in maps
   --
   -- @let res = map (\xs -> let y = reduce(+,0,xs) in
@@ -32,11 +120,36 @@ data FlatState = FlatState {
   -- so we would need to know that what the array for @y@ and @z@ was,
   -- creating the mapping [y -> ys, z -> zs]
 
+  , typetab :: HM.HashMap VName Type
+
   , flattenedDims :: M.Map (SubExp,SubExp) SubExp
+
+  , dataArrays :: M.Map VName Ident
+
+  , segDescriptors :: M.Map [SubExp] [SegDescp]
+    -- ^ segment descriptors for arrays. This is a should not be
+    -- empty. First element represents the outermost
+    -- dimension. (sometimes called segment descriptor 0 -- as it
+    -- belong to dimension 0)
+    --
+    -- [SubExp] should always contain at least two elements (a 1D
+    -- array has no segment descriptor)
   }
 
-newtype FlatM a = FlatM (StateT FlatState (Either Error) a)
+data Regularity = Regular
+                | Irregular
+                deriving(Show, Eq)
+
+instance PP.Pretty Regularity where
+  ppr Regular = PP.text "Regular"
+  ppr Irregular = PP.text "Irregular"
+
+type SegDescp = (Ident, Regularity)
+
+
+newtype FlatM a = FlatM (StateT FlatState (ExceptT Error (Writer FlatLog)) a)
                 deriving ( MonadState FlatState
+                         , MonadWriter FlatLog
                          , Monad, Applicative, Functor
                          )
 
@@ -44,9 +157,35 @@ instance MonadFreshNames FlatM where
   getNameSource = gets vnameSource
   putNameSource newSrc = modify $ \s -> s { vnameSource = newSrc }
 
+instance HasTypeEnv FlatM where
+  lookupType name = do
+    val <- HM.lookup name <$> askTypeEnv
+    case val of
+      Nothing -> flatError $ Error $
+                             "TypeEnv.lookupType: Name " ++ textual name ++
+                             " not found in type environment."
+      Just tp -> return tp
+  askTypeEnv = gets typetab
+
+----------------------------------------
+
+runFlatM :: FlatState -> FlatM a -> Either (Error,FlatLog) a
+runFlatM s (FlatM a) =
+  let (res,flatlog) = runWriter $ runExceptT $ runStateT a s
+  in case res of
+       Left e -> Left (e, flatlog)
+       Right (v,_) -> Right v
+
+flatError :: Error -> FlatM a
+flatError e = FlatM . lift $ throwError e
+
+----------------------------------------
+
+logMsg :: String -> FlatM ()
+logMsg s = tell [LogMsg s]
+
 --------------------------------------------------------------------------------
 
--- TODO: Add SrcLoc
 data Error = Error String
            | MemTypeFound
            | ArrayNoDims Ident
@@ -56,107 +195,560 @@ instance Show Error where
   show MemTypeFound = "encountered Mem as Type"
   show (ArrayNoDims i) = "found array without any dimensions " ++ pretty i
 
-runFlatM :: FlatState -> FlatM a -> Either Error (a, FlatState)
-runFlatM s (FlatM a) = runStateT a s
+data FlatMsg = TransformsBinding [Binding] [Binding]
+             | LogMsg String
+             | StartFun Name
+             | StartBnd String Binding
+             deriving (Eq)
 
-flatError :: Error -> FlatM a
-flatError e = FlatM . lift $ Left e
+type FlatLog = [FlatMsg]
+
+instance Show FlatMsg where
+  show (TransformsBinding origbnds newbnds) =
+    pretty origbnds ++ "=>" ++ pretty newbnds
+  show (LogMsg msg) = msg
+  show (StartFun name) = "Start function " ++ show name
+  show (StartBnd fname bnd) =
+    unwords [ "Start binding in", fname
+            , "let", pretty $ bindingPattern bnd, "= ..."
+            ]
+
+prettyLog :: FlatLog -> PlainString
+prettyLog flog = PlainString $ "\n" ++ unlines (map show flog)
+
+newtype PlainString = PlainString String
+instance Show PlainString where
+  show (PlainString s) = s
 
 --------------------------------------------------------------------------------
+-- Functions for working with FlatState
+--------------------------------------------------------------------------------
 
-getMapLetArray' :: Ident -> FlatM Ident
-getMapLetArray' ident = do
+getMapLetArray' :: VName -> FlatM Ident
+getMapLetArray' vn = do
   letArrs <- gets mapLetArrays
-  case M.lookup ident letArrs of
+  case M.lookup vn letArrs of
     Just letArr -> return letArr
-    Nothing -> flatError $ Error $ "getMapLetArray': Couldn't find Ident "
-                                   ++ show ident
-                                   ++ " in mapLetArrays table"
+    Nothing -> flatError $ Error $ "getMapLetArray': Couldn't find " ++
+                                   pretty vn ++
+                                   " in table"
 
-addMapLetArray :: Ident -> Ident -> FlatM ()
-addMapLetArray ident letArr = do
+addMapLetArray :: VName -> Ident -> FlatM ()
+addMapLetArray vn letArr = do
+  logMsg $ unwords ["addMapLetArray", pretty vn, "->", pretty letArr]
   letArrs <- gets mapLetArrays
-  case M.lookup ident letArrs of
-    (Just _) -> flatError $ Error $ "addMapLetArray: Ident " ++ show ident
-                         ++ " already present in mapLetArrays table"
+  case M.lookup vn letArrs of
+    (Just _) -> flatError $ Error $ "addMapLetArray: " ++
+                                    pretty vn ++
+                                    " already present in table"
     Nothing -> do
-      let letArrs' = M.insert ident letArr letArrs
+      let letArrs' = M.insert vn letArr letArrs
       modify (\s -> s{mapLetArrays = letArrs'})
 
---------------------------------------------------------------------------------
+----------------------------------------
 
-getFlattenedDims :: (SubExp, SubExp) -> FlatM SubExp
-getFlattenedDims (outer,inner) = do
+addType :: VName -> Type -> FlatM ()
+addType vn tp = do
+  tt <- gets typetab
+  case HM.lookup vn tt of
+    (Just _) -> flatError $ Error $ "addType: " ++
+                                    pretty vn ++
+                                    " already present in table"
+    Nothing -> do
+      let tt' = HM.insert vn tp tt
+      modify (\s -> s{typetab = tt'})
+
+addTypeIdent :: Ident -> FlatM ()
+addTypeIdent (Ident vn tp) = addType vn tp
+
+addTypePatElem :: PatElem -> FlatM ()
+addTypePatElem (PatElem i BindVar _) = addTypeIdent i
+addTypePatElem pat =
+  flatError . Error $ "addTypePatElem: cannot handle other than BindVar " ++
+                      pretty pat
+
+----------------------------------------
+
+getFlattenedDims1 :: (SubExp, SubExp) -> FlatM SubExp
+getFlattenedDims1 (outer,inner) = do
   fds <- gets flattenedDims
   case M.lookup (outer,inner) fds of
     Just sz -> return sz
+    Nothing -> flatError $ Error $ "getFlattenedDims not created for" ++
+                                    show (pretty outer, pretty inner)
+
+getFlattenedDims :: (SubExp, SubExp) -> FlatM (Maybe SubExp)
+getFlattenedDims (outer,inner) = do
+  fds <- gets flattenedDims
+  return $ M.lookup (outer,inner) fds
+
+addFlattenedDims :: (SubExp, SubExp) -> SubExp -> FlatM ()
+addFlattenedDims key val = do
+  fds <- gets flattenedDims
+  case M.lookup key fds of
+    Just _ -> flatError $ Error $ "addFlattenedDims: " ++
+                                  pretty key ++
+                                  " already present in table"
     Nothing -> do
-      new <- liftM Var $ newIdent "size" (Basic Int)
-      let fds' = M.insert (outer,inner) new fds
+      let fds' = M.insert key val fds
       modify (\s -> s{flattenedDims = fds'})
-      return new
+
+----------------------------------------
+
+getDataArray1 :: VName -> FlatM Ident
+getDataArray1 vn = do
+  da <- gets dataArrays
+  case M.lookup vn da of
+    Just val -> return val
+    Nothing -> flatError $ Error $ "getDataArray1 not created for" ++
+                                    show vn
+
+addDataArray :: VName -> Ident -> FlatM ()
+addDataArray key val = do
+  logMsg $ unwords ["addDataArray", pretty key, "->", pretty val]
+  da <- gets dataArrays
+  case M.lookup key da of
+    Just _ -> flatError $ Error $ "addDataArray: " ++
+                                  pretty key ++
+                                  " already present in table"
+    Nothing -> do
+      let da' = M.insert key val da
+      -- Automatically make a data array point to itself
+      let da'' = case M.lookup (identName val) da' of
+                   Just _ -> da'
+                   Nothing ->
+                     M.insert (identName val) val da'
+      modify (\s -> s{dataArrays = da''})
+
+----------------------------------------
+
+getSegDescriptors1Ident :: Ident -> FlatM [SegDescp]
+getSegDescriptors1Ident (Ident _ (Array _ (Shape subs) _)) =
+  getSegDescriptors1 subs
+getSegDescriptors1Ident i =
+  flatError $ Error $ "getSegDescriptors1Ident, not an array " ++ show i
+
+getSegDescriptors1 :: [SubExp] -> FlatM [SegDescp]
+getSegDescriptors1 subs = do
+  segmap <- gets segDescriptors
+  case M.lookup subs segmap of
+    Just segs -> return segs
+    Nothing   -> flatError $ Error $ "getSegDescriptors: Couldn't find " ++
+                                      show subs ++
+                                      " in table"
+
+getSegDescriptors :: [SubExp] -> FlatM (Maybe [SegDescp])
+getSegDescriptors subs = do
+  segmap <- gets segDescriptors
+  return $ M.lookup subs segmap
+
+addSegDescriptors :: [SubExp] -> [SegDescp] -> FlatM ()
+addSegDescriptors [] segs =
+  flatError $ Error $ "addSegDescriptors: subexpressions empty for " ++ show segs
+addSegDescriptors subs [] =
+  flatError $ Error $ "addSegDescriptors: empty seg array for " ++ show subs
+addSegDescriptors subs segs = do
+  logMsg $ unwords ["addSegDescriptors", pretty subs, pretty segs]
+  segmap <- gets segDescriptors
+  case M.lookup subs segmap of
+    (Just _) -> flatError $ Error $ "addSegDescriptors:  " ++ show subs ++
+                                    " already present in table"
+    Nothing -> do
+      let segmap' = M.insert subs segs segmap
+      modify (\s -> s{segDescriptors = segmap'})
+
+-- A list of subexps (defining shape of array), will define the segment descriptor
+createSegDescsForArray :: Ident -> FlatM ()
+createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
+  alreadyCreated <- liftM isJust $ getSegDescriptors (dim0:dims)
+
+  unless alreadyCreated $ do
+    (sizes, singlesegs) :: ([[SubExp]], [SegDescp]) <-
+      liftM (unzip . reverse . (\(res,_,_,_) -> res)) $
+        foldM  (\(res,dimouter,n::Int,_:dimrest) diminner -> do
+                   let segname = baseString vn ++ "_seg" ++ show n
+                   seg <- newIdent segname (Array Int (Shape [dimouter]) Nonunique)
+                   addTypeIdent seg
+                   segsize <- createFlattenedDims (n+1) (dimouter, diminner)
+                   return ((dimouter:dimrest, (seg, Regular)):res, segsize, n+1, dimrest)
+               )
+               ([],dim0,0,dim0:dims) dims
+
+    let segs = map (`drop` singlesegs) [0..length singlesegs]
+    zipWithM_ addSegDescriptors sizes segs
+  where
+    createFlattenedDims :: Int -> (SubExp, SubExp) -> FlatM SubExp
+    createFlattenedDims n (outer,inner) = do
+      fds <- gets flattenedDims
+      case M.lookup (outer,inner) fds of
+           Just sz -> return sz
+           Nothing -> do
+             new_subexp <- Var <$> newVName ("fakesize" ++ show n)
+             addFlattenedDims (outer,inner) new_subexp
+             return new_subexp
+
+createSegDescsForArray i =
+  flatError . Error $ "createSegDescsForArray not multidimensional array: " ++
+                      show i
+
+setupDataArray :: Ident -> FlatM ()
+setupDataArray (Ident vn tp@(Array _ (Shape [_]) _)) =
+  addDataArray vn (Ident vn tp)
+setupDataArray (Ident vn tp@(Array _ (Shape (dim0:dims)) _)) = do
+  data_size <- foldM (curry getFlattenedDims1) dim0 dims
+  let data_tp = setArrayDims tp [data_size]
+  data_ident <- newIdent (baseString vn ++ "_data") data_tp
+  addDataArray vn data_ident
+  addTypeIdent data_ident
+setupDataArray i =
+  flatError . Error $ "setupDataArray on non array: " ++
+                      show i
 
 --------------------------------------------------------------------------------
 
-flattenProg :: Prog -> Either Error Prog
-flattenProg p@(Prog funs) = do
-  (funs', _) <- runFlatM initState (mapM transformFun funs)
-  return $ Prog (funs ++ funs')
+flattenProg :: Prog -> Either (Error, PlainString) Prog
+flattenProg p =
+  case flattenProg' p of
+    Right p' -> Right p'
+    Left (e,fl) -> Left (e, prettyLog fl)
+
+flattenProg' :: Prog -> Either (Error,FlatLog) Prog
+flattenProg' p@(Prog funs) = do
+  let funs' = map renameToOld funs
+  funsTrans <- mapM (runFlatM initState . transformFun) funs
+  let Just main = funDecByName defaultEntryPoint p
+  main' <- runFlatM initState $ transformMain main
+  return $ Prog (main' : funsTrans ++ funs')
   where
     initState = FlatState { vnameSource = newNameSourceForProg p
                           , mapLetArrays = M.empty
                           , flattenedDims = M.empty
+                          , dataArrays = M.empty
+                          , segDescriptors = M.empty
+                          , typetab = HM.empty
                           }
+    renameToOld (FunDec name retType params body) =
+      FunDec name' retType params body
+      where
+        name' = nameFromString $ nameToString name ++ "_orig"
 
 --------------------------------------------------------------------------------
 
-transformFun :: FunDec -> FlatM FunDec
-transformFun (FunDec name retType params body) = do
-  body' <- transformBody body
-  return $ FunDec name' retType params body'
+-- | @convertToFlat idents@ transforms multidimensional arrays into
+-- their flat representation. Used when calling functions. Returns
+-- size- and array idents seperately.
+convertToFlat :: [Ident] -> FlatM ([Ident],[Ident])
+convertToFlat idents = do
+  --let orig_arr_sizes = concat $ mapMaybe (variableDimensionsAsIdents . identType) idents
+  --let idents' = filter (`notElem` orig_arr_sizes) idents
+
+  (sizes, arrs) <- liftM unzip $ forM idents $ \i@(Ident vn tp) ->
+    case dimentionality tp of
+      Nothing -> return ([], [i])
+      Just 1 -> do
+        dataarr <- getDataArray1 vn
+        return ([], [dataarr])
+      Just _ -> do
+        (segdescp_arrs,_) <- liftM unzip $ getSegDescriptors1Ident i
+        dataarr <- getDataArray1 vn
+        let arrs = segdescp_arrs ++ [dataarr]
+        let sizes = mapMaybe ( (\case
+                                  [Var szvn] -> Just $ Ident szvn (Basic Int)
+                                  _ -> Nothing
+                               ) . arrayDims . identType)
+                             (drop 1 arrs)
+        return (sizes, arrs)
+
+  return (L.nub $ concat sizes, L.nub $ concat arrs)
+
+convertExtRetType :: ExtRetType -> ExtRetType
+convertExtRetType (ExtRetType ex_tps) =
+  let tmp = concatMap convertExtType ex_tps
+  in ExtRetType $ zipWith changeToUniqFree tmp [0..]
   where
-    name' = nameFromString $ nameToString name ++ "_flattrans"
+    -- If we already know the sizes of the resulting segment
+    -- descriptos, use those otherwise just create a not of free
+    -- stuff.
+    --
+    -- If we know input is [[int,n],m] and output is [[int,m],n] we
+    -- are not able to keep that information, and will generate
+    -- [[int,?1],?0]
+    --
+    -- However, input [[[int,x],y],z] and output [[int,x],y] should
+    -- work TODO ^^ not implemented
+    convertExtType (Array bt (ExtShape extshps) uniq) =
+      let segs = replicate (length extshps -1)
+                           (Array Int (ExtShape [Ext 0]) Nonunique)
+          datatp = Array bt (ExtShape [Ext 0]) uniq
+      in segs ++ [datatp]
+    convertExtType tp = [tp]
+
+    changeToUniqFree (Array bt _ uniq) free =
+      Array bt (ExtShape [Ext free]) uniq
+    changeToUniqFree tp _ = tp
+
+
+-- | Transform the entry function so it converts array arguments to
+-- flat representation, calls the flattening transformed version, and
+-- finally converts the flat representation back to normal
+-- representation
+transformMain :: FunDec -> FlatM FunDec
+transformMain (FunDec name (ExtRetType rettypes) params _) = do
+  let arr_params = filter (maybe False (>=2) . dimentionality . identType)
+                          (map paramIdent params)
+
+  mapM_ createSegDescsForArray arr_params
+  mapM_ setupDataArray $ filter (isJust . dimentionality . identType)
+                                (map paramIdent params)
+
+  multandsegs_bnds <- mkMultAndSegs arr_params
+  reshape_bnds <- mapM mkDataReshape arr_params
+
+  flat_params <-
+    liftM (uncurry (++)) $ convertToFlat $ map paramIdent params
+  let flat_args = map ((\vn -> (Var vn, Observe)) . identName) flat_params
+  let (ExtRetType flatex_tps) = convertExtRetType (ExtRetType rettypes)
+  let call_exp = Apply (transformFunName name)
+                       flat_args
+                       (ExtRetType flatex_tps)
+  (flatrestps, extra_sizes) <- instantiateShapes' flatex_tps
+  callresidents <- mapM (newIdent "tmpres") flatrestps
+  let callpat = patternFromIdents extra_sizes callresidents
+  let call_bnd = Let callpat () call_exp
+
+  (realrestps, _) <- instantiateShapes' rettypes
+  realresidents <- mapM (newIdent "res") realrestps
+  -- This groups the flattened results returned from the function
+  -- call, putting segment descriptors and data arrays together in one group
+  let callresidents_grouped =
+        reverse $ snd $
+          foldl (\(takefrom,res) n -> (drop n takefrom, take n takefrom : res))
+                (callresidents,[])
+                (map (fromMaybe 1 . dimentionality) realrestps)
+  fromflat_bnds <-
+    liftM concat $ zipWithM fromFlat realresidents callresidents_grouped
+
+  let body' = Body { bodyLore = ()
+                   , bodyBindings = multandsegs_bnds ++ reshape_bnds ++
+                                    [call_bnd] ++ fromflat_bnds
+                   , bodyResult = map (Var . identName) realresidents
+                   }
+  return $ FunDec name (ExtRetType rettypes) params body'
+
+  where
+    -- | @mkMultAndSegs [idents]@ creates the bindings for initializing the
+    -- segment descriptors (and their size variable) belonging to
+    -- @ident \in idents@. Must be called on a multidimensional array.
+    --
+    -- Makes sure to /only/ create each binding /once/.
+    mkMultAndSegs :: [Ident] -> FlatM [Binding]
+    mkMultAndSegs arr_params = do
+      (all_mult_bnds, all_segbnds) <- liftM unzip $
+        forM arr_params $ \ident -> do
+          let dim0:dims = arrayDims $ identType ident
+          mult_bnds <-
+            liftM (reverse . concat . snd) $ foldM makeMult (dim0, []) dims
+          segdescps <- getSegDescriptors1Ident ident
+          rep_bnds <-
+            liftM reverse $ foldM makeRep [] $ zip dims segdescps
+          return (mult_bnds, rep_bnds)
+      return $ L.nub (concat all_mult_bnds) ++
+               L.nub (concat all_segbnds)
+      where
+
+
+        -- | Folding function which creates a binding for
+        -- @'getFlattenedDims1 (outer,inner)@ by multiplying @outer@
+        -- and @inner@
+        makeMult (outer, res) inner = do
+          merged <- getFlattenedDims1 (outer,inner)
+          let merge_bnd =
+                case merged of
+                  Constant _ -> Nothing
+                  Var vn ->
+                    let i = Ident vn (Basic Int)
+                        i_exp = PrimOp $ BinOp Times outer inner Int
+                        i_bnd = Let (Pattern [] [PatElem i BindVar ()]) () i_exp
+                    in Just i_bnd
+          return (merged, catMaybes [merge_bnd] : res)
+
+        makeRep res (content, (seg, Regular)) = do
+          let [count] = arrayDims $ identType seg
+          let rep_exp = PrimOp $ Replicate count content
+          let bnd = Let (Pattern [] [PatElem seg BindVar()]) () rep_exp
+          return $ bnd : res
+        makeRep _ _ =
+          flatError $ Error "transformMain, makeRep: SegDescriptor was not Regular"
+
+    -- | @mkDataReshape ident@ created the @reshape@ for the data array.
+    mkDataReshape :: Ident -> FlatM Binding
+    mkDataReshape (Ident vn _) = do
+      data_ident <- getDataArray1 vn
+      let [data_size] = arrayDims $ identType data_ident
+      let data_exp = PrimOp $ Reshape [] [data_size] vn
+      let data_bnd = Let (Pattern [] [PatElem data_ident BindVar()]) () data_exp
+      return data_bnd
+
+    -- | @fromFlat res tmps@ create a binding for the result to be
+    -- returned @res@, from the arrays (segs + data) in @tmps@. For
+    -- multidimentional arrays, this will end in a 'Reshape'
+    fromFlat :: Ident -> [Ident] -> FlatM [Binding]
+    fromFlat _ [] =
+      error "transformMain fromFlat: callresidents_grouped gave an empty list"
+    fromFlat res [Ident vn (Array _ (Shape [dim0]) _)] = do
+      let resdims = arrayDims $ identType res
+      case resdims of
+        [Var szvn] -> do
+          let sze = PrimOp $ SubExp dim0
+          let szpat = patternFromIdents [] [Ident szvn (Basic Int)]
+          let szbnd = Let szpat () sze
+          let reshape_e = PrimOp $ Reshape [] [Var szvn] vn
+          let reshape_pat = patternFromIdents [] [res]
+          let reshape_bnd = Let reshape_pat () reshape_e
+          return [szbnd, reshape_bnd]
+        [Constant _] ->
+          return []
+        _ -> flatError $ Error "transformMain fromFlat, trying to bind a multidimensional array to a 1D array"
+    fromFlat res [Ident vn (Basic _)] = do
+      let e = PrimOp $ SubExp $ Var vn
+      return [Let (Pattern [] [PatElem res BindVar ()]) () e]
+    fromFlat res tmps = do
+      let (segs,dataarr) = (\(d:sgs) -> (reverse sgs, d)) $ reverse tmps
+      let [datasize] = arrayDims $ identType dataarr
+
+      cmp_i <- newIdent "cmp" (Basic Bool)
+      let cmp_exp = PrimOp $ BinOp Equal datasize (Constant $ IntVal 0) Bool
+      let cmp_bnd = Let (Pattern [] [PatElem cmp_i BindVar ()]) () cmp_exp
+
+      let resdimidents = mapMaybe (\case
+                                      Var vn -> Just $ Ident vn (Basic Int)
+                                      Constant _ -> error "transformMain, fromFlat: size of a result array was constant"
+                                  ) (arrayDims $ identType res)
+      let truebody = Body { bodyLore = ()
+                          , bodyBindings = []
+                          , bodyResult = replicate (length resdimidents)
+                                                   (Constant $ IntVal 0)
+                          }
+      falsebody <- createFalseBody segs
+      let if_exp = If (Var $ identName cmp_i)
+                   truebody
+                   falsebody
+                   (replicate (length resdimidents) (Basic Int))
+      let if_bnd = Let (patternFromIdents [] resdimidents) () if_exp
+
+      let reshape_e = PrimOp $ Reshape [] (arrayDims $ identType res) (identName dataarr)
+      let reshape_bnd = Let (Pattern [] [PatElem res BindVar ()]) () reshape_e
+
+      return [cmp_bnd, if_bnd, reshape_bnd]
+      where
+        createFalseBody :: [Ident] -> FlatM Body
+        createFalseBody [] =
+          flatError $ Error "transformMain, createFalseBody: called on empty array"
+        createFalseBody (seg0:segs) = do
+          tmpids <- mapM (\_ -> newIdent "tmp" (Basic Int)) (seg0:segs)
+          let bnds :: [Binding] =
+                zipWith (\i seg -> Let (Pattern [] [PatElem i BindVar()]) ()
+                                       (PrimOp $ Index [] (identName seg)
+                                                       [Constant $ IntVal 0])
+                        )  tmpids (seg0:segs)
+          let [seg0sz] = arrayDims $ identType seg0
+          return Body { bodyLore = ()
+                      , bodyBindings = bnds
+                      , bodyResult = seg0sz : map (Var . identName) tmpids
+                      }
+
+--------------------------------------------------------------------------------
+
+transformFunName :: Name -> Name
+transformFunName name = nameFromString $ nameToString name ++ "_flattrans"
+
+transformFun :: FunDec -> FlatM FunDec
+transformFun (FunDec name rettype params body) = do
+  tell [StartFun name]
+  mapM_ (addTypeIdent . paramIdent) params
+  mapM_ createSegDescsForArray $
+    filter (maybe False (>=2) . dimentionality . identType)
+           (map paramIdent params)
+  mapM_ setupDataArray $ filter (isJust . dimentionality . identType)
+                                (map paramIdent params)
+  body' <- transformBody body
+  idents' <- liftM (uncurry (++)) $ convertToFlat $ map paramIdent params
+  let params' = map (\i -> Param { paramIdent = i
+                                 , paramLore = ()
+                                 }
+                    ) idents'
+  return $ FunDec name' rettype' params' body'
+  where
+    rettype' = convertExtRetType rettype
+    name' = transformFunName name
 
 transformBody :: Body -> FlatM Body
-transformBody (Body lore bindings (Result ses)) = do
+transformBody (Body () bindings ses) = do
   bindings' <- concat <$> mapM transformBinding bindings
-  return $ Body lore bindings' (Result ses)
+  ses' <- concat <$> mapM subexpToFlatrepresentation ses
+  return $ Body () bindings' ses'
+  where
+    subexpToFlatrepresentation (Constant v) =
+      return [Constant v]
+    subexpToFlatrepresentation (Var vn) = do
+      tp <- lookupType vn
+      (_,arrs) <- convertToFlat [Ident vn tp]
+      return $ map (Var . identName) arrs
 
 -- | Transform a function to use parallel operations.
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
 transformBinding :: Binding -> FlatM [Binding]
-transformBinding topBnd@(Let (Pattern pats) ()
-                             (LoopOp (Map certs lambda idents))) = do
+transformBinding topBnd@(Let (Pattern [] pats) ()
+                             (LoopOp (Map certs lambda arrs))) = do
+  tell [StartBnd "transformBinding" topBnd]
+  -- Checking if a Variable use is safe requires knowledge of the type
+  -- Consider writing isSafeToMap??? differently. TODO
+  mapM_ addTypePatElem $ concatMap (patternElements . bindingPattern) lamBnds
+  mapM_ (addTypeIdent . paramIdent) $ lambdaParams lambda
+
   okLamBnds <- mapM isSafeToMapBinding lamBnds
   let grouped = foldr group [] $ zip okLamBnds lamBnds
 
-  outerSize <- case idents of
-                 Ident _ (Array _ (Shape (outer:_)) _):_ -> return outer
+  arrtps <- mapM lookupType arrs
+  outerSize <- case arrtps of
+                 Array _ (Shape (outer:_)) _:_ -> return outer
                  _ -> flatError $ Error "impossible, map argument was not a list"
 
-  let mapInfo = MapInfo { mapListArgs = idents
-                        , lamParams = lambdaParams lambda
-                        , mapLets = letBoundIdentsInLambda lambda
-                        , mapSize = outerSize
-                        , mapCerts = certs
-                        }
-
   case grouped of
-   [Right _] -> return [topBnd]
+   [Right _] -> do
+     forM_ pats $ \(PatElem i _ ()) -> do
+       addTypeIdent i
+       addDataArray (identName i) i
+     arrs' <- mapM (liftM identName . getDataArray1) arrs
+     return [Let (Pattern [] pats) ()
+                 (LoopOp (Map certs lambda arrs'))]
    _ -> do
-     let mapResNeed = HS.unions $ map freeIn
-                   (resultSubExps $ bodyResult $ lambdaBody lambda)
+     loopinv_vns <-
+       filter (`notElem` arrs) <$> filterM (liftM isJust . vnDimentionality)
+       (HS.toList $ freeInExp (LoopOp $ Map certs lambda arrs))
+     (loopinv_repbnds, loopinv_repidents) <-
+       mapAndUnzipM (replicateVName outerSize) loopinv_vns
+
+     let mapInfo = MapInfo { mapListArgs = arrs ++ map identName loopinv_repidents
+                           , lamParamVNs = lambdaParamVNs ++ loopinv_vns
+                           , mapLets = letBoundIdentsInLambda
+                           , mapSize = outerSize
+                           , mapCerts = certs
+                           }
+
+     let mapResNeed = HS.unions $ map freeIn $ bodyResult $ lambdaBody lambda
      let freeIdents = flip map grouped $ \case
-             Right bnds -> HS.unions $ map (freeInExp . bindingExp) bnds
-             Left bnd -> freeInExp $ bindingExp bnd
+                Right bnds -> HS.unions $ map (freeInExp . bindingExp) bnds
+                Left bnd -> freeInExp $ bindingExp bnd
      let _:needed = scanr HS.union mapResNeed freeIdents
      let defining = flip map grouped $ \case
                       -- TODO: assuming Bindage == BindVar (which is ok?)
-           Right bnds -> concatMap (map patElemIdent
+           Right bnds -> concatMap (map (identName . patElemIdent)
                                     . patternElements
                                     . bindingPattern
                                    ) bnds
-           Left bnd -> map patElemIdent $ patternElements $ bindingPattern bnd
+           Left bnd -> map (identName . patElemIdent) $
+                            patternElements $ bindingPattern bnd
      let shouldReturn = zipWith (\def need -> filter (`HS.member` need ) def)
                                 defining needed
      let argsNeeded = zipWith (\def freeIds -> filter (`notElem` def) freeIds)
@@ -164,23 +756,41 @@ transformBinding topBnd@(Let (Pattern pats) ()
 
      grouped' <- zipWithM
        (\v bndInfo -> case v of
-                Right bnds -> liftM Right $ wrapRightInMap mapInfo bndInfo bnds
-                Left bnd ->  liftM Left $ pullOutOfMap mapInfo bndInfo bnd
+                Right bnds -> do
+                  mapbnd <- wrapRightInMap mapInfo bndInfo bnds
+                  tell [bnds `TransformsBinding` [mapbnd]]
+                  return $ Right mapbnd
+                Left bnd ->  do
+                  tell [StartBnd "pullOutOfMap" bnd]
+                  bnd' <- pullOutOfMap mapInfo bndInfo bnd
+                  tell [[bnd] `TransformsBinding` bnd']
+                  return $ Left bnd'
        ) grouped (zip argsNeeded shouldReturn)
 
-     res' <- forM (resultSubExps . bodyResult $ lambdaBody lambda) $
+     res' <- forM (bodyResult $ lambdaBody lambda) $
              \se -> case se of
                       (Constant bv) -> return $ Constant bv
-                      (Var ident) -> liftM Var $ getMapLetArray' ident
+                      (Var vn) -> Var <$> identName <$> getMapLetArray' vn
 
-     let resBnds =
-           zipWith (\pe se -> Let (Pattern [pe]) () (PrimOp $ SubExp se))
-                   pats res'
+     zipWithM_ fixDataArrStuff pats res'
 
-     return $ concatMap (either id (: [])) grouped' ++ resBnds
+     return $ loopinv_repbnds ++
+              concatMap (either id (: [])) grouped'
 
   where
+    fixDataArrStuff (PatElem (Ident patvn pattp) BindVar ()) (Var resvn) = do
+      addType patvn pattp
+      addDataArray patvn =<< getDataArray1 resvn
+    fixDataArrStuff _ (Constant _) = return ()
+    fixDataArrStuff _ _ =
+      flatError $ Error  "transformBinding(map) fixDataArrStuff: BindVar used"
+
     lamBnds = bodyBindings $ lambdaBody lambda
+    letBoundIdentsInLambda =
+      concatMap (map (identName . patElemIdent) . patternElements . bindingPattern)
+                (bodyBindings $ lambdaBody lambda)
+
+    lambdaParamVNs = map paramName $ lambdaParams lambda
 
     group :: (Bool, Binding)
              -> [Either Binding [Binding]]
@@ -189,52 +799,112 @@ transformBinding topBnd@(Let (Pattern pats) ()
     group (True, bnd) list                = Right [bnd] : list
     group (False, bnd) list               = Left bnd : list
 
-    wrapRightInMap :: MapInfo -> ([Ident], [Ident]) -> [Binding] -> FlatM Binding
-    wrapRightInMap mapInfo (argsNeeded, shouldReturn) bnds = do
-
-      (mapIdents, argArrs) <- liftM (unzip . catMaybes)
-        $ forM argsNeeded $ \arg -> do
-            argArr <- findTarget mapInfo arg
-            case argArr of
-              Just val -> return $ Just (arg, val)
+    wrapRightInMap :: MapInfo -> ([VName], [VName]) -> [Binding] -> FlatM Binding
+    wrapRightInMap mapInfo (argsneeded, toreturn_vns) bnds = do
+      (mapparams, argarrs) <- liftM (unzip . catMaybes)
+        $ forM argsneeded $ \arg -> do
+            argarr <- findTarget mapInfo arg
+            case argarr of
+              Just val -> do
+                val_tp <- lookupType arg
+                return $ Just (Param (Ident arg val_tp) (), identName val)
               Nothing -> return Nothing
 
-      pat <- liftM (Pattern . map (\i -> PatElem i BindVar () ))
-             $ forM shouldReturn $ \i -> do
-                 iArr <- wrapInArrIdent mapInfo i
-                 addMapLetArray i iArr
-                 return iArr
+      pat <- liftM (Pattern [] . map (\i -> PatElem i BindVar () ))
+             $ forM toreturn_vns $ \sr -> do
+                 iarr <- wrapInArrVName (mapSize mapInfo) sr
+                 addMapLetArray sr iarr
+                 return iarr
 
-      let lamBody = Body { bodyLore = ()
+      let lambody = Body { bodyLore = ()
                          , bodyBindings = bnds
-                         , bodyResult = Result $ map Var shouldReturn
+                         , bodyResult = map Var toreturn_vns
                          }
 
-      let wrapLambda = Lambda { lambdaParams = mapIdents
-                          , lambdaBody = lamBody
-                          , lambdaReturnType = map identType shouldReturn
-                          }
+      toreturn_tps <- mapM lookupType toreturn_vns
+      let wrappedlambda = Lambda { lambdaParams = mapparams
+                                 , lambdaBody = lambody
+                                 , lambdaReturnType = toreturn_tps
+                                 }
 
-      let theMapExp = LoopOp $ Map certs wrapLambda argArrs
+      let theMapExp = LoopOp $ Map certs wrappedlambda argarrs
       return $ Let pat () theMapExp
 
-transformBinding bnd = return [bnd]
+transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
+                       (PrimOp (Reshape certs (dim0:dims) reshapearr))) = do
+  -- FIXME: For the case where reshape is only to check map sizes,
+  -- where will those certifications go once we remove this reshape?
+  -- ... shouldn't the reshape certifications be on the map as well in
+  -- the first place? (ie, more than in one place)
 
-letBoundIdentsInLambda :: Lambda -> [Ident]
-letBoundIdentsInLambda lambda =
-   concatMap (\(Let (Pattern pats) _ _) ->map (\(PatElem i _ _) -> i)  pats)
-             (bodyBindings $ lambdaBody lambda)
+  extra_bnds <-
+    case dims of
+      [] -> return []
+      _ -> do
+        hackyhacky <- liftM (reverse . snd) $
+          foldM (\(m_outer,res) inner -> case m_outer of
+                                     Nothing -> return (Nothing, Nothing:res)
+                                     Just outer -> do
+                                       merged <- getFlattenedDims (outer,inner)
+                                       return (merged, merged:res))
+                (Just dim0, []) dims
+        createSegDescsForArray resident
+        liftM (reverse . concat . snd) $ foldM makeMult (dim0, [])
+                                                        (zip dims hackyhacky)
+
+
+   -- FIXME: add segment descriptor creation bindings
+
+  addTypeIdent resident
+  (Ident data_identvn data_identtp) <- getDataArray1 reshapearr
+
+  newdata_size <- foldM (curry getFlattenedDims1) dim0 dims
+  let newdata_tp = setArrayDims data_identtp [newdata_size]
+  newdata_ident <-
+    newIdent (baseString (identName resident) ++ "_data") newdata_tp
+  addTypeIdent newdata_ident
+  addDataArray (identName resident) newdata_ident
+
+  let reshape_exp' = PrimOp $ Reshape certs [newdata_size] data_identvn
+  let reshape_bnd = Let (Pattern [] [PatElem newdata_ident BindVar ()]) () reshape_exp'
+  return $ extra_bnds ++ [reshape_bnd]
+  where
+    makeMult (_, res) (_, Just oldmerged) = return (oldmerged, res)
+    makeMult (outer, res) (inner, Nothing) = do
+      merged <- getFlattenedDims1 (outer,inner)
+      let merge_bnd =
+            case merged of
+              Constant _ -> Nothing
+              Var vn ->
+                let i = Ident vn (Basic Int)
+                    i_exp = PrimOp $ BinOp Times outer inner Int
+                    i_bnd = Let (Pattern [] [PatElem i BindVar ()]) () i_exp
+                in Just i_bnd
+      return (merged, catMaybes [merge_bnd] : res)
+
+
+transformBinding (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+  (map_bnd, red_bnd) <-
+    redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
+  map_bnd' <- transformBinding map_bnd
+  red_bnd' <- transformBinding red_bnd
+  return $ map_bnd' ++ red_bnd'
+
+transformBinding bnd@(Let (Pattern _ pats) () _) = do
+  -- FIXME: magically construct segment descriptors as needed
+  mapM_ addTypePatElem pats
+  return [bnd]
 
 --------------------------------------------------------------------------------
 
 data MapInfo = MapInfo {
-    mapListArgs :: [Ident]
+    mapListArgs :: [VName]
     -- ^ the lists supplied to the map, ie [xs,ys] in
     -- @map f {xs,ys}@
-  , lamParams :: [Ident]
+  , lamParamVNs :: [VName]
     -- ^ the idents parmas in the map, ie [x,y] in
     -- @map (\x y -> let z = x+y in z) {xs,ys}@
-  , mapLets :: [Ident]
+  , mapLets :: [VName]
     -- ^ the idents that are bound in the outermost level of the map,
     -- ie [z] in @map (\x y -> let z = x+y in z) {xs,ys}@
   , mapSize :: SubExp
@@ -258,35 +928,45 @@ data MapInfo = MapInfo {
 -- @ys = segreduce(+,0,xss)@
 -- we must add the mapping @y |-> ys@ so that we can find the correct array
 -- for @y@ when processing @z = iota(y)@
-pullOutOfMap :: MapInfo -> ([Ident], [Ident]) -> Binding -> FlatM [Binding]
+pullOutOfMap :: MapInfo -> ([VName], [VName]) -> Binding -> FlatM [Binding]
 -- If no expressions is needed, do nothing (this case should be
 -- covered by other optimisations
 pullOutOfMap _ (_,[]) _ = return []
 pullOutOfMap mapInfo _
-                  (Let (Pattern [PatElem resIdent BindVar patlore]) letlore
-                       (PrimOp (Reshape certs dimSes reshapeIdent))) = do
-  -- TODO: Handle reshape on loop invariant array (ie, must be replicated)
-  Just target <- findTarget mapInfo reshapeIdent
+                  (Let (Pattern [] [PatElem resident BindVar ()]) ()
+                       (PrimOp (Reshape certs dimses reshapearr))) = do
+  Just target <- findTarget mapInfo reshapearr
 
-  newResIdent <-
-    case resIdent of
+  loopdep_dim_subexps <- filterM (\case
+                                  Var i -> liftM isJust $ findTarget mapInfo i
+                                  Constant _ -> return False
+                               ) dimses
+
+  unless (null loopdep_dim_subexps) $
+    flatError $ Error $ "pullOutOfMap Reshape: loop dependant variable used " ++
+                       show (map pretty loopdep_dim_subexps) ++
+                       " ^ TODO: implement SegReshape thingy"
+
+  newresident <-
+    case resident of
       (Ident vn (Array bt (Shape shpdms) uniq)) -> do
         vn' <- newID (baseName vn)
         return $ Ident vn' (Array bt (Shape (mapSize mapInfo:shpdms)) uniq)
       _ -> flatError $ Error "impossible, result of reshape not list"
 
-  addMapLetArray resIdent newResIdent
+  addMapLetArray (identName resident) newresident
 
-  let newReshape = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
-                                    (mapSize mapInfo:dimSes) target
+  let reshape_exp = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
+                                     (mapSize mapInfo:dimses) $ identName target
+  let reshape_bnd = Let (Pattern [] [PatElem newresident BindVar ()]) () reshape_exp
+  -- TODO: this trick probably only works for regular arrays
+  -- ... unless we specifically create the segment descriptors
+  -- beforehand, then it will probably work
+  transformBinding reshape_bnd
 
-  return [Let (Pattern [PatElem newResIdent BindVar patlore])
-              letlore newReshape]
-
-pullOutOfMap mapInfo (argsNeeded, _)
-                     (Let (Pattern pats) letlore
-                          (LoopOp (Map certs lambda idents))) = do
-
+pullOutOfMap mapInfo (argsneeded, _)
+                     (Let (Pattern [] pats) ()
+                          (LoopOp (Map certs lambda arrs))) = do
   -- For all argNeeded that are not already being mapped over:
   --
   -- 1) if they where created as an intermediate result in the outer map,
@@ -318,65 +998,49 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -----------------------------------------------
   (okIdents, okLambdaParams) <-
       liftM unzip
-      $ filterM (\(i,_) -> isJust <$> findTarget mapInfo i)
-              $ zip idents (lambdaParams lambda)
+      $ filterM (\(vn,_) -> isJust <$> findTarget mapInfo vn)
+              $ zip arrs (lambdaParams lambda)
   (loopInvIdents, loopInvLambdaParams) <-
       liftM unzip
-      $ filterM (\(i,_) -> isNothing <$> findTarget mapInfo i)
-              $ zip idents (lambdaParams lambda)
-  (loopInvRepBnds, loopInvIdentsArrs) <- mapAndUnzipM (replicateIdent mapInfo)
-                                                      loopInvIdents
+      $ filterM (\(vn,_) -> isNothing <$> findTarget mapInfo vn)
+              $ zip arrs (lambdaParams lambda)
+  (loopInvRepBnds, loopInvIdentsArrs) <-
+    mapAndUnzipM (replicateVName $ mapSize mapInfo) loopInvIdents
 
-  (flattenIdents, flatIdents) <- mapAndUnzipM flattenArg $
-                                   (Right <$> okIdents)
-                                   ++ (Left <$> loopInvIdentsArrs)
-
-  (unflattenPats, pats') <- mapAndUnzipM unflattenRes pats
-
+  flatIdents <-
+    mapM (flattenArg mapInfo) $
+                 (Right <$> okIdents) ++ (Left <$> loopInvIdentsArrs)
 
   -- We need this later on
-  innerMapSize <- case idents of
-                    Ident _ (Array _ (Shape (outer:_)) _):_ -> return outer
+  arrs_tps <- mapM lookupType arrs
+  innerMapSize <- case arrs_tps of
+                    Array _ (Shape (outer:_)) _:_ -> return outer
                     _ -> flatError $ Error "impossible, map argument was not a list"
 
   -------------------------------------------------------------
   -- Handle Idents needed by body, which are not mapped over --
   -------------------------------------------------------------
-  let reallyNeeded = filter (\i -> not $ HS.member i $ HS.unions
-                                   $ map freeIn idents) argsNeeded
+
+  -- TODO: This will lead to size variables been mapeed over :(
+  let reallyNeeded = filter (`notElem` arrs) argsneeded
   --
   -- Intermediate results needed
   --
-  itmResIdents <- filterM (\i -> isJust <$> findTarget mapInfo i) reallyNeeded
+  intmres_vns <- filterM (liftM isJust . findTarget mapInfo) reallyNeeded
 
   -- Need to rename so our intermediate result will not be found in
   -- other calls (through mapLetArray)
-  itmResIdents' <- mapM (newIdent' id) itmResIdents
-  itmResArrs <- mapM (findTarget1 mapInfo) itmResIdents
-
-  --
-  -- Loop invariant Idents needed
-  --
-  needInvIdents <- filterM (\i -> do
-                               ok <- isNothing <$> findTarget mapInfo i
-                               if ok
-                               then case identType i of
-                                      Basic _ -> return False
-                                      Array{} -> return True
-                                      Mem{}   -> flatError MemTypeFound
-                               else return False
-                           ) reallyNeeded
-
-  (needInvRepBnds, needInvArrs) <- mapAndUnzipM (replicateIdent mapInfo)
-                                                needInvIdents
+  intmres_vns' <- mapM newName intmres_vns
+  intmres_tps <- mapM lookupType intmres_vns
+  let intmres_params = map (`Param` ()) $ zipWith Ident intmres_vns' intmres_tps
+  intmres_arrs <- mapM (findTarget1 mapInfo) intmres_vns
 
   --
   -- Distribute and flatten idents needed (from above)
   --
-  let extraLamdaParams = itmResArrs ++ needInvArrs
   (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
-                                            extraLamdaParams
-  (flatDistBnds, flatDistArrIdents) <- mapAndUnzipM flattenArg (Left <$> distArrIdents)
+                                            intmres_arrs
+  flatDistArrIdents <- mapM (flattenArg mapInfo) $ Left <$> distArrIdents
 
 
   -----------------------------------------
@@ -384,27 +1048,32 @@ pullOutOfMap mapInfo (argsNeeded, _)
   -----------------------------------------
   let newInnerIdents = flatIdents ++ flatDistArrIdents
   let lambdaParams' = okLambdaParams ++ loopInvLambdaParams
-                      ++ extraLamdaParams
+                      ++ intmres_params
 
   let lambdaBody' = substituteNames
-                    (HM.fromList $ zip (map identName itmResIdents)
-                                       (map identName itmResIdents'))
+                    (HM.fromList $ zip intmres_vns
+                                       intmres_vns')
                     $ lambdaBody lambda
 
   let lambda' = lambda { lambdaParams = lambdaParams'
                        , lambdaBody = lambdaBody'
                        }
 
-  let mapBnd' = Let (Pattern pats') letlore
+  -- FIXME: Should call transformBinding on inner before calling unflattenRes
+  pats' <- mapM unflattenRes pats
+
+  let mapBnd' = Let (Pattern [] pats') ()
                     (LoopOp (Map (certs ++ mapCerts mapInfo)
                                  lambda'
-                                 newInnerIdents))
+                                 (map identName newInnerIdents)))
 
   mapBnd'' <- transformBinding mapBnd'
 
-  return $ needInvRepBnds ++ distBnds ++ flatDistBnds
-           ++ loopInvRepBnds
-           ++ flattenIdents ++ mapBnd'' ++ unflattenPats
+  zipWithM_ evenMoreExtraSutff pats pats'
+
+  return $ distBnds ++
+           loopInvRepBnds ++
+           mapBnd''
 
 
   where
@@ -420,123 +1089,243 @@ pullOutOfMap mapInfo (argsNeeded, _)
                  (Basic bt) ->
                    return $ Array bt (Shape [sz]) Nonunique
                  (Array bt (Shape (out:rest)) uniq) -> do
-                   when (out /= mapSize mapInfo) $ flatError $ Error "distributeExtraArg: trying to distribute array with incorrect outer size"
+                   when (out /= mapSize mapInfo) $
+                     flatError $
+                       Error $ "distributeExtraArg: " ++
+                               "trying to distribute array with incorrect outer size " ++
+                               pretty i
                    return $ Array bt (Shape $ out:sz:rest) uniq
 
-      distIdent <- newIdent (baseString vn ++ "_dist") distTp
+      distident <- newIdent (baseString vn ++ "_dist") distTp
+      addTypeIdent distident
+      addDataArray (identName distident) distident
 
       let distExp = Apply (nameFromString "distribute")
-                             [(Var i, Observe), (sz, Observe)]
-           -- TODO: I guess  Observe is okay for now
-                             (basicRetType Int) -- FIXME
+                          [(Var vn, Observe), (sz, Observe)]
+                          --  ^ TODO: I guess  Observe is okay for now
+                          (basicRetType Int)
+                          --  ^ TODO: stupid exsitensial types :(
 
 
-      let distBnd = Let (Pattern [PatElem distIdent BindVar ()]) () distExp
+      let distbnd = Let (Pattern [] [PatElem distident BindVar ()]) () distExp
 
-      return (distBnd, distIdent)
-
-
-
-    -- | preparation steps to enter nested map, meaning we
-    -- step-down/flatten/concat the outer array.
-    --
-    -- 1st arg is the parrent array for the Ident. In most cases, this
-    -- will be @Nothing@ and this function will find it itself.
-
-    -- TODO: does not currently handle loop invariant arrays
-    flattenArg :: Either Ident Ident -> FlatM (Binding, Ident)
-    flattenArg targInfo = do
-      target <- case targInfo of
-                  Left targ -> return targ
-                  Right innerMapArg -> findTarget1 mapInfo innerMapArg
-
-      -- tod = Target Outer Dimension
-      (tod1, tod2, rest, bt, uniq) <- case target of
-        (Ident _ (Array bt (Shape (tod1:tod2:rest)) uniq)) ->
-                  return (tod1, tod2, rest, bt, uniq)
-        _ -> flatError $ Error $ "trying to flatten less than 2D array: " ++ show target
-
-      newSize <- getFlattenedDims (tod1, tod2)
-
-      let flatTp = Array bt (Shape (newSize : rest)) uniq
-      flatIdent <- newIdent (baseString (identName target) ++ "_sd") flatTp
-      let flattenExp = Apply (nameFromString "stepdown")
-                             [(Var target, Observe)] -- TODO: I guess
-                                                     -- Observe is okay
-                                                     -- for now
-                             (basicRetType Int) -- FIXME
-
-      let flatBnd = Let (Pattern [PatElem flatIdent BindVar ()]) () flattenExp
-
-      return (flatBnd, flatIdent)
+      return (distbnd, distident)
 
     -- | Steps for exiting a nested map, meaning we step-up/unflatten the result
-    unflattenRes :: PatElem -> FlatM (Binding, PatElem)
-    unflattenRes (PatElem i@(Ident vn (Array bt (Shape (outer:rest)) uniq))
-                                BindVar patLore) = do
-      flatSize <- getFlattenedDims (mapSize mapInfo, outer)
+    unflattenRes :: PatElem -> FlatM PatElem
+    unflattenRes (PatElem (Ident vn (Array bt (Shape (outer:rest)) uniq))
+                          BindVar ()) = do
+      flatSize <- getFlattenedDims1 (mapSize mapInfo, outer)
       let flatTp = Array bt (Shape $ flatSize:rest) uniq
-      flatResArr <- newIdent (baseString vn ++ "_sd") flatTp
-      let flatResArrPat = PatElem flatResArr BindVar patLore
-
+      flatResArr <- newIdent (textual vn ++ "_sd") flatTp
+      let flatResArrPat = PatElem flatResArr BindVar ()
       let finalTp = Array bt (Shape $ mapSize mapInfo :outer:rest) uniq
       finalResArr <- newIdent (baseString vn) finalTp
-
-      addMapLetArray i finalResArr
-
-      let unflattenExp = Apply (nameFromString "stepup")
-                          [(Var flatResArr, Observe)] -- TODO: I guess
-                                                  -- Observe is okay
-                                                  -- for now
-                          (basicRetType Int) -- FIXME
-      let unflattenBnd = Let (Pattern [PatElem finalResArr BindVar ()])
-                             () unflattenExp
-
-      return (unflattenBnd, flatResArrPat)
+      addTypeIdent finalResArr
+      addMapLetArray vn finalResArr
+      return flatResArrPat
     unflattenRes pe = flatError $ Error $ "unflattenRes applied to " ++ pretty pe
 
+    evenMoreExtraSutff :: PatElem -> PatElem -> FlatM ()
+    evenMoreExtraSutff (PatElem (Ident origvn _) BindVar ())
+                       (PatElem resident BindVar ()) = do
+      --addMapLetArray origvn resident
+      -- FIXME: create seg descps if they do not already exists ...?
+      logMsg $ unwords ["evenMoreExtraSutff", pretty origvn, pretty resident]
+      data_arr <- getDataArray1 $ identName resident
+      fakemutlidimarray <- getMapLetArray' origvn
+      addDataArray (identName fakemutlidimarray) data_arr
+    evenMoreExtraSutff pe1 pe2 =
+      flatError $ Error $ "evenMoreExtraSutff applied to " ++ pretty pe1 ++
+                          " , " ++ pretty pe2
+
+
+pullOutOfMap mapInfo _
+                     topBnd@(Let (Pattern [] pats) letlore
+                                 (LoopOp (Reduce certs lambda args))) = do
+  ok <- isSafeToMapBody $ lambdaBody lambda
+  if not ok
+  then flatError . Error $ "map of reduce with \"advanced\" operator"
+                           ++ pretty topBnd
+  else do
+    -- Create new PatElems and Idents to hold result (now arrays)
+    pats' <- forM pats $ \(PatElem i BindVar ()) -> do
+      let vn = identName i
+      arr <- wrapInArrIdent (mapSize mapInfo) i
+      addMapLetArray vn arr
+      addDataArray (identName arr) arr
+      return $ PatElem arr BindVar ()
+
+    -- FIXME: This does not handle completely loop invariant things
+    flatargs <-
+      forM args $ \(ne,i) -> do
+        flatarr <- flattenArg mapInfo $ Right i
+        return (ne, identName flatarr)
+
+    seginfo <- case args of
+                 (_,argarr):_ ->
+                   getSegDescriptors1Ident =<< findTarget1 mapInfo argarr
+                 [] -> flatError $ Error "Reduce on empty array, not possible"
+    segdescp <- case seginfo of
+                  [(descp,_)] -> return $ identName descp
+                  _ -> flatError $ Error $ "pullOutOfMap Reduce: argument array was not two dimensional"
+                                         ++ pretty topBnd
+
+    let redBnd' = Let (Pattern [] pats') letlore
+                      (SegOp (SegReduce certs lambda flatargs segdescp))
+
+    return [redBnd']
+
+pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
+                            (PrimOp (Iota subexp))) = do
+  segdescp <- case subexp of
+                Constant _ ->
+                  flatError $ Error "FIXME: replicate that son of a bitch"
+                Var ident ->
+                  findTarget1 mapinfo ident
+
+  (segsum, sumbnd) <- getFlattenedDims (mapSize mapinfo, subexp) >>= (\mbi ->
+    case mbi of
+      Just i -> return (i, [])
+      Nothing -> do
+        sumident <- newIdent "segiota_sum" (Basic Int)
+        addTypeIdent sumident
+        sumexp <- reducePlus (identName segdescp)
+        let sumbnd = Let (Pattern [] [PatElem sumident BindVar ()]) () sumexp
+
+        addFlattenedDims (mapSize mapinfo, subexp) (Var $ identName sumident)
+        addSegDescriptors [mapSize mapinfo, subexp] [(segdescp, Irregular)]
+
+        return (Var $ identName sumident, [sumbnd]))
+
+  let tmptp = Array Int (Shape [segsum]) Nonunique
+
+  repident <- newIdent "segiota_rep" tmptp
+  let repexp = PrimOp $ Replicate segsum (Constant $ IntVal 1)
+  let repbnd = Let (Pattern [] [PatElem repident BindVar ()]) () repexp
+
+  scanident <- newIdent "segiota_segscan" tmptp
+  scanexp <- segscanPlus ScanExclusive (identName repident) (identName segdescp)
+  let scanbnd = Let (Pattern [] [PatElem scanident BindVar ()]) () scanexp
+
+  resarr <- newIdent (baseString (identName resident) ++ "_arr")
+                     (Array Int (Shape [mapSize mapinfo, subexp]) Nonunique)
+
+  addMapLetArray (identName resident) resarr
+  addTypeIdent resarr
+  addDataArray (identName resarr) scanident
+  addTypeIdent scanident
+
+  return $ sumbnd ++ [repbnd, scanbnd]
+
+
+pullOutOfMap mapinfo bndinfo
+             (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+  -- Remember that reduce function must be @a -> a -> a@
+  -- This means that the result of the map must be of type @a@.
+  (map_bnd, red_bnd) <-
+    redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
+
+  let newidents = patternValueIdents $ bindingPattern map_bnd
+  mapM_ addTypeIdent newidents
+  let mapinfo' = mapinfo{ mapLets = mapLets mapinfo ++ map identName newidents }
+  map_bnds' <- pullOutOfMap mapinfo' bndinfo map_bnd
+  red_bnds' <- pullOutOfMap mapinfo' bndinfo red_bnd
+  return $ map_bnds' ++ red_bnds'
+
+pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem ident1 BindVar _]) _
+                        (PrimOp (SubExp (Var name)))) = do
+  target <- findTarget1 mapinfo name
+  addMapLetArray (identName ident1) target
+  addDataArray (identName ident1) =<< getDataArray1 (identName target)
+  return []
 
 pullOutOfMap _ _ binding =
-  flatError $ Error $ "pullOutOfMap not implemented for " ++ pretty binding
+  flatError $ Error $ "pullOutOfMap not implemented for " ++ pretty binding ++
+                      "\n\t" ++ show binding
+
+----------------------------------------
+
+
+-- | preparation steps to enter nested map, meaning we
+-- step-down/flatten/concat the outer array.
+--
+-- 1st arg is the parrent array for the Ident. In most cases, this
+-- will be @Nothing@ and this function will find it itself.
+flattenArg :: MapInfo -> Either Ident VName -> FlatM Ident
+flattenArg mapInfo targInfo = do
+  target <- case targInfo of
+              Left targ -> return targ
+              Right innerMapArg -> findTarget1 mapInfo innerMapArg
+  logMsg $ unwords ["flattenArg", pretty target]
+
+  -- tod = Target Outer Dimension
+  (tod1, tod2, rest, bt, uniq) <- case target of
+    (Ident _ (Array bt (Shape (tod1:tod2:rest)) uniq)) ->
+              return (tod1, tod2, rest, bt, uniq)
+    _ -> flatError $ Error $ "trying to flatten less than 2D array: " ++ pretty target
+
+  newsize <- getFlattenedDims1 (tod1, tod2)
+
+  case rest of
+    [] -> getDataArray1 $ identName target
+    _ -> do let flatTp = Array bt (Shape (newsize : rest)) uniq
+            i <- newIdent (baseString (identName target) ++ "_sd") flatTp
+            logMsg $ unwords ["flattenArg", "created new ident", pretty i]
+            addTypeIdent i
+            addDataArray (identName i) =<< getDataArray1 (identName target)
+            return i
+
 
 
 -- | Find the "parent" array for a given Ident in a /specific/ map
-findTarget :: MapInfo -> Ident -> FlatM (Maybe Ident)
-findTarget mapInfo i =
-  case L.elemIndex i (lamParams mapInfo) of
-    Just n -> return . Just $ mapListArgs mapInfo !! n
-    Nothing -> if i `notElem` mapLets mapInfo
+findTarget :: MapInfo -> VName -> FlatM (Maybe Ident)
+findTarget mapInfo vn =
+  case L.elemIndex vn $ lamParamVNs mapInfo of
+    Just n -> do
+      let target_vn = mapListArgs mapInfo !! n
+      target_tp <- lookupType target_vn
+      return . Just $ Ident target_vn target_tp
+    Nothing -> if vn `notElem` mapLets mapInfo
                -- this argument is loop invariant
                then return Nothing
-               else liftM Just $ getMapLetArray' i
+               else liftM Just $ getMapLetArray' vn
 
-findTarget1 :: MapInfo -> Ident -> FlatM Ident
-findTarget1 mapInfo i =
-  findTarget mapInfo i >>= \case
-    Just iArr -> return iArr
+findTarget1 :: MapInfo -> VName -> FlatM Ident
+findTarget1 mapInfo vn =
+  findTarget mapInfo vn >>= \case
+    Just arr -> return arr
     Nothing -> flatError $ Error $ "findTarget': couldn't find expected arr for "
-                                   ++ pretty i
+                                   ++ pretty vn
 
-wrapInArrIdent :: MapInfo -> Ident -> FlatM Ident
-wrapInArrIdent mapInfo (Ident vn tp) = do
+wrapInArrIdent :: SubExp -> Ident -> FlatM Ident
+wrapInArrIdent sz (Ident vn tp) = do
   arrtp <- case tp of
     Basic bt                   -> return $ Array bt (Shape [sz]) Nonunique
     Array bt (Shape rest) uniq -> return $ Array bt (Shape $ sz:rest) uniq
     Mem _ -> flatError MemTypeFound
-  newIdent (baseString vn ++ "_arr") arrtp
-  where
-    sz = mapSize mapInfo
+  i <- newIdent (baseString vn ++ "_arr") arrtp
+  addTypeIdent i
+  return i
 
-replicateIdent :: MapInfo -> Ident -> FlatM (Binding, Ident)
-replicateIdent mapInfo i = do
-  arrRes <- wrapInArrIdent mapInfo i
-  let repExp = PrimOp $ Replicate (mapSize mapInfo) (Var i)
-      repBnd = Let (Pattern [PatElem arrRes BindVar ()]) () repExp
-
+replicateIdent :: SubExp -> Ident -> FlatM (Binding, Ident)
+replicateIdent sz i = do
+  arrRes <- wrapInArrIdent sz i
+  let repExp = PrimOp $ Replicate sz $ Var $ identName i
+      repBnd = Let (Pattern [] [PatElem arrRes BindVar ()]) () repExp
   return (repBnd, arrRes)
 
---------------------------------------------------------------------------------
+wrapInArrVName :: SubExp -> VName -> FlatM Ident
+wrapInArrVName sz vn = do
+  tp <- lookupType vn
+  wrapInArrIdent sz $ Ident vn tp
 
+replicateVName :: SubExp -> VName -> FlatM (Binding, Ident)
+replicateVName sz vn = do
+  tp <- lookupType vn
+  replicateIdent sz $ Ident vn tp
+
+--------------------------------------------------------------------------------
 
 isSafeToMapBody :: Body -> FlatM Bool
 isSafeToMapBody (Body _ bindings _) = and <$> mapM isSafeToMapBinding bindings
@@ -549,10 +1338,11 @@ isSafeToMapBinding (Let _ _ e) = isSafeToMapExp e
 -- Else we need to apply a segmented operator on it
 isSafeToMapExp :: Exp -> FlatM Bool
 isSafeToMapExp (PrimOp po) = do
-  let ts = primOpType po
+  ts <- primOpType po
   and <$> mapM isSafeToMapType ts
 -- DoLoop/Map/ConcatMap/Reduce/Scan/Filter/Redomap
 isSafeToMapExp (LoopOp _) = return False
+isSafeToMapExp (SegOp _) = return False
 isSafeToMapExp (If _ e1 e2 _) =
   liftM2 (&&) (isSafeToMapBody e1) (isSafeToMapBody e2)
 isSafeToMapExp (Apply{}) =
@@ -562,5 +1352,34 @@ isSafeToMapType :: Type -> FlatM Bool
 isSafeToMapType (Mem{}) = flatError MemTypeFound
 isSafeToMapType (Basic _) = return True
 isSafeToMapType (Array{}) = return False
+
+--------------------------------------------------------------------------------
+
+dimentionality :: Type -> Maybe Int
+dimentionality (Array _ (Shape dims) _) = Just $ length dims
+dimentionality _ = Nothing
+
+vnDimentionality :: VName -> FlatM (Maybe Int)
+vnDimentionality vn =
+  liftM dimentionality $ lookupType vn
+
+--------------------------------------------------------------------------------
+
+segscanPlus :: ScanType -> VName -> VName -> FlatM Exp
+segscanPlus st arr segdescp = do
+  lambda <- binOpLambda Plus Int
+  return $ SegOp $ SegScan [] st lambda [(Constant $ IntVal 0, arr)] segdescp
+
+reducePlus :: VName -> FlatM Exp
+reducePlus arr = do
+  lambda <- binOpLambda Plus Int
+  return $ LoopOp $ Reduce [] lambda [(Constant $ IntVal 0, arr)]
+
+--------------------------------------------------------------------------------
+
+patternFromIdents :: [Ident] -> [Ident] -> Pattern
+patternFromIdents ctx vals =
+  Pattern (map addBindVar ctx) (map addBindVar vals)
+  where addBindVar i = PatElem i BindVar ()
 
 --------------------------------------------------------------------------------

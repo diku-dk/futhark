@@ -39,6 +39,8 @@ data SimpleOps m =
                                       -> m (Lore.LetBound (Engine.InnerLore m))
             , simplifyFParamLore :: Lore.FParam (Engine.InnerLore m)
                                     -> m (Lore.FParam (Engine.InnerLore m))
+            , simplifyLParamLore :: Lore.LParam (Engine.InnerLore m)
+                                    -> m (Lore.LParam (Engine.InnerLore m))
             , simplifyRetType :: Lore.RetType (Engine.InnerLore m)
                                  -> m (Lore.RetType (Engine.InnerLore m))
             }
@@ -47,14 +49,17 @@ bindableSimpleOps :: (Engine.MonadEngine m,
                       Bindable (Engine.InnerLore m),
                       Lore.LetBound (Engine.InnerLore m) ~ (),
                       Lore.FParam (Engine.InnerLore m) ~ (),
+                      Lore.LParam (Engine.InnerLore m) ~ (),
                       RetType (Engine.InnerLore m) ~ ExtRetType) =>
                      SimpleOps m
 bindableSimpleOps =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  return return simplifyRetType'
-  where mkLetS' _ pat e = return $ mkLet pat' e
-          where pat' = [ (patElemIdent patElem, patElemBindage patElem)
-                       | patElem <- patternElements pat ]
+  return return return simplifyRetType'
+  where mkLetS' _ pat e = return $
+                          mkLet (map asPair $ patternContextElements pat)
+                          (map asPair $ patternValueElements pat)
+                          e
+          where asPair patElem = (patElemIdent patElem, patElemBindage patElem)
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
         simplifyRetType' =
@@ -74,6 +79,17 @@ newtype SimpleM lore a =
 instance MonadFreshNames (SimpleM lore) where
   getNameSource   = snd <$> get
   putNameSource y = modify $ \(x, _) -> (x,y)
+
+instance Engine.Simplifiable lore =>
+         HasTypeEnv (SimpleM lore) where
+  askTypeEnv = ST.typeEnv <$> Engine.getVtable
+  lookupType name = do
+    vtable <- Engine.getVtable
+    case ST.lookupType name vtable of
+      Just t -> return t
+      Nothing -> fail $
+                 "SimpleM.lookupType: cannot find variable " ++
+                 pretty name ++ " in symbol table."
 
 instance Engine.Simplifiable lore =>
          MonadBinder (SimpleM lore) where
@@ -111,6 +127,9 @@ instance Engine.Simplifiable lore =>
   simplifyFParamLore lore = do
     simpl <- fst <$> ask
     simplifyFParamLore simpl lore
+  simplifyLParamLore lore = do
+    simpl <- fst <$> ask
+    simplifyLParamLore simpl lore
   simplifyRetType restype = do
     simpl <- fst <$> ask
     simplifyRetType simpl restype

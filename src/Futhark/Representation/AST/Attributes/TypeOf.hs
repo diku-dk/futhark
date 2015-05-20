@@ -1,7 +1,21 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | This module provides facilities for obtaining the types of
+-- various Futhark constructs.  Typically, you will need to execute
+-- these in a context where type information is available as a
+-- 'TypeEnv'; usually by using a monad that is an instance of
+-- 'HasTypeEnv'.  The information is returned as a list of 'ExtType'
+-- values - one for each of the values the Futhark construct returns.
+-- Some constructs (such as subexpressions) can produce only a single
+-- value, and their typing functions hence do not return a list.
+--
+-- Some representations may have more specialised facilities enabling
+-- even more information - for example,
+-- "Futhark.Representation.ExplicitMemory" exposes functionality for
+-- also obtaining information about the storage location of results.
 module Futhark.Representation.AST.Attributes.TypeOf
        (
          expExtType
+       , expExtTypeSize
        , subExpType
        , bodyExtType
        , primOpType
@@ -12,164 +26,238 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , loopShapeContext
        , loopExtType
        , applyExtType
-       , substNamesInExtType
+
+       -- * Return type
        , module Futhark.Representation.AST.RetType
+       -- * Type environment
+       , module Futhark.Representation.AST.Attributes.TypeEnv
+       , typeEnvFromBindings
+       , typeEnvFromParams
+       , withParamTypes
        )
        where
 
+import Control.Applicative
+import Control.Monad.Reader
 import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
+import Data.Traversable hiding (mapM)
+
+import Prelude hiding (mapM)
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
+import Futhark.Representation.AST.Attributes.TypeEnv
 
-subExpType :: SubExp -> Type
-subExpType (Constant val) = Basic $ basicValueType val
-subExpType (Var ident)    = identType ident
+-- | The type of a subexpression.
+subExpType :: HasTypeEnv m => SubExp -> m Type
+subExpType (Constant val) = pure $ Basic $ basicValueType val
+subExpType (Var name)     = lookupType name
 
+-- | @mapType f arrts@ wraps each element in the return type of @f@ in
+-- an array with size equal to the outermost dimension of the first
+-- element of @arrts@.
 mapType :: Lambda lore -> [Type] -> [Type]
 mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
                  | t <- lambdaReturnType f ]
   where outersize = arraysSize 0 arrts
 
-primOpType :: PrimOp lore -> [Type]
+-- | The type of a primitive operation.
+primOpType :: HasTypeEnv m =>
+              PrimOp lore -> m [Type]
 primOpType (SubExp se) =
-  [subExpType se]
+  pure <$> subExpType se
 primOpType (ArrayLit es rt) =
-  [arrayOf rt (Shape [n]) $
-   mconcat $ map (uniqueness . subExpType) es]
+  arrays <$> traverse subExpType es
   where n = Constant (value (length es))
+        arrays ts = [arrayOf rt (Shape [n]) $ mconcat $ map uniqueness ts]
 primOpType (BinOp _ _ _ t) =
-  [Basic t]
+  pure [Basic t]
 primOpType (Not _) =
-  [Basic Bool]
+  pure [Basic Bool]
+primOpType (Complement _) =
+  pure [Basic Int]
 primOpType (Negate e) =
-  [subExpType e]
+  pure <$> subExpType e
 primOpType (Index _ ident idx) =
-  [stripArray (length idx) (identType ident)]
+  result <$> lookupType ident
+  where result t = [stripArray (length idx) t]
 primOpType (Iota ne) =
-  [arrayOf (Basic Int) (Shape [ne]) Nonunique]
+  pure [arrayOf (Basic Int) (Shape [ne]) Nonunique]
 primOpType (Replicate ne e) =
-  [arrayOf (subExpType e) (Shape [ne]) u]
-  where u = uniqueness $ subExpType e
+  result <$> subExpType e
+  where result t = [arrayOf t (Shape [ne]) $ uniqueness t]
 primOpType (Scratch t shape) =
-  [arrayOf (Basic t) (Shape shape) Unique]
+  pure [arrayOf (Basic t) (Shape shape) Unique]
 primOpType (Reshape _ [] e) =
-  [Basic $ elemType $ identType e]
+  result <$> lookupType e
+  where result t = [Basic $ elemType t]
 primOpType (Reshape _ shape e) =
-  [identType e `setArrayShape` Shape shape]
+  result <$> lookupType e
+  where result t = [t `setArrayShape` Shape shape]
 primOpType (Rearrange _ perm e) =
-  [identType e `setArrayShape` Shape (permuteShape perm shape)]
-  where Shape shape = arrayShape $ identType e
+  result <$> lookupType e
+  where result t = [t `setArrayShape` Shape (permuteShape perm $ arrayDims t)]
 primOpType (Split _ sizeexps e) =
-  map (identType e `setOuterSize`) sizeexps
+  result <$> lookupType e
+  where result t = map (t `setOuterSize`) sizeexps
 primOpType (Concat _ x ys ressize) =
-  [identType x `setUniqueness` u `setOuterSize` ressize]
-  where u = uniqueness (identType x) <> mconcat (map (uniqueness . identType) ys)
-primOpType (Copy e) =
-  [subExpType e `setUniqueness` Unique]
+  result <$> lookupType x <*> traverse lookupType ys
+  where result xt yts =
+          let u = uniqueness xt <> mconcat (map uniqueness yts)
+          in [xt `setUniqueness` u `setOuterSize` ressize]
+primOpType (Copy v) =
+  result <$> lookupType v
+  where result t = [t `setUniqueness` Unique]
 primOpType (Assert _ _) =
-  [Basic Cert]
+  pure [Basic Cert]
 primOpType (Alloc e) =
-  [Mem e]
-primOpType (Partition _ n _ array) =
-  replicate n (Basic Int) ++ [identType array]
+  pure [Mem e]
+primOpType (Partition _ n _ arrays) =
+  result <$> traverse lookupType arrays
+  where result ts = replicate n (Basic Int) ++ ts
 
-loopOpExtType :: LoopOp lore -> [ExtType]
+-- | The type of a loop operation.
+loopOpExtType :: HasTypeEnv m =>
+                 LoopOp lore -> m [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
-  loopExtType res $ map (fparamIdent . fst) merge
+  pure $ loopExtType res $ map (paramIdent . fst) merge
 loopOpExtType (Map _ f arrs) =
-  staticShapes $ mapType f $ map identType arrs
+  staticShapes <$> mapType f <$> traverse lookupType arrs
 loopOpExtType (ConcatMap _ f _) =
-  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
-  | t <- lambdaReturnType f ]
+  pure [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
+         | t <- lambdaReturnType f ]
 loopOpExtType (Reduce _ fun _) =
-  staticShapes $ lambdaReturnType fun
+  pure $ staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ _ inputs) =
-  staticShapes $ map (identType . snd) inputs
+  staticShapes <$> traverse (lookupType . snd) inputs
 loopOpExtType (Redomap _ outerfun innerfun _ ids) =
   let acc_tp    = lambdaReturnType outerfun
       acc_el_tp = lambdaReturnType innerfun
       res_el_tp = drop (length acc_tp) acc_el_tp
+      result outersize =
+        acc_tp ++ [ arrayOf eltp (Shape [outersize]) (uniqueness eltp) |
+                    eltp <- res_el_tp ]
   in  case res_el_tp of
-        [] -> staticShapes acc_tp
-        _  -> let outersize  = arraysSize 0 (map identType ids)
-                  res_arr_tp :: [Type]
-                  res_arr_tp = map (\eltp -> arrayOf eltp
-                                                     (Shape [outersize])
-                                                     (uniqueness eltp)
-                                   ) res_el_tp
-              in  staticShapes (acc_tp ++ res_arr_tp)
+        [] -> pure $ staticShapes acc_tp
+        _  -> staticShapes <$> result <$> arraysSize 0 <$> traverse lookupType ids
 loopOpExtType (Stream _ accs arrs lam) =
-  let (ExtLambda params _ rtp) = lam
-      nms = map identName (take (2 + length accs) params)
-      (Array _ shp _) = identType (head arrs)
-      (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
-      substs = HM.fromList $ zip nms (outersize:i0:accs)
-  in  map (substNamesInExtType substs) rtp
+  result <$> lookupType (head arrs)
+  where ExtLambda params _ rtp = lam
+        result (Array _ shp _) =
+          let nms = map paramName $ take (2 + length accs) params
+              (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
+              substs = HM.fromList $ zip nms (outersize:i0:accs)
+          in map (substNamesInExtType substs) rtp
+        result _ =
+          rtp
 
-expExtType :: IsRetType (RetType lore) => Exp lore -> [ExtType]
-expExtType (Apply _ _ rt) = retTypeValues rt
-expExtType (If _ _ _ rt)  = rt
+-- | The type of a segmented operation.
+segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
+segOpExtType (SegReduce _ fun _ descp) =
+  staticShapes <$> mapType fun <$> pure <$> lookupType descp
+segOpExtType (SegScan _ _ _ inputs _) =
+  staticShapes <$> traverse (lookupType . snd) inputs
+
+-- | The type of an expression.
+expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>
+              Exp lore -> m [ExtType]
+expExtType (Apply _ _ rt) = pure $ retTypeValues rt
+expExtType (If _ _ _ rt)  = pure rt
 expExtType (LoopOp op)    = loopOpExtType op
-expExtType (PrimOp op)    = staticShapes $ primOpType op
+expExtType (PrimOp op)    = staticShapes <$> primOpType op
+expExtType (SegOp op)    = segOpExtType op
 
-bodyExtType :: Body lore -> [ExtType]
+-- | The number of values returned by an expression.
+expExtTypeSize :: IsRetType (RetType lore) => Exp lore -> Int
+expExtTypeSize = length . feelBad . expExtType
+
+-- FIXME, this is a horrible quick hack.
+newtype FeelBad a = FeelBad { feelBad :: a }
+
+instance Functor FeelBad where
+  fmap f = FeelBad . f . feelBad
+
+instance Applicative FeelBad where
+  pure = FeelBad
+  f <*> x = FeelBad $ feelBad f $ feelBad x
+
+instance HasTypeEnv FeelBad where
+  lookupType = const $ pure $ Basic Int
+  askTypeEnv = pure mempty
+
+-- | The type of a body.
+bodyExtType :: (HasTypeEnv m, Monad m) =>
+               Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
-  existentialiseExtTypes bound $
-  staticShapes $ map subExpType $ resultSubExps res
-  where boundInLet (Let pat _ _) = patternNames pat
+  existentialiseExtTypes bound <$> staticShapes <$>
+  extendedTypeEnv (mapM subExpType res) bndtypes
+  where bndtypes = typeEnvFromBindings bnds
+        boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
 
+-- | Given an the return type of a function and the values returned by
+-- that function, return the size context.
 valueShapeContext :: [ExtType] -> [Value] -> [Value]
 valueShapeContext rettype values =
   map (BasicVal . value) $ extractShapeContext rettype $ map valueShape values
 
-subExpShapeContext :: [ExtType] -> [SubExp] -> [SubExp]
+-- | Given the return type of a function and the subexpressions
+-- returned by that function, return the size context.
+subExpShapeContext :: HasTypeEnv m =>
+                      [ExtType] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
-  extractShapeContext rettype $ map (arrayDims . subExpType) ses
+  extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
 
--- | A loop returns not only the values indicated in the result
+-- | A loop pures not only the values indicated in the result
 -- pattern, but also any shapes of arrays that are merge variables.
--- Thus, @loopResult res merge@ returns those variables in @merge@
+-- Thus, @loopResult res merge@ pures those variables in @merge@
 -- that constitute the shape context.
-loopShapeContext :: [Ident] -> [Ident] -> [Ident]
+loopShapeContext :: [VName] -> [Ident] -> [VName]
 loopShapeContext res merge = resShapes
   where isMergeVar (Constant _) = Nothing
         isMergeVar (Var v)
-          | v `elem` merge = Just v
-          | otherwise      = Nothing
+          | v `elem` mergenames = Just v
+          | otherwise           = Nothing
         resShapes =
-          nub $ concatMap (mapMaybe isMergeVar . arrayDims . identType) res
+          nub $ concatMap (mapMaybe isMergeVar . arrayDims . identType) res'
+        mergenames = map identName merge
+        res' = mapMaybe (\name -> find ((==name) . identName) merge) res
 
-loopExtType :: [Ident] -> [Ident] -> [ExtType]
+-- | Given the result list and the merge parameters of a Futhark
+-- @loop@, produce the return type.
+loopExtType :: [VName] -> [Ident] -> [ExtType]
 loopExtType res merge =
-  existentialiseExtTypes inaccessible $ staticShapes $ map identType res
+  existentialiseExtTypes inaccessible $ staticShapes $ map identType res'
   where inaccessible = HS.fromList $ map identName merge
+        res' = mapMaybe (\name -> find ((==name) . identName) merge) res
 
+-- | Produce the return type resulting from providing the given
+-- subexpressions (with associated type) as arguments to a function of
+-- the given return type and parameters.  Returns 'Nothing' if the
+-- application is invalid.
 applyExtType :: ExtRetType -> [Ident]
-             -> [SubExp]
+             -> [(SubExp,Type)]
              -> Maybe ExtRetType
-applyExtType (ExtRetType extret) params args
-  | length args == length params &&
-    and (zipWith subtypeOf
-         (map rankShaped argtypes)
-         (map rankShaped paramtypes)) =
-    Just $ ExtRetType $ map correctDims extret
-  | otherwise =
-    Nothing
-  where paramtypes = map identType params
-        argtypes   = map subExpType args
+applyExtType (ExtRetType extret) params args =
+  if length args == length params &&
+     and (zipWith subtypeOf
+          (map rankShaped argtypes)
+          (map rankShaped paramtypes))
+  then Just $ ExtRetType $ map correctDims extret
+  else Nothing
+  where argtypes = map snd args
+        paramtypes = map identType params
 
         parammap :: HM.HashMap VName SubExp
         parammap = HM.fromList $
-                   zip (map identName params) args
+                   zip (map identName params) (map fst args)
 
         correctDims t =
           t `setArrayShape`
@@ -180,10 +268,29 @@ applyExtType (ExtRetType extret) params args
         correctDim (Free (Constant v)) =
           Free $ Constant v
         correctDim (Free (Var v))
-          | Just se <- HM.lookup (identName v) parammap =
+          | Just se <- HM.lookup v parammap =
             Free se
           | otherwise =
             Free $ Var v
+
+-- | Create a type environment consisting of the names bound in the
+-- list of bindings.
+typeEnvFromBindings :: [Binding lore] -> TypeEnv
+typeEnvFromBindings = HM.fromList . concatMap assoc
+  where assoc bnd =
+          [ (identName ident, identType ident)
+          | ident <- patternIdents $ bindingPattern bnd
+          ]
+
+-- | Create a type environment from function parameters.
+typeEnvFromParams :: [Param attr] -> TypeEnv
+typeEnvFromParams = HM.fromList . map assoc
+  where assoc param = (paramName param, paramType param)
+
+-- | Execute an action with a locally extended type environment.
+withParamTypes :: LocalTypeEnv m =>
+                  [Param attr] -> m a -> m a
+withParamTypes = localTypeEnv . typeEnvFromParams
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Basic _) = tp
@@ -195,7 +302,7 @@ substNamesInExtType subs (Array btp shp u) =
 substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
-  fromMaybe (Var idd) (HM.lookup (identName idd) subs)
+  fromMaybe (Var idd) (HM.lookup idd subs)
 substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o

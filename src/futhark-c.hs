@@ -53,19 +53,32 @@ commandLineOptions =
     (ReqArg (\filename -> Right $ \config -> config { compilerOutput = Just filename })
      "FILE")
     "Name of the compiled binary."
+  , Option [] ["real-as-single"]
+    (NoArg $ Right $ \config -> config { compilerRealConfiguration = RealAsFloat32 } )
+    "Map 'real' to 32-bit floating point."
+  , Option [] ["real-as-double"]
+    (NoArg $ Right $ \config -> config { compilerRealConfiguration = RealAsFloat64 } )
+    "Map 'real' to 64-bit floating point (the default)."
   , Option "V" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
+  , Option [] ["unsafe"]
+    (NoArg $ Right $ \config -> config { compilerUnsafe = True })
+    "Do not perform bound- and size-checks in generated code."
   ]
 
 data CompilerConfig =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
+                 , compilerRealConfiguration :: RealConfiguration
+                 , compilerUnsafe :: Bool
                  }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
+                                   , compilerRealConfiguration = RealAsFloat64
+                                   , compilerUnsafe = False
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath
@@ -74,29 +87,22 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  FutharkConfig { futharkpipeline = compilerPipeline
-                , futharkaction = interpretAction'
-                , futharkcheckAliases = True
-                , futharkverbose = compilerVerbose config
-                , futharkboundsCheck = True
-                }
+  newFutharkConfig { futharkPipeline = compilerPipeline
+                   , futharkVerbose = compilerVerbose config
+                   , futharkRealConfiguration = compilerRealConfiguration config
+                   , futharkBoundsCheck = not $ compilerUnsafe config
+                   }
 
 compilerPipeline :: [Pass]
 compilerPipeline =
-  [ uttransform
-  , eotransform
-  , inlinetransform
-  , commonSubexpressionElimination
-  , eotransform
-  , hotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , removeDeadFunctions
-  , fotransform
+  standardPipeline ++
+  [ fotransform
   , eotransform
   , inPlaceLowering
   , explicitMemory
   , eotransform
   , commonSubexpressionElimination
+  , eotransform
+  , doubleBuffer
   , eotransform
   ]

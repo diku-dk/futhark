@@ -1,0 +1,2 @@
+#!/bin/sh
+futhark -s --flattening -i "$1"

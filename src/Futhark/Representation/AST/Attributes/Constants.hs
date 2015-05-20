@@ -1,3 +1,4 @@
+-- | Possibly convenient facilities for constructing constants.
 module Futhark.Representation.AST.Attributes.Constants
        (
          IsValue (..)
@@ -17,10 +18,16 @@ class IsValue a where
   value :: a -> BasicValue
 
 instance IsValue Int where
+  value = IntVal . fromIntegral
+
+instance IsValue Int32 where
   value = IntVal
 
 instance IsValue Double where
-  value = RealVal
+  value = Float64Val
+
+instance IsValue Float where
+  value = Float32Val
 
 instance IsValue Bool where
   value = LogVal

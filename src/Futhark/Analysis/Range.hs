@@ -87,9 +87,8 @@ analyseExp e = Out.mapExpM analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return
                      , Out.mapOnCertificates = return
-                     , Out.mapOnIdent = return
+                     , Out.mapOnVName = return
                      , Out.mapOnBody = analyseBody
-                     , Out.mapOnBinding = analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
                      , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
                      , Out.mapOnRetType = return
@@ -101,14 +100,18 @@ analyseLambda :: Lore lore =>
               -> RangeM (Out.Lambda lore)
 analyseLambda lam = do
   body <- analyseBody $ In.lambdaBody lam
-  return $ lam { Out.lambdaBody = body }
+  return $ lam { Out.lambdaBody = body
+               , Out.lambdaParams = In.lambdaParams lam
+               }
 
 analyseExtLambda :: Lore lore =>
                     In.ExtLambda lore
                  -> RangeM (Out.ExtLambda lore)
 analyseExtLambda lam = do
   body <- analyseBody $ In.extLambdaBody lam
-  return $ lam { Out.extLambdaBody = body }
+  return $ lam { Out.extLambdaBody = body
+               , Out.extLambdaParams = In.extLambdaParams lam
+               }
 
 -- Monad and utility definitions
 
@@ -122,7 +125,7 @@ type RangeM = Reader RangeEnv
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 
-bindFunParams :: [Out.FParamT attr] -> RangeM a -> RangeM a
+bindFunParams :: [Out.ParamT attr] -> RangeM a -> RangeM a
 bindFunParams []             m =
   m
 bindFunParams (param:params) m = do
@@ -130,8 +133,8 @@ bindFunParams (param:params) m = do
   local bindFunParam $
     local (refineDimensionRanges ranges dims) $
     bindFunParams params m
-  where bindFunParam = HM.insert (In.fparamName param) Out.unknownRange
-        dims = In.arrayDims $ In.fparamType param
+  where bindFunParam = HM.insert (In.paramName param) Out.unknownRange
+        dims = In.arrayDims $ In.paramType param
 
 bindPattern :: Out.Pattern lore -> RangeM a -> RangeM a
 bindPattern pat m = do
@@ -149,7 +152,7 @@ refineDimensionRanges :: AS.RangesRep -> [Out.SubExp]
                       -> RangeEnv -> RangeEnv
 refineDimensionRanges ranges = flip $ foldl refineShape
   where refineShape env (In.Var dim) =
-          refineRange ranges (In.identName dim) dimBound env
+          refineRange ranges dim dimBound env
         refineShape env _ =
           env
         -- A dimension is never negative.
@@ -181,8 +184,8 @@ lookupRange = liftM (fromMaybe Out.unknownRange) . asks . HM.lookup
 
 simplifyPatRanges :: Out.Pattern lore
                   -> RangeM (Out.Pattern lore)
-simplifyPatRanges (Out.Pattern patElems) =
-  Out.Pattern <$> mapM simplifyPatElemRange patElems
+simplifyPatRanges (Out.Pattern context values) =
+  Out.Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do
           let (range, innerattr) = Out.patElemLore patElem
           range' <- simplifyRange range
@@ -211,20 +214,20 @@ simplifyKnownBound _ bound =
   bound
 
 betterLowerBound :: Out.Bound -> RangeM Out.Bound
-betterLowerBound (Just (Out.ScalarBound (SE.Id v))) = do
-  range <- lookupRange $ Out.identName v
+betterLowerBound (Just (Out.ScalarBound (SE.Id v t))) = do
+  range <- lookupRange v
   return $ Just $ case range of
     (Just lower, _) -> lower
-    _               -> Out.ScalarBound $ SE.Id v
+    _               -> Out.ScalarBound $ SE.Id v t
 betterLowerBound bound =
   return bound
 
 betterUpperBound :: Out.Bound -> RangeM Out.Bound
-betterUpperBound (Just (Out.ScalarBound (SE.Id v))) = do
-  range <- lookupRange $ Out.identName v
+betterUpperBound (Just (Out.ScalarBound (SE.Id v t))) = do
+  range <- lookupRange v
   return $ Just $ case range of
     (_, Just upper) -> upper
-    _               -> Out.ScalarBound $ SE.Id v
+    _               -> Out.ScalarBound $ SE.Id v t
 betterUpperBound bound =
   return bound
 

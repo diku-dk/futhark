@@ -14,7 +14,6 @@ import Control.Monad.Reader
 
 import Data.List
 import Data.Maybe
-
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
@@ -143,33 +142,42 @@ inlineInBody
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
-        (withShapes $ resultSubExps res')
+        (runReader (withShapes res') $
+         typeEnvFromBindings callbnds)
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
        FunDec _ _ fargs body:_ ->
-         let revbnds = zip (map fparamIdent fargs) $ map fst args
+         let revbnds = zip (map paramIdent fargs) $ map fst args
          in  continue' $ foldr addArgBnd body revbnds
   where
+
       addArgBnd :: (Ident, SubExp) -> Body -> Body
       addArgBnd (farg, aarg) body =
         reshapeIfNecessary farg aarg `insertBinding` body
 
-      withShapes ses = extractShapeContext (retTypeValues rtp)
-                       (map (arrayDims . subExpType) ses) ++ ses
+      withShapes ses = do
+        ts <- mapM subExpType ses
+        return $
+          extractShapeContext (retTypeValues rtp) (map arrayDims ts) ++
+          ses
 
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,
           Var v <- se =
-            mkLet' [ident] $ PrimOp $ Reshape [] (arrayDims t) v
+            mkLet' [] [ident] $ PrimOp $ Reshape [] (arrayDims t) v
         | otherwise =
-          mkLet' [ident] $ PrimOp $ SubExp se
-inlineInBody inlcallees b = mapBody (inliner inlcallees) b
+          mkLet' [] [ident] $ PrimOp $ SubExp se
+inlineInBody inlcallees (Body () (bnd:bnds) res) =
+  let bnd' = inlineInBinding inlcallees bnd
+      Body () bnds' res' = inlineInBody inlcallees $ Body () bnds res
+  in Body () (bnd':bnds') res'
+inlineInBody _ (Body () [] res) =
+  Body () [] res
 
 inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
 inliner funs = identityMapper {
                  mapOnLambda = return . inlineInLambda funs
                , mapOnBody = return . inlineInBody funs
-               , mapOnBinding = return . inlineInBinding funs
                }
 
 inlineInBinding :: [FunDec] -> Binding -> Binding

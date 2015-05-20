@@ -13,11 +13,13 @@ module Futhark.Optimise.Simplifier.ClosedForm
 where
 
 import Control.Monad
-
+import Control.Applicative
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Monoid
+
+import Prelude
 
 import Futhark.Tools
 import Futhark.Representation.AST
@@ -47,15 +49,15 @@ Motivation:
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm :: MonadBinder m =>
                   VarLookup (Lore m) -> Pattern (Lore m) -> Lambda (Lore m)
-               -> [SubExp] -> [Ident]
+               -> [SubExp] -> [VName]
                -> RuleM m ()
 
 foldClosedForm look pat lam accs arrs = do
-  closedBody <- checkResults (patternIdents pat) knownBindings
-                (lambdaParams lam) (lambdaBody lam) accs
-  isEmpty <- newIdent "fold_input_is_empty" (Basic Bool)
-  let inputsize = arraysSize 0 $ map identType arrs
-  letBindNames'_ [identName isEmpty] $
+  closedBody <- checkResults (patternNames pat) knownBindings
+                (map paramIdent $ lambdaParams lam) (lambdaBody lam) accs
+  isEmpty <- newVName "fold_input_is_empty"
+  inputsize <- arraysSize 0 <$> mapM lookupType arrs
+  letBindNames'_ [isEmpty] $
     PrimOp $ BinOp Equal inputsize (intconst 0) Bool
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
@@ -66,15 +68,15 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm :: MonadBinder m =>
-                  Pattern (Lore m) -> [Ident] -> [(FParam (Lore m),SubExp)]
+                  Pattern (Lore m) -> [VName] -> [(FParam (Lore m),SubExp)]
                -> SubExp -> Body (Lore m)
                -> RuleM m ()
 loopClosedForm pat respat merge bound body
-  | respat == mergeidents = do
+  | respat == mergenames = do
     closedBody <- checkResults respat knownBindings
                   mergeidents body mergeexp
-    isEmpty <- newIdent "bound_is_zero" (Basic Bool)
-    letBindNames'_ [identName isEmpty] $
+    isEmpty <- newVName "bound_is_zero"
+    letBindNames'_ [isEmpty] $
       PrimOp $ BinOp Leq bound (intconst 0) Bool
     letBindNames'_ (patternNames pat) =<<
       eIf (eSubExp $ Var isEmpty)
@@ -82,35 +84,36 @@ loopClosedForm pat respat merge bound body
       (renameBody closedBody)
   | otherwise = cannotSimplify
   where (mergepat, mergeexp) = unzip merge
-        mergeidents = map fparamIdent mergepat
-        knownBindings = HM.fromList $ zip mergeidents mergeexp
+        mergeidents = map paramIdent mergepat
+        mergenames = map identName mergeidents
+        knownBindings = HM.fromList $ zip mergenames mergeexp
 
 checkResults :: MonadBinder m =>
-                [Ident]
-             -> HM.HashMap Ident SubExp
+                [VName]
+             -> HM.HashMap VName SubExp
              -> [Ident]
              -> Body (Lore m)
              -> [SubExp]
              -> RuleM m (Body (Lore m))
 checkResults pat knownBindings params body accs = do
   ((), bnds) <- collectBindings $
-                zipWithM_ checkResult (zip pat $ resultSubExps res) (zip accparams accs)
-  mkBodyM bnds $ Result (map Var pat)
+                zipWithM_ checkResult (zip pat res) (zip accparams accs)
+  mkBodyM bnds $ map Var pat
 
   where bndMap = makeBindMap body
         (accparams, _) = splitAt (length accs) params
         res = bodyResult body
 
         nonFree = boundInBody body <>
-                  HS.fromList params
+                  HS.fromList (map identName params)
 
         checkResult (p, e) _
-          | Just e' <- asFreeSubExp e = letBindNames'_ [identName p] $ PrimOp $ SubExp e'
+          | Just e' <- asFreeSubExp e = letBindNames'_ [p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
           e@(PrimOp (BinOp bop x y rt)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
-          let isThisAccum = (==Var accparam)
+          let isThisAccum = (==Var (identName accparam))
           (this, el) <- liftMaybe $
                         case ((asFreeSubExp x, isThisAccum y),
                               (asFreeSubExp y, isThisAccum x)) of
@@ -119,8 +122,8 @@ checkResults pat knownBindings params body accs = do
                           _                      -> Nothing
           case bop of
               LogAnd -> do
-                letBindNames'_ [identName v] e
-                letBindNames'_ [identName p] $ PrimOp $ BinOp LogAnd this el rt
+                letBindNames'_ [v] e
+                letBindNames'_ [p] $ PrimOp $ BinOp LogAnd this el rt
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify
@@ -130,25 +133,27 @@ checkResults pat knownBindings params body accs = do
           | HS.member v nonFree = HM.lookup v knownBindings
         asFreeSubExp se = Just se
 
-determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [Ident]
-                       -> HM.HashMap Ident SubExp
+determineKnownBindings :: VarLookup lore -> Lambda lore -> [SubExp] -> [VName]
+                       -> HM.HashMap VName SubExp
 determineKnownBindings look lam accs arrs =
   accBindings <> arrBindings
   where (accparams, arrparams) =
           splitAt (length accs) $ lambdaParams lam
-        accBindings = HM.fromList $ zip accparams accs
-        arrBindings = HM.fromList $ mapMaybe isReplicate $ zip arrparams arrs
+        accBindings = HM.fromList $
+                      zip (map paramName accparams) accs
+        arrBindings = HM.fromList $ mapMaybe isReplicate $
+                      zip (map paramName arrparams) arrs
 
         isReplicate (p, v)
-          | Just (PrimOp (Replicate _ ve)) <- look $ identName v = Just (p, ve)
+          | Just (PrimOp (Replicate _ ve)) <- look v = Just (p, ve)
         isReplicate _ = Nothing
 
-boundInBody :: Body lore -> HS.HashSet Ident
+boundInBody :: Body lore -> Names
 boundInBody = mconcat . map bound . bodyBindings
-  where bound (Let pat _ _) = HS.fromList $ patternIdents pat
+  where bound (Let pat _ _) = HS.fromList $ patternNames pat
 
-makeBindMap :: Body lore -> HM.HashMap Ident (Exp lore)
+makeBindMap :: Body lore -> HM.HashMap VName (Exp lore)
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
-  where isSingletonBinding (Let pat _ e) = case patternIdents pat of
+  where isSingletonBinding (Let pat _ e) = case patternNames pat of
           [v] -> Just (v,e)
           _   -> Nothing

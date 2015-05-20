@@ -45,6 +45,7 @@ instance Lore.Lore lore => Lore.Lore (Wise lore) where
   type Exp (Wise lore) = (ExpWisdom, Lore.Exp lore)
   type Body (Wise lore) = (BodyWisdom, Lore.Body lore)
   type FParam (Wise lore) = Lore.FParam lore
+  type LParam (Wise lore) = Lore.LParam lore
   type RetType (Wise lore) = Lore.RetType lore
 
   representative =
@@ -83,6 +84,7 @@ removeWisdom = Rephraser { rephraseExpLore = snd
                          , rephraseLetBoundLore = snd
                          , rephraseBodyLore = snd
                          , rephraseFParamLore = id
+                         , rephraseLParamLore = id
                          , rephraseRetType = id
                          }
 
@@ -107,13 +109,14 @@ removePatternWisdom = rephrasePattern removeWisdom
 addWisdomToPattern :: Lore.Lore lore =>
                       Pattern lore -> Exp (Wise lore) -> Pattern (Wise lore)
 addWisdomToPattern pat e =
-  Pattern $ zipWith addRanges (Aliases.mkPatternAliases pat e) ranges'
-  where addRanges patElem range =
+  Pattern
+  (map (`addRanges` unknownRange) ctxals)
+  (zipWith addRanges valals ranges)
+  where (ctxals, valals) = Aliases.mkPatternAliases pat e
+        addRanges patElem range =
           let (als,innerlore) = patElemLore patElem
           in patElem `setPatElemLore` ((als, range), innerlore)
         ranges = expRanges e
-        ranges' = replicate (patternSize pat - length ranges) unknownRange ++
-                  ranges
 
 mkWiseBody :: Lore.Lore lore =>
               Lore.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
@@ -131,8 +134,8 @@ mkWiseLetBinding pat explore e =
   e
 
 instance Bindable lore => Bindable (Wise lore) where
-  mkLet pat e =
-    let Let pat' explore _ = mkLet pat $ removeExpWisdom e
+  mkLet context values e =
+    let Let pat' explore _ = mkLet context values $ removeExpWisdom e
     in mkWiseLetBinding pat' explore e
 
   mkLetNames names e = do

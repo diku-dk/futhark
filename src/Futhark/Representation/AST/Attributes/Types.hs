@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+-- | Functions for inspecting and constructing various types.
 module Futhark.Representation.AST.Attributes.Types
        (
          rankShaped
@@ -267,10 +268,15 @@ subtypesOf :: ArrayShape shape => [TypeBase shape] -> [TypeBase shape] -> Bool
 subtypesOf xs ys = length xs == length ys &&
                    and (zipWith subtypeOf xs ys)
 
+-- | Set the uniqueness of the type of an identifier.
 setIdentUniqueness :: Ident -> Uniqueness -> Ident
 setIdentUniqueness ident u =
   ident { identType = identType ident `setUniqueness` u }
 
+-- | Given the existential return type of a function, and the shapes
+-- of the values returned by the function, return the existential
+-- shape context.  That is, those sizes that are existential in the
+-- return type.
 extractShapeContext :: [ExtType] -> [[a]] -> [a]
 extractShapeContext ts shapes =
   evalState (concat <$> zipWithM extract ts shapes) HS.empty
@@ -291,6 +297,7 @@ shapeContext = HS.fromList
   where ext (Ext x)  = Just x
         ext (Free _) = Nothing
 
+-- | The size of the set that would be returned by 'shapeContext'.
 shapeContextSize :: [ExtType] -> Int
 shapeContextSize = HS.size . shapeContext
 
@@ -306,6 +313,9 @@ hasStaticShape (Array bt (ExtShape shape) u) =
   where isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
 
+-- | Given two lists of 'ExtType's of the same length, return a list
+-- of 'ExtType's that is a subtype (as per 'isSubtypeOf') of the two
+-- operands.
 generaliseExtTypes :: [ExtType] -> [ExtType] -> [ExtType]
 generaliseExtTypes rt1 rt2 =
   evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
@@ -330,6 +340,10 @@ generaliseExtTypes rt1 rt2 =
                    put (n + 1, HM.insert x n m)
                    return n
 
+-- | Given a list of 'ExtType's and a set of "forbidden" names, modify
+-- the dimensions of the 'ExtType's such that they are 'Ext' where
+-- they were previously 'Free' with a variable in the set of forbidden
+-- names.
 existentialiseExtTypes :: Names -> [ExtType] -> [ExtType]
 existentialiseExtTypes inaccessible ts =
   evalState (mapM makeBoundShapesFree ts)
@@ -339,8 +353,8 @@ existentialiseExtTypes inaccessible ts =
           shape <- mapM checkDim $ extShapeDims $ arrayShape t
           return $ t `setArrayShape` ExtShape shape
         checkDim (Free (Var v))
-          | identName v `HS.member` inaccessible =
-            replaceVar $ identName v
+          | v `HS.member` inaccessible =
+            replaceVar v
         checkDim (Free se) = return $ Free se
         checkDim (Ext x)   = replaceExt x
         replaceExt x = do
@@ -374,4 +388,4 @@ shapeMapping' ts shapes = HM.fromList $ concat $ zipWith inspect ts shapes
   where inspect t shape =
           mapMaybe match $ zip (arrayDims t) shape
         match (Constant {}, _) = Nothing
-        match (Var v, dim)     = Just (identName v, dim)
+        match (Var v, dim)     = Just (v, dim)

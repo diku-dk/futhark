@@ -23,6 +23,7 @@
 --     let x[k,i] = a * i in
 --     x
 --     in
+--   let r = x[y] in
 --   ...
 -- @
 --
@@ -70,19 +71,17 @@ import Futhark.Representation.Basic (Basic)
 import Futhark.Optimise.InPlaceLowering.LowerIntoBinding
 import Futhark.MonadFreshNames
 import Futhark.Binder
+import Futhark.Tools (intraproceduralTransformation)
 
 import Prelude hiding (any, mapM_, elem, all)
 
+-- | Apply the in-place lowering optimisation to the given program.
 optimiseProgram :: Basic.Prog -> Basic.Prog
-optimiseProgram prog =
-  runForwardingM src $
-  liftM (removeProgAliases . Prog) .
-  mapM optimiseFunDec . progFunctions . aliasAnalysis $
-  prog
-  where src = newNameSourceForProg prog
+optimiseProgram = removeProgAliases . intraproceduralTransformation optimiseFunDec . aliasAnalysis
 
-optimiseFunDec :: FunDec Basic -> ForwardingM (FunDec Basic)
+optimiseFunDec :: MonadFreshNames m => FunDec Basic -> m (FunDec Basic)
 optimiseFunDec fundec =
+  modifyNameSource $ runForwardingM $
   bindingFParams (funDecParams fundec) $ do
     body <- optimiseBody $ funDecBody fundec
     return $ fundec { funDecBody = body }
@@ -90,10 +89,10 @@ optimiseFunDec fundec =
 optimiseBody :: Body Basic -> ForwardingM (Body Basic)
 optimiseBody (Body als bnds res) = do
   bnds' <- deepen $ optimiseBindings bnds $
-    mapM_ seen $ resultSubExps res
+    mapM_ seen res
   return $ Body als bnds' res
   where seen (Constant {}) = return ()
-        seen (Var v)       = seenIdent v
+        seen (Var v)       = seenVar v
 
 optimiseBindings :: [Binding Basic]
                  -> ForwardingM ()
@@ -103,7 +102,7 @@ optimiseBindings [] m = m >> return []
 optimiseBindings (bnd:bnds) m = do
   (bnds', bup) <- tapBottomUp $ bindingBinding bnd $ optimiseBindings bnds m
   bnd' <- optimiseInBinding bnd
-  case filter ((`elem` boundHere) . identName . updateValue) $
+  case filter ((`elem` boundHere) . updateValue) $
        forwardThese bup of
     [] -> checkIfForwardableUpdate bnd' bnds'
     updates -> do
@@ -142,7 +141,7 @@ optimiseExp (LoopOp (DoLoop res merge form body)) =
   bindingFParams (map fst merge) $ do
     body' <- optimiseBody body
     return $ LoopOp $ DoLoop res merge form body'
-  where boundInForm (ForLoop i _) = [i]
+  where boundInForm (ForLoop i _) = [Ident i $ Basic Int]
         boundInForm (WhileLoop _) = []
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
@@ -152,7 +151,7 @@ optimiseExp e = mapExpM optimise e
 optimiseLambda :: Lambda Basic
                -> ForwardingM (Lambda Basic)
 optimiseLambda lam =
-  bindingIdents (lambdaParams lam) $ do
+  bindingIdents (map paramIdent $ lambdaParams lam) $ do
     optbody <- optimiseBody $ lambdaBody lam
     return $ lam { lambdaBody = optbody }
 
@@ -160,6 +159,7 @@ data Entry = Entry { entryNumber :: Int
                    , entryAliases :: Names
                    , entryDepth :: Int
                    , entryOptimisable :: Bool
+                   , entryType :: Type
                    }
 
 type VTable = HM.HashMap VName Entry
@@ -180,11 +180,11 @@ instance Monoid BottomUp where
 
 updateBinding :: DesiredUpdate -> Binding Basic
 updateBinding fwd =
-  mkLet [(updateBindee fwd,
-          BindInPlace
-          (updateCertificates fwd)
-          (updateSource fwd)
-          (updateIndices fwd))] $
+  mkLet [] [(updateBindee fwd,
+             BindInPlace
+             (updateCertificates fwd)
+             (updateSource fwd)
+             (updateIndices fwd))] $
   PrimOp $ SubExp $ Var $ updateValue fwd
 
 newtype ForwardingM a = ForwardingM (RWS TopDown BottomUp VNameSource a)
@@ -197,8 +197,12 @@ instance MonadFreshNames ForwardingM where
   getNameSource = get
   putNameSource = put
 
-runForwardingM :: VNameSource -> ForwardingM a -> a
-runForwardingM src (ForwardingM m) = fst $ evalRWS m emptyTopDown src
+instance HasTypeEnv ForwardingM where
+  askTypeEnv = HM.map entryType <$> asks topDownTable
+
+runForwardingM :: ForwardingM a -> VNameSource -> (a, VNameSource)
+runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown src
+                                     in (x, src')
   where emptyTopDown = TopDown { topDownCounter = 0
                                , topDownTable = HM.empty
                                , topDownDepth = 0
@@ -209,8 +213,8 @@ bindingFParams :: [FParam Basic]
                -> ForwardingM a
 bindingFParams fparams = local $ \(TopDown n vtable d) ->
   let entry fparam =
-        (fparamName fparam,
-         Entry n mempty d False)
+        (paramName fparam,
+         Entry n mempty d False $ paramType fparam)
       entries = HM.fromList $ map entry fparams
   in TopDown (n+1) (HM.union entries vtable) d
 
@@ -222,7 +226,7 @@ bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
       entry patElem =
         let (aliases, ()) = patElemLore patElem
         in (patElemName patElem,
-            Entry n (unNames aliases) d True)
+            Entry n (unNames aliases) d True $ patElemType patElem)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingIdents :: [Ident]
@@ -232,7 +236,7 @@ bindingIdents vs = local $ \(TopDown n vtable d) ->
   let entries = HM.fromList $ map entry vs
       entry v =
         (identName v,
-         Entry n mempty d False)
+         Entry n mempty d False $ identType v)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int
@@ -251,7 +255,7 @@ areAvailableBefore ses point = do
   nameNs <- mapM bindingNumber names
   return $ all (< pointN) nameNs
   where names = mapMaybe isVar ses
-        isVar (Var v)       = Just $ identName v
+        isVar (Var v)       = Just v
         isVar (Constant {}) = Nothing
 
 isInCurrentBody :: VName -> ForwardingM Bool
@@ -269,31 +273,30 @@ isOptimisable name = do
               Nothing -> fail $ "isOptimisable: variable " ++
                          pretty name ++ " not found."
 
-seenIdent :: Ident -> ForwardingM ()
-seenIdent ident = do
+seenVar :: VName -> ForwardingM ()
+seenVar name = do
   aliases <- asks $
              maybe mempty entryAliases .
              HM.lookup name . topDownTable
   tell $ mempty { bottomUpSeen = HS.insert name aliases }
-  where name = identName ident
 
 tapBottomUp :: ForwardingM a -> ForwardingM (a, BottomUp)
 tapBottomUp m = do (x,bup) <- listen m
                    return (x, bup)
 
-maybeForward :: Ident
-             -> Ident -> Certificates -> Ident -> SubExp
+maybeForward :: VName
+             -> Ident -> Certificates -> VName -> SubExp
              -> ForwardingM Bool
 maybeForward v dest cs src i = do
   -- Checks condition (2)
-  available <- [i,Var src] `areAvailableBefore` identName v
+  available <- [i,Var src] `areAvailableBefore` v
   -- ...subcondition, the certificates must also.
-  certs_available <- map Var cs `areAvailableBefore` identName v
+  certs_available <- map Var cs `areAvailableBefore` v
   -- Check condition (3)
-  samebody <- isInCurrentBody $ identName v
+  samebody <- isInCurrentBody v
   -- Check condition (6)
-  optimisable <- isOptimisable $ identName v
-  let not_basic = not $ basicType $ identType v
+  optimisable <- isOptimisable v
+  not_basic <- not <$> basicType <$> lookupType v
   if available && certs_available && samebody && optimisable && not_basic then do
     let fwd = DesiredUpdate dest cs src [i] v
     tell mempty { forwardThese = [fwd] }

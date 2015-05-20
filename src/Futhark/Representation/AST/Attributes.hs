@@ -23,10 +23,13 @@ module Futhark.Representation.AST.Attributes
   , reshapeInner
   , asPrimOp
   , asLoopOp
+  , asSegOp
   , safeExp
   , loopResultValues
   )
   where
+
+import Data.List
 
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
@@ -38,18 +41,16 @@ import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax
 import qualified Futhark.Representation.AST.Lore as Lore
 
-import Data.List
-
 -- | Figure out which parts of a loop body result correspond to which
 -- value identifiers in the pattern.
 --
 -- The result of @loopResultValues patidents res mergeparams
 -- loopresult@ is a mapping from elements of @loopresult@ to elements
 -- of @patidents@.  Here, @patidents@ must be the identifiers of the
--- pattern storing the result of the loop (_including_ any existential
--- context), @res@ the names of the loop result list, @vname@ the
--- names of the merge parameters, and @loopresult@ the result of the
--- loop body - typically, a list of 'SubExp's.
+-- value part of the pattern storing the result of the loop, @res@ the
+-- names of the loop result list, @vname@ the names of the merge
+-- parameters, and @loopresult@ the result of the loop body -
+-- typically, a list of 'SubExp's.
 loopResultValues :: [Ident] -> [VName] -> [VName] -> [a]
                  -> [(a, Maybe Ident)]
 loopResultValues patidents res mergeparams ses =
@@ -68,19 +69,16 @@ loopResultValues patidents res mergeparams ses =
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
 funDecByName fname = find ((fname ==) . funDecName) . progFunctions
 
-shapeExps :: Ident -> [SubExp]
-shapeExps = shapeDims . arrayShape . identType
+-- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
+-- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
+reshapeOuter :: [SubExp] -> Int -> Shape -> [SubExp]
+reshapeOuter newshape n oldshape = newshape ++ drop n (shapeDims oldshape)
 
--- | @reshapeOuter shape n src@ returns a 'Reshape' expression that
--- replaces the outer @n@ dimensions of @src@ with @shape@.
-reshapeOuter :: [SubExp] -> Int -> Ident -> [SubExp]
-reshapeOuter shape n src = shape ++ drop n (shapeExps src)
-
--- | @reshapeInner shape n src@ returns a 'Reshape' expression that
--- replaces the inner @m-n@ dimensions (where @m@ is the rank of
--- @src@) of @src@ with @shape@.
-reshapeInner :: [SubExp] -> Int -> Ident -> [SubExp]
-reshapeInner shape n src = take n (shapeExps src) ++ shape
+-- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
+-- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
+-- @oldshape@) of @src@ with @newshape@.
+reshapeInner :: [SubExp] -> Int -> Shape -> [SubExp]
+reshapeInner newshape n oldshape = take n (shapeDims oldshape) ++ newshape
 
 -- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.
 asPrimOp :: Exp lore -> Maybe (PrimOp lore)
@@ -92,6 +90,11 @@ asLoopOp :: Exp lore -> Maybe (LoopOp lore)
 asLoopOp (LoopOp op) = Just op
 asLoopOp _           = Nothing
 
+-- | If the expression is a 'SegOp', return that 'SegOp', otherwise 'Nothing'.
+asSegOp :: Exp lore -> Maybe (SegOp lore)
+asSegOp (SegOp op) = Just op
+asSegOp _          = Nothing
+
 -- | An expression is safe if it is always well-defined (assuming that
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
@@ -99,10 +102,12 @@ asLoopOp _           = Nothing
 safeExp :: Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
   where safePrimOp (BinOp Divide _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (RealVal k)) _) = k /= 0
+        safePrimOp (BinOp Divide _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp Divide _ (Constant (Float64Val k)) _) = k /= 0
         safePrimOp (BinOp Divide _ _ _) = False
         safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Mod _ (Constant (RealVal k)) _) = k /= 0
+        safePrimOp (BinOp Mod _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0
         safePrimOp (BinOp Mod _ _ _) = False
         safePrimOp (BinOp Pow _ _ _) = False
         safePrimOp (BinOp {}) = True
@@ -112,6 +117,7 @@ safeExp (PrimOp op) = safePrimOp op
         safePrimOp (Alloc {}) = True
         safePrimOp _ = False
 safeExp (LoopOp _) = False
+safeExp (SegOp _) = False
 safeExp (Apply {}) = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&

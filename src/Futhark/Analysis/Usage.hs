@@ -17,16 +17,16 @@ usageInBinding (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,
            usageInExp e,
-           UT.usages (freeNamesInExp e)]
+           UT.usages (freeInExp e)]
   where usageInPat =
-          UT.usages (mconcat (map freeNamesIn $ patternElements pat)
+          UT.usages (mconcat (map freeIn $ patternElements pat)
                      `HS.difference`
                      HS.fromList (patternNames pat))
           <> mconcat (map consumptionInPatElem $ patternElements pat)
         usageInExpLore =
-          UT.usages $ freeNamesIn lore
+          UT.usages $ freeIn lore
         consumptionInPatElem (PatElem _ (BindInPlace _ src _) _) =
-          UT.consumedUsage $ identName src
+          UT.consumedUsage src
         consumptionInPatElem _ =
           mempty
 
@@ -38,30 +38,30 @@ usageInExp (Apply _ args _) =
 usageInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
-          | (v,se) <- merge, unique $ fparamType v ]
+          | (v,se) <- merge, unique $ paramType v ]
 usageInExp (LoopOp (Map _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ identAliases se
+            HS.toList $ vnameAliases se
           | (v,se) <- zip (lambdaParams f) args,
-            unique $ identType v ]
+            unique $ paramType v ]
 usageInExp (LoopOp (Reduce _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
           | (v,als) <- zip (lambdaParams f) $
                        map subExpAliases acc ++
-                       map identAliases arr,
-            unique $ identType v ]
+                       map vnameAliases arr,
+            unique $ paramType v ]
   where (acc, arr) = unzip args
 usageInExp (LoopOp (Scan _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
           | (v,als) <- zip (lambdaParams f) $
                        map subExpAliases acc ++
-                       map identAliases arr,
-            unique $ identType v ]
+                       map vnameAliases arr,
+            unique $ paramType v ]
   where (acc, arr) = unzip args
 usageInExp (LoopOp (Redomap _ _ f acc arr)) =
   mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
           | (v,als) <- zip (lambdaParams f) $
                        map subExpAliases acc ++
-                       map identAliases arr,
-            unique $ identType v ]
+                       map vnameAliases arr,
+            unique $ paramType v ]
 usageInExp _ = UT.empty

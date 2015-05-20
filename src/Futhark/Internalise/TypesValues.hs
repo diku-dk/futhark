@@ -90,14 +90,14 @@ internaliseDeclType' (E.Array at) =
         internaliseDim AnyDim =
           Ext <$> newId
         internaliseDim (ConstDim n) =
-          return $ Free $ Constant $ IntVal n
+          return $ Free $ Constant $ IntVal $ fromIntegral n
         internaliseDim (NamedDim name) =
           Ext <$> knownOrNewId name
         internaliseDim (KnownDim name) = do
           subst <- asks $ HM.lookup name . envSubsts
           return $ I.Free $ I.Var $ case subst of
             Just [v] -> v
-            _        -> I.Ident name $ I.Basic Int
+            _        -> name
 
 internaliseType :: Ord vn =>
                    E.TypeBase E.Rank als vn -> [I.TypeBase ExtShape]

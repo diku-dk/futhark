@@ -93,6 +93,7 @@ data DimDecl vn = NamedDim vn
 newtype ShapeDecl vn = ShapeDecl { shapeDims :: [DimDecl vn] }
                      deriving (Eq, Ord, Show)
 
+-- | The rank of an array as a positive natural number.
 newtype Rank vn = Rank Int
                 deriving (Eq, Ord, Show)
 
@@ -251,6 +252,7 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 -- | Unary operators.
 data UnOp = Not
           | Negate
+          | Complement
           deriving (Eq, Ord, Show)
 
 -- | Binary operators.
@@ -468,6 +470,7 @@ instance Located (ExpBase ty vn) where
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _ _ _ pos) = locOf pos
 
+-- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
                         | WhileLoop (ExpBase ty vn)
                           deriving (Eq, Ord, Show)

@@ -16,6 +16,7 @@ module Futhark.Representation.Basic
        , ExtLambda
        , FunDec
        , FParam
+       , LParam
        , RetType
        , PatElem
          -- * Module re-exports
@@ -32,7 +33,7 @@ module Futhark.Representation.Basic
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
-       , AST.FParamT(FParam)
+       , AST.ParamT(Param)
          -- Utility
        , basicPattern
        , basicPattern'
@@ -43,12 +44,14 @@ module Futhark.Representation.Basic
        )
 where
 
+import Control.Monad
+
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDec, FParam, RetType,
-          PatElem)
+          Pattern, Lambda, ExtLambda, FunDec, FParam, LParam,
+          RetType, PatElem)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -72,10 +75,10 @@ instance Lore.Lore Basic where
   representative = Futhark.Representation.Basic.Basic
 
   loopResultContext _ res merge =
-    loopShapeContext res $ map fparamIdent merge
+    loopShapeContext res $ map paramIdent merge
 
   applyRetType _ ret =
-    applyExtType ret . map fparamIdent
+    applyExtType ret . map paramIdent
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
@@ -88,6 +91,7 @@ type Lambda = AST.Lambda Basic
 type ExtLambda = AST.ExtLambda Basic
 type FunDec = AST.FunDecT Basic
 type FParam = AST.FParam Basic
+type LParam = AST.LParam Basic
 type RetType = AST.RetType Basic
 type PatElem = AST.PatElem Basic
 
@@ -97,10 +101,11 @@ instance TypeCheck.Checkable Basic where
   checkFParamLore = return
   checkLetBoundLore = return
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  matchPattern pat e =
-    TypeCheck.matchExtPattern (patternElements pat) (expExtType e)
+  matchPattern pat e = do
+    et <- expExtType e
+    TypeCheck.matchExtPattern (patternElements pat) et
   basicFParam _ name t =
-    AST.FParam (Ident name (AST.Basic t)) ()
+    AST.Param (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name ts
 
@@ -110,7 +115,7 @@ instance Proper Basic where
 
 instance Ranged Basic where
   bodyRanges body =
-    replicate (length $ resultSubExps $ bodyResult body) (Nothing, Nothing)
+    replicate (length $ bodyResult body) (Nothing, Nothing)
   patternRanges pat =
     replicate (patternSize pat) (Nothing, Nothing)
 
@@ -118,28 +123,32 @@ instance Simplifiable Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()
-  mkLet pat =
-    AST.Let (basicPattern pat) ()
+  mkLet context values =
+    AST.Let (basicPattern context values) ()
   mkLetNames names e = do
-    (ts, shapes) <- instantiateShapes' $ expExtType e
+    et <- expExtType e
+    (ts, shapes) <- instantiateShapes' et
     let shapeElems = [ AST.PatElem shapeident BindVar ()
-                  | shapeident <- shapes
-                  ]
-        valElems = zipWith mkValElem names ts
+                     | shapeident <- shapes
+                     ]
         mkValElem (name, BindVar) t =
-          AST.PatElem (Ident name t) BindVar ()
-        mkValElem (name, bindage@(BindInPlace _ src _)) _ =
-          AST.PatElem (Ident name (identType src)) bindage ()
-    return $ AST.Let (AST.Pattern $ shapeElems++valElems) () e
+          return $ AST.PatElem (Ident name t) BindVar ()
+        mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
+          srct <- lookupType src
+          return $ AST.PatElem (Ident name srct) bindage ()
+    valElems <- zipWithM mkValElem names ts
+    return $ AST.Let (AST.Pattern shapeElems valElems) () e
 
 instance PrettyLore Basic where
 
-basicPattern :: [(Ident,Bindage)] -> Pattern
-basicPattern idents =
-  AST.Pattern [ AST.PatElem ident bindage () | (ident,bindage) <- idents ]
+basicPattern :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Pattern
+basicPattern context values =
+  AST.Pattern (map patElem context) (map patElem values)
+  where patElem (ident,bindage) = AST.PatElem ident bindage ()
 
-basicPattern' :: [Ident] -> Pattern
-basicPattern' = basicPattern . map addBindVar
+basicPattern' :: [Ident] -> [Ident] -> Pattern
+basicPattern' context values =
+  basicPattern (map addBindVar context) (map addBindVar values)
     where addBindVar name = (name, BindVar)
 
 removeLore :: Lore.Lore lore => Rephraser lore Basic
@@ -148,6 +157,7 @@ removeLore =
             , rephraseLetBoundLore = const ()
             , rephraseBodyLore = const ()
             , rephraseFParamLore = const ()
+            , rephraseLParamLore = const ()
             , rephraseRetType = removeRetTypeLore
             }
 

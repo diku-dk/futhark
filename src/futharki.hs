@@ -6,7 +6,6 @@ import Control.Monad
 import Language.Futhark.Parser
 import Futhark.Version
 import Futhark.Pipeline
-import Futhark.Passes
 import Futhark.Compiler
 import Futhark.Util.Options
 
@@ -31,28 +30,11 @@ repl = do
   putStrLn "(C) HIPERFIT research centre"
   putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
   putStrLn ""
-  forever $ print =<< parseExpIncrIO "input" ""
+  forever $ print =<< parseExpIncrIO RealAsFloat64 "input" ""
 
 interpret :: FutharkConfig -> FilePath -> IO ()
-interpret = runCompilerOnProgram
+interpret config =
+  runCompilerOnProgram config $ interpretAction' $ futharkRealConfiguration config
 
 interpreterConfig :: FutharkConfig
-interpreterConfig = FutharkConfig { futharkpipeline = interpreterPipeline
-                                  , futharkaction = interpretAction'
-                                  , futharkcheckAliases = True
-                                  , futharkverbose = Nothing
-                                  , futharkboundsCheck = True
-                                  }
-
-interpreterPipeline :: [Pass]
-interpreterPipeline =
-  [ uttransform
-  , eotransform
-  , inlinetransform
-  , commonSubexpressionElimination
-  , eotransform
-  , hotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , removeDeadFunctions
-  ]
+interpreterConfig = newFutharkConfig

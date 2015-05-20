@@ -1,10 +1,12 @@
+-- | Inspecing and modifying 'Pattern's, function parameters and
+-- pattern elements.
 module Futhark.Representation.AST.Attributes.Patterns
        (
          -- * Function parameters
-         fparamIdent
-       , fparamName
-       , fparamType
-       , fparamLore
+         paramIdent
+       , paramName
+       , paramType
+       , paramLore
          -- * Pattern elements
        , patElemIdent
        , patElemName
@@ -12,11 +14,13 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patElemRequires
        , patElemLore
        , setPatElemLore
+       , patternElements
        , patternIdents
+       , patternContextIdents
+       , patternValueIdents
        , patternNames
        , patternTypes
        , patternSize
-       , splitPattern
          -- * Bindage
        , bindageRequires
        )
@@ -26,12 +30,12 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types (stripArray, setUniqueness)
 
 -- | The name of the 'Ident' bound by an 'FParam'.
-fparamName :: FParamT attr -> VName
-fparamName = identName . fparamIdent
+paramName :: ParamT attr -> VName
+paramName = identName . paramIdent
 
 -- | The type of the 'Ident' bound by an 'FParam'.
-fparamType :: FParamT attr -> Type
-fparamType = identType . fparamIdent
+paramType :: ParamT attr -> Type
+paramType = identType . paramIdent
 
 -- | The name of the ident bound by a 'PatElem'.
 patElemName :: PatElemT attr -> VName
@@ -51,17 +55,29 @@ patElemRequires (PatElem ident bindage _) =
 bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
-bindageRequires _ (BindInPlace _ src is) =
-  stripArray (length is) (identType src) `setUniqueness` Nonunique
+bindageRequires t (BindInPlace _ _ is) =
+  stripArray (length is) t `setUniqueness` Nonunique
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
 setPatElemLore (PatElem ident bindage _) =
   PatElem ident bindage
 
+-- | All pattern elements in the pattern - context first, then values.
+patternElements :: Pattern lore -> [PatElem lore]
+patternElements pat = patternContextElements pat ++ patternValueElements pat
+
 -- | Return a list of the 'Ident's bound by the 'Pattern'.
 patternIdents :: Pattern lore -> [Ident]
-patternIdents (Pattern xs) = map patElemIdent xs
+patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
+
+-- | Return a list of the context 'Ident's bound by the 'Pattern'.
+patternContextIdents :: Pattern lore -> [Ident]
+patternContextIdents = map patElemIdent . patternContextElements
+
+-- | Return a list of the value 'Ident's bound by the 'Pattern'.
+patternValueIdents :: Pattern lore -> [Ident]
+patternValueIdents = map patElemIdent . patternValueElements
 
 -- | Return a list of the 'Name's bound by the 'Pattern'.
 patternNames :: Pattern lore -> [VName]
@@ -73,9 +89,4 @@ patternTypes = map identType . patternIdents
 
 -- | Return the number of names bound by the 'Pattern'.
 patternSize :: Pattern lore -> Int
-patternSize = length . patternElements
-
--- | Split given pattern into a list of single-bindee patterns.  Do
--- not do this if the pattern has an existential context.
-splitPattern :: Pattern lore -> [Pattern lore]
-splitPattern = map (Pattern . (:[])) . patternElements
+patternSize (Pattern context values) = length context + length values

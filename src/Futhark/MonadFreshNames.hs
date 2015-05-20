@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances #-}
 -- | This module provides a monadic facility similar (and built on top
 -- of) "Futhark.FreshNames".  The removes the need for a (small) amount of
 -- boilerplate, at the cost of using some GHC extensions.  The idea is
@@ -23,6 +23,10 @@ module Futhark.MonadFreshNames
 import Control.Applicative
 import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
+import qualified Control.Monad.Writer.Lazy
+import qualified Control.Monad.Writer.Strict
+import Control.Monad.Reader
+import Data.Monoid
 
 import Prelude
 
@@ -82,7 +86,7 @@ newVName = newID . nameFromString
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
-            String -> TypeBase shape -> m (IdentBase shape)
+            String -> Type -> m Ident
 newIdent s t = do
   s' <- newID $ varName s Nothing
   return $ Ident s' t
@@ -91,7 +95,7 @@ newIdent s t = do
 -- but possibly modifying the name.
 newIdent' :: MonadFreshNames m =>
              (String -> String)
-          -> IdentBase shape -> m (IdentBase shape)
+          -> Ident -> m Ident
 newIdent' f ident =
   newIdent (f $ nameToString $ baseName $ identName ident)
            (identType ident)
@@ -99,10 +103,27 @@ newIdent' f ident =
 -- | Produce several 'Ident's, using the given name as a template,
 -- based on a list of types.
 newIdents :: MonadFreshNames m =>
-             String -> [TypeBase shape] -> m [IdentBase shape]
+             String -> [Type] -> m [Ident]
 newIdents = mapM . newIdent
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names used as variables in the given program.
 newNameSourceForProg :: Prog lore -> VNameSource
 newNameSourceForProg = newNameSource . progNames
+
+-- Utility instance defintions for MTL classes.  This requires
+-- UndecidableInstances, but saves on typing elsewhere.
+
+instance MonadFreshNames m => MonadFreshNames (ReaderT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance (MonadFreshNames m, Monoid s) =>
+         MonadFreshNames (Control.Monad.Writer.Lazy.WriterT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance (MonadFreshNames m, Monoid s) =>
+         MonadFreshNames (Control.Monad.Writer.Strict.WriterT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource

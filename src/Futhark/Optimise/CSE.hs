@@ -32,6 +32,12 @@ cseInBody (Body bodyattr bnds res) =
     CSEState (_, nsubsts) <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
+cseInLambda :: Proper lore =>
+               Lambda lore -> CSEM lore (Lambda lore)
+cseInLambda lam = do
+  body' <- cseInBody $ lambdaBody lam
+  return lam { lambdaBody = body' }
+
 cseInBindings :: Proper lore =>
                  [Binding lore]
               -> CSEM lore (Body lore)
@@ -45,7 +51,9 @@ cseInBindings (bnd:bnds) m =
   where nestedCSE bnd' = do
           e <- mapExpM cse $ bindingExp bnd'
           return bnd' { bindingExp = e }
-        cse = identityMapper { mapOnBody = cseInBody }
+        cse = identityMapper { mapOnBody = cseInBody
+                             , mapOnLambda = cseInLambda
+                             }
 
 cseInBinding :: Proper lore =>
                 Binding lore
@@ -62,17 +70,23 @@ cseInBinding (Let pat eattr e) m = do
       Nothing -> local (addExpSubst pat' eattr e') $ m [Let pat' eattr e']
 
       Just subpat ->
-        let lets =
-              [ Let (Pattern [patElem]) eattr $ PrimOp $ SubExp $ Var v
-              | (patElem,v) <- zip (patternElements pat') $ patternIdents subpat
-              ]
-        in local (addNameSubst pat' subpat) $ m lets
+        local (addNameSubst pat' subpat) $ do
+          let lets =
+                [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var $ patElemName patElem
+                | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
+                  let patElem' = setPatElemName patElem name
+                ]
+          m lets
   where bad (Array _ _ Unique) = True
         bad (Mem _)            = True
         bad _                  = False
+        setPatElemName patElem name =
+          patElem { patElemIdent = Ident name $ identType $ patElemIdent patElem }
 
-newtype CSEState lore =
-  CSEState (M.Map (Lore.Exp lore, Exp lore) (Pattern lore), HM.HashMap VName VName)
+type ExpressionSubstitutions lore = M.Map (Lore.Exp lore, Exp lore) (Pattern lore)
+type NameSubstitutions = HM.HashMap VName VName
+
+newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitutions)
 
 newCSEState :: CSEState lore
 newCSEState = CSEState (M.empty, HM.empty)

@@ -57,13 +57,17 @@ Library
                    Futhark.Analysis.UsageTable
                    Futhark.Analysis.Usage
                    Futhark.Binder
+                   Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
+                   Futhark.CodeGen.Backends.OpenCL
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
+                   Futhark.CodeGen.KernelImp
                    Futhark.CodeGen.ImpGen
+                   Futhark.CodeGen.KernelImpGen
                    Futhark.Compiler
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
@@ -77,8 +81,11 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
+                   Futhark.KernelSequentialisation
+                   Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
+                   Futhark.Optimise.DoubleBuffer
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
                    Futhark.Optimise.Errors
@@ -117,6 +124,7 @@ Library
                    Futhark.Representation.AST.Attributes.Names
                    Futhark.Representation.AST.Attributes.Patterns
                    Futhark.Representation.AST.Attributes.Ranges
+                   Futhark.Representation.AST.Attributes.TypeEnv
                    Futhark.Representation.AST.Attributes.TypeOf
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values
@@ -137,7 +145,6 @@ Library
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
                    Futhark.Representation.Ranges
-                   Futhark.SOACFlowGraph
                    Futhark.Substitute
                    Futhark.Tools
                    Futhark.TypeCheck
@@ -151,6 +158,7 @@ Library
                    Language.Futhark.Attributes
                    Language.Futhark.Core
                    Language.Futhark.Parser
+                   Language.Futhark.Parser.RealConfiguration
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
                    Language.Futhark.Traversals
@@ -159,7 +167,6 @@ Library
                  Language.Futhark.Parser.Lexer
                  Language.Futhark.Parser.Tokens
                  Paths_futhark
-                 Build_futhark
 
 
   -- Directories other than the root containing source files.
@@ -171,6 +178,8 @@ Library
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+  Ghc-prof-options:   -fprof-auto
 
   if impl(ghc >= 7.10.1)
      Ghc-Options:       -Wall -fno-warn-unticked-promoted-constructors
@@ -187,6 +196,8 @@ Executable futhark
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+  Ghc-prof-options:   -fprof-auto
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
@@ -217,6 +228,45 @@ Executable futharki
 
   Ghc-Options:        -Wall
 
+Executable futhark-test
+  Main-is: src/futhark-test.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 containers >= 0.5,
+                 directory,
+                 filepath,
+                 process,
+                 transformers,
+                 parsec >= 3,
+                 regex-tdfa >= 1.2,
+                 unordered-containers,
+                 text,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+Executable futhark-opencl
+  Main-is: src/futhark-opencl.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 filepath,
+                 process,
+                 transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+
 Test-suite unit
   Type:              exitcode-stdio-1.0
 
@@ -237,3 +287,13 @@ Test-suite unit
                      mtl >= 2.2.1,
                      containers >= 0.5,
                      futhark
+
+  Other-Modules: Futhark.Analysis.ScalExpTests
+                 Futhark.Optimise.AlgSimplifyTests
+                 Futhark.Representation.AST.AttributesTests
+                 Futhark.Representation.AST.Attributes.ValuesTests
+                 Futhark.Representation.AST.Syntax.CoreTests
+                 Futhark.Representation.AST.SyntaxTests
+                 Futhark.Representation.AttributesTests
+                 Language.Futhark.CoreTests
+                 Language.Futhark.SyntaxTests

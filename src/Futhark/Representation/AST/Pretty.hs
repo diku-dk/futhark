@@ -27,7 +27,8 @@ class (Lore lore,
        Pretty (RetType lore),
        Pretty (Pattern lore),
        Pretty (Lore.LetBound lore),
-       Pretty (Lore.FParam lore)) => PrettyLore lore where
+       Pretty (Lore.FParam lore),
+       Pretty (Lore.LParam lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -61,6 +62,16 @@ instance Pretty Value where
   ppr (ArrayVal a _ _) =
     brackets $ commasep $ map ppr $ elems a
 
+instance Pretty Shape where
+  ppr = brackets . commasep . map ppr . shapeDims
+
+instance Pretty ExtDimSize where
+  ppr (Free e) = ppr e
+  ppr (Ext x)  = text "?" <> text (show x)
+
+instance Pretty ExtShape where
+  ppr = brackets . commasep . map ppr . extShapeDims
+
 instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
@@ -70,9 +81,7 @@ instance Pretty (TypeBase Shape) where
 instance Pretty (TypeBase ExtShape) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
-    where f (Free e) s = brackets $ s <> comma <> ppr e
-          f (Ext x)  s = brackets $ s <> comma <>
-                         text "?" <> text (show x)
+    where f dim s = brackets $ s <> comma <> ppr dim
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
 instance Pretty (TypeBase Rank) where
@@ -83,22 +92,18 @@ instance Pretty (TypeBase Rank) where
              | otherwise = empty
   ppr (Mem s) = text "mem" <> parens (ppr s)
 
-instance Pretty (IdentBase shape) where
-  ppr = text . textual . identName
+instance Pretty Ident where
+  ppr ident = ppr (identType ident) <+> ppr (identName ident)
 
 instance Pretty SubExp where
   ppr (Var v)      = ppr v
   ppr (Constant v) = ppr v
 
-instance Pretty Result where
-  ppr (Result es) =
-    braces (commasep $ map ppr es)
-
 instance PrettyLore lore => Pretty (Body lore) where
   ppr (Body lore (bnd:bnds) res) =
     ppr bnd <+> text "in" </> ppr (Body lore bnds res)
   ppr (Body _ [] res) =
-    ppr res
+    braces (commasep $ map ppr res)
 
 bindingAnnotation :: PrettyLore lore => Binding lore -> Doc -> Doc
 bindingAnnotation bnd doc =
@@ -134,8 +139,8 @@ instance Pretty attr => Pretty (PatElemT attr) where
             parens (ppr attr)) <>
     brackets (commasep $ map ppr is)
 
-instance Pretty attr => Pretty (FParamT attr) where
-  ppr (FParam ident attr) =
+instance Pretty attr => Pretty (ParamT attr) where
+  ppr (Param ident attr) =
     ppr (identType ident) <+>
     ppr (identName ident) <+>
     parens (ppr attr)
@@ -167,8 +172,9 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
       Array {} -> brackets $ commastack $ map ppr es
       _        -> brackets $ commasep   $ map ppr es
   ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
-  ppr (Not e) = text "not" <+> pprPrec 9 e
+  ppr (Not e) = text "!" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
+  ppr (Complement e) = text "~" <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
@@ -188,15 +194,15 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Alloc e) = text "alloc" <> apply [ppr e]
-  ppr (Partition cs n flags arr) =
+  ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>
-    parens (commasep [ ppr n, ppr flags, ppr arr ])
+    parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =
-    text "loop" <+> ppPattern res <+>
-    text "<-" <+> ppPattern (map fparamIdent pat) <+> equals <+> ppTuple' initexp </>
+    text "loop" <+> braces (commasep $ map ppr res) <+>
+    text "<-" <+> ppPattern (map paramIdent pat) <+> equals <+> ppTuple' initexp </>
     (case form of
       ForLoop i bound ->
         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
@@ -214,7 +220,7 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     where pprConcatLam (Lambda params body rettype) =
             text "fn" <+>
             braces (commasep $ map (brackets . ppr) rettype) <+>
-            apply (map ppParam params) <+>
+            apply (map ppr params) <+>
             text "=>" </> indent 2 (ppr body)
   ppr (Reduce cs lam inputs) =
     ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
@@ -231,25 +237,46 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs
 
+instance PrettyLore lore => Pretty (SegOp lore) where
+  ppr (SegReduce cs lam inputs descp) =
+    ppCertificates' cs <> text "segreduce" <>
+    parens (ppr lam <> comma </>
+            ppTuple' nes <> comma <+>
+            ppTuple' flatarrs <> comma <+>
+            ppr descp)
+    where
+      (nes, flatarrs) = unzip inputs
+  ppr (SegScan cs st lam inputs descp) =
+    ppCertificates' cs <> text "segscan" <> ppScanType st <>
+    parens (ppr lam <> comma </>
+            ppTuple' nes <> comma <+>
+            ppTuple' flatarrs <> comma <+>
+            ppr descp)
+    where
+      (nes, flatarrs) = unzip inputs
+      ppScanType ScanInclusive = text "inc"
+      ppScanType ScanExclusive = text "exc"
+
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
                      text "then" <+> align (ppr t) </>
                      text "else" <+> align (ppr f)
   ppr (PrimOp op) = ppr op
   ppr (LoopOp op) = ppr op
+  ppr (SegOp op) = ppr op
   ppr (Apply fname args _) = text (nameToString fname) <>
                              apply (map (align . ppr . fst) args)
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    apply (map ppParam params) <+>
+    apply (map ppr params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
   ppr (ExtLambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    apply (map ppParam params) <+>
+    apply (map ppr params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where
@@ -260,14 +287,11 @@ instance PrettyLore lore => Pretty (FunDec lore) where
     maybe id (</>) (ppFunDecLore fundec) $
     text "fun" <+> ppr rettype <+>
     text (nameToString name) <//>
-    apply (map (ppParam . fparamIdent) args) <+>
+    apply (map (ppr . paramIdent) args) <+>
     equals </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions
-
-ppParam :: Param -> Doc
-ppParam param = ppr (identType param) <+> ppr param
 
 instance Pretty BinOp where
   ppr Plus = text "+"
@@ -275,6 +299,7 @@ instance Pretty BinOp where
   ppr Pow = text "pow"
   ppr Times = text "*"
   ppr Divide = text "/"
+  ppr IntDivide = text "mod"
   ppr Mod = text "%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
@@ -287,7 +312,7 @@ instance Pretty BinOp where
   ppr Less = text "<"
   ppr Leq = text "<="
 
-ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [Ident] -> Doc
+ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name funs es as =
   text name <> parens (ppList funs </>
                        commasep (es' ++ map ppr as))

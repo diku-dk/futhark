@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
   , simplify
@@ -5,7 +6,6 @@ module Futhark.Analysis.AlgSimplify
   , RangesRep
   , linFormScalE
   , pickSymToElim
---  , canSimplify
   )
   where
 
@@ -23,19 +23,21 @@ import Futhark.Representation.AST
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 
---import Debug.Trace
-
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
 
 -- | environment recording the position and
 --   a list of variable-to-range bindings.
-data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool, ranges :: RangesRep }
+data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool
+                                     , ranges :: RangesRep
+                                     }
 
 type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
 
 runAlgSimplifier :: Bool -> AlgSimplifyM a -> RangesRep -> Either Error a
 runAlgSimplifier s x r = runReaderT x env
-  where env = AlgSimplifyEnv{ inSolveLTH0 = s, ranges = r }
+  where env = AlgSimplifyEnv { inSolveLTH0 = s
+                             , ranges = r
+                             }
 
 badAlgSimplifyM :: String -> AlgSimplifyM a
 badAlgSimplifyM = lift . Left . SimplifyError
@@ -47,7 +49,6 @@ markInSolve env =
 
 markGaussLTH0 :: AlgSimplifyM a -> AlgSimplifyM a
 markGaussLTH0 = local markInSolve
---  where namesOfArrays = map identName . filter (not . basicType . identType)
 
 -----------------------------------------------------------
 -- A Scalar Expression, i.e., ScalExp, is simplified to: --
@@ -68,8 +69,8 @@ data NNumExp = NSum   [NNumExp]  BasicType
 
 data BTerm   = NRelExp RelOp0 NNumExp
              | LogCt  !Bool
-             | PosId   Ident
-             | NegId   Ident
+             | PosId   VName
+             | NegId   VName
                deriving (Eq, Ord, Show)
 type NAnd    = [BTerm]
 type DNF     = [NAnd ]
@@ -82,7 +83,7 @@ simplify e = runAlgSimplifier False (simplifyScal e)
 
 -- | Given a symbol i and a scalar expression e, it decomposes
 --   e = a*i + b and returns (a,b) if possible, otherwise Nothing.
-linFormScalE :: Ident -> ScalExp -> RangesRep -> Either Error (Maybe (ScalExp,ScalExp))
+linFormScalE :: VName -> ScalExp -> RangesRep -> Either Error (Maybe (ScalExp,ScalExp))
 linFormScalE i e = runAlgSimplifier False (linearFormScalExp i e)
 
 -- | Extracts sufficient conditions for a LTH0 relation to hold
@@ -141,16 +142,14 @@ simplifyNRel _ =
 
 gaussElimRel :: ScalExp -> AlgSimplifyM [[ScalExp]] -- ScalExp
 gaussElimRel (RelExp LTH0 e) = do
-    let tp = scalExpType e
-    e_sofp <- if tp == Int then toNumSofP =<< simplifyScal e
-              else badAlgSimplifyM "gaussElimRel: only Int relations please!"
+    e_sofp <- toNumSofP =<< simplifyScal e
     e_scal<- simplifyScal =<< gaussAllLTH0 False S.empty e_sofp
     e_dnf <- toDNF e_scal
     mapM (mapM (\f ->
                   case f of
                     LogCt c   -> return $ Val (LogVal c)
-                    PosId i   -> return $ Id  i
-                    NegId i   -> return $ Id  i
+                    PosId i   -> return $ Id  i Int
+                    NegId i   -> return $ Id  i Int
                     NRelExp rel ee -> do
                       e_scal' <- fromNumSofP ee
                       return $ RelExp rel e_scal'
@@ -285,10 +284,10 @@ gaussAllLTH0 static_only el_syms sofp = do
           Nothing-> do
             m_sofp <- gaussOneDefaultLTH0 static_only i el_syms sofp
             case m_sofp of
-                Nothing -> gaussAllLTH0 static_only (S.insert (identName i) el_syms) sofp
+                Nothing -> gaussAllLTH0 static_only (S.insert i el_syms) sofp
                 Just res_eofp -> return res_eofp
     where
-        findMinMaxTerm :: Ident -> NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod, [NNumExp])
+        findMinMaxTerm :: VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod, [NNumExp])
         findMinMaxTerm _  (NSum  [] _) = return (Nothing, [], [])
         findMinMaxTerm _  (NSum  [NProd [MaxMin ismin e] _] _) =
             return (Just (MaxMin ismin e), [], [])
@@ -298,7 +297,7 @@ gaussAllLTH0 static_only el_syms sofp = do
         findMinMaxTerm ii t@(NProd{}  ) = do (mm, fs) <- findMinMaxFact ii t; return (mm, fs, [])
         findMinMaxTerm ii (NSum (t:ts) tp)= do
             rangesrep <- asks ranges
-            case HM.lookup (identName ii) rangesrep of
+            case HM.lookup ii rangesrep of
                 Just (_, Just _, Just _) -> do
                     f <- findMinMaxFact ii t
                     case f of
@@ -307,7 +306,7 @@ gaussAllLTH0 static_only el_syms sofp = do
                                             return (mm, fs', t:ts')
                 _ -> return (Nothing, [], t:ts)
 
-        findMinMaxFact :: Ident -> NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod)
+        findMinMaxFact :: VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp, Prod)
         findMinMaxFact _  (NProd []     _ ) = return (Nothing, [])
         findMinMaxFact ii (NProd (f:fs) tp) =
             case f of
@@ -326,7 +325,7 @@ gaussAllLTH0 static_only el_syms sofp = do
 
 
 
-gaussOneDefaultLTH0 :: Bool -> Ident -> S.Set VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp)
+gaussOneDefaultLTH0 :: Bool -> VName -> S.Set VName -> NNumExp -> AlgSimplifyM (Maybe ScalExp)
 gaussOneDefaultLTH0  static_only i elsyms e = do
     aipb <- linearForm i e
     case aipb of
@@ -345,7 +344,7 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
             aleq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms am1
             ageq0 <- simplifyScal =<< gaussAllLTH0 static_only elsyms mam1
 
-            case HM.lookup (identName i) rangesrep of
+            case HM.lookup i rangesrep of
                 Nothing ->
                     badAlgSimplifyM "gaussOneDefaultLTH0: sym not in ranges!"
                 Just (_, Nothing, Nothing) ->
@@ -420,18 +419,18 @@ gaussOneDefaultLTH0  static_only i elsyms e = do
 --- Pick a Symbol to Eliminate & Bring To Linear Form  ---
 ----------------------------------------------------------
 
-pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe Ident
+pickSymToElim :: RangesRep -> S.Set VName -> ScalExp -> Maybe VName
 pickSymToElim rangesrep elsyms0 e_scal =
 --    ranges <- asks ranges
 --    e_scal <- fromNumSofP e0
     let ids0= HS.toList $ freeIn e_scal
-        ids1= filter (\s -> not (S.member (identName s) elsyms0)) ids0
-        ids2= filter (\s -> case HM.lookup (identName s) rangesrep of
+        ids1= filter (\s -> not (S.member s elsyms0)) ids0
+        ids2= filter (\s -> case HM.lookup s rangesrep of
                                 Nothing -> False
                                 Just _  -> True
                      ) ids1
-        ids = sortBy (\n1 n2 -> let n1p = HM.lookup (identName n1) rangesrep
-                                    n2p = HM.lookup (identName n2) rangesrep
+        ids = sortBy (\n1 n2 -> let n1p = HM.lookup n1 rangesrep
+                                    n2p = HM.lookup n2 rangesrep
                                 in case (n1p, n2p) of
                                      (Just (p1,_,_), Just (p2,_,_)) -> compare (-p1) (-p2)
                                      (_            , _            ) -> compare (1::Int) (1::Int)
@@ -441,7 +440,7 @@ pickSymToElim rangesrep elsyms0 e_scal =
             v:_ -> Just v
 
 
-linearFormScalExp :: Ident -> ScalExp -> AlgSimplifyM (Maybe (ScalExp, ScalExp))
+linearFormScalExp :: VName -> ScalExp -> AlgSimplifyM (Maybe (ScalExp, ScalExp))
 linearFormScalExp sym scl_exp = do
     sofp <- toNumSofP =<< simplifyScal scl_exp
     ab   <- linearForm sym sofp
@@ -455,7 +454,7 @@ linearFormScalExp sym scl_exp = do
         Nothing ->
             return Nothing
 
-linearForm :: Ident -> NNumExp -> AlgSimplifyM (Maybe (NNumExp, NNumExp))
+linearForm :: VName -> NNumExp -> AlgSimplifyM (Maybe (NNumExp, NNumExp))
 linearForm _ (NProd [] _) =
     badAlgSimplifyM "linearForm: empty Prod!"
 linearForm idd ee@(NProd{}) = linearForm idd (NSum [ee] (typeOfNAlg ee))
@@ -466,7 +465,7 @@ linearForm idd (NSum terms tp) = do
                                             NProd (_:_) _ -> return t
                                             _ -> badAlgSimplifyM "linearForm: ILLEGAL111!!!!"
                                    t_scal <- fromNumSofP t0
-                                   simplifyScal $ SDivide t_scal (Id idd)
+                                   simplifyScal $ SDivide t_scal (Id idd Int)
                          ) terms
     let myiota  = [1..(length terms)]
     let ia_terms= filter (\(_,t)-> case t of
@@ -505,8 +504,8 @@ linearForm idd (NSum terms tp) = do
 
 simplifyScal :: ScalExp -> AlgSimplifyM ScalExp
 
-simplifyScal (Val v)       = return $ Val v
-simplifyScal (Id  x)       = return $ Id  x
+simplifyScal (Val v) = return $ Val v
+simplifyScal (Id  x t) = return $ Id  x t
 
 simplifyScal e@(SNot   {}) = fromDNF =<< simplifyDNF =<< toDNF e
 simplifyScal e@(SLogAnd{}) = fromDNF =<< simplifyDNF =<< toDNF e
@@ -595,12 +594,13 @@ simplifyScal (SPlus e1o e2o) = do
             terms' <- mapM joinTerm filtered
             fromNumSofP $ NSum terms' tp
 
-simplifyScal (SMinus e1 e2) =
-    if e1 == e2
-    then do zero <- getZero tp; return $ Val zero
+simplifyScal (SMinus e1 e2) = do
+  let tp = scalExpType e1
+  if e1 == e2
+    then do zero <- getZero tp
+            return $ Val zero
     else do min_1 <- getNeg1 $ scalExpType e1
             simplifyScal $ SPlus e1 $ STimes (Val min_1) e2
-  where tp = scalExpType e1
 
 simplifyScal (SNeg e) = do
     negOne <- getNeg1 $ scalExpType e
@@ -727,7 +727,7 @@ simplifyScal (SPow e1 e2) = do
             (_, Val (IntVal n)) ->
                 if n >= 1
                 then -- simplifyScal =<< fromNumSofP $ NProd (replicate n e1') tp
-                        do new_e <- fromNumSofP $ NProd (replicate n e1') tp
+                        do new_e <- fromNumSofP $ NProd (genericReplicate n e1') tp
                            simplifyScal new_e
                 else return $ SPow e1' e2'
             (_, _) -> return $ SPow e1' e2'
@@ -738,7 +738,8 @@ simplifyScal (SPow e1 e2) = do
             | v2 < 0, v1 == 0 = badAlgSimplifyM "powVals: Negative exponential with zero base"
             | v2 < 0          = return $ IntVal ( 1 `div` (v1 ^ (-v2)) )
             | otherwise       = return $ IntVal ( v1 ^ v2 )
-        powVals (RealVal v1) (RealVal v2) = return $ RealVal (v1 ** v2)
+        powVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1 ** v2)
+        powVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1 ** v2)
         powVals _ _ = badAlgSimplifyM  "powVals: operands not of (the same) numeral type! "
 
 -----------------------------------------------------
@@ -850,8 +851,8 @@ negateBTerm (NRelExp rel e) = do
 
 bterm2ScalExp :: BTerm -> AlgSimplifyM ScalExp
 bterm2ScalExp (LogCt v) = return $ Val $ LogVal v
-bterm2ScalExp (PosId i) = return $ Id i
-bterm2ScalExp (NegId i) = return $ SNot $ Id i
+bterm2ScalExp (PosId i) = return $ Id i Int
+bterm2ScalExp (NegId i) = return $ SNot $ Id i Int
 bterm2ScalExp (NRelExp rel e) = do e' <- fromNumSofP e; return $ RelExp rel e'
 
 -- translates from DNF to ScalExp
@@ -869,25 +870,25 @@ fromDNF (t:ts) = do
 -- translates (and simplifies numeric expressions?) to DNF form.
 toDNF :: ScalExp -> AlgSimplifyM DNF
 toDNF (Val  (LogVal v)) = return [[LogCt v]]
-toDNF (Id      idd    ) = return [[PosId idd]]
-toDNF (RelExp  rel  e ) =
-    case scalExpType e of
-        Int -> do e' <- if rel == LEQ0
-                        then do m1 <- getNeg1 Int
-                                return $ SPlus e $ Val m1
-                        else return e
+toDNF (Id      idd  _ ) = return [[PosId idd]]
+toDNF (RelExp  rel  e ) = do
+  let t = scalExpType e
+  case t of
+    Int -> do e' <- if rel == LEQ0
+                    then do m1 <- getNeg1 Int
+                            return $ SPlus e $ Val m1
+                    else return e
+              ne   <- toNumSofP =<< simplifyScal e'
+              nrel <- simplifyNRel $ NRelExp LTH0 ne  -- False
+              return [[nrel]]
 
-                  ne   <- toNumSofP =<< simplifyScal e'
-                  nrel <- simplifyNRel $ NRelExp LTH0 ne  -- False
-                  return [[nrel]]
-
-        _   -> do ne   <- toNumSofP =<< simplifyScal e
-                  nrel <- markGaussLTH0 $ simplifyNRel $ NRelExp rel ne
-                  return [[nrel]]
+    _   -> do ne   <- toNumSofP =<< simplifyScal e
+              nrel <- markGaussLTH0 $ simplifyNRel $ NRelExp rel ne
+              return [[nrel]]
 --
 toDNF (SNot (SNot     e)) = toDNF e
 toDNF (SNot (Val (LogVal v))) = return [[LogCt $ not v]]
-toDNF (SNot (Id     idd)) = return [[NegId idd]]
+toDNF (SNot (Id idd _)) = return [[NegId idd]]
 toDNF (SNot (RelExp rel e)) = do
     let not_rel = if rel == LEQ0 then LTH0 else LEQ0
     neg_e <- simplifyScal (SNeg e)
@@ -994,7 +995,7 @@ simplifyAndOr is_and fs =
                         diffrel <- simplifyNRel $ NRelExp LTH0 e2me1m1
                         return $ diffrel == LogCt True
                     (_, _, Int) -> badAlgSimplifyM "impliesRel: LEQ0 for Int!"
-                    (_, _, Real)-> do
+                    (_, _, t) | t `elem` [Float32, Float64] -> do
                         e2me1 <- toNumSofP =<< simplifyScal (SMinus e2' e1')
                         let rel = if (rel1,rel2) == (LEQ0, LTH0) then LTH0 else LEQ0
                         diffrel <- simplifyNRel $ NRelExp rel e2me1
@@ -1092,11 +1093,11 @@ helperNegateMult e1 e2 =
 
 toNumSofP :: ScalExp -> AlgSimplifyM NNumExp
 toNumSofP e@(Val  _) = return $ NProd [e] $ scalExpType e
-toNumSofP e@(Id   _) = return $ NProd [e] $ scalExpType e
-toNumSofP e@(SDivide{})   = return $ NProd [e] $ scalExpType e
-toNumSofP e@(SPow{}   )   = return $ NProd [e] $ scalExpType e
-toNumSofP (SMinus _ _)  = badAlgSimplifyM "toNumSofP: SMinus is not in SofP form!"
-toNumSofP (SNeg _)        = badAlgSimplifyM "toNumSofP: SNeg is not in SofP form!"
+toNumSofP e@(Id _ _) = return $ NProd [e] $ scalExpType e
+toNumSofP e@(SDivide{}) = return $ NProd [e] $ scalExpType e
+toNumSofP e@(SPow{}   ) = return $ NProd [e] $ scalExpType e
+toNumSofP (SMinus _ _) = badAlgSimplifyM "toNumSofP: SMinus is not in SofP form!"
+toNumSofP (SNeg _) = badAlgSimplifyM "toNumSofP: SNeg is not in SofP form!"
 toNumSofP (STimes e1 e2) = do
     e2' <- toNumSofP e2
     case e2' of
@@ -1111,9 +1112,8 @@ toNumSofP (SPlus  e1 e2)   = do
         (NSum es1 _, NProd{}) -> return $ NSum (es1++[e2']) t
         (NProd{}, NSum es2 _) -> return $ NSum (e1':es2)    t
         (NProd{}, NProd{}   ) -> return $ NSum [e1', e2']   t
-toNumSofP me@(MaxMin{}) = do
-    let tp = scalExpType me
-    return $ NProd [me] tp
+toNumSofP me@(MaxMin{}) =
+  return $ NProd [me] $ scalExpType me
 toNumSofP s_e = badAlgSimplifyM $ "toNumSofP: unimplemented!"++pretty s_e
 
 
@@ -1196,67 +1196,79 @@ discriminate e@((k,v):t) (k', v') =
 ------------------------------------------------------
 
 getZero :: BasicType -> AlgSimplifyM BasicValue
-getZero Int  = return $ IntVal 0
-getZero Real = return $ RealVal 0.0
-getZero tp   = badAlgSimplifyM ("getZero for type: "++pretty tp)
+getZero Int     = return $ IntVal 0
+getZero Float32 = return $ Float32Val 0.0
+getZero Float64 = return $ Float64Val 0.0
+getZero tp      = badAlgSimplifyM ("getZero for type: "++pretty tp)
 
 getPos1 :: BasicType -> AlgSimplifyM BasicValue
-getPos1 Int  = return $  IntVal 1
-getPos1 Real = return $ RealVal 1.0
-getPos1 tp   = badAlgSimplifyM ("getOne for type: "++pretty tp)
+getPos1 Int     = return $ IntVal 1
+getPos1 Float32 = return $ Float32Val 1
+getPos1 Float64 = return $ Float64Val 1.0
+getPos1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 getNeg1 :: BasicType -> AlgSimplifyM BasicValue
-getNeg1 Int  = return $  IntVal (-1)
-getNeg1 Real = return $ RealVal (-1.0)
-getNeg1 tp   = badAlgSimplifyM ("getOne for type: "++pretty tp)
+getNeg1 Int     = return $  IntVal (-1)
+getNeg1 Float32 = return $ Float32Val (-1.0)
+getNeg1 Float64 = return $ Float64Val (-1.0)
+getNeg1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 isZero :: BasicValue -> Bool
-isZero (IntVal  v) = v == 0
-isZero (RealVal v) = v == 0.0
-isZero (_)         = False
+isZero (IntVal  v)    = v == 0
+isZero (Float32Val v) = v == 0.0
+isZero (Float64Val v) = v == 0.0
+isZero (_)            = False
 
 valLTHEQ0 :: RelOp0 -> BasicValue -> AlgSimplifyM Bool
-valLTHEQ0 rel ( IntVal v) = return $ if rel==LEQ0 then v <= 0   else v < 0
-valLTHEQ0 rel (RealVal v) = return $ if rel==LEQ0 then v <= 0.0 else v < 0.0
+valLTHEQ0 rel ( IntVal v)    = return $ if rel==LEQ0 then v <= 0   else v < 0
+valLTHEQ0 rel (Float32Val v) = return $ if rel==LEQ0 then v <= 0.0 else v < 0.0
+valLTHEQ0 rel (Float64Val v) = return $ if rel==LEQ0 then v <= 0.0 else v < 0.0
 valLTHEQ0 _ _ = badAlgSimplifyM "valLTHEQ0 for non-numeric type!"
 
 isOne :: BasicValue -> Bool
-isOne (IntVal  v) = v == 1
-isOne (RealVal v) = v == 1.0
-isOne (_)         = False
+isOne (IntVal  v)    = v == 1
+isOne (Float32Val v) = v == 1.0
+isOne (Float64Val v) = v == 1.0
+isOne (_)            = False
 
 isCt1 :: ScalExp -> Bool
-isCt1 (Val (IntVal  one)) = one == 1
-isCt1 (Val (RealVal one)) = one == 1.0
-isCt1 _                   = False
+isCt1 (Val (IntVal  one))    = one == 1
+isCt1 (Val (Float32Val one)) = one == 1.0
+isCt1 (Val (Float64Val one)) = one == 1.0
+isCt1 _                     = False
 
 isCt0 :: ScalExp -> Bool
-isCt0 (Val (IntVal  zr)) = zr == 0
-isCt0 (Val (RealVal zr)) = zr == 0.0
-isCt0 __                 = False
+isCt0 (Val (IntVal  zr))    = zr == 0
+isCt0 (Val (Float32Val zr)) = zr == 0.0
+isCt0 (Val (Float64Val zr)) = zr == 0.0
+isCt0 __                    = False
 
 
 addVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
-addVals (IntVal v1)  (IntVal v2)  = return $  IntVal (v1+v2)
-addVals (RealVal v1) (RealVal v2) = return $ RealVal (v1+v2)
+addVals (IntVal v1)     (IntVal v2)  = return $  IntVal (v1+v2)
+addVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1+v2)
+addVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1+v2)
 addVals _ _ =
   badAlgSimplifyM "addVals: operands not of (the same) numeral type! "
 
 mulVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
-mulVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1*v2)
-mulVals (RealVal v1) (RealVal v2) = return $ RealVal (v1*v2)
+mulVals (IntVal v1)     (IntVal v2)  = return $ IntVal (v1*v2)
+mulVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1*v2)
+mulVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1*v2)
 mulVals v1 v2 =
   badAlgSimplifyM $ "mulVals: operands not of (the same) numeral type! "++pretty (BasicVal v1)++" "++pretty (BasicVal v2)
 
 divVals :: BasicValue -> BasicValue -> AlgSimplifyM BasicValue
-divVals (IntVal v1)  (IntVal v2)  = return $ IntVal (v1 `div` v2)
-divVals (RealVal v1) (RealVal v2) = return $ RealVal (v1/v2)
+divVals (IntVal v1)     (IntVal v2)  = return $ IntVal (v1 `div` v2)
+divVals (Float32Val v1) (Float32Val v2) = return $ Float32Val (v1/v2)
+divVals (Float64Val v1) (Float64Val v2) = return $ Float64Val (v1/v2)
 divVals _ _ =
   badAlgSimplifyM "divVals: operands not of (the same) numeral type! "
 
 canDivValsEvenly :: BasicValue -> BasicValue -> AlgSimplifyM Bool
-canDivValsEvenly (IntVal v1)  (IntVal v2) = return $ v1 `mod` v2 == 0
-canDivValsEvenly (RealVal _) (RealVal _) = return True
+canDivValsEvenly (IntVal v1)    (IntVal v2) = return $ v1 `mod` v2 == 0
+canDivValsEvenly (Float32Val _) (Float32Val _) = return True
+canDivValsEvenly (Float64Val _) (Float64Val _) = return True
 canDivValsEvenly _ _ =
   badAlgSimplifyM "canDivValsEvenly: operands not of (the same) numeral type!"
 
@@ -1345,9 +1357,12 @@ tryDivTriv (SPow a e1) (SPow d e2)
                                     then (True,  SPow a e1me2)
                                     else (False, SDivide (SPow a e1) (SPow d e2))
 
-            (Real, Val (RealVal 0.0))   -> return (True, Val one)
-            (Real, Val (RealVal 1.0))   -> return (True, a)
-            (Real, Val (RealVal (-1.0)))-> return (True, SDivide (Val $ RealVal 1.0) a)
+            (Float32, Val (Float32Val 0.0))   -> return (True, Val one)
+            (Float32, Val (Float32Val 1.0))   -> return (True, a)
+            (Float32, Val (Float32Val (-1.0)))-> return (True, SDivide (Val $ Float32Val 1.0) a)
+            (Float64, Val (Float64Val 0.0))   -> return (True, Val one)
+            (Float64, Val (Float64Val 1.0))   -> return (True, a)
+            (Float64, Val (Float64Val (-1.0)))-> return (True, SDivide (Val $ Float64Val 1.0) a)
             (_, _) -> return (False, SDivide (SPow a e1) (SPow d e2))
 
     | otherwise = return (False, SDivide (SPow a e1) (SPow d e2))

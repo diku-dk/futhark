@@ -29,6 +29,15 @@ Contents:
    language-reference.rst
    publications.rst
 
+Manual pages:
+
+.. toctree::
+   :maxdepth: 1
+
+   man/futhark-c.rst
+   man/futhark-opencl.rst
+   man/futharki.rst
+   man/futhark-test.rst
 
 Indices and tables
 ==================

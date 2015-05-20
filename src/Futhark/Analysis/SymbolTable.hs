@@ -1,6 +1,7 @@
 module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings)
   , empty
+  , fromTypeEnv
     -- * Entries
   , Entry
   , deepen
@@ -10,11 +11,13 @@ module Futhark.Analysis.SymbolTable
   , entryBinding
   , entryLetBoundLore
   , entryFParamLore
+  , entryType
   , asScalExp
     -- * Lookup
   , elem
   , lookup
   , lookupExp
+  , lookupType
   , lookupSubExp
   , lookupScalExp
   , lookupValue
@@ -33,20 +36,24 @@ module Futhark.Analysis.SymbolTable
     -- * Misc
   , enclosingLoopVars
   , rangesRep
+  , typeEnv
   )
   where
 
 import Control.Applicative hiding (empty)
 import Control.Monad
+import Control.Monad.Reader
 import Data.Ord
 import Data.Maybe
+import Data.Monoid
 import Data.List hiding (elem, insert, lookup)
-import qualified Data.Set as S
+import qualified Data.Set          as S
+import qualified Data.HashSet      as HS
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (elem, lookup)
 
-import Futhark.Representation.AST hiding (FParam, FParamT (..))
+import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, paramLore, lookupType)
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Analysis.ScalExp
@@ -61,8 +68,19 @@ data SymbolTable lore = SymbolTable {
   , bindings :: HM.HashMap VName (Entry lore)
   }
 
+instance Monoid (SymbolTable lore) where
+  table1 `mappend` table2 =
+    SymbolTable { loopDepth = max (loopDepth table1) (loopDepth table2)
+                , bindings = bindings table1 `mappend` bindings table2
+                }
+  mempty = empty
+
 empty :: SymbolTable lore
 empty = SymbolTable 0 HM.empty
+
+fromTypeEnv :: TypeEnv -> SymbolTable lore
+fromTypeEnv = HM.foldlWithKey' insertFreeVar' empty
+  where insertFreeVar' m k v = insertFreeVar k v m
 
 deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
@@ -71,6 +89,7 @@ data Entry lore = LoopVar (LoopVarEntry lore)
                 | LetBound (LetBoundEntry lore)
                 | FParam (FParamEntry lore)
                 | LParam (LParamEntry lore)
+                | FreeVar FreeVarEntry
 
 data LoopVarEntry lore =
   LoopVarEntry { loopVarRange        :: ScalExpRange
@@ -84,18 +103,27 @@ data LetBoundEntry lore =
                 , letBoundBindingDepth :: Int
                 , letBoundScalExp      :: Maybe ScalExp
                 , letBoundBindage      :: Bindage
+                , letBoundType         :: Type
                 }
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
-              , fparamLore         :: Lore.FParam lore
+              , paramLore         :: Lore.FParam lore
               , fparamBindingDepth :: Int
+              , paramType         :: Type
               }
 
 data LParamEntry lore =
   LParamEntry { lparamRange        :: ScalExpRange
               , lparamBindingDepth :: Int
+              , lparamType         :: Type
               }
+
+data FreeVarEntry =
+  FreeVarEntry { freeVarType         :: Type
+               , freeVarBindingDepth :: Int
+               , freeVarRange        :: ScalExpRange
+               }
 
 isVarBound :: Entry lore -> Maybe (LetBoundEntry lore)
 isVarBound (LetBound entry)
@@ -112,6 +140,7 @@ bindingDepth (LetBound entry) = letBoundBindingDepth entry
 bindingDepth (FParam entry) = fparamBindingDepth entry
 bindingDepth (LParam entry) = lparamBindingDepth entry
 bindingDepth (LoopVar entry) = loopVarBindingDepth entry
+bindingDepth (FreeVar _) = 0
 
 setBindingDepth :: Int -> Entry lore -> Entry lore
 setBindingDepth d (LetBound entry) =
@@ -122,12 +151,15 @@ setBindingDepth d (LParam entry) =
   LParam $ entry { lparamBindingDepth = d }
 setBindingDepth d (LoopVar entry) =
   LoopVar $ entry { loopVarBindingDepth = d }
+setBindingDepth d (FreeVar entry) =
+  FreeVar $ entry { freeVarBindingDepth = d }
 
 valueRange :: Entry lore -> ScalExpRange
 valueRange (LetBound entry) = letBoundRange entry
 valueRange (FParam entry)   = fparamRange entry
 valueRange (LParam entry)   = lparamRange entry
 valueRange (LoopVar entry)  = loopVarRange entry
+valueRange (FreeVar entry)  = freeVarRange entry
 
 setValueRange :: ScalExpRange -> Entry lore -> Entry lore
 setValueRange range (LetBound entry) =
@@ -138,6 +170,8 @@ setValueRange range (LParam entry) =
   LParam $ entry { lparamRange = range }
 setValueRange range (LoopVar entry) =
   LoopVar $ entry { loopVarRange = range }
+setValueRange range (FreeVar entry) =
+  FreeVar $ entry { freeVarRange = range }
 
 entryBinding :: Entry lore -> Maybe (Binding lore)
 entryBinding (LetBound entry) = Just $ letBoundBinding entry
@@ -148,7 +182,7 @@ entryLetBoundLore (LetBound entry) = Just $ letBoundLore entry
 entryLetBoundLore _                = Nothing
 
 entryFParamLore :: Entry lore -> Maybe (Lore.FParam lore)
-entryFParamLore (FParam entry) = Just $ fparamLore entry
+entryFParamLore (FParam entry) = Just $ paramLore entry
 entryFParamLore _              = Nothing
 
 loopVariable :: Entry lore -> Bool
@@ -157,6 +191,13 @@ loopVariable _           = False
 
 asExp :: Entry lore -> Maybe (Exp lore)
 asExp = liftM (bindingExp . letBoundBinding) . isVarBound
+
+entryType :: Entry lore -> Type
+entryType (LetBound entry) = letBoundType entry
+entryType (LParam entry)   = lparamType entry
+entryType (FParam entry)   = paramType entry
+entryType (LoopVar _)      = Basic Int
+entryType (FreeVar entry)  = freeVarType entry
 
 instance Substitutable lore => Substitute (LetBoundEntry lore) where
   substituteNames substs entry =
@@ -167,14 +208,16 @@ instance Substitutable lore => Substitute (LetBoundEntry lore) where
       , letBoundScalExp = substituteNames substs $ letBoundScalExp entry
       , letBoundBindingDepth = letBoundBindingDepth entry
       , letBoundBindage = substituteNames substs $ letBoundBindage entry
+      , letBoundType = substituteNames substs $ letBoundType entry
       }
 
 instance Substitutable lore => Substitute (FParamEntry lore) where
   substituteNames substs entry =
     FParamEntry {
           fparamRange = substituteNames substs $ fparamRange entry
-        , fparamLore = substituteNames substs $ fparamLore entry
+        , paramLore = substituteNames substs $ paramLore entry
         , fparamBindingDepth = fparamBindingDepth entry
+        , paramType = substituteNames substs $ paramType entry
       }
 
 instance Substitutable lore => Substitute (LParamEntry lore) where
@@ -182,6 +225,7 @@ instance Substitutable lore => Substitute (LParamEntry lore) where
     LParamEntry {
           lparamRange = substituteNames substs $ lparamRange entry
         , lparamBindingDepth = lparamBindingDepth entry
+        , lparamType = substituteNames substs $ lparamType entry
       }
 
 instance Substitutable lore => Substitute (LoopVarEntry lore) where
@@ -189,6 +233,14 @@ instance Substitutable lore => Substitute (LoopVarEntry lore) where
     LoopVarEntry {
           loopVarRange = substituteNames substs $ loopVarRange entry
         , loopVarBindingDepth = loopVarBindingDepth entry
+      }
+
+instance Substitute FreeVarEntry where
+  substituteNames substs entry =
+    FreeVarEntry {
+        freeVarRange = substituteNames substs $ freeVarRange entry
+      , freeVarType = substituteNames substs $ freeVarType entry
+      , freeVarBindingDepth = freeVarBindingDepth entry
       }
 
 instance Substitutable lore =>
@@ -201,6 +253,8 @@ instance Substitutable lore =>
     LParam $ substituteNames substs entry
   substituteNames substs (LoopVar entry) =
     LoopVar $ substituteNames substs entry
+  substituteNames substs (FreeVar entry) =
+    FreeVar $ substituteNames substs entry
 
 elem :: VName -> SymbolTable lore -> Bool
 elem name = isJust . lookup name
@@ -210,6 +264,9 @@ lookup name = HM.lookup name . bindings
 
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
 lookupExp name vtable = asExp =<< lookup name vtable
+
+lookupType :: VName -> SymbolTable lore -> Maybe Type
+lookupType name vtable = entryType <$> lookup name vtable
 
 lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
 lookupSubExp name vtable = do
@@ -228,7 +285,7 @@ lookupValue name vtable = case lookupSubExp name vtable of
 
 lookupVar :: VName -> SymbolTable lore -> Maybe VName
 lookupVar name vtable = case lookupSubExp name vtable of
-                          Just (Var v) -> Just $ identName v
+                          Just (Var v) -> Just v
                           _            -> Nothing
 
 lookupRange :: VName -> SymbolTable lore -> ScalExpRange
@@ -249,6 +306,9 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
+typeEnv :: SymbolTable lore -> TypeEnv
+typeEnv = HM.map entryType . bindings
+
 defBndEntry :: SymbolTable lore
             -> PatElem lore
             -> Range
@@ -259,12 +319,16 @@ defBndEntry vtable patElem range bnd =
       letBoundRange = simplifyRange $ scalExpRange range
     , letBoundLore = patElemLore patElem
     , letBoundBinding = bnd
-    , letBoundScalExp = toScalExp (`lookupScalExp` vtable) (bindingExp bnd)
+    , letBoundScalExp =
+      runReader (toScalExp (`lookupScalExp` vtable) (bindingExp bnd)) types
     , letBoundBindingDepth = 0
     , letBoundBindage = patElemBindage patElem
+    , letBoundType = patElemType patElem
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
+
+        types = typeEnv vtable
 
         scalExpRange :: Range -> ScalExpRange
         scalExpRange (lower, upper) =
@@ -274,8 +338,8 @@ defBndEntry vtable patElem range bnd =
         scalExpBound :: (ScalExpRange -> Maybe ScalExp)
                      -> Ranges.KnownBound
                      -> Maybe ScalExp
-        scalExpBound pick (Ranges.ElemBound v) =
-          pick $ identRange v vtable
+        scalExpBound pick (Ranges.VarBound v) =
+          pick $ lookupRange v vtable
         scalExpBound _ (Ranges.ScalarBound se) =
           Just se
         scalExpBound _ (Ranges.MinimumBound b1 b2) = do
@@ -306,9 +370,6 @@ bindingEntries bnd@(Let pat _ _) vtable =
     (patElem, range) <- zip (patternElements pat) (Ranges.patternRanges pat)
   ]
 
-identRange :: Ident -> SymbolTable lore -> ScalExpRange
-identRange = lookupRange . identName
-
 insertEntry :: VName -> Entry lore -> SymbolTable lore
             -> SymbolTable lore
 insertEntry name entry =
@@ -335,18 +396,19 @@ insertFParam :: AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
 insertFParam fparam = insertEntry name entry
-  where name = fparamName fparam
+  where name = paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
-                                   , fparamLore = AST.fparamLore fparam
+                                   , paramLore = AST.paramLore fparam
                                    , fparamBindingDepth = 0
+                                   , paramType = AST.paramType fparam
                                    }
 
 insertFParams :: [AST.FParam lore] -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
-insertLParamWithRange :: Param -> ScalExpRange -> SymbolTable lore
-                     -> SymbolTable lore
+insertLParamWithRange :: LParam lore -> ScalExpRange -> SymbolTable lore
+                      -> SymbolTable lore
 insertLParamWithRange param range vtable =
   -- We know that the sizes in the type of param are at least zero,
   -- since they are array sizes.
@@ -354,48 +416,58 @@ insertLParamWithRange param range vtable =
   in foldr (`isAtLeast` 0) vtable' sizevars
   where bind = LParam LParamEntry { lparamRange = range
                                   , lparamBindingDepth = 0
+                                  , lparamType = AST.paramType param
                                   }
-        name = identName param
-        sizevars = mapMaybe isVar $ arrayDims $ identType param
-        isVar (Var v) = Just $ identName v
+        name = paramName param
+        sizevars = mapMaybe isVar $ arrayDims $ AST.paramType param
+        isVar (Var v) = Just v
         isVar _       = Nothing
 
-insertLParam :: Param -> SymbolTable lore -> SymbolTable lore
+insertLParam :: LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing)
 
-insertArrayLParam :: Param -> Maybe Ident -> SymbolTable lore
+insertArrayLParam :: LParam lore -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and
   -- that the inner sizes are at least zero, since they are array
   -- sizes.
-  let vtable' = insertLParamWithRange param (identRange array vtable) vtable
-  in case arrayDims $ identType array of
-    Var v:_ -> (identName v `isAtLeast` 1) vtable'
-    _       -> vtable'
+  let vtable' = insertLParamWithRange param (lookupRange array vtable) vtable
+  in case arrayDims <$> lookupType array vtable of
+    Just (Var v:_) -> (v `isAtLeast` 1) vtable'
+    _              -> vtable'
 insertArrayLParam param Nothing vtable =
   -- Well, we still know that it's a param...
   insertLParam param vtable
 
 insertLoopVar :: VName -> SubExp -> SymbolTable lore -> SymbolTable lore
-insertLoopVar name bound vtable = insertEntry name bind vtable
+insertLoopVar name bound = insertEntry name bind
   where bind = LoopVar LoopVarEntry {
             loopVarRange = (Just (Val (IntVal 0)),
-                            minus1 <$> toScalExp look (PrimOp $ SubExp bound))
+                            Just $
+                              subExpToScalExp bound Int `SMinus`
+                              Val (IntVal 1))
           , loopVarBindingDepth = 0
           }
-        look = (`lookupScalExp` vtable)
-        minus1 = (`SMinus` Val (IntVal 1))
+
+insertFreeVar :: VName -> Type -> SymbolTable lore -> SymbolTable lore
+insertFreeVar name t = insertEntry name entry
+  where entry = FreeVar FreeVarEntry {
+            freeVarType = t
+          , freeVarRange = (Nothing, Nothing)
+          , freeVarBindingDepth = 0
+          }
 
 updateBounds :: Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
-  case toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond of
+  case runReader (toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond) types of
     Nothing    -> vtable
     Just cond' ->
       let cond'' | isTrue    = cond'
                  | otherwise = SNot cond'
       in updateBounds' cond'' vtable
+  where types = typeEnv vtable
 
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
@@ -403,10 +475,11 @@ updateBounds isTrue cond vtable =
 updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
 updateBounds' cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
-  either (const []) getNotFactorsLEQ0 $ AS.simplify (SNot cond) ranges
+  either (const []) getNotFactorsLEQ0 $
+  AS.simplify (SNot cond) ranges
     where
-      updateBound (sym,True ,bound) = setUpperBound (identName sym) bound
-      updateBound (sym,False,bound) = setLowerBound (identName sym) bound
+      updateBound (sym,True ,bound) = setUpperBound sym bound
+      updateBound (sym,False,bound) = setLowerBound sym bound
 
       ranges = HM.filter nonEmptyRange $ HM.map toRep $ bindings sym_tab
       toRep entry = (bindingDepth entry, lower, upper)
@@ -439,16 +512,45 @@ updateBounds' cond sym_tab =
       --
       --  Returns: Nothing or
       --  Just (i, a == 1, -a*b), i.e., (symbol, isUpperBound, bound)
-      solve_leq0 :: ScalExp -> Maybe (Ident, Bool, ScalExp)
+      solve_leq0 :: ScalExp -> Maybe (VName, Bool, ScalExp)
       solve_leq0 e_scal = do
-        sym <- AS.pickSymToElim ranges S.empty e_scal
+        sym <- pickRefinedSym S.empty e_scal
         (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
         case a of
           Val (IntVal (-1)) -> Just (sym, False, b)
           Val (IntVal 1)    -> do
-            mb <- either (const Nothing) Just $ AS.simplify (SMinus (Val (IntVal 0)) b) ranges
+            mb <- either (const Nothing) Just $
+                  AS.simplify (SMinus (Val (IntVal 0)) b) ranges
             Just (sym, True, mb)
           _ -> Nothing
+
+      -- When picking a symbols, @sym@ whose bound it is to be refined:
+      -- make sure that @sym@ does not belong to the transitive closure
+      -- of the symbols apearing in the ranges of all the other symbols
+      -- in the sclar expression (themselves included).
+      -- If this does not hold, pick another symbol, rinse and repeat.
+      pickRefinedSym :: S.Set VName -> ScalExp -> Maybe VName
+      pickRefinedSym elsyms0 e_scal = do
+        let candidates = freeIn e_scal
+            sym0 = AS.pickSymToElim ranges elsyms0 e_scal
+        case sym0 of
+            Just sy -> let trclsyms = foldl trClSymsInRange HS.empty $ HS.toList $
+                                        candidates `HS.difference` HS.singleton sy
+                       in  if   HS.member sy trclsyms
+                           then pickRefinedSym (S.insert sy elsyms0) e_scal
+                           else sym0
+            Nothing -> sym0
+      -- computes the transitive closure of the symbols appearing
+      -- in the ranges of a symbol
+      trClSymsInRange :: HS.HashSet VName -> VName -> HS.HashSet VName
+      trClSymsInRange cur_syms sym =
+        if HS.member sym cur_syms then cur_syms
+        else case HM.lookup sym ranges of
+               Just (_,lb,ub) -> let sym_bds = concatMap (HS.toList . freeIn) (catMaybes [lb, ub])
+                                 in  foldl trClSymsInRange
+                                           (HS.insert sym cur_syms)
+                                           (HS.toList $ HS.fromList sym_bds)
+               Nothing        -> HS.insert sym cur_syms
 
 setUpperBound :: VName -> ScalExp -> SymbolTable lore
               -> SymbolTable lore
@@ -473,4 +575,4 @@ setLowerBound name bound vtable =
 
 isAtLeast :: VName -> Int -> SymbolTable lore -> SymbolTable lore
 isAtLeast name x =
-  setLowerBound name $ Val $ IntVal x
+  setLowerBound name $ Val $ IntVal $ fromIntegral x

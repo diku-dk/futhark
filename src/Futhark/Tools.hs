@@ -1,15 +1,12 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
 module Futhark.Tools
   ( letSubExp
   , letSubExps
   , letExp
   , letExps
-  , letShapedExp
   , letTupExp
   , letTupExp'
   , letInPlace
-
-  , newVar
 
   , eSubExp
   , eIf
@@ -33,10 +30,12 @@ module Futhark.Tools
   , binOpLambda
   , makeLambda
 
-  , copyConsumed
   , nonuniqueParams
 
   , module Futhark.Binder
+
+  , redomapToMapAndReduce
+  , intraproceduralTransformation
 
   -- * Result types
   , instantiateShapes
@@ -48,7 +47,6 @@ module Futhark.Tools
 where
 
 import qualified Data.Array as A
-import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Loc (SrcLoc)
 
@@ -60,8 +58,8 @@ import Control.Monad.Writer
 import Prelude
 
 import Futhark.Representation.AST
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
-import Futhark.Substitute
 import Futhark.Binder
 import Futhark.Util
 
@@ -69,30 +67,33 @@ letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
 letSubExp desc e = do
-  vs <- replicateM (length (expExtType e)) $ newVName desc
+  n <- length <$> expExtType e
+  vs <- replicateM n $ newVName desc
   idents <- letBindNames' vs e
   case idents of
-    [ident] -> return $ Var ident
+    [ident] -> return $ Var $ identName ident
     _       -> fail $ "letSubExp: tuple-typed expression given:\n" ++ pretty e
 
 letExp :: MonadBinder m =>
-          String -> Exp (Lore m) -> m Ident
-letExp _ (PrimOp (SubExp (Var v))) = return v
+          String -> Exp (Lore m) -> m VName
+letExp _ (PrimOp (SubExp (Var v))) =
+  return v
 letExp desc e = do
-  vs <- replicateM (length (expExtType e)) $ newVName desc
+  n <- length <$> expExtType e
+  vs <- replicateM n $ newVName desc
   idents <- letBindNames' vs e
   case idents of
-    [ident] -> return ident
+    [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letInPlace :: MonadBinder m =>
-              String -> Certificates -> Ident -> [SubExp] -> Exp (Lore m)
-           -> m Ident
+              String -> Certificates -> VName -> [SubExp] -> Exp (Lore m)
+           -> m VName
 letInPlace desc cs src is e = do
   v <- newVName desc
   idents <- letBindNames [(v,BindInPlace cs src is)] e
   case idents of
-    [ident] -> return ident
+    [ident] -> return $ identName ident
     _       -> fail $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
 letSubExps :: MonadBinder m =>
@@ -100,23 +101,18 @@ letSubExps :: MonadBinder m =>
 letSubExps desc = mapM $ letSubExp desc
 
 letExps :: MonadBinder m =>
-           String -> [Exp (Lore m)] -> m [Ident]
+           String -> [Exp (Lore m)] -> m [VName]
 letExps desc = mapM $ letExp desc
-
-letShapedExp :: (MonadBinder m) =>
-                String -> Exp (Lore m)
-             -> m ([Ident], [Ident])
-letShapedExp _ (PrimOp (SubExp (Var v))) = return ([], [v])
-letShapedExp name e = do
-  names <- replicateM numValues $ newVName name
-  idents <- letBindNames' names e
-  return $ splitAt (length idents - numValues) idents
-  where numValues = length $ expExtType e
 
 letTupExp :: (MonadBinder m) =>
              String -> Exp (Lore m)
-          -> m [Ident]
-letTupExp name e = snd <$> letShapedExp name e
+          -> m [VName]
+letTupExp _ (PrimOp (SubExp (Var v))) =
+  return [v]
+letTupExp name e = do
+  numValues <- length <$> expExtType e
+  names <- replicateM numValues $ newVName name
+  map identName <$> letBindNames' names e
 
 letTupExp' :: (MonadBinder m) =>
               String -> Exp (Lore m)
@@ -124,12 +120,6 @@ letTupExp' :: (MonadBinder m) =>
 letTupExp' _ (PrimOp (SubExp se)) = return [se]
 letTupExp' name ses = do vs <- letTupExp name ses
                          return $ map Var vs
-
-newVar :: MonadFreshNames m =>
-          String -> Type -> m (Ident, SubExp)
-newVar name tp = do
-  x <- newVName name
-  return (Ident x tp, Var $ Ident x tp)
 
 eSubExp :: MonadBinder m =>
            SubExp -> m (Exp (Lore m))
@@ -142,7 +132,7 @@ eIf ce te fe = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertBindingsM te
   fe' <- insertBindingsM fe
-  let ts = bodyExtType te' `generaliseExtTypes` bodyExtType fe'
+  ts <- generaliseExtTypes <$> bodyExtType te' <*> bodyExtType fe'
   return $ If ce' te' fe' ts
 
 eBinOp :: MonadBinder m =>
@@ -166,7 +156,7 @@ eNot e = do
   return $ PrimOp $ Not e'
 
 eIndex :: MonadBinder m =>
-          Certificates -> Ident -> [m (Exp (Lore m))]
+          Certificates -> VName -> [m (Exp (Lore m))]
        -> m (Exp (Lore m))
 eIndex cs a idxs = do
   idxs' <- letSubExps "i" =<< sequence idxs
@@ -174,7 +164,7 @@ eIndex cs a idxs = do
 
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
-eCopy e = do e' <- letSubExp "copy_arg" =<< e
+eCopy e = do e' <- letExp "copy_arg" =<< e
              return $ PrimOp $ Copy e'
 
 eAssert :: MonadBinder m =>
@@ -193,7 +183,7 @@ eValue (ArrayVal a bt shape) = do
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (Constant . IntVal) rowshape) Nonunique
+      rowtype = Array bt (Shape $ map (Constant . IntVal . fromIntegral) rowshape) Nonunique
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ PrimOp $ ArrayLit ses rowtype
 
@@ -203,7 +193,7 @@ eBody :: (MonadBinder m) =>
 eBody es = insertBindingsM $ do
              es' <- sequence es
              xs <- mapM (letTupExp "x") es'
-             mkBodyM [] $ Result $ map Var $ concat xs
+             mkBodyM [] $ map Var $ concat xs
 
 eLambda :: MonadBinder m =>
            Lambda (Lore m) -> [SubExp] -> m [SubExp]
@@ -211,7 +201,7 @@ eLambda lam args = do zipWithM_ letBindNames params $
                         map (PrimOp . SubExp) args
                       bodyBind $ lambdaBody lam
   where params = [ [(param, BindVar)] |
-                   param <- map identName $ lambdaParams lam ]
+                   param <- map paramName $ lambdaParams lam ]
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
@@ -227,24 +217,24 @@ foldBinOp bop ne (e:es) t =
 binOpLambda :: (MonadFreshNames m, Bindable lore) =>
                BinOp -> BasicType -> m (Lambda lore)
 binOpLambda bop t = do
-  x   <- newIdent "x"   $ Basic t
-  y   <- newIdent "y"   $ Basic t
-  res <- newIdent "res" $ Basic t
-  body <- runBinder $ do
-    bnds <- mkLetNamesM [(identName res,BindVar)] $
-            PrimOp $ BinOp bop (Var x) (Var y) t
-    mkBodyM [bnds] $ Result [Var res]
+  x   <- newVName "x"
+  y   <- newVName "y"
+  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
+    res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y) t
+    return $ resultBody [res]
   return Lambda {
-             lambdaParams     = [x, y]
+             lambdaParams     = [Param (Ident x (Basic t)) (),
+                                 Param (Ident y (Basic t)) ()]
            , lambdaReturnType = [Basic t]
            , lambdaBody       = body
            }
 
 makeLambda :: (Bindable (Lore m), MonadBinder m) =>
-              [Param] -> m (Body (Lore m)) -> m (Lambda (Lore m))
+              [LParam (Lore m)] -> m (Body (Lore m)) -> m (Lambda (Lore m))
 makeLambda params body = do
   body' <- insertBindingsM body
-  case allBasic $ bodyExtType body' of
+  bodyt <- bodyExtType body'
+  case allBasic bodyt of
     Nothing -> fail "Body passed to makeLambda has non-basic type"
     Just ts ->
       return Lambda {
@@ -258,15 +248,14 @@ makeLambda params body = do
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore
-resultBody ses = mkBody [] $ Result ses
+resultBody = mkBody []
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
 resultBodyM :: MonadBinder m =>
                [SubExp]
             -> m (Body (Lore m))
-resultBodyM ses =
-  mkBodyM [] $ Result ses
+resultBodyM = mkBodyM []
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addBinding'.
@@ -293,34 +282,23 @@ mapResult f (Body _ bnds res) =
   let Body _ bnds2 newres = f res
   in mkBody (bnds<>bnds2) newres
 
-copyConsumed :: (Proper (Lore m), MonadBinder m) => Body (Lore m) -> m (Body (Lore m))
-copyConsumed e
-  | consumed <- HS.toList $ freeUniqueInBody e,
-    not (null consumed) = do
-      copies <- copyVariables consumed
-      let substs = HM.fromList $ zip (map identName consumed)
-                                     (map identName copies)
-      return $ substituteNames substs e
-  | otherwise = return e
-  where copyVariables = mapM copyVariable
-        copyVariable v =
-          letExp (textual (baseName $ identName v) ++ "_copy") $
-                 PrimOp $ Copy $ Var v
-
-        freeUniqueInBody = HS.filter (unique . identType) . freeInBody
-
 nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
-                   [Param] -> m ([Param], [Binding lore])
-nonuniqueParams params = runBinder'' $ forM params $ \param ->
-  if unique $ identType param then do
-    param' <- nonuniqueParam <$> newIdent' (++"_nonunique") param
-    letBindNames_ [(identName param,BindVar)] $
-      PrimOp $ Copy $ Var param'
-    return param'
-  else
-    return param
-  where nonuniqueParam param =
-          param { identType = identType param `setUniqueness` Nonunique }
+                   [LParam lore] -> m ([LParam lore], [Binding lore])
+nonuniqueParams params =
+  modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
+  collectBindings $ forM params $ \param ->
+    if unique $ paramType param then do
+      param' <- Param <$>
+                (nonuniqueParam <$> newIdent' (++"_nonunique") (paramIdent param)) <*>
+                pure ()
+      bindingIdentTypes [paramIdent param'] $
+        letBindNames_ [(paramName param,BindVar)] $
+        PrimOp $ Copy $ paramName param'
+      return param'
+    else
+      return param
+  where nonuniqueParam ident =
+          ident { identType = identType ident `setUniqueness` Nonunique }
 
 -- | Instantiate all existential parts dimensions of the given
 -- 'RetType', using a monadic action to create the necessary
@@ -350,7 +328,7 @@ instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
   where instantiate _ = do v <- lift $ newIdent "size" (Basic Int)
                            tell [v]
-                           return $ Var v
+                           return $ Var $ identName v
 
 instantiateShapesFromIdentList :: [Ident] -> [ExtType] -> [Type]
 instantiateShapesFromIdentList idents ts =
@@ -360,7 +338,7 @@ instantiateShapesFromIdentList idents ts =
           case idents' of
             [] -> fail "instantiateShapesFromIdentList: insufficiently sized context"
             ident:idents'' -> do put idents''
-                                 return $ Var ident
+                                 return $ Var $ identName ident
 
 instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
 instantiateExtTypes names rt =
@@ -381,8 +359,58 @@ instantiateIdents names ts
           case remaining of []   -> lift Nothing
                             x:xs -> do let ident = Ident x (Basic Int)
                                        put (context'++[ident], xs)
-                                       return $ Var ident
+                                       return $ Var x
     (ts', (context', _)) <-
       runStateT (instantiateShapes nextShape ts) ([],context)
     return (context', zipWith Ident vals ts')
   | otherwise = Nothing
+
+-- | Turns a binding of a @redomap@ into two seperate bindings, a
+-- @map@ binding and a @reduce@ binding (returned in that order).
+--
+-- Reuses the original pattern for the @reduce@, and creates a new
+-- pattern with new 'Ident's for the result of the @map@. Does /not/
+-- add the new idents to the 'TypeEnv'.
+--
+-- Only handles a 'Pattern' with an empty 'patternContextElements'
+redomapToMapAndReduce :: (MonadFreshNames m, HasTypeEnv m, Bindable lore) =>
+                         PatternT lore -> Lore.Exp lore
+                      -> ( Certificates, LambdaT lore, LambdaT lore, [SubExp]
+                         , [VName])
+                      -> m (Binding lore, Binding lore)
+redomapToMapAndReduce (Pattern [] patelems) lore
+                      (certs, redlam, redmap_lam, accs, arrs) = do
+  -- Remember that a reduce function must have the type @a -> a -> a@.
+  -- This means that the result of the map must be of type @a@.
+  arrs_tps <- mapM lookupType arrs
+  let outersz = arraysSize 0 arrs_tps
+  (map_patidents, map_patbindages) <- liftM unzip $
+    forM patelems $ \pe -> do
+      let (Ident vn tp) = patElemIdent pe
+      let tp' = arrayOf tp (Shape [outersz]) (uniqueness tp)
+      i <- newIdent (baseString vn ++ "_maptmp") tp'
+      return (i, patElemBindage pe)
+  let map_bnd = mkLet [] (zip map_patidents map_patbindages)
+                      (LoopOp $ Map certs newmap_lam arrs)
+  let red_args = zip accs (map identName map_patidents)
+  let red_bnd = Let (Pattern [] patelems) lore
+                    (LoopOp $ Reduce certs redlam red_args)
+  return (map_bnd, red_bnd)
+  where
+    newmap_lam =
+      let tobnd = take (length accs) $ map paramIdent $ lambdaParams redmap_lam
+          params' = drop (length accs) $ lambdaParams redmap_lam
+          bndaccs = zipWith (\i acc -> mkLet' []  [i] (PrimOp $ SubExp acc))
+                            tobnd accs
+          body = lambdaBody redmap_lam
+          bnds' = bndaccs ++ bodyBindings body
+          body' = body {bodyBindings = bnds'}
+      in redmap_lam { lambdaBody = body', lambdaParams = params' }
+redomapToMapAndReduce _ _ _ =
+  error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
+
+intraproceduralTransformation :: (FunDec fromlore -> State VNameSource (FunDec tolore))
+                              -> Prog fromlore -> Prog tolore
+intraproceduralTransformation ft prog =
+  evalState (Prog <$> mapM ft (progFunctions prog)) src
+  where src = newNameSourceForProg prog

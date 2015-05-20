@@ -85,6 +85,7 @@ instance Lore.Lore lore => Lore.Lore (Ranges lore) where
   type Exp (Ranges lore) = Lore.Exp lore
   type Body (Ranges lore) = (BodyRanges, Lore.Body lore)
   type FParam (Ranges lore) = Lore.FParam lore
+  type LParam (Ranges lore) = Lore.LParam lore
   type RetType (Ranges lore) = Lore.RetType lore
 
   representative =
@@ -143,6 +144,7 @@ removeRanges = Rephraser { rephraseExpLore = id
                          , rephraseLetBoundLore = snd
                          , rephraseBodyLore = snd
                          , rephraseFParamLore = id
+                         , rephraseLParamLore = id
                          , rephraseRetType = id
                          }
 
@@ -170,7 +172,7 @@ removePatternRanges = rephrasePattern removeRanges
 addRangesToPattern :: Lore.Lore lore =>
                       AST.Pattern lore -> Exp lore -> Pattern lore
 addRangesToPattern pat e =
-  AST.Pattern $ mkPatternRanges pat e
+  uncurry AST.Pattern $ mkPatternRanges pat e
 
 mkRangedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result
@@ -180,30 +182,29 @@ mkRangedBody innerlore bnds res =
 
 mkPatternRanges :: Lore.Lore lore =>
                    AST.Pattern lore -> Exp lore
-                -> [PatElemT (Lore.LetBound (Ranges lore))]
+                -> ([PatElemT (Lore.LetBound (Ranges lore))],
+                    [PatElemT (Lore.LetBound (Ranges lore))])
 mkPatternRanges pat e =
-  zipWith addRanges (patternElements pat) ranges'
+  (map (`addRanges` unknownRange) $ patternContextElements pat,
+   zipWith addRanges (patternValueElements pat) ranges)
   where addRanges patElem range =
           let innerlore = patElemLore patElem
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
-        ranges' = replicate (patternSize pat - length ranges) unknownRange ++
-                  ranges
 
 mkBodyRanges :: Lore.Lore lore =>
                 [AST.Binding lore]
              -> Result
              -> BodyRanges
-mkBodyRanges bnds res =
-  map (removeUnknownBounds . subExpRange) $ resultSubExps res
+mkBodyRanges bnds = map $ removeUnknownBounds . subExpRange
   where boundInBnds =
           mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
         removeUnknownBounds (lower,upper) =
           (removeUnknownBound lower,
            removeUnknownBound upper)
         removeUnknownBound (Just bound)
-          | freeNamesIn bound `intersects` boundInBnds = Nothing
-          | otherwise                                  = Just bound
+          | freeIn bound `intersects` boundInBnds = Nothing
+          | otherwise                             = Just bound
         removeUnknownBound Nothing =
           Nothing
 

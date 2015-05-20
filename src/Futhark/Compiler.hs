@@ -24,28 +24,27 @@ import qualified Futhark.Representation.Basic as I
 import qualified Futhark.TypeCheck as I
 
 newFutharkConfig :: FutharkConfig
-newFutharkConfig = FutharkConfig { futharkpipeline = []
-                                 , futharkaction = printAction
-                                 , futharkcheckAliases = True
-                                 , futharkverbose = Nothing
-                                 , futharkboundsCheck = True
+newFutharkConfig = FutharkConfig { futharkPipeline = []
+                                 , futharkCheckAliases = True
+                                 , futharkVerbose = Nothing
+                                 , futharkBoundsCheck = True
+                                 , futharkRealConfiguration = RealAsFloat64
                                  }
 
-runCompilerOnProgram :: FutharkConfig -> FilePath -> IO ()
-runCompilerOnProgram config file = do
+runCompilerOnProgram :: FutharkConfig -> Action -> FilePath -> IO ()
+runCompilerOnProgram config action file = do
   (msgs, res) <- runPipelineOnProgram config file
   hPutStr stderr msgs
   case res of
     Left err -> do
       hPutStrLn stderr $ errorDesc err
-      case (errorState err, futharkverbose config) of
+      case (errorState err, futharkVerbose config) of
         (Just s, Just outfile) ->
           maybe (hPutStr stderr) writeFile outfile $
             I.pretty s ++ "\n"
         _ -> return ()
       exitWith $ ExitFailure 2
     Right s -> do
-      let action = futharkaction config
       when (verbose config) $
         hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
       applyAction action s
@@ -63,9 +62,9 @@ runPipelineOnSource config filename srccode = do
   case res of (Left err, msgs)  -> return (msgs, Left err)
               (Right prog, msgs) -> return (msgs, Right prog)
   where futharkc' = do
-          parsed_prog <- parseSourceProgram filename srccode
+          parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
           ext_prog    <- typeCheckSourceProgram config parsed_prog
-          case internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog of
+          case internaliseProg (futharkBoundsCheck config) $ E.tagProg ext_prog of
             Left err ->
               compileError ("During internalisation:\n" ++ err) Nothing
             Right int_prog -> do
@@ -77,13 +76,13 @@ typeCheck :: (prog -> Either err prog')
           -> FutharkConfig
           -> prog -> Either err prog'
 typeCheck checkProg checkProgNoUniqueness config
-  | futharkcheckAliases config = checkProg
+  | futharkCheckAliases config = checkProg
   | otherwise                  = checkProgNoUniqueness
 
-parseSourceProgram :: FilePath -> String
+parseSourceProgram :: RealConfiguration -> FilePath -> String
                    -> FutharkM E.UncheckedProg
-parseSourceProgram filename file_contents =
-  case parseFuthark filename file_contents of
+parseSourceProgram rconf filename file_contents =
+  case parseFuthark rconf filename file_contents of
     Left err   -> compileError (show err) Nothing
     Right prog -> return prog
 
@@ -102,11 +101,11 @@ typeCheckInternalProgram config prog =
                 Just $ Basic prog
     Right () -> return ()
 
-interpretAction' :: Action
-interpretAction' = interpretAction parseValues'
+interpretAction' :: RealConfiguration -> Action
+interpretAction' rconf = interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
-          liftM concat $ mapM internalise =<< parseValues path s
+          liftM concat $ mapM internalise =<< parseValues rconf path s
         internalise v =
           maybe (Left $ ParseError $ "Invalid input value: " ++ I.pretty v) Right $
           internaliseValue v

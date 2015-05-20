@@ -9,7 +9,10 @@ module Futhark.Internalise.Monad
   , InternaliseEnv(..)
   , FunBinding (..)
   , lookupFunction
-  , withNonuniqueReplacements
+  , bindingIdentTypes
+  , bindingParamTypes
+    -- * Convenient reexports
+  , module Futhark.Tools
   )
   where
 
@@ -26,13 +29,14 @@ import Data.List
 import qualified Futhark.Representation.External as E
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Tools
+import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
+import qualified Futhark.Tools as F
 
 import Prelude hiding (mapM)
 
 data FunBinding = FunBinding
                   { internalFun :: ([VName], [Type],
-                                    [SubExp] -> Maybe ExtRetType)
+                                    [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.DeclType, [E.DeclType])
                   }
 
@@ -42,7 +46,7 @@ type FunTable = HM.HashMap Name FunBinding
 
 -- | A mapping from external variable names to the corresponding
 -- internalised identifiers.
-type VarSubstitutions = HM.HashMap VName [Ident]
+type VarSubstitutions = HM.HashMap VName [VName]
 
 data InternaliseEnv = InternaliseEnv {
     envSubsts :: VarSubstitutions
@@ -58,7 +62,7 @@ initialFtable = HM.map addBuiltin builtInFunctions
            const $ Just $ ExtRetType [Basic t])
           (E.Basic t, map E.Basic paramts)
 
-newtype InternaliseM  a = InternaliseM (WriterT (DL.DList Binding)
+newtype InternaliseM  a = InternaliseM (BinderT Basic
                                         (ReaderT InternaliseEnv
                                          (StateT VNameSource
                                           (Except String)))
@@ -73,17 +77,19 @@ instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
+instance HasTypeEnv InternaliseM where
+  askTypeEnv = InternaliseM askTypeEnv
+
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = Basic
-  mkLetM pat e = return $ mkLet pat' e
-    where pat' = [ (ident, bindage)
-                 | PatElem ident bindage _ <- patternElements pat
-                 ]
-  mkBodyM bnds res = return $ mkBody bnds res
-  mkLetNamesM = mkLetNames
+  mkLetM pat e = InternaliseM $ mkLetM pat e
+  mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
+  mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
 
-  addBinding      = addBindingWriter
-  collectBindings = collectBindingsWriter
+  addBinding =
+    InternaliseM . addBinding
+  collectBindings (InternaliseM m) =
+    InternaliseM $ collectBindings m
 
 runInternaliseM :: MonadFreshNames m =>
                    Bool -> FunTable -> InternaliseM a
@@ -93,7 +99,7 @@ runInternaliseM boundsCheck ftable (InternaliseM m) =
   let onError e                 = (Left e, src)
       onSuccess ((prog,_),src') = (Right prog, src')
   in either onError onSuccess $ runExcept $
-     runStateT (runReaderT (runWriterT m) newEnv) src
+     runStateT (runReaderT (runBinderT m mempty) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = initialFtable `HM.union` ftable
@@ -106,7 +112,11 @@ lookupFunction fname = do
   case fun of Nothing   -> fail $ "Function '" ++ nameToString fname ++ "' not found"
               Just fun' -> return fun'
 
-withNonuniqueReplacements :: InternaliseM a -> InternaliseM a
-withNonuniqueReplacements = local $ \env ->
-  env { envSubsts = HM.map (map makeNonunique) $ envSubsts env }
-  where makeNonunique = (`setIdentUniqueness` Nonunique)
+bindingIdentTypes :: [Ident] -> InternaliseM a
+                  -> InternaliseM a
+bindingIdentTypes idents (InternaliseM m) =
+  InternaliseM $ F.bindingIdentTypes idents m
+
+bindingParamTypes :: [LParam] -> InternaliseM a
+                  -> InternaliseM a
+bindingParamTypes = bindingIdentTypes . map paramIdent

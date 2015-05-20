@@ -14,8 +14,14 @@ module Futhark.Externalise
   )
   where
 
+import Control.Applicative
+import Control.Arrow ((&&&))
+import Control.Monad.Reader
 import Data.Loc
 import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
@@ -31,53 +37,80 @@ externaliseFunction :: I.FunDec -> E.FunDec
 externaliseFunction (FunDec fname ret params body) =
   (fname,
    externaliseDeclTypes $ retTypeValues ret,
-   map (externaliseParam . fparamIdent) params,
-   externaliseBody body,
+   map externaliseParam params,
+   runExternaliseM $ bindFParams params $ externaliseBody body,
    noLoc)
 
-externaliseBody :: I.Body -> E.Exp
-externaliseBody (I.Body _ [] (I.Result es)) =
+type ExternaliseM = Reader TypeEnv
+
+runExternaliseM :: ExternaliseM a -> a
+runExternaliseM = flip runReader HM.empty
+
+bindFParams :: [I.FParam] -> ExternaliseM a
+            -> ExternaliseM a
+bindFParams = bindIdents . map paramIdent
+
+bindPattern :: I.Pattern -> ExternaliseM a
+            -> ExternaliseM a
+bindPattern = bindIdents . patternIdents
+
+bindIdents :: [I.Ident] -> ExternaliseM a
+            -> ExternaliseM a
+bindIdents = local . HM.union . HM.fromList . map (I.identName &&& I.identType)
+
+externaliseBody :: I.Body -> ExternaliseM E.Exp
+externaliseBody (I.Body _ [] es) =
   externaliseSubExps es
 externaliseBody (I.Body lore (I.Let pat _ e:bnds) res) =
-  E.LetPat (externalisePat pat) (externaliseExp e)
-           (externaliseBody $ I.Body lore bnds res) noLoc
+  E.LetPat (externalisePat pat) <$>
+  externaliseExp e <*>
+  bindPattern pat (externaliseBody $ I.Body lore bnds res) <*>
+  pure noLoc
 
-externaliseExp :: I.Exp -> E.Exp
+externaliseExp :: I.Exp -> ExternaliseM E.Exp
 externaliseExp (I.Apply fname args ts) =
-  E.Apply fname (map externaliseArg args)
-  (externaliseTypes $ retTypeValues ts) noLoc
-    where externaliseArg (e,d) =
-            (externaliseSubExp e,
-             externaliseDiet d)
+  E.Apply fname <$>
+  mapM externaliseArg args <*>
+  pure (externaliseTypes $ retTypeValues ts) <*>
+  pure noLoc
+    where externaliseArg (e,d) = do
+            e' <- externaliseSubExp e
+            return (e', externaliseDiet d)
 externaliseExp (I.If ce tb fb t) =
-  E.If (externaliseSubExp ce)
-       (externaliseBody tb)
-       (externaliseBody fb)
-       (externaliseTypes t)
-       noLoc
+  E.If <$>
+  externaliseSubExp ce <*>
+  externaliseBody tb <*>
+  externaliseBody fb <*>
+  pure (externaliseTypes t) <*>
+  pure noLoc
 externaliseExp (PrimOp op) =
   externalisePrimOp op
 externaliseExp (LoopOp op) =
   externaliseLoopOp op
 
-externalisePrimOp :: I.PrimOp -> E.Exp
+externalisePrimOp :: I.PrimOp -> ExternaliseM E.Exp
 externalisePrimOp (I.SubExp se) = externaliseSubExp se
 externalisePrimOp (I.ArrayLit [] et) =
-  E.Copy (E.Literal (E.arrayVal [] $ E.toDecl $ externaliseType et) noLoc) noLoc
+  pure $ E.Copy (E.Literal (E.arrayVal [] $ E.toDecl $ externaliseType et) noLoc) noLoc
 externalisePrimOp (I.ArrayLit es et) =
-  E.ArrayLit (map externaliseSubExp es) (externaliseType et) noLoc
+  E.ArrayLit <$>
+  mapM externaliseSubExp es <*>
+  pure (externaliseType et) <*>
+  pure noLoc
 externalisePrimOp (I.BinOp bop x y t) =
-  E.BinOp (externaliseBinOp bop)
-  (externaliseSubExp x) (externaliseSubExp y)
-  (E.Basic t) noLoc
+  E.BinOp (externaliseBinOp bop) <$>
+  externaliseSubExp x <*>
+  externaliseSubExp y <*>
+  pure (E.Basic t) <*>
+  pure noLoc
 externalisePrimOp (I.Not x) =
-  E.UnOp E.Not (externaliseSubExp x) noLoc
+  E.UnOp E.Not <$> externaliseSubExp x <*> pure noLoc
 externalisePrimOp (I.Negate x) =
-  E.UnOp E.Negate (externaliseSubExp x) noLoc
+  E.UnOp E.Negate <$> externaliseSubExp x <*> pure noLoc
 externalisePrimOp (I.Index _ src idxs) =
-  E.Index (externaliseIdent src)
-          (map externaliseSubExp idxs)
-          noLoc
+  E.Index <$> externaliseVar src <*>
+  mapM externaliseSubExp idxs <*>
+  pure noLoc
   {-
 externalisePrimOp (I.Update cs src idxs ve) =
   E.LetWith (externaliseCerts cs) (externaliseIdent src) (externaliseIdent src)
@@ -93,81 +126,91 @@ externalisePrimOp (I.Split cs sizeexps ae) =
           noLoc
 -}
 externalisePrimOp (I.Concat _ x ys _) =
-  E.Concat (E.Var $ externaliseIdent x)
-           (map (E.Var . externaliseIdent) ys)
-           noLoc
+  E.Concat <$>
+  (E.Var <$> externaliseVar x) <*>
+  mapM (liftM E.Var . externaliseVar) ys <*>
+  pure noLoc
 externalisePrimOp (I.Copy e) =
-  E.Copy (externaliseSubExp e) noLoc
+  E.Copy <$> (E.Var <$> externaliseVar e) <*> pure noLoc
 externalisePrimOp (I.Iota ne) =
-  E.Iota (externaliseSubExp ne) noLoc
+  E.Iota <$> externaliseSubExp ne <*> pure noLoc
 externalisePrimOp (I.Replicate ne ve) =
-  E.Replicate (externaliseSubExp ne)
-              (externaliseSubExp ve)
-              noLoc
+  E.Replicate <$>
+  externaliseSubExp ne <*>
+  externaliseSubExp ve <*>
+  pure noLoc
 externalisePrimOp (I.Reshape _ shape e) =
-  E.Reshape (map externaliseSubExp shape)
-            (E.Var $ externaliseIdent e)
-            noLoc
+  E.Reshape <$>
+  mapM externaliseSubExp shape <*>
+  (E.Var <$> externaliseVar e) <*>
+  pure noLoc
 externalisePrimOp (I.Rearrange _ perm e) =
-  E.Rearrange perm
-              (E.Var $ externaliseIdent e)
-              noLoc
+  E.Rearrange perm <$> (E.Var <$> externaliseVar e) <*> pure noLoc
 
-externaliseLoopOp :: I.LoopOp -> E.Exp
+externaliseLoopOp :: I.LoopOp -> ExternaliseM E.Exp
 
 externaliseLoopOp (I.DoLoop respat merge form loopbody) =
-  E.DoLoop (externaliseBinders (map fparamIdent mergepat))
-           (externaliseSubExps mergeexp)
-           form'
-           (externaliseBody loopbody)
-           (E.TupLit (map (E.Var . externaliseIdent) respat) noLoc) noLoc
+  bindFParams mergepat $
+  E.DoLoop (externaliseBinders (map paramIdent mergepat)) <$>
+  externaliseSubExps mergeexp <*>
+  form' <*>
+  externaliseBody loopbody <*>
+  (E.TupLit <$> mapM (liftM E.Var . externaliseVar) respat <*> pure noLoc) <*>
+  pure noLoc
   where (mergepat, mergeexp) = unzip merge
         form' = case form of
           I.ForLoop i bound ->
-            E.ForLoop (externaliseIdent i) (externaliseSubExp bound)
+            E.ForLoop (externaliseIdent $ I.Ident i $ I.Basic Int) <$>
+            externaliseSubExp bound
           I.WhileLoop cond ->
-            E.WhileLoop $ E.Var $ externaliseIdent cond
+            E.WhileLoop <$> E.Var <$> externaliseVar cond
 externaliseLoopOp (I.Map _ fun es) =
-  maybeUnzip $ E.Map (externaliseMapLambda fun)
-               (externaliseSOACArrayArgs es)
-               noLoc
+  maybeUnzip <$>
+  (E.Map <$>
+   externaliseMapLambda fun <*>
+   externaliseSOACArrayArgs es <*>
+   pure noLoc)
 externaliseLoopOp (I.Reduce _ fun inputs) =
-  E.Reduce (externaliseFoldLambda fun $ length inputs)
-           (maybeTupLit (map externaliseSubExp accinputs))
-           (externaliseSOACArrayArgs arrinputs)
-           noLoc
+  E.Reduce <$>
+  externaliseFoldLambda fun (length inputs) <*>
+  (maybeTupLit <$> mapM externaliseSubExp accinputs) <*>
+  externaliseSOACArrayArgs arrinputs <*>
+  pure noLoc
   where (accinputs, arrinputs) = unzip inputs
 externaliseLoopOp (I.Scan _ fun inputs) =
-  maybeUnzip $ E.Scan (externaliseFoldLambda fun $ length inputs)
-               (maybeTupLit (map externaliseSubExp accinputs))
-               (externaliseSOACArrayArgs arrinputs)
-               noLoc
+  maybeUnzip <$>
+  (E.Scan <$>
+   externaliseFoldLambda fun (length inputs) <*>
+   (maybeTupLit <$> mapM externaliseSubExp accinputs) <*>
+   externaliseSOACArrayArgs arrinputs <*>
+   pure noLoc)
   where (accinputs, arrinputs) = unzip inputs
 externaliseLoopOp (I.Redomap _ outerfun innerfun vs as) =
-  E.Redomap (externaliseFoldLambda outerfun $ length vs)
-            (externaliseFoldLambda innerfun $ length vs)
-            (maybeTupLit (map externaliseSubExp vs))
-            (externaliseSOACArrayArgs as)
-            noLoc
+  E.Redomap <$>
+  externaliseFoldLambda outerfun (length vs) <*>
+  externaliseFoldLambda innerfun (length vs) <*>
+  (maybeTupLit <$> mapM externaliseSubExp vs) <*>
+  externaliseSOACArrayArgs as <*>
+  pure noLoc
 
-externaliseMapLambda :: I.Lambda -> E.Lambda
+externaliseMapLambda :: I.Lambda -> ExternaliseM E.Lambda
 externaliseMapLambda (Lambda params body ret) =
-  E.AnonymFun params'
-              (wrap $ externaliseBody body)
-              (externaliseDeclTypes ret)
-              noLoc
+  E.AnonymFun params' <$>
+  (wrap <$> externaliseBody body) <*>
+  pure (externaliseDeclTypes ret) <*>
+  pure noLoc
   where (params', wrap) =
           let ps = map externaliseParam params
           in case makeTupleParam ps of
                Nothing     -> (ps, id)
                Just (p, f) -> ([p], f)
 
-externaliseFoldLambda :: I.Lambda -> Int -> E.Lambda
+externaliseFoldLambda :: I.Lambda -> Int -> ExternaliseM E.Lambda
 externaliseFoldLambda (Lambda params body ret) n =
-  E.AnonymFun (accparams'++arrparams')
-              (wraparr $ wrapacc $ externaliseBody body)
-              (externaliseDeclTypes ret)
-              noLoc
+  E.AnonymFun (accparams'++arrparams') <$>
+  (wraparr <$> wrapacc <$> externaliseBody body) <*>
+  pure (externaliseDeclTypes ret) <*>
+  pure noLoc
   where (accparams, arrparams) = splitAt n $ map externaliseParam params
         (accparams', wrapacc) = case makeTupleParam accparams of
                                   Nothing     -> (accparams, id)
@@ -247,28 +290,34 @@ externaliseType (I.Basic t) = E.Basic t
 externaliseType (I.Array et shape u) =
   E.Array $ E.BasicArray et (E.Rank (I.shapeRank shape)) u mempty
 
-externaliseSOACArrayArgs :: [I.Ident] -> E.Exp
+externaliseSOACArrayArgs :: [I.VName] -> ExternaliseM E.Exp
 externaliseSOACArrayArgs [e] = externaliseSubExp $ I.Var e
-externaliseSOACArrayArgs es  =
-  Zip [ (e, E.typeOf e) | e <- map (externaliseSubExp . I.Var) es ] noLoc
+externaliseSOACArrayArgs es  = do
+  es' <- mapM (externaliseSubExp . I.Var) es
+  return $ Zip [ (e, E.typeOf e) | e <- es' ] noLoc
 
-externaliseSubExps :: [I.SubExp] -> E.Exp
+externaliseSubExps :: [I.SubExp] -> ExternaliseM E.Exp
 externaliseSubExps [e] = externaliseSubExp e
-externaliseSubExps es  = E.TupLit (map externaliseSubExp es) noLoc
+externaliseSubExps es  = E.TupLit <$> mapM externaliseSubExp es <*> pure noLoc
 
-externaliseSubExp :: I.SubExp -> E.Exp
+externaliseSubExp :: I.SubExp -> ExternaliseM E.Exp
 externaliseSubExp (I.Var v) =
-  E.Var $ externaliseIdent v
+  E.Var <$> externaliseVar v
 externaliseSubExp (I.Constant v) =
-  E.Literal (E.BasicVal v) noLoc
+  return $ E.Literal (E.BasicVal v) noLoc
 
-externaliseParam :: I.Param -> E.Parameter
-externaliseParam (I.Ident name t) =
+externaliseParam :: I.ParamT attr -> E.Parameter
+externaliseParam (I.Param (I.Ident name t) _) =
   E.Ident name (externaliseDeclType t) noLoc
 
 externaliseIdent :: I.Ident -> E.Ident
 externaliseIdent (I.Ident name t) =
   E.Ident name (externaliseType t) noLoc
+
+externaliseVar :: I.VName -> ExternaliseM E.Ident
+externaliseVar name = do
+  t <- lookupType name
+  return $ E.Ident name (externaliseType t) noLoc
 
 maybeUnzip :: E.Exp -> E.Exp
 maybeUnzip e

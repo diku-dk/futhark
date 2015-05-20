@@ -1,3 +1,9 @@
+-- | Alias analysis of a full Futhark program.  Takes as input a
+-- program with an arbitrary lore and produces one with aliases.  This
+-- module does not implement the aliasing logic itself, and derives
+-- its information from definitions in
+-- "Futhark.Representation.AST.Attributes.Aliases" and
+-- "Futhark.Representation.Aliases".
 module Futhark.Analysis.Alias
        ( aliasAnalysis
        )
@@ -7,6 +13,7 @@ import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Syntax as In
 import qualified Futhark.Representation.Aliases as Out
 
+-- | Perform alias analysis on a Futhark program.
 aliasAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
@@ -51,13 +58,18 @@ analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
   Out.LoopOp $
   Out.Stream cs acc arr
    (analyseExtLambda lam)
+analyseExp (Out.SegOp (In.SegReduce cs lam input descp)) =
+  Out.SegOp $
+  Out.SegReduce cs (analyseLambda lam) input descp
+analyseExp (Out.SegOp (In.SegScan cs st lam input descp)) =
+  Out.SegOp $
+  Out.SegScan cs st (analyseLambda lam) input descp
 analyseExp e = Out.mapExp analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return
                      , Out.mapOnCertificates = return
-                     , Out.mapOnIdent = return
+                     , Out.mapOnVName = return
                      , Out.mapOnBody = return . analyseBody
-                     , Out.mapOnBinding = return . analyseBinding
                      , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
                      , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
                      , Out.mapOnRetType = return
@@ -67,8 +79,12 @@ analyseExp e = Out.mapExp analyse e
 analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore
 analyseLambda lam =
   let body = analyseBody $ In.lambdaBody lam
-  in lam { Out.lambdaBody = body }
+  in lam { Out.lambdaBody = body
+         , Out.lambdaParams = In.lambdaParams lam
+         }
 analyseExtLambda :: Lore lore => In.ExtLambda lore -> Out.ExtLambda lore
 analyseExtLambda lam =
   let body = analyseBody $ In.extLambdaBody lam
-  in lam { Out.extLambdaBody = body }
+  in lam { Out.extLambdaBody = body
+         , Out.extLambdaParams = In.extLambdaParams lam
+         }

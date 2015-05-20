@@ -16,6 +16,9 @@ module Futhark.Passes
   , inPlaceLowering
   , commonSubexpressionElimination
   , flattening
+  , doubleBuffer
+  , sequentialiseKernels
+  , standardPipeline
   )
 where
 
@@ -35,6 +38,8 @@ import qualified Futhark.ExplicitAllocations
 import qualified Futhark.Optimise.InPlaceLowering
 import qualified Futhark.Optimise.CSE
 import qualified Futhark.Flattening
+import qualified Futhark.Optimise.DoubleBuffer
+import qualified Futhark.KernelSequentialisation
 
 fotransform :: Pass
 fotransform = unfailableBasicPass "first-order transform"
@@ -49,11 +54,11 @@ eotransform = polyPass "enabling optimations" op
   where op (Basic prog)          =
           canFail "" (Just $ Basic prog) $
           Basic <$>
-          simpleOpts bindableSimpleOps basicRules prog
+          simpleOptProg bindableSimpleOps basicRules prog
         op (ExplicitMemory prog) =
           canFail "" (Just $ ExplicitMemory prog) $
           ExplicitMemory <$>
-          simpleOpts Futhark.ExplicitAllocations.simplifiable standardRules prog
+          simpleOptProg Futhark.ExplicitAllocations.simplifiable standardRules prog
 
 hotransform :: Pass
 hotransform = basicPass "higher-order optimisations"
@@ -96,3 +101,24 @@ commonSubexpressionElimination =
 flattening :: Pass
 flattening = basicPass "Flattening"
              Futhark.Flattening.flattenProg
+
+doubleBuffer :: Pass
+doubleBuffer = unfailableExplicitMemoryPass "double buffering"
+               Futhark.Optimise.DoubleBuffer.optimiseProg
+
+sequentialiseKernels :: Pass
+sequentialiseKernels = unfailableBasicPass "sequentialise kernels"
+                       Futhark.KernelSequentialisation.sequentialiseKernels
+
+standardPipeline :: [Pass]
+standardPipeline =
+  [ uttransform
+  , eotransform
+  , inlinetransform
+  , commonSubexpressionElimination
+  , eotransform
+  , hotransform
+  , commonSubexpressionElimination
+  , eotransform
+  , removeDeadFunctions
+  ]

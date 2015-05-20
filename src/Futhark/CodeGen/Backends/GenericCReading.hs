@@ -21,6 +21,8 @@ import qualified Language.C.Quote.C as C
 -- int read_char(void* dest)
 --
 -- int read_double(void* dest)
+--
+-- int read_float(void* dest)
 -- @
 --
 readerFunctions :: [C.Definition]
@@ -213,6 +215,34 @@ readerFunctions =
       skipspaces();
       if (scanf("%lf", (double*)dest) == 1) {
         return 0;
+      } else {
+        return 1;
+      }
+    }
+
+    int read_float(void* dest) {
+      skipspaces();
+      if (scanf("%f", (float*)dest) == 1) {
+        return 0;
+      } else {
+        return 1;
+      }
+    }
+
+    int read_bool(void* dest) {
+      /* This is a monstrous hack.  Maybe we should get a proper lexer in here. */
+      char b[4];
+      skipspaces();
+      if (scanf("%4c", b) == 1) {
+        if (strncmp(b, "True", 4) == 0) {
+          *(int*)dest = 1;
+          return 0;
+        } else if (strncmp(b, "Fals", 4) == 0 && getchar() == 'e') {
+          *(int*)dest = 0;
+          return 0;
+        } else {
+          return 1;
+        }
       } else {
         return 1;
       }

@@ -1,6 +1,6 @@
 {-# Language FlexibleInstances, FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Aliases
-       ( identAliases
+       ( vnameAliases
        , subExpAliases
        , primOpAliases
        , loopOpAliases
@@ -26,23 +26,22 @@ class Lore lore => Aliased lore where
   consumedInBody :: Body lore -> Names
   patternAliases :: Pattern lore -> [Names]
 
-identAliases :: Ident -> Names
-identAliases ident
-  | Basic _ <- identType ident = mempty
-  | otherwise = HS.singleton $ identName ident
+vnameAliases :: VName -> Names
+vnameAliases = HS.singleton
 
 subExpAliases :: SubExp -> Names
 subExpAliases (Constant {}) = mempty
-subExpAliases (Var v)       = identAliases v
+subExpAliases (Var v)       = vnameAliases v
 
 primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
-primOpAliases (ArrayLit es _) = map subExpAliases es
+primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
 primOpAliases (BinOp {}) = [mempty]
 primOpAliases (Not {}) = [mempty]
+primOpAliases (Complement {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
 primOpAliases (Index _ ident _) =
-  [identAliases ident]
+  [vnameAliases ident]
 primOpAliases (Iota {}) =
   [mempty]
 primOpAliases (Replicate _ e) =
@@ -50,13 +49,13 @@ primOpAliases (Replicate _ e) =
 primOpAliases (Scratch {}) =
   [mempty]
 primOpAliases (Reshape _ _ e) =
-  [identAliases e]
+  [vnameAliases e]
 primOpAliases (Rearrange _ _ e) =
-  [identAliases e]
+  [vnameAliases e]
 primOpAliases (Split _ sizeexps e) =
-  replicate (length sizeexps) (identAliases e)
+  replicate (length sizeexps) (vnameAliases e)
 primOpAliases (Concat _ x ys _) =
-  [identAliases x <> mconcat (map identAliases ys)]
+  [vnameAliases x <> mconcat (map vnameAliases ys)]
 primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =
@@ -64,24 +63,30 @@ primOpAliases (Assert {}) =
 primOpAliases (Alloc _) =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
-  replicate n mempty ++ [identAliases arr]
+  replicate n mempty ++ map vnameAliases arr
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
-  zip (map ((`elem` res) . fparamIdent . fst) merge) (bodyAliases loopbody)
+  zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
 loopOpAliases (Map _ f _) =
   bodyAliases $ lambdaBody f
 loopOpAliases (Reduce _ f _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Scan _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Redomap _ outerfun _ _ _) =
-  map (const mempty) $ lambdaReturnType outerfun
+loopOpAliases (Redomap _ _ innerfun _ _) =
+  map (const mempty) $ lambdaReturnType innerfun
 loopOpAliases (Stream _ _ _ lam) =
   bodyAliases $ extLambdaBody lam
 loopOpAliases (ConcatMap {}) =
   [mempty]
+
+segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
+segOpAliases (SegReduce _ f _ _) =
+  map (const mempty) $ lambdaReturnType f
+segOpAliases (SegScan _ _ f _ _) =
+  map (const mempty) $ lambdaReturnType f
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
@@ -100,6 +105,7 @@ aliasesOf (If _ tb fb _) =
   (bodyAliases fb, consumedInBody fb)
 aliasesOf (PrimOp op) = primOpAliases op
 aliasesOf (LoopOp op) = loopOpAliases op
+aliasesOf (SegOp op) = segOpAliases op
 aliasesOf (Apply _ args t) =
   funcallAliases args $ retTypeValues t
 
@@ -130,12 +136,12 @@ consumedInExp pat e =
         consumedInExp' (LoopOp (DoLoop _ merge _ _)) =
           consumedInPattern pat <>
           mconcat (map (subExpAliases . snd) $
-                   filter (unique . fparamType . fst) merge)
+                   filter (unique . paramType . fst) merge)
         consumedInExp' _ = mempty
 
 consumedInPattern :: Pattern lore -> Names
 consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
-           patternElements pat)
+           patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
-        consumedInBindage (BindInPlace _ src _) = identAliases src
+        consumedInBindage (BindInPlace _ src _) = vnameAliases src

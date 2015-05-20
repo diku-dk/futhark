@@ -1,13 +1,14 @@
 {
 {-# OPTIONS_GHC -w #-}
+-- | The Futhark lexer.  Takes a string, produces a list of tokens with position information.
 module Language.Futhark.Parser.Lexer
   ( Token(..)
   , alexScanTokens
   , L(..)
-  , unLoc
   ) where
 
-import Data.Loc hiding (L, unLoc)
+import Data.Loc hiding (L)
+import Data.Int (Int32)
 
 import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser.Tokens
@@ -35,7 +36,7 @@ tokens :-
   ">="                     { const GEQ }
   "+"                      { const PLUS }
   "-"                      { const MINUS }
-  "~"                      { const NEGATE }
+  "~"                      { const TILDE }
   "*"                      { const TIMES }
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
@@ -55,7 +56,8 @@ tokens :-
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
   "!"                      { const BANG }
-  [0-9]+                   { INTLIT . readInt }
+  0[xX][0-9a-fA-F]*        { INTLIT . readInt32 }
+  [0-9]+                   { INTLIT . readInt32 }
   (([0-9]+("."[0-9]+)?))
     ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
   [a-zA-Z] [a-zA-Z0-9_']* { keyword }
@@ -84,7 +86,6 @@ keyword s =
     "for"          -> FOR
     "do"           -> DO
     "op"           -> OP
-    "not"          -> NOT
     "True"         -> TRUE
     "False"        -> FALSE
     "Checked"      -> CHECKED
@@ -167,6 +168,10 @@ utf8Encode = map fromIntegral . go . ord
                         , 0x80 + oc .&. 0x3f
                         ]
 
+-- | Given a string, returns either a lexer error, or a finite stream
+-- of tokens, each with embedded position information.  The
+-- 'FilePath' is used solely for error messages and the position
+-- information.
 alexScanTokens :: FilePath -> String -> Either String [L Token]
 alexScanTokens file str = go (alexStartPos,'\n',[],str)
   where go inp@(pos,_,_,str) =
@@ -185,9 +190,10 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
 readReal :: String -> Double
 readReal = read
 
-readInt :: String -> Int
-readInt = read
+readInt32 :: String -> Int32
+readInt32 = read
 
+-- | A value tagged with a source location.
 data L a = L SrcLoc a
 
 instance Eq a => Eq (L a) where
@@ -196,6 +202,4 @@ instance Eq a => Eq (L a) where
 instance Located (L a) where
   locOf (L (SrcLoc loc) _) = loc
 
-unLoc :: L a -> a
-unLoc (L _ x) = x
 }

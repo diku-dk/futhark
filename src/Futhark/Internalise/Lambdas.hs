@@ -11,14 +11,12 @@ module Futhark.Internalise.Lambdas
 
 import Control.Applicative
 import Control.Monad
-
 import Data.List
 import Data.Loc
 
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
 import Futhark.MonadFreshNames
-import Futhark.Tools
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -27,22 +25,24 @@ import Prelude hiding (mapM)
 
 -- | A function for internalising lambdas.
 type InternaliseLambda =
-  E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.Param], I.Body, [I.ExtType])
+  E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 
 internaliseMapLambda :: InternaliseLambda
                      -> E.Lambda
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
 internaliseMapLambda internaliseLambda lam args = do
-  let argtypes = map I.subExpType args
-      rowtypes = map I.rowType argtypes
+  argtypes <- mapM I.subExpType args
+  let rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda lam $ Just rowtypes
   (rettype', inner_shapes) <- instantiateShapes' rettype
   let outer_shape = arraysSize 0 argtypes
-      shape_body = shapeBody (map I.identName inner_shapes) rettype' body
+  shape_body <- bindingParamTypes params $
+                shapeBody (map I.identName inner_shapes) rettype' body
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
-  body' <- ensureResultShape (srclocOf lam) rettype' body
+  body' <- bindingParamTypes params $
+           ensureResultShape (srclocOf lam) rettype' body
   return $ I.Lambda params body' rettype'
 
 internaliseConcatMapLambda :: InternaliseLambda
@@ -56,7 +56,7 @@ internaliseConcatMapLambda internaliseLambda lam = do
     _ ->
       fail "concatMap lambda does not return a single-dimensional array"
 
-makeShapeFun :: [I.Param] -> I.Body -> Int
+makeShapeFun :: [I.LParam] -> I.Body -> Int
              -> InternaliseM I.Lambda
 makeShapeFun params body n = do
   -- Some of 'params' may be unique, which means that the shape slice
@@ -73,7 +73,7 @@ bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
 bindMapShapes inner_shapes sizefun args outer_shape
   | null $ I.lambdaReturnType sizefun = return ()
   | otherwise =
-    letBind_ (basicPattern' inner_shapes) =<<
+    letBind_ (basicPattern' [] inner_shapes) =<<
     eIf isempty emptybranch nonemptybranch
   where zero = intconst 0
         isempty = eBinOp I.Equal
@@ -101,7 +101,8 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- The result of the body must have the exact same shape as the
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
-  body' <- ensureResultShape (srclocOf lam) rettype' body
+  body' <- bindingParamTypes params $
+           ensureResultShape (srclocOf lam) rettype' body
 
   return $ I.Lambda params body' rettype'
 
@@ -113,9 +114,9 @@ internaliseRedomapInnerLambda ::
                          -> [I.SubExp]
                          -> InternaliseM I.Lambda
 internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
-  let arrtypes = map I.subExpType arr_args
-      rowtypes = map I.rowType    arrtypes
-      acctypes = map I.subExpType nes
+  arrtypes <- mapM I.subExpType arr_args
+  acctypes <- mapM I.subExpType nes
+  let rowtypes = map I.rowType arrtypes
   --
   (params, body, rettype) <- internaliseLambda lam $ Just $
                              acctypes ++ rowtypes
@@ -130,15 +131,16 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   (rettypearr', inner_shapes) <- instantiateShapes' res_el_tps
   let outer_shape = arraysSize 0 arrtypes
       acc_params  = take acc_len params
-      map_bodyres = I.Result $ drop acc_len $ I.resultSubExps $ I.bodyResult body
+      map_bodyres = drop acc_len $ I.bodyResult body
       acc_bindings= map (\(ac_var,ac_val) ->
-                            mkLet' [ac_var] (PrimOp $ SubExp ac_val)
+                            mkLet' [] [paramIdent ac_var] (PrimOp $ SubExp ac_val)
                         ) (zip acc_params nes)
 
       map_bindings= acc_bindings ++ bodyBindings body
       map_lore    = bodyLore body
       map_body = I.Body map_lore map_bindings map_bodyres
-      shape_body = shapeBody (map I.identName inner_shapes) rettypearr' map_body
+  shape_body <- bindingParamTypes params $
+                shapeBody (map I.identName inner_shapes) rettypearr' map_body
   shapefun <- makeShapeFun (drop acc_len params) shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun arr_args outer_shape
   --
@@ -150,7 +152,8 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   -- an assertion and reshape().
   --
   -- finally, place assertions and return result
-  body' <- ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
+  body' <- bindingParamTypes params $
+           ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
   return $ I.Lambda params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
@@ -159,7 +162,7 @@ internaliseStreamLambda :: InternaliseLambda
                         -> [I.Type]
                         -> InternaliseM I.ExtLambda
 internaliseStreamLambda internaliseLambda lam accs arrtypes = do
-  let acctypes = map I.subExpType accs
+  acctypes <- mapM I.subExpType accs
   (params, body, rettype) <- internaliseLambda lam $ Just $
                              acctypes++arrtypes
   -- split rettype into (i) accummulator types && (ii) result-array-elem types
@@ -180,25 +183,27 @@ internaliseStreamLambda internaliseLambda lam accs arrtypes = do
   let acctype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
   body' <- insertBindingsM $ do
-                let mkArrType :: (I.Ident, I.ExtType) -> I.Type
-                    mkArrType (x, I.Array btp shp u) =
-                      let dsx    = (I.shapeDims . I.arrayShape . I.identType) x
-                          dsrtpx =  I.extShapeDims shp
+                let mkArrType :: (VName, ExtType) -> InternaliseM I.Type
+                    mkArrType (x, I.Array btp shp u) = do
+                      dsx <- I.shapeDims <$> I.arrayShape <$> I.lookupType x
+                      let dsrtpx =  I.extShapeDims shp
                           resdims= zipWith (\ dx drtpx ->
                                                   case drtpx of
                                                     Ext  _ -> dx
                                                     Free s -> s
                                            ) dsx dsrtpx
-                      in  I.Array btp (I.Shape resdims) u
-                    mkArrType (_, I.Basic btp ) = I.Basic btp
-                    mkArrType (_, I.Mem   se  ) = I.Mem   se
+                      return $ I.Array btp (I.Shape resdims) u
+                    mkArrType (_, I.Basic btp ) =
+                      return $ I.Basic btp
+                    mkArrType (_, I.Mem   se  ) =
+                      return $ I.Mem   se
                 lamres <- bodyBind body
                 let (lamacc_res, lamarr_res) = (take acc_len lamres, drop acc_len lamres)
                     lamarr_idtps = concatMap (\(y,tp) -> case y of
                                                            I.Var ii -> [(ii,tp)]
                                                            _        -> []
                                              ) (zip lamarr_res lam_arr_tps)
-                    arrtype' = map mkArrType lamarr_idtps
+                arrtype' <- mapM mkArrType lamarr_idtps
                 reses1 <- zipWithM assertProperShape acctype' lamacc_res
                 reses2 <- zipWithM assertProperShape arrtype' lamarr_res
                 return $ resultBody $ reses1 ++ reses2
@@ -212,35 +217,35 @@ internalisePartitionLambdas :: InternaliseLambda
                             -> [I.SubExp]
                             -> InternaliseM I.Lambda
 internalisePartitionLambdas internaliseLambda lams args = do
-  let argtypes = map I.subExpType args
-      rowtypes = map I.rowType argtypes
+  argtypes <- mapM I.subExpType args
+  let rowtypes = map I.rowType argtypes
   lams' <- forM lams $ \lam -> do
     (params, body, _) <- internaliseLambda lam $ Just rowtypes
     return (params, body)
   params <- newIdents "partition_param" rowtypes
   body <- mkCombinedLambdaBody params 0 lams'
-  return $ I.Lambda params body [I.Basic Int]
-  where mkCombinedLambdaBody :: [I.Param]
+  return $ I.Lambda (map (`Param` ()) params) body [I.Basic Int]
+  where mkCombinedLambdaBody :: [I.Ident]
                              -> Int
-                             -> [([I.Param], I.Body)]
+                             -> [([I.LParam], I.Body)]
                              -> InternaliseM I.Body
         mkCombinedLambdaBody _      i [] =
           return $ resultBody [intconst i]
         mkCombinedLambdaBody params i ((lam_params,lam_body):lams') =
           case lam_body of
-            Body () bodybnds (Result [boolres]) -> do
+            Body () bodybnds [boolres] -> do
               intres <- newIdent "partition_equivalence_class" $ I.Basic Int
               next_lam_body <-
-                mkCombinedLambdaBody lam_params (i+1) lams'
+                mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
               let parambnds =
-                    [ mkLet' [top] $ I.PrimOp $ I.SubExp $ I.Var fromp
+                    [ mkLet' [] [paramIdent top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
-                  branchbnd = mkLet' [intres] $ I.If boolres
+                  branchbnd = mkLet' [] [intres] $ I.If boolres
                               (resultBody [intconst i])
                               next_lam_body
                               [I.Basic Int]
               return $ mkBody
                 (parambnds++bodybnds++[branchbnd])
-                (Result [I.Var intres])
+                [I.Var $ I.identName intres]
             _ ->
               fail "Partition lambda returns too many values."

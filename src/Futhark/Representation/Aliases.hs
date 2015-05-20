@@ -16,6 +16,7 @@ module Futhark.Representation.Aliases
        , Pattern
        , PrimOp
        , LoopOp
+       , SegOp
        , Exp
        , Lambda
        , ExtLambda
@@ -33,6 +34,7 @@ module Futhark.Representation.Aliases
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(LoopOp)
+       , AST.ExpT(SegOp)
        , AST.FunDecT(FunDec)
          -- * Adding aliases
        , addAliasesToPattern
@@ -63,7 +65,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
@@ -120,6 +122,7 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   type Exp (Aliases lore) = (ConsumedInExp, Lore.Exp lore)
   type Body (Aliases lore) = (BodyAliasing, Lore.Body lore)
   type FParam (Aliases lore) = Lore.FParam lore
+  type LParam (Aliases lore) = Lore.LParam lore
   type RetType (Aliases lore) = Lore.RetType lore
 
   representative =
@@ -138,6 +141,7 @@ instance Ranged lore => Ranged (Aliases lore) where
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
 type LoopOp lore = AST.LoopOp (Aliases lore)
+type SegOp lore = AST.SegOp (Aliases lore)
 type Exp lore = AST.Exp (Aliases lore)
 type Body lore = AST.Body (Aliases lore)
 type Binding lore = AST.Binding (Aliases lore)
@@ -187,6 +191,7 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseLetBoundLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
+                          , rephraseLParamLore = id
                           , rephraseRetType = id
                           }
 
@@ -214,7 +219,7 @@ removePatternAliases = rephrasePattern removeAliases
 addAliasesToPattern :: Lore.Lore lore =>
                        AST.Pattern lore -> Exp lore -> Pattern lore
 addAliasesToPattern pat e =
-  AST.Pattern $ mkPatternAliases pat e
+  uncurry AST.Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: Lore.Lore lore =>
                  Lore.Body lore -> [Binding lore] -> Result -> Body lore
@@ -223,13 +228,14 @@ mkAliasedBody innerlore bnds res =
 
 mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
                     AST.Pattern anylore -> AST.Exp lore
-                 -> [PatElemT (VarAliases, Lore.LetBound anylore)]
+                 -> ([PatElemT (VarAliases, Lore.LetBound anylore)],
+                     [PatElemT (VarAliases, Lore.LetBound anylore)])
 mkPatternAliases pat e =
   -- Some part of the pattern may be the context, which is not
   -- aliased.
   let als = aliasesOf e
-      als' = replicate (patternSize pat - length als) mempty <> als
-  in zipWith annotateBindee (patternElements pat) als'
+  in (map (`annotateBindee` mempty) $ patternContextElements pat,
+      zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
             bindee `setPatElemLore` (Names' names', patElemLore bindee)
           where names' =
@@ -257,7 +263,7 @@ mkBodyAliases bnds res =
       consumed' = HS.filter (not . bound) consumed
   in (map Names' aliases', Names' consumed')
   where delve (aliasmap, consumed) [] =
-          (map (aliasClosure aliasmap . subExpAliases) $ resultSubExps res,
+          (map (aliasClosure aliasmap . subExpAliases) res,
            consumed)
         delve (aliasmap, consumed) (bnd:bnds') =
           let pat = bindingPattern bnd
@@ -280,8 +286,8 @@ mkAliasedLetBinding pat explore e =
   e
 
 instance Bindable lore => Bindable (Aliases lore) where
-  mkLet pat e =
-    let Let pat' explore _ = mkLet pat $ removeExpAliases e
+  mkLet context values e =
+    let Let pat' explore _ = mkLet context values $ removeExpAliases e
     in mkAliasedLetBinding pat' explore e
 
   mkLetNames names e = do

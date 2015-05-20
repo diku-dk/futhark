@@ -24,9 +24,7 @@ module Futhark.Representation.AST.Syntax
   , Value(..)
 
   -- * Abstract syntax tree
-  , IdentBase(..)
-  , Ident
-  , Param
+  , Ident (..)
   , Certificates
   , SubExp(..)
   , Bindage (..)
@@ -35,11 +33,13 @@ module Futhark.Representation.AST.Syntax
   , PatternT (..)
   , Pattern
   , Binding(..)
-  , Result(..)
+  , Result
   , BodyT(..)
   , Body
   , PrimOp (..)
   , LoopOp (..)
+  , SegOp (..)
+  , ScanType(..)
   , BinOp (..)
   , ExpT(..)
   , Exp
@@ -51,8 +51,10 @@ module Futhark.Representation.AST.Syntax
   , Lore.RetType
 
   -- * Definitions
-  , FParamT (..)
+  , ParamT (..)
+  , Param
   , FParam
+  , LParam
   , FunDecT (..)
   , FunDec
   , ProgT(..)
@@ -76,16 +78,18 @@ import Futhark.Representation.AST.Syntax.Core
 type PatElem lore = PatElemT (Lore.LetBound lore)
 
 -- | A pattern is conceptually just a list of names and their types.
-newtype PatternT lore =
-  Pattern { patternElements :: [PatElem lore] }
+data PatternT lore =
+  Pattern { patternContextElements :: [PatElem lore]
+          , patternValueElements   :: [PatElem lore]
+          }
 
 deriving instance Lore lore => Ord (PatternT lore)
 deriving instance Lore lore => Show (PatternT lore)
 deriving instance Lore lore => Eq (PatternT lore)
 
 instance Monoid (PatternT lore) where
-  mempty = Pattern []
-  Pattern l1 `mappend` Pattern l2 = Pattern $ l1 ++ l2
+  mempty = Pattern [] []
+  Pattern cs1 vs1 `mappend` Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 -- | A type alias for namespace control.
 type Pattern = PatternT
@@ -100,11 +104,8 @@ deriving instance Lore lore => Ord (Binding lore)
 deriving instance Lore lore => Show (Binding lore)
 deriving instance Lore lore => Eq (Binding lore)
 
--- | The result of a body - a sequence of subexpressions, possibly
--- predicated on one or more certificates.
-data Result = Result { resultSubExps :: [SubExp]
-                     }
-                   deriving (Eq, Ord, Show)
+-- | The result of a body is a sequence of subexpressions.
+type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
@@ -125,6 +126,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Pow
            | Times
            | Divide
+           | IntDivide -- ^ Rounds towards negative infinity.
            | Mod
            | ShiftR
            | ShiftL
@@ -152,9 +154,10 @@ data PrimOp lore
   | BinOp BinOp SubExp SubExp BasicType
     -- ^ The type is the result type.
 
-  -- Unary Ops: Not for bools and Negate for ints
-  | Not    SubExp -- ^ E.g., @not True == False@.
-  | Negate SubExp -- ^ E.g., @~(~1) = 1@.
+  -- Unary Ops: Not for bools and Negate and Complement for ints
+  | Not SubExp -- ^ E.g., @! True == False@.
+  | Negate SubExp -- ^ E.g., @-(-1) = 1@.
+  | Complement SubExp -- ^ E.g., @~(~1) = 1@.
 
   -- Assertion management.
   | Assert SubExp SrcLoc
@@ -164,26 +167,25 @@ data PrimOp lore
   -- Primitive array operations
 
   | Index Certificates
-          Ident
+          VName
           [SubExp]
 
   -- ^ 3rd arg are (optional) certificates for bounds
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates [SubExp] Ident
+  | Split Certificates [SubExp] VName
   -- ^ 2nd arg is sizes of arrays you back, which is
   -- different from what the external language does.
   -- In the internal langauge,
   -- @a = [1,2,3,4]@
   -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates Ident [Ident] SubExp
+  | Concat Certificates VName [VName] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
-  | Copy SubExp
-  -- ^ Copy the value return by the expression.  This only
-  -- makes a difference in do-loops with merge variables.
+  | Copy VName
+  -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.
   | Iota SubExp
@@ -194,18 +196,19 @@ data PrimOp lore
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
-  | Reshape Certificates [SubExp] Ident
+  | Reshape Certificates [SubExp] VName
    -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
-  | Rearrange Certificates [Int] Ident
+  | Rearrange Certificates [Int] VName
   -- ^ Permute the dimensions of the input array.  The list
   -- of integers is a list of dimensions (0-indexed), which
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Partition Certificates Int Ident Ident
+  | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element
-    -- array.
+    -- arrays.  If no arrays are given, the returned offsets are zero,
+    -- and no arrays are returned.
 
   | Alloc SubExp
     -- ^ Allocate a memory block.  This really should not be an
@@ -213,28 +216,68 @@ data PrimOp lore
   deriving (Eq, Ord, Show)
 
 data LoopOp lore
-  = DoLoop [Ident] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+  = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
     -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
 
-  | Map Certificates (LambdaT lore) [Ident]
+  | Map Certificates (LambdaT lore) [VName]
     -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
     -- 3rd arg is either a tuple of multi-dim arrays
     --   of basic type, or a multi-dim array of basic type.
     -- 4th arg is the input-array row types
 
-  | ConcatMap Certificates (LambdaT lore) [[Ident]]
+  | ConcatMap Certificates (LambdaT lore) [[VName]]
 
-  | Reduce  Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Scan   Certificates (LambdaT lore) [(SubExp, Ident)]
-  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [Ident]
-  | Stream  Certificates [SubExp] [Ident] (ExtLambdaT lore)
+  | Reduce  Certificates (LambdaT lore) [(SubExp, VName)]
+  | Scan   Certificates (LambdaT lore) [(SubExp, VName)]
+  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [VName]
+  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
+
+-- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
+-- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@
+-- Exclusive = @[ ne, ne `op` x_1, ... , ne `op` x_1 ... `op` x_{n-1} ]@
+--
+-- Both versions generate arrays of the same size as @xs@ (this is not
+-- always the semantics).
+--
+-- An easy way to remember which is which, is that inclusive /includes/
+-- the last element in the calculation, whereas the exclusive does not
+data ScanType = ScanInclusive
+              | ScanExclusive
+              deriving(Eq, Ord, Show)
+
+-- | Segmented version of SOACS that use flat array representation.
+-- This means a /single/ flat array for data, and segment descriptors
+-- (integer arrays) for each dimension of the array.
+--
+-- For example the array
+-- @ [ [ [1,2] , [3,4,5] ]
+--   , [ [6]             ]
+--   , []
+--   ]
+-- @
+--
+-- Can be represented as
+-- @ data  = [1,2, 3,4,5, 6    ]
+--   seg_1 = [2,   3,     1,   ]
+--   seg_0 = [2,          1,  0]
+-- @
+data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, VName)] VName
+                  -- ^ @map (\xs -> reduce(op,ne,xs), xss@ can loosely
+                  -- be transformed into
+                  -- @segreduce(op, ne, xss_flat, xss_descpritor)@
+                  --
+                  -- Note that this requires the neutral element to be constant
+                | SegScan Certificates ScanType (LambdaT lore) [(SubExp, VName)] VName
+                  -- ^ Identical to 'Scan', except that the last arg
+                  -- is a segment descriptor.
+                deriving (Eq, Ord, Show)
 
 deriving instance Lore lore => Eq (LoopOp lore)
 deriving instance Lore lore => Show (LoopOp lore)
 deriving instance Lore lore => Ord (LoopOp lore)
 
-data LoopForm = ForLoop Ident SubExp
-              | WhileLoop Ident
+data LoopForm = ForLoop VName SubExp
+              | WhileLoop VName
               deriving (Eq, Show, Ord)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
@@ -246,6 +289,8 @@ data ExpT lore
     -- ^ A simple (non-recursive) operation.
 
   | LoopOp (LoopOp lore)
+
+  | SegOp (SegOp lore)
 
   | Apply  Name [(SubExp, Diet)] (Lore.RetType lore)
 
@@ -260,25 +305,33 @@ type Exp = ExpT
 
 -- | Anonymous function for use in a tuple-SOAC.
 data LambdaT lore =
-  Lambda { lambdaParams     :: [Param]
+  Lambda { lambdaParams     :: [LParam lore]
          , lambdaBody       :: BodyT lore
          , lambdaReturnType :: [Type]
          }
-  deriving (Eq, Ord, Show)
+
+deriving instance Lore lore => Eq (LambdaT lore)
+deriving instance Lore lore => Show (LambdaT lore)
+deriving instance Lore lore => Ord (LambdaT lore)
 
 type Lambda = LambdaT
 
 -- | Anonymous function for use in a tuple-SOAC.
 data ExtLambdaT lore =
-  ExtLambda { extLambdaParams     :: [Param]
+  ExtLambda { extLambdaParams     :: [LParam lore]
             , extLambdaBody       :: BodyT lore
             , extLambdaReturnType :: [ExtType]
             }
-  deriving (Eq, Ord, Show)
+
+deriving instance Lore lore => Eq (ExtLambdaT lore)
+deriving instance Lore lore => Show (ExtLambdaT lore)
+deriving instance Lore lore => Ord (ExtLambdaT lore)
 
 type ExtLambda = ExtLambdaT
 
-type FParam lore = FParamT (Lore.FParam lore)
+type FParam lore = ParamT (Lore.FParam lore)
+
+type LParam lore = ParamT (Lore.LParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name

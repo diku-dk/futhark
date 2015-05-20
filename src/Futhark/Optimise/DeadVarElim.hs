@@ -78,14 +78,14 @@ deadCodeElimBody = fst . runDCElimM . deadCodeElimBodyM
 --------------------------------------------------------------------
 
 deadCodeElimSubExp :: SubExp -> DCElimM SubExp
-deadCodeElimSubExp (Var ident)  = Var <$> deadCodeElimIdent ident
+deadCodeElimSubExp (Var ident)  = Var <$> deadCodeElimVName ident
 deadCodeElimSubExp (Constant v) = return $ Constant v
 
 deadCodeElimBodyM :: Proper lore => Body lore -> DCElimM (Body lore)
 
 deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
   let idds = patternNames pat
-  seen $ freeNamesIn explore
+  seen $ freeIn explore
   (Body _ bnds' res', noref) <-
     collectRes idds $ do
       deadCodeElimPat pat
@@ -96,58 +96,51 @@ deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
           return $ Body bodylore
                    (Let pat explore e':bnds') res'
 
-deadCodeElimBodyM (Body bodylore [] (Result es)) = do
-  seen $ freeNamesIn bodylore
-  Body bodylore [] <$>
-    (Result <$> mapM deadCodeElimSubExp es)
+deadCodeElimBodyM (Body bodylore [] es) = do
+  seen $ freeIn bodylore
+  Body bodylore [] <$> mapM deadCodeElimSubExp es
 
 deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge form body)) = do
   let (mergepat, mergeexp) = unzip merge
-  mapM_ deadCodeElimFParam mergepat
+  mapM_ deadCodeElimParam mergepat
   mapM_ deadCodeElimSubExp mergeexp
   body' <- deadCodeElimBodyM body
   case form of
     ForLoop _ bound -> void $ deadCodeElimSubExp bound
-    WhileLoop cond  -> void $ deadCodeElimIdent cond
+    WhileLoop cond  -> void $ deadCodeElimVName cond
   return $ LoopOp $ DoLoop respat merge form body'
 deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
-                   mapOnBinding = return -- Handled in case for Body.
-                 , mapOnBody = deadCodeElimBodyM
+                   mapOnBody = deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
                  , mapOnLambda = deadCodeElimLambda
                  , mapOnExtLambda = deadCodeElimExtLambda
-                 , mapOnIdent = deadCodeElimIdent
-                 , mapOnCertificates = mapM deadCodeElimIdent
+                 , mapOnVName = deadCodeElimVName
+                 , mapOnCertificates = mapM deadCodeElimVName
                  , mapOnRetType = \rt -> do
-                   seen $ freeNamesIn rt
+                   seen $ freeIn rt
                    return rt
                  , mapOnFParam = \fparam -> do
-                   seen $ freeNamesIn fparam
+                   seen $ freeIn fparam
                    return fparam
                  }
 
-deadCodeElimIdent :: Ident -> DCElimM Ident
-deadCodeElimIdent ident@(Ident vnm t) = do
-  tell $ DCElimRes False $ HS.singleton vnm
-  dims <- mapM deadCodeElimSubExp $ arrayDims t
-  return ident { identType = t `setArrayShape` Shape dims }
+deadCodeElimVName :: VName -> DCElimM VName
+deadCodeElimVName vnm = do
+  seen $ HS.singleton vnm
+  return vnm
 
 deadCodeElimPat :: Proper lore => Pattern lore -> DCElimM ()
 deadCodeElimPat = mapM_ deadCodeElimPatElem . patternElements
 
 deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()
 deadCodeElimPatElem patelem =
-  seen $ patElemName patelem `HS.delete` freeNamesIn patelem
+  seen $ patElemName patelem `HS.delete` freeIn patelem
 
-deadCodeElimFParam :: FreeIn attr => FParamT attr -> DCElimM ()
-deadCodeElimFParam fparam =
-  seen $ fparamName fparam `HS.delete` freeNamesIn fparam
-
-
-deadCodeElimBnd :: Ident -> DCElimM ()
-deadCodeElimBnd = void . deadCodeElimType . identType
+deadCodeElimParam :: FreeIn attr => ParamT attr -> DCElimM ()
+deadCodeElimParam fparam =
+  seen $ paramName fparam `HS.delete` freeIn fparam
 
 deadCodeElimType :: Type -> DCElimM Type
 deadCodeElimType t = do
@@ -158,7 +151,7 @@ deadCodeElimLambda :: Proper lore =>
                       Lambda lore -> DCElimM (Lambda lore)
 deadCodeElimLambda (Lambda params body rettype) = do
   body' <- deadCodeElimBodyM body
-  mapM_ deadCodeElimBnd params
+  mapM_ deadCodeElimParam params
   mapM_ deadCodeElimType rettype
   return $ Lambda params body' rettype
 
@@ -166,8 +159,8 @@ deadCodeElimExtLambda :: Proper lore =>
                          ExtLambda lore -> DCElimM (ExtLambda lore)
 deadCodeElimExtLambda (ExtLambda params body rettype) = do
   body' <- deadCodeElimBodyM body
-  mapM_ deadCodeElimBnd params
-  seen $ freeNamesIn rettype
+  mapM_ deadCodeElimParam params
+  seen $ freeIn rettype
   return $ ExtLambda params body' rettype
 
 seen :: Names -> DCElimM ()

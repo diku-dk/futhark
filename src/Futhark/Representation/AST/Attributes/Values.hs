@@ -1,3 +1,5 @@
+-- | Queries and operations on values.  Useful for the interpreter and
+-- constant folding.
 module Futhark.Representation.AST.Attributes.Values
        (
          valueType
@@ -31,7 +33,7 @@ valueType :: Value -> Type
 valueType (BasicVal v) =
   Basic $ basicValueType v
 valueType (ArrayVal _ et shape) =
-  Array et (Shape $ map (Constant . IntVal) shape) Nonunique
+  Array et (Shape $ map (Constant . IntVal . fromIntegral) shape) Nonunique
 
 -- | Return the size of the first dimension of an array, or zero for
 -- non-arrays.
@@ -54,6 +56,9 @@ valueShape _ = []
 permuteShape :: [Int] -> [a] -> [a]
 permuteShape perm l = map (l!!) perm
 
+-- | Permute the dimensions of an array value.  If the given value is
+-- not an array, it is returned unchanged.  The length of the
+-- permutation must be equal to the rank of the value.
 permuteArray :: [Int] -> Value -> Value
 permuteArray perm (ArrayVal inarr et oldshape) =
   let newshape = move oldshape

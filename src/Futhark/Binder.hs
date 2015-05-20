@@ -1,216 +1,156 @@
-{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleInstances, MultiParamTypeClasses, UndecidableInstances #-}
 -- | This module defines a convenience monad/typeclass for creating
 -- normalised programs.
 module Futhark.Binder
-  ( Proper
-  , Bindable (..)
-  , mkLet'
-  , mkLetNames'
-  , MonadBinder (..)
-  , mkLetNamesM'
-  , bodyBindings
-  , insertBindings
-  , insertBinding
-  , valueIdents
-  , letBind
-  , letBind_
-  , letBindNames
-  , letBindNames'
-  , letBindNames_
-  , letBindNames'_
-  , bodyBind
-  -- * A concrete @Binder@ monad.
-  , BinderT
+  ( -- * A concrete @MonadBinder@ monad.
+    BinderT
   , runBinderT
   , Binder
   , runBinder
-  , runBinder'
-  , runBinder''
-  , runBinderWithNameSource
-  -- * Writer convenience interface
-  , addBindingWriter
-  , collectBindingsWriter
+  , runBodyBinder
+  , runBinderEmptyEnv
+  , bindingIdentTypes
+  , bindingParamTypes
+  -- * Non-class interface
+  , addBinderBinding
+  , collectBinderBindings
+  -- * The 'MonadBinder' typeclass
+  , module Futhark.Binder.Class
   )
 where
 
 import qualified Data.DList as DL
 import Control.Applicative
+import Control.Arrow ((&&&))
 import Control.Monad.Writer
 import Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.Error.Class
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import Futhark.Binder.Class
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
-import Futhark.Substitute
-import Futhark.Renamer (Renameable)
 
--- | A lore that supports some basic facilities.
-class (Lore.Lore lore, PrettyLore lore,
-       Renameable lore, Substitutable lore,
-       FreeIn (Lore.Exp lore),
-       FreeIn (Lore.LetBound lore),
-       FreeIn (Lore.Body lore),
-       FreeIn (Lore.FParam lore),
-       FreeIn (Lore.RetType lore),
-       IsRetType (RetType lore)) => Proper lore where
-
--- | The class of lores that can be constructed solely from an
--- expression, non-monadically, except for generating fresh names.
-class (Proper lore, Lore.FParam lore ~ ()) => Bindable lore where
-  mkLet :: [(Ident,Bindage)] -> Exp lore -> Binding lore
-  mkBody :: [Binding lore] -> Result -> Body lore
-  mkLetNames :: MonadFreshNames m =>
-                [(VName, Bindage)] -> Exp lore -> m (Binding lore)
-
--- | A monad that supports the creation of bindings from expressions
--- and bodies from bindings, with a specific lore.  This is the main
--- typeclass that a monad must implement in order for it to be useful
--- for generating or modifying Futhark code.
---
--- Very important: the methods should not have any significant side
--- effects!  They may be called more often than you think, and the
--- results thrown away.  It is acceptable for them to create new
--- bindings, however.
-class (Proper (Lore m),
-       MonadFreshNames m, Applicative m, Monad m) =>
-      MonadBinder m where
-  type Lore m :: *
-  mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
-  mkBodyM :: [Binding (Lore m)] -> Result -> m (Body (Lore m))
-  mkLetNamesM :: [(VName, Bindage)] -> Exp (Lore m) -> m (Binding (Lore m))
-  addBinding      :: Binding (Lore m) -> m ()
-  collectBindings :: m a -> m (a, [Binding (Lore m)])
-
-valueIdents :: Proper lore => Pattern lore -> Exp lore -> [Ident]
-valueIdents pat e =
-  snd $
-  splitAt (patternSize pat - length (expExtType e)) $
-  patternIdents pat
-
-letBind :: MonadBinder m =>
-           Pattern (Lore m) -> Exp (Lore m) -> m [Ident]
-letBind pat e = do
-  bnd <- mkLetM pat e
-  addBinding bnd
-  return $ valueIdents (bindingPattern bnd) e
-
-letBind_ :: MonadBinder m =>
-            Pattern (Lore m) -> Exp (Lore m) -> m ()
-letBind_ pat e = void $ letBind pat e
-
-mkLet' :: Bindable lore =>
-          [Ident] -> Exp lore -> Binding lore
-mkLet' = mkLet . map addBindVar
-  where addBindVar name = (name, BindVar)
-
-mkLetNamesM' :: MonadBinder m =>
-                [VName] -> Exp (Lore m) -> m (Binding (Lore m))
-mkLetNamesM' = mkLetNamesM . map addBindVar
-  where addBindVar name = (name, BindVar)
-
-mkLetNames' :: (Bindable lore, MonadFreshNames m) =>
-               [VName] -> Exp lore -> m (Binding lore)
-mkLetNames' = mkLetNames . map addBindVar
-  where addBindVar name = (name, BindVar)
-
-letBindNames :: MonadBinder m =>
-                [(VName,Bindage)] -> Exp (Lore m) -> m [Ident]
-letBindNames names e = do
-  bnd <- mkLetNamesM names e
-  addBinding bnd
-  return $ valueIdents (bindingPattern bnd) e
-
-letBindNames' :: MonadBinder m =>
-                 [VName] -> Exp (Lore m) -> m [Ident]
-letBindNames' = letBindNames . map addBindVar
-  where addBindVar name = (name, BindVar)
-
-letBindNames_ :: MonadBinder m =>
-                [(VName,Bindage)] -> Exp (Lore m) -> m ()
-letBindNames_ names e = void $ letBindNames names e
-
-letBindNames'_ :: MonadBinder m =>
-                  [VName] -> Exp (Lore m) -> m ()
-letBindNames'_ names e = void $ letBindNames' names e
-
-bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
-bodyBind (Body _ bnds (Result es)) = do
-  mapM_ addBinding bnds
-  return es
-
--- | Add several bindings at the outermost level of a 'Body'.
-insertBindings :: Bindable lore => [Binding lore] -> Body lore -> Body lore
-insertBindings bnds1 (Body _ bnds2 res) =
-  mkBody (bnds1++bnds2) res
-
--- | Add a single binding at the outermost level of a 'Body'.
-insertBinding :: Bindable lore => Binding lore -> Body lore -> Body lore
-insertBinding bnd = insertBindings [bnd]
-
-addBindingWriter :: (MonadFreshNames m, Applicative m, MonadWriter (DL.DList (Binding lore)) m) =>
-                    Binding lore -> m ()
-addBindingWriter = tell . DL.singleton
-
-collectBindingsWriter :: (MonadFreshNames m,
-                          Applicative m,
-                          MonadWriter (DL.DList (Binding lore)) m) =>
-                         m a -> m (a, [Binding lore])
-collectBindingsWriter m = pass $ do
-                            (x, bnds) <- listen m
-                            return ((x, DL.toList bnds), const DL.empty)
-
-newtype BinderT lore m a = BinderT (WriterT
-                                    (DL.DList (Binding lore))
-                                    m
+newtype BinderT lore m a = BinderT (StateT
+                                    TypeEnv
+                                    (WriterT
+                                     (DL.DList (Binding lore))
+                                     m)
                                     a)
   deriving (Functor, Monad, Applicative,
             MonadWriter (DL.DList (Binding lore)))
+-- Cannot add MonadState instance, because it would conflict with the
+-- utility instances.
 
 instance MonadTrans (BinderT lore) where
-  lift = BinderT . lift
+  lift = BinderT . lift . lift
 
 type Binder lore = BinderT lore (State VNameSource)
 
 instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
-  getNameSource = BinderT . lift $ getNameSource
-  putNameSource = BinderT . lift . putNameSource
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance (Applicative m, Monad m) => HasTypeEnv (BinderT lore m) where
+  lookupType name = do
+    t <- BinderT $ gets $ HM.lookup name
+    case t of
+      Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
+      Just t' -> return t'
+  askTypeEnv = BinderT get
+
+instance (Applicative m, Monad m) => LocalTypeEnv (BinderT lore m) where
+  localTypeEnv types (BinderT m) = BinderT $ do
+    modify (`HM.union` types)
+    x <- m
+    modify (`HM.difference` types)
+    return x
 
 instance (Proper lore, Bindable lore, MonadFreshNames m) =>
          MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
   mkBodyM bnds res = return $ mkBody bnds res
-  mkLetM pat e = return $ mkLet pat' e
-    where pat' = [ (patElemIdent patElem, patElemBindage patElem)
-                 | patElem <- patternElements pat ]
+  mkLetM pat e =
+    return $ mkLet
+    (map asPair $ patternContextElements pat)
+    (map asPair $ patternValueElements pat)
+    e
+    where asPair patElem = (patElemIdent patElem, patElemBindage patElem)
   mkLetNamesM = mkLetNames
-  addBinding      = addBindingWriter
-  collectBindings = collectBindingsWriter
+
+  addBinding      = addBinderBinding
+  collectBindings = collectBinderBindings
 
 runBinderT :: Monad m =>
               BinderT lore m a
+           -> TypeEnv
            -> m (a, [Binding lore])
-runBinderT (BinderT m) = do (x, bnds) <- runWriterT m
-                            return (x, DL.toList bnds)
+runBinderT (BinderT m) types = do
+  (x, bnds) <- runWriterT $ evalStateT m types
+  return (x, DL.toList bnds)
 
-runBinder :: (Bindable lore, MonadFreshNames m) =>
-             Binder lore (Body lore) -> m (Body lore)
+runBinder :: (MonadFreshNames m, Bindable lore, HasTypeEnv m) =>
+              Binder lore a
+           -> m (a, [Binding lore])
 runBinder m = do
-  (b, f) <- runBinder' m
-  return $ f b
+  types <- askTypeEnv
+  modifyNameSource $ runState $ runBinderT m types
 
-runBinder' :: (MonadFreshNames m, Bindable lore) =>
-              Binder lore a -> m (a, Body lore -> Body lore)
-runBinder' m = do
-  (x, bnds) <- runBinder'' m
-  return (x, insertBindings bnds)
+runBodyBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+                 Binder lore (Body lore) -> m (Body lore)
+runBodyBinder = liftM (uncurry $ flip insertBindings) . runBinder
 
-runBinder'' :: MonadFreshNames m => Binder lore a -> m (a, [Binding lore])
-runBinder'' = modifyNameSource . runBinderWithNameSource
+runBinderEmptyEnv :: MonadFreshNames m =>
+                     Binder lore a -> m (a, [Binding lore])
+runBinderEmptyEnv m =
+  modifyNameSource $ runState $ runBinderT m mempty
 
-runBinderWithNameSource :: Binder lore a -> VNameSource
-                        -> ((a, [Binding lore]), VNameSource)
-runBinderWithNameSource (BinderT m) src =
-  let ((x,bnds),src') = runState (runWriterT m) src
-  in ((x, DL.toList bnds), src')
+addBinderBinding :: Monad m =>
+                    Binding lore -> BinderT lore m ()
+addBinderBinding binding = do
+  tell $ DL.singleton binding
+  BinderT $ modify (`HM.union` typeEnvFromBindings [binding])
+
+collectBinderBindings :: Monad m =>
+                         BinderT lore m a
+                      -> BinderT lore m (a, [Binding lore])
+collectBinderBindings m = pass $ do
+  (x, bnds) <- listen m
+  let bnds' = DL.toList bnds
+  BinderT $ modify (`HM.difference` typeEnvFromBindings bnds')
+  return ((x, bnds'), const DL.empty)
+
+-- | Add the names and types from the given list of 'Ident's to the
+-- type environment while executing the given action.  This is used to
+-- deal with function parameters and loop merge variables.
+bindingIdentTypes :: (Applicative m, Monad m) =>
+                     [Ident] -> BinderT lore m a
+                  -> BinderT lore m a
+bindingIdentTypes idents = localTypeEnv types
+  where types = HM.fromList $ map (identName &&& identType) idents
+
+-- | Add the names and types from the given list of 'Param's to the
+-- type environment while executing the given action.
+bindingParamTypes :: (Applicative m, Monad m) =>
+                     [ParamT attr] -> BinderT lore m a
+                  -> BinderT lore m a
+bindingParamTypes = bindingIdentTypes . map paramIdent
+
+-- Utility instance defintions for MTL classes.  These require
+-- UndecidableInstances, but save on typing elsewhere.
+instance MonadReader r m => MonadReader r (BinderT lore m) where
+  ask = BinderT ask
+  local f (BinderT m) = BinderT $ local f m
+
+instance MonadState s m => MonadState s (BinderT lore m) where
+  get = BinderT $ lift get
+  put = BinderT . lift . put
+
+instance MonadError e m => MonadError e (BinderT lore m) where
+  throwError = lift . throwError
+  catchError (BinderT m) f =
+    BinderT $ catchError m $ unBinder . f
+    where unBinder (BinderT m') = m'

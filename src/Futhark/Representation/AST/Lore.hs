@@ -7,9 +7,9 @@ module Futhark.Representation.AST.Lore
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax.Core
 
-class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (RetType l),
-       Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l), Eq (RetType l),
-       Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l), Ord (RetType l),
+class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (LParam l), Show (RetType l),
+       Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l), Eq (LParam l), Eq (RetType l),
+       Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l), Ord (LParam l), Ord (RetType l),
        IsRetType (RetType l))
       => Lore l where
   -- | Annotation for every binding.
@@ -24,6 +24,9 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   -- | Annotation for every (non-lambda) function parameter.
   type FParam l :: *
   type FParam l = ()
+  -- | Annotation for every lambda function parameter.
+  type LParam l :: *
+  type LParam l = ()
   -- | The type of expressions and function calls.
   type RetType l :: *
   type RetType l = ExtRetType
@@ -38,15 +41,15 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (Re
   -- @loopResult res merge@ returns those variables in @merge@ that
   -- constitute the context.
   loopResultContext :: l
-                    -> [Ident]
-                    -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
-                    -> [Ident]
+                    -> [VName]
+                    -> [Futhark.Representation.AST.Syntax.Core.ParamT (FParam l)]
+                    -> [VName]
 
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated
   -- return type for the concrete call, if valid.
   applyRetType :: l
                -> RetType l
-               -> [Futhark.Representation.AST.Syntax.Core.FParamT (FParam l)]
-               -> [SubExp]
+               -> [Futhark.Representation.AST.Syntax.Core.ParamT (FParam l)]
+               -> [(SubExp, Type)]
                -> Maybe (RetType l)

@@ -12,6 +12,9 @@ module Futhark.Pipeline
   , basicPass
   , unfailableBasicPass
   , basicProg
+  , explicitMemoryPass
+  , unfailableExplicitMemoryPass
+  , explicitMemoryProg
   , CompileError(..)
   , compileError
   , Action
@@ -21,6 +24,7 @@ module Futhark.Pipeline
   , basicAction
   , explicitMemoryAction
   , FutharkConfig(..)
+  , module Language.Futhark.Parser.RealConfiguration
   , verbose
   )
 
@@ -42,10 +46,11 @@ import qualified Futhark.Representation.Basic as Basic
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.TypeCheck
 import Futhark.Analysis.Alias
+import Language.Futhark.Parser.RealConfiguration
 
 runPasses :: FutharkConfig -> PipelineState -> FutharkM PipelineState
 runPasses config startprog =
-  foldM (applyPass config) startprog $ futharkpipeline config
+  foldM (applyPass config) startprog $ futharkPipeline config
 
 applyPass :: FutharkConfig -> PipelineState -> Pass
           -> FutharkM PipelineState
@@ -113,7 +118,7 @@ runPass config pass state = do
         -- programs, we prettyprint the AST to force out IO
         -- exceptions.
         forcePassRes
-          | isJust $ futharkverbose config = either (const "") Basic.pretty . snd
+          | isJust $ futharkVerbose config = either (const "") Basic.pretty . snd
           | otherwise                      = const ""
 
 
@@ -138,15 +143,15 @@ applyAction :: Action -> PipelineState -> IO ()
 applyAction (Action _ f) = f
 
 data FutharkConfig = FutharkConfig {
-    futharkpipeline :: [Pass]
-  , futharkaction :: Action
-  , futharkcheckAliases :: Bool
-  , futharkverbose :: Maybe (Maybe FilePath)
-  , futharkboundsCheck :: Bool
+    futharkPipeline :: [Pass]
+  , futharkCheckAliases :: Bool
+  , futharkVerbose :: Maybe (Maybe FilePath)
+  , futharkBoundsCheck :: Bool
+  , futharkRealConfiguration :: RealConfiguration
 }
 
 verbose :: FutharkConfig -> Bool
-verbose = isJust . futharkverbose
+verbose = isJust . futharkVerbose
 
 compileError :: MonadError CompileError m =>
                 String -> Maybe PipelineState -> m a
@@ -155,7 +160,7 @@ compileError s p = throwError $ CompileError s p
 typeCheck :: Checkable lore => FutharkConfig -> Prog lore
           -> Either (TypeError lore) (Prog lore)
 typeCheck config prog = either Left (const $ Right prog) $ check prog
-  where check | futharkcheckAliases config = checkProg
+  where check | futharkCheckAliases config = checkProg
               | otherwise                  = checkProgNoUniqueness
 
 canFail :: Show err =>
@@ -177,6 +182,22 @@ unfailableBasicPass :: String -> (Basic.Prog -> Basic.Prog)
                     -> Pass
 unfailableBasicPass name f = basicPass name f'
   where f' :: Basic.Prog -> Either () Basic.Prog
+        f' = Right . f
+
+explicitMemoryProg :: PipelineState -> PassM ExplicitMemory.Prog
+explicitMemoryProg (ExplicitMemory p) = return p
+explicitMemoryProg s                  = compileError "Expected explicit memory representation." $ Just s
+
+explicitMemoryPass :: Show err =>
+                      String -> (ExplicitMemory.Prog -> Either err ExplicitMemory.Prog)
+                   -> Pass
+explicitMemoryPass name f = polyPass name op
+  where op s = ExplicitMemory <$> (canFail "" (Just s) =<< (f <$> explicitMemoryProg s))
+
+unfailableExplicitMemoryPass :: String -> (ExplicitMemory.Prog -> ExplicitMemory.Prog)
+                    -> Pass
+unfailableExplicitMemoryPass name f = explicitMemoryPass name f'
+  where f' :: ExplicitMemory.Prog -> Either () ExplicitMemory.Prog
         f' = Right . f
 
 polyPass :: String -> (PipelineState -> PassM PipelineState)
