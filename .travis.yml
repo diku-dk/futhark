@@ -8,6 +8,7 @@ language: sh
 # need/want testing for.
 env:
  - CABALVER=1.18 GHCVER=7.8.4
+ - CABALVER=1.22 GHCVER=7.10.1
 
 # Note: the distinction between `before_install` and `install` is not
 # important.
@@ -23,7 +24,7 @@ before_install:
 install:
  - cabal --version
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
- - cabal install --only-dependencies --enable-tests
+ - cabal install --only-dependencies --enable-tests --force-reinstalls
 
 # Here starts the actual work to be performed for the package under
 # test; any command which exits with a non-zero exit code causes the
