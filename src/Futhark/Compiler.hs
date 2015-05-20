@@ -24,10 +24,10 @@ import qualified Futhark.Representation.Basic as I
 import qualified Futhark.TypeCheck as I
 
 newFutharkConfig :: FutharkConfig
-newFutharkConfig = FutharkConfig { futharkpipeline = []
-                                 , futharkcheckAliases = True
-                                 , futharkverbose = Nothing
-                                 , futharkboundsCheck = True
+newFutharkConfig = FutharkConfig { futharkPipeline = []
+                                 , futharkCheckAliases = True
+                                 , futharkVerbose = Nothing
+                                 , futharkBoundsCheck = True
                                  , futharkRealConfiguration = RealAsFloat64
                                  }
 
@@ -38,7 +38,7 @@ runCompilerOnProgram config action file = do
   case res of
     Left err -> do
       hPutStrLn stderr $ errorDesc err
-      case (errorState err, futharkverbose config) of
+      case (errorState err, futharkVerbose config) of
         (Just s, Just outfile) ->
           maybe (hPutStr stderr) writeFile outfile $
             I.pretty s ++ "\n"
@@ -64,7 +64,7 @@ runPipelineOnSource config filename srccode = do
   where futharkc' = do
           parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
           ext_prog    <- typeCheckSourceProgram config parsed_prog
-          case internaliseProg (futharkboundsCheck config) $ E.tagProg ext_prog of
+          case internaliseProg (futharkBoundsCheck config) $ E.tagProg ext_prog of
             Left err ->
               compileError ("During internalisation:\n" ++ err) Nothing
             Right int_prog -> do
@@ -76,7 +76,7 @@ typeCheck :: (prog -> Either err prog')
           -> FutharkConfig
           -> prog -> Either err prog'
 typeCheck checkProg checkProgNoUniqueness config
-  | futharkcheckAliases config = checkProg
+  | futharkCheckAliases config = checkProg
   | otherwise                  = checkProgNoUniqueness
 
 parseSourceProgram :: RealConfiguration -> FilePath -> String

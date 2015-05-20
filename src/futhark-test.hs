@@ -256,7 +256,7 @@ optimisedProgramMetrics program = do
     (_, Right (ExplicitMemory _)) ->
       throwError "Compiling for metrics resulted in non-basic program"
   where futharkConfig =
-          newFutharkConfig { futharkpipeline = standardPipeline }
+          newFutharkConfig { futharkPipeline = standardPipeline }
 
 testMetrics :: FilePath -> AstMetrics -> TestM ()
 testMetrics program expected = context "Checking metrics" $ do

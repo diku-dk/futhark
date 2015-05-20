@@ -32,6 +32,12 @@ cseInBody (Body bodyattr bnds res) =
     CSEState (_, nsubsts) <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
+cseInLambda :: Proper lore =>
+               Lambda lore -> CSEM lore (Lambda lore)
+cseInLambda lam = do
+  body' <- cseInBody $ lambdaBody lam
+  return lam { lambdaBody = body' }
+
 cseInBindings :: Proper lore =>
                  [Binding lore]
               -> CSEM lore (Body lore)
@@ -45,7 +51,9 @@ cseInBindings (bnd:bnds) m =
   where nestedCSE bnd' = do
           e <- mapExpM cse $ bindingExp bnd'
           return bnd' { bindingExp = e }
-        cse = identityMapper { mapOnBody = cseInBody }
+        cse = identityMapper { mapOnBody = cseInBody
+                             , mapOnLambda = cseInLambda
+                             }
 
 cseInBinding :: Proper lore =>
                 Binding lore

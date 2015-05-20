@@ -21,12 +21,12 @@ import           Data.Maybe
 import           Prelude
 
 import           Futhark.MonadFreshNames
+import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
 optimiseProg :: Prog -> Prog
-optimiseProg prog = evalState (Prog <$> mapM optimiseFunDec (progFunctions prog)) src
-  where src = newNameSourceForProg prog
+optimiseProg = intraproceduralTransformation optimiseFunDec
 
 optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec
 optimiseFunDec fundec = do

@@ -26,9 +26,7 @@ import Futhark.Tools
 
 -- | Perform the first-order transformation on an Futhark program.
 transformProg :: Prog -> Prog
-transformProg prog =
-  renameProg $ Prog $ evalState (mapM transformFunDec $ progFunctions prog) src
-  where src = newNameSourceForProg prog
+transformProg = intraproceduralTransformation transformFunDec
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec (FunDec fname rettype params body) = do

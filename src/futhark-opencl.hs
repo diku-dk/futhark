@@ -62,18 +62,23 @@ commandLineOptions =
   , Option "V" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
+  , Option [] ["unsafe"]
+    (NoArg $ Right $ \config -> config { compilerUnsafe = True })
+    "Do not perform bound- and size-checks in generated code."
   ]
 
 data CompilerConfig =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
                  , compilerRealConfiguration :: RealConfiguration
+                 , compilerUnsafe :: Bool
                  }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
                                    , compilerRealConfiguration = RealAsFloat64
+                                   , compilerUnsafe = False
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath
@@ -82,9 +87,10 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkpipeline = compilerPipeline
-                   , futharkverbose = compilerVerbose config
+  newFutharkConfig { futharkPipeline = compilerPipeline
+                   , futharkVerbose = compilerVerbose config
                    , futharkRealConfiguration = compilerRealConfiguration config
+                   , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
 compilerPipeline :: [Pass]
