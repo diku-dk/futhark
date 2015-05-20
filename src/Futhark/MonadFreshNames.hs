@@ -25,6 +25,8 @@ import qualified Control.Monad.State.Lazy
 import qualified Control.Monad.State.Strict
 import qualified Control.Monad.Writer.Lazy
 import qualified Control.Monad.Writer.Strict
+import qualified Control.Monad.RWS.Lazy
+import qualified Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Data.Monoid
 
@@ -54,6 +56,16 @@ instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Lazy
 instance (Applicative im, Monad im) => MonadFreshNames (Control.Monad.State.Strict.StateT VNameSource im) where
   getNameSource = Control.Monad.State.Strict.get
   putNameSource = Control.Monad.State.Strict.put
+
+instance (Applicative im, Monad im, Monoid w) =>
+         MonadFreshNames (Control.Monad.RWS.Lazy.RWST r w VNameSource im) where
+  getNameSource = Control.Monad.RWS.Lazy.get
+  putNameSource = Control.Monad.RWS.Lazy.put
+
+instance (Applicative im, Monad im, Monoid w) =>
+         MonadFreshNames (Control.Monad.RWS.Strict.RWST r w VNameSource im) where
+  getNameSource = Control.Monad.RWS.Strict.get
+  putNameSource = Control.Monad.RWS.Strict.put
 
 -- | Run a computation needing a fresh name source and returning a new
 -- one, using 'getNameSource' and 'putNameSource' before and after the
