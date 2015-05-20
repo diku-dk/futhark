@@ -5,6 +5,7 @@
 // output {
 //   [[3, 5, 7], [7, 10, 13], [14, 18, 22]]
 // }
+// structure { Map 2 Scan 1 }
 fun [[int]] main([[int]] input) =
   let x = scan(fn [int] ([int] a, [int] b) =>
                  map(+, zip(a, b)),
