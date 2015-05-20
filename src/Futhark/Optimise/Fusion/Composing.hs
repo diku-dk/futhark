@@ -12,6 +12,8 @@
 -- The module will, however, remove duplicate inputs after fusion.
 module Futhark.Optimise.Fusion.Composing
   ( fuseMaps
+  , fuseRedomap
+  , mergeReduceOps
   , Input(..)
   )
   where
@@ -158,3 +160,51 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
         forward to from b =
           mkLet' [] [to] (PrimOp $ SubExp $ Var from)
           `insertBinding` b
+
+fuseRedomap :: (Input input, Bindable lore) =>
+               [VName]  -> [VName]
+            -> [SubExp] -> Lambda lore -> [input] -> [(VName,Ident)]
+            -> Lambda lore -> [input]
+            -> (Lambda lore, [input])
+fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
+  -- We hack the implementation of map o redomap to handle this case:
+  --   (i) we remove the accumulator formal paramter and corresponding
+  --       (body) result from from redomap's fold-lambda body
+  let acc_len     = length p_nes
+      unfus_accs  = take acc_len outVars
+      unfus_arrs  = unfus_nms \\ unfus_accs
+      lam1_body   = lambdaBody p_lam
+      lam1_accres = take acc_len $ bodyResult lam1_body
+      lam1_arrres = drop acc_len $ bodyResult lam1_body
+      lam1_hacked = p_lam { lambdaParams = drop acc_len $ lambdaParams p_lam
+                         , lambdaBody   = lam1_body { bodyResult = lam1_arrres } }
+  --  (ii) we remove the accumulator's (global) output result from
+  --       @outPairs@, then ``map o redomap'' fuse the two lambdas
+  --       (in the usual way), and construct the extra return types
+  --       for the arrays that fall through.
+      (res_lam, new_inp) = fuseMaps unfus_arrs lam1_hacked p_inparr
+                                    (drop acc_len outPairs) c_lam c_inparr
+      (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
+                       zip (drop acc_len outVars) $ drop acc_len $
+                       lambdaReturnType p_lam
+  -- (iii) Finally, we put back the accumulator's formal parameter and
+  --       (body) result in the first position of the obtained lambda.
+      (accrtps, accpars)  = ( take acc_len $ lambdaReturnType p_lam
+                            , take acc_len $ lambdaParams p_lam )
+      res_body = lambdaBody res_lam
+      res_rses = bodyResult res_body
+      res_body'= res_body { bodyResult = lam1_accres ++ res_rses }
+      res_lam' = res_lam { lambdaParams     = accpars ++ lambdaParams res_lam
+                         , lambdaBody       = res_body'
+                         , lambdaReturnType = accrtps ++ lambdaReturnType res_lam ++ extra_rtps
+                         }
+  in  (res_lam', new_inp)
+
+mergeReduceOps :: Bindable lore => Lambda lore -> Lambda lore -> Lambda lore
+mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
+  let body' = Body (bodyLore bdy1)
+                   (bodyBindings bdy1 ++ bodyBindings bdy2)
+                   (bodyResult   bdy1 ++ bodyResult   bdy2)
+      (len1, len2) = (length rtp1, length rtp2)
+      par'  = take len1 par1 ++ take len2 par2 ++ drop len1 par1 ++ drop len2 par2
+  in  Lambda par' body' (rtp1++rtp2)

@@ -28,6 +28,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , setLambda
   , certificates
   , typeOf
+  , inpOuterSize
   -- ** Converting to and from expressions
   , NotSOAC (..)
   , fromExp
@@ -445,6 +446,16 @@ typeOf (Redomap _ outlam inlam nes inps) =
   let accrtps = lambdaReturnType outlam
       arrrtps = drop (length nes) $ mapType inlam $ map inputType inps
   in  accrtps ++ arrrtps
+
+inpOuterSize :: SOAC lore -> SubExp
+inpOuterSize (Map _ _ inps) =
+  arraysSize 0 $ map inputType inps
+inpOuterSize (Reduce _ _ input) =
+  arraysSize 0 $ map (inputType . snd) input
+inpOuterSize (Scan _ _ input) =
+  arraysSize 0 $ map (inputType . snd) input
+inpOuterSize (Redomap _ _ _ _ inps) =
+  arraysSize 0 $ map inputType inps
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m) =>

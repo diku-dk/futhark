@@ -415,7 +415,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                              -- the accumulator result cannot be fused!
                              drop (length nes) out_nms
                         _ -> out_nms
-      to_fuse_knms   = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
+      to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
+      to_fuse_knms2  = getKersWithSameInpSize (SOAC.inpOuterSize soac) res
+      to_fuse_knms   = HS.toList $ HS.fromList $ to_fuse_knms1 ++ to_fuse_knms2
       lookup_kern k  = case HM.lookup k (kernels res) of
                          Nothing  -> badFusionGM $ Error
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
@@ -479,6 +481,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   let (to_fuse_kers',to_fuse_knms',_) = unzip3 $ take ok_ind kernminds'
       new_kernms = [to_fuse_knms' !! (ok_ind - 1) | ok_ind > 0]
   return (ok_ind>0, [fused_ker], new_kernms, to_fuse_kers', to_fuse_knms')
+    where getKersWithSameInpSize :: SubExp -> FusedRes -> [KernName]
+          getKersWithSameInpSize sz ress =
+            map fst $ filter (\ (_,ker) -> sz == SOAC.inpOuterSize (fsoac ker)) $ HM.toList $ kernels ress
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------

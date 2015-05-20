@@ -33,6 +33,8 @@ import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Tools
 
+--import Debug.Trace
+
 type SOAC = SOAC.SOAC Basic
 type SOACNest = Nest.SOACNest Basic
 type MapNest = MapNest.MapNest Basic
@@ -205,11 +207,11 @@ removeUnusedParams l inps =
 mapFusionOK :: [VName] -> FusedKer -> Bool
 mapFusionOK outVars ker = any (`elem` inpIds) outVars
   where inpIds = mapMaybe SOAC.isVarInput (inputs ker)
-
+{-
 mapOrFilter :: SOAC -> Bool
 mapOrFilter (SOAC.Map {}) = True
 mapOrFilter _             = False
-
+-}
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 fuseSOACwithKer unfus_set outVars soac1 ker = do
@@ -219,8 +221,8 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       cs1      = SOAC.certificates soac1
       cs2      = SOAC.certificates soac2
       inp1_arr = SOAC.inputs soac1
-      inp1_idds= if HS.null unfus_set then []
-                 else mapMaybe SOAC.isVarInput inp1_arr
+      horizFuse= not (HS.null unfus_set) &&
+                 SOAC.inpOuterSize soac1 == SOAC.inpOuterSize soac2
       inp2_arr = SOAC.inputs soac2
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2
@@ -240,7 +242,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
   case (soac2, soac1) of
     -- The Fusions that are semantically map fusions:
     (SOAC.Map {}, SOAC.Map    {})
-      | mapFusionOK (outVars++inp1_idds) ker -> do
+      | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
@@ -249,62 +251,32 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
               SOAC.Map (cs1++cs2) res_lam' new_inp
 
     (SOAC.Map {}, SOAC.Redomap _ lam11 _ nes _)
-      | mapFusionOK (outVars++inp1_idds) ker -> do
-    -- We hack the implementation of map o redomap to handle this case:
-    --   (i) we remove the accumulator formal paramter and corresponding
-    --       (body) result from from redomap's fold-lambda body
-      let acc_len     = length nes
-          unfus_accs  = take acc_len outVars
+      | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
+      let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes lam1 inp1_arr
+                                            outPairs lam2 inp2_arr
+          unfus_accs  = take (length nes) outVars
           unfus_arrs  = unfus_nms \\ unfus_accs
-          lam1_body   = lambdaBody lam1
-          lam1_accres = take acc_len $ bodyResult lam1_body
-          lam1_arrres = drop acc_len $ bodyResult lam1_body
-          lam1_hacked = lam1 { lambdaParams = drop acc_len $ lambdaParams lam1
-                             , lambdaBody   = lam1_body { bodyResult = lam1_arrres } }
-    --  (ii) we remove the accumulator's (global) output result from
-    --       @outPairs@, then ``map o redomap'' fuse the two lambdas
-    --       (in the usual way), and construct the extra return types
-    --       for the arrays that fall through.
-          (res_lam, new_inp) = fuseMaps unfus_arrs lam1_hacked inp1_arr
-                                        (drop acc_len outPairs) lam2 inp2_arr
-          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
-                           zip (drop acc_len outVars) $ map (stripArray 1) $
-                           drop acc_len $ SOAC.typeOf soac1
-    -- (iii) Finally, we put back the accumulator's formal parameter and
-    --       (body) result in the first position of the obtained lambda.
-          (accrtps, accpars)  = (lambdaReturnType lam11, take acc_len $ lambdaParams lam1)
-          res_body = lambdaBody res_lam
-          res_rses = bodyResult res_body
-          res_body'= res_body { bodyResult = lam1_accres ++ res_rses }
-          res_lam' = res_lam { lambdaParams     = accpars ++ lambdaParams res_lam
-                             , lambdaBody       = res_body'
-                             , lambdaReturnType = accrtps ++ lambdaReturnType res_lam ++ extra_rtps
-                             }
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
               SOAC.Redomap (cs1++cs2) lam11 res_lam' nes new_inp
 
+    (SOAC.Redomap _ lam2r _ nes2 _, SOAC.Redomap _ lam1r _ nes1 _)
+      | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
+      let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1 inp1_arr
+                                            outPairs lam2 inp2_arr
+          unfus_accs  = take (length nes1) outVars
+          unfus_arrs  = unfus_nms \\ unfus_accs
+          lamr        = mergeReduceOps lam1r lam2r
+      success (unfus_accs ++ outNames ker ++ unfus_arrs) $
+              SOAC.Redomap (cs1++cs2) lamr res_lam' (nes1++nes2) new_inp
+
     (SOAC.Redomap _ lam21 _ nes _, SOAC.Map {})
-      | mapFusionOK (outVars++inp1_idds) ker -> do
+      | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ unfus_nms) $
               SOAC.Redomap (cs1++cs2) lam21 res_lam' nes new_inp
-{-
-    (SOAC.Redomap _ lam21 _ ne _, SOAC.Map {})
-      | mapFusionOK outVars ker -> do
-      let (res_lam, new_inp) = fuseMaps lam1 inp1_arr outPairs lam2 inp2_arr
-      success $ SOAC.Redomap (cs1++cs2) lam21 res_lam ne new_inp
--}
-    -- Nothing else worked, so mkLets try rewriting to redomap if
-    -- possible. (Should not be reached anymore ... remove when safe)
-    (SOAC.Reduce _ lam args, _) | mapOrFilter soac1 -> do
-       let (ne, arrs) = unzip args
-           soac2' = SOAC.Redomap (cs1++cs2) lam lam ne arrs
-           ker'   = ker { fsoac = soac2'
-                        }
-       fuseSOACwithKer unfus_set outVars soac1 ker'
 
     _ -> fail "Cannot fuse"
 
