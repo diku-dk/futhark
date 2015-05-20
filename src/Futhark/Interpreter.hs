@@ -616,15 +616,20 @@ evalPrimOp (Assert e loc) = do
             _ ->
               bad $ AssertFailed loc
 
-evalPrimOp (Partition _ n flags arr) = do
+evalPrimOp (Partition _ n flags arrs) = do
   flags_elems <- arrToList =<< lookupVar flags
-  arrv <- lookupVar arr
-  let et = elemType $ valueType arrv
-  arr_elems <- arrToList arrv
-  partitions <- partitionArray flags_elems arr_elems
+  arrvs <- mapM lookupVar arrs
+  let ets = map (elemType . valueType) arrvs
+  arrs_elems <- mapM arrToList arrvs
+  partitions <- mapM (partitionArray flags_elems) arrs_elems
   return $
-    map (BasicVal . IntVal . genericLength) partitions ++
-    [arrayVal (concat partitions) et (valueShape arrv)]
+    case partitions of
+      [] ->
+        replicate n (BasicVal $ IntVal 0)
+      first_part:_ ->
+        map (BasicVal . IntVal . genericLength) first_part ++
+        [arrayVal (concat part) et (valueShape arrv) |
+         (part,et,arrv) <- zip3 partitions ets arrvs]
   where partitionArray flagsv arrv =
           map reverse <$>
           foldM divide (replicate n []) (zip flagsv arrv)

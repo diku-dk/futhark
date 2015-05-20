@@ -423,11 +423,11 @@ internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
-  forM arrs $ \arr' -> do
-    filter_size <- newIdent "filter_size" $ I.Basic Int
-    filter_perm <- newIdent "filter_perm" =<< lookupType arr'
-    addBinding $ mkLet' [] [filter_size,filter_perm] $
-      I.PrimOp $ I.Partition [] 1 flags arr'
+  filter_size <- newIdent "filter_size" $ I.Basic Int
+  filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
+  addBinding $ mkLet' [] (filter_size : filter_perms) $
+    I.PrimOp $ I.Partition [] 1 flags arrs
+  forM filter_perms $ \filter_perm ->
     letSubExp desc $
       I.PrimOp $ I.Split [] [I.Var $ I.identName filter_size] $
       I.identName filter_perm
@@ -440,7 +440,7 @@ internaliseExp desc (E.Partition lams arr _) = do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
     addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
-      I.PrimOp $ I.Partition [] n flags arr'
+      I.PrimOp $ I.Partition [] n flags [arr']
     letTupExp desc $
       I.PrimOp $ I.Split [] (map (I.Var . I.identName) partition_sizes) $
       I.identName partition_perm

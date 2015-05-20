@@ -63,7 +63,7 @@ primOpAliases (Assert {}) =
 primOpAliases (Alloc _) =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
-  replicate n mempty ++ [vnameAliases arr]
+  replicate n mempty ++ map vnameAliases arr
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
