@@ -9,8 +9,12 @@
 //   , [3.0, -2.0, -0.3999999999999999]
 //   , [4.0, -6.0, -2.8 ]
 //   , [9.0, -6.0, -1.1999999999999997]
-//   }
+//   } 
 // }
+// structure { 
+//      Map 1 
+// }
+//
 fun {[real],[real],[real],[real],[real]} main([real] arr) =
     let xy = map(fn {real,real} (real a) => {a+1.0,a+2.0}, arr) in
     let {x,y} = unzip(xy) in

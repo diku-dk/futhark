@@ -12,6 +12,11 @@
 //   , [0.0,1.0,2.0]
 //   }
 // }
+// structure { 
+//      Map 1 
+//      Redomap 1
+// }
+//
 fun real mul2([real] x, int i) = x[i]*2.0
 fun {real,[real],real,[real],real,[real]} main([real] arr) =
     let r1 = reduce(+, 0.0, arr) in

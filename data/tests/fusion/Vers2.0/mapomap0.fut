@@ -9,6 +9,10 @@
 //   , [3.0, -7.0, -3.8]
 //   }
 // }
+// structure { 
+//      Map 1 
+// }
+//
 fun {[real],[real],[real]} main([real] arr) =
     let x = map    (+ 1.0, arr) in
     let y = zipWith(+,  x, arr) in

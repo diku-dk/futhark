@@ -10,6 +10,10 @@
 //   , [0.7, -2.8, -1.68]
 //   }
 // }
+// structure { 
+//      Redomap 1 
+// }
+//
 fun {real,[real],[real],[real]} main([real] arr) =
     let A = map(+3.0, arr)   in
     let B = map(+7.0, arr)   in
