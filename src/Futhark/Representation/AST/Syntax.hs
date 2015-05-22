@@ -205,9 +205,10 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Partition Certificates Int VName VName
+  | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element
-    -- array.
+    -- arrays.  If no arrays are given, the returned offsets are zero,
+    -- and no arrays are returned.
 
   | Alloc SubExp
     -- ^ Allocate a memory block.  This really should not be an

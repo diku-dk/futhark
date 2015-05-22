@@ -409,8 +409,8 @@ redomapToMapAndReduce (Pattern [] patelems) lore
 redomapToMapAndReduce _ _ _ =
   error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
 
-intraproceduralTransformation :: (FunDec lore -> State VNameSource (FunDec lore))
-                              -> Prog lore -> Prog lore
+intraproceduralTransformation :: (FunDec fromlore -> State VNameSource (FunDec tolore))
+                              -> Prog fromlore -> Prog tolore
 intraproceduralTransformation ft prog =
   evalState (Prog <$> mapM ft (progFunctions prog)) src
   where src = newNameSourceForProg prog

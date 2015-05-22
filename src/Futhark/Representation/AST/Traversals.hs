@@ -152,7 +152,7 @@ mapExpM tv (PrimOp (Partition cs n flags arr)) =
   PrimOp <$> (pure Partition <*> mapOnCertificates tv cs <*>
               pure n <*>
               mapOnVName tv flags <*>
-              mapOnVName tv arr)
+              mapM (mapOnVName tv) arr)
 mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
   LoopOp <$> (DoLoop <$> mapM (mapOnVName tv) res <*>
               (zip <$> mapM (mapOnFParam tv) vs <*> mapM (mapOnSubExp tv) es) <*>

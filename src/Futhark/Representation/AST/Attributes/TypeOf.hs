@@ -119,9 +119,9 @@ primOpType (Assert _ _) =
   pure [Basic Cert]
 primOpType (Alloc e) =
   pure [Mem e]
-primOpType (Partition _ n _ array) =
-  result <$> lookupType array
-  where result t = replicate n (Basic Int) ++ [t]
+primOpType (Partition _ n _ arrays) =
+  result <$> traverse lookupType arrays
+  where result ts = replicate n (Basic Int) ++ ts
 
 -- | The type of a loop operation.
 loopOpExtType :: HasTypeEnv m =>

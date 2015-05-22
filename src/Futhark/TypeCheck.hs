@@ -720,14 +720,17 @@ checkPrimOp (Assert e _) =
 checkPrimOp (Alloc e) =
   require [Basic Int] e
 
-checkPrimOp (Partition cs _ flags arr) = do
+checkPrimOp (Partition cs _ flags arrs) = do
   mapM_ (requireI [Basic Cert]) cs
   flagst <- lookupType flags
-  arrt <- lookupType arr
   unless (rowType flagst == Basic Int) $
     bad $ TypeError noLoc $ "Flag array has type " ++ pretty flagst ++ "."
-  unless (arrayRank arrt > 0) $
-    bad $ TypeError noLoc $ "Array argument to partition has type " ++ pretty arrt ++ "."
+  forM_ arrs $ \arr -> do
+    arrt <- lookupType arr
+    unless (arrayRank arrt > 0) $
+      bad $ TypeError noLoc $
+      "Array argument " ++ pretty arr ++
+      " to partition has type " ++ pretty arrt ++ "."
 
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore ()

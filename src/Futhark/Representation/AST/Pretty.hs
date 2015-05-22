@@ -194,10 +194,10 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Alloc e) = text "alloc" <> apply [ppr e]
-  ppr (Partition cs n flags arr) =
+  ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>
-    parens (commasep [ ppr n, ppr flags, ppr arr ])
+    parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =

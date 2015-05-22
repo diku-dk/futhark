@@ -496,17 +496,15 @@ defCompilePrimOp _ (Rearrange {}) =
 defCompilePrimOp _ (Reshape {}) =
   return ()
 
-defCompilePrimOp (Destination dests) (Partition _ n flags values)
+defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
   | (sizedests, arrdest) <- splitAt n dests,
     Just sizenames <- mapM fromScalarDestination sizedests,
-    [ArrayDestination (CopyIntoMemory destloc) _] <- arrdest = do
+    Just destlocs <- mapM arrDestLoc arrdest = do
   i <- newVName "i"
   declaringLoopVar i $ do
-    et <- elemType <$> lookupType values
     outer_dim <- compileSubExp <$> arraySize 0 <$> lookupType flags
     -- We will use 'i' to index the flag array and the value array.
     -- Note that they have the same outer size ('outer_dim').
-    srcloc <- arrayLocation values
     (flagmem, space, flagoffset) <- fullyIndexArray flags [varIndex i]
 
     -- First, for each of the 'n' output arrays, we compute the final
@@ -558,16 +556,19 @@ defCompilePrimOp (Destination dests) (Partition _ n flags values)
     -- parallel, and put each element where it is supposed to go.  Note
     -- that after writing to a partition, we increase the corresponding
     -- offset.
-    copy_element <- copyElem et
-                    destloc [varIndex partition_cur_offset]
-                    srcloc [varIndex i]
+    ets <- mapM (fmap elemType . lookupType) value_arrs
+    srclocs <- mapM arrayLocation value_arrs
+    copy_elements <- forM (zip3 destlocs ets srclocs) $ \(destloc,et,srcloc) ->
+      copyElem et
+      destloc [varIndex partition_cur_offset]
+      srcloc [varIndex i]
     let mkWriteLoopBody code c offsetvar =
           Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass)
                   (Imp.Constant $ IntVal $ fromIntegral c))
           (Imp.SetScalar partition_cur_offset
              (Imp.ScalarVar offsetvar)
            <>
-           copy_element
+           mconcat copy_elements
            <>
            Imp.SetScalar offsetvar
              (Imp.BinOp Plus (Imp.ScalarVar offsetvar) (Imp.Constant (IntVal 1))))
@@ -577,6 +578,10 @@ defCompilePrimOp (Destination dests) (Partition _ n flags values)
       Imp.SetScalar eqclass (index flagmem flagoffset Int space) <>
       writeLoopBody
     return ()
+  where arrDestLoc (ArrayDestination (CopyIntoMemory destloc) _) =
+          Just destloc
+        arrDestLoc _ =
+          Nothing
 
 defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 

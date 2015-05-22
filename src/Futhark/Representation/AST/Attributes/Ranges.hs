@@ -160,7 +160,7 @@ primOpRanges (Copy se) =
 primOpRanges (Index _ v _) =
   [subExpRange $ Var v]
 primOpRanges (Partition _ n _ arr) =
-  replicate n unknownRange ++ [subExpRange $ Var arr]
+  replicate n unknownRange ++ map (subExpRange . Var) arr
 primOpRanges (ArrayLit (e:es) _) =
   [(Just lower, Just upper)]
   where (e_lower, e_upper) = subExpKnownRange e

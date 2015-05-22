@@ -71,20 +71,17 @@ import Futhark.Representation.Basic (Basic)
 import Futhark.Optimise.InPlaceLowering.LowerIntoBinding
 import Futhark.MonadFreshNames
 import Futhark.Binder
+import Futhark.Tools (intraproceduralTransformation)
 
 import Prelude hiding (any, mapM_, elem, all)
 
 -- | Apply the in-place lowering optimisation to the given program.
 optimiseProgram :: Basic.Prog -> Basic.Prog
-optimiseProgram prog =
-  runForwardingM src $
-  liftM (removeProgAliases . Prog) .
-  mapM optimiseFunDec . progFunctions . aliasAnalysis $
-  prog
-  where src = newNameSourceForProg prog
+optimiseProgram = removeProgAliases . intraproceduralTransformation optimiseFunDec . aliasAnalysis
 
-optimiseFunDec :: FunDec Basic -> ForwardingM (FunDec Basic)
+optimiseFunDec :: MonadFreshNames m => FunDec Basic -> m (FunDec Basic)
 optimiseFunDec fundec =
+  modifyNameSource $ runForwardingM $
   bindingFParams (funDecParams fundec) $ do
     body <- optimiseBody $ funDecBody fundec
     return $ fundec { funDecBody = body }
@@ -203,8 +200,9 @@ instance MonadFreshNames ForwardingM where
 instance HasTypeEnv ForwardingM where
   askTypeEnv = HM.map entryType <$> asks topDownTable
 
-runForwardingM :: VNameSource -> ForwardingM a -> a
-runForwardingM src (ForwardingM m) = fst $ evalRWS m emptyTopDown src
+runForwardingM :: ForwardingM a -> VNameSource -> (a, VNameSource)
+runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown src
+                                     in (x, src')
   where emptyTopDown = TopDown { topDownCounter = 0
                                , topDownTable = HM.empty
                                , topDownDepth = 0
