@@ -117,6 +117,10 @@ standardPipeline =
   , inlinetransform
   , commonSubexpressionElimination
   , eotransform
+    -- We run fusion twice.
+  , hotransform
+  , commonSubexpressionElimination
+  , eotransform
   , hotransform
   , commonSubexpressionElimination
   , eotransform
