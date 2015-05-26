@@ -49,6 +49,8 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyNegate
                , letRule simplifyAssert
                , letRule simplifyIndexing
+               , removeEmptySplits
+               , removeSingletonSplits
                , evaluateBranch
                , simplifyBoolBranch
                , hoistBranchInvariant
@@ -595,6 +597,28 @@ simplifyIndexing defOf _ (Index cs idd inds) =
     _ -> Nothing
 
 simplifyIndexing _ _ _ = Nothing
+
+removeEmptySplits :: MonadBinder m => TopDownRule m
+removeEmptySplits _ (Let pat _ (PrimOp (Split cs ns arr)))
+  | (pointless,sane) <- partition (isCt0 . snd) $ zip (patternValueElements pat) ns,
+    not (null pointless) = do
+      rt <- rowType <$> lookupType arr
+      letBind_ (Pattern [] $ map fst sane) $
+        PrimOp $ Split cs (map snd sane) arr
+      forM_ pointless $ \(patElem,_) ->
+        letBindNames' [patElemName patElem] $
+        PrimOp $ ArrayLit [] rt
+removeEmptySplits _ _ =
+  cannotSimplify
+
+removeSingletonSplits :: MonadBinder m => TopDownRule m
+removeSingletonSplits _ (Let pat _ (PrimOp (Split _ [n] arr))) = do
+  size <- arraySize 0 <$> lookupType arr
+  if size == n then
+    letBind_ pat $ PrimOp $ SubExp $ Var arr
+    else cannotSimplify
+removeSingletonSplits _ _ =
+  cannotSimplify
 
 evaluateBranch :: MonadBinder m => TopDownRule m
 evaluateBranch _ (Let pat _ (If e1 tb fb t))
