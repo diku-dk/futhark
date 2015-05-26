@@ -410,17 +410,20 @@ simplifyBinOp _ _ (BinOp Times e1 e2 _)
 simplifyBinOp _ _ (BinOp Divide e1 e2 _)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e2 = Nothing
   | otherwise = SubExp <$> intFloatBinOp intop floatop e1 e2
   where intop x y = return $ x `div` y
         floatop x y = return $ x / y
 
-simplifyBinOp _ _ (BinOp Mod e1 e2 _) =
-  SubExp <$> intBinOp op e1 e2
+simplifyBinOp _ _ (BinOp Mod e1 e2 _)
+  | isCt0 e2 = Nothing
+  | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = Just $ x `mod` y
 
 simplifyBinOp _ _ (BinOp IntDivide e1 e2 _)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e2 = Nothing
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = return $ x `div` y
 

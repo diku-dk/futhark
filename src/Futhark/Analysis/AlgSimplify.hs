@@ -1266,8 +1266,11 @@ divVals _ _ =
   badAlgSimplifyM "divVals: operands not of (the same) numeral type! "
 
 canDivValsEvenly :: BasicValue -> BasicValue -> AlgSimplifyM Bool
+canDivValsEvenly (IntVal _)     (IntVal 0) = return False
 canDivValsEvenly (IntVal v1)    (IntVal v2) = return $ v1 `mod` v2 == 0
+canDivValsEvenly (Float32Val _) (Float32Val 0) = return False
 canDivValsEvenly (Float32Val _) (Float32Val _) = return True
+canDivValsEvenly (Float64Val _) (Float64Val 0) = return False
 canDivValsEvenly (Float64Val _) (Float64Val _) = return True
 canDivValsEvenly _ _ =
   badAlgSimplifyM "canDivValsEvenly: operands not of (the same) numeral type!"
