@@ -50,6 +50,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyAssert
                , letRule simplifyIndexing
                , simplifyIndexIntoReshape
+               , simplifyIndexIntoSplit
                , removeEmptySplits
                , removeSingletonSplits
                , evaluateBranch
@@ -641,6 +642,31 @@ simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
       letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_indices
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
+
+simplifyIndexIntoSplit :: MonadBinder m => TopDownRule m
+simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
+  | Just (Let split_pat _ (PrimOp (Split cs2 ns idd2))) <-
+      ST.entryBinding =<< ST.lookup idd vtable,
+    first_index : rest_indices <- inds = do
+      -- Figure out the extra offset that we should add to the first index.
+      let plus x y = eBinOp Plus x y Int
+          esum [] = return $ PrimOp $ SubExp $ Constant $ IntVal 0
+          esum (x:xs) = foldl plus x xs
+
+      patElem_and_offset <-
+        zip (patternValueElements split_pat) <$>
+        mapM esum (inits $ map eSubExp ns)
+      case find ((==idd) . patElemName . fst) patElem_and_offset of
+        Nothing ->
+          cannotSimplify -- Probably should not happen.
+        Just (_, offset_e) -> do
+          offset <- letSubExp "offset" offset_e
+          offset_index <- letSubExp "offset_index" $
+                          PrimOp $ BinOp Plus first_index offset Int
+          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 (offset_index:rest_indices)
+simplifyIndexIntoSplit _ _ =
+  cannotSimplify
+
 
 removeEmptySplits :: MonadBinder m => TopDownRule m
 removeEmptySplits _ (Let pat _ (PrimOp (Split cs ns arr)))
