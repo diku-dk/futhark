@@ -134,6 +134,11 @@ checkResults pat size untouchable knownBindings params body accs = do
                        letBindNames'_ [p] =<<
                          eBinOp Plus (eSubExp this)
                          (pure $ PrimOp $ BinOp Times el size' rt) rt
+              Times | Just properly_typed_size <- properSize rt -> do
+                        size' <- properly_typed_size
+                        letBindNames'_ [p] =<<
+                          eBinOp Times (eSubExp this)
+                          (pure $ PrimOp $ BinOp Pow el size' rt) rt
               _ -> cannotSimplify -- Um... sorry.
 
         checkResult _ _ = cannotSimplify
