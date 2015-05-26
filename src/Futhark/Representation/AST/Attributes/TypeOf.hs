@@ -164,6 +164,9 @@ segOpExtType (SegReduce _ fun _ descp) =
   staticShapes <$> mapType fun <$> pure <$> lookupType descp
 segOpExtType (SegScan _ _ _ inputs _) =
   staticShapes <$> traverse (lookupType . snd) inputs
+segOpExtType (SegReplicate _ _ dataarr _) =
+  result <$> lookupType dataarr
+  where result t = [Array (elemType t) (ExtShape [Ext 0]) Nonunique]
 
 -- | The type of an expression.
 expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>

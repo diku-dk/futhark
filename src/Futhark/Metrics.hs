@@ -96,6 +96,8 @@ segOpMetrics (SegScan _ ScanInclusive fun _ _) =
   seen "SegScanInclusive" >> lambdaMetrics fun
 segOpMetrics (SegScan _ ScanExclusive fun _ _) =
   seen "SegScanExclusive" >> lambdaMetrics fun
+segOpMetrics (SegReplicate{}) =
+  seen "SegReplicate"
 
 lambdaMetrics :: Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

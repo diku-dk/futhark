@@ -256,6 +256,9 @@ instance PrettyLore lore => Pretty (SegOp lore) where
       (nes, flatarrs) = unzip inputs
       ppScanType ScanInclusive = text "inc"
       ppScanType ScanExclusive = text "exc"
+  ppr (SegReplicate cs counts dataarr seg) =
+    ppCertificates' cs <> text "segreplicate" <>
+    parens (commasep $ map ppr [counts,dataarr,seg])
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>

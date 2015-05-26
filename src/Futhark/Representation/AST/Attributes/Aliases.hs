@@ -87,6 +87,9 @@ segOpAliases (SegReduce _ f _ _) =
   map (const mempty) $ lambdaReturnType f
 segOpAliases (SegScan _ _ f _ _) =
   map (const mempty) $ lambdaReturnType f
+segOpAliases (SegReplicate{}) =
+  [mempty]
+-- TODO: Troels, should this be vnameAliases ?
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =

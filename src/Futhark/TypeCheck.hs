@@ -935,6 +935,22 @@ checkSegOp (SegScan ass _ fun inputs descp_exp) = do
     ", but should be [Int]"
   checkLoopOp $ Scan ass fun inputs
 
+checkSegOp (SegReplicate ass counts_vn _ seg_vn) = do
+  _ <- checkSOACArrayArgs [counts_vn,seg_vn]
+  mapM_ (requireI [Basic Cert]) ass
+  counts_arg <- checkArg $ Var counts_vn
+  seg_arg <- checkArg $ Var seg_vn
+  let counts_tp = argType counts_arg
+  let seg_tp = argType seg_arg
+  unless (elemType counts_tp == Int) $
+    bad $ TypeError noLoc $
+    "Array is of type " ++ pretty counts_tp ++
+    ", but should be [Int] (segreplicate)"
+  unless (elemType seg_tp == Int) $
+    bad $ TypeError noLoc $
+    "Array is of type " ++ pretty seg_tp ++
+    ", but should be [Int] (segreplicate)"
+
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()
 

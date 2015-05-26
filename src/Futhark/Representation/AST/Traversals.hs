@@ -200,6 +200,11 @@ mapExpM tv (SegOp (SegScan cs st fun inputs descp_exp)) =
                         mapM (mapOnVName tv) flatarr_exps) <*>
               mapOnVName tv descp_exp)
     where (startexps, flatarr_exps) = unzip inputs
+mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
+  SegOp <$> (pure SegReplicate <*> mapOnCertificates tv cs <*>
+             mapOnVName tv counts <*>
+             mapOnVName tv dataarr <*>
+             mapOnVName tv seg)
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType

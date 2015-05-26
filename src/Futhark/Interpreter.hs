@@ -825,6 +825,8 @@ evalSegOp (SegScan _ st fun inputs descparr_exp) = do
                        ScanExclusive -> acc  : l
             return (acc', l')
 
+evalSegOp (SegReplicate{}) =
+  bad $ TypeError "FIXME: implement SegReplicate in Interpreter"
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do

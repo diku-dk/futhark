@@ -707,6 +707,13 @@ simplifySegOp (SegScan cs st fun input descp) = do
   descp' <- simplifyVName descp
   return $ SegScan cs' st fun' (zip acc' arrs') descp'
 
+simplifySegOp (SegReplicate cs counts dataarr seg) = do
+  cs' <- simplifyCerts cs
+  counts' <- simplifyVName counts
+  dataarr' <- simplifyVName dataarr
+  seg' <- simplifyVName seg
+  return $ SegReplicate cs' counts' dataarr' seg'
+
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp
 simplifySubExp (Var name) = do
   bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
