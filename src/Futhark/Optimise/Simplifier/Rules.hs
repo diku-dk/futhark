@@ -49,6 +49,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyNegate
                , letRule simplifyAssert
                , letRule simplifyIndexing
+               , simplifyIndexIntoReshape
                , removeEmptySplits
                , removeSingletonSplits
                , evaluateBranch
@@ -562,7 +563,7 @@ simplifyAssert _ _ _ =
   Nothing
 
 simplifyIndexing :: LetTopDownRule lore u
-simplifyIndexing defOf _ (Index cs idd inds) =
+simplifyIndexing defOf typeOf (Index cs idd inds) =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
@@ -591,12 +592,52 @@ simplifyIndexing defOf _ (Index cs idd inds) =
          let inds' = permuteShape (take (length inds) perm) inds
          in Just $ Index (cs++cs2) src inds'
 
-    Just (Reshape cs2 [_] v2) ->
-      Just $ Index (cs++cs2) v2 inds
+    Just (Reshape cs2 [_] v2)
+      | Just [_] <- arrayDims <$> typeOf (Var v2) ->
+        Just $ Index (cs++cs2) v2 inds
 
     _ -> Nothing
 
 simplifyIndexing _ _ _ = Nothing
+
+simplifyIndexIntoReshape :: MonadBinder m => TopDownRule m
+simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
+  | Just (Reshape cs2 newshape idd2) <- asPrimOp =<< ST.lookupExp idd vtable,
+    length newshape == length inds = do
+      -- Linearise indices and map to old index space.
+      oldshape <- arrayDims <$> lookupType idd2
+      let mult x y = eBinOp Times x y Int
+          plus x y = eBinOp Plus x y Int
+          eproduct [] = return $ PrimOp $ SubExp $ Constant $ IntVal 1
+          eproduct (x:xs) = foldl mult x xs
+          esum [] = return $ PrimOp $ SubExp $ Constant $ IntVal 0
+          esum (x:xs) = foldl plus x xs
+
+          sliceSizes [] =
+            return [PrimOp $ SubExp $ Constant $ IntVal 1]
+          sliceSizes (n:ns) =
+            (:) <$> eproduct (map eSubExp $ n:ns) <*> sliceSizes ns
+
+          computeNewIndices :: MonadBinder m => [SubExp] -> SubExp -> m [SubExp]
+          computeNewIndices [] _ = return []
+          computeNewIndices (size:slices) i = do
+            i' <- letSubExp "i" $
+                  PrimOp $ BinOp IntDivide i size Int
+            i_remnant <- letSubExp "i_remnant" =<<
+                         eBinOp Minus (eSubExp i)
+                         (eBinOp Times
+                          (eSubExp i')
+                          (eSubExp size) Int) Int
+            is <- computeNewIndices slices i_remnant
+            return $ i' : is
+      new_slice_sizes <- mapM (letSubExp "new_slice_size") =<< drop 1 <$> sliceSizes newshape
+      old_slice_sizes <- mapM (letSubExp "old_slice_size") =<< drop 1 <$> sliceSizes oldshape
+      ind_sizes <- zipWithM mult (map eSubExp inds) (map eSubExp new_slice_sizes)
+      flat_index <- letSubExp "flat_index" =<< esum (map return ind_sizes)
+      new_indices <- computeNewIndices old_slice_sizes flat_index
+      letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_indices
+simplifyIndexIntoReshape _ _ =
+  cannotSimplify
 
 removeEmptySplits :: MonadBinder m => TopDownRule m
 removeEmptySplits _ (Let pat _ (PrimOp (Split cs ns arr)))
