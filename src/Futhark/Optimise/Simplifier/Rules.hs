@@ -415,6 +415,12 @@ simplifyBinOp _ _ (BinOp Mod e1 e2 _) =
   SubExp <$> intBinOp op e1 e2
   where op x y = Just $ x `mod` y
 
+simplifyBinOp _ _ (BinOp IntDivide e1 e2 _)
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e1
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x `div` y
+
 simplifyBinOp _ typeOf (BinOp Pow e1 e2 _)
   | isCt0 e2 =
     case typeOf e1 of
