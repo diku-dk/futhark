@@ -366,8 +366,8 @@ simplifyClosedFormReduce vtable (Let pat _ (LoopOp (Reduce _ fun args))) =
 simplifyClosedFormReduce _ _ = cannotSimplify
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge (ForLoop _ bound) body))) =
-  loopClosedForm pat respat merge bound body
+simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge (ForLoop i bound) body))) =
+  loopClosedForm pat respat merge (HS.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifyRearrange :: LetTopDownRule lore u
