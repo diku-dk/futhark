@@ -1025,6 +1025,7 @@ pullOutOfMap mapInfo (argsneeded, _)
   innerMapSize <- case arrs_tps of
                     Array _ (Shape (outer:_)) _:_ -> return outer
                     _ -> flatError $ Error "impossible, map argument was not a list"
+  [innerMapSeg] <- getSegDescriptors1 [mapSize mapInfo, innerMapSize]
 
   -------------------------------------------------------------
   -- Handle Idents needed by body, which are not mapped over --
@@ -1047,10 +1048,8 @@ pullOutOfMap mapInfo (argsneeded, _)
   --
   -- Distribute and flatten idents needed (from above)
   --
-  (distBnds, distArrIdents) <- mapAndUnzipM (distributeExtraArg innerMapSize)
-                                            intmres_arrs
-  flatDistArrIdents <- mapM (flattenArg mapInfo) $ Left <$> distArrIdents
-
+  (distBnds, flatDistArrIdents) <-
+    mapAndUnzipM (distributeExtraArg innerMapSize innerMapSeg) intmres_arrs
 
   -----------------------------------------
   -- Merge information and update lambda --
@@ -1080,7 +1079,7 @@ pullOutOfMap mapInfo (argsneeded, _)
 
   zipWithM_ evenMoreExtraSutff pats pats'
 
-  return $ distBnds ++
+  return $ concat distBnds ++
            loopInvRepBnds ++
            mapBnd''
 
@@ -1089,36 +1088,44 @@ pullOutOfMap mapInfo (argsneeded, _)
     -- | The inner map apparently depends on some variable that does
     -- not come from the lists mapped over, so we'll need to add that
     --
-    -- 1st arg is the size of the inner map
-    distributeExtraArg :: SubExp -> Ident -> FlatM (Binding, Ident)
-    distributeExtraArg sz i@(Ident vn tp) = do
-      distTp <- case tp of
+    -- 1st arg is "size" of the inner map
+    -- 2nd arg is the segment descriptor for the sizes of the inner map
+    distributeExtraArg :: SubExp -> (Ident,Regularity) -> Ident -> FlatM ([Binding], Ident)
+    distributeExtraArg sz (Ident counts _,_) i@(Ident vn tp) = do
+      dist_tp <- case tp of
                  Mem{} -> flatError MemTypeFound
                  Array _ (Shape []) _ -> flatError $ ArrayNoDims i
-                 (Basic bt) ->
-                   return $ Array bt (Shape [sz]) Nonunique
+                 (Basic _) ->
+                   flatError $
+                       Error $ "distributeExtraArg: " ++
+                               "trying to distribute basic type"
                  (Array bt (Shape (out:rest)) uniq) -> do
                    when (out /= mapSize mapInfo) $
                      flatError $
                        Error $ "distributeExtraArg: " ++
                                "trying to distribute array with incorrect outer size " ++
                                pretty i
-                   return $ Array bt (Shape $ out:sz:rest) uniq
+                   unless (null rest) $
+                     flatError $ Error "distributeExtraArg: TODO: handle replicating arrays"
+                   newsz <- getFlattenedDims1 (out,sz)
+                   return $ Array bt (Shape $ newsz:rest) uniq
 
-      distident <- newIdent (baseString vn ++ "_dist") distTp
+      distident <- newIdent (baseString vn ++ "_dist") dist_tp
+      let [flatsz] = arrayDims dist_tp
       addTypeIdent distident
       addDataArray (identName distident) distident
+      dataarr <- getDataArray1 vn
 
-      let distExp = Apply (nameFromString "distribute")
-                          [(Var vn, Observe), (sz, Observe)]
-                          --  ^ TODO: I guess  Observe is okay for now
-                          (basicRetType Int)
-                          --  ^ TODO: stupid exsitensial types :(
+      tmpsz_ident <- newIdent "size" (Basic Int)
+      let tmpident_tp = setArrayDims dist_tp [Var $ identName tmpsz_ident]
+      tmpident <- newIdent "tmp" tmpident_tp
 
-
-      let distbnd = Let (Pattern [] [PatElem distident BindVar ()]) () distExp
-
-      return (distbnd, distident)
+      let segrep_exp = SegOp $ SegReplicate [] counts (identName dataarr) Nothing
+      let segrep_bnd = Let (patternFromIdents [tmpsz_ident] [tmpident])
+                           () segrep_exp
+      let reshape_exp = PrimOp $ Reshape [] [flatsz] (identName tmpident)
+      let reshape_bnd = Let (patternFromIdents [] [distident]) () reshape_exp
+      return ([segrep_bnd, reshape_bnd], distident)
 
     -- | Steps for exiting a nested map, meaning we step-up/unflatten the result
     unflattenRes :: PatElem -> FlatM PatElem
