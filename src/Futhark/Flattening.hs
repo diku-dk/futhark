@@ -813,11 +813,13 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                 val_tp <- lookupType arg
                 return $ Just (Param (Ident arg val_tp) (), identName val)
               Nothing -> return Nothing
+      argarrs' <- mapM (liftM identName . getDataArray1) argarrs
 
       pat <- liftM (Pattern [] . map (\i -> PatElem i BindVar () ))
              $ forM toreturn_vns $ \sr -> do
                  iarr <- wrapInArrVName (mapSize mapInfo) sr
                  addMapLetArray sr iarr
+                 addDataArray (identName iarr) iarr
                  return iarr
 
       let lambody = Body { bodyLore = ()
@@ -831,7 +833,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                                  , lambdaReturnType = toreturn_tps
                                  }
 
-      let theMapExp = LoopOp $ Map certs wrappedlambda argarrs
+      let theMapExp = LoopOp $ Map certs wrappedlambda argarrs'
       return $ Let pat () theMapExp
 
 transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
