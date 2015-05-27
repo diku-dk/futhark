@@ -54,6 +54,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.Writer
 import Control.Monad.State
+import qualified Data.Traversable
 
 import Prelude
 
@@ -204,7 +205,7 @@ mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
   SegOp <$> (pure SegReplicate <*> mapOnCertificates tv cs <*>
              mapOnVName tv counts <*>
              mapOnVName tv dataarr <*>
-             mapOnVName tv seg)
+             Data.Traversable.mapM (mapOnVName tv) seg)
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType

@@ -270,11 +270,14 @@ data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, VName)] VName
                 | SegScan Certificates ScanType (LambdaT lore) [(SubExp, VName)] VName
                   -- ^ Identical to 'Scan', except that the last arg
                   -- is a segment descriptor.
-                | SegReplicate Certificates VName VName VName
+                | SegReplicate Certificates VName VName (Maybe VName)
                   -- ^ @segreplicate(counts,data,seg)@ splits the
                   -- @data@ array into subarrays based on the lengths
                   -- given in @seg@. Subarray @sa_i@ is replicated
                   -- @counts_i@ times.
+                  --
+                  -- If @seg@ is @Nothing@, this is the same as
+                  -- @seg = replicate (length counts) 1@
                   --
                   -- It should always be the case that
                   -- @length(counts) == length(seg)@

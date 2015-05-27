@@ -935,21 +935,28 @@ checkSegOp (SegScan ass _ fun inputs descp_exp) = do
     ", but should be [Int]"
   checkLoopOp $ Scan ass fun inputs
 
-checkSegOp (SegReplicate ass counts_vn _ seg_vn) = do
-  _ <- checkSOACArrayArgs [counts_vn,seg_vn]
+checkSegOp (SegReplicate ass counts_vn data_vn mb_seg_vn) = do
+  seg_tp <- case mb_seg_vn of
+         Just vn -> liftM argType $ checkArg $ Var vn
+         Nothing -> do data_tp <- liftM argType $ checkArg $ Var data_vn
+                       return $ arrayOf (Basic Int) (arrayShape data_tp) Nonunique
   mapM_ (requireI [Basic Cert]) ass
   counts_arg <- checkArg $ Var counts_vn
-  seg_arg <- checkArg $ Var seg_vn
   let counts_tp = argType counts_arg
-  let seg_tp = argType seg_arg
-  unless (elemType counts_tp == Int) $
+  -- TODO: Not sure Troels is happy about this
+  unless (arrayDims counts_tp == arrayDims seg_tp) $
+    bad $ TypeError noLoc $
+    "Arrays should have same shapes " ++ pretty counts_tp ++ " , " ++
+    pretty seg_tp
+  unless (elemType counts_tp == Int && not (null (arrayDims counts_tp))) $
     bad $ TypeError noLoc $
     "Array is of type " ++ pretty counts_tp ++
     ", but should be [Int] (segreplicate)"
-  unless (elemType seg_tp == Int) $
+  unless (elemType seg_tp == Int && not (null (arrayDims seg_tp))) $
     bad $ TypeError noLoc $
     "Array is of type " ++ pretty seg_tp ++
     ", but should be [Int] (segreplicate)"
+
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()

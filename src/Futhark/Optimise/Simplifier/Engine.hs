@@ -53,6 +53,7 @@ import Control.Monad.Writer
 import Data.Either
 import Data.Hashable
 import Data.List
+import qualified Data.Traversable
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -711,7 +712,7 @@ simplifySegOp (SegReplicate cs counts dataarr seg) = do
   cs' <- simplifyCerts cs
   counts' <- simplifyVName counts
   dataarr' <- simplifyVName dataarr
-  seg' <- simplifyVName seg
+  seg' <- Data.Traversable.mapM simplifyVName seg
   return $ SegReplicate cs' counts' dataarr' seg'
 
 simplifySubExp :: MonadEngine m => SubExp -> m SubExp

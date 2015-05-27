@@ -12,6 +12,7 @@ module Futhark.Representation.AST.Pretty
   where
 
 import Data.Array
+import Data.Maybe
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
@@ -258,7 +259,7 @@ instance PrettyLore lore => Pretty (SegOp lore) where
       ppScanType ScanExclusive = text "exc"
   ppr (SegReplicate cs counts dataarr seg) =
     ppCertificates' cs <> text "segreplicate" <>
-    parens (commasep $ map ppr [counts,dataarr,seg])
+    parens (commasep $ map ppr $ catMaybes [Just counts, Just dataarr, seg])
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
