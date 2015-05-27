@@ -723,14 +723,18 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
      return [Let (Pattern [] pats) ()
                  (LoopOp (Map certs lambda arrs'))]
    _ -> do
-     loopinv_vns <-
+     loopinv_arrvns <-
        filter (`notElem` arrs) <$> filterM (liftM isJust . vnDimentionality)
        (HS.toList $ freeInExp (LoopOp $ Map certs lambda arrs))
-     (loopinv_repbnds, loopinv_repidents) <-
-       mapAndUnzipM (replicateVName outerSize) loopinv_vns
+     unless (null loopinv_arrvns) $
+       flatError $ Error $ "We only handle intermediate results currently" ++
+                           "but these where loop invariant: " ++
+                           pretty loopinv_arrvns
+--     (loopinv_repbnds, loopinv_repidents) <-
+--       mapAndUnzipM (replicateVName outerSize) loopinv_vns
 
-     let mapInfo = MapInfo { mapListArgs = arrs ++ map identName loopinv_repidents
-                           , lamParamVNs = lambdaParamVNs ++ loopinv_vns
+     let mapInfo = MapInfo { mapListArgs = arrs --FIXME ++ map identName loopinv_repidents
+                           , lamParamVNs = lambdaParamVNs --FIXME ++ loopinv_vns
                            , mapLets = letBoundIdentsInLambda
                            , mapSize = outerSize
                            , mapCerts = certs
@@ -774,7 +778,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
 
      zipWithM_ fixDataArrStuff pats res'
 
-     return $ loopinv_repbnds ++
+     return $ --FIXME loopinv_repbnds ++
               concatMap (either id (: [])) grouped'
 
   where
