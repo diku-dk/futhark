@@ -836,8 +836,9 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
       let theMapExp = LoopOp $ Map certs wrappedlambda argarrs'
       return $ Let pat () theMapExp
 
-transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
-                       (PrimOp (Reshape certs (dim0:dims) reshapearr))) = do
+transformBinding topbnd@(Let (Pattern [] [PatElem resident BindVar ()]) ()
+                        (PrimOp (Reshape certs (dim0:dims) reshapearr))) = do
+  tell [StartBnd "transformBinding" topbnd]
   -- FIXME: For the case where reshape is only to check map sizes,
   -- where will those certifications go once we remove this reshape?
   -- ... shouldn't the reshape certifications be on the map as well in
@@ -889,7 +890,8 @@ transformBinding (Let (Pattern [] [PatElem resident BindVar ()]) ()
       return (merged, catMaybes [merge_bnd] : res)
 
 
-transformBinding (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+transformBinding topbnd@(Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+  tell [StartBnd "transformBinding" topbnd]
   (map_bnd, red_bnd) <-
     redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
   map_bnd' <- transformBinding map_bnd
@@ -897,6 +899,7 @@ transformBinding (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
   return $ map_bnd' ++ red_bnd'
 
 transformBinding bnd@(Let (Pattern _ pats) () _) = do
+  tell [StartBnd "transformBinding" bnd]
   -- FIXME: magically construct segment descriptors as needed
   mapM_ addTypePatElem pats
   return [bnd]
@@ -1263,7 +1266,7 @@ flattenArg mapInfo targInfo = do
   target <- case targInfo of
               Left targ -> return targ
               Right innerMapArg -> findTarget1 mapInfo innerMapArg
-  logMsg $ unwords ["flattenArg", pretty target]
+  logMsg $ unwords ["flattenArg", "target=",pretty target, "targetInfo=",show targInfo]
 
   -- tod = Target Outer Dimension
   (tod1, tod2, rest, bt, uniq) <- case target of
