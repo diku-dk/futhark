@@ -825,8 +825,33 @@ evalSegOp (SegScan _ st fun inputs descparr_exp) = do
                        ScanExclusive -> acc  : l
             return (acc', l')
 
-evalSegOp (SegReplicate{}) =
-  bad $ TypeError "FIXME: implement SegReplicate in Interpreter"
+evalSegOp (SegReplicate _ counts_vn dataarr_vn mb_seg_vn) = do
+  vs <- (arrToList <=< lookupVar) dataarr_vn
+  vs_tp <- liftM valueType $ lookupVar dataarr_vn
+  counts <- mapM asInt <=< arrToList <=< lookupVar $ counts_vn
+  segments <- case mb_seg_vn of
+    Nothing -> return $ map (const 1) counts
+    Just vn -> mapM asInt <=< arrToList <=< lookupVar $ vn
+
+  when (any (<0) segments) $ bad . TypeError $
+    "evalSegOp SegReplicate segment with negative length"
+  unless (length vs == sum segments) $ bad . TypeError $
+    unwords["evalSegOp SegReplicate segment size (", show $ sum segments, ")"
+           ,"was not equal to array length (", show $ length vs, ")"
+           ]
+
+  let segmented_arrs =
+        reverse $ fst $
+                  foldl (\(res,rest) n -> (take n rest : res, drop n rest))
+                        ([], vs) segments
+
+  let result = concat $ zipWith (\c arr -> concat $ replicate c arr)
+                                counts segmented_arrs
+
+  return [ BasicVal $ IntVal $ fromIntegral $ length result
+         , arrayVal result (elemType vs_tp) [length result] ]
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
+        asInt _ = bad $ TypeError "evalSegOp SegReplicate asInt"
 
 evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
 evalFuncall fname args = do
