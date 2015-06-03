@@ -34,7 +34,7 @@ import Data.Traversable
 
 import Prelude
 
-import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap, subExpType)
+import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap, Stream, subExpType)
 import qualified Futhark.Representation.AST as AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -135,6 +135,10 @@ data Combinator lore = Map Certificates (NestBody lore)
                      | Reduce Certificates (NestBody lore) [TypedSubExp]
                      | Scan Certificates (NestBody lore) [TypedSubExp]
                      | Redomap Certificates (Lambda lore) (NestBody lore) [TypedSubExp]
+                     | Stream  Certificates (NestBody lore) [TypedSubExp]
+                      -- Cosmin: I think it might be helpful to make Stream part of a
+                      --         nest, although the stream might not be parallel: that
+                      --         is because it might enable, for example tiling.
                  deriving (Show)
 
 instance Substitutable lore => Substitute (Combinator lore) where
@@ -150,12 +154,14 @@ body (Map _ b) = b
 body (Reduce _ b _) = b
 body (Scan _ b _) = b
 body (Redomap _ _ b _) = b
+body (Stream  _   b _) = b
 
 setBody :: NestBody lore -> Combinator lore -> Combinator lore
 setBody b (Map cs _) = Map cs b
 setBody b (Reduce cs _ es) = Reduce cs b es
 setBody b (Scan cs _ es) = Scan cs b es
 setBody b (Redomap cs l _ es) = Redomap cs l b es
+setBody b (Stream  cs   _ es) = Stream  cs   b es
 
 combinatorFirstLoop :: Combinator lore -> ([Ident], [Type])
 combinatorFirstLoop comb =
@@ -195,6 +201,7 @@ combCertificates (Map     cs _    ) = cs
 combCertificates (Reduce  cs _   _) = cs
 combCertificates (Scan    cs _   _) = cs
 combCertificates (Redomap cs _ _ _) = cs
+combCertificates (Stream  cs   _ _) = cs
 
 -- | Sets the certificates used in a 'Combinator'.
 setCombCertificates :: Certificates -> Combinator lore -> Combinator lore
@@ -202,6 +209,7 @@ setCombCertificates cs (Map     _ bdy    ) = Map    cs bdy
 setCombCertificates cs (Reduce  _ bdy acc) = Reduce cs bdy acc
 setCombCertificates cs (Scan    _ bdy acc) = Scan   cs bdy acc
 setCombCertificates cs (Redomap _ fun bdy acc) = Redomap cs fun bdy acc
+setCombCertificates cs (Stream  _     bdy acc) = Stream  cs     bdy acc
 
 typeOf :: SOACNest lore -> [ExtType]
 typeOf (SOACNest inps (Map _ b)) =
@@ -210,11 +218,23 @@ typeOf (SOACNest inps (Map _ b)) =
   where outersize = arraysSize 0 $ map SOAC.inputType inps
 typeOf (SOACNest _ (Reduce _ _ accinit)) =
   staticShapes $ map subExpType accinit
-typeOf (SOACNest _ (Redomap _ _ _ accinit)) =
-  staticShapes $ map subExpType accinit
 typeOf (SOACNest inps (Scan _ _ accinit)) =
   staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
                | t <- map subExpType accinit ]
+  where outersize = arraysSize 0 $ map SOAC.inputType inps
+typeOf (SOACNest inps (Redomap _ _ b nes)) =
+  let allrtps = nestBodyReturnType b
+      accrtps = take (length nes) allrtps
+      arrrtps = [ arrayOf t (Shape [outersize]) (uniqueness t)
+                  | t <- drop (length nes) allrtps ]
+  in  staticShapes $ accrtps ++ arrrtps
+  where outersize = arraysSize 0 $ map SOAC.inputType inps
+typeOf (SOACNest inps (Stream  _ b nes)) =
+  let allrtps = nestBodyReturnType b
+      accrtps = take (length nes) allrtps
+      arrrtps = [ arrayOf t (Shape [outersize]) (uniqueness t)
+                  | t <- drop (length nes) allrtps ]
+  in  staticShapes $ accrtps ++ arrrtps
   where outersize = arraysSize 0 $ map SOAC.inputType inps
 
 fromExp :: (Bindable lore, LocalTypeEnv f, Monad f) =>
@@ -238,6 +258,8 @@ fromSOAC (SOAC.Redomap cs ol l es as) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
   SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*> traverse typedSubExp es)
+fromSOAC (SOAC.Stream cs lam es as) =
+  SOACNest as <$> (Stream  cs  <$> lambdaToBody lam <*> traverse typedSubExp es)
 
 nested :: (LocalTypeEnv m, Monad m, Bindable lore) =>
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
@@ -272,5 +294,9 @@ toSOAC (SOACNest as (Scan cs b es)) =
   pure (zip (map subExpExp es) as)
 toSOAC (SOACNest as (Redomap cs l b es)) =
   SOAC.Redomap cs l <$>
+  bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
+  pure (map subExpExp es) <*> pure as
+toSOAC (SOACNest as (Stream  cs b es)) =
+  SOAC.Stream cs <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (map subExpExp es) <*> pure as
