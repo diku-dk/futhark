@@ -162,29 +162,62 @@ instance Lore.Lore lore => Aliased (Aliases lore) where
 
 instance (PrettyLore lore) => PrettyLore (Aliases lore) where
   ppBindingLore binding@(Let pat (consumed,_) _) =
-    case catMaybes [patElemAttrs,
-                    expAttr,
-                    ppBindingLore $ removeBindingAliases binding] of
-      [] -> Nothing
-      ls -> Just $ PP.folddoc (PP.</>) ls
+    maybeComment $ catMaybes [patElemAttrs,
+                              expAttr,
+                              ppBindingLore $ removeBindingAliases binding]
     where expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
             als -> Just $ oneline $
                    PP.text "// Consumes " <> PP.commasep (map PP.ppr als)
+
           patElemAttrs =
-            case mapMaybe patElemAttr $ patternElements pat of
-              []    -> Nothing
-              attrs -> Just $ PP.folddoc (PP.</>) attrs
+            maybeComment $ mapMaybe patElemAttr $ patternElements pat
+
           patElemAttr patelem =
-            case HS.toList . unNames . fst . patElemLore $ patelem of
-              [] -> Nothing
-              als -> Just $ oneline $
-                     PP.text "// " <> PP.ppr (patElemName patelem) <> PP.text " aliases " <>
-                     PP.commasep (map PP.ppr als)
-          oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
+            oneline <$>
+            aliasComment (patElemName patelem)
+            (unNames . fst . patElemLore $ patelem)
 
   ppFunDecLore = ppFunDecLore . removeFunDecAliases
-  ppExpLore = ppExpLore . removeExpAliases
+
+  ppExpLore e@(AST.LoopOp (DoLoop _ merge _ body)) =
+    maybeComment $ catMaybes [expAttr, mergeAttr]
+    where mergeAttr = let mergeParamAliases fparam als
+                            | basicType (paramType fparam) =
+                              Nothing
+                            | otherwise =
+                              resultAliasComment (paramName fparam) als
+                      in maybeComment $ catMaybes $
+                         zipWith mergeParamAliases (map fst merge) $
+                         bodyAliases body
+          expAttr = ppExpLore $ removeExpAliases e
+  ppExpLore e =
+    ppExpLore $ removeExpAliases e
+
+oneline :: PP.Doc -> PP.Doc
+oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
+
+maybeComment :: [PP.Doc] -> Maybe PP.Doc
+maybeComment [] = Nothing
+maybeComment cs = Just $ PP.folddoc (PP.</>) cs
+
+aliasComment :: (PP.Pretty a, PP.Pretty b) =>
+                a -> HS.HashSet b -> Maybe PP.Doc
+aliasComment name als =
+  case HS.toList als of
+    [] -> Nothing
+    als' -> Just $ oneline $
+            PP.text "// " <> PP.ppr name <> PP.text " aliases " <>
+            PP.commasep (map PP.ppr als')
+
+resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
+                a -> HS.HashSet b -> Maybe PP.Doc
+resultAliasComment name als =
+  case HS.toList als of
+    [] -> Nothing
+    als' -> Just $ oneline $
+            PP.text "// Result of " <> PP.ppr name <> PP.text " aliases " <>
+            PP.commasep (map PP.ppr als')
 
 removeAliases :: Rephraser (Aliases lore) lore
 removeAliases = Rephraser { rephraseExpLore = snd
