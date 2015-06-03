@@ -328,10 +328,7 @@ ppList as = case map ppr as of
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
 ppPattern :: [Ident] -> Doc
-ppPattern = braces . commasep . map ppBind
-
-ppBind :: Ident -> Doc
-ppBind ident = ppr (identType ident) <+> ppr ident
+ppPattern = braces . commasep . map ppr
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets
