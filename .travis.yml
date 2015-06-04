@@ -5,7 +5,7 @@ sudo: false
 
 ghc:
   - "7.8"
-  - "7.10"
+#  - "7.10"
 
 cache:
   directories:
