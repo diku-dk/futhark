@@ -9,14 +9,14 @@ ghc:
 
 cache:
   directories:
-    - .cabal
-    - .ghc
+    - $HOME/.cabal
+    - $HOME/.ghc
 
 # Note: the distinction between `before_install` and `install` is not
 # important.
 before_install:
  - travis_retry cabal update
- - travis_retry cabal install happy alex hlint regex-tdfa
+ - travis_retry cabal install happy alex hlint
 
 install:
  - cabal --version
