@@ -26,7 +26,7 @@ before_install:
  - export PATH=$HOME/.cabal/bin:$HOME/.local/bin:$PATH
  - tar xf ghc-$GHCVER-x86_64-unknown-linux-deb7.tar.xz
  - tar xf cabal-install-$CABALVER.tar.gz
- - (cd ghc-$GHCVER && ./configure --path=$HOME/.local/ && make install)
+ - (cd ghc-$GHCVER && ./configure --prefix=$HOME/.local/ && make install)
  - (cd cabal-install-$CABALVER && ./bootstrap.sh)
  - travis_retry cabal update
  - travis_retry cabal install happy alex hlint regex-tdfa
