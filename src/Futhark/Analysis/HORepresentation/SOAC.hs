@@ -79,7 +79,7 @@ import Prelude hiding (mapM)
 
 import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST
-  hiding (Map, Reduce, Scan, Redomap,
+  hiding (Map, Reduce, Scan, Redomap, Stream,
           Var, Iota, Rearrange, Reshape, Replicate)
 import Futhark.Substitute
 import Futhark.Tools
@@ -389,6 +389,7 @@ data SOAC lore = Map Certificates (Lambda lore) [Input]
                | Reduce  Certificates (Lambda lore) [(SubExp,Input)]
                | Scan Certificates (Lambda lore) [(SubExp,Input)]
                | Redomap Certificates (Lambda lore) (Lambda lore) [SubExp] [Input]
+               | Stream  Certificates (Lambda lore) [SubExp] [Input]
             deriving (Show)
 
 -- | Returns the inputs used in a SOAC.
@@ -397,6 +398,7 @@ inputs (Map _     _     arrs) = arrs
 inputs (Reduce  _ _     args) = map snd args
 inputs (Scan    _ _     args) = map snd args
 inputs (Redomap _ _ _ _ arrs) = arrs
+inputs (Stream  _ _ _   arrs) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
@@ -408,6 +410,8 @@ setInputs arrs (Scan cs lam args) =
   Scan cs lam (zip (map fst args) arrs)
 setInputs arrs (Redomap cs lam1 lam ne _) =
   Redomap cs lam1 lam ne arrs
+setInputs arrs (Stream  cs lam ne _) =
+  Stream cs lam ne arrs
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC lore -> Lambda lore
@@ -415,6 +419,7 @@ lambda (Map     _ lam _       ) = lam
 lambda (Reduce  _ lam _       ) = lam
 lambda (Scan    _ lam _       ) = lam
 lambda (Redomap _ _   lam2 _ _) = lam2
+lambda (Stream  _ lam      _ _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
@@ -426,6 +431,8 @@ setLambda lam (Scan cs _ args) =
   Scan cs lam args
 setLambda lam (Redomap cs lam1 _ ne arrs) =
   Redomap cs lam1 lam ne arrs
+setLambda lam (Stream  cs _      ne arrs) =
+  Stream cs lam ne arrs
 
 -- | Returns the certificates used in a SOAC.
 certificates :: SOAC lore -> Certificates
@@ -433,6 +440,7 @@ certificates (Map     cs _     _) = cs
 certificates (Reduce  cs _ _    ) = cs
 certificates (Scan    cs _ _    ) = cs
 certificates (Redomap cs _ _ _ _) = cs
+certificates (Stream  cs _   _ _) = cs
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
@@ -446,6 +454,10 @@ typeOf (Redomap _ outlam inlam nes inps) =
   let accrtps = lambdaReturnType outlam
       arrrtps = drop (length nes) $ mapType inlam $ map inputType inps
   in  accrtps ++ arrrtps
+typeOf (Stream _ lam nes inps) =
+  let accrtps = take (length nes) $ lambdaReturnType lam
+      arrtps  = drop (length nes) $ mapType lam $ map inputType inps
+  in  accrtps ++ arrtps
 
 inpOuterSize :: SOAC lore -> SubExp
 inpOuterSize (Map _ _ inps) =
@@ -455,6 +467,8 @@ inpOuterSize (Reduce _ _ input) =
 inpOuterSize (Scan _ _ input) =
   arraysSize 0 $ map (inputType . snd) input
 inpOuterSize (Redomap _ _ _ _ inps) =
+  arraysSize 0 $ map inputType inps
+inpOuterSize (Stream  _   _ _ inps) =
   arraysSize 0 $ map inputType inps
 
 -- | Convert a SOAC to the corresponding expression.
@@ -470,6 +484,11 @@ toExp (Scan cs l args) =
   where (es, as) = unzip args
 toExp (Redomap cs l1 l2 es as) =
   LoopOp <$> (Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as)
+toExp (Stream  cs lam nes inps) = LoopOp <$> do
+  let extrtp = staticShapes $ lambdaReturnType lam
+      extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
+  inpexp <- inputsToSubExps inps
+  return $ Futhark.Stream cs nes inpexp extlam
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -494,4 +513,11 @@ fromExp (LoopOp (Futhark.Scan cs l args)) = do
   Right <$> Scan cs l <$> zip es <$> traverse varInput as
 fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as)) =
   Right <$> Redomap cs l1 l2 es <$> traverse varInput as
+fromExp (LoopOp (Futhark.Stream cs nes as extlam)) = do
+  let mrtps = map hasStaticShape $ extLambdaReturnType extlam
+      rtps  = catMaybes mrtps
+  if length mrtps == length rtps
+  then Right <$> do let lam = Lambda (extLambdaParams extlam) (extLambdaBody extlam) rtps
+                    Stream cs lam nes <$> traverse varInput as
+  else pure $ Left NotSOAC
 fromExp _ = pure $ Left NotSOAC
