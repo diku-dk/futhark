@@ -1,33 +1,20 @@
-# NB: don't set `language: haskell` here.  We use 'sh' in order to get
-# a pure VM with nothing really preinstalled.
-language: sh
+language: haskell
 
 # We use a container-based worker.
 sudo: false
+
+ghc:
+  7.8
+  7.10
 
 cache:
   directories:
     - .cabal
     - .ghc
 
-# The following enables several GHC versions to be tested; often it's
-# enough to test only against the last release in a major GHC
-# version. Feel free to omit lines listings versions you don't
-# need/want testing for.
-env:
- - CABALVER=1.18.1.0 GHCVER=7.8.4
- - CABALVER=1.22.4.0 GHCVER=7.10.1
-
 # Note: the distinction between `before_install` and `install` is not
 # important.
 before_install:
- - travis_retry wget https://www.haskell.org/ghc/dist/$GHCVER/ghc-$GHCVER-x86_64-unknown-linux-deb7.tar.xz
- - travis_retry wget http://hackage.haskell.org/package/cabal-install-$CABALVER/cabal-install-$CABALVER.tar.gz
- - export PATH=$HOME/.cabal/bin:$HOME/.local/bin:$PATH
- - tar xf ghc-$GHCVER-x86_64-unknown-linux-deb7.tar.xz
- - tar xf cabal-install-$CABALVER.tar.gz
- - (cd ghc-$GHCVER && ./configure --prefix=$HOME/.local/ && make install)
- - (cd cabal-install-$CABALVER && ./bootstrap.sh)
  - travis_retry cabal update
  - travis_retry cabal install happy alex hlint regex-tdfa
 
