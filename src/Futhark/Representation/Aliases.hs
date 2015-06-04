@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies, ScopedTypeVariables #-}
 -- | A representation where all bindings are annotated with aliasing
 -- information.
 module Futhark.Representation.Aliases
@@ -264,10 +264,12 @@ mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
                  -> ([PatElemT (VarAliases, Lore.LetBound anylore)],
                      [PatElemT (VarAliases, Lore.LetBound anylore)])
 mkPatternAliases pat e =
-  -- Some part of the pattern may be the context, which is not
-  -- aliased.
+  -- Some part of the pattern may  be the context.  This does not have
+  -- aliases from aliasesOf, so we  use a hack to compute some aliases
+  -- from do-loops.  FIXME.  This should be more general.
   let als = aliasesOf e
-  in (map (`annotateBindee` mempty) $ patternContextElements pat,
+      context_als = mkContextAliases pat e
+  in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
             bindee `setPatElemLore` (Names' names', patElemLore bindee)
@@ -278,6 +280,22 @@ mkPatternAliases pat e =
                     (_, Mem _)          -> names
                     _                   -> mempty
 
+mkContextAliases :: forall anylore lore.
+                    (Lore.Lore anylore, Aliased lore) =>
+                    AST.Pattern anylore -> AST.Exp lore
+                 -> [Names]
+mkContextAliases _ (AST.LoopOp (DoLoop res merge _ body)) =
+  let ctx = loopResultContext (representative :: lore) res $ map fst merge
+      init_als = zip mergenames $ map (subExpAliases . snd) merge
+      expand als = als <> HS.unions (mapMaybe (`lookup` init_als) (HS.toList als))
+      merge_als = zip mergenames $
+                  map ((`HS.difference` mergenames_set) . expand) $
+                  bodyAliases body
+  in map (fromMaybe mempty . flip lookup merge_als) ctx
+  where mergenames = map (paramName . fst) merge
+        mergenames_set = HS.fromList mergenames
+mkContextAliases pat _ =
+  replicate (length $ patternContextElements pat) mempty
 
 mkBodyAliases :: Aliased lore =>
                  [AST.Binding lore]
