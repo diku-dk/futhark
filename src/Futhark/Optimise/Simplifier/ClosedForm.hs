@@ -174,10 +174,6 @@ determineKnownBindings look lam accs arrs =
           | Just (PrimOp (Replicate _ ve)) <- look v = Just (p, ve)
         isReplicate _ = Nothing
 
-boundInBody :: Body lore -> Names
-boundInBody = mconcat . map bound . bodyBindings
-  where bound (Let pat _ _) = HS.fromList $ patternNames pat
-
 makeBindMap :: Body lore -> HM.HashMap VName (Exp lore)
 makeBindMap = HM.fromList . mapMaybe isSingletonBinding . bodyBindings
   where isSingletonBinding (Let pat _ e) = case patternNames pat of
