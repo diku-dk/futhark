@@ -36,6 +36,7 @@ module Futhark.Tools
 
   , redomapToMapAndReduce
   , intraproceduralTransformation
+  , boundInBody
 
   -- * Result types
   , instantiateShapes
@@ -49,6 +50,7 @@ where
 import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
 import Data.Loc (SrcLoc)
+import qualified Data.HashSet as HS
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -414,3 +416,8 @@ intraproceduralTransformation :: (FunDec fromlore -> State VNameSource (FunDec t
 intraproceduralTransformation ft prog =
   evalState (Prog <$> mapM ft (progFunctions prog)) src
   where src = newNameSourceForProg prog
+
+-- | The names bound by the bindings immediately in a 'Body'.
+boundInBody :: Body lore -> Names
+boundInBody = mconcat . map bound . bodyBindings
+  where bound (Let pat _ _) = HS.fromList $ patternNames pat

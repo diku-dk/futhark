@@ -8,7 +8,8 @@
 -- that each memory block is copied at the end of the iteration, thus
 -- ensuring that any allocation inside the loop is dead at the end of
 -- the loop.  This is only possible for allocations whose size is
--- loop-invariant, of course.
+-- loop-invariant, although the initial size may differ from the size
+-- produced by the loop result.
 module Futhark.Optimise.DoubleBuffer
        ( optimiseProg )
        where
@@ -16,12 +17,14 @@ module Futhark.Optimise.DoubleBuffer
 import           Control.Applicative
 import           Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import           Data.Maybe
+import           Data.List
 
 import           Prelude
 
 import           Futhark.MonadFreshNames
-import           Futhark.Tools (intraproceduralTransformation)
+import           Futhark.Tools (intraproceduralTransformation, boundInBody)
 import           Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
@@ -60,7 +63,9 @@ optimiseLoop :: MonadFreshNames m =>
 optimiseLoop mergeparams body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
-  buffered <- doubleBufferMergeParams $ map fst mergeparams
+  buffered <- doubleBufferMergeParams
+              (zip (map fst mergeparams) (bodyResult body))
+              (boundInBody body)
   -- Then create the allocations of the buffers.
   let allocs = allocBindings buffered
   -- Modify the loop body to copy buffered result arrays.
@@ -74,18 +79,30 @@ data DoubleBuffer = BufferAlloc VName SubExp
                   | NoBuffer
 
 doubleBufferMergeParams :: MonadFreshNames m =>
-                           [FParam] -> m [DoubleBuffer]
-doubleBufferMergeParams params = evalStateT (mapM buffer params) HM.empty
-  where paramnames = map paramName params
-        loopInvariantSize (Constant _) = True
-        loopInvariantSize (Var v)      = v `notElem` paramnames
+                           [(FParam,SubExp)] -> Names -> m [DoubleBuffer]
+doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer params) HM.empty
+  where (params,_) = unzip params_and_res
+
+        loopInvariantSize (Constant v) =
+          Just $ Constant v
+        loopInvariantSize (Var v) =
+          case find ((==v) . paramName . fst) params_and_res of
+            Just (_, Constant val) ->
+              Just $ Constant val
+            Just (_, Var v') | not $ v' `HS.member` bound_in_loop ->
+              Just $ Var v'
+            Just _ ->
+              Nothing
+            Nothing ->
+              Just $ Var v
+
         buffer fparam = case paramType fparam of
           Mem size
-            | loopInvariantSize size -> do
+            | Just size' <- loopInvariantSize size -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
                 modify $ HM.insert (paramName fparam) bufname
-                return $ BufferAlloc bufname size
+                return $ BufferAlloc bufname size'
           Array {}
             | MemSummary mem ixfun <- paramLore fparam -> do
                 buffered <- gets $ HM.lookup mem
