@@ -18,6 +18,7 @@ import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 import Data.List
 
@@ -26,6 +27,7 @@ import Prelude
 import Futhark.Representation.Basic
 import Futhark.Renamer (renameLambda)
 import Futhark.MonadFreshNames
+import Futhark.Substitute
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
@@ -96,7 +98,6 @@ data FusedKer = FusedKer {
 
   , outputTransform :: SOAC.ArrayTransforms
   , outNames :: [VName]
-  -- ^ the names of the kernel's results
   }
                 deriving (Show)
 
@@ -181,7 +182,7 @@ removeUnusedParamsFromKer ker =
   case soac of
     SOAC.Map {}     -> ker { fsoac = soac' }
     SOAC.Redomap {} -> ker { fsoac = soac' }
-    _                -> ker
+    _               -> ker
   where soac = fsoac ker
         l = SOAC.lambda soac
         inps = SOAC.inputs soac
@@ -207,11 +208,8 @@ removeUnusedParams l inps =
 mapFusionOK :: [VName] -> FusedKer -> Bool
 mapFusionOK outVars ker = any (`elem` inpIds) outVars
   where inpIds = mapMaybe SOAC.isVarInput (inputs ker)
-{-
-mapOrFilter :: SOAC -> Bool
-mapOrFilter (SOAC.Map {}) = True
-mapOrFilter _             = False
--}
+
+-- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 fuseSOACwithKer unfus_set outVars soac1 ker = do
@@ -240,7 +238,9 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
                 outVar' <- newVName $ baseString outVar ++ "_elem"
                 return (outVar, Ident outVar' t)
   case (soac2, soac1) of
-    -- The Fusions that are semantically map fusions:
+    ------------------------------
+    -- Redomap-Redomap Fusions: --
+    ------------------------------
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
@@ -277,7 +277,51 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ unfus_nms) $
               SOAC.Redomap (cs1++cs2) lam21 res_lam' nes new_inp
+    ----------------------------
+    -- Stream-Stream Fusions: --
+    ----------------------------
+    (SOAC.Stream _ _ nes2 _, SOAC.Stream _ _ nes1 _)
+      | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
+      -- very similar to redomap o redomap composition,
+      -- but need to remove first the `chunk' and `i'
+      -- parameters of streams' lambdas and put them
+      -- lab in the resulting stream lambda.
+      let chunki1 = take 2 $ lambdaParams lam1
+          chunki2 = take 2 $ lambdaParams lam2
+          hmnms = HM.fromList $ zip (map paramName chunki2)
+                                    (map paramName chunki1)
+          lam20 = substituteNames hmnms lam2
+          lam1' = lam1  { lambdaParams = drop 2 $ lambdaParams lam1  }
+          lam2' = lam20 { lambdaParams = drop 2 $ lambdaParams lam20 }
+          (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1'
+                                            inp1_arr outPairs lam2' inp2_arr
+          res_lam'' = res_lam' { lambdaParams = chunki1++lambdaParams res_lam' }
+          unfus_accs  = take (length nes1) outVars
+          unfus_arrs  = unfus_nms \\ unfus_accs
+      success (unfus_accs ++ outNames ker ++ unfus_arrs) $
+              SOAC.Stream (cs1++cs2) res_lam'' (nes1++nes2) new_inp
 
+    (SOAC.Stream{}, _) -> do
+      -- To fuse a stream kernel, we transform the input
+      -- soac to a stream and perform stream-stream fusion.
+      (soac1', newacc_ids) <- SOAC.soacToStream soac1
+      fuseSOACwithKer unfus_set (map identName newacc_ids++outVars) soac1' ker
+    (_, SOAC.Scan  {}) -> do
+      -- A Scan soac can be currently only fused as a stream,
+      -- hence it is first translated to a Stream and then
+      -- fusion with a kernel is attempted.
+      (soac1', newacc_ids) <- SOAC.soacToStream soac1
+      fuseSOACwithKer unfus_set (map identName newacc_ids++outVars) soac1' ker
+
+    (_, SOAC.Stream{}) -> do
+      -- If it reached this case then soac2 is not a Stream kernel,
+      -- hence transform the kernel's soac to a stream and attempt
+      -- stream-stream fusion recursivelly.
+      (soac2', newacc_ids) <- SOAC.soacToStream soac2
+      fuseSOACwithKer unfus_set outVars soac1 $
+        ker { fsoac = soac2', outNames = map identName newacc_ids ++ outNames ker }
+
+    -- DEFAULT, CANNOT FUSE CASE
     _ -> fail "Cannot fuse"
 
 -- Here follows optimizations and transforms to expose fusability.

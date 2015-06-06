@@ -5,7 +5,6 @@ module Futhark.Analysis.HORepresentation.SOACNest
   , inputFromTypedSubExp
   , Combinator (..)
   , body
-  , setBody
   , params
   , returnType
   , typeOf
@@ -135,15 +134,18 @@ data Combinator lore = Map Certificates (NestBody lore)
                      | Reduce Certificates (NestBody lore) [TypedSubExp]
                      | Scan Certificates (NestBody lore) [TypedSubExp]
                      | Redomap Certificates (Lambda lore) (NestBody lore) [TypedSubExp]
-                     | Stream  Certificates (NestBody lore) [TypedSubExp]
+                     | Stream  Certificates (Lambda lore) [TypedSubExp]
                       -- Cosmin: I think it might be helpful to make Stream part of a
                       --         nest, although the stream might not be parallel: that
                       --         is because it might enable, for example tiling.
                  deriving (Show)
 
 instance Substitutable lore => Substitute (Combinator lore) where
-  substituteNames m comb =
-    substituteNames m (body comb) `setBody` comb
+  substituteNames m (Map     cs b      ) = Map     cs $  substituteNames m b
+  substituteNames m (Reduce  cs b   ses) = Reduce  cs   (substituteNames m b) ses
+  substituteNames m (Scan    cs b   ses) = Scan    cs   (substituteNames m b) ses
+  substituteNames m (Redomap cs l b ses) = Redomap cs l (substituteNames m b) ses
+  substituteNames m (Stream  cs l   ses) = Stream  cs   (substituteNames m l) ses
 
 instance Substitutable lore => Substitute (Nesting lore) where
   substituteNames m n =
@@ -154,14 +156,7 @@ body (Map _ b) = b
 body (Reduce _ b _) = b
 body (Scan _ b _) = b
 body (Redomap _ _ b _) = b
-body (Stream  _   b _) = b
-
-setBody :: NestBody lore -> Combinator lore -> Combinator lore
-setBody b (Map cs _) = Map cs b
-setBody b (Reduce cs _ es) = Reduce cs b es
-setBody b (Scan cs _ es) = Scan cs b es
-setBody b (Redomap cs l _ es) = Redomap cs l b es
-setBody b (Stream  cs   _ es) = Stream  cs   b es
+body (Stream  _   l _) = Fun l
 
 combinatorFirstLoop :: Combinator lore -> ([Ident], [Type])
 combinatorFirstLoop comb =
@@ -229,10 +224,10 @@ typeOf (SOACNest inps (Redomap _ _ b nes)) =
                   | t <- drop (length nes) allrtps ]
   in  staticShapes $ accrtps ++ arrrtps
   where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest inps (Stream  _ b nes)) =
-  let allrtps = nestBodyReturnType b
+typeOf (SOACNest inps (Stream  _ lam nes)) =
+  let allrtps = lambdaReturnType lam
       accrtps = take (length nes) allrtps
-      arrrtps = [ arrayOf t (Shape [outersize]) (uniqueness t)
+      arrrtps = [ arrayOf (stripArray 1 t) (Shape [outersize]) (uniqueness t)
                   | t <- drop (length nes) allrtps ]
   in  staticShapes $ accrtps ++ arrrtps
   where outersize = arraysSize 0 $ map SOAC.inputType inps
@@ -259,7 +254,7 @@ fromSOAC (SOAC.Redomap cs ol l es as) =
   -- the outer combining function.
   SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*> traverse typedSubExp es)
 fromSOAC (SOAC.Stream cs lam es as) =
-  SOACNest as <$> (Stream  cs  <$> lambdaToBody lam <*> traverse typedSubExp es)
+  SOACNest as <$> (Stream  cs  <$> return lam <*> traverse typedSubExp es)
 
 nested :: (LocalTypeEnv m, Monad m, Bindable lore) =>
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
@@ -296,7 +291,5 @@ toSOAC (SOACNest as (Redomap cs l b es)) =
   SOAC.Redomap cs l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (map subExpExp es) <*> pure as
-toSOAC (SOACNest as (Stream  cs b es)) =
-  SOAC.Stream cs <$>
-  bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
-  pure (map subExpExp es) <*> pure as
+toSOAC (SOACNest as (Stream  cs lam es)) =
+  return $ SOAC.Stream cs lam (map subExpExp es) as

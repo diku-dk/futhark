@@ -312,6 +312,7 @@ greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
       isUnfusable = (`HS.member` unfusable res)
       is_redomap  = case orig_soac of
                         SOAC.Redomap{} -> True
+                        --SOAC.Stream {} -> True
                         _              -> False
   --
   -- Conditions for fusion:
@@ -411,9 +412,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   let out_nms        = patternNames out_idds
       unfusable_nms  = HS.fromList $ filter (`HS.member` unfusable res) out_nms
       out_arr_nms    = case soac of
-                        SOAC.Redomap _ _ _ nes _ ->
-                             -- the accumulator result cannot be fused!
-                             drop (length nes) out_nms
+                        -- the accumulator result cannot be fused!
+                        SOAC.Redomap _ _ _ nes _ -> drop (length nes) out_nms
+                        SOAC.Stream  _   _ nes _ -> drop (length nes) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
       to_fuse_knms2  = getKersWithSameInpSize (SOAC.inpOuterSize soac) res
@@ -428,7 +429,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   -- and sort based on the index so that partial fusion may succeed.
   kernminds <- forM (zip to_fuse_knms to_fuse_kers) $ \(ker_nm, ker) -> do
                     let bnd_nms = map (patternNames . bindingPattern) rem_bnds
-                        out_nm  = head $ outNames ker
+                        out_nm  = case fsoac ker of
+                                    SOAC.Stream _ _ nes _ -> head $ drop (length nes) $ outNames ker
+                                    _                     -> head $ outNames ker
                     case L.findIndex (elem out_nm) bnd_nms of
                       Nothing -> return Nothing
                       Just i  -> return $ Just (ker,ker_nm,i)

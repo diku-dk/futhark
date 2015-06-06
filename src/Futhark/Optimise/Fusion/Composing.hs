@@ -30,6 +30,8 @@ import Futhark.Binder
   (Bindable(..), insertBinding, insertBindings, mkLet')
 import Futhark.Tools (mapResult)
 
+--import Debug.Trace
+
 -- | Something that can be used as a SOAC input.  As far as this
 -- module is concerned, this means supporting just a single operation.
 class (Ord a, Eq a) => Input a where
@@ -177,7 +179,8 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
       lam1_accres = take acc_len $ bodyResult lam1_body
       lam1_arrres = drop acc_len $ bodyResult lam1_body
       lam1_hacked = p_lam { lambdaParams = drop acc_len $ lambdaParams p_lam
-                         , lambdaBody   = lam1_body { bodyResult = lam1_arrres } }
+                          , lambdaBody   = lam1_body { bodyResult = lam1_arrres }
+                          , lambdaReturnType = drop acc_len $ lambdaReturnType p_lam }
   --  (ii) we remove the accumulator's (global) output result from
   --       @outPairs@, then ``map o redomap'' fuse the two lambdas
   --       (in the usual way), and construct the extra return types
