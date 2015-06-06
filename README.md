@@ -7,7 +7,7 @@ here](http://futhark.readthedocs.org).
 Installation
 ============
 
-You will need GHC 7.8 to compile Futhark.
+You will need GHC 7.8 or newer to compile Futhark.
 
 Just run `cabal install` and executables by the names of `futhark`,
 `futhark-c`, `futhark-opencl` and `futharki` will be installed in your
@@ -28,7 +28,7 @@ Usage
 
 To compile a Futhark program to sequential C:
 
-    futhark prog.fut -o prog
+    futhark-c prog.fut -o prog
 
 And then run it:
 
