@@ -27,6 +27,7 @@ data DesiredUpdate =
                 , updateIndices :: [SubExp]
                 , updateValue :: VName
                 }
+  deriving (Show)
 
 updateHasValue :: VName -> DesiredUpdate -> Bool
 updateHasValue name = (name==) . updateValue
@@ -102,7 +103,8 @@ lowerUpdateIntoLoop updates pat res merge body = do
     let (ctxpat,valpat,res') = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
-    let body' = mkBody newbnds $ manipulateResult in_place_map idxsubsts'
+    (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
+    let body' = mkBody (newbnds++res_bnds) body_res
     return (prebnds, postbnds, ctxpat, valpat, map identName res', merge', body')
   where mergeparams = map fst merge
         usedInBody = freeInBody body
@@ -192,6 +194,7 @@ data LoopResultSummary =
                     , mergeParam :: (ParamT (), SubExp)
                     , relatedUpdate :: Maybe (DesiredUpdate, Ident)
                     }
+  deriving (Show)
 
 indexSubstitutions :: [LoopResultSummary]
                    -> IndexSubstitutions
@@ -201,15 +204,23 @@ indexSubstitutions = mapMaybe getSubstitution
           let name = paramName $ fst $ mergeParam res
           return (name, (cs, mergeident, is))
 
-manipulateResult :: [LoopResultSummary]
-                 -> [IndexSubstitution]
-                 -> Result
-manipulateResult summaries substs =
-  let orig_ses = mapMaybe unchangedRes summaries
-      subst_ses = map (\(_,v,_) -> Var $ identName v) substs
-  in orig_ses ++ subst_ses
+manipulateResult :: (Bindable lore, MonadFreshNames m) =>
+                    [LoopResultSummary]
+                 -> IndexSubstitutions
+                 -> m (Result, [Binding lore])
+manipulateResult summaries substs = do
+  let (orig_ses,updated_ses) = partitionEithers $ map unchangedRes summaries
+  (subst_ses, res_bnds) <- runWriterT $ zipWithM substRes updated_ses substs
+  return (orig_ses ++ subst_ses, res_bnds)
   where
     unchangedRes summary =
       case relatedUpdate summary of
-        Nothing -> Just $ resultSubExp summary
-        Just _  -> Nothing
+        Nothing -> Left $ resultSubExp summary
+        Just _  -> Right $ resultSubExp summary
+    substRes (Var res_v) (subst_v, (_, v, _))
+      | res_v == subst_v =
+        return $ Var $ identName v
+    substRes res_se (_, (cs, v, is)) = do
+      v' <- newIdent' (++"_updated") v
+      tell [mkLet [] [(v', BindInPlace cs (identName v) is)] $ PrimOp $ SubExp res_se]
+      return $ Var $ identName v'

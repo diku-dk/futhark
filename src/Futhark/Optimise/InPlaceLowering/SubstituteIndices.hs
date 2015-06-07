@@ -31,11 +31,9 @@ typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution. snd)
 
 substituteIndices :: (MonadFreshNames m, Bindable lore) =>
                      IndexSubstitutions -> [Binding lore]
-                  -> m ([IndexSubstitution], [Binding lore])
-substituteIndices substs bnds = do
-  (substs', bnds') <-
-    runBinderT (substituteIndicesInBindings substs bnds) types
-  return (map snd substs', bnds')
+                  -> m (IndexSubstitutions, [Binding lore])
+substituteIndices substs bnds =
+  runBinderT (substituteIndicesInBindings substs bnds) types
   where types = typeEnvFromSubstitutions substs
 
 substituteIndicesInBindings :: MonadBinder m =>
@@ -49,14 +47,10 @@ substituteIndicesInBinding :: MonadBinder m =>
                            -> Binding (Lore m)
                            -> m IndexSubstitutions
 substituteIndicesInBinding substs (Let pat lore e) = do
+  e' <- substituteIndicesInExp substs e
   (substs', pat') <- substituteIndicesInPattern substs pat
-  e' <- mapExpM substitute e
   addBinding $ Let pat' lore e'
   return substs'
-  where substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs
-                                    , mapOnVName  = substituteIndicesInVar substs
-                                    , mapOnBody   = substituteIndicesInBody substs
-                                    }
 
 substituteIndicesInPattern :: MonadBinder m =>
                               IndexSubstitutions
@@ -75,6 +69,38 @@ substituteIndicesInPattern substs pat = do
         sub substs' patElem =
           return (substs', patElem)
 
+substituteIndicesInExp :: MonadBinder m =>
+                          IndexSubstitutions
+                       -> Exp (Lore m)
+                       -> m (Exp (Lore m))
+substituteIndicesInExp substs e = do
+  substs' <- copyAnyConsumed e
+  let substitute = identityMapper { mapOnSubExp = substituteIndicesInSubExp substs'
+                                  , mapOnVName  = substituteIndicesInVar substs'
+                                  , mapOnBody   = substituteIndicesInBody substs'
+                                  }
+
+  mapExpM substitute e
+  where -- FIXME: quick and dirty - really, we should use
+        -- 'consumedInExp' to also handle branches and function calls.
+        -- Another approach would be to just copy out the rows instead
+        -- of all this substitute business.
+        copyAnyConsumed (LoopOp (DoLoop _ merge _ _)) =
+          let consumingSubst substs' (fparam, Var v)
+                | unique (paramType fparam),
+                  Just (cs2, src2, is2) <- lookup v substs = do
+                    row <- letExp (baseString v ++ "_row") $
+                           PrimOp $ Index cs2 (identName src2) is2
+                    row_copy <- letExp (baseString v ++ "_row_copy") $
+                                PrimOp $ Copy row
+                    return $ update v v ([],
+                                         Ident row_copy (stripArray (length is2) $ identType src2),
+                                         []) substs'
+              consumingSubst substs' _ =
+                return substs'
+          in foldM consumingSubst substs merge
+        copyAnyConsumed _ = return substs
+
 substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions
                           -> SubExp
@@ -82,12 +108,13 @@ substituteIndicesInSubExp :: MonadBinder m =>
 substituteIndicesInSubExp substs (Var v) = Var <$> substituteIndicesInVar substs v
 substituteIndicesInSubExp _      se      = return se
 
-
 substituteIndicesInVar :: MonadBinder m =>
                           IndexSubstitutions
                        -> VName
                        -> m VName
 substituteIndicesInVar substs v
+  | Just ([], src2, []) <- lookup v substs =
+    letExp (baseString $ identName src2) $ PrimOp $ SubExp $ Var $ identName src2
   | Just (cs2, src2, is2) <- lookup v substs =
     letExp "idx" $ PrimOp $ Index cs2 (identName src2) is2
   | otherwise =
