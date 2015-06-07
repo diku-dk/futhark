@@ -145,11 +145,15 @@ staticShapes1 (Mem size) =
 -- itself be an array.  If @t@ is an @n@-dimensional array, and @s@ is
 -- a list of length @n@, the resulting type is of an @n+m@ dimensions.
 -- The uniqueness of the new array will be @u@, no matter the
--- uniqueness of @t@.
+-- uniqueness of @t@.  If the shape @s@ has rank 0, then the @t@ will
+-- be returned, although if it is an array, with the uniqueness
+-- changed to @u@.
 arrayOf :: (ArrayShape shape) =>
            TypeBase shape -> shape -> Uniqueness -> TypeBase shape
 arrayOf (Array et size1 _) size2 u =
   Array et (size2 <> size1) u
+arrayOf t s _
+  | 0 <- shapeRank s = t
 arrayOf (Basic et) size u =
   Array et size u
 arrayOf (Mem {}) _ _ =
