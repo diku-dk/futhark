@@ -61,6 +61,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyReshapeReshape
                , removeScratchValue
                , hackilySimplifyBranch
+               , removeIdentityInPlace
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -815,10 +816,27 @@ simplifyReshapeReshape _ _ _ = Nothing
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
 removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
   t <- lookupType v
-  if basicType t || (unique t && not (any (`UT.used` used) $ vnameAliases v))
+  let originalNotUsedAnymore =
+        unique t && not (any (`UT.used` used) $ vnameAliases v)
+  if basicType t || originalNotUsedAnymore
     then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
     else cannotSimplify
 removeUnnecessaryCopy _ _ = cannotSimplify
+
+removeIdentityInPlace :: MonadBinder m => TopDownRule m
+removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
+  | BindInPlace _ dest destis <- patElemBindage d,
+    arrayFrom e dest destis =
+    letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $ PrimOp $ SubExp $ Var dest
+  where arrayFrom (PrimOp (Copy v)) dest destis
+          | Just e' <- ST.lookupExp v vtable =
+              arrayFrom e' dest destis
+        arrayFrom (PrimOp (Index _ src srcis)) dest destis =
+          src == dest && destis == srcis
+        arrayFrom _ _ _ =
+          False
+removeIdentityInPlace _ _ =
+  cannotSimplify
 
 removeScratchValue :: MonadBinder m => TopDownRule m
 removeScratchValue _ (Let
