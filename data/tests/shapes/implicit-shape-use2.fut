@@ -21,4 +21,4 @@ mkPrices(  [[real,num_und],num_dates] md_vols,
     map( combineVs, zip(noises, md_vols) )
     
 
-fun int main() = 3
+fun [[real]] main([[real]] vol, [[real]] noises) = mkPrices(vol,noises)
