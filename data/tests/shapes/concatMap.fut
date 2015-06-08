@@ -7,7 +7,7 @@
 // output {
 //   [1, 2, 3, 4, 5, 6, 7, 8]
 // }
-fun [int,!n] reverse([int,n] a) =
+fun [int,n] reverse([int,n] a) =
   map (fn int (int i) =>
          a[size(0,a)-i-1],
        iota(size(0,a)))

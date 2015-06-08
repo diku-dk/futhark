@@ -2,8 +2,8 @@
 module Futhark.Internalise.TypesValues
   (
    -- * Internalising types
-    internaliseDeclType
-  , internaliseDeclTypes
+    internaliseReturnType
+  , internaliseParamTypes
   , internaliseType
   , internaliseUniqueness
 
@@ -29,28 +29,32 @@ internaliseUniqueness :: E.Uniqueness -> I.Uniqueness
 internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
-internaliseDeclTypes :: [E.TypeBase E.ShapeDecl als VName]
-                     -> InternaliseM ([[I.TypeBase ExtShape]],
-                                      HM.HashMap VName Int)
-internaliseDeclTypes ts = do
-  (ts', (_, subst)) <- runStateT (mapM internaliseDeclType' ts) (0, HM.empty)
+internaliseParamTypes :: [E.TypeBase E.ShapeDecl als VName]
+                      -> InternaliseM ([[I.TypeBase ExtShape]],
+                                       HM.HashMap VName Int)
+internaliseParamTypes ts = do
+  (ts', (_, subst)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, HM.empty)
   return (ts', subst)
 
-internaliseDeclType :: E.TypeBase E.ShapeDecl als VName
-                    -> InternaliseM ([I.TypeBase ExtShape],
-                                     HM.HashMap VName Int)
-internaliseDeclType t = do
-  (t', (_, subst)) <- runStateT (internaliseDeclType' t) (0, HM.empty)
+internaliseReturnType :: E.TypeBase E.ShapeDecl als VName
+                      -> InternaliseM ([I.TypeBase ExtShape],
+                                       HM.HashMap VName Int)
+internaliseReturnType t = do
+  (t', (_, subst)) <- runStateT (internaliseDeclType' AssertDims t) (0, HM.empty)
   return (t', subst)
 
-internaliseDeclType' :: E.TypeBase E.ShapeDecl als VName
+data DimDeclInterpretation = AssertDims
+                           | BindDims
+
+internaliseDeclType' :: DimDeclInterpretation
+                     -> E.TypeBase E.ShapeDecl als VName
                      -> StateT (Int, HM.HashMap VName Int)
                         InternaliseM [I.TypeBase ExtShape]
-internaliseDeclType' (E.Basic bt) =
+internaliseDeclType' _ (E.Basic bt) =
   return [I.Basic bt]
-internaliseDeclType' (E.Tuple ets) =
-  concat <$> mapM internaliseDeclType' ets
-internaliseDeclType' (E.Array at) =
+internaliseDeclType' ddi (E.Tuple ets) =
+  concat <$> mapM (internaliseDeclType' ddi) ets
+internaliseDeclType' ddi (E.Array at) =
   internaliseArrayType at
   where internaliseArrayType (E.BasicArray bt shape u _) = do
           dims <- internaliseShape shape
@@ -85,19 +89,19 @@ internaliseDeclType' (E.Array at) =
                           return i
             Just j  -> return j
 
-        internaliseShape = mapM internaliseDim . E.shapeDims
+        internaliseShape = mapM (internaliseDim ddi) . E.shapeDims
 
-        internaliseDim AnyDim =
+        internaliseDim _ AnyDim =
           Ext <$> newId
-        internaliseDim (ConstDim n) =
+        internaliseDim _ (ConstDim n) =
           return $ Free $ Constant $ IntVal $ fromIntegral n
-        internaliseDim (NamedDim name) =
+        internaliseDim BindDims (NamedDim name) =
           Ext <$> knownOrNewId name
-        internaliseDim (KnownDim name) = do
+        internaliseDim AssertDims (NamedDim name) = do
           subst <- asks $ HM.lookup name . envSubsts
-          return $ I.Free $ I.Var $ case subst of
-            Just [v] -> v
-            _        -> name
+          I.Free <$> I.Var <$> case subst of
+            Just [v] -> return v
+            _        -> fail $ "Shape declaration " ++ pretty name ++ " not found"
 
 internaliseType :: Ord vn =>
                    E.TypeBase E.Rank als vn -> [I.TypeBase ExtShape]

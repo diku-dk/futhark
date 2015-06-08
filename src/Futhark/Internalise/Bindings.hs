@@ -33,7 +33,7 @@ internaliseParams :: [E.Parameter]
                   -> InternaliseM (HM.HashMap VName Int,
                                    [[(VName, I.ExtType)]])
 internaliseParams params = do
-  (param_ts, ctx) <- internaliseDeclTypes $ map E.identType params
+  (param_ts, ctx) <- internaliseParamTypes $ map E.identType params
   vss <- forM (zip params param_ts) $ \(param, ts) -> do
     let base = nameToString $ baseName $ E.identName param
     forM ts $ \t -> do

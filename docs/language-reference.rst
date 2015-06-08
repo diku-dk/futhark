@@ -22,20 +22,20 @@ and body of the function::
 
   fun rettype_type name(params...) = body
 
-Type inference is not supported, and the function is fully
+Type inference is not supported, and functions are fully
 monomorphic.  Optionally, the programmer may put *shape declarations*
 in the return type and parameter types.  These can be used to express
 invariants about the shapes of arrays that are accepted or produced by
 the function, e.g::
 
-  fun [int,!n] f([int,n] a) =
+  fun [int,n] f([int,n] a) =
     map(+1, a)
 
 The above declaration specifies a function that takes an array
 containing ``n`` elements and returns an array likewise containing
-``n`z elements.  The ``!`` is used to indicate that we are referring
-to the already bound ``n``, rather than a fresh ``n``.  Forgetting the
-``!`` is a very common error, so be careful.
+``n`z elements.  In general, shape declarations in parameters are
+fresh names, whilst shape declarations in return types must refer to a
+name in scope.  A shape declaration can also be an integer constant.
 
 The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
@@ -46,7 +46,7 @@ computing dot products::
 
 Or matrix multiplication::
 
-  fun [[int,!n],!n] matMult([[int,m],n] x, [[int,n],m] y) =
+  fun [[int,n],n] matMult([[int,m],n] x, [[int,n],m] y) =
     ...
 
 The dimension names bound in a parameter shape declaration can be used

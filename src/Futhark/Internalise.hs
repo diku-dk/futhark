@@ -54,7 +54,7 @@ buildFtable = runInternaliseM True HM.empty .
               liftM HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) =
           bindingParams params $ \shapes values -> do
-            (rettype', _) <- internaliseDeclType rettype
+            (rettype', _) <- internaliseReturnType rettype
             let shapenames = map I.identName shapes
             return (fname,
                     FunBinding { internalFun = (shapenames,
@@ -69,7 +69,7 @@ buildFtable = runInternaliseM True HM.empty .
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
-    (rettype', _) <- internaliseDeclType rettype
+    (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape loc rettype' firstbody
     let mkFParam = flip Param ()
@@ -610,13 +610,13 @@ internaliseLambda :: InternaliseLambda
 internaliseLambda (E.AnonymFun params body rettype _) (Just rowtypes) = do
   (body', params') <- bindingLambdaParams params rowtypes $
                       internaliseBody body
-  (rettype', _) <- internaliseDeclType rettype
+  (rettype', _) <- internaliseReturnType rettype
   return (map (`Param` ()) params', body', rettype')
 
 internaliseLambda (E.AnonymFun params body rettype _) Nothing = do
   (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
     body' <- internaliseBody body
-    (rettype', _) <- internaliseDeclType rettype
+    (rettype', _) <- internaliseReturnType rettype
     return (body', shapeparams ++ valparams, rettype')
   return (map (`Param` ()) params', body', rettype')
 

@@ -316,13 +316,6 @@ bindingParams params m =
           return Nothing
         inspectDim _ (ConstDim _) =
           return Nothing
-        inspectDim loc (KnownDim name) = do
-          t <- lookupVar name loc
-          case t of
-            Basic Int ->
-              return Nothing -- Fine.
-            _ ->
-              bad $ DimensionNotInteger loc (baseName name)
         inspectDim loc (NamedDim name) =
           return $ Just $ Ident name (Basic Int) loc
 
@@ -478,7 +471,7 @@ checkFun :: (TypeBox ty, VarName vn) =>
 checkFun (fname, rettype, params, body, loc) = do
   checkParams
   body' <- bindingParams params $ do
-    checkDeclType loc rettype
+    checkRetType loc rettype
     checkExp body
 
   checkReturnAlias $ typeOf body'
@@ -862,9 +855,6 @@ checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
   let [_, lam_arr_tp] = map identType lam_ps
   let outer_dims = arrayDims lam_arr_tp
   _ <- case head outer_dims of
-        KnownDim nm -> unless (nm == identName chunk) $
-                        bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
-                                             " be specified since it is "++chunk_str++"by default.")
         AnyDim      -> return ()
         NamedDim _  -> return ()
         ConstDim _  ->  bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
@@ -875,7 +865,7 @@ checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
             if all isArrayType res_arr_tps
             then do let lam_params = HS.fromList $ identName chunk : identName i : map identName lam_ps
                         arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
-                        boundDim (KnownDim name) = return $ Just name
+                        boundDim (NamedDim name) = return $ Just name
                         boundDim (ConstDim _   ) = return Nothing
                         boundDim _             =
                             bad $ TypeError pos $ "Stream's lambda: inner dimensions of the"++
@@ -1247,9 +1237,10 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               params <- zipWithM mkparam [(0::Int)..] paramtypes'
               tupparam <- newIdent "x" (removeShapeAnnotations tupt) pos
               let tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
-                  tupfun = AnonymFun [toParam tupparam] tuplet rt pos
+                  tupfun = AnonymFun [toParam tupparam] tuplet
+                           (vacuousShapeAnnotations rt) pos
                   body = Apply fname [(Var param, diet paramt) |
-                                      (param, paramt) <- zip params paramtypes]
+                                      (param, paramt) <- zip params paramtypes']
                          rettype' pos
               checkLambda tupfun args
           | otherwise -> do
@@ -1338,11 +1329,11 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
     args
   where fname = nameFromString $ ppBinOp op
 
-checkDeclType :: VarName vn =>
-                 SrcLoc -> TaggedDeclType vn -> TypeM vn ()
-checkDeclType loc (Tuple ts) = mapM_ (checkDeclType loc) ts
-checkDeclType _ (Basic _) = return ()
-checkDeclType loc (Array at) =
+checkRetType :: VarName vn =>
+                SrcLoc -> TaggedDeclType vn -> TypeM vn ()
+checkRetType loc (Tuple ts) = mapM_ (checkRetType loc) ts
+checkRetType _ (Basic _) = return ()
+checkRetType loc (Array at) =
   checkArrayType loc at
 
 checkArrayType :: VarName vn =>
@@ -1372,10 +1363,8 @@ checkDim _ AnyDim =
   return ()
 checkDim _ (ConstDim _) =
   return ()
-checkDim loc (KnownDim name) = do
+checkDim loc (NamedDim name) = do
   t <- lookupVar name loc
   case t of
     Basic Int -> return ()
     _         -> bad $ DimensionNotInteger loc $ baseName name
-checkDim _ (NamedDim _) =
-  return ()

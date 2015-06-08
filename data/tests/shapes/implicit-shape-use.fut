@@ -1,23 +1,27 @@
+// Extraction from generic pricer.  Uses shape declarations in ways
+// that were at one point problematic.
+//
 // --
 // input {
-//   {
-//     5
-//   , 3
-//   , [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]]
-//   , [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]
-//   }
-// }
-// output {
+//   3
+//   [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]]
 //   [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]
 // }
+// output {
+//   [[109.0, 140.0, 171.0],
+//    [-109.0, -140.0, -171.0],
+//    [0.0, 0.0, 0.0],
+//    [0.0, 0.0, 0.0],
+//    [0.0, 0.0, 0.0]]
+// }
+
 fun [[real]] main(
-              int                   num_dates,
-              int                   num_und,
-             [[int, !num_dates],3]  bb_inds,
-             [real]                 arr_usz
+              int                  num_und,
+             [[int, num_dates],3]  bb_inds,
+             [real]                arr_usz
 ) =
   let arr    = reshape( (num_dates*num_und), arr_usz ) in
-  let bb_data= map(fn [real,!num_dates] ([int,!num_dates] row) => 
+  let bb_data= map(fn [real] ([int] row) =>
                         map(toFloat64,row)
                   , bb_inds )   in
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
@@ -71,7 +75,6 @@ fun [[real]] brownianBridge (
             ) =
     let gauss2d  = reshape((num_dates,num_und), gaussian_arr) in
     let gauss2dT = transpose(gauss2d) in
-      transpose( 
-        map( brownianBridgeDates(bb_inds, bb_data), gauss2dT ) 
+      transpose(
+        map( brownianBridgeDates(bb_inds, bb_data), gauss2dT )
       )
-

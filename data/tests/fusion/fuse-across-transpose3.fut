@@ -1,7 +1,7 @@
 // --
 // structure { Redomap 2 }
 fun int main([[int,m],n] a) =
-  let b = map(fn [int,!m] ([int] z1) =>
+  let b = map(fn [int,m] ([int] z1) =>
                 map(*3, z1),
               a) in
   let ravgs = map(fn int ([int] r) =>

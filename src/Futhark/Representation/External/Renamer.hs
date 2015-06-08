@@ -206,8 +206,6 @@ bindParams params =
           Nothing
         inspectDim (NamedDim name) =
           Just name
-        inspectDim (KnownDim _) =
-          Nothing
 
 renameFun :: (TypeBox ty, VarName f, VarName t) =>
              FunDecBase ty f -> RenameM f t (FunDecBase ty t)
@@ -275,8 +273,7 @@ renameDeclType = renameTypeGeneric
                  (liftM ShapeDecl . mapM renameDim . shapeDims)
                  (const $ return NoInfo)
   where renameDim AnyDim       = return AnyDim
-        renameDim (NamedDim v)   = NamedDim <$> replName v
-        renameDim (KnownDim v) = KnownDim <$> replName v
+        renameDim (NamedDim v) = NamedDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n
 
 renameTypeGeneric :: (VarName f, VarName t) =>

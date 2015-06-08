@@ -77,11 +77,10 @@ class (Eq shape, Ord shape, Monoid shape) => ArrayShape shape where
 
 -- | Declaration of a dimension size.
 data DimDecl vn = NamedDim vn
-                  -- ^ Bind the size of the dimension to
-                  -- this name.
-                | KnownDim vn
-                  -- ^ The size of the dimension is the value of a
-                  -- variable already in scope.
+                  -- ^ The size of the dimension is this name.  In a
+                  -- function parameter, this is in a binding
+                  -- position.  In a return type, this will give rise
+                  -- to an assertion.
                 | ConstDim Int
                   -- ^ The size is a constant.
                 | AnyDim

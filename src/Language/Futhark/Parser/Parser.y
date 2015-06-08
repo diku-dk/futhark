@@ -211,9 +211,6 @@ DimDecl :: { DimDecl Name }
         : ',' id
           { let L _ (ID name) = $2
             in NamedDim name }
-        | ',' '!' id
-          { let L _ (ID name) = $3
-            in KnownDim name }
         | ',' intlit
           { let L _ (INTLIT n) = $2
             in ConstDim (fromIntegral n) }

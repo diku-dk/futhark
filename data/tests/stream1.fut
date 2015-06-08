@@ -19,7 +19,7 @@
 // }
 fun {{int,[int]},[[int]],[real],[real],[int]} main(int m, *[int,n] A) =
   let B = map(+10, A) in
-  stream( fn {{int,[int]},[[int,!m]],[real],[real],[int]} ({int, [int,!m]} acc2, *[int] C) =>
+  stream( fn {{int,[int]},[[int,m]],[real],[real],[int]} ({int, [int,m]} acc2, *[int] C) =>
                     let {acc0, acc} = acc2                in
                     let X = map ( fn [int] (int c) =>
                                     map(+c, iota(m))
