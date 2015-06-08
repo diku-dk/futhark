@@ -845,12 +845,12 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
   checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
   let acct = map argType accargs
       outerRetType = lambdaReturnType outerfun
-  unless (innerAccType `subtypesOf` acct) $
+  unless (acct `subtypesOf` innerAccType ) $
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomapT inner reduction returns type " ++ prettyTuple innerRetType ++ "."
-  unless (outerRetType `subtypesOf` acct) $
+          ", but redomap inner reduction returns type " ++ prettyTuple innerRetType ++ "."
+  unless (acct `subtypesOf` outerRetType) $
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomapT outer reduction returns type " ++ prettyTuple outerRetType ++ "."
+          ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
 checkLoopOp (Stream ass accexps arrexps lam) = do
   mapM_ (requireI [Basic Cert]) ass
