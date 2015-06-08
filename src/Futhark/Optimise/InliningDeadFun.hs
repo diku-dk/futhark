@@ -178,6 +178,7 @@ inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
 inliner funs = identityMapper {
                  mapOnLambda = return . inlineInLambda funs
                , mapOnBody = return . inlineInBody funs
+               , mapOnExtLambda = return . inlineInExtLambda funs
                }
 
 inlineInBinding :: [FunDec] -> Binding -> Binding
@@ -187,6 +188,9 @@ inlineInLambda :: [FunDec] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda params body ret) =
   Lambda params (inlineInBody inlcallees body) ret
 
+inlineInExtLambda :: [FunDec] -> ExtLambda -> ExtLambda
+inlineInExtLambda inlcallees (ExtLambda params body ret) =
+  ExtLambda params (inlineInBody inlcallees body) ret
 ------------------------------------------------------------------
 ------------------  Dead Function Elimination --------------------
 ------------------------------------------------------------------

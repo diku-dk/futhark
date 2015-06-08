@@ -355,5 +355,8 @@ foldlPattern expf = foldExp m
             , foldOnLambda =
               \x (Lambda _ body _) ->
                 return $ foldBody onBinding x body
+            , foldOnExtLambda =
+              \x (ExtLambda _ body _) ->
+                return $ foldBody onBinding x body
             }
         onBinding x (Let _ _ e) = expf x e
