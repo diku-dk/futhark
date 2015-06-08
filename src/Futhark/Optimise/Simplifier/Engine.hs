@@ -222,8 +222,9 @@ localVtable :: MonadEngine m =>
 localVtable f m = do
   vtable <- getVtable
   modifyEngineState $ \env -> env { stateVtable = f vtable }
-  x <- m
-  modifyEngineState $ \env -> env { stateVtable = vtable }
+  (x, need) <- listenNeed m
+  let vtable' = foldl (flip ST.insertBinding) vtable $ needBindings need
+  modifyEngineState $ \env -> env { stateVtable = vtable' }
   return x
 
 enterLoop :: MonadEngine m => m a -> m a
