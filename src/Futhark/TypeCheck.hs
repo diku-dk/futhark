@@ -1098,7 +1098,7 @@ checkBindage (BindInPlace cs src is) = do
   mapM_ (require [Basic Int]) is
 
   unless (unique srct || basicType srct) $
-    bad $ TypeError noLoc $ "Source '" ++ textual src ++ show src ++ "' is not unique"
+    bad $ TypeError noLoc $ "Source '" ++ textual src ++ "' is not unique"
 
   consume =<< lookupAliases src
 
