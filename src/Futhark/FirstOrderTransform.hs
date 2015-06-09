@@ -128,7 +128,7 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs fun inputs))) = do
     letBindNames' [name] $ PrimOp $ SubExp se
 
 transformBinding (Let pat () (LoopOp (Reduce cs fun args))) = do
-  ((acc, initacc), (i, i_ident)) <- newFold accexps
+  ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   let arrus = map (uniqueness . paramType) $
               snd $ splitAt (length args) $ lambdaParams fun
@@ -143,9 +143,10 @@ transformBinding (Let pat () (LoopOp (Reduce cs fun args))) = do
     DoLoop (map identName acc) (loopMerge (inarrs++acc) (map Var arrexps++initacc))
     (ForLoop i (isize inarrs)) loopbody
   where (accexps, arrexps) = unzip args
+        accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformBinding (Let pat () (LoopOp (Scan cs fun args))) = do
-  ((acc, initacc), (i, i_ident)) <- newFold accexps
+  ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
   arr <- forM arrts $ \t ->
@@ -162,6 +163,7 @@ transformBinding (Let pat () (LoopOp (Scan cs fun args))) = do
     DoLoop (map identName arr) (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
     (ForLoop i (isize arr)) loopbody
   where (accexps, arrexps) = unzip args
+        accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) = do
   arrts <- mapM lookupType arrexps
@@ -174,11 +176,12 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
                | t <- map_arr_tps ]
   let arrus = map (uniqueness . paramType) $
               snd $ splitAt acc_num $ lambdaParams innerfun
+      accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
   maparrs <- resultArray res_ts
   outarrs <- forM res_ts $ \t ->
              newIdent "redomap_outarr" $ t `setUniqueness` Unique
   -- for the REDUCE part
-  ((acc, initacc), (i, i_ident)) <- newFold accexps
+  ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
   inarrs <- mapM (newIdent "redomap_inarr") $ zipWith setUniqueness arrts arrus
   loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:inarrs++acc++outarrs) $ do
     accxis<- bindLambda innerfun
@@ -579,13 +582,14 @@ transformLambda (Lambda params body rettype) = do
   body' <- bindingParamTypes params $ transformBody body
   return $ Lambda params body' rettype
 
-newFold :: [SubExp]
+newFold :: [(SubExp,Type)]
         -> Binder Basic (([Ident], [SubExp]), (VName, Ident))
-newFold accexps = do
+newFold accexps_and_types = do
   i <- newVName "i"
-  initacc <- mapM copyIfArray accexps
-  acc <- mapM (newIdent "acc" <=< subExpType) accexps
+  initacc <- mapM copyIfArray acc_exps
+  acc <- mapM (newIdent "acc") acc_types
   return ((acc, initacc), (i, Ident i $ Basic Int))
+  where (acc_exps, acc_types) = unzip accexps_and_types
 
 copyIfArray :: SubExp -> Binder Basic SubExp
 copyIfArray (Constant v) = return $ Constant v
