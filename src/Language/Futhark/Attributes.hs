@@ -477,13 +477,27 @@ stripArray _ t = t
 -- | Set the uniqueness attribute of a type.  If the type is a tuple,
 -- the uniqueness of its components will be modified.
 setUniqueness :: TypeBase shape as vn -> Uniqueness -> TypeBase shape as vn
-setUniqueness (Array (BasicArray et dims _ als)) u =
-  Array $ BasicArray et dims u als
-setUniqueness (Array (TupleArray et dims _)) u =
-  Array $ TupleArray et dims u
+setUniqueness (Array at) u =
+  Array $ setArrayUniqueness at u
 setUniqueness (Tuple ets) u =
   Tuple $ map (`setUniqueness` u) ets
 setUniqueness t _ = t
+
+setArrayUniqueness :: ArrayTypeBase shape as vn -> Uniqueness
+                   -> ArrayTypeBase shape as vn
+setArrayUniqueness (BasicArray et dims _ als) u =
+  BasicArray et dims u als
+setArrayUniqueness (TupleArray et dims _) u =
+  TupleArray (map (`setTupleArrayElemUniqueness` u) et) dims u
+
+setTupleArrayElemUniqueness :: TupleArrayElemTypeBase shape as vn -> Uniqueness
+                            -> TupleArrayElemTypeBase shape as vn
+setTupleArrayElemUniqueness (BasicArrayElem bt als) _ =
+  BasicArrayElem bt als
+setTupleArrayElemUniqueness (ArrayArrayElem at) u =
+  ArrayArrayElem $ setArrayUniqueness at u
+setTupleArrayElemUniqueness (TupleArrayElem ts) u =
+  TupleArrayElem $ map (`setTupleArrayElemUniqueness` u) ts
 
 -- | @t \`setAliases\` als@ returns @t@, but with @als@ substituted for
 -- any already present aliasing.
