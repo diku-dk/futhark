@@ -571,10 +571,12 @@ compileExp (BinOp bop x y) = do
                     1 : 0)|]
              Mod ->
                let r = [C.cexp|$exp:x' % $exp:y'|]
-               in [C.cexp|$exp:r +
-                   ((($exp:r != 0) &&
-                     (($exp:r < 0) != ($exp:y' < 0))) ?
-                    $exp:y' : 0)|]
+               in [C.cexp|
+                   $exp:r +
+                   (($exp:r == 0 ||
+                    ($exp:x' > 0 && $exp:y' > 0) ||
+                    ($exp:x' < 0 && $exp:y' < 0)) ?
+                    0 : $exp:y')|]
 
 compileExp (SizeOf t) =
   return [C.cexp|(sizeof($ty:t'))|]
