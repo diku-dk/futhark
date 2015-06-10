@@ -28,12 +28,10 @@ module Futhark.Analysis.HORepresentation.SOACNest
 import Control.Applicative
 import Control.Monad
 import Data.Maybe
-import Data.Traversable
 
 import Prelude
 
 import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap, Stream, subExpType)
-import qualified Futhark.Representation.AST as AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
@@ -120,9 +118,6 @@ data TypedSubExp = TypedSubExp { subExpExp :: SubExp
 inputFromTypedSubExp :: TypedSubExp -> Maybe SOAC.Input
 inputFromTypedSubExp (TypedSubExp (Var v) t) = Just $ SOAC.identInput $ Ident v t
 inputFromTypedSubExp _                       = Nothing
-
-typedSubExp :: LocalTypeEnv f => SubExp -> f TypedSubExp
-typedSubExp se = TypedSubExp se <$> AST.subExpType se
 
 data Combinator lore = Map Certificates (NestBody lore)
                      | Reduce Certificates (NestBody lore) [TypedSubExp]
@@ -239,16 +234,21 @@ fromSOAC (SOAC.Map cs l as) =
   SOACNest as <$> Map cs <$> lambdaToBody l
 fromSOAC (SOAC.Reduce cs l args) =
   SOACNest (map snd args) <$>
-  (Reduce cs <$> lambdaToBody l <*> traverse (typedSubExp . fst) args)
+  (Reduce cs <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
 fromSOAC (SOAC.Scan cs l args) =
   SOACNest (map snd args) <$>
-  (Scan cs <$> lambdaToBody l <*> traverse (typedSubExp . fst) args)
+  (Scan cs <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
 fromSOAC (SOAC.Redomap cs ol l es as) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*> traverse typedSubExp es)
+  SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*>
+                   pure (accSubExps l es))
 fromSOAC (SOAC.Stream cs lam es as) =
-  SOACNest as <$> (Stream  cs  <$> return lam <*> traverse typedSubExp es)
+  SOACNest as <$> (Stream  cs  <$> return lam <*>
+                   pure (zipWith TypedSubExp es (map paramType $ drop 2 $ lambdaParams lam)))
+
+accSubExps :: Lambda lore -> [SubExp] -> [TypedSubExp]
+accSubExps l args = zipWith TypedSubExp args (map paramType $ lambdaParams l)
 
 nested :: (LocalTypeEnv m, Monad m, Bindable lore) =>
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
