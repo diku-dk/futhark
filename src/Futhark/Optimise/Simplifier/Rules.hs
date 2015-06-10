@@ -524,6 +524,8 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2 _)
 
 simplifyBinOp _ _ (BinOp Equal e1 e2 _)
   | e1 == e2 = binOpRes $ LogVal True
+  | otherwise = SubExp <$> ordBinOp op e1 e2
+  where op x y = return $ x == y
 
 simplifyBinOp _ _ (BinOp Less e1 e2 _)
   | e1 == e2 = binOpRes $ LogVal False
