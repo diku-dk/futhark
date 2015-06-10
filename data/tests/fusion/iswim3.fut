@@ -1,9 +1,17 @@
-//test
+// This test exposed a bug in map-nest creation.  The program involves
+// ISWIM with apparently more complex shapes than the other ISWIM
+// tests.  The bug happened whilst pulling a transpose before the
+// producer.
+//
+//--
+//
+// structure { Map 2 Redomap 1 Scan 1 }
+
 fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
 
-fun [[real,num_und],num_dates] 
-correlateDeltas( [[real,num_und],num_und  ] md_c, 
-                 [[real,num_und],num_dates] zds  
+fun [[real,num_und],num_dates]
+correlateDeltas( [[real,num_und],num_und  ] md_c,
+                 [[real,num_und],num_dates] zds
 ) =
     map( fn [real,num_und] ([real,num_und] zi) =>
             map( fn real (int j) =>
@@ -33,4 +41,3 @@ fun [[real]] main(
 ) =
   let bd_row = blackScholes(md_cs, md_vols, md_drifts, md_sts, bb_row)
   in  bd_row
-
