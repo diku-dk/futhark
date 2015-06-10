@@ -79,7 +79,10 @@ fromSOACNest' bound (Nest.SOACNest inps
            , nestingReturnType   = Nest.nestingReturnType n
            }
   return $ Just $ MapNest (cs++cs') body' (n':ns') inps''
-  where bound' = bound <> Nest.nestingParams n
+  where bound' = bound <>
+                 zipWith Ident
+                 (Nest.nestingParamNames n)
+                 (map (rowType . SOAC.inputType) inps)
 
 fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
   lam <- lambdaBody <$> Nest.bodyToLambda (map SOAC.inputType inps) body
@@ -150,7 +153,7 @@ fixInputs ourInps childInps =
   where
     isParam x (y, _) = x == y
 
-    ourSize = arraysSize 0 $ map (SOAC.inputType . snd) ourInps
+    ourWidth = arraysSize 0 $ map (SOAC.inputType . snd) ourInps
 
     findParam :: [(VName, SOAC.Input)]
               -> VName
@@ -164,23 +167,18 @@ fixInputs ourInps childInps =
             -> (VName, SOAC.Input)
             -> m ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
     inspect (remPs, newInps) (_, SOAC.Input ts (SOAC.Var v _))
-      | SOAC.nullTransforms ts,
-        Just (ourP, remPs') <- findParam remPs v =
-          return (remPs', ourP:newInps)
-
-    inspect (remPs, newInps) (param, SOAC.Input ts ia) =
-      case ia of
-        SOAC.Var v _
-          | Just ((p,pInp), remPs') <- findParam remPs v ->
-          let pInp'  = SOAC.transformRows ts pInp
+      | Just ((p,pInp), remPs') <- findParam remPs v =
+          let pInp' = SOAC.transformRows ts pInp
           in return (remPs',
                      (p, pInp') : newInps)
-          | Just ((p,pInp), _) <- findParam newInps  v -> do
+
+      | Just ((p,pInp), _) <- findParam newInps v = do
           -- The input corresponds to a variable that has already
           -- been used.
           p' <- newNameFromString $ baseString p
           return (remPs, (p', pInp) : newInps)
-        _ -> do
-          newParam <- newNameFromString (baseString param ++ "_rep")
-          return (remPs, (newParam,
-                          SOAC.Input (ts SOAC.|> SOAC.Replicate ourSize) ia) : newInps)
+
+    inspect (remPs, newInps) (param, SOAC.Input ts ia) = do
+      newParam <- newNameFromString (baseString param ++ "_rep")
+      return (remPs, (newParam,
+                      SOAC.Input (ts SOAC.|> SOAC.Replicate ourWidth) ia) : newInps)

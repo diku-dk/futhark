@@ -86,7 +86,6 @@ import Futhark.Substitute
 import Futhark.Tools
 import Futhark.Renamer (renameLambda)
 import Futhark.MonadFreshNames
---import Debug.Trace
 
 -- | A single, simple transformation.  If you want several, don't just
 -- create a list, use 'ArrayTransforms' instead.
@@ -358,7 +357,7 @@ transformRows (ArrayTransforms ts) =
             Rearrange [] [1,0] `addTransform`
             (Replicate n `addTransform` inp)
           | otherwise =
-            Rearrange [] (1:0:[2..inputRank inp]) `addTransform`
+            Rearrange [] (2:0:1:[3..inputRank inp]) `addTransform`
             (Replicate n `addTransform`
              (Rearrange [] (1:0:[2..inputRank inp-1]) `addTransform` inp))
         transformRows' inp nts =

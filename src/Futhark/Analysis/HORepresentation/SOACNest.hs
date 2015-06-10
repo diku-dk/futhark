@@ -1,6 +1,5 @@
 module Futhark.Analysis.HORepresentation.SOACNest
   ( SOACNest (..)
-  , nestingParams
   , TypedSubExp (..)
   , inputFromTypedSubExp
   , Combinator (..)
@@ -55,11 +54,6 @@ data Nesting lore = Nesting {
   , nestingResult     :: [VName]
   , nestingReturnType :: [Type]
   } deriving (Eq, Ord, Show)
-
-nestingParams :: Nesting lore -> [Ident]
-nestingParams nest = zipWith Ident names types
-  where names = nestingParamNames nest
-        types = map SOAC.inputType $ nestingInputs nest
 
 data NestBody lore = Fun (Lambda lore)
                    | NewNest (Nesting lore) (Combinator lore)
