@@ -313,7 +313,7 @@ inputArray (Input _ (Iota _))  = Nothing
 
 inputArrayType :: InputArray -> Type
 inputArrayType (Var _ t) = t
-inputArrayType (Iota e)  = arrayOf (Basic Int) (Shape [e]) Unique
+inputArrayType (Iota e)  = arrayOf (Basic Int) (Shape [e]) Nonunique
 
 -- | Return the type of an input.
 inputType :: Input -> Type
