@@ -202,7 +202,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
 -- is purely existential, the intent is to translate a stream exp such as:
 -- @stream (fn {int,[int,m],[int,?0],[real,?1]@
--- @           (int chunkloc, int i, int acc, [int] a) =>@
+-- @           (int chunkloc, int i, int acc, *[int] a) =>@
 -- @               body in {acc', x, y, z}@
 -- @       , acc0, A)@
 -- into a loop in which the input array is streamed by splitting each time
@@ -224,17 +224,19 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
 -- A Loop pseudocode is:
 -- @let chunkglb = 16 in@
 -- @let (Xglb0,Yglb0,Zglb0)=(scratch(N,..),scratch(U,..),scratch(N,..)) in@
--- loop( {Aloop, A_iv, z_al, y_iv, z_iv, acc, Xglb, Yglb, Zglb} =   @
--- @      {A,     N,    0,    0,    0,    acc0,Xglb0,Yglb0,Zglb0} )=@
+-- loop( {z_al, y_iv, z_iv, acc, Xglb, Yglb, Zglb} =   @
+-- @      {0,    0,    0,    acc0,Xglb0,Yglb0,Zglb0} )=@
 -- @  for i_chk < (N+chunkglb-1)/chunkglb do                        @
--- @    let i        = chunkglb * i_chk          in                 @
--- @    let A_cur_sz = N - i*chunkglb            in                 @
--- @    let chunkloc = min(chunkglb, A_iv)       in                 @
--- @    let A_nxt_sz = A_cur_sz - chunkloc       in                 @
--- @    let (elms,Anxt) = split(chunkloc, Aloop) in                 @
--- @    ... body ...                                                @
--- @    ............                                                @
--- @    let z_iv' = z_iv + size(0,z)             in                 @
+-- @    let i        = chunkglb * i_chk            in               @
+-- @    let diff0    = i + chunkglb - N            in               @
+-- @    let diff     = diff0 > 0 ? diff0 : 0       in               @
+-- @    let chunkloc = chunkglb - diff             in               @
+-- @    let (_,a_chg)= split((i-diff, chunkglb),A) in               @
+-- @    let a_chg*   = copy(a_chg)                 in               @
+-- @    let (_,a) = split((diff,chunkloc), a_chg*) in               @
+-- @    ... body(a) ...                                             @
+-- @    ...............                                             @
+-- @    let z_iv' = z_iv + size(0,z)               in               @
 -- @    let {z_al',Zglb'} =                                         @
 -- @      if z_iv' <= z_al then {z_al, Zglb}                        @
 -- @      else let Znew = scratch(2*z_iv') in                       @
@@ -263,8 +265,8 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
   (chunkloc,ilam) <- case lampars of
                     chnk:iorig:_ -> return (chnk,iorig)
                     _ -> fail "FirstOrderTransform Stream: chunk or i error!"
-  chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp $ intconst 1
   outersz <- arraysSize 0 <$> mapM lookupType arrexps
+  chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp $ intconst 1
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
       sub_chko= HM.fromList [(paramName chunkloc, outersz)]
@@ -303,28 +305,14 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
                     newIdent (nm++"_resE") $ t `setUniqueness` Unique
   strmresacc <- mapM (newIdent "stream_accres" <=< subExpType) accexps
   -- various stream array identifiers and outer sizes
-  inarrVsz <- newIdent "stream_cursize" $ Basic Int
-  inarrNsz <- newIdent "stream_nxtsize" $ Basic Int
-  bothinarrsloop <- forM (zip arrexps arruniq) $ \(aid,u) -> do
-          atp <- lookupType aid
-          let anm = textual aid
-          (t1,t2) <- case atp of
-              Array bt (Shape (_:dims)) _ ->
-                  return ( Array bt (Shape $ Var (identName inarrVsz):dims) u
-                         , Array bt (Shape $ Var (identName inarrNsz):dims) u)
-              _ -> fail "FirstOrderTransform(Stream): array of not array type"
-          id1 <- newIdent (anm++"_inloop1") t1
-          id2 <- newIdent (anm++"_inloop2") t2
-          return (id1, id2)
-  let (inarrsloop1, inarrsloop2) = unzip bothinarrsloop
   acc0     <- mapM (newIdent "acc" <=< subExpType) accexps
   loopind  <- newVName "stream_i"
   let loopind_ident = Ident loopind $ Basic Int
   loopcnt  <- newIdent "stream_N" $ Basic Int
   -- 3.) Transform the stream's lambda to a loop body
-  loopbody <- runBodyBinder $ bindingIdentTypes (loopind_ident:inarrVsz:
-                                             inarrsloop1++ exszvar ++ exindvars ++
-                                             acc0++outarrloop) $ do
+  loopbody <- runBodyBinder $ bindingIdentTypes (loopind_ident:exszvar ++
+                                                 exindvars ++ acc0 ++
+                                                 outarrloop) $ do
       let argsacc = map (PrimOp . SubExp . Var . identName) acc0
           accpars = take acc_num $ drop 2 lampars
           arrpars = drop (2 + acc_num) lampars
@@ -335,47 +323,77 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
               letBindNames' [paramName param] =<< eCopy (pure arg)
             else
               letBindNames' [paramName param] arg
-          -- ilam := i*chunk_glb, the local chunk
-          -- inside the loop, together with the size of the
-          -- remaining stream in `inarrNsz'
+          -- ilam := i*chunk_glb, the local chunk inside the loop
           ilamexp <- eBinOp Times
                             (pure $ PrimOp $ SubExp $ Var loopind)
                             (pure $ PrimOp $ SubExp $ Var chunkglb)
                             Int
           addBinding $ myMkLet ilamexp $ paramIdent ilam
-          -- inarrtmpsz := total_stream_size - ilam
-          inarrtmpsz <- newIdent "stream_curszind" $ Basic Int
-          subexp <- eBinOp Minus
-                           ( pure $ PrimOp $ SubExp outersz )
-                           ( pure $ PrimOp $ SubExp $ Var $ paramName ilam )
-                           Int
-          addBinding $ myMkLet subexp inarrtmpsz
-          -- chunk_loc = min chunk_glb inarrtmpsz
-          ifexp <- eIf (eBinOp Leq (pure $ PrimOp $ SubExp $ Var chunkglb)
-                                   (pure $ PrimOp $ SubExp $ Var $ identName inarrtmpsz)
-                               Bool)
-                       (pure $ resultBody [Var chunkglb])
-                       (pure $ resultBody [Var $ identName inarrtmpsz])
-          addBinding $ myMkLet ifexp $ paramIdent chunkloc
-          -- inarrNsz := inarrtmpsz - chunk_loc, i.e., the size of
-          -- the remaining stream after consuming the current chunk.
-          remstrmszexp <-
-            eBinOp Minus (pure $ PrimOp $ SubExp $ Var $ identName inarrtmpsz)
-                         (pure $ PrimOp $ SubExp $ Var $ paramName chunkloc)
-                         Int
-          addBinding $ myMkLet remstrmszexp inarrNsz
+          ---------------- changed from here --------------
+          -- ilampch := (i+1)*chunk_glb
+          ip1chgid <- newIdent "stream_ip1chg" $ Basic Int
+          ip1chgexp<- eBinOp Plus
+                             (pure $ PrimOp $ SubExp $ Var $ paramName ilam)
+                             (pure $ PrimOp $ SubExp $ Var chunkglb)
+                             Int
+          addBinding $ myMkLet ip1chgexp ip1chgid
+          -- diff0   := (i+1)*ghunk_glb - total_stream_size
+          diff0id  <- newIdent "stream_diff0" $ Basic Int
+          diff0exp <-eBinOp Minus
+                            (pure $ PrimOp $ SubExp $ Var $ identName ip1chgid)
+                            (pure $ PrimOp $ SubExp outersz)
+                            Int
+          addBinding $ myMkLet diff0exp diff0id
+          -- diff    := 0 < diff0 ? diff0 : 0
+          diffid   <- newIdent "stream_diff" $ Basic Int
+          ifdiffexp<- eIf (eBinOp Less (pure $ PrimOp $ SubExp $ Constant $ IntVal 0)
+                                       (pure $ PrimOp $ SubExp $ Var $ identName diff0id)
+                                  Bool)
+                          (pure $ resultBody [Var $ identName diff0id])
+                          (pure $ resultBody [Constant $ IntVal 0])
+          addBinding $ myMkLet ifdiffexp diffid
+          -- chunk_loc := chunk_glb - diff
+          chlexp   <- eBinOp Minus
+                             (pure $ PrimOp $ SubExp $ Var chunkglb)
+                             (pure $ PrimOp $ SubExp $ Var $ identName diffid)
+                             Int
+          addBinding $ myMkLet chlexp $ paramIdent chunkloc
+          -- diff1   := chunk_glb*i - diff
+          diff1id  <- newIdent "stream_diff1" $ Basic Int
+          diff1exp <- eBinOp Minus
+                             (pure $ PrimOp $ SubExp $ Var $ paramName ilam)
+                             (pure $ PrimOp $ SubExp $ Var $ identName diffid)
+                             Int
+          addBinding $ myMkLet diff1exp diff1id
           -- split input streams into current chunk and rest of stream
-          forM_ (zip3 arrpars inarrsloop1 inarrsloop2) $
-            \(param, inarr1, inarr2) -> do
-                let myarg = PrimOp $ Split [] [Var $ paramName chunkloc,
-                                               Var $ identName inarrNsz] $
-                                     identName inarr1
-                tmpid <- newIdent "tmpelem" $ paramType param
-                _ <- letBindNames' [identName tmpid, identName inarr2] myarg
-                -- UGLY: I NEED TO COPY THE UNIQUE ARGUMENT TO MAKE IT
-                --       WORK IN SOME CASES WHERE THE ARRAY IS MODIFIED IN PLACE.
-                letBindNames' [paramName param] =<<
-                  eCopy (pure (PrimOp $ SubExp $ Var $ identName tmpid))
+          forM_ (zip3 arrpars arrexps arruniq) $
+            \(param, inarr, u) -> do
+                atp <- lookupType inarr
+                let anm = textual inarr
+                (dt1,t2,dt4) <- case atp of
+                    Array bt (Shape (_:dims)) _ ->
+                        return ( Array bt (Shape $ Var (identName diff1id):dims) u
+                               , Array bt (Shape $ Var chunkglb           :dims) u
+                               , Array bt (Shape $ Var (identName diffid ):dims) u )
+                    _ -> fail "FirstOrderTransform(Stream): array of not array type"
+                id1 <- newIdent "dead" dt1
+                id2 <- newIdent (anm++"_chg" ) t2
+                id3 <- newIdent (anm++"_chgu") t2
+                id4 <- newIdent "dead" dt4
+                -- (_,a_cg) = split((chunk_glb*i-diff, chunk_glb), inarr)
+                let split1= PrimOp $ Split [] [Var $ identName diff1id, Var chunkglb] inarr
+                _ <- letBindNames' [identName id1, identName id2] split1
+                -- a_cg* := copy(a_cg)
+                id' <- case u of
+                        Unique -> do _ <- letBindNames' [identName id3] =<<
+                                            eCopy (pure (PrimOp $ SubExp $ Var $ identName id2))
+                                     return id3
+                        _      ->    return id2
+                -- (_,a_cl) = split((diff,cg-diff), a_cg*)
+                let split2= PrimOp $ Split [] [Var $ identName diffid,
+                                               Var $ paramName chunkloc] $
+                                     identName id'
+                letBindNames' [identName id4, paramName param] split2
           let fakebody = Body (bodyLore lambody) (bodyBindings lambody) (bodyResult lambody)
           transformBody fakebody
       -- make copy-out epilogue for result arrays
@@ -386,7 +404,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
       let (mszvars,mindvars,dests) = unzip3 epilogue
           (indvars,szvars) = (catMaybes mindvars, catMaybes mszvars)
       return $
-        resultBody (map (Var . identName) (inarrNsz : inarrsloop2 ++ szvars ++ indvars) ++
+        resultBody (map (Var . identName) (szvars ++ indvars) ++
                     acc' ++
                     map (Var . identName) dests)
   -- 4.) Build the loop
@@ -396,9 +414,8 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
       initacc = exszses ++ exindses  ++ initacc0
       loopres = LoopOp $
                 DoLoop (map identName $ accres++outarrloop)
-                       (loopMerge (inarrVsz:inarrsloop1++accall++outarrloop)
-                                  (outersz:map Var arrexps++initacc++
-                                   map (Var . identName) outarrinit))
+                       (loopMerge (accall++outarrloop)
+                                  (initacc++map (Var . identName) outarrinit))
                        (ForLoop loopind (Var $ identName loopcnt)) loopbody
       loopbnd = mkLet' exszarres (indvarres++strmresacc++strmresarrl) loopres
   -- 5.) A stream needs prologue-loop-epilogue bindings, so we make a dummy
