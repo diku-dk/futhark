@@ -17,6 +17,7 @@ module Futhark.Representation.AST.Attributes.Types
        , basicType
 
        , arrayOf
+       , arrayOfRow
        , setOuterSize
        , setOuterDim
        , setArrayDims
@@ -158,6 +159,12 @@ arrayOf (Basic et) size u =
   Array et size u
 arrayOf (Mem {}) _ _ =
   error "arrayOf Mem"
+
+-- | Construct an array whose rows are the given type, and the outer
+-- size is the given 'SubExp'.  This is just a convenient wrapper
+-- around 'arrayOfRow'.
+arrayOfRow :: Type -> SubExp -> Type
+arrayOfRow t size = arrayOf t (Shape [size]) (uniqueness t)
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
