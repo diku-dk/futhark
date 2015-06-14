@@ -15,6 +15,7 @@ module Futhark.Renamer
   --
   -- These all require execution in a 'MonadFreshNames' environment.
   , renameExp
+  , renameBinding
   , renameBody
   , renameLambda
   , renameFun
@@ -65,6 +66,16 @@ renameProg prog = Prog $ fst $
 renameExp :: (Renameable lore, MonadFreshNames m) =>
              Exp lore -> m (Exp lore)
 renameExp = modifyNameSource . runRenamer . rename
+
+-- | Rename bound variables such that each is unique.  The semantics
+-- of the binding is unaffected, under the assumption that the
+-- binding was correct to begin with.  Any free variables are left
+-- untouched, as are the names in the pattern of the binding.
+renameBinding :: (Renameable lore, MonadFreshNames m) =>
+                 Binding lore -> m (Binding lore)
+renameBinding binding = do
+  e <- renameExp $ bindingExp binding
+  return binding { bindingExp = e }
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the body is unaffected, under the assumption that the body was
