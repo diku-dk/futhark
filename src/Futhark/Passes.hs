@@ -18,6 +18,7 @@ module Futhark.Passes
   , flattening
   , doubleBuffer
   , sequentialiseKernels
+  , distributeKernels
   , standardPipeline
   )
 where
@@ -40,6 +41,7 @@ import qualified Futhark.Optimise.CSE
 import qualified Futhark.Flattening
 import qualified Futhark.Optimise.DoubleBuffer
 import qualified Futhark.KernelSequentialisation
+import qualified Futhark.DistributeKernels
 
 fotransform :: Pass
 fotransform = unfailableBasicPass "first-order transform"
@@ -109,6 +111,10 @@ doubleBuffer = unfailableExplicitMemoryPass "double buffering"
 sequentialiseKernels :: Pass
 sequentialiseKernels = unfailableBasicPass "sequentialise kernels"
                        Futhark.KernelSequentialisation.sequentialiseKernels
+
+distributeKernels :: Pass
+distributeKernels = unfailableBasicPass "distribute kernels"
+                    Futhark.DistributeKernels.transformProg
 
 standardPipeline :: [Pass]
 standardPipeline =
