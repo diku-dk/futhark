@@ -105,6 +105,8 @@ commandLineOptions =
     [] ["double-buffer"]
   , passoption "Kernel sequentialisation" sequentialiseKernels
     [] ["sequentialise-kernels"]
+  , passoption "Kernel distribution" distributeKernels
+    [] ["distribute-kernels"]
 
   , Option "s" ["standard"]
     (NoArg $ Right $ changeFutharkConfig $
