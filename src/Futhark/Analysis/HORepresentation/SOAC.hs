@@ -658,7 +658,7 @@ soacToStream soac = do
                           addaccres ++ map (Futhark.Var . identName) strm_resids
           strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)
-      lam0 <- renameLambda lam
+      lam0 <- renameLambda lamin
       return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])

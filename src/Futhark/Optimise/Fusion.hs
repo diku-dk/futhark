@@ -550,6 +550,21 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       blres' <- foldM fusionGatherSubExp blres nes
       greedyFuse False (bodyBindings body) used_lam blres' (pat, soac)
 
+    Right soac@(SOAC.Stream _ form lam _ _) -> do
+      -- a redomap does not neccessarily start a new kernel, e.g.,
+      -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
+      -- can be fused into a redomap that replaces the @map@, if @a@
+      -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
+      -- a redomap always starts a new kernel
+      let nes     = getStreamAccums form
+          lambdas = case form of
+                        RedLike _ lout _ -> [lout, lam]
+                        _                -> [lam]
+      (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
+      bres  <- bindingFamily pat $ fusionGatherBody lres body
+      bres' <- foldM fusionGatherSubExp bres nes
+      greedyFuse False (bodyBindings body) used_lam bres' (pat, soac)
+
     Left (SOAC.InvalidArrayInput inpe) ->
       badFusionGM $ Error
       ("In Fusion.hs, "++pretty inpe++" is not valid array input.")
