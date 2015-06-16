@@ -143,7 +143,16 @@ import Language.Futhark.Parser.Lexer
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       while           { L $$ WHILE }
-      stream          { L $$ STREAM }
+      streamMap       { L $$ STREAM_MAP }
+      streamMapMax    { L $$ STREAM_MAPMAX }
+      streamMapPer    { L $$ STREAM_MAPPER }
+      streamMapPerMax { L $$ STREAM_MAPPERMAX }
+      streamRed       { L $$ STREAM_RED }
+      streamRedMax    { L $$ STREAM_REDMAX }
+      streamRedPer    { L $$ STREAM_REDPER }
+      streamRedPerMax { L $$ STREAM_REDPERMAX }
+      streamSeq       { L $$ STREAM_SEQ }
+      streamSeqMax    { L $$ STREAM_SEQMAX }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -400,8 +409,28 @@ Exp  :: { UncheckedExp }
      | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
                       { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
 
-     | stream '(' FunAbstr ',' Id ',' Id ',' Exp ',' Exp ')'
-                      { Stream $5 $7 $9 $11 $3 $1 }
+     | streamMap       '(' FunAbstr ',' Exp ')'
+                         { Stream (MapLike InOrder)  $3 $5 MinChunk $1 }
+     | streamMapMax    '(' FunAbstr ',' Exp ')'
+                         { Stream (MapLike InOrder)  $3 $5 MaxChunk $1 }
+     | streamMapPer    '(' FunAbstr ',' Exp ')'
+                         { Stream (MapLike Disorder) $3 $5 MinChunk $1 }
+     | streamMapPerMax '(' FunAbstr ',' Exp ')'
+                         { Stream (MapLike Disorder) $3 $5 MaxChunk $1 }
+
+     | streamRed       '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
+                         { Stream (RedLike InOrder  $3 $7) $5 $9 MinChunk $1 }
+     | streamRedMax    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
+                         { Stream (RedLike InOrder  $3 $7) $5 $9 MaxChunk $1 }
+     | streamRedPer    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
+                         { Stream (RedLike Disorder $3 $7) $5 $9 MinChunk $1 }
+     | streamRedPerMax '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
+                         { Stream (RedLike Disorder $3 $7) $5 $9 MaxChunk $1 }
+
+     | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
+                         { Stream (Sequential $5) $3 $7 MinChunk $1 }
+     | streamSeqMax    '(' FunAbstr ',' Exp ',' Exp ')'
+                         { Stream (Sequential $5) $3 $7 MaxChunk $1 }
 
 Index : '[' Exps ']'                  { $2 }
 

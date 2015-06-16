@@ -19,7 +19,7 @@
 // }
 fun {{int,[int]},[[int]],[real],[real],[int]} main(int m, *[int,n] A) =
   let B = map(+10, A) in
-  stream( fn {{int,[int]},[[int,m]],[real],[real],[int]} ({int, [int,m]} acc2, *[int] C) =>
+  streamSeq( fn {{int,[int]},[[int,m]],[real],[real],[int]} (int chunk, {int, [int,m]} acc2, *[int] C) =>
                     let {acc0, acc} = acc2                in
                     let X = map ( fn [int] (int c) =>
                                     map(+c, iota(m))
@@ -49,5 +49,5 @@ fun {{int,[int]},[[int]],[real],[real],[int]} main(int m, *[int,n] A) =
                             in  C
                     in
                     { {C[chunk-1],Y[chunk-1]}, Y, Z, W, C }
-        , chunk, i, {0,replicate(m,0)}, copy(B)
-        )
+
+           , {0,replicate(m,0)}, copy(B) )

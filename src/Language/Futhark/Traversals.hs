@@ -164,10 +164,15 @@ mapExpM tv (Partition funs arrexp loc) =
 mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
   pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Stream chunk i acc arr fun loc) =
-  pure Stream <*> mapOnIdent tv chunk <*> mapOnIdent tv i <*>
-       mapOnExp tv acc <*> mapOnExp tv arr <*>
-       mapOnLambda tv fun <*> pure loc
+mapExpM tv (Stream form fun arr mm loc) =
+  pure Stream <*> mapOnStreamForm form <*> mapOnLambda tv fun <*>
+       mapOnExp tv arr <*> pure mm <*> pure loc
+  where mapOnStreamForm (MapLike o) = pure $ MapLike o
+        mapOnStreamForm (RedLike o lam acc) =
+            pure RedLike <*> pure o <*>
+                 mapOnLambda tv lam <*> mapOnExp tv acc
+        mapOnStreamForm (Sequential acc) =
+            pure Sequential <*> mapOnExp tv acc
 mapExpM tv (Split splitexps arrexp loc) =
   pure Split <*>
        mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>

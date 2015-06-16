@@ -230,10 +230,23 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ppCertificates' cs <> text "redomap" <>
     parens (ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  ppr (Stream cs accs arrs lam) =
-    ppCertificates' cs <> text "stream" <>
-    parens (ppr lam <> comma </>
-            commasep ( braces (commasep $ map ppr accs) : map ppr arrs ))
+  ppr (Stream cs form lam arrs ii) =
+    let intent_str = if ii==MaxChunk then "Max" else ""
+    in ppCertificates' cs <> case form of
+          MapLike o ->
+            let ord_str = if o == Disorder then "Per" else ""
+            in  text ("streamMap"++ord_str++intent_str) <>
+                parens (ppr lam <> comma </>
+                        commasep (map ppr arrs) )
+          RedLike o lam0 acc ->
+            let ord_str = if o == Disorder then "Per" else ""
+            in  text ("streamRed"++ord_str++intent_str) <>
+                parens (ppr lam0 </> comma </> ppr lam </>
+                        commasep ( braces (commasep $ map ppr acc) : map ppr arrs ))
+          Sequential acc ->
+                text "streamSeq" <>
+                parens (ppr lam <> comma </>
+                        commasep ( braces (commasep $ map ppr acc) : map ppr arrs ))
   ppr (Scan cs lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
     where (es, as) = unzip inputs

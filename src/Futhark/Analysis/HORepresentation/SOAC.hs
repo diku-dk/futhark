@@ -392,7 +392,7 @@ data SOAC lore = Map Certificates (Lambda lore) [Input]
                | Reduce  Certificates (Lambda lore) [(SubExp,Input)]
                | Scan Certificates (Lambda lore) [(SubExp,Input)]
                | Redomap Certificates (Lambda lore) (Lambda lore) [SubExp] [Input]
-               | Stream  Certificates (Lambda lore) [SubExp] [Input]
+               | Stream  Certificates (StreamForm lore) (Lambda lore) ChunkIntent [Input]
             deriving (Show)
 
 -- | Returns the inputs used in a SOAC.
@@ -401,7 +401,7 @@ inputs (Map _     _     arrs) = arrs
 inputs (Reduce  _ _     args) = map snd args
 inputs (Scan    _ _     args) = map snd args
 inputs (Redomap _ _ _ _ arrs) = arrs
-inputs (Stream  _ _ _   arrs) = arrs
+inputs (Stream  _ _ _ _ arrs) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
@@ -413,8 +413,8 @@ setInputs arrs (Scan cs lam args) =
   Scan cs lam (zip (map fst args) arrs)
 setInputs arrs (Redomap cs lam1 lam ne _) =
   Redomap cs lam1 lam ne arrs
-setInputs arrs (Stream  cs lam ne _) =
-  Stream cs lam ne arrs
+setInputs arrs (Stream  cs form lam ii _) =
+  Stream cs form lam ii arrs
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC lore -> Lambda lore
@@ -422,7 +422,7 @@ lambda (Map     _ lam _       ) = lam
 lambda (Reduce  _ lam _       ) = lam
 lambda (Scan    _ lam _       ) = lam
 lambda (Redomap _ _   lam2 _ _) = lam2
-lambda (Stream  _ lam      _ _) = lam
+lambda (Stream  _ _ lam    _ _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
@@ -434,8 +434,8 @@ setLambda lam (Scan cs _ args) =
   Scan cs lam args
 setLambda lam (Redomap cs lam1 _ ne arrs) =
   Redomap cs lam1 lam ne arrs
-setLambda lam (Stream  cs _      ne arrs) =
-  Stream cs lam ne arrs
+setLambda lam (Stream  cs form _ ii arrs) =
+  Stream cs form lam ii arrs
 
 -- | Returns the certificates used in a SOAC.
 certificates :: SOAC lore -> Certificates
@@ -443,7 +443,7 @@ certificates (Map     cs _     _) = cs
 certificates (Reduce  cs _ _    ) = cs
 certificates (Scan    cs _ _    ) = cs
 certificates (Redomap cs _ _ _ _) = cs
-certificates (Stream  cs _   _ _) = cs
+certificates (Stream  cs _ _ _ _) = cs
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
@@ -457,8 +457,9 @@ typeOf (Redomap _ outlam inlam nes inps) =
   let accrtps = lambdaReturnType outlam
       arrrtps = drop (length nes) $ mapType inlam $ map inputType inps
   in  accrtps ++ arrrtps
-typeOf (Stream _ lam nes inps) =
-  let accrtps = take (length nes) $ lambdaReturnType lam
+typeOf (Stream _ form lam _ inps) =
+  let nes     = getStreamAccums form
+      accrtps = take (length nes) $ lambdaReturnType lam
       outersz = arraysSize 0 $ map inputType inps
       arrtps  = [ arrayOf (stripArray 1 t) (Shape [outersz]) (uniqueness t)
                   | t <- drop (length nes) (lambdaReturnType lam) ]
@@ -473,7 +474,7 @@ inpOuterSize (Scan _ _ input) =
   arraysSize 0 $ map (inputType . snd) input
 inpOuterSize (Redomap _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
-inpOuterSize (Stream  _   _ _ inps) =
+inpOuterSize (Stream  _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
 
 -- | Convert a SOAC to the corresponding expression.
@@ -489,11 +490,11 @@ toExp (Scan cs l args) =
   where (es, as) = unzip args
 toExp (Redomap cs l1 l2 es as) =
   LoopOp <$> (Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as)
-toExp (Stream  cs lam nes inps) = LoopOp <$> do
+toExp (Stream  cs form lam ii inps) = LoopOp <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
       extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
   inpexp <- inputsToSubExps inps
-  return $ Futhark.Stream cs nes inpexp extlam
+  return $ Futhark.Stream cs form extlam inpexp ii
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -518,12 +519,12 @@ fromExp (LoopOp (Futhark.Scan cs l args)) = do
   Right <$> Scan cs l <$> zip es <$> traverse varInput as
 fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as)) =
   Right <$> Redomap cs l1 l2 es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Stream cs nes as extlam)) = do
+fromExp (LoopOp (Futhark.Stream cs form extlam as ii)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
   if length mrtps == length rtps
   then Right <$> do let lam = Lambda (extLambdaParams extlam) (extLambdaBody extlam) rtps
-                    Stream cs lam nes <$> traverse varInput as
+                    Stream cs form lam ii <$> traverse varInput as
   else pure $ Left NotSOAC
 fromExp _ = pure $ Left NotSOAC
 
@@ -534,10 +535,9 @@ soacToStream :: (MonadFreshNames m, Bindable lore)
                   => SOAC lore -> m (SOAC lore,[Ident])
 soacToStream soac = do
   chunk_id <- newIdent "chunk" $ Basic Int
-  iota_id  <- newIdent "i"     $ Basic Int
   let chvar= Futhark.Var $ identName chunk_id
       (cs, lam, inps) = (certificates soac, lambda soac, inputs soac)
-  lam'        <- renameLambda lam
+  lam'     <- renameLambda lam
   -- Treat each SOAC case individually:
   case soac of
     -- Map(f,a) => is translated in strem's body to:
@@ -554,10 +554,10 @@ soacToStream soac = do
       let insoac = Futhark.Map cs lam' $ map identName strm_inpids
           insbnd = mkLet' [] strm_resids $ LoopOp insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
-          strmpar= map (`Param` ()) $ chunk_id:iota_id:strm_inpids
+          strmpar= map (`Param` ()) $ chunk_id:strm_inpids
           strmlam= Lambda strmpar strmbdy loutps
       -- map(f,a) creates a stream with NO accumulators
-      return (Stream cs strmlam [] inps, [])
+      return (Stream cs (MapLike Disorder) strmlam MaxChunk inps, [])
     -- Scan(+,nes,a) => is translated in strem's body to:
     -- 1. let scan0_ids   = scan(+, nes, a_ch)           in
     -- 2. let strm_resids = map (acc `+`,nes, scan0_ids) in
@@ -602,9 +602,9 @@ soacToStream soac = do
       let (addlelbnd,addlelres) = (bodyBindings addlelbdy, bodyResult addlelbdy)
           strmbdy= mkBody (insbnd:mapbnd:outszm1bnd:lelbnds++addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
-          strmpar= map (`Param` ()) $ chunk_id:iota_id:inpacc_ids++strm_inpids
+          strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)
-      return (Stream cs strmlam nes inps, inpacc_ids)
+      return (Stream cs (Sequential nes) strmlam MinChunk inps, inpacc_ids)
     -- Reduce(+,nes,a) => is translated in strem's body to:
     -- 1. let acc0_ids = reduce(+,nes,a_ch) in
     -- 2. let acc'     = acc + acc0_ids    in
@@ -627,9 +627,10 @@ soacToStream soac = do
       -- Construct the stream
       let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
           strmbdy= mkBody (insbnd : addaccbnd) addaccres
-          strmpar= map (`Param` ()) $ chunk_id:iota_id:inpacc_ids++strm_inpids
+          strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy accrtps
-      return (Stream cs strmlam nes inps, [])
+      lam0 <- renameLambda lam
+      return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
     -- Redomap(+,lam,nes,a) => is translated in strem's body to:
     -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
     -- 2. let acc'                   = acc + acc0_ids          in
@@ -655,9 +656,10 @@ soacToStream soac = do
       let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
           strmbdy= mkBody (insbnd : addaccbnd) $
                           addaccres ++ map (Futhark.Var . identName) strm_resids
-          strmpar= map (`Param` ()) $ chunk_id:iota_id:inpacc_ids++strm_inpids
+          strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)
-      return (Stream cs strmlam nes inps, [])
+      lam0 <- renameLambda lam
+      return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])
     -- HELPER FUNCTIONS

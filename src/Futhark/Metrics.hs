@@ -86,7 +86,7 @@ loopOpMetrics (ConcatMap _ fun _) =
   seen "ConcatMap" >> lambdaMetrics fun
 loopOpMetrics (Redomap _ fun1 fun2 _ _) =
   seen "Redomap" >> lambdaMetrics fun1 >> lambdaMetrics fun2
-loopOpMetrics (Stream _ _ _ lam) =
+loopOpMetrics (Stream _ _ lam _ _) =
   seen "Stream" >> extLambdaMetrics lam
 
 segOpMetrics :: SegOp lore -> MetricsM ()

@@ -852,7 +852,8 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-checkLoopOp (Stream ass accexps arrexps lam) = do
+checkLoopOp (Stream ass form lam arrexps _) = do
+  let accexps = getStreamAccums form
   mapM_ (requireI [Basic Cert]) ass
   accargs <- mapM checkArg accexps
   arrargs <- mapM lookupType arrexps
@@ -863,18 +864,28 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
       lamarrs'= [ arrayOf t (Shape [Var $ paramName chunk]) (uniqueness t)
                    | t <- map (\(Array bt s u)->Array bt (stripDims 1 s) u)
                               arrargs ]
-  checkExtLambda lam $ asArg inttp : asArg inttp :
+  checkExtLambda lam $ asArg inttp :
                        accargs ++ map asArg lamarrs'
   let acc_len= length accexps
   let lamrtp = take acc_len $ extLambdaReturnType lam
   unless (all (uncurry (==)) $ zip lamrtp (staticShapes $ map (\(y,_,_)->y) accargs)) $
     bad $ TypeError noLoc "Stream with inconsistent accumulator type in lambda."
+  -- check reduce's lambda, if any
+  _ <- case form of
+        RedLike _ lam0 _ -> do
+            let acct = map argType accargs
+                outerRetType = lambdaReturnType lam0
+            checkLambda lam0 (accargs ++ accargs)
+            unless (acct `subtypesOf` outerRetType) $
+                bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+                      ", but stream's reduce lambda returns type " ++ prettyTuple outerRetType ++ "."
+        _ -> return ()
   -- just get the dflow of lambda on the fakearg, which does not alias
   -- arr, so we can later check that aliases of arr are not used inside lam.
   -- let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
   let fake_lamarrs' = map asArg lamarrs'
   (_,dflow) <- collectDataflow $
-                checkExtLambda lam $ asArg inttp : asArg inttp :
+                checkExtLambda lam $ asArg inttp :
                                      accargs ++ fake_lamarrs'
   arr_aliases <- mapM lookupAliases arrexps
   let aliased_syms = HS.toList $ HS.fromList $ concatMap HS.toList arr_aliases
@@ -885,7 +896,7 @@ checkLoopOp (Stream ass accexps arrexps lam) = do
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!
   let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
-      lamarr_ptp = map paramType $ drop (acc_len+2) $ extLambdaParams lam
+      lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
       names_lamparams = HS.fromList $ map paramName $ extLambdaParams lam
   _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
   _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp

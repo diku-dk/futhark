@@ -77,8 +77,12 @@ loopOpAliases (Scan _ f _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Redomap _ _ innerfun _ _) =
   map (const mempty) $ lambdaReturnType innerfun
-loopOpAliases (Stream _ _ _ lam) =
-  bodyAliases $ extLambdaBody lam
+loopOpAliases (Stream _ form lam _ _) =
+  let a1 = case form of
+             MapLike _        -> []
+             RedLike _ lam0 _ -> bodyAliases $ lambdaBody lam0
+             Sequential _     -> []
+  in  a1 ++ bodyAliases (extLambdaBody lam)
 loopOpAliases (ConcatMap {}) =
   [mempty]
 

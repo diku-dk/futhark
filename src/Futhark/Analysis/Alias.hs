@@ -54,10 +54,15 @@ analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
    (analyseLambda outerlam)
    (analyseLambda innerlam)
    acc arr
-analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
+analyseExp (Out.LoopOp (In.Stream cs form lam arr ii)) =
   Out.LoopOp $
-  Out.Stream cs acc arr
-   (analyseExtLambda lam)
+  Out.Stream cs (analyseStreamForm form)
+                (analyseExtLambda lam) arr ii
+  where analyseStreamForm (In.RedLike o lam0 acc) =
+            Out.RedLike o (analyseLambda lam0) acc
+        analyseStreamForm (In.Sequential acc) = Out.Sequential acc
+        analyseStreamForm (In.MapLike    o  ) = Out.MapLike    o
+
 analyseExp (Out.SegOp (In.SegReduce cs lam input descp)) =
   Out.SegOp $
   Out.SegReduce cs (analyseLambda lam) input descp

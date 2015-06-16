@@ -460,30 +460,35 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   letTupExp' desc $ I.LoopOp $
     I.Redomap [] lam1' lam2' nes arrs'
 
-internaliseExp desc (E.Stream chunk i acc arr lam _) = do
+internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr ii _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
-  accs' <- internaliseExp "stream_accs" acc
-  let chunkiparams = map E.toParam [chunk,i]
-  (lam', chunk', i') <-
-      bindingParams chunkiparams $ \_ mergepat' -> do
-            let [chunk'', i'']  = mergepat'
-            rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
-            let lam_arrs' = [ I.arrayOf t
-                              (Shape [I.Var $ I.identName chunk''])
+  accs' <- case form of
+             E.MapLike _       -> return []
+             E.RedLike _ _ acc -> internaliseExp "stream_acc" acc
+             E.Sequential  acc -> internaliseExp "stream_acc" acc
+  lam'  <- bindingParams [E.toParam chunk] $ \_ [chunk'] -> do
+             rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
+             let lam_arrs' = [ I.arrayOf t
+                              (Shape [I.Var $ I.identName chunk'])
                               (I.uniqueness t)
                               | t <- rowts
-                            ]
-            lam'' <- internaliseStreamLambda internaliseLambda lam
-                     accs' lam_arrs'
-            return (lam'', chunk'', i'')
-  let params' = extLambdaParams lam'
-  let res_lam = ExtLambda (Param chunk' () :
-                           Param i' () :
-                           params')
-                (I.extLambdaBody lam')
-                (I.extLambdaReturnType lam')
+                             ]
+                 lamf = AnonymFun remparams body lamrtp pos
+             lam'' <- internaliseStreamLambda internaliseLambda lamf accs' lam_arrs'
+             return $ lam'' { extLambdaParams = I.Param chunk' () : extLambdaParams lam'' }
+  form' <- case form of
+             E.MapLike o -> return $ I.MapLike o
+             E.RedLike o lam0 _ -> do
+                 acctps <- mapM I.subExpType accs'
+                 outsz  <- arraysSize 0 <$> mapM lookupType arrs'
+                 let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) (I.uniqueness t) | t <- acctps ]
+                 lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
+                 return $ I.RedLike o lam0' accs'
+             E.Sequential _ -> return $ I.Sequential accs'
   letTupExp' desc $
-    I.LoopOp $ I.Stream [] accs' arrs' res_lam
+    I.LoopOp $ I.Stream [] form' lam' arrs' ii
+internaliseExp _ (E.Stream{}) =
+  fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 
 internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arr' <- internaliseExpToVars "concatMap_arr" arr

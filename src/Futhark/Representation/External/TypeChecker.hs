@@ -806,11 +806,99 @@ checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
              return $ Redomap outerfun' innerfun' accexp' arrexp' pos
          _ -> bad $ TypeError pos "Redomap with illegal reduce type."
 
-checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
+checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
   let isArrayType arrtp =
         case arrtp of
           Array _ -> True
           _       -> False
+  let lit_int0 = Literal (BasicVal $ IntVal 0) pos
+  [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
+  -- arr must have an array type
+  unless (isArrayType $ typeOf arr') $
+    bad $ TypeError pos "Stream with input array of non-array type."
+  -- typecheck stream's lambdas
+  (form', macctup) <-
+    case form of
+      MapLike o -> return (MapLike o, Nothing)
+      RedLike o lam0 acc -> do
+        (acc',accarg) <- checkArg acc
+        lam0' <- checkLambda lam0 [accarg, accarg]
+        let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
+        unless (typeOf acc' `subtypeOf` redtype) $
+            bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
+                  ppType (typeOf acc') ++ ", but reduce fun returns type "++ppType redtype++"."
+        return (RedLike o lam0' acc', Just(acc',accarg))
+      Sequential acc -> do
+        (acc',accarg) <- checkArg acc
+        return (Sequential acc', Just(acc',accarg))
+  -- (i) properly check the lambda on its parameter and
+  --(ii) make some fake arguments, which do not alias `arr', and
+  --     check that aliases of `arr' are not used inside lam.
+  let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
+      (aas,faas) = case macctup of
+                    Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
+                    Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
+  lam' <- checkLambda lam aas
+  (_, dflow)<- collectDataflow $ checkLambda lam faas
+  let arr_aliasses = HS.toList $ aliases $ typeOf arr'
+  let usages = usageMap $ usageOccurences dflow
+  when (any (`HM.member` usages) arr_aliasses) $
+     bad $ TypeError pos "Stream with input array used inside lambda."
+  -- check that the result type of lambda matches the accumulator part
+  _ <- case macctup of
+        Just (acc',_) -> do
+            let rtp' = lambdaType lam' [Basic Int, typeOf acc', typeOf acc']
+            case rtp' of
+                Tuple (acctp:_) ->
+                     unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
+                        bad $ TypeError pos ("Stream with accumulator-type missmatch"++
+                                             "or result arrays of non-array type.")
+                _ -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
+                        bad $ TypeError pos "Stream with accumulator-type missmatch."
+        Nothing -> return ()
+  -- check outerdim of Lambda's streamed-in array params are NOT specified,
+  -- and that return type inner dimens are all specified but not as other
+  -- lambda parameters!
+  (chunk,lam_arr_tp)<- case macctup of
+                         Just _ -> case lam_ps of
+                                     [ch,_,arrpar] -> return (identName ch, identType arrpar)
+                                     _ -> bad $ TypeError pos "Stream's lambda should have three args."
+                         Nothing-> case lam_ps of
+                                     [ch,  arrpar] -> return (identName ch, identType arrpar)
+                                     _ -> bad $ TypeError pos "Stream's lambda should have three args."
+  let outer_dims = arrayDims lam_arr_tp
+  _ <- case head outer_dims of
+        AnyDim      -> return ()
+        NamedDim _  -> return ()
+        ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
+                                            " be specified since it is "++textual chunk++"by default.")
+  _ <- case lam_rtp of
+        Tuple res_tps -> do
+            let res_arr_tps = tail res_tps
+            if all isArrayType res_arr_tps
+            then do let lam_params = HS.fromList $ map identName lam_ps
+                        arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
+                        boundDim (NamedDim name) = return $ Just name
+                        boundDim (ConstDim _   ) = return Nothing
+                        boundDim _               =
+                            bad $ TypeError pos $ "Stream's lambda: inner dimensions of the"++
+                                                  " streamed-result arrays MUST be specified!"
+                    rtp_iner_syms <- catMaybes <$> mapM boundDim arr_iner_dims
+                    case find (`HS.member` lam_params) rtp_iner_syms of
+                      Just name -> bad $ TypeError pos $
+                                          "Stream's lambda: " ++ textual (baseName name) ++
+                                          " cannot specify a variant inner result shape"
+                      _ -> return ()
+            else bad $ TypeError pos "Stream with result arrays of non-array type."
+        _ -> return ()-- means that no array is streamed out!
+  -- finally return type-checked stream!
+  return $ Stream form' lam' arr' ii pos
+
+
+
+
+{-
+checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
   let lit_int0 = Literal (BasicVal $ IntVal 0) pos
   [(_,  intarg),(acc',accarg),(arr',arrarg)] <-
         mapM checkArg [lit_int0, acc, arr]
@@ -857,8 +945,8 @@ checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
   _ <- case head outer_dims of
         AnyDim      -> return ()
         NamedDim _  -> return ()
-        ConstDim _  ->  bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
-                                             " be specified since it is "++chunk_str++"by default.")
+        ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
+                                            " be specified since it is "++chunk_str++"by default.")
   _ <- case rtp of
         Tuple res_tps -> do
             let res_arr_tps = tail res_tps
@@ -867,9 +955,9 @@ checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
                         arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
                         boundDim (NamedDim name) = return $ Just name
                         boundDim (ConstDim _   ) = return Nothing
-                        boundDim _             =
+                        boundDim _               =
                             bad $ TypeError pos $ "Stream's lambda: inner dimensions of the"++
-                                                  " streamed-out arrays MUST be specified!"
+                                                  " streamed-result arrays MUST be specified!"
                     rtp_iner_syms <- catMaybes <$> mapM boundDim arr_iner_dims
                     case find (`HS.member` lam_params) rtp_iner_syms of
                       Just name -> bad $ TypeError pos $
@@ -880,7 +968,10 @@ checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
         _ -> return ()-- means that no array is streamed out!
   -- finally return type-checked stream!
   return $ Stream (fromParam chunk') (fromParam i') acc' arr' lam' pos
-checkExp (Stream _ _ _ _ _ pos) =
+-}
+
+
+checkExp (Stream _ _ _ _ pos) =
   bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
 checkExp (Split splitexps arrexp pos) = do

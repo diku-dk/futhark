@@ -751,7 +751,8 @@ evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalLoopOp (Stream _ accs arrs elam) = do
+evalLoopOp (Stream _ form elam arrs _) = do
+  let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
   let (ExtLambda elam_params elam_body elam_rtp) = elam
@@ -759,9 +760,8 @@ evalLoopOp (Stream _ accs arrs elam) = do
                             evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   let (ArrayVal _ _ (outersize:_)) = head arrvals
-  let (chunkval, ival) = (BasicVal $ IntVal $ fromIntegral outersize,
-                          BasicVal $ IntVal 0)
-  vs <- fun (chunkval:ival:accvals++arrvals)
+  let chunkval = BasicVal $ IntVal $ fromIntegral outersize
+  vs <- fun (chunkval:accvals++arrvals)
   return $ valueShapeContext elam_rtp vs ++ vs
 
 evalSegOp :: forall lore . Lore lore => SegOp lore -> FutharkM lore [Value]

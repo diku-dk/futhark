@@ -123,18 +123,32 @@ data Combinator lore = Map Certificates (NestBody lore)
                      | Reduce Certificates (NestBody lore) [TypedSubExp]
                      | Scan Certificates (NestBody lore) [TypedSubExp]
                      | Redomap Certificates (Lambda lore) (NestBody lore) [TypedSubExp]
-                     | Stream  Certificates (Lambda lore) [TypedSubExp]
+                     | Stream  Certificates (StreamFormN lore) (Lambda lore) ChunkIntent
                       -- Cosmin: I think it might be helpful to make Stream part of a
                       --         nest, although the stream might not be parallel: that
                       --         is because it might enable, for example tiling.
                  deriving (Show)
 
+data StreamFormN lore  = MapLikeN StreamOrd
+                       | RedLikeN StreamOrd (LambdaT lore) [TypedSubExp]
+                       | SequentN [TypedSubExp]
+                            deriving (Show)
+
+getStreamAccumsN :: StreamFormN lore -> [TypedSubExp]
+getStreamAccumsN (MapLikeN _       ) = []
+getStreamAccumsN (RedLikeN _ _ accs) = accs
+getStreamAccumsN (SequentN     accs) = accs
+
+
 instance Substitutable lore => Substitute (Combinator lore) where
   substituteNames m (Map     cs b      ) = Map     cs $  substituteNames m b
   substituteNames m (Reduce  cs b   ses) = Reduce  cs   (substituteNames m b) ses
   substituteNames m (Scan    cs b   ses) = Scan    cs   (substituteNames m b) ses
-  substituteNames m (Redomap cs l b ses) = Redomap cs l (substituteNames m b) ses
-  substituteNames m (Stream  cs l   ses) = Stream  cs   (substituteNames m l) ses
+  substituteNames m (Redomap cs l b ses) =
+        Redomap cs (substituteNames m l) (substituteNames m b) ses
+  substituteNames m (Stream  cs (RedLikeN o l0 acc) l ii) =
+        Stream cs (RedLikeN o (substituteNames m l0) acc) (substituteNames m l) ii
+  substituteNames m (Stream  cs f l ii) = Stream cs f (substituteNames m l) ii
 
 instance Substitutable lore => Substitute (Nesting lore) where
   substituteNames m n =
@@ -145,7 +159,7 @@ body (Map _ b) = b
 body (Reduce _ b _) = b
 body (Scan _ b _) = b
 body (Redomap _ _ b _) = b
-body (Stream  _   l _) = Fun l
+body (Stream  _ _ l _) = Fun l
 
 combinatorFirstLoop :: Combinator lore -> ([Ident], [Type])
 combinatorFirstLoop comb =
@@ -185,7 +199,7 @@ combCertificates (Map     cs _    ) = cs
 combCertificates (Reduce  cs _   _) = cs
 combCertificates (Scan    cs _   _) = cs
 combCertificates (Redomap cs _ _ _) = cs
-combCertificates (Stream  cs   _ _) = cs
+combCertificates (Stream  cs _ _ _) = cs
 
 -- | Sets the certificates used in a 'Combinator'.
 setCombCertificates :: Certificates -> Combinator lore -> Combinator lore
@@ -193,7 +207,7 @@ setCombCertificates cs (Map     _ bdy    ) = Map    cs bdy
 setCombCertificates cs (Reduce  _ bdy acc) = Reduce cs bdy acc
 setCombCertificates cs (Scan    _ bdy acc) = Scan   cs bdy acc
 setCombCertificates cs (Redomap _ fun bdy acc) = Redomap cs fun bdy acc
-setCombCertificates cs (Stream  _     bdy acc) = Stream  cs     bdy acc
+setCombCertificates cs (Stream  _ f   bdy ii ) = Stream  cs f bdy ii
 
 typeOf :: SOACNest lore -> [ExtType]
 typeOf (SOACNest inps (Map _ b)) =
@@ -213,8 +227,9 @@ typeOf (SOACNest inps (Redomap _ _ b nes)) =
                   | t <- drop (length nes) allrtps ]
   in  staticShapes $ accrtps ++ arrrtps
   where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest inps (Stream  _ lam nes)) =
-  let allrtps = lambdaReturnType lam
+typeOf (SOACNest inps (Stream  _ form lam _)) =
+  let nes     = getStreamAccumsN form
+      allrtps = lambdaReturnType lam
       accrtps = take (length nes) allrtps
       arrrtps = [ arrayOf (stripArray 1 t) (Shape [outersize]) (uniqueness t)
                   | t <- drop (length nes) allrtps ]
@@ -243,9 +258,16 @@ fromSOAC (SOAC.Redomap cs ol l es as) =
   -- the outer combining function.
   SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*>
                    pure (accSubExps l es))
-fromSOAC (SOAC.Stream cs lam es as) =
-  SOACNest as <$> (Stream  cs  <$> return lam <*>
-                   pure (zipWith TypedSubExp es (map paramType $ drop 2 $ lambdaParams lam)))
+fromSOAC (SOAC.Stream cs form lam ii as) = do
+  let es  = getStreamAccums form
+      tes = zipWith TypedSubExp es $ map paramType $ take (length es) $
+                                     drop 1 $ lambdaParams lam
+      form' = case form of
+                MapLike o      -> MapLikeN o
+                Sequential   _ -> SequentN      tes
+                RedLike o l0 _ -> RedLikeN o l0 tes
+  SOACNest as <$> (Stream  cs  <$> return form' <*>
+                                   return lam   <*> pure ii)
 
 accSubExps :: Lambda lore -> [SubExp] -> [TypedSubExp]
 accSubExps l args = zipWith TypedSubExp args (map paramType $ lambdaParams l)
@@ -285,5 +307,11 @@ toSOAC (SOACNest as (Redomap cs l b es)) =
   SOAC.Redomap cs l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (map subExpExp es) <*> pure as
-toSOAC (SOACNest as (Stream  cs lam es)) =
-  return $ SOAC.Stream cs lam (map subExpExp es) as
+toSOAC (SOACNest as (Stream  cs form lam ii)) = do
+  let tes   = getStreamAccumsN form
+      nes   = map subExpExp tes
+      form' = case form of
+                MapLikeN o      -> MapLike o
+                SequentN      _ -> Sequential   nes
+                RedLikeN o l0 _ -> RedLike o l0 nes
+  return $ SOAC.Stream cs form' lam ii as

@@ -7,6 +7,8 @@ module Language.Futhark.Core
   , BasicValue(..)
   , basicValueType
   , blankBasicValue
+  , ChunkIntent(..)
+  , StreamOrd(..)
 
   -- * Location utilities
   , locStr
@@ -60,6 +62,14 @@ instance Monoid Uniqueness where
 instance Hashable Uniqueness where
   hashWithSalt salt Unique    = salt
   hashWithSalt salt Nonunique = salt * 2
+
+data ChunkIntent = MaxChunk
+                 | MinChunk
+                    deriving (Eq, Ord, Show)
+
+data StreamOrd  = InOrder
+                | Disorder
+                    deriving (Eq, Ord, Show)
 
 -- | Low-level primitive types.  TODO: please add float, double, long
 -- int, etc.

@@ -252,26 +252,30 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-
-transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
+transformBinding (Let pattern () (LoopOp (Stream cs form lam arrexps ii))) = do
   -- 1.) trivial step: find and build some of the basic things you need
-  let lampars = extLambdaParams     lam
+  let accexps = getStreamAccums    form
+      lampars = extLambdaParams     lam
       lamrtps = extLambdaReturnType lam
       lambody = extLambdaBody       lam
   -- a) ilam becomes the loop_index*chunkglb,
   -- b) chunkloc is the chunk used inside the loop body
   -- c) chunkglb is the global chunk (set to 1 or a convenient number)
   -- d) inarrVsz is the variant size of the streamed input array in the loop.
-  (chunkloc,ilam) <- case lampars of
-                    chnk:iorig:_ -> return (chnk,iorig)
-                    _ -> fail "FirstOrderTransform Stream: chunk or i error!"
-  outersz <- arraysSize 0 <$> mapM lookupType arrexps
-  chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp $ intconst 1
+  ilam <- newIdent "stream_ii" $ Basic Int
+  chunkloc <- case lampars of
+                chnk:_ -> return chnk
+                _ -> fail "FirstOrderTransform Stream: chunk error!"
+  outersz  <- arraysSize 0 <$> mapM lookupType arrexps
+  let chunkglb_val = case ii of
+                       MinChunk -> intconst 1
+                       MaxChunk -> outersz
+  chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp chunkglb_val
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
       sub_chko= HM.fromList [(paramName chunkloc, outersz)]
       arruniq = map (uniqueness . paramType)
-                    (snd $ splitAt (acc_num+2) lampars)
+                    (snd $ splitAt (acc_num+1) lampars)
   -- 2.) Make the existential induction variables, allocated-size variables,
   --       and all possible instantiations of the existential types, i.e.,
   --       inside and outside the loop body!
@@ -314,8 +318,8 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
                                                  exindvars ++ acc0 ++
                                                  outarrloop) $ do
       let argsacc = map (PrimOp . SubExp . Var . identName) acc0
-          accpars = take acc_num $ drop 2 lampars
-          arrpars = drop (2 + acc_num) lampars
+          accpars = take acc_num $ drop 1 lampars
+          arrpars = drop (1 + acc_num) lampars
       accxis <- bodyBind =<< do
           -- for accumulators:
           forM_ (zip accpars argsacc) $ \(param, arg) ->
@@ -328,12 +332,12 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
                             (pure $ PrimOp $ SubExp $ Var loopind)
                             (pure $ PrimOp $ SubExp $ Var chunkglb)
                             Int
-          addBinding $ myMkLet ilamexp $ paramIdent ilam
+          addBinding $ myMkLet ilamexp ilam
           ---------------- changed from here --------------
           -- ilampch := (i+1)*chunk_glb
           ip1chgid <- newIdent "stream_ip1chg" $ Basic Int
           ip1chgexp<- eBinOp Plus
-                             (pure $ PrimOp $ SubExp $ Var $ paramName ilam)
+                             (pure $ PrimOp $ SubExp $ Var $ identName ilam)
                              (pure $ PrimOp $ SubExp $ Var chunkglb)
                              Int
           addBinding $ myMkLet ip1chgexp ip1chgid
@@ -361,7 +365,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
           -- diff1   := chunk_glb*i - diff
           diff1id  <- newIdent "stream_diff1" $ Basic Int
           diff1exp <- eBinOp Minus
-                             (pure $ PrimOp $ SubExp $ Var $ paramName ilam)
+                             (pure $ PrimOp $ SubExp $ Var $ identName ilam)
                              (pure $ PrimOp $ SubExp $ Var $ identName diffid)
                              Int
           addBinding $ myMkLet diff1exp diff1id
@@ -400,7 +404,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs accexps arrexps lam))) = do
       let (acc', xis) = splitAt acc_num accxis
           indszids = zip mexistszs mexistinds
       epilogue <- forM (zip3 indszids outarrloop xis) $
-                       mkOutArrEpilogue cs (Var $ paramName ilam)
+                       mkOutArrEpilogue cs (Var $ identName ilam)
       let (mszvars,mindvars,dests) = unzip3 epilogue
           (indvars,szvars) = (catMaybes mindvars, catMaybes mszvars)
       return $

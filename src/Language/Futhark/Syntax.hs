@@ -34,6 +34,7 @@ module Language.Futhark.Syntax
   , LoopFormBase (..)
   , LambdaBase(..)
   , TupIdentBase(..)
+  , StreamForm(..)
 
   -- * Definitions
   , FunDecBase
@@ -393,27 +394,23 @@ data ExpBase ty vn =
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
-            | Stream (IdentBase  ty vn)  (IdentBase ty vn)
-                     (ExpBase    ty vn)  (ExpBase   ty vn)
-                     (LambdaBase ty vn)  SrcLoc
+            | Stream (StreamForm ty vn) (LambdaBase ty vn) (ExpBase ty vn) ChunkIntent SrcLoc
             -- ^ Streaming: intuitively, this gives a size-parameterized
             -- composition for SOACs that cannot be fused, e.g., due to scan.
             -- For example, assuming @A : [int], f : int->int, g : real->real@,
             -- the code: @let x = map(f,A) in let y = scan(op+,0,x) in map(g,y)@
             -- can be re-written (streamed) in the source-Futhark language as:
             -- @let {acc, z} =
-            -- @stream( chunk, i, 0, A,@
-            -- @      , fn {int,[real]} (real acc, [int] a) =>@
+            -- @stream( 0, A,@
+            -- @      , fn {int,[real]} (real chunk, real acc, [int] a) =>@
             -- @            let x = map (f,         A ) in@
             -- @            let y0= scan(op +, 0,   x ) in@
             -- @            let y = map (op +(acc), y0) in@
             -- @            { acc+y0[chunk-1], map(g, y) }@
             -- @      )@
-            -- where (i) @chunk@ is a symbolic int denoting the chunk
-            -- size, (ii) @i@ maps the global iteration space, hence together
-            -- with @chunk@ identify accurately the current chunk of the input
-            -- array that is being processed, (iii) @0@ is the initial value of
-            -- the accumulator, which allows the streaming of @scan@.
+            -- where (i)  @chunk@ is a symbolic int denoting the chunk
+            -- size, (ii) @0@ is the initial value of the accumulator,
+            -- which allows the streaming of @scan@.
             -- Finally, the unnamed function (@fn...@) implements the a fold that:
             -- computes the accumulator of @scan@, as defined inside its body, AND
             -- implicitly concatenates each of the result arrays across
@@ -435,6 +432,11 @@ data ExpBase ty vn =
             -- types are the elements of the tuple.
 
               deriving (Eq, Ord, Show)
+
+data StreamForm ty vn = MapLike    StreamOrd
+                      | RedLike    StreamOrd (LambdaBase ty vn) (ExpBase ty vn)
+                      | Sequential (ExpBase ty vn)
+                        deriving (Eq, Ord, Show)
 
 instance Located (ExpBase ty vn) where
   locOf (Literal _ loc) = locOf loc
@@ -467,7 +469,7 @@ instance Located (ExpBase ty vn) where
   locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
-  locOf (Stream _ _ _ _ _ pos) = locOf pos
+  locOf (Stream _ _ _ _   pos) = locOf pos
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)

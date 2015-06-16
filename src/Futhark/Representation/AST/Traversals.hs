@@ -182,10 +182,17 @@ mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
   LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
               mapM (mapOnSubExp tv) accexps <*> mapM (mapOnVName tv) arrexps)
-mapExpM tv (LoopOp (Stream cs accs arrs lam)) =
+mapExpM tv (LoopOp (Stream cs form lam arrs ii)) =
   LoopOp <$> (pure Stream <*> mapOnCertificates tv cs <*>
-              mapM (mapOnSubExp tv) accs <*>
-              mapM (mapOnVName  tv) arrs <*> mapOnExtLambda tv lam)
+              mapOnStreamForm form <*> mapOnExtLambda tv lam <*>
+              mapM (mapOnVName tv) arrs <*> pure ii)
+  where mapOnStreamForm (MapLike o) = pure $ MapLike o
+        mapOnStreamForm (RedLike o lam0 acc) =
+            pure RedLike <*> pure o  <*>
+                 mapOnLambda tv lam0 <*>
+                 mapM (mapOnSubExp tv) acc
+        mapOnStreamForm (Sequential acc) =
+            pure Sequential <*> mapM (mapOnSubExp tv) acc
 mapExpM tv (SegOp (SegReduce cs fun inputs descp_exp)) =
   SegOp <$> (pure SegReduce <*> mapOnCertificates tv cs <*>
               mapOnLambda tv fun <*>

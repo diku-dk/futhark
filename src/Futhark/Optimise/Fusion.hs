@@ -414,7 +414,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
                         SOAC.Redomap _ _ _ nes _ -> drop (length nes) out_nms
-                        SOAC.Stream  _   _ nes _ -> drop (length nes) out_nms
+                        SOAC.Stream  _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
       to_fuse_knms2  = getKersWithSameInpSize (SOAC.inpOuterSize soac) res
@@ -430,8 +430,10 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   kernminds <- forM (zip to_fuse_knms to_fuse_kers) $ \(ker_nm, ker) -> do
                     let bnd_nms = map (patternNames . bindingPattern) rem_bnds
                         out_nm  = case fsoac ker of
-                                    SOAC.Stream _ _ nes _ -> head $ drop (length nes) $ outNames ker
-                                    _                     -> head $ outNames ker
+                                    SOAC.Stream _ frm _ _ _ ->
+                                        let acc_len = length $ getStreamAccums frm
+                                        in  head $ drop acc_len $ outNames ker
+                                    _ -> head $ outNames ker
                     case L.findIndex (elem out_nm) bnd_nms of
                       Nothing -> return Nothing
                       Just i  -> return $ Just (ker,ker_nm,i)

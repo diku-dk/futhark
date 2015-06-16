@@ -80,9 +80,15 @@ analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
    analyseLambda outerlam <*>
    analyseLambda innerlam <*>
    pure acc <*> pure arr)
-analyseExp (Out.LoopOp (In.Stream cs acc arr lam)) =
+analyseExp (Out.LoopOp (In.Stream cs form lam arr ii)) =
   Out.LoopOp <$>
-  (Out.Stream cs acc arr <$> analyseExtLambda lam)
+  (Out.Stream cs <$> analyseStreamForm form <*> analyseExtLambda lam <*>
+                     pure arr <*> pure ii)
+  where analyseStreamForm (In.MapLike    o  ) = return $ Out.MapLike o
+        analyseStreamForm (In.Sequential acc) = return $ Out.Sequential acc
+        analyseStreamForm (In.RedLike o lam0 acc) = do
+            lam0' <- analyseLambda lam0
+            return $ Out.RedLike o lam0' acc
 analyseExp e = Out.mapExpM analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return

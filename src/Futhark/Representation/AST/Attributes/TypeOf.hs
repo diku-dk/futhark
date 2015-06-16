@@ -147,13 +147,17 @@ loopOpExtType (Redomap _ outerfun innerfun _ ids) =
   in  case res_el_tp of
         [] -> pure $ staticShapes acc_tp
         _  -> staticShapes <$> result <$> arraysSize 0 <$> traverse lookupType ids
-loopOpExtType (Stream _ accs arrs lam) =
+loopOpExtType (Stream _ form lam arrs _) =
   result <$> lookupType (head arrs)
   where ExtLambda params _ rtp = lam
+        accs = case form of
+                MapLike _ -> []
+                RedLike _ _ acc -> acc
+                Sequential  acc -> acc
         result (Array _ shp _) =
-          let nms = map paramName $ take (2 + length accs) params
-              (outersize, i0) = (head $ shapeDims shp, Constant $ IntVal 0)
-              substs = HM.fromList $ zip nms (outersize:i0:accs)
+          let nms = map paramName $ take (1 + length accs) params
+              outersize = head $ shapeDims shp
+              substs = HM.fromList $ zip nms (outersize:accs)
           in map (substNamesInExtType substs) rtp
         result _ =
           rtp

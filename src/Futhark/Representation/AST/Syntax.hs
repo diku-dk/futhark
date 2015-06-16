@@ -49,6 +49,7 @@ module Futhark.Representation.AST.Syntax
   , ExtLambdaT (..)
   , ExtLambda
   , Lore.RetType
+  , StreamForm(..)
 
   -- * Definitions
   , ParamT (..)
@@ -230,7 +231,14 @@ data LoopOp lore
   | Reduce  Certificates (LambdaT lore) [(SubExp, VName)]
   | Scan   Certificates (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [VName]
-  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
+  | Stream Certificates (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
+--  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
+
+data StreamForm lore  = MapLike    StreamOrd
+                      | RedLike    StreamOrd (LambdaT lore) [SubExp]
+                      | Sequential [SubExp]
+                        deriving (Eq, Ord, Show)
+
 
 -- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
 -- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@
