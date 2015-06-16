@@ -38,6 +38,7 @@ import Prelude hiding (any, all)
 topDownRules :: MonadBinder m => TopDownRules m
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
+               , removeUnusedMapInput
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
@@ -152,6 +153,29 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
               Left (p, v)
 
 removeReplicateMapping _ _ = cannotSimplify
+
+-- | Remove inputs that are not used inside the @map@.
+removeUnusedMapInput :: MonadBinder m => TopDownRule m
+removeUnusedMapInput _ (Let pat _ (LoopOp (Map cs fun arrs)))
+  | (used,unused) <- partition usedInput params_and_arrs,
+    not (null unused) =
+      -- Empty maps are not permitted, so if that would be the result,
+      -- turn the entire map into a replicate.
+      case used of
+        [] -> do
+          mapM_ addBinding $ bodyBindings $ lambdaBody fun
+          forM_ (zip (patternNames pat) $
+                bodyResult $ lambdaBody fun) $ \(name, res_se) ->
+            letBindNames'_ [name] $ PrimOp $ Replicate width res_se
+        _ -> do
+          let (used_params, used_arrs) = unzip used
+              fun' = fun { lambdaParams = used_params }
+          letBind_ pat $ LoopOp $ Map cs fun' used_arrs
+  where params_and_arrs = zip (lambdaParams fun) arrs
+        width = arraysSize 0 $ patternTypes pat
+        used_in_body = freeInBody $ lambdaBody fun
+        usedInput (param, _) = paramName param `HS.member` used_in_body
+removeUnusedMapInput _ _ = cannotSimplify
 
 removeDeadMapping :: MonadBinder m => BottomUpRule m
 removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs))) =
