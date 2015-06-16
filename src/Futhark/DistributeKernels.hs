@@ -163,7 +163,7 @@ import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.FirstOrderTransform as FOT
---import Futhark.Renamer
+import Futhark.Renamer
 
 transformProg :: Prog -> Prog
 transformProg = intraproceduralTransformation transformFunDec
@@ -358,11 +358,12 @@ distribute acc = do
          (kernelTargets acc) (mkBody bnds res) >>=
          \case
            Just (distributed, targets) -> do
+             distributed' <- renameBinding distributed
              trace ("distributing\n" ++
                     pretty (mkBody bnds res) ++
                     "\nas\n" ++ pretty distributed ++
                     "\ndue to targets\n" ++ ppTargets (kernelTargets acc) ++
-                    "\nand with new targets\n" ++ ppTargets targets) tell [distributed]
+                    "\nand with new targets\n" ++ ppTargets targets) tell [distributed']
              return KernelAcc { kernelBindings = []
                               , kernelRequires = mempty
                               , kernelTargets = targets
