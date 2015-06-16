@@ -150,6 +150,7 @@ module Futhark.DistributeKernels
        (transformProg)
        where
 
+import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
 import Control.Monad.State
