@@ -27,6 +27,7 @@ import qualified Control.Monad.Writer.Lazy
 import qualified Control.Monad.Writer.Strict
 import qualified Control.Monad.RWS.Lazy
 import qualified Control.Monad.RWS.Strict
+import qualified Control.Monad.Trans.Maybe
 import Control.Monad.Reader
 import Data.Monoid
 
@@ -137,5 +138,10 @@ instance (MonadFreshNames m, Monoid s) =>
 
 instance (MonadFreshNames m, Monoid s) =>
          MonadFreshNames (Control.Monad.Writer.Strict.WriterT s m) where
+  getNameSource = lift getNameSource
+  putNameSource = lift . putNameSource
+
+instance (MonadFreshNames m =>
+          MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m)) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
