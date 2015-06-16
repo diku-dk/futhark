@@ -388,7 +388,7 @@ createKernelNest let_bound (inner_nest, nests) (inner_target, targets) inner_bod
           map rowType . patternTypes
         let_and_nestings_bound =
           let_bound <> HS.fromList (concatMap boundInNesting $ inner_nest : nests)
-        lifted_type_ok =
+        liftedTypeOK =
           HS.null . HS.intersection let_and_nestings_bound . freeIn . arrayDims
 
         distributeAtNesting :: Nesting
@@ -414,7 +414,7 @@ createKernelNest let_bound (inner_nest, nests) (inner_target, targets) inner_bod
           (free_params, free_arrs) <-
             liftM unzip $
             forM (inner_returned_arrs++required_res_idents) $ \(Ident pname ptype) -> do
-              unless (lifted_type_ok ptype) $
+              unless (liftedTypeOK ptype) $
                 fail "Would induce irregular array"
               arr <- newIdent (baseString pname ++ "_r") $
                      arrayOfRow ptype width
