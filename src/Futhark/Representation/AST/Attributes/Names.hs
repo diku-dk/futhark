@@ -48,25 +48,23 @@ freeWalker = identityWalker {
 
         extLambdaFree = tell . freeInExtLambda
 
-        typeFree = tell . freeIn
-
         binding bound = censor (`HS.difference` bound)
 
         bodyFree (Body lore [] ses) = do
           tell $ freeIn lore
           mapM_ subExpFree ses
         bodyFree (Body lore (Let pat annot e:bnds) res) = do
-          expFree e
           tell $ freeIn annot
+          expFree e
           binding (HS.fromList $ patternNames pat) $ do
-            mapM_ typeFree $ patternTypes pat
+            tell $ freeInPattern pat
             bodyFree $ Body lore bnds res
 
         bindingFree (Let pat annot e) = do
           tell $ freeIn annot
-          binding (HS.fromList $ patternNames pat) $ do
+          expFree e
+          binding (HS.fromList $ patternNames pat) $
             tell $ freeInPattern pat
-            expFree e
 
         expFree (LoopOp (DoLoop _ merge (ForLoop i boundexp) loopbody)) = do
           let (mergepat, mergeexps) = unzip merge
