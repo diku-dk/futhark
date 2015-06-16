@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -w #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -159,11 +158,14 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 import Debug.Trace
+
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Renamer
+
+import Prelude
 
 transformProg :: Prog -> Prog
 transformProg = intraproceduralTransformation transformFunDec
@@ -207,10 +209,7 @@ transformBinding (Let pat () (LoopOp (Map cs lam arrs))) =
   distributeMap pat $ MapLoop cs lam arrs
 transformBinding bnd = return [bnd]
 
-data MapLoop = MapLoop { mapCertificates :: Certificates
-                       , mapLambda :: Lambda
-                       , mapArrays :: [VName]
-                       }
+data MapLoop = MapLoop Certificates Lambda [VName]
 
 mapLoopExp :: MapLoop -> Exp
 mapLoopExp (MapLoop cs lam arrs) = LoopOp $ Map cs lam arrs
@@ -226,6 +225,10 @@ singleTarget = (,[])
 
 innerTarget :: Targets -> Target
 innerTarget = fst
+
+outerTarget :: Targets -> Target
+outerTarget (inner_target, []) = inner_target
+outerTarget (_, outer_target : _) = outer_target
 
 pushOuterTarget :: Target -> Targets -> Targets
 pushOuterTarget target (inner_target, targets) =
@@ -255,10 +258,6 @@ nestingWidth = arraysSize 0 . patternTypes . nestingPattern
 nestingPattern :: Nesting -> Pattern
 nestingPattern (MapNesting pat _ _) = pat
 
-nestingArrays :: Nesting -> [VName]
-nestingArrays (MapNesting _ _ params_and_arrs) =
-  map snd params_and_arrs
-
 nestingParams :: Nesting -> [LParam]
 nestingParams (MapNesting _ _ params_and_arrs) =
   map fst params_and_arrs
@@ -266,8 +265,7 @@ nestingParams (MapNesting _ _ params_and_arrs) =
 boundInNesting :: Nesting -> [VName]
 boundInNesting = map paramName . nestingParams
 
-data KernelEnv = KernelEnv { kernelOuterTarget :: Target
-                           , kernelLetBound :: Names
+data KernelEnv = KernelEnv { kernelLetBound :: Names
                            , kernelNest :: Nestings
                            , kernelTypeEnv :: TypeEnv
                            }
@@ -301,9 +299,7 @@ distributeMap :: (HasTypeEnv m, MonadFreshNames m) =>
                  Pattern -> MapLoop -> m [Binding]
 distributeMap pat (MapLoop cs lam arrs) = do
   types <- askTypeEnv
-  let env = KernelEnv { kernelOuterTarget =
-                        (pat, bodyResult $ lambdaBody lam)
-                      , kernelNest =
+  let env = KernelEnv { kernelNest =
                         singleNesting (MapNesting pat cs $
                                        zip (lambdaParams lam) arrs)
                       , kernelLetBound = mempty
@@ -326,22 +322,15 @@ withBinding bnd = local $ \env ->
           HS.fromList (patternNames (bindingPattern bnd))
       }
 
-withTarget :: Maybe Target -> KernelM a -> KernelM a
-withTarget target = local $ \env ->
-  env { kernelOuterTarget = fromMaybe (kernelOuterTarget env) target }
-
 mapNesting :: Pattern -> Certificates -> Lambda -> [VName]
            -> KernelM a
            -> KernelM a
 mapNesting pat cs lam arrs = local $ \env ->
   env { kernelNest = pushInnerNesting nest $ kernelNest env
-      , kernelOuterTarget = (fst (kernelOuterTarget env),
-                             res)
       , kernelTypeEnv = kernelTypeEnv env <>
                         typeEnvFromParams (lambdaParams lam)
       }
   where nest = MapNesting pat cs (zip (lambdaParams lam) arrs)
-        res = bodyResult $ lambdaBody lam
 
 newKernelNames :: Names -> Body -> Names
 newKernelNames let_bound inner_body =
@@ -390,59 +379,31 @@ createKernelNest :: Names -> Nestings -> Targets
                  -> KernelM (Maybe (Binding, Targets))
 createKernelNest let_bound (inner_nest, nests) (inner_target, targets) inner_body = do
   unless (length nests == length targets) $
-    error $ "Nests and targets do not match!\n" ++
+    fail $ "Nests and targets do not match!\n" ++
     "nests: " ++ ppNestings (inner_nest, nests) ++
     "\ntargets:" ++ ppTargets (inner_target, targets)
-  liftM fst <$> runMaybeT (recurse $ zip nests targets)
+  runMaybeT (recurse $ zip nests targets)
 
-  where inner_width =
-          nestingWidth inner_nest
-        patternMapTypes =
+  where patternMapTypes =
           map rowType . patternTypes
         let_and_nestings_bound =
           let_bound <> HS.fromList (concatMap boundInNesting $ inner_nest : nests)
         lifted_type_ok =
           HS.null . HS.intersection let_and_nestings_bound . freeIn . arrayDims
 
-        recurse :: [(Nesting,Target)]
-                -> MaybeT KernelM ((Binding, Targets), [Ident])
-        recurse [] = do
-          let MapNesting _ cs params_and_arrs = inner_nest
-              (pat,_) = inner_target
-              (params,arrs) = unzip params_and_arrs
-              -- Bound names needed by the new kernel.
-              required_res = newKernelNames let_bound inner_body
-
-          required_idents <- forM (HS.toList required_res) $ \name -> do
-            t <- lift $ lookupType name
-            return $ Ident name t
-
-          (free_params, free_arrs) <-
-            liftM unzip $ forM required_idents $ \(Ident pname ptype) -> do
-              unless (lifted_type_ok ptype) $
-                fail "Would induce irregular array"
-              arr <- newIdent (baseString pname ++ "_r") $
-                     arrayOfRow ptype inner_width
-              return (Param (Ident pname ptype) (),
-                      arr)
-
-          let free_arrs_pat =
-                basicPattern [] $ map (,BindVar) free_arrs
-              rettype = patternMapTypes pat
-
-          return ((Let pat () $ LoopOp $
-                   Map cs (Lambda (params++free_params) inner_body rettype) $
-                   arrs ++ map identName free_arrs,
-
-                   singleTarget (free_arrs_pat, map (Var . paramName) free_params)),
-
-                  free_arrs)
-
-        recurse ((nest@(MapNesting _ cs params_and_arrs),
-                  (pat,res)):nests') = do
-          ((inner, inner_targets), inner_free_arrs) <- recurse nests'
-          let body = mkBody [inner] res
-              (params,arrs) = unzip params_and_arrs
+        distributeAtNesting :: Nesting
+                            -> Target
+                            -> Body
+                            -> [Ident]
+                            -> (Target -> Targets)
+                            -> MaybeT KernelM (Binding, Targets)
+        distributeAtNesting
+          (nest@(MapNesting _ cs params_and_arrs))
+          (pat,_)
+          body
+          inner_returned_arrs
+          addTarget = do
+          let (params,arrs) = unzip params_and_arrs
               width = nestingWidth nest
               required_res = newKernelNames let_bound body
 
@@ -452,7 +413,7 @@ createKernelNest let_bound (inner_nest, nests) (inner_target, targets) inner_bod
 
           (free_params, free_arrs) <-
             liftM unzip $
-            forM (inner_free_arrs++required_res_idents) $ \(Ident pname ptype) -> do
+            forM (inner_returned_arrs++required_res_idents) $ \(Ident pname ptype) -> do
               unless (lifted_type_ok ptype) $
                 fail "Would induce irregular array"
               arr <- newIdent (baseString pname ++ "_r") $
@@ -464,14 +425,30 @@ createKernelNest let_bound (inner_nest, nests) (inner_target, targets) inner_bod
                 basicPattern [] $ map (,BindVar) free_arrs
               rettype = patternMapTypes pat
 
-          return ((Let pat () $ LoopOp $
-                   Map cs (Lambda (params++free_params) body rettype) $
-                   arrs ++ map identName free_arrs,
+          return (Let pat () $ LoopOp $
+                  Map cs (Lambda (params++free_params) body rettype) $
+                  arrs ++ map identName free_arrs,
 
-                   pushOuterTarget (free_arrs_pat, map (Var . paramName) free_params)
-                   inner_targets),
+                  addTarget (free_arrs_pat, map (Var . paramName) free_params))
 
-                  free_arrs)
+        recurse :: [(Nesting,Target)]
+                -> MaybeT KernelM (Binding, Targets)
+        recurse [] =
+          distributeAtNesting
+            inner_nest
+            inner_target
+            inner_body
+            []
+            singleTarget
+
+        recurse ((nest, target@(_,res)) : nests') = do
+          (inner, inner_targets) <- recurse nests'
+          distributeAtNesting
+            nest
+            target
+            (mkBody [inner] res)
+            (patternIdents $ fst $ outerTarget inner_targets)
+            (`pushOuterTarget` inner_targets)
 
 unbalancedMap :: MapLoop -> KernelM Bool
 unbalancedMap = const $ return False
@@ -500,8 +477,8 @@ leavingNesting :: KernelAcc -> KernelAcc
 leavingNesting acc =
   acc { kernelTargets =
            case reverse $ snd $ kernelTargets acc of
-            [] -> error "Popping too far"
-            x:xs -> (x, reverse xs)
+             [] -> error "The kernel targets list is unexpectedly empty"
+             x:xs -> (x, reverse xs)
       }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
@@ -517,7 +494,7 @@ maybeDistributeBinding :: Binding -> KernelAcc
 maybeDistributeBinding (Let pat _ (LoopOp (Map cs lam arrs))) acc = do
   acc' <- distribute acc
   distribute =<< distributeInnerMap pat (MapLoop cs lam arrs) acc'
-maybeDistributeBinding bnd@(Let pat _ (LoopOp {})) acc =
+maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc =
   distribute $ addBindingToKernel bnd acc
 maybeDistributeBinding bnd acc =
   return $ addBindingToKernel bnd acc
