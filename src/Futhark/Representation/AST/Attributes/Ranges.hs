@@ -138,9 +138,28 @@ subExpKnownRange (Constant val) =
   (ScalarBound $ Val val,
    ScalarBound $ Val val)
 
+-- | The range of a scalar expression.
+scalExpRange :: ScalExp -> Range
+scalExpRange se =
+  (Just $ ScalarBound se, Just $ ScalarBound se)
+
 primOpRanges :: PrimOp lore -> [Range]
 primOpRanges (SubExp se) =
   [subExpRange se]
+
+primOpRanges (BinOp Plus x y t) =
+  [scalExpRange $ SPlus (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp Minus x y t) =
+  [scalExpRange $ SMinus (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp Times x y t) =
+  [scalExpRange $ STimes (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp IntDivide x y t) =
+  [scalExpRange $ SDivide (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp Divide x y t) =
+  [scalExpRange $ SDivide (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp Pow x y t) =
+  [scalExpRange $ SPow (subExpToScalExp x t) (subExpToScalExp y t)]
+
 primOpRanges (Iota n) =
   [(Just $ ScalarBound zero,
     Just $ ScalarBound $ n' `SMinus` one)]

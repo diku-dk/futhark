@@ -5,6 +5,7 @@
 // output {
 //   1
 // }
+// structure { DoLoop 0 }
 
 fun int main(int chunk, int m) =
   loop (m) = for j < chunk do
