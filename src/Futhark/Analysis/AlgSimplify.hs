@@ -4,6 +4,7 @@ module Futhark.Analysis.AlgSimplify
   , simplify
   , mkSuffConds
   , RangesRep
+  , ppRangesRep
   , linFormScalE
   , pickSymToElim
   )
@@ -23,7 +24,19 @@ import Futhark.Representation.AST
 import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 
+-- | Ranges are inclusive.
 type RangesRep = HM.HashMap VName (Int, Maybe ScalExp, Maybe ScalExp)
+
+-- | Prettyprint a 'RangesRep'.  Do not rely on the format of this
+-- string.  Does not include the loop nesting depth information.
+ppRangesRep :: RangesRep -> String
+ppRangesRep = unlines . map ppRange . HM.toList
+  where ppRange (name, (_, lower, upper)) =
+          pretty name ++ ": " ++
+          "[" ++ ppBound lower ++ ", " ++
+          ppBound upper ++ "]"
+        ppBound Nothing = "?"
+        ppBound (Just se) = pretty se
 
 -- | environment recording the position and
 --   a list of variable-to-range bindings.
