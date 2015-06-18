@@ -16,16 +16,20 @@ module Futhark.Representation.AST.Attributes.Ranges
 
 import Control.Applicative
 import Data.Monoid
-
+import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Analysis.ScalExp
+import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Substitute
 import Futhark.Renamer
 import qualified Text.PrettyPrint.Mainland as PP
+
+--import Debug.Trace
 
 -- | A known bound on a value.
 data KnownBound = VarBound VName
@@ -200,5 +204,31 @@ expRanges (If _ tbranch fbranch _) =
   (zipWith maximumBound t_upper f_upper)
   where (t_lower, t_upper) = unzip $ bodyRanges tbranch
         (f_lower, f_upper) = unzip $ bodyRanges fbranch
+expRanges (LoopOp (DoLoop res_nms fpar_inis (ForLoop i_nm l_count) body)) =
+  let (pars, inis) = unzip fpar_inis
+      loop_nms = HS.fromList $ i_nm : map paramName pars ++
+                 concatMap (patternNames . bindingPattern) (bodyBindings body)
+      lress = filter (\(par,_,_)-> elem (paramName par) res_nms &&
+                                   identType (paramIdent par) == Basic Int
+                     ) $ zip3 pars inis (bodyRanges body)
+      tmplam= mkIndVarBound loop_nms l_count
+  in  map (\(par, ini, (lb,ub)) ->( tmplam (paramName par) ini lb,
+                                    tmplam (paramName par) ini ub )
+          ) lress
+  where mkIndVarBound :: Names -> SubExp -> VName -> SubExp -> Bound -> Bound
+        mkIndVarBound _ _ _ _ Nothing = Nothing--trace ("Simplified loop result range: No bounds exist for "++textual par_nm) $ Nothing
+        mkIndVarBound var_nms loop_ct par_nm ini (Just bd) =
+          case boundToScalExp bd of
+            Nothing -> Nothing--trace ("Simplified loop result range: boundToScalExp gives Nothing "++textual par_nm) $ Nothing
+            Just bd'->
+              case AS.simplify (SMinus (Id par_nm Int) bd') HM.empty of
+                Right se_diff ->
+                     if--trace ("Simplified loop result range: "++textual par_nm++" to: " ++ PP.pretty 0 (PP.ppr se_diff)) $
+                          HS.null $ HS.intersection var_nms $ freeIn se_diff
+                     then Just $ ScalarBound $ SPlus (subExpToScalExp ini Int) $
+                                 STimes se_diff $ MaxMin False
+                                 [subExpToScalExp loop_ct Int, Val $ IntVal 0]
+                     else Nothing
+                _ -> Nothing
 expRanges e =
   replicate (expExtTypeSize e) unknownRange
