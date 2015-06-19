@@ -204,31 +204,27 @@ expRanges (If _ tbranch fbranch _) =
   (zipWith maximumBound t_upper f_upper)
   where (t_lower, t_upper) = unzip $ bodyRanges tbranch
         (f_lower, f_upper) = unzip $ bodyRanges fbranch
-expRanges (LoopOp (DoLoop res_nms fpar_inis (ForLoop i_nm l_count) body)) =
-  let (pars, inis) = unzip fpar_inis
-      loop_nms = HS.fromList $ i_nm : map paramName pars ++
-                 concatMap (patternNames . bindingPattern) (bodyBindings body)
-      lress = filter (\(par,_,_)-> elem (paramName par) res_nms &&
-                                   identType (paramIdent par) == Basic Int
-                     ) $ zip3 pars inis (bodyRanges body)
-      tmplam= mkIndVarBound loop_nms l_count
-  in  map (\(par, ini, (lb,ub)) ->( tmplam (paramName par) ini lb,
-                                    tmplam (paramName par) ini ub )
-          ) lress
-  where mkIndVarBound :: Names -> SubExp -> VName -> SubExp -> Bound -> Bound
-        mkIndVarBound _ _ _ _ Nothing = Nothing--trace ("Simplified loop result range: No bounds exist for "++textual par_nm) $ Nothing
-        mkIndVarBound var_nms loop_ct par_nm ini (Just bd) =
-          case boundToScalExp bd of
-            Nothing -> Nothing--trace ("Simplified loop result range: boundToScalExp gives Nothing "++textual par_nm) $ Nothing
-            Just bd'->
-              case AS.simplify (SMinus (Id par_nm Int) bd') HM.empty of
-                Right se_diff ->
-                     if--trace ("Simplified loop result range: "++textual par_nm++" to: " ++ PP.pretty 0 (PP.ppr se_diff)) $
-                          HS.null $ HS.intersection var_nms $ freeIn se_diff
-                     then Just $ ScalarBound $ SPlus (subExpToScalExp ini Int) $
-                                 STimes se_diff $ MaxMin False
-                                 [subExpToScalExp loop_ct Int, Val $ IntVal 0]
-                     else Nothing
-                _ -> Nothing
+expRanges (LoopOp (DoLoop res merge (ForLoop i iterations) body)) =
+  map returnedRange $
+  filter ((`elem` res) . paramName . fst . fst) $
+  zip merge $ bodyRanges body
+  where bound_in_loop =
+          HS.fromList $ i : map (paramName . fst) merge ++
+          concatMap (patternNames . bindingPattern) (bodyBindings body)
+
+        returnedRange (mergeparam, (lower, upper)) =
+          (returnedBound mergeparam lower,
+           returnedBound mergeparam upper)
+
+        returnedBound (param, mergeinit) (Just bound)
+          | paramType param == Basic Int,
+            Just bound' <- boundToScalExp bound,
+            Right se_diff <- AS.simplify (SMinus (Id (paramName param) Int) bound')
+                             HM.empty,
+            HS.null $ HS.intersection bound_in_loop $ freeIn se_diff =
+              Just $ ScalarBound $ SPlus (subExpToScalExp mergeinit Int) $
+              STimes se_diff $ MaxMin False
+              [subExpToScalExp iterations Int, Val $ IntVal 0]
+        returnedBound _ _ = Nothing
 expRanges e =
   replicate (expExtTypeSize e) unknownRange
