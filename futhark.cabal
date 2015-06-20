@@ -123,6 +123,7 @@ Library
                    Futhark.Representation.AST.Attributes
                    Futhark.Representation.AST.Attributes.Aliases
                    Futhark.Representation.AST.Attributes.Constants
+                   Futhark.Representation.AST.Attributes.Context
                    Futhark.Representation.AST.Attributes.Names
                    Futhark.Representation.AST.Attributes.Patterns
                    Futhark.Representation.AST.Attributes.Ranges

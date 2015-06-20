@@ -24,6 +24,18 @@ class Annotations.Annotations lore => Lore lore where
                     -> [FParam lore]
                     -> [VName]
 
+  -- | As far as possible, determine the subexpression to which ecah
+  -- context pattern element will be bound due to evaluation of the
+  -- given expression.  The resulting list must have the same number
+  -- of elements as there are context elements in the pattern.
+  --
+  -- The default method invokes 'expExtContext'.
+  expContext :: (HasTypeEnv m, Monad m) =>
+                Pattern lore ->
+                Exp lore ->
+                m [Maybe SubExp]
+  expContext = expExtContext
+
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated
   -- return type for the concrete call, if valid.

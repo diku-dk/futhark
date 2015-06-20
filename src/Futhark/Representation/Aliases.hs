@@ -136,6 +136,9 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   applyRetType (Aliases lore) =
     applyRetType lore
 
+  expContext pat e =
+    expContext (removePatternAliases pat) (removeExpAliases e)
+
 instance Ranged lore => Ranged (Aliases lore) where
   bodyRanges = bodyRanges . removeBodyAliases
   patternRanges = patternRanges . removePatternAliases

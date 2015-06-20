@@ -63,6 +63,7 @@ topDownRules = [ liftIdentityMapping
                , removeScratchValue
                , hackilySimplifyBranch
                , removeIdentityInPlace
+               , simplifyBranchContext
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -805,6 +806,33 @@ hoistBranchInvariant _ (Let pat _ (If e1 tb fb ret))
           | otherwise  =
             return (v:pat', (tse,fse):res, invariant)
 hoistBranchInvariant _ _ = cannotSimplify
+
+-- | Non-existentialise the parts of the context that are the same in
+-- both branches.
+simplifyBranchContext :: MonadBinder m => TopDownRule m
+simplifyBranchContext _ bnd@(Let pat _ e@(If cond tbranch fbranch _))
+  | not $ null $ patternContextElements pat = do
+      ctx_res <- expContext pat e
+      let old_ctx =
+            patternContextElements pat
+          (free_ctx, new_ctx) =
+            partitionEithers $
+            zipWith ctxPatElemIsKnown old_ctx ctx_res
+      if null free_ctx then
+        cannotSimplify
+        else do let ret' = existentialiseExtTypes
+                           (HS.fromList $ map patElemName new_ctx) $
+                           staticShapes $ patternValueTypes pat
+                forM_ free_ctx $ \(name, se) ->
+                  letBind_ (Pattern [] [name]) $ PrimOp $ SubExp se
+                letBind_ pat { patternContextElements = new_ctx } $
+                  If cond tbranch fbranch ret'
+  where ctxPatElemIsKnown patElem (Just se) =
+          Left (patElem, se)
+        ctxPatElemIsKnown patElem _ =
+          Right patElem
+simplifyBranchContext _ _ =
+  cannotSimplify
 
 simplifyScalExp :: MonadBinder m => TopDownRule m
 simplifyScalExp vtable (Let pat _ e) = do
