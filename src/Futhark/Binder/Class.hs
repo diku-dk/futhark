@@ -26,21 +26,23 @@ import Control.Monad.Writer
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
 import Futhark.Substitute
 import Futhark.Renamer (Renameable)
 
 -- | A lore that supports some basic facilities.
-class (Lore.Lore lore, PrettyLore lore,
+class (Lore.Lore lore,
+       PrettyLore lore,
        Renameable lore, Substitutable lore,
-       FreeIn (Lore.Exp lore),
-       FreeIn (Lore.LetBound lore),
-       FreeIn (Lore.Body lore),
-       FreeIn (Lore.FParam lore),
-       FreeIn (Lore.LParam lore),
-       FreeIn (Lore.RetType lore),
+       FreeIn (Annotations.Exp lore),
+       FreeIn (Annotations.LetBound lore),
+       FreeIn (Annotations.Body lore),
+       FreeIn (Annotations.FParam lore),
+       FreeIn (Annotations.LParam lore),
+       FreeIn (Annotations.RetType lore),
        IsRetType (RetType lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an
@@ -49,7 +51,8 @@ class (Lore.Lore lore, PrettyLore lore,
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Proper lore, Lore.FParam lore ~ (), Lore.LParam lore ~ ()) => Bindable lore where
+class (Proper lore, Annotations.FParam lore ~ (), Annotations.LParam lore ~ ()) =>
+      Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
   mkLetNames :: (MonadFreshNames m, HasTypeEnv m) =>

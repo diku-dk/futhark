@@ -12,10 +12,7 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.Patterns
   , module Futhark.Representation.AST.Attributes.Names
   , module Futhark.Representation.AST.RetType
-
-  , Lore.representative
-  , Lore.loopResultContext
-  , Lore.applyRetType
+  , module Futhark.Representation.AST.Lore
 
   -- * Extra tools
   , funDecByName
@@ -41,7 +38,7 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax
-import qualified Futhark.Representation.AST.Lore as Lore
+import Futhark.Representation.AST.Lore
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]

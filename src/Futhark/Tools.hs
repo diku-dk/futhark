@@ -60,7 +60,7 @@ import Control.Monad.Writer
 import Prelude
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Util
@@ -376,7 +376,7 @@ instantiateIdents names ts
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
 redomapToMapAndReduce :: (MonadFreshNames m, HasTypeEnv m, Bindable lore) =>
-                         PatternT lore -> Lore.Exp lore
+                         PatternT lore -> Annotations.Exp lore
                       -> ( Certificates, LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
                       -> m (Binding lore, Binding lore)

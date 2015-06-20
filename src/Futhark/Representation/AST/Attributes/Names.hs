@@ -23,15 +23,15 @@ import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.RetType
 
-freeWalker :: (FreeIn (Lore.Exp lore),
-               FreeIn (Lore.Body lore),
-               FreeIn (Lore.FParam lore),
-               FreeIn (Lore.LParam lore),
-               FreeIn (Lore.LetBound lore)) =>
+freeWalker :: (FreeIn (Annotations.Exp lore),
+               FreeIn (Annotations.Body lore),
+               FreeIn (Annotations.FParam lore),
+               FreeIn (Annotations.LParam lore),
+               FreeIn (Annotations.LetBound lore)) =>
               Walker lore (Writer Names)
 freeWalker = identityWalker {
                walkOnSubExp = subExpFree
@@ -85,31 +85,31 @@ freeWalker = identityWalker {
         expFree e = walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given body.
-freeInBody :: (FreeIn (Lore.Exp lore),
-               FreeIn (Lore.Body lore),
-               FreeIn (Lore.FParam lore),
-               FreeIn (Lore.LParam lore),
-               FreeIn (Lore.LetBound lore)) =>
+freeInBody :: (FreeIn (Annotations.Exp lore),
+               FreeIn (Annotations.Body lore),
+               FreeIn (Annotations.FParam lore),
+               FreeIn (Annotations.LParam lore),
+               FreeIn (Annotations.LetBound lore)) =>
               Body lore -> Names
 freeInBody = execWriter . walkOnBody freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- expression.
-freeInExp :: (FreeIn (Lore.Exp lore),
-              FreeIn (Lore.Body lore),
-              FreeIn (Lore.FParam lore),
-              FreeIn (Lore.LParam lore),
-              FreeIn (Lore.LetBound lore)) =>
+freeInExp :: (FreeIn (Annotations.Exp lore),
+              FreeIn (Annotations.Body lore),
+              FreeIn (Annotations.FParam lore),
+              FreeIn (Annotations.LParam lore),
+              FreeIn (Annotations.LetBound lore)) =>
              Exp lore -> Names
 freeInExp = execWriter . walkExpM freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- lambda, including shape annotations in the parameters.
-freeInLambda :: (FreeIn (Lore.Exp lore),
-                 FreeIn (Lore.Body lore),
-                 FreeIn (Lore.FParam lore),
-                 FreeIn (Lore.LParam lore),
-                 FreeIn (Lore.LetBound lore)) =>
+freeInLambda :: (FreeIn (Annotations.Exp lore),
+                 FreeIn (Annotations.Body lore),
+                 FreeIn (Annotations.FParam lore),
+                 FreeIn (Annotations.LParam lore),
+                 FreeIn (Annotations.LetBound lore)) =>
                 Lambda lore -> Names
 freeInLambda (Lambda params body rettype) =
   inRet <> inParams <> inBody
@@ -120,11 +120,11 @@ freeInLambda (Lambda params body rettype) =
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
-freeInExtLambda :: (FreeIn (Lore.Exp lore),
-                    FreeIn (Lore.Body lore),
-                    FreeIn (Lore.FParam lore),
-                    FreeIn (Lore.LParam lore),
-                    FreeIn (Lore.LetBound lore)) =>
+freeInExtLambda :: (FreeIn (Annotations.Exp lore),
+                    FreeIn (Annotations.Body lore),
+                    FreeIn (Annotations.FParam lore),
+                    FreeIn (Annotations.LParam lore),
+                    FreeIn (Annotations.LetBound lore)) =>
                    ExtLambda lore -> Names
 freeInExtLambda (ExtLambda params body rettype) =
   inRet <> inParams <> inBody
@@ -133,7 +133,7 @@ freeInExtLambda (ExtLambda params body rettype) =
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
         paramnames = map paramName params
 
-freeInPattern :: FreeIn (Lore.LetBound lore) => Pattern lore -> Names
+freeInPattern :: FreeIn (Annotations.LetBound lore) => Pattern lore -> Names
 freeInPattern (Pattern context values) =
   mconcat $ map freeIn $ context ++ values
 

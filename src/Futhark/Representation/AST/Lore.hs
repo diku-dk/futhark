@@ -4,52 +4,31 @@ module Futhark.Representation.AST.Lore
        )
        where
 
-import Futhark.Representation.AST.RetType
-import Futhark.Representation.AST.Syntax.Core
+import Futhark.Representation.AST.Syntax
+import qualified Futhark.Representation.AST.Annotations as Annotations
+import Futhark.Representation.AST.Attributes.TypeEnv
+import Futhark.Representation.AST.Attributes.Context
 
-class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (LParam l), Show (RetType l),
-       Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l), Eq (LParam l), Eq (RetType l),
-       Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l), Ord (LParam l), Ord (RetType l),
-       IsRetType (RetType l))
-      => Lore l where
-  -- | Annotation for every binding.
-  type LetBound l :: *
-  type LetBound l = ()
-  -- | Annotation for every expression.
-  type Exp l :: *
-  type Exp l = ()
-  -- | Annotation for every body.
-  type Body l :: *
-  type Body l = ()
-  -- | Annotation for every (non-lambda) function parameter.
-  type FParam l :: *
-  type FParam l = ()
-  -- | Annotation for every lambda function parameter.
-  type LParam l :: *
-  type LParam l = ()
-  -- | The type of expressions and function calls.
-  type RetType l :: *
-  type RetType l = ExtRetType
-
+class Annotations.Annotations lore => Lore lore where
   -- | A constant used to disambiguate method calls.  XXX, this is a
   -- hack to get around mising type application in Haskell, sometimes
   -- resulting in ambiguous types.
-  representative :: l
+  representative :: lore
 
   -- | A loop returns not only the values indicated in the result list
   -- @res@, but may also have an existential context.  Thus,
   -- @loopResult res merge@ returns those variables in @merge@ that
   -- constitute the context.
-  loopResultContext :: l
+  loopResultContext :: lore
                     -> [VName]
-                    -> [Futhark.Representation.AST.Syntax.Core.ParamT (FParam l)]
+                    -> [FParam lore]
                     -> [VName]
 
   -- | Given a function return type, the parameters of the function,
   -- and the arguments for a concrete call, return the instantiated
   -- return type for the concrete call, if valid.
-  applyRetType :: l
-               -> RetType l
-               -> [Futhark.Representation.AST.Syntax.Core.ParamT (FParam l)]
+  applyRetType :: lore
+               -> RetType lore
+               -> [FParam lore]
                -> [(SubExp, Type)]
-               -> Maybe (RetType l)
+               -> Maybe (RetType lore)

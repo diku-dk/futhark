@@ -14,7 +14,7 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.RetType
@@ -167,10 +167,10 @@ instance Substitute ExtRetType where
 
 -- | The class of lores in which all annotations support name
 -- substitution.
-class (Substitute (Lore.Exp lore),
-       Substitute (Lore.Body lore),
-       Substitute (Lore.LetBound lore),
-       Substitute (Lore.FParam lore),
-       Substitute (Lore.LParam lore),
-       Substitute (Lore.RetType lore)) =>
+class (Substitute (Annotations.Exp lore),
+       Substitute (Annotations.Body lore),
+       Substitute (Annotations.LetBound lore),
+       Substitute (Annotations.FParam lore),
+       Substitute (Annotations.LParam lore),
+       Substitute (Annotations.RetType lore)) =>
       Substitutable lore where

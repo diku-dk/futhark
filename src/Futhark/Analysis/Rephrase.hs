@@ -13,14 +13,14 @@ where
 
 import Control.Monad.Identity
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 
 data Rephraser from to
-  = Rephraser { rephraseExpLore :: Lore.Exp from -> Lore.Exp to
-              , rephraseLetBoundLore :: Lore.LetBound from -> Lore.LetBound to
-              , rephraseFParamLore :: Lore.FParam from -> Lore.FParam to
-              , rephraseLParamLore :: Lore.LParam from -> Lore.LParam to
-              , rephraseBodyLore :: Lore.Body from -> Lore.Body to
+  = Rephraser { rephraseExpLore :: Annotations.Exp from -> Annotations.Exp to
+              , rephraseLetBoundLore :: Annotations.LetBound from -> Annotations.LetBound to
+              , rephraseFParamLore :: Annotations.FParam from -> Annotations.FParam to
+              , rephraseLParamLore :: Annotations.LParam from -> Annotations.LParam to
+              , rephraseBodyLore :: Annotations.Body from -> Annotations.Body to
               , rephraseRetType :: RetType from -> RetType to
               }
 

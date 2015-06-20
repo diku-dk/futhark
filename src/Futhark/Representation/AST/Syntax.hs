@@ -48,7 +48,7 @@ module Futhark.Representation.AST.Syntax
   , Lambda
   , ExtLambdaT (..)
   , ExtLambda
-  , Lore.RetType
+  , Annotations.RetType
   , StreamForm(..)
 
   -- * Definitions
@@ -72,11 +72,11 @@ import Data.Loc
 import Prelude
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Lore (Lore)
-import qualified Futhark.Representation.AST.Lore as Lore
+import Futhark.Representation.AST.Annotations (Annotations)
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax.Core
 
-type PatElem lore = PatElemT (Lore.LetBound lore)
+type PatElem lore = PatElemT (Annotations.LetBound lore)
 
 -- | A pattern is conceptually just a list of names and their types.
 data PatternT lore =
@@ -84,9 +84,9 @@ data PatternT lore =
           , patternValueElements   :: [PatElem lore]
           }
 
-deriving instance Lore lore => Ord (PatternT lore)
-deriving instance Lore lore => Show (PatternT lore)
-deriving instance Lore lore => Eq (PatternT lore)
+deriving instance Annotations lore => Ord (PatternT lore)
+deriving instance Annotations lore => Show (PatternT lore)
+deriving instance Annotations lore => Eq (PatternT lore)
 
 instance Monoid (PatternT lore) where
   mempty = Pattern [] []
@@ -97,27 +97,27 @@ type Pattern = PatternT
 
 -- | A local variable binding.
 data Binding lore = Let { bindingPattern :: Pattern lore
-                        , bindingLore :: Lore.Exp lore
+                        , bindingLore :: Annotations.Exp lore
                         , bindingExp :: Exp lore
                         }
 
-deriving instance Lore lore => Ord (Binding lore)
-deriving instance Lore lore => Show (Binding lore)
-deriving instance Lore lore => Eq (Binding lore)
+deriving instance Annotations lore => Ord (Binding lore)
+deriving instance Annotations lore => Show (Binding lore)
+deriving instance Annotations lore => Eq (Binding lore)
 
 -- | The result of a body is a sequence of subexpressions.
 type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body { bodyLore :: Lore.Body lore
+data BodyT lore = Body { bodyLore :: Annotations.Body lore
                        , bodyBindings :: [Binding lore]
                        , bodyResult :: Result
                        }
 
-deriving instance Lore lore => Ord (BodyT lore)
-deriving instance Lore lore => Show (BodyT lore)
-deriving instance Lore lore => Eq (BodyT lore)
+deriving instance Annotations lore => Ord (BodyT lore)
+deriving instance Annotations lore => Show (BodyT lore)
+deriving instance Annotations lore => Eq (BodyT lore)
 
 type Body = BodyT
 
@@ -291,9 +291,9 @@ data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, VName)] VName
                   -- @length(counts) == length(seg)@
                 deriving (Eq, Ord, Show)
 
-deriving instance Lore lore => Eq (LoopOp lore)
-deriving instance Lore lore => Show (LoopOp lore)
-deriving instance Lore lore => Ord (LoopOp lore)
+deriving instance Annotations lore => Eq (LoopOp lore)
+deriving instance Annotations lore => Show (LoopOp lore)
+deriving instance Annotations lore => Ord (LoopOp lore)
 
 data LoopForm = ForLoop VName SubExp
               | WhileLoop VName
@@ -311,13 +311,13 @@ data ExpT lore
 
   | SegOp (SegOp lore)
 
-  | Apply  Name [(SubExp, Diet)] (Lore.RetType lore)
+  | Apply  Name [(SubExp, Diet)] (Annotations.RetType lore)
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
 
-deriving instance Lore lore => Eq (ExpT lore)
-deriving instance Lore lore => Show (ExpT lore)
-deriving instance Lore lore => Ord (ExpT lore)
+deriving instance Annotations lore => Eq (ExpT lore)
+deriving instance Annotations lore => Show (ExpT lore)
+deriving instance Annotations lore => Ord (ExpT lore)
 
 -- | A type alias for namespace control.
 type Exp = ExpT
@@ -329,9 +329,9 @@ data LambdaT lore =
          , lambdaReturnType :: [Type]
          }
 
-deriving instance Lore lore => Eq (LambdaT lore)
-deriving instance Lore lore => Show (LambdaT lore)
-deriving instance Lore lore => Ord (LambdaT lore)
+deriving instance Annotations lore => Eq (LambdaT lore)
+deriving instance Annotations lore => Show (LambdaT lore)
+deriving instance Annotations lore => Ord (LambdaT lore)
 
 type Lambda = LambdaT
 
@@ -342,26 +342,26 @@ data ExtLambdaT lore =
             , extLambdaReturnType :: [ExtType]
             }
 
-deriving instance Lore lore => Eq (ExtLambdaT lore)
-deriving instance Lore lore => Show (ExtLambdaT lore)
-deriving instance Lore lore => Ord (ExtLambdaT lore)
+deriving instance Annotations lore => Eq (ExtLambdaT lore)
+deriving instance Annotations lore => Show (ExtLambdaT lore)
+deriving instance Annotations lore => Ord (ExtLambdaT lore)
 
 type ExtLambda = ExtLambdaT
 
-type FParam lore = ParamT (Lore.FParam lore)
+type FParam lore = ParamT (Annotations.FParam lore)
 
-type LParam lore = ParamT (Lore.LParam lore)
+type LParam lore = ParamT (Annotations.LParam lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name
-                           , funDecRetType :: Lore.RetType lore
+                           , funDecRetType :: Annotations.RetType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore
                            }
 
-deriving instance Lore lore => Eq (FunDecT lore)
-deriving instance Lore lore => Show (FunDecT lore)
-deriving instance Lore lore => Ord (FunDecT lore)
+deriving instance Annotations lore => Eq (FunDecT lore)
+deriving instance Annotations lore => Show (FunDecT lore)
+deriving instance Annotations lore => Ord (FunDecT lore)
 
 type FunDec = FunDecT
 

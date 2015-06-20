@@ -61,7 +61,7 @@ import Data.Foldable (traverse_)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.MonadFreshNames
@@ -123,14 +123,14 @@ class (MonadBinder m,
   simplifyBody = defaultSimplifyBody
   inspectBinding :: Binding (Lore m) -> m ()
   inspectBinding = defaultInspectBinding
-  simplifyLetBoundLore :: Lore.LetBound (InnerLore m)
-                       -> m (Lore.LetBound (InnerLore m))
-  simplifyFParamLore :: Lore.FParam (InnerLore m)
-                     -> m (Lore.FParam (InnerLore m))
-  simplifyLParamLore :: Lore.LParam (InnerLore m)
-                     -> m (Lore.LParam (InnerLore m))
-  simplifyRetType :: Lore.RetType (InnerLore m)
-                  -> m (Lore.RetType (InnerLore m))
+  simplifyLetBoundLore :: Annotations.LetBound (InnerLore m)
+                       -> m (Annotations.LetBound (InnerLore m))
+  simplifyFParamLore :: Annotations.FParam (InnerLore m)
+                     -> m (Annotations.FParam (InnerLore m))
+  simplifyLParamLore :: Annotations.LParam (InnerLore m)
+                     -> m (Annotations.LParam (InnerLore m))
+  simplifyRetType :: Annotations.RetType (InnerLore m)
+                  -> m (Annotations.RetType (InnerLore m))
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()

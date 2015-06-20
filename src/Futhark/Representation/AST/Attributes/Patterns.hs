@@ -19,7 +19,10 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternContextIdents
        , patternValueIdents
        , patternNames
+       , patternValueNames
+       , patternContextNames
        , patternTypes
+       , patternValueTypes
        , patternSize
          -- * Bindage
        , bindageRequires
@@ -83,9 +86,21 @@ patternValueIdents = map patElemIdent . patternValueElements
 patternNames :: Pattern lore -> [VName]
 patternNames = map identName . patternIdents
 
+-- | Return a list of the 'Name's bound by the context part of the 'Pattern'.
+patternContextNames :: Pattern lore -> [VName]
+patternContextNames = map identName . patternContextIdents
+
+-- | Return a list of the 'Name's bound by the value part of the 'Pattern'.
+patternValueNames :: Pattern lore -> [VName]
+patternValueNames = map identName . patternValueIdents
+
 -- | Return a list of the 'types's bound by the 'Pattern'.
 patternTypes :: Pattern lore -> [Type]
 patternTypes = map identType . patternIdents
+
+-- | Return a list of the 'types's bound by the value part of the 'Pattern'.
+patternValueTypes :: Pattern lore -> [Type]
+patternValueTypes = map identType . patternValueIdents
 
 -- | Return the number of names bound by the 'Pattern'.
 patternSize :: Pattern lore -> Int

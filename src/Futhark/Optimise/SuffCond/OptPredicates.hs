@@ -36,6 +36,7 @@ import Futhark.Optimise.Simplifier.Simplify
   (bindableSimpleOps)
 import Futhark.Substitute
 import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Optimise.Simplifier.Lore
@@ -432,9 +433,10 @@ isForbidden Invariant = False
 isForbidden TooVariant = True
 
 data Invariance' = Invariance'
-instance Lore.Lore Invariance' where
+instance Annotations.Annotations Invariance' where
   type LetBound Invariance' = Maybe VName
   type Exp Invariance' = Variance
+instance Lore.Lore Invariance' where
   representative = Invariance'
   loopResultContext _ = loopResultContext (representative :: Basic)
 instance Ranged Invariance' where

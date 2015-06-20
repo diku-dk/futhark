@@ -38,8 +38,7 @@ import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
-import Futhark.Representation.AST.Lore (Lore)
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases hiding (TypeEnv)
 import Futhark.MonadFreshNames
@@ -52,7 +51,7 @@ data TypeError lore = Error [String] (ErrorCase lore)
 
 -- | What went wrong.
 type ErrorCase lore =
-  GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (Lore.LetBound lore)))
+  GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (Annotations.LetBound lore)))
 
 instance PrettyLore lore => Show (TypeError lore) where
   show (Error [] err) =
@@ -64,9 +63,9 @@ instance PrettyLore lore => Show (TypeError lore) where
 -- named.
 type FunBinding lore = (RetType lore, [FParam lore])
 
-data VarBindingLore lore = LetBound (Lore.LetBound lore)
-                         | FunBound (Lore.FParam lore)
-                         | LambdaBound (Lore.LParam lore)
+data VarBindingLore lore = LetBound (Annotations.LetBound lore)
+                         | FunBound (Annotations.FParam lore)
+                         | LambdaBound (Annotations.LParam lore)
 
 data VarBinding lore = Bound Type (VarBindingLore lore) Names
                      | WasConsumed
@@ -1275,14 +1274,14 @@ checkExtLambda (ExtLambda params body rettype) args =
          " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
-class (FreeIn (Lore.Exp lore),
-       FreeIn (Lore.LetBound lore),
-       FreeIn (Lore.Body lore),
+class (FreeIn (Annotations.Exp lore),
+       FreeIn (Annotations.LetBound lore),
+       FreeIn (Annotations.Body lore),
        Lore lore, PrettyLore lore) => Checkable lore where
-  checkExpLore :: Lore.Exp lore -> TypeM lore ()
-  checkBodyLore :: Lore.Body lore -> TypeM lore ()
-  checkFParamLore :: Lore.FParam lore -> TypeM lore ()
-  checkLetBoundLore :: Lore.LetBound lore -> TypeM lore ()
+  checkExpLore :: Annotations.Exp lore -> TypeM lore ()
+  checkBodyLore :: Annotations.Body lore -> TypeM lore ()
+  checkFParamLore :: Annotations.FParam lore -> TypeM lore ()
+  checkLetBoundLore :: Annotations.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()

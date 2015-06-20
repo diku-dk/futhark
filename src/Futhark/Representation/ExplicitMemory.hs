@@ -64,6 +64,7 @@ import qualified Text.PrettyPrint.Mainland as PP
 import Prelude
 
 import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
@@ -106,12 +107,13 @@ instance IsRetType [FunReturns] where
 
   basicRetType t = [ReturnsScalar t]
 
-instance Lore.Lore ExplicitMemory where
+instance Annotations.Annotations ExplicitMemory where
   type LetBound ExplicitMemory = MemSummary
   type FParam   ExplicitMemory = MemSummary
   type LParam   ExplicitMemory = MemSummary
   type RetType  ExplicitMemory = [FunReturns]
 
+instance Lore.Lore ExplicitMemory where
   representative = ExplicitMemory
 
   loopResultContext _ res mergevars =

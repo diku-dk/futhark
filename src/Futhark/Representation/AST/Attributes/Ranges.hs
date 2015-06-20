@@ -22,7 +22,6 @@ import Prelude
 
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Analysis.ScalExp
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Substitute

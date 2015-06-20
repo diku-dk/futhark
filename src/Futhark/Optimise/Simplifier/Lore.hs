@@ -17,6 +17,7 @@ module Futhark.Optimise.Simplifier.Lore
 
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
@@ -40,14 +41,15 @@ type ExpWisdom = ConsumedInExp
 -- | Wisdom about a body.
 type BodyWisdom = ([VarAliases], ConsumedInExp, [Range])
 
-instance Lore.Lore lore => Lore.Lore (Wise lore) where
-  type LetBound (Wise lore) = (VarWisdom, Lore.LetBound lore)
-  type Exp (Wise lore) = (ExpWisdom, Lore.Exp lore)
-  type Body (Wise lore) = (BodyWisdom, Lore.Body lore)
-  type FParam (Wise lore) = Lore.FParam lore
-  type LParam (Wise lore) = Lore.LParam lore
-  type RetType (Wise lore) = Lore.RetType lore
+instance Annotations.Annotations lore => Annotations.Annotations (Wise lore) where
+  type LetBound (Wise lore) = (VarWisdom, Annotations.LetBound lore)
+  type Exp (Wise lore) = (ExpWisdom, Annotations.Exp lore)
+  type Body (Wise lore) = (BodyWisdom, Annotations.Body lore)
+  type FParam (Wise lore) = Annotations.FParam lore
+  type LParam (Wise lore) = Annotations.LParam lore
+  type RetType (Wise lore) = Annotations.RetType lore
 
+instance Lore.Lore lore => Lore.Lore (Wise lore) where
   representative =
     Wise Lore.representative
 
@@ -119,14 +121,14 @@ addWisdomToPattern pat e =
         ranges = expRanges e
 
 mkWiseBody :: Lore.Lore lore =>
-              Lore.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
+              Annotations.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
   Body ((aliases, consumed, ranges), innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
         ranges = Ranges.mkBodyRanges bnds res
 
 mkWiseLetBinding :: Lore.Lore lore =>
-                    Pattern lore -> Lore.Exp lore -> Exp (Wise lore)
+                    Pattern lore -> Annotations.Exp lore -> Exp (Wise lore)
                  -> Binding (Wise lore)
 mkWiseLetBinding pat explore e =
   Let (addWisdomToPattern pat e)

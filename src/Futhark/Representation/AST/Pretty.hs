@@ -17,8 +17,7 @@ import Data.Maybe
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
 
-import Futhark.Representation.AST.Lore (Lore)
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 import Futhark.Util
@@ -27,9 +26,9 @@ import Futhark.Util
 class (Lore lore,
        Pretty (RetType lore),
        Pretty (Pattern lore),
-       Pretty (Lore.LetBound lore),
-       Pretty (Lore.FParam lore),
-       Pretty (Lore.LParam lore)) => PrettyLore lore where
+       Pretty (Annotations.LetBound lore),
+       Pretty (Annotations.FParam lore),
+       Pretty (Annotations.LParam lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc

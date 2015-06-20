@@ -55,7 +55,7 @@ import Prelude hiding (elem, lookup)
 
 import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, paramLore, lookupType)
 import qualified Futhark.Representation.AST as AST
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
@@ -98,7 +98,7 @@ data LoopVarEntry lore =
 
 data LetBoundEntry lore =
   LetBoundEntry { letBoundRange        :: ScalExpRange
-                , letBoundLore         :: Lore.LetBound lore
+                , letBoundLore         :: Annotations.LetBound lore
                 , letBoundBinding      :: Binding lore
                 , letBoundBindingDepth :: Int
                 , letBoundScalExp      :: Maybe ScalExp
@@ -108,7 +108,7 @@ data LetBoundEntry lore =
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
-              , paramLore         :: Lore.FParam lore
+              , paramLore         :: Annotations.FParam lore
               , fparamBindingDepth :: Int
               , paramType         :: Type
               }
@@ -177,11 +177,11 @@ entryBinding :: Entry lore -> Maybe (Binding lore)
 entryBinding (LetBound entry) = Just $ letBoundBinding entry
 entryBinding _                = Nothing
 
-entryLetBoundLore :: Entry lore -> Maybe (Lore.LetBound lore)
+entryLetBoundLore :: Entry lore -> Maybe (Annotations.LetBound lore)
 entryLetBoundLore (LetBound entry) = Just $ letBoundLore entry
 entryLetBoundLore _                = Nothing
 
-entryFParamLore :: Entry lore -> Maybe (Lore.FParam lore)
+entryFParamLore :: Entry lore -> Maybe (Annotations.FParam lore)
 entryFParamLore (FParam entry) = Just $ paramLore entry
 entryFParamLore _              = Nothing
 

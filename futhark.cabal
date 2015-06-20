@@ -119,6 +119,7 @@ Library
                    Futhark.Renamer
                    Futhark.Representation.Aliases
                    Futhark.Representation.AST
+                   Futhark.Representation.AST.Annotations
                    Futhark.Representation.AST.Attributes
                    Futhark.Representation.AST.Attributes.Aliases
                    Futhark.Representation.AST.Attributes.Constants

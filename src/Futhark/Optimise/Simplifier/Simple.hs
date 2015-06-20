@@ -17,7 +17,7 @@ import Control.Arrow (second)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -35,21 +35,21 @@ data SimpleOps m =
             , mkLetNamesS :: ST.SymbolTable (Lore m)
                              -> [(VName,Bindage)] -> Exp (Lore m)
                              -> m (Binding (Lore m))
-            , simplifyLetBoundLore :: Lore.LetBound (Engine.InnerLore m)
-                                      -> m (Lore.LetBound (Engine.InnerLore m))
-            , simplifyFParamLore :: Lore.FParam (Engine.InnerLore m)
-                                    -> m (Lore.FParam (Engine.InnerLore m))
-            , simplifyLParamLore :: Lore.LParam (Engine.InnerLore m)
-                                    -> m (Lore.LParam (Engine.InnerLore m))
-            , simplifyRetType :: Lore.RetType (Engine.InnerLore m)
-                                 -> m (Lore.RetType (Engine.InnerLore m))
+            , simplifyLetBoundLore :: Annotations.LetBound (Engine.InnerLore m)
+                                      -> m (Annotations.LetBound (Engine.InnerLore m))
+            , simplifyFParamLore :: Annotations.FParam (Engine.InnerLore m)
+                                    -> m (Annotations.FParam (Engine.InnerLore m))
+            , simplifyLParamLore :: Annotations.LParam (Engine.InnerLore m)
+                                    -> m (Annotations.LParam (Engine.InnerLore m))
+            , simplifyRetType :: Annotations.RetType (Engine.InnerLore m)
+                                 -> m (Annotations.RetType (Engine.InnerLore m))
             }
 
 bindableSimpleOps :: (Engine.MonadEngine m,
                       Bindable (Engine.InnerLore m),
-                      Lore.LetBound (Engine.InnerLore m) ~ (),
-                      Lore.FParam (Engine.InnerLore m) ~ (),
-                      Lore.LParam (Engine.InnerLore m) ~ (),
+                      Annotations.LetBound (Engine.InnerLore m) ~ (),
+                      Annotations.FParam (Engine.InnerLore m) ~ (),
+                      Annotations.LParam (Engine.InnerLore m) ~ (),
                       RetType (Engine.InnerLore m) ~ ExtRetType) =>
                      SimpleOps m
 bindableSimpleOps =

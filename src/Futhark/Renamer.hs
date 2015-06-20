@@ -37,7 +37,7 @@ import Data.Maybe
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
@@ -286,10 +286,10 @@ instance Rename ExtRetType where
   rename = liftM ExtRetType . mapM rename . retTypeValues
 
 -- | A class for lores in which all annotations are renameable.
-class (Rename (Lore.LetBound lore),
-       Rename (Lore.Exp lore),
-       Rename (Lore.Body lore),
-       Rename (Lore.FParam lore),
-       Rename (Lore.LParam lore),
-       Rename (Lore.RetType lore)) =>
+class (Rename (Annotations.LetBound lore),
+       Rename (Annotations.Exp lore),
+       Rename (Annotations.Body lore),
+       Rename (Annotations.FParam lore),
+       Rename (Annotations.LParam lore),
+       Rename (Annotations.RetType lore)) =>
       Renameable lore where

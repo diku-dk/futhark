@@ -62,7 +62,7 @@ import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
@@ -71,6 +71,7 @@ import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
+import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Renamer
 import Futhark.Binder
 import Futhark.Substitute
@@ -117,22 +118,23 @@ type ConsumedInExp = Names'
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 
-instance Lore.Lore lore => Lore.Lore (Aliases lore) where
-  type LetBound (Aliases lore) = (VarAliases, Lore.LetBound lore)
-  type Exp (Aliases lore) = (ConsumedInExp, Lore.Exp lore)
-  type Body (Aliases lore) = (BodyAliasing, Lore.Body lore)
-  type FParam (Aliases lore) = Lore.FParam lore
-  type LParam (Aliases lore) = Lore.LParam lore
-  type RetType (Aliases lore) = Lore.RetType lore
+instance Annotations.Annotations lore => Annotations.Annotations (Aliases lore) where
+  type LetBound (Aliases lore) = (VarAliases, Annotations.LetBound lore)
+  type Exp (Aliases lore) = (ConsumedInExp, Annotations.Exp lore)
+  type Body (Aliases lore) = (BodyAliasing, Annotations.Body lore)
+  type FParam (Aliases lore) = Annotations.FParam lore
+  type LParam (Aliases lore) = Annotations.LParam lore
+  type RetType (Aliases lore) = Annotations.RetType lore
 
+instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   representative =
-    Aliases Lore.representative
+    Aliases representative
 
   loopResultContext (Aliases lore) =
-    Lore.loopResultContext lore
+    loopResultContext lore
 
   applyRetType (Aliases lore) =
-    Lore.applyRetType lore
+    applyRetType lore
 
 instance Ranged lore => Ranged (Aliases lore) where
   bodyRanges = bodyRanges . removeBodyAliases
@@ -255,14 +257,14 @@ addAliasesToPattern pat e =
   uncurry AST.Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: Lore.Lore lore =>
-                 Lore.Body lore -> [Binding lore] -> Result -> Body lore
+                 Annotations.Body lore -> [Binding lore] -> Result -> Body lore
 mkAliasedBody innerlore bnds res =
   AST.Body (mkBodyAliases bnds res, innerlore) bnds res
 
 mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
                     AST.Pattern anylore -> AST.Exp lore
-                 -> ([PatElemT (VarAliases, Lore.LetBound anylore)],
-                     [PatElemT (VarAliases, Lore.LetBound anylore)])
+                 -> ([PatElemT (VarAliases, Annotations.LetBound anylore)],
+                     [PatElemT (VarAliases, Annotations.LetBound anylore)])
 mkPatternAliases pat e =
   -- Some part of the pattern may  be the context.  This does not have
   -- aliases from aliasesOf, so we  use a hack to compute some aliases
@@ -329,7 +331,7 @@ mkBodyAliases bnds res =
           where look k = HM.lookupDefault mempty k aliasmap
 
 mkAliasedLetBinding :: Lore.Lore lore =>
-                       AST.Pattern lore -> Lore.Exp lore -> Exp lore
+                       AST.Pattern lore -> Annotations.Exp lore -> Exp lore
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e)

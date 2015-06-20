@@ -11,7 +11,7 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.AST.Lore as Lore
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.Binder (Proper)
 
@@ -93,7 +93,7 @@ foldDeps deps pat cs fun acc arr =
                 lambdaDeps deps' fun
   in resdeps `HM.union` deps'
 
-lambdaDeps :: FreeIn (Lore.Exp lore) => Dependencies -> Lambda lore -> [Names]
+lambdaDeps :: FreeIn (Annotations.Exp lore) => Dependencies -> Lambda lore -> [Names]
 lambdaDeps deps fun =
   map (depsOf deps) $ bodyResult $ lambdaBody fun
 
