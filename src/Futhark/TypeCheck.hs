@@ -496,7 +496,7 @@ checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
 checkFunParams = mapM_ $ \param ->
   context ("In function parameter " ++ pretty param) $
-  checkFParamLore $ paramLore param
+  checkFParamLore (paramIdent param) (paramLore param)
 
 checkAnonymousFun :: Checkable lore =>
                      (Name, [Type], [LParam (Aliases lore)], BodyT (Aliases lore))
@@ -1097,7 +1097,7 @@ checkPatElem :: Checkable lore =>
 checkPatElem (PatElem ident bindage attr) = do
   checkBndSizes ident
   checkBindage bindage
-  checkLetBoundLore attr
+  checkLetBoundLore ident attr
 
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
@@ -1280,8 +1280,8 @@ class (FreeIn (Annotations.Exp lore),
        Lore lore, PrettyLore lore) => Checkable lore where
   checkExpLore :: Annotations.Exp lore -> TypeM lore ()
   checkBodyLore :: Annotations.Body lore -> TypeM lore ()
-  checkFParamLore :: Annotations.FParam lore -> TypeM lore ()
-  checkLetBoundLore :: Annotations.LetBound lore -> TypeM lore ()
+  checkFParamLore :: Ident -> Annotations.FParam lore -> TypeM lore ()
+  checkLetBoundLore :: Ident -> Annotations.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()

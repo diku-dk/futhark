@@ -513,10 +513,10 @@ varMemSummary name = do
     TypeCheck.FunBound summary -> return summary
     TypeCheck.LambdaBound summary -> return summary
 
-checkMemSummary :: MemSummary
+checkMemSummary :: Ident -> MemSummary
                 -> TypeCheck.TypeM ExplicitMemory ()
-checkMemSummary Scalar = return ()
-checkMemSummary (MemSummary v ixfun) = do
+checkMemSummary _ Scalar = return ()
+checkMemSummary ident (MemSummary v ixfun) = do
   t <- lookupType v
   case t of
     Mem size ->
@@ -527,8 +527,15 @@ checkMemSummary (MemSummary v ixfun) = do
       " used as memory block, but is of type " ++
       pretty t ++ "."
 
-  TypeCheck.context ("in index function " ++ pretty ixfun) $
+  TypeCheck.context ("in index function " ++ pretty ixfun) $ do
     traverse_ (TypeCheck.requireI [Basic Int]) $ freeIn ixfun
+    let ixfun_rank = IxFun.rank ixfun
+        ident_rank = arrayRank $ identType ident
+    unless (ixfun_rank == ident_rank) $
+      TypeCheck.bad $ TypeCheck.TypeError noLoc $
+      "Arity of index function (" ++ pretty ixfun_rank ++
+      ") does not match rank of array " ++ pretty ident ++
+      " (" ++ show ident_rank ++ ")"
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where
