@@ -810,7 +810,7 @@ hoistBranchInvariant _ _ = cannotSimplify
 -- | Non-existentialise the parts of the context that are the same in
 -- both branches.
 simplifyBranchContext :: MonadBinder m => TopDownRule m
-simplifyBranchContext _ bnd@(Let pat _ e@(If cond tbranch fbranch _))
+simplifyBranchContext _ (Let pat _ e@(If cond tbranch fbranch _))
   | not $ null $ patternContextElements pat = do
       ctx_res <- expContext pat e
       let old_ctx =
