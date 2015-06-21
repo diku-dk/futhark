@@ -103,10 +103,37 @@ data Exp = Constant BasicValue
          | SizeOf BasicType
            deriving (Eq, Show)
 
-data UnOp = Not
-          | Complement
-          | Negate
+data UnOp = Not -- ^ Boolean negation.
+          | Complement -- ^ Bitwise complement.
+          | Negate -- ^ Numerical negation.
+          | Abs -- ^ Absolute/numerical value.
+          | Signum -- ^ Sign function.
             deriving (Eq, Show)
+
+instance Num Exp where
+  0 + y = y
+  x + 0 = x
+  x + y = BinOp Plus x y
+
+  x - 0 = x
+  x - y = BinOp Minus x y
+
+  0 * _ = 0
+  _ * 0 = 0
+  1 * y = y
+  y * 1 = y
+  x * y = BinOp Times x y
+
+  abs = UnOp Abs
+  signum = UnOp Signum
+  fromInteger = Constant . IntVal . fromInteger
+  negate = UnOp Negate
+
+instance Fractional Exp where
+  0 / _ = 0
+  x / 1 = x
+  x / y = BinOp Divide x y
+  fromRational = Constant . Float64Val . fromRational
 
 instance Monoid (Code a) where
   mempty = Skip
@@ -208,9 +235,13 @@ instance Pretty Exp where
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
   pprPrec _ (UnOp Complement x) =
-    text "not" <+> ppr x
+    text "~" <+> ppr x
   pprPrec _ (UnOp Negate x) =
     text "-" <+> ppr x
+  pprPrec _ (UnOp Abs x) =
+    text "abs" <> parens (ppr x)
+  pprPrec _ (UnOp Signum x) =
+    text "signum" <> parens (ppr x)
   pprPrec _ (ScalarVar v) =
     ppr v
   pprPrec _ (Index v is bt space) =

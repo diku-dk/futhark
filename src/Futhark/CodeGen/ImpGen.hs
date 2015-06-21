@@ -427,7 +427,7 @@ defCompilePrimOp
           targetloc <-
             indexArray destlocation [varIndex i]
           srcloc <- arrayLocation v
-          let rowsize = impProduct (drop 1 shape')
+          let rowsize = product (drop 1 shape')
                         `withElemType` elemt
           emit =<< (Imp.For i (compileSubExp n) <$>
             copyIxFun elemt targetloc srcloc rowsize)
@@ -468,14 +468,13 @@ defCompilePrimOp
                     []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
                     r:_ -> innerExp $ dimSizeToExp r
         emit =<< copyIxFun et destloc srcloc (arrayByteSizeExp yentry)
-        emit $ Imp.SetScalar offs_glb $
-               Imp.BinOp Plus (Imp.ScalarVar offs_glb) rows
+        emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
   (ArrayLit es rt) = do
     let rowshape = map (elements . compileSubExp) $ arrayDims rt
-        rowsize = impProduct (drop 1 rowshape) `withElemType` et
+        rowsize = product (drop 1 rowshape) `withElemType` et
     forM_ (zip [0..] es) $ \(i,e) ->
       if basicType rt then do
         (targetmem, space, targetoffset) <-
@@ -516,7 +515,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
 
     -- We initialise ecah size to zero.
     forM_ sizenames $ \sizename ->
-      emit $ Imp.SetScalar sizename $ Imp.Constant $ IntVal 0
+      emit $ Imp.SetScalar sizename 0
 
     -- Now iterate across the flag array, storing each element in
     -- 'eqclass', then comparing it to the known classes and increasing
@@ -524,11 +523,8 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
     eqclass <- newVName "eqclass"
     emit $ Imp.DeclareScalar eqclass Int
     let mkSizeLoopBody code c sizevar =
-          Imp.If (Imp.BinOp Equal
-                  (Imp.ScalarVar eqclass)
-                  (Imp.Constant (IntVal $ fromIntegral c)))
-          (Imp.SetScalar sizevar
-           (Imp.BinOp Plus (Imp.ScalarVar sizevar) (Imp.Constant (IntVal 1))))
+          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (fromIntegral c))
+          (Imp.SetScalar sizevar $ Imp.ScalarVar sizevar + 1)
           code
         sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
     emit $ Imp.For i outer_dim $
@@ -543,7 +539,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
       partition_offset <- lift $ newVName "partition_offset"
       lift $ emit $ Imp.DeclareScalar partition_offset Int
       lift $ emit $ Imp.SetScalar partition_offset cur_offset
-      put $ Imp.BinOp Plus (Imp.ScalarVar partition_offset) (Imp.ScalarVar size)
+      put $ Imp.ScalarVar partition_offset + Imp.ScalarVar size
       return partition_offset
 
     -- We create the memory location we use when writing a result
@@ -563,15 +559,14 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
       destloc [varIndex partition_cur_offset]
       srcloc [varIndex i]
     let mkWriteLoopBody code c offsetvar =
-          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass)
-                  (Imp.Constant $ IntVal $ fromIntegral c))
+          Imp.If (Imp.BinOp Equal (Imp.ScalarVar eqclass) (fromIntegral c))
           (Imp.SetScalar partition_cur_offset
              (Imp.ScalarVar offsetvar)
            <>
            mconcat copy_elements
            <>
            Imp.SetScalar offsetvar
-             (Imp.BinOp Plus (Imp.ScalarVar offsetvar) (Imp.Constant (IntVal 1))))
+             (Imp.ScalarVar offsetvar + 1))
           code
         writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
     emit $ Imp.For i outer_dim $
@@ -934,11 +929,11 @@ arrayByteSizeExp entry =
 
 arrayElemSizeExp :: ArrayEntry -> Count Elements
 arrayElemSizeExp entry =
-  impProduct (map dimSizeToExp $ entryArrayShape entry)
+  product (map dimSizeToExp $ entryArrayShape entry)
 
 -- A wrapper around 'Imp.Exp' that maintains a unit as a phantom type.
 newtype Count u = Count { innerExp :: Imp.Exp }
-                deriving (Eq, Show)
+                deriving (Eq, Show, Num)
 
 instance PP.Pretty (Count u) where
   ppr = PP.ppr . innerExp
@@ -953,26 +948,13 @@ bytes :: Imp.Exp -> Count Bytes
 bytes = Count
 
 withElemType :: Count Elements -> BasicType -> Count Bytes
-withElemType (Count e) t = bytes $ e `times'` Imp.SizeOf t
+withElemType (Count e) t = bytes $ e * Imp.SizeOf t
 
 index :: VName -> Count Bytes -> BasicType -> Imp.Space -> Imp.Exp
 index name (Count e) = Imp.Index name e
 
 write :: VName -> Count Bytes -> BasicType -> Imp.Space -> Imp.Exp -> Imp.Code a
 write name (Count i) = Imp.Write name i
-
-times :: Count u -> Count u -> Count u
-times (Count x) (Count y) = Count $ x `times'` y
-
-times' :: Imp.Exp -> Imp.Exp -> Imp.Exp
-times' (Imp.Constant (IntVal 1)) e = e
-times' e (Imp.Constant (IntVal 1)) = e
-times' (Imp.Constant (IntVal 0)) _ = Imp.Constant $ IntVal 0
-times' _ (Imp.Constant (IntVal 0)) = Imp.Constant $ IntVal 0
-times' x y                         = Imp.BinOp Times x y
-
-impProduct :: [Count u] -> Count u
-impProduct = foldl times $ Count $ Imp.Constant $ IntVal 1
 
 -- More complicated read/write operations that use index functions.
 
@@ -1030,7 +1012,7 @@ copyElem bt
   destlocation' <- indexArray destlocation destis
   srclocation'  <- indexArray srclocation  srcis
   copyIxFun bt destlocation' srclocation' $
-    impProduct (map dimSizeToExp $ drop (length srcis) srcshape) `withElemType` bt
+    product (map dimSizeToExp $ drop (length srcis) srcshape) `withElemType` bt
 
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =
@@ -1038,13 +1020,13 @@ scalExpToImpExp (SE.Val x) =
 scalExpToImpExp (SE.Id v _) =
   Just $ Imp.ScalarVar v
 scalExpToImpExp (SE.SPlus e1 e2) =
-  Imp.BinOp Plus <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+  (+) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.SMinus e1 e2) =
-  Imp.BinOp Minus <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+  (-) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.STimes e1 e2) =
-  Imp.BinOp Times <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+  (*) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.SDivide e1 e2) =
-  Imp.BinOp Divide <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+  (/) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp _ =
   Nothing
 

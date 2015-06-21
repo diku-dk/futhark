@@ -543,6 +543,14 @@ compileExp (UnOp Not x) = do
   x' <- compileExp x
   return [C.cexp|!$exp:x'|]
 
+compileExp (UnOp Abs x) = do
+  x' <- compileExp x
+  return [C.cexp|abs($exp:x')|]
+
+compileExp (UnOp Signum x) = do
+  x' <- compileExp x
+  return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+
 compileExp (BinOp bop x y) = do
   x' <- compileExp x
   y' <- compileExp y
