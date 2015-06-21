@@ -202,13 +202,14 @@ allocsForPattern sizeidents validents rts = do
             return $ PatElem ident bindage $ MemSummary mem ixfun
           BindInPlace _ src is -> do
             (destmem,destixfun) <- lift $ lookupArraySummary' src
-            if destmem == mem && destixfun == ixfun then
-              return $ PatElem ident bindage $ MemSummary mem ixfun
+            if destmem == mem && destixfun == ixfun
+              then return $ PatElem ident bindage $ MemSummary mem ixfun
               else do
-              -- The expression returns in some memory, but we want to
-              -- put the result somewhere else.  This means we need to
-              -- store it in the memory it wants to first, then copy
-              -- it to our intended destination in an extra binding.
+              -- The expression returns at some specific memory
+              -- location, but we want to put the result somewhere
+              -- else.  This means we need to store it in the memory
+              -- it wants to first, then copy it to our intended
+              -- destination in an extra binding.
               tmp_buffer <- lift $
                             newIdent (baseString (identName ident)<>"_buffer")
                             (stripArray (length is) $ identType ident
@@ -224,12 +225,32 @@ allocsForPattern sizeidents validents rts = do
           summary <- lift $ summaryForBindage (identType ident) bindage
           return $ PatElem ident bindage summary
 
-      _ -> do
+      ReturnsArray _ _ u (Just (ReturnsNewBlock {}))
+        | BindInPlace _ _ is <- bindage -> do
+            -- The expression returns its own memory, but the pattern
+            -- wants to store it somewhere else.  We first let it
+            -- store the value where it wants, then we copy it to the
+            -- intended destination.  In some cases, the copy may be
+            -- optimised away later, but in some cases it may not be
+            -- possible (e.g. function calls).
+            tmp_buffer <- lift $
+                          newIdent (baseString (identName ident)<>"_ext_buffer")
+                          (stripArray (length is) $ identType ident
+                           `setUniqueness` u)
+            (memsize,mem,(_,lore)) <- lift $ memForBindee tmp_buffer
+            tell ([PatElem memsize BindVar Scalar],
+                  [PatElem mem     BindVar Scalar],
+                  [ArrayCopy (identName ident) bindage $
+                   identName tmp_buffer])
+            return $ PatElem tmp_buffer BindVar lore
+
+      ReturnsArray {} -> do
         (memsize,mem,(ident',lore)) <- lift $ memForBindee ident
         tell ([PatElem memsize BindVar Scalar],
               [PatElem mem     BindVar Scalar],
               [])
         return $ PatElem ident' bindage lore
+
   return (memsizes <> mems <> sizes',
           vals,
           postbnds)
