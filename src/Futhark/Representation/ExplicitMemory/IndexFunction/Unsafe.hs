@@ -80,7 +80,13 @@ rank (IxFun n _) = sNatToInt n
 
 index :: IxFun -> Indices -> ScalExp -> ScalExp
 index f is element_size = case f of
-  IxFun n f' -> Safe.index f' (unsafeFromList n is) element_size
+  IxFun n f'
+    | length is == sNatToInt n ->
+        Safe.index f' (unsafeFromList n is) element_size
+    | otherwise ->
+        error $
+        "Index list " ++ pretty is ++
+        " incompatible with index function " ++ pretty f'
 
 iota :: Shape -> IxFun
 iota shape = case toSing (intToNat $ n-1) of
