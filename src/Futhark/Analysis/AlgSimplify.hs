@@ -91,8 +91,11 @@ type DNF     = [NAnd ]
 --type CNF     = [NOr  ]
 
 -- | Applies Simplification at Expression level:
-simplify :: ScalExp -> RangesRep -> Either Error ScalExp
-simplify e = runAlgSimplifier False (simplifyScal e)
+simplify :: ScalExp -> RangesRep -> ScalExp
+simplify e rangesrep = case runAlgSimplifier False (simplifyScal e) rangesrep of
+  Left err -> error $ "Error during algebraic simplification of: " ++ pretty e ++
+              "\n"  ++ show err
+  Right e' -> e'
 
 -- | Given a symbol i and a scalar expression e, it decomposes
 --   e = a*i + b and returns (a,b) if possible, otherwise Nothing.
@@ -145,8 +148,8 @@ simplifyNRel inp_term@(NRelExp LTH0 inp_sofp) = do
         cheapSimplifyNRel (NRelExp rel (NProd [Val v] _)) = do
             succ' <- valLTHEQ0 rel v; return $ LogCt succ'
         cheapSimplifyNRel e = return e
-simplifyNRel _ =
-    badAlgSimplifyM "simplifyNRel: implemented only for relational LTH0 on ints!"
+simplifyNRel inp_term =
+    return inp_term --- TODO: handle more cases.
 
 --gaussEliminateNRel :: BTerm -> AlgSimplifyM DNF
 --gaussEliminateNRel _ =

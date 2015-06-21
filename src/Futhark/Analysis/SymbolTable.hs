@@ -356,11 +356,10 @@ defBndEntry vtable patElem range bnd =
           (simplifyBound lower,
            simplifyBound upper)
 
-        simplifyBound (Just se)
-          | Right se' <- AS.simplify se ranges =
-            Just se'
-        simplifyBound bound =
-          bound
+        simplifyBound (Just se) =
+          Just $ AS.simplify se ranges
+        simplifyBound Nothing =
+          Nothing
 
 bindingEntries :: Ranged lore =>
                   Binding lore -> SymbolTable lore
@@ -475,8 +474,7 @@ updateBounds isTrue cond vtable =
 updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
 updateBounds' cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
-  either (const []) getNotFactorsLEQ0 $
-  AS.simplify (SNot cond) ranges
+  getNotFactorsLEQ0 $ AS.simplify (SNot cond) ranges
     where
       updateBound (sym,True ,bound) = setUpperBound sym bound
       updateBound (sym,False,bound) = setLowerBound sym bound
@@ -499,7 +497,7 @@ updateBounds' cond sym_tab =
                                 then SMinus (Val (IntVal 0)) e_scal
                                 else SMinus (Val (IntVal 1)) e_scal
 
-               in  either (const []) (:[]) $ AS.simplify leq0_escal ranges
+               in  [AS.simplify leq0_escal ranges]
       getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
       getNotFactorsLEQ0 _ = []
 
@@ -518,10 +516,9 @@ updateBounds' cond sym_tab =
         (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
         case a of
           Val (IntVal (-1)) -> Just (sym, False, b)
-          Val (IntVal 1)    -> do
-            mb <- either (const Nothing) Just $
-                  AS.simplify (SMinus (Val (IntVal 0)) b) ranges
-            Just (sym, True, mb)
+          Val (IntVal 1)    ->
+            let mb = AS.simplify (SMinus (Val (IntVal 0)) b) ranges
+            in Just (sym, True, mb)
           _ -> Nothing
 
       -- When picking a symbols, @sym@ whose bound it is to be refined:

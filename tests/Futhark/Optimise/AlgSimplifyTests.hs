@@ -90,19 +90,14 @@ instantiateRanges varinfo r =
         fixBound s  = Just $ parseScalExp' varinfo s
 
 simplify' :: VarInfo -> String -> RangesRep' -> ScalExp
-simplify' varinfo s r = case simplify e r' of
-  Left err -> error $ show err
-  Right e' -> e'
+simplify' varinfo s r = simplify e r'
   where e = parseScalExp' varinfo s
         r' = instantiateRanges varinfo r
 
 mkSuffConds' :: VarInfo -> String -> RangesRep' -> [[ScalExp]]
 mkSuffConds' varinfo s r =
-  case simplify e r' of
-    Left err -> error $ show err
-    Right e' ->
-      case mkSuffConds e' r' of
-        Left _ -> [[e']]
-        Right sc -> sc
-  where e = parseScalExp' varinfo s
+  case mkSuffConds e r' of
+    Left _ -> [[e]]
+    Right sc -> sc
+  where e = simplify (parseScalExp' varinfo s) r'
         r' = instantiateRanges varinfo r

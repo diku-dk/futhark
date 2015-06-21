@@ -218,8 +218,8 @@ expRanges (LoopOp (DoLoop res merge (ForLoop i iterations) body)) =
         returnedBound (param, mergeinit) (Just bound)
           | paramType param == Basic Int,
             Just bound' <- boundToScalExp bound,
-            Right se_diff <- AS.simplify (SMinus (Id (paramName param) Int) bound')
-                             HM.empty,
+            let se_diff =
+                  AS.simplify (SMinus (Id (paramName param) Int) bound') HM.empty,
             HS.null $ HS.intersection bound_in_loop $ freeIn se_diff =
               Just $ ScalarBound $ SPlus (subExpToScalExp mergeinit Int) $
               STimes se_diff $ MaxMin False

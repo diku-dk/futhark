@@ -978,8 +978,8 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ src
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     declaringLoopVars is $ do
       let ivars = map varIndex is
-      destidx <- simplifyScalExp $ IxFun.index destIxFun ivars bt_size
-      srcidx <- simplifyScalExp $ IxFun.index srcIxFun ivars bt_size
+          destidx = simplifyScalExp $ IxFun.index destIxFun ivars bt_size
+          srcidx = simplifyScalExp $ IxFun.index srcIxFun ivars bt_size
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       return $ foldl (.) id (zipWith Imp.For is $
@@ -1030,11 +1030,8 @@ scalExpToImpExp (SE.SDivide e1 e2) =
 scalExpToImpExp _ =
   Nothing
 
-simplifyScalExp :: Monad m => ScalExp -> m ScalExp
-simplifyScalExp se =
-  case AlgSimplify.simplify se mempty of
-    Left err  -> fail $ show err
-    Right se' -> return se'
+simplifyScalExp :: ScalExp -> ScalExp
+simplifyScalExp se = AlgSimplify.simplify se mempty
 
 basicScalarSize :: BasicType -> ScalExp
 basicScalarSize = SE.Val . IntVal . fromIntegral . basicSize

@@ -843,8 +843,7 @@ simplifyScalExp vtable (Let pat _ e) = do
       | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
         letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
     Just se
-      | Right new <- AS.simplify se ranges,
-        SE.Val val <- new,
+      | new@(SE.Val val) <- AS.simplify se ranges,
         se /= new ->
            letBind_ pat $ PrimOp $ SubExp $ Constant val
     _ -> cannotSimplify

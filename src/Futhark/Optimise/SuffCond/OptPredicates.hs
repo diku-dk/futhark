@@ -148,7 +148,7 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [] [patElem]) _ e):
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
-        (Nothing, Just (Right se@(SE.RelExp SE.LTH0 ine)))
+        (Nothing, Just se@(SE.RelExp SE.LTH0 ine))
           | Int <- SE.scalExpType ine ->
           case AS.mkSuffConds se ranges of
             Left err  -> error $ show err -- Why can this even fail?
@@ -366,7 +366,7 @@ makeSufficientBinding bnd = do
 
 makeSufficientBinding' :: MonadFreshNames m => Context m -> S.Binding Invariance -> VariantM m ()
 makeSufficientBinding' context@(_,vtable) (Let pat _ e)
-  | Just (Right se@(SE.RelExp SE.LTH0 ine)) <-
+  | Just se@(SE.RelExp SE.LTH0 ine) <-
       simplify <$> runReader (SE.toScalExp (`suffScalExp` vtable) e) types,
     Int <- SE.scalExpType ine,
     Right suff <- AS.mkSuffConds se ranges,

@@ -209,9 +209,8 @@ simplifyBound ranges = liftM $ simplifyKnownBound ranges
 
 simplifyKnownBound :: AS.RangesRep -> Out.KnownBound -> Out.KnownBound
 simplifyKnownBound ranges bound
-  | Just se <- Out.boundToScalExp bound,
-    Right se' <- AS.simplify se ranges =
-    Out.ScalarBound se'
+  | Just se <- Out.boundToScalExp bound =
+    Out.ScalarBound $ AS.simplify se ranges
 simplifyKnownBound ranges (Out.MinimumBound b1 b2) =
   Out.MinimumBound (simplifyKnownBound ranges b1) (simplifyKnownBound ranges b2)
 simplifyKnownBound ranges (Out.MaximumBound b1 b2) =
