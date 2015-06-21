@@ -80,8 +80,7 @@ instance Show (IxFun n) where
   show (Direct offset n) = "Direct (" ++ show offset ++ "," ++ show n ++ ")"
   show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
-  show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++
-                          ", " ++ show is ++ ")"
+  show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
   show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
 
 instance Pretty (IxFun n) where
