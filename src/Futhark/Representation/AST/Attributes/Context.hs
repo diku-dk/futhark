@@ -3,7 +3,6 @@ module Futhark.Representation.AST.Attributes.Context
   )
   where
 
-
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Attributes.Types
@@ -25,4 +24,4 @@ expExtContext pat (If _ tbranch fbranch _) = do
         _              -> Nothing
   return $ map (hasFreeDim . identName) $ patternContextIdents pat
 expExtContext pat _ =
-  pure $ replicate (length $ patternContextElements pat) Nothing
+  return $ replicate (length $ patternContextElements pat) Nothing
