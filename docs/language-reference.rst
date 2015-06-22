@@ -110,7 +110,7 @@ explicitly.
 Logical disjunction; both operands must be of type ``bool``.  As with
 ``&&``, not short-circuiting.
 
-``not x``
+``! x``
 ~~~~~~~~~
 
 Logical negation of ``x``, which must be of type ``bool``.
@@ -120,6 +120,21 @@ Logical negation of ``x``, which must be of type ``bool``.
 
 Numerical negation of ``x``, which must be of type ``real`` or
 ``int``.
+
+``~ x``
+~~~~~~~
+
+Bitwise negation of ``x``, which must be of type ``int``.
+
+``abs x``
+~~~~~~~~~
+
+Absolute value of ``x``, which must be of type ``int``.
+
+``signum x``
+~~~~~~~~~~~~
+
+Sign of ``x``, which must be of type ``int``.  Returns 1, 0, or -1.
 
 ``a[i]``
 ~~~~~~~~

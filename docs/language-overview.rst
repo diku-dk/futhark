@@ -140,7 +140,9 @@ Grammar of First-Order Fragment
    e : "[" `e` "," ...  "," `e` "]"
    e : `e` `op` `e`
    e : "-" `e`
-   e : "not" `e`
+   e : "!" `e`
+   e : "abs" `e`
+   e : "signum" `e`
    e : "if" `e` "then" `e` "else" `e`
    e : variable "[" `e` "," ...  "," `e` "]"
    e : funname "(" `e` "," ...  "," `e` ")"
