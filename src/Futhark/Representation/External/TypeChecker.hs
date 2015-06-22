@@ -608,6 +608,14 @@ checkExp (UnOp Negate e loc) = do
   e' <- require [Basic Int, Basic Float32, Basic Float64] =<< checkExp e
   return $ UnOp Negate e' loc
 
+checkExp (UnOp Abs e loc) = do
+  e' <- require [Basic Int] =<< checkExp e
+  return $ UnOp Abs e' loc
+
+checkExp (UnOp Signum e loc) = do
+  e' <- require [Basic Int] =<< checkExp e
+  return $ UnOp Signum e' loc
+
 checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Basic Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3

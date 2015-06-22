@@ -658,6 +658,12 @@ checkPrimOp (Complement e) =
 checkPrimOp (Negate e) =
   require [Basic Int, Basic Float32, Basic Float64] e
 
+checkPrimOp (Abs e) =
+  require [Basic Int] e
+
+checkPrimOp (Signum e) =
+  require [Basic Int] e
+
 checkPrimOp (Index cs ident idxes) = do
   mapM_ (requireI [Basic Cert]) cs
   vt <- lookupType ident

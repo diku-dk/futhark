@@ -388,6 +388,12 @@ defCompilePrimOp (Destination [target]) (Complement e) =
 defCompilePrimOp (Destination [target]) (Negate e) =
   writeExp target $ Imp.UnOp Imp.Negate $ compileSubExp e
 
+defCompilePrimOp (Destination [target]) (Abs e) =
+  writeExp target $ Imp.UnOp Imp.Abs $ compileSubExp e
+
+defCompilePrimOp (Destination [target]) (Signum e) =
+  writeExp target $ Imp.UnOp Imp.Signum $ compileSubExp e
+
 defCompilePrimOp (Destination [target]) (BinOp bop x y _) =
   writeExp target $ Imp.BinOp bop (compileSubExp x) (compileSubExp y)
 

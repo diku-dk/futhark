@@ -499,6 +499,16 @@ evalPrimOp (Negate e) = do
             BasicVal (Float64Val x) -> return [BasicVal $ Float64Val (-x)]
             _                       -> bad $ TypeError "evalPrimOp Negate"
 
+evalPrimOp (Abs e) = do
+  v <- evalSubExp e
+  case v of BasicVal (IntVal x)     -> return [BasicVal $ IntVal $ abs x]
+            _                       -> bad $ TypeError "evalPrimOp Abs"
+
+evalPrimOp (Signum e) = do
+  v <- evalSubExp e
+  case v of BasicVal (IntVal x)     -> return [BasicVal $ IntVal $ signum x]
+            _                       -> bad $ TypeError "evalPrimOp Signum"
+
 evalPrimOp (Index _ ident idxs) = do
   v <- lookupVar ident
   idxs' <- mapM (asInt <=< evalSubExp) idxs

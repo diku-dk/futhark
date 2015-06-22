@@ -534,6 +534,14 @@ internaliseExp desc (E.UnOp E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   letTupExp' desc $ I.PrimOp $ I.Negate e'
 
+internaliseExp desc (E.UnOp E.Abs e _) = do
+  e' <- internaliseExp1 "abs_arg" e
+  letTupExp' desc $ I.PrimOp $ I.Abs e'
+
+internaliseExp desc (E.UnOp E.Signum e _) = do
+  e' <- internaliseExp1 "signum_arg" e
+  letTupExp' desc $ I.PrimOp $ I.Signum e'
+
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]

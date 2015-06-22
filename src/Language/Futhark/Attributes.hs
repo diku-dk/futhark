@@ -594,6 +594,8 @@ typeOf (BinOp _ _ _ t _) = t
 typeOf (UnOp Not _ _) = Basic Bool
 typeOf (UnOp Negate e _) = typeOf e
 typeOf (UnOp Complement _ _) = Basic Int
+typeOf (UnOp Abs _ _) = Basic Int
+typeOf (UnOp Signum _ _) = Basic Int
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of

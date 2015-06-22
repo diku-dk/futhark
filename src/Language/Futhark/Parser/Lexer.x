@@ -90,6 +90,8 @@ keyword s =
     "False"        -> FALSE
     "Checked"      -> CHECKED
     "pow"          -> POW
+    "abs"          -> ABS
+    "signum"       -> SIGNUM
 
     "iota"         -> IOTA
     "size"         -> SIZE

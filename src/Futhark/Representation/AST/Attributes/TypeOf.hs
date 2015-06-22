@@ -85,6 +85,10 @@ primOpType (Complement _) =
   pure [Basic Int]
 primOpType (Negate e) =
   pure <$> subExpType e
+primOpType (Abs _) =
+  pure [Basic Int]
+primOpType (Signum _) =
+  pure [Basic Int]
 primOpType (Index _ ident idx) =
   result <$> lookupType ident
   where result t = [stripArray (length idx) t]

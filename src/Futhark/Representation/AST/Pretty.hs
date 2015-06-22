@@ -176,6 +176,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
   ppr (Not e) = text "!" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
+  ppr (Abs e) = text "abs" <> pprPrec 9 e
+  ppr (Signum e) = text "signum" <> pprPrec 9 e
   ppr (Complement e) = text "~" <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>

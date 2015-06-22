@@ -253,6 +253,8 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 data UnOp = Not
           | Negate
           | Complement
+          | Abs
+          | Signum
           deriving (Eq, Ord, Show)
 
 -- | Binary operators.

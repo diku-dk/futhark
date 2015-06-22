@@ -111,6 +111,10 @@ mapExpM tv (PrimOp (Complement x)) =
   PrimOp <$> (Complement <$> mapOnSubExp tv x)
 mapExpM tv (PrimOp (Negate x)) =
   PrimOp <$> (Negate <$> mapOnSubExp tv x)
+mapExpM tv (PrimOp (Abs x)) =
+  PrimOp <$> (Abs <$> mapOnSubExp tv x)
+mapExpM tv (PrimOp (Signum x)) =
+  PrimOp <$> (Signum <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp ts) =
   pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
        mapM (mapOnExtType tv) ts

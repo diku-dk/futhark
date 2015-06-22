@@ -116,6 +116,8 @@ instance Pretty UnOp where
   ppr Not = text "!"
   ppr Negate = text "-"
   ppr Complement = text "~"
+  ppr Abs = text "abs "
+  ppr Signum = text "signum "
 
 instance Pretty BinOp where
   ppr Plus = text "+"

@@ -137,6 +137,8 @@ import Language.Futhark.Parser.Lexer
       false           { L $$ FALSE }
       checked         { L $$ CHECKED }
       '~'             { L $$ TILDE }
+      abs             { L $$ ABS }
+      signum          { L $$ SIGNUM }
       '&&'            { L $$ AND }
       '||'            { L $$ OR }
       op              { L $$ OP }
@@ -165,7 +167,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%'
 %left pow
-%nonassoc '~' '!'
+%nonassoc '~' '!' signum abs
 
 %%
 
@@ -196,6 +198,8 @@ BinOp :: { (BinOp, SrcLoc) }
 UnOp :: { (UnOp, SrcLoc) }
      : '~' { (Complement, $1) }
      | '!' { (Not, $1) }
+     | abs { (Abs, $1) }
+     | signum { (Signum, $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
@@ -291,6 +295,8 @@ Exp  :: { UncheckedExp }
      | '-' Exp %prec '~' { UnOp Negate $2 $1 }
      | '!' Exp        { UnOp Not $2 $1 }
      | '~' Exp        { UnOp Complement $2 $1 }
+     | abs Exp        { UnOp Abs $2 $1 }
+     | signum Exp     { UnOp Signum $2 $1 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }

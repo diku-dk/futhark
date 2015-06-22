@@ -99,5 +99,7 @@ data Token = IF
            | STREAM_SEQ
            | STREAM_SEQMAX
            | BANG
+           | ABS
+           | SIGNUM
            | EOF
              deriving (Show, Eq)

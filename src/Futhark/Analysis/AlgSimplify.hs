@@ -622,6 +622,10 @@ simplifyScal (SNeg e) = do
     negOne <- getNeg1 $ scalExpType e
     simplifyScal $ STimes (Val negOne) e
 
+simplifyScal (SAbs e) = return $ SAbs e
+
+simplifyScal (SSignum e) = return $ SSignum e
+
 ---------------------------------------------------
 --- Times        related simplifications        ---
 --- BUG: the MinMax pattern matching should     ---
@@ -1066,6 +1070,9 @@ simplifyAndOr is_and fs =
 negateSimplified :: ScalExp -> AlgSimplifyM ScalExp
 negateSimplified (SNeg e) = return e
 negateSimplified (SNot e) = return e
+negateSimplified (SAbs e) = return $ SAbs e
+negateSimplified (SSignum e) =
+  SSignum <$> negateSimplified e
 negateSimplified e@(Val v) = do
     m1 <- getNeg1 $ scalExpType e
     v' <- mulVals m1 v; return $ Val v'

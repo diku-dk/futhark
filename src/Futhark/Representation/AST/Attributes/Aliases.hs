@@ -40,6 +40,8 @@ primOpAliases (BinOp {}) = [mempty]
 primOpAliases (Not {}) = [mempty]
 primOpAliases (Complement {}) = [mempty]
 primOpAliases (Negate {}) = [mempty]
+primOpAliases (Abs {}) = [mempty]
+primOpAliases (Signum {}) = [mempty]
 primOpAliases (Index _ ident _) =
   [vnameAliases ident]
 primOpAliases (Iota {}) =

@@ -13,6 +13,8 @@ module Futhark.Tools
   , eBinOp
   , eNegate
   , eNot
+  , eAbs
+  , eSignum
   , eIndex
   , eCopy
   , eAssert
@@ -156,6 +158,18 @@ eNot :: MonadBinder m =>
 eNot e = do
   e' <- letSubExp "not_arg" =<< e
   return $ PrimOp $ Not e'
+
+eAbs :: MonadBinder m =>
+        m (Exp (Lore m)) -> m (Exp (Lore m))
+eAbs e = do
+  e' <- letSubExp "abs_arg" =<< e
+  return $ PrimOp $ Abs e'
+
+eSignum :: MonadBinder m =>
+        m (Exp (Lore m)) -> m (Exp (Lore m))
+eSignum e = do
+  e' <- letSubExp "signum_arg" =<< e
+  return $ PrimOp $ Signum e'
 
 eIndex :: MonadBinder m =>
           Certificates -> VName -> [m (Exp (Lore m))]
