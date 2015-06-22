@@ -54,6 +54,8 @@ data ScalExp= Val     BasicValue
             | Id      VName BasicType
             | SNeg    ScalExp
             | SNot    ScalExp
+            | SAbs    ScalExp
+            | SSignum ScalExp
             | SPlus   ScalExp ScalExp
             | SMinus  ScalExp ScalExp
             | STimes  ScalExp ScalExp
@@ -65,11 +67,38 @@ data ScalExp= Val     BasicValue
             | SLogOr  ScalExp ScalExp
               deriving (Eq, Ord, Show)
 
+instance Num ScalExp where
+  0 + y = y
+  x + 0 = x
+  x + y = SPlus x y
+
+  x - 0 = x
+  x - y = SMinus x y
+
+  0 * _ = 0
+  _ * 0 = 0
+  1 * y = y
+  y * 1 = y
+  x * y = STimes x y
+
+  abs = SAbs
+  signum = SSignum
+  fromInteger = Val . IntVal . fromInteger
+  negate = SNeg
+
+instance Fractional ScalExp where
+  0 / _ = 0
+  x / 1 = x
+  x / y = SDivide x y
+  fromRational = Val . Float64Val . fromRational
+
 instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ BasicVal val
   pprPrec _ (Id v _) = ppr v
   pprPrec _ (SNeg e) = text "-" <> pprPrec 9 e
   pprPrec _ (SNot e) = text "not" <+> pprPrec 9 e
+  pprPrec _ (SAbs e) = text "abs" <+> pprPrec 9 e
+  pprPrec _ (SSignum e) = text "signum" <+> pprPrec 9 e
   pprPrec prec (SPlus x y) = ppBinOp prec "+" 4 4 x y
   pprPrec prec (SMinus x y) = ppBinOp prec "-" 4 10 x y
   pprPrec prec (SPow x y) = ppBinOp prec "^" 6 6 x y
@@ -95,6 +124,8 @@ instance Substitute ScalExp where
               Val v -> Val v
               SNeg x -> SNeg $ substituteNames subst x
               SNot x -> SNot $ substituteNames subst x
+              SAbs x -> SAbs $ substituteNames subst x
+              SSignum x -> SSignum $ substituteNames subst x
               SPlus x y -> substituteNames subst x `SPlus` substituteNames subst y
               SMinus x y -> substituteNames subst x `SMinus` substituteNames subst y
               SPow x y -> substituteNames subst x `SPow` substituteNames subst y
@@ -112,10 +143,11 @@ instance Rename ScalExp where
 
 scalExpType :: ScalExp -> BasicType
 scalExpType (Val v) = basicValueType v
-scalExpType (Id _ t) =
-  t
-scalExpType (SNeg  e) = scalExpType e
-scalExpType (SNot  _) = Bool
+scalExpType (Id _ t) = t
+scalExpType (SNeg    e) = scalExpType e
+scalExpType (SNot    _) = Bool
+scalExpType (SAbs    e) = scalExpType e
+scalExpType (SSignum _) = Int
 scalExpType (SPlus   e _) = scalExpType e
 scalExpType (SMinus  e _) = scalExpType e
 scalExpType (STimes  e _) = scalExpType e
@@ -194,6 +226,8 @@ expandScalExp _ (Val v) = Val v
 expandScalExp look (Id v t) = fromMaybe (Id v t) $ look v
 expandScalExp look (SNeg se) = SNeg $ expandScalExp look se
 expandScalExp look (SNot se) = SNot $ expandScalExp look se
+expandScalExp look (SAbs se) = SAbs $ expandScalExp look se
+expandScalExp look (SSignum se) = SSignum $ expandScalExp look se
 expandScalExp look (MaxMin b ses) = MaxMin b $ map (expandScalExp look) ses
 expandScalExp look (SPlus x y) = SPlus (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SMinus x y) = SMinus (expandScalExp look x) (expandScalExp look y)
@@ -248,6 +282,8 @@ fromScalExp' = convert
         convert (Id v _)  = return $ PrimOp $ SubExp $ Var v
         convert (SNeg se) = eNegate $ convert se
         convert (SNot se) = eNot $ convert se
+        convert (SAbs se) = eAbs $ convert se
+        convert (SSignum se) = eSignum $ convert se
         convert (SPlus x y) = arithBinOp Plus x y
         convert (SMinus x y) = arithBinOp Minus x y
         convert (STimes x y) = arithBinOp Times x y
@@ -283,6 +319,8 @@ instance FreeIn ScalExp where
   freeIn (Id i _)  = HS.singleton i
   freeIn (SNeg  e) = freeIn e
   freeIn (SNot  e) = freeIn e
+  freeIn (SAbs  e) = freeIn e
+  freeIn (SSignum e) = freeIn e
   freeIn (SPlus x y)   = freeIn x <> freeIn y
   freeIn (SMinus x y)  = freeIn x <> freeIn y
   freeIn (SPow x y)    = freeIn x <> freeIn y
