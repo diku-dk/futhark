@@ -33,6 +33,8 @@ class (Lore lore,
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
   ppFunDecLore = const Nothing
+  ppLambdaLore :: Lambda lore -> Maybe Doc
+  ppLambdaLore = const Nothing
   ppExpLore :: Exp lore -> Maybe Doc
   ppExpLore = const Nothing
 
@@ -284,15 +286,16 @@ instance PrettyLore lore => Pretty (Exp lore) where
                              apply (map (align . ppr . fst) args)
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr (Lambda params body rettype) =
+  ppr lambda@(Lambda params body rettype) =
+    maybe id (</>) (ppLambdaLore lambda) $
     text "fn" <+> ppTuple' rettype <+>
-    apply (map ppr params) <+>
+    apply (map (ppr . paramIdent) params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
   ppr (ExtLambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    apply (map ppr params) <+>
+    apply (map (ppr . paramIdent) params) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where

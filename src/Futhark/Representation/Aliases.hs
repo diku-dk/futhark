@@ -184,6 +184,7 @@ instance (PrettyLore lore) => PrettyLore (Aliases lore) where
             (unNames . fst . patElemLore $ patelem)
 
   ppFunDecLore = ppFunDecLore . removeFunDecAliases
+  ppLambdaLore = ppLambdaLore . removeLambdaAliases
 
   ppExpLore e@(AST.LoopOp (DoLoop _ merge _ body)) =
     maybeComment $ catMaybes [expAttr, mergeAttr]
