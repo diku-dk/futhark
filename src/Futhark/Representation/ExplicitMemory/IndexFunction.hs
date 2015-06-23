@@ -27,39 +27,36 @@ import Data.Type.Equality hiding (outer)
 
 import Prelude
 
-import Futhark.Analysis.ScalExp
 import Futhark.Substitute
 import Futhark.Renamer
 
 import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
-import Language.Futhark.Core
-import Futhark.Representation.AST (SubExp (..))
 
 import Text.PrettyPrint.Mainland
 
-type Shape = Vector SubExp
-type Indices = Vector ScalExp
+type Shape num = Vector num
+type Indices num = Vector num
 
-data IxFun :: Nat -> * where
-  Direct :: ScalExp -> Shape n -> IxFun n
-  Offset :: IxFun n -> ScalExp -> IxFun n
-  Permute :: IxFun n -> Perm.Permutation n -> IxFun n
-  Index :: SNat n -> IxFun (m:+:n) -> Indices m -> IxFun n
-  Reshape :: IxFun (S m) -> Shape n -> IxFun n
+data IxFun :: * -> Nat -> * where
+  Direct :: num -> Shape num n -> IxFun num n
+  Offset :: IxFun num n -> num -> IxFun num n
+  Permute :: IxFun num n -> Perm.Permutation n -> IxFun num n
+  Index :: SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
+  Reshape :: IxFun num (S m) -> Shape num n -> IxFun num n
 
 --- XXX: this is just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
-instance Eq (IxFun n) where
+instance (Fractional num, Eq num) => Eq (IxFun num n) where
   Direct offset1 _ == Direct offset2 _ =
     offset1 == offset2
   Offset ixfun1 offset1 == Offset ixfun2 offset2 =
     ixfun1 == ixfun2 && offset1 == offset2
   Permute ixfun1 perm1 == Permute ixfun2 perm2 =
     ixfun1 == ixfun2 && perm1 == perm2
-  Index _ (ixfun1 :: IxFun (m1 :+: n)) (is1 :: Indices m1)
-    == Index _ (ixfun2 :: IxFun (m2 :+: n)) (is2 :: Indices m2) =
+  Index _ (ixfun1 :: IxFun num (m1 :+: n)) (is1 :: Indices nun m1)
+    == Index _ (ixfun2 :: IxFun num (m2 :+: n)) (is2 :: Indices num m2) =
     case testEquality m1' m2' of
       Nothing -> False
       Just Refl ->
@@ -76,14 +73,14 @@ instance Eq (IxFun n) where
       _ -> False
   _ == _ = False
 
-instance Show (IxFun n) where
+instance Show num => Show (IxFun num n) where
   show (Direct offset n) = "Direct (" ++ show offset ++ "," ++ show n ++ ")"
   show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
   show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
   show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
 
-instance Pretty (IxFun n) where
+instance Pretty num => Pretty (IxFun num n) where
   ppr (Direct offset dims) =
     text "Direct" <> parens (commasep $ ppr offset : map ppr (Vec.toList dims))
   ppr (Offset fun k) = ppr fun <+> text "+" <+> ppr k
@@ -93,7 +90,7 @@ instance Pretty (IxFun n) where
     ppr fun <> text "->" <>
     parens (commasep (map ppr $ Vec.toList oldshape))
 
-instance Substitute (IxFun n) where
+instance Substitute num => Substitute (IxFun num n) where
   substituteNames subst (Direct offset n) =
     Direct (substituteNames subst offset) n
   substituteNames subst (Offset fun k) =
@@ -109,7 +106,7 @@ instance Substitute (IxFun n) where
     (substituteNames subst fun)
     (Vec.map (substituteNames subst) newshape)
 
-instance Rename (IxFun n) where
+instance (Substitute num, Rename num) => Rename (IxFun num n) where
   -- Because there is no mapM-like function on sized vectors, we
   -- implement renaming by retrieving the substitution map, then using
   -- 'substituteNames'.  This is safe as index functions do not
@@ -118,26 +115,26 @@ instance Rename (IxFun n) where
     subst <- renamerSubstitutions
     return $ substituteNames subst ixfun
 
-index :: forall (n::Nat).
-         IxFun (S n) -> Indices (S n) -> ScalExp -> ScalExp
+index :: forall (n::Nat) num. Fractional num =>
+         IxFun num (S n) -> Indices num (S n) -> num -> num
 
 index (Direct offset dims) is element_size =
-  (ssum (Vec.toList $ Vec.zipWithSame STimes is slicesizes) `STimes` element_size) `SPlus` offset
-  where slicesizes :: Vector ScalExp (S n)
+  (Vec.sum (Vec.zipWithSame (*) is slicesizes) * element_size) + offset
+  where slicesizes :: Vector num (S n)
         slicesizes = Vec.tail $ sliceSizes dims
 
 index (Offset fun offset) (i :- is) element_size =
-  index fun ((i `SPlus` offset) :- is) element_size
+  index fun ((i + offset) :- is) element_size
 
 index (Permute fun perm) is_new element_size =
   index fun is_old element_size
-  where is_old   = Perm.apply (Perm.invert perm) is_new
+  where is_old = Perm.apply (Perm.invert perm) is_new
 
-index (Index _ fun (is1::Indices m)) is2 element_size =
+index (Index _ fun (is1::Indices num m)) is2 element_size =
   case (singInstance $ sLength is1,
         singInstance $ sLength is2 %:- sOne) of
     (SingInstance,SingInstance) ->
-      let is :: Indices (m :+ S n)
+      let is :: Indices num (m :+ S n)
           is = is1 `Vec.append` is2
           outer = succPlusR (sing :: SNat m) (sing :: SNat n)
           proof :: (m :+ S n) :=: S (m :+ n)
@@ -146,54 +143,64 @@ index (Index _ fun (is1::Indices m)) is2 element_size =
         SingInstance ->
           index (coerce outer fun) (coerce outer is) element_size
 
-index (Reshape (fun :: IxFun (S m)) newshape) is element_size =
+index (Reshape (fun :: IxFun num (S m)) newshape) is element_size =
   -- First, compute a flat index based on the new shape.  Then, turn
   -- that into an index set for the inner index function and apply the
   -- inner index function to that set.
   let oldshape = shape fun
       flatidx = computeFlatIndex newshape is
-      innerslicesizes :: Vector ScalExp (S m)
+      innerslicesizes :: Vector num (S m)
       innerslicesizes = Vec.tail $ sliceSizes oldshape
-      new_indices :: Indices (S m)
+      new_indices :: Indices num (S m)
       new_indices = computeNewIndices innerslicesizes flatidx
   in index fun new_indices element_size
 
-computeNewIndices :: Vector ScalExp k -> ScalExp -> Indices k
+computeNewIndices :: Fractional num =>
+                     Vector num k -> num -> Indices num k
 computeNewIndices Nil _ =
   Nil
 computeNewIndices (size :- slices) i =
-  (i `SDivide` size) :-
-  computeNewIndices slices (i `SMinus` ((i `SDivide` size) `STimes` size))
+  (i / size) :-
+  computeNewIndices slices (i - (i / size) * size)
 
-computeFlatIndex :: Shape (S k) -> Indices (S k) -> ScalExp
+computeFlatIndex :: Fractional num =>
+                    Shape num (S k) -> Indices num (S k) -> num
 computeFlatIndex dims is =
-  ssum $ Vec.toList $ Vec.zipWithSame STimes is slicesizes
+  Vec.sum $ Vec.zipWithSame (*) is slicesizes
   where slicesizes = Vec.tail $ sliceSizes dims
 
-sliceSizes :: Shape m -> Vector ScalExp (S m)
-sliceSizes Nil = singleton $ Val $ IntVal 1
+sliceSizes :: Fractional num =>
+              Shape num m -> Vector num (S m)
+sliceSizes Nil =
+  singleton 1
 sliceSizes (n :- ns) =
-  sproduct (map intSubExpToScalExp $ n : Vec.toList ns) :-
+  Vec.product (n :- ns) :-
   sliceSizes ns
 
-iota :: Shape n -> IxFun n
-iota = Direct $ Val $ IntVal 0
+iota :: Fractional num =>
+        Shape num n -> IxFun num n
+iota = Direct 0
 
-offsetIndex :: IxFun n -> ScalExp -> IxFun n
+offsetIndex :: Fractional num =>
+               IxFun num n -> num -> IxFun num n
 offsetIndex = Offset
 
-permute :: IxFun n -> Perm.Permutation n -> IxFun n
+permute :: Fractional num =>
+           IxFun num n -> Perm.Permutation n -> IxFun num n
 permute = Permute
 
-reshape :: IxFun (S m) -> Shape n -> IxFun n
+reshape :: Fractional num =>
+           IxFun num (S m) -> Shape num n -> IxFun num n
 reshape = Reshape
 
-applyInd :: SNat n -> IxFun (m:+:n) -> Indices m -> IxFun n
+applyInd :: Fractional num =>
+            SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
 applyInd = Index
 
-offsetUnderlying :: IxFun n -> ScalExp -> IxFun n
+offsetUnderlying :: Fractional num =>
+                    IxFun num n -> num -> IxFun num n
 offsetUnderlying (Direct offset dims) k =
-  Direct (offset `SPlus` k) dims
+  Direct (offset + k) dims
 offsetUnderlying (Offset ixfun m) k =
   Offset (offsetUnderlying ixfun k) m
 offsetUnderlying (Permute ixfun perm) k =
@@ -203,25 +210,28 @@ offsetUnderlying (Index n ixfun is) k =
 offsetUnderlying (Reshape ixfun dims) k =
   Reshape (offsetUnderlying ixfun k) dims
 
-codomain :: IxFun n -> SymSet n
+codomain :: Fractional num =>
+            IxFun num n -> SymSet n
 codomain = undefined
 
-rank :: IxFun n -> SNat n
+rank :: Fractional num =>
+        IxFun num n -> SNat n
 rank (Direct _ dims) = sLength dims
 rank (Offset ixfun _) = rank ixfun
 rank (Permute ixfun _) = rank ixfun
 rank (Index n _ _) = n
 rank (Reshape _ newshape) = sLength newshape
 
-shape :: IxFun n -> Shape n
+shape :: Fractional num =>
+         IxFun num n -> Shape num n
 shape (Direct _ dims) =
   dims
 shape (Permute ixfun perm) =
   Perm.apply perm $ shape ixfun
 shape (Offset ixfun _) =
   shape ixfun
-shape (Index n (ixfun::IxFun (m :+ n)) (indices::Indices m)) =
-  let ixfunshape :: Shape (m :+ n)
+shape (Index n (ixfun::IxFun num (m :+ n)) (indices::Indices num m)) =
+  let ixfunshape :: Shape num (m :+ n)
       ixfunshape = shape ixfun
       islen :: SNat m
       islen = Vec.sLength indices
@@ -232,7 +242,7 @@ shape (Index n (ixfun::IxFun (m :+ n)) (indices::Indices m)) =
   in
    case (propToBoolLeq prop, prop2) of
      (Dict,Refl) ->
-       let resshape :: Shape ((m :+ n) :- m)
+       let resshape :: Shape num ((m :+ n) :- m)
            resshape = Vec.drop islen ixfunshape
        in resshape
 shape (Reshape _ dims) =
@@ -240,20 +250,21 @@ shape (Reshape _ dims) =
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.  We really miss a case for Index, though.
-linearWithOffset :: forall n.
-                    IxFun n -> ScalExp -> Maybe ScalExp
-linearWithOffset (Direct offset _) _ = Just offset
+linearWithOffset :: forall n num. Fractional num =>
+                    IxFun num n -> num -> Maybe num
+linearWithOffset (Direct offset _) _ =
+  Just offset
 linearWithOffset (Offset ixfun n) element_size = do
   inner_offset <- linearWithOffset ixfun element_size
   case Vec.tail $ sliceSizes $ shape ixfun of
     Nil -> Nothing
     rowslice :- _ ->
-      return $ inner_offset `SPlus` (n `STimes` rowslice `STimes` element_size)
+      return $ inner_offset + (n * rowslice * element_size)
 linearWithOffset (Reshape ixfun _) element_size =
  linearWithOffset ixfun element_size
 linearWithOffset _ _ = Nothing
 
-instance FreeIn (IxFun n) where
+instance FreeIn num => FreeIn (IxFun num n) where
   freeIn (Direct offset dims) = freeIn offset <> freeIn (Vec.toList dims)
   freeIn (Offset ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Permute ixfun _) = freeIn ixfun

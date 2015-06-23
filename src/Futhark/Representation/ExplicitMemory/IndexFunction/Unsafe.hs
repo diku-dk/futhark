@@ -47,7 +47,7 @@ import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
 import Language.Futhark.Core
 import Futhark.Representation.AST.Pretty (pretty)
 
-data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun (S n))
+data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun ScalExp (S n))
 
 instance Show IxFun where
   show (IxFun _ fun) = show fun
@@ -91,7 +91,8 @@ index f is element_size = case f of
 iota :: Shape -> IxFun
 iota shape = case toSing (intToNat $ n-1) of
   SomeSing (sb::SNat n) ->
-    IxFun (SS sb) $ Safe.iota $ unsafeFromList (SS sb) shape
+    IxFun (SS sb) $ Safe.iota $ unsafeFromList (SS sb) $
+    map intSubExpToScalExp shape
   where n = Prelude.length shape
 
 offsetIndex :: IxFun -> ScalExp -> IxFun
@@ -132,10 +133,11 @@ reshape (IxFun _ ixfun) newshape =
   case toSing $ intToNat $ Prelude.length newshape-1 of
     SomeSing (sn::SNat n) ->
       IxFun (SS sn) $
-      Safe.reshape ixfun $ unsafeFromList (SS sn) newshape
+      Safe.reshape ixfun $ unsafeFromList (SS sn) $
+      map intSubExpToScalExp newshape
 
 applyInd :: IxFun -> Indices -> IxFun
-applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
+applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun ScalExp (S n))) is =
   case promote (Prelude.length is) :: Monomorphic (Sing :: Nat -> *) of
     Monomorphic (mnat::SNat m) ->
       case mnat %:<<= nnat of
@@ -144,15 +146,15 @@ applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun (S n))) is =
               k = SS $ nnat %- mnat
               nmnat :: SNat (n :- m)
               nmnat = nnat %- mnat
-              is' :: Safe.Indices m
+              is' :: Safe.Indices ScalExp m
               is' = unsafeFromList mnat is
               proof :: S n :=: (m :+: S (n :- m))
               proof = sym $
                       trans (succPlusR mnat nmnat)
                       (succCongEq (minusPlusEqR nnat mnat))
-              f' :: Safe.IxFun (m :+: S (n :- m))
+              f' :: Safe.IxFun ScalExp (m :+: S (n :- m))
               f' = coerce proof f
-              ixfun' :: Safe.IxFun (S (n :- m))
+              ixfun' :: Safe.IxFun ScalExp (S (n :- m))
               ixfun' = Safe.applyInd k f' is'
           in IxFun k ixfun'
         SFalse ->
