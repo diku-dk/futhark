@@ -8,8 +8,12 @@
 -- compatible).
 module Futhark.Util
        (mapAccumLM,
-        chunk)
+        chunk,
+        mapEither
+        )
        where
+
+import Data.Either
 
 -- | Like 'mapAccumL', but monadic.
 mapAccumLM :: Monad m =>
@@ -28,3 +32,7 @@ chunk _ [] = []
 chunk n xs =
   let (bef,aft) = splitAt n xs
   in bef : chunk n aft
+
+-- | A combination of 'map' and 'partitionEithers'.
+mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
+mapEither f l = partitionEithers $ map f l
