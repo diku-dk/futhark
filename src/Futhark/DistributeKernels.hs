@@ -414,6 +414,10 @@ createKernelNest
               (pat', body', identity_map, expand_target) =
                 removeIdentityMapping pat body
               required_res = newKernelNames let_bound body'
+              (used_params, used_arrs) =
+                unzip $
+                filter ((`HS.member` freeInBody body') . paramName . fst) $
+                zip params arrs
 
           required_res_idents <- forM (HS.toList required_res) $ \name -> do
             t <- lift $ lookupType name
@@ -443,9 +447,15 @@ createKernelNest
                 map snd $ filter fst $ zip bind_in_target free_params
               rettype = patternMapTypes pat'
 
+              (actual_params, actual_arrs) =
+                case (used_params++free_params,
+                      used_arrs++map identName free_arrs) of
+                 ([], []) -> (params,arrs) -- XXX - we want to avoid
+                                           -- empty argument lists.
+                 l        -> l
+
           return (Let pat' () $ LoopOp $
-                  Map cs (Lambda (params++free_params) body' rettype) $
-                  arrs ++ map identName free_arrs,
+                  Map cs (Lambda actual_params body' rettype) actual_arrs,
 
                   addTarget $ expand_target
                   (free_arrs_pat, map (Var . paramName) free_params_pat))
