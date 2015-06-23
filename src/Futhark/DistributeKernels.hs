@@ -363,7 +363,7 @@ distribute acc = do
          (kernelTargets acc) (mkBody bnds res) >>=
          \case
            Just (distributed, targets) -> do
-             distributed' <- renameBinding distributed
+             distributed' <- optimiseKernel <$> renameBinding distributed
              trace ("distributing\n" ++
                     pretty (mkBody bnds res) ++
                     "\nas\n" ++ pretty distributed ++
@@ -375,6 +375,72 @@ distribute acc = do
                               }
            Nothing ->
              return acc
+
+optimiseKernel :: Binding -> Binding
+optimiseKernel bnd = fromMaybe bnd $ tryOptimiseKernel bnd
+
+tryOptimiseKernel :: Binding -> Maybe Binding
+tryOptimiseKernel bnd = kernelIsRearrange bnd <|>
+                        kernelIsReshape bnd <|>
+                        kernelBodyOptimisable bnd
+
+singleBindingBody :: Body -> Maybe Binding
+singleBindingBody (Body _ [bnd] [res])
+  | [res] == map Var (patternNames $ bindingPattern bnd) =
+      Just bnd
+singleBindingBody _ = Nothing
+
+singleExpBody :: Body -> Maybe Exp
+singleExpBody = liftM bindingExp . singleBindingBody
+
+kernelIsRearrange :: Binding -> Maybe Binding
+kernelIsRearrange (Let outer_pat _
+                   (LoopOp (Map outer_cs outer_fun [outer_arr]))) =
+  delve 1 outer_cs outer_fun
+  where delve n cs (Lambda [param] body _)
+          | Just (PrimOp (Rearrange inner_cs perm arr)) <-
+              singleExpBody body,
+            paramName param == arr =
+              let cs' = cs ++ inner_cs
+                  perm' = [0..n-1] ++ map (n+) perm
+              in Just $ Let outer_pat () $
+                 PrimOp $ Rearrange cs' perm' outer_arr
+          | Just (LoopOp (Map inner_cs fun [arr])) <- singleExpBody body,
+            paramName param == arr =
+            delve (n+1) (cs++inner_cs) fun
+        delve _ _ _ =
+          Nothing
+kernelIsRearrange _ = Nothing
+
+kernelIsReshape :: Binding -> Maybe Binding
+kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
+                 (LoopOp (Map outer_cs outer_fun [outer_arr]))) =
+  delve outer_cs outer_fun
+    where new_shape = arrayDims $ patElemType outer_patElem
+
+          delve cs (Lambda [param] body _)
+            | Just (PrimOp (Reshape inner_cs _ arr)) <-
+              singleExpBody body,
+              paramName param == arr =
+              let cs' = cs ++ inner_cs
+              in Just $ Let (Pattern [] [outer_patElem]) () $
+                 PrimOp $ Reshape cs' new_shape outer_arr
+
+            | Just (LoopOp (Map inner_cs fun [arr])) <- singleExpBody body,
+              paramName param == arr =
+              delve (cs++inner_cs) fun
+
+          delve _ _ =
+            Nothing
+kernelIsReshape _ = Nothing
+
+kernelBodyOptimisable :: Binding -> Maybe Binding
+kernelBodyOptimisable (Let pat () (LoopOp (Map cs fun arrs))) = do
+  bnd <- tryOptimiseKernel =<< singleBindingBody (lambdaBody fun)
+  let body = (lambdaBody fun) { bodyBindings = [bnd] }
+  return $ Let pat () $ LoopOp $ Map cs fun { lambdaBody = body } arrs
+kernelBodyOptimisable _ =
+  Nothing
 
 createKernelNest :: Names -> Nestings -> Targets
                  -> Body
@@ -549,7 +615,14 @@ maybeDistributeBinding :: Binding -> KernelAcc
 maybeDistributeBinding (Let pat _ (LoopOp (Map cs lam arrs))) acc = do
   acc' <- distribute acc
   distribute =<< distributeInnerMap pat (MapLoop cs lam arrs) acc'
-maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc =
-  distribute $ addBindingToKernel bnd acc
+maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
+  acc' <- distribute acc
+  distribute $ addBindingToKernel bnd acc'
+maybeDistributeBinding bnd@(Let _ _ (PrimOp (Rearrange {}))) acc = do
+  acc' <- distribute acc
+  distribute $ addBindingToKernel bnd acc'
+maybeDistributeBinding bnd@(Let _ _ (PrimOp (Reshape {}))) acc = do
+  acc' <- distribute acc
+  distribute $ addBindingToKernel bnd acc'
 maybeDistributeBinding bnd acc =
   return $ addBindingToKernel bnd acc
