@@ -260,10 +260,10 @@ fun real horner (real x) =
    let {c1,c2,c3,c4,c5} = {0.31938153,-0.356563782,1.781477937,-1.821255978,1.330274429}
    in x * (c1 + x * (c2 + x * (c3 + x * (c4 + x * c5))))
 
-fun real abs (real x) = if x < 0.0 then -x else x
+fun real fabs (real x) = if x < 0.0 then -x else x
 
 fun real cnd0 (real d) =
-   let k        = 1.0 / (1.0 + 0.2316419 * abs(d)) in
+   let k        = 1.0 / (1.0 + 0.2316419 * fabs(d)) in
    let p        = horner(k) in
    let rsqrt2pi = 0.39894228040143267793994605993438 in
    rsqrt2pi * exp(-0.5*d*d) * p
