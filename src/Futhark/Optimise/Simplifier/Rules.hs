@@ -83,9 +83,8 @@ basicRules :: MonadBinder m => RuleBook m
 basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 liftIdentityMapping :: MonadBinder m => TopDownRule m
-liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
-  outersize <- arraysSize 0 <$> mapM lookupType arrs
-  case foldr (checkInvariance outersize) ([], [], []) $
+liftIdentityMapping _ (Let pat _ (LoopOp (Map cs outersize fun arrs))) =
+  case foldr checkInvariance ([], [], []) $
        zip3 (patternElements pat) ses rettype of
     ([], _, _) -> cannotSimplify
     (invariant, mapresult, rettype') -> do
@@ -94,7 +93,7 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
                      , lambdaReturnType = rettype'
                      }
       mapM_ (uncurry letBind) invariant
-      letBindNames'_ (map patElemName pat') $ LoopOp $ Map cs fun' arrs
+      letBindNames'_ (map patElemName pat') $ LoopOp $ Map cs outersize fun' arrs
   where inputMap = HM.fromList $ zip (map paramName $ lambdaParams fun) arrs
         free = freeInBody $ lambdaBody fun
         rettype = lambdaReturnType fun
@@ -103,20 +102,19 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs fun arrs))) = do
         freeOrConst (Var v)       = v `HS.member` free
         freeOrConst (Constant {}) = True
 
-        checkInvariance :: SubExp
-                        -> (PatElem lore, SubExp, Type)
+        checkInvariance :: (PatElem lore, SubExp, Type)
                         -> ([(Pattern lore, Exp lore)],
                             [(PatElem lore, SubExp)],
                             [Type])
                         -> ([(Pattern lore, Exp lore)],
                             [(PatElem lore, SubExp)],
                             [Type])
-        checkInvariance _ (outId, Var v, _) (invariant, mapresult, rettype')
+        checkInvariance (outId, Var v, _) (invariant, mapresult, rettype')
           | Just inp <- HM.lookup v inputMap =
             ((Pattern [] [outId], PrimOp $ SubExp $ Var inp) : invariant,
              mapresult,
              rettype')
-        checkInvariance outersize (outId, e, t) (invariant, mapresult, rettype')
+        checkInvariance (outId, e, t) (invariant, mapresult, rettype')
           | freeOrConst e = ((Pattern [] [outId], PrimOp $ Replicate outersize e) : invariant,
                              mapresult,
                              rettype')
@@ -128,21 +126,12 @@ liftIdentityMapping _ _ = cannotSimplify
 -- | Remove all arguments to the map that are simply replicates.
 -- These can be turned into free variables instead.
 removeReplicateMapping :: MonadBinder m => TopDownRule m
-removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs fun arrs)))
+removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs outersize fun arrs)))
   | not $ null parameterBnds = do
-  n <- arraysSize 0 <$> mapM lookupType arrs
   let (params, arrs') = unzip paramsAndArrs
       fun' = fun { lambdaParams = params }
-      -- Empty maps are not permitted, so if that would be the result,
-      -- turn the entire map into a replicate.
-      ses = bodyResult $ lambdaBody fun
-      mapres = bodyBindings $ lambdaBody fun
   mapM_ (uncurry letBindNames') parameterBnds
-  case arrs' of
-    [] -> do mapM_ addBinding mapres
-             sequence_ [ letBind (Pattern [] [p]) $ PrimOp $ Replicate n e
-                       | (p,e) <- zip (patternValueElements pat) ses ]
-    _  -> letBind_ pat $ LoopOp $ Map cs fun' arrs'
+  letBind_ pat $ LoopOp $ Map cs outersize fun' arrs'
   where (paramsAndArrs, parameterBnds) =
           partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
 
@@ -157,29 +146,19 @@ removeReplicateMapping _ _ = cannotSimplify
 
 -- | Remove inputs that are not used inside the @map@.
 removeUnusedMapInput :: MonadBinder m => TopDownRule m
-removeUnusedMapInput _ (Let pat _ (LoopOp (Map cs fun arrs)))
+removeUnusedMapInput _ (Let pat _ (LoopOp (Map cs width fun arrs)))
   | (used,unused) <- partition usedInput params_and_arrs,
-    not (null unused) =
-      -- Empty maps are not permitted, so if that would be the result,
-      -- turn the entire map into a replicate.
-      case used of
-        [] -> do
-          mapM_ addBinding $ bodyBindings $ lambdaBody fun
-          forM_ (zip (patternNames pat) $
-                bodyResult $ lambdaBody fun) $ \(name, res_se) ->
-            letBindNames'_ [name] $ PrimOp $ Replicate width res_se
-        _ -> do
-          let (used_params, used_arrs) = unzip used
-              fun' = fun { lambdaParams = used_params }
-          letBind_ pat $ LoopOp $ Map cs fun' used_arrs
+    not (null unused) = do
+      let (used_params, used_arrs) = unzip used
+          fun' = fun { lambdaParams = used_params }
+      letBind_ pat $ LoopOp $ Map cs width fun' used_arrs
   where params_and_arrs = zip (lambdaParams fun) arrs
-        width = arraysSize 0 $ patternTypes pat
         used_in_body = freeInBody $ lambdaBody fun
         usedInput (param, _) = paramName param `HS.member` used_in_body
 removeUnusedMapInput _ _ = cannotSimplify
 
 removeDeadMapping :: MonadBinder m => BottomUpRule m
-removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs))) =
+removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs width fun arrs))) =
   let ses = bodyResult $ lambdaBody fun
       isUsed (bindee, _, _) = (`UT.used` used) $ patElemName bindee
       (pat',ses', ts') = unzip3 $ filter isUsed $
@@ -188,7 +167,7 @@ removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs fun arrs))) =
                  , lambdaReturnType = ts'
                  }
   in if pat /= Pattern [] pat'
-     then letBind_ (Pattern [] pat') $ LoopOp $ Map cs fun' arrs
+     then letBind_ (Pattern [] pat') $ LoopOp $ Map cs width fun' arrs
      else cannotSimplify
 removeDeadMapping _ _ = cannotSimplify
 
@@ -382,12 +361,12 @@ letRule _ _ _ =
   cannotSimplify
 
 simplifyClosedFormRedomap :: MonadBinder m => TopDownRule m
-simplifyClosedFormRedomap vtable (Let pat _ (LoopOp (Redomap _ _ innerfun acc arr))) =
+simplifyClosedFormRedomap vtable (Let pat _ (LoopOp (Redomap _ _ _ innerfun acc arr))) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: MonadBinder m => TopDownRule m
-simplifyClosedFormReduce vtable (Let pat _ (LoopOp (Reduce _ fun args))) =
+simplifyClosedFormReduce vtable (Let pat _ (LoopOp (Reduce _ _ fun args))) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify

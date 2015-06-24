@@ -62,28 +62,28 @@ analyseBinding (In.Let pat lore e) = do
 analyseExp :: Lore lore =>
               In.Exp lore
            -> RangeM (Out.Exp lore)
-analyseExp (Out.LoopOp (In.Map cs lam args)) =
+analyseExp (Out.LoopOp (In.Map cs w lam args)) =
   Out.LoopOp <$>
-  (Out.Map cs <$> analyseLambda lam <*> pure args)
-analyseExp (Out.LoopOp (In.ConcatMap cs lam args)) =
+  (Out.Map cs w <$> analyseLambda lam <*> pure args)
+analyseExp (Out.LoopOp (In.ConcatMap cs w lam args)) =
   Out.LoopOp <$>
-  (Out.ConcatMap cs <$> analyseLambda lam <*> pure args)
-analyseExp (Out.LoopOp (In.Reduce cs lam input)) =
+  (Out.ConcatMap cs w <$> analyseLambda lam <*> pure args)
+analyseExp (Out.LoopOp (In.Reduce cs w lam input)) =
   Out.LoopOp <$>
-  (Out.Reduce cs <$> analyseLambda lam <*> pure input)
-analyseExp (Out.LoopOp (In.Scan cs lam input)) =
+  (Out.Reduce cs w <$> analyseLambda lam <*> pure input)
+analyseExp (Out.LoopOp (In.Scan cs w lam input)) =
   Out.LoopOp <$>
-  (Out.Scan cs <$> analyseLambda lam <*> pure input)
-analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
+  (Out.Scan cs w <$> analyseLambda lam <*> pure input)
+analyseExp (Out.LoopOp (In.Redomap cs w outerlam innerlam acc arr)) =
   Out.LoopOp <$>
-  (Out.Redomap cs <$>
+  (Out.Redomap cs w <$>
    analyseLambda outerlam <*>
    analyseLambda innerlam <*>
    pure acc <*> pure arr)
-analyseExp (Out.LoopOp (In.Stream cs form lam arr ii)) =
+analyseExp (Out.LoopOp (In.Stream cs w form lam arr ii)) =
   Out.LoopOp <$>
-  (Out.Stream cs <$> analyseStreamForm form <*> analyseExtLambda lam <*>
-                     pure arr <*> pure ii)
+  (Out.Stream cs w <$> analyseStreamForm form <*> analyseExtLambda lam <*>
+                       pure arr <*> pure ii)
   where analyseStreamForm (In.MapLike    o  ) = return $ Out.MapLike o
         analyseStreamForm (In.Sequential acc) = return $ Out.Sequential acc
         analyseStreamForm (In.RedLike o lam0 acc) = do

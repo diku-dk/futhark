@@ -448,20 +448,21 @@ certificates (Stream  cs _ _ _ _) = cs
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
 typeOf (Map _ lam inps) =
-  mapType lam $ map inputType inps
+  mapType (arraysSize 0 $ map inputType inps) lam
 typeOf (Reduce _ lam _) =
   lambdaReturnType lam
 typeOf (Scan _ _ input) =
   map (inputType . snd) input
 typeOf (Redomap _ outlam inlam nes inps) =
   let accrtps = lambdaReturnType outlam
-      arrrtps = drop (length nes) $ mapType inlam $ map inputType inps
+      width   = arraysSize 0 $ map inputType inps
+      arrrtps = drop (length nes) $ mapType width inlam
   in  accrtps ++ arrrtps
 typeOf (Stream _ form lam _ inps) =
   let nes     = getStreamAccums form
       accrtps = take (length nes) $ lambdaReturnType lam
-      outersz = arraysSize 0 $ map inputType inps
-      arrtps  = [ arrayOf (stripArray 1 t) (Shape [outersz]) (uniqueness t)
+      width   = arraysSize 0 $ map inputType inps
+      arrtps  = [ arrayOf (stripArray 1 t) (Shape [width]) (uniqueness t)
                   | t <- drop (length nes) (lambdaReturnType lam) ]
   in  accrtps ++ arrtps
 
@@ -481,20 +482,25 @@ inpOuterSize (Stream  _ _ _ _ inps) =
 toExp :: (MonadBinder m) =>
          SOAC (Lore m) -> m (Exp (Lore m))
 toExp (Map cs l as) =
-  LoopOp <$> (Futhark.Map cs l <$> inputsToSubExps as)
+  LoopOp <$> (Futhark.Map cs w l <$> inputsToSubExps as)
+  where w = arraysSize 0 $ map inputType as
 toExp (Reduce cs l args) =
-  LoopOp <$> (Futhark.Reduce cs l <$> (zip es <$> inputsToSubExps as))
+  LoopOp <$> (Futhark.Reduce cs w l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
+        w = arraysSize 0 $ map inputType as
 toExp (Scan cs l args) =
-  LoopOp <$> (Futhark.Scan cs l <$> (zip es <$> inputsToSubExps as))
+  LoopOp <$> (Futhark.Scan cs w l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
+        w = arraysSize 0 $ map inputType as
 toExp (Redomap cs l1 l2 es as) =
-  LoopOp <$> (Futhark.Redomap cs l1 l2 es <$> inputsToSubExps as)
+  LoopOp <$> (Futhark.Redomap cs w l1 l2 es <$> inputsToSubExps as)
+  where w = arraysSize 0 $ map inputType as
 toExp (Stream  cs form lam ii inps) = LoopOp <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
       extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
+      w = arraysSize 0 $ map inputType inps
   inpexp <- inputsToSubExps inps
-  return $ Futhark.Stream cs form extlam inpexp ii
+  return $ Futhark.Stream cs w form extlam inpexp ii
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -509,17 +515,17 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- valid form.
 fromExp :: HasTypeEnv f =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
-fromExp (LoopOp (Futhark.Map cs l as)) =
+fromExp (LoopOp (Futhark.Map cs _ l as)) =
   Right <$> Map cs l <$> traverse varInput as
-fromExp (LoopOp (Futhark.Reduce cs l args)) = do
+fromExp (LoopOp (Futhark.Reduce cs _ l args)) = do
   let (es,as) = unzip args
   Right <$> Reduce cs l <$> zip es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Scan cs l args)) = do
+fromExp (LoopOp (Futhark.Scan cs _ l args)) = do
   let (es,as) = unzip args
   Right <$> Scan cs l <$> zip es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Redomap cs l1 l2 es as)) =
+fromExp (LoopOp (Futhark.Redomap cs _ l1 l2 es as)) =
   Right <$> Redomap cs l1 l2 es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Stream cs form extlam as ii)) = do
+fromExp (LoopOp (Futhark.Stream cs _ form extlam as ii)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
   if length mrtps == length rtps
@@ -532,11 +538,12 @@ fromExp _ = pure $ Left NotSOAC
 --   Returns the Stream SOAC and the
 --   extra-accumulator body-result ident if any.
 soacToStream :: (MonadFreshNames m, Bindable lore)
-                  => SOAC lore -> m (SOAC lore,[Ident])
+                => SOAC lore -> m (SOAC lore,[Ident])
 soacToStream soac = do
   chunk_id <- newIdent "chunk" $ Basic Int
   let chvar= Futhark.Var $ identName chunk_id
       (cs, lam, inps) = (certificates soac, lambda soac, inputs soac)
+      w = arraysSize 0 $ map inputType inps
   lam'     <- renameLambda lam
   -- Treat each SOAC case individually:
   case soac of
@@ -544,14 +551,14 @@ soacToStream soac = do
     -- let strm_resids = map(f,a_ch) in strm_resids
     Map{}  -> do
       -- the array and accumulator result types
-      let arrrtps= mapType lam $ map inputType inps
+      let arrrtps= mapType w lam
       -- the chunked-outersize of the array result and input types
           loutps = [ arrayOf t (Shape [chvar]) (uniqueness t) | t <- map rowType   arrrtps ]
           lintps = [ arrayOf t (Shape [chvar]) (uniqueness t) | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newIdent "inp") lintps
-      let insoac = Futhark.Map cs lam' $ map identName strm_inpids
+      let insoac = Futhark.Map cs w lam' $ map identName strm_inpids
           insbnd = mkLet' [] strm_resids $ LoopOp insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= map (`Param` ()) $ chunk_id:strm_inpids
@@ -569,7 +576,7 @@ soacToStream soac = do
       -- the array and accumulator result types
       let nes = fst $ unzip nesinps
           accrtps= lambdaReturnType lam
-          arrrtps= mapType lam $ map inputType inps
+          arrrtps= mapType w lam
       -- the chunked-outersize of the array result and input types
           loutps = [ arrayOf t (Shape [chvar]) (uniqueness t) | t <- map rowType   arrrtps ]
           lintps = [ arrayOf t (Shape [chvar]) (uniqueness t) | t <- map inputRowType inps ]
@@ -582,12 +589,12 @@ soacToStream soac = do
       inpacc_ids <- mapM (newIdent "inpacc")  accrtps
       outszm1id  <- newIdent "szm1" $ Basic Int
       -- 1. let scan0_ids   = scan(+,nes,a_ch)             in
-      let insoac = Futhark.Scan cs lam' $ zip nes (map identName strm_inpids)
+      let insoac = Futhark.Scan cs w lam' $ zip nes (map identName strm_inpids)
           insbnd = mkLet' [] scan0_ids $ LoopOp insoac
       -- 2. let strm_resids = map (acc `+`,nes, scan0_ids) in
       maplam <- mkMapPlusAccLam (map (Futhark.Var . identName) inpacc_ids) lam
       let mapbnd = mkLet' [] strm_resids $ LoopOp $
-                   Futhark.Map cs maplam $ map identName scan0_ids
+                   Futhark.Map cs w maplam $ map identName scan0_ids
       -- 3. let outerszm1id = sizeof(0,strm_resids) - 1    in
           outszm1bnd = mkLet' [] [outszm1id] $ PrimOp $
                        BinOp Minus (Futhark.Var $ identName chunk_id) (Constant $ IntVal 1) Int
@@ -620,7 +627,7 @@ soacToStream soac = do
       inpacc_ids <- mapM (newIdent "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let acc0_ids = reduce(+,nes,a_ch) in
-      let insoac = Futhark.Reduce cs lam' $ zip nes (map identName strm_inpids)
+      let insoac = Futhark.Reduce cs w lam' $ zip nes (map identName strm_inpids)
           insbnd = mkLet' [] acc0_ids $ LoopOp insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lam $ map (Futhark.Var . identName) (inpacc_ids++acc0_ids)
@@ -638,7 +645,7 @@ soacToStream soac = do
     Redomap _ lamin _ nes _ -> do
       -- the array and accumulator result types
       let accrtps= take (length nes) $ lambdaReturnType lam
-          arrrtps= drop (length nes) $ mapType lam $ map inputType inps
+          arrrtps= drop (length nes) $ mapType w lam
       -- the chunked-outersize of the array result and input types
           loutps = [ arrayOf t (Shape [chvar]) (uniqueness t) | t <- map rowType   arrrtps ]
           lintps = [ arrayOf t (Shape [chvar]) (uniqueness t) | t <- map inputRowType inps ]
@@ -648,7 +655,7 @@ soacToStream soac = do
       inpacc_ids <- mapM (newIdent "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-      let insoac = Futhark.Redomap cs lamin lam' nes (map identName strm_inpids)
+      let insoac = Futhark.Redomap cs w lamin lam' nes (map identName strm_inpids)
           insbnd = mkLet' [] (acc0_ids++strm_resids) $ LoopOp insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lamin $ map (Futhark.Var . identName) (inpacc_ids++acc0_ids)

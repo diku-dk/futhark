@@ -711,7 +711,7 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
           mergevars = map fst merge
 
 expReturns _ (AST.LoopOp op) =
-  extReturns <$> loopOpExtType op
+  pure $ extReturns $ loopOpExtType op
 
 expReturns _ (AST.SegOp op) =
   fail $ "ExplicitMemory called on Segmented Operator, this is not supported. " ++

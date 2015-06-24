@@ -389,17 +389,16 @@ instantiateIdents names ts
 -- add the new idents to the 'TypeEnv'.
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
-redomapToMapAndReduce :: (MonadFreshNames m, HasTypeEnv m, Bindable lore) =>
+redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore) =>
                          PatternT lore -> Annotations.Exp lore
-                      -> ( Certificates, LambdaT lore, LambdaT lore, [SubExp]
+                      -> ( Certificates, SubExp
+                         , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
                       -> m (Binding lore, Binding lore)
 redomapToMapAndReduce (Pattern [] patelems) lore
-                      (certs, redlam, redmap_lam, accs, arrs) = do
+                      (certs, outersz, redlam, redmap_lam, accs, arrs) = do
   -- Remember that a reduce function must have the type @a -> a -> a@.
   -- This means that the result of the map must be of type @a@.
-  arrs_tps <- mapM lookupType arrs
-  let outersz = arraysSize 0 arrs_tps
   (map_patidents, map_patbindages) <- liftM unzip $
     forM patelems $ \pe -> do
       let (Ident vn tp) = patElemIdent pe
@@ -407,10 +406,10 @@ redomapToMapAndReduce (Pattern [] patelems) lore
       i <- newIdent (baseString vn ++ "_maptmp") tp'
       return (i, patElemBindage pe)
   let map_bnd = mkLet [] (zip map_patidents map_patbindages)
-                      (LoopOp $ Map certs newmap_lam arrs)
+                      (LoopOp $ Map certs outersz newmap_lam arrs)
   let red_args = zip accs (map identName map_patidents)
   let red_bnd = Let (Pattern [] patelems) lore
-                    (LoopOp $ Reduce certs redlam red_args)
+                    (LoopOp $ Reduce certs outersz redlam red_args)
   return (map_bnd, red_bnd)
   where
     newmap_lam =

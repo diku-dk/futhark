@@ -393,7 +393,8 @@ internaliseExp desc (E.Concat x ys loc) = do
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToVars "map_arr" arr
   lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs
-  letTupExp' desc $ I.LoopOp $ I.Map [] lam' arrs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.LoopOp $ I.Map [] w lam' arrs
 
 internaliseExp desc (E.Reduce lam ne arr loc) = do
   arrs <- internaliseExpToVars "reduce_arr" arr
@@ -405,7 +406,8 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   let input = zip nes' arrs
-  letTupExp' desc $ I.LoopOp $ I.Reduce [] lam' input
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.LoopOp $ I.Reduce [] w lam' input
 
 internaliseExp desc (E.Scan lam ne arr loc) = do
   arrs <- internaliseExpToVars "scan_arr" arr
@@ -417,12 +419,14 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   arrts <- mapM lookupType arrs
   lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
   let input = zip nes' arrs
-  letTupExp' desc $ I.LoopOp $ I.Scan [] lam' input
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.LoopOp $ I.Scan [] w lam' input
 
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
-  flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] w lam' arrs
   filter_size <- newIdent "filter_size" $ I.Basic Int
   filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
   addBinding $ mkLet' [] (filter_size : filter_perms) $
@@ -435,7 +439,8 @@ internaliseExp desc (E.Filter lam arr _) = do
 internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
-  flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] lam' arrs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] w lam' arrs
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
@@ -457,8 +462,9 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   lam1' <- internaliseFoldLambda internaliseLambda lam1 nests acc_arr_tps
   lam2' <- internaliseRedomapInnerLambda internaliseLambda lam2
            nes (map I.Var arrs')
+  w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.LoopOp $
-    I.Redomap [] lam1' lam2' nes arrs'
+    I.Redomap [] w lam1' lam2' nes arrs'
 
 internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr ii _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
@@ -485,8 +491,9 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
                  lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
                  return $ I.RedLike o lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'
+  w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $
-    I.LoopOp $ I.Stream [] form' lam' arrs' ii
+    I.LoopOp $ I.Stream [] w form' lam' arrs' ii
 internaliseExp _ (E.Stream{}) =
   fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 
@@ -494,8 +501,8 @@ internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arr' <- internaliseExpToVars "concatMap_arr" arr
   arrs' <- mapM (internaliseExpToVars "concatMap_arr") arrs
   lam' <- internaliseConcatMapLambda internaliseLambda lam
-  letTupExp' desc $ I.LoopOp $ I.ConcatMap [] lam' $ arr':arrs'
-
+  w <- arraysSize 0 <$> mapM lookupType arr'
+  letTupExp' desc $ I.LoopOp $ I.ConcatMap [] w lam' $ arr':arrs'
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 

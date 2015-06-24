@@ -39,26 +39,26 @@ usageInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
           | (v,se) <- merge, unique $ paramType v ]
-usageInExp (LoopOp (Map _ f args)) =
+usageInExp (LoopOp (Map _ _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ vnameAliases se
           | (v,se) <- zip (lambdaParams f) args,
             unique $ paramType v ]
-usageInExp (LoopOp (Reduce _ f args)) =
+usageInExp (LoopOp (Reduce _ _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
           | (v,als) <- zip (lambdaParams f) $
                        map subExpAliases acc ++
                        map vnameAliases arr,
             unique $ paramType v ]
   where (acc, arr) = unzip args
-usageInExp (LoopOp (Scan _ f args)) =
+usageInExp (LoopOp (Scan _ _ f args)) =
   mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
           | (v,als) <- zip (lambdaParams f) $
                        map subExpAliases acc ++
                        map vnameAliases arr,
             unique $ paramType v ]
   where (acc, arr) = unzip args
-usageInExp (LoopOp (Redomap _ _ f acc arr)) =
+usageInExp (LoopOp (Redomap _ _ _ f acc arr)) =
   mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
           | (v,als) <- zip (lambdaParams f) $
                        map subExpAliases acc ++

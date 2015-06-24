@@ -221,18 +221,15 @@ data LoopOp lore
   = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
     -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
 
-  | Map Certificates (LambdaT lore) [VName]
-    -- ^ @map(op +(1), {1,2,..,n}) = [2,3,..,n+1]@.
-    -- 3rd arg is either a tuple of multi-dim arrays
-    --   of basic type, or a multi-dim array of basic type.
-    -- 4th arg is the input-array row types
+  | Map Certificates SubExp (LambdaT lore) [VName]
+    -- ^ @map(+1, {1,2,..,n}) = [2,3,..,n+1]@.
 
-  | ConcatMap Certificates (LambdaT lore) [[VName]]
+  | ConcatMap Certificates SubExp (LambdaT lore) [[VName]]
 
-  | Reduce  Certificates (LambdaT lore) [(SubExp, VName)]
-  | Scan   Certificates (LambdaT lore) [(SubExp, VName)]
-  | Redomap Certificates (LambdaT lore) (LambdaT lore) [SubExp] [VName]
-  | Stream Certificates (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
+  | Reduce  Certificates SubExp (LambdaT lore) [(SubExp, VName)]
+  | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
+  | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
+  | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
 --  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -270,13 +267,13 @@ data ScanType = ScanInclusive
 --   seg_1 = [2,   3,     1,   ]
 --   seg_0 = [2,          1,  0]
 -- @
-data SegOp lore = SegReduce Certificates (LambdaT lore) [(SubExp, VName)] VName
+data SegOp lore = SegReduce Certificates SubExp (LambdaT lore) [(SubExp, VName)] VName
                   -- ^ @map (\xs -> reduce(op,ne,xs), xss@ can loosely
                   -- be transformed into
                   -- @segreduce(op, ne, xss_flat, xss_descpritor)@
                   --
                   -- Note that this requires the neutral element to be constant
-                | SegScan Certificates ScanType (LambdaT lore) [(SubExp, VName)] VName
+                | SegScan Certificates SubExp ScanType (LambdaT lore) [(SubExp, VName)] VName
                   -- ^ Identical to 'Scan', except that the last arg
                   -- is a segment descriptor.
                 | SegReplicate Certificates VName VName (Maybe VName)

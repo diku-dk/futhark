@@ -207,14 +207,14 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
   where boundInForm (ForLoop i _) = HM.insert i (Basic Int)
         boundInForm (WhileLoop _) = id
         mergeparams = map fst mergepat
-transformBinding (Let pat () (LoopOp (Map cs lam arrs))) =
-  distributeMap pat $ MapLoop cs lam arrs
+transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
+  distributeMap pat $ MapLoop cs w lam arrs
 transformBinding bnd = return [bnd]
 
-data MapLoop = MapLoop Certificates Lambda [VName]
+data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 
 mapLoopExp :: MapLoop -> Exp
-mapLoopExp (MapLoop cs lam arrs) = LoopOp $ Map cs lam arrs
+mapLoopExp (MapLoop cs w lam arrs) = LoopOp $ Map cs w lam arrs
 
 type Target = (Pattern, Result)
 
@@ -240,7 +240,7 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget target (inner_target, targets) =
   (target, targets ++ [inner_target])
 
-data Nesting = MapNesting Pattern Certificates [(LParam, VName)]
+data Nesting = MapNesting Pattern Certificates SubExp [(LParam, VName)]
              deriving (Show)
 
 -- ^ First pair element is the very innermost ("current") nest.  In
@@ -258,10 +258,10 @@ nestingWidth :: Nesting -> SubExp
 nestingWidth = arraysSize 0 . patternTypes . nestingPattern
 
 nestingPattern :: Nesting -> Pattern
-nestingPattern (MapNesting pat _ _) = pat
+nestingPattern (MapNesting pat _ _ _) = pat
 
 nestingParams :: Nesting -> [LParam]
-nestingParams (MapNesting _ _ params_and_arrs) =
+nestingParams (MapNesting _ _ _ params_and_arrs) =
   map fst params_and_arrs
 
 boundInNesting :: Nesting -> [VName]
@@ -299,10 +299,10 @@ runKernelM env (KernelM m) = modifyNameSource $ getKernels . runRWS m env
 
 distributeMap :: (HasTypeEnv m, MonadFreshNames m) =>
                  Pattern -> MapLoop -> m [Binding]
-distributeMap pat (MapLoop cs lam arrs) = do
+distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askTypeEnv
   let env = KernelEnv { kernelNest =
-                        singleNesting (MapNesting pat cs $
+                        singleNesting (MapNesting pat cs w $
                                        zip (lambdaParams lam) arrs)
                       , kernelLetBound = mempty
                       , kernelTypeEnv =
@@ -324,15 +324,15 @@ withBinding bnd = local $ \env ->
           HS.fromList (patternNames (bindingPattern bnd))
       }
 
-mapNesting :: Pattern -> Certificates -> Lambda -> [VName]
+mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
            -> KernelM a
-mapNesting pat cs lam arrs = local $ \env ->
+mapNesting pat cs w lam arrs = local $ \env ->
   env { kernelNest = pushInnerNesting nest $ kernelNest env
       , kernelTypeEnv = kernelTypeEnv env <>
                         typeEnvFromParams (lambdaParams lam)
       }
-  where nest = MapNesting pat cs (zip (lambdaParams lam) arrs)
+  where nest = MapNesting pat cs w (zip (lambdaParams lam) arrs)
 
 newKernelNames :: Names -> Body -> Names
 newKernelNames let_bound inner_body =
@@ -347,7 +347,7 @@ ppTargets (target, targets) =
 ppNestings :: Nestings -> String
 ppNestings (nesting, nestings) =
   unlines $ map ppNesting $ nestings ++ [nesting]
-  where ppNesting (MapNesting _ _ params_and_arrs) =
+  where ppNesting (MapNesting _ _ _ params_and_arrs) =
           pretty (map fst params_and_arrs) ++
           " <- " ++
           pretty (map snd params_and_arrs)
@@ -395,7 +395,7 @@ singleExpBody = liftM bindingExp . singleBindingBody
 
 kernelIsRearrange :: Binding -> Maybe Binding
 kernelIsRearrange (Let outer_pat _
-                   (LoopOp (Map outer_cs outer_fun [outer_arr]))) =
+                   (LoopOp (Map outer_cs _ outer_fun [outer_arr]))) =
   delve 1 outer_cs outer_fun
   where delve n cs (Lambda [param] body _)
           | Just (PrimOp (Rearrange inner_cs perm arr)) <-
@@ -405,7 +405,7 @@ kernelIsRearrange (Let outer_pat _
                   perm' = [0..n-1] ++ map (n+) perm
               in Just $ Let outer_pat () $
                  PrimOp $ Rearrange cs' perm' outer_arr
-          | Just (LoopOp (Map inner_cs fun [arr])) <- singleExpBody body,
+          | Just (LoopOp (Map inner_cs _ fun [arr])) <- singleExpBody body,
             paramName param == arr =
             delve (n+1) (cs++inner_cs) fun
         delve _ _ _ =
@@ -414,7 +414,7 @@ kernelIsRearrange _ = Nothing
 
 kernelIsReshape :: Binding -> Maybe Binding
 kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
-                 (LoopOp (Map outer_cs outer_fun [outer_arr]))) =
+                 (LoopOp (Map outer_cs _ outer_fun [outer_arr]))) =
   delve outer_cs outer_fun
     where new_shape = arrayDims $ patElemType outer_patElem
 
@@ -426,7 +426,7 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
               in Just $ Let (Pattern [] [outer_patElem]) () $
                  PrimOp $ Reshape cs' new_shape outer_arr
 
-            | Just (LoopOp (Map inner_cs fun [arr])) <- singleExpBody body,
+            | Just (LoopOp (Map inner_cs _ fun [arr])) <- singleExpBody body,
               paramName param == arr =
               delve (cs++inner_cs) fun
 
@@ -435,10 +435,10 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
 kernelIsReshape _ = Nothing
 
 kernelBodyOptimisable :: Binding -> Maybe Binding
-kernelBodyOptimisable (Let pat () (LoopOp (Map cs fun arrs))) = do
+kernelBodyOptimisable (Let pat () (LoopOp (Map cs w fun arrs))) = do
   bnd <- tryOptimiseKernel =<< singleBindingBody (lambdaBody fun)
   let body = (lambdaBody fun) { bodyBindings = [bnd] }
-  return $ Let pat () $ LoopOp $ Map cs fun { lambdaBody = body } arrs
+  return $ Let pat () $ LoopOp $ Map cs w fun { lambdaBody = body } arrs
 kernelBodyOptimisable _ =
   Nothing
 
@@ -470,7 +470,7 @@ createKernelNest
                             -> (Target -> Targets)
                             -> MaybeT KernelM (Binding, Targets)
         distributeAtNesting
-          (nest@(MapNesting _ cs params_and_arrs))
+          (nest@(MapNesting _ cs w params_and_arrs))
           pat
           body
           inner_returned_arrs
@@ -514,14 +514,11 @@ createKernelNest
               rettype = patternMapTypes pat'
 
               (actual_params, actual_arrs) =
-                case (used_params++free_params,
-                      used_arrs++map identName free_arrs) of
-                 ([], []) -> (params,arrs) -- XXX - we want to avoid
-                                           -- empty argument lists.
-                 l        -> l
+                (used_params++free_params,
+                 used_arrs++map identName free_arrs)
 
           return (Let pat' () $ LoopOp $
-                  Map cs (Lambda actual_params body' rettype) actual_arrs,
+                  Map cs w (Lambda actual_params body' rettype) actual_arrs,
 
                   addTarget $ expand_target
                   (free_arrs_pat, map (Var . paramName) free_params_pat))
@@ -576,7 +573,7 @@ unbalancedMap = const $ return False
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
-distributeInnerMap pat maploop@(MapLoop cs lam arrs) acc =
+distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc =
   unbalancedMap maploop >>= \case
     True ->
       foldl (flip addBindingToKernel) acc <$>
@@ -584,7 +581,7 @@ distributeInnerMap pat maploop@(MapLoop cs lam arrs) acc =
                  Let pat () $ mapLoopExp maploop)
     False ->
       liftM leavingNesting $
-      mapNesting pat cs lam arrs $
+      mapNesting pat cs w lam arrs $
       distribute =<<
       distributeMapBodyBindings acc' (bodyBindings $ lambdaBody lam)
       where acc' = KernelAcc { kernelTargets = pushInnerTarget
@@ -612,9 +609,9 @@ distributeMapBodyBindings target (bnd:bnds) =
 
 maybeDistributeBinding :: Binding -> KernelAcc
                        -> KernelM KernelAcc
-maybeDistributeBinding (Let pat _ (LoopOp (Map cs lam arrs))) acc = do
+maybeDistributeBinding (Let pat _ (LoopOp (Map cs w lam arrs))) acc = do
   acc' <- distribute acc
-  distribute =<< distributeInnerMap pat (MapLoop cs lam arrs) acc'
+  distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
   acc' <- distribute acc
   distribute $ addBindingToKernel bnd acc'

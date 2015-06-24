@@ -409,13 +409,14 @@ toNestedSeqStream   (SOAC.Stream cs form lam ii arrs) = do
   let inner_extlam = ExtLambda (lambdaParams innerlam)
                                (lambdaBody   innerlam)
                                (staticShapes $ lambdaReturnType innerlam)
+      w = arraysSize 0 $ map SOAC.inputType arrs
       nes      = getStreamAccums form
       instrm_inarrs = drop (1 + length nes) $ map paramName $ lambdaParams lam
       (ii_outer,ii_inner) = case (form, ii) of
                               (Sequential _, _) -> (MaxChunk, MinChunk)
                               (_,     MaxChunk) -> (MaxChunk, MaxChunk)
                               (_,     MinChunk) -> (MaxChunk, MinChunk)
-      insoac   = Futhark.Stream cs form inner_extlam instrm_inarrs ii_inner
+      insoac   = Futhark.Stream cs w form inner_extlam instrm_inarrs ii_inner
       lam_bind = mkLet' [] instrm_resids $ LoopOp insoac
       lam_body = mkBody [lam_bind] $ map (Futhark.Var . identName) instrm_resids
       lam' = lam { lambdaBody = lam_body }

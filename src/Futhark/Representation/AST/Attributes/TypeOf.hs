@@ -63,10 +63,9 @@ subExpType (Var name)     = lookupType name
 -- | @mapType f arrts@ wraps each element in the return type of @f@ in
 -- an array with size equal to the outermost dimension of the first
 -- element of @arrts@.
-mapType :: Lambda lore -> [Type] -> [Type]
-mapType f arrts = [ arrayOf t (Shape [outersize]) (uniqueness t)
-                 | t <- lambdaReturnType f ]
-  where outersize = arraysSize 0 arrts
+mapType :: SubExp -> Lambda lore -> [Type]
+mapType outersize f = [ arrayOf t (Shape [outersize]) (uniqueness t)
+                      | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
 primOpType :: HasTypeEnv m =>
@@ -128,49 +127,42 @@ primOpType (Partition _ n _ arrays) =
   where result ts = replicate n (Basic Int) ++ ts
 
 -- | The type of a loop operation.
-loopOpExtType :: HasTypeEnv m =>
-                 LoopOp lore -> m [ExtType]
+loopOpExtType :: LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
-  pure $ loopExtType res $ map (paramIdent . fst) merge
-loopOpExtType (Map _ f arrs) =
-  staticShapes <$> mapType f <$> traverse lookupType arrs
-loopOpExtType (ConcatMap _ f _) =
-  pure [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
-         | t <- lambdaReturnType f ]
-loopOpExtType (Reduce _ fun _) =
-  pure $ staticShapes $ lambdaReturnType fun
-loopOpExtType (Scan _ _ inputs) =
-  staticShapes <$> traverse (lookupType . snd) inputs
-loopOpExtType (Redomap _ outerfun innerfun _ ids) =
+  loopExtType res $ map (paramIdent . fst) merge
+loopOpExtType (Map _ size f _) =
+  staticShapes $ mapType size f
+loopOpExtType (ConcatMap _ _ f _) =
+  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
+  | t <- lambdaReturnType f ]
+loopOpExtType (Reduce _ _ fun _) =
+  staticShapes $ lambdaReturnType fun
+loopOpExtType (Scan _ width lam _) =
+  staticShapes $ map (`arrayOfRow` width) $ lambdaReturnType lam
+loopOpExtType (Redomap _ outersize outerfun innerfun _ _) =
+  staticShapes $
   let acc_tp    = lambdaReturnType outerfun
       acc_el_tp = lambdaReturnType innerfun
       res_el_tp = drop (length acc_tp) acc_el_tp
-      result outersize =
-        acc_tp ++ [ arrayOf eltp (Shape [outersize]) (uniqueness eltp) |
-                    eltp <- res_el_tp ]
   in  case res_el_tp of
-        [] -> pure $ staticShapes acc_tp
-        _  -> staticShapes <$> result <$> arraysSize 0 <$> traverse lookupType ids
-loopOpExtType (Stream _ form lam arrs _) =
-  result <$> lookupType (head arrs)
-  where ExtLambda params _ rtp = lam
+        [] -> acc_tp
+        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) (uniqueness eltp) |
+                          eltp <- res_el_tp ]
+loopOpExtType (Stream _ outersize form lam _ _) =
+  map (substNamesInExtType substs) rtp
+  where nms = map paramName $ take (1 + length accs) params
+        substs = HM.fromList $ zip nms (outersize:accs)
+        ExtLambda params _ rtp = lam
         accs = case form of
                 MapLike _ -> []
                 RedLike _ _ acc -> acc
                 Sequential  acc -> acc
-        result (Array _ shp _) =
-          let nms = map paramName $ take (1 + length accs) params
-              outersize = head $ shapeDims shp
-              substs = HM.fromList $ zip nms (outersize:accs)
-          in map (substNamesInExtType substs) rtp
-        result _ =
-          rtp
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
-segOpExtType (SegReduce _ fun _ descp) =
-  staticShapes <$> mapType fun <$> pure <$> lookupType descp
-segOpExtType (SegScan _ _ _ inputs _) =
+segOpExtType (SegReduce _ size fun _ _) =
+  pure $ staticShapes $ mapType size fun
+segOpExtType (SegScan _ _ _ _ inputs _) =
   staticShapes <$> traverse (lookupType . snd) inputs
 segOpExtType (SegReplicate _ _ dataarr _) =
   result <$> lookupType dataarr
@@ -181,9 +173,9 @@ expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
-expExtType (LoopOp op)    = loopOpExtType op
+expExtType (LoopOp op)    = pure $ loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
-expExtType (SegOp op)    = segOpExtType op
+expExtType (SegOp op)     = segOpExtType op
 
 -- | The number of values returned by an expression.
 expExtTypeSize :: IsRetType (RetType lore) => Exp lore -> Int

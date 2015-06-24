@@ -180,12 +180,12 @@ analyseExp vtable (LoopOp (DoLoop _ _ (ForLoop i bound) body)) =
                                    Constant {} -> id
 analyseExp vtable (LoopOp (DoLoop _ _ _ body)) =
   Just $ analyseExpBody vtable body
-analyseExp vtable (LoopOp (Map _ fun arrs)) =
+analyseExp vtable (LoopOp (Map _ _ fun arrs)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
   where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $
                   zip params $ map Just arrs
         params = lambdaParams fun
-analyseExp vtable (LoopOp (Redomap _ outerfun innerfun acc arrs)) =
+analyseExp vtable (LoopOp (Redomap _ _ outerfun innerfun acc arrs)) =
   Just $ analyseExpBody vtable' (lambdaBody innerfun) <>
          analyseExpBody vtable (lambdaBody outerfun)
   where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $

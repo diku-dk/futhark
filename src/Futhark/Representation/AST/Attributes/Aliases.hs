@@ -71,15 +71,15 @@ loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
   zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
-loopOpAliases (Map _ f _) =
+loopOpAliases (Map _ _ f _) =
   bodyAliases $ lambdaBody f
-loopOpAliases (Reduce _ f _) =
+loopOpAliases (Reduce _ _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Scan _ f _) =
+loopOpAliases (Scan _ _ f _) =
   map (const mempty) $ lambdaReturnType f
-loopOpAliases (Redomap _ _ innerfun _ _) =
+loopOpAliases (Redomap _ _ _ innerfun _ _) =
   map (const mempty) $ lambdaReturnType innerfun
-loopOpAliases (Stream _ form lam _ _) =
+loopOpAliases (Stream _ _ form lam _ _) =
   let a1 = case form of
              MapLike _        -> []
              RedLike _ lam0 _ -> bodyAliases $ lambdaBody lam0
@@ -89,9 +89,9 @@ loopOpAliases (ConcatMap {}) =
   [mempty]
 
 segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
-segOpAliases (SegReduce _ f _ _) =
+segOpAliases (SegReduce _ _ f _ _) =
   map (const mempty) $ lambdaReturnType f
-segOpAliases (SegScan _ _ f _ _) =
+segOpAliases (SegScan _ _ _ f _ _) =
   map (const mempty) $ lambdaReturnType f
 segOpAliases (SegReplicate{}) =
   [mempty]

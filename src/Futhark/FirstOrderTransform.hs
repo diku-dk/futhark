@@ -67,9 +67,9 @@ transformBindingRecursively (Let pat () e) =
 -- if this is not what you want.
 transformBinding :: Binding -> Binder Basic ()
 
-transformBinding (Let pat () (LoopOp (Map cs fun arrs))) = do
+transformBinding (Let pat () (LoopOp (Map cs width fun arrs))) = do
   i <- newVName "i"
-  out_ts <- mapType fun <$> mapM lookupType arrs
+  let out_ts = mapType width fun
   resarr <- resultArray out_ts
   outarrs <- forM out_ts $ \t ->
              newIdent "map_outarr" $ t `setUniqueness` Unique
@@ -81,9 +81,9 @@ transformBinding (Let pat () (LoopOp (Map cs fun arrs))) = do
     return $ resultBody $ map Var dests
   addBinding $ Let pat () $ LoopOp $
     DoLoop outarrs_names (loopMerge outarrs (map Var resarr))
-    (ForLoop i (arraysSize 0 out_ts)) loopbody
+    (ForLoop i width) loopbody
 
-transformBinding (Let pat () (LoopOp (ConcatMap cs fun inputs))) = do
+transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
   arrs <- forM inputs $ \input -> do
     fun' <- renameLambda fun
     let funparams = lambdaParams fun'
@@ -127,7 +127,7 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs fun inputs))) = do
   forM_ (zip (patternNames pat) ses) $ \(name, se) ->
     letBindNames' [name] $ PrimOp $ SubExp se
 
-transformBinding (Let pat () (LoopOp (Reduce cs fun args))) = do
+transformBinding (Let pat () (LoopOp (Reduce cs width fun args))) = do
   ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   let arrus = map (uniqueness . paramType) $
@@ -141,11 +141,11 @@ transformBinding (Let pat () (LoopOp (Reduce cs fun args))) = do
     return $ resultBody (map (Var . identName) inarrs ++ acc')
   addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName acc) (loopMerge (inarrs++acc) (map Var arrexps++initacc))
-    (ForLoop i (isize inarrs)) loopbody
+    (ForLoop i width) loopbody
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
-transformBinding (Let pat () (LoopOp (Scan cs fun args))) = do
+transformBinding (Let pat () (LoopOp (Scan cs width fun args))) = do
   ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
@@ -161,11 +161,11 @@ transformBinding (Let pat () (LoopOp (Scan cs fun args))) = do
     return $ resultBody $ rowcopies ++ map Var dests
   addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName arr) (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
-    (ForLoop i (isize arr)) loopbody
+    (ForLoop i width) loopbody
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
-transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) = do
+transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexps))) = do
   arrts <- mapM lookupType arrexps
   let outersize = arraysSize 0 arrts
   -- for the MAP    part
@@ -195,7 +195,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
     DoLoop (map identName $ acc++outarrs)
     (loopMerge (inarrs++acc++outarrs)
      (map Var arrexps++initacc++map Var maparrs))
-    (ForLoop i (isize inarrs)) loopbody
+    (ForLoop i width) loopbody
 
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
@@ -252,7 +252,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs _ innerfun accexps arrexps))) =
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-transformBinding (Let pattern () (LoopOp (Stream cs form lam arrexps _))) = do
+transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
   -- 1.) trivial step: find and build some of the basic things you need
   let accexps = getStreamAccums    form
       lampars = extLambdaParams     lam
@@ -640,9 +640,6 @@ letwith cs ks i vs = do
   let update k v =
         letInPlace "lw_dest" cs k [i'] $ PrimOp $ SubExp v
   zipWithM update ks vs'
-
-isize :: [Ident] -> SubExp
-isize = arraysSize 0 . map identType
 
 pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . PrimOp . SubExp

@@ -164,30 +164,36 @@ mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
               mapOnLoopForm tv form <*>
               mapOnBody tv loopbody)
   where (vs,es) = unzip mergepat
-mapExpM tv (LoopOp (Map cs fun arrexps)) =
-  LoopOp <$> (pure Map <*> mapOnCertificates tv cs <*>
+mapExpM tv (LoopOp (Map cs size fun arrexps)) =
+  LoopOp <$> (pure Map <*>
+              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnLambda tv fun <*> mapM (mapOnVName tv) arrexps)
-mapExpM tv (LoopOp (ConcatMap cs fun arrexps)) =
-  LoopOp <$> (pure ConcatMap <*> mapOnCertificates tv cs <*>
+mapExpM tv (LoopOp (ConcatMap cs size fun arrexps)) =
+  LoopOp <$> (pure ConcatMap <*>
+              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnLambda tv fun <*> mapM (mapM (mapOnVName tv)) arrexps)
-mapExpM tv (LoopOp (Reduce cs fun inputs)) =
-  LoopOp <$> (pure Reduce <*> mapOnCertificates tv cs <*>
+mapExpM tv (LoopOp (Reduce cs size fun inputs)) =
+  LoopOp <$> (pure Reduce <*>
+              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
                        mapM (mapOnVName tv) arrexps))
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Scan cs fun inputs)) =
-  LoopOp <$> (pure Scan <*> mapOnCertificates tv cs <*>
+mapExpM tv (LoopOp (Scan cs size fun inputs)) =
+  LoopOp <$> (pure Scan <*>
+              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
                        mapM (mapOnVName tv) arrexps))
   where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Redomap cs redfun mapfun accexps arrexps)) =
-  LoopOp <$> (pure Redomap <*> mapOnCertificates tv cs <*>
+mapExpM tv (LoopOp (Redomap cs size redfun mapfun accexps arrexps)) =
+  LoopOp <$> (pure Redomap <*>
+              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
               mapM (mapOnSubExp tv) accexps <*> mapM (mapOnVName tv) arrexps)
-mapExpM tv (LoopOp (Stream cs form lam arrs ii)) =
-  LoopOp <$> (pure Stream <*> mapOnCertificates tv cs <*>
+mapExpM tv (LoopOp (Stream cs size form lam arrs ii)) =
+  LoopOp <$> (pure Stream <*>
+              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnStreamForm form <*> mapOnExtLambda tv lam <*>
               mapM (mapOnVName tv) arrs <*> pure ii)
   where mapOnStreamForm (MapLike o) = pure $ MapLike o
@@ -197,23 +203,26 @@ mapExpM tv (LoopOp (Stream cs form lam arrs ii)) =
                  mapM (mapOnSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapM (mapOnSubExp tv) acc
-mapExpM tv (SegOp (SegReduce cs fun inputs descp_exp)) =
-  SegOp <$> (pure SegReduce <*> mapOnCertificates tv cs <*>
+mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
+  SegOp <$> (pure SegReduce <*>
+             mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) startexps <*>
                         mapM (mapOnVName tv) flatarr_exps) <*>
               mapOnVName tv descp_exp)
     where (startexps, flatarr_exps) = unzip inputs
-mapExpM tv (SegOp (SegScan cs st fun inputs descp_exp)) =
-  SegOp <$> (pure SegScan <*> mapOnCertificates tv cs <*>
-              pure st <*>
-              mapOnLambda tv fun <*>
-              (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                        mapM (mapOnVName tv) flatarr_exps) <*>
-              mapOnVName tv descp_exp)
+mapExpM tv (SegOp (SegScan cs size st fun inputs descp_exp)) =
+  SegOp <$> (pure SegScan <*>
+             mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
+             pure st <*>
+             mapOnLambda tv fun <*>
+             (zip <$> mapM (mapOnSubExp tv) startexps <*>
+              mapM (mapOnVName tv) flatarr_exps) <*>
+             mapOnVName tv descp_exp)
     where (startexps, flatarr_exps) = unzip inputs
 mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
-  SegOp <$> (pure SegReplicate <*> mapOnCertificates tv cs <*>
+  SegOp <$> (pure SegReplicate <*>
+             mapOnCertificates tv cs <*>
              mapOnVName tv counts <*>
              mapOnVName tv dataarr <*>
              Data.Traversable.mapM (mapOnVName tv) seg)

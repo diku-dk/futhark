@@ -460,11 +460,11 @@ allocInExp (LoopOp (DoLoop res merge form
         formBinds (WhileLoop _) =
           id
 
-allocInExp (LoopOp (Map cs f arrs)) = do
+allocInExp (LoopOp (Map cs w f arrs)) = do
   size <- arraysSize 0 <$> mapM lookupType arrs
   is <- letExp "is" $ PrimOp $ Iota size
   f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
-  return $ LoopOp $ Map cs f' $ is:arrs
+  return $ LoopOp $ Map cs w f' $ is:arrs
 
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."

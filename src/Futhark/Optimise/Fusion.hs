@@ -515,9 +515,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
 -- A reduce is translated to a redomap and treated from there.
-fusionGatherBody fres (Body blore (Let pat bndtp (LoopOp (Reduce cs lam args)):bnds) res) = do
+fusionGatherBody fres (Body blore (Let pat bndtp (LoopOp (Reduce cs w lam args)):bnds) res) = do
   let (ne, arrs) = unzip args
-      equivsoac = Redomap cs lam lam ne arrs
+      equivsoac = Redomap cs w lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (LoopOp equivsoac):bnds) res
 
 fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do

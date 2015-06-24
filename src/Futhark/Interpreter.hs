@@ -695,12 +695,12 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
               _ ->
                 bad $ TypeError "evalBody DoLoop while"
 
-evalLoopOp (Map _ fun arrexps) = do
+evalLoopOp (Map _ _ fun arrexps) = do
   vss <- mapM (arrToList <=< lookupVar) arrexps
   vss' <- mapM (applyLambda fun) $ transpose vss
   arrays (lambdaReturnType fun) vss'
 
-evalLoopOp (ConcatMap _ fun inputs) = do
+evalLoopOp (ConcatMap _ _ fun inputs) = do
   inputs' <- mapM (mapM lookupVar) inputs
   vss <- mapM (mapM asArray <=< applyConcatMapLambda fun) inputs'
   innershapes <- mapM (mapM (asInt <=< evalSubExp) . arrayDims) $
@@ -722,14 +722,14 @@ evalLoopOp (ConcatMap _ fun inputs) = do
         asArray (ArrayVal a _ (n:_)) = return (a, n)
         asArray _                    = bad $ TypeError "evalLoopOp asArray"
 
-evalLoopOp (Reduce _ fun inputs) = do
+evalLoopOp (Reduce _ _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
   vss <- mapM (arrToList <=< lookupVar) arrexps
   let foldfun acc x = applyLambda fun $ acc ++ x
   foldM foldfun startaccs (transpose vss)
 
-evalLoopOp (Scan _ fun inputs) = do
+evalLoopOp (Scan _ _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   vss <- mapM (arrToList <=< lookupVar) arrexps
@@ -739,7 +739,7 @@ evalLoopOp (Scan _ fun inputs) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
+evalLoopOp (Redomap _ _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   vss <- mapM (arrToList <=< lookupVar) arrexps
   if res_len == acc_len
@@ -761,7 +761,7 @@ evalLoopOp (Redomap _ _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalLoopOp (Stream _ form elam arrs _) = do
+evalLoopOp (Stream _ _ form elam arrs _) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
@@ -776,7 +776,7 @@ evalLoopOp (Stream _ form elam arrs _) = do
 
 evalSegOp :: forall lore . Lore lore => SegOp lore -> FutharkM lore [Value]
 
-evalSegOp (SegReduce _ fun inputs descparr_exp) = do
+evalSegOp (SegReduce _ _ fun inputs descparr_exp) = do
   let (ne_exps, flatarr_exps) = unzip inputs
   startaccs <- mapM evalSubExp ne_exps
   segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp
@@ -802,7 +802,7 @@ evalSegOp (SegReduce _ fun inputs descparr_exp) = do
   where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
 
-evalSegOp (SegScan _ st fun inputs descparr_exp) = do
+evalSegOp (SegScan _ _ st fun inputs descparr_exp) = do
   let (ne_exps, flatarr_exps) = unzip inputs
   startaccs <- mapM evalSubExp ne_exps
   segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp

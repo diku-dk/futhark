@@ -30,10 +30,10 @@ transformBody (Body () bnds res) = insertBindingsM $ do
   return $ resultBody res
 
 transformBinding :: Binding -> SequentialiseM ()
-transformBinding (Let pat () (LoopOp (Map cs fun arrs))) = do
+transformBinding (Let pat () (LoopOp (Map cs w fun arrs))) = do
   (fun', bnds) <- runBinder $ FOT.transformLambda fun
   mapM_ addBinding bnds
-  addBinding $ Let pat () $ LoopOp $ Map cs fun' arrs
+  addBinding $ Let pat () $ LoopOp $ Map cs w fun' arrs
 
 transformBinding (Let pat () e) = do
   e' <- mapExpM transform e

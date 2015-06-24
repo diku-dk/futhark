@@ -791,20 +791,23 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
                  " is not a merge variable."
       Just _  -> return ()
 
-checkLoopOp (Map ass fun arrexps) = do
+checkLoopOp (Map ass size fun arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
+  require [Basic Int] size
   arrargs <- checkSOACArrayArgs arrexps
   void $ checkLambda fun arrargs
 
-checkLoopOp (ConcatMap cd fun inarrs) = do
+checkLoopOp (ConcatMap cd size fun inarrs) = do
   mapM_ (requireI [Basic Cert]) cd
+  require [Basic Int] size
   forM_ inarrs $ \inarr -> do
     args <- mapM (checkArg . Var) inarr
     void $ checkConcatMapLambda fun args
 
-checkLoopOp (Reduce ass fun inputs) = do
+checkLoopOp (Reduce ass size fun inputs) = do
   let (startexps, arrexps) = unzip inputs
   mapM_ (requireI [Basic Cert]) ass
+  require [Basic Int] size
   startargs <- mapM checkArg startexps
   arrargs   <- checkSOACArrayArgs arrexps
   checkLambda fun $ startargs ++ arrargs
@@ -821,9 +824,10 @@ checkLoopOp (Reduce ass fun inputs) = do
     ", but reduce function returns type " ++ prettyTuple funret ++ "."
 
 -- Scan is exactly identical to Reduce.  Duplicate for clarity anyway.
-checkLoopOp (Scan ass fun inputs) = do
+checkLoopOp (Scan ass size fun inputs) = do
   let (startexps, arrexps) = unzip inputs
   mapM_ (requireI [Basic Cert]) ass
+  require [Basic Int] size
   startargs <- mapM checkArg startexps
   arrargs   <- checkSOACArrayArgs arrexps
   checkLambda fun $ startargs ++ arrargs
@@ -839,8 +843,9 @@ checkLoopOp (Scan ass fun inputs) = do
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
-checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
+checkLoopOp (Redomap ass size outerfun innerfun accexps arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
+  require [Basic Int] size
   arrargs <- checkSOACArrayArgs arrexps
   accargs <- mapM checkArg accexps
   checkLambda innerfun $ accargs ++ arrargs
@@ -857,9 +862,10 @@ checkLoopOp (Redomap ass outerfun innerfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-checkLoopOp (Stream ass form lam arrexps _) = do
+checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
   mapM_ (requireI [Basic Cert]) ass
+  require [Basic Int] size
   accargs <- mapM checkArg accexps
   arrargs <- mapM lookupType arrexps
   _ <- checkSOACArrayArgs arrexps
@@ -932,24 +938,26 @@ checkLoopOp (Stream ass form lam arrexps _) = do
 checkSegOp :: Checkable lore =>
               SegOp lore -> TypeM lore ()
 
-checkSegOp (SegReduce ass fun inputs descp_exp) = do
+checkSegOp (SegReduce ass size fun inputs descp_exp) = do
   descp_arg <- checkArg $ Var descp_exp
+  require [Basic Int] size
   let descp_tp = argType descp_arg
   unless (elemType descp_tp == Int) $
     bad $ TypeError noLoc $
     "Array descriptor is of type " ++ pretty descp_tp ++
     ", but should be [Int]"
-  checkLoopOp $ Reduce ass fun inputs
+  checkLoopOp $ Reduce ass size fun inputs
 
 -- SegScan is mostly identical to SegReduced. Duplicated for clarity.
-checkSegOp (SegScan ass _ fun inputs descp_exp) = do
+checkSegOp (SegScan ass size _ fun inputs descp_exp) = do
   descp_arg <- checkArg $ Var descp_exp
+  require [Basic Int] size
   let descp_tp = argType descp_arg
   unless (elemType descp_tp == Int) $
     bad $ TypeError noLoc $
     "Array descriptor is of type " ++ pretty descp_tp ++
     ", but should be [Int]"
-  checkLoopOp $ Scan ass fun inputs
+  checkLoopOp $ Scan ass size fun inputs
 
 checkSegOp (SegReplicate ass counts_vn data_vn mb_seg_vn) = do
   seg_tp <- case mb_seg_vn of

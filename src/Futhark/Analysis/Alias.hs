@@ -36,39 +36,39 @@ analyseBinding (In.Let pat lore e) =
   in Out.Let pat' lore' e'
 
 analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore
-analyseExp (Out.LoopOp (In.Map cs lam args)) =
+analyseExp (Out.LoopOp (In.Map cs size lam args)) =
   Out.LoopOp $
-  Out.Map cs (analyseLambda lam) args
-analyseExp (Out.LoopOp (In.ConcatMap cs lam args)) =
+  Out.Map cs size (analyseLambda lam) args
+analyseExp (Out.LoopOp (In.ConcatMap cs size lam args)) =
   Out.LoopOp $
-  Out.ConcatMap cs (analyseLambda lam) args
-analyseExp (Out.LoopOp (In.Reduce cs lam input)) =
+  Out.ConcatMap cs size (analyseLambda lam) args
+analyseExp (Out.LoopOp (In.Reduce cs size lam input)) =
   Out.LoopOp $
-  Out.Reduce cs (analyseLambda lam) input
-analyseExp (Out.LoopOp (In.Scan cs lam input)) =
+  Out.Reduce cs size (analyseLambda lam) input
+analyseExp (Out.LoopOp (In.Scan cs size lam input)) =
   Out.LoopOp $
-  Out.Scan cs (analyseLambda lam) input
-analyseExp (Out.LoopOp (In.Redomap cs outerlam innerlam acc arr)) =
+  Out.Scan cs size (analyseLambda lam) input
+analyseExp (Out.LoopOp (In.Redomap cs size outerlam innerlam acc arr)) =
   Out.LoopOp $
-  Out.Redomap cs
+  Out.Redomap cs size
    (analyseLambda outerlam)
    (analyseLambda innerlam)
    acc arr
-analyseExp (Out.LoopOp (In.Stream cs form lam arr ii)) =
+analyseExp (Out.LoopOp (In.Stream cs size form lam arr ii)) =
   Out.LoopOp $
-  Out.Stream cs (analyseStreamForm form)
-                (analyseExtLambda lam) arr ii
+  Out.Stream cs size (analyseStreamForm form)
+                     (analyseExtLambda lam) arr ii
   where analyseStreamForm (In.RedLike o lam0 acc) =
             Out.RedLike o (analyseLambda lam0) acc
         analyseStreamForm (In.Sequential acc) = Out.Sequential acc
         analyseStreamForm (In.MapLike    o  ) = Out.MapLike    o
 
-analyseExp (Out.SegOp (In.SegReduce cs lam input descp)) =
+analyseExp (Out.SegOp (In.SegReduce cs size lam input descp)) =
   Out.SegOp $
-  Out.SegReduce cs (analyseLambda lam) input descp
-analyseExp (Out.SegOp (In.SegScan cs st lam input descp)) =
+  Out.SegReduce cs size (analyseLambda lam) input descp
+analyseExp (Out.SegOp (In.SegScan cs size st lam input descp)) =
   Out.SegOp $
-  Out.SegScan cs st (analyseLambda lam) input descp
+  Out.SegScan cs size st (analyseLambda lam) input descp
 analyseExp e = Out.mapExp analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return

@@ -164,20 +164,20 @@ externaliseLoopOp (I.DoLoop respat merge form loopbody) =
             externaliseSubExp bound
           I.WhileLoop cond ->
             E.WhileLoop <$> E.Var <$> externaliseVar cond
-externaliseLoopOp (I.Map _ fun es) =
+externaliseLoopOp (I.Map _ _ fun es) =
   maybeUnzip <$>
   (E.Map <$>
    externaliseMapLambda fun <*>
    externaliseSOACArrayArgs es <*>
    pure noLoc)
-externaliseLoopOp (I.Reduce _ fun inputs) =
+externaliseLoopOp (I.Reduce _ _ fun inputs) =
   E.Reduce <$>
   externaliseFoldLambda fun (length inputs) <*>
   (maybeTupLit <$> mapM externaliseSubExp accinputs) <*>
   externaliseSOACArrayArgs arrinputs <*>
   pure noLoc
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Scan _ fun inputs) =
+externaliseLoopOp (I.Scan _ _ fun inputs) =
   maybeUnzip <$>
   (E.Scan <$>
    externaliseFoldLambda fun (length inputs) <*>
@@ -185,7 +185,7 @@ externaliseLoopOp (I.Scan _ fun inputs) =
    externaliseSOACArrayArgs arrinputs <*>
    pure noLoc)
   where (accinputs, arrinputs) = unzip inputs
-externaliseLoopOp (I.Redomap _ outerfun innerfun vs as) =
+externaliseLoopOp (I.Redomap _ _ outerfun innerfun vs as) =
   E.Redomap <$>
   externaliseFoldLambda outerfun (length vs) <*>
   externaliseFoldLambda innerfun (length vs) <*>

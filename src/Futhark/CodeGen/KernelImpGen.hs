@@ -28,9 +28,9 @@ compileProg = ImpGen.compileProg kernelCompiler
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.Kernel
 
-kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ lam arrs)) = do
+kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
   -- The number of threads - one per input element.
-  num_threads <- ImpGen.compileSubExp <$> arraysSize 0 <$> mapM lookupType arrs
+  let num_threads = ImpGen.compileSubExp w
 
   -- Extract allocations from the body.
   (body, thread_allocs) <- either fail return $ extractKernelAllocations lam

@@ -93,32 +93,32 @@ splitBinding bnd@(Let pat _ (PrimOp (Assert (Var v) _))) = do
                  PrimOp $ SubExp (Var $ identName cert_ident),
                  Just $ Var v)
 
-splitBinding bnd@(Let pat _ (LoopOp (Map cs fun args))) = do
-  (predbody, valfun, ok) <- splitMap cs fun args
+splitBinding bnd@(Let pat _ (LoopOp (Map cs w fun args))) = do
+  (predbody, valfun, ok) <- splitMap cs w fun args
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Map cs valfun args,
+          LoopOp $ Map cs w valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Reduce cs fun args))) = do
-  (predbody, valfun, ok) <- splitReduce cs fun args
+splitBinding bnd@(Let pat _ (LoopOp (Reduce cs w fun args))) = do
+  (predbody, valfun, ok) <- splitReduce cs w fun args
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Reduce cs valfun args,
+          LoopOp $ Reduce cs w valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Scan cs fun args))) = do
-  (predbody, valfun, ok) <- splitReduce cs fun args
+splitBinding bnd@(Let pat _ (LoopOp (Scan cs w fun args))) = do
+  (predbody, valfun, ok) <- splitReduce cs w fun args
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Scan cs valfun args,
+          LoopOp $ Scan cs w valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Redomap cs outerfun innerfun acc arr))) = do
-  (predbody, valfun, ok) <- splitRedomap cs innerfun acc arr
+splitBinding bnd@(Let pat _ (LoopOp (Redomap cs w outerfun innerfun acc arr))) = do
+  (predbody, valfun, ok) <- splitRedomap cs w innerfun acc arr
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Redomap cs outerfun valfun acc arr,
+          LoopOp $ Redomap cs w outerfun valfun acc arr,
           ok)
 
 splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
@@ -157,29 +157,29 @@ splitBinding (Let pat _ (If cond tbranch fbranch t)) = do
 
 splitBinding bnd = return ([bnd], bnd, Nothing)
 
-splitMap :: Certificates -> Lambda -> [VName]
+splitMap :: Certificates -> SubExp -> Lambda -> [VName]
          -> GenM ([Binding], Lambda, Maybe SubExp)
-splitMap cs fun args = do
+splitMap cs w fun args = do
   (predfun, valfun) <- splitMapLambda fun
-  (andbnd, andcheck) <- allTrue cs predfun args
+  (andbnd, andcheck) <- allTrue cs w predfun args
   return ([andbnd],
           valfun,
           Just andcheck)
 
-splitReduce :: Certificates -> Lambda -> [(SubExp,VName)]
+splitReduce :: Certificates -> SubExp -> Lambda -> [(SubExp,VName)]
             -> GenM ([Binding], Lambda, Maybe SubExp)
-splitReduce cs fun args = do
+splitReduce cs w fun args = do
   (predfun, valfun) <- splitFoldLambda fun $ map fst args
-  (andbnd, andcheck) <- allTrue cs predfun (map snd args)
+  (andbnd, andcheck) <- allTrue cs w predfun (map snd args)
   return ([andbnd],
           valfun,
           Just andcheck)
 
-splitRedomap :: Certificates -> Lambda -> [SubExp] -> [VName]
+splitRedomap :: Certificates -> SubExp -> Lambda -> [SubExp] -> [VName]
              -> GenM ([Binding], Lambda, Maybe SubExp)
-splitRedomap cs fun acc arr = do
+splitRedomap cs w fun acc arr = do
   (predfun, valfun) <- splitFoldLambda fun acc
-  (andbnd, andcheck) <- allTrue cs predfun arr
+  (andbnd, andcheck) <- allTrue cs w predfun arr
   return ([andbnd],
           valfun,
           Just andcheck)
@@ -213,14 +213,14 @@ splitFoldLambda lam acc = do
         accbnds = [ mkLet' [] [paramIdent p] $ PrimOp $ SubExp e
                   | (p,e) <- zip accParams acc ]
 
-allTrue :: Certificates -> Lambda -> [VName]
+allTrue :: Certificates -> SubExp -> Lambda -> [VName]
         -> GenM (Binding, SubExp)
-allTrue cs predfun args = do
+allTrue cs w predfun args = do
   andchecks <- newIdent "allTrue" (Basic Bool)
   andfun <- binOpLambda LogAnd Bool
   innerfun <- predConjFun
   let andbnd = mkLet' [] [andchecks] $ LoopOp $
-               Redomap cs andfun innerfun [constant True] args
+               Redomap cs w andfun innerfun [constant True] args
   return (andbnd,
           Var $ identName andchecks)
   where predConjFun = do

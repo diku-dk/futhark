@@ -64,7 +64,6 @@ import Prelude
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -604,12 +603,11 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   return $ DoLoop respat merge' form' loopbody'
   where fparamnames = HS.fromList (map (paramName . fst) merge)
 
-simplifyLoopOp (Stream cs form lam arr ii) = do
+simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
   cs'   <- simplifyCerts      cs
   form' <- simplifyStreamForm form
   arr' <- mapM simplifyVName  arr
   vtab <- getVtable
-  outerdim <- arraysSize 0 <$> mapM lookupType arr
   let (chunk:_) = extLambdaParams lam
       se_outer = case outerdim of
                     Var idd    -> fromMaybe (SExp.Id idd Int) (ST.lookupScalExp idd vtab)
@@ -619,7 +617,7 @@ simplifyLoopOp (Stream cs form lam arr ii) = do
       -- by setting the bounds to [0, se_outer-1]
       parbnds  = [ (chunk, se_1, se_outer) ]
   lam' <- simplifyExtLambda parbnds lam
-  return $ Stream cs' form' lam' arr' ii
+  return $ Stream cs' outerdim form' lam' arr' ii
   where simplifyStreamForm (MapLike o) = return $ MapLike o
         simplifyStreamForm (RedLike o lam0 acc) = do
             acc'  <- mapM simplifySubExp acc
@@ -630,93 +628,77 @@ simplifyLoopOp (Stream cs form lam arr ii) = do
             acc'  <- mapM simplifySubExp acc
             return $ Sequential acc'
 
-simplifyLoopOp (Map cs fun arrs) = do
+simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Map cs' fun' arrs'
+  return $ Map cs' w' fun' arrs'
 
-simplifyLoopOp (ConcatMap cs fun arrs) = do
+simplifyLoopOp (ConcatMap cs w fun arrs) = do
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   arrs' <- mapM (mapM simplifyVName) arrs
   fun' <- simplifyLambda fun $ map (const Nothing) $ lambdaParams fun
-  return $ ConcatMap cs' fun' arrs'
+  return $ ConcatMap cs' w' fun' arrs'
 
-simplifyLoopOp (Reduce cs fun input) = do
+simplifyLoopOp (Reduce cs w fun input) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Reduce cs' fun' (zip acc' arrs')
+  return $ Reduce cs' w' fun' (zip acc' arrs')
 
-simplifyLoopOp (Scan cs fun input) = do
+simplifyLoopOp (Scan cs w fun input) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
-  return $ Scan cs' fun' (zip acc' arrs')
+  return $ Scan cs' w' fun' (zip acc' arrs')
 
-simplifyLoopOp (Redomap cs outerfun innerfun acc arrs) = do
+simplifyLoopOp (Redomap cs w outerfun innerfun acc arrs) = do
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
   outerfun' <- simplifyLambda outerfun $
                replicate (length $ lambdaParams outerfun) Nothing
   (innerfun', used) <- tapUsage $ simplifyLambda innerfun $ map Just arrs
   (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-  return $ Redomap cs' outerfun' innerfun'' acc' arrs''
+  return $ Redomap cs' w' outerfun' innerfun'' acc' arrs''
   where removeUnusedParams used lam arrinps
-          | (accparams, arrparams@(firstparam:_)) <-
-            splitAt (length acc) $ lambdaParams lam,
-            firstarr : _ <- arrinps =
-              case unzip $ filter ((`UT.used` used) . paramName . fst) $
-                   zip arrparams arrinps of
-               ([],[]) -> do
-                 -- Avoid having zero inputs to redomap, as that would
-                 -- set the number of iterations to zero, possibly
-                 -- changing semantics.  Ideally, we should pick the
-                 -- "simplest" size instead of just the one of the
-                 -- first array, but I do not think it matters much.
-                 outerSize <- arraySize 0 <$> lookupType firstarr
-                 input <- newVName "unused_input"
-                 letBindNames'_ [input] $
-                   PrimOp $ Iota outerSize
-                 return (lam { lambdaParams =
-                                  accparams ++
-                                  -- FIXME: this is not sound if the
-                                  -- removed parameter is non-scalar
-                                  -- and we are in ExplicitMemory
-                                  -- representation.
-                                  [firstparam { paramIdent =
-                                                   (paramIdent firstparam)
-                                                   { identType = Basic Int }
-                                              }]
-                             },
-                         [input])
-               (arrparams', arrinps') ->
-                 return (lam { lambdaParams = accparams ++ arrparams' }, arrinps')
+          | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
+              let (arrparams', arrinps') =
+                    unzip $ filter ((`UT.used` used) . paramName . fst) $
+                    zip arrparams arrinps
+              in return (lam { lambdaParams = accparams ++ arrparams' },
+                         arrinps')
           | otherwise = return (lam, arrinps)
 
 simplifySegOp :: MonadEngine m => SegOp (InnerLore m) -> m (SegOp (Lore m))
-simplifySegOp (SegReduce cs fun input descp) = do
+simplifySegOp (SegReduce cs w fun input descp) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   descp' <- simplifyVName descp
-  return $ SegReduce cs' fun' (zip acc' arrs') descp'
+  return $ SegReduce cs' w' fun' (zip acc' arrs') descp'
 
-simplifySegOp (SegScan cs st fun input descp) = do
+simplifySegOp (SegScan cs w st fun input descp) = do
   let (acc, arrs) = unzip input
   cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
   fun' <- simplifyLambda fun $ map Just arrs'
   descp' <- simplifyVName descp
-  return $ SegScan cs' st fun' (zip acc' arrs') descp'
+  return $ SegScan cs' w' st fun' (zip acc' arrs') descp'
 
 simplifySegOp (SegReplicate cs counts dataarr seg) = do
   cs' <- simplifyCerts cs

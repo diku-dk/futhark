@@ -699,7 +699,7 @@ transformBody (Body () bindings ses) = do
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
 transformBinding :: Binding -> FlatM [Binding]
 transformBinding topBnd@(Let (Pattern [] pats) ()
-                             (LoopOp (Map certs lambda arrs))) = do
+                             (LoopOp (Map certs w lambda arrs))) = do
   tell [StartBnd "transformBinding" topBnd]
   -- Checking if a Variable use is safe requires knowledge of the type
   -- Consider writing isSafeToMap??? differently. TODO
@@ -721,11 +721,11 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
        addDataArray (identName i) i
      arrs' <- mapM (liftM identName . getDataArray1) arrs
      return [Let (Pattern [] pats) ()
-                 (LoopOp (Map certs lambda arrs'))]
+                 (LoopOp (Map certs w lambda arrs'))]
    _ -> do
      loopinv_arrvns <-
        filter (`notElem` arrs) <$> filterM (liftM isJust . vnDimentionality)
-       (HS.toList $ freeInExp (LoopOp $ Map certs lambda arrs))
+       (HS.toList $ freeInExp (LoopOp $ Map certs w lambda arrs))
      unless (null loopinv_arrvns) $
        flatError $ Error $ "We only handle intermediate results currently" ++
                            "but these where loop invariant: " ++
@@ -833,7 +833,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                                  , lambdaReturnType = toreturn_tps
                                  }
 
-      let theMapExp = LoopOp $ Map certs wrappedlambda argarrs'
+      let theMapExp = LoopOp $ Map certs w wrappedlambda argarrs'
       return $ Let pat () theMapExp
 
 transformBinding topbnd@(Let (Pattern [] [PatElem resident BindVar ()]) ()
@@ -890,10 +890,10 @@ transformBinding topbnd@(Let (Pattern [] [PatElem resident BindVar ()]) ()
       return (merged, catMaybes [merge_bnd] : res)
 
 
-transformBinding topbnd@(Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+transformBinding topbnd@(Let pat () (LoopOp (Redomap certs w lam1 lam2 accs arrs))) = do
   tell [StartBnd "transformBinding" topbnd]
   (map_bnd, red_bnd) <-
-    redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
+    redomapToMapAndReduce pat () (certs, w, lam1, lam2, accs, arrs)
   map_bnd' <- transformBinding map_bnd
   red_bnd' <- transformBinding red_bnd
   return $ map_bnd' ++ red_bnd'
@@ -975,7 +975,7 @@ pullOutOfMap mapInfo _
 
 pullOutOfMap mapInfo (argsneeded, _)
                      (Let (Pattern [] pats) ()
-                          (LoopOp (Map certs lambda arrs))) = do
+                          (LoopOp (Map certs w lambda arrs))) = do
   -- For all argNeeded that are not already being mapped over:
   --
   -- 1) if they where created as an intermediate result in the outer map,
@@ -1072,6 +1072,7 @@ pullOutOfMap mapInfo (argsneeded, _)
 
   let mapBnd' = Let (Pattern [] pats') ()
                     (LoopOp (Map (certs ++ mapCerts mapInfo)
+                                 w
                                  lambda'
                                  (map identName newInnerIdents)))
 
@@ -1158,7 +1159,7 @@ pullOutOfMap mapInfo (argsneeded, _)
 
 pullOutOfMap mapInfo _
                      topBnd@(Let (Pattern [] pats) letlore
-                                 (LoopOp (Reduce certs lambda args))) = do
+                                 (LoopOp (Reduce certs w lambda args))) = do
   ok <- isSafeToMapBody $ lambdaBody lambda
   if not ok
   then flatError . Error $ "map of reduce with \"advanced\" operator"
@@ -1188,7 +1189,7 @@ pullOutOfMap mapInfo _
                                          ++ pretty topBnd
 
     let redBnd' = Let (Pattern [] pats') letlore
-                      (SegOp (SegReduce certs lambda flatargs segdescp))
+                      (SegOp (SegReduce certs w lambda flatargs segdescp))
 
     return [redBnd']
 
@@ -1206,7 +1207,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
       Nothing -> do
         sumident <- newIdent "segiota_sum" (Basic Int)
         addTypeIdent sumident
-        sumexp <- reducePlus (identName segdescp)
+        sumexp <- reducePlus (arraySize 0 $ identType segdescp) (identName segdescp)
         let sumbnd = Let (Pattern [] [PatElem sumident BindVar ()]) () sumexp
 
         addFlattenedDims (mapSize mapinfo, subexp) (Var $ identName sumident)
@@ -1221,7 +1222,8 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
   let repbnd = Let (Pattern [] [PatElem repident BindVar ()]) () repexp
 
   scanident <- newIdent "segiota_segscan" tmptp
-  scanexp <- segscanPlus ScanExclusive (identName repident) (identName segdescp)
+  scanexp <- segscanPlus (arraySize 0 $ identType repident)
+             ScanExclusive (identName repident) (identName segdescp)
   let scanbnd = Let (Pattern [] [PatElem scanident BindVar ()]) () scanexp
 
   resarr <- newIdent (baseString (identName resident) ++ "_arr")
@@ -1236,11 +1238,11 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
 
 
 pullOutOfMap mapinfo bndinfo
-             (Let pat () (LoopOp (Redomap certs lam1 lam2 accs arrs))) = do
+             (Let pat () (LoopOp (Redomap certs w lam1 lam2 accs arrs))) = do
   -- Remember that reduce function must be @a -> a -> a@
   -- This means that the result of the map must be of type @a@.
   (map_bnd, red_bnd) <-
-    redomapToMapAndReduce pat () (certs, lam1, lam2, accs, arrs)
+    redomapToMapAndReduce pat () (certs, w, lam1, lam2, accs, arrs)
 
   let newidents = patternValueIdents $ bindingPattern map_bnd
   mapM_ addTypeIdent newidents
@@ -1381,15 +1383,15 @@ vnDimentionality vn =
 
 --------------------------------------------------------------------------------
 
-segscanPlus :: ScanType -> VName -> VName -> FlatM Exp
-segscanPlus st arr segdescp = do
+segscanPlus :: SubExp -> ScanType -> VName -> VName -> FlatM Exp
+segscanPlus w st arr segdescp = do
   lambda <- binOpLambda Plus Int
-  return $ SegOp $ SegScan [] st lambda [(Constant $ IntVal 0, arr)] segdescp
+  return $ SegOp $ SegScan [] w st lambda [(Constant $ IntVal 0, arr)] segdescp
 
-reducePlus :: VName -> FlatM Exp
-reducePlus arr = do
+reducePlus :: SubExp -> VName -> FlatM Exp
+reducePlus w arr = do
   lambda <- binOpLambda Plus Int
-  return $ LoopOp $ Reduce [] lambda [(Constant $ IntVal 0, arr)]
+  return $ LoopOp $ Reduce [] w lambda [(Constant $ IntVal 0, arr)]
 
 --------------------------------------------------------------------------------
 

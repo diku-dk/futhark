@@ -78,25 +78,25 @@ loopOpMetrics (DoLoop _ _ (ForLoop {}) body) =
   seen "DoLoop" >> seen "ForLoop" >> bodyMetrics body
 loopOpMetrics (DoLoop _ _ (WhileLoop {}) body) =
   seen "DoLoop" >> seen "WhileLoop" >> bodyMetrics body
-loopOpMetrics (Map _ fun _) =
+loopOpMetrics (Map _ _ fun _) =
   seen "Map" >> lambdaMetrics fun
-loopOpMetrics (Reduce _ fun _) =
+loopOpMetrics (Reduce _ _ fun _) =
   seen "Reduce" >> lambdaMetrics fun
-loopOpMetrics (Scan _ fun _) =
+loopOpMetrics (Scan _ _ fun _) =
   seen "Scan" >> lambdaMetrics fun
-loopOpMetrics (ConcatMap _ fun _) =
+loopOpMetrics (ConcatMap _ _ fun _) =
   seen "ConcatMap" >> lambdaMetrics fun
-loopOpMetrics (Redomap _ fun1 fun2 _ _) =
+loopOpMetrics (Redomap _ _ fun1 fun2 _ _) =
   seen "Redomap" >> lambdaMetrics fun1 >> lambdaMetrics fun2
-loopOpMetrics (Stream _ _ lam _ _) =
+loopOpMetrics (Stream _ _ _ lam _ _) =
   seen "Stream" >> extLambdaMetrics lam
 
 segOpMetrics :: SegOp lore -> MetricsM ()
-segOpMetrics (SegReduce _ fun _ _) =
+segOpMetrics (SegReduce _ _ fun _ _) =
   seen "SegReduce" >> lambdaMetrics fun
-segOpMetrics (SegScan _ ScanInclusive fun _ _) =
+segOpMetrics (SegScan _ _ ScanInclusive fun _ _) =
   seen "SegScanInclusive" >> lambdaMetrics fun
-segOpMetrics (SegScan _ ScanExclusive fun _ _) =
+segOpMetrics (SegScan _ _ ScanExclusive fun _ _) =
   seen "SegScanExclusive" >> lambdaMetrics fun
 segOpMetrics (SegReplicate{}) =
   seen "SegReplicate"

@@ -215,57 +215,58 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
-  ppr (Map cs lam as) =
-    ppCertificates' cs <> ppSOAC "map" [lam] Nothing as
-  ppr (ConcatMap cs lam as) =
+  ppr (Map cs size lam as) =
+    ppCertificates' cs <> ppSOAC "map" size [lam] Nothing as
+  ppr (ConcatMap cs size lam as) =
     ppCertificates' cs <> text "concatMap" <>
-    parens (pprConcatLam lam <> comma </>
+    parens (ppr size <> comma </>
+            pprConcatLam lam <> comma </>
             commasep (map (braces . commasep . map ppr) as))
     where pprConcatLam (Lambda params body rettype) =
             text "fn" <+>
             braces (commasep $ map (brackets . ppr) rettype) <+>
             apply (map ppr params) <+>
             text "=>" </> indent 2 (ppr body)
-  ppr (Reduce cs lam inputs) =
-    ppCertificates' cs <> ppSOAC "reduce" [lam] (Just es) as
+  ppr (Reduce cs size lam inputs) =
+    ppCertificates' cs <> ppSOAC "reduce" size [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Redomap cs outer inner es as) =
+  ppr (Redomap cs size outer inner es as) =
     ppCertificates' cs <> text "redomap" <>
-    parens (ppr outer <> comma </> ppr inner <> comma </>
+    parens (ppr size <> comma </> ppr outer <> comma </> ppr inner <> comma </>
             commasep (braces (commasep $ map ppr es) : map ppr as))
-  ppr (Stream cs form lam arrs ii) =
+  ppr (Stream cs size form lam arrs ii) =
     let intent_str = if ii==MaxChunk then "Max" else ""
     in ppCertificates' cs <> case form of
           MapLike o ->
             let ord_str = if o == Disorder then "Per" else ""
             in  text ("streamMap"++ord_str++intent_str) <>
-                parens (ppr lam <> comma </>
+                parens (ppr size <> comma </> ppr lam <> comma </>
                         commasep (map ppr arrs) )
           RedLike o lam0 acc ->
             let ord_str = if o == Disorder then "Per" else ""
             in  text ("streamRed"++ord_str++intent_str) <>
-                parens (ppr lam0 </> comma </> ppr lam </>
+                parens (ppr size <> comma </> ppr lam0 </> comma </> ppr lam </>
                         commasep ( braces (commasep $ map ppr acc) : map ppr arrs ))
           Sequential acc ->
                 text "streamSeq" <>
-                parens (ppr lam <> comma </>
+                parens (ppr size <> comma </> ppr lam <> comma </>
                         commasep ( braces (commasep $ map ppr acc) : map ppr arrs ))
-  ppr (Scan cs lam inputs) =
-    ppCertificates' cs <> ppSOAC "scan" [lam] (Just es) as
+  ppr (Scan cs size lam inputs) =
+    ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
 
 instance PrettyLore lore => Pretty (SegOp lore) where
-  ppr (SegReduce cs lam inputs descp) =
+  ppr (SegReduce cs size lam inputs descp) =
     ppCertificates' cs <> text "segreduce" <>
-    parens (ppr lam <> comma </>
+    parens (ppr size <> comma </> ppr lam <> comma </>
             ppTuple' nes <> comma <+>
             ppTuple' flatarrs <> comma <+>
             ppr descp)
     where
       (nes, flatarrs) = unzip inputs
-  ppr (SegScan cs st lam inputs descp) =
+  ppr (SegScan cs size st lam inputs descp) =
     ppCertificates' cs <> text "segscan" <> ppScanType st <>
-    parens (ppr lam <> comma </>
+    parens (ppr size <> comma </> ppr lam <> comma </>
             ppTuple' nes <> comma <+>
             ppTuple' flatarrs <> comma <+>
             ppr descp)
@@ -333,9 +334,10 @@ instance Pretty BinOp where
   ppr Less = text "<"
   ppr Leq = text "<="
 
-ppSOAC :: Pretty fn => String -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
-ppSOAC name funs es as =
-  text name <> parens (ppList funs </>
+ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
+ppSOAC name size funs es as =
+  text name <> parens (ppr size <> comma </>
+                       ppList funs </>
                        commasep (es' ++ map ppr as))
   where es' = maybe [] ((:[]) . ppTuple') es
 
