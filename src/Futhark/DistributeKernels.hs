@@ -209,6 +209,12 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
         mergeparams = map fst mergepat
 transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
+transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) = do
+  (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
+  mapbnd' <- transformBinding mapbnd
+  localTypeEnv (typeEnvFromBindings mapbnd') $ do
+    redbnd' <- transformBinding redbnd
+    return $ mapbnd' ++ redbnd'
 transformBinding bnd = return [bnd]
 
 data MapLoop = MapLoop Certificates SubExp Lambda [VName]
