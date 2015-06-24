@@ -397,21 +397,25 @@ redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore) =>
                       -> m (Binding lore, Binding lore)
 redomapToMapAndReduce (Pattern [] patelems) lore
                       (certs, outersz, redlam, redmap_lam, accs, arrs) = do
-  -- Remember that a reduce function must have the type @a -> a -> a@.
-  -- This means that the result of the map must be of type @a@.
-  (map_patidents, map_patbindages) <- liftM unzip $
-    forM patelems $ \pe -> do
-      let (Ident vn tp) = patElemIdent pe
-      let tp' = arrayOf tp (Shape [outersz]) (uniqueness tp)
-      i <- newIdent (baseString vn ++ "_maptmp") tp'
-      return (i, patElemBindage pe)
-  let map_bnd = mkLet [] (zip map_patidents map_patbindages)
-                      (LoopOp $ Map certs outersz newmap_lam arrs)
-  let red_args = zip accs (map identName map_patidents)
-  let red_bnd = Let (Pattern [] patelems) lore
-                    (LoopOp $ Reduce certs outersz redlam red_args)
+  let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
+  map_accpat <- mapM accMapPatElem acc_patelems
+  map_arrpat <- mapM arrMapPatElem arr_patelems
+  let map_pat = map_accpat ++ map_arrpat
+      map_bnd = mkLet [] map_pat $
+                LoopOp $ Map certs outersz newmap_lam arrs
+      red_args = zip accs $ map (identName . fst) map_accpat
+      red_bnd = Let (Pattern [] patelems) lore $
+                LoopOp $ Reduce certs outersz redlam red_args
   return (map_bnd, red_bnd)
   where
+    accMapPatElem pe = do
+      let (Ident vn tp) = patElemIdent pe
+      let tp' = arrayOfRow tp outersz
+      i <- newIdent (baseString vn ++ "_map_acc") tp'
+      return (i, patElemBindage pe)
+    arrMapPatElem pe =
+      return (patElemIdent pe, patElemBindage pe)
+
     newmap_lam =
       let tobnd = take (length accs) $ map paramIdent $ lambdaParams redmap_lam
           params' = drop (length accs) $ lambdaParams redmap_lam
