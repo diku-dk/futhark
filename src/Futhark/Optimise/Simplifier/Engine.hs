@@ -423,12 +423,9 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
 defaultSimplifyBody :: MonadEngine m =>
                        [Diet] -> Body (InnerLore m) -> m Result
 
-defaultSimplifyBody ds (Body _ [] res) =
+defaultSimplifyBody ds (Body _ bnds res) = do
+  mapM_ simplifyBinding bnds
   simplifyResult ds res
-
-defaultSimplifyBody ds (Body lore (bnd:bnds) res) = do
-  simplifyBinding bnd
-  simplifyBody ds $ Body lore bnds res
 
 -- | Simplify a single 'Result' inside an arbitrary 'MonadEngine'.
 simplifyResult :: MonadEngine m =>
