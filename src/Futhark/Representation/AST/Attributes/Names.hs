@@ -15,6 +15,7 @@ module Futhark.Representation.AST.Attributes.Names
          , freeInExtLambda
          -- * Bound Names
          , progNames
+         , boundInBody
        )
        where
 
@@ -238,3 +239,9 @@ progNames = execWriter . mapM funNames . progFunctions
 
         extLambdaNames (ExtLambda params body _) =
           mapM_ (one . paramName) params >> bodyNames body
+
+
+-- | The names bound by the bindings immediately in a 'Body'.
+boundInBody :: Body lore -> Names
+boundInBody = mconcat . map bound . bodyBindings
+  where bound (Let pat _ _) = HS.fromList $ patternNames pat

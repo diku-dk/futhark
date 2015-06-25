@@ -26,7 +26,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.ScalExp (ScalExp)
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.AlgSimplify as AS
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.Analysis.Rephrase
 import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)

@@ -28,7 +28,7 @@ import Text.PrettyPrint.Mainland hiding (pretty)
 
 import Futhark.Representation.AST
 import Futhark.Substitute
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.Renamer
 
 -----------------------------------------------------------------

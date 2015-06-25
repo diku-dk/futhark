@@ -21,7 +21,7 @@ import Data.Monoid
 
 import Prelude
 
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.Representation.AST
 import Futhark.Renamer
 import Futhark.MonadFreshNames

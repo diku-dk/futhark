@@ -69,6 +69,7 @@ Library
                    Futhark.CodeGen.ImpGen
                    Futhark.CodeGen.KernelImpGen
                    Futhark.Compiler
+                   Futhark.Construct
                    Futhark.DistributeKernels
                    Futhark.ExplicitAllocations
                    Futhark.Externalise

@@ -28,7 +28,7 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Representation.AST
 import Futhark.Binder
   (Bindable(..), insertBinding, insertBindings, mkLet')
-import Futhark.Tools (mapResult)
+import Futhark.Construct (mapResult)
 
 --import Debug.Trace
 

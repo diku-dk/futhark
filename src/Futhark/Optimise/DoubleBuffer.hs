@@ -24,7 +24,7 @@ import           Data.List
 import           Prelude
 
 import           Futhark.MonadFreshNames
-import           Futhark.Tools (intraproceduralTransformation, boundInBody)
+import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 

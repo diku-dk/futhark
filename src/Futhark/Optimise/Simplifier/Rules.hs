@@ -31,7 +31,7 @@ import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Tools
+import Futhark.Construct
 
 import Prelude hiding (any, all)
 

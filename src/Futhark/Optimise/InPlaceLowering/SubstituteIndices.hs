@@ -17,7 +17,7 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Representation.AST
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.MonadFreshNames
 import Futhark.Util
 

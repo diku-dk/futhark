@@ -35,7 +35,7 @@ import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
-import Futhark.Tools
+import Futhark.Construct
 
 --import Debug.Trace
 

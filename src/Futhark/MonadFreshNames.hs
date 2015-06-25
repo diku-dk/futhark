@@ -34,7 +34,7 @@ import Data.Monoid
 import Prelude
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes (progNames)
+import Futhark.Representation.AST.Attributes.Names (progNames)
 import qualified Futhark.FreshNames as FreshNames
 import Futhark.FreshNames hiding (newName, newID, newVName)
 

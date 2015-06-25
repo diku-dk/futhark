@@ -83,7 +83,7 @@ import Futhark.Representation.AST
   hiding (Map, Reduce, Scan, Redomap, Stream,
           Var, Iota, Rearrange, Reshape, Replicate)
 import Futhark.Substitute
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.Renamer (renameLambda)
 import Futhark.MonadFreshNames
 

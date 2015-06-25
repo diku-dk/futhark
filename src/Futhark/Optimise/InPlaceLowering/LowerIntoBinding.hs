@@ -16,7 +16,7 @@ import qualified Data.HashSet as HS
 import Prelude
 
 import Futhark.Representation.AST
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.MonadFreshNames
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 

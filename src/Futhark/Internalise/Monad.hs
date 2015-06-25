@@ -29,8 +29,8 @@ import Data.List
 import qualified Futhark.Representation.External as E
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
+import qualified Futhark.Binder as B
 import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
-import qualified Futhark.Tools as F
 
 import Prelude hiding (mapM)
 
@@ -115,7 +115,7 @@ lookupFunction fname = do
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
 bindingIdentTypes idents (InternaliseM m) =
-  InternaliseM $ F.bindingIdentTypes idents m
+  InternaliseM $ B.bindingIdentTypes idents m
 
 bindingParamTypes :: [LParam] -> InternaliseM a
                   -> InternaliseM a

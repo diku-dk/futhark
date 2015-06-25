@@ -58,7 +58,7 @@ import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import Futhark.Renamer
 import Futhark.Binder
-import Futhark.Tools
+import Futhark.Construct
 import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase

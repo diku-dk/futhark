@@ -69,7 +69,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Optimise.Simplifier.Apply
-import Futhark.Tools
+import Futhark.Construct
 import qualified Futhark.Analysis.ScalExp as SExp
 import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Optimise.Simplifier.Lore
