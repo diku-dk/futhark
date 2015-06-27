@@ -246,8 +246,15 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget target (inner_target, targets) =
   (target, targets ++ [inner_target])
 
-data Nesting = MapNesting Pattern Certificates SubExp [(LParam, VName)]
+data Nesting = MapNesting Names Pattern Certificates SubExp [(LParam, VName)]
              deriving (Show)
+
+letBoundInNesting :: Nesting -> Names
+letBoundInNesting (MapNesting names _ _ _ _) = names
+
+letBindInNesting :: Names -> Nesting -> Nesting
+letBindInNesting newnames (MapNesting oldnames pat cs w params_and_arrs) =
+  MapNesting (oldnames <> newnames) pat cs w params_and_arrs
 
 -- ^ First pair element is the very innermost ("current") nest.  In
 -- the list, the outermost nest comes first.
@@ -264,17 +271,23 @@ nestingWidth :: Nesting -> SubExp
 nestingWidth = arraysSize 0 . patternTypes . nestingPattern
 
 nestingPattern :: Nesting -> Pattern
-nestingPattern (MapNesting pat _ _ _) = pat
+nestingPattern (MapNesting _ pat _ _ _) = pat
 
 nestingParams :: Nesting -> [LParam]
-nestingParams (MapNesting _ _ _ params_and_arrs) =
+nestingParams (MapNesting _ _ _ _ params_and_arrs) =
   map fst params_and_arrs
 
-boundInNesting :: Nesting -> [VName]
-boundInNesting = map paramName . nestingParams
+-- | Both parameters and let-bound.
+boundInNesting :: Nesting -> Names
+boundInNesting nesting =
+  HS.fromList (map paramName (nestingParams nesting)) <>
+  letBoundInNesting nesting
 
-data KernelEnv = KernelEnv { kernelLetBound :: Names
-                           , kernelNest :: Nestings
+letBindInInnerNesting :: Names -> Nestings -> Nestings
+letBindInInnerNesting names (nest, nestings) =
+  (letBindInNesting names nest, nestings)
+
+data KernelEnv = KernelEnv { kernelNest :: Nestings
                            , kernelTypeEnv :: TypeEnv
                            }
 
@@ -308,9 +321,8 @@ distributeMap :: (HasTypeEnv m, MonadFreshNames m) =>
 distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askTypeEnv
   let env = KernelEnv { kernelNest =
-                        singleNesting (MapNesting pat cs w $
+                        singleNesting (MapNesting mempty pat cs w $
                                        zip (lambdaParams lam) arrs)
-                      , kernelLetBound = mempty
                       , kernelTypeEnv =
                         types <> typeEnvFromParams (lambdaParams lam)
                       }
@@ -325,10 +337,11 @@ withBinding :: Binding -> KernelM a -> KernelM a
 withBinding bnd = local $ \env ->
   env { kernelTypeEnv =
           kernelTypeEnv env <> typeEnvFromBindings [bnd]
-      , kernelLetBound =
-          kernelLetBound env <>
-          HS.fromList (patternNames (bindingPattern bnd))
+      , kernelNest =
+        letBindInInnerNesting provided $
+        kernelNest env
       }
+  where provided = HS.fromList $ patternNames $ bindingPattern bnd
 
 mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
@@ -338,7 +351,7 @@ mapNesting pat cs w lam arrs = local $ \env ->
       , kernelTypeEnv = kernelTypeEnv env <>
                         typeEnvFromParams (lambdaParams lam)
       }
-  where nest = MapNesting pat cs w (zip (lambdaParams lam) arrs)
+  where nest = MapNesting mempty pat cs w (zip (lambdaParams lam) arrs)
 
 newKernelNames :: Names -> Body -> Names
 newKernelNames let_bound inner_body =
@@ -353,7 +366,7 @@ ppTargets (target, targets) =
 ppNestings :: Nestings -> String
 ppNestings (nesting, nestings) =
   unlines $ map ppNesting $ nestings ++ [nesting]
-  where ppNesting (MapNesting _ _ _ params_and_arrs) =
+  where ppNesting (MapNesting _ _ _ _ params_and_arrs) =
           pretty (map fst params_and_arrs) ++
           " <- " ++
           pretty (map snd params_and_arrs)
@@ -365,8 +378,8 @@ distributeIfPossible acc = do
       res = snd $ innerTarget $ kernelTargets acc
   if null bnds -- No point in distributing an empty kernel.
     then return $ Just acc
-    else createKernelNest (kernelLetBound env) (kernelNest env)
-         (kernelTargets acc) (mkBody bnds res) >>=
+    else createKernelNest
+         (kernelNest env) (kernelTargets acc) (mkBody bnds res) >>=
          \case
            Just (distributed, targets) -> do
              distributed' <- optimiseKernel <$> renameBinding distributed
@@ -452,11 +465,10 @@ kernelBodyOptimisable (Let pat () (LoopOp (Map cs w fun arrs))) = do
 kernelBodyOptimisable _ =
   Nothing
 
-createKernelNest :: Names -> Nestings -> Targets
+createKernelNest :: Nestings -> Targets
                  -> Body
                  -> KernelM (Maybe (Binding, Targets))
 createKernelNest
-  let_bound
   (inner_nest, nests)
   (inner_target@(inner_pat,_), targets)
   inner_body = do
@@ -468,10 +480,10 @@ createKernelNest
 
   where patternMapTypes =
           map rowType . patternTypes
-        let_and_nestings_bound =
-          let_bound <> HS.fromList (concatMap boundInNesting $ inner_nest : nests)
+        bound_in_nest =
+          mconcat $ map boundInNesting $ inner_nest : nests
         liftedTypeOK =
-          HS.null . HS.intersection let_and_nestings_bound . freeIn . arrayDims
+          HS.null . HS.intersection bound_in_nest . freeIn . arrayDims
 
         distributeAtNesting :: Nesting
                             -> Pattern
@@ -480,7 +492,7 @@ createKernelNest
                             -> (Target -> Targets)
                             -> MaybeT KernelM (Binding, Targets)
         distributeAtNesting
-          (nest@(MapNesting _ cs w params_and_arrs))
+          (nest@(MapNesting nest_let_bound _ cs w params_and_arrs))
           pat
           body
           inner_returned_arrs
@@ -489,7 +501,7 @@ createKernelNest
               width = nestingWidth nest
               (pat', body', identity_map, expand_target) =
                 removeIdentityMapping pat body
-              required_res = newKernelNames let_bound body'
+              required_res = newKernelNames nest_let_bound body'
               (used_params, used_arrs) =
                 unzip $
                 filter ((`HS.member` freeInBody body') . paramName . fst) $
@@ -627,9 +639,12 @@ distributeMapBodyBindings acc (bnd@(Let pat () (LoopOp (Stream cs w (Sequential 
   in trace msg distributeMapBodyBindings acc $ streambnds ++ res_bnds ++ bnds
 
 distributeMapBodyBindings acc (bnd:bnds) =
+  -- It is important that bnd is in scope if 'maybeDistributeBinding'
+  -- wants to distribute, even if this causes the slightly silly
+  -- situation that bnd is in scope of itself.
+  withBinding bnd $
   maybeDistributeBinding bnd =<<
-  withBinding bnd
-  (distributeMapBodyBindings acc bnds)
+  distributeMapBodyBindings acc bnds
 
 maybeDistributeBinding :: Binding -> KernelAcc
                        -> KernelM KernelAcc
