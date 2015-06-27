@@ -358,13 +358,13 @@ ppNestings (nesting, nestings) =
           " <- " ++
           pretty (map snd params_and_arrs)
 
-distribute :: KernelAcc -> KernelM KernelAcc
-distribute acc = do
+distributeIfPossible :: KernelAcc -> KernelM (Maybe KernelAcc)
+distributeIfPossible acc = do
   env <- ask
   let bnds = kernelBindings acc
       res = snd $ innerTarget $ kernelTargets acc
   if null bnds -- No point in distributing an empty kernel.
-    then return acc
+    then return $ Just acc
     else createKernelNest (kernelLetBound env) (kernelNest env)
          (kernelTargets acc) (mkBody bnds res) >>=
          \case
@@ -375,12 +375,16 @@ distribute acc = do
                     "\nas\n" ++ pretty distributed ++
                     "\ndue to targets\n" ++ ppTargets (kernelTargets acc) ++
                     "\nand with new targets\n" ++ ppTargets targets) tell [distributed']
-             return KernelAcc { kernelBindings = []
-                              , kernelRequires = mempty
-                              , kernelTargets = targets
-                              }
+             return $ Just KernelAcc { kernelBindings = []
+                                     , kernelRequires = mempty
+                                     , kernelTargets = targets
+                                     }
            Nothing ->
-             return acc
+             return Nothing
+
+
+distribute :: KernelAcc -> KernelM KernelAcc
+distribute acc = fromMaybe acc <$> distributeIfPossible acc
 
 optimiseKernel :: Binding -> Binding
 optimiseKernel bnd = fromMaybe bnd $ tryOptimiseKernel bnd
@@ -606,18 +610,35 @@ leavingNesting acc =
       }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
+
 distributeMapBodyBindings acc [] =
   return acc
-distributeMapBodyBindings target (bnd:bnds) =
-  withBinding bnd $
+
+distributeMapBodyBindings acc (bnd@(Let pat () (LoopOp (Stream cs w (Sequential accs) lam arrs _))):bnds) =
+  let (streambnds,res) = sequentialStreamWholeArray w accs lam arrs
+      reshapeRes t (Var v) = PrimOp $ Reshape cs (arrayDims t) v
+      reshapeRes _ se      = PrimOp $ SubExp se
+      res_bnds = [ mkLet' [] [ident] $ reshapeRes (identType ident) se
+                 | (ident,se) <- zip (patternIdents pat) res ]
+      msg = unlines ["turned",
+                     pretty bnd,
+                     "into"] ++
+                     unlines (map pretty $ streambnds ++ res_bnds ++ bnds)
+  in trace msg distributeMapBodyBindings acc $ streambnds ++ res_bnds ++ bnds
+
+distributeMapBodyBindings acc (bnd:bnds) =
   maybeDistributeBinding bnd =<<
-  distributeMapBodyBindings target bnds
+  withBinding bnd
+  (distributeMapBodyBindings acc bnds)
 
 maybeDistributeBinding :: Binding -> KernelAcc
                        -> KernelM KernelAcc
-maybeDistributeBinding (Let pat _ (LoopOp (Map cs w lam arrs))) acc = do
-  acc' <- distribute acc
-  distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
+maybeDistributeBinding bnd@(Let pat _ (LoopOp (Map cs w lam arrs))) acc =
+  -- Only distribute inside the map if we can distribute everything
+  -- following the map.
+  distributeIfPossible acc >>= \case
+    Nothing -> return $ addBindingToKernel bnd acc
+    Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
   acc' <- distribute acc
   distribute $ addBindingToKernel bnd acc'

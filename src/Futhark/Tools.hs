@@ -5,6 +5,7 @@ module Futhark.Tools
 
   , nonuniqueParams
   , redomapToMapAndReduce
+  , sequentialStreamWholeArray
   , intraproceduralTransformation
   , boundInBody
   )
@@ -85,6 +86,32 @@ redomapToMapAndReduce (Pattern [] patelems) lore
       in redmap_lam { lambdaBody = body', lambdaParams = params' }
 redomapToMapAndReduce _ _ _ =
   error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
+
+sequentialStreamWholeArray :: Bindable lore =>
+                              SubExp -> [SubExp]
+                           -> ExtLambdaT lore -> [VName]
+                           -> ([Binding lore], [SubExp])
+sequentialStreamWholeArray width accs lam arrs =
+  let (chunk_param, acc_params, arr_params) =
+        partitionParameters $ extLambdaParams lam
+      chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
+      acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
+                 | (acc_param, acc) <- zip acc_params accs ]
+      arr_bnds = [ mkLet' [] [paramIdent arr_param] $
+                   PrimOp $ Reshape [] (arrayDims $ paramType arr_param) arr
+                 | (arr_param, arr) <- zip arr_params arrs ]
+
+  in (chunk_bnd :
+      acc_bnds ++
+      arr_bnds ++
+      bodyBindings (extLambdaBody lam),
+
+      bodyResult $ extLambdaBody lam)
+  where partitionParameters [] =
+          error "sequentialStreamWholeArray: lambda takes no parameters"
+        partitionParameters (chunk_param : params) =
+          let (acc_params, arr_params) = splitAt (length accs) params
+          in (chunk_param, acc_params, arr_params)
 
 intraproceduralTransformation :: (FunDec fromlore -> State VNameSource (FunDec tolore))
                               -> Prog fromlore -> Prog tolore
