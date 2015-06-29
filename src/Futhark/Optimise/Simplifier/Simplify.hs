@@ -6,6 +6,7 @@ module Futhark.Optimise.Simplifier.Simplify
   , simplifyProg
   , simplifyFun
   , simplifyLambda
+  , simplifyBindings
   )
   where
 
@@ -64,5 +65,19 @@ simplifyLambda simpl rules prog lam args = do
   types <- askTypeEnv
   let m = Engine.localVtable (<> ST.fromTypeEnv types) $
           Engine.simplifyLambdaNoHoisting lam args
+  modifyNameSource $ runSimpleM m simpl $
+    Engine.emptyEnv rules prog
+
+-- | Simplify a list of 'Binding's.
+simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
+                    SimpleOps (SimpleM lore)
+                 -> RuleBook (SimpleM lore)
+                 -> Maybe (Prog lore) -> [Binding lore]
+                 -> m [Binding (Wise lore)]
+simplifyBindings simpl rules prog bnds = do
+  types <- askTypeEnv
+  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+          fmap snd $ Engine.collectBindingsEngine $
+          mapM_ Engine.simplifyBinding bnds
   modifyNameSource $ runSimpleM m simpl $
     Engine.emptyEnv rules prog

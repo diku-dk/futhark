@@ -160,12 +160,14 @@ import Data.Maybe
 import Data.List
 import Debug.Trace
 
+import Futhark.Optimise.Simplifier.Simple (bindableSimpleOps)
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.Renamer
 import Futhark.Util
+import Futhark.CopyPropagate
 
 import Prelude
 
@@ -671,17 +673,20 @@ distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
 distributeMapBodyBindings acc [] =
   return acc
 
-distributeMapBodyBindings acc (bnd@(Let pat () (LoopOp (Stream cs w (Sequential accs) lam arrs _))):bnds) =
-  let (streambnds,res) = sequentialStreamWholeArray w accs lam arrs
+distributeMapBodyBindings acc
+  (bnd@(Let pat () (LoopOp (Stream cs w (Sequential accs) lam arrs _))):bnds) = do
+  let (body_bnds,res) = sequentialStreamWholeArray w accs lam arrs
       reshapeRes t (Var v) = PrimOp $ Reshape cs (arrayDims t) v
       reshapeRes _ se      = PrimOp $ SubExp se
       res_bnds = [ mkLet' [] [ident] $ reshapeRes (identType ident) se
                  | (ident,se) <- zip (patternIdents pat) res ]
-      msg = unlines ["turned",
+  stream_bnds <- copyPropagateInBindings bindableSimpleOps $
+                 body_bnds ++ res_bnds
+  let msg = unlines ["turned",
                      pretty bnd,
                      "into"] ++
-                     unlines (map pretty $ streambnds ++ res_bnds ++ bnds)
-  in trace msg distributeMapBodyBindings acc $ streambnds ++ res_bnds ++ bnds
+                     unlines (map pretty stream_bnds)
+  trace msg distributeMapBodyBindings acc $ stream_bnds ++ bnds
 
 distributeMapBodyBindings acc (bnd:bnds) =
   -- It is important that bnd is in scope if 'maybeDistributeBinding'
