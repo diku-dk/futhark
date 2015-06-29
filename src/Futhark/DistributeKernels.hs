@@ -268,10 +268,7 @@ pushInnerNesting nesting (inner_nesting, nestings) =
   (nesting, nestings ++ [inner_nesting])
 
 nestingWidth :: Nesting -> SubExp
-nestingWidth = arraysSize 0 . patternTypes . nestingPattern
-
-nestingPattern :: Nesting -> Pattern
-nestingPattern (MapNesting _ pat _ _ _) = pat
+nestingWidth (MapNesting _ _ _ w _) = w
 
 nestingParams :: Nesting -> [LParam]
 nestingParams (MapNesting _ _ _ _ params_and_arrs) =

@@ -461,8 +461,7 @@ allocInExp (LoopOp (DoLoop res merge form
           id
 
 allocInExp (LoopOp (Map cs w f arrs)) = do
-  size <- arraysSize 0 <$> mapM lookupType arrs
-  is <- letExp "is" $ PrimOp $ Iota size
+  is <- letExp "is" $ PrimOp $ Iota w
   f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
   return $ LoopOp $ Map cs w f' $ is:arrs
 

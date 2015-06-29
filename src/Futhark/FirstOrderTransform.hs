@@ -167,12 +167,11 @@ transformBinding (Let pat () (LoopOp (Scan cs width fun args))) = do
 
 transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexps))) = do
   arrts <- mapM lookupType arrexps
-  let outersize = arraysSize 0 arrts
   -- for the MAP    part
   let acc_num     = length accexps
   let res_tps     = lambdaReturnType innerfun
   let map_arr_tps = drop acc_num res_tps
-  let res_ts = [ arrayOf t (Shape [outersize]) (uniqueness t)
+  let res_ts = [ arrayOf t (Shape [width]) (uniqueness t)
                | t <- map_arr_tps ]
   let arrus = map (uniqueness . paramType) $
               snd $ splitAt acc_num $ lambdaParams innerfun

@@ -91,7 +91,7 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
       _ ->
         return Nothing
 
-    kernel_size <- ImpGen.subExpToDimSize =<< (arraysSize 0 <$> mapM lookupType arrs)
+    kernel_size <- ImpGen.subExpToDimSize w
 
     ImpGen.emit $ Imp.Op Imp.Kernel {
         Imp.kernelThreadNum = thread_num

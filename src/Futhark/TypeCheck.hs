@@ -794,7 +794,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
 checkLoopOp (Map ass size fun arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
   require [Basic Int] size
-  arrargs <- checkSOACArrayArgs arrexps
+  arrargs <- checkSOACArrayArgs size arrexps
   void $ checkLambda fun arrargs
 
 checkLoopOp (ConcatMap cd size fun inarrs) = do
@@ -809,7 +809,7 @@ checkLoopOp (Reduce ass size fun inputs) = do
   mapM_ (requireI [Basic Cert]) ass
   require [Basic Int] size
   startargs <- mapM checkArg startexps
-  arrargs   <- checkSOACArrayArgs arrexps
+  arrargs   <- checkSOACArrayArgs size arrexps
   checkLambda fun $ startargs ++ arrargs
   let startt      = map argType startargs
       intupletype = map argType arrargs
@@ -829,7 +829,7 @@ checkLoopOp (Scan ass size fun inputs) = do
   mapM_ (requireI [Basic Cert]) ass
   require [Basic Int] size
   startargs <- mapM checkArg startexps
-  arrargs   <- checkSOACArrayArgs arrexps
+  arrargs   <- checkSOACArrayArgs size arrexps
   checkLambda fun $ startargs ++ arrargs
   let startt      = map argType startargs
       intupletype = map argType arrargs
@@ -846,7 +846,7 @@ checkLoopOp (Scan ass size fun inputs) = do
 checkLoopOp (Redomap ass size outerfun innerfun accexps arrexps) = do
   mapM_ (requireI [Basic Cert]) ass
   require [Basic Int] size
-  arrargs <- checkSOACArrayArgs arrexps
+  arrargs <- checkSOACArrayArgs size arrexps
   accargs <- mapM checkArg accexps
   checkLambda innerfun $ accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
@@ -868,7 +868,7 @@ checkLoopOp (Stream ass size form lam arrexps _) = do
   require [Basic Int] size
   accargs <- mapM checkArg accexps
   arrargs <- mapM lookupType arrexps
-  _ <- checkSOACArrayArgs arrexps
+  _ <- checkSOACArrayArgs size arrexps
   let chunk = head $ extLambdaParams lam
   let asArg t = (t, mempty, mempty)
       inttp   = Basic Int
@@ -1022,26 +1022,22 @@ checkExp (Apply fname args rettype_annot) = do
   checkFuncall (Just fname) paramtypes argflows
 
 checkSOACArrayArgs :: Checkable lore =>
-                     [VName] -> TypeM lore [Arg]
-checkSOACArrayArgs [] = return []
-checkSOACArrayArgs (v:vs) = do
-  (vt, v') <- checkSOACArrayArg v
-  let firstArgSize = arraySize 0 vt
-  vs' <- forM vs $ \nextv -> do
-    (nextvt, nextv') <- checkSOACArrayArg nextv
-    let argSize = arraySize 0 nextvt
-    unless (argSize == firstArgSize) $
+                      SubExp -> [VName] -> TypeM lore [Arg]
+checkSOACArrayArgs width vs =
+  forM vs $ \v -> do
+    (vt, v') <- checkSOACArrayArg v
+    let argSize = arraySize 0 vt
+    unless (argSize == width) $
       bad $ TypeError noLoc $
-      "SOAC argument " ++ pretty nextv ++ " has outer size " ++
-      pretty argSize ++ ", but argument " ++ pretty v ++
-      " has outer size " ++ pretty firstArgSize
-    return nextv'
-  return $ v' : vs'
+      "SOAC argument " ++ pretty v ++ " has outer size " ++
+      pretty argSize ++ ", but width of SOAC is " ++
+      pretty width
+    return v'
   where checkSOACArrayArg ident = do
           (t, als, dflow) <- checkArg $ Var ident
           case peelArray 1 t of
             Nothing -> bad $ TypeError noLoc $
-                       "SOAC argument " ++ pretty v ++ " is not an array"
+                       "SOAC argument " ++ pretty ident ++ " is not an array"
             Just rt -> return (t, (rt, als, dflow))
 
 checkType :: Checkable lore =>
