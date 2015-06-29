@@ -3,6 +3,10 @@
 // map
 //   map
 //     sequential...
+//
+// --
+//
+// structure distributed { Map 2 DoLoop 2 Reduce 0 }
 
 fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
 

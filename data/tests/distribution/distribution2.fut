@@ -4,8 +4,10 @@
 // --
 //
 // structure distributed {
-//   Map 11
-//   Redomap 1
+//   Map 7
+//   DoLoop 2
+//   Reduce 0
+//   Redomap 0
 //   Scan 1
 // }
 

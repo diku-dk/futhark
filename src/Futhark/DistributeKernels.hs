@@ -588,15 +588,63 @@ removeIdentityMapping pat body =
         isIdentity x                  = Right x
 
 unbalancedMap :: MapLoop -> KernelM Bool
-unbalancedMap = const $ return False
+unbalancedMap (MapLoop _ _ origlam _) =
+  return $ unbalancedLambda mempty origlam
+  where subExpBound (Var i) bound = i `HS.member` bound
+        subExpBound (Constant _) _ = False
+
+        unbalancedBody bound body =
+          any (unbalancedBinding (bound <> boundInBody body) . bindingExp) $
+          bodyBindings body
+
+        unbalancedLambda bound lam =
+          unbalancedBody
+          (foldr (HS.insert . paramName) bound $ lambdaParams lam) $
+          lambdaBody lam
+
+        -- XXX - our notion of balancing is probably still too naive.
+        unbalancedBinding bound (LoopOp (Map _ w _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (Reduce _ w _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (Scan _ w _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (Redomap _ w _ _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (ConcatMap _ w _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (Stream _ w _ _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (DoLoop _ merge (ForLoop i iterations) body)) =
+          iterations `subExpBound` bound ||
+          unbalancedBody bound' body
+          where bound' = foldr HS.insert bound $
+                         i : map (paramName . fst) merge
+        unbalancedBinding _ (LoopOp (DoLoop _ _ (WhileLoop _) _)) =
+          True
+
+        unbalancedBinding bound (If _ tbranch fbranch _) =
+          unbalancedBody bound tbranch || unbalancedBody bound fbranch
+
+        unbalancedBinding bound (SegOp (SegReduce _ w _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (SegOp (SegScan _ w _ _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (SegOp (SegReplicate _ w _ _)) =
+          w `HS.member` bound
+
+        unbalancedBinding _ (PrimOp _) =
+          False
+        unbalancedBinding _ (Apply fname _ _) =
+          not $ isBuiltInFunction fname
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc =
   unbalancedMap maploop >>= \case
     True ->
-      foldl (flip addBindingToKernel) acc <$>
-      liftM snd (runBinder $ FOT.transformBinding $
+      foldr addBindingToKernel acc <$>
+      liftM snd (runBinder $ FOT.transformBindingRecursively $
                  Let pat () $ mapLoopExp maploop)
     False ->
       liftM leavingNesting $
