@@ -42,7 +42,7 @@ import qualified Language.Futhark.Parser as F
 import Futhark.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
-import Futhark.Passes (standardPipeline)
+import qualified Futhark.Passes as Passes
 
 import Futhark.Util.Options
 
@@ -62,7 +62,7 @@ data ProgramTest =
               , testAction ::
                    TestAction
               , testExpectedStructure ::
-                   Maybe AstMetrics
+                   Maybe StructureTest
               }
   deriving (Show)
 
@@ -77,6 +77,12 @@ data ExpectedError = AnyError
 instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
+
+data StructureTest = StructureTest FutharkConfig AstMetrics
+
+instance Show StructureTest where
+  show (StructureTest _ metrics) =
+    "StructureTest <config> " ++ show metrics
 
 data RunMode
   = CompiledOnly
@@ -176,11 +182,25 @@ parseBlockBody n = do
 restOfLine :: Parser T.Text
 restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
 
-parseExpectedStructure :: Parser AstMetrics
-parseExpectedStructure = do
-  lexstr "structure"
-  braces $ liftM HM.fromList $ many $
-    (,) <$> (T.pack <$> lexeme (many1 (satisfy isAlpha))) <*> parseNatural
+parseExpectedStructure :: Parser StructureTest
+parseExpectedStructure =
+  lexstr "structure" *>
+  (StructureTest <$> parsePipeline <*> parseMetrics)
+
+parsePipeline :: Parser FutharkConfig
+parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
+                pure defaultPipelineConfig
+  where defaultPipelineConfig =
+          newFutharkConfig { futharkPipeline = Passes.standardPipeline }
+        distributePipelineConfig =
+          newFutharkConfig { futharkPipeline = Passes.standardPipeline ++
+                                               [Passes.distributeKernels,
+                                                Passes.eotransform]
+                           }
+
+parseMetrics :: Parser AstMetrics
+parseMetrics = braces $ liftM HM.fromList $ many $
+               (,) <$> (T.pack <$> lexeme (many1 (satisfy isAlpha))) <*> parseNatural
 
 testSpec :: Parser ProgramTest
 testSpec =
@@ -245,9 +265,9 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-optimisedProgramMetrics :: FilePath -> TestM AstMetrics
-optimisedProgramMetrics program = do
-  res <- io $ runPipelineOnProgram futharkConfig program
+optimisedProgramMetrics :: FutharkConfig -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics config program = do
+  res <- io $ runPipelineOnProgram config program
   case res of
     (_, Left err) ->
       throwError $ show $ errorDesc err
@@ -255,12 +275,10 @@ optimisedProgramMetrics program = do
       return $ progMetrics prog
     (_, Right (ExplicitMemory _)) ->
       throwError "Compiling for metrics resulted in non-basic program"
-  where futharkConfig =
-          newFutharkConfig { futharkPipeline = standardPipeline }
 
-testMetrics :: FilePath -> AstMetrics -> TestM ()
-testMetrics program expected = context "Checking metrics" $ do
-  actual <- optimisedProgramMetrics program
+testMetrics :: FilePath -> StructureTest -> TestM ()
+testMetrics program (StructureTest config expected) = context "Checking metrics" $ do
+  actual <- optimisedProgramMetrics config program
   mapM_ (ok actual) $ HM.toList expected
   where ok metrics (name, expected_occurences) =
           case HM.lookup name metrics of
