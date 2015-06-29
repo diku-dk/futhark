@@ -97,6 +97,7 @@ import Data.Array
 import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
+import Data.Loc
 
 import Prelude
 
@@ -787,7 +788,8 @@ mapTails f _ e = f e
 
 -- | Return the set of identifiers that are free in the given
 -- expression.
-freeInExp :: (Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet (IdentBase ty vn)
+freeInExp :: (TypeBox ty, Eq vn, Hashable vn) =>
+             ExpBase ty vn -> HS.HashSet (IdentBase ty vn)
 freeInExp = execWriter . expFree
   where names = identityWalker {
                   walkOnExp = expFree
@@ -826,13 +828,15 @@ freeInExp = execWriter . expFree
         binding bound = censor (`HS.difference` bound)
 
 -- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
-freeNamesInExp :: (Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet vn
+freeNamesInExp :: (TypeBox ty, Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet vn
 freeNamesInExp = HS.map identName . freeInExp
 
 -- | Return the set of identifiers that are free in the given lambda.
-freeInLambda :: (Eq vn, Hashable vn) => LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)
-freeInLambda (AnonymFun params body _ _) =
-  HS.filter ((`notElem` params') . identName) $ freeInExp body
+freeInLambda :: (TypeBox ty, Eq vn, Hashable vn) =>
+                LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)
+freeInLambda (AnonymFun params body rettype _) =
+  HS.filter ((`notElem` params') . identName) (freeInExp body) <>
+  freeInDeclType rettype
     where params' = map identName params
 freeInLambda (CurryFun _ exps _ _) =
   HS.unions (map freeInExp exps)
@@ -844,6 +848,36 @@ freeInLambda (CurryBinOpLeft _ e _ _) =
   freeInExp e
 freeInLambda (CurryBinOpRight _ e _ _) =
   freeInExp e
+
+freeInDeclType :: (TypeBox ty, Eq vn, Hashable vn) =>
+                  DeclTypeBase vn -> HS.HashSet (IdentBase ty vn)
+freeInDeclType (Basic _) = mempty
+freeInDeclType (Array at) = freeInDeclArrayType at
+freeInDeclType (Tuple ts) = mconcat $ map freeInDeclType ts
+
+freeInDeclArrayType :: (TypeBox ty, Eq vn, Hashable vn) =>
+                       DeclArrayTypeBase vn -> HS.HashSet (IdentBase ty vn)
+freeInDeclArrayType (BasicArray _ shape _ _) =
+  mconcat $ map freeInDimDecl $ shapeDims shape
+freeInDeclArrayType (TupleArray ts shape _) =
+  mconcat (map freeInDeclTupleArrayElemType ts) <>
+  mconcat (map freeInDimDecl $ shapeDims shape)
+
+freeInDeclTupleArrayElemType :: (TypeBox ty, Eq vn, Hashable vn) =>
+                                DeclTupleArrayElemTypeBase vn
+                             -> HS.HashSet (IdentBase ty vn)
+freeInDeclTupleArrayElemType (BasicArrayElem _ _) =
+  mempty
+freeInDeclTupleArrayElemType (ArrayArrayElem at) =
+  freeInDeclArrayType at
+freeInDeclTupleArrayElemType (TupleArrayElem ts) =
+  mconcat $ map freeInDeclTupleArrayElemType ts
+
+freeInDimDecl :: (TypeBox ty, Eq vn, Hashable vn) =>
+                 DimDecl vn -> HS.HashSet (IdentBase ty vn)
+freeInDimDecl (NamedDim name) = HS.singleton $
+                                Ident name (boxType $ Basic Int) noLoc
+freeInDimDecl _               = mempty
 
 -- | Remove alias information from the type of an ident.
 toParam :: ArrayShape (shape vn) =>
