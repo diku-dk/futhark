@@ -99,7 +99,8 @@
 --
 -- But assume now that the width of @map(g)@ is invariant to the outer
 -- loop.  Then if possible, we can interchange @map(f)@ and @map(g)@,
--- sequentialise @map(f)@ and distribute:
+-- sequentialise @map(f)@ and distribute, interchanging the outer
+-- parallel loop into the sequential loop:
 --
 -- @
 --   loop(f)
@@ -687,6 +688,11 @@ distributeMapBodyBindings acc
                      "into"] ++
                      unlines (map pretty stream_bnds)
   trace msg distributeMapBodyBindings acc $ stream_bnds ++ bnds
+
+distributeMapBodyBindings acc
+  (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs)):bnds) = do
+    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
+    distributeMapBodyBindings acc $ mapbnd : redbnd : bnds
 
 distributeMapBodyBindings acc (bnd:bnds) =
   -- It is important that bnd is in scope if 'maybeDistributeBinding'
