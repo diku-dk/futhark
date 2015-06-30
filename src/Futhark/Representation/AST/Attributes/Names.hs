@@ -11,6 +11,7 @@ module Futhark.Representation.AST.Attributes.Names
          -- * Specialised Functions
          , freeInBody
          , freeInExp
+         , freeInPattern
          , freeInLambda
          , freeInExtLambda
          -- * Bound Names
