@@ -607,13 +607,18 @@ checkLambdaBody ret (Body (_,lore) bnds res) = do
 
 checkLambdaResult :: Checkable lore =>
                      [Type] -> Result -> TypeM lore ()
-checkLambdaResult ts es =
-  forM_ (zip ts es) $ \(t, e) -> do
-    et <- checkSubExp e
-    unless (et `subtypeOf` t) $
-      bad $ TypeError noLoc $
-      "Subexpression " ++ pretty e ++ " has type " ++ pretty et ++
-      " but expected " ++ pretty t
+checkLambdaResult ts es
+  | length ts /= length es =
+    bad $ TypeError noLoc $
+    "Lambda has return type " ++ prettyTuple ts ++
+    " describing " ++ show (length ts) ++ " values, but body returns " ++
+    show (length es) ++ " values: " ++ prettyTuple es
+  | otherwise = forM_ (zip ts es) $ \(t, e) -> do
+      et <- checkSubExp e
+      unless (et `subtypeOf` t) $
+        bad $ TypeError noLoc $
+        "Subexpression " ++ pretty e ++ " has type " ++ pretty et ++
+        " but expected " ++ pretty t
 
 checkBody :: Checkable lore =>
              Body lore -> TypeM lore ()
