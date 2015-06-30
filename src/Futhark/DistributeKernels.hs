@@ -249,15 +249,21 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget target (inner_target, targets) =
   (target, targets ++ [inner_target])
 
-data Nesting = MapNesting Names Pattern Certificates SubExp [(LParam, VName)]
+data LoopNesting = MapNesting Pattern Certificates SubExp [(LParam, VName)]
+                 deriving (Show)
+
+loopNestingParams :: LoopNesting -> [LParam]
+loopNestingParams (MapNesting _ _ _ params_and_arrs) =
+  map fst params_and_arrs
+
+data Nesting = Nesting { nestingLetBound :: Names
+                       , nestingLoop :: LoopNesting
+                       }
              deriving (Show)
 
-letBoundInNesting :: Nesting -> Names
-letBoundInNesting (MapNesting names _ _ _ _) = names
-
 letBindInNesting :: Names -> Nesting -> Nesting
-letBindInNesting newnames (MapNesting oldnames pat cs w params_and_arrs) =
-  MapNesting (oldnames <> newnames) pat cs w params_and_arrs
+letBindInNesting newnames (Nesting oldnames loop) =
+  Nesting (oldnames <> newnames) loop
 
 -- ^ First pair element is the very innermost ("current") nest.  In
 -- the list, the outermost nest comes first.
@@ -270,18 +276,11 @@ pushInnerNesting :: Nesting -> Nestings -> Nestings
 pushInnerNesting nesting (inner_nesting, nestings) =
   (nesting, nestings ++ [inner_nesting])
 
-nestingWidth :: Nesting -> SubExp
-nestingWidth (MapNesting _ _ _ w _) = w
-
-nestingParams :: Nesting -> [LParam]
-nestingParams (MapNesting _ _ _ _ params_and_arrs) =
-  map fst params_and_arrs
-
 -- | Both parameters and let-bound.
 boundInNesting :: Nesting -> Names
 boundInNesting nesting =
-  HS.fromList (map paramName (nestingParams nesting)) <>
-  letBoundInNesting nesting
+  HS.fromList (map paramName (loopNestingParams $ nestingLoop nesting)) <>
+  nestingLetBound nesting
 
 letBindInInnerNesting :: Names -> Nestings -> Nestings
 letBindInInnerNesting names (nest, nestings) =
@@ -321,7 +320,8 @@ distributeMap :: (HasTypeEnv m, MonadFreshNames m) =>
 distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askTypeEnv
   let env = KernelEnv { kernelNest =
-                        singleNesting (MapNesting mempty pat cs w $
+                        singleNesting (Nesting mempty $
+                                       MapNesting pat cs w $
                                        zip (lambdaParams lam) arrs)
                       , kernelTypeEnv =
                         types <> typeEnvFromParams (lambdaParams lam)
@@ -351,7 +351,8 @@ mapNesting pat cs w lam arrs = local $ \env ->
       , kernelTypeEnv = kernelTypeEnv env <>
                         typeEnvFromParams (lambdaParams lam)
       }
-  where nest = MapNesting mempty pat cs w (zip (lambdaParams lam) arrs)
+  where nest = Nesting mempty $
+               MapNesting pat cs w $ zip (lambdaParams lam) arrs
 
 newKernelNames :: Names -> Body -> Names
 newKernelNames let_bound inner_body =
@@ -366,7 +367,7 @@ ppTargets (target, targets) =
 ppNestings :: Nestings -> String
 ppNestings (nesting, nestings) =
   unlines $ map ppNesting $ nestings ++ [nesting]
-  where ppNesting (MapNesting _ _ _ _ params_and_arrs) =
+  where ppNesting (Nesting _ (MapNesting _ _ _ params_and_arrs)) =
           pretty (map fst params_and_arrs) ++
           " <- " ++
           pretty (map snd params_and_arrs)
@@ -492,13 +493,12 @@ createKernelNest
                             -> (Target -> Targets)
                             -> MaybeT KernelM (Binding, Targets)
         distributeAtNesting
-          (nest@(MapNesting nest_let_bound _ cs w params_and_arrs))
+          (Nesting nest_let_bound (MapNesting _ cs w params_and_arrs))
           pat
           body
           inner_returned_arrs
           addTarget = do
           let (params,arrs) = unzip params_and_arrs
-              width = nestingWidth nest
               (pat', body', identity_map, expand_target) =
                 removeIdentityMapping pat body
               required_res = newKernelNames nest_let_bound body'
@@ -519,7 +519,7 @@ createKernelNest
               case HM.lookup pname identity_map of
                 Nothing -> do
                   arr <- newIdent (baseString pname ++ "_r") $
-                         arrayOfRow ptype width
+                         arrayOfRow ptype w
                   return (Param (Ident pname ptype) (),
                           arr,
                           True)
