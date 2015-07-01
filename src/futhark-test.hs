@@ -270,7 +270,7 @@ optimisedProgramMetrics config program = do
   res <- io $ runPipelineOnProgram config program
   case res of
     (_, Left err) ->
-      throwError $ show $ errorDesc err
+      throwError $ errorDesc err
     (_, Right (Basic prog)) ->
       return $ progMetrics prog
     (_, Right (ExplicitMemory _)) ->
