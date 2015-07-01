@@ -531,30 +531,30 @@ createKernelNest
                             -> (Target -> Targets)
                             -> MaybeT KernelM (Kernel, Names, Targets)
         distributeAtNesting
-          (Nesting nest_let_bound nest@(MapNesting _ cs w params_and_arrs))
+          (Nesting nest_let_bound nest)
           pat
           (add_to_kernel, free_in_kernel)
           identity_map
           inner_returned_arrs
           addTarget = do
-          let (params,arrs) = unzip params_and_arrs
-              (used_params, used_arrs) =
-                unzip $
-                filter ((`HS.member` free_in_kernel) . paramName . fst) $
-                zip params arrs
+          let nest'@(MapNesting _ cs w params_and_arrs) =
+                removeUnusedNestingParts nest free_in_kernel
+              (params,arrs) = unzip params_and_arrs
               param_names = HS.fromList $ map paramName params
               free_in_kernel' =
-                (freeIn nest <> free_in_kernel) `HS.difference` param_names
-              required_res =
+                (freeIn nest' <> free_in_kernel) `HS.difference` param_names
+              required_from_nest =
                 free_in_kernel' `HS.intersection` nest_let_bound
 
-          required_res_idents <- forM (HS.toList required_res) $ \name -> do
-            t <- lift $ lookupType name
-            return $ Ident name t
+          required_from_nest_idents <-
+            forM (HS.toList required_from_nest) $ \name -> do
+              t <- lift $ lookupType name
+              return $ Ident name t
 
           (free_params, free_arrs, bind_in_target) <-
             liftM unzip3 $
-            forM (inner_returned_arrs++required_res_idents) $ \(Ident pname ptype) -> do
+            forM (inner_returned_arrs++required_from_nest_idents) $
+            \(Ident pname ptype) -> do
               unless (liftedTypeOK ptype) $
                 fail "Would induce irregular array"
               case HM.lookup pname identity_map of
@@ -575,17 +575,25 @@ createKernelNest
               free_params_pat =
                 map snd $ filter fst $ zip bind_in_target free_params
 
+              nest'' =
+                removeUnusedNestingParts
+                (MapNesting pat cs w $ zip actual_params actual_arrs)
+                free_in_kernel
+              actual_param_names =
+                HS.fromList $ map paramName actual_params
+
+              free_in_kernel'' =
+                (freeIn nest'' <> free_in_kernel) `HS.difference` actual_param_names
+
               (actual_params, actual_arrs) =
-                (used_params++free_params,
-                 used_arrs++map identName free_arrs)
+                (params++free_params,
+                 arrs++map identName free_arrs)
 
-          return (add_to_kernel $
-                  MapNesting pat cs w (zip actual_params actual_arrs),
+          return (add_to_kernel nest'',
 
-                  free_in_kernel',
+                  free_in_kernel'',
 
-                  addTarget (free_arrs_pat, map (Var . paramName) free_params_pat)
-                  )
+                  addTarget (free_arrs_pat, map (Var . paramName) free_params_pat))
 
         recurse :: [(Nesting,Target)]
                 -> MaybeT KernelM (Kernel, Names, Targets)
@@ -614,6 +622,15 @@ createKernelNest
             identity_map
             (patternIdents $ fst $ outerTarget kernel_targets)
             ((`pushOuterTarget` kernel_targets) . expand_target)
+
+removeUnusedNestingParts :: LoopNesting -> Names -> LoopNesting
+removeUnusedNestingParts (MapNesting pat cs w params_and_arrs) used =
+  MapNesting pat cs w $ zip used_params used_arrs
+  where (params,arrs) = unzip params_and_arrs
+        (used_params, used_arrs) =
+          unzip $
+          filter ((`HS.member` used) . paramName . fst) $
+          zip params arrs
 
 removeIdentityMappingGeneral :: Names -> Pattern -> Result
                              -> (Pattern,
