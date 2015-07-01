@@ -383,22 +383,17 @@ distributeIfPossible :: KernelAcc -> KernelM (Maybe KernelAcc)
 distributeIfPossible acc = do
   env <- ask
   let bnds = kernelBindings acc
-      (inner_pat,inner_res) = innerTarget $ kernelTargets acc
   if null bnds -- No point in distributing an empty kernel.
     then return $ Just acc
     else
-    let inner_body = mkBody bnds inner_res
-        (inner_pat', inner_body', inner_identity_map, inner_expand_target) =
-          removeIdentityMappingFromBody inner_pat inner_body
-    in createKernelNest
-       (kernelNest env) (kernelTargets acc)
-       (inner_pat', inner_body', inner_identity_map, inner_expand_target) >>=
+    let (dist_body, inner_body) = distributionBodyFromBindings (kernelTargets acc) bnds
+    in createKernelNest (kernelNest env) dist_body >>=
        \case
          Just (distributed, _, targets) -> do
            distributed' <- optimiseKernel <$>
-                           renameBinding (kernelToBinding distributed inner_body')
+                           renameBinding (kernelToBinding distributed inner_body)
            trace ("distributing\n" ++
-                  pretty (mkBody bnds inner_res) ++
+                  pretty (mkBody bnds $ snd $ innerTarget $ kernelTargets acc) ++
                   "\nas\n" ++ pretty distributed' ++
                   "\ndue to targets\n" ++ ppTargets (kernelTargets acc) ++
                   "\nand with new targets\n" ++ ppTargets targets) tell [distributed']
@@ -505,18 +500,41 @@ kernelToBinding (MapNesting pat cs w params_and_arrs, nest : nests) inner_body =
         bnd = kernelToBinding (nest, nests) inner_body
         body = mkBody [bnd] $ map Var $ patternNames $ bindingPattern bnd
 
-createKernelNest :: Nestings -> Targets
-                 -> (Pattern, Body, HM.HashMap VName Ident, Target -> Target)
+-- | Description of distribution to do.
+data DistributionBody = DistributionBody {
+    distributionTarget :: Targets
+  , distributionFreeInBody :: Names
+  , distributionIdentityMap :: HM.HashMap VName Ident
+  , distributionExpandTarget :: Target -> Target
+    -- ^ Also related to avoiding identity mapping.
+  }
+
+distributionInnerPattern :: DistributionBody -> Pattern
+distributionInnerPattern = fst . innerTarget . distributionTarget
+
+distributionBodyFromBindings :: Targets -> [Binding] -> (DistributionBody, Body)
+distributionBodyFromBindings ((inner_pat, inner_res), targets) bnds =
+  let inner_body = mkBody bnds inner_res
+      (inner_pat', inner_body', inner_identity_map, inner_expand_target) =
+        removeIdentityMappingFromBody inner_pat inner_body
+  in (DistributionBody
+      { distributionTarget = ((inner_pat', bodyResult inner_body'), targets)
+      , distributionFreeInBody = freeInBody inner_body'
+      , distributionIdentityMap = inner_identity_map
+      , distributionExpandTarget = inner_expand_target
+      },
+      inner_body')
+
+createKernelNest :: Nestings
+                 -> DistributionBody
                  -> KernelM (Maybe (Kernel, Names, Targets))
-createKernelNest
-  (inner_nest, nests)
-  (inner_target, targets)
-  (inner_pat, inner_body, inner_identity_map, inner_expand_target) = do
-    unless (length nests == length targets) $
-      fail $ "Nests and targets do not match!\n" ++
-      "nests: " ++ ppNestings (inner_nest, nests) ++
-      "\ntargets:" ++ ppTargets (inner_target, targets)
-    runMaybeT (recurse $ zip nests targets)
+createKernelNest (inner_nest, nests) distrib_body = do
+  let (target, targets) = distributionTarget distrib_body
+  unless (length nests == length targets) $
+    fail $ "Nests and targets do not match!\n" ++
+    "nests: " ++ ppNestings (inner_nest, nests) ++
+    "\ntargets:" ++ ppTargets (target, targets)
+  runMaybeT (recurse $ zip nests targets)
 
   where bound_in_nest =
           mconcat $ map boundInNesting $ inner_nest : nests
@@ -600,12 +618,12 @@ createKernelNest
         recurse [] =
           distributeAtNesting
           inner_nest
-          inner_pat
+          (distributionInnerPattern distrib_body)
           (newKernel,
-           freeInBody inner_body `HS.intersection` bound_in_nest)
-          inner_identity_map
+           distributionFreeInBody distrib_body `HS.intersection` bound_in_nest)
+          (distributionIdentityMap distrib_body)
           [] $
-          singleTarget . inner_expand_target
+          singleTarget . distributionExpandTarget distrib_body
 
         recurse ((nest, (pat,res)) : nests') = do
           (kernel@(outer, _), kernel_names, kernel_targets) <- recurse nests'
