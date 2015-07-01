@@ -670,8 +670,8 @@ removeIdentityMappingGeneral bound pat res =
       identity_map,
       expandTarget)
   where isIdentity (patElem, Var v)
-          | v `notElem` bound = Left (patElem, v)
-        isIdentity x          = Right x
+          | not (v `HS.member` bound) = Left (patElem, v)
+        isIdentity x                  = Right x
 
 removeIdentityMappingFromNesting :: Names -> Pattern -> Result
                                  -> (Pattern,
