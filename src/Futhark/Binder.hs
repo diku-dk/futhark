@@ -7,6 +7,7 @@ module Futhark.Binder
   , runBinderT
   , Binder
   , runBinder
+  , runBinder_
   , joinBinder
   , runBodyBinder
   , runBinderEmptyEnv
@@ -99,6 +100,13 @@ runBinder :: (MonadFreshNames m, HasTypeEnv m) =>
 runBinder m = do
   types <- askTypeEnv
   modifyNameSource $ runState $ runBinderT m types
+
+-- | Like 'runBinder', but throw away the result and just return the
+-- added bindings.
+runBinder_ :: (MonadFreshNames m, HasTypeEnv m) =>
+              Binder lore a
+           -> m [Binding lore]
+runBinder_ = liftM snd . runBinder
 
 -- | As 'runBinder', but uses 'addBinding' to add the returned
 -- bindings to the surrounding monad.
