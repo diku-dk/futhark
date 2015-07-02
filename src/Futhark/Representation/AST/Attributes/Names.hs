@@ -11,12 +11,14 @@ module Futhark.Representation.AST.Attributes.Names
          -- * Specialised Functions
          , freeInBody
          , freeInExp
+         , freeInBinding
          , freeInPattern
          , freeInLambda
          , freeInExtLambda
          -- * Bound Names
          , progNames
          , boundInBody
+         , boundByBindings
        )
        where
 
@@ -104,6 +106,16 @@ freeInExp :: (FreeIn (Annotations.Exp lore),
               FreeIn (Annotations.LetBound lore)) =>
              Exp lore -> Names
 freeInExp = execWriter . walkExpM freeWalker
+
+-- | Return the set of variable names that are free in the given
+-- binding.
+freeInBinding :: (FreeIn (Annotations.Exp lore),
+                  FreeIn (Annotations.Body lore),
+                  FreeIn (Annotations.FParam lore),
+                  FreeIn (Annotations.LParam lore),
+                  FreeIn (Annotations.LetBound lore)) =>
+                 Binding lore -> Names
+freeInBinding = execWriter . walkOnBinding freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- lambda, including shape annotations in the parameters.
@@ -241,8 +253,11 @@ progNames = execWriter . mapM funNames . progFunctions
         extLambdaNames (ExtLambda params body _) =
           mapM_ (one . paramName) params >> bodyNames body
 
-
 -- | The names bound by the bindings immediately in a 'Body'.
 boundInBody :: Body lore -> Names
-boundInBody = mconcat . map bound . bodyBindings
+boundInBody = boundByBindings . bodyBindings
+
+-- | The names bound by the bindings.
+boundByBindings :: [Binding lore] -> Names
+boundByBindings = mconcat . map bound
   where bound (Let pat _ _) = HS.fromList $ patternNames pat
