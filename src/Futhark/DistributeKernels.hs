@@ -408,11 +408,14 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (Map cs w lam arrs))) acc =
 
 maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc =
   distributeSingleBinding acc bnd >>= \case
-    Nothing ->
-      return $ addBindingToKernel bnd acc
-    Just (res, nest, acc') -> do
-      tell . pure =<< interchangeLoops nest res pat ret merge form body
+    Just (kernels, res, nest, acc')
+      | length res == patternSize pat -> do
+      tell kernels
+      tell . reverse =<<
+        interchangeLoops nest (SeqLoop pat ret merge form body)
       return acc'
+    _ ->
+      return $ addBindingToKernel bnd acc
 
 maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
   acc' <- distribute acc
@@ -446,17 +449,17 @@ distributeIfPossible acc = do
                               }
 
 distributeSingleBinding :: KernelAcc -> Binding
-                        -> KernelM (Maybe (Result, KernelNest, KernelAcc))
+                        -> KernelM (Maybe (PostKernels, Result, KernelNest, KernelAcc))
 distributeSingleBinding acc bnd = do
   nest <- asks kernelNest
   tryDistribute nest (kernelTargets acc) (kernelBindings acc) >>= \case
     Nothing -> return Nothing
-    Just (targets, distributed_kernels) -> do
-      tell distributed_kernels
+    Just (targets, distributed_kernels) ->
       tryDistributeBinding nest targets bnd >>= \case
         Nothing -> return Nothing
         Just (res, targets', new_kernel_nest) ->
-          return $ Just (res,
+          return $ Just (distributed_kernels,
+                         res,
                          new_kernel_nest,
                          KernelAcc { kernelTargets = targets'
                                    , kernelBindings = []

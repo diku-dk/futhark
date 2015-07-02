@@ -26,6 +26,8 @@ module Futhark.DistributeKernels.Distribution
 
        , tryDistribute
        , tryDistributeBinding
+
+       , SeqLoop (..)
        , interchangeLoops
        )
        where
@@ -146,6 +148,9 @@ pushKernelNesting newnest (nest, nests) =
 
 newKernel :: LoopNesting -> KernelNest
 newKernel nest = (nest, [])
+
+kernelNestLoops :: KernelNest -> [LoopNesting]
+kernelNestLoops (loop, loops) = loop : loops
 
 constructKernel :: KernelNest -> Body -> Binding
 constructKernel (MapNesting pat cs w params_and_arrs, []) body =
@@ -383,14 +388,63 @@ tryDistributeBinding nest targets bnd =
   where (dist_body, res) = distributionBodyFromBinding targets bnd
         addRes (targets', kernel_nest) = (res, targets', kernel_nest)
 
-interchangeLoops :: MonadFreshNames m =>
-                    KernelNest
-                 -> Result
-                 -> Pattern -> [VName] -> [(FParam, SubExp)] -> LoopForm -> Body
-                 -> m Binding
-interchangeLoops nest res pat ret merge form body =
-  return $ constructKernel nest $ mkBody [bnd] res
-  where bnd = Let pat () $ LoopOp $ DoLoop ret merge form body
+data SeqLoop = SeqLoop Pattern [VName] [(FParam, SubExp)] LoopForm Body
+
+seqLoopBinding :: SeqLoop -> Binding
+seqLoopBinding (SeqLoop pat ret merge form body) =
+  Let pat () $ LoopOp $ DoLoop ret merge form body
+
+interchangeLoop :: MonadBinder m =>
+                   SeqLoop -> LoopNesting
+                -> m SeqLoop
+interchangeLoop
+  (SeqLoop loop_pat ret merge form body)
+  (MapNesting pat cs w params_and_arrs) = do
+    merge_expanded <- mapM expand merge
+
+    let ret_params_mask = map ((`elem` ret) . paramName . fst) merge
+        ret_expanded = [ paramName param
+                       | ((param,_), used) <- zip merge_expanded ret_params_mask,
+                         used]
+        loop_pat_expanded =
+          Pattern [] $ map expandPatElem $ patternElements loop_pat
+        new_params = map fst merge
+        new_arrs = map (paramName . fst) merge_expanded
+        rettype = map rowType $ patternTypes pat
+        lam = Lambda (new_params<>params) body rettype
+        map_bnd = Let loop_pat_expanded () $
+                  LoopOp $ Map cs w lam $ new_arrs <> arrs
+        res = map Var $ patternNames loop_pat_expanded
+
+    return $
+      SeqLoop pat ret_expanded merge_expanded form $
+      mkBody [map_bnd] res
+  where (params, arrs) = unzip params_and_arrs
+
+        expand (merge_param, merge_init) = do
+          expanded_param <-
+            newIdent (param_name <> "_expanded") $
+            arrayOfRow (paramType merge_param) w
+          expanded_init <-
+            letSubExp (param_name <> "_expanded_init") $
+            PrimOp $ Replicate w merge_init
+          return (Param expanded_param (), expanded_init)
+            where param_name = baseString $ paramName merge_param
+
+        expandPatElem patElem =
+          patElem { patElemIdent = expandIdent $ patElemIdent patElem }
+
+        expandIdent ident =
+          ident { identType = arrayOfRow (identType ident) w }
+
+interchangeLoops :: (MonadFreshNames m, HasTypeEnv m) =>
+                    KernelNest -> SeqLoop
+                 -> m [Binding]
+
+interchangeLoops nest loop = do
+  (loop', bnds) <-
+    runBinder $ foldM interchangeLoop loop $ reverse $ kernelNestLoops nest
+  return $ bnds ++ [seqLoopBinding loop']
 
 optimiseKernel :: Binding -> Binding
 optimiseKernel bnd = fromMaybe bnd $ tryOptimiseKernel bnd
