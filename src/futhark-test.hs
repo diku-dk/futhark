@@ -200,7 +200,8 @@ parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ liftM HM.fromList $ many $
-               (,) <$> (T.pack <$> lexeme (many1 (satisfy isAlpha))) <*> parseNatural
+               (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
+  where constituent c = isAlpha c || c == '/'
 
 testSpec :: Parser ProgramTest
 testSpec =

@@ -27,6 +27,14 @@ type MetricsM = Writer CountMetrics
 seen :: Text -> MetricsM ()
 seen k = tell $ CountMetrics $ HM.singleton k 1
 
+inside :: Text -> MetricsM () -> MetricsM ()
+inside what m = seen what >> censor addWhat m
+  where addWhat (CountMetrics metrics) =
+          CountMetrics metrics <>
+          CountMetrics (HM.foldlWithKey' addWhat' mempty metrics)
+        addWhat' new_metrics k v =
+          HM.insert (what <> "/" <> k) v new_metrics
+
 progMetrics :: Prog lore -> AstMetrics
 progMetrics = actualMetrics . execWriter . mapM_ funDecMetrics . progFunctions
 
@@ -47,7 +55,7 @@ expMetrics (LoopOp op) =
 expMetrics (SegOp op) =
   seen "SegOp" >> segOpMetrics op
 expMetrics (If _ tb fb _) =
-  seen "If" >> bodyMetrics tb >> bodyMetrics fb
+  inside "If" $ bodyMetrics tb >> bodyMetrics fb
 expMetrics (Apply fname _ _) =
   seen $ "Apply" <> fromString (nameToString fname)
 
@@ -75,29 +83,29 @@ primOpMetrics (Alloc {}) = seen "Alloc"
 
 loopOpMetrics :: LoopOp lore -> MetricsM ()
 loopOpMetrics (DoLoop _ _ (ForLoop {}) body) =
-  seen "DoLoop" >> seen "ForLoop" >> bodyMetrics body
+  inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 loopOpMetrics (DoLoop _ _ (WhileLoop {}) body) =
-  seen "DoLoop" >> seen "WhileLoop" >> bodyMetrics body
+  inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 loopOpMetrics (Map _ _ fun _) =
-  seen "Map" >> lambdaMetrics fun
+  inside "Map" $ lambdaMetrics fun
 loopOpMetrics (Reduce _ _ fun _) =
-  seen "Reduce" >> lambdaMetrics fun
+  inside "Reduce" $ lambdaMetrics fun
 loopOpMetrics (Scan _ _ fun _) =
-  seen "Scan" >> lambdaMetrics fun
+  inside "Scan" $ lambdaMetrics fun
 loopOpMetrics (ConcatMap _ _ fun _) =
-  seen "ConcatMap" >> lambdaMetrics fun
+  inside "ConcatMap" $ lambdaMetrics fun
 loopOpMetrics (Redomap _ _ fun1 fun2 _ _) =
-  seen "Redomap" >> lambdaMetrics fun1 >> lambdaMetrics fun2
+  inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
 loopOpMetrics (Stream _ _ _ lam _ _) =
-  seen "Stream" >> extLambdaMetrics lam
+  inside "Stream" $ extLambdaMetrics lam
 
 segOpMetrics :: SegOp lore -> MetricsM ()
 segOpMetrics (SegReduce _ _ fun _ _) =
-  seen "SegReduce" >> lambdaMetrics fun
+  inside "SegReduce" $ lambdaMetrics fun
 segOpMetrics (SegScan _ _ ScanInclusive fun _ _) =
-  seen "SegScanInclusive" >> lambdaMetrics fun
+  inside "SegScanInclusive" $ lambdaMetrics fun
 segOpMetrics (SegScan _ _ ScanExclusive fun _ _) =
-  seen "SegScanExclusive" >> lambdaMetrics fun
+  inside "SegScanExclusive" $ lambdaMetrics fun
 segOpMetrics (SegReplicate{}) =
   seen "SegReplicate"
 
