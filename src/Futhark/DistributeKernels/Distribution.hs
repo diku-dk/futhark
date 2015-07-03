@@ -420,14 +420,18 @@ interchangeLoop
       SeqLoop pat ret_expanded merge_expanded form $
       mkBody [map_bnd] res
   where (params, arrs) = unzip params_and_arrs
+        expandedInit _ (Var v)
+          | Just arr <- snd <$> find ((==v).paramName.fst) params_and_arrs =
+              return $ Var arr
+        expandedInit param_name se =
+          letSubExp (param_name <> "_expanded_init") $
+            PrimOp $ Replicate w se
 
         expand (merge_param, merge_init) = do
           expanded_param <-
             newIdent (param_name <> "_expanded") $
             arrayOfRow (paramType merge_param) w
-          expanded_init <-
-            letSubExp (param_name <> "_expanded_init") $
-            PrimOp $ Replicate w merge_init
+          expanded_init <- expandedInit param_name merge_init
           return (Param expanded_param (), expanded_init)
             where param_name = baseString $ paramName merge_param
 
