@@ -232,7 +232,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
                       , kernelTypeEnv =
                         types <> typeEnvFromParams (lambdaParams lam)
                       }
-  liftM (reverse . snd) $ runKernelM env $
+  liftM (postKernelBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelRequires = mempty
@@ -248,7 +248,14 @@ data KernelAcc = KernelAcc { kernelTargets :: Targets
                            , kernelRequires :: Names
                            }
 
-type PostKernels = [Binding]
+newtype PostKernels = PostKernels [[Binding]]
+
+instance Monoid PostKernels where
+  mempty = PostKernels mempty
+  PostKernels xs `mappend` PostKernels ys = PostKernels $ ys ++ xs
+
+postKernelBindings :: PostKernels -> [Binding]
+postKernelBindings (PostKernels kernels) = concat kernels
 
 addBindingToKernel :: Binding -> KernelAcc -> KernelAcc
 addBindingToKernel bnd acc =
@@ -264,9 +271,12 @@ instance HasTypeEnv KernelM where
   askTypeEnv = asks kernelTypeEnv
 
 runKernelM :: (HasTypeEnv m, MonadFreshNames m) =>
-              KernelEnv -> KernelM a -> m (a, [Binding])
+              KernelEnv -> KernelM a -> m (a, PostKernels)
 runKernelM env (KernelM m) = modifyNameSource $ getKernels . runRWS m env
   where getKernels (x,s,a) = ((x, a), s)
+
+addKernel :: [Binding] -> KernelM ()
+addKernel bnds = tell $ PostKernels [bnds]
 
 withBinding :: Binding -> KernelM a -> KernelM a
 withBinding bnd = local $ \env ->
@@ -411,7 +421,7 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
     Just (kernels, res, nest, acc')
       | length res == patternSize pat -> do
       tell kernels
-      tell . reverse =<<
+      addKernel =<<
         interchangeLoops nest (SeqLoop pat ret merge form body)
       return acc'
     _ ->
@@ -441,8 +451,8 @@ distributeIfPossible acc = do
   nest <- asks kernelNest
   tryDistribute nest (kernelTargets acc) (kernelBindings acc) >>= \case
     Nothing -> return Nothing
-    Just (targets, kernels) -> do
-      tell kernels
+    Just (targets, kernel) -> do
+      addKernel kernel
       return $ Just KernelAcc { kernelTargets = targets
                               , kernelBindings = []
                               , kernelRequires = mempty
@@ -454,11 +464,11 @@ distributeSingleBinding acc bnd = do
   nest <- asks kernelNest
   tryDistribute nest (kernelTargets acc) (kernelBindings acc) >>= \case
     Nothing -> return Nothing
-    Just (targets, distributed_kernels) ->
+    Just (targets, distributed_bnds) ->
       tryDistributeBinding nest targets bnd >>= \case
         Nothing -> return Nothing
         Just (res, targets', new_kernel_nest) ->
-          return $ Just (distributed_kernels,
+          return $ Just (PostKernels [distributed_bnds],
                          res,
                          new_kernel_nest,
                          KernelAcc { kernelTargets = targets'
