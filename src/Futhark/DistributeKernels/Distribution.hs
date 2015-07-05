@@ -410,16 +410,40 @@ interchangeLoop
           Pattern [] $ map expandPatElem $ patternElements loop_pat
         new_params = map fst merge
         new_arrs = map (paramName . fst) merge_expanded
-        rettype = map rowType $ patternTypes pat
-        lam = Lambda (new_params<>params) body rettype
+        rettype = map rowType $ patternTypes loop_pat_expanded
+
+    -- If the map consumes something that is bound outside the loop
+    -- (i.e. is not a merge parameter), we have to copy() it.  As a
+    -- small simplification, we just remove the parameter outright if
+    -- it is not used anymore.  This might happen if the parameter was
+    -- used just as the inital value of a merge parameter.
+    ((params', arrs'), copy_bnds) <-
+      runBinder $ bindingParamTypes new_params $
+      unzip <$> catMaybes <$> mapM copyOrRemoveParam params_and_arrs
+
+    let lam = Lambda (params'<>new_params) body rettype
         map_bnd = Let loop_pat_expanded () $
-                  LoopOp $ Map cs w lam $ new_arrs <> arrs
+                  LoopOp $ Map cs w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
 
     return $
       SeqLoop pat ret_expanded merge_expanded form $
-      mkBody [map_bnd] res
-  where (params, arrs) = unzip params_and_arrs
+      mkBody (copy_bnds++[map_bnd]) res
+  where free_in_body = freeInBody body
+
+        copyOrRemoveParam (param, arr)
+          | not (paramName param `HS.member` free_in_body) =
+            return Nothing
+          | unique $ paramType param = do
+              arr' <- newVName $ baseString arr <> "_copy"
+              let arr_t = arrayOfRow (paramType param) w
+              addBinding $
+                Let (basicPattern' [] [Ident arr' arr_t]) () $
+                PrimOp $ Copy arr
+              return $ Just (param, arr')
+          | otherwise =
+            return $ Just (param, arr)
+
         expandedInit _ (Var v)
           | Just arr <- snd <$> find ((==v).paramName.fst) params_and_arrs =
               return $ Var arr
