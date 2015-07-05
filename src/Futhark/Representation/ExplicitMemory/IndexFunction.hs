@@ -193,9 +193,22 @@ reshape :: Fractional num =>
            IxFun num (S m) -> Shape num n -> IxFun num n
 reshape = Reshape
 
-applyInd :: Fractional num =>
+applyInd :: forall num n m.
+            Fractional num =>
             SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
-applyInd = Index
+applyInd n (Index m_plus_n (ixfun :: IxFun num (k:+:(m:+:n))) (mis :: Indices num k)) is =
+  Index n ixfun' is'
+  where k :: SNat k
+        k = Vec.sLength mis
+        m :: SNat m
+        m = case propToBoolLeq $ plusLeqR m n of
+              Dict -> coerce (plusMinusEqL m n) $ m_plus_n %- n
+        is' :: Indices num (m:+:k)
+        is' = coerce (plusCommutative k m) $ Vec.append mis is
+        ixfun' :: IxFun num ((m:+:k):+:n)
+        ixfun' = coerce (plusCongR n (plusCommutative k m)) $
+                 coerce (plusAssociative k m n) ixfun
+applyInd n ixfun is = Index n ixfun is
 
 offsetUnderlying :: Fractional num =>
                     IxFun num n -> num -> IxFun num n
