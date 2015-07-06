@@ -189,10 +189,24 @@ transformBody body = transformBindings (bodyBindings body) $
 transformBindings :: [Binding] -> DistribM Body -> DistribM Body
 transformBindings [] m =
   m
-transformBindings (bnd:bnds) m = do
-  bnd' <- transformBinding bnd
-  localTypeEnv (typeEnvFromBindings bnd') $
-    insertBindings bnd' <$> transformBindings bnds m
+transformBindings (bnd:bnds) m =
+  sequentialisedUnbalancedBinding bnd >>= \case
+    Nothing -> do
+      bnd' <- transformBinding bnd
+      localTypeEnv (typeEnvFromBindings bnd') $
+        insertBindings bnd' <$> transformBindings bnds m
+    Just bnds' ->
+      transformBindings (bnds' <> bnds) m
+
+sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
+sequentialisedUnbalancedBinding bnd@(Let _ _ (LoopOp (Map _ _ lam _)))
+  | unbalancedLambda lam =
+    Just <$> runBinder_ (FOT.transformBinding bnd)
+sequentialisedUnbalancedBinding bnd@(Let _ _ (LoopOp (Redomap _ _ lam1 lam2 _ _)))
+  | unbalancedLambda lam1 || unbalancedLambda lam2 =
+    Just <$> runBinder_ (FOT.transformBinding bnd)
+sequentialisedUnbalancedBinding _ =
+  return Nothing
 
 transformBinding :: Binding -> DistribM [Binding]
 transformBinding (Let pat () (If c tb fb rt)) = do
@@ -299,20 +313,18 @@ mapNesting pat cs w lam arrs = local $ \env ->
   where nest = Nesting mempty $
                MapNesting pat cs w $ zip (lambdaParams lam) arrs
 
-unbalancedMap :: MapLoop -> KernelM Bool
-unbalancedMap (MapLoop _ _ origlam _) =
-  return $ unbalancedLambda mempty origlam
+unbalancedLambda :: Lambda -> Bool
+unbalancedLambda lam =
+  unbalancedBody
+  (HS.fromList $ map paramName $ lambdaParams lam) $
+  lambdaBody lam
+
   where subExpBound (Var i) bound = i `HS.member` bound
         subExpBound (Constant _) _ = False
 
         unbalancedBody bound body =
           any (unbalancedBinding (bound <> boundInBody body) . bindingExp) $
           bodyBindings body
-
-        unbalancedLambda bound lam =
-          unbalancedBody
-          (foldr (HS.insert . paramName) bound $ lambdaParams lam) $
-          lambdaBody lam
 
         -- XXX - our notion of balancing is probably still too naive.
         unbalancedBinding bound (LoopOp (Map _ w _ _)) =
@@ -352,13 +364,12 @@ unbalancedMap (MapLoop _ _ origlam _) =
 
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
-distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc =
-  unbalancedMap maploop >>= \case
-    True ->
+distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
+  | unbalancedLambda lam =
       foldr addBindingToKernel acc <$>
       liftM snd (runBinder $ FOT.transformBindingRecursively $
                  Let pat () $ mapLoopExp maploop)
-    False ->
+  | otherwise =
       liftM leavingNesting $
       mapNesting pat cs w lam arrs $
       distribute =<<
