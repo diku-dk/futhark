@@ -250,7 +250,6 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   liftM (postKernelBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
-                          , kernelRequires = mempty
                           , kernelBindings = mempty
                           }
 
@@ -260,7 +259,6 @@ data KernelEnv = KernelEnv { kernelNest :: Nestings
 
 data KernelAcc = KernelAcc { kernelTargets :: Targets
                            , kernelBindings :: [Binding]
-                           , kernelRequires :: Names
                            }
 
 newtype PostKernels = PostKernels [[Binding]]
@@ -378,7 +376,6 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       where acc' = KernelAcc { kernelTargets = pushInnerTarget
                                                (pat, bodyResult $ lambdaBody lam) $
                                                kernelTargets acc
-                             , kernelRequires = mempty
                              , kernelBindings = mempty
                              }
 
@@ -487,7 +484,6 @@ distributeIfPossible acc = do
       addKernel kernel
       return $ Just KernelAcc { kernelTargets = targets
                               , kernelBindings = []
-                              , kernelRequires = mempty
                               }
 
 distributeSingleBinding :: KernelAcc -> Binding
@@ -505,5 +501,4 @@ distributeSingleBinding acc bnd = do
                          new_kernel_nest,
                          KernelAcc { kernelTargets = targets'
                                    , kernelBindings = []
-                                   , kernelRequires = mempty
                                    })
