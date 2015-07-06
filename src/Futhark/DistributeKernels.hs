@@ -149,6 +149,7 @@ module Futhark.DistributeKernels
        (transformProg)
        where
 
+import Control.Arrow (second)
 import Control.Applicative
 import Control.Monad.RWS.Strict
 import Control.Monad.Reader
@@ -370,10 +371,10 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       liftM snd (runBinder $ FOT.transformBindingRecursively $
                  Let pat () $ mapLoopExp maploop)
   | otherwise =
-      liftM leavingNesting $
-      mapNesting pat cs w lam arrs $
       distribute =<<
-      distributeMapBodyBindings acc' (bodyBindings $ lambdaBody lam)
+      leavingNesting maploop <$>
+      mapNesting pat cs w lam arrs
+      (distributeMapBodyBindings acc' $ bodyBindings $ lambdaBody lam)
       where acc' = KernelAcc { kernelTargets = pushInnerTarget
                                                (pat, bodyResult $ lambdaBody lam) $
                                                kernelTargets acc
@@ -381,13 +382,31 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
                              , kernelBindings = mempty
                              }
 
-leavingNesting :: KernelAcc -> KernelAcc
-leavingNesting acc =
-  acc { kernelTargets =
-           case reverse $ snd $ kernelTargets acc of
-             [] -> error "The kernel targets list is unexpectedly empty"
-             x:xs -> (x, reverse xs)
-      }
+leavingNesting :: MapLoop -> KernelAcc -> KernelAcc
+leavingNesting (MapLoop cs w lam arrs) acc =
+  case second reverse $ kernelTargets acc of
+   (_, []) ->
+     error "The kernel targets list is unexpectedly small"
+   ((pat,res), x:xs) ->
+     acc { kernelTargets =
+           (x, reverse xs)
+         , kernelBindings =
+           case kernelBindings acc of
+             []      ->
+               []
+             remnant ->
+               let body = mkBody remnant res
+                   used_in_body = freeInBody body
+                   (used_params, used_arrs) =
+                     unzip $
+                     filter ((`HS.member` used_in_body) . paramName . fst) $
+                     zip (lambdaParams lam) arrs
+                   lam' = Lambda { lambdaBody = body
+                                 , lambdaReturnType = map rowType $ patternTypes pat
+                                 , lambdaParams = used_params
+                                 }
+               in [Let pat () $ LoopOp $ Map cs w lam' used_arrs]
+         }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
 

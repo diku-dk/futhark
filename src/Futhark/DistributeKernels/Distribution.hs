@@ -82,6 +82,12 @@ pushInnerTarget target (inner_target, targets) =
 data LoopNesting = MapNesting Pattern Certificates SubExp [(LParam, VName)]
                  deriving (Show)
 
+ppLoopNesting :: LoopNesting -> String
+ppLoopNesting (MapNesting _ _ _ params_and_arrs) =
+  pretty (map fst params_and_arrs) ++
+  " <- " ++
+  pretty (map snd params_and_arrs)
+
 loopNestingPattern :: LoopNesting -> Pattern
 loopNestingPattern (MapNesting pat _ _ _) =
   pat
@@ -113,10 +119,8 @@ type Nestings = (Nesting, [Nesting])
 ppNestings :: Nestings -> String
 ppNestings (nesting, nestings) =
   unlines $ map ppNesting $ nestings ++ [nesting]
-  where ppNesting (Nesting _ (MapNesting _ _ _ params_and_arrs)) =
-          pretty (map fst params_and_arrs) ++
-          " <- " ++
-          pretty (map snd params_and_arrs)
+  where ppNesting (Nesting _ loop) =
+          ppLoopNesting loop
 
 singleNesting :: Nesting -> Nestings
 singleNesting = (,[])
@@ -211,7 +215,9 @@ createKernelNest (inner_nest, nests) distrib_body = do
   where prepare (x, _, z) = (z, x)
         bound_in_nest =
           mconcat $ map boundInNesting $ inner_nest : nests
-        liftedTypeOK =
+        -- | Can something of this type be taken outside the nest?
+        -- I.e. are none of its dimensions bound inside the nest.
+        distributableType =
           HS.null . HS.intersection bound_in_nest . freeIn . arrayDims
 
         distributeAtNesting :: (HasTypeEnv m, MonadFreshNames m) =>
@@ -246,9 +252,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           (free_params, free_arrs, bind_in_target) <-
             liftM unzip3 $
             forM (inner_returned_arrs++required_from_nest_idents) $
-            \(Ident pname ptype) -> do
-              unless (liftedTypeOK ptype) $
-                fail "Would induce irregular array"
+            \(Ident pname ptype) ->
               case HM.lookup pname identity_map of
                 Nothing -> do
                   arr <- newIdent (baseString pname ++ "_r") $
@@ -267,19 +271,23 @@ createKernelNest (inner_nest, nests) distrib_body = do
               free_params_pat =
                 map snd $ filter fst $ zip bind_in_target free_params
 
+              (actual_params, actual_arrs) =
+                (params++free_params,
+                 arrs++map identName free_arrs)
+              actual_param_names =
+                HS.fromList $ map paramName actual_params
+
               nest'' =
                 removeUnusedNestingParts
                 (MapNesting pat cs w $ zip actual_params actual_arrs)
                 free_in_kernel
-              actual_param_names =
-                HS.fromList $ map paramName actual_params
 
               free_in_kernel'' =
                 (freeIn nest'' <> free_in_kernel) `HS.difference` actual_param_names
 
-              (actual_params, actual_arrs) =
-                (params++free_params,
-                 arrs++map identName free_arrs)
+          unless (all (distributableType . paramType) $
+                  loopNestingParams nest'') $
+            fail "Would induce irregular array"
 
           return (add_to_kernel nest'',
 
