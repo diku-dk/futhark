@@ -41,7 +41,7 @@ class (Lore lore,
 -- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
 -- parentheses.
 apply :: [Doc] -> Doc
-apply = encloseSep lparen rparen comma . map align
+apply = parens . commasep . map align
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
