@@ -1,8 +1,8 @@
-// More distribution with maps consuming their input.
-//
-// --
-//
-// structure distributed { Map/Loop 0 }
+-- More distribution with maps consuming their input.
+--
+-- ==
+--
+-- structure distributed { Map/Loop 0 }
 
 fun [[[int,k],m],n] main(*[[[int,k],m],n] a) =
   map(fn [[int,k],m] (*[[int,k],m] a_r) =>

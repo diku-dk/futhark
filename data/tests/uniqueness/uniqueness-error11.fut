@@ -1,6 +1,6 @@
-// Make sure occurences are checked inside function parameters as well.
-// --
-// error:
+-- Make sure occurences are checked inside function parameters as well.
+-- ==
+-- error:
 
 fun int f(int x) = x
 

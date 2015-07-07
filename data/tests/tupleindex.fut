@@ -1,10 +1,10 @@
-// --
-// input {
-// }
-// output {
-//   0
-//   1
-// }
+-- ==
+-- input {
+-- }
+-- output {
+--   0
+--   1
+-- }
 fun {int, int} main() =
   let arr = [{0,1}, {2,3}, {4,5}] in
   let n = size(0, arr) in

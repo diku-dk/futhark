@@ -1,5 +1,5 @@
-// Example program from the ARRAY'14 paper.
-// --
+-- Example program from the ARRAY'14 paper.
+-- ==
 
 fun [[real]] main(*[int] X, *[[real]] A) =
   let M = size(0,A) in

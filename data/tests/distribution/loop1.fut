@@ -1,9 +1,9 @@
-// Like loop0.fut, but the sequential loop also carries a scalar
-// variable that is not mapped.
-//
-// --
-//
-// structure distributed { Map/DoLoop 0 }
+-- Like loop0.fut, but the sequential loop also carries a scalar
+-- variable that is not mapped.
+--
+-- ==
+--
+-- structure distributed { Map/DoLoop 0 }
 
 fun [{[int,k],int},n] main([[[int,k],m],n] a) =
   let acc = replicate(k, 0) in
@@ -15,7 +15,7 @@ fun [{[int,k],int},n] main([[[int,k],m],n] a) =
         {acc, accnum}
      , a)
 
-// Example of what we want - this is dead code.
+-- Example of what we want - this is dead code.
 fun [{[int,k],int},n] main_distributed([[[int,k],m],n] a) =
   let acc_expanded = replicate(n, replicate(k, 0)) in
   let accnum_expanded = replicate(n, 1) in

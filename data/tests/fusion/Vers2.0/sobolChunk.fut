@@ -1,34 +1,34 @@
-// --
-// input {
-//   { 1
-//   , 1
-//   , 100
-//   , [ [ 536870912, 268435456, 134217728, 67108864, 33554432, 16777216, 8388608, 4194304, 2097152, 1048576
-//       , 524288,    262144,    131072,    65536,    32768,    16384,    8192,    4096,    2048,    1024
-//       , 512,       256,       128,       64,       32,       16,       8,       4,       2,       1
-//       ]
-//     ]
-//   }
-// }
-// output {
-//   49.8203125
-// }
+-- ==
+-- input {
+--   { 1
+--   , 1
+--   , 100
+--   , [ [ 536870912, 268435456, 134217728, 67108864, 33554432, 16777216, 8388608, 4194304, 2097152, 1048576
+--       , 524288,    262144,    131072,    65536,    32768,    16384,    8192,    4096,    2048,    1024
+--       , 512,       256,       128,       64,       32,       16,       8,       4,       2,       1
+--       ]
+--     ]
+--   }
+-- }
+-- output {
+--   49.8203125
+-- }
 
 
 fun int grayCode(int x) = (x >> 1) ^ x
 
-////////////////////////////////////////
-/// Sobol Generator
-////////////////////////////////////////
+----------------------------------------
+--/ Sobol Generator
+----------------------------------------
 fun bool testBit(int n, int ind) =
     let t = (1 << ind) in (n & t) == t
 
-/////////////////////////////////////////////////////////////////
-//// INDEPENDENT FORMULA: 
-////    filter is redundantly computed inside map.
-////    Currently Futhark hoists it outside, but this will
-////    not allow fusing the filter with reduce => redomap,
-/////////////////////////////////////////////////////////////////
+----------------------------------------------------------------/
+---- INDEPENDENT FORMULA: 
+----    filter is redundantly computed inside map.
+----    Currently Futhark hoists it outside, but this will
+----    not allow fusing the filter with reduce => redomap,
+----------------------------------------------------------------/
 fun int xorInds(int n, [int,num_bits] dir_vs) =
     let reldv_vals = map( fn int (int dv, int i) => 
                             if testBit(grayCode(n),i) 
@@ -44,9 +44,9 @@ fun [real] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
     let arri    = sobolIndI( dir_vs, n )     in
         map( fn real (int x) => toFloat(x) / divisor, arri )
 
-/////////////////////////////////
-//// STRENGTH-REDUCED FORMULA
-/////////////////////////////////
+--------------------------------/
+---- STRENGTH-REDUCED FORMULA
+--------------------------------/
 
 fun int index_of_least_significant_0(int num_bits, int n) = 
   let {goon,k} = {True,0} in
@@ -84,7 +84,7 @@ fun real main( int num_dates, int num_und, int num_mc_it,
                [[int,num_bits]] dir_vs_nosz ) =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
-//  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
+--  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
   let sobol_mat = streamMapMax ( fn [[real,sobvctsz]] (int chunk, [int] ns) =>
                                     sobolChunk(dir_vs, ns[0], chunk)
                                , iota(num_mc_it) ) in

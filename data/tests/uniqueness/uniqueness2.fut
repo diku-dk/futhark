@@ -1,9 +1,9 @@
-// --
-// input {
-// }
-// output {
-//   3
-// }
+-- ==
+-- input {
+-- }
+-- output {
+--   3
+-- }
 fun int main() =
     let n = 10 in
     let {a, b} = {copy(replicate(n,0)), copy(replicate(n,0))} in

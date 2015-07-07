@@ -1,5 +1,5 @@
-// --
-// structure { Map 2 }
+-- ==
+-- structure { Map 2 }
 fun [[int]] main([[{int,int}]] a) =
   let b = map(fn [{int,int}] ([{int,int}] row) =>
                 map(fn {int,int} (int x, int y) =>

@@ -1,10 +1,10 @@
-// --
-// input {
-//   [1.0,-4.0,-2.4]
-// }
-// output {
-//   16.000000
-// }
+-- ==
+-- input {
+--   [1.0,-4.0,-2.4]
+-- }
+-- output {
+--   16.000000
+-- }
 fun real f(real a        ) = a + 3.0
 fun real g(real a        ) = a * 3.0
 fun real h(real a1, real a2, real a3) = a1 * a2 + a3

@@ -1,7 +1,7 @@
-// This test tracks whether aliasing is propagated properly when
-// tuples of differing dimensions is used as function parameters.
-// --
-// error:
+-- This test tracks whether aliasing is propagated properly when
+-- tuples of differing dimensions is used as function parameters.
+-- ==
+-- error:
 
 fun [int] f({int, int} x, {int, int, [int]} t) =
     let {x, y, a} = t in
@@ -13,4 +13,4 @@ fun [int] main() =
     let t = {3, 4, a} in
     let b = f({1,2}, t) in
     let a[0] = 2 in
-    b // Error, because b is aliased to t.
+    b -- Error, because b is aliased to t.

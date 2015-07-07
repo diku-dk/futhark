@@ -1,16 +1,16 @@
-// --
-// input {
-// }
-// output {
-//   70
-// }
+-- ==
+-- input {
+-- }
+-- output {
+--   70
+-- }
 fun int getInt() = 10
 
 fun int myfun( {int,int,{int,int}} x ) =
     let {a,b,{c,d}} = x in a + b + c + d
 
 fun int main() =
-    let n  = getInt()          in   // Int
+    let n  = getInt()          in   -- Int
     let a  = {n, n, {n*0+5,n}}   in
 
     let {x1, x2} = {

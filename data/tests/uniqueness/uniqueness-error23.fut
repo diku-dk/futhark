@@ -1,7 +1,7 @@
-// --
-// error:
+-- ==
+-- error:
 fun int f(*[int] ar, *[[int]] a) =
-  f(a[0], a) // Should be a type error, as both are supposed to be uniqu
+  f(a[0], a) -- Should be a type error, as both are supposed to be uniqu
 
 fun int main(int n) =
   let a = copy(replicate(n, iota(n))) in

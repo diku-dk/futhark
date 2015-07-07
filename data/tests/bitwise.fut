@@ -1,21 +1,21 @@
-// Bitwise operation stress test.
-//
-// Mostly to ensure that interpreter and code generator agree.
-// Originally distilled from MD5 sum calculation.
-// --
-// input {
-//   1732584193
-//   -271733879
-//   -1732584194
-//   271733878
-//   1
-// }
-// output {
-//   271733878
-//   757607282
-//   -271733879
-//   -1732584194
-// }
+-- Bitwise operation stress test.
+--
+-- Mostly to ensure that interpreter and code generator agree.
+-- Originally distilled from MD5 sum calculation.
+-- ==
+-- input {
+--   1732584193
+--   -271733879
+--   -1732584194
+--   271733878
+--   1
+-- }
+-- output {
+--   271733878
+--   757607282
+--   -271733879
+--   -1732584194
+-- }
 
 fun int funF(int x, int y, int z) = x & y | ~x & z
 

@@ -47,7 +47,7 @@ readerFunctions =
       int c = getchar();
       if (isspace(c)) {
         skipspaces();
-      } else if (c == '/') {
+      } else if (c == '-' && peekc() == '-') {
         // Skip to end of line.
         for (; c != '\n' && c != EOF; c = getchar());
         // Next line may have more spaces.

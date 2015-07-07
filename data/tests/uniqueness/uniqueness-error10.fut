@@ -1,6 +1,6 @@
-// Don't let occurences clash just because they're function arguments.
-// --
-// error:
+-- Don't let occurences clash just because they're function arguments.
+-- ==
+-- error:
 
 fun [int] f(*[int] a) = a
 

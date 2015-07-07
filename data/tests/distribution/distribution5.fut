@@ -1,24 +1,24 @@
-// Expected distributed structure:
-//
-// map
-//   map
-// map
-//   map
-//     map
-// map
-//   map
-//     concat
-// map
-//   map
-//     reduce
-//
-// --
-//
-// structure distributed {
-//   Map 9
-//   Concat 1
-//   Reduce 1
-// }
+-- Expected distributed structure:
+--
+-- map
+--   map
+-- map
+--   map
+--     map
+-- map
+--   map
+--     concat
+-- map
+--   map
+--     reduce
+--
+-- ==
+--
+-- structure distributed {
+--   Map 9
+--   Concat 1
+--   Reduce 1
+-- }
 
 fun [{[int],[int]}] main([[[int],an],n] a, [[int,bn],n] b) =
   zipWith(fn {[int,bn],[int,an]} ([[int]] a_row, [int] b_row) =>

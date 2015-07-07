@@ -1,6 +1,6 @@
-// Test that we cannot consume anything inside an anonymous function.
-// --
-// error:
+-- Test that we cannot consume anything inside an anonymous function.
+-- ==
+-- error:
 
 fun int f(*[int] a) = a[0]
 

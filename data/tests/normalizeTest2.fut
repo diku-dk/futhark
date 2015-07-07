@@ -1,10 +1,10 @@
-// --
-// input {
-//   42
-// }
-// output {
-//   72754416
-// }
+-- ==
+-- input {
+--   42
+-- }
+-- output {
+--   72754416
+-- }
 fun int main(int a) =
     let y = let zz = 2*a in copy(replicate(zz,a)) in
     let bound = let x1 = 2*y[2*a-a-a] in 2*x1 in

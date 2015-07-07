@@ -1,15 +1,15 @@
-// Expected distributed structure:
-//
-// map
-//   map
-//     scan
-// map
-//   map
-//     scan
-//
-// --
-//
-// structure distributed { Map 4 Scan 2 }
+-- Expected distributed structure:
+--
+-- map
+--   map
+--     scan
+-- map
+--   map
+--     scan
+--
+-- ==
+--
+-- structure distributed { Map 4 Scan 2 }
 
 fun [[[int]]] main([[[int,m],n]] a) =
   map(fn [[int,n],m] ([[int]] a_row) =>

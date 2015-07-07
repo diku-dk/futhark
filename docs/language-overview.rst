@@ -29,8 +29,8 @@ and indentation is only used for readability.  An identifier starts
 with a letter, followed by any number of letters, digits and
 underscores.  Numeric, string and character literals use the same
 notation as Haskell (which is very similar to C), including all escape
-characters.  Comments are indicated with ``//`` and span to end of
-line.
+characters.  Comments are indicated with ``--`` and span to end of
+line.  Block comments are not presently supported.
 
 First-order Futhark
 -------------------

@@ -1,10 +1,10 @@
-// --
-// compiled input {
-//   5
-// }
-// output {
-//   [1, 1, 2, 3, 5]
-// }
+-- ==
+-- compiled input {
+--   5
+-- }
+-- output {
+--   [1, 1, 2, 3, 5]
+-- }
 fun *[int,n] fib(*[int,n] a, int i) =
   if i == n
   then a

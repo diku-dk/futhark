@@ -25,7 +25,7 @@ import Data.Bits
 tokens :-
 
   $white+                               ;
-  "//"[^\n]*                            ;
+  "--"[^\n]*                            ;
   "&&"                     { const AND }
   "||"                     { const OR }
   ">>"                     { const SHIFTR }

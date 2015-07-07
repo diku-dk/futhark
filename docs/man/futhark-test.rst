@@ -28,7 +28,7 @@ options.  The comment block has the following overall format::
 
 The ``description`` is an arbitrary (and possibly multiline)
 human-readable explanation of the test program.  It is separated from
-the test cases by a line contianing just ``--``.  The format of a test
+the test cases by a line containing just ``==``.  The format of a test
 case is as follows::
 
   [compiled] input {
@@ -94,7 +94,7 @@ EXAMPLES
 The following program tests simple indexing and bounds checking::
 
   // Test simple indexing of an array.
-  // --
+  // ==
   // input {
   //   [4,3,2,1]
   //   1

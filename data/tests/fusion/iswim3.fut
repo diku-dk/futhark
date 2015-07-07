@@ -1,11 +1,11 @@
-// This test exposed a bug in map-nest creation.  The program involves
-// ISWIM with apparently more complex shapes than the other ISWIM
-// tests.  The bug happened whilst pulling a transpose before the
-// producer.
-//
-//--
-//
-// structure { Map 2 Redomap 1 Scan 1 }
+-- This test exposed a bug in map-nest creation.  The program involves
+-- ISWIM with apparently more complex shapes than the other ISWIM
+-- tests.  The bug happened whilst pulling a transpose before the
+-- producer.
+--
+--==
+--
+-- structure { Map 2 Redomap 1 Scan 1 }
 
 fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
 

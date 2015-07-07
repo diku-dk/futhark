@@ -1,10 +1,10 @@
-// --
-// input {
-//   {3, 300}
-// }
-// output {
-//   [100.0,100.0,100.0]
-// }
+-- ==
+-- input {
+--   {3, 300}
+-- }
+-- output {
+--   [100.0,100.0,100.0]
+-- }
 fun *[real,n_histo] main(int n_histo, int n_image) =
   let A = iota(n_image) in
   streamRedPerMax( fn [real] ([real] a, [real] b) =>

@@ -1,22 +1,22 @@
-// Simple game of life implementation with a donut world.  Tested with
-// a glider running for four iterations.
-//
-// --
-// input {
-//   [[0, 0, 0, 0, 0],
-//    [0, 0, 1, 0, 0],
-//    [0, 0, 0, 1, 0],
-//    [0, 1, 1, 1, 0],
-//    [0, 0, 0, 0, 0]]
-//   4
-//   }
-// output {
-//   [[0, 0, 0, 0, 0],
-//    [0, 0, 0, 0, 0],
-//    [0, 0, 0, 1, 0],
-//    [0, 0, 0, 0, 1],
-//    [0, 0, 1, 1, 1]]
-//   }
+-- Simple game of life implementation with a donut world.  Tested with
+-- a glider running for four iterations.
+--
+-- ==
+-- input {
+--   [[0, 0, 0, 0, 0],
+--    [0, 0, 1, 0, 0],
+--    [0, 0, 0, 1, 0],
+--    [0, 1, 1, 1, 0],
+--    [0, 0, 0, 0, 0]]
+--   4
+--   }
+-- output {
+--   [[0, 0, 0, 0, 0],
+--    [0, 0, 0, 0, 0],
+--    [0, 0, 0, 1, 0],
+--    [0, 0, 0, 0, 1],
+--    [0, 0, 1, 1, 1]]
+--   }
 
 fun int bint(bool b) = if b then 1 else 0
 fun bool intb(int x) = if x == 0 then False else True
@@ -61,8 +61,8 @@ fun [[bool]] iteration([[bool]] board) =
             lives, board)
 
 fun [[int]] main([[int]] int_board, int iterations) =
-  // We accept the board as integers for convenience, and then we
-  // convert to booleans here.
+  -- We accept the board as integers for convenience, and then we
+  -- convert to booleans here.
   let board = to_bool_board(int_board) in
   loop (board) = for i < iterations do
     iteration(board) in

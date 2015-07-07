@@ -1,4 +1,4 @@
-// --
+-- ==
 fun real main(*[real] arr) =
     let x      = map(+1.0, arr)  in
     let arr[1] = 3.33                 in

@@ -1,10 +1,10 @@
-// --
-// input {
-//   [ [3,2,1,5,3], [6,8,7,0,0] ]
-// }
-// output {
-//   [ [1,2,3,3,5], [0,0,6,7,8] ]
-// }
+-- ==
+-- input {
+--   [ [3,2,1,5,3], [6,8,7,0,0] ]
+-- }
+-- output {
+--   [ [1,2,3,3,5], [0,0,6,7,8] ]
+-- }
 fun bool isSorted ([int] xs) =
     if size(0,xs) < 2 then True
     else let bs = map (fn bool (int i) => xs[i] <= xs[i+1], iota( size(0,xs) - 1) ) in
@@ -19,34 +19,34 @@ fun [int] quicksort ([int] xs) =
                                    , xs ) in
          concatMap(quicksort, lt, eq, gt)
 
-// fun [[int]] quicksort^ ([[int]] xss)
+-- fun [[int]] quicksort^ ([[int]] xss)
 
-// but isn't that going to generate a lot of assertions checking that
-// input arrays must be regular ?
+-- but isn't that going to generate a lot of assertions checking that
+-- input arrays must be regular ?
 
-// Should it be this instead ?
-// fun [ { SegDescp , [int] } ] quicksort^ ( [ { SegDescp , [int] } ] xs )
+-- Should it be this instead ?
+-- fun [ { SegDescp , [int] } ] quicksort^ ( [ { SegDescp , [int] } ] xs )
 
-// But won't arrays of tuples be turned into tuple of arrays, meaning it doesn't matter?
+-- But won't arrays of tuples be turned into tuple of arrays, meaning it doesn't matter?
 
-// This is how the lifted version of the old code could look like
-//
-// fun [[int]] quicksort^ ([[int]] xss) =
-//     let lens = map (fn int ([int] xs) => size(0,xs), xss) in
-//     let cnds = map(fn bool (int len) => len < 2, lens) in
-//
-//     let (xs_t, xs_f) = partition(cnds, xss) in
-//
-//     let xs_t' = xs_t in
-//
-//     let xs_f' = let pivots = map(fn int ([int] xs) => xs[0], xss) in
-//                 let {arrs, ltIndexs, eqIndexs} = filter^ (<^ pivot, ==^ pivot, xss) in
-//                 let {lts, eqs, gts} = split^ (arrs, ltIndexs, eqIndexs) in
-//                 let {lts', gts'} = tmap(quicksort^, {lts, gts}) in
-//                     concat^(lts', eqs, gts')
-//                 in
-//
-//     merge(cnds, xs_t', xs_f')
+-- This is how the lifted version of the old code could look like
+--
+-- fun [[int]] quicksort^ ([[int]] xss) =
+--     let lens = map (fn int ([int] xs) => size(0,xs), xss) in
+--     let cnds = map(fn bool (int len) => len < 2, lens) in
+--
+--     let (xs_t, xs_f) = partition(cnds, xss) in
+--
+--     let xs_t' = xs_t in
+--
+--     let xs_f' = let pivots = map(fn int ([int] xs) => xs[0], xss) in
+--                 let {arrs, ltIndexs, eqIndexs} = filter^ (<^ pivot, ==^ pivot, xss) in
+--                 let {lts, eqs, gts} = split^ (arrs, ltIndexs, eqIndexs) in
+--                 let {lts', gts'} = tmap(quicksort^, {lts, gts}) in
+--                     concat^(lts', eqs, gts')
+--                 in
+--
+--     merge(cnds, xs_t', xs_f')
 
 fun [[int]] main ([[int]] tosort) =
     map(quicksort, tosort)

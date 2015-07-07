@@ -1,8 +1,8 @@
-// When distributing, the stream should be removed and the body
-// distributed.
-//
-// --
-// structure distributed { Map 3 Reduce 1 }
+-- When distributing, the stream should be removed and the body
+-- distributed.
+--
+-- ==
+-- structure distributed { Map 3 Reduce 1 }
 
 fun [int] main([[int,n]] A) =
   map(fn int ([int] A_row) =>

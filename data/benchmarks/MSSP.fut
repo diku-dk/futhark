@@ -1,9 +1,9 @@
-// --
-// input {
-// }
-// output {
-//   11
-// }
+-- --
+-- input {
+-- }
+-- output {
+--   11
+-- }
 fun int max(int x, int y) = if(x<y) then y else x
 
 fun {int,int,int, int} mapfun(int x) =

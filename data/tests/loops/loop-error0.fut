@@ -1,5 +1,5 @@
-// --
-// error:
+-- ==
+-- error:
 fun {[real],[[real]]} main() =
   let e_rows = empty([real]) in
   let arr = copy(e_rows) in
@@ -8,7 +8,7 @@ fun {[real],[[real]]} main() =
     let arr[i] = let y = arr[i] in
                  let x = acc in
                  [2.0] in
-    // Error, because 'arr[i]' and 'arr' are aliased, yet the latter
-    // is consumed.
+    -- Error, because 'arr[i]' and 'arr' are aliased, yet the latter
+    -- is consumed.
     {arr[i], arr} in
   {acc,arr}

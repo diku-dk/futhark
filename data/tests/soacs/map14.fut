@@ -1,4 +1,4 @@
-// This program broke the simplifier at one point.
+-- This program broke the simplifier at one point.
 
 fun [int] main(int x, int y, [int] a, [int] b) =
   let c = map(fn {int,int} (int av) =>

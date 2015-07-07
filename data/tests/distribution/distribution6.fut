@@ -1,6 +1,6 @@
-// --
-// structure distributed { Map 3 }
-//
+-- ==
+-- structure distributed { Map 3 }
+--
 
 fun [[int]] main(int outer_loop_count, [int] a) =
   map(fn [int] (int i) =>

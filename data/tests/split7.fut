@@ -1,21 +1,21 @@
-// Distilled from GenericPricing.
-//
-// This test does not actually have anything to do with split, but
-// rather exposed a bug in array index generation due to a typo in the
-// scalar expression module (see commit
-// d4a3f6f313deb2d246c15c30bcb095afa1095338).  This test still has
-// value since apparently no other part of the test suite triggered
-// this code path.
-// --
-// input {
-//   [ [[ 1.0000000 , 0.6000000 , 0.8000000  ],
-//      [ 0.6000000 , 0.8000000 , 0.1500000  ],
-//      [ 0.8000000 , 0.1500000 , 0.5809475  ]]
-//   ]
-// }
-// output {
-//   [0.000000, 0.600000, 0.950000]
-// }
+-- Distilled from GenericPricing.
+--
+-- This test does not actually have anything to do with split, but
+-- rather exposed a bug in array index generation due to a typo in the
+-- scalar expression module (see commit
+-- d4a3f6f313deb2d246c15c30bcb095afa1095338).  This test still has
+-- value since apparently no other part of the test suite triggered
+-- this code path.
+-- ==
+-- input {
+--   [ [[ 1.0000000 , 0.6000000 , 0.8000000  ],
+--      [ 0.6000000 , 0.8000000 , 0.1500000  ],
+--      [ 0.8000000 , 0.1500000 , 0.5809475  ]]
+--   ]
+-- }
+-- output {
+--   [0.000000, 0.600000, 0.950000]
+-- }
 
 fun [real] take(int n, [real] a) =
   let {first, rest} = split( (n), a) in

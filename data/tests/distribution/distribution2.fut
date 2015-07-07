@@ -1,15 +1,15 @@
-// A combination of distribution0.fut and distribution1.fut.  AKA the
-// blackScholes computation from GenericPricing.
-//
-// --
-//
-// structure distributed {
-//   Map 7
-//   DoLoop 2
-//   Reduce 0
-//   Redomap 0
-//   Scan 1
-// }
+-- A combination of distribution0.fut and distribution1.fut.  AKA the
+-- blackScholes computation from GenericPricing.
+--
+-- ==
+--
+-- structure distributed {
+--   Map 7
+--   DoLoop 2
+--   Reduce 0
+--   Redomap 0
+--   Scan 1
+-- }
 
 fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
 
@@ -34,7 +34,7 @@ fun [[real]] mkPrices(  [real]  md_starts, [[real]] md_vols,
     in  scan( fn [real] ([real] x, [real] y) => map(*, zip(x, y)),
               md_starts, e_rows )
 
-//[num_dates, num_paths]
+--[num_dates, num_paths]
 fun [[[real]]] main(int        num_paths,
                     [[real]]   md_c,
                     [[real]]   md_vols,

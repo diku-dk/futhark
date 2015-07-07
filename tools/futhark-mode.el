@@ -80,9 +80,9 @@
 
 (defvar futhark-mode-syntax-table
   (let ((st (make-syntax-table)))
-    ;; Define the // line comment syntax.
-    (modify-syntax-entry ?/ ". 124b" st)
-    (modify-syntax-entry ?\n "> b" st)
+    ;; Define the -- line comment syntax.
+    (modify-syntax-entry ?- ". 123" st)
+    (modify-syntax-entry ?\n ">" st)
     ;; apostrophe can be used in variable names, should be in symbol class
     (modify-syntax-entry ?' "_" st)
     st)

@@ -1,11 +1,11 @@
-// Test that aliasing is found, even if hidden inside a
-// branch.
-// --
-// error:
+-- Test that aliasing is found, even if hidden inside a
+-- branch.
+-- ==
+-- error:
 
 fun int main() =
   let n = 10 in
   let a = copy(iota(n)) in
-  let c = if 2=2 then copy(iota(n)) else a in // c aliases a.
-  let c[0] = 4 in // Consume c and a.
-  a[0] // Error, because a was consumed.
+  let c = if 2=2 then copy(iota(n)) else a in -- c aliases a.
+  let c[0] = 4 in -- Consume c and a.
+  a[0] -- Error, because a was consumed.

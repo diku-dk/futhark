@@ -1,11 +1,11 @@
-// Test that filter can be fused into reduce.
-// --
-// input {
-//   [9,-3,5,2]
-// }
-// output {
-//   6
-// }
+-- Test that filter can be fused into reduce.
+-- ==
+-- input {
+--   [9,-3,5,2]
+-- }
+-- output {
+--   6
+-- }
 
 fun bool divisibleBy(int x, int y) = y % x == 0
 

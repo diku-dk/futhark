@@ -121,10 +121,13 @@ parseNatural = lexeme $ foldl (\acc x -> acc * 10 + x) 0 <$>
   where num c = ord c - ord '0'
 
 parseDescription :: Parser T.Text
-parseDescription = lexeme $ T.pack <$> (anyChar `manyTill` descriptionSeparator)
+parseDescription = lexeme $ T.pack <$> (anyChar `manyTill` parseDescriptionSeparator)
 
-descriptionSeparator :: Parser ()
-descriptionSeparator = try (string "--" >> void newline) <|> eof
+parseDescriptionSeparator :: Parser ()
+parseDescriptionSeparator = try (string descriptionSeparator >> void newline) <|> eof
+
+descriptionSeparator :: String
+descriptionSeparator = "=="
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
@@ -211,7 +214,7 @@ readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
 
 commentPrefix :: T.Text
-commentPrefix = "//"
+commentPrefix = "--"
 
 fixPosition :: ParseError -> ParseError
 fixPosition err =

@@ -1,5 +1,5 @@
-// Date computations.  Some complex scalar expressions and a branch.
-// Once messed up the simplifier.
+-- Date computations.  Some complex scalar expressions and a branch.
+-- Once messed up the simplifier.
 
 fun int MOD(int x, int y) = x - (x/y)*y
 
@@ -36,15 +36,15 @@ fun {int,int,int,int,int}
   let m = j + 2 - ( 12 * l ) in
   let y = 100 * ( n - 49 ) + i + l in
 
-  //let daytime = minutes_since_epoch mod minutes_in_day in
+  --let daytime = minutes_since_epoch mod minutes_in_day in
   let daytime = MOD( minutes_since_epoch, minutes_in_dayI() ) in
 
   if ( daytime == minutes_to_noonI() )
 
-  //then [year = y; month = m; day = d; hour = 12; minute = 0]
+  --then [year = y; month = m; day = d; hour = 12; minute = 0]
   then {y, m, d, 12, 0}
 
-  //else [year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
+  --else [year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
   else {y, m, d, daytime / 60, MOD(daytime, 60) }
 
 fun int main(int x) =

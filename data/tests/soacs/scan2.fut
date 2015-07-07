@@ -1,13 +1,13 @@
-// Fails if the scan is rewritten to be in-place (consume md_st)
-// during first-order transform.
-// --
-// input {
-//   [[[1.0]]]
-//   [[1.0],[2.0]]
-// }
-// output {
-//   2.000000
-// }
+-- Fails if the scan is rewritten to be in-place (consume md_st)
+-- during first-order transform.
+-- ==
+-- input {
+--   [[[1.0]]]
+--   [[1.0],[2.0]]
+-- }
+-- output {
+--   2.000000
+-- }
 
 fun real main([[[real]]] bb_mat, [[real]] e_rows) =
   let md_st = [42.0] in

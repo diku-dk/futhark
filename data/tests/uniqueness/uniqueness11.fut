@@ -1,11 +1,11 @@
-// Test that map does not introduce aliasing when the row type is a
-// basic type.
-// --
-// input {
-// }
-// output {
-//   0
-// }
+-- Test that map does not introduce aliasing when the row type is a
+-- basic type.
+-- ==
+-- input {
+-- }
+-- output {
+--   0
+-- }
 
 fun int f (int x) = x
 

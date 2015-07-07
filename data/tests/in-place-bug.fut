@@ -1,6 +1,6 @@
-// This test was derived from CalibVolDiff and exposed a bug in
-// in-place-lowering (after the maps had been turned into do-loops).
-// --
+-- This test was derived from CalibVolDiff and exposed a bug in
+-- in-place-lowering (after the maps had been turned into do-loops).
+-- ==
 
 fun [real] tridagSeq( [real] a, [real] b, [real] c, [real] y ) =
   copy(concat(a,b,c,y))
@@ -44,11 +44,11 @@ fun real main(int numX, int numY, int numT, real s0, real strike, real t, real a
     let myMuX  = replicate(numY, replicate(numX, 0.0)) in
     let myVarX = map(fn [real] (real yj) => map(exp, myX ), myY) in
 
-    // explicitX
+    -- explicitX
     let u = explicitMethod( myDx, myDxx, myMuX, myVarX, myResult ) in
-    // implicitX
+    -- implicitX
     let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 ) in
-    // implicitY
+    -- implicitY
     let y = map( fn [real] ([real] u_row) =>
                    map(+1.0, u_row),
                    transpose(u)) in

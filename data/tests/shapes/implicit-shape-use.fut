@@ -1,19 +1,19 @@
-// Extraction from generic pricer.  Uses shape declarations in ways
-// that were at one point problematic.
-//
-// --
-// input {
-//   3
-//   [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]]
-//   [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]
-// }
-// output {
-//   [[109.0, 140.0, 171.0],
-//    [-109.0, -140.0, -171.0],
-//    [0.0, 0.0, 0.0],
-//    [0.0, 0.0, 0.0],
-//    [0.0, 0.0, 0.0]]
-// }
+-- Extraction from generic pricer.  Uses shape declarations in ways
+-- that were at one point problematic.
+--
+-- ==
+-- input {
+--   3
+--   [[1,1,1,1,1],[1,1,1,1,1],[1,1,1,1,1]]
+--   [1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.0,11.0,12.0,13.0,14.0,15.0]
+-- }
+-- output {
+--   [[109.0, 140.0, 171.0],
+--    [-109.0, -140.0, -171.0],
+--    [0.0, 0.0, 0.0],
+--    [0.0, 0.0, 0.0],
+--    [0.0, 0.0, 0.0]]
+-- }
 
 fun [[real]] main(
               int                  num_und,
@@ -44,7 +44,7 @@ fun [real] brownianBridgeDates (
     let bbrow[ bi[0]-1 ] = sd[0] * gauss[0]       in
 
     loop (bbrow) =
-        for i < num_dates-1 do  // use i+1 since i in 1 .. num_dates-1
+        for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
             let j  = li[i+1] - 1 in
             let k  = ri[i+1] - 1 in
             let l  = bi[i+1] - 1 in
@@ -58,8 +58,8 @@ fun [real] brownianBridgeDates (
                              else tmp + lw[i+1] * bbrow[j]
             in  bbrow
 
-        // This can be written as map-reduce, but it
-        //   needs delayed arrays to be mapped nicely!
+        -- This can be written as map-reduce, but it
+        --   needs delayed arrays to be mapped nicely!
     in loop (bbrow) =
         for ii < num_dates-1 do
             let i = num_dates - (ii+1) in

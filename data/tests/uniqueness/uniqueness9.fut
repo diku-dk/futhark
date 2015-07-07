@@ -1,11 +1,11 @@
-// This test checks whether we can consume something in a loop,
-// without causing an error just because it's aliased outside the loop.
-// --
-// input {
-// }
-// output {
-//   0
-// }
+-- This test checks whether we can consume something in a loop,
+-- without causing an error just because it's aliased outside the loop.
+-- ==
+-- input {
+-- }
+-- output {
+--   0
+-- }
 
 fun int main() =
   let n = 10 in
