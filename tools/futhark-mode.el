@@ -137,7 +137,7 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
       (beginning-of-line-text)
 
       ;; Align comment to next non-comment line.
-      (when (looking-at "//")
+      (when (looking-at "--")
         (forward-comment (buffer-size)))
 
       (or (cond
@@ -328,7 +328,7 @@ return t if found; return nil otherwise."
   :syntax-table futhark-mode-syntax-table
   (set (make-local-variable 'font-lock-defaults) '(futhark-font-lock-keywords))
   (set (make-local-variable 'indent-line-function) 'futhark-indent-line)
-  (set (make-local-variable 'comment-start) "//")
+  (set (make-local-variable 'comment-start) "--")
   (set (make-local-variable 'comment-padding) " "))
 
 (when (featurep 'flycheck)
