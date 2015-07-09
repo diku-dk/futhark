@@ -42,13 +42,15 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
 
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
-  thread_num <- newVName "thread_num"
-  let alloc_offsets =
+  let thread_num = lambdaIndex lam
+      alloc_offsets =
         HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp) thread_allocs
       body' = offsetMemorySummariesInBody alloc_offsets body
+      thread_num_param = Imp.ScalarParam (lambdaIndex lam) Int
 
   allocMemoryBlocks expanded_allocs $ makeAllMemoryGlobal $ do
     kernelbody <- ImpGen.collect $
+                  ImpGen.withParam thread_num_param $
                   ImpGen.declaringLParams (lambdaParams lam) $ do
                     zipWithM_ (readThreadParams thread_num) (lambdaParams lam) arrs
                     ImpGen.compileBindings (bodyBindings body') $

@@ -461,9 +461,8 @@ allocInExp (LoopOp (DoLoop res merge form
           id
 
 allocInExp (LoopOp (Map cs w f arrs)) = do
-  is <- letExp "is" $ PrimOp $ Iota w
   f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
-  return $ LoopOp $ Map cs w f' $ is:arrs
+  return $ LoopOp $ Map cs w f' arrs
 
 allocInExp (LoopOp (Reduce {})) =
   fail "Cannot put explicit allocations in reduce yet."
@@ -485,7 +484,7 @@ allocInExp e = mapExpM alloc e
 
 allocInMapLambda :: In.Lambda -> [MemSummary] -> AllocM Lambda
 allocInMapLambda lam input_summaries = do
-  i <- newVName "i"
+  let i = lambdaIndex lam
   params' <-
     forM (zip (lambdaParams lam) input_summaries) $ \(p,summary) ->
     case (paramType p, summary) of
@@ -502,7 +501,7 @@ allocInMapLambda lam input_summaries = do
   body' <- local (HM.union all_summaries) $
            allocInBody $ lambdaBody lam
   return lam { lambdaBody = body'
-             , lambdaParams = Param (Ident i $ Basic Int) Scalar : params'
+             , lambdaParams = params'
              }
 
 vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
