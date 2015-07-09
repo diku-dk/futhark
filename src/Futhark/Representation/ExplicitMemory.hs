@@ -554,7 +554,7 @@ instance PrettyLore ExplicitMemory where
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppLambdaLore lam =
     case mapMaybe fparamAnnot $ lambdaParams lam of
-      []     -> Just $ PP.text $ show $ lambdaParams lam
+      []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppExpLore (AST.LoopOp (DoLoop _ merge _ _)) =
     case mapMaybe (fparamAnnot . fst) merge of
