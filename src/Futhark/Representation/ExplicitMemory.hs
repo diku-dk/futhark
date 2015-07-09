@@ -359,6 +359,8 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   basicFParam _ name t =
     AST.Param (Ident name (AST.Basic t)) Scalar
+  basicLParam _ name t =
+    AST.Param (Ident name (AST.Basic t)) Scalar
 
   matchPattern pat e = do
     rt <- expReturns varMemSummary e

@@ -43,16 +43,18 @@ internaliseMapLambda internaliseLambda lam args = do
   bindMapShapes inner_shapes shapefun args outer_shape
   body' <- bindingParamTypes params $
            ensureResultShape (srclocOf lam) rettype' body
-  return $ I.Lambda params body' rettype'
+  i <- newVName "i"
+  return $ I.Lambda i params body' rettype'
 
 internaliseConcatMapLambda :: InternaliseLambda
                            -> E.Lambda
                            -> InternaliseM I.Lambda
 internaliseConcatMapLambda internaliseLambda lam = do
   (params, body, rettype) <- internaliseLambda lam Nothing
+  i <- newVName "i"
   case rettype of
     [I.Array bt (ExtShape [_]) _] ->
-      return $ I.Lambda params body [I.Basic bt]
+      return $ I.Lambda i params body [I.Basic bt]
     _ ->
       fail "concatMap lambda does not return a single-dimensional array"
 
@@ -65,7 +67,8 @@ makeShapeFun params body n = do
   -- we create a substitute non-unique parameter, and insert a
   -- copy-binding in the body of the function.
   (params', copybnds) <- nonuniqueParams params
-  return $ I.Lambda params' (insertBindings copybnds body) rettype
+  i <- newVName "i"
+  return $ I.Lambda i params' (insertBindings copybnds body) rettype
   where rettype = replicate n $ I.Basic Int
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
@@ -104,7 +107,9 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   body' <- bindingParamTypes params $
            ensureResultShape (srclocOf lam) rettype' body
 
-  return $ I.Lambda params body' rettype'
+  i <- newVName "i"
+
+  return $ I.Lambda i params body' rettype'
 
 
 internaliseRedomapInnerLambda ::
@@ -154,7 +159,8 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   -- finally, place assertions and return result
   body' <- bindingParamTypes params $
            ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
-  return $ I.Lambda params body' (acctype'++rettypearr')
+  i <- newVName "i"
+  return $ I.Lambda i params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
                         -> E.Lambda
@@ -207,7 +213,8 @@ internaliseStreamLambda internaliseLambda lam accs arrtypes = do
                 reses1 <- zipWithM assertProperShape acctype' lamacc_res
                 reses2 <- zipWithM assertProperShape arrtype' lamarr_res
                 return $ resultBody $ reses1 ++ reses2
-  return $ I.ExtLambda params body' $
+  i <- newVName "i"
+  return $ I.ExtLambda i params body' $
             staticShapes acctypes ++ lam_arr_tps
 
 -- Given @n@ lambdas, this will return a lambda that returns an
@@ -224,7 +231,8 @@ internalisePartitionLambdas internaliseLambda lams args = do
     return (params, body)
   params <- newIdents "partition_param" rowtypes
   body <- mkCombinedLambdaBody params 0 lams'
-  return $ I.Lambda (map (`Param` ()) params) body [I.Basic Int]
+  i <- newVName "i"
+  return $ I.Lambda i (map (`Param` ()) params) body [I.Basic Int]
   where mkCombinedLambdaBody :: [I.Ident]
                              -> Int
                              -> [([I.LParam], I.Body)]

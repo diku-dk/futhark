@@ -32,5 +32,5 @@ untraceBody = mapBody untraceBinding
 
 
 untraceLambda :: Lambda -> Lambda
-untraceLambda (Lambda params body ret) =
-  Lambda params (untraceBody body) ret
+untraceLambda lam =
+  lam { lambdaBody = untraceBody $ lambdaBody lam }

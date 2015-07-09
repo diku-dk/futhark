@@ -697,7 +697,7 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
 
 evalLoopOp (Map _ _ fun arrexps) = do
   vss <- mapM (arrToList <=< lookupVar) arrexps
-  vss' <- mapM (applyLambda fun) $ transpose vss
+  vss' <- zipWithM (applyLambda fun) [0..] $ transpose vss
   arrays (lambdaReturnType fun) vss'
 
 evalLoopOp (ConcatMap _ _ fun inputs) = do
@@ -726,26 +726,28 @@ evalLoopOp (Reduce _ _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
   vss <- mapM (arrToList <=< lookupVar) arrexps
-  let foldfun acc x = applyLambda fun $ acc ++ x
-  foldM foldfun startaccs (transpose vss)
+  let foldfun acc (i, x) = applyLambda fun i $ acc ++ x
+  foldM foldfun startaccs $ zip [0..] $ transpose vss
 
 evalLoopOp (Scan _ _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   vss <- mapM (arrToList <=< lookupVar) arrexps
-  (acc, vals') <- foldM scanfun (startvals, []) $ transpose vss
+  (acc, vals') <- foldM scanfun (startvals, []) $
+                  zip [0..] $ transpose vss
   arrays (map valueType acc) $ reverse vals'
-    where scanfun (acc, l) x = do
-            acc' <- applyLambda fun $ acc ++ x
+    where scanfun (acc, l) (i,x) = do
+            acc' <- applyLambda fun i $ acc ++ x
             return (acc', acc' : l)
 
 evalLoopOp (Redomap _ _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   vss <- mapM (arrToList <=< lookupVar) arrexps
   if res_len == acc_len
-  then foldM foldfun startaccs $ transpose vss
+  then foldM foldfun startaccs $ zip [0..] $ transpose vss
   else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
-          (acc_res, arr_res) <- foldM foldfun' startaccs' $ transpose vss
+          (acc_res, arr_res) <- foldM foldfun' startaccs' $
+                                zip [0..] $ transpose vss
           arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
           return $ acc_res ++ arr_res_fut
     where
@@ -753,9 +755,9 @@ evalLoopOp (Redomap _ _ _ innerfun accexp arrexps) = do
         res_len        = length lam_ret_tp
         acc_len        = length accexp
         lam_ret_arr_tp = drop acc_len lam_ret_tp
-        foldfun  acc x = applyLambda innerfun $ acc ++ x
-        foldfun' (acc,arr) x = do
-            res_lam <- applyLambda innerfun $ acc ++ x
+        foldfun  acc (i,x) = applyLambda innerfun i $ acc ++ x
+        foldfun' (acc,arr) (i,x) = do
+            res_lam <- applyLambda innerfun i $ acc ++ x
             let res_acc = take acc_len res_lam
                 res_arr = drop acc_len res_lam
                 acc_arr = zipWith (:) res_arr arr
@@ -765,9 +767,15 @@ evalLoopOp (Stream _ _ form elam arrs _) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
-  let (ExtLambda elam_params elam_body elam_rtp) = elam
-  let fun funargs = binding (zip3 (map paramIdent elam_params) (repeat BindVar) funargs) $
-                            evalBody elam_body
+  let ExtLambda i elam_params elam_body elam_rtp = elam
+      bind_i = (Ident i (Basic Int),
+                BindVar,
+                BasicVal $ IntVal 0)
+  let fun funargs = binding (bind_i :
+                             zip3 (map paramIdent elam_params)
+                                  (repeat BindVar)
+                                  funargs) $
+                    evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   let (ArrayVal _ _ (outersize:_)) = head arrvals
   let chunkval = BasicVal $ IntVal $ fromIntegral outersize
@@ -795,8 +803,8 @@ evalSegOp (SegReduce _ _ fun inputs descparr_exp) = do
                   foldl (\(res,rest) n -> (take n rest : res, drop n rest))
                         ([], vss') segments
 
-  let foldfun acc x = applyLambda fun $ acc ++ x
-  let runReduce = foldM foldfun startaccs
+  let foldfun acc (i,x) = applyLambda fun i $ acc ++ x
+  let runReduce = foldM foldfun startaccs . zip [0..]
   res <- mapM runReduce segmented_arrs
   arrays (map valueType startaccs) res
   where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
@@ -822,14 +830,15 @@ evalSegOp (SegScan _ _ st fun inputs descparr_exp) = do
                         ([], vss') segments
 
   let runscan segarr =
-        liftM (reverse . snd) $ foldM scanfun (startaccs, []) segarr
+        liftM (reverse . snd) $ foldM scanfun (startaccs, []) $
+        zip [0..] segarr
   res <- liftM concat $ mapM runscan segmented_arrs
   arrays (map valueType startaccs) res
   where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalSegOp SegScan asInt"
 
-        scanfun (acc, l) x = do
-            acc' <- applyLambda fun $ acc ++ x
+        scanfun (acc, l) (i,x) = do
+            acc' <- applyLambda fun i $ acc ++ x
             let l' = case st of
                        ScanInclusive -> acc' : l
                        ScanExclusive -> acc  : l
@@ -932,21 +941,29 @@ evalBoolBinOp op e1 e2 = do
     _ ->
       bad $ TypeError $ "evalBoolBinOp " ++ pretty v1 ++ " " ++ pretty v2
 
-applyLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
-applyLambda (Lambda params body rettype) args =
-  do v <- binding (zip3 (map paramIdent params) (repeat BindVar) args) $ evalBody body
-     checkReturnShapes (staticShapes rettype) v
-     return v
+applyLambda :: Lore lore => Lambda lore -> Int32 -> [Value] -> FutharkM lore [Value]
+applyLambda (Lambda i params body rettype) j args = do
+  v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) args) $
+       evalBody body
+  checkReturnShapes (staticShapes rettype) v
+  return v
+  where bind_i = (Ident i $ Basic Int,
+                 BindVar,
+                 BasicVal $ IntVal j)
 
 applyConcatMapLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
-applyConcatMapLambda (Lambda params body rettype) valargs = do
-  v <- binding (zip3 (map paramIdent params) (repeat BindVar) $ shapes ++ valargs) $
+applyConcatMapLambda (Lambda i params body rettype) valargs = do
+  v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) (shapes ++ valargs)) $
        evalBody body
   let rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
                  | t <- staticShapes rettype ]
   checkReturnShapes rettype' v
   return v
-  where shapes =
+  where bind_i = (Ident i $ Basic Int,
+                  BindVar,
+                  BasicVal $ IntVal 0)
+
+        shapes =
           let (shapeparams, valparams) =
                 splitAt (length params - length valargs) params
               shapemap = shapeMapping'

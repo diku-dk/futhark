@@ -38,6 +38,7 @@ simpleOptProg simpl rules prog = do
 simpleOptLambda :: (MonadFreshNames m, HasTypeEnv m) =>
                      Basic.Prog
                   -> Basic.Lambda
+                  -> SubExp
                   -> [Maybe VName]
                   -> m Basic.Lambda
 simpleOptLambda = simplifyLambdaWithRules bindableSimpleOps basicRules

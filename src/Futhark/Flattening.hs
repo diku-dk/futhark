@@ -828,7 +828,8 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                          }
 
       toreturn_tps <- mapM lookupType toreturn_vns
-      let wrappedlambda = Lambda { lambdaParams = mapparams
+      let wrappedlambda = Lambda { lambdaIndex = lambdaIndex lambda
+                                 , lambdaParams = mapparams
                                  , lambdaBody = lambody
                                  , lambdaReturnType = toreturn_tps
                                  }

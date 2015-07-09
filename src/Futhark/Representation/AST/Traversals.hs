@@ -373,10 +373,10 @@ foldlPattern expf = foldExp m
               foldOnBinding = \x (Let _ _ e) -> return $ expf x e
             , foldOnBody = \x -> return . foldBody onBinding x
             , foldOnLambda =
-              \x (Lambda _ body _) ->
-                return $ foldBody onBinding x body
+              \x ->
+                return . foldBody onBinding x . lambdaBody
             , foldOnExtLambda =
-              \x (ExtLambda _ body _) ->
-                return $ foldBody onBinding x body
+              \x ->
+                return . foldBody onBinding x . extLambdaBody
             }
         onBinding x (Let _ _ e) = expf x e

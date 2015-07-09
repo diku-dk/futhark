@@ -248,20 +248,22 @@ instance (Rename shape) =>
   rename (Mem e) = Mem <$> rename e
 
 instance Renameable lore => Rename (Lambda lore) where
-  rename (Lambda params body ret) =
-    bind (map paramName params) $ do
+  rename (Lambda index params body ret) =
+    bind (index : map paramName params) $ do
+      index' <- rename index
       params' <- mapM rename params
       body' <- rename body
       ret' <- mapM rename ret
-      return $ Lambda params' body' ret'
+      return $ Lambda index' params' body' ret'
 
 instance Renameable lore => Rename (ExtLambda lore) where
-  rename (ExtLambda params body rettype) =
-    bind (map paramName params) $ do
+  rename (ExtLambda index params body rettype) =
+    bind (index : map paramName params) $ do
+      index' <- rename index
       params' <- mapM rename params
       body' <- rename body
       rettype' <- rename rettype
-      return $ ExtLambda params' body' rettype'
+      return $ ExtLambda index' params' body' rettype'
 
 instance Rename Names where
   rename = liftM HS.fromList . mapM rename . HS.toList

@@ -11,7 +11,7 @@ module Futhark.Representation.AST.Pretty
   )
   where
 
-import Data.Array
+import Data.Array (elems, listArray)
 import Data.Maybe
 
 import Text.PrettyPrint.Mainland hiding (pretty)
@@ -222,10 +222,10 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     parens (ppr size <> comma </>
             pprConcatLam lam <> comma </>
             commasep (map (braces . commasep . map ppr) as))
-    where pprConcatLam (Lambda params body rettype) =
+    where pprConcatLam (Lambda index params body rettype) =
             text "fn" <+>
             braces (commasep $ map (brackets . ppr) rettype) <+>
-            apply (map ppr params) <+>
+            parens (ppr index <> semi <+> commasep (map ppr params)) <+>
             text "=>" </> indent 2 (ppr body)
   ppr (Reduce cs size lam inputs) =
     ppCertificates' cs <> ppSOAC "reduce" size [lam] (Just es) as
@@ -289,16 +289,18 @@ instance PrettyLore lore => Pretty (Exp lore) where
                              apply (map (align . ppr . fst) args)
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr lambda@(Lambda params body rettype) =
+  ppr lambda@(Lambda index params body rettype) =
     maybe id (</>) (ppLambdaLore lambda) $
     text "fn" <+> ppTuple' rettype <+>
-    apply (map (ppr . paramIdent) params) <+>
+    parens (ppr index <> semi <+>
+            commasep (map (ppr . paramIdent) params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
-  ppr (ExtLambda params body rettype) =
+  ppr (ExtLambda index params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    apply (map (ppr . paramIdent) params) <+>
+    parens (ppr index <> semi <+>
+            commasep (map (ppr . paramIdent) params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where

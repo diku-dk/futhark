@@ -37,8 +37,6 @@ import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
 
---import Debug.Trace
-
 type SOAC = SOAC.SOAC Basic
 type SOACNest = Nest.SOACNest Basic
 type MapNest = MapNest.MapNest Basic
@@ -406,7 +404,8 @@ toNestedSeqStream :: SOAC -> TryFusion SOAC
 toNestedSeqStream   (SOAC.Stream cs form lam ii arrs) = do
   innerlam      <- renameLambda lam
   instrm_resids <- mapM (newIdent "res_instream") $ lambdaReturnType lam
-  let inner_extlam = ExtLambda (lambdaParams innerlam)
+  let inner_extlam = ExtLambda (lambdaIndex innerlam)
+                               (lambdaParams innerlam)
                                (lambdaBody   innerlam)
                                (staticShapes $ lambdaReturnType innerlam)
       w = arraysSize 0 $ map SOAC.inputType arrs
@@ -468,7 +467,7 @@ iswim _ nest ots
   | Nest.Scan cs1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
     Nest.Map cs2 mb <- nn,
     Just es' <- mapM Nest.inputFromTypedSubExp es,
-    Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
+    Nest.Nesting i paramIds mapArrs bndIds retTypes <- lvl,
     mapM isVarInput mapArrs == Just paramIds = do
     let newInputs :: [SOAC.Input]
         newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
@@ -484,6 +483,7 @@ iswim _ nest ots
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
                                               map (arraySize 0) arrsizes
                    , Nest.nestingResult = bndIds
+                   , Nest.nestingIndex = i
                    , Nest.nestingParamNames = paramIds
                    }
         perm = case retTypes of []  -> []
@@ -550,27 +550,44 @@ pushRearrange :: [VName] -> SOACNest -> SOAC.ArrayTransforms
 pushRearrange inpIds nest ots = do
   nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
-  if permuteReach perm <= mapDepth nest' then
+  if permuteReach perm <= mapDepth nest' then do
     let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
-    in return (MapNest.toSOACNest $
-               inputs' `MapNest.setInputs`
-               rearrangeReturnTypes nest' perm,
-               ots SOAC.|> invertRearrange)
+        nest'' = MapNest.toSOACNest $
+                 inputs' `MapNest.setInputs`
+                 rearrangeReturnTypes nest' perm
+    return (nest'',
+            ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
 
 rearrangeReturnTypes :: MapNest -> [Int] -> MapNest
 rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
-  MapNest.MapNest cs body
-  (zipWith setReturnType nestings $
-   drop 1 $ iterate (map rowType) ts)
+  MapNest.MapNest cs
+  (inner_index `Nest.setNestBodyIndex` body)
+  (zipWith setIndex
+   (zipWith setReturnType
+    nestings $
+    drop 1 $ iterate (map rowType) ts)
+   outer_indices)
   inps
   where rearrange t = setArrayDims t $
                       permuteShape (perm ++ [length perm..arrayRank t-1]) $
                       arrayDims t
         origts = MapNest.typeOf nest
         ts =  map rearrange origts
+
+        orig_indices =
+          map MapNest.nestingIndex nestings ++ [Nest.nestBodyIndex body]
+
+        (outer_indices,inner_index) =
+          case reverse $
+               permuteShape (take (length orig_indices) perm) orig_indices of
+           i:is -> (reverse is, i)
+           []   -> ([], Nest.nestBodyIndex body)
+
         setReturnType nesting t' =
           nesting { MapNest.nestingReturnType = t' }
+        setIndex nesting index =
+          nesting { MapNest.nestingIndex = index }
 
 fixupInputs :: [VName] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
@@ -609,9 +626,11 @@ pullReshape nest ots
 
         bnds <- forM retTypes $ \_ ->
                   newNameFromString "pullReshape_bnd"
+        i <- newVName "pull_reshape_index"
 
         let nesting = Nest.Nesting {
-                        Nest.nestingParamNames = map identName ps
+                        Nest.nestingIndex = i
+                      , Nest.nestingParamNames = map identName ps
                       , Nest.nestingInputs = map SOAC.identInput ps
                       , Nest.nestingResult = bnds
                       , Nest.nestingReturnType = retTypes

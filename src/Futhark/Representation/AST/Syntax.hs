@@ -320,9 +320,10 @@ deriving instance Annotations lore => Ord (ExpT lore)
 -- | A type alias for namespace control.
 type Exp = ExpT
 
--- | Anonymous function for use in a tuple-SOAC.
+-- | Anonymous function for use in a SOAC.
 data LambdaT lore =
-  Lambda { lambdaParams     :: [LParam lore]
+  Lambda { lambdaIndex      :: VName
+         , lambdaParams     :: [LParam lore]
          , lambdaBody       :: BodyT lore
          , lambdaReturnType :: [Type]
          }
@@ -333,9 +334,11 @@ deriving instance Annotations lore => Ord (LambdaT lore)
 
 type Lambda = LambdaT
 
--- | Anonymous function for use in a tuple-SOAC.
+-- | Anonymous function for use in a SOAC, with an existential return
+-- type.
 data ExtLambdaT lore =
-  ExtLambda { extLambdaParams     :: [LParam lore]
+  ExtLambda { extLambdaIndex      :: VName
+            , extLambdaParams     :: [LParam lore]
             , extLambdaBody       :: BodyT lore
             , extLambdaReturnType :: [ExtType]
             }

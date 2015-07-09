@@ -142,15 +142,17 @@ instance (Substitute shape) => Substitute (TypeBase shape) where
     Mem $ substituteNames substs sz
 
 instance Substitutable lore => Substitute (Lambda lore) where
-  substituteNames substs (Lambda params body rettype) =
+  substituteNames substs (Lambda index params body rettype) =
     Lambda
+    (substituteNames substs index)
     (substituteNames substs params)
     (substituteNames substs body)
     (map (substituteNames substs) rettype)
 
 instance Substitutable lore => Substitute (ExtLambda lore) where
-  substituteNames substs (ExtLambda params body rettype) =
+  substituteNames substs (ExtLambda index params body rettype) =
     ExtLambda
+    (substituteNames substs index)
     (substituteNames substs params)
     (substituteNames substs body)
     (map (substituteNames substs) rettype)

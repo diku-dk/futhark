@@ -613,12 +613,12 @@ simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
       -- extension: one may similarly treat iota stream-array case,
       -- by setting the bounds to [0, se_outer-1]
       parbnds  = [ (chunk, se_1, se_outer) ]
-  lam' <- simplifyExtLambda parbnds lam
+  lam' <- simplifyExtLambda parbnds lam outerdim
   return $ Stream cs' outerdim form' lam' arr' ii
   where simplifyStreamForm (MapLike o) = return $ MapLike o
         simplifyStreamForm (RedLike o lam0 acc) = do
             acc'  <- mapM simplifySubExp acc
-            lam0' <- simplifyLambda lam0 $
+            lam0' <- simplifyLambda lam0 outerdim $
                         replicate (length $ lambdaParams lam0) Nothing
             return $ RedLike o lam0' acc'
         simplifyStreamForm (Sequential acc) = do
@@ -629,14 +629,14 @@ simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
   arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun $ map Just arrs'
+  fun' <- simplifyLambda fun w $ map Just arrs'
   return $ Map cs' w' fun' arrs'
 
 simplifyLoopOp (ConcatMap cs w fun arrs) = do
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
   arrs' <- mapM (mapM simplifyVName) arrs
-  fun' <- simplifyLambda fun $ map (const Nothing) $ lambdaParams fun
+  fun' <- simplifyLambda fun w $ map (const Nothing) $ lambdaParams fun
   return $ ConcatMap cs' w' fun' arrs'
 
 simplifyLoopOp (Reduce cs w fun input) = do
@@ -645,7 +645,7 @@ simplifyLoopOp (Reduce cs w fun input) = do
   w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun $ map Just arrs'
+  fun' <- simplifyLambda fun w $ map Just arrs'
   return $ Reduce cs' w' fun' (zip acc' arrs')
 
 simplifyLoopOp (Scan cs w fun input) = do
@@ -654,7 +654,7 @@ simplifyLoopOp (Scan cs w fun input) = do
   w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun $ map Just arrs'
+  fun' <- simplifyLambda fun w $ map Just arrs'
   return $ Scan cs' w' fun' (zip acc' arrs')
 
 simplifyLoopOp (Redomap cs w outerfun innerfun acc arrs) = do
@@ -662,9 +662,9 @@ simplifyLoopOp (Redomap cs w outerfun innerfun acc arrs) = do
   w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
-  outerfun' <- simplifyLambda outerfun $
+  outerfun' <- simplifyLambda outerfun w $
                replicate (length $ lambdaParams outerfun) Nothing
-  (innerfun', used) <- tapUsage $ simplifyLambda innerfun $ map Just arrs
+  (innerfun', used) <- tapUsage $ simplifyLambda innerfun w $ map Just arrs
   (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
   return $ Redomap cs' w' outerfun' innerfun'' acc' arrs''
   where removeUnusedParams used lam arrinps
@@ -683,7 +683,7 @@ simplifySegOp (SegReduce cs w fun input descp) = do
   w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun $ map Just arrs'
+  fun' <- simplifyLambda fun w $ map Just arrs'
   descp' <- simplifyVName descp
   return $ SegReduce cs' w' fun' (zip acc' arrs') descp'
 
@@ -693,7 +693,7 @@ simplifySegOp (SegScan cs w st fun input descp) = do
   w' <- simplifySubExp w
   acc' <- mapM simplifySubExp acc
   arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun $ map Just arrs'
+  fun' <- simplifyLambda fun w $ map Just arrs'
   descp' <- simplifyVName descp
   return $ SegScan cs' w' st fun' (zip acc' arrs') descp'
 
@@ -786,42 +786,48 @@ simplifyType (Basic bt) =
   return $ Basic bt
 
 simplifyLambda :: MonadEngine m =>
-                  Lambda (InnerLore m) -> [Maybe VName]
+                  Lambda (InnerLore m)
+               -> SubExp -> [Maybe VName]
                -> m (Lambda (Lore m))
 simplifyLambda = simplifyLambdaMaybeHoist True
 
 simplifyLambdaNoHoisting :: MonadEngine m =>
-                            Lambda (InnerLore m) -> [Maybe VName]
+                            Lambda (InnerLore m)
+                         -> SubExp -> [Maybe VName]
                          -> m (Lambda (Lore m))
 simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist False
 
 simplifyLambdaMaybeHoist :: MonadEngine m =>
-                            Bool -> Lambda (InnerLore m) -> [Maybe VName]
+                            Bool -> Lambda (InnerLore m)
+                         -> SubExp -> [Maybe VName]
                          -> m (Lambda (Lore m))
-simplifyLambdaMaybeHoist hoisting (Lambda params body rettype) arrs = do
+simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
   params' <- mapM (simplifyParam simplifyLParamLore) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
-      paramnames = HS.fromList $ map paramName params'
+      paramnames = HS.fromList $ boundByLambda lam
   body' <-
     enterLoop $ enterBody $
+    bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
     blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
       simplifyBody (map diet rettype) body
   rettype' <- mapM simplifyType rettype
-  return $ Lambda params' body' rettype'
+  return $ Lambda i params' body' rettype'
 
 
 simplifyExtLambda :: MonadEngine m =>
                     [(LParam (Lore m), SExp.ScalExp, SExp.ScalExp)]
-               ->    ExtLambda (InnerLore m)
-               -> m (ExtLambda (Lore m))
-simplifyExtLambda parbnds (ExtLambda params body rettype) = do
+                  ->    ExtLambda (InnerLore m)
+                  -> SubExp
+                  -> m (ExtLambda (Lore m))
+simplifyExtLambda parbnds lam@(ExtLambda index params body rettype) w = do
   params' <- mapM (simplifyParam simplifyLParamLore) params
-  let paramnames = HS.fromList $ map paramName params'
+  let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplifyExtType rettype
   body' <- enterLoop $ enterBody $
+           bindLoopVar index w $
            bindLParams params' $
            blockIf (hasFree paramnames `orIf` isUnique) $
            localVtable extendSymTab $
@@ -830,7 +836,7 @@ simplifyExtLambda parbnds (ExtLambda params body rettype) = do
       bodyenv = typeEnvFromBindings $ bodyBindings body'
   rettype'' <- bindLParams params' $
                zipWithM (refineArrType bodyenv params') bodyres rettype'
-  return $ ExtLambda params' body' rettype''
+  return $ ExtLambda index params' body' rettype''
     where extendSymTab vtb =
             foldl (\ vt (i,l,u) ->
                         let i_name = paramName i

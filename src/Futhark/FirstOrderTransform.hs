@@ -68,8 +68,8 @@ transformBindingRecursively (Let pat () e) =
 transformBinding :: Binding -> Binder Basic ()
 
 transformBinding (Let pat () (LoopOp (Map cs width fun arrs))) = do
-  i <- newVName "i"
-  let out_ts = mapType width fun
+  let i = lambdaIndex fun
+      out_ts = mapType width fun
   resarr <- resultArray out_ts
   outarrs <- forM out_ts $ \t ->
              newIdent "map_outarr" $ t `setUniqueness` Unique
@@ -128,13 +128,13 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
     letBindNames' [name] $ PrimOp $ SubExp se
 
 transformBinding (Let pat () (LoopOp (Reduce cs width fun args))) = do
-  ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
+  (acc, initacc) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   let arrus = map (uniqueness . paramType) $
               snd $ splitAt (length args) $ lambdaParams fun
   inarrs <- forM (zip arrts arrus) $ \(t,u) ->
             newIdent "reduce_inarr" (setUniqueness t u)
-  loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:inarrs++acc) $ do
+  loopbody <- runBodyBinder $ bindingIdentTypes (inarrs++acc) $ do
     acc' <- bindLambda fun
             (map (PrimOp . SubExp . Var . identName) acc ++
              index cs (map identName inarrs) (Var i))
@@ -142,17 +142,18 @@ transformBinding (Let pat () (LoopOp (Reduce cs width fun args))) = do
   addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName acc) (loopMerge (inarrs++acc) (map Var arrexps++initacc))
     (ForLoop i width) loopbody
-  where (accexps, arrexps) = unzip args
+  where i = lambdaIndex fun
+        (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformBinding (Let pat () (LoopOp (Scan cs width fun args))) = do
-  ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
+  (acc, initacc) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
   arr <- forM arrts $ \t ->
     newIdent "scan_arr" $ t `setUniqueness` Unique
   let arr_names = map identName arr
-  loopbody <- insertBindingsM $ bindingIdentTypes (i_ident:acc++arr) $ do
+  loopbody <- insertBindingsM $ bindingIdentTypes (acc++arr) $ do
     x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
                               index cs arrexps (Var i))
     dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) x
@@ -162,12 +163,14 @@ transformBinding (Let pat () (LoopOp (Scan cs width fun args))) = do
   addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName arr) (loopMerge (acc ++ arr) (initacc ++ map Var initarr))
     (ForLoop i width) loopbody
-  where (accexps, arrexps) = unzip args
+  where i = lambdaIndex fun
+        (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexps))) = do
   arrts <- mapM lookupType arrexps
   -- for the MAP    part
+  let i = lambdaIndex innerfun
   let acc_num     = length accexps
   let res_tps     = lambdaReturnType innerfun
   let map_arr_tps = drop acc_num res_tps
@@ -180,9 +183,9 @@ transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexp
   outarrs <- forM res_ts $ \t ->
              newIdent "redomap_outarr" $ t `setUniqueness` Unique
   -- for the REDUCE part
-  ((acc, initacc), (i, i_ident)) <- newFold $ zip accexps accts
+  (acc, initacc) <- newFold $ zip accexps accts
   inarrs <- mapM (newIdent "redomap_inarr") $ zipWith setUniqueness arrts arrus
-  loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:inarrs++acc++outarrs) $ do
+  loopbody <- runBodyBinder $ bindingIdentTypes (inarrs++acc++outarrs) $ do
     accxis<- bindLambda innerfun
              (map (PrimOp . SubExp . Var . identName) acc ++
               index cs (map identName inarrs) (Var i))
@@ -603,17 +606,17 @@ transformBinding bnd = addBinding bnd
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: Lambda -> Binder Basic Lambda
-transformLambda (Lambda params body rettype) = do
-  body' <- bindingParamTypes params $ transformBody body
-  return $ Lambda params body' rettype
+transformLambda (Lambda i params body rettype) = do
+  body' <- bindingIdentTypes [Ident i $ Basic Int] $
+           bindingParamTypes params $ transformBody body
+  return $ Lambda i params body' rettype
 
 newFold :: [(SubExp,Type)]
-        -> Binder Basic (([Ident], [SubExp]), (VName, Ident))
+        -> Binder Basic ([Ident], [SubExp])
 newFold accexps_and_types = do
-  i <- newVName "i"
   initacc <- mapM copyIfArray acc_exps
   acc <- mapM (newIdent "acc") acc_types
-  return ((acc, initacc), (i, Ident i $ Basic Int))
+  return (acc, initacc)
   where (acc_exps, acc_types) = unzip accexps_and_types
 
 copyIfArray :: SubExp -> Binder Basic SubExp
@@ -644,7 +647,7 @@ pexp :: Applicative f => SubExp -> f Exp
 pexp = pure . PrimOp . SubExp
 
 bindLambda :: Lambda -> [Exp] -> Binder Basic [SubExp]
-bindLambda (Lambda params body _) args = do
+bindLambda (Lambda _ params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
     if unique (paramType param) then
       letBindNames' [paramName param] =<< eCopy (pure arg)

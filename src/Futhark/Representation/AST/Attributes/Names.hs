@@ -19,6 +19,8 @@ module Futhark.Representation.AST.Attributes.Names
          , progNames
          , boundInBody
          , boundByBindings
+         , boundByLambda
+         , boundByExtLambda
        )
        where
 
@@ -125,12 +127,12 @@ freeInLambda :: (FreeIn (Annotations.Exp lore),
                  FreeIn (Annotations.LParam lore),
                  FreeIn (Annotations.LetBound lore)) =>
                 Lambda lore -> Names
-freeInLambda (Lambda params body rettype) =
+freeInLambda (Lambda index params body rettype) =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = map paramName params
+        paramnames = index : map paramName params
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
@@ -140,12 +142,12 @@ freeInExtLambda :: (FreeIn (Annotations.Exp lore),
                     FreeIn (Annotations.LParam lore),
                     FreeIn (Annotations.LetBound lore)) =>
                    ExtLambda lore -> Names
-freeInExtLambda (ExtLambda params body rettype) =
+freeInExtLambda (ExtLambda index params body rettype) =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = map paramName params
+        paramnames = index : map paramName params
 
 freeInPattern :: FreeIn (Annotations.LetBound lore) => Pattern lore -> Names
 freeInPattern (Pattern context values) =
@@ -247,11 +249,15 @@ progNames = execWriter . mapM funNames . progFunctions
 
         expNames e = walkExpM names e
 
-        lambdaNames (Lambda params body _) =
-          mapM_ (one . paramName) params >> bodyNames body
+        lambdaNames (Lambda index params body _) = do
+          one index
+          mapM_ (one . paramName) params
+          bodyNames body
 
-        extLambdaNames (ExtLambda params body _) =
-          mapM_ (one . paramName) params >> bodyNames body
+        extLambdaNames (ExtLambda index params body _) = do
+          one index
+          mapM_ (one . paramName) params
+          bodyNames body
 
 -- | The names bound by the bindings immediately in a 'Body'.
 boundInBody :: Body lore -> Names
@@ -261,3 +267,11 @@ boundInBody = boundByBindings . bodyBindings
 boundByBindings :: [Binding lore] -> Names
 boundByBindings = mconcat . map bound
   where bound (Let pat _ _) = HS.fromList $ patternNames pat
+
+-- | The names of the lambda parameters plus the index parameter.
+boundByLambda :: Lambda lore -> [VName]
+boundByLambda lam = lambdaIndex lam : map paramName (lambdaParams lam)
+
+-- | The names of the lambda parameters plus the index parameter.
+boundByExtLambda :: ExtLambda lore -> [VName]
+boundByExtLambda lam = extLambdaIndex lam : map paramName (extLambdaParams lam)

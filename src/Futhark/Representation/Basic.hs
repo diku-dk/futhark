@@ -109,6 +109,8 @@ instance TypeCheck.Checkable Basic where
     TypeCheck.matchExtPattern (patternElements pat) et
   basicFParam _ name t =
     AST.Param (Ident name (AST.Basic t)) ()
+  basicLParam _ name t =
+    AST.Param (Ident name (AST.Basic t)) ()
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name ts
 

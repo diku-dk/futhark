@@ -51,8 +51,9 @@ simplifyLambdaWithRules :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) 
                         -> RuleBook (SimpleM lore)
                         -> Prog lore
                         -> Lambda lore
+                        -> SubExp
                         -> [Maybe VName]
                         -> m (Lambda lore)
-simplifyLambdaWithRules simpl rules prog lam args =
+simplifyLambdaWithRules simpl rules prog lam w args =
   liftM removeLambdaWisdom $
-  simplifyLambda simpl rules (Just prog) lam args
+  simplifyLambda simpl rules (Just prog) lam w args

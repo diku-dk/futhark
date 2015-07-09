@@ -32,12 +32,14 @@ import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
+import Futhark.Substitute
 
 import Prelude hiding (any, all)
 
 topDownRules :: MonadBinder m => TopDownRules m
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
+               , removeIotaMapping
                , removeUnusedMapInput
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
@@ -143,6 +145,27 @@ removeReplicateMapping vtable (Let pat _ (LoopOp (Map cs outersize fun arrs)))
               Left (p, v)
 
 removeReplicateMapping _ _ = cannotSimplify
+
+-- | Remove all arguments to the map that are iotas.
+-- These can be turned into references to the index variable instead.
+removeIotaMapping :: MonadBinder m => TopDownRule m
+removeIotaMapping vtable (Let pat _ (LoopOp (Map cs outersize fun arrs)))
+  | not $ null iotaParams = do
+  let substs = HM.fromList $ zip iotaParams $ repeat $ lambdaIndex fun
+      (params, arrs') = unzip paramsAndArrs
+      fun' = substituteNames substs fun { lambdaParams = params
+                                        }
+  letBind_ pat $ LoopOp $ Map cs outersize fun' arrs'
+  where (paramsAndArrs, iotaParams) =
+          partitionEithers $ zipWith isIota (lambdaParams fun) arrs
+
+        isIota p v
+          | Just (Iota _) <- asPrimOp =<< ST.lookupExp v vtable =
+              Right $ paramName p
+          | otherwise =
+              Left (p, v)
+
+removeIotaMapping _ _ = cannotSimplify
 
 -- | Remove inputs that are not used inside the @map@.
 removeUnusedMapInput :: MonadBinder m => TopDownRule m

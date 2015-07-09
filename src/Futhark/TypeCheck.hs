@@ -1243,18 +1243,20 @@ checkFuncall fname params args = do
 
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore ()
-checkLambda (Lambda params body ret) args = do
+checkLambda (Lambda i params body ret) args = do
   mapM_ checkType ret
+  iparam <- basicLParamM i Int
   if length params == length args then do
     checkFuncall Nothing (map paramType params) args
     noConsume $ checkAnonymousFun
-      (nameFromString "<anonymous>", ret, params, body)
+      (nameFromString "<anonymous>", ret, iparam:params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkConcatMapLambda :: Checkable lore =>
                         Lambda lore -> [Arg] -> TypeM lore ()
-checkConcatMapLambda (Lambda params body rettype) args = do
+checkConcatMapLambda (Lambda i params body rettype) args = do
   mapM_ checkType rettype
+  iparam <- basicLParamM i Int
   let (_,elemparams) =
         splitAt (length params - length args) params
       fname = nameFromString "<anonymous>"
@@ -1264,7 +1266,8 @@ checkConcatMapLambda (Lambda params body rettype) args = do
     checkFuncall Nothing (map paramType elemparams) args
     noConsume $ checkFun' (fname,
                           rettype',
-                          [ (paramIdent param, LambdaBound $ paramLore param) | param <- params ],
+                          [ (paramIdent param, LambdaBound $ paramLore param)
+                          | param <- iparam:params ],
                           body) $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
@@ -1273,13 +1276,15 @@ checkConcatMapLambda (Lambda params body rettype) args = do
 
 checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
-checkExtLambda (ExtLambda params body rettype) args =
+checkExtLambda (ExtLambda i params body rettype) args =
   if length params == length args then do
+    iparam <- basicLParamM i Int
     checkFuncall Nothing (map paramType params) args
     let fname = nameFromString "<anonymous>"
     noConsume $ checkFun' (fname,
                           rettype,
-                          [ (paramIdent param, LambdaBound $ paramLore param) | param <- params ],
+                          [ (paramIdent param, LambdaBound $ paramLore param)
+                          | param <- iparam:params ],
                           body) $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
@@ -1301,9 +1306,15 @@ class (FreeIn (Annotations.Exp lore),
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()
   basicFParam :: lore -> VName -> BasicType -> AST.FParam lore
+  basicLParam :: lore -> VName -> BasicType -> AST.LParam lore
   matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()
 
 basicFParamM :: forall lore.Checkable lore =>
                 VName -> BasicType -> TypeM lore (AST.FParam lore)
 basicFParamM name t =
   return $ basicFParam (representative :: lore) name t
+
+basicLParamM :: forall lore.Checkable lore =>
+                VName -> BasicType -> TypeM lore (AST.LParam lore)
+basicLParamM name t =
+  return $ basicLParam (representative :: lore) name t

@@ -79,25 +79,29 @@ pushInnerTarget :: Target -> Targets -> Targets
 pushInnerTarget target (inner_target, targets) =
   (target, targets ++ [inner_target])
 
-data LoopNesting = MapNesting Pattern Certificates SubExp [(LParam, VName)]
+data LoopNesting = MapNesting Pattern Certificates SubExp VName [(LParam, VName)]
                  deriving (Show)
 
 ppLoopNesting :: LoopNesting -> String
-ppLoopNesting (MapNesting _ _ _ params_and_arrs) =
+ppLoopNesting (MapNesting _ _ _ _ params_and_arrs) =
   pretty (map fst params_and_arrs) ++
   " <- " ++
   pretty (map snd params_and_arrs)
 
 loopNestingPattern :: LoopNesting -> Pattern
-loopNestingPattern (MapNesting pat _ _ _) =
+loopNestingPattern (MapNesting pat _ _ _ _) =
   pat
 
 loopNestingParams :: LoopNesting -> [LParam]
-loopNestingParams (MapNesting _ _ _ params_and_arrs) =
+loopNestingParams (MapNesting _ _ _ _ params_and_arrs) =
   map fst params_and_arrs
 
+loopNestingIndex :: LoopNesting -> VName
+loopNestingIndex (MapNesting _ _ _ i _) =
+  i
+
 instance FreeIn LoopNesting where
-  freeIn (MapNesting pat cs w params_and_arrs) =
+  freeIn (MapNesting pat cs w _ params_and_arrs) =
     freeInPattern pat <>
     freeIn cs <>
     freeIn w <>
@@ -132,8 +136,9 @@ pushInnerNesting nesting (inner_nesting, nestings) =
 -- | Both parameters and let-bound.
 boundInNesting :: Nesting -> Names
 boundInNesting nesting =
-  HS.fromList (map paramName (loopNestingParams $ nestingLoop nesting)) <>
+  HS.fromList (loopNestingIndex loop : map paramName (loopNestingParams loop)) <>
   nestingLetBound nesting
+  where loop = nestingLoop nesting
 
 letBindInInnerNesting :: Names -> Nestings -> Nestings
 letBindInInnerNesting names (nest, nestings) =
@@ -157,14 +162,14 @@ kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
 
 constructKernel :: KernelNest -> Body -> Binding
-constructKernel (MapNesting pat cs w params_and_arrs, []) body =
+constructKernel (MapNesting pat cs w i params_and_arrs, []) body =
   Let pat () $ LoopOp $
-  Map cs w (Lambda params body rettype) arrs
+  Map cs w (Lambda i params body rettype) arrs
   where (params, arrs) = unzip params_and_arrs
         rettype = map rowType $ patternTypes pat
-constructKernel (MapNesting pat cs w params_and_arrs, nest : nests) inner_body =
+constructKernel (MapNesting pat cs w i params_and_arrs, nest : nests) inner_body =
   Let pat () $ LoopOp $
-  Map cs w (Lambda params body rettype) arrs
+  Map cs w (Lambda i params body rettype) arrs
   where (params, arrs) = unzip params_and_arrs
         rettype = map rowType $ patternTypes pat
         bnd = constructKernel (nest, nests) inner_body
@@ -235,7 +240,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           identity_map
           inner_returned_arrs
           addTarget = do
-          let nest'@(MapNesting _ cs w params_and_arrs) =
+          let nest'@(MapNesting _ cs w i params_and_arrs) =
                 removeUnusedNestingParts nest free_in_kernel
               (params,arrs) = unzip params_and_arrs
               param_names = HS.fromList $ map paramName params
@@ -279,7 +284,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
               nest'' =
                 removeUnusedNestingParts
-                (MapNesting pat cs w $ zip actual_params actual_arrs)
+                (MapNesting pat cs w i $ zip actual_params actual_arrs)
                 free_in_kernel
 
               free_in_kernel'' =
@@ -325,8 +330,8 @@ createKernelNest (inner_nest, nests) distrib_body = do
             ((`pushOuterTarget` kernel_targets) . expand_target)
 
 removeUnusedNestingParts :: LoopNesting -> Names -> LoopNesting
-removeUnusedNestingParts (MapNesting pat cs w params_and_arrs) used =
-  MapNesting pat cs w $ zip used_params used_arrs
+removeUnusedNestingParts (MapNesting pat cs w i params_and_arrs) used =
+  MapNesting pat cs w i $ zip used_params used_arrs
   where (params,arrs) = unzip params_and_arrs
         (used_params, used_arrs) =
           unzip $
@@ -407,7 +412,7 @@ interchangeLoop :: MonadBinder m =>
                 -> m SeqLoop
 interchangeLoop
   (SeqLoop loop_pat ret merge form body)
-  (MapNesting pat cs w params_and_arrs) = do
+  (MapNesting pat cs w i params_and_arrs) = do
     merge_expanded <- mapM expand merge
 
     let ret_params_mask = map ((`elem` ret) . paramName . fst) merge
@@ -429,7 +434,7 @@ interchangeLoop
       runBinder $ bindingParamTypes new_params $
       unzip <$> catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
-    let lam = Lambda (params'<>new_params) body rettype
+    let lam = Lambda i (params'<>new_params) body rettype
         map_bnd = Let loop_pat_expanded () $
                   LoopOp $ Map cs w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
@@ -503,7 +508,7 @@ kernelIsRearrange :: Binding -> Maybe Binding
 kernelIsRearrange (Let outer_pat _
                    (LoopOp (Map outer_cs _ outer_fun [outer_arr]))) =
   delve 1 outer_cs outer_fun
-  where delve n cs (Lambda [param] body _)
+  where delve n cs (Lambda _ [param] body _)
           | Just (PrimOp (Rearrange inner_cs perm arr)) <-
               singleExpBody body,
             paramName param == arr =
@@ -524,7 +529,7 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
   delve outer_cs outer_fun
     where new_shape = arrayDims $ patElemType outer_patElem
 
-          delve cs (Lambda [param] body _)
+          delve cs (Lambda _ [param] body _)
             | Just (PrimOp (Reshape inner_cs _ arr)) <-
               singleExpBody body,
               paramName param == arr =

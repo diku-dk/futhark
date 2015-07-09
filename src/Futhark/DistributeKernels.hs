@@ -242,7 +242,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askTypeEnv
   let env = KernelEnv { kernelNest =
                         singleNesting (Nesting mempty $
-                                       MapNesting pat cs w $
+                                       MapNesting pat cs w (lambdaIndex lam) $
                                        zip (lambdaParams lam) arrs)
                       , kernelTypeEnv =
                         types <> typeEnvFromParams (lambdaParams lam)
@@ -310,7 +310,8 @@ mapNesting pat cs w lam arrs = local $ \env ->
                         typeEnvFromParams (lambdaParams lam)
       }
   where nest = Nesting mempty $
-               MapNesting pat cs w $ zip (lambdaParams lam) arrs
+               MapNesting pat cs w (lambdaIndex lam) $
+               zip (lambdaParams lam) arrs
 
 unbalancedLambda :: Lambda -> Bool
 unbalancedLambda lam =
@@ -401,6 +402,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                    lam' = Lambda { lambdaBody = body
                                  , lambdaReturnType = map rowType $ patternTypes pat
                                  , lambdaParams = used_params
+                                 , lambdaIndex = lambdaIndex lam
                                  }
                in [Let pat () $ LoopOp $ Map cs w lam' used_arrs]
          }

@@ -149,19 +149,19 @@ deadCodeElimType t = do
 
 deadCodeElimLambda :: Proper lore =>
                       Lambda lore -> DCElimM (Lambda lore)
-deadCodeElimLambda (Lambda params body rettype) = do
+deadCodeElimLambda (Lambda i params body rettype) = do
   body' <- deadCodeElimBodyM body
   mapM_ deadCodeElimParam params
   mapM_ deadCodeElimType rettype
-  return $ Lambda params body' rettype
+  return $ Lambda i params body' rettype
 
 deadCodeElimExtLambda :: Proper lore =>
                          ExtLambda lore -> DCElimM (ExtLambda lore)
-deadCodeElimExtLambda (ExtLambda params body rettype) = do
+deadCodeElimExtLambda (ExtLambda i params body rettype) = do
   body' <- deadCodeElimBodyM body
   mapM_ deadCodeElimParam params
   seen $ freeIn rettype
-  return $ ExtLambda params body' rettype
+  return $ ExtLambda i params body' rettype
 
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False

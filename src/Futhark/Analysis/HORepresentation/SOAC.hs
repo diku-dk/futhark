@@ -481,6 +481,14 @@ inpOuterSize (Stream  _ _ _ _ inps) =
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m) =>
          SOAC (Lore m) -> m (Exp (Lore m))
+
+-- XXX: the other part of the zero-input hack (see fromExp).
+toExp (Map cs l as)
+  | lambdaIndex l `elem` map paramName (lambdaParams l) = do
+      new_index <- newVName $ baseString $ lambdaIndex l
+      LoopOp <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
+  where w = arraysSize 0 $ map inputType as
+
 toExp (Map cs l as) =
   LoopOp <$> (Futhark.Map cs w l <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
@@ -497,7 +505,7 @@ toExp (Redomap cs l1 l2 es as) =
   where w = arraysSize 0 $ map inputType as
 toExp (Stream  cs form lam ii inps) = LoopOp <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
-      extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
+      extlam = ExtLambda (lambdaIndex lam) (lambdaParams lam) (lambdaBody lam) extrtp
       w = arraysSize 0 $ map inputType inps
   inpexp <- inputsToSubExps inps
   return $ Futhark.Stream cs w form extlam inpexp ii
@@ -513,8 +521,19 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: HasTypeEnv f =>
+fromExp :: (Bindable lore, HasTypeEnv f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
+
+-- | XXX: ugly hack to deal with the lack of support for zero-input
+-- SOACs.  If we encounter one of these (and it is a map), we add a
+-- dummy iota input.  This really should go away, because it is not
+-- robust.
+fromExp (LoopOp (Futhark.Map cs w lam [])) =
+  let iota_input = Input mempty $ Iota w
+      lam' = lam
+             { lambdaParams = [Param (Ident (lambdaIndex lam) $ Basic Int) ()] }
+  in pure $ Right $ Map cs lam' [iota_input]
+
 fromExp (LoopOp (Futhark.Map cs _ l as)) =
   Right <$> Map cs l <$> traverse varInput as
 fromExp (LoopOp (Futhark.Reduce cs _ l args)) = do
@@ -529,7 +548,10 @@ fromExp (LoopOp (Futhark.Stream cs _ form extlam as ii)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
   if length mrtps == length rtps
-  then Right <$> do let lam = Lambda (extLambdaParams extlam) (extLambdaBody extlam) rtps
+  then Right <$> do let lam = Lambda (extLambdaIndex extlam)
+                                     (extLambdaParams extlam)
+                                     (extLambdaBody extlam)
+                                     rtps
                     Stream cs form lam ii <$> traverse varInput as
   else pure $ Left NotSOAC
 fromExp _ = pure $ Left NotSOAC
@@ -545,6 +567,7 @@ soacToStream soac = do
       (cs, lam, inps) = (certificates soac, lambda soac, inputs soac)
       w = arraysSize 0 $ map inputType inps
   lam'     <- renameLambda lam
+  i <- newVName "stream_i"
   -- Treat each SOAC case individually:
   case soac of
     -- Map(f,a) => is translated in strem's body to:
@@ -562,7 +585,7 @@ soacToStream soac = do
           insbnd = mkLet' [] strm_resids $ LoopOp insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= map (`Param` ()) $ chunk_id:strm_inpids
-          strmlam= Lambda strmpar strmbdy loutps
+          strmlam= Lambda i strmpar strmbdy loutps
       -- map(f,a) creates a stream with NO accumulators
       return (Stream cs (MapLike Disorder) strmlam MaxChunk inps, [])
     -- Scan(+,nes,a) => is translated in strem's body to:
@@ -610,7 +633,7 @@ soacToStream soac = do
           strmbdy= mkBody (insbnd:mapbnd:outszm1bnd:lelbnds++addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
-          strmlam= Lambda strmpar strmbdy (accrtps++loutps)
+          strmlam= Lambda i strmpar strmbdy (accrtps++loutps)
       return (Stream cs (Sequential nes) strmlam MinChunk inps, inpacc_ids)
     -- Reduce(+,nes,a) => is translated in strem's body to:
     -- 1. let acc0_ids = reduce(+,nes,a_ch) in
@@ -635,7 +658,7 @@ soacToStream soac = do
       let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
           strmbdy= mkBody (insbnd : addaccbnd) addaccres
           strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
-          strmlam= Lambda strmpar strmbdy accrtps
+          strmlam= Lambda i strmpar strmbdy accrtps
       lam0 <- renameLambda lam
       return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
     -- Redomap(+,lam,nes,a) => is translated in strem's body to:
@@ -664,7 +687,7 @@ soacToStream soac = do
           strmbdy= mkBody (insbnd : addaccbnd) $
                           addaccres ++ map (Futhark.Var . identName) strm_resids
           strmpar= map (`Param` ()) $ chunk_id:inpacc_ids++strm_inpids
-          strmlam= Lambda strmpar strmbdy (accrtps++loutps)
+          strmlam= Lambda i strmpar strmbdy (accrtps++loutps)
       lam0 <- renameLambda lamin
       return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
@@ -673,6 +696,7 @@ soacToStream soac = do
     where mkMapPlusAccLam :: (MonadFreshNames m, Bindable lore)
                           => [SubExp] -> Lambda lore -> m (Lambda lore)
           mkMapPlusAccLam accs plus = do
+            i <- newVName "map_plus_i"
             let lampars = lambdaParams plus
                 (accpars, rempars) = (  take (length accs) lampars,
                                         drop (length accs) lampars  )
@@ -683,7 +707,7 @@ soacToStream soac = do
                 newlambdy = Body (bodyLore plus_bdy)
                                  (parbnds ++ bodyBindings plus_bdy)
                                  (bodyResult plus_bdy)
-            renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
+            renameLambda $ Lambda i rempars newlambdy $ lambdaReturnType plus
 
           mkPlusBnds :: (MonadFreshNames m, Bindable lore)
                      => Lambda lore -> [SubExp] -> m (Body lore)

@@ -152,7 +152,7 @@ loopOpExtType (Stream _ outersize form lam _ _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
         substs = HM.fromList $ zip nms (outersize:accs)
-        ExtLambda params _ rtp = lam
+        ExtLambda _ params _ rtp = lam
         accs = case form of
                 MapLike _ -> []
                 RedLike _ _ acc -> acc

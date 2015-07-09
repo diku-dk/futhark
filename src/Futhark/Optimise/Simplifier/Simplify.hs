@@ -59,12 +59,13 @@ simplifyFun' simpl rules prog fundec =
 simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
-               -> Maybe (Prog lore) -> Lambda lore -> [Maybe VName]
+               -> Maybe (Prog lore)
+               -> Lambda lore -> SubExp -> [Maybe VName]
                -> m (Lambda (Wise lore))
-simplifyLambda simpl rules prog lam args = do
+simplifyLambda simpl rules prog lam w args = do
   types <- askTypeEnv
   let m = Engine.localVtable (<> ST.fromTypeEnv types) $
-          Engine.simplifyLambdaNoHoisting lam args
+          Engine.simplifyLambdaNoHoisting lam w args
   modifyNameSource $ runSimpleM m simpl $
     Engine.emptyEnv rules prog
 

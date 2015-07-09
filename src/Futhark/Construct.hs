@@ -30,7 +30,6 @@ module Futhark.Construct
 
   , foldBinOp
   , binOpLambda
-  , makeLambda
 
   , module Futhark.Binder
 
@@ -227,32 +226,17 @@ binOpLambda :: (MonadFreshNames m, Bindable lore) =>
 binOpLambda bop t = do
   x   <- newVName "x"
   y   <- newVName "y"
+  i   <- newVName "i"
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
     res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y) t
     return $ resultBody [res]
   return Lambda {
-             lambdaParams     = [Param (Ident x (Basic t)) (),
+             lambdaIndex      = i
+           , lambdaParams     = [Param (Ident x (Basic t)) (),
                                  Param (Ident y (Basic t)) ()]
            , lambdaReturnType = [Basic t]
            , lambdaBody       = body
            }
-
-makeLambda :: (Bindable (Lore m), MonadBinder m) =>
-              [LParam (Lore m)] -> m (Body (Lore m)) -> m (Lambda (Lore m))
-makeLambda params body = do
-  body' <- insertBindingsM body
-  bodyt <- bodyExtType body'
-  case allBasic bodyt of
-    Nothing -> fail "Body passed to makeLambda has non-basic type"
-    Just ts ->
-      return Lambda {
-          lambdaParams = params
-        , lambdaReturnType = map Basic ts
-        , lambdaBody = body'
-        }
-  where allBasic = mapM isBasic
-        isBasic (Basic t) = Just t
-        isBasic _         = Nothing
 
 -- | Conveniently construct a body that contains no bindings.
 resultBody :: Bindable lore => [SubExp] -> Body lore

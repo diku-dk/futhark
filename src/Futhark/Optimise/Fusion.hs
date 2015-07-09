@@ -580,8 +580,9 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       (used_set, bres') <-
         getUnfusableSet bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
       repl_idnm <- newVName "repl_x"
+      i <- newVName "i"
       let repl_id = Param (Ident repl_idnm (Basic Int)) ()
-          repl_lam = Lambda [repl_id] (mkBody [] [el])
+          repl_lam = Lambda i [repl_id] (mkBody [] [el])
                      [rowType $ identType v]
           soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
       greedyFuse True [] used_set bres' (pat, soac_repl)
@@ -665,7 +666,7 @@ addVarToUnfusable fres name = do
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the unfusable set.
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
-fusionGatherLam (u_set,fres) (Lambda idds body _) = do
+fusionGatherLam (u_set,fres) (Lambda _ idds body _) = do
     let null_res = mkFreshFusionRes
     new_res <- binding (map paramIdent idds) $
                fusionGatherBody null_res body
@@ -735,9 +736,10 @@ fuseIn = identityMapper {
          }
 
 fuseInLambda :: Lambda -> FusionGM Lambda
-fuseInLambda (Lambda params body rtp) = do
-  body' <- binding (map paramIdent params) $ fuseInBody body
-  return $ Lambda params body' rtp
+fuseInLambda (Lambda i params body rtp) = do
+  body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
+  return $ Lambda i params body' rtp
+  where i_ident = Ident i $ Basic Int
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern _ []) _ body = return body
@@ -768,7 +770,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simpleOptLambda prog lam args --BUG in here: symbol table lookup for var fails!!!
+  lam' <- simpleOptLambda prog lam (SOAC.inpOuterSize new_soac) args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

@@ -194,7 +194,7 @@ externaliseLoopOp (I.Redomap _ _ outerfun innerfun vs as) =
   pure noLoc
 
 externaliseMapLambda :: I.Lambda -> ExternaliseM E.Lambda
-externaliseMapLambda (Lambda params body ret) =
+externaliseMapLambda (Lambda _ params body ret) =
   E.AnonymFun params' <$>
   (wrap <$> externaliseBody body) <*>
   pure (externaliseDeclTypes ret) <*>
@@ -206,7 +206,7 @@ externaliseMapLambda (Lambda params body ret) =
                Just (p, f) -> ([p], f)
 
 externaliseFoldLambda :: I.Lambda -> Int -> ExternaliseM E.Lambda
-externaliseFoldLambda (Lambda params body ret) n =
+externaliseFoldLambda (Lambda _ params body ret) n =
   E.AnonymFun (accparams'++arrparams') <$>
   (wraparr <$> wrapacc <$> externaliseBody body) <*>
   pure (externaliseDeclTypes ret) <*>

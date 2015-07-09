@@ -229,7 +229,8 @@ allTrue cs w predfun args = do
           let Body _ predbnds [se] = lambdaBody predfun -- XXX
               andbnd = mkLet' [] [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
               body = mkBody (predbnds++[andbnd]) [Var $ identName res]
-          return Lambda { lambdaParams = Param acc () : lambdaParams predfun
+          return Lambda { lambdaIndex = lambdaIndex predfun
+                        , lambdaParams = Param acc () : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body
                         }
