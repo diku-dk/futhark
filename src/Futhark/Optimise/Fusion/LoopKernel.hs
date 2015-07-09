@@ -220,7 +220,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       cs2      = SOAC.certificates soac2
       inp1_arr = SOAC.inputs soac1
       horizFuse= not (HS.null unfus_set) &&
-                 SOAC.inpOuterSize soac1 == SOAC.inpOuterSize soac2
+                 SOAC.width soac1 == SOAC.width soac2
       inp2_arr = SOAC.inputs soac2
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2

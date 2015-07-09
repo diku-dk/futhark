@@ -28,7 +28,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , setLambda
   , certificates
   , typeOf
-  , inpOuterSize
+  , width
   -- ** Converting to and from expressions
   , NotSOAC (..)
   , fromExp
@@ -453,29 +453,27 @@ typeOf (Reduce _ lam _) =
   lambdaReturnType lam
 typeOf (Scan _ _ input) =
   map (inputType . snd) input
-typeOf (Redomap _ outlam inlam nes inps) =
+typeOf soac@(Redomap _ outlam inlam nes _) =
   let accrtps = lambdaReturnType outlam
-      width   = arraysSize 0 $ map inputType inps
-      arrrtps = drop (length nes) $ mapType width inlam
+      arrrtps = drop (length nes) $ mapType (width soac) inlam
   in  accrtps ++ arrrtps
-typeOf (Stream _ form lam _ inps) =
+typeOf soac@(Stream _ form lam _ _) =
   let nes     = getStreamAccums form
       accrtps = take (length nes) $ lambdaReturnType lam
-      width   = arraysSize 0 $ map inputType inps
-      arrtps  = [ arrayOf (stripArray 1 t) (Shape [width]) (uniqueness t)
+      arrtps  = [ arrayOf (stripArray 1 t) (Shape [width soac]) (uniqueness t)
                   | t <- drop (length nes) (lambdaReturnType lam) ]
   in  accrtps ++ arrtps
 
-inpOuterSize :: SOAC lore -> SubExp
-inpOuterSize (Map _ _ inps) =
+width :: SOAC lore -> SubExp
+width (Map _ _ inps) =
   arraysSize 0 $ map inputType inps
-inpOuterSize (Reduce _ _ input) =
+width (Reduce _ _ input) =
   arraysSize 0 $ map (inputType . snd) input
-inpOuterSize (Scan _ _ input) =
+width (Scan _ _ input) =
   arraysSize 0 $ map (inputType . snd) input
-inpOuterSize (Redomap _ _ _ _ inps) =
+width (Redomap _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
-inpOuterSize (Stream  _ _ _ _ inps) =
+width (Stream  _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
 
 -- | Convert a SOAC to the corresponding expression.

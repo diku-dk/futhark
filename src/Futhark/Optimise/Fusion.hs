@@ -417,7 +417,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                         SOAC.Stream  _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
-      to_fuse_knms2  = getKersWithSameInpSize (SOAC.inpOuterSize soac) res
+      to_fuse_knms2  = getKersWithSameInpSize (SOAC.width soac) res
       to_fuse_knms   = HS.toList $ HS.fromList $ to_fuse_knms1 ++ to_fuse_knms2
       lookup_kern k  = case HM.lookup k (kernels res) of
                          Nothing  -> badFusionGM $ Error
@@ -488,7 +488,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   return (ok_ind>0, [fused_ker], new_kernms, to_fuse_kers', to_fuse_knms')
     where getKersWithSameInpSize :: SubExp -> FusedRes -> [KernName]
           getKersWithSameInpSize sz ress =
-            map fst $ filter (\ (_,ker) -> sz == SOAC.inpOuterSize (fsoac ker)) $ HM.toList $ kernels ress
+            map fst $ filter (\ (_,ker) -> sz == SOAC.width (fsoac ker)) $ HM.toList $ kernels ress
 
 ------------------------------------------------------------------------
 ------------------------------------------------------------------------
@@ -770,7 +770,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simpleOptLambda prog lam (SOAC.inpOuterSize new_soac) args
+  lam' <- simpleOptLambda prog lam (SOAC.width new_soac) args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'
