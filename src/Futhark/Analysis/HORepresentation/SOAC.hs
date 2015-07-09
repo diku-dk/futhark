@@ -484,7 +484,7 @@ toExp :: (MonadBinder m) =>
 
 -- XXX: the other part of the zero-input hack (see fromExp).
 toExp (Map cs l as)
-  | lambdaIndex l `elem` map paramName (lambdaParams l) = do
+  | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
       new_index <- newVName $ baseString $ lambdaIndex l
       LoopOp <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
