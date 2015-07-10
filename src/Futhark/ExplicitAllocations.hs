@@ -5,6 +5,7 @@ module Futhark.ExplicitAllocations
        )
 where
 
+import Control.Arrow (first, second)
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
@@ -73,12 +74,14 @@ computeSize desc se = do
 
 -- | Monad for adding allocations to an entire program.
 newtype AllocM a = AllocM (BinderT ExplicitMemory
-                           (ReaderT MemoryMap
-                            (State VNameSource))
+                            (State (MemoryMap, VNameSource))
                            a)
                  deriving (Applicative, Functor, Monad,
-                           MonadReader MemoryMap,
-                           MonadFreshNames)
+                           MonadState (MemoryMap, VNameSource))
+
+instance MonadFreshNames AllocM where
+  getNameSource = snd <$> get
+  putNameSource src = modify $ \(memmap, _) -> (memmap, src)
 
 instance MonadBinder AllocM where
   type Lore AllocM = ExplicitMemory
@@ -91,16 +94,19 @@ instance MonadBinder AllocM where
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addBinding =
-    AllocM . addBinderBinding
+  addBinding binding = do
+    AllocM $ addBinderBinding binding
+    let summaries = HM.fromList $
+                    map patElemSummary $ patternElements $ bindingPattern binding
+    modify $ first (`HM.union` summaries)
   collectBindings (AllocM m) =
     AllocM $ collectBinderBindings m
 
 instance HasTypeEnv AllocM where
-  askTypeEnv = liftM2 HM.union (AllocM askTypeEnv) (HM.map entryType <$> ask)
+  askTypeEnv = liftM2 HM.union (AllocM askTypeEnv) (HM.map entryType <$> askMemoryMap)
 
 instance Allocator AllocM where
-  askMemoryMap = ask
+  askMemoryMap = gets fst
 
   addAllocBinding (SizeComputation name se) =
     letBindNames'_ [name] =<< SE.fromScalExp' se
@@ -116,8 +122,13 @@ runAllocMWithEnv :: MonadFreshNames m =>
                     MemoryMap
                  -> AllocM a
                  -> m a
-runAllocMWithEnv env (AllocM m) =
-  fst <$> modifyNameSource (runState (runReaderT (runBinderT m mempty) env))
+runAllocMWithEnv env (AllocM m) = modifyNameSource $ \src ->
+  first fst $ second snd $ runState (runBinderT m mempty) (env, src)
+
+localMemoryMap :: (MemoryMap -> MemoryMap) -> AllocM a -> AllocM a
+localMemoryMap f m = do old <- gets fst
+                        modify $ first f
+                        m <* modify (first (const old))
 
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM a = PatAllocM (WriterT [AllocBinding]
@@ -288,8 +299,15 @@ directIndexFunction :: VName -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ arrayDims t
 
+sizeOfMemoryBlock :: (Monad m, HasTypeEnv m) => VName -> m SubExp
+sizeOfMemoryBlock mem = do
+  t <- lookupType mem
+  case t of
+    Mem size -> return size
+    _        -> fail $ "sizeOfMemoryBlock: " <> pretty mem <> " not a memory block."
+
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
-lookupSummary name = asks $ fmap entryMemSummary . HM.lookup name
+lookupSummary name = asksMemoryMap $ fmap entryMemSummary . HM.lookup name
 
 lookupSummary' :: Allocator m =>
                   VName -> m MemSummary
@@ -308,12 +326,12 @@ lookupArraySummary' name = do
                   Scalar ->
                     fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
-bindeeSummary :: PatElem -> (VName, Entry)
-bindeeSummary bindee = (patElemName bindee,
+patElemSummary :: PatElem -> (VName, Entry)
+patElemSummary bindee = (patElemName bindee,
                         Entry (patElemLore bindee) (patElemType bindee))
 
 bindeesSummary :: [PatElem] -> MemoryMap
-bindeesSummary = HM.fromList . map bindeeSummary
+bindeesSummary = HM.fromList . map patElemSummary
 
 paramsSummary :: [ParamT MemSummary] -> MemoryMap
 paramsSummary = HM.fromList . map paramSummary
@@ -332,7 +350,7 @@ allocInFParams params m = do
       _ -> return param { paramLore = Scalar }
   let params' = memsizeparams <> memparams <> valparams
       summary = paramsSummary params'
-  local (summary `HM.union`) $ m params'
+  localMemoryMap (summary `HM.union`) $ m params'
 
 isArray :: SubExp -> AllocM Bool
 isArray (Var v) = not <$> (==Scalar) <$> lookupSummary' v
@@ -424,7 +442,7 @@ allocInBindings origbnds m = allocInBindings' origbnds []
           let summaries =
                 bindeesSummary $
                 concatMap (patternElements . bindingPattern) allocbnds
-          local (`HM.union` summaries) $
+          localMemoryMap (`HM.union` summaries) $
             allocInBindings' xs (bnds'++allocbnds)
         allocInBinding' bnd = do
           ((),bnds') <- collectBindings $ allocInBinding bnd
@@ -456,7 +474,7 @@ allocInExp (LoopOp (DoLoop res merge form
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (mergeparams, mergeinit) = unzip merge
         formBinds (ForLoop i _) =
-          local (HM.singleton i (Entry Scalar $ Basic Int)<>)
+          localMemoryMap (HM.insert i $ Entry Scalar $ Basic Int)
         formBinds (WhileLoop _) =
           id
 
@@ -464,8 +482,13 @@ allocInExp (LoopOp (Map cs w f arrs)) = do
   f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
   return $ LoopOp $ Map cs w f' arrs
 
-allocInExp (LoopOp (Reduce {})) =
-  fail "Cannot put explicit allocations in reduce yet."
+allocInExp (LoopOp (Reduce cs w f input)) = do
+  -- Create new memory blocks but use same index functions.
+  (new_summaries, new_arrs) <- unzip <$> mapM (duplicateArray "reduce") arrs
+  f' <- allocInReduceLambda f new_summaries
+  return $ LoopOp $ Reduce cs w f' $ zip accs new_arrs
+  where (accs,arrs) = unzip input
+
 allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
 allocInExp (LoopOp (Redomap {})) =
@@ -482,6 +505,21 @@ allocInExp e = mapExpM alloc e
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
 
+-- | Duplicate an array into a new memory block, but with the same
+-- index function.
+duplicateArray :: String -> VName -> AllocM ((VName, IxFun.IxFun), VName)
+duplicateArray desc arr = do
+  (mem, ixfun) <- lookupArraySummary' arr
+  mem_size <- sizeOfMemoryBlock mem
+  new_mem <- letExp (desc <> "_" <> baseString arr <> "_mem") $
+             PrimOp $ Alloc mem_size
+  new_arr <- newVName $ desc <> "_" <> baseString arr
+  new_arr_ident <- Ident new_arr <$> lookupType arr
+  let pat = Pattern [] [PatElem new_arr_ident BindVar $
+                        MemSummary new_mem ixfun]
+  addBinding =<< mkLetM pat (PrimOp $ Copy arr)
+  return ((new_mem, ixfun), new_arr)
+
 allocInMapLambda :: In.Lambda -> [MemSummary] -> AllocM Lambda
 allocInMapLambda lam input_summaries = do
   let i = lambdaIndex lam
@@ -496,13 +534,37 @@ allocInMapLambda lam input_summaries = do
                 }
      _ ->
        return p { paramLore = Scalar }
-  let param_summaries = paramsSummary params'
+  allocInLambda i params' (lambdaBody lam) (lambdaReturnType lam)
+
+allocInReduceLambda :: In.Lambda
+                    -> [(VName, IxFun.IxFun)]
+                    -> AllocM Lambda
+allocInReduceLambda lam input_summaries = do
+  -- Idea: at index point 'i', the accumulator is at offset 'i' and
+  -- the element is at offset 'i+1'.
+  acc_params' <-
+    forM (zip acc_params input_summaries) $ \(acc_param, (mem, ixfun)) ->
+    return acc_param { paramLore =
+                          MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
+                     }
+  arr_params' <-
+    forM (zip arr_params input_summaries) $ \(arr_param, (mem, ixfun)) ->
+    return arr_param { paramLore =
+                          MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int + 1]
+                     }
+  allocInLambda i (acc_params' ++ arr_params') (lambdaBody lam) (lambdaReturnType lam)
+  where n = length input_summaries
+        i = lambdaIndex lam
+        (acc_params, arr_params) = splitAt n $ lambdaParams lam
+
+allocInLambda :: VName -> [LParam] -> In.Body -> [Type]
+              -> AllocM Lambda
+allocInLambda i params body rettype = do
+  let param_summaries = paramsSummary params
       all_summaries = HM.insert i (Entry Scalar $ Basic Int) param_summaries
-  body' <- local (HM.union all_summaries) $
-           allocInBody $ lambdaBody lam
-  return lam { lambdaBody = body'
-             , lambdaParams = params'
-             }
+  body' <- localMemoryMap (HM.union all_summaries) $
+           allocInBody body
+  return $ Lambda i params body' rettype
 
 vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
                  -> MemoryMap
