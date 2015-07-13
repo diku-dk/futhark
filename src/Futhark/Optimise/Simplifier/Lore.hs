@@ -132,7 +132,7 @@ mkWiseLetBinding :: Lore.Lore lore =>
                  -> Binding (Wise lore)
 mkWiseLetBinding pat explore e =
   Let (addWisdomToPattern pat e)
-  (Names' $ consumedInExp pat e, explore)
+  (Names' $ consumedInPattern pat `mappend` consumedInExp e, explore)
   e
 
 instance Bindable lore => Bindable (Wise lore) where

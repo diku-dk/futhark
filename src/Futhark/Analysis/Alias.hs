@@ -9,9 +9,13 @@ module Futhark.Analysis.Alias
        )
        where
 
+import Data.Monoid
+
 import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST.Syntax as In
 import qualified Futhark.Representation.Aliases as Out
+
+import Prelude
 
 -- | Perform alias analysis on a Futhark program.
 aliasAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
@@ -31,7 +35,7 @@ analyseBinding :: Lore lore => In.Binding lore -> Out.Binding lore
 analyseBinding (In.Let pat lore e) =
   let e' = analyseExp e
       pat' = Out.addAliasesToPattern pat e'
-      lore' = (Out.Names' $ Out.consumedInExp pat' e',
+      lore' = (Out.Names' $ Out.consumedInPattern pat' <> Out.consumedInExp e',
                lore)
   in Out.Let pat' lore' e'
 

@@ -7,7 +7,9 @@ module Futhark.Representation.AST.Attributes.Aliases
        , aliasesOf
        , Aliased (..)
          -- * Consumption
+       , consumedInBinding
        , consumedInExp
+       , consumedInPattern
        )
        where
 
@@ -133,20 +135,37 @@ maskAliases :: Names -> Diet -> Names
 maskAliases _   Consume = mempty
 maskAliases als Observe = als
 
-consumedInExp :: (Aliased lore) => Pattern anylore -> Exp lore -> Names
-consumedInExp pat e =
-  consumedInPattern pat <> consumedInExp' e
-  where consumedInExp' (Apply _ args _) =
-          mconcat (map (consumeArg . first subExpAliases) args)
-          where consumeArg (als, Consume) = als
-                consumeArg (_,   Observe) = mempty
-        consumedInExp' (If _ tb fb _) =
-          consumedInBody tb <> consumedInBody fb
-        consumedInExp' (LoopOp (DoLoop _ merge _ _)) =
-          consumedInPattern pat <>
-          mconcat (map (subExpAliases . snd) $
-                   filter (unique . paramType . fst) merge)
-        consumedInExp' _ = mempty
+consumedInBinding :: Aliased lore => Binding lore -> Names
+consumedInBinding binding = consumedInPattern (bindingPattern binding) <>
+                            consumedInExp (bindingExp binding)
+
+consumedInExp :: (Aliased lore) => Exp lore -> Names
+consumedInExp (Apply _ args _) =
+  mconcat (map (consumeArg . first subExpAliases) args)
+  where consumeArg (als, Consume) = als
+        consumeArg (_,   Observe) = mempty
+consumedInExp (If _ tb fb _) =
+  consumedInBody tb <> consumedInBody fb
+consumedInExp (LoopOp (DoLoop _ merge _ _)) =
+  mconcat (map (subExpAliases . snd) $
+           filter (unique . paramType . fst) merge)
+consumedInExp (LoopOp (Map _ _ lam arrs)) =
+  consumedByLambda lam $ map vnameAliases arrs
+consumedInExp (LoopOp (Reduce _ _ lam input)) =
+  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
+  where (accs, arrs) = unzip input
+consumedInExp (LoopOp (Scan _ _ lam input)) =
+  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
+  where (accs, arrs) = unzip input
+consumedInExp (LoopOp (Redomap _ _ _ lam accs arrs)) =
+  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
+consumedInExp _ = mempty
+
+consumedByLambda :: Lambda lore -> [Names] -> Names
+consumedByLambda lam param_als =
+  mconcat [ als
+          | (param, als) <- zip (lambdaParams lam) param_als,
+            unique $ paramType param ]
 
 consumedInPattern :: Pattern lore -> Names
 consumedInPattern pat =

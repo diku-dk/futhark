@@ -324,11 +324,10 @@ mkBodyAliases bnds res =
            consumed)
         delve (aliasmap, consumed) (bnd:bnds') =
           let pat = bindingPattern bnd
-              e = bindingExp bnd
               als = HM.fromList $
                     zip (patternNames pat) (patternAliases pat)
               aliasmap' = als <> aliasmap
-              consumed' = consumed <> aliasClosure aliasmap (consumedInExp pat e)
+              consumed' = consumed <> aliasClosure aliasmap (consumedInBinding bnd)
           in delve (aliasmap', consumed') bnds'
         aliasClosure aliasmap names =
           names `HS.union` mconcat (map look $ HS.toList names)
@@ -339,7 +338,7 @@ mkAliasedLetBinding :: Lore.Lore lore =>
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e)
-  (Names' $ consumedInExp pat e, explore)
+  (Names' $ consumedInPattern pat <> consumedInExp e, explore)
   e
 
 instance Bindable lore => Bindable (Aliases lore) where
