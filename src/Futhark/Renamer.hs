@@ -211,18 +211,21 @@ instance Renameable lore => Rename (Exp lore) where
   rename (LoopOp (DoLoop respat merge form loopbody)) = do
     let (mergepat, mergeexp) = unzip merge
     mergeexp' <- mapM rename mergeexp
-    bind (map paramName mergepat) $ do
-      mergepat' <- mapM rename mergepat
-      respat' <- mapM rename respat
-      case form of
-        ForLoop loopvar boundexp -> do
-          boundexp' <- rename boundexp
+    case form of
+      ForLoop loopvar boundexp -> do
+        boundexp' <- rename boundexp
+        bind (map paramName mergepat) $ do
+          mergepat' <- mapM rename mergepat
+          respat'   <- mapM rename respat
           bind [loopvar] $ do
             loopvar'  <- rename loopvar
             loopbody' <- rename loopbody
             return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
               (ForLoop loopvar' boundexp') loopbody'
-        WhileLoop cond -> do
+      WhileLoop cond ->
+        bind (map paramName mergepat) $ do
+          mergepat' <- mapM rename mergepat
+          respat'   <- mapM rename respat
           loopbody' <- rename loopbody
           cond'     <- rename cond
           return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')

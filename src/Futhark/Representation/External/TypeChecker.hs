@@ -1023,38 +1023,36 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- Check the loop body.
   (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
   (loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm) <-
-    firstscope $ noDataflow $ binding bindExtra $
-      case form of
-        ForLoop (Ident loopvar _ loopvarloc) boundexp -> do
-          bound <- newIdent "loop_bound" (Basic Int) loc
-          boundexp' <- require [Basic Int] =<< checkExp boundexp
+    binding bindExtra $ noDataflow $
+    case form of
+      ForLoop (Ident loopvar _ loopvarloc) boundexp -> do
+        boundexp' <- require [Basic Int] =<< checkExp boundexp
+        firstscope $ do
           loopbody' <- checkExp loopbody
           let iparam = Ident loopvar (Basic Int) loc
           return (loopbody',
                   ForLoop (Ident loopvar (Basic Int) loopvarloc) boundexp',
-                  [(Literal (BasicVal $ IntVal 0) loc, Observe),
-                   (Var bound, Observe)],
-                  \inner -> LetPat (Id bound) boundexp'
-                            inner (srclocOf mergeexp),
+                  [(Literal (BasicVal $ IntVal 0) loc, Observe)],
+                  id,
                   HS.singleton iparam,
-                  [iparam, toParam bound],
-                  freeInExp boundexp')
-        WhileLoop condexp -> do
-          (condexp', condflow) <-
-            collectDataflow $ require [Basic Bool] =<< checkExp condexp
-          (loopbody', bodyflow) <-
-            collectDataflow $ checkExp loopbody
-          occur $ usageOccurences condflow `seqOccurences`
-                  usageOccurences bodyflow
-          cond <- newIdent "loop_cond" (Basic Bool) loc
-          return (loopbody',
-                  WhileLoop condexp',
-                  [(Var cond, Observe)],
-                  \inner -> LetPat (Id cond) condexp'
-                            inner (srclocOf mergeexp),
-                  HS.empty,
-                  [toParam cond],
-                  freeInExp condexp')
+                  [iparam],
+                  mempty)
+      WhileLoop condexp -> firstscope $ do
+        (condexp', condflow) <-
+          collectDataflow $ require [Basic Bool] =<< checkExp condexp
+        (loopbody', bodyflow) <-
+          collectDataflow $ checkExp loopbody
+        occur $ usageOccurences condflow `seqOccurences`
+                usageOccurences bodyflow
+        cond <- newIdent "loop_cond" (Basic Bool) loc
+        return (loopbody',
+                WhileLoop condexp',
+                [(Var cond, Observe)],
+                \inner -> LetPat (Id cond) condexp'
+                          inner (srclocOf mergeexp),
+                HS.empty,
+                [toParam cond],
+                freeInExp condexp')
 
   -- We can use the name generator in a slightly hacky way to generate
   -- a unique Name for the function.
