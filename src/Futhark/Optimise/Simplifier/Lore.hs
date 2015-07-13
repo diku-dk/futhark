@@ -15,6 +15,8 @@ module Futhark.Optimise.Simplifier.Lore
        )
        where
 
+import Data.Monoid
+
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Annotations as Annotations
@@ -29,6 +31,8 @@ import Futhark.Binder
 import Futhark.Renamer
 import Futhark.Substitute
 import Futhark.Analysis.Rephrase
+
+import Prelude
 
 data Wise lore = Wise lore
 
@@ -132,7 +136,7 @@ mkWiseLetBinding :: Lore.Lore lore =>
                  -> Binding (Wise lore)
 mkWiseLetBinding pat explore e =
   Let (addWisdomToPattern pat e)
-  (Names' $ consumedInPattern pat `mappend` consumedInExp e, explore)
+  (Names' $ consumedInPattern pat <> consumedInExp e, explore)
   e
 
 instance Bindable lore => Bindable (Wise lore) where
