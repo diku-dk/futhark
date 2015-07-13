@@ -82,7 +82,8 @@ internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name tp _) =
   case internaliseType tp of
     [I.Basic _] -> return name
-    _           -> fail "Futhark.Internalise.internaliseIdent: asked to internalise non-basic-typed ident."
+    _           -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-basic-typed ident '"
+                   ++ pretty name ++ "'."
 
 internaliseBody :: E.Exp -> InternaliseM Body
 internaliseBody e = insertBindingsM $ do
