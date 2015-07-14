@@ -6,6 +6,8 @@
 -- "Futhark.Representation.Aliases".
 module Futhark.Analysis.Alias
        ( aliasAnalysis
+         -- * Ad-hoc utilities
+       , analyseBinding
        )
        where
 
