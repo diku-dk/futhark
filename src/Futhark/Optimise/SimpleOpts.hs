@@ -24,16 +24,18 @@ import Futhark.Optimise.DeadVarElim
 import Futhark.Optimise.Errors
 
 simpleOptProg :: Simplifiable lore =>
-              SimpleOps (SimpleM lore)
-           -> RuleBook (SimpleM lore)
-           -> Prog lore -> Either Error (Prog lore)
-simpleOptProg simpl rules prog = do
-  let prog_enopt1   = pass prog
-      prog_enopt2   = pass prog_enopt1
-      prog_flat_opt = pass prog_enopt2
-
-  return $ pass prog_flat_opt
+                 SimpleOps (SimpleM lore)
+              -> RuleBook (SimpleM lore)
+              -> Prog lore -> Either Error (Prog lore)
+simpleOptProg simpl rules =
+  -- XXX: A given simplification rule may leave the program in a form
+  -- that is technically type-incorrect, but which will be correct
+  -- after copy-propagation.  Right now, we just run the simplifier a
+  -- number of times and hope that it is enough.  Will be fixed later;
+  -- promise.
+  Right . foldl (.) id (replicate num_passes pass)
   where pass = deadCodeElim . simplifyProgWithRules simpl rules
+        num_passes = 5
 
 simpleOptLambda :: (MonadFreshNames m, HasTypeEnv m) =>
                      Basic.Prog
