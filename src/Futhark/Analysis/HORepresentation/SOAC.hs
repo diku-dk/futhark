@@ -486,6 +486,11 @@ toExp (Map cs l as)
       new_index <- newVName $ baseString $ lambdaIndex l
       LoopOp <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
+toExp (Redomap cs redlam l acc as)
+  | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
+      new_index <- newVName $ baseString $ lambdaIndex l
+      LoopOp <$> (Futhark.Redomap cs w redlam l { lambdaIndex = new_index } acc <$> inputsToSubExps as)
+  where w = arraysSize 0 $ map inputType as
 
 toExp (Map cs l as) =
   LoopOp <$> (Futhark.Map cs w l <$> inputsToSubExps as)
@@ -523,14 +528,20 @@ fromExp :: (Bindable lore, HasTypeEnv f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
 -- | XXX: ugly hack to deal with the lack of support for zero-input
--- SOACs.  If we encounter one of these (and it is a map), we add a
--- dummy iota input.  This really should go away, because it is not
--- robust.
+-- SOACs.  If we encounter one of these (and it is a map or redomap),
+-- we add a dummy iota input.  This really should go away, because it
+-- is not robust.
 fromExp (LoopOp (Futhark.Map cs w lam [])) =
   let iota_input = Input mempty $ Iota w
       lam' = lam
              { lambdaParams = [Param (Ident (lambdaIndex lam) $ Basic Int) ()] }
   in pure $ Right $ Map cs lam' [iota_input]
+fromExp (LoopOp (Futhark.Redomap cs w redlam lam acc [])) =
+  let iota_input = Input mempty $ Iota w
+      lam' = lam
+             { lambdaParams = lambdaParams lam ++
+                              [Param (Ident (lambdaIndex lam) $ Basic Int) ()] }
+  in pure $ Right $ Redomap cs redlam lam' acc [iota_input]
 
 fromExp (LoopOp (Futhark.Map cs _ l as)) =
   Right <$> Map cs l <$> traverse varInput as
