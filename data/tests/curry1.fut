@@ -4,7 +4,7 @@
 --   [1.0,6.0,3.0,4.0,1.0,0.0]
 -- }
 -- output {
---   267.000000
+--   252.000000
 -- }
 
 fun real f({int, real} x, real y) =
@@ -12,7 +12,7 @@ fun real f({int, real} x, real y) =
 
 fun real g([{real, real}] x, real y) =
     let {a,b} = unzip(x) in
-    reduce(+, y, a) + reduce(+, y, b)
+    y + reduce(+, 0.0, a) + reduce(+, 0.0, b)
 
 fun real main([real] a) =
   let b = map(f ({5,6.0}), a) in
