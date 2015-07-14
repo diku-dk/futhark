@@ -3,7 +3,7 @@
 --   [-2.0,3.0,9.0]
 -- }
 -- output {
---   56.000000
+--   19.0
 -- }
 fun real f(real a        ) = a + 3.0
 fun real g(real a        ) = a * 3.0
@@ -14,7 +14,7 @@ fun real main([real] arr) =
     let arr2 = replicate(5, arr) in
     let y = map( fn real ([real] x)  =>
                     let a = map(f, x) in
-                    let b = reduce(opp(2.0), 0.0, a) in
-                    b--[1]
+                    let b = reduce(opp(1.0), 0.0, a) in
+                    b
                 , arr2)
     in y[0]
