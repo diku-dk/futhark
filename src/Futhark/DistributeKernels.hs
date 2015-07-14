@@ -447,7 +447,8 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (Map cs w lam arrs))) acc =
     Nothing -> return $ addBindingToKernel bnd acc
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
-maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc =
+maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
+  | any (isMap . bindingExp) $ bodyBindings body =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | length res == patternSize pat -> do
@@ -457,6 +458,8 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
       return acc'
     _ ->
       return $ addBindingToKernel bnd acc
+  where isMap (LoopOp (Map {})) = True
+        isMap _                 = False
 
 maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
   acc' <- distribute acc
