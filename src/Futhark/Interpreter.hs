@@ -224,6 +224,14 @@ arrays ts vs = zipWithM arrays' ts vs'
         asInt (BasicVal (IntVal x)) = return x
         asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
+soacArrays :: SubExp -> [VName] -> FutharkM lore [[Value]]
+soacArrays w [] = do
+  w' <- asInt =<< evalSubExp w
+  return $ genericReplicate w' []
+  where asInt (BasicVal (IntVal x)) = return x
+        asInt _                     = bad $ TypeError "soacArrays width"
+soacArrays _ names = transpose <$> mapM (arrToList <=< lookupVar) names
+
 indexArray :: String -> [Int] -> [Int]
            -> FutharkM lore Int
 indexArray name shape is
@@ -695,9 +703,8 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
               _ ->
                 bad $ TypeError "evalBody DoLoop while"
 
-evalLoopOp (Map _ _ fun arrexps) = do
-  vss <- mapM (arrToList <=< lookupVar) arrexps
-  vss' <- zipWithM (applyLambda fun) [0..] $ transpose vss
+evalLoopOp (Map _ w fun arrexps) = do
+  vss' <- zipWithM (applyLambda fun) [0..] =<< soacArrays w arrexps
   arrays (lambdaReturnType fun) vss'
 
 evalLoopOp (ConcatMap _ _ fun inputs) = do
@@ -722,32 +729,29 @@ evalLoopOp (ConcatMap _ _ fun inputs) = do
         asArray (ArrayVal a _ (n:_)) = return (a, n)
         asArray _                    = bad $ TypeError "evalLoopOp asArray"
 
-evalLoopOp (Reduce _ _ fun inputs) = do
+evalLoopOp (Reduce _ w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
-  vss <- mapM (arrToList <=< lookupVar) arrexps
   let foldfun acc (i, x) = applyLambda fun i $ acc ++ x
-  foldM foldfun startaccs $ zip [0..] $ transpose vss
+  foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
 
-evalLoopOp (Scan _ _ fun inputs) = do
+evalLoopOp (Scan _ w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
-  vss <- mapM (arrToList <=< lookupVar) arrexps
-  (acc, vals') <- foldM scanfun (startvals, []) $
-                  zip [0..] $ transpose vss
+  (acc, vals') <- foldM scanfun (startvals, []) =<<
+                  (zip [0..] <$> soacArrays w arrexps)
   arrays (map valueType acc) $ reverse vals'
     where scanfun (acc, l) (i,x) = do
             acc' <- applyLambda fun i $ acc ++ x
             return (acc', acc' : l)
 
-evalLoopOp (Redomap _ _ _ innerfun accexp arrexps) = do
+evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
-  vss <- mapM (arrToList <=< lookupVar) arrexps
   if res_len == acc_len
-  then foldM foldfun startaccs $ zip [0..] $ transpose vss
+  then foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
   else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
-          (acc_res, arr_res) <- foldM foldfun' startaccs' $
-                                zip [0..] $ transpose vss
+          (acc_res, arr_res) <- foldM foldfun' startaccs' =<<
+                                (zip [0..] <$> soacArrays w arrexps)
           arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
           return $ acc_res ++ arr_res_fut
     where
