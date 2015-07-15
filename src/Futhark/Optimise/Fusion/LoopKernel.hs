@@ -541,7 +541,9 @@ pullRearrange nest ots = do
         perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
         inputs' = map addPerm $ MapNest.inputs nest'
-    in return (MapNest.toSOACNest $ inputs' `MapNest.setInputs` nest',
+    in return (MapNest.toSOACNest $
+               inputs' `MapNest.setInputs`
+               rearrangeReturnTypes nest' perm,
                ots')
   else fail "Cannot pull transpose"
 
