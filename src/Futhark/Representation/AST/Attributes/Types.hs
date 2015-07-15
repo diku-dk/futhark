@@ -42,6 +42,7 @@ module Futhark.Representation.AST.Attributes.Types
        , shapeContext
        , shapeContextSize
        , hasStaticShape
+       , hasStaticShapes
        , generaliseExtTypes
        , existentialiseExtTypes
        , shapeMapping
@@ -323,6 +324,9 @@ hasStaticShape (Array bt (ExtShape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
   where isFree (Free s) = Just s
         isFree (Ext _)  = Nothing
+
+hasStaticShapes :: [ExtType] -> Maybe [Type]
+hasStaticShapes = mapM hasStaticShape
 
 -- | Given two lists of 'ExtType's of the same length, return a list
 -- of 'ExtType's that is a subtype (as per 'isSubtypeOf') of the two
