@@ -624,7 +624,7 @@ copyIfArray (Constant v) = return $ Constant v
 copyIfArray (Var v) = do
   t <- lookupType v
   case t of
-   Array {} -> letSubExp (baseString v ++ "_copy") $ PrimOp $ Copy v
+   Array {} -> letSubExp (baseString v ++ "_first_order_copy") $ PrimOp $ Copy v
    _        -> return $ Var v
 
 index :: Certificates -> [VName] -> SubExp -> [Exp]
