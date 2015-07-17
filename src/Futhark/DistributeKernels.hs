@@ -210,10 +210,12 @@ sequentialisedUnbalancedBinding _ =
   return Nothing
 
 transformBinding :: Binding -> DistribM [Binding]
+
 transformBinding (Let pat () (If c tb fb rt)) = do
   tb' <- transformBody tb
   fb' <- transformBody fb
   return [Let pat () $ If c tb' fb' rt]
+
 transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
   localTypeEnv (boundInForm form $ typeEnvFromParams mergeparams) $ do
     body' <- transformBody body
@@ -221,14 +223,23 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
   where boundInForm (ForLoop i _) = HM.insert i (Basic Int)
         boundInForm (WhileLoop _) = id
         mergeparams = map fst mergepat
+
 transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
+
 transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) = do
   (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
   mapbnd' <- transformBinding mapbnd
   localTypeEnv (typeEnvFromBindings mapbnd') $ do
     redbnd' <- transformBinding redbnd
     return $ mapbnd' ++ redbnd'
+
+transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs c))) =
+  localTypeEnv (typeEnvFromParams $ extLambdaParams lam) $ do
+    body' <- transformBody $ extLambdaBody lam
+    let lam' = lam { extLambdaBody = body' }
+    return [Let pat () $ LoopOp $ Stream cs w form lam' arrs c]
+
 transformBinding bnd = return [bnd]
 
 data MapLoop = MapLoop Certificates SubExp Lambda [VName]
