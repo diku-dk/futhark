@@ -32,7 +32,6 @@ import Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Maybe
-import Data.Loc
 
 import Prelude
 
@@ -167,18 +166,12 @@ typeName [t] = valueTypeName t
 typeName ts  = "tuple_" ++ intercalate "_" (map (typeName . pure) ts)
 
 scalarTypeToCType :: BasicType -> C.Type
-scalarTypeToCType bt =
-  C.Type (C.DeclSpec [] [] (scalarTypeToCTypeSpec bt) noLoc)
-  (C.DeclRoot noLoc)
-  noLoc
-
-scalarTypeToCTypeSpec :: BasicType -> C.TypeSpec
-scalarTypeToCTypeSpec Int  = C.Tint Nothing noLoc
-scalarTypeToCTypeSpec Bool = C.Tchar Nothing noLoc
-scalarTypeToCTypeSpec Char = C.Tchar Nothing noLoc
-scalarTypeToCTypeSpec Float64 = C.Tdouble noLoc
-scalarTypeToCTypeSpec Float32 = C.Tfloat noLoc
-scalarTypeToCTypeSpec Cert = C.Tint Nothing noLoc
+scalarTypeToCType Int  = [C.cty|int|]
+scalarTypeToCType Bool = [C.cty|char|]
+scalarTypeToCType Char = [C.cty|char|]
+scalarTypeToCType Float64 = [C.cty|double|]
+scalarTypeToCType Float32 = [C.cty|float|]
+scalarTypeToCType Cert = [C.cty|char|]
 
 qualsFromSpace :: Space -> CompilerM op [C.TypeQual]
 qualsFromSpace Nothing =
@@ -186,21 +179,19 @@ qualsFromSpace Nothing =
 qualsFromSpace (Just space) =
   join $ asks envPointerQuals <*> pure space
 
-pointerTypeFromElemSpec :: C.TypeSpec -> Space
-                        -> CompilerM op C.Type
-pointerTypeFromElemSpec espec space = do
+pointerTypeFromType :: C.Type -> Space
+                    -> CompilerM op C.Type
+pointerTypeFromType t space = do
   quals <- qualsFromSpace space
-  let spec = C.DeclSpec [] quals espec noLoc
-      tdecl = C.Ptr [] (C.DeclRoot noLoc) noLoc
-  return $ C.Type spec tdecl noLoc
+  return [C.cty|$tyquals:quals $ty:t*|]
 
 pointerType :: BasicType -> Space -> CompilerM op C.Type
 pointerType =
-  pointerTypeFromElemSpec . scalarTypeToCTypeSpec
+  pointerTypeFromType . scalarTypeToCType
 
 memToCType :: Space -> CompilerM op C.Type
 memToCType =
-  pointerTypeFromElemSpec $ C.Tchar (Just $ C.Tunsigned noLoc) noLoc
+  pointerTypeFromType [C.cty|unsigned char|]
 
 typeToCType :: [Type] -> CompilerM op C.Type
 typeToCType [Scalar bt] = return $ scalarTypeToCType bt

@@ -6,7 +6,6 @@ module Futhark.CodeGen.Backends.OpenCL
 import Control.Monad
 import Control.Monad.Writer
 import Data.Traversable hiding (forM)
-import Data.Loc (noLoc)
 import qualified Data.HashSet as HS
 
 import Prelude
@@ -92,14 +91,14 @@ failOnKernels kernel =
   fail $ "Asked to call kernel " ++ kernelName kernel ++ " while already inside a kernel"
 
 pointerQuals ::  GenericC.PointerQuals Kernel
-pointerQuals "global"    = return [C.TCLglobal noLoc]
-pointerQuals "local"     = return [C.TCLlocal noLoc]
-pointerQuals "private"   = return [C.TCLprivate noLoc]
-pointerQuals "constant"  = return [C.TCLconstant noLoc]
-pointerQuals "writeonly" = return [C.TCLwriteonly noLoc]
-pointerQuals "readonly"  = return [C.TCLreadonly noLoc]
-pointerQuals "kernel"    = return [C.TCLkernel noLoc]
-pointerQuals s           = fail $ "'" ++ s ++ "' is not an OpenCL address space."
+pointerQuals "global"     = return [C.ctyquals|__global|]
+pointerQuals "local"      = return [C.ctyquals|__local|]
+pointerQuals "private"    = return [C.ctyquals|__private|]
+pointerQuals "constant"   = return [C.ctyquals|__constant|]
+pointerQuals "write_only" = return [C.ctyquals|__write_only|]
+pointerQuals "read_only"  = return [C.ctyquals|__read_only|]
+pointerQuals "kernel"     = return [C.ctyquals|__kernel|]
+pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL address space."
 
 compileKernel :: Kernel -> Either String C.Func
 compileKernel kernel =
@@ -257,14 +256,18 @@ openClKernelHeader kernel =
                   ("sqrt64", c_sqrt64),
                   ("exp64", c_exp64)]
 
-utilityFunctions :: [C.Func]
-utilityFunctions = [
+-- | @memcpy@ parametrised by the address space of the destination and
+-- source pointers.
+genericMemcpy :: [C.TypeQual] -> [C.TypeQual] -> C.Func
+genericMemcpy dest_quals src_quals =
   [C.cfun|
   // From musl.
-  __global void *memcpy(__global void *restrict dest, __global const void *restrict src, size_t n)
+  $tyquals:dest_quals *memcpy($tyquals:dest_quals void *restrict dest,
+                              $tyquals:src_quals const void *restrict src,
+                              size_t n)
   {
-    __global unsigned char *d = dest;
-    __global const unsigned char *s = src;
+    $tyquals:dest_quals unsigned char *d = dest;
+    $tyquals:src_quals const unsigned char *s = src;
     // These were #defines in the musl source code.
     size_t SS = sizeof(size_t), ALIGN = sizeof(size_t)-1, ONES=((size_t)-1/UCHAR_MAX);
     if (((typename uintptr_t)d & ALIGN) != ((typename uintptr_t)s & ALIGN)) {
@@ -274,11 +277,11 @@ utilityFunctions = [
       *d++ = *s++;
     }
     if (n) {
-      __global size_t *wd = (__global void *)d;
-      __global const size_t *ws = (__global const void *)s;
+      $tyquals:dest_quals size_t *wd = ($tyquals:dest_quals void *)d;
+      $tyquals:src_quals const size_t *ws = ($tyquals:src_quals const void *)s;
       for (; n>=SS; n-=SS) *wd++ = *ws++;
-      d = (__global void *)wd;
-      s = (__global const void *)ws;
+      d = ($tyquals:dest_quals void *)wd;
+      s = ($tyquals:dest_quals const void *)ws;
 
       misaligned:
       for (; n; n--) {
@@ -287,14 +290,20 @@ utilityFunctions = [
     }
     return dest;
   }
-   |],
+   |]
 
+-- | @memmove@ parametrised by the address space of the destination and
+-- source pointers.
+genericMemmove :: [C.TypeQual] -> [C.TypeQual] -> C.Func
+genericMemmove dest_quals src_quals =
   [C.cfun|
   // From musl.
-  __global void *memmove(__global void *dest, __global const void *src, size_t n)
+  $tyquals:dest_quals *memmove($tyquals:dest_quals void *dest,
+                               $tyquals:src_quals const void *src,
+                               size_t n)
   {
-    __global char *d = dest;
-    __global const char *s = src;
+    $tyquals:dest_quals char *d = dest;
+    $tyquals:src_quals char *s = src;
     size_t WS = sizeof(size_t);
     if (d==s) { return d; }
     if (s+n <= d || d+n <= s) { return memcpy(d, s, n); }
@@ -305,7 +314,7 @@ utilityFunctions = [
           *d++ = *s++;
         }
         for (; n>=WS; n-=WS, d+=WS, s+=WS) {
-          *(__global size_t *)d = *(__global size_t *)s;
+          *($tyquals:dest_quals size_t *)d = *($tyquals:src_quals size_t *)s;
         }
       }
       for (; n; n--) { *d++ = *s++; }
@@ -317,7 +326,7 @@ utilityFunctions = [
         }
         while (n>=WS) {
           n-=WS;
-          *(__global size_t *)(d+n) = *(__global size_t *)(s+n);
+          *($tyquals:dest_quals size_t *)(d+n) = *($tyquals:src_quals size_t *)(s+n);
         }
       }
       while (n) { n--, d[n] = s[n]; }
@@ -325,4 +334,10 @@ utilityFunctions = [
     return dest;
   }
    |]
-                   ]
+
+utilityFunctions :: [C.Func]
+utilityFunctions =
+  [ genericMemcpy [C.ctyquals|__global|] [C.ctyquals|__global|],
+
+    genericMemmove [C.ctyquals|__global|] [C.ctyquals|__global|]
+  ]
