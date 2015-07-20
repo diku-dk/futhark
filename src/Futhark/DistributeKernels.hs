@@ -281,9 +281,11 @@ instance Monoid PostKernels where
 postKernelBindings :: PostKernels -> [Binding]
 postKernelBindings (PostKernels kernels) = concat kernels
 
-addBindingToKernel :: Binding -> KernelAcc -> KernelAcc
-addBindingToKernel bnd acc =
-  acc { kernelBindings = bnd : kernelBindings acc }
+addBindingToKernel :: (HasTypeEnv m, MonadFreshNames m) =>
+                      Binding -> KernelAcc -> m KernelAcc
+addBindingToKernel bnd acc = do
+  bnds <- runBinder_ $ FOT.transformBindingRecursively bnd
+  return acc { kernelBindings = bnds <> kernelBindings acc }
 
 newtype KernelM a = KernelM (RWS KernelEnv PostKernels VNameSource a)
   deriving (Functor, Applicative, Monad,
@@ -377,9 +379,7 @@ distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
   | unbalancedLambda lam =
-      foldr addBindingToKernel acc <$>
-      liftM snd (runBinder $ FOT.transformBindingRecursively $
-                 Let pat () $ mapLoopExp maploop)
+      addBindingToKernel (Let pat () $ mapLoopExp maploop) acc
   | otherwise =
       distribute =<<
       leavingNesting maploop <$>
@@ -455,7 +455,7 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (Map cs w lam arrs))) acc =
   -- Only distribute inside the map if we can distribute everything
   -- following the map.
   distributeIfPossible acc >>= \case
-    Nothing -> return $ addBindingToKernel bnd acc
+    Nothing -> addBindingToKernel bnd acc
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
 maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
@@ -468,24 +468,52 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
         interchangeLoops nest (SeqLoop pat ret merge form body)
       return acc'
     _ ->
-      return $ addBindingToKernel bnd acc
+      addBindingToKernel bnd acc
   where isMap (LoopOp (Map {})) = True
         isMap _                 = False
 
+-- We keep reduce and scan in the program if they can be distributed
+-- by themselves, as this means they can be turned into segmented
+-- parallel operations.  We currently sequentialise their lambda
+-- bodies.  This may lose us some parallelism as it is possible there
+-- may have been maps in there that we could interchange out via
+-- transposition.
+--
+-- If the reduce or scan cannot be distributed by itself, it will be
+-- sequentialised in the default case for this function.
+maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
+  | Just (lam, call_with_new_lam) <- reduceOrScan op =
+      distributeSingleBinding acc bnd >>= \case
+        Just (kernels, res, nest, acc') -> do
+          tell kernels
+          lam' <- FOT.transformLambda lam
+          addKernel [constructKernel nest $
+                     mkBody [bnd { bindingExp = call_with_new_lam lam' }] res]
+          return acc'
+        _ ->
+          addBindingToKernel bnd acc
+
+  where reduceOrScan (Scan cs w lam input) =
+          Just (lam, \lam' -> LoopOp $ Scan cs w lam' input)
+        reduceOrScan (Reduce cs w lam input) =
+          Just (lam, \lam' -> LoopOp $ Reduce cs w lam' input)
+        reduceOrScan _ =
+           Nothing
+
 maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
   acc' <- distribute acc
-  distribute $ addBindingToKernel bnd acc'
+  distribute =<< addBindingToKernel bnd acc'
 
 maybeDistributeBinding bnd@(Let _ _ (PrimOp (Rearrange {}))) acc = do
   acc' <- distribute acc
-  distribute $ addBindingToKernel bnd acc'
+  distribute =<< addBindingToKernel bnd acc'
 
 maybeDistributeBinding bnd@(Let _ _ (PrimOp (Reshape {}))) acc = do
   acc' <- distribute acc
-  distribute $ addBindingToKernel bnd acc'
+  distribute =<< addBindingToKernel bnd acc'
 
 maybeDistributeBinding bnd acc =
-  return $ addBindingToKernel bnd acc
+  addBindingToKernel bnd acc
 
 distribute :: KernelAcc -> KernelM KernelAcc
 distribute acc =

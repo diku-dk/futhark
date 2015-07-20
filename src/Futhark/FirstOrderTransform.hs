@@ -605,9 +605,11 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
 transformBinding bnd = addBinding bnd
 
 -- | Recursively first-order-transform a lambda.
-transformLambda :: Lambda -> Binder Basic Lambda
+transformLambda :: (MonadFreshNames m, HasTypeEnv m) =>
+                   Lambda -> m Lambda
 transformLambda (Lambda i params body rettype) = do
-  body' <- bindingIdentTypes [Ident i $ Basic Int] $
+  body' <- runBodyBinder $
+           bindingIdentTypes [Ident i $ Basic Int] $
            bindingParamTypes params $ transformBody body
   return $ Lambda i params body' rettype
 

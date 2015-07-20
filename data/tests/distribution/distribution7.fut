@@ -2,7 +2,7 @@
 -- distributed.
 --
 -- ==
--- structure distributed { Map 3 Reduce 1 }
+-- structure distributed { Map 3 Reduce 0 }
 
 fun [int] main([[int,n]] A) =
   map(fn int ([int] A_row) =>
