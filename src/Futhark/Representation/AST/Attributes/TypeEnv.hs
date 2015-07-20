@@ -51,7 +51,9 @@ instance (Applicative m, Monad m) => HasTypeEnv (ReaderT TypeEnv m) where
 -- the ability to locally extend it.  A 'Reader' containing a
 -- 'TypeEnv' is the prototypical example of such a monad.
 class (HasTypeEnv m, Monad m) => LocalTypeEnv m where
-  -- | Run a computation with an extended type environment.
+  -- | Run a computation with an extended type environment.  Note that
+  -- this is intended to *add* to the current type environment, it
+  -- does not replace it.
   localTypeEnv :: TypeEnv -> m a -> m a
 
 instance (Applicative m, Monad m) => LocalTypeEnv (ReaderT TypeEnv m) where
