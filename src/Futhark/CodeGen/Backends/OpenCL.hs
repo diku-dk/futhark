@@ -3,6 +3,7 @@ module Futhark.CodeGen.Backends.OpenCL
   ( compileProg
   ) where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
 import Data.Traversable hiding (forM)
