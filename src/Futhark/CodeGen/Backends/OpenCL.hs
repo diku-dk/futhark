@@ -31,13 +31,102 @@ compileProg prog = do
                                                  pretty kernel')|])
   return $
     header ++
-    GenericC.compileProg callKernels pointerQuals (openClDecls kernels) openClInit prog'
+    GenericC.compileProg operations (openClDecls kernels) openClInit prog'
+  where operations :: GenericC.Operations Kernel
+        operations = GenericC.Operations
+                     { GenericC.opsCompiler = callKernel
+                     , GenericC.opsWriteScalar = writeOpenCLScalar
+                     , GenericC.opsReadScalar = readOpenCLScalar
+                     , GenericC.opsAllocate = allocateOpenCLBuffer
+                     , GenericC.opsCopy = copyOpenCLMemory
+                     , GenericC.opsMemoryType = openclMemoryType
+                     }
 
-callKernels :: GenericC.OpCompiler Kernel
-callKernels kernel = do
-  zipWithM_ mkBuffer [(0::Int)..] $ kernelCopyIn kernel
-  devReads <-
-    zipWithM mkBuffer [length (kernelCopyIn kernel)..] $ kernelCopyOut kernel
+writeOpenCLScalar :: GenericC.WriteScalar Kernel
+writeOpenCLScalar mem i t "device" val = do
+  val' <- newVName "write_tmp"
+  GenericC.stm [C.cstm|{
+                   $ty:t $id:val' = $exp:val;
+                   assert(clEnqueueWriteBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                                               $exp:i, sizeof($ty:t),
+                                               &$id:val',
+                                               0, NULL, NULL)
+                          == CL_SUCCESS);
+                   assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+                }|]
+writeOpenCLScalar _ _ _ space _ =
+  fail $ "Cannot write to '" ++ space ++ "' memory space."
+
+readOpenCLScalar :: GenericC.ReadScalar Kernel
+readOpenCLScalar mem i t "device" = do
+  val <- newVName "read_res"
+  GenericC.stm [C.cstm|{
+                 assert(clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                                            $exp:i, sizeof($ty:t),
+                                            &$id:val,
+                                            0, NULL, NULL)
+                        == CL_SUCCESS);
+                 assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+              }|]
+  return [C.cexp|$id:val|]
+readOpenCLScalar _ _ _ space =
+  fail $ "Cannot read from '" ++ space ++ "' memory space."
+
+allocateOpenCLBuffer :: GenericC.Allocate Kernel
+allocateOpenCLBuffer mem size "device" = do
+  errorname <- newVName "error"
+  GenericC.stm [C.cstm|{
+    typename cl_int $id:errorname;
+    $id:mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
+                             $exp:size, NULL,
+                             &$id:errorname);
+    assert($id:errorname == 0);
+  }|]
+allocateOpenCLBuffer _ _ space =
+  fail $ "Cannot allocate in '" ++ space ++ "' space"
+
+copyOpenCLMemory :: GenericC.Copy Kernel
+copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
+  GenericC.stm [C.cstm|{
+    assert(clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
+                               $exp:srcidx, $exp:nbytes,
+                               $id:destmem + $exp:destidx,
+                               0, NULL, NULL)
+           == CL_SUCCESS);
+    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+  }|]
+copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
+  GenericC.stm [C.cstm|{
+    assert(clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
+                                $exp:destidx, $exp:nbytes,
+                                $id:srcmem + $exp:srcidx,
+                                0, NULL, NULL)
+           == CL_SUCCESS);
+    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+  }|]
+copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
+  -- Be aware that OpenCL swaps the usual order of operands for
+  -- memcpy()-like functions.  The order below is not a typo.
+  GenericC.stm [C.cstm|{
+    assert(clEnqueueCopyBuffer(fut_cl_queue,
+                               $id:srcmem, $id:destmem,
+                               $exp:srcidx, $exp:destidx,
+                               $exp:nbytes,
+                               0, NULL, NULL)
+           == CL_SUCCESS);
+    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+  }|]
+copyOpenCLMemory _ _ destspace _ _ srcspace _ =
+  error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+
+openclMemoryType :: GenericC.MemoryType Kernel
+openclMemoryType "device" = pure [C.cty|typename cl_mem|]
+openclMemoryType space =
+  fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
+
+callKernel :: GenericC.OpCompiler Kernel
+callKernel kernel = do
+  zipWithM_ mkBuffer [(0::Int)..] $ kernelUses kernel
   global_work_size <- newVName "global_work_size"
   let kernel_size = GenericC.dimSizeToExp $ kernelSize kernel
 
@@ -49,48 +138,24 @@ callKernels kernel = do
            == CL_SUCCESS);
     }|]
 
-  sequence_ devReads
   GenericC.stm [C.cstm|assert(clFinish(fut_cl_queue) == CL_SUCCESS);|]
   return GenericC.Done
 
-  where mkBuffer i (CopyMemory hostbuf size copy_before) = do
-          let size' = GenericC.dimSizeToExp size
-          devbuf <- newVName $ baseString hostbuf ++ "_dev"
-          errorname <- newVName "error"
-          GenericC.decl [C.cdecl|typename cl_mem $id:devbuf;|]
+  where mkBuffer i (MemoryUse mem _) =
           GenericC.stm [C.cstm|{
-            typename cl_int $id:errorname;
-            $id:devbuf = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE, $exp:size', NULL, &$id:errorname);
-            assert($id:errorname == 0);
-            assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:devbuf), &$id:devbuf)
+            assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:mem), &$id:mem)
                    == CL_SUCCESS);
             }|]
-          when copy_before $
-            readOrWriteBuffer "clEnqueueWriteBuffer" hostbuf devbuf size'
-          return $ readOrWriteBuffer "clEnqueueReadBuffer" hostbuf devbuf size'
 
-        mkBuffer i (CopyScalar hostvar _) = do
+        mkBuffer i (ScalarUse hostvar _) =
           GenericC.stm [C.cstm|{
             assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:hostvar), &$id:hostvar)
                    == CL_SUCCESS);
-            }|]
-          return $ return ()
-
-        readOrWriteBuffer readwrite hostbuf devbuf size =
-          GenericC.stm [C.cstm|{
-            assert($id:readwrite(fut_cl_queue, $id:devbuf,
-                                 CL_FALSE, 0, $exp:size, $id:hostbuf,
-                                 0, NULL, NULL)
-                    == CL_SUCCESS);
-            }|]
+          }|]
 
         kernel_name = kernelName kernel
 
-failOnKernels :: GenericC.OpCompiler Kernel
-failOnKernels kernel =
-  fail $ "Asked to call kernel " ++ kernelName kernel ++ " while already inside a kernel"
-
-pointerQuals ::  GenericC.PointerQuals Kernel
+pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
 pointerQuals "local"      = return [C.ctyquals|__local|]
 pointerQuals "private"    = return [C.ctyquals|__private|]
@@ -98,25 +163,54 @@ pointerQuals "constant"   = return [C.ctyquals|__constant|]
 pointerQuals "write_only" = return [C.ctyquals|__write_only|]
 pointerQuals "read_only"  = return [C.ctyquals|__read_only|]
 pointerQuals "kernel"     = return [C.ctyquals|__kernel|]
-pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL address space."
+pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel address space."
+
+inKernelOperations :: GenericC.Operations Kernel
+inKernelOperations = GenericC.Operations
+                     { GenericC.opsCompiler = failOnKernels
+                     , GenericC.opsMemoryType = kernelMemoryType
+                     , GenericC.opsWriteScalar = GenericC.writeScalarPointerWithQuals pointerQuals
+                     , GenericC.opsReadScalar = GenericC.readScalarPointerWithQuals pointerQuals
+                     , GenericC.opsAllocate = cannotAllocate
+                     , GenericC.opsCopy = copyInKernel
+                     }
+  where failOnKernels :: GenericC.OpCompiler Kernel
+        failOnKernels kernel =
+          fail $ "Asked to call kernel " ++ kernelName kernel ++ " while already inside a kernel"
+
+        cannotAllocate :: GenericC.Allocate Kernel
+        cannotAllocate _ =
+          fail "Cannot allocate memory in kernel"
+
+        copyInKernel :: GenericC.Copy Kernel
+        copyInKernel dest destidx (Space "global") src srcidx (Space "global") nbytes =
+          GenericC.stm [C.cstm|memmove($id:dest + $exp:destidx,
+                                       $id:src + $exp:srcidx,
+                                       $exp:nbytes);|]
+        copyInKernel _ _ destspace _ _ srcspace _ =
+          error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+
+        kernelMemoryType space = do
+          quals <- pointerQuals space
+          return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
 compileKernel :: Kernel -> Either String C.Func
 compileKernel kernel =
-  let (funbody,_) = GenericC.runCompilerM (Program []) failOnKernels pointerQuals blankNameSource $
-                    GenericC.collect $ GenericC.compileCode $ kernelBody kernel
+  let (funbody,_) =
+        GenericC.runCompilerM (Program []) inKernelOperations blankNameSource $
+        GenericC.collect $ GenericC.compileCode $ kernelBody kernel
 
-      asParam (CopyScalar name bt) =
+      asParam (ScalarUse name bt) =
         let ctp = GenericC.scalarTypeToCType bt
         in [C.cparam|$ty:ctp $id:name|]
-      asParam (CopyMemory name _ _) =
+      asParam (MemoryUse name _) =
         [C.cparam|__global unsigned char *$id:name|]
 
-      inparams = map asParam $ kernelCopyIn kernel
-      outparams = map asParam $ kernelCopyOut kernel
-  in Right [C.cfun|__kernel void $id:(kernelName kernel) ($params:(inparams++outparams)) {
+      params = map asParam $ kernelUses kernel
+  in Right [C.cfun|__kernel void $id:(kernelName kernel) ($params:params) {
                const uint $id:(kernelThreadNum kernel) = get_global_id(0);
                $items:funbody
-}|]
+            }|]
 
 openClDecls :: [(String, C.Initializer)] -> [C.Definition]
 openClDecls kernels =

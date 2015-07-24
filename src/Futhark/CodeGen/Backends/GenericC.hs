@@ -4,9 +4,19 @@
 module Futhark.CodeGen.Backends.GenericC
   ( compileProg
   -- * Pluggable compiler
+  , Operations (..)
+  , defaultOperations
   , OpCompiler
   , OpCompilerResult(..)
+
   , PointerQuals
+  , MemoryType
+  , WriteScalar
+  , writeScalarPointerWithQuals
+  , ReadScalar
+  , readScalarPointerWithQuals
+  , Allocate
+  , Copy
   -- * Monadic compiler interface
   , CompilerM
   , runCompilerM
@@ -62,7 +72,6 @@ newCompilerState src = CompilerState {
                        , compNameSrc = src
                        }
 
-
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
 type OpCompiler op = op -> CompilerM op (OpCompilerResult op)
@@ -75,17 +84,90 @@ data OpCompilerResult op = CompileCode (Code op) -- ^ Equivalent to this code.
 -- the given annotation.
 type PointerQuals op = String -> CompilerM op [C.TypeQual]
 
+-- | The type of a memory block in the given memory space.
+type MemoryType op = SpaceId -> CompilerM op C.Type
+
+-- | Write a scalar to the given memory block with the given index and
+-- in the given memory space.
+type WriteScalar op = VName -> C.Exp -> C.Type -> SpaceId -> C.Exp
+                      -> CompilerM op ()
+
+-- | Read a scalar from the given memory block with the given index and
+-- in the given memory space.
+type ReadScalar op = VName -> C.Exp -> C.Type -> SpaceId
+                     -> CompilerM op C.Exp
+
+-- | Allocate a memory block of the given size in the given memory
+-- space, saving a reference in the given variable name.
+type Allocate op = VName -> C.Exp -> SpaceId
+                   -> CompilerM op ()
+
+-- | Copy from one memory block to another.
+type Copy op = VName -> C.Exp -> Space ->
+               VName -> C.Exp -> Space ->
+               C.Exp ->
+               CompilerM op ()
+
+data Operations op = Operations { opsWriteScalar :: WriteScalar op
+                                , opsReadScalar :: ReadScalar op
+                                , opsAllocate :: Allocate op
+                                , opsCopy :: Copy op
+
+                                , opsMemoryType :: MemoryType op
+                                , opsCompiler :: OpCompiler op
+                                }
+
+-- | A set of operations that fail for every operation involving
+-- non-default memory spaces.  Uses plain pointers and @malloc@ for
+-- memory management.
+defaultOperations :: Operations op
+defaultOperations = Operations { opsWriteScalar = defWriteScalar
+                               , opsReadScalar = defReadScalar
+                               , opsAllocate  = defAllocate
+                               , opsCopy = defCopy
+                               , opsMemoryType = defMemoryType
+                               , opsCompiler = defCompiler
+                               }
+  where defWriteScalar _ _ _ _ _ =
+          fail "Cannot write to non-default memory space because I am dumb"
+        defReadScalar _ _ _ _ =
+          fail "Cannot read from non-default memory space"
+        defAllocate _ _ _ =
+          fail "Cannot allocate in non-default memory space"
+        defCopy _ _ _ _ _ _ _ =
+          fail "Cannot copy to or from non-default memory space"
+        defMemoryType _ =
+          fail "Has no type for non-default memory space"
+        defCompiler _ =
+          fail "The default compiler cannot compile extended operations"
+
 data CompilerEnv op = CompilerEnv {
-    envOpCompiler :: OpCompiler op
-  , envPointerQuals :: PointerQuals op
+    envOperations :: Operations op
   , envFtable     :: HM.HashMap Name [Type]
   }
 
-newCompilerEnv :: Program op -> OpCompiler op -> PointerQuals op
+envOpCompiler :: CompilerEnv op -> OpCompiler op
+envOpCompiler = opsCompiler . envOperations
+
+envMemoryType :: CompilerEnv op -> MemoryType op
+envMemoryType = opsMemoryType . envOperations
+
+envReadScalar :: CompilerEnv op -> ReadScalar op
+envReadScalar = opsReadScalar . envOperations
+
+envWriteScalar :: CompilerEnv op -> WriteScalar op
+envWriteScalar = opsWriteScalar . envOperations
+
+envAllocate :: CompilerEnv op -> Allocate op
+envAllocate = opsAllocate . envOperations
+
+envCopy :: CompilerEnv op -> Copy op
+envCopy = opsCopy . envOperations
+
+newCompilerEnv :: Program op -> Operations op
                -> CompilerEnv op
-newCompilerEnv (Program funs) ec pc =
-  CompilerEnv { envOpCompiler = ec
-              , envPointerQuals = pc
+newCompilerEnv (Program funs) ops =
+  CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
   where ftable = HM.fromList $ map funReturn funs
@@ -111,11 +193,11 @@ instance MonadFreshNames (CompilerM op) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: Program op -> OpCompiler op -> PointerQuals op -> VNameSource
+runCompilerM :: Program op -> Operations op -> VNameSource
              -> CompilerM op a
              -> (a, CompilerState)
-runCompilerM prog ec pc src (CompilerM m) =
-  let (x, s, _) = runRWS m (newCompilerEnv prog ec pc) (newCompilerState src)
+runCompilerM prog ops src (CompilerM m) =
+  let (x, s, _) = runRWS m (newCompilerEnv prog ops) (newCompilerState src)
   in (x, s)
 
 collect :: CompilerM op () -> CompilerM op [C.BlockItem]
@@ -158,8 +240,8 @@ valueTypeName (Scalar Char) = "char"
 valueTypeName (Scalar Float32) = "float"
 valueTypeName (Scalar Float64) = "double"
 valueTypeName (Scalar Cert) = "cert"
-valueTypeName (Mem _ (Just space)) = space ++ "_mem"
-valueTypeName (Mem _ Nothing) = "mem"
+valueTypeName (Mem _ (Space space)) = space ++ "_mem"
+valueTypeName (Mem _ DefaultSpace) = "mem"
 
 typeName :: [Type] -> String
 typeName [t] = valueTypeName t
@@ -173,25 +255,11 @@ scalarTypeToCType Float64 = [C.cty|double|]
 scalarTypeToCType Float32 = [C.cty|float|]
 scalarTypeToCType Cert = [C.cty|char|]
 
-qualsFromSpace :: Space -> CompilerM op [C.TypeQual]
-qualsFromSpace Nothing =
-  return []
-qualsFromSpace (Just space) =
-  join $ asks envPointerQuals <*> pure space
-
-pointerTypeFromType :: C.Type -> Space
-                    -> CompilerM op C.Type
-pointerTypeFromType t space = do
-  quals <- qualsFromSpace space
-  return [C.cty|$tyquals:quals $ty:t*|]
-
-pointerType :: BasicType -> Space -> CompilerM op C.Type
-pointerType =
-  pointerTypeFromType . scalarTypeToCType
-
 memToCType :: Space -> CompilerM op C.Type
-memToCType =
-  pointerTypeFromType [C.cty|unsigned char|]
+memToCType DefaultSpace =
+  return defaultMemBlockType
+memToCType (Space space) =
+  join $ asks envMemoryType <*> pure space
 
 typeToCType :: [Type] -> CompilerM op C.Type
 typeToCType [Scalar bt] = return $ scalarTypeToCType bt
@@ -383,13 +451,13 @@ mainCall fname (Function outputs inputs _ results args) = do
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
-compileProg :: OpCompiler op -> PointerQuals op
+compileProg :: Operations op
             -> [C.Definition] -> [C.Stm]
             -> Program op
             -> String
-compileProg ec pc decls mainstms prog@(Program funs) =
+compileProg ops decls mainstms prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
-        runCompilerM prog ec pc blankNameSource compileProg'
+        runCompilerM prog ops blankNameSource compileProg'
   in pretty 80 $ ppr [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
@@ -510,6 +578,22 @@ dimSizeToExp :: DimSize -> C.Exp
 dimSizeToExp (ConstSize x) = [C.cexp|$int:x|]
 dimSizeToExp (VarSize v)   = C.var v
 
+derefPointer :: VName -> C.Exp -> C.Type -> C.Exp
+derefPointer ptr i res_t =
+  [C.cexp|*(($ty:res_t)&($id:ptr[$exp:i]))|]
+
+writeScalarPointerWithQuals :: PointerQuals op -> WriteScalar op
+writeScalarPointerWithQuals quals_f dest i elemtype space v = do
+  quals <- quals_f space
+  let deref = derefPointer dest i
+              [C.cty|$tyquals:quals $ty:elemtype*|]
+  stm [C.cstm|$exp:deref = $exp:v;|]
+
+readScalarPointerWithQuals :: PointerQuals op -> ReadScalar op
+readScalarPointerWithQuals quals_f dest i elemtype space = do
+  quals <- quals_f space
+  return $ derefPointer dest i [C.cty|$tyquals:quals $ty:elemtype*|]
+
 compileExp :: Exp -> CompilerM op C.Exp
 
 compileExp (Constant val) = return $ compileBasicValue val
@@ -517,10 +601,15 @@ compileExp (Constant val) = return $ compileBasicValue val
 compileExp (ScalarVar src) =
   return [C.cexp|$id:src|]
 
-compileExp (Index src iexp restype space) = do
-  iexp' <- compileExp iexp
-  ty <- pointerType restype space
-  return [C.cexp|*(($ty:ty)&($id:src[$exp:iexp']))|]
+compileExp (Index src iexp restype DefaultSpace) =
+  derefPointer src
+  <$> compileExp iexp
+  <*> pure [C.cty|$ty:(scalarTypeToCType restype)*|]
+
+compileExp (Index src iexp restype (Space space)) =
+  join $ asks envReadScalar
+    <*> pure src <*> compileExp iexp
+    <*> pure (scalarTypeToCType restype) <*> pure space
 
 compileExp (UnOp Negate x) = do
   x' <- compileExp x
@@ -603,9 +692,12 @@ compileCode (Assert e loc) = do
                  }
           }|]
 
-compileCode (Allocate name e) = do
+compileCode (Allocate name e DefaultSpace) = do
   size' <- compileExp e
   stm [C.cstm|$id:name = malloc($exp:size');|]
+
+compileCode (Allocate name e (Space space)) =
+  join $ asks envAllocate <*> pure name <*> compileExp e <*> pure space
 
 compileCode (For i bound body) = do
   let i' = textual i
@@ -628,7 +720,7 @@ compileCode (If cond tbranch fbranch) = do
   fbranch' <- collect $ compileCode fbranch
   stm [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode (Copy dest destoffset src srcoffset size) = do
+compileCode (Copy dest destoffset DefaultSpace src srcoffset DefaultSpace size) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
   size' <- compileExp size
@@ -636,11 +728,27 @@ compileCode (Copy dest destoffset src srcoffset size) = do
                       $id:src + $exp:srcoffset',
                       $exp:size');|]
 
-compileCode (Write dest idx elemtype space elemexp) = do
-  idx' <- compileExp idx
+compileCode (Copy dest destoffset destspace src srcoffset srcspace size) = do
+  copy <- asks envCopy
+  join $ copy
+    <$> pure dest <*> compileExp destoffset <*> pure destspace
+    <*> pure src <*> compileExp srcoffset <*> pure srcspace
+    <*> compileExp size
+
+compileCode (Write dest idx elemtype DefaultSpace elemexp) = do
+  deref <- derefPointer dest
+           <$> compileExp idx
+           <*> pure [C.cty|$ty:(scalarTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
-  ty <- pointerType elemtype space
-  stm [C.cstm|*(($ty:ty)&($id:dest[$exp:idx'])) = $exp:elemexp';|]
+  stm [C.cstm|$exp:deref = $exp:elemexp';|]
+
+compileCode (Write dest idx elemtype (Space space) elemexp) =
+  join $ asks envWriteScalar
+    <*> pure dest
+    <*> compileExp idx
+    <*> pure (scalarTypeToCType elemtype)
+    <*> pure space
+    <*> compileExp elemexp
 
 compileCode (DeclareMem name space) = do
   ty <- memToCType space

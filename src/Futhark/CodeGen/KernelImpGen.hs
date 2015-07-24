@@ -23,7 +23,7 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.Util
 
 compileProg :: Prog -> Either String Imp.Program
-compileProg = ImpGen.compileProg kernelCompiler
+compileProg = ImpGen.compileProg kernelCompiler $ Imp.Space "device"
 
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.Kernel
@@ -66,30 +66,28 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
           Nothing
 
     -- Compute the variables that we need to pass to the kernel.
-    copy_in <- liftM catMaybes $
+    reads_from <- liftM catMaybes $
                forM (HS.toList $ freeIn kernelbody) $ \var ->
       if var `elem` thread_num : dest_mems ++ map paramName (lambdaParams lam)
         then return Nothing
         else do t <- lookupType var
                 case t of
                   Array {} -> return Nothing
-                  Mem memsize -> Just <$> (Imp.CopyMemory var <$>
-                                           ImpGen.subExpToDimSize memsize <*>
-                                           pure True)
+                  Mem memsize -> Just <$> (Imp.MemoryUse var <$>
+                                           ImpGen.subExpToDimSize memsize)
                   Basic bt ->
                     if bt == Cert
                     then return Nothing
-                    else return $ Just $ Imp.CopyScalar var bt
+                    else return $ Just $ Imp.ScalarUse var bt
 
     -- Compute what memory to copy out.  Must be allocated on device
     -- before kernel execution anyway.
-    copy_out <- liftM catMaybes $ forM dest $ \case
+    writes_to <- liftM catMaybes $ forM dest $ \case
       (ImpGen.ArrayDestination
        (ImpGen.CopyIntoMemory
-        (ImpGen.MemLocation mem _ ixfun)) _) -> do
+        (ImpGen.MemLocation mem _ _)) _) -> do
         memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
-        let copy_before = not $ IxFun.isDirect ixfun
-        return $ Just $ Imp.CopyMemory mem memsize copy_before
+        return $ Just $ Imp.MemoryUse mem memsize
       _ ->
         return Nothing
 
@@ -98,8 +96,7 @@ kernelCompiler (ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
     ImpGen.emit $ Imp.Op Imp.Kernel {
         Imp.kernelThreadNum = thread_num
       , Imp.kernelBody = kernelbody
-      , Imp.kernelCopyIn = copy_in
-      , Imp.kernelCopyOut = copy_out
+      , Imp.kernelUses = nub $ reads_from ++ writes_to
       , Imp.kernelSize = kernel_size
       }
     return ImpGen.Done
@@ -118,7 +115,7 @@ makeAllMemoryGlobal :: ImpGen.ImpM Imp.Kernel a
 makeAllMemoryGlobal =
   local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env }
   where globalMemory (ImpGen.MemVar entry) =
-          ImpGen.MemVar entry { ImpGen.entryMemSpace = Just "global" }
+          ImpGen.MemVar entry { ImpGen.entryMemSpace = Imp.Space "global" }
         globalMemory entry =
           entry
 
@@ -131,12 +128,12 @@ allocMemoryBlocks = allocMemoryBlocks' . HM.toList
           let sizeentry = ImpGen.ScalarVar $ ImpGen.ScalarEntry Int
               mementry = ImpGen.MemVar ImpGen.MemEntry {
                   ImpGen.entryMemSize = Imp.VarSize sizename
-                , ImpGen.entryMemSpace = Nothing
+                , ImpGen.entryMemSpace = Imp.DefaultSpace
                 }
           ImpGen.declaringVarEntry sizename sizeentry $ do
             ImpGen.emit $ Imp.SetScalar sizename size
             ImpGen.declaringVarEntry memname mementry $ do
-              ImpGen.emit $ Imp.Allocate memname $ Imp.ScalarVar sizename
+              ImpGen.emit $ Imp.Allocate memname (Imp.ScalarVar sizename) Imp.DefaultSpace
               allocMemoryBlocks' allocs m
 
 writeThreadResult :: VName -> ImpGen.ValueDestination -> SubExp

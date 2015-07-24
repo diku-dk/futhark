@@ -7,7 +7,7 @@ module Futhark.CodeGen.KernelImp
   , FunctionT (Function)
   , Code
   , Kernel (..)
-  , KernelCopy (..)
+  , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
   )
   where
@@ -28,32 +28,28 @@ data Kernel = Kernel { kernelThreadNum :: VName
                        -- ^ Binding position - also serves as a unique
                        -- name for the kernel.
                      , kernelBody :: Code
-                     , kernelCopyIn :: [KernelCopy]
-                     , kernelCopyOut :: [KernelCopy]
+                     , kernelUses :: [KernelUse]
                      , kernelSize :: DimSize
                      }
             deriving (Show)
 
-data KernelCopy = CopyScalar VName BasicType
-                | CopyMemory VName Imp.DimSize Bool
-                deriving (Eq, Show)
+data KernelUse = ScalarUse VName BasicType
+               | MemoryUse VName Imp.DimSize
+                 deriving (Eq, Show)
 
-instance Pretty KernelCopy where
-  ppr (CopyScalar name t) =
+instance Pretty KernelUse where
+  ppr (ScalarUse name t) =
     text "scalar_copy" <> parens (commasep [ppr name, ppr t])
-  ppr (CopyMemory name size False) =
+  ppr (MemoryUse name size) =
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
-  ppr (CopyMemory name size True) =
-    text "mem_copy_before" <> parens (commasep [ppr name, ppr size])
 
 instance Pretty Kernel where
   ppr kernel =
     text "kernel" <+> brace
-    (text "copy-in" <+> brace (commasep $ map ppr $ kernelCopyIn kernel) </>
+    (text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
      text "body" <+> brace (ppr (kernelThreadNum kernel) <+>
                             text "<- get_thread_number()" </>
-                            ppr (kernelBody kernel)) </>
-     text "copy-out" <+> brace (commasep $ map ppr $ kernelCopyOut kernel))
+                            ppr (kernelBody kernel)))
 
 instance FreeIn Kernel where
   freeIn kernel =
