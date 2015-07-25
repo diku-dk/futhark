@@ -205,6 +205,11 @@ collect m = pass $ do
   ((), w) <- listen m
   return (w, const mempty)
 
+collect' :: CompilerM op a -> CompilerM op (a, [C.BlockItem])
+collect' m = pass $ do
+  (x, w) <- listen m
+  return ((x, w), const mempty)
+
 lookupFunction :: Name -> CompilerM op [Type]
 lookupFunction name = do
   res <- asks $ HM.lookup name . envFtable
@@ -357,12 +362,63 @@ readBasicStm _ t =
         exit(1);
       }|]
 
-sizeVars :: [Param] -> HM.HashMap VName VName
-sizeVars = mconcat . map sizeVars'
-  where sizeVars' (MemParam parname (VarSize memsizename) _) =
-          HM.singleton parname memsizename
-        sizeVars' _ =
-          HM.empty
+-- | Our strategy for main() is to parse everything into host memory
+-- ('DefaultSpace-) and copy the result into host memory after the
+-- @fut_main()@ function has returned.  We have some ad-hoc frobbery
+-- to copy the host-level memory blocks to another memory space if
+-- necessary.  This will break if @fut_main@ uses non-trivial index
+-- functions for its input or output.
+--
+-- The idea here is to keep the nastyness in main(), whilst not
+-- messing up anything else.
+mainCall :: Name -> Function op -> CompilerM op C.Stm
+mainCall fname (Function outputs inputs _ results args) = do
+  crettype <- typeToCType $ paramsTypes outputs
+  ret <- newVName "main_ret"
+  let readstms = readInputs inputs args
+  (argexps, prepare) <- collect' $ mapM prepareArg inputs
+  -- unpackResults may copy back to DefaultSpace.
+  unpackstms <- unpackResults ret outputs
+  -- paramDecl will always create DefaultSpace memory.
+  paramdecls <- liftM2 (++) (mapM paramDecl outputs) (mapM paramDecl inputs)
+  printstms <- printResult results
+  return [C.cstm|{
+               $decls:paramdecls
+               $ty:crettype $id:ret;
+               $stms:readstms
+               $items:prepare
+               gettimeofday(&t_start, NULL);
+               $id:ret = $id:(funName fname)($args:argexps);
+               gettimeofday(&t_end, NULL);
+               $items:unpackstms
+               $stms:printstms
+             }|]
+  where paramDecl (MemParam name _ _) = do
+          ty <- memToCType DefaultSpace
+          return [C.cdecl|$ty:ty $id:name;|]
+        paramDecl (ScalarParam name ty) = do
+          let ty' = scalarTypeToCType ty
+          return [C.cdecl|$ty:ty' $id:name;|]
+
+prepareArg :: Param -> CompilerM op C.Exp
+prepareArg (MemParam name size (Space space)) = do
+  -- Futhark main expects some other memory space than default, so
+  -- create a new memory block and copy it there.
+  name' <- newVName $ baseString name <> "_" <> space
+  ty <- memToCType $ Space space
+  copy <- asks envCopy
+  alloc <- asks envAllocate
+  let size' = dimSizeToExp size
+  decl [C.cdecl|$ty:ty $id:name';|]
+  alloc name' size' space
+  copy name' [C.cexp|0|] (Space space) name [C.cexp|0|] DefaultSpace size'
+  return [C.cexp|$id:name'|]
+
+prepareArg p = return $ C.var $ paramName p
+
+readInputs :: [Param] -> [ValueDecl] -> [C.Stm]
+readInputs inputparams = map $ readInput memsizes
+  where memsizes = sizeVars inputparams
 
 readInput :: HM.HashMap VName VName -> ValueDecl -> C.Stm
 readInput _ (ScalarValue t name) =
@@ -404,50 +460,44 @@ readInput memsizes (ArrayValue name t shape)
                exit(1);
     }|]
 
-readInputs :: [Param] -> [ValueDecl] -> [C.Stm]
-readInputs inputparams = map $ readInput memsizes
-  where memsizes = sizeVars inputparams
+sizeVars :: [Param] -> HM.HashMap VName VName
+sizeVars = mconcat . map sizeVars'
+  where sizeVars' (MemParam parname (VarSize memsizename) _) =
+          HM.singleton parname memsizename
+        sizeVars' _ =
+          HM.empty
 
 printResult :: [ValueDecl] -> CompilerM op [C.Stm]
 printResult vs = liftM concat $ forM vs $ \v -> do
   p <- printStm v
   return [p, [C.cstm|printf("\n");|]]
 
-unpackResults :: VName -> [Param] -> [C.Stm]
-unpackResults ret [ScalarParam name _] =
-  [[C.cstm|$id:name = $id:ret;|]]
-unpackResults ret [MemParam name _ _] =
- [[C.cstm|$id:name = $id:ret;|]]
-unpackResults ret outparams = zipWith assign outparams [0..]
-  where assign param i =
-          let e = tupleFieldExp (C.var ret) i
-          in [C.cstm|$id:(paramName param) = $exp:e;|]
+unpackResults :: VName -> [Param] -> CompilerM op [C.BlockItem]
+unpackResults ret [p] =
+  collect $ unpackResult ret p
+unpackResults ret outparams =
+  collect $ zipWithM_ assign outparams [0..]
+  where assign param i = do
+          ret_field_tmp <- newVName "ret_field_tmp"
+          field_t <- case param of
+                       ScalarParam _ bt ->
+                         return $ scalarTypeToCType bt
+                       MemParam _ _ space ->
+                         memToCType space
+          let field_e = tupleFieldExp (C.var ret) i
+          item [C.citem|$ty:field_t $id:ret_field_tmp = $exp:field_e;|]
+          unpackResult ret_field_tmp param
 
-mainCall :: Name -> Function op -> CompilerM op C.Stm
-mainCall fname (Function outputs inputs _ results args) = do
-  crettype <- typeToCType $ paramsTypes outputs
-  ret <- newVName "main_ret"
-  let argexps = map (C.var . paramName) inputs
-      unpackstms = unpackResults ret outputs
-      readstms = readInputs inputs args
-  paramdecls <- liftM2 (++) (mapM paramDecl outputs) (mapM paramDecl inputs)
-  printstms <- printResult results
-  return [C.cstm|{
-               $decls:paramdecls
-               $ty:crettype $id:ret;
-               $stms:readstms
-               gettimeofday(&t_start, NULL);
-               $id:ret = $id:(funName fname)($args:argexps);
-               gettimeofday(&t_end, NULL);
-               $stms:unpackstms
-               $stms:printstms
-             }|]
-  where paramDecl (MemParam name _ space) = do
-          ty <- memToCType space
-          return [C.cdecl|$ty:ty $id:name;|]
-        paramDecl (ScalarParam name ty) = do
-          let ty' = scalarTypeToCType ty
-          return [C.cdecl|$ty:ty' $id:name;|]
+unpackResult :: VName -> Param -> CompilerM op ()
+unpackResult ret (ScalarParam name _) =
+  stm [C.cstm|$id:name = $id:ret;|]
+unpackResult ret (MemParam name _ DefaultSpace) =
+  stm [C.cstm|$id:name = $id:ret;|]
+unpackResult ret (MemParam name size (Space srcspace)) = do
+  copy <- asks envCopy
+  let size' = dimSizeToExp size
+  stm [C.cstm|$id:name = malloc($exp:size');|]
+  copy name [C.cexp|0|] DefaultSpace ret [C.cexp|0|] (Space srcspace) size'
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
