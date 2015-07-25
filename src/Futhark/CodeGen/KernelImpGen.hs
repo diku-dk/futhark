@@ -128,12 +128,12 @@ allocMemoryBlocks = allocMemoryBlocks' . HM.toList
           let sizeentry = ImpGen.ScalarVar $ ImpGen.ScalarEntry Int
               mementry = ImpGen.MemVar ImpGen.MemEntry {
                   ImpGen.entryMemSize = Imp.VarSize sizename
-                , ImpGen.entryMemSpace = Imp.DefaultSpace
+                , ImpGen.entryMemSpace = Imp.Space "device"
                 }
           ImpGen.declaringVarEntry sizename sizeentry $ do
             ImpGen.emit $ Imp.SetScalar sizename size
             ImpGen.declaringVarEntry memname mementry $ do
-              ImpGen.emit $ Imp.Allocate memname (Imp.ScalarVar sizename) Imp.DefaultSpace
+              ImpGen.emit $ Imp.Allocate memname (Imp.ScalarVar sizename) $ Imp.Space "device"
               allocMemoryBlocks' allocs m
 
 writeThreadResult :: VName -> ImpGen.ValueDestination -> SubExp
