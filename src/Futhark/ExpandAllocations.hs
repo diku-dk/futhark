@@ -4,6 +4,7 @@ module Futhark.ExpandAllocations
        ( expandAllocations )
        where
 
+import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
