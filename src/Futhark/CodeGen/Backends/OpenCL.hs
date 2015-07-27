@@ -61,6 +61,7 @@ writeOpenCLScalar _ _ _ space _ =
 readOpenCLScalar :: GenericC.ReadScalar Kernel
 readOpenCLScalar mem i t "device" = do
   val <- newVName "read_res"
+  GenericC.decl [C.cdecl|$ty:t $id:val;|]
   GenericC.stm [C.cstm|{
                  assert(clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
                                             $exp:i, sizeof($ty:t),
