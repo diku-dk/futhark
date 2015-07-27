@@ -73,6 +73,7 @@ Library
                    Futhark.Construct
                    Futhark.DistributeKernels
                    Futhark.DistributeKernels.Distribution
+                   Futhark.ExpandAllocations
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform

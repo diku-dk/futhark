@@ -105,6 +105,8 @@ commandLineOptions =
     [] ["double-buffer"]
   , passoption "Kernel sequentialisation" sequentialiseKernels
     [] ["sequentialise-kernels"]
+  , passoption "Expand allocations" expandAllocations
+    [] ["expand-allocations"]
   , passoption "Kernel distribution" distributeKernels
     [] ["distribute-kernels"]
 
