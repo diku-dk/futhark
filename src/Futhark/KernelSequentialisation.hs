@@ -41,6 +41,7 @@ transformBinding (Let pat () e) = do
   mapM_ addBinding bnds
   where transform = identityMapper { mapOnBody = transformBody
                                    , mapOnLambda = transformLambda
+                                   , mapOnExtLambda = transformExtLambda
                                    }
 
 transformLambda :: Lambda -> SequentialiseM Lambda
@@ -48,3 +49,9 @@ transformLambda lam = do
   body' <- bindingParamTypes (lambdaParams lam) $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }
+
+transformExtLambda :: ExtLambda -> SequentialiseM ExtLambda
+transformExtLambda lam = do
+  body' <- bindingParamTypes (extLambdaParams lam) $
+           transformBody $ extLambdaBody lam
+  return lam { extLambdaBody = body' }
