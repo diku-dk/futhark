@@ -59,6 +59,7 @@ transformBindingRecursively (Let pat () e) =
   transformBinding =<< liftM (Let pat ()) (mapExpM transform e)
   where transform = identityMapper { mapOnBody = transformBody
                                    , mapOnLambda = transformLambda
+                                   , mapOnExtLambda = transformExtLambda
                                    }
 
 -- | Transform a single binding _without_ recursing further.  This
@@ -405,8 +406,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
                                                Var $ paramName chunkloc] $
                                      identName id'
                 letBindNames' [identName id4, paramName param] split2
-          let fakebody = Body (bodyLore lambody) (bodyBindings lambody) (bodyResult lambody)
-          transformBody fakebody
+          return $ Body (bodyLore lambody) (bodyBindings lambody) (bodyResult lambody)
       -- make copy-out epilogue for result arrays
       let (acc', xis) = splitAt acc_num accxis
           indszids = zip mexistszs mexistinds
@@ -612,6 +612,15 @@ transformLambda (Lambda i params body rettype) = do
            bindingIdentTypes [Ident i $ Basic Int] $
            bindingParamTypes params $ transformBody body
   return $ Lambda i params body' rettype
+
+-- | Recursively first-order-transform a lambda.
+transformExtLambda :: (MonadFreshNames m, HasTypeEnv m) =>
+                      ExtLambda -> m ExtLambda
+transformExtLambda (ExtLambda i params body rettype) = do
+  body' <- runBodyBinder $
+           bindingIdentTypes [Ident i $ Basic Int] $
+           bindingParamTypes params $ transformBody body
+  return $ ExtLambda i params body' rettype
 
 newFold :: [(SubExp,Type)]
         -> Binder Basic ([Ident], [SubExp])
