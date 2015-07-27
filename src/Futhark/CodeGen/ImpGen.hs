@@ -16,7 +16,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , Env (envVtable)
+  , Env (envVtable, envDefaultSpace)
   , emit
   , collect
   , VarEntry (..)

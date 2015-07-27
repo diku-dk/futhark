@@ -113,7 +113,9 @@ kernelCompiler _ e =
 makeAllMemoryGlobal :: ImpGen.ImpM Imp.Kernel a
                     -> ImpGen.ImpM Imp.Kernel a
 makeAllMemoryGlobal =
-  local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env }
+  local $ \env -> env { ImpGen.envVtable = HM.map globalMemory $ ImpGen.envVtable env
+                      , ImpGen.envDefaultSpace = Imp.Space "global"
+                      }
   where globalMemory (ImpGen.MemVar entry) =
           ImpGen.MemVar entry { ImpGen.entryMemSpace = Imp.Space "global" }
         globalMemory entry =
