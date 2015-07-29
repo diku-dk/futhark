@@ -30,19 +30,34 @@ transformBody (Body () bnds res) = insertBindingsM $ do
   return $ resultBody res
 
 transformBinding :: Binding -> SequentialiseM ()
-transformBinding (Let pat () (LoopOp (Map cs w fun arrs))) = do
-  (fun', bnds) <- runBinder $ FOT.transformLambda fun
-  mapM_ addBinding bnds
-  addBinding $ Let pat () $ LoopOp $ Map cs w fun' arrs
+transformBinding (Let pat () (LoopOp (Map cs w fun arrs)))
+  | Body () [bnd] res <- lambdaBody fun, -- Body has a single binding
+    map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
+    LoopOp (Map {}) <- bindingExp bnd = do
+      fun' <- transformLambda fun
+      addBinding $ Let pat () $ LoopOp $ Map cs w fun' arrs
+
+  | otherwise = do
+      fun' <- joinBinder $ FOT.transformLambda fun
+      addBinding $ Let pat () $ LoopOp $ Map cs w fun' arrs
+
+transformBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
+  body' <- bindingParamTypes (map fst merge) $ bindingIdentTypes form_idents $
+           transformBody body
+  addBinding $ Let pat () $ LoopOp $ DoLoop res merge form body'
+  where form_idents = case form of ForLoop i _ -> [Ident i $ Basic Int]
+                                   WhileLoop _ -> []
 
 transformBinding (Let pat () e) = do
   e' <- mapExpM transform e
   ((), bnds) <- runBinder $ FOT.transformBinding $ Let pat () e'
   mapM_ addBinding bnds
-  where transform = identityMapper { mapOnBody = transformBody
-                                   , mapOnLambda = transformLambda
-                                   , mapOnExtLambda = transformExtLambda
-                                   }
+
+transform :: Mapper Basic Basic SequentialiseM
+transform = identityMapper { mapOnBody = transformBody
+                           , mapOnLambda = transformLambda
+                           , mapOnExtLambda = transformExtLambda
+                           }
 
 transformLambda :: Lambda -> SequentialiseM Lambda
 transformLambda lam = do

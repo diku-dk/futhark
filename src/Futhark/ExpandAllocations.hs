@@ -38,7 +38,16 @@ transformBody (Body () bnds res) = do
 
 transformBinding :: Binding -> ExpandM [Binding]
 
-transformBinding (Let pat () (LoopOp (Map cs w fun args)))
+transformBinding (Let pat () e) = do
+  (bnds, e') <- transformExp =<< mapExpM transform e
+  return $ bnds ++ [Let pat () e']
+  where transform = identityMapper { mapOnBody = transformBody
+                                   , mapOnLambda = transformLambda
+                                   , mapOnExtLambda = transformExtLambda
+                                   }
+
+transformExp :: Exp -> ExpandM ([Binding], Exp)
+transformExp (LoopOp (Map cs w fun args))
   -- Extract allocations from the body.
   | Right (body, thread_allocs) <- extractKernelAllocations fun = do
   -- We expand the allocations by multiplying their size with the
@@ -59,14 +68,9 @@ transformBinding (Let pat () (LoopOp (Map cs w fun args)))
       fun' = fun { lambdaBody =
                        offsetMemorySummariesInBody alloc_offsets body
                  }
-  return $ alloc_bnds ++ [Let pat () (LoopOp (Map cs w fun' args))]
-
-transformBinding (Let pat () e) =
-  pure <$> Let pat () <$> mapExpM transform e
-  where transform = identityMapper { mapOnBody = transformBody
-                                   , mapOnLambda = transformLambda
-                                   , mapOnExtLambda = transformExtLambda
-                                   }
+  return (alloc_bnds, LoopOp (Map cs w fun' args))
+transformExp e =
+  return ([], e)
 
 transformLambda :: Lambda -> ExpandM Lambda
 transformLambda lam = do
