@@ -32,7 +32,7 @@ module Futhark.CodeGen.ImpGen
   , subExpToDimSize
   , declaringLParams
   , declaringVarEntry
-  , withParam
+  , withParams
   , compileBindings
   , writeExp
   , indexArray
