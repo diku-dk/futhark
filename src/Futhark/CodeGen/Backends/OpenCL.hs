@@ -76,47 +76,63 @@ readOpenCLScalar _ _ _ space =
 
 allocateOpenCLBuffer :: GenericC.Allocate Kernel
 allocateOpenCLBuffer mem size "device" = do
-  errorname <- newVName "error"
+  errorname <- newVName "clCreateBuffer_succeeded"
+  -- clCreateBuffer fails with CL_INVALID_BUFFER_SIZE if we pass 0 as
+  -- the size (unlike malloc()), so we make sure we always allocate at
+  -- least a single byte.  The alternative is to protect this with a
+  -- branch and leave the cl_mem variable uninitialised if the size is
+  -- zero, but this would leave sort of a landmine around, that would
+  -- blow up if we ever passed it to an OpenCL function.
   GenericC.stm [C.cstm|{
     typename cl_int $id:errorname;
     $id:mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
-                             $exp:size, NULL,
+                             $exp:size > 0 ? $exp:size : 1, NULL,
                              &$id:errorname);
     assert($id:errorname == 0);
   }|]
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
+
 copyOpenCLMemory :: GenericC.Copy Kernel
+-- The read/write/copy-buffer functions fail if the given offset is
+-- out of bounds, even if asked to read zero bytes.  We protect with a
+-- branch to avoid this.
 copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
   GenericC.stm [C.cstm|{
-    assert(clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
-                               $exp:srcidx, $exp:nbytes,
-                               $id:destmem + $exp:destidx,
-                               0, NULL, NULL)
-           == CL_SUCCESS);
-    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    if ($exp:nbytes > 0) {
+      assert(clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
+                                 $exp:srcidx, $exp:nbytes,
+                                 $id:destmem + $exp:destidx,
+                                 0, NULL, NULL)
+             == CL_SUCCESS);
+      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+   }
   }|]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
   GenericC.stm [C.cstm|{
-    assert(clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
-                                $exp:destidx, $exp:nbytes,
-                                $id:srcmem + $exp:srcidx,
-                                0, NULL, NULL)
-           == CL_SUCCESS);
-    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    if ($exp:nbytes > 0) {
+      assert(clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
+                                  $exp:destidx, $exp:nbytes,
+                                  $id:srcmem + $exp:srcidx,
+                                  0, NULL, NULL)
+             == CL_SUCCESS);
+      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    }
   }|]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
   -- Be aware that OpenCL swaps the usual order of operands for
   -- memcpy()-like functions.  The order below is not a typo.
   GenericC.stm [C.cstm|{
-    assert(clEnqueueCopyBuffer(fut_cl_queue,
-                               $id:srcmem, $id:destmem,
-                               $exp:srcidx, $exp:destidx,
-                               $exp:nbytes,
-                               0, NULL, NULL)
-           == CL_SUCCESS);
-    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    if ($exp:nbytes > 0) {
+      assert(clEnqueueCopyBuffer(fut_cl_queue,
+                                 $id:srcmem, $id:destmem,
+                                 $exp:srcidx, $exp:destidx,
+                                 $exp:nbytes,
+                                 0, NULL, NULL)
+             == CL_SUCCESS);
+      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    }
   }|]
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
