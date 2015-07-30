@@ -44,7 +44,7 @@ data IxFun :: * -> Nat -> * where
   Offset :: IxFun num n -> num -> IxFun num n
   Permute :: IxFun num n -> Perm.Permutation n -> IxFun num n
   Index :: SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
-  Reshape :: IxFun num (S m) -> Shape num n -> IxFun num n
+  Reshape :: IxFun num ('S m) -> Shape num n -> IxFun num n
 
 --- XXX: this is just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -116,12 +116,11 @@ instance (Substitute num, Rename num) => Rename (IxFun num n) where
     return $ substituteNames subst ixfun
 
 index :: forall (n::Nat) num. Fractional num =>
-         IxFun num (S n) -> Indices num (S n) -> num -> num
+         IxFun num ('S n) -> Indices num ('S n) -> num -> num
 
 index (Direct offset dims) is element_size =
   (Vec.sum (Vec.zipWithSame (*) is slicesizes) * element_size) + offset
-  where slicesizes :: Vector num (S n)
-        slicesizes = Vec.tail $ sliceSizes dims
+  where slicesizes = Vec.tail $ sliceSizes dims
 
 index (Offset fun offset) (i :- is) element_size =
   index fun ((i + offset) :- is) element_size
@@ -134,24 +133,21 @@ index (Index _ fun (is1::Indices num m)) is2 element_size =
   case (singInstance $ sLength is1,
         singInstance $ sLength is2 %:- sOne) of
     (SingInstance,SingInstance) ->
-      let is :: Indices num (m :+ S n)
-          is = is1 `Vec.append` is2
+      let is = is1 `Vec.append` is2
           outer = succPlusR (sing :: SNat m) (sing :: SNat n)
-          proof :: (m :+ S n) :=: S (m :+ n)
+          proof :: (m :+ 'S n) :=: 'S (m :+ n)
           proof = succPlusR (sing :: SNat m) (sing :: SNat n)
       in case singInstance $ coerce proof (sLength is) %:- sOne of
         SingInstance ->
           index (coerce outer fun) (coerce outer is) element_size
 
-index (Reshape (fun :: IxFun num (S m)) newshape) is element_size =
+index (Reshape (fun :: IxFun num ('S m)) newshape) is element_size =
   -- First, compute a flat index based on the new shape.  Then, turn
   -- that into an index set for the inner index function and apply the
   -- inner index function to that set.
   let oldshape = shape fun
       flatidx = computeFlatIndex newshape is
-      innerslicesizes :: Vector num (S m)
       innerslicesizes = Vec.tail $ sliceSizes oldshape
-      new_indices :: Indices num (S m)
       new_indices = computeNewIndices innerslicesizes flatidx
   in index fun new_indices element_size
 
@@ -164,13 +160,13 @@ computeNewIndices (size :- slices) i =
   computeNewIndices slices (i - (i / size) * size)
 
 computeFlatIndex :: Fractional num =>
-                    Shape num (S k) -> Indices num (S k) -> num
+                    Shape num ('S k) -> Indices num ('S k) -> num
 computeFlatIndex dims is =
   Vec.sum $ Vec.zipWithSame (*) is slicesizes
   where slicesizes = Vec.tail $ sliceSizes dims
 
 sliceSizes :: Fractional num =>
-              Shape num m -> Vector num (S m)
+              Shape num m -> Vector num ('S m)
 sliceSizes Nil =
   singleton 1
 sliceSizes (n :- ns) =
@@ -190,7 +186,7 @@ permute :: Fractional num =>
 permute = Permute
 
 reshape :: Fractional num =>
-           IxFun num (S m) -> Shape num n -> IxFun num n
+           IxFun num ('S m) -> Shape num n -> IxFun num n
 reshape = Reshape
 
 applyInd :: forall num n m.

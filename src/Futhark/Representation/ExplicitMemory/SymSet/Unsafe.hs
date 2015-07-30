@@ -60,8 +60,7 @@ fix iint range (SymSet (n::SNat n) s) =
             SFalse ->
               error "SymSet.Unsafe.fix: index out of bounds"
             STrue ->
-              let i' :: Ordinal (S n')
-                  i' = sNatToOrd' (SS n') i
+              let i' = sNatToOrd' (SS n') i
                   s' :: Safe.SymSet n'
                   s' = Safe.fix i' range s
               in SymSet n' s'

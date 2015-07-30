@@ -47,7 +47,7 @@ import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
 import Language.Futhark.Core
 import Futhark.Representation.AST.Pretty (pretty)
 
-data IxFun = forall n . IxFun (SNat (S n)) (Safe.IxFun ScalExp (S n))
+data IxFun = forall n . IxFun (SNat ('S n)) (Safe.IxFun ScalExp ('S n))
 
 instance Show IxFun where
   show (IxFun _ fun) = show fun
@@ -56,7 +56,7 @@ instance PP.Pretty IxFun where
   ppr (IxFun _ fun) = PP.ppr fun
 
 instance Eq IxFun where
-  IxFun (n1 :: SNat (S n1)) fun1 == IxFun (n2 :: SNat (S n2)) fun2 =
+  IxFun (n1 :: SNat ('S n1)) fun1 == IxFun (n2 :: SNat ('S n2)) fun2 =
     case testEquality n1 n2 of
       Nothing   -> False
       Just Refl -> fun1 == fun2
@@ -100,7 +100,7 @@ offsetIndex (IxFun n f) se =
   IxFun n $ Safe.offsetIndex f se
 
 permute :: IxFun -> [Int] -> IxFun
-permute (IxFun (n::SNat (S n)) f) perm
+permute (IxFun (n::SNat ('S n)) f) perm
   | sort perm /= [0..n'-1] =
     error $ "IndexFunction.Unsafe.permute: " ++ show perm ++
     " is an invalid permutation for index function of rank " ++
@@ -115,7 +115,7 @@ permute (IxFun (n::SNat (S n)) f) perm
   where buildPermutation (perm', dims) (at, wants) =
           let wants' = dims Prelude.!! wants
               has = dims Prelude.!! at
-              sw :: Swap (S n)
+              sw :: Swap ('S n)
               sw = withSingI n $
                    unsafeFromInt at :<->: unsafeFromInt wants'
           in if has /= wants
@@ -137,26 +137,23 @@ reshape (IxFun _ ixfun) newshape =
       map intSubExpToScalExp newshape
 
 applyInd :: IxFun -> Indices -> IxFun
-applyInd ixfun@(IxFun (snnat::SNat (S n)) (f::Safe.IxFun ScalExp (S n))) is =
+applyInd ixfun@(IxFun (snnat::SNat ('S n)) (f::Safe.IxFun ScalExp ('S n))) is =
   case promote (Prelude.length is) :: Monomorphic (Sing :: Nat -> *) of
     Monomorphic (mnat::SNat m) ->
       case mnat %:<<= nnat of
         STrue ->
-          let k :: SNat (S (n :- m))
-              k = SS $ nnat %- mnat
+          let k = SS $ nnat %- mnat
               nmnat :: SNat (n :- m)
               nmnat = nnat %- mnat
               is' :: Safe.Indices ScalExp m
               is' = unsafeFromList mnat is
-              proof :: S n :=: (m :+: S (n :- m))
+              proof :: 'S n :=: (m :+: 'S (n :- m))
               proof = sym $
                       trans (succPlusR mnat nmnat)
                       (succCongEq (minusPlusEqR nnat mnat))
-              f' :: Safe.IxFun ScalExp (m :+: S (n :- m))
+              f' :: Safe.IxFun ScalExp (m :+: 'S (n :- m))
               f' = coerce proof f
-              ixfun' :: Safe.IxFun ScalExp (S (n :- m))
-              ixfun' = Safe.applyInd k f' is'
-          in IxFun k ixfun'
+          in IxFun k $ Safe.applyInd k f' is'
         SFalse ->
           error $
           unlines ["IndexFunction.Unsafe.applyInd: Too many indices given.",
