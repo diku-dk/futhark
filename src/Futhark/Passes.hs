@@ -17,7 +17,8 @@ module Futhark.Passes
   , commonSubexpressionElimination
   , flattening
   , doubleBuffer
-  , sequentialiseKernels
+  , babysitKernels
+  , expandAllocations
   , distributeKernels
   , standardPipeline
   )
@@ -40,7 +41,8 @@ import qualified Futhark.Optimise.InPlaceLowering
 import qualified Futhark.Optimise.CSE
 import qualified Futhark.Flattening
 import qualified Futhark.Optimise.DoubleBuffer
-import qualified Futhark.KernelSequentialisation
+import qualified Futhark.KernelBabysitting
+import qualified Futhark.ExpandAllocations
 import qualified Futhark.DistributeKernels
 
 fotransform :: Pass
@@ -108,9 +110,13 @@ doubleBuffer :: Pass
 doubleBuffer = unfailableExplicitMemoryPass "double buffering"
                Futhark.Optimise.DoubleBuffer.optimiseProg
 
-sequentialiseKernels :: Pass
-sequentialiseKernels = unfailableBasicPass "sequentialise kernels"
-                       Futhark.KernelSequentialisation.sequentialiseKernels
+babysitKernels :: Pass
+babysitKernels = unfailableBasicPass "babysit kernels"
+                 Futhark.KernelBabysitting.babysitKernels
+
+expandAllocations :: Pass
+expandAllocations = unfailableExplicitMemoryPass "expand allocations"
+                    Futhark.ExpandAllocations.expandAllocations
 
 distributeKernels :: Pass
 distributeKernels = unfailableBasicPass "distribute kernels"

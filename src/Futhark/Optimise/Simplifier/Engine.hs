@@ -364,6 +364,10 @@ hasFree ks _ need = ks `intersects` requires need
 isNotSafe :: BlockPred m
 isNotSafe _ = not . safeExp . bindingExp
 
+isInPlaceBound :: BlockPred m
+isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
+                   patternElements . bindingPattern
+
 isNotCheap :: BlockPred m
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
@@ -399,7 +403,7 @@ hoistCommon :: MonadEngine m =>
 hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   (body1, needs1) <- listenNeed $ localVtable vtablef1 m1
   (body2, needs2) <- listenNeed $ localVtable vtablef2 m2
-  let block = isNotSafe `orIf` isNotCheap
+  let block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (body1', safe1, f1) <-

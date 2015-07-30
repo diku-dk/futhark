@@ -29,6 +29,9 @@ module Futhark.Representation.AST.Attributes.Types
        , rowType
        , elemType
 
+       , transposeType
+       , rearrangeType
+
        , diet
        , dietingAs
 
@@ -239,6 +242,19 @@ elemType :: TypeBase shape -> BasicType
 elemType (Array t _ _) = t
 elemType (Basic t)     = t
 elemType (Mem {})      = error "elemType Mem"
+
+-- | Swap the two outer dimensions of the type.
+transposeType :: Type -> Type
+transposeType = rearrangeType [1,0]
+
+-- | Rearrange the dimensions of the type.  If the length of the
+-- permutation does not match the rank of the type, the permutation
+-- will be extended with identity.
+rearrangeType :: [Int] -> Type -> Type
+rearrangeType perm t =
+  t `setArrayShape` Shape (permute perm' $ arrayDims t)
+  where perm' = perm ++ [length perm .. arrayRank t - 1]
+        permute x l = map (l!!) x
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.

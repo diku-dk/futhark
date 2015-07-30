@@ -73,6 +73,7 @@ Library
                    Futhark.Construct
                    Futhark.DistributeKernels
                    Futhark.DistributeKernels.Distribution
+                   Futhark.ExpandAllocations
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform
@@ -85,7 +86,7 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
-                   Futhark.KernelSequentialisation
+                   Futhark.KernelBabysitting
                    Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames

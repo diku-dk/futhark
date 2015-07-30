@@ -12,7 +12,8 @@ module Futhark.CodeGen.ImpCode
   , MemSize
   , DimSize
   , Type (..)
-  , Space
+  , Space (..)
+  , SpaceId
   , Code (..)
   , Exp (..)
   , UnOp (..)
@@ -47,11 +48,18 @@ data Size = ConstSize Int
 type MemSize = Size
 type DimSize = Size
 
--- | The memory space of a block.  If 'Nothing', this is the "default"
--- space, whatever that is.  The exact meaning of the string depends
--- on the backend used.  On the GPU, for example, this is used to
--- distinguish between constant, global and shared memory spaces.
-type Space = Maybe String
+-- | The memory space of a block.  If 'DefaultSpace', this is the "default"
+-- space, whatever that is.  The exact meaning of the 'SpaceID'
+-- depends on the backend used.  In GPU kernels, for example, this is
+-- used to distinguish between constant, global and shared memory
+-- spaces.  In GPU-enabled host code, it is used to distinguish
+-- between host memory ('DefaultSpace') and GPU space.
+data Space = DefaultSpace
+           | Space SpaceId
+             deriving (Show, Eq, Ord)
+
+-- | A string representing a specific non-default memory space.
+type SpaceId = String
 
 data Type = Scalar BasicType | Mem DimSize Space
 
@@ -82,13 +90,17 @@ data Code a = Skip
             | While Exp (Code a)
             | DeclareMem VName Space
             | DeclareScalar VName BasicType
-            | Allocate VName Exp
-            | Copy VName Exp VName Exp Exp
-              -- ^ Destination, offset in destination, source, offset
-              -- in source, number of bytes.
+            | Allocate VName Exp Space
+              -- ^ Memory space must match the corresponding
+              -- 'DeclareMem'.
+            | Copy VName Exp Space VName Exp Space Exp
+              -- ^ Destination, offset in destination, destination
+              -- space, source, offset in source, offset space, number
+              -- of bytes.
             | Write VName Exp BasicType Space Exp
             | SetScalar VName Exp
             | SetMem VName VName
+              -- ^ Must be in same space.
             | Call [VName] Name [Exp]
             | If Exp (Code a) (Code a)
             | Assert Exp SrcLoc
@@ -163,8 +175,8 @@ instance Pretty Param where
     ppr ptype <+> ppr name
   ppr (MemParam name size space) =
     text "mem" <> parens (ppr size) <> space' <+> ppr name
-    where space' = case space of Just s -> text "@" <> text s
-                                 Nothing -> mempty
+    where space' = case space of Space s      -> text "@" <> text s
+                                 DefaultSpace -> mempty
 
 instance Pretty ValueDecl where
   ppr (ScalarValue t name) =
@@ -190,28 +202,25 @@ instance Pretty op => Pretty (Code op) where
     indent 2 (ppr body) </>
     text "}"
   ppr (DeclareMem name space) =
-    text "declare" <+> ppr name <+> text "as memory block" <>
-    case space of Nothing -> mempty
-                  Just s  -> text " at" <+> text s
+    text "declare" <+> ppr name <+> text "as memory block" <> ppSpace space
   ppr (DeclareScalar name t) =
     text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
-  ppr (Allocate name e) =
-    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e)
+  ppr (Allocate name e space) =
+    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppSpace space
   ppr (Write name i bt space val) =
-    ppr name <> langle <> ppr bt <> space' <> rangle <> brackets (ppr i) <+>
+    ppr name <> langle <> ppr bt <> ppSpace space <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
-    where space' = case space of Nothing -> mempty
-                                 Just s -> text "@" <> text s
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from) =
     ppr dest <+> text "<-" <+> ppr from
   ppr (Assert e _) =
     text "assert" <> parens (ppr e)
-  ppr (Copy dest destoffset src srcoffset size) =
-    text "memcpy" <> parens (ppMemLoc dest destoffset <> comma </>
-                             ppMemLoc src srcoffset <> comma </>
-                             ppr size)
+  ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
+    text "memcpy" <>
+    parens (ppMemLoc dest destoffset <> ppSpace destspace <> comma </>
+            ppMemLoc src srcoffset <> ppSpace srcspace <> comma </>
+            ppr size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
   ppr (If cond tbranch fbranch) =
@@ -223,6 +232,10 @@ instance Pretty op => Pretty (Code op) where
   ppr (Call dests fname args) =
     commasep (map ppr dests) <+> text "<-" <+>
     ppr fname <> parens (commasep $ map ppr args)
+
+ppSpace :: Space -> Doc
+ppSpace DefaultSpace = mempty
+ppSpace (Space s)    = text "@" <> text s
 
 instance Pretty Exp where
   ppr = pprPrec (-1)
@@ -246,8 +259,8 @@ instance Pretty Exp where
     ppr v
   pprPrec _ (Index v is bt space) =
     ppr v <> langle <> ppr bt <> space' <> rangle <> brackets (ppr is)
-    where space' = case space of Nothing -> mempty
-                                 Just s -> text "@" <> text s
+    where space' = case space of DefaultSpace -> mempty
+                                 Space s      -> text "@" <> text s
   pprPrec _ (SizeOf t) =
     text "sizeof" <> parens (ppr t)
 
@@ -319,10 +332,10 @@ instance Traversable Code where
     pure $ DeclareMem name space
   traverse _ (DeclareScalar name bt) =
     pure $ DeclareScalar name bt
-  traverse _ (Allocate name size) =
-    pure $ Allocate name size
-  traverse _ (Copy dest destoffset src srcoffset size) =
-    pure $ Copy dest destoffset src srcoffset size
+  traverse _ (Allocate name size s) =
+    pure $ Allocate name size s
+  traverse _ (Copy dest destoffset destspace src srcoffset srcspace size) =
+    pure $ Copy dest destoffset destspace src srcoffset srcspace size
   traverse _ (Write name i bt val space) =
     pure $ Write name i bt val space
   traverse _ (SetScalar name val) =
@@ -356,9 +369,9 @@ instance FreeIn a => FreeIn (Code a) where
     mempty
   freeIn (DeclareScalar {}) =
     mempty
-  freeIn (Allocate name size) =
+  freeIn (Allocate name size _) =
     freeIn name <> freeIn size
-  freeIn (Copy dest x src y n) =
+  freeIn (Copy dest x _ src y _ n) =
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
   freeIn (SetMem x y) =
     freeIn x <> freeIn y

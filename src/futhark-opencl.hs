@@ -93,10 +93,15 @@ futharkConfig config =
                    , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
+-- XXX: this pipeline is a total hack - note that we run both
+-- distribution and expandAllocations multiple times.
 compilerPipeline :: [Pass]
 compilerPipeline =
   standardPipeline ++
-  [ sequentialiseKernels
+  [ distributeKernels
+  , distributeKernels
+  , eotransform
+  , babysitKernels
   , eotransform
   , inPlaceLowering
   , explicitMemory
@@ -104,5 +109,13 @@ compilerPipeline =
   , commonSubexpressionElimination
   , eotransform
   , doubleBuffer
+  , eotransform
+  , expandAllocations
+  , eotransform
+  , expandAllocations
+  , eotransform
+  , expandAllocations
+  , eotransform
+  , expandAllocations
   , eotransform
   ]

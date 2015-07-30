@@ -103,8 +103,10 @@ commandLineOptions =
     [] ["flattening"]
   , passoption "Double-buffering" doubleBuffer
     [] ["double-buffer"]
-  , passoption "Kernel sequentialisation" sequentialiseKernels
-    [] ["sequentialise-kernels"]
+  , passoption "Kernel babysitting" babysitKernels
+    [] ["babysit-kernels"]
+  , passoption "Expand allocations" expandAllocations
+    [] ["expand-allocations"]
   , passoption "Kernel distribution" distributeKernels
     [] ["distribute-kernels"]
 

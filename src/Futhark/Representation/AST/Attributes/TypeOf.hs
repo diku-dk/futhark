@@ -106,7 +106,7 @@ primOpType (Reshape _ shape e) =
   where result t = [t `setArrayShape` Shape shape]
 primOpType (Rearrange _ perm e) =
   result <$> lookupType e
-  where result t = [t `setArrayShape` Shape (permuteShape perm $ arrayDims t)]
+  where result t = [rearrangeType perm t]
 primOpType (Split _ sizeexps e) =
   result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps

@@ -16,7 +16,7 @@ module Futhark.CodeGen.ImpGen
 
     -- * Monadic Compiler Interface
   , ImpM
-  , Env (envVtable)
+  , Env (envVtable, envDefaultSpace)
   , emit
   , collect
   , VarEntry (..)
@@ -32,7 +32,7 @@ module Futhark.CodeGen.ImpGen
   , subExpToDimSize
   , declaringLParams
   , declaringVarEntry
-  , withParam
+  , withParams
   , compileBindings
   , writeExp
   , indexArray
@@ -136,12 +136,14 @@ data ArrayMemoryDestination = SetMemory VName (Maybe VName)
 data Env op = Env {
     envVtable :: HM.HashMap VName VarEntry
   , envExpCompiler :: ExpCompiler op
+  , envDefaultSpace :: Imp.Space
   }
 
-newEnv :: ExpCompiler op -> Env op
-newEnv ec = Env { envVtable = HM.empty
-                , envExpCompiler = ec
-                }
+newEnv :: ExpCompiler op -> Imp.Space -> Env op
+newEnv ec ds = Env { envVtable = HM.empty
+                   , envExpCompiler = ec
+                   , envDefaultSpace = ds
+                   }
 
 newtype ImpM op a = ImpM (RWST (Env op) (Imp.Code op) VNameSource (Either String) a)
   deriving (Functor, Applicative, Monad,
@@ -170,8 +172,10 @@ instance HasTypeEnv (ImpM op) where
           dimSizeToSubExp (Imp.VarSize v) =
             Var v
 
-runImpM :: ImpM op a -> ExpCompiler op -> VNameSource -> Either String (a, VNameSource, Imp.Code op)
-runImpM (ImpM m) = runRWST m . newEnv
+runImpM :: ImpM op a
+        -> ExpCompiler op -> Imp.Space -> VNameSource
+        -> Either String (a, VNameSource, Imp.Code op)
+runImpM (ImpM m) comp = runRWST m . newEnv comp
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
@@ -184,19 +188,21 @@ collect m = pass $ do
 emit :: Imp.Code op -> ImpM op ()
 emit = tell
 
-compileProg :: ExpCompiler op -> Prog -> Either String (Imp.Program op)
-compileProg ec prog =
-  Imp.Program <$> snd <$> mapAccumLM (compileFunDec ec) src (progFunctions prog)
+compileProg :: ExpCompiler op -> Imp.Space
+            -> Prog -> Either String (Imp.Program op)
+compileProg ec ds prog =
+  Imp.Program <$> snd <$> mapAccumLM (compileFunDec ec ds) src (progFunctions prog)
   where src = newNameSourceForProg prog
 
--- | 'compileProg' with an 'ExpCompiler' that always returns 'CompileExp'.
+-- | 'compileProg' with an 'ExpCompiler' that always returns
+-- 'CompileExp' and always using 'DefaultSpace'.
 compileProgSimply :: Prog -> Either String (Imp.Program ())
-compileProgSimply = compileProg $ const $ return . CompileExp
+compileProgSimply = compileProg (const $ return . CompileExp) Imp.DefaultSpace
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case t of
   Basic bt -> return $ Left $ Imp.ScalarParam name bt
-  Mem size -> Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> pure Nothing)
+  Mem size -> Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> asks envDefaultSpace)
   Array bt shape _ -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
@@ -250,11 +256,12 @@ compileOutParams rts = do
           tell [Imp.ScalarParam out t]
           return (Imp.ScalarValue t out, ScalarDestination out)
         mkParam (ReturnsArray t shape _ lore) = do
+          space <- asks envDefaultSpace
           (memout, memdestf) <- case lore of
             ReturnsNewBlock x -> do
               memout <- imp $ newVName "out_mem"
               (sizeout, destmemsize) <- ensureMemSizeOut x
-              tell [Imp.MemParam memout (Imp.VarSize sizeout) Nothing]
+              tell [Imp.MemParam memout (Imp.VarSize sizeout) space]
               return (memout, const $ SetMemory memout destmemsize)
             ReturnsInBlock memout ixfun ->
               return (memout,
@@ -292,11 +299,13 @@ compileOutParams rts = do
                                return (sizeout, Just sizeout)
             Just sizeout -> return (sizeout, Nothing)
 
-compileFunDec :: ExpCompiler op -> VNameSource -> FunDec
+compileFunDec :: ExpCompiler op -> Imp.Space
+              -> VNameSource
+              -> FunDec
               -> Either String (VNameSource, (Name, Imp.Function op))
-compileFunDec ec src (FunDec fname rettype params body) = do
+compileFunDec ec ds src (FunDec fname rettype params body) = do
   ((outparams, inparams, results, args), src', body') <-
-    runImpM compile ec src
+    runImpM compile ec ds src
   return (src',
           (fname,
            Imp.Function outparams inparams body' results args))
@@ -402,7 +411,7 @@ defCompilePrimOp (Destination [_]) (Assert e loc) =
   emit $ Imp.Assert (compileSubExp e) loc
 
 defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e) = do
-  emit $ Imp.Allocate mem e'
+  emit =<< (Imp.Allocate mem e' <$> asks envDefaultSpace)
   case size of Just size' -> emit $ Imp.SetScalar size' e'
                Nothing    -> return ()
   where e' = compileSubExp e
@@ -700,9 +709,10 @@ declaringVar patElem m =
       declaringVarEntry name entry m
     Mem size -> do
       size' <- subExpToDimSize size
+      space <- asks envDefaultSpace
       let entry = MemVar MemEntry {
               entryMemSize = size'
-            , entryMemSpace = Nothing
+            , entryMemSpace = space
             }
       declaringVarEntry name entry m
     Array bt shape _ -> do
@@ -973,14 +983,16 @@ copyIxFun :: BasicType
 copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ srcIxFun) n
   | Just destoffset <-
       scalExpToImpExp =<<
-      IxFun.linearWithOffset destIxFun bt_size ,
+      IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
       scalExpToImpExp =<<
-      IxFun.linearWithOffset srcIxFun bt_size =
+      IxFun.linearWithOffset srcIxFun bt_size = do
+        srcspace <- entryMemSpace <$> lookupMemory srcmem
+        destspace <- entryMemSpace <$> lookupMemory destmem
         return $ memCopy
-        destmem (bytes destoffset)
-        srcmem (bytes srcoffset)
-        n
+          destmem (bytes destoffset) destspace
+          srcmem (bytes srcoffset) srcspace
+          n
   | otherwise = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     declaringLoopVars is $ do
@@ -995,10 +1007,12 @@ copyIxFun bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ src
         index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
   where bt_size = basicScalarSize bt
 
-memCopy :: VName -> Count Bytes -> VName -> Count Bytes -> Count Bytes
+memCopy :: VName -> Count Bytes -> Imp.Space
+        -> VName -> Count Bytes -> Imp.Space
+        -> Count Bytes
         -> Imp.Code a
-memCopy dest (Count destoffset) src (Count srcoffset) (Count n) =
-  Imp.Copy dest destoffset src srcoffset n
+memCopy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count n) =
+  Imp.Copy dest destoffset destspace src srcoffset srcspace n
 
 copyElem :: BasicType
          -> MemLocation -> [SE.ScalExp]
