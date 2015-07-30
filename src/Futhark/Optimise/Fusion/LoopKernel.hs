@@ -571,11 +571,8 @@ rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
     drop 1 $ iterate (map rowType) ts)
    outer_indices)
   inps
-  where rearrange t = setArrayDims t $
-                      permuteShape (perm ++ [length perm..arrayRank t-1]) $
-                      arrayDims t
-        origts = MapNest.typeOf nest
-        ts =  map rearrange origts
+  where origts = MapNest.typeOf nest
+        ts =  map (rearrangeType perm) origts
 
         orig_indices =
           map MapNest.nestingIndex nestings ++ [Nest.nestBodyIndex body]

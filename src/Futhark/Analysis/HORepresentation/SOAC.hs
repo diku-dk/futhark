@@ -324,8 +324,7 @@ inputType (Input (ArrayTransforms ts) ia) =
           where u | unique t  = Unique
                   | otherwise = Nonunique
         transformType t (Rearrange _ perm) =
-          let Shape oldshape = arrayShape t
-          in t `setArrayShape` Shape (permuteShape perm oldshape)
+          rearrangeType perm t
         transformType t (Reshape _ shape) =
           t `setArrayShape` Shape shape
         transformType t (ReshapeOuter _ shape) =
