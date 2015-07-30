@@ -338,12 +338,14 @@ checkError (ThisError regex_s regex) err
 checkError _ _ =
   return ()
 
-runResult :: ExitCode -> String -> String -> TestM RunResult
-runResult ExitSuccess stdout_s _ =
+runResult :: FilePath -> ExitCode -> String -> String -> TestM RunResult
+runResult program ExitSuccess stdout_s _ =
   case parseValuesFromString "stdout" stdout_s of
-    Left e   -> throwError $ show e
+    Left e   -> do
+      actual <- io $ writeOutFile program "actual" stdout_s
+      throwError $ show e <> "\n(See " <> actual <> ")"
     Right vs -> return $ SuccessResult vs
-runResult (ExitFailure code) _ stderr_s =
+runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
 getValues :: MonadIO m => FilePath -> Values -> m [Value]
@@ -370,7 +372,7 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = d
     ExitFailure 127 ->
       throwError $ progNotFound futharki
     _               ->
-      compareResult program expectedResult' =<< runResult code output err
+      compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
 compileTestProgram :: String -> FilePath -> TestRun -> TestM ()
@@ -389,9 +391,11 @@ compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
   -- no path component.
   (progCode, output, progerr) <-
     io $ readProcessWithExitCode ("." </> binOutputf) [] input
-  compareResult program expectedResult' =<< runResult progCode output progerr
+  withExceptT validating $
+    compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
+        validating = ("validating test result:\n"++)
 
 justCompileTestProgram :: String -> FilePath -> TestM ()
 justCompileTestProgram futharkc program =
