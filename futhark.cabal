@@ -86,7 +86,7 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
-                   Futhark.KernelSequentialisation
+                   Futhark.KernelBabysitting
                    Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames

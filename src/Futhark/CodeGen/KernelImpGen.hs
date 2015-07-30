@@ -85,6 +85,17 @@ kernelCompiler target@(ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
       }
     return ImpGen.Done
 
+-- We generate a simple kernel for itoa and replicate.
+kernelCompiler target (PrimOp (Iota n)) = do
+  i <- newVName "i"
+  let fun = Lambda i [] (Body () [] [Var i]) [Basic Int]
+  kernelCompiler target $ LoopOp $ Map [] n fun []
+kernelCompiler target (PrimOp (Replicate n v)) = do
+  i <- newVName "i"
+  t <- subExpType v
+  let fun = Lambda i [] (Body () [] [v]) [t]
+  kernelCompiler target $ LoopOp $ Map [] n fun []
+
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
 
