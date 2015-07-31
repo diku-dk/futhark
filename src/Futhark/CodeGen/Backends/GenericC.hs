@@ -716,6 +716,16 @@ compileExp (BinOp bop x y) = do
                     ($exp:x' < 0 && $exp:y' < 0)) ?
                     0 : $exp:y')|]
 
+compileExp (UnsignedDivide x y) = do
+  x' <- compileExp x
+  y' <- compileExp y
+  return [C.cexp|$exp:x' / $exp:y'|]
+
+compileExp (UnsignedMod x y) = do
+  x' <- compileExp x
+  y' <- compileExp y
+  return [C.cexp|$exp:x' % $exp:y'|]
+
 compileExp (SizeOf t) =
   return [C.cexp|(sizeof($ty:t'))|]
   where t' = scalarTypeToCType t

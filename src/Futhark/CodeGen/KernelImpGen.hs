@@ -151,10 +151,10 @@ readThreadParams thread_index param arr = do
 setIndexVariable :: VName -> SubExp -> VName -> Imp.Exp -> Imp.Code
 setIndexVariable index w global_thread_index inner_size =
   Imp.SetScalar index $
-  (Imp.ScalarVar global_thread_index / inner_size)
+  (Imp.ScalarVar global_thread_index `Imp.UnsignedDivide` inner_size)
    `impMod` ImpGen.compileSubExp w
   where impMod x 1 = x
-        impMod x y = Imp.BinOp Mod x y
+        impMod x y = Imp.UnsignedMod x y
 
 type ReadParams = ImpGen.ImpM Imp.Kernel ()
 type WriteResult = ImpGen.ImpM Imp.Kernel ()

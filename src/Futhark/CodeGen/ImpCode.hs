@@ -113,6 +113,12 @@ data Exp = Constant BasicValue
          | Index VName Exp BasicType Space
          | ScalarVar VName
          | SizeOf BasicType
+         | UnsignedDivide Exp Exp -- Hack for doing address
+                                  -- calculations.  We should remove
+                                  -- this when we get around to
+                                  -- improving our binary operators
+                                  -- and scalar types.
+         | UnsignedMod Exp Exp -- Likewise.
            deriving (Eq, Show)
 
 data UnOp = Not -- ^ Boolean negation.
@@ -245,6 +251,16 @@ instance Pretty Exp where
     pprPrec (precedence op) x <+/>
     ppr op <+>
     pprPrec (rprecedence op) y
+  pprPrec p (UnsignedDivide x y) =
+    parensIf (p >= precedence IntDivide) $
+    pprPrec (precedence IntDivide) x <+/>
+    text "///" <+>
+    pprPrec (rprecedence IntDivide) y
+  pprPrec p (UnsignedMod x y) =
+    parensIf (p >= precedence Mod) $
+    pprPrec (precedence Mod) x <+/>
+    text "///" <+>
+    pprPrec (rprecedence Mod) y
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
   pprPrec _ (UnOp Complement x) =
@@ -391,6 +407,8 @@ instance FreeIn a => FreeIn (Code a) where
 instance FreeIn Exp where
   freeIn (Constant _) = mempty
   freeIn (BinOp _ x y) = freeIn x <> freeIn y
+  freeIn (UnsignedDivide x y) = freeIn x <> freeIn y
+  freeIn (UnsignedMod x y) = freeIn x <> freeIn y
   freeIn (UnOp _ x) = freeIn x
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
