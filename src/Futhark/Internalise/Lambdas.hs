@@ -28,10 +28,11 @@ type InternaliseLambda =
   E.Lambda -> Maybe [I.Type] -> InternaliseM ([I.LParam], I.Body, [I.ExtType])
 
 internaliseMapLambda :: InternaliseLambda
+                     -> (InternaliseM Certificates -> InternaliseM Certificates)
                      -> E.Lambda
                      -> [I.SubExp]
                      -> InternaliseM I.Lambda
-internaliseMapLambda internaliseLambda lam args = do
+internaliseMapLambda internaliseLambda asserting lam args = do
   argtypes <- mapM I.subExpType args
   let rowtypes = map I.rowType argtypes
   (params, body, rettype) <- internaliseLambda lam $ Just rowtypes
@@ -42,7 +43,7 @@ internaliseMapLambda internaliseLambda lam args = do
   shapefun <- makeShapeFun params shape_body (length inner_shapes)
   bindMapShapes inner_shapes shapefun args outer_shape
   body' <- bindingParamTypes params $
-           ensureResultShape (srclocOf lam) rettype' body
+           ensureResultShape asserting (srclocOf lam) rettype' body
   i <- newVName "i"
   return $ I.Lambda i params body' rettype'
 
@@ -92,10 +93,11 @@ bindMapShapes inner_shapes sizefun args outer_shape
           letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [intconst 0]
 
 internaliseFoldLambda :: InternaliseLambda
+                      -> (InternaliseM Certificates -> InternaliseM Certificates)
                       -> E.Lambda
                       -> [I.Type] -> [I.Type]
                       -> InternaliseM I.Lambda
-internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
+internaliseFoldLambda internaliseLambda asserting lam acctypes arrtypes = do
   let rowtypes = map I.rowType arrtypes
   (params, body, rettype) <- internaliseLambda lam $ Just $
                              acctypes ++ rowtypes
@@ -105,20 +107,20 @@ internaliseFoldLambda internaliseLambda lam acctypes arrtypes = do
   -- initial accumulator.  We accomplish this with an assertion and
   -- reshape().
   body' <- bindingParamTypes params $
-           ensureResultShape (srclocOf lam) rettype' body
+           ensureResultShape asserting (srclocOf lam) rettype' body
 
   i <- newVName "i"
 
   return $ I.Lambda i params body' rettype'
 
 
-internaliseRedomapInnerLambda ::
-                            InternaliseLambda
-                         -> E.Lambda
-                         -> [I.SubExp]
-                         -> [I.SubExp]
-                         -> InternaliseM I.Lambda
-internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
+internaliseRedomapInnerLambda :: InternaliseLambda
+                              -> (InternaliseM Certificates -> InternaliseM Certificates)
+                              -> E.Lambda
+                              -> [I.SubExp]
+                              -> [I.SubExp]
+                              -> InternaliseM I.Lambda
+internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
   arrtypes <- mapM I.subExpType arr_args
   acctypes <- mapM I.subExpType nes
   let rowtypes = map I.rowType arrtypes
@@ -158,16 +160,17 @@ internaliseRedomapInnerLambda internaliseLambda lam nes arr_args = do
   --
   -- finally, place assertions and return result
   body' <- bindingParamTypes params $
-           ensureResultShape (srclocOf lam) (acctype'++rettypearr') body
+           ensureResultShape asserting (srclocOf lam) (acctype'++rettypearr') body
   i <- newVName "i"
   return $ I.Lambda i params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
+                        -> (InternaliseM Certificates -> InternaliseM Certificates)
                         -> E.Lambda
                         -> [I.SubExp]
                         -> [I.Type]
                         -> InternaliseM I.ExtLambda
-internaliseStreamLambda internaliseLambda lam accs arrtypes = do
+internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
   acctypes <- mapM I.subExpType accs
   (params, body, rettype) <- internaliseLambda lam $ Just $
                              acctypes++arrtypes
@@ -185,7 +188,7 @@ internaliseStreamLambda internaliseLambda lam accs arrtypes = do
   --
   let assertProperShape t se =
         let name = "result_stream_proper_shape"
-        in  ensureShape (srclocOf lam) t name se
+        in  ensureShape asserting (srclocOf lam) t name se
   let acctype' = [ t `I.setArrayShape` arrayShape shape
                    | (t,shape) <- zip lam_acc_tps acctypes ]
   body' <- insertBindingsM $ do

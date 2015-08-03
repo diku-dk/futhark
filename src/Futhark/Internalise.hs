@@ -71,7 +71,7 @@ internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
-    body' <- ensureResultExtShape loc rettype' firstbody
+    body' <- ensureResultExtShape asserting loc rettype' firstbody
     let mkFParam = flip Param ()
     return $ FunDec
       fname (ExtRetType rettype')
@@ -266,7 +266,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   idxcs' <- boundsChecks loc srcs idxs'
   let comb sname ve' = do
         rowtype <- I.stripArray (length idxs) <$> lookupType sname
-        ve'' <- ensureShape loc rowtype "lw_val_correct_shape" ve'
+        ve'' <- ensureShape asserting loc rowtype "lw_val_correct_shape" ve'
         letInPlace "letwith_dst" idxcs' sname idxs' $
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
@@ -397,7 +397,7 @@ internaliseExp desc (E.Concat x ys loc) = do
 
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToVars "map_arr" arr
-  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs
+  lam' <- internaliseMapLambda internaliseLambda asserting lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.LoopOp $ I.Map [] w lam' arrs
 
@@ -406,10 +406,10 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   nes <- internaliseExp "reduce_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
     rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape loc rowtype "reduce_ne_right_shape" ne'
+    ensureShape asserting loc rowtype "reduce_ne_right_shape" ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
+  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.LoopOp $ I.Reduce [] w lam' input
@@ -419,10 +419,10 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   nes <- internaliseExp "scan_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
     rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape loc rowtype "scan_ne_right_shape" ne'
+    ensureShape asserting loc rowtype "scan_ne_right_shape" ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
+  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.LoopOp $ I.Scan [] w lam' input
@@ -464,8 +464,8 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
                         | t <- acc_tps ]
   nests <- mapM I.subExpType nes
-  lam1' <- internaliseFoldLambda internaliseLambda lam1 nests acc_arr_tps
-  lam2' <- internaliseRedomapInnerLambda internaliseLambda lam2
+  lam1' <- internaliseFoldLambda internaliseLambda asserting lam1 nests acc_arr_tps
+  lam2' <- internaliseRedomapInnerLambda internaliseLambda asserting lam2
            nes (map I.Var arrs')
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.LoopOp $
@@ -485,7 +485,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
                               | t <- rowts
                              ]
                  lamf = AnonymFun remparams body lamrtp pos
-             lam'' <- internaliseStreamLambda internaliseLambda lamf accs' lam_arrs'
+             lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
              return $ lam'' { extLambdaParams = I.Param chunk' () : extLambdaParams lam'' }
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
@@ -493,7 +493,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
                  acctps <- mapM I.subExpType accs'
                  outsz  <- arraysSize 0 <$> mapM lookupType arrs'
                  let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) (I.uniqueness t) | t <- acctps ]
-                 lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
+                 lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
                  return $ I.RedLike o lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
