@@ -173,9 +173,15 @@ transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs _)))
         | null (arrayDims t) = PrimOp $ SubExp $ Var v
         | otherwise          = PrimOp $ Reshape cs (arrayDims t) v
       reshapeRes _ se        = PrimOp $ SubExp se
-      res_bnds = [ mkLet' [] [ident] $ reshapeRes (identType ident) se
-                 | (ident,se) <- zip (patternIdents pat) res ]
-  mapM_ transformBinding $ body_bnds ++ res_bnds
+      res_bnds =
+        [ mkLet' [] [ident] $ reshapeRes (identType ident) se
+        | (ident,se) <- zip (patternValueIdents pat) res]
+  mapM_ transformBinding body_bnds
+  shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
+  forM_ (HM.toList shapemap) $ \(name,se) ->
+    when (name `elem` patternContextNames pat) $
+      transformBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
+  mapM_ transformBinding res_bnds
   where redForm (RedLike _ _ accs) = Just accs
         redForm (Sequential accs)  = Just accs
         redForm _                  = Nothing
