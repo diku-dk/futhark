@@ -90,7 +90,7 @@ instance Pretty num => Pretty (IxFun num n) where
     ppr fun <> text "->" <>
     parens (commasep (map ppr $ Vec.toList oldshape))
 
-instance Substitute num => Substitute (IxFun num n) where
+instance (Eq num, Fractional num, Substitute num) => Substitute (IxFun num n) where
   substituteNames subst (Direct offset n) =
     Direct (substituteNames subst offset) n
   substituteNames subst (Offset fun k) =
@@ -102,11 +102,11 @@ instance Substitute num => Substitute (IxFun num n) where
     (substituteNames subst fun)
     (Vec.map (substituteNames subst) is)
   substituteNames subst (Reshape fun newshape) =
-    Reshape
+    reshape
     (substituteNames subst fun)
     (Vec.map (substituteNames subst) newshape)
 
-instance (Substitute num, Rename num) => Rename (IxFun num n) where
+instance (Eq num, Fractional num, Substitute num, Rename num) => Rename (IxFun num n) where
   -- Because there is no mapM-like function on sized vectors, we
   -- implement renaming by retrieving the substitution map, then using
   -- 'substituteNames'.  This is safe as index functions do not
@@ -185,9 +185,14 @@ permute :: Fractional num =>
            IxFun num n -> Perm.Permutation n -> IxFun num n
 permute = Permute
 
-reshape :: Fractional num =>
+reshape :: forall num m n.(Eq num, Fractional num) =>
            IxFun num ('S m) -> Shape num n -> IxFun num n
-reshape = Reshape
+reshape ixfun newshape =
+  case rank ixfun `testEquality` Vec.sLength newshape of
+    Just Refl | shape ixfun == newshape ->
+      ixfun
+    _ ->
+      Reshape ixfun newshape
 
 applyInd :: forall num n m.
             Fractional num =>
