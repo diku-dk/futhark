@@ -309,10 +309,11 @@ internaliseExp _ (E.Zip (e:es) loc) = do
           outer:inner -> do
             cmp <- letSubExp "zip_cmp" $ I.PrimOp $
                    I.BinOp I.Equal e_outer outer I.Bool
-            c   <- letExp "zip_assert" $ I.PrimOp $
+            c   <- assertingOne $
+                   letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
             letExp (postfix e_unchecked' "_zip_res") $ I.PrimOp $
-              I.Reshape [c] (e_outer:inner) e_unchecked'
+              I.Reshape c (e_outer:inner) e_unchecked'
   es' <- mapM (mapM reshapeToOuter) es_unchecked'
   return $ concatMap (map I.Var) $ e' : es'
 
@@ -335,10 +336,11 @@ internaliseExp _ (E.Reshape shape e loc) = do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
     dims <- I.arrayDims <$> lookupType v
-    shapeOk <- letExp "shape_ok" =<<
+    shapeOk <- assertingOne $
+               letExp "shape_ok" =<<
                eAssert (eBinOp I.Equal (prod dims) (prod shape') I.Bool)
                loc
-    return $ I.Reshape [shapeOk] shape' v
+    return $ I.Reshape shapeOk shape' v
   where prod l = foldBinOp I.Times (intconst 1) l I.Int
 
 internaliseExp _ (E.Split splitexps arrexp loc) = do
@@ -348,11 +350,12 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
   arrayOuterdim <- arraysSize 0 <$> mapM lookupType arrs
 
   -- Assertions
-  let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
+  indexAsserts <- asserting $ do
+    let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
                      (I.intconst 0:splits') (splits'++[arrayOuterdim])
-  indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
-  indexAsserts <- mapM (\cnd -> letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc)
-                  indexChecks
+    indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
+    forM indexChecks$ \cnd ->
+      letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
   let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp I.Minus end beg I.Int)
@@ -379,7 +382,8 @@ internaliseExp desc (E.Concat x ys loc) = do
               eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m I.Bool) loc
             x_inner_dims  = drop 1 $ I.arrayDims xt
             ys_inner_dims = map (drop 1 . I.arrayDims) yts
-        matchcs <- concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
+        matchcs <- asserting $
+                   concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
                         yt <- lookupType yarr
                         letExp "concat_y_reshaped" $ I.PrimOp $
@@ -757,13 +761,26 @@ binOpCurriedToLambda op t e swap = do
           E.BinOp op x' y' t noLoc,
           E.vacuousShapeAnnotations $ E.toDecl t)
 
-boundsChecks :: SrcLoc -> [VName] -> [I.SubExp] -> InternaliseM I.Certificates
-boundsChecks _ []    _  = return []
-boundsChecks loc (v:_) es = do
+-- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
+-- just return an empty list.
+asserting :: InternaliseM I.Certificates
+          -> InternaliseM I.Certificates
+asserting m = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
-  then zipWithM (boundsCheck loc v) [0..] es
+  then m
   else return []
+
+-- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
+-- just return an empty list.
+assertingOne :: InternaliseM VName
+             -> InternaliseM I.Certificates
+assertingOne m = asserting $ liftM pure m
+
+boundsChecks :: SrcLoc -> [VName] -> [I.SubExp] -> InternaliseM I.Certificates
+boundsChecks _ []    _  = return []
+boundsChecks loc (v:_) es =
+  asserting $ zipWithM (boundsCheck loc v) [0..] es
 
 boundsCheck :: SrcLoc -> VName -> Int -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc v i e = do
