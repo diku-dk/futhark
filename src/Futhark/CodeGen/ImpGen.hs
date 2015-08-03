@@ -19,6 +19,7 @@ module Futhark.CodeGen.ImpGen
   , Env (envVtable, envDefaultSpace)
   , emit
   , collect
+  , comment
   , VarEntry (..)
 
     -- * Lookups
@@ -183,6 +184,12 @@ collect :: ImpM op () -> ImpM op (Imp.Code op)
 collect m = pass $ do
   ((), code) <- listen m
   return (code, const mempty)
+
+-- | Execute a code generation action, wrapping the generated code
+-- within a 'Imp.Comment' with the given description.
+comment :: String -> ImpM op () -> ImpM op ()
+comment desc m = do code <- collect m
+                    emit $ Imp.Comment desc code
 
 -- | Emit some generated imperative code.
 emit :: Imp.Code op -> ImpM op ()

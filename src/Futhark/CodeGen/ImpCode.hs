@@ -104,6 +104,10 @@ data Code a = Skip
             | Call [VName] Name [Exp]
             | If Exp (Code a) (Code a)
             | Assert Exp SrcLoc
+            | Comment String (Code a)
+              -- ^ Has the same semantics as the contained code, but
+              -- the comment should show up in generated code for ease
+              -- of inspection.
             | Op a
             deriving (Show)
 
@@ -238,6 +242,8 @@ instance Pretty op => Pretty (Code op) where
   ppr (Call dests fname args) =
     commasep (map ppr dests) <+> text "<-" <+>
     ppr fname <> parens (commasep $ map ppr args)
+  ppr (Comment s code) =
+    text "//" <+> text s </> ppr code
 
 ppSpace :: Space -> Doc
 ppSpace DefaultSpace = mempty
@@ -362,6 +368,8 @@ instance Traversable Code where
     pure $ Assert e loc
   traverse _ (Call dests fname args) =
     pure $ Call dests fname args
+  traverse f (Comment s code) =
+    Comment s <$> traverse f code
 
 declaredIn :: Code a -> Names
 declaredIn (DeclareMem name _) = HS.singleton name
@@ -403,6 +411,8 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn e
   freeIn (Op op) =
     freeIn op
+  freeIn (Comment _ code) =
+    freeIn code
 
 instance FreeIn Exp where
   freeIn (Constant _) = mempty

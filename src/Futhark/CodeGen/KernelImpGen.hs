@@ -39,8 +39,9 @@ kernelCompiler target@(ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
     kernelbody <- ImpGen.collect $
                   ImpGen.withParams [global_thread_index_param] $
                   ImpGen.declaringLParams (indices_lparams++params) $ do
-                    read_params
-                    ImpGen.compileBindings kernel_bnds write_result
+                    ImpGen.comment "read kernel parameters" read_params
+                    ImpGen.compileBindings kernel_bnds $
+                     ImpGen.comment "write kernel result" write_result
 
     -- Find the memory blocks containing the output arrays.
     let dest_mems = mapMaybe destMem dest

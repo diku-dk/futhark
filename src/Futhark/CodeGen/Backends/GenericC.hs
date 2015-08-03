@@ -756,6 +756,12 @@ compileCode (Op op) = do
 
 compileCode Skip = return ()
 
+compileCode (Comment s code) = do
+  items <- collect $ compileCode code
+  stm [C.cstm|$comment:("// " ++ s)
+              { $items:items }
+             |]
+
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e loc) = do
