@@ -8,6 +8,8 @@ import Control.Monad
 import Control.Monad.Writer
 import Data.Traversable hiding (forM)
 import qualified Data.HashSet as HS
+import Data.List
+import Data.Ord
 
 import Prelude
 
@@ -26,14 +28,15 @@ compileProg prog = do
   prog' <- KernelImpGen.compileProg prog
   let header = unlines [ "#include <CL/cl.h>\n" ]
   kernels <- forM (getKernels prog') $ \kernel -> do
-    kernel' <- compileKernel kernel
-    return (kernelName kernel, [C.cinit|$string:(openClKernelHeader kernel ++
-                                                 "\n" ++
-                                                 pretty kernel')|])
+    (kernel', used_functions) <- compileKernel kernel
+    return (kernelName kernel,
+            [C.cinit|$string:(openClKernelHeader used_functions kernel ++
+                              "\n" ++
+                              pretty kernel')|])
   return $
     header ++
-    GenericC.compileProg operations (openClDecls kernels) openClInit prog'
-  where operations :: GenericC.Operations Kernel
+    GenericC.compileProg operations () (openClDecls kernels) openClInit prog'
+  where operations :: GenericC.Operations Kernel ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel
                      , GenericC.opsWriteScalar = writeOpenCLScalar
@@ -43,7 +46,7 @@ compileProg prog = do
                      , GenericC.opsMemoryType = openclMemoryType
                      }
 
-writeOpenCLScalar :: GenericC.WriteScalar Kernel
+writeOpenCLScalar :: GenericC.WriteScalar Kernel ()
 writeOpenCLScalar mem i t "device" val = do
   val' <- newVName "write_tmp"
   GenericC.stm [C.cstm|{
@@ -58,7 +61,7 @@ writeOpenCLScalar mem i t "device" val = do
 writeOpenCLScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
 
-readOpenCLScalar :: GenericC.ReadScalar Kernel
+readOpenCLScalar :: GenericC.ReadScalar Kernel ()
 readOpenCLScalar mem i t "device" = do
   val <- newVName "read_res"
   GenericC.decl [C.cdecl|$ty:t $id:val;|]
@@ -74,7 +77,7 @@ readOpenCLScalar mem i t "device" = do
 readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
 
-allocateOpenCLBuffer :: GenericC.Allocate Kernel
+allocateOpenCLBuffer :: GenericC.Allocate Kernel ()
 allocateOpenCLBuffer mem size "device" = do
   errorname <- newVName "clCreateBuffer_succeeded"
   -- clCreateBuffer fails with CL_INVALID_BUFFER_SIZE if we pass 0 as
@@ -94,7 +97,7 @@ allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
 
-copyOpenCLMemory :: GenericC.Copy Kernel
+copyOpenCLMemory :: GenericC.Copy Kernel ()
 -- The read/write/copy-buffer functions fail if the given offset is
 -- out of bounds, even if asked to read zero bytes.  We protect with a
 -- branch to avoid this.
@@ -137,12 +140,12 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
-openclMemoryType :: GenericC.MemoryType Kernel
+openclMemoryType :: GenericC.MemoryType Kernel ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
 openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
-callKernel :: GenericC.OpCompiler Kernel
+callKernel :: GenericC.OpCompiler Kernel ()
 callKernel kernel = do
   zipWithM_ mkBuffer [(0::Int)..] $ kernelUses kernel
   global_work_size <- newVName "global_work_size"
@@ -183,7 +186,13 @@ pointerQuals "read_only"  = return [C.ctyquals|__read_only|]
 pointerQuals "kernel"     = return [C.ctyquals|__kernel|]
 pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel address space."
 
-inKernelOperations :: GenericC.Operations Kernel
+type UsedFunctions = [(String,C.Func)] -- The ordering is important!
+
+usedFunction :: String -> C.Func -> GenericC.CompilerM op UsedFunctions ()
+usedFunction name func =
+  GenericC.modifyUserState $ insertBy (comparing fst) (name, func)
+
+inKernelOperations :: GenericC.Operations Kernel UsedFunctions
 inKernelOperations = GenericC.Operations
                      { GenericC.opsCompiler = failOnKernels
                      , GenericC.opsMemoryType = kernelMemoryType
@@ -192,16 +201,20 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsCopy = copyInKernel
                      }
-  where failOnKernels :: GenericC.OpCompiler Kernel
+  where failOnKernels :: GenericC.OpCompiler Kernel UsedFunctions
         failOnKernels kernel =
           fail $ "Asked to call kernel " ++ kernelName kernel ++ " while already inside a kernel"
 
-        cannotAllocate :: GenericC.Allocate Kernel
+        cannotAllocate :: GenericC.Allocate Kernel UsedFunctions
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
 
-        copyInKernel :: GenericC.Copy Kernel
-        copyInKernel dest destidx (Space "global") src srcidx (Space "global") nbytes =
+        copyInKernel :: GenericC.Copy Kernel UsedFunctions
+        copyInKernel dest destidx (Space "global") src srcidx (Space "global") nbytes = do
+          usedFunction "memcpy" $
+            genericMemcpy [C.ctyquals|__global|] [C.ctyquals|__global|]
+          usedFunction "memmove" $
+            genericMemmove [C.ctyquals|__global|] [C.ctyquals|__global|]
           GenericC.stm [C.cstm|memmove($id:dest + $exp:destidx,
                                        $id:src + $exp:srcidx,
                                        $exp:nbytes);|]
@@ -212,10 +225,10 @@ inKernelOperations = GenericC.Operations
           quals <- pointerQuals space
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
-compileKernel :: Kernel -> Either String C.Func
+compileKernel :: Kernel -> Either String (C.Func, UsedFunctions)
 compileKernel kernel =
-  let (funbody,_) =
-        GenericC.runCompilerM (Program []) inKernelOperations blankNameSource $
+  let (funbody,s) =
+        GenericC.runCompilerM (Program []) inKernelOperations blankNameSource mempty $
         GenericC.collect $ GenericC.compileCode $ kernelBody kernel
 
       asParam (ScalarUse name bt) =
@@ -225,10 +238,11 @@ compileKernel kernel =
         [C.cparam|__global unsigned char *$id:name|]
 
       params = map asParam $ kernelUses kernel
-  in Right [C.cfun|__kernel void $id:(kernelName kernel) ($params:params) {
-               const uint $id:(kernelThreadNum kernel) = get_global_id(0);
-               $items:funbody
-            }|]
+  in Right ([C.cfun|__kernel void $id:(kernelName kernel) ($params:params) {
+                 const uint $id:(kernelThreadNum kernel) = get_global_id(0);
+                 $items:funbody
+             }|],
+            GenericC.compUserState s)
 
 openClDecls :: [(String, C.Initializer)] -> [C.Definition]
 openClDecls kernels =
@@ -344,10 +358,10 @@ getKernels = execWriter . traverse getFunKernels
   where getFunKernels kernel =
           tell [kernel] >> return kernel
 
-openClKernelHeader :: Kernel -> String
-openClKernelHeader kernel =
+openClKernelHeader :: UsedFunctions -> Kernel -> String
+openClKernelHeader used_functions kernel =
   unlines $
-  pragmas ++ map pretty (utilityFunctions ++ funs32_used ++ funs64_used)
+  pragmas ++ map pretty (map snd used_functions ++ funs32_used ++ funs64_used)
   where kernel_funs = functionsCalled $ kernelBody kernel
         used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
         funs32_used = map snd $ filter used_in_kernel funs32
@@ -446,10 +460,3 @@ genericMemmove dest_quals src_quals =
     return dest;
   }
    |]
-
-utilityFunctions :: [C.Func]
-utilityFunctions =
-  [ genericMemcpy [C.ctyquals|__global|] [C.ctyquals|__global|],
-
-    genericMemmove [C.ctyquals|__global|] [C.ctyquals|__global|]
-  ]
