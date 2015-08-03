@@ -9,6 +9,7 @@ module Futhark.KernelBabysitting
        ( babysitKernels )
        where
 
+import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
