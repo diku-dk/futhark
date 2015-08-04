@@ -14,6 +14,8 @@ module Futhark.CodeGen.KernelImp
   )
   where
 
+import Data.Monoid
+
 import qualified Data.HashSet as HS
 import Text.PrettyPrint.Mainland
 
