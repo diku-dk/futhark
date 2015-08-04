@@ -17,6 +17,7 @@ module Futhark.CodeGen.ImpGen
     -- * Monadic Compiler Interface
   , ImpM
   , Env (envVtable, envDefaultSpace)
+  , subImpM
   , emit
   , collect
   , comment
@@ -177,6 +178,17 @@ runImpM :: ImpM op a
         -> ExpCompiler op -> Imp.Space -> VNameSource
         -> Either String (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) comp = runRWST m . newEnv comp
+
+subImpM :: ExpCompiler op' -> ImpM op' ()
+        -> ImpM op (Imp.Code op')
+subImpM comp (ImpM m) = do
+  env <- ask
+  src <- getNameSource
+  case execRWST m env { envExpCompiler = comp } src of
+    Left err -> fail err
+    Right (src', code) -> do
+      putNameSource src'
+      return code
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
