@@ -23,6 +23,6 @@ fun {real,[real],real,[real],real,[real]} main([real] arr) =
     let x  = map   (+1.0,   arr) in
     let r2 = reduce(*, 1.0, x  ) in
     let y  = map(mul2(x),   iota(size(0,x  ))) in
-    let z  = map(toFloat64, iota(size(0,arr))) in
+    let z  = map(toFloat, iota(size(0,arr))) in
     let r3 = reduce(+, 0.0, z) in
     {r1,x,r2,y,r3,z}
