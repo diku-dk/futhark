@@ -243,7 +243,7 @@ instance Pretty op => Pretty (Code op) where
     commasep (map ppr dests) <+> text "<-" <+>
     ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
-    text "//" <+> text s </> ppr code
+    text "--" <+> text s </> ppr code
 
 ppSpace :: Space -> Doc
 ppSpace DefaultSpace = mempty
