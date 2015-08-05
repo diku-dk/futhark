@@ -9,7 +9,6 @@ import Control.Monad.Writer
 import Data.Traversable hiding (forM)
 import qualified Data.HashSet as HS
 import Data.List
-import Data.Ord
 
 import Prelude
 
@@ -190,8 +189,10 @@ pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel addres
 type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 
 usedFunction :: String -> C.Func -> GenericC.CompilerM op UsedFunctions ()
-usedFunction name func =
-  GenericC.modifyUserState $ insertBy (comparing fst) (name, func)
+usedFunction name func = GenericC.modifyUserState insertIfMissing
+  where insertIfMissing funcs
+          | name `elem` map fst funcs = funcs
+          | otherwise                 = funcs ++ [(name, func)]
 
 inKernelOperations :: GenericC.Operations InKernel UsedFunctions
 inKernelOperations = GenericC.Operations
