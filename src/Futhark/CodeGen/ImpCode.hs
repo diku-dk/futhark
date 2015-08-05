@@ -265,7 +265,7 @@ instance Pretty Exp where
   pprPrec p (UnsignedMod x y) =
     parensIf (p >= precedence Mod) $
     pprPrec (precedence Mod) x <+/>
-    text "///" <+>
+    text "%%" <+>
     pprPrec (rprecedence Mod) y
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
