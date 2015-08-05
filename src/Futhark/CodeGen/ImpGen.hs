@@ -509,7 +509,7 @@ defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
   (ArrayLit es rt) = do
     let rowshape = map (elements . compileSubExp) $ arrayDims rt
-        rowsize = product (drop 1 rowshape) `withElemType` et
+        rowsize = product rowshape `withElemType` et
     forM_ (zip [0..] es) $ \(i,e) ->
       if basicType rt then do
         (targetmem, space, targetoffset) <-
