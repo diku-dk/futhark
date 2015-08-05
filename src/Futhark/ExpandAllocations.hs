@@ -10,6 +10,7 @@ import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
+import Data.List
 
 import Prelude
 
@@ -64,7 +65,12 @@ transformExp (LoopOp (Map cs w fun args))
   -- thread number.
   let thread_num = lambdaIndex fun
       alloc_offsets =
-        HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp) thread_allocs
+        OffsetMap { offsetMap =
+                    HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp)
+                    thread_allocs
+                  , indexVariable = lambdaIndex fun
+                  , kernelWidth = w
+                  }
       fun' = fun { lambdaBody =
                        offsetMemorySummariesInBody alloc_offsets body
                  }
@@ -110,36 +116,62 @@ extractKernelAllocations lam = do
         isAlloc allocs bnd =
           return (allocs, Just bnd)
 
-offsetMemorySummariesInBody :: HM.HashMap VName SE.ScalExp -> Body -> Body
+data OffsetMap = OffsetMap {
+    offsetMap :: HM.HashMap VName SE.ScalExp
+    -- ^ A map from memory block names to offsets.
+  , indexVariable :: VName
+  , kernelWidth :: SubExp
+  }
+
+lookupOffset :: VName -> OffsetMap -> Maybe SE.ScalExp
+lookupOffset name = HM.lookup name . offsetMap
+
+offsetByIndex :: VName -> SubExp -> OffsetMap -> OffsetMap
+offsetByIndex name size (OffsetMap offsets index width) =
+  OffsetMap (HM.insert name offset offsets) index width
+  where offset = SE.intSubExpToScalExp size /
+                 SE.intSubExpToScalExp width * SE.Id index Int
+
+offsetMemorySummariesInBody :: OffsetMap -> Body -> Body
 offsetMemorySummariesInBody offsets (Body attr bnds res) =
-  Body attr (map (offsetMemorySummariesInBinding offsets) bnds) res
+  Body attr (snd $ mapAccumL offsetMemorySummariesInBinding offsets bnds) res
 
-offsetMemorySummariesInBinding :: HM.HashMap VName SE.ScalExp -> Binding -> Binding
+offsetMemorySummariesInBinding :: OffsetMap -> Binding
+                               -> (OffsetMap, Binding)
 offsetMemorySummariesInBinding offsets (Let pat attr e) =
-  Let
-  (offsetMemorySummariesInPattern offsets pat)
-  attr
-  (offsetMemorySummariesInExp offsets e)
+  (offsets', Let pat' attr $ offsetMemorySummariesInExp offsets e)
+  where (offsets', pat') = offsetMemorySummariesInPattern offsets pat
 
-offsetMemorySummariesInPattern :: HM.HashMap VName SE.ScalExp -> Pattern -> Pattern
+offsetMemorySummariesInPattern :: OffsetMap -> Pattern -> (OffsetMap, Pattern)
 offsetMemorySummariesInPattern offsets (Pattern ctx vals) =
-  Pattern (map inspect ctx) (map inspect vals)
-  where inspect patElem =
+  (offsets', Pattern ctx vals')
+  where offsets' = foldl inspectCtx offsets ctx
+        vals' = map inspectVal vals
+        inspectVal patElem =
           patElem { patElemLore =
-                       offsetMemorySummariesInMemSummary offsets $ patElemLore patElem }
+                       offsetMemorySummariesInMemSummary offsets' $ patElemLore patElem
+                  }
+        inspectCtx ctx_offsets patElem
+          | Mem size <- patElemType patElem =
+              offsetByIndex (patElemName patElem) size ctx_offsets
+          | otherwise =
+              ctx_offsets
 
-offsetMemorySummariesInFParam :: HM.HashMap VName SE.ScalExp -> FParam -> FParam
+offsetMemorySummariesInFParam :: OffsetMap -> FParam -> FParam
 offsetMemorySummariesInFParam offsets fparam =
   fparam { paramLore = offsetMemorySummariesInMemSummary offsets $ paramLore fparam }
 
-offsetMemorySummariesInMemSummary :: HM.HashMap VName SE.ScalExp -> MemSummary -> MemSummary
+offsetMemorySummariesInMemSummary :: OffsetMap -> MemSummary -> MemSummary
 offsetMemorySummariesInMemSummary offsets (MemSummary mem ixfun)
-  | Just offset <- HM.lookup mem offsets =
+  | Just offset <- lookupOffset mem offsets,
+    -- XXX FIXME HACK - the problem is making sure multiple runs of
+    -- the pass won't mess up anything.
+    IxFun.underlyingOffset ixfun == 0 =
       MemSummary mem $ IxFun.offsetUnderlying ixfun offset
 offsetMemorySummariesInMemSummary _ summary =
   summary
 
-offsetMemorySummariesInExp :: HM.HashMap VName SE.ScalExp -> Exp -> Exp
+offsetMemorySummariesInExp :: OffsetMap -> Exp -> Exp
 offsetMemorySummariesInExp offsets (LoopOp (DoLoop res merge form body)) =
   LoopOp $ DoLoop res (zip mergeparams' mergeinit) form body'
   where (mergeparams, mergeinit) = unzip merge

@@ -11,6 +11,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , reshape
        , applyInd
        , offsetUnderlying
+       , underlyingOffset
        , codomain
        , shape
        , linearWithOffset
@@ -224,6 +225,19 @@ offsetUnderlying (Index n ixfun is) k =
 offsetUnderlying (Reshape ixfun dims) k =
   Reshape (offsetUnderlying ixfun k) dims
 
+underlyingOffset :: Fractional num =>
+                    IxFun num n -> num
+underlyingOffset (Direct offset _) =
+  offset
+underlyingOffset (Offset ixfun _) =
+  underlyingOffset ixfun
+underlyingOffset (Permute ixfun _) =
+  underlyingOffset ixfun
+underlyingOffset (Index _ ixfun _) =
+  underlyingOffset ixfun
+underlyingOffset (Reshape ixfun _) =
+  underlyingOffset ixfun
+
 codomain :: Fractional num =>
             IxFun num n -> SymSet n
 codomain = undefined
@@ -263,7 +277,7 @@ shape (Reshape _ dims) =
   dims
 
 -- This function does not cover all possible cases.  It's a "best
--- effort" kind of thing.  We really miss a case for Index, though.
+-- effort" kind of thing.
 linearWithOffset :: forall n num. Fractional num =>
                     IxFun num n -> num -> Maybe num
 linearWithOffset (Direct offset _) _ =
@@ -276,6 +290,15 @@ linearWithOffset (Offset ixfun n) element_size = do
       return $ inner_offset + (n * rowslice * element_size)
 linearWithOffset (Reshape ixfun _) element_size =
  linearWithOffset ixfun element_size
+linearWithOffset (Index n ixfun (is :: Indices num m)) element_size = do
+  inner_offset <- linearWithOffset ixfun element_size
+  case propToBoolLeq $ plusLeqL m n of
+    Dict ->
+      let slices :: Vector num m
+          slices = Vec.take m $ Vec.tail $ sliceSizes $ shape ixfun
+      in Just $ inner_offset + Vec.sum (Vec.zipWith (*) slices is) * element_size
+  where m :: SNat m
+        m = Vec.sLength is
 linearWithOffset _ _ = Nothing
 
 instance FreeIn num => FreeIn (IxFun num n) where
