@@ -134,7 +134,7 @@ instance (PrettyLore lore) => PrettyLore (Ranges lore) where
               (Nothing, Nothing) -> Nothing
               range ->
                 Just $ oneline $
-                PP.text "// " <> PP.ppr (patElemName patelem) <> PP.text " range: " <>
+                PP.text "-- " <> PP.ppr (patElemName patelem) <> PP.text " range: " <>
                 PP.ppr range
           oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
 

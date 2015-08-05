@@ -568,7 +568,7 @@ bindeeAnnot bindeeName bindeeLore bindee =
   case bindeeLore bindee of
     MemSummary ident fun ->
       Just $
-      PP.text "// " <>
+      PP.text "-- " <>
       PP.ppr (bindeeName bindee) <>
       PP.text "@" <>
       PP.ppr ident <>

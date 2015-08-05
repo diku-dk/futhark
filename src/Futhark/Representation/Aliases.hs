@@ -173,7 +173,7 @@ instance (PrettyLore lore) => PrettyLore (Aliases lore) where
     where expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
             als -> Just $ oneline $
-                   PP.text "// Consumes " <> PP.commasep (map PP.ppr als)
+                   PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
 
           patElemAttrs =
             maybeComment $ mapMaybe patElemAttr $ patternElements pat
@@ -213,7 +213,7 @@ aliasComment name als =
   case HS.toList als of
     [] -> Nothing
     als' -> Just $ oneline $
-            PP.text "// " <> PP.ppr name <> PP.text " aliases " <>
+            PP.text "-- " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
 resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
@@ -222,7 +222,7 @@ resultAliasComment name als =
   case HS.toList als of
     [] -> Nothing
     als' -> Just $ oneline $
-            PP.text "// Result of " <> PP.ppr name <> PP.text " aliases " <>
+            PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
 removeAliases :: Rephraser (Aliases lore) lore
