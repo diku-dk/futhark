@@ -71,9 +71,10 @@ transformExp (LoopOp (Map cs w fun args))
                   , indexVariable = lambdaIndex fun
                   , kernelWidth = w
                   }
-      fun' = fun { lambdaBody =
-                       offsetMemorySummariesInBody alloc_offsets body
-                 }
+      fun' = if null alloc_bnds then fun
+             else fun { lambdaBody =
+                        offsetMemorySummariesInBody alloc_offsets body
+                      }
   return (alloc_bnds, LoopOp (Map cs w fun' args))
 transformExp e =
   return ([], e)
@@ -163,10 +164,7 @@ offsetMemorySummariesInFParam offsets fparam =
 
 offsetMemorySummariesInMemSummary :: OffsetMap -> MemSummary -> MemSummary
 offsetMemorySummariesInMemSummary offsets (MemSummary mem ixfun)
-  | Just offset <- lookupOffset mem offsets,
-    -- XXX FIXME HACK - the problem is making sure multiple runs of
-    -- the pass won't mess up anything.
-    IxFun.underlyingOffset ixfun == 0 =
+  | Just offset <- lookupOffset mem offsets =
       MemSummary mem $ IxFun.offsetUnderlying ixfun offset
 offsetMemorySummariesInMemSummary _ summary =
   summary
@@ -179,4 +177,13 @@ offsetMemorySummariesInExp offsets (LoopOp (DoLoop res merge form body)) =
         mergeparams' = map (offsetMemorySummariesInFParam offsets) mergeparams
 offsetMemorySummariesInExp offsets e = mapExp recurse e
   where recurse = identityMapper { mapOnBody = return . offsetMemorySummariesInBody offsets
+                                 , mapOnLambda = return . offsetMemorySummariesInLambda offsets
                                  }
+
+offsetMemorySummariesInLambda :: OffsetMap -> Lambda -> Lambda
+offsetMemorySummariesInLambda offsets lam =
+  lam { lambdaParams = params,
+        lambdaBody = body
+      }
+  where params = map (offsetMemorySummariesInFParam offsets) $ lambdaParams lam
+        body = offsetMemorySummariesInBody offsets $ lambdaBody lam
