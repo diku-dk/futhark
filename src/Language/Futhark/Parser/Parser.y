@@ -624,7 +624,7 @@ getRealValue x = do f <- lift $ asks parserRealFun
 
 getFunName :: Name -> ParserMonad Name
 getFunName name = do substs <- lift $ asks parserFunMap
-                     return $ fromMaybe name $ HM.lookup name substs
+                     return $ HM.lookupDefault name name substs
 
 readLine :: ParserMonad String
 readLine = lift $ lift $ lift readLineFromMonad

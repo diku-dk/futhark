@@ -305,7 +305,7 @@ substNamesInExtType subs (Array btp shp u) =
 substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
-  fromMaybe (Var idd) (HM.lookup idd subs)
+  HM.lookupDefault (Var idd) idd subs
 substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o

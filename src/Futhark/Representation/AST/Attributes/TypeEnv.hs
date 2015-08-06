@@ -35,7 +35,7 @@ class Applicative m => HasTypeEnv m where
   -- the type environment.
   lookupType :: VName -> m Type
   lookupType name =
-    fromMaybe notFound <$> HM.lookup name <$> askTypeEnv
+    HM.lookupDefault notFound name <$> askTypeEnv
     where notFound =
             error $ "TypeEnv.lookupType: Name " ++ textual name ++
             " not found in type environment."

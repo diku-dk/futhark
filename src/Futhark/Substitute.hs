@@ -10,7 +10,6 @@ module Futhark.Substitute
   where
 
 import Control.Monad.Identity
-import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
@@ -54,7 +53,7 @@ instance Substitute Bool where
   substituteNames = flip const
 
 instance Substitute VName where
-  substituteNames substs k = fromMaybe k $ HM.lookup k substs
+  substituteNames substs k = HM.lookupDefault k k substs
 
 instance Substitute SubExp where
   substituteNames substs (Var v) = Var $ substituteNames substs v

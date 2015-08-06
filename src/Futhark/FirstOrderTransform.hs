@@ -470,7 +470,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
         exToNormShapeDim d _ (Ext   _) = d
         exToNormShapeDim _ _ (Free c@(Constant _)) = c
         exToNormShapeDim _ subs (Free (Var idd)) =
-          fromMaybe (Var idd) $ HM.lookup idd subs
+          HM.lookupDefault (Var idd) idd subs
         existUpperBound :: SubExp -> Bool -> MEQType
         existUpperBound outerSize b =
             if not b then UnknownBd

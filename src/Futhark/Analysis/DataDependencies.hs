@@ -6,8 +6,6 @@ module Futhark.Analysis.DataDependencies
   )
   where
 
-import Data.Maybe
-
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
@@ -108,7 +106,7 @@ depsOf _ (Constant _) = HS.empty
 depsOf deps (Var v)   = depsOfVar deps v
 
 depsOfVar :: Dependencies -> VName -> Names
-depsOfVar deps name = HS.insert name $ fromMaybe HS.empty $ HM.lookup name deps
+depsOfVar deps name = HS.insert name $ HM.lookupDefault HS.empty name deps
 
 mkDeps :: [Ident] -> [Names] -> Dependencies
 mkDeps idents names = HM.fromList $ zip (map identName idents) names
