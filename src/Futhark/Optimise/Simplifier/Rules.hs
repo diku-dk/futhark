@@ -241,8 +241,8 @@ removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
 removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form body)))
   | not $ all (explicitlyReturned . fst) merge =
   let es = bodyResult body
-      returnedResultSubExps = map snd $ filter (explicitlyReturned . fst) $ zip mergepat es
-      necessaryForReturned = mconcat $ map dependencies returnedResultSubExps
+      necessaryForReturned =
+        findNecessaryForReturned explicitlyReturned (zip mergepat es) (dataDependencies body)
       resIsNecessary ((v,_), _) =
         explicitlyReturned v ||
         paramName v `HS.member` necessaryForReturned ||
@@ -276,13 +276,26 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
           | unique (paramType p),
             Var v <- e            = ([paramName p], PrimOp $ Copy v)
           | otherwise             = ([paramName p], PrimOp $ SubExp e)
-
-        allDependencies = dataDependencies body
-        dependencies (Constant _) = HS.empty
-        dependencies (Var v)        =
-          fromMaybe HS.empty $ HM.lookup v allDependencies
 removeRedundantMergeVariables _ _ =
   cannotSimplify
+
+findNecessaryForReturned :: (Param attr -> Bool) -> [(Param attr, SubExp)]
+                         -> HM.HashMap VName Names
+                         -> Names
+findNecessaryForReturned explicitlyReturned merge_and_res allDependencies =
+  iterateNecessary mempty
+  where iterateNecessary prev_necessary
+          | necessary == prev_necessary = necessary
+          | otherwise                   = iterateNecessary necessary
+          where necessary = mconcat $ map dependencies returnedResultSubExps
+                explicitlyReturnedOrNecessary param =
+                  explicitlyReturned param || paramName param `HS.member` prev_necessary
+                returnedResultSubExps =
+                  map snd $ filter (explicitlyReturnedOrNecessary . fst) merge_and_res
+                dependencies (Constant _) =
+                  HS.empty
+                dependencies (Var v)      =
+                  HM.lookupDefault HS.empty v allDependencies
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
