@@ -524,6 +524,7 @@ optimiseKernel bnd = fromMaybe bnd $ tryOptimiseKernel bnd
 tryOptimiseKernel :: Binding -> Maybe Binding
 tryOptimiseKernel bnd = kernelIsRearrange bnd <|>
                         kernelIsReshape bnd <|>
+                        kernelIsCopy bnd <|>
                         kernelBodyOptimisable bnd
 
 singleBindingBody :: Body -> Maybe Binding
@@ -575,6 +576,24 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
           delve _ _ =
             Nothing
 kernelIsReshape _ = Nothing
+
+kernelIsCopy :: Binding -> Maybe Binding
+kernelIsCopy (Let (Pattern [] [outer_patElem]) ()
+              (LoopOp (Map _ _ outer_fun [outer_arr]))) =
+  delve outer_fun
+  where delve (Lambda _ [param] body _)
+          | Just (PrimOp (Copy arr)) <- singleExpBody body,
+            paramName param == arr =
+            Just $ Let (Pattern [] [outer_patElem]) () $
+            PrimOp $ Copy outer_arr
+
+          | Just (LoopOp (Map _ _ fun [arr])) <- singleExpBody body,
+            paramName param == arr =
+            delve fun
+
+        delve _ =
+          Nothing
+kernelIsCopy _ = Nothing
 
 kernelBodyOptimisable :: Binding -> Maybe Binding
 kernelBodyOptimisable (Let pat () (LoopOp (Map cs w fun arrs))) = do
