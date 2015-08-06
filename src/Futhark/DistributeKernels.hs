@@ -500,10 +500,6 @@ maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
         reduceOrScan _ =
            Nothing
 
-maybeDistributeBinding bnd@(Let _ _ (LoopOp {})) acc = do
-  acc' <- distribute acc
-  distribute =<< addBindingToKernel bnd acc'
-
 maybeDistributeBinding bnd@(Let _ _ (PrimOp (Rearrange {}))) acc = do
   acc' <- distribute acc
   distribute =<< addBindingToKernel bnd acc'
