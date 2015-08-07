@@ -47,7 +47,7 @@ data IxFun :: * -> Nat -> * where
   Index :: SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
   Reshape :: IxFun num ('S m) -> Shape num n -> IxFun num n
 
---- XXX: this is just structural equality, which may be too
+--- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
 instance (Fractional num, Eq num) => Eq (IxFun num n) where
   Direct offset1 _ == Direct offset2 _ =
@@ -70,7 +70,7 @@ instance (Fractional num, Eq num) => Eq (IxFun num n) where
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
     case testEquality (rank ixfun1) (rank ixfun2) of
       Just Refl ->
-        ixfun1 == ixfun2 && shape1 == shape2
+        ixfun1 == ixfun2 && Vec.length shape1 == Vec.length shape2
       _ -> False
   _ == _ = False
 
@@ -188,6 +188,10 @@ permute = Permute
 
 reshape :: forall num m n.(Eq num, Fractional num) =>
            IxFun num ('S m) -> Shape num n -> IxFun num n
+reshape (Direct offset _) newshape =
+  Direct offset newshape
+reshape (Reshape ixfun _) newshape =
+  reshape ixfun newshape
 reshape ixfun newshape =
   case rank ixfun `testEquality` Vec.sLength newshape of
     Just Refl | shape ixfun == newshape ->
