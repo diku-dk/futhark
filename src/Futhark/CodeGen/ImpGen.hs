@@ -524,8 +524,21 @@ defCompilePrimOp
           emit =<< copyIxFun et targetloc srcloc rowsize
   where et = elemType rt
 
-defCompilePrimOp _ (Rearrange {}) =
-    return ()
+defCompilePrimOp (Destination [ArrayDestination memdest shape]) (Rearrange _ perm src)
+  | CopyIntoMemory (MemLocation destmem destshape destixfun) <- memdest = do
+    et <- elemType <$> lookupType src
+    arr <- lookupArray src
+    let MemLocation srcmem srcshape srcixfun = entryArrayLocation arr
+        arrsize = arrayByteSizeExp arr
+    emit =<< copyIxFun et
+      (MemLocation destmem destshape destixfun)
+      (MemLocation srcmem srcshape $ IxFun.permute srcixfun perm)
+      arrsize
+    zipWithM_ maybeSetShape shape $ entryArrayShape arr
+  where maybeSetShape Nothing _ =
+          return ()
+        maybeSetShape (Just dim) size =
+          emit $ Imp.SetScalar dim $ innerExp $ dimSizeToExp size
 
 defCompilePrimOp _ (Reshape {}) =
   return ()
