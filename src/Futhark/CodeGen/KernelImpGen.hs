@@ -14,6 +14,8 @@ import Data.List
 
 import Prelude
 
+import Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.KernelImp as Imp
@@ -101,6 +103,40 @@ kernelCompiler target (PrimOp (Replicate n v)) = do
   t <- subExpType v
   let fun = Lambda i [] (Body () [] [v]) [t]
   kernelCompiler target $ LoopOp $ Map [] n fun []
+
+-- We also generate kernels for rearrange.
+kernelCompiler
+  (ImpGen.Destination [ImpGen.ArrayDestination memloc shape])
+  (PrimOp (Rearrange _ perm src))
+  | ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun) <- memloc = do
+      srct <- lookupType src
+      let src_et = elemType srct
+          ixfun' =
+            IxFun.permute ixfun $ permuteInverse perm
+          dims' =
+            permuteShape (permuteInverse perm) dims
+          kernel_target =
+            ImpGen.ArrayDestination
+            (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims' ixfun')) shape
+
+          makeNest [] is =
+            return $ PrimOp $ Index [] src is
+          makeNest (outer:inner) is = do
+            index <- newVName "rearrange_index"
+            level_res <- newIdent "rearrange_level_res" $
+                         arrayOf (Basic src_et) (Shape inner) (uniqueness srct)
+            inner_e <- makeNest inner (is++[Var index])
+            let summary = if null inner then Scalar
+                          else MemSummary mem $ IxFun.applyInd ixfun' $
+                               map SE.intSubExpToScalExp $ is++[Var index]
+                pat = Pattern [] [PatElem level_res BindVar summary]
+                bnd = Let pat () inner_e
+                lambda = Lambda index [] (Body() [bnd] [Var $ identName level_res])
+                         [identType level_res]
+            return $ LoopOp $ Map [] outer lambda []
+
+      map_nest <- makeNest (arrayDims srct) []
+      kernelCompiler (ImpGen.Destination [kernel_target]) map_nest
 
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
