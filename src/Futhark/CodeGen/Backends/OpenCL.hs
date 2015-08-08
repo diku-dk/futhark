@@ -151,15 +151,27 @@ callKernel kernel = do
   global_work_size <- newVName "global_work_size"
   let kernel_size = GenericC.dimSizeToExp $ kernelSize kernel
 
+  time_start <- newVName "time_start"
+  time_end <- newVName "time_end"
+  time_diff <- newVName "time_diff"
+
   GenericC.stm [C.cstm|{
     size_t $id:global_work_size = $exp:kernel_size;
+    struct timeval $id:time_start, $id:time_end, $id:time_diff;
+    fprintf(stderr, "kernel size %s: %d\n", $string:(textual global_work_size), $id:global_work_size);
+    gettimeofday(&$id:time_start, NULL);
     assert(clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, 1, NULL,
                                   &$id:global_work_size, NULL,
                                   0, NULL, NULL)
            == CL_SUCCESS);
+    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    gettimeofday(&$id:time_end, NULL);
+    timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
+    fprintf(stderr, "kernel %s runtime: %d\n",
+            $string:kernel_name,
+            (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)/1000));
     }|]
 
-  GenericC.stm [C.cstm|assert(clFinish(fut_cl_queue) == CL_SUCCESS);|]
   return GenericC.Done
 
   where mkBuffer i (MemoryUse mem _) =
