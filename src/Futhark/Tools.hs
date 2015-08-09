@@ -98,7 +98,7 @@ sequentialStreamWholeArray width accs lam arrs =
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
-                   PrimOp $ Reshape [] (arrayDims $ paramType arr_param) arr
+                   PrimOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
   in (chunk_bnd :

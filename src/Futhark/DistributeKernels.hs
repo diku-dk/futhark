@@ -428,7 +428,7 @@ distributeMapBodyBindings acc
   let (body_bnds,res) = sequentialStreamWholeArray w accs lam arrs
       reshapeRes t (Var v)
         | null (arrayDims t) = PrimOp $ SubExp $ Var v
-        | otherwise          = PrimOp $ Reshape cs (arrayDims t) v
+        | otherwise          = shapeCoerce cs (arrayDims t) v
       reshapeRes _ se      = PrimOp $ SubExp se
       res_bnds = [ mkLet' [] [ident] $ reshapeRes (identType ident) se
                  | (ident,se) <- zip (patternIdents pat) res ]

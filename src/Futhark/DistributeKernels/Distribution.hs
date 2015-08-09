@@ -562,12 +562,14 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
     where new_shape = arrayDims $ patElemType outer_patElem
 
           delve cs (Lambda _ [param] body _)
-            | Just (PrimOp (Reshape inner_cs _ arr)) <-
+            | Just (PrimOp (Reshape inner_cs new_inner_shape arr)) <-
               singleExpBody body,
               paramName param == arr =
-              let cs' = cs ++ inner_cs
+              let new_outer_shape =
+                    take (length new_shape - length new_inner_shape) new_shape
+                  cs' = cs ++ inner_cs
               in Just $ Let (Pattern [] [outer_patElem]) () $
-                 PrimOp $ Reshape cs' new_shape outer_arr
+                 PrimOp $ Reshape cs' (map DimCoercion new_outer_shape ++ new_inner_shape) outer_arr
 
             | Just (LoopOp (Map inner_cs _ fun [arr])) <- singleExpBody body,
               paramName param == arr =

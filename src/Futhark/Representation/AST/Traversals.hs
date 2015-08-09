@@ -135,7 +135,7 @@ mapExpM tv (PrimOp (Scratch t shape)) =
   PrimOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
 mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
   PrimOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
-                 mapM (mapOnSubExp tv) shape <*>
+                 mapM (Data.Traversable.traverse (mapOnSubExp tv)) shape <*>
                  mapOnVName tv arrexp)
 mapExpM tv (PrimOp (Rearrange cs perm e)) =
   PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>

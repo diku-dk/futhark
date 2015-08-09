@@ -4,6 +4,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
          IxFun
        , Indices
        , Shape
+       , ShapeChange
        , rank
        , index
        , iota
@@ -36,7 +37,7 @@ import qualified Text.PrettyPrint.Mainland as PP
 import Prelude
 
 import Futhark.Analysis.ScalExp
-import Futhark.Representation.AST.Syntax (SubExp(..))
+import Futhark.Representation.AST.Syntax (SubExp(..), DimChange)
 import Futhark.Substitute
 import Futhark.Renamer
 import Futhark.Util.Truths
@@ -70,8 +71,9 @@ instance Rename IxFun where
   rename (IxFun n ixfun) =
     IxFun n <$> rename ixfun
 
-type Indices = [ScalExp]
-type Shape   = [SubExp]
+type Indices     = [ScalExp]
+type Shape       = [SubExp]
+type ShapeChange = [DimChange SubExp]
 
 shapeFromInts :: [Int] -> Shape
 shapeFromInts = map $ Constant . IntVal . fromIntegral
@@ -129,13 +131,13 @@ update i x l =
   let (bef,_:aft) = Prelude.splitAt i l
   in bef ++ x : aft
 
-reshape :: IxFun -> Shape -> IxFun
+reshape :: IxFun -> ShapeChange -> IxFun
 reshape (IxFun _ ixfun) newshape =
   case toSing $ intToNat $ Prelude.length newshape-1 of
     SomeSing (sn::SNat n) ->
       IxFun (SS sn) $
       Safe.reshape ixfun $ unsafeFromList (SS sn) $
-      map intSubExpToScalExp newshape
+      map (fmap intSubExpToScalExp) newshape
 
 applyInd :: IxFun -> Indices -> IxFun
 applyInd ixfun@(IxFun (snnat::SNat ('S n)) (f::Safe.IxFun ScalExp ('S n))) is =

@@ -91,11 +91,11 @@ import Futhark.MonadFreshNames
 -- create a list, use 'ArrayTransforms' instead.
 data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ A permutation of an otherwise valid input.
-                    | Reshape Certificates [SubExp]
+                    | Reshape Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of an otherwise valid input.
-                    | ReshapeOuter Certificates [SubExp]
+                    | ReshapeOuter Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of the outer dimension.
-                    | ReshapeInner Certificates [SubExp]
+                    | ReshapeInner Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of everything but the outer dimension.
                     | Replicate SubExp
                     -- ^ Replicate the rows of the array a number of times.
@@ -326,13 +326,13 @@ inputType (Input (ArrayTransforms ts) ia) =
         transformType t (Rearrange _ perm) =
           rearrangeType perm t
         transformType t (Reshape _ shape) =
-          t `setArrayShape` Shape shape
+          t `setArrayShape` newShape shape
         transformType t (ReshapeOuter _ shape) =
           let Shape oldshape = arrayShape t
-          in t `setArrayShape` Shape (shape ++ drop 1 oldshape)
+          in t `setArrayShape` Shape (newDims shape ++ drop 1 oldshape)
         transformType t (ReshapeInner _ shape) =
           let Shape oldshape = arrayShape t
-          in t `setArrayShape` Shape (take 1 oldshape ++ shape)
+          in t `setArrayShape` Shape (take 1 oldshape ++ newDims shape)
 
 -- | Return the row type of an input.  Just a convenient alias.
 inputRowType :: Input -> Type
@@ -368,13 +368,13 @@ transformTypeRows (ArrayTransforms ts) = flip (Foldable.foldl transform) ts
   where transform t (Rearrange _ perm) =
           t `setArrayShape` Shape (permuteShape (0:map (+1) perm) $ arrayDims t)
         transform t (Reshape _ shape) =
-          t `setArrayShape` Shape shape
+          t `setArrayShape` newShape shape
         transform t (ReshapeOuter _ shape) =
           let outer:oldshape = arrayDims t
-          in t `setArrayShape` Shape (outer : shape ++ drop 1 oldshape)
+          in t `setArrayShape` Shape (outer : newDims shape ++ drop 1 oldshape)
         transform t (ReshapeInner _ shape) =
           let outer:inner:_ = arrayDims t
-          in t `setArrayShape` Shape (outer : inner : shape)
+          in t `setArrayShape` Shape (outer : inner : newDims shape)
         transform t (Replicate n) =
           let outer:shape = arrayDims t
           in t `setArrayShape` Shape (outer : n : shape)

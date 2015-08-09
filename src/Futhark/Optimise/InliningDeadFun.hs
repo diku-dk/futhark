@@ -164,7 +164,7 @@ inlineInBody
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,
           Var v <- se =
-            mkLet' [] [ident] $ PrimOp $ Reshape [] (arrayDims t) v
+            mkLet' [] [ident] $ shapeCoerce [] (arrayDims t) v
         | otherwise =
           mkLet' [] [ident] $ PrimOp $ SubExp se
 inlineInBody inlcallees (Body () (bnd:bnds) res) =

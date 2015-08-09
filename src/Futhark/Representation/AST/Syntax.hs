@@ -41,6 +41,8 @@ module Futhark.Representation.AST.Syntax
   , SegOp (..)
   , ScanType(..)
   , BinOp (..)
+  , DimChange (..)
+  , ShapeChange
   , ExpT(..)
   , Exp
   , LoopForm (..)
@@ -66,7 +68,10 @@ module Futhark.Representation.AST.Syntax
   )
   where
 
+import Control.Applicative
+import Data.Foldable
 import Data.Monoid
+import Data.Traversable
 import Data.Loc
 
 import Prelude
@@ -142,6 +147,33 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Leq
              deriving (Eq, Ord, Enum, Bounded, Show)
 
+-- | The new dimension in a 'Reshape'-like operation.  This allows us to
+-- disambiguate "real" reshapes, that change the actual shape of the
+-- array, from type coercions that are just present to make the types
+-- work out.
+data DimChange d = DimCoercion d
+                   -- ^ The new dimension is guaranteed to be numerically
+                   -- equal to the old one.
+                 | DimNew d
+                   -- ^ The new dimension is not necessarily numerically
+                   -- equal to the old one.
+                 deriving (Eq, Ord, Show)
+
+instance Functor DimChange where
+  fmap f (DimCoercion d) = DimCoercion $ f d
+  fmap f (DimNew      d) = DimNew $ f d
+
+instance Foldable DimChange where
+  foldMap f (DimCoercion d) = f d
+  foldMap f (DimNew      d) = f d
+
+instance Traversable DimChange where
+  traverse f (DimCoercion d) = DimCoercion <$> f d
+  traverse f (DimNew      d) = DimNew <$> f d
+
+-- | A list of 'DimChange's, indicating the new dimensions of an array.
+type ShapeChange d = [DimChange d]
+
 data PrimOp lore
   = SubExp SubExp
     -- ^ Subexpressions, doubling as tuple literals if the
@@ -198,7 +230,7 @@ data PrimOp lore
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
-  | Reshape Certificates [SubExp] VName
+  | Reshape Certificates (ShapeChange SubExp) VName
    -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
   | Rearrange Certificates [Int] VName

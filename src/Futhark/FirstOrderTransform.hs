@@ -98,7 +98,7 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
         letBindNames'_ [size] $ PrimOp $ SubExp se
     input' <- forM (zip valparams input) $ \(p,v) ->
       letExp "concatMap_reshaped_input" $
-      PrimOp $ Reshape [] (arrayDims $ paramType p) v
+      shapeCoerce [] (arrayDims $ paramType p) v
     vs <- bindLambda fun'' (map (PrimOp . SubExp . Var) input')
     mapM (letExp "concatMap_fun_res" . PrimOp . SubExp) vs
   emptyarrs <- mapM (letExp "empty")

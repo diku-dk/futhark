@@ -639,7 +639,7 @@ pullReshape nest ots
   -- only has the significance of making the generated code look
   -- very slightly neater.
   op' <- foldM outernest ([] `Nest.setCombCertificates` op) $
-         drop 1 $ reverse $ drop 1 $ tails shape
+         drop 1 $ reverse $ drop 1 $ tails $ newDims shape
   let nest'   = Nest.SOACNest {
                   Nest.inputs    = inputs'
                 , Nest.operation =

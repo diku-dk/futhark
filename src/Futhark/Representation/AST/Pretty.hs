@@ -336,6 +336,10 @@ instance Pretty BinOp where
   ppr Less = text "<"
   ppr Leq = text "<="
 
+instance Pretty d => Pretty (DimChange d) where
+  ppr (DimCoercion se) = text "~" <> ppr se
+  ppr (DimNew      se) = ppr se
+
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =
   text name <> parens (ppr size <> comma </>

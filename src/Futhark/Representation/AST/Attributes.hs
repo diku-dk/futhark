@@ -5,7 +5,8 @@
 -- embellishments we need here.  This is an internal, desugared
 -- representation.
 module Futhark.Representation.AST.Attributes
-  ( module Futhark.Representation.AST.Attributes.Types
+  ( module Futhark.Representation.AST.Attributes.Reshape
+  , module Futhark.Representation.AST.Attributes.Types
   , module Futhark.Representation.AST.Attributes.Values
   , module Futhark.Representation.AST.Attributes.Constants
   , module Futhark.Representation.AST.Attributes.TypeOf
@@ -16,8 +17,6 @@ module Futhark.Representation.AST.Attributes
 
   -- * Extra tools
   , funDecByName
-  , reshapeOuter
-  , reshapeInner
   , asPrimOp
   , asLoopOp
   , asSegOp
@@ -30,6 +29,7 @@ module Futhark.Representation.AST.Attributes
 
 import Data.List
 
+import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants
@@ -79,17 +79,6 @@ loopResultValues patidents res mergeparams ses =
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
 funDecByName fname = find ((fname ==) . funDecName) . progFunctions
-
--- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
--- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
-reshapeOuter :: [SubExp] -> Int -> Shape -> [SubExp]
-reshapeOuter newshape n oldshape = newshape ++ drop n (shapeDims oldshape)
-
--- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
--- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
--- @oldshape@) of @src@ with @newshape@.
-reshapeInner :: [SubExp] -> Int -> Shape -> [SubExp]
-reshapeInner newshape n oldshape = take n (shapeDims oldshape) ++ newshape
 
 -- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.
 asPrimOp :: Exp lore -> Maybe (PrimOp lore)

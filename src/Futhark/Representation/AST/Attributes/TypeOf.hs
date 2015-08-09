@@ -49,6 +49,7 @@ import Data.Traversable hiding (mapM)
 import Prelude hiding (mapM)
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
@@ -103,7 +104,7 @@ primOpType (Reshape _ [] e) =
   where result t = [Basic $ elemType t]
 primOpType (Reshape _ shape e) =
   result <$> lookupType e
-  where result t = [t `setArrayShape` Shape shape]
+  where result t = [t `setArrayShape` newShape shape]
 primOpType (Rearrange _ perm e) =
   result <$> lookupType e
   where result t = [rearrangeType perm t]

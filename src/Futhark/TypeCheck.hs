@@ -688,10 +688,20 @@ checkPrimOp (Replicate countexp valexp) = do
 checkPrimOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 
-checkPrimOp (Reshape cs shapeexps arrexp) = do
+checkPrimOp (Reshape cs newshape arrexp) = do
+  rank <- arrayRank <$> checkArrIdent arrexp
   mapM_ (requireI [Basic Cert]) cs
-  mapM_ (require [Basic Int]) shapeexps
-  void $ checkArrIdent arrexp
+  mapM_ (require [Basic Int] . newDim) newshape
+  zipWithM_ (checkDimChange rank) newshape [0..]
+  where checkDimChange _ (DimNew _) _ =
+          return ()
+        checkDimChange rank (DimCoercion se) i
+          | i >= rank =
+            bad $ TypeError noLoc $
+            "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se ++
+            ", but array " ++ pretty arrexp ++ " has only " ++ pretty rank ++ " dimensions"
+          | otherwise =
+            return ()
 
 checkPrimOp (Rearrange cs perm arr) = do
   mapM_ (requireI [Basic Cert]) cs

@@ -3,6 +3,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        (
          IxFun
        , Shape
+       , ShapeChange
        , Indices
        , index
        , iota
@@ -31,13 +32,16 @@ import Prelude
 import Futhark.Substitute
 import Futhark.Renamer
 
+import Futhark.Representation.AST.Syntax (DimChange (..))
 import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
+import Futhark.Representation.AST.Attributes.Reshape
 
 import Text.PrettyPrint.Mainland
 
 type Shape num = Vector num
+type ShapeChange num = Vector (DimChange num)
 type Indices num = Vector num
 
 data IxFun :: * -> Nat -> * where
@@ -45,7 +49,7 @@ data IxFun :: * -> Nat -> * where
   Offset :: IxFun num n -> num -> IxFun num n
   Permute :: IxFun num n -> Perm.Permutation n -> IxFun num n
   Index :: SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
-  Reshape :: IxFun num ('S m) -> Shape num n -> IxFun num n
+  Reshape :: IxFun num ('S m) -> ShapeChange num n -> IxFun num n
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -147,7 +151,7 @@ index (Reshape (fun :: IxFun num ('S m)) newshape) is element_size =
   -- that into an index set for the inner index function and apply the
   -- inner index function to that set.
   let oldshape = shape fun
-      flatidx = computeFlatIndex newshape is
+      flatidx = computeFlatIndex (Vec.map newDim newshape) is
       innerslicesizes = Vec.tail $ sliceSizes oldshape
       new_indices = computeNewIndices innerslicesizes flatidx
   in index fun new_indices element_size
@@ -187,15 +191,40 @@ permute :: Fractional num =>
 permute = Permute
 
 reshape :: forall num m n.(Eq num, Fractional num) =>
-           IxFun num ('S m) -> Shape num n -> IxFun num n
+           IxFun num ('S m) -> ShapeChange num n -> IxFun num n
 reshape (Direct offset _) newshape =
-  Direct offset newshape
+  Direct offset $ Vec.map newDim newshape
 reshape (Reshape ixfun _) newshape =
   reshape ixfun newshape
 reshape ixfun newshape =
   case rank ixfun `testEquality` Vec.sLength newshape of
-    Just Refl | shape ixfun == newshape ->
+    Just Refl
+      | shape ixfun == Vec.map newDim newshape ->
       ixfun
+      | Just _ <- shapeCoercion $ Vec.toList newshape ->
+        case ixfun of
+          Permute ixfun' perm ->
+            Permute (reshape ixfun' newshape) perm
+
+          Offset ixfun' offset ->
+            Offset (reshape ixfun' newshape) offset
+
+          Index sm (ixfun' :: IxFun num (k :+: 'S m)) (is :: Indices num k)
+            | Dict <- propToBoolLeq $ plusLeqL (Vec.sLength is) sm ->
+            let ixfun'' :: IxFun num ('S (k :+: m))
+                ixfun'' = coerce (sym $ plusSR (Vec.sLength is) (sm %- sOne)) ixfun'
+                unchanged_shape :: ShapeChange num k
+                unchanged_shape =
+                  Vec.map DimCoercion $ Vec.take (Vec.sLength is) $ shape ixfun'
+                newshape' :: ShapeChange num (k :+: 'S m)
+                newshape' = Vec.append unchanged_shape newshape
+            in Index sm (reshape ixfun'' newshape') is
+
+          Reshape _ _ ->
+            Reshape ixfun newshape
+
+          Direct offset _ ->
+            Direct offset $ Vec.map newDim newshape
     _ ->
       Reshape ixfun newshape
 
@@ -278,7 +307,7 @@ shape (Index n (ixfun::IxFun num (m :+ n)) (indices::Indices num m)) =
            resshape = Vec.drop islen ixfunshape
        in resshape
 shape (Reshape _ dims) =
-  dims
+  Vec.map newDim dims
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.

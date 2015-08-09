@@ -166,6 +166,10 @@ instance Substitute ExtRetType where
   substituteNames substs (ExtRetType ts) =
     ExtRetType $ map (substituteNames substs) ts
 
+instance Substitute d => Substitute (DimChange d) where
+  substituteNames substs =
+    fmap $ substituteNames substs
+
 -- | The class of lores in which all annotations support name
 -- substitution.
 class (Substitute (Annotations.Exp lore),

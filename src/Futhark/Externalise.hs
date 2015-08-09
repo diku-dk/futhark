@@ -141,7 +141,7 @@ externalisePrimOp (I.Replicate ne ve) =
   pure noLoc
 externalisePrimOp (I.Reshape _ shape e) =
   E.Reshape <$>
-  mapM externaliseSubExp shape <*>
+  mapM (externaliseSubExp . newDim) shape <*>
   (E.Var <$> externaliseVar e) <*>
   pure noLoc
 externalisePrimOp (I.Rearrange _ perm e) =

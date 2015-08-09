@@ -89,7 +89,7 @@ ensureShapeVar asserting loc t name v
           letExp "shape_cert" =<<
           eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
     certs <- asserting $ zipWithM checkDim newshape oldshape
-    letExp name $ PrimOp $ Reshape certs newshape v
+    letExp name $ shapeCoerce certs newshape v
   | otherwise = return v
 
 removeExistentials :: ExtType -> Type -> Type

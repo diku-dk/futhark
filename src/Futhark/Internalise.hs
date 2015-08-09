@@ -312,8 +312,8 @@ internaliseExp _ (E.Zip (e:es) loc) = do
             c   <- assertingOne $
                    letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
-            letExp (postfix e_unchecked' "_zip_res") $ I.PrimOp $
-              I.Reshape c (e_outer:inner) e_unchecked'
+            letExp (postfix e_unchecked' "_zip_res") $
+              shapeCoerce c (e_outer:inner) e_unchecked'
   es' <- mapM (mapM reshapeToOuter) es_unchecked'
   return $ concatMap (map I.Var) $ e' : es'
 
@@ -340,7 +340,7 @@ internaliseExp _ (E.Reshape shape e loc) = do
                letExp "shape_ok" =<<
                eAssert (eBinOp I.Equal (prod dims) (prod shape') I.Bool)
                loc
-    return $ I.Reshape shapeOk shape' v
+    return $ I.Reshape shapeOk (DimNew <$> shape') v
   where prod l = foldBinOp I.Times (intconst 1) l I.Int
 
 internaliseExp _ (E.Split splitexps arrexp loc) = do
@@ -386,8 +386,8 @@ internaliseExp desc (E.Concat x ys loc) = do
                    concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
                         yt <- lookupType yarr
-                        letExp "concat_y_reshaped" $ I.PrimOp $
-                          I.Reshape matchcs (arraySize 0 yt : x_inner_dims) yarr
+                        letExp "concat_y_reshaped" $
+                          shapeCoerce matchcs (arraySize 0 yt : x_inner_dims) yarr
         return $ I.PrimOp $ I.Concat [] xarr yarrs' ressize
   letSubExps desc =<< zipWithM conc xs (transpose yss)
 

@@ -573,7 +573,7 @@ evalPrimOp (Scratch bt shape) = do
         asInt _                     = bad $ TypeError "evalPrimOp Scratch asInt"
 
 evalPrimOp e@(Reshape _ shapeexp arrexp) = do
-  shape <- mapM (asInt <=< evalSubExp) shapeexp
+  shape <- mapM (asInt <=< evalSubExp) $ newDims shapeexp
   arr <- lookupVar arrexp
   case arr of
     ArrayVal vs bt oldshape

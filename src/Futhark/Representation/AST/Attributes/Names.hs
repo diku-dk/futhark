@@ -26,6 +26,9 @@ module Futhark.Representation.AST.Attributes.Names
 
 import Control.Monad.Writer
 import qualified Data.HashSet as HS
+import Data.Foldable (foldMap)
+
+import Prelude
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
@@ -218,6 +221,9 @@ instance FreeIn ExtRetType where
 instance FreeIn LoopForm where
   freeIn (ForLoop _ bound) = freeIn bound
   freeIn (WhileLoop cond) = freeIn cond
+
+instance FreeIn d => FreeIn (DimChange d) where
+  freeIn = Data.Foldable.foldMap freeIn
 
 -- | Return the set of all variable names bound in a program.
 progNames :: Prog lore -> Names

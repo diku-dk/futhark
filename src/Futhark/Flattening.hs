@@ -585,7 +585,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
     mkDataReshape (Ident vn _) = do
       data_ident <- getDataArray1 vn
       let [data_size] = arrayDims $ identType data_ident
-      let data_exp = PrimOp $ Reshape [] [data_size] vn
+      let data_exp = PrimOp $ Reshape [] [DimNew data_size] vn
       let data_bnd = Let (Pattern [] [PatElem data_ident BindVar()]) () data_exp
       return data_bnd
 
@@ -602,7 +602,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
           let sze = PrimOp $ SubExp dim0
           let szpat = patternFromIdents [] [Ident szvn (Basic Int)]
           let szbnd = Let szpat () sze
-          let reshape_e = PrimOp $ Reshape [] [Var szvn] vn
+          let reshape_e = PrimOp $ Reshape [] [DimNew $ Var szvn] vn
           let reshape_pat = patternFromIdents [] [res]
           let reshape_bnd = Let reshape_pat () reshape_e
           return [szbnd, reshape_bnd]
@@ -636,7 +636,7 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
                    (replicate (length resdimidents) (Basic Int))
       let if_bnd = Let (patternFromIdents [] resdimidents) () if_exp
 
-      let reshape_e = PrimOp $ Reshape [] (arrayDims $ identType res) (identName dataarr)
+      let reshape_e = PrimOp $ Reshape [] (map DimNew $ arrayDims $ identType res) (identName dataarr)
       let reshape_bnd = Let (Pattern [] [PatElem res BindVar ()]) () reshape_e
 
       return [cmp_bnd, if_bnd, reshape_bnd]
@@ -838,7 +838,9 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
       return $ Let pat () theMapExp
 
 transformBinding topbnd@(Let (Pattern [] [PatElem resident BindVar ()]) ()
-                        (PrimOp (Reshape certs (dim0:dims) reshapearr))) = do
+                        (PrimOp (Reshape certs (dim0_c:dims_c) reshapearr))) = do
+  let dim0 = newDim dim0_c
+      dims = map newDim dims_c
   tell [StartBnd "transformBinding" topbnd]
   -- FIXME: For the case where reshape is only to check map sizes,
   -- where will those certifications go once we remove this reshape?
@@ -873,7 +875,7 @@ transformBinding topbnd@(Let (Pattern [] [PatElem resident BindVar ()]) ()
   addTypeIdent newdata_ident
   addDataArray (identName resident) newdata_ident
 
-  let reshape_exp' = PrimOp $ Reshape certs [newdata_size] data_identvn
+  let reshape_exp' = PrimOp $ Reshape certs [DimNew newdata_size] data_identvn
   let reshape_bnd = Let (Pattern [] [PatElem newdata_ident BindVar ()]) () reshape_exp'
   return $ extra_bnds ++ [reshape_bnd]
   where
@@ -944,7 +946,8 @@ pullOutOfMap :: MapInfo -> ([VName], [VName]) -> Binding -> FlatM [Binding]
 pullOutOfMap _ (_,[]) _ = return []
 pullOutOfMap mapInfo _
                   (Let (Pattern [] [PatElem resident BindVar ()]) ()
-                       (PrimOp (Reshape certs dimses reshapearr))) = do
+                       (PrimOp (Reshape certs dimses_c reshapearr))) = do
+  let dimses = newDims dimses_c
   Just target <- findTarget mapInfo reshapearr
 
   loopdep_dim_subexps <- filterM (\case
@@ -967,7 +970,8 @@ pullOutOfMap mapInfo _
   addMapLetArray (identName resident) newresident
 
   let reshape_exp = PrimOp $ Reshape (certs ++ mapCerts mapInfo)
-                                     (mapSize mapInfo:dimses) $ identName target
+                                     (map DimNew $ mapSize mapInfo:dimses) $
+                    identName target
   let reshape_bnd = Let (Pattern [] [PatElem newresident BindVar ()]) () reshape_exp
   -- TODO: this trick probably only works for regular arrays
   -- ... unless we specifically create the segment descriptors
@@ -1125,7 +1129,7 @@ pullOutOfMap mapInfo (argsneeded, _)
       let segrep_exp = SegOp $ SegReplicate [] counts (identName dataarr) Nothing
       let segrep_bnd = Let (patternFromIdents [tmpsz_ident] [tmpident])
                            () segrep_exp
-      let reshape_exp = PrimOp $ Reshape [] [flatsz] (identName tmpident)
+      let reshape_exp = PrimOp $ Reshape [] [DimNew flatsz] (identName tmpident)
       let reshape_bnd = Let (patternFromIdents [] [distident]) () reshape_exp
       return ([segrep_bnd, reshape_bnd], distident)
 
