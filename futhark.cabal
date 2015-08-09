@@ -298,6 +298,5 @@ Test-suite unit
                  Futhark.Representation.AST.Attributes.ValuesTests
                  Futhark.Representation.AST.Syntax.CoreTests
                  Futhark.Representation.AST.SyntaxTests
-                 Futhark.Representation.AttributesTests
                  Language.Futhark.CoreTests
                  Language.Futhark.SyntaxTests
