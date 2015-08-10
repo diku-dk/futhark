@@ -203,7 +203,7 @@ reshape ixfun newshape =
       | Just _ <- shapeCoercion $ Vec.toList newshape ->
         case ixfun of
           Permute ixfun' perm ->
-            Permute (reshape ixfun' newshape) perm
+            Permute (reshape ixfun' $ Perm.apply perm newshape) perm
 
           Offset ixfun' offset ->
             Offset (reshape ixfun' newshape) offset
