@@ -658,33 +658,13 @@ simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
         Nothing -> do
           -- Linearise indices and map to old index space.
           oldshape <- arrayDims <$> lookupType idd2
-          let mult x y = eBinOp Times x y Int
-              plus x y = eBinOp Plus x y Int
-              esum [] = return $ PrimOp $ SubExp $ Constant $ IntVal 0
-              esum (x:xs) = foldl plus x xs
-
-              computeNewIndices :: MonadBinder m => [SubExp] -> SubExp -> m [SubExp]
-              computeNewIndices [] _ = return []
-              computeNewIndices (size:slices) i = do
-                i' <- letSubExp "i" $
-                      PrimOp $ BinOp IntDivide i size Int
-                i_remnant <- letSubExp "i_remnant" =<<
-                             eBinOp Minus (eSubExp i)
-                             (eBinOp Times
-                              (eSubExp i')
-                              (eSubExp size) Int) Int
-                is <- computeNewIndices slices i_remnant
-                return $ i' : is
-          new_slice_sizes <-
-            mapM (letSubExp "new_slice_size" <=< SE.fromScalExp') $
-            drop 1 $ sliceSizes $ map SE.intSubExpToScalExp $ newDims newshape
-          old_slice_sizes <-
-            mapM (letSubExp "old_slice_size" <=< SE.fromScalExp') $
-            drop 1 $ sliceSizes $ map SE.intSubExpToScalExp oldshape
-          ind_sizes <- zipWithM mult (map eSubExp inds) (map eSubExp new_slice_sizes)
-          flat_index <- letSubExp "flat_index" =<< esum (map return ind_sizes)
-          new_indices <- computeNewIndices old_slice_sizes flat_index
-          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_indices
+          let new_inds =
+                reshapeIndex (map SE.intSubExpToScalExp oldshape)
+                             (map SE.intSubExpToScalExp $ newDims newshape)
+                             (map SE.intSubExpToScalExp inds)
+          new_inds' <-
+            mapM (letSubExp "new_index" <=< SE.fromScalExp') new_inds
+          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
 
