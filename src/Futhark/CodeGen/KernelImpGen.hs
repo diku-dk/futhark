@@ -116,11 +116,11 @@ copyCompiler bt
       src_is = dest_is
 
   makeAllMemoryGlobal $ do
-    (_, destspace, destoffset) <- ImpGen.fullyIndexArray' destloc dest_is bt
-    (_, srcspace, srcoffset) <- ImpGen.fullyIndexArray' srcloc src_is bt
+    (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
+    (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
 
-    let body = ImpGen.write destmem destoffset bt destspace $
-               ImpGen.index srcmem srcoffset bt srcspace
+    let body = ImpGen.write destmem destidx bt destspace $
+               ImpGen.index srcmem srcidx bt srcspace
 
     destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
     let writes_to = [Imp.MemoryUse destmem destmem_size]
