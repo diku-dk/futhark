@@ -262,7 +262,6 @@ data LoopOp lore
   | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
---  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
 
 data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]
