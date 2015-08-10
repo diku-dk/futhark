@@ -19,12 +19,18 @@ module Futhark.Representation.AST.Attributes.Reshape
        , fuseReshape
        , fuseReshapes
        , informReshape
+
+         -- * Shape calculations
+       , reshapeIndex
+       , flattenIndex
+       , unflattenIndex
+       , sliceSizes
        )
        where
 
 import Data.Foldable
 
-import Prelude
+import Prelude hiding (sum, product)
 
 import Futhark.Representation.AST.Syntax
 
@@ -103,3 +109,45 @@ informReshape shape sc
         inform _ dc =
           dc
 informReshape _ sc = sc
+
+-- | @reshapeIndex to_dims from_dims is@ transforms the index list
+-- @is@ (which is into an array of shape @from_dims@) into an index
+-- list @is'@, which is into an array of shape @to_dims@.  @is@ must
+-- have the same length as @from_dims@, and @is'@ will have the same
+-- length as @to_dims@.
+reshapeIndex :: Fractional num =>
+                [num] -> [num] -> [num] -> [num]
+reshapeIndex to_dims from_dims is =
+  unflattenIndex to_dims $ flattenIndex from_dims is
+
+-- | @unflattenIndex dims i@ computes a list of indices into an array
+-- with dimension @dims@ given the flat index @i@.  The resulting list
+-- will have the same size as @dims@.
+unflattenIndex :: Fractional num =>
+                  [num] -> num -> [num]
+unflattenIndex = unflattenIndexFromSlices . drop 1 . sliceSizes
+
+unflattenIndexFromSlices :: Fractional num =>
+                            [num] -> num -> [num]
+unflattenIndexFromSlices [] _ = []
+unflattenIndexFromSlices (size : slices) i =
+  (i / size) : unflattenIndexFromSlices slices (i - (i / size) * size)
+
+-- | @flattenIndex dims is@ computes the flat index of @is@ into an
+-- array with dimensions @dims@.  The length of @dims@ and @is@ must
+-- be the same.
+flattenIndex :: Fractional num =>
+                [num] -> [num] -> num
+flattenIndex dims is =
+  sum $ zipWith (*) is slicesizes
+  where slicesizes = drop 1 $ sliceSizes dims
+
+-- | Given a length @n@ list of dimensions @dims@, @sizeSizes dims@
+-- will compute a length @n+1@ list of the size of each possible array
+-- slice.  The first element of this list will be the product of
+-- @dims@, and the last element will be 1.
+sliceSizes :: Fractional num =>
+              [num] -> [num]
+sliceSizes [] = [1]
+sliceSizes (n:ns) =
+  product (n : ns) : sliceSizes ns

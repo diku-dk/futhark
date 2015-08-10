@@ -653,6 +653,13 @@ expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
           Just $ ReturnsInBlock mem $
           IxFun.reshape ixfun newshape]
 
+expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
+  (et, Shape dims, u, mem, ixfun) <- arrayVarReturns look v
+  let ixfun' = IxFun.permute ixfun perm
+      dims'  = permuteShape perm dims
+  return [ReturnsArray et (ExtShape $ map Free dims') u $
+          Just $ ReturnsInBlock mem ixfun']
+
 expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, u, mem, ixfun) <- arrayVarReturns look v
   let newShapes = map (shape `setOuterDim`) sizeexps

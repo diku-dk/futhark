@@ -8,14 +8,13 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Maybe
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.List
 
 import Prelude
 
-import Futhark.Analysis.ScalExp as SE
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.KernelImp as Imp
@@ -24,8 +23,17 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 type CallKernelGen = ImpGen.ImpM Imp.CallKernel
 type InKernelGen = ImpGen.ImpM Imp.InKernel
 
+callKernelOperations :: ImpGen.Operations Imp.CallKernel
+callKernelOperations =
+  ImpGen.Operations { ImpGen.opsExpCompiler = kernelCompiler
+                    , ImpGen.opsCopyCompiler = copyCompiler
+                    }
+
+inKernelOperations :: ImpGen.Operations Imp.InKernel
+inKernelOperations = ImpGen.defaultOperations
+
 compileProg :: Prog -> Either String Imp.Program
-compileProg = ImpGen.compileProg kernelCompiler $ Imp.Space "device"
+compileProg = ImpGen.compileProg callKernelOperations $ Imp.Space "device"
 
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
@@ -39,11 +47,9 @@ kernelCompiler target@(ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
 
   let indices_lparams = [ Param (Ident index $ Basic Int) Scalar | index <- indices ]
       bound_in_kernel = global_thread_index : indices ++ map paramName params
-      compileNormally :: ImpGen.ExpCompiler Imp.InKernel
-      compileNormally _ = return . ImpGen.CompileExp
 
   makeAllMemoryGlobal $ do
-    kernelbody <- ImpGen.subImpM compileNormally $
+    kernelbody <- ImpGen.subImpM inKernelOperations $
                   ImpGen.withParams [global_thread_index_param] $
                   ImpGen.declaringLParams (indices_lparams++params) $ do
                     ImpGen.comment "read kernel parameters" read_params
@@ -60,19 +66,9 @@ kernelCompiler target@(ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
           Nothing
 
     -- Compute the variables that we need to pass to the kernel.
-    reads_from <- liftM catMaybes $
-                  forM (HS.toList $ freeIn kernelbody) $ \var ->
-      if var `elem` dest_mems ++ bound_in_kernel
-        then return Nothing
-        else do t <- lookupType var
-                case t of
-                  Array {} -> return Nothing
-                  Mem memsize -> Just <$> (Imp.MemoryUse var <$>
-                                           ImpGen.subExpToDimSize memsize)
-                  Basic bt ->
-                    if bt == Cert
-                    then return Nothing
-                    else return $ Just $ Imp.ScalarUse var bt
+    reads_from <- readsFromSet $
+                  freeIn kernelbody `HS.difference`
+                  HS.fromList (dest_mems <> bound_in_kernel)
 
     -- Compute what memory to copy out.  Must be allocated on device
     -- before kernel execution anyway.
@@ -103,43 +99,60 @@ kernelCompiler target (PrimOp (Replicate n v)) = do
   t <- subExpType v
   let fun = Lambda i [] (Body () [] [v]) [t]
   kernelCompiler target $ LoopOp $ Map [] n fun []
-
--- We also generate kernels for rearrange.
-kernelCompiler
-  (ImpGen.Destination [ImpGen.ArrayDestination memloc shape])
-  (PrimOp (Rearrange _ perm src))
-  | ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun) <- memloc = do
-      srct <- lookupType src
-      let src_et = elemType srct
-          ixfun' =
-            IxFun.permute ixfun $ permuteInverse perm
-          dims' =
-            permuteShape (permuteInverse perm) dims
-          kernel_target =
-            ImpGen.ArrayDestination
-            (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims' ixfun')) shape
-
-          makeNest [] is =
-            return $ PrimOp $ Index [] src is
-          makeNest (outer:inner) is = do
-            index <- newVName "rearrange_index"
-            level_res <- newIdent "rearrange_level_res" $
-                         arrayOf (Basic src_et) (Shape inner) (uniqueness srct)
-            inner_e <- makeNest inner (is++[Var index])
-            let summary = if null inner then Scalar
-                          else MemSummary mem $ IxFun.applyInd ixfun' $
-                               map SE.intSubExpToScalExp $ is++[Var index]
-                pat = Pattern [] [PatElem level_res BindVar summary]
-                bnd = Let pat () inner_e
-                lambda = Lambda index [] (Body() [bnd] [Var $ identName level_res])
-                         [identType level_res]
-            return $ LoopOp $ Map [] outer lambda []
-
-      map_nest <- makeNest (arrayDims srct) []
-      kernelCompiler (ImpGen.Destination [kernel_target]) map_nest
-
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
+
+copyCompiler :: ImpGen.CopyCompiler Imp.CallKernel
+copyCompiler bt
+  destloc@(ImpGen.MemLocation destmem destshape destIxFun)
+  srcloc@(ImpGen.MemLocation srcmem _ srcIxFun) = do
+  global_thread_index <- newVName "copy_global_thread_index"
+
+  -- Note that the shape of the destination and the source are
+  -- necessarily the same.
+  let shape = map ImpGen.sizeToExp destshape
+      shape_se = map ImpGen.sizeToScalExp destshape
+      dest_is = unflattenIndex shape_se $ ImpGen.varIndex global_thread_index
+      src_is = dest_is
+
+  makeAllMemoryGlobal $ do
+    (_, destspace, destoffset) <- ImpGen.fullyIndexArray' destloc dest_is bt
+    (_, srcspace, srcoffset) <- ImpGen.fullyIndexArray' srcloc src_is bt
+
+    let body = ImpGen.write destmem destoffset bt destspace $
+               ImpGen.index srcmem srcoffset bt srcspace
+
+    destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
+    let writes_to = [Imp.MemoryUse destmem destmem_size]
+
+    reads_from <- readsFromSet $
+                  HS.singleton srcmem <>
+                  freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
+
+    kernel_size <- newVName "copy_kernel_size"
+    ImpGen.emit $ Imp.DeclareScalar kernel_size Int
+    ImpGen.emit $ Imp.SetScalar kernel_size $ product shape
+
+    ImpGen.emit $ Imp.Op Imp.CallKernel {
+        Imp.kernelThreadNum = global_thread_index
+      , Imp.kernelSize = Imp.VarSize kernel_size
+      , Imp.kernelUses = nub $ reads_from ++ writes_to
+      , Imp.kernelBody = body
+      }
+
+readsFromSet :: Names -> ImpGen.ImpM op [Imp.KernelUse]
+readsFromSet free =
+  liftM catMaybes $
+  forM (HS.toList free) $ \var -> do
+    t <- lookupType var
+    case t of
+      Array {} -> return Nothing
+      Mem memsize -> Just <$> (Imp.MemoryUse var <$>
+                               ImpGen.subExpToDimSize memsize)
+      Basic bt ->
+        if bt == Cert
+        then return Nothing
+        else return $ Just $ Imp.ScalarUse var bt
 
 -- | Change every memory block to be in the global address space.
 -- This is fairly hacky and can be improved once the Futhark-level

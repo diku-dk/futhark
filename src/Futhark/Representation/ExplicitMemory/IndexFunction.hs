@@ -36,7 +36,7 @@ import Futhark.Representation.AST.Syntax (DimChange (..))
 import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
-import Futhark.Representation.AST.Attributes.Reshape
+import Futhark.Representation.AST.Attributes.Reshape hiding (sliceSizes)
 
 import Text.PrettyPrint.Mainland
 
@@ -167,8 +167,7 @@ computeNewIndices (size :- slices) i =
 computeFlatIndex :: Fractional num =>
                     Shape num ('S k) -> Indices num ('S k) -> num
 computeFlatIndex dims is =
-  Vec.sum $ Vec.zipWithSame (*) is slicesizes
-  where slicesizes = Vec.tail $ sliceSizes dims
+  flattenIndex (Vec.toList dims) (Vec.toList is)
 
 sliceSizes :: Fractional num =>
               Shape num m -> Vector num ('S m)

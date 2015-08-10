@@ -41,7 +41,7 @@ import Futhark.Representation.AST.Pretty ()
 
 import Text.PrettyPrint.Mainland hiding (space)
 
-data Size = ConstSize Int
+data Size = ConstSize Int32
           | VarSize VName
           deriving (Eq, Show)
 
@@ -423,6 +423,10 @@ instance FreeIn Exp where
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
+
+instance FreeIn Size where
+  freeIn (VarSize name) = HS.singleton name
+  freeIn (ConstSize _) = mempty
 
 functionsCalled :: Code a -> HS.HashSet Name
 functionsCalled (If _ t f) = functionsCalled t <> functionsCalled f
