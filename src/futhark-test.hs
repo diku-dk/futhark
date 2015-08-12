@@ -197,7 +197,7 @@ parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
           newFutharkConfig { futharkPipeline = Passes.standardPipeline }
         distributePipelineConfig =
           newFutharkConfig { futharkPipeline = Passes.standardPipeline ++
-                                               [Passes.distributeKernels,
+                                               [Passes.extractKernels,
                                                 Passes.eotransform]
                            }
 

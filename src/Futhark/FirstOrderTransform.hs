@@ -55,6 +55,13 @@ transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) =
         formIdents (WhileLoop _) =
           []
 
+transformBindingRecursively (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
+  body' <- bindingIdentTypes (Ident i (Basic Int) :
+                              map ((`Ident` Basic Int) . fst) ispace ++
+                              map kernelInputIdent inps) $
+           transformBody body
+  addBinding $ Let pat () $ LoopOp $ Kernel cs w i ispace inps returns body'
+
 transformBindingRecursively (Let pat () e) =
   transformBinding =<< liftM (Let pat ()) (mapExpM transform e)
   where transform = identityMapper { mapOnBody = transformBody
@@ -643,8 +650,8 @@ index cs arrs i = flip map arrs $ \arr ->
   PrimOp $ Index cs arr [i]
 
 resultArray :: [TypeBase Shape] -> Binder Basic [VName]
-resultArray = mapM arrayOfShape
-  where arrayOfShape t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
+resultArray = mapM oneArray
+  where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
 
 letwith :: Certificates -> [VName] -> Binder Basic Exp -> [Exp] -> Binder Basic [VName]
 letwith cs ks i vs = do

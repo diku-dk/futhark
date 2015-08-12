@@ -19,6 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.KernelImp as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
+import Futhark.Analysis.ScalExp as SE
 
 type CallKernelGen = ImpGen.ImpM Imp.CallKernel
 type InKernelGen = ImpGen.ImpM Imp.InKernel
@@ -38,20 +39,35 @@ compileProg = ImpGen.compileProg callKernelOperations $ Imp.Space "device"
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
 
-kernelCompiler target@(ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
-  global_thread_index <- newVName "global_thread_index"
-  let global_thread_index_param = Imp.ScalarParam global_thread_index Int
+kernelCompiler
+  (ImpGen.Destination dest)
+  (LoopOp (Kernel _ w global_thread_index ispace inps returns body)) = do
 
-  (kernel_size, indices, params, read_params, write_result, kernel_bnds) <-
-    getKernel target global_thread_index w lam arrs
+  kernel_size <- ImpGen.subExpToDimSize w
+
+  let global_thread_index_param = Imp.ScalarParam global_thread_index Int
+      shape = map (ImpGen.compileSubExp . snd) ispace
+      indices = map fst ispace
 
   let indices_lparams = [ Param (Ident index $ Basic Int) Scalar | index <- indices ]
-      bound_in_kernel = global_thread_index : indices ++ map paramName params
+      bound_in_kernel = global_thread_index : indices ++ map kernelInputName inps
+      kernel_bnds = bodyBindings body
+
+      index_expressions = unflattenIndex shape $ Imp.ScalarVar global_thread_index
+      set_indices = forM_ (zip indices index_expressions) $ \(i, x) ->
+        ImpGen.emit $ Imp.SetScalar i x
+
+      read_params = mapM_ readKernelInput inps
+
+      perms = map snd returns
+      write_result =
+        sequence_ $ zipWith3 (writeThreadResult indices) perms dest $ bodyResult body
 
   makeAllMemoryGlobal $ do
     kernelbody <- ImpGen.subImpM inKernelOperations $
                   ImpGen.withParams [global_thread_index_param] $
-                  ImpGen.declaringLParams (indices_lparams++params) $ do
+                  ImpGen.declaringLParams (indices_lparams++map kernelInputParam inps) $ do
+                    ImpGen.comment "compute thread index" set_indices
                     ImpGen.comment "read kernel parameters" read_params
                     ImpGen.compileBindings kernel_bnds $
                      ImpGen.comment "write kernel result" write_result
@@ -92,13 +108,15 @@ kernelCompiler target@(ImpGen.Destination dest) (LoopOp (Map _ w lam arrs)) = do
 -- We generate a simple kernel for itoa and replicate.
 kernelCompiler target (PrimOp (Iota n)) = do
   i <- newVName "i"
-  let fun = Lambda i [] (Body () [] [Var i]) [Basic Int]
-  kernelCompiler target $ LoopOp $ Map [] n fun []
+  global_thread_index <- newVName "global_thread_index"
+  kernelCompiler target $
+    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
 kernelCompiler target (PrimOp (Replicate n v)) = do
   i <- newVName "i"
+  global_thread_index <- newVName "global_thread_index"
   t <- subExpType v
-  let fun = Lambda i [] (Body () [] [v]) [t]
-  kernelCompiler target $ LoopOp $ Map [] n fun []
+  kernelCompiler target $
+    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0])] (Body () [] [v])
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
 
@@ -171,13 +189,17 @@ makeAllMemoryGlobal =
         globalMemory entry =
           entry
 
-writeThreadResult :: [VName] -> ImpGen.ValueDestination -> SubExp
+writeThreadResult :: [VName] -> [Int] -> ImpGen.ValueDestination -> SubExp
                   -> InKernelGen ()
-writeThreadResult thread_idxs
+writeThreadResult thread_idxs perm
   (ImpGen.ArrayDestination
    (ImpGen.CopyIntoMemory
     destloc@(ImpGen.MemLocation mem _ _)) _) se = do
   set <- subExpType se
+
+  unless (perm == sort perm) $
+    fail "Cannot handle rearranged kernels yet."
+
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let is = map ImpGen.varIndex thread_idxs
   case set of
@@ -190,78 +212,18 @@ writeThreadResult thread_idxs
       let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
                  replicate (arrayRank set) Nothing
       ImpGen.compileResultSubExp dest se
-writeThreadResult _ _ _ =
+writeThreadResult _ _ _ _ =
   fail "Cannot handle kernel that does not return an array."
 
-readThreadParams :: VName -> LParam -> VName
-                 -> InKernelGen ()
-readThreadParams thread_index param arr = do
-  t <- lookupType arr
-  when (arrayRank t == 1) $ do
+readKernelInput :: KernelInput ExplicitMemory
+                -> InKernelGen ()
+readKernelInput inp =
+  when (basicType t) $ do
     (srcmem, space, srcoffset) <-
-      ImpGen.fullyIndexArray arr [ImpGen.varIndex thread_index]
-    ImpGen.emit $ Imp.SetScalar (paramName param) $
+      ImpGen.fullyIndexArray arr $ map SE.intSubExpToScalExp is
+    ImpGen.emit $ Imp.SetScalar name $
       ImpGen.index srcmem srcoffset (elemType t) space
-
-setIndexVariable :: VName -> SubExp -> VName -> Imp.Exp -> Imp.KernelCode
-setIndexVariable index w global_thread_index inner_size =
-  Imp.SetScalar index $
-  (Imp.ScalarVar global_thread_index `unsignedDivide` inner_size)
-   `impMod` ImpGen.compileSubExp w
-  where impMod x 1 = x
-        impMod x y = Imp.UnsignedMod x y
-        unsignedDivide x 1 = x
-        unsignedDivide x y = Imp.UnsignedDivide x y
-
-type ReadParams = InKernelGen ()
-type WriteResult = InKernelGen ()
-
-getKernel :: ImpGen.Destination -> VName
-          -> SubExp -> Lambda -> [VName]
-          -> CallKernelGen
-             (Imp.DimSize, [VName], [LParam], ReadParams, WriteResult, [Binding])
-getKernel dest global_thread_index w lam arrs = do
-  kernel_size <- newVName "kernel_size"
-  let (inner_kernel_size, indices, params, read_params, write_result, kernel_bnds) =
-        lookForInnerMaps []  dest global_thread_index w lam arrs
-  ImpGen.emit $ Imp.DeclareScalar kernel_size Int
-  ImpGen.emit $ Imp.SetScalar kernel_size $
-    inner_kernel_size * ImpGen.compileSubExp w
-  return (Imp.VarSize kernel_size, indices, params,
-          read_params, write_result, kernel_bnds)
-
-lookForInnerMaps :: [VName]
-                 -> ImpGen.Destination -> VName
-                 -> SubExp -> Lambda -> [VName]
-                 -> (Imp.Exp, [VName], [LParam], ReadParams, WriteResult, [Binding])
-lookForInnerMaps outer_indices target@(ImpGen.Destination dest) global_thread_index w lam arrs
-  | Body () [bnd] res <- lambdaBody lam, -- Body has a single binding
-    map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    LoopOp (Map _ inner_w inner_lam inner_arrs) <- bindingExp bnd = -- And the binding is a map
-      let (inner_kernel_size, indices, params,
-           inner_read_params, write_result, kernel_bnds) =
-            lookForInnerMaps (outer_indices++[lambdaIndex lam]) target
-            global_thread_index inner_w inner_lam inner_arrs
-          this_kernel_size =
-            inner_kernel_size * ImpGen.compileSubExp inner_w
-          set_index =
-            setIndexVariable (lambdaIndex lam) w global_thread_index this_kernel_size
-      in (this_kernel_size,
-          lambdaIndex lam : indices,
-          lambdaParams lam ++ params,
-          ImpGen.emit set_index >> read_params >> inner_read_params,
-          write_result,
-          kernel_bnds)
-
-  | otherwise =
-      let write_result = zipWithM_ (writeThreadResult thread_indices)
-                         dest $ bodyResult $ lambdaBody lam
-          set_index = setIndexVariable (lambdaIndex lam) w global_thread_index 1
-      in (1,
-          [lambdaIndex lam],
-          lambdaParams lam,
-          ImpGen.emit set_index >> read_params,
-          write_result,
-          bodyBindings $ lambdaBody lam)
-  where thread_indices = outer_indices ++ [lambdaIndex lam]
-        read_params = zipWithM_ (readThreadParams $ lambdaIndex lam) (lambdaParams lam) arrs
+  where arr = kernelInputArray inp
+        name = kernelInputName inp
+        t = kernelInputType inp
+        is = kernelInputIndices inp

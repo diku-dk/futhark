@@ -257,6 +257,12 @@ bindLoopVar var bound =
         clampUpper = case bound of Var v -> ST.isAtLeast v 1
                                    _     -> id
 
+bindLoopVars :: MonadEngine m => [(VName,SubExp)] -> m a -> m a
+bindLoopVars []                  m =
+  m
+bindLoopVars ((var,bound):lvars) m =
+  bindLoopVar var bound $ bindLoopVars lvars m
+
 hoistBindings :: MonadEngine m =>
                  RuleBook m -> BlockPred (Lore m)
               -> ST.SymbolTable (Lore m) -> UT.UsageTable
@@ -629,6 +635,24 @@ simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
             acc'  <- mapM simplifySubExp acc
             return $ Sequential acc'
 
+simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
+  cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
+  ispace' <- forM ispace $ \(i, bound) -> do
+    bound' <- simplifySubExp bound
+    return (i, bound')
+  inps' <- mapM simplifyKernelInput inps
+  returns' <- forM returns $ \(t, perm) -> do
+    t' <- simplifyType t
+    return (t', perm)
+  body' <- enterLoop $ enterBody $
+           bindLoopVars ((index,w) : ispace) $
+           bindFParams (map kernelInputParam inps) $
+           blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
+           simplifyBody (map (diet . fst) returns) body
+  return $ Kernel cs' w' index ispace' inps' returns' body'
+  where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
+
 simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
@@ -892,6 +916,14 @@ simplifyCerts = liftM (nub . concat) . mapM check
                                   return [idd']
             _ -> do usedName idd
                     return [idd]
+
+simplifyKernelInput :: MonadEngine m =>
+                       KernelInput (InnerLore m) -> m (KernelInput (Lore m))
+simplifyKernelInput (KernelInput param arr is) = do
+  param' <- simplifyParam simplifyFParamLore param
+  arr' <- simplifyVName arr
+  is' <- mapM simplifySubExp is
+  return $ KernelInput param' arr' is'
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))

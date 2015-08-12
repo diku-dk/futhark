@@ -254,6 +254,26 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (Scan cs size lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
+  ppr (Kernel cs w index ispace inps returns body) =
+    ppCertificates' cs <> text "kernel" <+>
+    align (parens (text "width:" <+> ppr w) </>
+           parens (text "index:" <+> ppr index) </>
+           parens (stack $ punctuate semi $ map ppBound ispace) </>
+           parens (stack $ punctuate semi $ map ppr inps) </>
+           parens (stack $ punctuate semi $ map ppRet returns) </>
+           text "do") </>
+    indent 2 (ppr body)
+    where ppBound (name, bound) =
+            ppr name <+> text "<" <+> ppr bound
+          ppRet (t, perm) =
+            ppr t <+> text "permuted" <+> apply (map ppr perm)
+
+instance PrettyLore lore => Pretty (KernelInput lore) where
+  ppr inp = ppr (kernelInputType inp) <+>
+            ppr (kernelInputName inp) <+>
+            text "<-" <+>
+            ppr (kernelInputArray inp) <>
+            brackets (commasep (map ppr $ kernelInputIndices inp))
 
 instance PrettyLore lore => Pretty (SegOp lore) where
   ppr (SegReduce cs size lam inputs descp) =

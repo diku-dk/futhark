@@ -98,6 +98,8 @@ loopOpMetrics (Redomap _ _ fun1 fun2 _ _) =
   inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
 loopOpMetrics (Stream _ _ _ lam _ _) =
   inside "Stream" $ extLambdaMetrics lam
+loopOpMetrics (Kernel _ _ _ _ _ _ body) =
+  inside "Kernel" $ bodyMetrics body
 
 segOpMetrics :: SegOp lore -> MetricsM ()
 segOpMetrics (SegReduce _ _ fun _ _) =

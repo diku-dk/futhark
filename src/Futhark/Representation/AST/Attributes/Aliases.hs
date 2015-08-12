@@ -89,6 +89,8 @@ loopOpAliases (Stream _ _ form lam _ _) =
   in  a1 ++ bodyAliases (extLambdaBody lam)
 loopOpAliases (ConcatMap {}) =
   [mempty]
+loopOpAliases (Kernel _ _ _ _ _ returns _) =
+  map (const mempty) returns
 
 segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
 segOpAliases (SegReduce _ _ f _ _) =

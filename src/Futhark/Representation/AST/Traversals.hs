@@ -203,6 +203,17 @@ mapExpM tv (LoopOp (Stream cs size form lam arrs ii)) =
                  mapM (mapOnSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapM (mapOnSubExp tv) acc
+mapExpM tv (LoopOp (Kernel cs w index ispace inps rettype body)) =
+  LoopOp <$> (Kernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              mapOnVName tv index <*>
+              (zip iparams <$> mapM (mapOnSubExp tv) bounds) <*>
+              mapM (mapOnKernelInput tv) inps <*>
+              (zip <$> mapM (mapOnType tv) ts <*> pure perms) <*>
+              mapOnBody tv body)
+  where (iparams, bounds) = unzip ispace
+        (ts, perms) = unzip rettype
 mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
   SegOp <$> (pure SegReduce <*>
              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
@@ -243,6 +254,14 @@ mapOnLoopForm tv (ForLoop i bound) =
   ForLoop <$> mapOnVName tv i <*> mapOnSubExp tv bound
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
+
+mapOnKernelInput :: (Monad m, Applicative m) =>
+                    Mapper flore tlore m -> KernelInput flore
+                 -> m (KernelInput tlore)
+mapOnKernelInput tv (KernelInput param arr is) =
+  KernelInput <$> mapOnFParam tv param <*>
+                  mapOnVName tv arr <*>
+                  mapM (mapOnSubExp tv) is
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore

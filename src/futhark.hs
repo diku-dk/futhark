@@ -107,8 +107,8 @@ commandLineOptions =
     [] ["babysit-kernels"]
   , passoption "Expand allocations" expandAllocations
     [] ["expand-allocations"]
-  , passoption "Kernel distribution" distributeKernels
-    [] ["distribute-kernels"]
+  , passoption "Kernel extraction" extractKernels
+    [] ["extract-kernels"]
 
   , Option "s" ["standard"]
     (NoArg $ Right $ changeFutharkConfig $
