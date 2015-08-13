@@ -695,6 +695,13 @@ simplifyIndexing defOf typeOf idd inds =
         not $ and $ drop (length inds) changed_dims ->
         Just $ IndexResult cs src inds
 
+      | Just newdims <- shapeCoercion newshape,
+        Just olddims <- arrayDims <$> typeOf (Var src),
+        length newshape == length inds,
+        length olddims == length newdims ->
+        Just $ IndexResult cs src inds
+
+
     Just (Reshape cs [_] v2)
       | Just [_] <- arrayDims <$> typeOf (Var v2) ->
         Just $ IndexResult cs v2 inds
