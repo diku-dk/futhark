@@ -187,8 +187,7 @@ constructKernel kernel_nest inner_body = do
   let rank = length ispace
       returns = [ (rt, [0..rank-1]) | rt <- rts ]
   index <- newVName "kernel_thread_index"
-  let msg = "got this nest: " ++ pretty (constructMapNest kernel_nest inner_body)
-  trace msg return (w_bnds,
+  return (w_bnds,
           Let (loopNestingPattern first_nest) () $ LoopOp $
           Kernel (loopNestingCertificates first_nest) w index ispace inps returns inner_body)
   where
@@ -220,21 +219,6 @@ constructKernel kernel_nest inner_body = do
       where extra_inps =
               [ KernelInput (Param (paramIdent param `setIdentUniqueness` Nonunique) ()) arr [Var i] |
                 (param, arr) <- params_and_arrs ]
-
-constructMapNest :: KernelNest -> Body -> Binding
-constructMapNest (MapNesting pat cs w i params_and_arrs, []) body =
-  Let pat () $ LoopOp $
-  Map cs w (Lambda i params body rettype) arrs
-  where (params, arrs) = unzip params_and_arrs
-        rettype = map rowType $ patternTypes pat
-constructMapNest (MapNesting pat cs w i params_and_arrs, nest : nests) inner_body =
-  Let pat () $ LoopOp $
-  Map cs w (Lambda i params body rettype) arrs
-  where (params, arrs) = unzip params_and_arrs
-        rettype = map rowType $ patternTypes pat
-        bnd = constructMapNest (nest, nests) inner_body
-        body = mkBody [bnd] $ map Var $ patternNames $ bindingPattern bnd
-
 
 -- | Description of distribution to do.
 data DistributionBody = DistributionBody {
@@ -386,14 +370,14 @@ createKernelNest (inner_nest, nests) distrib_body = do
         recurse ((nest, (pat,res)) : nests') = do
           (kernel@(outer, _), kernel_free, kernel_consumed, kernel_targets) <- recurse nests'
 
-          let (pat', identity_map, expand_target) =
+          let (pat', res', identity_map, expand_target) =
                 removeIdentityMappingFromNesting
                 (HS.fromList $ patternNames $ loopNestingPattern outer) pat res
 
           distributeAtNesting
             nest
             pat'
-            (\k -> pushKernelNesting (pat,res) k kernel,
+            (\k -> pushKernelNesting (pat',res') k kernel,
              kernel_free,
              kernel_consumed)
             identity_map
@@ -446,12 +430,13 @@ removeIdentityMappingGeneral bound pat res =
 
 removeIdentityMappingFromNesting :: Names -> Pattern -> Result
                                  -> (Pattern,
+                                     Result,
                                      HM.HashMap VName Ident,
                                      Target -> Target)
 removeIdentityMappingFromNesting bound_in_nesting pat res =
-  let (pat', _, identity_map, expand_target) =
+  let (pat', res', identity_map, expand_target) =
         removeIdentityMappingGeneral bound_in_nesting pat res
-  in (pat', identity_map, expand_target)
+  in (pat', res', identity_map, expand_target)
 
 tryDistribute :: (MonadFreshNames m, HasTypeEnv m) =>
                  Nestings -> Targets -> [Binding]
