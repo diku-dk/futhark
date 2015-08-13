@@ -43,6 +43,7 @@ topDownRules = [ liftIdentityMapping
                , removeUnusedMapInput
                , removeUnusedKernelInputs
                , simplifyKernelInputs
+               , removeInvariantKernelOutputs
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
@@ -197,10 +198,15 @@ removeUnusedKernelInputs _ _ = cannotSimplify
 -- are defined, we may be able to simplify the input.
 simplifyKernelInputs :: MonadBinder m => TopDownRule m
 simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
-  | (inps', extra_cs) <- unzip $ map simplifyInput inps,
-    inps /= inps' =
+  | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
+    inps /= catMaybes inps' = do
+      body' <- insertBindingsM $ do
+         forM_ (catMaybes extra_bnds) $ \(name, se) ->
+           letBindNames'_ [name] $ PrimOp $ SubExp se
+         return body
       letBind_ pat $ LoopOp $
-      Kernel (cs++concat extra_cs) w index ispace inps' returns body
+        Kernel (cs++concat extra_cs) w index ispace
+        (catMaybes inps') returns body'
   where defOf = (`ST.lookupExp` vtable)
         typeOf (Var v) = ST.lookupType v vtable
         typeOf (Constant v) = Just $ Basic $ basicValueType v
@@ -208,10 +214,36 @@ simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps re
         simplifyInput inp@(KernelInput param arr is) =
           case simplifyIndexing defOf typeOf arr is of
             Just (IndexResult inp_cs arr' is') ->
-              (KernelInput param arr' is', inp_cs)
+              (Just $ KernelInput param arr' is', inp_cs, Nothing)
+            Just (SubExpResult se) ->
+              (Nothing, [], Just (paramName param, se))
             _ ->
-              (inp, [])
+              (Just inp, [], Nothing)
 simplifyKernelInputs _ _ = cannotSimplify
+
+removeInvariantKernelOutputs :: MonadBinder m => TopDownRule m
+removeInvariantKernelOutputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
+  | (invariant, variant) <-
+      partitionEithers $ zipWith3 isInvariant
+      (patternValueElements pat) returns $ bodyResult body,
+    not $ null invariant = do
+      let (variant_pat_elems, variant_returns, variant_result) =
+            unzip3 variant
+          pat' = Pattern [] variant_pat_elems
+      forM_ invariant $ \(pat_elem, (t, perm), se) ->
+        if perm /= sort perm
+        then cannotSimplify
+        else do
+          flat <- letExp "kernel_invariant_flat" $ PrimOp $ Replicate w se
+          let shape = map (DimNew . snd) ispace ++ map DimCoercion (arrayDims t)
+          letBind_ (Pattern [] [pat_elem]) $ PrimOp $ Reshape cs shape flat
+      letBind_ pat' $ LoopOp $
+        Kernel cs w index ispace inps variant_returns
+        body { bodyResult = variant_result }
+  where isInvariant pat_elem ret (Var v)
+          | Just _ <- ST.lookupType v vtable = Left (pat_elem, ret, Var v)
+        isInvariant pat_elem ret se = Right (pat_elem, ret, se)
+removeInvariantKernelOutputs _ _ = cannotSimplify
 
 removeDeadMapping :: MonadBinder m => BottomUpRule m
 removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs width fun arrs))) =
