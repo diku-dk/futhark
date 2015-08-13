@@ -877,6 +877,51 @@ checkLoopOp (Redomap ass size outerfun innerfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
+checkLoopOp (Kernel cs w index ispace inps returns body) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  mapM_ (require [Basic Int]) bounds
+  index_param <- basicFParamM index Int
+  iparams' <- forM iparams $ \iparam -> basicFParamM iparam Int
+  forM_ perms $ \perm ->
+    unless (length perm == rank && sort perm == [0..rank-1]) $
+    bad $ TypeError noLoc $
+    "Permutation " ++ pretty perm ++
+    " not valid for a rank " ++ pretty rank ++ " kernel."
+  checkFun' (nameFromString "<kernel body>",
+             staticShapes rettype,
+             funParamsToIdentsAndLores $ index_param : iparams' ++ map kernelInputParam inps,
+             body) $ do
+    checkFunParams $ map kernelInputParam inps
+    mapM_ checkKernelInput inps
+    checkBody body
+    bodyt <- bodyExtType body
+    unless (map rankShaped bodyt `subtypesOf`
+            map rankShaped (staticShapes rettype)) $
+      bad $
+      ReturnTypeError noLoc (nameFromString "<kernel body>")
+      (Several $ staticShapes rettype)
+      (Several bodyt)
+  where (iparams, bounds) = unzip ispace
+        rank = length ispace
+        (rettype, perms) = unzip returns
+        checkKernelInput inp = do
+          checkExp $ PrimOp $ Index []
+            (kernelInputArray inp) (kernelInputIndices inp)
+
+          arr_t <- lookupType $ kernelInputArray inp
+          unless (stripArray (length $ kernelInputIndices inp) arr_t `subtypeOf`
+                  kernelInputType inp) $
+            bad $ TypeError noLoc $
+            "Kernel input " ++ pretty inp ++ " has inconsistent type."
+
+          let uses_all_iparams =
+                all (`elem` kernelInputIndices inp) $ map Var iparams
+          when (unique (kernelInputType inp) && not uses_all_iparams) $
+             bad $ TypeError noLoc $ "Unique kernel input " ++
+             pretty (kernelInputName inp) ++
+             " does not use entire index space."
+
 checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
   mapM_ (requireI [Basic Cert]) ass

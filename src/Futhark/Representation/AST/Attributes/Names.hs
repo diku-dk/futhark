@@ -91,6 +91,19 @@ freeWalker = identityWalker {
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
+        expFree (LoopOp (Kernel cs w index ispace inps returns body)) = do
+          tell $ freeIn w
+          tell $ freeIn cs
+          tell $ freeIn index
+          tell $ freeIn $ map snd ispace
+          tell $ freeIn $ map fst returns
+          binding (HS.fromList $ index : map fst ispace) $ do
+            tell $ freeIn $ map kernelInputParam inps
+            tell $ freeIn $ map kernelInputArray inps
+            tell $ freeIn $ map kernelInputIndices inps
+            binding (HS.fromList $ map kernelInputName inps) $
+              bodyFree body
+
         expFree e = walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given body.
@@ -252,6 +265,12 @@ progNames = execWriter . mapM funNames . progFunctions
                        WhileLoop _ ->
                          return ()
           bodyNames loopbody
+
+        expNames (LoopOp (Kernel _ _ index ispace inps _ body)) = do
+          one index
+          mapM_ (one . kernelInputName) inps
+          mapM_ (one . fst) ispace
+          bodyNames body
 
         expNames e = walkExpM names e
 

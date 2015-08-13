@@ -12,7 +12,7 @@
 --     scan
 --
 -- ==
--- structure distributed { Map 8 Scan 1 }
+-- structure distributed { Kernel 4 Scan 1 }
 
 fun [real] combineVs([real] n_row, [real] vol_row, [real] dr_row) =
     map(+, zip(dr_row, map(*, zip(n_row, vol_row ) )))

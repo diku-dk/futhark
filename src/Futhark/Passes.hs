@@ -19,7 +19,7 @@ module Futhark.Passes
   , doubleBuffer
   , babysitKernels
   , expandAllocations
-  , distributeKernels
+  , extractKernels
   , standardPipeline
   )
 where
@@ -43,7 +43,7 @@ import qualified Futhark.Flattening
 import qualified Futhark.Optimise.DoubleBuffer
 import qualified Futhark.KernelBabysitting
 import qualified Futhark.ExpandAllocations
-import qualified Futhark.DistributeKernels
+import qualified Futhark.ExtractKernels
 
 fotransform :: Pass
 fotransform = unfailableBasicPass "first-order transform"
@@ -118,9 +118,9 @@ expandAllocations :: Pass
 expandAllocations = unfailableExplicitMemoryPass "expand allocations"
                     Futhark.ExpandAllocations.expandAllocations
 
-distributeKernels :: Pass
-distributeKernels = unfailableBasicPass "distribute kernels"
-                    Futhark.DistributeKernels.transformProg
+extractKernels :: Pass
+extractKernels = unfailableBasicPass "distribute kernels"
+                 Futhark.ExtractKernels.transformProg
 
 standardPipeline :: [Pass]
 standardPipeline =

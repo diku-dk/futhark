@@ -3,6 +3,15 @@
 --
 -- ==
 --
+-- input {
+--   [[[1,7],[9,4],[8,6]],
+--    [[1,0],[6,4],[1,6]]]
+-- }
+-- output {
+--   [[18, 17], [8, 10]]
+--   [8, 8]
+-- }
+--
 -- structure distributed { Map/DoLoop 0 }
 
 fun [{[int,k],int},n] main([[[int,k],m],n] a) =
@@ -11,7 +20,7 @@ fun [{[int,k],int},n] main([[[int,k],m],n] a) =
   map(fn {[int,k],int} ([[int,k],m] a_r) =>
         loop({acc,accnum}) = for i < m do
           {zipWith(+, acc, a_r[i]),
-           accnum * accnum} in
+           accnum + accnum} in
         {acc, accnum}
      , a)
 

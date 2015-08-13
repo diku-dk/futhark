@@ -48,9 +48,9 @@ transformBinding (Let pat () e) = do
                                    }
 
 transformExp :: Exp -> ExpandM ([Binding], Exp)
-transformExp (LoopOp (Map cs w fun args))
+transformExp (LoopOp (Kernel cs w thread_num ispace inps returns body))
   -- Extract allocations from the body.
-  | Right (body, thread_allocs) <- extractKernelAllocations fun = do
+  | Right (body', thread_allocs) <- extractKernelAllocations bound_before_body body = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
   alloc_bnds <-
@@ -63,19 +63,18 @@ transformExp (LoopOp (Map cs w fun args))
 
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
-  let thread_num = lambdaIndex fun
-      alloc_offsets =
+  let alloc_offsets =
         OffsetMap { offsetMap =
                     HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp)
                     thread_allocs
-                  , indexVariable = lambdaIndex fun
+                  , indexVariable = thread_num
                   , kernelWidth = w
                   }
-      fun' = if null alloc_bnds then fun
-             else fun { lambdaBody =
-                        offsetMemorySummariesInBody alloc_offsets body
-                      }
-  return (alloc_bnds, LoopOp (Map cs w fun' args))
+      body'' = if null alloc_bnds then body'
+               else offsetMemorySummariesInBody alloc_offsets body'
+  return (alloc_bnds, LoopOp $ Kernel cs w thread_num ispace inps returns body'')
+  where bound_before_body =
+          HS.fromList $ map fst ispace ++ map kernelInputName inps
 transformExp e =
   return ([], e)
 
@@ -93,20 +92,16 @@ transformExtLambda lam = do
 -- as well as the lambda body where all the allocations have been removed.
 -- Only looks at allocations in the immediate body - if there are any
 -- further down, we will fail later.  If the size of one of the
--- allocations is not free in the lambda, we return 'Left' and an
+-- allocations is not free in the body, we return 'Left' and an
 -- error message.
-extractKernelAllocations :: Lambda -> Either String (Body, HM.HashMap VName SubExp)
-extractKernelAllocations lam = do
-  (allocs, bnds) <- mapAccumLM isAlloc HM.empty lambdaBindings
-  return ((lambdaBody lam) { bodyBindings = catMaybes bnds }, allocs)
-  where boundHere = HS.fromList $
-                    map paramName (lambdaParams lam) ++
-                    concatMap (patternNames . bindingPattern) lambdaBindings
-
-        lambdaBindings = bodyBindings $ lambdaBody lam
+extractKernelAllocations :: Names -> Body -> Either String (Body, HM.HashMap VName SubExp)
+extractKernelAllocations bound_before_body body = do
+  (allocs, bnds) <- mapAccumLM isAlloc HM.empty $ bodyBindings body
+  return (body { bodyBindings = catMaybes bnds }, allocs)
+  where bound_here = bound_before_body `HS.union` boundInBody body
 
         isAlloc _ (Let (Pattern [] [patElem]) () (PrimOp (Alloc (Var v))))
-          | v `HS.member` boundHere =
+          | v `HS.member` bound_here =
             throwError $ "Size " ++ pretty v ++
             " for block " ++ pretty patElem ++
             " is not lambda-invariant"

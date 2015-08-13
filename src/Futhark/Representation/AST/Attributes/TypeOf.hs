@@ -158,6 +158,11 @@ loopOpExtType (Stream _ outersize form lam _ _) =
                 MapLike _ -> []
                 RedLike _ _ acc -> acc
                 Sequential  acc -> acc
+loopOpExtType (Kernel _ _ _ is _ returns _) =
+  staticShapes
+  [ rearrangeType perm (arrayOfShape t outer_shape)
+  | (t, perm) <- returns ]
+  where outer_shape = Shape $ map snd is
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]

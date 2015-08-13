@@ -5,10 +5,10 @@
 -- input { [1,2,3,4,5,6,7,8,9] }
 -- output { [1, 3, 6, 10, 15, 21, 28, 36, 45] }
 -- structure distributed {
---   Map 1
---   Map/Map 0
---   Map/Reduce 0
---   Map/DoLoop 0
+--   Kernel 1
+--   Map 0
+--   Kernel/Reduce 0
+--   Kernel/DoLoop 0
 -- }
 
 fun [int] main([int] a) =

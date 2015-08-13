@@ -71,8 +71,9 @@ Library
                    Futhark.CopyPropagate
                    Futhark.Compiler
                    Futhark.Construct
-                   Futhark.DistributeKernels
-                   Futhark.DistributeKernels.Distribution
+                   Futhark.ExtractKernels
+                   Futhark.ExtractKernels.Distribution
+                   Futhark.ExtractKernels.ISRWIM
                    Futhark.ExpandAllocations
                    Futhark.ExplicitAllocations
                    Futhark.Externalise

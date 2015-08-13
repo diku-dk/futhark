@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
--- | Distribute kernels.
+-- | Extract kernels.
 -- In the following, I will use the term "width" to denote the amount
 -- of immediate parallelism in a map - that is, the row size of the
 -- array(s) being used as input.
@@ -145,7 +145,7 @@
 --         e,a,b)
 -- @
 --
-module Futhark.DistributeKernels
+module Futhark.ExtractKernels
        (transformProg)
        where
 
@@ -159,15 +159,16 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
 
+import Prelude
+
 import Futhark.Optimise.Simplifier.Simple (bindableSimpleOps)
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.FirstOrderTransform as FOT
 import Futhark.CopyPropagate
-import Futhark.DistributeKernels.Distribution
-
-import Prelude
+import Futhark.ExtractKernels.Distribution
+import Futhark.ExtractKernels.ISRWIM
 
 transformProg :: Prog -> Prog
 transformProg = intraproceduralTransformation transformFunDec
@@ -184,20 +185,20 @@ runDistribM :: MonadFreshNames m => DistribM a -> m a
 runDistribM m = modifyNameSource $ runState (runReaderT m HM.empty)
 
 transformBody :: Body -> DistribM Body
-transformBody body = transformBindings (bodyBindings body) $
-                     return $ resultBody $ bodyResult body
+transformBody body = do bnds <- transformBindings $ bodyBindings body
+                        return body { bodyBindings = bnds }
 
-transformBindings :: [Binding] -> DistribM Body -> DistribM Body
-transformBindings [] m =
-  m
-transformBindings (bnd:bnds) m =
+transformBindings :: [Binding] -> DistribM [Binding]
+transformBindings [] =
+  return []
+transformBindings (bnd:bnds) =
   sequentialisedUnbalancedBinding bnd >>= \case
     Nothing -> do
       bnd' <- transformBinding bnd
       localTypeEnv (typeEnvFromBindings bnd') $
-        insertBindings bnd' <$> transformBindings bnds m
+        (bnd'++) <$> transformBindings bnds
     Just bnds' ->
-      transformBindings (bnds' <> bnds) m
+      transformBindings $ bnds' <> bnds
 
 sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
 sequentialisedUnbalancedBinding bnd@(Let _ _ (LoopOp (Map _ _ lam _)))
@@ -240,7 +241,27 @@ transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs c))) =
     let lam' = lam { extLambdaBody = body' }
     return [Let pat () $ LoopOp $ Stream cs w form lam' arrs c]
 
-transformBinding bnd = return [bnd]
+transformBinding (Let res_pat () (LoopOp op))
+  | Scan cs w scan_fun scan_input <- op,
+    Just do_iswim <- iswim res_pat cs w scan_fun scan_input =
+      transformBindings =<< runBinder_ do_iswim
+
+transformBinding (Let res_pat () (LoopOp op))
+  | Reduce cs w red_fun red_input <- op,
+    Just do_irwim <- irwim res_pat cs w red_fun red_input =
+      transformBindings =<< runBinder_ do_irwim
+
+transformBinding bnd = do
+  e' <- mapExpM transform $ bindingExp bnd
+  return [bnd { bindingExp = e' }]
+  where transform = identityMapper { mapOnLambda = transformLambda }
+
+transformLambda :: Lambda -> DistribM Lambda
+transformLambda lam =
+  localTypeEnv (typeEnvFromParams $ lambdaParams lam) $
+  localTypeEnv (HM.singleton (lambdaIndex lam) $ Basic Int ) $ do
+    body' <- transformBody $ lambdaBody lam
+    return lam { lambdaBody = body' }
 
 data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 
@@ -352,6 +373,8 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (Stream _ w _ _ _ _)) =
           w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (Kernel _ w _ _ _ _ _)) =
+          w `subExpBound` bound
         unbalancedBinding bound (LoopOp (DoLoop _ merge (ForLoop i iterations) body)) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
@@ -382,41 +405,38 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       addBindingToKernel (Let pat () $ mapLoopExp maploop) acc
   | otherwise =
       distribute =<<
-      leavingNesting maploop <$>
+      leavingNesting maploop =<<
       mapNesting pat cs w lam arrs
-      (distributeMapBodyBindings acc' $ bodyBindings $ lambdaBody lam)
+      (distribute =<< distributeMapBodyBindings acc' (bodyBindings $ lambdaBody lam))
       where acc' = KernelAcc { kernelTargets = pushInnerTarget
                                                (pat, bodyResult $ lambdaBody lam) $
                                                kernelTargets acc
                              , kernelBindings = mempty
                              }
 
-leavingNesting :: MapLoop -> KernelAcc -> KernelAcc
+leavingNesting :: MapLoop -> KernelAcc -> KernelM KernelAcc
 leavingNesting (MapLoop cs w lam arrs) acc =
   case second reverse $ kernelTargets acc of
    (_, []) ->
-     error "The kernel targets list is unexpectedly small"
-   ((pat,res), x:xs) ->
-     acc { kernelTargets =
-           (x, reverse xs)
-         , kernelBindings =
-           case kernelBindings acc of
-             []      ->
-               []
-             remnant ->
-               let body = mkBody remnant res
-                   used_in_body = freeInBody body
-                   (used_params, used_arrs) =
-                     unzip $
-                     filter ((`HS.member` used_in_body) . paramName . fst) $
-                     zip (lambdaParams lam) arrs
-                   lam' = Lambda { lambdaBody = body
-                                 , lambdaReturnType = map rowType $ patternTypes pat
-                                 , lambdaParams = used_params
-                                 , lambdaIndex = lambdaIndex lam
-                                 }
-               in [Let pat () $ LoopOp $ Map cs w lam' used_arrs]
-         }
+     fail "The kernel targets list is unexpectedly small"
+   ((pat,res), x:xs) -> do
+     let acc' = acc { kernelTargets = (x, reverse xs) }
+     case kernelBindings acc' of
+       []      -> return acc'
+       remnant ->
+         let body = mkBody remnant res
+             used_in_body = freeInBody body
+             (used_params, used_arrs) =
+               unzip $
+               filter ((`HS.member` used_in_body) . paramName . fst) $
+               zip (lambdaParams lam) arrs
+             lam' = Lambda { lambdaBody = body
+                           , lambdaReturnType = map rowType $ patternTypes pat
+                           , lambdaParams = used_params
+                           , lambdaIndex = lambdaIndex lam
+                           }
+         in addBindingToKernel (Let pat () $ LoopOp $ Map cs w lam' used_arrs)
+            acc' { kernelBindings = [] }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
 
@@ -487,8 +507,10 @@ maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
         Just (kernels, res, nest, acc') -> do
           tell kernels
           lam' <- FOT.transformLambda lam
-          addKernel [constructKernel nest $
-                     mkBody [bnd { bindingExp = call_with_new_lam lam' }] res]
+          (w_bnds, kern_bnd) <-
+            constructKernel nest $
+            mkBody [bnd { bindingExp = call_with_new_lam lam' }] res
+          addKernel $ w_bnds++[kern_bnd]
           return acc'
         _ ->
           addBindingToKernel bnd acc

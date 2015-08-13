@@ -8,7 +8,7 @@
 --   reduce
 -- ==
 --
--- structure distributed { Map 3 Reduce 1 }
+-- structure distributed { Kernel 2 Reduce 1 Map 0 }
 
 fun [int] main([[int]] a) =
   map(fn int ([int] a_r) =>

@@ -98,8 +98,8 @@ futharkConfig config =
 compilerPipeline :: [Pass]
 compilerPipeline =
   standardPipeline ++
-  [ distributeKernels
-  , distributeKernels
+  [ extractKernels
+  , extractKernels
   , eotransform
   , babysitKernels
   , eotransform

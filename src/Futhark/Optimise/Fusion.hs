@@ -262,14 +262,6 @@ soacInputs soac = do
   other_nms <- expandSoacInpArr other_nms0
   return (inp_nms, other_nms)
 
-{-
-addNewKer :: FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
-addNewKer res (idd, soac) = do
-  (inp_nms, other_nms) <- soacInputs soac
-  let used_inps = filter (isInpArrInResModKers res HS.empty) inp_nms
-  let ufs = HS.unions [unfusable res, HS.fromList used_inps, HS.fromList other_nms]
-  addNewKerWithUnfusable res (idd, soac) ufs
--}
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
