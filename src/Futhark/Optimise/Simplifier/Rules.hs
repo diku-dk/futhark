@@ -41,6 +41,8 @@ topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
                , removeIotaMapping
                , removeUnusedMapInput
+               , removeUnusedKernelInputs
+               , simplifyKernelInputs
                , hoistLoopInvariantMergeVariables
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
@@ -51,7 +53,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyComplement
                , letRule simplifyNegate
                , letRule simplifyAssert
-               , letRule simplifyIndexing
+               , letRule simplifyIndex
                , simplifyIndexIntoReshape
                , simplifyIndexIntoSplit
                , removeEmptySplits
@@ -180,6 +182,36 @@ removeUnusedMapInput _ (Let pat _ (LoopOp (Map cs width fun arrs)))
         used_in_body = freeInBody $ lambdaBody fun
         usedInput (param, _) = paramName param `HS.member` used_in_body
 removeUnusedMapInput _ _ = cannotSimplify
+
+-- | Remove inputs that are not used inside the @kernel@.
+removeUnusedKernelInputs :: MonadBinder m => TopDownRule m
+removeUnusedKernelInputs _ (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
+  | (used,unused) <- partition usedInput inps,
+    not (null unused) =
+      letBind_ pat $ LoopOp $ Kernel cs w index ispace used returns body
+  where used_in_body = freeInBody body
+        usedInput inp = kernelInputName inp `HS.member` used_in_body
+removeUnusedKernelInputs _ _ = cannotSimplify
+
+-- | Kernel inputs are indexes into arrays.  Based on how those arrays
+-- are defined, we may be able to simplify the input.
+simplifyKernelInputs :: MonadBinder m => TopDownRule m
+simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
+  | (inps', extra_cs) <- unzip $ map simplifyInput inps,
+    inps /= inps' =
+      letBind_ pat $ LoopOp $
+      Kernel (cs++concat extra_cs) w index ispace inps' returns body
+  where defOf = (`ST.lookupExp` vtable)
+        typeOf (Var v) = ST.lookupType v vtable
+        typeOf (Constant v) = Just $ Basic $ basicValueType v
+
+        simplifyInput inp@(KernelInput param arr is) =
+          case simplifyIndexing defOf typeOf arr is of
+            Just (IndexResult inp_cs arr' is') ->
+              (KernelInput param arr' is', inp_cs)
+            _ ->
+              (inp, [])
+simplifyKernelInputs _ _ = cannotSimplify
 
 removeDeadMapping :: MonadBinder m => BottomUpRule m
 removeDeadMapping (_, used) (Let pat _ (LoopOp (Map cs width fun arrs))) =
@@ -610,43 +642,64 @@ simplifyAssert _ _ (Assert (Constant (LogVal True)) _) =
 simplifyAssert _ _ _ =
   Nothing
 
-simplifyIndexing :: LetTopDownRule lore u
-simplifyIndexing defOf typeOf (Index cs idd inds) =
+simplifyIndex :: LetTopDownRule lore u
+simplifyIndex defOf typeOf (Index cs idd inds) =
+  case simplifyIndexing defOf typeOf idd inds of
+    Just (SubExpResult se) ->
+      Just $ SubExp se
+    Just (IndexResult extra_cs idd' inds') ->
+      Just $ Index (cs++extra_cs) idd' inds'
+    Nothing ->
+      Nothing
+simplifyIndex _ _ _ = Nothing
+
+data IndexResult = IndexResult Certificates VName [SubExp]
+                 | SubExpResult SubExp
+
+simplifyIndexing :: VarLookup lore -> TypeLookup
+                 -> VName -> [SubExp]
+                 -> Maybe IndexResult
+simplifyIndexing defOf typeOf idd inds =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
-    Just (SubExp (Var v)) ->
-      return $ Index cs v inds
+    Just (SubExp (Var v)) -> Just $ IndexResult [] v inds
 
     Just (Iota _)
-      | [ii] <- inds -> Just $ SubExp ii
+      | [ii] <- inds -> Just $ SubExpResult ii
 
-    Just (Index cs2 aa ais) ->
-      Just $ Index (cs++cs2) aa (ais ++ inds)
-
-    Just (e@ArrayLit {})
-       | Just iis <- ctIndex inds,
-         Just el <- arrLitInd e iis -> Just el
+    Just (Index cs aa ais) ->
+      Just $ IndexResult cs aa (ais ++ inds)
 
     Just (Replicate _ (Var vv))
-      | [_]   <- inds -> Just $ SubExp $ Var vv
-      | _:is' <- inds -> Just $ Index cs vv is'
+      | [_]   <- inds -> Just $ SubExpResult $ Var vv
+      | _:is' <- inds -> Just $ IndexResult [] vv is'
 
     Just (Replicate _ val@(Constant _))
-      | [_] <- inds -> Just $ SubExp val
+      | [_] <- inds -> Just $ SubExpResult val
 
-    Just (Rearrange cs2 perm src)
+    Just (Rearrange cs perm src)
        | permuteReach perm <= length inds ->
          let inds' = permuteShape (take (length inds) perm) inds
-         in Just $ Index (cs++cs2) src inds'
+         in Just $ IndexResult cs src inds'
 
-    Just (Reshape cs2 [_] v2)
+    Just (Copy src)
+      | Just dims <- arrayDims <$> typeOf (Var src),
+        length inds == length dims ->
+          Just $ IndexResult [] src inds
+
+    Just (Reshape cs newshape src)
+      | Just newdims <- shapeCoercion newshape,
+        Just olddims <- arrayDims <$> typeOf (Var src),
+        changed_dims <- zipWith (/=) newdims olddims,
+        not $ and $ drop (length inds) changed_dims ->
+        Just $ IndexResult cs src inds
+
+    Just (Reshape cs [_] v2)
       | Just [_] <- arrayDims <$> typeOf (Var v2) ->
-        Just $ Index (cs++cs2) v2 inds
+        Just $ IndexResult cs v2 inds
 
     _ -> Nothing
-
-simplifyIndexing _ _ _ = Nothing
 
 simplifyIndexIntoReshape :: MonadBinder m => TopDownRule m
 simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
@@ -977,20 +1030,6 @@ isCt0 (Constant (Float32Val x)) = x == 0
 isCt0 (Constant (Float64Val x)) = x == 0
 isCt0 (Constant (LogVal x))     = not x
 isCt0 _                         = False
-
-ctIndex :: [SubExp] -> Maybe [Int32]
-ctIndex [] = Just []
-ctIndex (Constant (IntVal ii):is) =
-  case ctIndex is of
-    Nothing -> Nothing
-    Just y  -> Just (ii:y)
-ctIndex _ = Nothing
-
-arrLitInd :: PrimOp lore -> [Int32] -> Maybe (PrimOp lore)
-arrLitInd e [] = Just e
-arrLitInd (ArrayLit els _) (i:is)
-  | i >= 0, i < genericLength els = arrLitInd (SubExp $ els !! fromIntegral i) is
-arrLitInd _ _ = Nothing
 
 ordBinOp :: (Functor m, Monad m) =>
             (forall a. Ord a => a -> a -> m Bool)
