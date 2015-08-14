@@ -641,16 +641,15 @@ simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
   ispace' <- forM ispace $ \(i, bound) -> do
     bound' <- simplifySubExp bound
     return (i, bound')
-  inps' <- mapM simplifyKernelInput inps
   returns' <- forM returns $ \(t, perm) -> do
     t' <- simplifyType t
     return (t', perm)
-  body' <- enterLoop $ enterBody $
-           bindLoopVars ((index,w) : ispace) $
-           bindFParams (map kernelInputParam inps) $
-           blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
-           simplifyBody (map (diet . fst) returns) body
-  return $ Kernel cs' w' index ispace' inps' returns' body'
+  enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
+    inps' <- mapM simplifyKernelInput inps
+    body' <- bindFParams (map kernelInputParam inps') $
+             blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
+             simplifyBody (map (diet . fst) returns) body
+    return $ Kernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
 
 simplifyLoopOp (Map cs w fun arrs) = do

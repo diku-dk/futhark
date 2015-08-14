@@ -269,6 +269,8 @@ instance MonadFreshNames m => MonadFreshNames (VariantM m) where
 
 instance (Functor m, Monad m) => HasTypeEnv (VariantM m) where
 
+instance (Functor m, Monad m) => LocalTypeEnv (VariantM m) where
+
 runVariantM :: (Functor m, Monad m) =>
                Env m -> VariantM m a -> m (a, Bool)
 runVariantM env (VariantM m) =

@@ -36,7 +36,7 @@ import Futhark.Substitute
 
 import Prelude hiding (any, all)
 
-topDownRules :: MonadBinder m => TopDownRules m
+topDownRules :: (MonadBinder m, LocalTypeEnv m) => TopDownRules m
 topDownRules = [ liftIdentityMapping
                , removeReplicateMapping
                , removeIotaMapping
@@ -81,11 +81,11 @@ bottomUpRules = [ removeDeadMapping
                 , simplifyEqualBranchResult
                 ]
 
-standardRules :: MonadBinder m => RuleBook m
+standardRules :: (MonadBinder m, LocalTypeEnv m) => RuleBook m
 standardRules = (topDownRules, bottomUpRules)
 
 -- | Rules that only work on 'Basic' lores or similar.  Includes 'standardRules'.
-basicRules :: MonadBinder m => RuleBook m
+basicRules :: (MonadBinder m, LocalTypeEnv m) => RuleBook m
 basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 liftIdentityMapping :: MonadBinder m => TopDownRule m
@@ -196,11 +196,11 @@ removeUnusedKernelInputs _ _ = cannotSimplify
 
 -- | Kernel inputs are indexes into arrays.  Based on how those arrays
 -- are defined, we may be able to simplify the input.
-simplifyKernelInputs :: MonadBinder m => TopDownRule m
+simplifyKernelInputs :: (MonadBinder m, LocalTypeEnv m) => TopDownRule m
 simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
   | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
     inps /= catMaybes inps' = do
-      body' <- insertBindingsM $ do
+      body' <- localTypeEnv index_env $ insertBindingsM $ do
          forM_ (catMaybes extra_bnds) $ \(name, se) ->
            letBindNames'_ [name] $ PrimOp $ SubExp se
          return body
@@ -210,6 +210,7 @@ simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps re
   where defOf = (`ST.lookupExp` vtable)
         typeOf (Var v) = ST.lookupType v vtable
         typeOf (Constant v) = Just $ Basic $ basicValueType v
+        index_env = HM.fromList $ zip (map fst ispace) $ repeat $ Basic Int
 
         simplifyInput inp@(KernelInput param arr is) =
           case simplifyIndexing defOf typeOf arr is of
