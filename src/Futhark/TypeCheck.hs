@@ -883,11 +883,13 @@ checkLoopOp (Kernel cs w index ispace inps returns body) = do
   mapM_ (require [Basic Int]) bounds
   index_param <- basicFParamM index Int
   iparams' <- forM iparams $ \iparam -> basicFParamM iparam Int
-  forM_ perms $ \perm ->
-    unless (length perm == rank && sort perm == [0..rank-1]) $
-    bad $ TypeError noLoc $
-    "Permutation " ++ pretty perm ++
-    " not valid for a rank " ++ pretty rank ++ " kernel."
+  forM_ returns $ \(t, perm) ->
+    let return_rank = arrayRank t + rank
+    in unless (sort perm == [0..return_rank - 1]) $
+       bad $ TypeError noLoc $
+       "Permutation " ++ pretty perm ++
+       " not valid for returning " ++ pretty t ++
+       " from a rank " ++ pretty rank ++ " kernel."
   checkFun' (nameFromString "<kernel body>",
              staticShapes rettype,
              funParamsToIdentsAndLores $ index_param : iparams' ++ map kernelInputParam inps,
@@ -904,7 +906,7 @@ checkLoopOp (Kernel cs w index ispace inps returns body) = do
       (Several bodyt)
   where (iparams, bounds) = unzip ispace
         rank = length ispace
-        (rettype, perms) = unzip returns
+        (rettype, _) = unzip returns
         checkKernelInput inp = do
           checkExp $ PrimOp $ Index []
             (kernelInputArray inp) (kernelInputIndices inp)

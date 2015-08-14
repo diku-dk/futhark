@@ -185,7 +185,7 @@ constructKernel :: MonadFreshNames m =>
 constructKernel kernel_nest inner_body = do
   (w_bnds, w, ispace, inps, rts) <- constructKernel' kernel_nest
   let rank = length ispace
-      returns = [ (rt, [0..rank-1]) | rt <- rts ]
+      returns = [ (rt, [0..rank + arrayRank rt - 1]) | rt <- rts ]
   index <- newVName "kernel_thread_index"
   return (w_bnds,
           Let (loopNestingPattern first_nest) () $ LoopOp $
