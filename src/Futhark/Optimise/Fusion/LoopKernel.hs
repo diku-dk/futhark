@@ -207,7 +207,7 @@ removeUnusedParams l inps =
 -- unmodified.
 mapFusionOK :: [VName] -> FusedKer -> Bool
 mapFusionOK outVars ker = any (`elem` inpIds) outVars
-  where inpIds = mapMaybe SOAC.isVarInput (inputs ker)
+  where inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer

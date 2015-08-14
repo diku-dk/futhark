@@ -38,6 +38,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , varInput
   , identInput
   , isVarInput
+  , isVarishInput
   , addTransform
   , addTransforms
   , InputArray (..)
@@ -263,6 +264,15 @@ identInput v = Input (ArrayTransforms Seq.empty) $ Var (identName v) (identType 
 isVarInput :: Input -> Maybe VName
 isVarInput (Input ts (Var v _)) | nullTransforms ts = Just v
 isVarInput _                                        = Nothing
+
+-- | If the given input is a plain variable input, with no non-vacuous transforms,
+-- return the variable.
+isVarishInput :: Input -> Maybe VName
+isVarishInput (Input ts ia@(Var v _))
+  | nullTransforms ts = Just v
+  | Reshape [] [DimCoercion _] :< ts' <- viewf ts =
+      isVarishInput $ Input ts' ia
+isVarishInput _ = Nothing
 
 -- | Add a transformation to the end of the transformation list.
 addTransform :: ArrayTransform -> Input -> Input
