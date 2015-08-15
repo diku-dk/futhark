@@ -48,7 +48,7 @@ bindAllocBinding (SizeComputation name se) = do
 bindAllocBinding (Allocation name size) =
   letBindNames'_ [name] $ PrimOp $ Alloc size
 bindAllocBinding (ArrayCopy name bindage src) =
-  letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
+  letBindNames_ [(name,bindage)] $ PrimOp $ Copy CopyLinear src
 
 class (MonadFreshNames m, HasTypeEnv m) => Allocator m where
   addAllocBinding :: AllocBinding -> m ()
@@ -168,6 +168,15 @@ allocForArray t = do
 allocsForBinding :: Allocator m =>
                     [Ident] -> [(Ident,Bindage)] -> Exp
                  -> m (Binding, [AllocBinding])
+allocsForBinding [] [(dest,BindVar)] (PrimOp (Copy CopyVerbatim src))
+  | not $ basicType t = do
+  (_, ixfun) <- lookupArraySummary' src
+  (_, m) <- allocForArray t
+  let summary = MemSummary m ixfun
+  return (Let (Pattern [] [PatElem dest BindVar summary]) () $
+          PrimOp $ Copy CopyVerbatim src,
+          [])
+  where t = identType dest
 allocsForBinding sizeidents validents e = do
   rts <- expReturns lookupSummary' e
   (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts
@@ -381,7 +390,7 @@ allocLinearArray s v = do
   (size, mem) <- allocForArray t
   v' <- newIdent s t
   let pat = Pattern [] [PatElem v' BindVar $ directIndexFunction mem t]
-  addBinding $ Let pat () $ PrimOp $ Copy v
+  addBinding $ Let pat () $ PrimOp $ Copy CopyLinear v
   return (size, mem, Var $ identName v')
 
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
@@ -535,7 +544,7 @@ duplicateArray desc arr = do
   new_arr_ident <- Ident new_arr <$> lookupType arr
   let pat = Pattern [] [PatElem new_arr_ident BindVar $
                         MemSummary new_mem ixfun]
-  addBinding =<< mkLetM pat (PrimOp $ Copy arr)
+  addBinding =<< mkLetM pat (PrimOp $ Copy CopyVerbatim arr)
   return ((new_mem, ixfun), new_arr)
 
 allocInMapLambda :: In.Lambda -> [MemSummary] -> AllocM Lambda

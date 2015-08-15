@@ -177,7 +177,7 @@ primOpRanges (Rearrange _ _ v) =
   [subExpRange $ Var v]
 primOpRanges (Split _ sizeexps v) =
   replicate (length sizeexps) $ subExpRange $ Var v
-primOpRanges (Copy se) =
+primOpRanges (Copy _ se) =
   [subExpRange $ Var se]
 primOpRanges (Index _ v _) =
   [subExpRange $ Var v]

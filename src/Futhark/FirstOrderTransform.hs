@@ -119,7 +119,7 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
                    (pure $ PrimOp $ SubExp n)
                    (map (pure . PrimOp . SubExp) ms)
         res <- letExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
-        return $ PrimOp $ Copy res
+        return $ PrimOp $ Copy CopyVerbatim res
 
       nonempty :: [VName] -> Maybe (VName, [VName])
       nonempty []     = Nothing
@@ -642,7 +642,8 @@ copyIfArray (Constant v) = return $ Constant v
 copyIfArray (Var v) = do
   t <- lookupType v
   case t of
-   Array {} -> letSubExp (baseString v ++ "_first_order_copy") $ PrimOp $ Copy v
+   Array {} -> letSubExp (baseString v ++ "_first_order_copy") $
+               PrimOp $ Copy CopyVerbatim v
    _        -> return $ Var v
 
 index :: Certificates -> [VName] -> SubExp -> [Exp]

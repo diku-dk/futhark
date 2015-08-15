@@ -147,8 +147,8 @@ mapExpM tv (PrimOp (Concat cs x ys size)) =
   PrimOp <$> (pure Concat <*> mapOnCertificates tv cs <*>
                  mapOnVName tv x <*> mapM (mapOnVName tv) ys <*>
                  mapOnSubExp tv size)
-mapExpM tv (PrimOp (Copy e)) =
-  PrimOp <$> (pure Copy <*> mapOnVName tv e)
+mapExpM tv (PrimOp (Copy method e)) =
+  PrimOp <$> (Copy method <$> mapOnVName tv e)
 mapExpM tv (PrimOp (Alloc e)) =
   PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
 mapExpM tv (PrimOp (Assert e loc)) =

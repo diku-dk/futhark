@@ -92,7 +92,7 @@ substituteIndicesInExp substs e = do
                     row <- letExp (baseString v ++ "_row") $
                            PrimOp $ Index cs2 (identName src2) is2
                     row_copy <- letExp (baseString v ++ "_row_copy") $
-                                PrimOp $ Copy row
+                                PrimOp $ Copy CopyVerbatim row
                     return $ update v v ([],
                                          Ident row_copy (stripArray (length is2) $ identType src2),
                                          []) substs'

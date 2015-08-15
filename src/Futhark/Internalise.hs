@@ -556,7 +556,7 @@ internaliseExp desc (E.UnOp E.Signum e _) = do
 
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
-  letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
+  letSubExps desc [I.PrimOp $ I.Copy CopyVerbatim se | se <- ses]
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
