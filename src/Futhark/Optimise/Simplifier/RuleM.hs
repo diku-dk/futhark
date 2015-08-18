@@ -32,8 +32,7 @@ instance (Monad m, HasTypeEnv m) => HasTypeEnv (RuleM m) where
 instance (Monad m, LocalTypeEnv m) => LocalTypeEnv (RuleM m) where
   localTypeEnv types (RuleM m) = RuleM $ do
     x <- lift $ localTypeEnv types $ runMaybeT m
-    case x of Nothing -> MaybeT $ return Nothing
-              Just v  -> return v
+    MaybeT $ return x
 
 instance MonadBinder m => MonadBinder (RuleM m) where
   type Lore (RuleM m) = Lore m
