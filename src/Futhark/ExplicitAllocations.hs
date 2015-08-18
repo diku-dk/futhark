@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections #-}
 module Futhark.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
@@ -350,20 +350,51 @@ paramsSummary = HM.fromList . map paramSummary
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
 allocInFParams params m = do
-  (valparams, (memsizeparams, memparams)) <- runWriterT $ forM params $ \param ->
-    case paramType param of
-      Array {} -> do
-        (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ paramIdent param
-        tell ([Param memsize Scalar], [Param mem Scalar])
-        return $ Param param' paramlore
-      _ -> return param { paramLore = Scalar }
+  (valparams, (memsizeparams, memparams)) <-
+    runWriterT $ mapM allocInFParam params
   let params' = memsizeparams <> memparams <> valparams
       summary = paramsSummary params'
   localMemoryMap (summary `HM.union`) $ m params'
 
-isArray :: SubExp -> AllocM Bool
-isArray (Var v) = not <$> (==Scalar) <$> lookupSummary' v
-isArray (Constant _) = return False
+allocInFParam :: MonadFreshNames m =>
+                 In.FParam -> WriterT ([FParam], [FParam]) m FParam
+allocInFParam param
+  | Array {} <- paramType param = do
+      (memsize,mem,(param',paramlore)) <- lift $ memForBindee $ paramIdent param
+      tell ([Param memsize Scalar], [Param mem Scalar])
+      return $ Param param' paramlore
+  | otherwise =
+      return param { paramLore = Scalar }
+
+allocInMergeParams :: [(In.FParam,SubExp)]
+                   -> ([FParam] -> ([SubExp] -> AllocM [SubExp]) -> AllocM a)
+                   -> AllocM a
+allocInMergeParams merge m = do
+  ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
+    runWriterT $ unzip <$> mapM allocInMergeParam merge
+  let mergeparams' = memsizeparams <> memparams <> valparams
+      summary = paramsSummary mergeparams'
+
+      mk_loop_res :: [SubExp] -> AllocM [SubExp]
+      mk_loop_res ses = do
+        (valargs, (memsizeargs, memargs)) <-
+          runWriterT $ zipWithM ($) handle_loop_subexps ses
+        return $ memsizeargs <> memargs <> valargs
+
+  localMemoryMap (summary `HM.union`) $ m mergeparams' mk_loop_res
+  where param_names = map (paramName . fst) merge
+        loopInvariantShape =
+          not . any (`elem` param_names) . subExpVars . arrayDims . paramType
+        allocInMergeParam (mergeparam, Var v)
+          | Array {} <- paramType mergeparam,
+            unique $ paramType mergeparam,
+            loopInvariantShape mergeparam = do
+              (mem, ixfun) <- lift $ lookupArraySummary' v
+              return (mergeparam { paramLore = MemSummary mem ixfun },
+                      lift . ensureArrayIn (paramType mergeparam) mem ixfun)
+        allocInMergeParam (mergeparam, _) = do
+          mergeparam' <- allocInFParam mergeparam
+          return (mergeparam', linearFuncallArg $ paramType mergeparam)
 
 ensureDirectArray :: VName -> AllocM (SubExp, VName, SubExp)
 ensureDirectArray v = do
@@ -383,6 +414,19 @@ ensureDirectArray v = do
       -- binding for the size of the memory block.
       allocLinearArray (baseString v) v
 
+ensureArrayIn :: Type -> VName -> IxFun.IxFun -> SubExp -> AllocM SubExp
+ensureArrayIn _ _ _ (Constant v) =
+  fail $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
+ensureArrayIn t mem ixfun (Var v) = do
+  (src_mem, src_ixfun) <- lookupArraySummary' v
+  if src_mem == mem && src_ixfun == ixfun
+    then return $ Var v
+    else do copy <- newIdent (baseString v ++ "_copy") t
+            let summary = MemSummary mem ixfun
+                pat = Pattern [] [PatElem copy BindVar summary]
+            letBind_ pat $ PrimOp $ Copy CopyVerbatim v
+            return $ Var $ identName copy
+
 allocLinearArray :: String
                  -> VName -> AllocM (SubExp, VName, SubExp)
 allocLinearArray s v = do
@@ -396,15 +440,18 @@ allocLinearArray s v = do
 funcallArgs :: [(SubExp,Diet)] -> AllocM [(SubExp,Diet)]
 funcallArgs args = do
   (valargs, (memsizeargs, memargs)) <- runWriterT $ forM args $ \(arg,d) -> do
-    array <- lift $ isArray arg
-    case (arg, array) of
-      (Var v, True) -> do
-        (size, mem, arg') <- lift $ ensureDirectArray v
-        tell ([(size, Observe)], [(Var mem, Observe)])
-        return (arg', d)
-      _ ->
-        return (arg, d)
-  return $ memsizeargs <> memargs <> valargs
+    t <- lift $ subExpType arg
+    arg' <- linearFuncallArg t arg
+    return (arg', d)
+  return $ map (,Observe) (memsizeargs <> memargs) <> valargs
+
+linearFuncallArg :: Type -> SubExp -> WriterT ([SubExp], [SubExp]) AllocM SubExp
+linearFuncallArg (Array {}) (Var v) = do
+  (size, mem, arg') <- lift $ ensureDirectArray v
+  tell ([size], [Var mem])
+  return arg'
+linearFuncallArg _ arg =
+  return arg
 
 explicitAllocations :: In.Prog -> Prog
 explicitAllocations = intraproceduralTransformation allocInFun
@@ -466,22 +513,18 @@ allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
   addBinding bnd
   mapM_ bindAllocBinding bnds
 
-funcallSubExps :: [SubExp] -> AllocM [SubExp]
-funcallSubExps ses = map fst <$>
-                     funcallArgs [ (se, Observe) | se <- ses ]
-
 allocInExp :: In.Exp -> AllocM Exp
 allocInExp (LoopOp (DoLoop res merge form
                     (Body () bodybnds bodyres))) =
-  allocInFParams mergeparams $ \mergeparams' ->
+  allocInMergeParams merge $ \mergeparams' mk_loop_res ->
   formBinds form $ do
-    mergeinit' <- funcallSubExps mergeinit
+    mergeinit' <- mk_loop_res mergeinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
-      (ses,retbnds) <- collectBindings $ funcallSubExps bodyres
+      (ses,retbnds) <- collectBindings $ mk_loop_res bodyres
       return $ Body () (bodybnds'<>retbnds) ses
     return $ LoopOp $
       DoLoop res (zip mergeparams' mergeinit') form body'
-  where (mergeparams, mergeinit) = unzip merge
+  where (_mergeparams, mergeinit) = unzip merge
         formBinds (ForLoop i _) =
           localMemoryMap (HM.insert i $ Entry Scalar $ Basic Int)
         formBinds (WhileLoop _) =

@@ -24,10 +24,12 @@ module Futhark.Representation.AST.Attributes
   , loopResultValues
   , getStreamAccums
   , getStreamOrder
+  , subExpVars
   )
   where
 
 import Data.List
+import Data.Maybe (mapMaybe)
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
@@ -122,3 +124,10 @@ safeExp (Apply {}) = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
   all (safeExp . bindingExp) (bodyBindings fbranch)
+
+-- | Return the variable names used in 'Var' subexpressions.  May contain
+-- duplicates.
+subExpVars :: [SubExp] -> [VName]
+subExpVars = mapMaybe subExpVar
+  where subExpVar (Var v)       = Just v
+        subExpVar (Constant {}) = Nothing
