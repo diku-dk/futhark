@@ -25,13 +25,14 @@ import Futhark.MonadFreshNames
 compileProg :: Prog -> Either String String
 compileProg prog = do
   prog' <- KernelImpGen.compileProg prog
-  let header = unlines [ "#include <CL/cl.h>\n" ]
+  let header = unlines [ "#include <CL/cl.h>\n"
+                       , "#define FUT_KERNEL(s) #s"
+                       ]
   kernels <- forM (getKernels prog') $ \kernel -> do
     (kernel', used_functions) <- compileKernel kernel
     return (kernelName kernel,
-            [C.cinit|$string:(openClKernelHeader used_functions kernel ++
-                              "\n" ++
-                              pretty kernel')|])
+            openClKernelHeader used_functions kernel ++
+            [[C.cedecl|$func:kernel'|]])
   return $
     header ++
     GenericC.compileProg operations () (openClDecls kernels) openClInit prog'
@@ -254,7 +255,7 @@ compileKernel kernel =
              }|],
             GenericC.compUserState s)
 
-openClDecls :: [(String, C.Initializer)] -> [C.Definition]
+openClDecls :: [(String, [C.Definition])] -> [C.Definition]
 openClDecls kernels =
   clGlobals ++ kernelSourceDeclarations ++ kernelDeclarations ++ [buildKernelFunction, setupFunction]
   where clGlobals =
@@ -263,7 +264,9 @@ openClDecls kernels =
           ]
 
         kernelSourceDeclarations =
-          [ [C.cedecl|const char $id:(name++"_src")[] = $init:kernel;|]
+          [ [C.cedecl|$esc:("const char "++name++"_src[] = FUT_KERNEL(\n"++
+                            pretty kernel++
+                            ");")|]
           | (name, kernel) <- kernels ]
 
         kernelDeclarations =
@@ -368,17 +371,17 @@ getKernels = execWriter . traverse getFunKernels
   where getFunKernels kernel =
           tell [kernel] >> return kernel
 
-openClKernelHeader :: UsedFunctions -> CallKernel -> String
+openClKernelHeader :: UsedFunctions -> CallKernel -> [C.Definition]
 openClKernelHeader used_functions kernel =
-  unlines $
-  pragmas ++ map pretty (map snd used_functions ++ funs32_used ++ funs64_used)
+  pragmas ++
+  [[C.cedecl|$func:f|] | f <- map snd used_functions ++ funs32_used ++ funs64_used ]
   where kernel_funs = functionsCalled $ kernelBody kernel
         used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
         funs32_used = map snd $ filter used_in_kernel funs32
         funs64_used = map snd $ filter used_in_kernel funs64
         pragmas = if null funs64_used
                   then []
-                  else ["#pragma OPENCL EXTENSION cl_khr_fp64 : enable"]
+                  else [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
 
         funs32 = [("toFloat32", c_toFloat32),
                   ("trunc32", c_trunc32),
@@ -405,7 +408,9 @@ genericMemcpy dest_quals src_quals =
     $tyquals:dest_quals unsigned char *d = dest;
     $tyquals:src_quals const unsigned char *s = src;
     // These were #defines in the musl source code.
-    size_t SS = sizeof(size_t), ALIGN = sizeof(size_t)-1, ONES=((size_t)-1/UCHAR_MAX);
+    size_t SS = sizeof(size_t);
+    size_t ALIGN = sizeof(size_t)-1;
+    size_t ONES=((size_t)-1/UCHAR_MAX);
     if (((typename uintptr_t)d & ALIGN) != ((typename uintptr_t)s & ALIGN)) {
       goto misaligned;
     }
@@ -465,7 +470,7 @@ genericMemmove dest_quals src_quals =
           *($tyquals:dest_quals size_t *)(d+n) = *($tyquals:src_quals size_t *)(s+n);
         }
       }
-      while (n) { n--, d[n] = s[n]; }
+      while (n) { n--; d[n] = s[n]; }
     }
     return dest;
   }
