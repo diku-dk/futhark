@@ -50,7 +50,14 @@ transformBinding (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) 
                               map ((`Ident` Basic Int) . fst) ispace ++
                               map kernelInputIdent inps) $
            transformBody body
-  addBinding $ Let pat () $ LoopOp $ Kernel cs w i ispace inps returns body'
+  -- For every input that is an array, we transpose the next-outermost
+  -- and outermost dimension.
+  inps' <- if any isLoop $ bodyBindings body'
+           then rearrangeInputs inps
+           else return inps
+  addBinding $ Let pat () $ LoopOp $ Kernel cs w i ispace inps' returns body'
+  where isLoop (Let _ _ (LoopOp (DoLoop {}))) = True
+        isLoop _                              = False
 
 transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs _)))
   | Just accs <- redForm form = do
@@ -94,3 +101,23 @@ transformExtLambda lam = do
   body' <- bindingParamTypes (extLambdaParams lam) $
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
+
+rearrangeInputs :: [KernelInput Basic] -> SequentialiseM [KernelInput Basic]
+rearrangeInputs = mapM rearrangeInput
+  where
+    rearrangeInput inp =
+      case paramType $ kernelInputParam inp of
+        Array {} -> do
+          let arr = kernelInputArray inp
+              num_is = length $ kernelInputIndices inp
+          arr_t <- lookupType arr
+          let perm = [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..arrayRank arr_t-1]
+              inv_perm = permuteInverse perm
+          transposed <- letExp (baseString arr ++ "_tr") $
+                        PrimOp $ Rearrange [] perm arr
+          manifested <- letExp (baseString arr ++ "_tr_manifested") $
+                        PrimOp $ Copy CopyLinear transposed
+          inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
+                        PrimOp $ Rearrange [] inv_perm manifested
+          return inp { kernelInputArray = inv_transposed }
+        _ -> return inp
