@@ -518,10 +518,10 @@ unpackResult ret (MemParam name size (Space srcspace)) = do
 -- function named "main" as entry point, so make sure it is defined.
 compileProg :: Operations op s
             -> s
-            -> [C.Definition] -> [C.Stm]
+            -> [C.Definition] -> [C.Stm] -> [C.Stm]
             -> Program op
             -> String
-compileProg ops userstate decls mainstms prog@(Program funs) =
+compileProg ops userstate decls pre_main_stms post_main_stms prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops blankNameSource userstate compileProg'
   in pretty 80 $ ppr [C.cunit|
@@ -562,8 +562,9 @@ int main(int argc, char** argv) {
   struct timeval t_start, t_end, t_diff;
   unsigned long int elapsed_usec;
   $stms:(compInit endstate)
-  $stms:mainstms
+  $stms:pre_main_stms
   $stm:main;
+  $stms:post_main_stms
   if (argc == 3 && strcmp(argv[1], "-t") == 0) {
     FILE* runtime_file;
     runtime_file = fopen(argv[2], "w");

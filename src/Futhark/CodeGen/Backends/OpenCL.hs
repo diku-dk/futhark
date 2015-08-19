@@ -35,7 +35,8 @@ compileProg prog = do
             [[C.cedecl|$func:kernel'|]])
   return $
     header ++
-    GenericC.compileProg operations () (openClDecls kernels) openClInit prog'
+    GenericC.compileProg operations () (openClDecls kernels)
+    openClInit (openClReport $ map fst kernels) prog'
   where operations :: GenericC.Operations CallKernel ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel
@@ -168,9 +169,11 @@ callKernel kernel = do
     assert(clFinish(fut_cl_queue) == CL_SUCCESS);
     gettimeofday(&$id:time_end, NULL);
     timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
-    fprintf(stderr, "kernel %s runtime: %d\n",
+    $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
+    $id:kernel_runs++;
+    fprintf(stderr, "kernel %s runtime: %dus\n",
             $string:kernel_name,
-            (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)/1000));
+            (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
     }|]
 
   return GenericC.Done
@@ -188,6 +191,8 @@ callKernel kernel = do
           }|]
 
         kernel_name = kernelName kernel
+        kernel_total_runtime = kernel_name ++ "_total_runtime"
+        kernel_runs = kernel_name ++ "_runs"
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -257,21 +262,22 @@ compileKernel kernel =
 
 openClDecls :: [(String, [C.Definition])] -> [C.Definition]
 openClDecls kernels =
-  clGlobals ++ kernelSourceDeclarations ++ kernelDeclarations ++ [buildKernelFunction, setupFunction]
+  clGlobals ++ kernelDeclarations ++ [buildKernelFunction, setupFunction]
   where clGlobals =
           [ [C.cedecl|typename cl_context fut_cl_context;|]
           , [C.cedecl|typename cl_command_queue fut_cl_queue;|]
           ]
 
-        kernelSourceDeclarations =
-          [ [C.cedecl|$esc:("const char "++name++"_src[] = FUT_KERNEL(\n"++
-                            pretty kernel++
-                            ");")|]
-          | (name, kernel) <- kernels ]
-
         kernelDeclarations =
-          [ [C.cedecl|typename cl_kernel $id:name;|]
-          | (name, _) <- kernels ]
+          concat
+          [ [ [C.cedecl|static typename cl_kernel $id:name;|]
+            , [C.cedecl|static typename suseconds_t $id:(name ++ "_total_runtime") = 0;|]
+            , [C.cedecl|static int $id:(name ++ "_runs") = 0;|]
+            , [C.cedecl|$esc:("static const char "++name++"_src[] = FUT_KERNEL(\n"++
+                              pretty kernel++
+                              ");")|]
+            ]
+          | (name, kernel) <- kernels ]
 
         setupFunction = [C.cedecl|
 void setup_opencl() {
@@ -359,6 +365,20 @@ loadKernelByName name = [C.cstm|{
 openClInit :: [C.Stm]
 openClInit =
   [[C.cstm|setup_opencl();|]]
+
+openClReport :: [String] -> [C.Stm]
+openClReport = map reportKernel
+  where reportKernel name =
+          let runs = name ++ "_runs"
+              total_runtime = name ++ "_total_runtime"
+          in [C.cstm|
+               fprintf(stderr,
+                       "Kernel %s executed %d times, with average runtime:\t %6dus\n",
+                       $string:name,
+                       $id:runs,
+                       $id:total_runtime / ($id:runs != 0 ? $id:runs : 1));
+             |]
+
 
 kernelId :: CallKernel -> Int
 kernelId = baseTag . kernelThreadNum

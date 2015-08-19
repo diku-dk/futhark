@@ -12,7 +12,7 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 
 compileProg :: Prog -> Either String String
-compileProg = fmap (GenericC.compileProg operations () [] []) .
+compileProg = fmap (GenericC.compileProg operations () [] [] []) .
               ImpGen.compileProgSimply
   where operations :: GenericC.Operations () ()
         operations = GenericC.defaultOperations {
