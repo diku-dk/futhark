@@ -534,7 +534,8 @@ allocInExp (LoopOp (Kernel cs w index ispace inps returns body)) = do
   inps' <- mapM allocInKernelInput inps
   let mem_map = paramsSummary (map kernelInputParam inps') <> ispace_map
   localMemoryMap (mem_map <>) $ do
-    body' <- allocInBody body
+    body' <- allocInBindings (bodyBindings body) $ \bnds' ->
+      return $ Body () bnds' $ bodyResult body
     return $ LoopOp $ Kernel cs w index ispace inps' returns body'
   where ispace_map = HM.fromList [ (i, Entry Scalar $ Basic Int)
                                  | i <- index : map fst ispace ]
