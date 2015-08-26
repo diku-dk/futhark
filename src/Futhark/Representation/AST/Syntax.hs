@@ -43,7 +43,6 @@ module Futhark.Representation.AST.Syntax
   , BinOp (..)
   , DimChange (..)
   , ShapeChange
-  , CopyMethod (..)
   , ExpT(..)
   , Exp
   , LoopForm (..)
@@ -176,12 +175,6 @@ instance Traversable DimChange where
 -- | A list of 'DimChange's, indicating the new dimensions of an array.
 type ShapeChange d = [DimChange d]
 
-data CopyMethod = CopyVerbatim
-                  -- ^ Preserve memory layout of source.
-                | CopyLinear
-                  -- ^ Linearise in memory.
-                deriving (Eq, Ord, Show)
-
 data PrimOp lore
   = SubExp SubExp
     -- ^ Subexpressions, doubling as tuple literals if the
@@ -226,7 +219,7 @@ data PrimOp lore
   | Concat Certificates VName [VName] SubExp
   -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
-  | Copy CopyMethod VName
+  | Copy VName
   -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.

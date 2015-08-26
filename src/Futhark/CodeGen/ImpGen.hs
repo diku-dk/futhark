@@ -505,7 +505,7 @@ defCompilePrimOp
       emit $ Imp.For i (compileSubExp n) $
         write targetmem targetoffset Int space $ Imp.ScalarVar i
 
-defCompilePrimOp (Destination [target]) (Copy _ src) =
+defCompilePrimOp (Destination [target]) (Copy src) =
   compileResultSubExp target $ Var src
 
 defCompilePrimOp _ (Split {}) =

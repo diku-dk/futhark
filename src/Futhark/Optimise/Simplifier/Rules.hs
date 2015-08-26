@@ -340,7 +340,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
         dummyBindings = map dummyBinding
         dummyBinding ((p,e), _)
           | unique (paramType p),
-            Var v <- e            = ([paramName p], PrimOp $ Copy CopyVerbatim v)
+            Var v <- e            = ([paramName p], PrimOp $ Copy v)
           | otherwise             = ([paramName p], PrimOp $ SubExp e)
 removeRedundantMergeVariables _ _ =
   cannotSimplify
@@ -716,7 +716,7 @@ simplifyIndexing defOf typeOf idd inds =
          let inds' = permuteShape (take (length inds) perm) inds
          in Just $ IndexResult cs src inds'
 
-    Just (Copy _ src)
+    Just (Copy src)
       | Just dims <- arrayDims <$> typeOf (Var src),
         length inds == length dims ->
           Just $ IndexResult [] src inds
@@ -965,7 +965,7 @@ improveReshape _ typeOf (Reshape cs newshape v)
 improveReshape _ _ _ = Nothing
 
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy CopyVerbatim v))) = do
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
   t <- lookupType v
   let originalNotUsedAnymore =
         unique t && not (any (`UT.used` used) $ vnameAliases v)
@@ -979,7 +979,7 @@ removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
   | BindInPlace _ dest destis <- patElemBindage d,
     arrayFrom e dest destis =
     letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $ PrimOp $ SubExp $ Var dest
-  where arrayFrom (PrimOp (Copy _ v)) dest destis
+  where arrayFrom (PrimOp (Copy v)) dest destis
           | Just e' <- ST.lookupExp v vtable =
               arrayFrom e' dest destis
         arrayFrom (PrimOp (Index _ src srcis)) dest destis =
