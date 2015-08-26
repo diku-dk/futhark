@@ -53,7 +53,7 @@ transformBinding (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) 
   -- For every input that is an array, we transpose the next-outermost
   -- and outermost dimension.
   inps' <- if any isLoop $ bodyBindings body'
-           then rearrangeInputs inps
+           then rearrangeInputs (map fst ispace) inps
            else return inps
   addBinding $ Let pat () $ LoopOp $ Kernel cs w i ispace inps' returns body'
   where isLoop (Let _ _ (LoopOp (DoLoop {}))) = True
@@ -102,12 +102,17 @@ transformExtLambda lam = do
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
-rearrangeInputs :: [KernelInput Basic] -> SequentialiseM [KernelInput Basic]
-rearrangeInputs = mapM rearrangeInput
+rearrangeInputs :: [VName] -> [KernelInput Basic]
+                -> SequentialiseM [KernelInput Basic]
+rearrangeInputs is = mapM rearrangeInput
   where
+    iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
+                            reverse .
+                            kernelInputIndices
+
     rearrangeInput inp =
       case paramType $ kernelInputParam inp of
-        Array {} -> do
+        Array {} | not $ iteratesLastDimension inp -> do
           let arr = kernelInputArray inp
               num_is = length $ kernelInputIndices inp
           arr_t <- lookupType arr
