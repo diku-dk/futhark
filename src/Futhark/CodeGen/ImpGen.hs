@@ -516,19 +516,20 @@ defCompilePrimOp
   (Concat _ x ys _) = do
     et <- elemType <$> lookupType x
     offs_glb <- newVName "tmp_offs"
-    emit $ Imp.DeclareScalar offs_glb Int
-    emit $ Imp.SetScalar offs_glb $ Imp.Constant $ IntVal 0
-    let destloc = MemLocation destmem destshape
-                  (IxFun.offsetIndex destixfun $ SE.Id offs_glb Int)
+    declaringBasicVar offs_glb Int $ do
+      emit $ Imp.DeclareScalar offs_glb Int
+      emit $ Imp.SetScalar offs_glb $ Imp.Constant $ IntVal 0
+      let destloc = MemLocation destmem destshape
+                    (IxFun.offsetIndex destixfun $ SE.Id offs_glb Int)
 
-    forM_ (x:ys) $ \y -> do
-        yentry <- lookupArray y
-        let srcloc = entryArrayLocation yentry
-            rows = case entryArrayShape yentry of
-                    []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
-                    r:_ -> innerExp $ dimSizeToExp r
-        emit =<< copyIxFun et destloc srcloc (arrayByteSizeExp yentry)
-        emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
+      forM_ (x:ys) $ \y -> do
+          yentry <- lookupArray y
+          let srcloc = entryArrayLocation yentry
+              rows = case entryArrayShape yentry of
+                      []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
+                      r:_ -> innerExp $ dimSizeToExp r
+          emit =<< copyIxFun et destloc srcloc (arrayByteSizeExp yentry)
+          emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory memlocation) _])
