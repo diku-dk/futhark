@@ -107,6 +107,8 @@ commandLineOptions =
     [] ["babysit-kernels"]
   , passoption "Expand allocations" expandAllocations
     [] ["expand-allocations"]
+  , passoption "Expand arrays" expandArrays
+    [] ["expand-arrays"]
   , passoption "Kernel extraction" extractKernels
     [] ["extract-kernels"]
 

@@ -415,7 +415,7 @@ ensureArrayIn t mem ixfun (Var v) = do
     else do copy <- newIdent (baseString v ++ "_copy") t
             let summary = MemSummary mem ixfun
                 pat = Pattern [] [PatElem copy BindVar summary]
-            letBind_ pat $ PrimOp $ Copy CopyVerbatim v
+            letBind_ pat $ PrimOp $ Copy v
             return $ Var $ identName copy
 
 allocLinearArray :: String

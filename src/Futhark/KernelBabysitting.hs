@@ -121,7 +121,7 @@ rearrangeInputs is = mapM rearrangeInput
           transposed <- letExp (baseString arr ++ "_tr") $
                         PrimOp $ Rearrange [] perm arr
           manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                        PrimOp $ Copy CopyLinear transposed
+                        PrimOp $ Copy transposed
           inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
                         PrimOp $ Rearrange [] inv_perm manifested
           return inp { kernelInputArray = inv_transposed }
