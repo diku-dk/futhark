@@ -731,7 +731,7 @@ checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
     pretty arr1t ++ " and " ++ intercalate ", " (map pretty arr2ts)
   require [Basic Int] ressize
 
-checkPrimOp (Copy _ e) =
+checkPrimOp (Copy e) =
   void $ checkArrIdent e
 
 checkPrimOp (Assert e _) =

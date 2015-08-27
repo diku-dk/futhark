@@ -55,6 +55,7 @@ topDownRules = [ liftIdentityMapping
                , letRule simplifyNegate
                , letRule simplifyAssert
                , letRule simplifyIndex
+               , letRule copyScratchToScratch
                , simplifyIndexIntoReshape
                , simplifyIndexIntoSplit
                , removeEmptySplits
@@ -65,6 +66,7 @@ topDownRules = [ liftIdentityMapping
                , simplifyScalExp
                , letRule simplifyIdentityReshape
                , letRule simplifyReshapeReshape
+               , letRule simplifyReshapeScratch
                , letRule improveReshape
                , removeScratchValue
                , hackilySimplifyBranch
@@ -340,7 +342,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
         dummyBindings = map dummyBinding
         dummyBinding ((p,e), _)
           | unique (paramType p),
-            Var v <- e            = ([paramName p], PrimOp $ Copy CopyVerbatim v)
+            Var v <- e            = ([paramName p], PrimOp $ Copy v)
           | otherwise             = ([paramName p], PrimOp $ SubExp e)
 removeRedundantMergeVariables _ _ =
   cannotSimplify
@@ -716,7 +718,7 @@ simplifyIndexing defOf typeOf idd inds =
          let inds' = permuteShape (take (length inds) perm) inds
          in Just $ IndexResult cs src inds'
 
-    Just (Copy _ src)
+    Just (Copy src)
       | Just dims <- arrayDims <$> typeOf (Var src),
         length inds == length dims ->
           Just $ IndexResult [] src inds
@@ -956,6 +958,12 @@ simplifyReshapeReshape defOf _ (Reshape cs newshape v)
     Just $ Reshape (cs++cs2) (fuseReshape oldshape newshape) v2
 simplifyReshapeReshape _ _ _ = Nothing
 
+simplifyReshapeScratch :: LetTopDownRule lore u
+simplifyReshapeScratch defOf _ (Reshape _ newshape v)
+  | Just (Scratch bt _) <- asPrimOp =<< defOf v =
+    Just $ Scratch bt $ newDims newshape
+simplifyReshapeScratch _ _ _ = Nothing
+
 improveReshape :: LetTopDownRule lore u
 improveReshape _ typeOf (Reshape cs newshape v)
   | Just t <- typeOf $ Var v,
@@ -964,8 +972,25 @@ improveReshape _ typeOf (Reshape cs newshape v)
       Just $ Reshape cs newshape' v
 improveReshape _ _ _ = Nothing
 
+-- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
+-- itself.
+copyScratchToScratch :: LetTopDownRule lore u
+copyScratchToScratch defOf typeOf (Copy src) = do
+  t <- typeOf $ Var src
+  if isActuallyScratch src then
+    Just $ Scratch (elemType t) (arrayDims t)
+    else Nothing
+  where isActuallyScratch v =
+          case asPrimOp =<< defOf v of
+            Just (Scratch {}) -> True
+            Just (Rearrange _ _ v') -> isActuallyScratch v'
+            Just (Reshape _ _ v') -> isActuallyScratch v'
+            _ -> False
+copyScratchToScratch _ _ _ =
+  Nothing
+
 removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy CopyVerbatim v))) = do
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
   t <- lookupType v
   let originalNotUsedAnymore =
         unique t && not (any (`UT.used` used) $ vnameAliases v)
@@ -979,7 +1004,7 @@ removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
   | BindInPlace _ dest destis <- patElemBindage d,
     arrayFrom e dest destis =
     letBind_ (Pattern [] [d { patElemBindage = BindVar}]) $ PrimOp $ SubExp $ Var dest
-  where arrayFrom (PrimOp (Copy _ v)) dest destis
+  where arrayFrom (PrimOp (Copy v)) dest destis
           | Just e' <- ST.lookupExp v vtable =
               arrayFrom e' dest destis
         arrayFrom (PrimOp (Index _ src srcis)) dest destis =

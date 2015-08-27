@@ -130,7 +130,7 @@ externalisePrimOp (I.Concat _ x ys _) =
   (E.Var <$> externaliseVar x) <*>
   mapM (liftM E.Var . externaliseVar) ys <*>
   pure noLoc
-externalisePrimOp (I.Copy _ e) =
+externalisePrimOp (I.Copy e) =
   E.Copy <$> (E.Var <$> externaliseVar e) <*> pure noLoc
 externalisePrimOp (I.Iota ne) =
   E.Iota <$> externaliseSubExp ne <*> pure noLoc

@@ -520,7 +520,7 @@ interchangeLoop
               let arr_t = arrayOfRow (paramType param) w
               addBinding $
                 Let (basicPattern' [] [Ident arr' arr_t]) () $
-                PrimOp $ Copy CopyVerbatim arr
+                PrimOp $ Copy arr
               return $ Just (param, arr')
           | otherwise =
             return $ Just (param, arr)
@@ -609,10 +609,10 @@ kernelIsReshape _ = Nothing
 kernelIsCopy :: Binding -> Maybe Binding
 kernelIsCopy (Let pat ()
               (LoopOp (Kernel _ _ _ ispace inps [_] body)))
-  | Just (PrimOp (Copy method arr)) <- singleExpBody body,
+  | Just (PrimOp (Copy arr)) <- singleExpBody body,
     Just inp <- fullIndexInput ispace inps,
     map (Var . fst) ispace == kernelInputIndices inp,
     arr == kernelInputName inp =
       Just $ Let pat () $
-      PrimOp $ Copy method $ kernelInputArray inp
+      PrimOp $ Copy $ kernelInputArray inp
 kernelIsCopy _ = Nothing

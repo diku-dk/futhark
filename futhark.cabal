@@ -75,6 +75,7 @@ Library
                    Futhark.ExtractKernels.Distribution
                    Futhark.ExtractKernels.ISRWIM
                    Futhark.ExpandAllocations
+                   Futhark.ExpandArrays
                    Futhark.ExplicitAllocations
                    Futhark.Externalise
                    Futhark.FirstOrderTransform

@@ -116,7 +116,7 @@ primOpType (Concat _ x ys ressize) =
   where result xt yts =
           let u = uniqueness xt <> mconcat (map uniqueness yts)
           in [xt `setUniqueness` u `setOuterSize` ressize]
-primOpType (Copy _ v) =
+primOpType (Copy v) =
   result <$> lookupType v
   where result t = [t `setUniqueness` Unique]
 primOpType (Assert _ _) =

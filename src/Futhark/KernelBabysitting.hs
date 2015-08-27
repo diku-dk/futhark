@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | The OpenCL code generator is a fragile and sensitive thing and it
 -- needs a carefully massaged program to work at all.
 --
@@ -11,6 +12,7 @@ module Futhark.KernelBabysitting
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import Data.Monoid
 
 import Prelude
 
@@ -52,12 +54,24 @@ transformBinding (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) 
            transformBody body
   -- For every input that is an array, we transpose the next-outermost
   -- and outermost dimension.
-  inps' <- if any isLoop $ bodyBindings body'
-           then rearrangeInputs (map fst ispace) inps
-           else return inps
-  addBinding $ Let pat () $ LoopOp $ Kernel cs w i ispace inps' returns body'
-  where isLoop (Let _ _ (LoopOp (DoLoop {}))) = True
-        isLoop _                              = False
+  inps' <- rearrangeInputs (map fst ispace) inps
+  -- For every return that is an array, we transpose the
+  -- next-outermost and outermost dimension.
+  let value_elems = patternValueElements pat
+  (value_elems', returns') <- rearrangeReturns num_is value_elems returns
+  let pat' = Pattern [] value_elems'
+  addBinding $ Let pat' () $ LoopOp $ Kernel cs w i ispace inps' returns' body'
+  mapM_ maybeRearrangeResult $ zip3 value_elems value_elems' returns'
+  where num_is = length ispace
+
+        maybeRearrangeResult (orig_pat_elem, new_pat_elem, (_, perm))
+          | orig_pat_elem == new_pat_elem =
+            return ()
+          | otherwise =
+            addBinding $
+            mkLet' [] [patElemIdent orig_pat_elem] $
+            PrimOp $ Rearrange [] (permuteInverse perm) $
+            patElemName new_pat_elem
 
 transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs _)))
   | Just accs <- redForm form = do
@@ -116,13 +130,30 @@ rearrangeInputs is = mapM rearrangeInput
           let arr = kernelInputArray inp
               num_is = length $ kernelInputIndices inp
           arr_t <- lookupType arr
-          let perm = [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..arrayRank arr_t-1]
+          let perm = coalescingPermutation num_is arr_t
               inv_perm = permuteInverse perm
           transposed <- letExp (baseString arr ++ "_tr") $
                         PrimOp $ Rearrange [] perm arr
           manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                        PrimOp $ Copy CopyLinear transposed
+                        PrimOp $ Copy transposed
           inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
                         PrimOp $ Rearrange [] inv_perm manifested
           return inp { kernelInputArray = inv_transposed }
         _ -> return inp
+
+coalescingPermutation :: Int -> Type -> [Int]
+coalescingPermutation num_is arr_t =
+  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..arrayRank arr_t-1]
+
+rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
+                    SequentialiseM ([PatElem], [(Type, [Int])])
+rearrangeReturns num_is pat_elems returns =
+  unzip <$> zipWithM rearrangeReturn pat_elems returns
+  where rearrangeReturn (PatElem ident BindVar ()) (t@(Array {}), perm) = do
+          name_tr <- newVName $ baseString (identName ident) <> "_tr"
+          let perm' = permuteShape (coalescingPermutation num_is t) perm
+              ident' = Ident name_tr $ rearrangeType perm' $ identType ident
+              new_pat_elem = PatElem ident' BindVar ()
+          return (new_pat_elem, (t, perm'))
+        rearrangeReturn pat_elem (t, perm) =
+          return (pat_elem, (t, perm))

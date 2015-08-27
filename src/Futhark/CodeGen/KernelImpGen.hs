@@ -20,6 +20,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.KernelImp as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
 type CallKernelGen = ImpGen.ImpM Imp.CallKernel
 type InKernelGen = ImpGen.ImpM Imp.InKernel
@@ -194,21 +195,21 @@ writeThreadResult :: [VName] -> [Int] -> ImpGen.ValueDestination -> SubExp
 writeThreadResult thread_idxs perm
   (ImpGen.ArrayDestination
    (ImpGen.CopyIntoMemory
-    destloc@(ImpGen.MemLocation mem _ _)) _) se = do
+    (ImpGen.MemLocation mem dims ixfun)) _) se = do
   set <- subExpType se
 
-  unless (perm == sort perm) $
-    fail "Cannot handle rearranged kernels yet."
+  let ixfun' = IxFun.permute ixfun perm
+      destloc' = ImpGen.MemLocation mem dims ixfun'
 
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let is = map ImpGen.varIndex thread_idxs
   case set of
     Basic bt -> do
       (_, _, elemOffset) <-
-        ImpGen.fullyIndexArray' destloc is bt
+        ImpGen.fullyIndexArray' destloc' is bt
       ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space elemOffset) se
     _ -> do
-      memloc <- ImpGen.indexArray destloc is
+      memloc <- ImpGen.indexArray destloc' is
       let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
                  replicate (arrayRank set) Nothing
       ImpGen.compileResultSubExp dest se

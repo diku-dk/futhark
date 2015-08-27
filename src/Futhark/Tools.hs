@@ -33,7 +33,7 @@ nonuniqueParams params =
                 pure ()
       bindingIdentTypes [paramIdent param'] $
         letBindNames_ [(paramName param,BindVar)] $
-        PrimOp $ Copy CopyVerbatim $ paramName param'
+        PrimOp $ Copy $ paramName param'
       return param'
     else
       return param

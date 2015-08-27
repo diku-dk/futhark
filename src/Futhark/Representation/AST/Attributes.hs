@@ -25,6 +25,7 @@ module Futhark.Representation.AST.Attributes
   , getStreamAccums
   , getStreamOrder
   , subExpVars
+  , shapeVars
   )
   where
 
@@ -131,3 +132,8 @@ subExpVars :: [SubExp] -> [VName]
 subExpVars = mapMaybe subExpVar
   where subExpVar (Var v)       = Just v
         subExpVar (Constant {}) = Nothing
+
+-- | Return the variable dimension sizes.  May contain
+-- duplicates.
+shapeVars :: Shape -> [VName]
+shapeVars = subExpVars . shapeDims

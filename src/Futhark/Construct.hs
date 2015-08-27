@@ -172,7 +172,7 @@ eIndex cs a idxs = do
 eCopy :: MonadBinder m =>
          m (Exp (Lore m)) -> m (Exp (Lore m))
 eCopy e = do e' <- letExp "copy_arg" =<< e
-             return $ PrimOp $ Copy CopyVerbatim e'
+             return $ PrimOp $ Copy e'
 
 eAssert :: MonadBinder m =>
          m (Exp (Lore m)) -> SrcLoc -> m (Exp (Lore m))

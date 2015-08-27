@@ -101,6 +101,8 @@ compilerPipeline =
   [ extractKernels
   , extractKernels
   , eotransform
+  , expandArrays
+  , eotransform
   , babysitKernels
   , eotransform
   , inPlaceLowering
