@@ -150,7 +150,7 @@ rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
 rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
   where rearrangeReturn (PatElem ident BindVar ()) (t@(Array {}), perm) = do
-          name_tr <- newVName $ baseString (identName ident) <> "_tr"
+          name_tr <- newVName $ baseString (identName ident) <> "_tr_res"
           let perm' = permuteShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
               ident' = Ident name_tr $ rearrangeType perm' $ identType ident
               new_pat_elem = PatElem ident' BindVar ()
