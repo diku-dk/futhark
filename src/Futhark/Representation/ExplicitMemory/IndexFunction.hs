@@ -187,7 +187,9 @@ offsetIndex = Offset
 
 permute :: Fractional num =>
            IxFun num n -> Perm.Permutation n -> IxFun num n
-permute = Permute
+permute (Permute ixfun oldperm) perm
+  | Perm.invert oldperm == perm = ixfun
+permute ixfun perm = Permute ixfun perm
 
 reshape :: forall num m n.(Eq num, Fractional num) =>
            IxFun num ('S m) -> ShapeChange num n -> IxFun num n
