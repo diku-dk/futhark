@@ -28,14 +28,10 @@ compileProg prog = do
   let header = unlines [ "#include <CL/cl.h>\n"
                        , "#define FUT_KERNEL(s) #s"
                        ]
-  kernels <- forM (getKernels prog') $ \kernel -> do
-    (kernel', used_functions) <- compileKernel kernel
-    return (kernelName kernel,
-            openClKernelHeader used_functions kernel ++
-            [[C.cedecl|$func:kernel'|]])
+  (kernels, requirements) <- compileKernels $ getKernels prog'
   return $
     header ++
-    GenericC.compileProg operations () (openClDecls kernels)
+    GenericC.compileProg operations () (openClDecls kernels requirements)
     openClInit (openClReport $ map fst kernels) prog'
   where operations :: GenericC.Operations CallKernel ()
         operations = GenericC.Operations
@@ -206,6 +202,19 @@ pointerQuals s            = fail $ "'" ++ s ++ "' is not an OpenCL kernel addres
 
 type UsedFunctions = [(String,C.Func)] -- The ordering is important!
 
+data OpenClRequirements =
+  OpenClRequirements { _kernelUsedFunctions :: UsedFunctions
+                     , _kernelPragmas :: [String]
+                     }
+
+instance Monoid OpenClRequirements where
+  mempty =
+    OpenClRequirements [] []
+
+  OpenClRequirements used1 pragmas1 `mappend` OpenClRequirements used2 pragmas2 =
+    OpenClRequirements (nubBy cmpFst $ used1 <> used2) (nub $ pragmas1 ++ pragmas2)
+    where cmpFst (x, _) (y, _) = x == y
+
 usedFunction :: String -> C.Func -> GenericC.CompilerM op UsedFunctions ()
 usedFunction name func = GenericC.modifyUserState insertIfMissing
   where insertIfMissing funcs
@@ -241,11 +250,18 @@ inKernelOperations = GenericC.Operations
           quals <- pointerQuals space
           return [C.cty|$tyquals:quals $ty:defaultMemBlockType|]
 
-compileKernel :: CallKernel -> Either String (C.Func, UsedFunctions)
+compileKernels :: [CallKernel] -> Either String ([(String, C.Func)], OpenClRequirements)
+compileKernels kernels = do
+  (funcs, reqs) <- unzip <$> mapM compileKernel kernels
+  return (zip (map kernelName kernels) funcs, mconcat reqs)
+
+compileKernel :: CallKernel -> Either String (C.Func, OpenClRequirements)
 compileKernel kernel =
-  let (funbody,s) =
+  let (funbody, s) =
         GenericC.runCompilerM (Program []) inKernelOperations blankNameSource mempty $
         GenericC.collect $ GenericC.compileCode $ kernelBody kernel
+
+      used_funs = GenericC.compUserState s
 
       asParam (ScalarUse name bt) =
         let ctp = GenericC.scalarTypeToCType bt
@@ -254,18 +270,62 @@ compileKernel kernel =
         [C.cparam|__global unsigned char *$id:name|]
 
       params = map asParam $ kernelUses kernel
+
+      kernel_funs = functionsCalled $ kernelBody kernel
+      used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
+      funs32_used = filter used_in_kernel funs32
+      funs64_used = filter used_in_kernel funs64
+      extra_pragmas = if null funs64_used
+                      then []
+                      else ["#pragma OPENCL EXTENSION cl_khr_fp64 : enable"]
+
+      funs32 = [("toFloat32", c_toFloat32),
+                ("trunc32", c_trunc32),
+                ("log32", c_log32),
+                ("sqrt32", c_sqrt32),
+                ("exp32", c_exp32)]
+
+      funs64 = [("toFloat64", c_toFloat64),
+                ("trunc64", c_trunc64),
+                ("log64", c_log64),
+                ("sqrt64", c_sqrt64),
+                ("exp64", c_exp64)]
+
   in Right ([C.cfun|__kernel void $id:(kernelName kernel) ($params:params) {
                  const uint $id:(kernelThreadNum kernel) = get_global_id(0);
                  $items:funbody
              }|],
-            GenericC.compUserState s)
+            OpenClRequirements (used_funs ++ funs32_used ++ funs64_used) extra_pragmas)
 
-openClDecls :: [(String, [C.Definition])] -> [C.Definition]
-openClDecls kernels =
+openClProgramHeader :: OpenClRequirements -> [C.Definition]
+openClProgramHeader (OpenClRequirements used_funs pragmas) =
+  [ [C.cedecl|$esc:pragma|] | pragma <- pragmas ] ++
+  [ [C.cedecl|$func:used_fun|] | (_, used_fun) <- used_funs ]
+
+openClProgram :: [(String, C.Func)] -> OpenClRequirements -> [C.Definition]
+openClProgram kernels requirements =
+  [C.cunit|
+// Program header and utility functions
+   $edecls:header
+
+// Kernel definitions
+   $edecls:funcs
+          |]
+  where header =
+          openClProgramHeader requirements
+        funcs =
+          [[C.cedecl|$func:kernel_func|] |
+           (_, kernel_func) <- kernels ]
+
+openClDecls :: [(String, C.Func)] -> OpenClRequirements -> [C.Definition]
+openClDecls kernels requirements =
   clGlobals ++ kernelDeclarations ++ [buildKernelFunction, setupFunction]
   where clGlobals =
           [ [C.cedecl|typename cl_context fut_cl_context;|]
           , [C.cedecl|typename cl_command_queue fut_cl_queue;|]
+          , [C.cedecl|$esc:("static const char fut_opencl_src[] = FUT_KERNEL(\n"++
+                              pretty (openClProgram kernels requirements) ++
+                              ");")|]
           ]
 
         kernelDeclarations =
@@ -273,14 +333,12 @@ openClDecls kernels =
           [ [ [C.cedecl|static typename cl_kernel $id:name;|]
             , [C.cedecl|static typename suseconds_t $id:(name ++ "_total_runtime") = 0;|]
             , [C.cedecl|static int $id:(name ++ "_runs") = 0;|]
-            , [C.cedecl|$esc:("static const char "++name++"_src[] = FUT_KERNEL(\n"++
-                              pretty kernel++
-                              ");")|]
             ]
-          | (name, kernel) <- kernels ]
+          | (name, _) <- kernels ]
 
         setupFunction = [C.cedecl|
 void setup_opencl() {
+
   typename cl_int error;
   typename cl_platform_id platform;
   typename cl_device_id device;
@@ -300,13 +358,28 @@ void setup_opencl() {
   // Note that nVidia's OpenCL requires the platform property
   fut_cl_context = clCreateContext(properties, 1, &device, NULL, NULL, &error);
   fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
+
+  // Some drivers complain if we compile empty programs, so bail out early if so.
+  if (strlen(fut_opencl_src) == 0) return;
+
+  // Build the OpenCL program.
+  size_t src_size;
+  typename cl_program prog;
+  fprintf(stderr, "look at me, loading this program:\n%s\n", fut_opencl_src);
+  error = 0;
+  src_size = sizeof(fut_opencl_src);
+  const char* src_ptr[] = {fut_opencl_src};
+  prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
+  assert(error == 0);
+  assert(build_opencl_program(prog, device, "") == CL_SUCCESS);
+
   // Load all the kernels.
   $stms:(map (loadKernelByName . fst) kernels)
 }
     |]
 
         buildKernelFunction = [C.cedecl|
-typename cl_build_status build_opencl_kernel(typename cl_program program, typename cl_device_id device, const char* options) {
+typename cl_build_status build_opencl_program(typename cl_program program, typename cl_device_id device, const char* options) {
   typename cl_int ret_val = clBuildProgram(program, 1, &device, options, NULL, NULL);
 
   // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
@@ -347,20 +420,10 @@ typename cl_build_status build_opencl_kernel(typename cl_program program, typena
 
 loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
-  size_t src_size;
-  typename cl_program prog;
-  fprintf(stderr, "look at me, loading this kernel:\n%s\n", $id:srcname);
-  error = 0;
-  src_size = sizeof($id:srcname);
-  const char* src_ptr[] = {$id:srcname};
-  prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
-  assert(error == 0);
-  assert(build_opencl_kernel(prog, device, "") == CL_SUCCESS);
   $id:name = clCreateKernel(prog, $string:name, &error);
   assert(error == 0);
-  fprintf(stderr, "I guess it worked.\n");
+  fprintf(stderr, "Created kernel %s.\n", $string:name);
   }|]
-  where srcname = name ++ "_src"
 
 openClInit :: [C.Stm]
 openClInit =
@@ -390,30 +453,6 @@ getKernels :: Program -> [CallKernel]
 getKernels = execWriter . traverse getFunKernels
   where getFunKernels kernel =
           tell [kernel] >> return kernel
-
-openClKernelHeader :: UsedFunctions -> CallKernel -> [C.Definition]
-openClKernelHeader used_functions kernel =
-  pragmas ++
-  [[C.cedecl|$func:f|] | f <- map snd used_functions ++ funs32_used ++ funs64_used ]
-  where kernel_funs = functionsCalled $ kernelBody kernel
-        used_in_kernel = (`HS.member` kernel_funs) . nameFromString . fst
-        funs32_used = map snd $ filter used_in_kernel funs32
-        funs64_used = map snd $ filter used_in_kernel funs64
-        pragmas = if null funs64_used
-                  then []
-                  else [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
-
-        funs32 = [("toFloat32", c_toFloat32),
-                  ("trunc32", c_trunc32),
-                  ("log32", c_log32),
-                  ("sqrt32", c_sqrt32),
-                  ("exp32", c_exp32)]
-
-        funs64 = [("toFloat64", c_toFloat64),
-                  ("trunc64", c_trunc64),
-                  ("log64", c_log64),
-                  ("sqrt64", c_sqrt64),
-                  ("exp64", c_exp64)]
 
 -- | @memcpy@ parametrised by the address space of the destination and
 -- source pointers.
