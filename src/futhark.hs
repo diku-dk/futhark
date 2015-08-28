@@ -61,9 +61,6 @@ commandLineOptions =
                                                      futharkRealConfiguration $
                                                      futharkConfig opts })
     "Run the program via an interpreter."
-  , Option [] ["externalise"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = externaliseAction})
-    "Prettyprint the resulting external representation on standard output."
   , Option [] ["range-analysis"]
     (NoArg $ Right $ \opts -> opts { futharkAction = rangeAction })
     "Print the program with range annotations added."

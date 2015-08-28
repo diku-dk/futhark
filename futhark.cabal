@@ -77,7 +77,6 @@ Library
                    Futhark.ExpandAllocations
                    Futhark.ExpandArrays
                    Futhark.ExplicitAllocations
-                   Futhark.Externalise
                    Futhark.FirstOrderTransform
                    Futhark.Flattening
                    Futhark.FreshNames

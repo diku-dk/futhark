@@ -1,6 +1,5 @@
 module Futhark.Actions
   ( printAction
-  , externaliseAction
   , interpretAction
   , impCodeGenAction
   , kernelImpCodeGenAction
@@ -14,7 +13,6 @@ import Data.List
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 
-import Futhark.Externalise
 import Futhark.Pipeline
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
@@ -30,10 +28,6 @@ printAction = polyAction "prettyprinter" act
         act (Basic prog) = pp prog
         pp :: PrettyLore lore => Prog lore -> IO ()
         pp = putStrLn . pretty . aliasAnalysis
-
-externaliseAction :: Action
-externaliseAction = basicAction "externalise" $
-                    putStrLn . pretty . externaliseProg
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
                 -> Action
