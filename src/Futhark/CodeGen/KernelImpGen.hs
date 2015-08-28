@@ -117,7 +117,7 @@ kernelCompiler target (PrimOp (Replicate n v)) = do
   global_thread_index <- newVName "global_thread_index"
   t <- subExpType v
   kernelCompiler target $
-    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0])] (Body () [] [v])
+    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0..arrayRank t])] (Body () [] [v])
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
 
@@ -199,7 +199,7 @@ writeThreadResult thread_idxs perm
   set <- subExpType se
 
   let ixfun' = IxFun.permute ixfun perm
-      destloc' = ImpGen.MemLocation mem dims ixfun'
+      destloc' = ImpGen.MemLocation mem (permuteShape perm dims) ixfun'
 
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let is = map ImpGen.varIndex thread_idxs
