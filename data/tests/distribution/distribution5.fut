@@ -18,7 +18,7 @@
 --   Kernel 4
 --   Map 0
 --   Concat 1
---   Reduce 1
+--   Reduce 0
 -- }
 
 fun [{[int],[int]}] main([[[int],an],n] a, [[int,bn],n] b) =
