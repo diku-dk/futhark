@@ -130,7 +130,7 @@ rearrangeInputs is = mapM rearrangeInput
           let arr = kernelInputArray inp
               num_is = length $ kernelInputIndices inp
           arr_t <- lookupType arr
-          let perm = coalescingPermutation num_is arr_t
+          let perm = coalescingPermutation num_is $ arrayRank arr_t
               inv_perm = permuteInverse perm
           transposed <- letExp (baseString arr ++ "_tr") $
                         PrimOp $ Rearrange [] perm arr
@@ -141,9 +141,9 @@ rearrangeInputs is = mapM rearrangeInput
           return inp { kernelInputArray = inv_transposed }
         _ -> return inp
 
-coalescingPermutation :: Int -> Type -> [Int]
-coalescingPermutation num_is arr_t =
-  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..arrayRank arr_t-1]
+coalescingPermutation :: Int -> Int -> [Int]
+coalescingPermutation num_is rank =
+  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..rank-1]
 
 rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
                     SequentialiseM ([PatElem], [(Type, [Int])])
@@ -151,7 +151,7 @@ rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
   where rearrangeReturn (PatElem ident BindVar ()) (t@(Array {}), perm) = do
           name_tr <- newVName $ baseString (identName ident) <> "_tr"
-          let perm' = permuteShape (coalescingPermutation num_is t) perm
+          let perm' = permuteShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
               ident' = Ident name_tr $ rearrangeType perm' $ identType ident
               new_pat_elem = PatElem ident' BindVar ()
           return (new_pat_elem, (t, perm'))
