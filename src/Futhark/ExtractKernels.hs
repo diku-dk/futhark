@@ -510,7 +510,8 @@ maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
           (w_bnds, kern_bnd) <-
             constructKernel nest $
             mkBody [bnd { bindingExp = call_with_new_lam lam' }] res
-          addKernel $ w_bnds++[kern_bnd]
+          kern_bnd' <- runBinder_ $ FOT.transformBindingRecursively kern_bnd
+          addKernel $ w_bnds++kern_bnd'
           return acc'
         _ ->
           addBindingToKernel bnd acc

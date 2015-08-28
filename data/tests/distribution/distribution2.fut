@@ -6,10 +6,9 @@
 -- structure distributed {
 --   Kernel 4
 --   Map 0
---   DoLoop 2
+--   DoLoop 3
 --   Reduce 0
 --   Redomap 0
---   Scan 1
 -- }
 
 fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
