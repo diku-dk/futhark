@@ -54,7 +54,7 @@ transformExtLambda lam = do
 transformExp :: MonadFreshNames m =>
                 Exp -> m ([Binding], Exp)
 transformExp (LoopOp (Kernel cs w thread_num ispace inps returns body)) = do
-  (body', expanded) <- expandInKernel ispace $ expandInBody body
+  (body', expanded) <- expandInKernel thread_num ispace inps $ expandInBody body
   let inps' = inps ++ map expandedInput expanded
   return (map expansionBinding expanded,
           LoopOp $ Kernel cs w thread_num ispace inps' returns body')
@@ -77,24 +77,37 @@ data ExpandEnv = ExpandEnv { envKernelSpace :: [(VName, SubExp)]
                            , envKernelVariant :: Names
                            }
 
+variantIn :: Names -> ExpandM a -> ExpandM a
+variantIn names = local $ \env -> env { envKernelVariant = names <> envKernelVariant env }
+
 expandInKernel :: MonadFreshNames m =>
-                  [(VName, SubExp)]
+                  VName -> [(VName, SubExp)] -> [KernelInput Basic]
                -> ExpandM a
                -> m (a, [ExpandedArray])
-expandInKernel kernel_dims m =
-  modifyNameSource $ frob . runRWS m (ExpandEnv kernel_dims mempty)
+expandInKernel thread_num ispace inps m =
+  modifyNameSource $ frob . runRWS m (ExpandEnv ispace variant)
   where frob (x,y,z) = ((x,z),y)
+
+        variant = thread_num `HS.insert`
+                  HS.fromList (map fst ispace ++ map kernelInputName inps)
 
 expandInBody :: Body -> ExpandM Body
 expandInBody (Body _ bnds res) = do
-  bnds' <- mapM expandInBinding bnds
+  bnds' <- variantIn (boundByBindings bnds) $ mapM expandInBinding bnds
   return $ mkBody bnds' res
 
 expandInBinding :: Binding -> ExpandM Binding
 expandInBinding (Let pat () e) = do
-  pat' <- expandInPattern pat
   e'   <- expandInExp e
+  pat' <- if expandForExp e'
+          then expandInPattern pat
+          else return pat
   return $ Let pat' () e'
+  where expandForExp (LoopOp (DoLoop {}))    = False
+        expandForExp (PrimOp (Index {}))     = False
+        expandForExp (PrimOp (Reshape {}))   = False
+        expandForExp (PrimOp (Rearrange {})) = False
+        expandForExp _                       = True
 
 expandInPattern :: Pattern -> ExpandM Pattern
 expandInPattern pat@(Pattern context values) = do
@@ -131,7 +144,9 @@ inPlaceInput name t = do
   where unique_t = t `setUniqueness` Unique
 
 expandInExp :: Exp -> ExpandM Exp
-expandInExp = mapExpM transform
+expandInExp (LoopOp (DoLoop res merge form body)) =
+  return $ LoopOp $ DoLoop res merge form body -- Cannot safely do this inside do-loops.
+expandInExp e = mapExpM transform e
   where transform = identityMapper { mapOnBody = expandInBody
                                    , mapOnLambda = fail "Cannot expand in lambda"
                                    , mapOnExtLambda = fail "Cannot expand in ext lambda"
