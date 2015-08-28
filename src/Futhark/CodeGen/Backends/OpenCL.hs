@@ -6,7 +6,7 @@ module Futhark.CodeGen.Backends.OpenCL
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
-import Data.Traversable hiding (forM)
+import Data.Traversable hiding (forM, mapM)
 import qualified Data.HashSet as HS
 import Data.List
 
