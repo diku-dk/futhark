@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
-module Futhark.ExtractKernels.ISRWIM
+module Futhark.Pass.ExtractKernels.ISRWIM
        ( iswim
        , irwim)
        where

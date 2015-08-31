@@ -1,7 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
-module Futhark.ExtractKernels.Distribution
+module Futhark.Pass.ExtractKernels.Distribution
        (
          Target
        , Targets
@@ -48,7 +48,7 @@ import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import qualified Futhark.Analysis.Alias as Alias
 
 import Prelude

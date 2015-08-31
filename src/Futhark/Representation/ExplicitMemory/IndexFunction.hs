@@ -29,8 +29,8 @@ import Data.Type.Equality hiding (outer)
 
 import Prelude
 
-import Futhark.Substitute
-import Futhark.Renamer
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax (DimChange (..))
 import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm

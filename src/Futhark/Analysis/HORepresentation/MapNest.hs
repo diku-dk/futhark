@@ -23,7 +23,7 @@ import Prelude
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder (Bindable)

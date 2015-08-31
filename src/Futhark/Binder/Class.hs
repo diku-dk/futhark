@@ -31,8 +31,8 @@ import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
-import Futhark.Substitute
-import Futhark.Renamer (Renameable)
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename (Renameable)
 
 -- | A lore that supports some basic facilities.
 class (Lore.Lore lore,

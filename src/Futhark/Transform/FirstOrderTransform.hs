@@ -3,7 +3,7 @@
 -- equivalent do-loops.  The transformation is currently rather naive,
 -- and - it's certainly worth considering when we can express such
 -- transformations in-place.
-module Futhark.FirstOrderTransform
+module Futhark.Transform.FirstOrderTransform
   ( transformProg
   , transformBinding
   , transformBindingRecursively
@@ -20,7 +20,7 @@ import Data.List
 import Prelude
 
 import Futhark.Representation.Basic
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Tools
 

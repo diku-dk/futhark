@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 -- | Expand allocations inside of maps when possible.
-module Futhark.ExpandAllocations
+module Futhark.Pass.ExpandAllocations
        ( expandAllocations )
        where
 
@@ -19,10 +19,14 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import Futhark.Tools
 import Futhark.Util
+import Futhark.Pass
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
-expandAllocations :: Prog -> Prog
-expandAllocations = intraproceduralTransformation transformFunDec
+expandAllocations :: Pass ExplicitMemory ExplicitMemory
+expandAllocations = simplePass
+                    "expand allocations"
+                    "Expand allocations" $
+                    intraproceduralTransformation transformFunDec
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = do

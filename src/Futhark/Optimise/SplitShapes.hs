@@ -20,21 +20,26 @@ import Prelude
 import Futhark.Representation.Basic
 import Futhark.Tools
 import Futhark.MonadFreshNames
-import Futhark.Renamer
-import Futhark.Substitute
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.DeadVarElim
+import Futhark.Pass
 
 -- | Perform the transformation on a program.
-splitShapes :: Prog -> Prog
-splitShapes prog =
-  Prog { progFunctions = runSplitM m HM.empty $ newNameSourceForProg prog }
-  where m = do let origfuns = progFunctions prog
-               (substs, newfuns) <-
-                 unzip <$> map extract <$>
-                 makeFunSubsts origfuns
-               mapM (substCalls substs) $ origfuns ++ concat newfuns
+splitShapes :: Pass Basic Basic
+splitShapes =
+  Pass { passName = "Split shapes"
+       , passDescription = "Optimise shape computation"
+       , passFunction = \prog ->
+       return $ Prog $ runSplitM (m prog) HM.empty $ newNameSourceForProg prog
+       }
+  where m prog = do
+          let origfuns = progFunctions prog
+          (substs, newfuns) <-
+            unzip <$> map extract <$> makeFunSubsts origfuns
+          mapM (substCalls substs) $ origfuns ++ concat newfuns
         extract (fname, (shapefun, valfun)) =
           ((fname, (funDecName shapefun, funDecRetType shapefun,
                     funDecName valfun, funDecRetType valfun)),

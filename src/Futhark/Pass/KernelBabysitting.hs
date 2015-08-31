@@ -5,7 +5,7 @@
 -- This pass will turn SOACs into sequential loops.  The only
 -- difference from first order transform is another approach to
 -- stream.
-module Futhark.KernelBabysitting
+module Futhark.Pass.KernelBabysitting
        ( babysitKernels )
        where
 
@@ -19,10 +19,15 @@ import Prelude
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
 import Futhark.Tools
-import qualified Futhark.FirstOrderTransform as FOT
+import Futhark.Pass
+import qualified Futhark.Transform.FirstOrderTransform as FOT
 
-babysitKernels :: Prog -> Prog
-babysitKernels = intraproceduralTransformation transformFunDec
+babysitKernels :: Pass Basic Basic
+babysitKernels =
+  Pass { passName = "babysit kernels"
+       , passDescription = "Remove stream and transpose kernel input arrays for better performance."
+       , passFunction = return . intraproceduralTransformation transformFunDec
+       }
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = do

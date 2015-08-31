@@ -50,12 +50,12 @@ Library
                    Futhark.Analysis.HORepresentation.MapNest
                    Futhark.Analysis.HORepresentation.SOAC
                    Futhark.Analysis.HORepresentation.SOACNest
-                   Futhark.Analysis.ScalExp
-                   Futhark.Analysis.SymbolTable
                    Futhark.Analysis.Range
                    Futhark.Analysis.Rephrase
-                   Futhark.Analysis.UsageTable
+                   Futhark.Analysis.ScalExp
+                   Futhark.Analysis.SymbolTable
                    Futhark.Analysis.Usage
+                   Futhark.Analysis.UsageTable
                    Futhark.Binder
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
@@ -65,20 +65,11 @@ Library
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
-                   Futhark.CodeGen.KernelImp
                    Futhark.CodeGen.ImpGen
+                   Futhark.CodeGen.KernelImp
                    Futhark.CodeGen.KernelImpGen
-                   Futhark.CopyPropagate
                    Futhark.Compiler
                    Futhark.Construct
-                   Futhark.ExtractKernels
-                   Futhark.ExtractKernels.Distribution
-                   Futhark.ExtractKernels.ISRWIM
-                   Futhark.ExpandAllocations
-                   Futhark.ExpandArrays
-                   Futhark.ExplicitAllocations
-                   Futhark.FirstOrderTransform
-                   Futhark.Flattening
                    Futhark.FreshNames
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes
@@ -87,13 +78,12 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
-                   Futhark.KernelBabysitting
                    Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
-                   Futhark.Optimise.DoubleBuffer
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
+                   Futhark.Optimise.DoubleBuffer
                    Futhark.Optimise.Errors
                    Futhark.Optimise.Fusion
                    Futhark.Optimise.Fusion.Composing
@@ -103,7 +93,6 @@ Library
                    Futhark.Optimise.InPlaceLowering
                    Futhark.Optimise.InPlaceLowering.LowerIntoBinding
                    Futhark.Optimise.InPlaceLowering.SubstituteIndices
-                   Futhark.Optimise.SimpleOpts
                    Futhark.Optimise.Simplifier
                    Futhark.Optimise.Simplifier.Apply
                    Futhark.Optimise.Simplifier.ClosedForm
@@ -113,15 +102,27 @@ Library
                    Futhark.Optimise.Simplifier.RuleM
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simple
-                   Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.Simplifier.Simplifiable
+                   Futhark.Optimise.Simplifier.Simplify
+                   Futhark.Optimise.SimplifyLambda
                    Futhark.Optimise.SplitShapes
                    Futhark.Optimise.SuffCond
                    Futhark.Optimise.SuffCond.GenPredicates
                    Futhark.Optimise.SuffCond.OptPredicates
+                   Futhark.Pass
                    Futhark.Passes
+                   Futhark.Pass.ExpandAllocations
+                   Futhark.Pass.ExpandArrays
+                   Futhark.Pass.ExplicitAllocations
+                   Futhark.Pass.ExtractKernels
+                   Futhark.Pass.ExtractKernels.Distribution
+                   Futhark.Pass.ExtractKernels.ISRWIM
+                   Futhark.Pass.FirstOrderTransform
+                   Futhark.Pass.Flattening
+                   Futhark.Pass.KernelBabysitting
+                   Futhark.Pass.Simplify
+                   Futhark.Pass.Untrace
                    Futhark.Pipeline
-                   Futhark.Renamer
                    Futhark.Representation.Aliases
                    Futhark.Representation.AST
                    Futhark.Representation.AST.Annotations
@@ -138,8 +139,8 @@ Library
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values
                    Futhark.Representation.AST.Lore
-                   Futhark.Representation.AST.RetType
                    Futhark.Representation.AST.Pretty
+                   Futhark.Representation.AST.RetType
                    Futhark.Representation.AST.Syntax
                    Futhark.Representation.AST.Syntax.Core
                    Futhark.Representation.AST.Traversals
@@ -154,15 +155,17 @@ Library
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
                    Futhark.Representation.Ranges
-                   Futhark.Substitute
                    Futhark.Tools
+                   Futhark.Transform.CopyPropagate
+                   Futhark.Transform.FirstOrderTransform
+                   Futhark.Transform.Rename
+                   Futhark.Transform.Substitute
                    Futhark.TypeCheck
                    Futhark.TypeCheck.TypeError
-                   Futhark.Untrace
-                   Futhark.Version
                    Futhark.Util
-                   Futhark.Util.Truths
                    Futhark.Util.Options
+                   Futhark.Util.Truths
+                   Futhark.Version
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
@@ -197,6 +200,7 @@ Executable futhark
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
@@ -212,6 +216,7 @@ Executable futhark-c
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 text,
                  filepath,
                  process,
                  transformers,
@@ -228,6 +233,7 @@ Executable futharki
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
@@ -266,12 +272,12 @@ Executable futhark-opencl
                  filepath,
                  process,
                  transformers,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
 
 Test-suite unit
   Type:              exitcode-stdio-1.0

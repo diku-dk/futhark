@@ -32,7 +32,7 @@ import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 
 import Prelude hiding (any, all)
 

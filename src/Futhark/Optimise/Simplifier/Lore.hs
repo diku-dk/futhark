@@ -28,8 +28,8 @@ import qualified Futhark.Representation.Aliases as Aliases
 import qualified Futhark.Representation.Ranges as Ranges
 import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Binder
-import Futhark.Renamer
-import Futhark.Substitute
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 
 import Prelude

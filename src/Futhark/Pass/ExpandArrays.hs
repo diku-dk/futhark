@@ -1,5 +1,5 @@
 -- | Expand arrays inside of kernels when possible.
-module Futhark.ExpandArrays
+module Futhark.Pass.ExpandArrays
        ( expandArrays )
        where
 
@@ -13,9 +13,13 @@ import Prelude
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
 import Futhark.Tools
+import Futhark.Pass
 
-expandArrays :: Prog -> Prog
-expandArrays = intraproceduralTransformation transformFunDec
+expandArrays :: Pass Basic Basic
+expandArrays = simplePass
+               "expand arrays"
+               "Expand arrays inside kernels" $
+               intraproceduralTransformation transformFunDec
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = do

@@ -3,7 +3,7 @@
 --
 -- This module contains exports a single function, 'substituteNames',
 -- for performing name substitution in an Futhark expression.
-module Futhark.Substitute
+module Futhark.Transform.Substitute
   (Substitutions,
    Substitute(..),
    Substitutable)

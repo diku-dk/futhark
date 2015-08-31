@@ -1,15 +1,25 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Futhark.Compiler
        (
-         runCompilerOnProgram
-       , runPipelineOnProgram
+         runPipelineOnProgram
+       , runCompilerOnProgram
        , interpretAction'
+       , FutharkConfig (..)
        , newFutharkConfig
+       , RealConfiguration (..)
+       , dumpError
        )
 where
 
+import Data.Monoid
 import Control.Monad
+import Data.Maybe
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
+
+import Prelude
 
 import Language.Futhark.Parser
 import Futhark.Internalise
@@ -20,89 +30,106 @@ import qualified Futhark.Representation.External as E
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
+import Futhark.Representation.AST
 import qualified Futhark.Representation.Basic as I
 import qualified Futhark.TypeCheck as I
 
+data FutharkConfig = FutharkConfig {
+    futharkVerbose :: Maybe (Maybe FilePath)
+  , futharkBoundsCheck :: Bool
+  , futharkRealConfiguration :: RealConfiguration
+}
+
 newFutharkConfig :: FutharkConfig
-newFutharkConfig = FutharkConfig { futharkPipeline = []
-                                 , futharkCheckAliases = True
-                                 , futharkVerbose = Nothing
+newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
                                  , futharkBoundsCheck = True
                                  , futharkRealConfiguration = RealAsFloat64
                                  }
 
-runCompilerOnProgram :: FutharkConfig -> Action -> FilePath -> IO ()
-runCompilerOnProgram config action file = do
-  (msgs, res) <- runPipelineOnProgram config file
-  hPutStr stderr msgs
+dumpError :: FutharkConfig -> CompileError -> IO ()
+dumpError config err = do
+  T.hPutStrLn stderr $ errorDesc err
+  case (errorData err, futharkVerbose config) of
+    (s, Just outfile) ->
+      maybe (T.hPutStr stderr) T.writeFile outfile $ s <> "\n"
+    _ -> return ()
+
+runCompilerOnProgram :: FutharkConfig
+                     -> Pipeline I.Basic lore
+                     -> Action lore
+                     -> FilePath
+                     -> IO ()
+runCompilerOnProgram config pipeline action file = do
+  (res, msgs) <- runPipelineOnProgram config pipeline file
+  T.hPutStrLn stderr msgs
   case res of
     Left err -> do
-      hPutStrLn stderr $ errorDesc err
-      case (errorState err, futharkVerbose config) of
-        (Just s, Just outfile) ->
-          maybe (hPutStr stderr) writeFile outfile $
-            I.pretty s ++ "\n"
-        _ -> return ()
+      dumpError config err
       exitWith $ ExitFailure 2
-    Right s -> do
-      when (verbose config) $
+    Right prog -> do
+      when (isJust $ futharkVerbose config) $
         hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
-      applyAction action s
+      (action_res, action_msgs) <- runFutharkM $ actionProcedure action prog
+      T.hPutStrLn stderr action_msgs
+      case action_res of
+        Left err -> do
+          dumpError config err
+          exitWith $ ExitFailure 2
+        Right () -> return ()
 
-runPipelineOnProgram :: FutharkConfig -> FilePath
-                     -> IO (String, Either CompileError PipelineState)
-runPipelineOnProgram config file = do
+runPipelineOnProgram :: FutharkConfig
+                     -> Pipeline I.Basic tolore
+                     -> FilePath
+                     -> IO (Either CompileError (Prog tolore), T.Text)
+runPipelineOnProgram config pipeline file = do
   contents <- readFile file
-  runPipelineOnSource config file contents
+  runPipelineOnSource config pipeline file contents
 
-runPipelineOnSource :: FutharkConfig -> FilePath -> String
-                    -> IO (String, Either CompileError PipelineState)
-runPipelineOnSource config filename srccode = do
+runPipelineOnSource :: FutharkConfig
+                    -> Pipeline I.Basic tolore
+                    -> FilePath
+                    -> String
+                    -> IO (Either CompileError (Prog tolore), T.Text)
+runPipelineOnSource config pipeline filename srccode = do
   res <- runFutharkM futharkc'
-  case res of (Left err, msgs)  -> return (msgs, Left err)
-              (Right prog, msgs) -> return (msgs, Right prog)
+  case res of (Left err, msgs)  -> return (Left err, msgs)
+              (Right prog, msgs) -> return (Right prog, msgs)
   where futharkc' = do
           parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
-          ext_prog    <- typeCheckSourceProgram config parsed_prog
+          ext_prog    <- typeCheckSourceProgram parsed_prog
           case internaliseProg (futharkBoundsCheck config) $ E.tagProg ext_prog of
             Left err ->
-              compileError ("During internalisation:\n" ++ err) Nothing
+              compileErrorS "During internalisation:" err
             Right int_prog -> do
-              typeCheckInternalProgram config int_prog
-              runPasses config $ Basic int_prog
-
-typeCheck :: (prog -> Either err prog')
-          -> (prog -> Either err prog')
-          -> FutharkConfig
-          -> prog -> Either err prog'
-typeCheck checkProg checkProgNoUniqueness config
-  | futharkCheckAliases config = checkProg
-  | otherwise                  = checkProgNoUniqueness
-
+              typeCheckInternalProgram int_prog
+              runPasses pipeline pipeline_config int_prog
+        pipeline_config =
+          PipelineConfig { pipelineVerbose = isJust $ futharkVerbose config
+                         , pipelineValidate = True
+                         }
 parseSourceProgram :: RealConfiguration -> FilePath -> String
                    -> FutharkM E.UncheckedProg
 parseSourceProgram rconf filename file_contents =
   case parseFuthark rconf filename file_contents of
-    Left err   -> compileError (show err) Nothing
+    Left err   -> compileError (T.pack $ show err) ()
     Right prog -> return prog
 
-typeCheckSourceProgram :: FutharkConfig
-                       -> E.UncheckedProg
+typeCheckSourceProgram :: E.UncheckedProg
                        -> FutharkM (E.ProgBase E.CompTypeBase I.Name)
-typeCheckSourceProgram config prog =
-  case typeCheck E.checkProg E.checkProgNoUniqueness config prog of
-    Left err    -> compileError (show err) Nothing
+typeCheckSourceProgram prog =
+  case E.checkProg prog of
+    Left err    -> compileError (T.pack $ show err) ()
     Right prog' -> return prog'
 
-typeCheckInternalProgram :: FutharkConfig -> I.Prog -> FutharkM ()
-typeCheckInternalProgram config prog =
-  case typeCheck I.checkProg I.checkProgNoUniqueness config prog of
-    Left err -> compileError ("After internalisation:\n" ++ show err) $
-                Just $ Basic prog
+typeCheckInternalProgram :: I.Prog -> FutharkM ()
+typeCheckInternalProgram prog =
+  case I.checkProg prog of
+    Left err -> compileError (T.pack $ "After internalisation:\n" ++ show err) prog
     Right () -> return ()
 
-interpretAction' :: RealConfiguration -> Action
-interpretAction' rconf = interpretAction parseValues'
+interpretAction' :: RealConfiguration -> Action I.Basic
+interpretAction' rconf =
+  interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
           liftM concat $ mapM internalise =<< parseValues rconf path s

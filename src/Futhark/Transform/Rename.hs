@@ -7,7 +7,7 @@
 -- The intent is that you call 'tagProg' once at some early stage,
 -- then use 'renameProg' from then on.  Functions are also provided
 -- for removing the tags again from expressions, patterns and typs.
-module Futhark.Renamer
+module Futhark.Transform.Rename
   (
   -- * Renaming programs
    renameProg

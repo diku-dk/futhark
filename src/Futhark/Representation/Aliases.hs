@@ -72,9 +72,9 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import qualified Futhark.Representation.AST.Lore as Lore
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Binder
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 import Futhark.Representation.AST.Attributes.Ranges
 

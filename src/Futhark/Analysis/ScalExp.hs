@@ -27,9 +27,9 @@ import Prelude
 import Text.PrettyPrint.Mainland hiding (pretty)
 
 import Futhark.Representation.AST
-import Futhark.Substitute
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename
 import Futhark.Construct
-import Futhark.Renamer
 
 -----------------------------------------------------------------
 -- BINARY OPERATORS for Numbers                                --

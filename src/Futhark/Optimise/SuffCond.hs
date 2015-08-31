@@ -1,24 +1,30 @@
 module Futhark.Optimise.SuffCond
        (
-         optimiseProg
+         Futhark.Optimise.SuffCond.optimisePredicates
        )
        where
 
 import Control.Monad.State
 
 import Futhark.Representation.Basic
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simplify (bindableSimpleOps)
 import Futhark.Optimise.DeadVarElim
+import Futhark.Pass
 
-optimiseProg :: Prog -> Prog
-optimiseProg prog =
-  let m = optimisePredicates standardRules =<< extractPredicates prog
-  in evalState m $ newNameSourceForProg prog
+optimisePredicates :: Pass Basic Basic
+optimisePredicates =
+  Pass { passName = "Optimise predicates"
+       , passDescription = "Optimise predicates by extracting sufficient conditions."
+       , passFunction = \prog -> do
+         let m = Futhark.Optimise.SuffCond.OptPredicates.optimisePredicates standardRules
+                 =<< extractPredicates prog
+         return $ evalState m $ newNameSourceForProg prog
+       }
 
 extractPredicates :: MonadFreshNames m => Prog -> m Prog
 extractPredicates =

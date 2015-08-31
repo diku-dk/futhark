@@ -26,9 +26,10 @@
 --
 -- If you are interested in knowing more details, see futher comments
 -- in the source code!
-module Futhark.Flattening ( flattenProg )
+module Futhark.Pass.Flattening ( flattenProg )
   where
 
+import Control.Arrow (second)
 import Control.Applicative
 import Control.Monad.Except
 import Control.Monad.State
@@ -44,9 +45,9 @@ import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Basic
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Tools
-
+import Futhark.Pass
 
 {- -----------------------------------------------------------------------------
                        Understanding the code / transformation
@@ -406,11 +407,14 @@ setupDataArray i =
 
 --------------------------------------------------------------------------------
 
-flattenProg :: Prog -> Either (Error, PlainString) Prog
-flattenProg p =
-  case flattenProg' p of
-    Right p' -> Right p'
-    Left (e,fl) -> Left (e, prettyLog fl)
+flattenProg :: Pass Basic Basic
+flattenProg =
+  Pass { passName = "flattening"
+       , passDescription = "Perform flattening transformation"
+       , passFunction = liftEither .
+                        either (Left . second prettyLog) Right .
+                        flattenProg'
+       }
 
 flattenProg' :: Prog -> Either (Error,FlatLog) Prog
 flattenProg' p@(Prog funs) = do

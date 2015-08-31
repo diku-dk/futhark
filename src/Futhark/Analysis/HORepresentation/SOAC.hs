@@ -83,9 +83,9 @@ import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST
   hiding (Map, Reduce, Scan, Redomap, Stream,
           Var, Iota, Rearrange, Reshape, Replicate)
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Construct
-import Futhark.Renamer (renameLambda)
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.MonadFreshNames
 
 -- | A single, simple transformation.  If you want several, don't just

@@ -67,9 +67,9 @@ import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Binder
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 
 -- | The lore for the basic representation.

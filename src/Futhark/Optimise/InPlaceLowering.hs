@@ -54,7 +54,7 @@
 -- above conditions are not really checked.
 module Futhark.Optimise.InPlaceLowering
        (
-         optimiseProgram
+         inPlaceLowering
        ) where
 
 import Control.Applicative
@@ -66,18 +66,21 @@ import Data.Maybe
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
-import qualified Futhark.Representation.Basic as Basic
 import Futhark.Representation.Basic (Basic)
 import Futhark.Optimise.InPlaceLowering.LowerIntoBinding
 import Futhark.MonadFreshNames
 import Futhark.Binder
+import Futhark.Pass
 import Futhark.Tools (intraproceduralTransformation)
 
 import Prelude hiding (any, mapM_, elem, all)
 
 -- | Apply the in-place lowering optimisation to the given program.
-optimiseProgram :: Basic.Prog -> Basic.Prog
-optimiseProgram = removeProgAliases . intraproceduralTransformation optimiseFunDec . aliasAnalysis
+inPlaceLowering :: Pass Basic Basic
+inPlaceLowering = simplePass
+                  "In-place lowering"
+                  "Lower in-place updates into loops" $
+                  removeProgAliases . intraproceduralTransformation optimiseFunDec . aliasAnalysis
 
 optimiseFunDec :: MonadFreshNames m => FunDec Basic -> m (FunDec Basic)
 optimiseFunDec fundec =

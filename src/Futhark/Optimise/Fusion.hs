@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.Optimise.Fusion ( fuseProg )
+module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
 import Control.Monad.State
@@ -18,11 +18,12 @@ import Prelude
 
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Optimise.SimpleOpts
+import Futhark.Optimise.SimplifyLambda
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import Futhark.Renamer
+import Futhark.Transform.Rename
+import Futhark.Pass
 
 --import Debug.Trace
 
@@ -47,6 +48,12 @@ arrsInScope :: FusionGEnv -> HM.HashMap VName (Ident, SOAC.ArrayTransforms)
 arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
   where asArray (name, IsArray ident ts) = Just (name, (ident, ts))
         asArray (_, IsNotArray _)        = Nothing
+
+data Error = Error String
+
+instance Show Error where
+  show (Error msg) =
+    "Fusion error:\n" ++ msg
 
 newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either Error)) a)
   deriving (Monad, Applicative, Functor,
@@ -159,6 +166,13 @@ badFusionGM = FusionGM . lift . lift . Left
 --- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---
 ---    and fuse them in a second pass!                               ---
 ------------------------------------------------------------------------
+
+fuseSOACs :: Pass Basic Basic
+fuseSOACs =
+  Pass { passName = "Fuse SOACs"
+       , passDescription = "Perform higher-order optimisation, i.e., fusion."
+       , passFunction = liftEither . fuseProg
+       }
 
 fuseProg :: Prog -> Either Error Prog
 fuseProg prog = do
@@ -762,7 +776,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simpleOptLambda prog lam (SOAC.width new_soac) args
+  lam' <- simplifyLambda prog lam (SOAC.width new_soac) args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

@@ -22,9 +22,9 @@ import Data.Traversable (mapM)
 import Data.Loc
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
-import Futhark.Renamer as I
+import Futhark.Transform.Rename as I
+import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import Futhark.Substitute
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes

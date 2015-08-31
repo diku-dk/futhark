@@ -24,8 +24,8 @@ import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
 import Futhark.Analysis.ScalExp
 import qualified Futhark.Analysis.AlgSimplify as AS
-import Futhark.Substitute
-import Futhark.Renamer
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename
 import qualified Text.PrettyPrint.Mainland as PP
 
 --import Debug.Trace

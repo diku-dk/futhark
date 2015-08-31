@@ -1,10 +1,8 @@
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
 module Futhark.Optimise.InliningDeadFun
-  ( CallGraph
-  , buildCallGraph
-  , aggInlineDriver
-  , deadFunElim
+  ( inlineAggressively
+  , removeDeadFunctions
   )
   where
 
@@ -19,10 +17,11 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Representation.Basic
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
 import Futhark.Optimise.Errors
 import Futhark.Binder
+import Futhark.Pass
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
@@ -39,15 +38,19 @@ badCGM = lift . Left
 ------------------------------------------------------------------
 ------------------------------------------------------------------
 ------------------------------------------------------------------
--- | @aggInlineDriver prog@ performs aggressive inlining for all
+-- | This pass performs aggressive inlining for all
 -- functions in @prog@ by repeatedly inlining the functions with
--- empty-apply-callee set into other callers.  Afterwards, all dead
--- functions are removed.
-aggInlineDriver :: Prog -> Either Error Prog
-aggInlineDriver prog = do
-  cg  <- buildCallGraph prog
-  env <- CGEnv <$> buildFunctionTable prog
-  renameProg <$> (deadFunElim =<< runCGM (aggInlining cg) env)
+-- empty-apply-callee set into other callers.
+inlineAggressively :: Pass Basic Basic
+inlineAggressively =
+  Pass { passName = "inline functions"
+       , passDescription = "Inline all non-recursive functions."
+       , passFunction = inline
+       }
+  where inline prog = liftEither $ do
+          cg  <- buildCallGraph prog
+          env <- CGEnv <$> buildFunctionTable prog
+          renameProg <$> runCGM (aggInlining cg) env
 
 -- | Bind a name as a common (non-merge) variable.
 bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
@@ -191,17 +194,18 @@ inlineInLambda inlcallees (Lambda i params body ret) =
 inlineInExtLambda :: [FunDec] -> ExtLambda -> ExtLambda
 inlineInExtLambda inlcallees (ExtLambda i params body ret) =
   ExtLambda i params (inlineInBody inlcallees body) ret
-------------------------------------------------------------------
-------------------  Dead Function Elimination --------------------
-------------------------------------------------------------------
--- | @deadFunElim prog@ removes the functions that are unreachable from
+
+-- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
--- The functions called (indirectly) via SOACs are obviously considered.
-deadFunElim :: Prog -> Either Error Prog
-deadFunElim prog = do
-  ftable <- buildFunctionTable prog
-  cg     <- buildCallGraph prog
-  let ftable' = HM.filter (isFunInCallGraph cg) ftable
-  return $ Prog $ HM.elems ftable'
-  where
-    isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg
+removeDeadFunctions :: Pass Basic Basic
+removeDeadFunctions =
+  Pass { passName = "Remove dead functions"
+       , passDescription = "Remove the functions that are unreachable from the main function"
+       , passFunction = liftEither . pass
+       }
+  where pass prog = do
+          ftable <- buildFunctionTable prog
+          cg     <- buildCallGraph prog
+          let ftable' = HM.filter (isFunInCallGraph cg) ftable
+          return $ Prog $ HM.elems ftable'
+        isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg

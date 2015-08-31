@@ -1,7 +1,7 @@
 -- | Perform copy propagation.  This is done by invoking the
 -- simplifier with no rules, so hoisting and dead-code elimination may
 -- also take place.
-module Futhark.CopyPropagate
+module Futhark.Transform.CopyPropagate
        (copyPropagateInBindings)
        where
 

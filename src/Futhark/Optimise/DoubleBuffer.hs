@@ -11,7 +11,7 @@
 -- loop-invariant, although the initial size may differ from the size
 -- produced by the loop result.
 module Futhark.Optimise.DoubleBuffer
-       ( optimiseProg )
+       ( doubleBuffer )
        where
 
 import           Control.Applicative
@@ -27,9 +27,14 @@ import           Futhark.MonadFreshNames
 import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import           Futhark.Pass
 
-optimiseProg :: Prog -> Prog
-optimiseProg = intraproceduralTransformation optimiseFunDec
+doubleBuffer :: Pass ExplicitMemory ExplicitMemory
+doubleBuffer =
+  Pass { passName = "Double buffer"
+       , passDescription = "Perform double buffering for merge parameters of sequential loops."
+       , passFunction = return . intraproceduralTransformation optimiseFunDec
+       }
 
 optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec
 optimiseFunDec fundec = do

@@ -26,9 +26,9 @@ import Data.List
 import Prelude
 
 import Futhark.Representation.Basic
-import Futhark.Renamer (renameLambda)
+import Futhark.Transform.Rename (renameLambda)
+import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import Futhark.Substitute
 import qualified Futhark.Representation.AST as Futhark
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest

@@ -38,8 +38,8 @@ import Prelude
 
 import Futhark.Analysis.ScalExp
 import Futhark.Representation.AST.Syntax (SubExp(..), DimChange)
-import Futhark.Substitute
-import Futhark.Renamer
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename
 import Futhark.Util.Truths
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.ExplicitMemory.Permutation

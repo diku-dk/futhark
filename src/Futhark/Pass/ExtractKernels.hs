@@ -145,8 +145,8 @@
 --         e,a,b)
 -- @
 --
-module Futhark.ExtractKernels
-       (transformProg)
+module Futhark.Pass.ExtractKernels
+       (extractKernels)
        where
 
 import Control.Arrow (second)
@@ -165,13 +165,17 @@ import Futhark.Optimise.Simplifier.Simple (bindableSimpleOps)
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import qualified Futhark.FirstOrderTransform as FOT
-import Futhark.CopyPropagate
-import Futhark.ExtractKernels.Distribution
-import Futhark.ExtractKernels.ISRWIM
+import qualified Futhark.Transform.FirstOrderTransform as FOT
+import Futhark.Pass
+import Futhark.Transform.CopyPropagate
+import Futhark.Pass.ExtractKernels.Distribution
+import Futhark.Pass.ExtractKernels.ISRWIM
 
-transformProg :: Prog -> Prog
-transformProg = intraproceduralTransformation transformFunDec
+extractKernels :: Pass Basic Basic
+extractKernels = simplePass
+                 "extract kernels"
+                 "Perform kernel extraction" $
+                 intraproceduralTransformation transformFunDec
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = runDistribM $ do

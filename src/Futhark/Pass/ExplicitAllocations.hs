@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections #-}
-module Futhark.ExplicitAllocations
+module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
        )
@@ -29,6 +29,7 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Optimise.Simplifier.Simplify (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import Futhark.Pass
 
 data Entry = Entry { entryMemSummary :: MemSummary
                    , entryType :: Type
@@ -444,8 +445,11 @@ linearFuncallArg (Array {}) (Var v) = do
 linearFuncallArg _ arg =
   return arg
 
-explicitAllocations :: In.Prog -> Prog
-explicitAllocations = intraproceduralTransformation allocInFun
+explicitAllocations :: Pass In.Basic ExplicitMemory
+explicitAllocations = simplePass
+                      "explicit allocations"
+                      "Transform program to explicit memory representation" $
+                      intraproceduralTransformation allocInFun
 
 memoryInRetType :: In.RetType -> RetType
 memoryInRetType (ExtRetType ts) =

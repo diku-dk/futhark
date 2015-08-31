@@ -19,7 +19,7 @@ import Control.Monad.RWS
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -34,7 +34,7 @@ import Futhark.Optimise.Simplifier
   (simplifyFunWithRules, basicRules)
 import Futhark.Optimise.Simplifier.Simplify
   (bindableSimpleOps)
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as S

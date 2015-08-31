@@ -1,6 +1,9 @@
 module Main (main) where
 
+import Control.Category ((>>>))
 import Data.Maybe
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.FilePath
 import System.Process
 import System.IO
@@ -10,29 +13,37 @@ import System.Console.GetOpt
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
+import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
+import Futhark.Optimise.InPlaceLowering
+import Futhark.Optimise.CSE
+import Futhark.Pass.FirstOrderTransform
+import Futhark.Pass.Simplify
 import Futhark.Util.Options
+import Futhark.Optimise.DoubleBuffer
+import Futhark.Representation.AST.Pretty
 
 main :: IO ()
 main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 
-
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath = do
-  (msgs, res) <- runPipelineOnProgram (futharkConfig config) filepath
-  hPutStr stderr msgs
+  (res, msgs) <- runPipelineOnProgram (futharkConfig config) compilerPipeline filepath
+  T.hPutStr stderr msgs
   case res of
     Left err -> do
-      hPutStrLn stderr $ errorDesc err
+      dumpError (futharkConfig config) err
       exitWith $ ExitFailure 2
-    Right (Basic _) ->
-      error "Pipeline produced program without memory annotations."
-    Right (ExplicitMemory prog) ->
+    Right prog ->
       case SequentialC.compileProg prog of
         Left err -> do
-          hPutStrLn stderr err
+          dumpError (futharkConfig config) $
+            CompileError (T.pack err) $
+            T.pack $ pretty prog
           exitWith $ ExitFailure 2
         Right cprog -> do
           let binpath = outputFilePath filepath config
@@ -87,22 +98,22 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkPipeline = compilerPipeline
-                   , futharkVerbose = compilerVerbose config
+  newFutharkConfig { futharkVerbose = compilerVerbose config
                    , futharkRealConfiguration = compilerRealConfiguration config
                    , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
-compilerPipeline :: [Pass]
+compilerPipeline :: Pipeline Basic ExplicitMemory
 compilerPipeline =
-  standardPipeline ++
-  [ fotransform
-  , eotransform
-  , inPlaceLowering
-  , explicitMemory
-  , eotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , doubleBuffer
-  , eotransform
-  ]
+  standardPipeline >>>
+  passes [ firstOrderTransform
+         , simplifyBasic
+         , inPlaceLowering
+         ] >>>
+  onePass explicitAllocations >>>
+  passes [ simplifyExplicitMemory
+         , performCSE
+         , simplifyExplicitMemory
+         , doubleBuffer
+         , simplifyExplicitMemory
+         ]

@@ -76,9 +76,9 @@ import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import Futhark.Renamer
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 import Futhark.Binder
-import Futhark.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Representation.AST.Attributes.Ranges
