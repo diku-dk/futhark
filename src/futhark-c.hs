@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Category ((>>>))
+import Control.Monad
 import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -22,6 +23,7 @@ import Futhark.Optimise.CSE
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.Simplify
 import Futhark.Util.Options
+import Futhark.Util.Log
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Representation.AST.Pretty
 
@@ -33,7 +35,8 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath = do
   (res, msgs) <- runPipelineOnProgram (futharkConfig config) compilerPipeline filepath
-  T.hPutStr stderr msgs
+  when (isJust $ compilerVerbose config) $
+    T.hPutStr stderr $ toText msgs
   case res of
     Left err -> do
       dumpError (futharkConfig config) err

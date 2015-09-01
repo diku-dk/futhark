@@ -19,16 +19,20 @@ import qualified Data.Text as T
 import Prelude
 
 import Futhark.Representation.AST
+import Futhark.Util.Log
 
 -- | The monad in which passes execute.
-newtype PassM a = PassM (ExceptT T.Text (Writer T.Text) a)
+newtype PassM a = PassM (ExceptT T.Text (Writer Log) a)
               deriving (Functor, Applicative, Monad,
-                        MonadWriter T.Text,
+                        MonadWriter Log,
                         MonadError T.Text)
+
+instance MonadLogger PassM where
+  addLog = tell
 
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error text or a result.
-runPassM :: PassM a -> (T.Text, Either T.Text a)
+runPassM :: PassM a -> (Log, Either T.Text a)
 runPassM (PassM m) = case runWriter $ runExceptT m of
   (res, w) -> (w, res)
 

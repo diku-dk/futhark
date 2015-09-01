@@ -47,6 +47,7 @@ import Futhark.Compiler
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Passes
+import Futhark.Util.Log
 
 import Futhark.Util.Options
 
@@ -276,7 +277,7 @@ optimisedProgramMetrics pipeline program = do
   res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
-      throwError $ T.unpack $ T.unlines [msgs, errorDesc err]
+      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
     (Right prog, _) ->
       return $ progMetrics prog
 

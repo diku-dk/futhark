@@ -26,6 +26,7 @@ import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.AST (Prog)
 import Futhark.TypeCheck (Checkable)
+import Futhark.Util.Log
 
 import Futhark.Pass.Untrace
 import Futhark.Optimise.InliningDeadFun
@@ -230,7 +231,7 @@ main = mainWithOptions newConfig commandLineOptions compile
   where compile [file] config =
           Just $ do
             (res, msgs) <- runPipelineOnProgram (futharkConfig config) id file
-            T.hPutStr stderr msgs
+            T.hPutStr stderr $ toText msgs
             case res of
               Left err -> do
                 dumpError (futharkConfig config) err
@@ -264,7 +265,7 @@ runPolyPasses config prog = do
       (ExplicitMemory mem_prog, PolyAction _ poly_action) ->
         actionProcedure poly_action mem_prog
 
-  T.hPutStr stderr msgs
+  T.hPutStr stderr $ toText msgs
   case res of
     Left err -> do
       dumpError (futharkConfig config) err

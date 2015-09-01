@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
@@ -152,8 +153,6 @@ module Futhark.Pass.ExtractKernels
 import Control.Arrow (second)
 import Control.Applicative
 import Control.Monad.RWS.Strict
-import Control.Monad.Reader
-import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
@@ -170,23 +169,36 @@ import Futhark.Pass
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
+import Futhark.Util.Log
 
 extractKernels :: Pass Basic Basic
-extractKernels = simplePass
-                 "extract kernels"
-                 "Perform kernel extraction" $
-                 intraproceduralTransformation transformFunDec
+extractKernels =
+  Pass { passName = "extract kernels"
+       , passDescription = "Perform kernel extraction"
+       , passFunction = perform
+       }
+  where perform prog =
+          runDistribM (liftM Prog . mapM transformFunDec . progFunctions $ prog) $
+          newNameSourceForProg prog
 
-transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
-transformFunDec fundec = runDistribM $ do
+newtype DistribM a = DistribM (RWS TypeEnv Log VNameSource a)
+                   deriving (Functor, Applicative, Monad,
+                             HasTypeEnv,
+                             LocalTypeEnv,
+                             MonadFreshNames,
+                             MonadLogger)
+
+runDistribM :: MonadLogger m =>
+               DistribM a -> VNameSource -> m a
+runDistribM (DistribM m) src = do let (x, msgs) = evalRWS m HM.empty src
+                                  addLog msgs
+                                  return x
+
+transformFunDec :: FunDec -> DistribM FunDec
+transformFunDec fundec = do
   body' <- localTypeEnv (typeEnvFromParams $ funDecParams fundec) $
            transformBody $ funDecBody fundec
   return fundec { funDecBody = body' }
-
-type DistribM = ReaderT TypeEnv (State VNameSource)
-
-runDistribM :: MonadFreshNames m => DistribM a -> m a
-runDistribM m = modifyNameSource $ runState (runReaderT m HM.empty)
 
 transformBody :: Body -> DistribM Body
 transformBody body = do bnds <- transformBindings $ bodyBindings body
@@ -272,7 +284,7 @@ data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 mapLoopExp :: MapLoop -> Exp
 mapLoopExp (MapLoop cs w lam arrs) = LoopOp $ Map cs w lam arrs
 
-distributeMap :: (HasTypeEnv m, MonadFreshNames m) =>
+distributeMap :: (HasTypeEnv m, MonadFreshNames m, MonadLogger m) =>
                  Pattern -> MapLoop -> m [Binding]
 distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askTypeEnv
@@ -297,6 +309,15 @@ data KernelAcc = KernelAcc { kernelTargets :: Targets
                            , kernelBindings :: [Binding]
                            }
 
+data KernelRes = KernelRes { accPostKernels :: PostKernels
+                           , accLog :: Log
+                           }
+
+instance Monoid KernelRes where
+  KernelRes ks1 log1 `mappend` KernelRes ks2 log2 =
+    KernelRes (ks1 <> ks2) (log1 <> log2)
+  mempty = KernelRes mempty mempty
+
 newtype PostKernels = PostKernels [[Binding]]
 
 instance Monoid PostKernels where
@@ -312,22 +333,31 @@ addBindingToKernel bnd acc = do
   bnds <- runBinder_ $ FOT.transformBindingRecursively bnd
   return acc { kernelBindings = bnds <> kernelBindings acc }
 
-newtype KernelM a = KernelM (RWS KernelEnv PostKernels VNameSource a)
+newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
   deriving (Functor, Applicative, Monad,
             MonadReader KernelEnv,
-            MonadWriter PostKernels,
+            MonadWriter KernelRes,
             MonadFreshNames)
 
 instance HasTypeEnv KernelM where
   askTypeEnv = asks kernelTypeEnv
 
-runKernelM :: (HasTypeEnv m, MonadFreshNames m) =>
+instance MonadLogger KernelM where
+  addLog msgs = tell mempty { accLog = msgs }
+
+runKernelM :: (HasTypeEnv m, MonadFreshNames m, MonadLogger m) =>
               KernelEnv -> KernelM a -> m (a, PostKernels)
-runKernelM env (KernelM m) = modifyNameSource $ getKernels . runRWS m env
+runKernelM env (KernelM m) = do
+  (x, res) <- modifyNameSource $ getKernels . runRWS m env
+  addLog $ accLog res
+  return (x, accPostKernels res)
   where getKernels (x,s,a) = ((x, a), s)
 
+addKernels :: PostKernels -> KernelM ()
+addKernels ks = tell $ mempty { accPostKernels = ks }
+
 addKernel :: [Binding] -> KernelM ()
-addKernel bnds = tell $ PostKernels [bnds]
+addKernel bnds = addKernels $ PostKernels [bnds]
 
 withBinding :: Binding -> KernelM a -> KernelM a
 withBinding bnd = local $ \env ->
@@ -487,7 +517,7 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | length res == patternSize pat -> do
-      tell kernels
+      addKernels kernels
       addKernel =<<
         interchangeLoops nest (SeqLoop pat ret merge form body)
       return acc'
@@ -509,7 +539,7 @@ maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
   | Just (lam, call_with_new_lam) <- reduceOrScan op =
       distributeSingleBinding acc bnd >>= \case
         Just (kernels, res, nest, acc') -> do
-          tell kernels
+          addKernels kernels
           lam' <- FOT.transformLambda lam
           (w_bnds, kern_bnd) <-
             constructKernel nest $

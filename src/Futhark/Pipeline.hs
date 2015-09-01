@@ -31,19 +31,23 @@ import qualified Text.PrettyPrint.Mainland as PP
 import Futhark.Representation.AST (Prog, pretty, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
+import Futhark.Util.Log
 
 data CompileError = CompileError {
     errorDesc :: T.Text
   , errorData :: T.Text
   }
 
-newtype FutharkM a = FutharkM (ExceptT CompileError (WriterT T.Text IO) a)
+newtype FutharkM a = FutharkM (ExceptT CompileError (WriterT Log IO) a)
                      deriving (Applicative, Functor, Monad,
-                               MonadWriter T.Text,
+                               MonadWriter Log,
                                MonadError CompileError,
                                MonadIO)
 
-runFutharkM :: FutharkM a -> IO (Either CompileError a, T.Text)
+instance MonadLogger FutharkM where
+  addLog = tell
+
+runFutharkM :: FutharkM a -> IO (Either CompileError a, Log)
 runFutharkM (FutharkM m) = runWriterT $ runExceptT m
 
 compileError :: (MonadError CompileError m, PP.Pretty err) =>
@@ -87,7 +91,7 @@ runPipeline :: Pipeline fromlore tolore
             -> FutharkM ()
 runPipeline p cfg prog a = do
   prog' <- runPasses p cfg prog
-  when (pipelineVerbose cfg) $ tell $
+  when (pipelineVerbose cfg) $ logMsg $
     "Running action " <> T.pack (actionName a)
   actionProcedure a prog'
 
@@ -95,7 +99,7 @@ onePass :: Checkable tolore =>
            Pass fromlore tolore -> Pipeline fromlore tolore
 onePass pass = Pipeline perform
   where perform cfg prog = do
-          when (pipelineVerbose cfg) $ tell $
+          when (pipelineVerbose cfg) $ logMsg $
             "Running pass " <> T.pack (passName pass)
           prog' <- runPass pass prog
           when (pipelineValidate cfg) $

@@ -41,7 +41,6 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
 import Data.Ord
-import Debug.Trace
 
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Basic
@@ -50,6 +49,7 @@ import Futhark.Tools
 import Futhark.Util
 import Futhark.Transform.Rename
 import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Util.Log
 
 import Prelude
 
@@ -438,7 +438,7 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
         removeIdentityMappingGeneral bound_in_nesting pat res
   in (pat', res', identity_map, expand_target)
 
-tryDistribute :: (MonadFreshNames m, HasTypeEnv m) =>
+tryDistribute :: (MonadFreshNames m, HasTypeEnv m, MonadLogger m) =>
                  Nestings -> Targets -> [Binding]
               -> m (Maybe (Targets, [Binding]))
 tryDistribute _ targets [] =
@@ -450,12 +450,12 @@ tryDistribute nest targets bnds =
     Just (targets', distributed) -> do
       (w_bnds, kernel_bnd) <- constructKernel distributed inner_body
       distributed' <- optimiseKernel <$> renameBinding kernel_bnd
-      trace ("distributing\n" ++
-             pretty (mkBody bnds $ snd $ innerTarget targets) ++
-             "\nas\n" ++ pretty distributed' ++
-             "\ndue to targets\n" ++ ppTargets targets ++
-             "\nand with new targets\n" ++ ppTargets targets') return $
-        Just (targets', w_bnds ++ [distributed'])
+      logMsg $ "distributing\n" ++
+        pretty (mkBody bnds $ snd $ innerTarget targets) ++
+        "\nas\n" ++ pretty distributed' ++
+        "\ndue to targets\n" ++ ppTargets targets ++
+        "\nand with new targets\n" ++ ppTargets targets'
+      return $ Just (targets', w_bnds ++ [distributed'])
     Nothing ->
       return Nothing
   where (dist_body, inner_body_res) = distributionBodyFromBindings targets bnds

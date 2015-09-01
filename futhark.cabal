@@ -164,6 +164,7 @@ Library
                    Futhark.TypeCheck.TypeError
                    Futhark.Util
                    Futhark.Util.Options
+                   Futhark.Util.Log
                    Futhark.Util.Truths
                    Futhark.Version
                    Language.Futhark

@@ -33,6 +33,7 @@ import qualified Futhark.Representation.External.Renamer as E
 import Futhark.Representation.AST
 import qualified Futhark.Representation.Basic as I
 import qualified Futhark.TypeCheck as I
+import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig {
     futharkVerbose :: Maybe (Maybe FilePath)
@@ -61,7 +62,7 @@ runCompilerOnProgram :: FutharkConfig
                      -> IO ()
 runCompilerOnProgram config pipeline action file = do
   (res, msgs) <- runPipelineOnProgram config pipeline file
-  T.hPutStrLn stderr msgs
+  T.hPutStrLn stderr $ toText msgs
   case res of
     Left err -> do
       dumpError config err
@@ -70,7 +71,7 @@ runCompilerOnProgram config pipeline action file = do
       when (isJust $ futharkVerbose config) $
         hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
       (action_res, action_msgs) <- runFutharkM $ actionProcedure action prog
-      T.hPutStrLn stderr action_msgs
+      T.hPutStrLn stderr $ toText action_msgs
       case action_res of
         Left err -> do
           dumpError config err
@@ -80,7 +81,7 @@ runCompilerOnProgram config pipeline action file = do
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.Basic tolore
                      -> FilePath
-                     -> IO (Either CompileError (Prog tolore), T.Text)
+                     -> IO (Either CompileError (Prog tolore), Log)
 runPipelineOnProgram config pipeline file = do
   contents <- readFile file
   runPipelineOnSource config pipeline file contents
@@ -89,7 +90,7 @@ runPipelineOnSource :: FutharkConfig
                     -> Pipeline I.Basic tolore
                     -> FilePath
                     -> String
-                    -> IO (Either CompileError (Prog tolore), T.Text)
+                    -> IO (Either CompileError (Prog tolore), Log)
 runPipelineOnSource config pipeline filename srccode = do
   res <- runFutharkM futharkc'
   case res of (Left err, msgs)  -> return (Left err, msgs)
