@@ -5,6 +5,7 @@ module Futhark.Optimise.Fusion ( fuseSOACs )
 import Control.Monad.State
 import Control.Applicative
 import Control.Monad.Reader
+import Control.Monad.Except
 
 import Data.Hashable
 import Data.Maybe
@@ -55,9 +56,11 @@ instance Show Error where
   show (Error msg) =
     "Fusion error:\n" ++ msg
 
-newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either Error)) a)
+newtype FusionGM a = FusionGM (ExceptT Error (StateT VNameSource (Reader FusionGEnv)) a)
   deriving (Monad, Applicative, Functor,
-            MonadState VNameSource, MonadReader FusionGEnv)
+            MonadError Error,
+            MonadState VNameSource,
+            MonadReader FusionGEnv)
 
 instance MonadFreshNames FusionGM where
   getNameSource = get
@@ -155,12 +158,13 @@ bindRes rrr = local (\x -> x { fusedRes = rrr })
 -- state refers to the fresh-names engine.
 -- The reader hides the vtable that associates ... to ... (fill in, please).
 -- The 'Either' monad is used for error handling.
-runFusionGatherM :: VNameSource -> FusionGM a -> FusionGEnv -> Either Error (a, VNameSource)
-runFusionGatherM src (FusionGM a) =
-  runReaderT (runStateT a src)
+runFusionGatherM :: MonadFreshNames m =>
+                    FusionGM a -> FusionGEnv -> m (Either Error a)
+runFusionGatherM (FusionGM a) env =
+  modifyNameSource $ \src -> runReader (runStateT (runExceptT a) src) env
 
 badFusionGM :: Error -> FusionGM a
-badFusionGM = FusionGM . lift . lift . Left
+badFusionGM = throwError
 
 ------------------------------------------------------------------------
 --- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---
@@ -171,10 +175,10 @@ fuseSOACs :: Pass Basic Basic
 fuseSOACs =
   Pass { passName = "Fuse SOACs"
        , passDescription = "Perform higher-order optimisation, i.e., fusion."
-       , passFunction = liftEither . fuseProg
+       , passFunction = fuseProg
        }
 
-fuseProg :: Prog -> Either Error Prog
+fuseProg :: Prog -> PassM Prog
 fuseProg prog = do
   let env  = FusionGEnv { soacs = HM.empty
                         , varsInScope = HM.empty
@@ -182,13 +186,12 @@ fuseProg prog = do
                         , program = prog
                         }
       funs = progFunctions prog
-      src  = newNameSourceForProg prog
-  (ks,src') <- runFusionGatherM src (mapM fusionGatherFun funs) env
+  ks <- liftEitherM $ runFusionGatherM (mapM fusionGatherFun funs) env
   let ks'    = map cleanFusionResult ks
   let succc = any rsucc ks'
   if not succc
   then return prog
-  else do (funs',_) <- runFusionGatherM src' (zipWithM fuseInFun ks' funs) env
+  else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
           return $ renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes

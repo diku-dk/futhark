@@ -80,7 +80,9 @@ inPlaceLowering :: Pass Basic Basic
 inPlaceLowering = simplePass
                   "In-place lowering"
                   "Lower in-place updates into loops" $
-                  removeProgAliases . intraproceduralTransformation optimiseFunDec . aliasAnalysis
+                  liftM removeProgAliases .
+                  intraproceduralTransformation optimiseFunDec .
+                  aliasAnalysis
 
 optimiseFunDec :: MonadFreshNames m => FunDec Basic -> m (FunDec Basic)
 optimiseFunDec fundec =

@@ -175,11 +175,8 @@ extractKernels :: Pass Basic Basic
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = perform
+       , passFunction = runDistribM . liftM Prog . mapM transformFunDec . progFunctions
        }
-  where perform prog =
-          runDistribM (liftM Prog . mapM transformFunDec . progFunctions $ prog) $
-          newNameSourceForProg prog
 
 newtype DistribM a = DistribM (RWS TypeEnv Log VNameSource a)
                    deriving (Functor, Applicative, Monad,
@@ -188,11 +185,13 @@ newtype DistribM a = DistribM (RWS TypeEnv Log VNameSource a)
                              MonadFreshNames,
                              MonadLogger)
 
-runDistribM :: MonadLogger m =>
-               DistribM a -> VNameSource -> m a
-runDistribM (DistribM m) src = do let (x, msgs) = evalRWS m HM.empty src
-                                  addLog msgs
-                                  return x
+runDistribM :: (MonadLogger m, MonadFreshNames m) =>
+               DistribM a -> m a
+runDistribM (DistribM m) = do
+  (x, msgs) <- modifyNameSource $ positionNameSource . runRWS m HM.empty
+  addLog msgs
+  return x
+  where positionNameSource (x, src, msgs) = ((x, msgs), src)
 
 transformFunDec :: FunDec -> DistribM FunDec
 transformFunDec fundec = do

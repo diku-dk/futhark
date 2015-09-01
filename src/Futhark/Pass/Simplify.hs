@@ -7,6 +7,8 @@ module Futhark.Pass.Simplify
   )
   where
 
+import Control.Monad
+
 import qualified Futhark.Representation.Basic as R
 import qualified Futhark.Representation.ExplicitMemory as R
 
@@ -29,8 +31,8 @@ simplify simpl rules =
   -- after copy-propagation.  Right now, we just run the simplifier a
   -- number of times and hope that it is enough.  Will be fixed later;
   -- promise.
-  foldl (.) id (replicate num_passes pass)
-  where pass = deadCodeElim . simplifyProgWithRules simpl rules
+  foldl (<=<) return (replicate num_passes pass)
+  where pass = liftM deadCodeElim . simplifyProgWithRules simpl rules
         num_passes = 5
 
 simplifyBasic :: Pass R.Basic R.Basic

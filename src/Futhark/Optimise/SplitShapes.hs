@@ -32,8 +32,7 @@ splitShapes :: Pass Basic Basic
 splitShapes =
   Pass { passName = "Split shapes"
        , passDescription = "Optimise shape computation"
-       , passFunction = \prog ->
-       return $ Prog $ runSplitM (m prog) HM.empty $ newNameSourceForProg prog
+       , passFunction = \prog -> Prog <$> runSplitM (m prog) HM.empty
        }
   where m prog = do
           let origfuns = progFunctions prog
@@ -54,9 +53,9 @@ newtype SplitM a = SplitM (ReaderT TypeEnv
                            MonadFreshNames,
                            HasTypeEnv, LocalTypeEnv)
 
-runSplitM :: SplitM a -> TypeEnv -> VNameSource -> a
-runSplitM (SplitM m) =
-  evalState . runReaderT m
+runSplitM :: MonadFreshNames m => SplitM a -> TypeEnv -> m a
+runSplitM (SplitM m) env =
+  modifyNameSource $ runState (runReaderT m env)
 
 makeFunSubsts :: [FunDec] -> SplitM [(Name, (FunDec, FunDec))]
 makeFunSubsts fundecs =

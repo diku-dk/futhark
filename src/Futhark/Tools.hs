@@ -113,8 +113,8 @@ sequentialStreamWholeArray width accs lam arrs =
           let (acc_params, arr_params) = splitAt (length accs) params
           in (chunk_param, acc_params, arr_params)
 
-intraproceduralTransformation :: (FunDec fromlore -> State VNameSource (FunDec tolore))
-                              -> Prog fromlore -> Prog tolore
+intraproceduralTransformation :: MonadFreshNames m =>
+                                 (FunDec fromlore -> State VNameSource (FunDec tolore))
+                              -> Prog fromlore -> m (Prog tolore)
 intraproceduralTransformation ft prog =
-  evalState (Prog <$> mapM ft (progFunctions prog)) src
-  where src = newNameSourceForProg prog
+  modifyNameSource $ runState $ Prog <$> mapM ft (progFunctions prog)

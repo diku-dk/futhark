@@ -32,6 +32,7 @@ import Futhark.Representation.AST (Prog, pretty, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
 import Futhark.Util.Log
+import Futhark.MonadFreshNames
 
 data CompileError = CompileError {
     errorDesc :: T.Text
@@ -122,7 +123,8 @@ runPass :: Pass fromlore tolore
         -> Prog fromlore
         -> FutharkM (Prog tolore)
 runPass pass prog = do
-  let (logged, res) = runPassM $ passFunction pass prog
+  let (res, logged) = runPassM (passFunction pass prog) $
+                      newNameSourceForProg prog
   tell logged
   case res of Left err -> compileError err ()
               Right x  -> return x

@@ -41,7 +41,6 @@ import Prelude
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases hiding (TypeEnv)
-import Futhark.MonadFreshNames
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
 import Data.Maybe
@@ -161,13 +160,12 @@ data TypeEnv lore =
 newtype TypeM lore a = TypeM (RWST
                               (TypeEnv lore)     -- Reader
                               Dataflow           -- Writer
-                              (NameSource VName) -- State
+                              ()                 -- State
                               (Either (TypeError lore)) -- Inner monad
                               a)
   deriving (Monad, Functor, Applicative,
             MonadReader (TypeEnv lore),
-            MonadWriter Dataflow,
-            MonadState VNameSource)
+            MonadWriter Dataflow)
 
 instance HasTypeEnv (TypeM lore) where
   lookupType name = do (t, _, _) <- lookupVar name
@@ -176,9 +174,9 @@ instance HasTypeEnv (TypeM lore) where
     where varType (name, Bound t _ _ ) = Just (name, t)
           varType (_,    WasConsumed)  = Nothing
 
-runTypeM :: TypeEnv lore -> NameSource VName -> TypeM lore a
+runTypeM :: TypeEnv lore -> TypeM lore a
          -> Either (TypeError lore) a
-runTypeM env src (TypeM m) = fst <$> evalRWST m env src
+runTypeM env (TypeM m) = fst <$> evalRWST m env ()
 
 bad :: ErrorCase lore -> TypeM lore a
 bad e = do
@@ -198,10 +196,6 @@ message :: PP.Pretty a =>
            String -> a -> String
 message s x = PP.pretty 80 $
               PP.text s PP.<+> PP.align (PP.ppr x)
-
-instance MonadFreshNames (TypeM lore) where
-  getNameSource = get
-  putNameSource = put
 
 liftEither :: Either (ErrorCase lore) a -> TypeM lore a
 liftEither = either bad return
@@ -445,11 +439,10 @@ checkProg' checkoccurs prog = do
                         , envContext = []
                         }
 
-  runTypeM typeenv src $
+  runTypeM typeenv $
     mapM_ (noDataflow . checkFun) $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
-    src = newNameSourceForProg prog'
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of

@@ -33,7 +33,7 @@ doubleBuffer :: Pass ExplicitMemory ExplicitMemory
 doubleBuffer =
   Pass { passName = "Double buffer"
        , passDescription = "Perform double buffering for merge parameters of sequential loops."
-       , passFunction = return . intraproceduralTransformation optimiseFunDec
+       , passFunction = intraproceduralTransformation optimiseFunDec
        }
 
 optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec

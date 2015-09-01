@@ -20,10 +20,9 @@ optimisePredicates :: Pass Basic Basic
 optimisePredicates =
   Pass { passName = "Optimise predicates"
        , passDescription = "Optimise predicates by extracting sufficient conditions."
-       , passFunction = \prog -> do
-         let m = Futhark.Optimise.SuffCond.OptPredicates.optimisePredicates standardRules
-                 =<< extractPredicates prog
-         return $ evalState m $ newNameSourceForProg prog
+       , passFunction =
+         Futhark.Optimise.SuffCond.OptPredicates.optimisePredicates standardRules
+         <=< extractPredicates
        }
 
 extractPredicates :: MonadFreshNames m => Prog -> m Prog

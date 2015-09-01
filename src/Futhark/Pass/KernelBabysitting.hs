@@ -26,7 +26,7 @@ babysitKernels :: Pass Basic Basic
 babysitKernels =
   Pass { passName = "babysit kernels"
        , passDescription = "Remove stream and transpose kernel input arrays for better performance."
-       , passFunction = return . intraproceduralTransformation transformFunDec
+       , passFunction = intraproceduralTransformation transformFunDec
        }
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec

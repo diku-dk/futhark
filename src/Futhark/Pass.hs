@@ -5,6 +5,7 @@ module Futhark.Pass
        ( PassM
        , runPassM
        , liftEither
+       , liftEitherM
        , Pass (..)
        , passLongOption
        , simplePass
@@ -13,6 +14,7 @@ module Futhark.Pass
 import Control.Applicative
 import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
+import Control.Monad.State
 import Data.Char
 import qualified Data.Text as T
 
@@ -20,27 +22,35 @@ import Prelude
 
 import Futhark.Representation.AST
 import Futhark.Util.Log
+import Futhark.MonadFreshNames
 
 -- | The monad in which passes execute.
-newtype PassM a = PassM (ExceptT T.Text (Writer Log) a)
+newtype PassM a = PassM (ExceptT T.Text (WriterT Log (State VNameSource)) a)
               deriving (Functor, Applicative, Monad,
-                        MonadWriter Log,
                         MonadError T.Text)
 
 instance MonadLogger PassM where
-  addLog = tell
+  addLog = PassM . tell
+
+instance MonadFreshNames PassM where
+  putNameSource = PassM . put
+  getNameSource = PassM get
 
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error text or a result.
-runPassM :: PassM a -> (Log, Either T.Text a)
-runPassM (PassM m) = case runWriter $ runExceptT m of
-  (res, w) -> (w, res)
+runPassM :: PassM a -> VNameSource -> (Either T.Text a, Log)
+runPassM (PassM m) = evalState $ runWriterT $ runExceptT m
 
 -- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
 -- 'Left', the result is an exception.
 liftEither :: Show err => Either err a -> PassM a
 liftEither (Left e)  = throwError $ T.pack $ show e
 liftEither (Right v) = return v
+
+-- | Turn an 'Either' monadic computation into a 'PassM'.  If the 'Either' is
+-- 'Left', the result is an exception.
+liftEitherM :: Show err => PassM (Either err a) -> PassM a
+liftEitherM m = liftEither =<< m
 
 -- | A compiler pass transforming a 'Prog' of a given lore to a 'Prog'
 -- of another lore.
@@ -64,9 +74,10 @@ passLongOption = map (spaceToDash . toLower) . passName
 
 -- | Turn a simple function on programs into a pass that cannot fail
 -- and produces no log output.
-simplePass :: String -> String -> (Prog fromlore -> Prog tolore)
+simplePass :: String -> String
+           -> (Prog fromlore -> State VNameSource (Prog tolore))
            -> Pass fromlore tolore
 simplePass name desc f = Pass { passName = name
                               , passDescription = desc
-                              , passFunction = return . f
+                              , passFunction = modifyNameSource . runState . f
                               }

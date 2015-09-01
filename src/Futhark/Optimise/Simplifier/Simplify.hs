@@ -24,11 +24,11 @@ import Futhark.Tools (intraproceduralTransformation)
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProg :: Simplifiable lore =>
+simplifyProg :: (Simplifiable lore, MonadFreshNames m) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Prog lore
-             -> Prog (Wise lore)
+             -> m (Prog (Wise lore))
 simplifyProg simpl rules prog =
   intraproceduralTransformation
   (simplifyFun' simpl rules (Just prog))

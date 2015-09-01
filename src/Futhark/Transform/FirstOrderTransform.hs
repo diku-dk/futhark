@@ -25,7 +25,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 
 -- | Perform the first-order transformation on an Futhark program.
-transformProg :: Prog -> Prog
+transformProg :: MonadFreshNames m => Prog -> m Prog
 transformProg = intraproceduralTransformation transformFunDec
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
