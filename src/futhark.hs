@@ -264,8 +264,8 @@ runPolyPasses config prog = do
         actionProcedure basic_action basic_prog
       (ExplicitMemory mem_prog, PolyAction _ poly_action) ->
         actionProcedure poly_action mem_prog
-
-  T.hPutStr stderr $ toText msgs
+  when (isJust $ futharkVerbose $ futharkConfig config) $
+    T.hPutStr stderr $ toText msgs
   case res of
     Left err -> do
       dumpError (futharkConfig config) err
