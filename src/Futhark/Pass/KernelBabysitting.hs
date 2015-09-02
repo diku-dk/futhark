@@ -40,26 +40,41 @@ type SequentialiseM = Binder Basic
 
 transformBody :: Body -> SequentialiseM Body
 transformBody (Body () bnds res) = insertBindingsM $ do
-  mapM_ transformBinding bnds
+  foldM_ transformBinding HM.empty bnds
   return $ resultBody res
 
-transformBinding :: Binding -> SequentialiseM ()
+-- | Map from variable names to defining expression.  We use this to
+-- hackily determine whether something is transposed or otherwise
+-- funky in memory (and we'd prefer it not to be).  If we cannot find
+-- it in the map, we just assume it's all good.  HACK and FIXME, I
+-- suppose.  We really should do this at the memory level.
+type ExpMap = HM.HashMap VName Exp
 
-transformBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
+nonlinearInMemory :: VName -> ExpMap -> Bool
+nonlinearInMemory name m =
+  case HM.lookup name m of
+    Just (PrimOp (Rearrange {})) -> True
+    Just (PrimOp (Reshape _ _ arr)) -> nonlinearInMemory arr m
+    _ -> False
+
+transformBinding :: ExpMap -> Binding -> SequentialiseM ExpMap
+
+transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
   body' <- bindingParamTypes (map fst merge) $ bindingIdentTypes form_idents $
            transformBody body
   addBinding $ Let pat () $ LoopOp $ DoLoop res merge form body'
+  return expmap
   where form_idents = case form of ForLoop i _ -> [Ident i $ Basic Int]
                                    WhileLoop _ -> []
 
-transformBinding (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
+transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
   body' <- bindingIdentTypes (Ident i (Basic Int) :
                               map ((`Ident` Basic Int) . fst) ispace ++
                               map kernelInputIdent inps) $
            transformBody body
   -- For every input that is an array, we transpose the next-outermost
   -- and outermost dimension.
-  inps' <- rearrangeInputs (map fst ispace) inps
+  inps' <- rearrangeInputs expmap (map fst ispace) inps
   -- For every return that is an array, we transpose the
   -- next-outermost and outermost dimension.
   let value_elems = patternValueElements pat
@@ -67,6 +82,7 @@ transformBinding (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) 
   let pat' = Pattern [] value_elems'
   addBinding $ Let pat' () $ LoopOp $ Kernel cs w i ispace inps' returns' body'
   mapM_ maybeRearrangeResult $ zip3 value_elems value_elems' returns'
+  return expmap
   where num_is = length ispace
 
         maybeRearrangeResult (orig_pat_elem, new_pat_elem, (_, perm))
@@ -78,7 +94,7 @@ transformBinding (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) 
             PrimOp $ Rearrange [] (permuteInverse perm) $
             patElemName new_pat_elem
 
-transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs _)))
+transformBinding expmap (Let pat () (LoopOp (Stream cs w form lam arrs _)))
   | Just accs <- redForm form = do
   let (body_bnds,res) = sequentialStreamWholeArray w accs lam arrs
       reshapeRes t (Var v)
@@ -88,20 +104,26 @@ transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs _)))
       res_bnds =
         [ mkLet' [] [ident] $ reshapeRes (identType ident) se
         | (ident,se) <- zip (patternValueIdents pat) res]
-  mapM_ transformBinding body_bnds
+  expmap' <- foldM transformBinding expmap body_bnds
   shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
   forM_ (HM.toList shapemap) $ \(name,se) ->
     when (name `elem` patternContextNames pat) $
-      transformBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
-  mapM_ transformBinding res_bnds
+      void $ transformBinding expmap =<< mkLetNames' [name] (PrimOp $ SubExp se)
+  foldM transformBinding expmap' res_bnds
   where redForm (RedLike _ _ accs) = Just accs
         redForm (Sequential accs)  = Just accs
         redForm _                  = Nothing
 
-transformBinding (Let pat () e) = do
+transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
   ((), bnds) <- runBinder $ FOT.transformBinding $ Let pat () e'
-  mapM_ addBinding bnds
+  foldM addBinding' expmap bnds
+  where addBinding' expmap' bnd = do
+          addBinding bnd
+          return $
+            HM.fromList [ (name, bindingExp bnd)
+                        | name <- patternNames $ bindingPattern bnd ]
+            <> expmap'
 
 transform :: Mapper Basic Basic SequentialiseM
 transform = identityMapper { mapOnBody = transformBody
@@ -121,9 +143,9 @@ transformExtLambda lam = do
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
-rearrangeInputs :: [VName] -> [KernelInput Basic]
+rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Basic]
                 -> SequentialiseM [KernelInput Basic]
-rearrangeInputs is = mapM rearrangeInput
+rearrangeInputs expmap is = mapM rearrangeInput
   where
     iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
                             reverse .
@@ -132,8 +154,6 @@ rearrangeInputs is = mapM rearrangeInput
     rearrangeInput inp =
       case paramType $ kernelInputParam inp of
         Array {} | not $ iteratesLastDimension inp -> do
-          let arr = kernelInputArray inp
-              num_is = length $ kernelInputIndices inp
           arr_t <- lookupType arr
           let perm = coalescingPermutation num_is $ arrayRank arr_t
               inv_perm = permuteInverse perm
@@ -144,7 +164,13 @@ rearrangeInputs is = mapM rearrangeInput
           inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
                         PrimOp $ Rearrange [] inv_perm manifested
           return inp { kernelInputArray = inv_transposed }
-        _ -> return inp
+        _ | nonlinearInMemory arr expmap -> do
+              flat <- letExp (baseString arr ++ "_flat") $ PrimOp $ Copy arr
+              return inp { kernelInputArray = flat }
+          | otherwise ->
+              return inp
+      where arr = kernelInputArray inp
+            num_is = length $ kernelInputIndices inp
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
