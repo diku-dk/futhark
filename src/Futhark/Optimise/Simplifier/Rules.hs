@@ -719,6 +719,10 @@ simplifyIndexing defOf typeOf idd inds =
          in Just $ IndexResult cs src inds'
 
     Just (Copy src)
+      -- We cannot just remove a copy of a rearrange, because it might
+      -- be important for coalescing.
+      | Just (PrimOp (Rearrange {})) <- defOf src ->
+          Nothing
       | Just dims <- arrayDims <$> typeOf (Var src),
         length inds == length dims ->
           Just $ IndexResult [] src inds
