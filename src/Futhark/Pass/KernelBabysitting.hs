@@ -145,32 +145,42 @@ transformExtLambda lam = do
 
 rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Basic]
                 -> SequentialiseM [KernelInput Basic]
-rearrangeInputs expmap is = mapM rearrangeInput
+rearrangeInputs expmap is = mapM maybeRearrangeInput
   where
     iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
                             reverse .
                             kernelInputIndices
 
-    rearrangeInput inp =
+    maybeRearrangeInput inp =
       case paramType $ kernelInputParam inp of
-        Array {} | not $ iteratesLastDimension inp -> do
-          arr_t <- lookupType arr
-          let perm = coalescingPermutation num_is $ arrayRank arr_t
-              inv_perm = permuteInverse perm
-          transposed <- letExp (baseString arr ++ "_tr") $
-                        PrimOp $ Rearrange [] perm arr
-          manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                        PrimOp $ Copy transposed
-          inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
-                        PrimOp $ Rearrange [] inv_perm manifested
-          return inp { kernelInputArray = inv_transposed }
+        Array {}
+          | not $ iteratesLastDimension inp -> do
+              arr_t <- lookupType arr
+              let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
+              rearrangeInput perm inp
+        Basic {}
+          | Just perm <- map Var is `isPermutationOf` inp_is,
+            perm /= [0..length perm-1] ->
+              rearrangeInput perm inp
         _ | nonlinearInMemory arr expmap -> do
               flat <- letExp (baseString arr ++ "_flat") $ PrimOp $ Copy arr
               return inp { kernelInputArray = flat }
           | otherwise ->
               return inp
       where arr = kernelInputArray inp
-            num_is = length $ kernelInputIndices inp
+            inp_is = kernelInputIndices inp
+            num_inp_is = length inp_is
+
+    rearrangeInput perm inp = do
+      let inv_perm = permuteInverse perm
+      transposed <- letExp (baseString arr ++ "_tr") $
+                    PrimOp $ Rearrange [] perm arr
+      manifested <- letExp (baseString arr ++ "_tr_manifested") $
+                    PrimOp $ Copy transposed
+      inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
+                        PrimOp $ Rearrange [] inv_perm manifested
+      return inp { kernelInputArray = inv_transposed }
+      where arr = kernelInputArray inp
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
