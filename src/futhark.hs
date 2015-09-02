@@ -64,7 +64,7 @@ data UntypedAction = BasicAction (Action Basic)
                    | PolyAction (Action Basic) (Action ExplicitMemory)
 
 newConfig :: Config
-newConfig = Config newFutharkConfig [] $ BasicAction printAction
+newConfig = Config newFutharkConfig [] $ PolyAction printAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
