@@ -26,8 +26,6 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Transform.Rename
 import Futhark.Pass
 
---import Debug.Trace
-
 data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
 

@@ -28,8 +28,6 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import qualified Text.PrettyPrint.Mainland as PP
 
---import Debug.Trace
-
 -- | A known bound on a value.
 data KnownBound = VarBound VName
                   -- ^ Has the same bounds as this variable.  VERY
