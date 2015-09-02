@@ -656,7 +656,7 @@ expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
 expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
   (et, Shape dims, u, mem, ixfun) <- arrayVarReturns look v
   let ixfun' = IxFun.permute ixfun perm
-      dims'  = permuteShape perm dims
+      dims'  = rearrangeShape perm dims
   return [ReturnsArray et (ExtShape $ map Free dims') u $
           Just $ ReturnsInBlock mem ixfun']
 

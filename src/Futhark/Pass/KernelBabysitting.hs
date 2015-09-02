@@ -91,7 +91,7 @@ transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns b
           | otherwise =
             addBinding $
             mkLet' [] [patElemIdent orig_pat_elem] $
-            PrimOp $ Rearrange [] (permuteInverse perm) $
+            PrimOp $ Rearrange [] (rearrangeInverse perm) $
             patElemName new_pat_elem
 
 transformBinding expmap (Let pat () (LoopOp (Stream cs w form lam arrs _)))
@@ -172,7 +172,7 @@ rearrangeInputs expmap is = mapM maybeRearrangeInput
             num_inp_is = length inp_is
 
     rearrangeInput perm inp = do
-      let inv_perm = permuteInverse perm
+      let inv_perm = rearrangeInverse perm
       transposed <- letExp (baseString arr ++ "_tr") $
                     PrimOp $ Rearrange [] perm arr
       manifested <- letExp (baseString arr ++ "_tr_manifested") $
@@ -192,7 +192,7 @@ rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
   where rearrangeReturn (PatElem ident BindVar ()) (t@(Array {}), perm) = do
           name_tr <- newVName $ baseString (identName ident) <> "_tr_res"
-          let perm' = permuteShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
+          let perm' = rearrangeShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
               ident' = Ident name_tr $ rearrangeType perm' $ identType ident
               new_pat_elem = PatElem ident' BindVar ()
           return (new_pat_elem, (t, perm'))

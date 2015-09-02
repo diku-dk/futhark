@@ -536,7 +536,7 @@ pullRearrange :: SOACNest -> SOAC.ArrayTransforms
 pullRearrange nest ots = do
   nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
-  if permuteReach perm <= mapDepth nest' then
+  if rearrangeReach perm <= mapDepth nest' then
     let -- Expand perm to cover the full extent of the input dimensionality
         perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
@@ -552,8 +552,8 @@ pushRearrange :: [VName] -> SOACNest -> SOAC.ArrayTransforms
 pushRearrange inpIds nest ots = do
   nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
-  if permuteReach perm <= mapDepth nest' then do
-    let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
+  if rearrangeReach perm <= mapDepth nest' then do
+    let invertRearrange = SOAC.Rearrange [] $ rearrangeInverse perm
         nest'' = MapNest.toSOACNest $
                  inputs' `MapNest.setInputs`
                  rearrangeReturnTypes nest' perm
@@ -579,7 +579,7 @@ rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
 
         (outer_indices,inner_index) =
           case reverse $
-               permuteShape (take (length orig_indices) perm) orig_indices of
+               rearrangeShape (take (length orig_indices) perm) orig_indices of
            i:is -> (reverse is, i)
            []   -> ([], Nest.nestBodyIndex body)
 
@@ -591,7 +591,7 @@ rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
 fixupInputs :: [VName] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
   case mapMaybe inputRearrange $ filter exposable inps of
-    perm:_ -> do inps' <- mapM (fixupInput (permuteReach perm) perm) inps
+    perm:_ -> do inps' <- mapM (fixupInput (rearrangeReach perm) perm) inps
                  return (perm, inps')
     _    -> Nothing
   where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
@@ -602,7 +602,7 @@ fixupInputs inpIds inps =
 
         fixupInput d perm inp
           | SOAC.inputRank inp >= d =
-              Just $ SOAC.addTransform (SOAC.Rearrange [] $ permuteInverse perm) inp
+              Just $ SOAC.addTransform (SOAC.Rearrange [] $ rearrangeInverse perm) inp
           | otherwise = Nothing
 
 pullReshape :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)

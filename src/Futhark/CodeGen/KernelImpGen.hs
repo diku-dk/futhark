@@ -199,7 +199,7 @@ writeThreadResult thread_idxs perm
   set <- subExpType se
 
   let ixfun' = IxFun.permute ixfun perm
-      destloc' = ImpGen.MemLocation mem (permuteShape perm dims) ixfun'
+      destloc' = ImpGen.MemLocation mem (rearrangeShape perm dims) ixfun'
 
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let is = map ImpGen.varIndex thread_idxs

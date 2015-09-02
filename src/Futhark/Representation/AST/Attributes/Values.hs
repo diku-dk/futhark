@@ -57,8 +57,8 @@ permuteArray perm (ArrayVal inarr et oldshape) =
                [ inarr ! idx (invmove is) oldshape
                | is <- map reverse $ picks $ reverse newshape ])
      et newshape
-  where move = permuteShape perm
-        invmove = permuteShape $ permuteInverse perm
+  where move = rearrangeShape perm
+        invmove = rearrangeShape $ rearrangeInverse perm
         picks [] = []
         picks [n] = map (:[]) [0..n-1]
         picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]

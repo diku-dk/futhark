@@ -1,8 +1,8 @@
 module Futhark.Representation.AST.Attributes.Rearrange
-       ( permuteShape
-       , permuteInverse
-       , permuteReach
-       , permuteCompose
+       ( rearrangeShape
+       , rearrangeInverse
+       , rearrangeReach
+       , rearrangeCompose
        , isPermutationOf
        , transposeIndex
        ) where
@@ -14,8 +14,8 @@ import Futhark.Util
 
 -- | Calculate the given permutation of the list.  It is an error if
 -- the permutation goes out of bounds.
-permuteShape :: [Int] -> [a] -> [a]
-permuteShape perm l = map pick perm
+rearrangeShape :: [Int] -> [a] -> [a]
+rearrangeShape perm l = map pick perm
   where pick i
           | 0 <= i, i < n = l!!i
           | otherwise =
@@ -23,21 +23,21 @@ permuteShape perm l = map pick perm
         n = length l
 
 -- | Produce the inverse permutation.
-permuteInverse :: [Int] -> [Int]
-permuteInverse perm = map snd $ sortBy (comparing fst) $ zip perm [0..]
+rearrangeInverse :: [Int] -> [Int]
+rearrangeInverse perm = map snd $ sortBy (comparing fst) $ zip perm [0..]
 
 -- | Return the first dimension not affected by the permutation.  For
 -- example, the permutation @[1,0,2]@ would return @2@.
-permuteReach :: [Int] -> Int
-permuteReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0..n-1]) of
+rearrangeReach :: [Int] -> Int
+rearrangeReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0..n-1]) of
                       []          -> n + 1
                       (perm',_):_ -> n - length perm'
   where n = length perm
 
 -- | Compose two permutations, with the second given permutation being
 -- applied first.
-permuteCompose :: [Int] -> [Int] -> [Int]
-permuteCompose = permuteShape
+rearrangeCompose :: [Int] -> [Int] -> [Int]
+rearrangeCompose = rearrangeShape
 
 -- | Check whether the first list is a permutation of the second, and
 -- if so, return the permutation.  This will also find identity

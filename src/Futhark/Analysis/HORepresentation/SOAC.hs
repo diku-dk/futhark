@@ -206,7 +206,7 @@ identityTransform _ = False
 
 combineTransforms :: ArrayTransform -> ArrayTransform -> Maybe ArrayTransform
 combineTransforms (Rearrange cs2 perm2) (Rearrange cs1 perm1) =
-  Just $ Rearrange (cs1++cs2) $ perm2 `permuteCompose` perm1
+  Just $ Rearrange (cs1++cs2) $ perm2 `rearrangeCompose` perm1
 combineTransforms _ _ = Nothing
 
 -- | Given an expression, determine whether the expression represents
@@ -376,7 +376,7 @@ transformRows (ArrayTransforms ts) =
 transformTypeRows :: ArrayTransforms -> Type -> Type
 transformTypeRows (ArrayTransforms ts) = flip (Foldable.foldl transform) ts
   where transform t (Rearrange _ perm) =
-          t `setArrayShape` Shape (permuteShape (0:map (+1) perm) $ arrayDims t)
+          t `setArrayShape` Shape (rearrangeShape (0:map (+1) perm) $ arrayDims t)
         transform t (Reshape _ shape) =
           t `setArrayShape` newShape shape
         transform t (ReshapeOuter _ shape) =

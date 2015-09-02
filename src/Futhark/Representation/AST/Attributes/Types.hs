@@ -260,7 +260,7 @@ transposeType = rearrangeType [1,0]
 -- will be extended with identity.
 rearrangeType :: [Int] -> Type -> Type
 rearrangeType perm t =
-  t `setArrayShape` Shape (permuteShape perm' $ arrayDims t)
+  t `setArrayShape` Shape (rearrangeShape perm' $ arrayDims t)
   where perm' = perm ++ [length perm .. arrayRank t - 1]
 
 -- | @diet t@ returns a description of how a function parameter of

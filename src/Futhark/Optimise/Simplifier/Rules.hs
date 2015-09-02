@@ -491,7 +491,7 @@ simplifyRearrange defOf _ (Rearrange cs perm v) =
   case asPrimOp =<< defOf v of
     Just (Rearrange cs2 perm2 e) ->
       -- Rearranging a rearranging: compose the permutations.
-      Just $ Rearrange (cs++cs2) (perm `permuteCompose` perm2) e
+      Just $ Rearrange (cs++cs2) (perm `rearrangeCompose` perm2) e
     _ -> Nothing
 
 simplifyRearrange _ _ _ = Nothing
@@ -714,8 +714,8 @@ simplifyIndexing defOf typeOf idd inds =
       | [_] <- inds -> Just $ SubExpResult val
 
     Just (Rearrange cs perm src)
-       | permuteReach perm <= length inds ->
-         let inds' = permuteShape (take (length inds) perm) inds
+       | rearrangeReach perm <= length inds ->
+         let inds' = rearrangeShape (take (length inds) perm) inds
          in Just $ IndexResult cs src inds'
 
     Just (Copy src)
