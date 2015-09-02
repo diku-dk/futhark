@@ -65,6 +65,7 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants
+import Futhark.Representation.AST.Attributes.Rearrange
 
 -- | Remove shape information from a type.
 rankShaped :: ArrayShape shape => TypeBase shape -> TypeBase Rank
@@ -259,9 +260,8 @@ transposeType = rearrangeType [1,0]
 -- will be extended with identity.
 rearrangeType :: [Int] -> Type -> Type
 rearrangeType perm t =
-  t `setArrayShape` Shape (permute perm' $ arrayDims t)
+  t `setArrayShape` Shape (permuteShape perm' $ arrayDims t)
   where perm' = perm ++ [length perm .. arrayRank t - 1]
-        permute x l = map (l!!) x
 
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.

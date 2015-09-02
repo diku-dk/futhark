@@ -9,12 +9,7 @@ module Futhark.Representation.AST.Attributes.Values
        , intconst
 
          -- * Rearranging
-       , permuteShape
        , permuteArray
-       , permuteInverse
-       , permuteReach
-       , permuteCompose
-       , transposeIndex
 
          -- * Miscellaneous
        , arrayString
@@ -23,10 +18,10 @@ module Futhark.Representation.AST.Attributes.Values
 
 import Data.Array
 import Data.List
-import Data.Ord
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Constants
+import Futhark.Representation.AST.Attributes.Rearrange
 
 -- | Return the type of the given value.
 valueType :: Value -> Type
@@ -51,11 +46,6 @@ valueShape :: Value -> [Int]
 valueShape (ArrayVal _ _ shape) = shape
 valueShape _ = []
 
--- | Calculate the given permutation of the list.  It is an error if
--- the permutation goes out of bounds.
-permuteShape :: [Int] -> [a] -> [a]
-permuteShape perm l = map (l!!) perm
-
 -- | Permute the dimensions of an array value.  If the given value is
 -- not an array, it is returned unchanged.  The length of the
 -- permutation must be equal to the rank of the value.
@@ -74,39 +64,6 @@ permuteArray perm (ArrayVal inarr et oldshape) =
         picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]
 permuteArray _ v = v
 
--- | Produce the inverse permutation.
-permuteInverse :: [Int] -> [Int]
-permuteInverse perm = map snd $ sortBy (comparing fst) $ zip perm [0..]
-
--- | Return the first dimension not affected by the permutation.  For
--- example, the permutation @[1,0,2]@ would return @2@.
-permuteReach :: [Int] -> Int
-permuteReach perm = case dropWhile (uncurry (/=)) $ zip (tails perm) (tails [0..n-1]) of
-                      []          -> n + 1
-                      (perm',_):_ -> n - length perm'
-  where n = length perm
-
--- | Compose two permutations, with the second given permutation being
--- applied first.
-permuteCompose :: [Int] -> [Int] -> [Int]
-permuteCompose = permuteShape
-
--- | If @l@ is an index into the array @a@, then @transposeIndex k n
--- l@ is an index to the same element in the array @transposeArray k n
--- a@.
-transposeIndex :: Int -> Int -> [a] -> [a]
-transposeIndex k n l
-  | k + n >= length l =
-    let n' = ((k + n) `mod` length l)-k
-    in transposeIndex k n' l
-  | n < 0,
-    (pre,needle:end) <- splitAt k l,
-    (beg,mid) <- splitAt (length pre+n) pre =
-    beg ++ [needle] ++ mid ++ end
-  | (beg,needle:post) <- splitAt k l,
-    (mid,end) <- splitAt n post =
-    beg ++ mid ++ [needle] ++ end
-  | otherwise = l
 
 -- | If the given value is a nonempty array containing only
 -- characters, return the corresponding 'String', otherwise return
