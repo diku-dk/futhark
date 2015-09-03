@@ -212,13 +212,13 @@ instance Pretty op => Pretty (Code op) where
     indent 2 (ppr body) </>
     text "}"
   ppr (DeclareMem name space) =
-    text "declare" <+> ppr name <+> text "as memory block" <> ppSpace space
+    text "declare" <+> ppr name <+> text "as memory block" <> ppr space
   ppr (DeclareScalar name t) =
     text "declare" <+> ppr name <+> text "as scalar of type" <+> ppr t
   ppr (Allocate name e space) =
-    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppSpace space
+    ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
   ppr (Write name i bt space val) =
-    ppr name <> langle <> ppr bt <> ppSpace space <> rangle <> brackets (ppr i) <+>
+    ppr name <> langle <> ppr bt <> ppr space <> rangle <> brackets (ppr i) <+>
     text "<-" <+> ppr val
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
@@ -228,8 +228,8 @@ instance Pretty op => Pretty (Code op) where
     text "assert" <> parens (ppr e)
   ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
     text "memcpy" <>
-    parens (ppMemLoc dest destoffset <> ppSpace destspace <> comma </>
-            ppMemLoc src srcoffset <> ppSpace srcspace <> comma </>
+    parens (ppMemLoc dest destoffset <> ppr destspace <> comma </>
+            ppMemLoc src srcoffset <> ppr srcspace <> comma </>
             ppr size)
     where ppMemLoc base offset =
             ppr base <+> text "+" <+> ppr offset
@@ -245,9 +245,9 @@ instance Pretty op => Pretty (Code op) where
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
 
-ppSpace :: Space -> Doc
-ppSpace DefaultSpace = mempty
-ppSpace (Space s)    = text "@" <> text s
+instance Pretty Space where
+  ppr DefaultSpace = mempty
+  ppr (Space s)    = text "@" <> text s
 
 instance Pretty Exp where
   ppr = pprPrec (-1)
