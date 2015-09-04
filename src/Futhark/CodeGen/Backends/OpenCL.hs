@@ -223,8 +223,8 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
     struct timeval $id:time_start, $id:time_end, $id:time_diff;
     fprintf(stderr, "kernel size %s: [", $string:(textual global_work_size));
     $stms:(printKernelSize global_work_size)
-    gettimeofday(&$id:time_start, NULL);
     fprintf(stderr, "]\n");
+    gettimeofday(&$id:time_start, NULL);
     assert(clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
                                   $id:global_work_size, $exp:local_work_size_arg,
                                   0, NULL, NULL)
