@@ -6,7 +6,6 @@ module Futhark.Optimise.InliningDeadFun
   )
   where
 
-import Control.Arrow
 import Control.Applicative
 import Control.Monad.Reader
 
@@ -48,8 +47,8 @@ inlineAggressively =
        , passFunction = inline
        }
   where inline prog = liftEither $ do
-          cg  <- buildCallGraph prog
-          env <- CGEnv <$> buildFunctionTable prog
+          let cg = buildCallGraph prog
+              env = CGEnv $ buildFunctionTable prog
           renameProg <$> runCGM (aggInlining cg) env
 
 -- | Bind a name as a common (non-merge) variable.
@@ -92,10 +91,9 @@ aggInlining cg = do
     -- to a fix point. At this point it is guaranteed that `work' is
     -- not empty, hence there are functions to be inlined in each
     -- caller function (from `work').
-    else do let cg'  = HM.map ( \(callees,l) -> ( (\\) callees inlcand, l ) ) cg
-            let work'= map ( \(x,(y,_)) -> (x,y) ) work
-            newfuns  <- mapM processfun work'
-            let newfunnms  = fst (unzip work')
+    else do let cg'  = HM.map (\\inlcand) cg
+            newfuns  <- mapM processfun work
+            let newfunnms  = fst (unzip work)
             remBindingsFtab  newfunnms $
                 bindingFtab (zip newfunnms newfuns) $
                 aggInlining cg'
@@ -118,11 +116,13 @@ aggInlining cg = do
 
         getInlineOps :: [Name] -> CallGraph -> CallGraph
         getInlineOps inlcand =
-            HM.filter (\(callees,_) -> not (null callees)) .
-            HM.map (first $ intersect inlcand)
+            HM.filter (not . funHasNoCalls) .
+            HM.map (intersect inlcand)
 
-        funHasNoCalls :: ([Name],[Name]) -> Bool
-        funHasNoCalls (callees,_) = null callees
+        known_funs = HM.keys cg
+
+        funHasNoCalls :: [Name] -> Bool
+        funHasNoCalls = not . any (`elem` known_funs)
 
 
 -- | @doInlineInCaller caller inlcallees@ inlines in @calleer@ the functions
@@ -201,11 +201,11 @@ removeDeadFunctions :: Pass Basic Basic
 removeDeadFunctions =
   Pass { passName = "Remove dead functions"
        , passDescription = "Remove the functions that are unreachable from the main function"
-       , passFunction = liftEither . pass
+       , passFunction = return . pass
        }
-  where pass prog = do
-          ftable <- buildFunctionTable prog
-          cg     <- buildCallGraph prog
-          let ftable' = HM.filter (isFunInCallGraph cg) ftable
-          return $ Prog $ HM.elems ftable'
+  where pass prog =
+          let ftable = buildFunctionTable prog
+              cg     = buildCallGraph prog
+              ftable' = HM.filter (isFunInCallGraph cg) ftable
+          in Prog $ HM.elems ftable'
         isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg
