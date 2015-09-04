@@ -41,7 +41,7 @@ import Futhark.Representation.AST.Syntax.Core hiding (Basic)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
 import Futhark.Representation.Basic (Basic)
-import Futhark.Metrics
+import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
 import Futhark.Pass.Simplify

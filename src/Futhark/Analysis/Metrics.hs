@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Abstract Syntax Tree metrics.  This is used in the @futhark-test@ program.
-module Futhark.Metrics
+module Futhark.Analysis.Metrics
        ( AstMetrics
        , progMetrics
        ) where

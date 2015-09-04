@@ -56,6 +56,7 @@ Library
                    Futhark.Analysis.SymbolTable
                    Futhark.Analysis.Usage
                    Futhark.Analysis.UsageTable
+                   Futhark.Analysis.Metrics
                    Futhark.Binder
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
@@ -78,7 +79,6 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
-                   Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
                    Futhark.Optimise.CSE
