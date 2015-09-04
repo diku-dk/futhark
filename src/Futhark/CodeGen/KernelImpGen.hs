@@ -98,7 +98,7 @@ kernelCompiler
       _ ->
         return Nothing
 
-    ImpGen.emit $ Imp.Op Imp.CallKernel {
+    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.GenericKernel {
         Imp.kernelThreadNum = global_thread_index
       , Imp.kernelBody = kernelbody
       , Imp.kernelUses = nub $ reads_from ++ writes_to
@@ -124,7 +124,14 @@ kernelCompiler _ e =
 copyCompiler :: ImpGen.CopyCompiler Imp.CallKernel
 copyCompiler bt
   destloc@(ImpGen.MemLocation destmem destshape destIxFun)
-  srcloc@(ImpGen.MemLocation srcmem _ srcIxFun) = do
+  srcloc@(ImpGen.MemLocation srcmem _ srcIxFun)
+
+  | Just (destoffset, srcoffset) <- isMapTranspose bt destloc srcloc,
+    [num_arrays, size_x, size_y] <- map ImpGen.sizeToExp destshape =
+  ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
+  num_arrays size_x size_y
+
+  | otherwise = do
   global_thread_index <- newVName "copy_global_thread_index"
 
   -- Note that the shape of the destination and the source are
@@ -152,7 +159,7 @@ copyCompiler bt
     ImpGen.emit $ Imp.DeclareScalar kernel_size Int
     ImpGen.emit $ Imp.SetScalar kernel_size $ product shape
 
-    ImpGen.emit $ Imp.Op Imp.CallKernel {
+    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.GenericKernel {
         Imp.kernelThreadNum = global_thread_index
       , Imp.kernelSize = Imp.VarSize kernel_size
       , Imp.kernelUses = nub $ reads_from ++ writes_to
@@ -228,3 +235,24 @@ readKernelInput inp =
         name = kernelInputName inp
         t = kernelInputType inp
         is = kernelInputIndices inp
+
+isMapTranspose :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
+               -> Maybe (Imp.Exp, Imp.Exp)
+isMapTranspose bt
+  (ImpGen.MemLocation _ _ destIxFun)
+  (ImpGen.MemLocation _ _ srcIxFun)
+  | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun,
+    Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
+    perm == [0, 2, 1] =
+    isOk dest_offset src_offset
+  | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
+    Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun,
+    perm == [0, 2, 1] =
+    isOk dest_offset src_offset
+  | otherwise =
+    Nothing
+  where bt_size = ImpGen.basicScalarSize bt
+        isOk dest_offset src_offset = do
+          dest_offset' <- ImpGen.scalExpToImpExp dest_offset
+          src_offset' <- ImpGen.scalExpToImpExp src_offset
+          return (dest_offset', src_offset')

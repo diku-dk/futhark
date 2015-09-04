@@ -8,6 +8,7 @@ module Futhark.CodeGen.KernelImp
   , Code
   , KernelCode
   , CallKernel (..)
+  , GenericKernel (..)
   , KernelUse (..)
   , InKernel (..)
   , module Futhark.CodeGen.ImpCode
@@ -31,14 +32,19 @@ type Code = Imp.Code CallKernel
 -- | Code inside a kernel.
 type KernelCode = Imp.Code InKernel
 
-data CallKernel = CallKernel { kernelThreadNum :: VName
-                               -- ^ Binding position - also serves as a unique
-                               -- name for the kernel.
-                             , kernelBody :: Imp.Code InKernel
-                             , kernelUses :: [KernelUse]
-                             , kernelSize :: DimSize
-                             }
+data CallKernel = Kernel GenericKernel
+                | MapTranspose BasicType VName Exp VName Exp Exp Exp Exp
             deriving (Show)
+
+-- | A generic kernel containing arbitrary kernel code.
+data GenericKernel = GenericKernel { kernelThreadNum :: VName
+                                     -- ^ Binding position - also serves as a unique
+                                     -- name for the kernel.
+                                   , kernelBody :: Imp.Code InKernel
+                                   , kernelUses :: [KernelUse]
+                                   , kernelSize :: DimSize
+                                   }
+                     deriving (Show)
 
 data KernelUse = ScalarUse VName BasicType
                | MemoryUse VName Imp.DimSize
@@ -51,6 +57,17 @@ instance Pretty KernelUse where
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
 
 instance Pretty CallKernel where
+  ppr (Kernel k) = ppr k
+  ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y) =
+    text "mapTranspose" <>
+    parens (ppr bt <> comma </>
+            ppMemLoc dest destoffset <> comma </>
+            ppMemLoc src srcoffset <> comma </>
+            ppr num_arrays <> comma <+> ppr size_x <> comma <+> ppr size_y)
+    where ppMemLoc base offset =
+            ppr base <+> text "+" <+> ppr offset
+
+instance Pretty GenericKernel where
   ppr kernel =
     text "kernel" <+> brace
     (text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
@@ -58,7 +75,7 @@ instance Pretty CallKernel where
                             text "<- get_thread_number()" </>
                             ppr (kernelBody kernel)))
 
-instance FreeIn CallKernel where
+instance FreeIn GenericKernel where
   freeIn kernel =
     kernelThreadNum kernel `HS.delete` freeIn (kernelBody kernel)
 

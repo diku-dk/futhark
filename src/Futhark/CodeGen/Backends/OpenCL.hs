@@ -27,6 +27,7 @@ compileProg prog = do
   prog' <- KernelImpGen.compileProg prog
   let header = unlines [ "#include <CL/cl.h>\n"
                        , "#define FUT_KERNEL(s) #s"
+                       , blockDimPragma
                        ]
   (kernels, requirements) <- compileKernels $ getKernels prog'
   return $
@@ -144,36 +145,12 @@ openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
 callKernel :: GenericC.OpCompiler CallKernel ()
-callKernel kernel = do
+callKernel (Kernel kernel) = do
   zipWithM_ mkBuffer [(0::Int)..] $ kernelUses kernel
-  global_work_size <- newVName "global_work_size"
   let kernel_size = GenericC.dimSizeToExp $ kernelSize kernel
 
-  time_start <- newVName "time_start"
-  time_end <- newVName "time_end"
-  time_diff <- newVName "time_diff"
-
-  GenericC.stm [C.cstm|{
-    size_t $id:global_work_size = $exp:kernel_size;
-    struct timeval $id:time_start, $id:time_end, $id:time_diff;
-    fprintf(stderr, "kernel size %s: %d\n", $string:(textual global_work_size), $id:global_work_size);
-    gettimeofday(&$id:time_start, NULL);
-    assert(clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, 1, NULL,
-                                  &$id:global_work_size, NULL,
-                                  0, NULL, NULL)
-           == CL_SUCCESS);
-    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
-    gettimeofday(&$id:time_end, NULL);
-    timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
-    $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
-    $id:kernel_runs++;
-    fprintf(stderr, "kernel %s runtime: %dus\n",
-            $string:kernel_name,
-            (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
-    }|]
-
+  launchKernel kernel_name [kernel_size] Nothing
   return GenericC.Done
-
   where mkBuffer i (MemoryUse mem _) =
           GenericC.stm [C.cstm|{
             assert(clSetKernelArg($id:kernel_name, $int:i, sizeof($id:mem), &$id:mem)
@@ -186,9 +163,94 @@ callKernel kernel = do
                    == CL_SUCCESS);
           }|]
 
-        kernel_name = kernelName kernel
-        kernel_total_runtime = kernel_name ++ "_total_runtime"
+        kernel_name = genericKernelName kernel
+
+callKernel kernel@(MapTranspose bt destmem destoffset srcmem srcoffset num_arrays x_elems y_elems) = do
+  destoffset' <- GenericC.compileExp destoffset
+  srcoffset' <- GenericC.compileExp srcoffset
+  x_elems' <- GenericC.compileExp x_elems
+  y_elems' <- GenericC.compileExp y_elems
+  x_elems_name <- newVName "x_elems"
+  y_elems_name <- newVName "y_elems"
+  destoffset_name <- newVName "destoffset"
+  srcoffset_name <- newVName "srcoffset"
+  GenericC.stm [C.cstm|{
+    int $id:x_elems_name = $exp:x_elems';
+    int $id:y_elems_name = $exp:y_elems';
+    int $id:destoffset_name = $exp:destoffset';
+    int $id:srcoffset_name = $exp:srcoffset';
+    assert(clSetKernelArg($id:kernel_name, 0, sizeof(cl_mem), &$id:destmem)
+           == CL_SUCCESS);
+    assert(clSetKernelArg($id:kernel_name, 1, sizeof(int), &$id:destoffset_name)
+           == CL_SUCCESS);
+    assert(clSetKernelArg($id:kernel_name, 2, sizeof(cl_mem), &$id:srcmem)
+           == CL_SUCCESS);
+    assert(clSetKernelArg($id:kernel_name, 3, sizeof(int), &$id:srcoffset_name)
+           == CL_SUCCESS);
+    assert(clSetKernelArg($id:kernel_name, 4, sizeof(int), &$id:x_elems_name)
+           == CL_SUCCESS);
+    assert(clSetKernelArg($id:kernel_name, 5, sizeof(int), &$id:y_elems_name)
+           == CL_SUCCESS);
+    assert(clSetKernelArg($id:kernel_name, 6, (FUT_BLOCK_DIM + 1) * FUT_BLOCK_DIM * sizeof($ty:ty), NULL)
+           == CL_SUCCESS);
+  }|]
+  kernel_size <- mapM GenericC.compileExp [x_elems, y_elems, num_arrays]
+  let workgroup_size = Just [[C.cexp|FUT_BLOCK_DIM|], [C.cexp|FUT_BLOCK_DIM|], [C.cexp|1|]]
+  launchKernel kernel_name kernel_size workgroup_size
+  return GenericC.Done
+  where kernel_name = kernelName kernel
+        ty = GenericC.scalarTypeToCType bt
+
+launchKernel :: C.ToExp a =>
+                String -> [a] -> Maybe [a] -> GenericC.CompilerM op s ()
+launchKernel kernel_name kernel_dims workgroup_dims = do
+  global_work_size <- newVName "global_work_size"
+  time_start <- newVName "time_start"
+  time_end <- newVName "time_end"
+  time_diff <- newVName "time_diff"
+
+  local_work_size_arg <- case workgroup_dims of
+    Nothing ->
+      return [C.cexp|NULL|]
+    Just es -> do
+      local_work_size <- newVName "local_work_size"
+      let workgroup_dims' = map toInit es
+      GenericC.decl [C.cdecl|const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};|]
+      return [C.cexp|$id:local_work_size|]
+
+  GenericC.stm [C.cstm|{
+    const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
+    struct timeval $id:time_start, $id:time_end, $id:time_diff;
+    fprintf(stderr, "kernel size %s: [", $string:(textual global_work_size));
+    $stms:(printKernelSize global_work_size)
+    gettimeofday(&$id:time_start, NULL);
+    fprintf(stderr, "]\n");
+    assert(clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
+                                  $id:global_work_size, $exp:local_work_size_arg,
+                                  0, NULL, NULL)
+           == CL_SUCCESS);
+    assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+    gettimeofday(&$id:time_end, NULL);
+    timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
+    $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
+    $id:kernel_runs++;
+    fprintf(stderr, "kernel %s runtime: %dus\n",
+            $string:kernel_name,
+            (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
+    }|]
+  where kernel_total_runtime = kernel_name ++ "_total_runtime"
         kernel_runs = kernel_name ++ "_runs"
+        kernel_rank = length kernel_dims
+        kernel_dims' = map toInit kernel_dims
+
+        toInit e = [C.cinit|$exp:e|]
+
+        printKernelSize :: VName -> [C.Stm]
+        printKernelSize global_work_size =
+          intercalate [[C.cstm|fprintf(stderr, ", ");|]] $
+          map (printKernelDim global_work_size) [0..kernel_rank-1]
+        printKernelDim global_work_size i =
+          [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -256,7 +318,7 @@ compileKernels kernels = do
   return (zip (map kernelName kernels) funcs, mconcat reqs)
 
 compileKernel :: CallKernel -> Either String (C.Func, OpenClRequirements)
-compileKernel kernel =
+compileKernel (Kernel kernel) =
   let (funbody, s) =
         GenericC.runCompilerM (Program []) inKernelOperations blankNameSource mempty $
         GenericC.collect $ GenericC.compileCode $ kernelBody kernel
@@ -291,11 +353,61 @@ compileKernel kernel =
                 ("sqrt64", c_sqrt64),
                 ("exp64", c_exp64)]
 
-  in Right ([C.cfun|__kernel void $id:(kernelName kernel) ($params:params) {
+  in Right ([C.cfun|__kernel void $id:(genericKernelName kernel) ($params:params) {
                  const uint $id:(kernelThreadNum kernel) = get_global_id(0);
                  $items:funbody
              }|],
             OpenClRequirements (used_funs ++ funs32_used ++ funs64_used) extra_pragmas)
+
+compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _) =
+  Right ([C.cfun|
+  // This kernel is optimized to ensure all global reads and writes are coalesced,
+  // and to avoid bank conflicts in shared memory.  The shared memory array is sized
+  // to (BLOCK_DIM+1)*BLOCK_DIM.  This pads each row of the 2D block in shared memory
+  // so that bank conflicts do not occur when threads address the array column-wise.
+  __kernel void $id:(kernelName kernel)(__global $ty:ty *odata,
+                                        unsigned int odata_offset,
+                                        __global $ty:ty *idata,
+                                        unsigned int idata_offset,
+                                        unsigned int width,
+                                        unsigned int height,
+                                        __local $ty:ty* block) {
+    unsigned int x_index;
+    unsigned int y_index;
+    unsigned int our_array_offset;
+
+    // Adjust the input and output arrays with the basic offset.
+    odata += odata_offset;
+    idata += idata_offset;
+
+    // Adjust the input and output arrays for the third dimension.
+    our_array_offset = get_global_id(2) * width * height;
+    odata += our_array_offset;
+    idata += our_array_offset;
+
+    // read the matrix tile into shared memory
+    x_index = get_global_id(0);
+    y_index = get_global_id(1);
+
+    if((x_index < width) && (y_index < height))
+    {
+        unsigned int index_in = y_index * width + x_index;
+        block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Write the transposed matrix tile to global memory.
+    x_index = get_group_id(1) * FUT_BLOCK_DIM + get_local_id(0);
+    y_index = get_group_id(0) * FUT_BLOCK_DIM + get_local_id(1);
+    if((x_index < height) && (y_index < width))
+    {
+        unsigned int index_out = y_index * height + x_index;
+        odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
+    }
+  }|],
+         OpenClRequirements [] [blockDimPragma])
+  where ty = GenericC.scalarTypeToCType bt
 
 openClProgramHeader :: OpenClRequirements -> [C.Definition]
 openClProgramHeader (OpenClRequirements used_funs pragmas) =
@@ -371,7 +483,9 @@ void setup_opencl() {
   const char* src_ptr[] = {fut_opencl_src};
   prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
   assert(error == 0);
-  assert(build_opencl_program(prog, device, "") == CL_SUCCESS);
+  char compile_opts[1024];
+  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d", FUT_BLOCK_DIM);
+  assert(build_opencl_program(prog, device, compile_opts) == CL_SUCCESS);
 
   // Load all the kernels.
   $stms:(map (loadKernelByName . fst) kernels)
@@ -443,16 +557,31 @@ openClReport = map reportKernel
              |]
 
 
-kernelId :: CallKernel -> Int
+kernelId :: GenericKernel -> Int
 kernelId = baseTag . kernelThreadNum
 
+genericKernelName :: GenericKernel -> String
+genericKernelName = ("kernel_"++) . show . kernelId
+
 kernelName :: CallKernel -> String
-kernelName = ("kernel_"++) . show . kernelId
+kernelName (Kernel k) =
+  genericKernelName k
+kernelName (MapTranspose bt _ _ _ _ _ _ _) =
+  "fut_kernel_map_transpose_" ++ pretty bt
 
 getKernels :: Program -> [CallKernel]
-getKernels = execWriter . traverse getFunKernels
+getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
   where getFunKernels kernel =
           tell [kernel] >> return kernel
+        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _) =
+          bt1 == bt2
+        sameKernel _ _ = False
+
+blockDim :: Int
+blockDim = 16
+
+blockDimPragma :: String
+blockDimPragma = "#define FUT_BLOCK_DIM " ++ show blockDim
 
 -- | @memcpy@ parametrised by the address space of the destination and
 -- source pointers.

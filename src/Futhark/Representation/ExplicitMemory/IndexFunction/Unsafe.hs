@@ -16,6 +16,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , underlyingOffset
        , codomain
        , linearWithOffset
+       , rearrangeWithOffset
        , isDirect
          -- * Utility
        , shapeFromInts
@@ -29,7 +30,7 @@ import Data.Singletons.Prelude
 import Data.Type.Monomorphic
 import Data.Type.Natural hiding (n1, n2)
 import Data.Type.Ordinal
-import Data.Vector.Sized (unsafeFromList)
+import qualified Data.Vector.Sized as Vec
 import Proof.Equational
 import Data.Type.Equality hiding (outer)
 import qualified Text.PrettyPrint.Mainland as PP
@@ -42,6 +43,7 @@ import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Util.Truths
 import Futhark.Representation.AST.Attributes.Names
+import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
@@ -85,7 +87,7 @@ index :: IxFun -> Indices -> ScalExp -> ScalExp
 index f is element_size = case f of
   IxFun n f'
     | length is == sNatToInt n ->
-        Safe.index f' (unsafeFromList n is) element_size
+        Safe.index f' (Vec.unsafeFromList n is) element_size
     | otherwise ->
         error $
         "Index list " ++ pretty is ++
@@ -94,7 +96,7 @@ index f is element_size = case f of
 iota :: Shape -> IxFun
 iota shape = case toSing (intToNat $ n-1) of
   SomeSing (sb::SNat n) ->
-    IxFun (SS sb) $ Safe.iota $ unsafeFromList (SS sb) $
+    IxFun (SS sb) $ Safe.iota $ Vec.unsafeFromList (SS sb) $
     map intSubExpToScalExp shape
   where n = Prelude.length shape
 
@@ -136,7 +138,7 @@ reshape (IxFun _ ixfun) newshape =
   case toSing $ intToNat $ Prelude.length newshape-1 of
     SomeSing (sn::SNat n) ->
       IxFun (SS sn) $
-      Safe.reshape ixfun $ unsafeFromList (SS sn) $
+      Safe.reshape ixfun $ Vec.unsafeFromList (SS sn) $
       map (fmap intSubExpToScalExp) newshape
 
 applyInd :: IxFun -> Indices -> IxFun
@@ -149,7 +151,7 @@ applyInd ixfun@(IxFun (snnat::SNat ('S n)) (f::Safe.IxFun ScalExp ('S n))) is =
               nmnat :: SNat (n :- m)
               nmnat = nnat %- mnat
               is' :: Safe.Indices ScalExp m
-              is' = unsafeFromList mnat is
+              is' = Vec.unsafeFromList mnat is
               proof :: 'S n :=: (m :+: 'S (n :- m))
               proof = sym $
                       trans (succPlusR mnat nmnat)
@@ -186,6 +188,11 @@ isDirect =
 linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ ixfun) =
   Safe.linearWithOffset ixfun
+
+rearrangeWithOffset :: IxFun -> Maybe (ScalExp, [Int])
+rearrangeWithOffset (IxFun n ixfun) = do
+  (offset, perm) <- Safe.rearrangeWithOffset ixfun
+  return (offset, Vec.toList $ Perm.apply perm $ Vec.unsafeFromList n [0..])
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 

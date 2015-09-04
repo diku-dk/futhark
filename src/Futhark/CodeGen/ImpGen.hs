@@ -46,6 +46,8 @@ module Futhark.CodeGen.ImpGen
   , fullyIndexArray
   , fullyIndexArray'
   , varIndex
+  , basicScalarSize
+  , scalExpToImpExp
 
     -- * Typed enumerations
   , Count (..)

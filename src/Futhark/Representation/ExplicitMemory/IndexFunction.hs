@@ -16,6 +16,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , codomain
        , shape
        , linearWithOffset
+       , rearrangeWithOffset
        )
        where
 
@@ -334,6 +335,13 @@ linearWithOffset (Index n ixfun (is :: Indices num m)) element_size = do
   where m :: SNat m
         m = Vec.sLength is
 linearWithOffset _ _ = Nothing
+
+rearrangeWithOffset :: forall n num. Fractional num =>
+                       IxFun num n -> Maybe (num, Perm.Permutation n)
+rearrangeWithOffset (Permute (Direct offset _) perm) =
+  Just (offset, perm)
+rearrangeWithOffset _ =
+  Nothing
 
 instance FreeIn num => FreeIn (IxFun num n) where
   freeIn (Direct offset dims) = freeIn offset <> freeIn (Vec.toList dims)
