@@ -84,7 +84,6 @@ Library
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
                    Futhark.Optimise.DoubleBuffer
-                   Futhark.Optimise.Errors
                    Futhark.Optimise.Fusion
                    Futhark.Optimise.Fusion.Composing
                    Futhark.Optimise.Fusion.LoopKernel

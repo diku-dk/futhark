@@ -2,6 +2,7 @@
 module Futhark.Analysis.AlgSimplify
   ( ScalExp
   , simplify
+  , Error
   , mkSuffConds
   , RangesRep
   , ppRangesRep
@@ -23,7 +24,6 @@ import Data.Monoid
 import Prelude
 
 import Futhark.Representation.AST
-import Futhark.Optimise.Errors
 import Futhark.Analysis.ScalExp
 
 -- | Ranges are inclusive.
@@ -46,6 +46,8 @@ data AlgSimplifyEnv = AlgSimplifyEnv { inSolveLTH0 :: Bool
                                      , ranges :: RangesRep
                                      }
 
+type Error = String
+
 type AlgSimplifyM = ReaderT AlgSimplifyEnv (Either Error)
 
 runAlgSimplifier :: Bool -> AlgSimplifyM a -> RangesRep -> Either Error a
@@ -55,7 +57,7 @@ runAlgSimplifier s x r = runReaderT x env
                              }
 
 badAlgSimplifyM :: String -> AlgSimplifyM a
-badAlgSimplifyM = lift . Left . SimplifyError
+badAlgSimplifyM = lift . Left
 
 -- | Binds an array name to the set of used-array vars
 markInSolve :: AlgSimplifyEnv -> AlgSimplifyEnv
@@ -96,7 +98,7 @@ type DNF     = [NAnd ]
 simplify :: ScalExp -> RangesRep -> ScalExp
 simplify e rangesrep = case runAlgSimplifier False (simplifyScal e) rangesrep of
   Left err -> error $ "Error during algebraic simplification of: " ++ pretty e ++
-              "\n"  ++ show err
+              "\n"  ++ err
   Right e' -> e'
 
 -- | Given a symbol i and a scalar expression e, it decomposes
