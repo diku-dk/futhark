@@ -6,7 +6,6 @@
 --
 module Futhark.Internalise
   ( internaliseProg
-  , internaliseType
   , internaliseValue
   )
   where
