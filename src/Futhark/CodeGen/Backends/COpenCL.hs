@@ -1,5 +1,5 @@
 {-# LANGUAGE QuasiQuotes, FlexibleContexts #-}
-module Futhark.CodeGen.Backends.OpenCL
+module Futhark.CodeGen.Backends.COpenCL
   ( compileProg
   ) where
 

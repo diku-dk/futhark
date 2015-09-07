@@ -17,7 +17,7 @@ import Futhark.Compiler
 import Futhark.Representation.Basic (Basic)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Pass.ExplicitAllocations
-import qualified Futhark.CodeGen.Backends.OpenCL as OpenCL
+import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.CSE
 import Futhark.Pass.Simplify
@@ -46,7 +46,7 @@ compile config filepath = do
       dumpError (futharkConfig config) err
       exitWith $ ExitFailure 2
     Right prog ->
-      case OpenCL.compileProg prog of
+      case COpenCL.compileProg prog of
         Left err -> do
           dumpError (futharkConfig config) $
             CompileError (T.pack err) $ T.pack $ pretty prog
