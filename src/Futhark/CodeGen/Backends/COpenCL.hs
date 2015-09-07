@@ -166,30 +166,22 @@ callKernel (Kernel kernel) = do
         kernel_name = genericKernelName kernel
 
 callKernel kernel@(MapTranspose bt destmem destoffset srcmem srcoffset num_arrays x_elems y_elems) = do
-  destoffset' <- GenericC.compileExp destoffset
-  srcoffset' <- GenericC.compileExp srcoffset
-  x_elems' <- GenericC.compileExp x_elems
-  y_elems' <- GenericC.compileExp y_elems
-  x_elems_name <- newVName "x_elems"
-  y_elems_name <- newVName "y_elems"
-  destoffset_name <- newVName "destoffset"
-  srcoffset_name <- newVName "srcoffset"
+  destoffset' <- GenericC.compileExpToName "destoffset" Int destoffset
+  srcoffset' <- GenericC.compileExpToName "srcoffset" Int  srcoffset
+  x_elems' <- GenericC.compileExpToName "x_elems" Int x_elems
+  y_elems' <- GenericC.compileExpToName "y_elems" Int y_elems
   GenericC.stm [C.cstm|{
-    int $id:x_elems_name = $exp:x_elems';
-    int $id:y_elems_name = $exp:y_elems';
-    int $id:destoffset_name = $exp:destoffset';
-    int $id:srcoffset_name = $exp:srcoffset';
     assert(clSetKernelArg($id:kernel_name, 0, sizeof(cl_mem), &$id:destmem)
            == CL_SUCCESS);
-    assert(clSetKernelArg($id:kernel_name, 1, sizeof(int), &$id:destoffset_name)
+    assert(clSetKernelArg($id:kernel_name, 1, sizeof(int), &$id:destoffset')
            == CL_SUCCESS);
     assert(clSetKernelArg($id:kernel_name, 2, sizeof(cl_mem), &$id:srcmem)
            == CL_SUCCESS);
-    assert(clSetKernelArg($id:kernel_name, 3, sizeof(int), &$id:srcoffset_name)
+    assert(clSetKernelArg($id:kernel_name, 3, sizeof(int), &$id:srcoffset')
            == CL_SUCCESS);
-    assert(clSetKernelArg($id:kernel_name, 4, sizeof(int), &$id:x_elems_name)
+    assert(clSetKernelArg($id:kernel_name, 4, sizeof(int), &$id:x_elems')
            == CL_SUCCESS);
-    assert(clSetKernelArg($id:kernel_name, 5, sizeof(int), &$id:y_elems_name)
+    assert(clSetKernelArg($id:kernel_name, 5, sizeof(int), &$id:y_elems')
            == CL_SUCCESS);
     assert(clSetKernelArg($id:kernel_name, 6, (FUT_BLOCK_DIM + 1) * FUT_BLOCK_DIM * sizeof($ty:ty), NULL)
            == CL_SUCCESS);

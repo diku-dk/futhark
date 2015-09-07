@@ -28,6 +28,7 @@ module Futhark.CodeGen.Backends.GenericC
   , compileFun
   , compileCode
   , compileExp
+  , compileExpToName
   , dimSizeToExp
   , item
   , stm
@@ -660,6 +661,15 @@ readScalarPointerWithQuals :: PointerQuals op s -> ReadScalar op s
 readScalarPointerWithQuals quals_f dest i elemtype space = do
   quals <- quals_f space
   return $ derefPointer dest i [C.cty|$tyquals:quals $ty:elemtype*|]
+
+compileExpToName :: String -> BasicType -> Exp -> CompilerM op s VName
+compileExpToName _ _ (ScalarVar v) =
+  return v
+compileExpToName desc t e = do
+  desc' <- newVName desc
+  e' <- compileExp e
+  decl [C.cdecl|$ty:(scalarTypeToCType t) $id:desc' = $e';|]
+  return desc'
 
 compileExp :: Exp -> CompilerM op s C.Exp
 
