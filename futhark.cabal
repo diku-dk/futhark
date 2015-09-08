@@ -69,6 +69,7 @@ Library
                    Futhark.CodeGen.ImpGen
                    Futhark.CodeGen.KernelImp
                    Futhark.CodeGen.KernelImpGen
+                   Futhark.CodeGen.OpenCL.Kernels
                    Futhark.Compiler
                    Futhark.Construct
                    Futhark.FreshNames
