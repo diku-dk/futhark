@@ -187,12 +187,17 @@ callKernel kernel@(MapTranspose bt destmem destoffset srcmem srcoffset num_array
     assert(clSetKernelArg($id:kernel_name, 6, (FUT_BLOCK_DIM + 1) * FUT_BLOCK_DIM * sizeof($ty:ty), NULL)
            == CL_SUCCESS);
   }|]
-  kernel_size <- mapM GenericC.compileExp [x_elems, y_elems, num_arrays]
+  kernel_size <- mapM (liftM roundedToBlockSize . GenericC.compileExp)
+                 [x_elems, y_elems, num_arrays]
   let workgroup_size = Just [[C.cexp|FUT_BLOCK_DIM|], [C.cexp|FUT_BLOCK_DIM|], [C.cexp|1|]]
   launchKernel kernel_name kernel_size workgroup_size
   return GenericC.Done
   where kernel_name = kernelName kernel
         ty = GenericC.scalarTypeToCType bt
+        roundedToBlockSize e =
+          [C.cexp|$exp:e +
+                   (FUT_BLOCK_DIM - $exp:e % FUT_BLOCK_DIM) % FUT_BLOCK_DIM
+           |]
 
 launchKernel :: C.ToExp a =>
                 String -> [a] -> Maybe [a] -> GenericC.CompilerM op s ()
