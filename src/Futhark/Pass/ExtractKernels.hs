@@ -250,6 +250,15 @@ transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) = do
     redbnd' <- transformBinding redbnd
     return $ mapbnd' ++ redbnd'
 
+transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ redlam nes) maplam arrs _))) = do
+  maplam' <- FOT.transformLambda =<<
+             singletonChunkRedLikeStreamLambda (lambdaReturnType redlam) maplam
+  (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, redlam, maplam', nes, arrs)
+  mapbnd' <- transformBinding mapbnd
+  localTypeEnv (typeEnvFromBindings mapbnd') $ do
+    redbnd' <- transformBinding redbnd
+    return $ mapbnd' ++ redbnd'
+
 transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs c))) =
   localTypeEnv (typeEnvFromParams $ extLambdaParams lam) $ do
     body' <- transformBody $ extLambdaBody lam

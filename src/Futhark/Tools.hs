@@ -6,6 +6,7 @@ module Futhark.Tools
   , nonuniqueParams
   , redomapToMapAndReduce
   , sequentialStreamWholeArray
+  , singletonChunkRedLikeStreamLambda
   , intraproceduralTransformation
   , boundInBody
   )
@@ -14,6 +15,7 @@ where
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
+import Data.Monoid
 
 import Prelude
 
@@ -112,6 +114,38 @@ sequentialStreamWholeArray width accs lam arrs =
         partitionParameters (chunk_param : params) =
           let (acc_params, arr_params) = splitAt (length accs) params
           in (chunk_param, acc_params, arr_params)
+
+singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
+                                     [Type] -> ExtLambda lore -> m (Lambda lore)
+singletonChunkRedLikeStreamLambda acc_ts lam = do
+  -- The accumulator params are OK, but we need array params without
+  -- the chunk part.
+  let (chunk_param, acc_params, arr_params) =
+        partitionParameters $ extLambdaParams lam
+  unchunked_arr_params <- forM arr_params $ \arr_param ->
+    flip Param () <$>
+    newIdent (baseString (paramName arr_param) <> "_unchunked")
+    (rowType $ paramType arr_param)
+  let chunk_name = paramName chunk_param
+      chunk_bnd = mkLet' [] [paramIdent chunk_param] $
+                  PrimOp $ SubExp $ Constant $ IntVal 1
+      arr_bnds = [ mkLet' [] [paramIdent arr_param] $
+                   PrimOp $ Replicate (Var chunk_name) $
+                   Var $ paramName unchunked_arr_param |
+                   (arr_param, unchunked_arr_param) <-
+                     zip arr_params unchunked_arr_params ]
+      unchunked_body = insertBindings (chunk_bnd:arr_bnds) $ extLambdaBody lam
+  return Lambda { lambdaBody = unchunked_body
+                , lambdaParams = acc_params <> unchunked_arr_params
+                , lambdaReturnType = acc_ts
+                , lambdaIndex = extLambdaIndex lam
+                }
+  where partitionParameters [] =
+          error "transformStreamLambda: lambda takes no parameters"
+        partitionParameters (chunk_param : params) =
+          let (acc_params, arr_params) = splitAt num_accs params
+          in (chunk_param, acc_params, arr_params)
+        num_accs = length acc_ts
 
 intraproceduralTransformation :: MonadFreshNames m =>
                                  (FunDec fromlore -> State VNameSource (FunDec tolore))
