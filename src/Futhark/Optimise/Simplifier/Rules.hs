@@ -48,6 +48,7 @@ topDownRules = [ liftIdentityMapping
                , simplifyClosedFormRedomap
                , simplifyClosedFormReduce
                , simplifyClosedFormLoop
+               , simplifKnownIterationLoop
                , letRule simplifyRearrange
                , letRule simplifyBinOp
                , letRule simplifyNot
@@ -479,6 +480,30 @@ simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
 simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge (ForLoop i bound) body))) =
   loopClosedForm pat respat merge (HS.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
+
+simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
+simplifKnownIterationLoop _ (Let pat _
+                               (LoopOp
+                                (DoLoop respat merge (ForLoop i (Constant (IntVal 1))) body))) = do
+  forM_ merge $ \(mergevar, mergeinit) ->
+    letBindNames' [paramName mergevar] $ PrimOp $ SubExp mergeinit
+  letBindNames'_ [i] $ PrimOp $ SubExp $ Constant $ IntVal 0
+  loop_body_res <- mapM asVar =<< bodyBind body
+  let res_params = zipWith setParamName (map fst merge) loop_body_res
+      subst = HM.fromList $ zip (map (paramName . fst) merge) loop_body_res
+      respat' = substituteNames subst respat
+      res_context = loopResultContext (representative :: Lore m) respat res_params
+  forM_ (zip (patternContextElements pat) res_context) $ \(pat_elem, v) ->
+    letBind_ (Pattern [] [pat_elem]) $ PrimOp $ SubExp $ Var v
+  forM_ (zip (patternValueElements pat) respat') $ \(pat_elem, v) ->
+    letBind_ (Pattern [] [pat_elem]) $ PrimOp $ SubExp $ Var v
+  where asVar (Var v)      = return v
+        asVar (Constant v) = letExp "named" $ PrimOp $ SubExp $ Constant v
+
+        setParamName param name =
+          param { paramIdent = (paramIdent param) { identName = name } }
+simplifKnownIterationLoop _ _ =
+  cannotSimplify
 
 simplifyRearrange :: LetTopDownRule lore u
 
