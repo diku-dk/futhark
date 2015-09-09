@@ -611,27 +611,28 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   where fparamnames = HS.fromList (map (paramName . fst) merge)
 
 simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
-  cs'   <- simplifyCerts      cs
-  form' <- simplifyStreamForm form
+  cs' <- simplifyCerts      cs
+  outerdim' <- simplifySubExp outerdim
+  form' <- simplifyStreamForm outerdim' form
   arr' <- mapM simplifyVName  arr
   vtab <- getVtable
   let (chunk:_) = extLambdaParams lam
-      se_outer = case outerdim of
+      se_outer = case outerdim' of
                     Var idd    -> fromMaybe (SExp.Id idd Int) (ST.lookupScalExp idd vtab)
                     Constant c -> SExp.Val c
       se_1 = SExp.Val $ IntVal 1
       -- extension: one may similarly treat iota stream-array case,
       -- by setting the bounds to [0, se_outer-1]
       parbnds  = [ (chunk, se_1, se_outer) ]
-  lam' <- simplifyExtLambda parbnds lam outerdim
-  return $ Stream cs' outerdim form' lam' arr' ii
-  where simplifyStreamForm (MapLike o) = return $ MapLike o
-        simplifyStreamForm (RedLike o lam0 acc) = do
+  lam' <- simplifyExtLambda parbnds lam outerdim'
+  return $ Stream cs' outerdim' form' lam' arr' ii
+  where simplifyStreamForm _ (MapLike o) = return $ MapLike o
+        simplifyStreamForm outerdim' (RedLike o lam0 acc) = do
             acc'  <- mapM simplifySubExp acc
-            lam0' <- simplifyLambda lam0 outerdim $
-                        replicate (length $ lambdaParams lam0) Nothing
+            lam0' <- simplifyLambda lam0 outerdim' $
+                     replicate (length $ lambdaParams lam0) Nothing
             return $ RedLike o lam0' acc'
-        simplifyStreamForm (Sequential acc) = do
+        simplifyStreamForm _ (Sequential acc) = do
             acc'  <- mapM simplifySubExp acc
             return $ Sequential acc'
 
