@@ -129,7 +129,7 @@ instance Lore.Lore ExplicitMemory where
               _ ->
                 Nothing
           memSizeIfNecessary ident
-            | Mem (Var sizevar) <- identType ident,
+            | Mem (Var sizevar) _ <- identType ident,
               isJust $ isMergeParam sizevar =
               Just sizevar
             | otherwise =
@@ -225,7 +225,7 @@ data Returns a = ReturnsArray BasicType ExtShape Uniqueness a
                  -- (existential) shape, and uniqueness.
                | ReturnsScalar BasicType
                  -- ^ Returns a scalar of the given type.
-               | ReturnsMemory SubExp
+               | ReturnsMemory SubExp Space
                  -- ^ Returns a memory block of the given size.
                deriving (Eq, Ord, Show)
 
@@ -242,8 +242,8 @@ instance Substitute a => Substitute (Returns a) where
     (substituteNames substs x)
   substituteNames _ (ReturnsScalar bt) =
     ReturnsScalar bt
-  substituteNames substs (ReturnsMemory size) =
-    ReturnsMemory $ substituteNames substs size
+  substituteNames substs (ReturnsMemory size space) =
+    ReturnsMemory (substituteNames substs size) space
 
 instance PP.Pretty (Returns (Maybe MemReturn)) where
   ppr ret@(ReturnsArray _ _ _ summary) =
@@ -260,7 +260,7 @@ instance PP.Pretty (Returns (Maybe MemReturn)) where
 instance FreeIn a => FreeIn (Returns a) where
   freeIn (ReturnsScalar _) =
     mempty
-  freeIn (ReturnsMemory size) =
+  freeIn (ReturnsMemory size _) =
     freeIn size
   freeIn (ReturnsArray _ shape _ summary) =
     freeIn shape <> freeIn summary
@@ -268,8 +268,8 @@ instance FreeIn a => FreeIn (Returns a) where
 instance Rename a => Rename (Returns a) where
   rename (ReturnsScalar bt) =
     return $ ReturnsScalar bt
-  rename (ReturnsMemory size) =
-    ReturnsMemory <$> rename size
+  rename (ReturnsMemory size space) =
+    ReturnsMemory <$> rename size <*> pure space
   rename (ReturnsArray bt shape u summary) =
     ReturnsArray bt <$> rename shape <*> pure u <*> rename summary
 
@@ -299,8 +299,8 @@ funReturnsToExpReturns (ReturnsArray bt shape u summary) =
   ReturnsArray bt shape u $ Just summary
 funReturnsToExpReturns (ReturnsScalar bt) =
   ReturnsScalar bt
-funReturnsToExpReturns (ReturnsMemory size) =
-  ReturnsMemory size
+funReturnsToExpReturns (ReturnsMemory size space) =
+  ReturnsMemory size space
 
 -- | Similar to 'generaliseExtTypes', but also generalises the
 -- existentiality of memory returns.
@@ -423,11 +423,11 @@ matchPatternToReturns wrong pat rt = do
 
     matchBindee bindee (ReturnsScalar bt) =
       matchType bindee $ Basic bt
-    matchBindee bindee (ReturnsMemory size@(Constant {})) =
-      matchType bindee $ Mem size
-    matchBindee bindee (ReturnsMemory (Var size)) = do
+    matchBindee bindee (ReturnsMemory size@(Constant {}) space) =
+      matchType bindee $ Mem size space
+    matchBindee bindee (ReturnsMemory (Var size) space) = do
       popSizeIfInCtx size
-      matchType bindee $ Mem $ Var size
+      matchType bindee $ Mem (Var size) space
     matchBindee bindee (ReturnsArray et shape u rets)
       | MemSummary mem bindeeIxFun <- patElemLore bindee = do
           case rets of
@@ -488,9 +488,9 @@ matchPatternToReturns wrong pat rt = do
         ([memBindee], ctxbindees'') -> do
           put ctxbindees''
           case patElemType memBindee of
-            Mem (Var size) ->
+            Mem (Var size) _ ->
               popSizeIfInCtx size
-            Mem (Constant {}) ->
+            Mem (Constant {}) _ ->
               return ()
             _ ->
               lift $ wrong $ pretty memBindee ++ " is not a memory block."
@@ -521,7 +521,7 @@ checkMemSummary _ Scalar = return ()
 checkMemSummary ident (MemSummary v ixfun) = do
   t <- lookupType v
   case t of
-    Mem size ->
+    Mem size _ ->
       TypeCheck.require [Basic Int] size
     _        ->
       TypeCheck.bad $ TypeCheck.TypeError noLoc $
@@ -586,8 +586,10 @@ patElemAnnot = bindeeAnnot patElemName patElemLore
 -- | Convet a 'Returns' to an 'ExtType' by throwing away memory
 -- information.
 returnsToType :: Returns a -> ExtType
-returnsToType (ReturnsScalar bt) = Basic bt
-returnsToType (ReturnsMemory size) = Mem size
+returnsToType (ReturnsScalar bt) =
+  Basic bt
+returnsToType (ReturnsMemory size space) =
+  Mem size space
 returnsToType (ReturnsArray bt shape u _) =
   Array bt shape u
 
@@ -596,8 +598,8 @@ extReturns ts =
     evalState (mapM addAttr ts) 0
     where addAttr (Basic bt) =
             return $ ReturnsScalar bt
-          addAttr (Mem size) =
-            return $ ReturnsMemory size
+          addAttr (Mem size space) =
+            return $ ReturnsMemory size space
           addAttr t@(Array bt shape u)
             | existential t = do
               i <- get
@@ -633,8 +635,8 @@ varReturns look v = do
     (MemSummary mem ixfun, Array et shape u) ->
       return $ ReturnsArray et (ExtShape $ map Free $ shapeDims shape) u $
               Just $ ReturnsInBlock mem ixfun
-    (Scalar, Mem size) ->
-      return $ ReturnsMemory size
+    (Scalar, Mem size space) ->
+      return $ ReturnsMemory size space
     _ ->
       fail "Something went very wrong in varReturns."
 
@@ -681,8 +683,8 @@ expReturns look (AST.PrimOp (Index _ v is)) = do
              IxFun.applyInd ixfun
              (map (`SE.subExpToScalExp` Int) is)]
 
-expReturns _ (AST.PrimOp (Alloc size)) =
-  return [ReturnsMemory size]
+expReturns _ (AST.PrimOp (Alloc size space)) =
+  return [ReturnsMemory size space]
 
 expReturns _ (AST.PrimOp op) =
   extReturns <$> staticShapes <$> primOpType op
@@ -707,7 +709,7 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
                 fail "expReturns: result is not a merge variable."
               (Basic bt, _) ->
                 return $ ReturnsScalar bt
-              (Mem _, _) ->
+              (Mem {}, _) ->
                 fail "expReturns: loop returns memory block explicitly."
           isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst merge
@@ -749,7 +751,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
         return $ ReturnsScalar $ basicValueType val
       inspect (Basic bt) (Var _) =
         return $ ReturnsScalar bt
-      inspect (Mem _) (Var _) =
+      inspect (Mem {}) (Var _) =
         -- FIXME
         fail "bodyReturns: cannot handle bodies returning memory yet."
       inspect (Array et shape u) (Var v) = do
@@ -810,8 +812,8 @@ applyFunReturns rets params args
 
         correctDims (ReturnsScalar t) =
           ReturnsScalar t
-        correctDims (ReturnsMemory se) =
-          ReturnsMemory $ substSubExp se
+        correctDims (ReturnsMemory se space) =
+          ReturnsMemory (substSubExp se) space
         correctDims (ReturnsArray et shape u memsummary) =
           ReturnsArray et (correctExtShape shape) u $
           correctSummary memsummary

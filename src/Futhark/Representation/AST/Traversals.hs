@@ -149,8 +149,8 @@ mapExpM tv (PrimOp (Concat cs x ys size)) =
                  mapOnSubExp tv size)
 mapExpM tv (PrimOp (Copy e)) =
   PrimOp <$> (pure Copy <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Alloc e)) =
-  PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
+mapExpM tv (PrimOp (Alloc e space)) =
+  PrimOp <$> (Alloc <$> mapOnSubExp tv e <*> pure space)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Partition cs n flags arr)) =
@@ -246,7 +246,7 @@ mapOnExtType tv (Array bt (ExtShape shape) u) =
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 mapOnExtType _ (Basic bt) = return $ Basic bt
-mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
 mapOnLoopForm :: (Monad m, Applicative m) =>
                  Mapper flore tlore m -> LoopForm -> m LoopForm
@@ -270,7 +270,7 @@ mapExp m = runIdentity . mapExpM m
 mapOnType :: (Applicative m, Monad m) =>
              Mapper flore tlore m -> Type -> m Type
 mapOnType _ (Basic bt) = return $ Basic bt
-mapOnType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 mapOnType tv (Array bt shape u) =
   Array bt <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape)) <*> pure u
 

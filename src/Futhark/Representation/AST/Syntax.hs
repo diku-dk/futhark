@@ -14,6 +14,8 @@ module Futhark.Representation.AST.Syntax
   , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
+  , Space (..)
+  , SpaceId
   , TypeBase(..)
   , Type
   , ExtType
@@ -245,7 +247,7 @@ data PrimOp lore
     -- arrays.  If no arrays are given, the returned offsets are zero,
     -- and no arrays are returned.
 
-  | Alloc SubExp
+  | Alloc SubExp Space
     -- ^ Allocate a memory block.  This really should not be an
     -- expression, but what are you gonna do...
   deriving (Eq, Ord, Show)

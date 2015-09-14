@@ -35,7 +35,7 @@ import qualified Data.HashSet as HS
 import Prelude hiding (foldr)
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Syntax (BinOp (..))
+import Futhark.Representation.AST.Syntax (BinOp (..), Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 
@@ -47,19 +47,6 @@ data Size = ConstSize Int32
 
 type MemSize = Size
 type DimSize = Size
-
--- | The memory space of a block.  If 'DefaultSpace', this is the "default"
--- space, whatever that is.  The exact meaning of the 'SpaceID'
--- depends on the backend used.  In GPU kernels, for example, this is
--- used to distinguish between constant, global and shared memory
--- spaces.  In GPU-enabled host code, it is used to distinguish
--- between host memory ('DefaultSpace') and GPU space.
-data Space = DefaultSpace
-           | Space SpaceId
-             deriving (Show, Eq, Ord)
-
--- | A string representing a specific non-default memory space.
-type SpaceId = String
 
 data Type = Scalar BasicType | Mem DimSize Space
 
@@ -244,10 +231,6 @@ instance Pretty op => Pretty (Code op) where
     ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
-
-instance Pretty Space where
-  ppr DefaultSpace = mempty
-  ppr (Space s)    = text "@" <> text s
 
 instance Pretty Exp where
   ppr = pprPrec (-1)

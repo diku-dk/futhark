@@ -38,7 +38,7 @@ data Entry = Entry { entryMemSummary :: MemSummary
 type MemoryMap = HM.HashMap VName Entry
 
 data AllocBinding = SizeComputation VName SE.ScalExp
-                  | Allocation VName SubExp
+                  | Allocation VName SubExp Space
                   | ArrayCopy VName Bindage VName
                     deriving (Eq, Ord, Show)
 
@@ -46,8 +46,8 @@ bindAllocBinding :: MonadBinder m => AllocBinding -> m ()
 bindAllocBinding (SizeComputation name se) = do
   e <- SE.fromScalExp' se
   letBindNames'_ [name] e
-bindAllocBinding (Allocation name size) =
-  letBindNames'_ [name] $ PrimOp $ Alloc size
+bindAllocBinding (Allocation name size space) =
+  letBindNames'_ [name] $ PrimOp $ Alloc size space
 bindAllocBinding (ArrayCopy name bindage src) =
   letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
 
@@ -60,10 +60,10 @@ class (MonadFreshNames m, HasTypeEnv m) => Allocator m where
   asksMemoryMap f = f <$> askMemoryMap
 
 allocateMemory :: Allocator m =>
-                  String -> SubExp -> m VName
-allocateMemory desc size = do
+                  String -> SubExp -> Space -> m VName
+allocateMemory desc size space = do
   v <- newVName desc
-  addAllocBinding $ Allocation v size
+  addAllocBinding $ Allocation v size space
   return v
 
 computeSize :: Allocator m =>
@@ -111,8 +111,8 @@ instance Allocator AllocM where
 
   addAllocBinding (SizeComputation name se) =
     letBindNames'_ [name] =<< SE.fromScalExp' se
-  addAllocBinding (Allocation name size) =
-    letBindNames'_ [name] $ PrimOp $ Alloc size
+  addAllocBinding (Allocation name size space) =
+    letBindNames'_ [name] $ PrimOp $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
     letBindNames_ [(name, bindage)] $ PrimOp $ SubExp $ Var src
 
@@ -163,7 +163,7 @@ allocForArray t = do
     SE.sproduct $
     (SE.Val $ IntVal $ fromIntegral $ basicSize $ elemType t) :
     map (`SE.subExpToScalExp` Int) (arrayDims t)
-  m <- allocateMemory "mem" size
+  m <- allocateMemory "mem" size DefaultSpace
   return (size, m)
 
 allocsForBinding :: Allocator m =>
@@ -205,7 +205,7 @@ allocsForPattern sizeidents validents rts = do
         summary <- lift $ summaryForBindage (identType ident) bindage
         return $ PatElem ident bindage summary
 
-      ReturnsMemory _ ->
+      ReturnsMemory {} ->
         return $ PatElem ident bindage Scalar
 
       ReturnsArray _ _ u (Just (ReturnsInBlock mem ixfun)) ->
@@ -289,7 +289,7 @@ memForBindee :: (MonadFreshNames m) =>
                    (Ident, MemSummary))
 memForBindee ident = do
   size <- newIdent (memname <> "_size") (Basic Int)
-  mem <- newIdent memname $ Mem $ Var $ identName size
+  mem <- newIdent memname $ Mem (Var $ identName size) DefaultSpace
   return (size,
           mem,
           (ident, directIndexFunction (identName mem) t))
@@ -304,8 +304,8 @@ sizeOfMemoryBlock :: (Monad m, HasTypeEnv m) => VName -> m SubExp
 sizeOfMemoryBlock mem = do
   t <- lookupType mem
   case t of
-    Mem size -> return size
-    _        -> fail $ "sizeOfMemoryBlock: " <> pretty mem <> " not a memory block."
+    Mem size _ -> return size
+    _          -> fail $ "sizeOfMemoryBlock: " <> pretty mem <> " not a memory block."
 
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
 lookupSummary name = asksMemoryMap $ fmap entryMemSummary . HM.lookup name
@@ -396,11 +396,11 @@ ensureDirectArray v = do
       | IxFun.isDirect ixfun -> do
         memt <- lookupType mem
         case memt of
-          Mem size -> return (size, mem, Var v)
-          _        -> fail $
-                      pretty mem ++
-                      " should be a memory block but has type " ++
-                      pretty memt
+          Mem size _ -> return (size, mem, Var v)
+          _          -> fail $
+                        pretty mem ++
+                        " should be a memory block but has type " ++
+                        pretty memt
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
@@ -455,7 +455,7 @@ memoryInRetType :: In.RetType -> RetType
 memoryInRetType (ExtRetType ts) =
   evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Basic t) = return $ ReturnsScalar t
-        addAttr (Mem _)  = fail "memoryInRetType: too much memory"
+        addAttr (Mem {})  = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get
           put $ i + 1
@@ -578,7 +578,7 @@ duplicateArray desc arr = do
   (mem, ixfun) <- lookupArraySummary' arr
   mem_size <- sizeOfMemoryBlock mem
   new_mem <- letExp (desc <> "_" <> baseString arr <> "_mem") $
-             PrimOp $ Alloc mem_size
+             PrimOp $ Alloc mem_size DefaultSpace
   new_arr <- newVName $ desc <> "_" <> baseString arr
   new_arr_ident <- Ident new_arr <$> lookupType arr
   let pat = Pattern [] [PatElem new_arr_ident BindVar $
@@ -672,8 +672,8 @@ simplifiable =
                   Engine.simplifyExtShape shape <*>
                   pure u <*>
                   simplifyMemReturn ret
-                simplifyReturns (ReturnsMemory size) =
-                  ReturnsMemory <$> Engine.simplifySubExp size
+                simplifyReturns (ReturnsMemory size space) =
+                  ReturnsMemory <$> Engine.simplifySubExp size <*> pure space
                 simplifyMemReturn (ReturnsNewBlock i) =
                   return $ ReturnsNewBlock i
                 simplifyMemReturn (ReturnsInBlock v ixfun) =

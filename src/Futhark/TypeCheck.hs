@@ -362,8 +362,8 @@ unifyTypes (Array t1 ds1 u1) (Array t2 ds2 u2)
   | shapeRank ds1 == shapeRank ds2 = do
   t <- t1 `unifyBasicTypes` t2
   Just $ Array t ds2 (u1 <> u2)
-unifyTypes (Mem size1) (Mem size2)
-  | size1 == size2 = Just $ Mem size1
+unifyTypes (Mem size1 space1) (Mem size2 space2)
+  | size1 == size2, space1 == space2 = Just $ Mem size1 space1
 unifyTypes _ _ = Nothing
 
 -- | As 'unifyTypes', but for element types.
@@ -730,7 +730,7 @@ checkPrimOp (Copy e) =
 checkPrimOp (Assert e _) =
   require [Basic Bool] e
 
-checkPrimOp (Alloc e) =
+checkPrimOp (Alloc e _) =
   require [Basic Int] e
 
 checkPrimOp (Partition cs _ flags arrs) = do

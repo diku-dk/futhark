@@ -64,7 +64,7 @@ primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =
   [mempty]
-primOpAliases (Alloc _) =
+primOpAliases (Alloc {}) =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr

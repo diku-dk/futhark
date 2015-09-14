@@ -186,7 +186,7 @@ instance MonadFreshNames (ImpM op) where
 instance HasTypeEnv (ImpM op) where
   askTypeEnv = HM.map entryType <$> asks envVtable
     where entryType (MemVar memEntry) =
-            Mem $ dimSizeToSubExp $ entryMemSize memEntry
+            Mem (dimSizeToSubExp $ entryMemSize memEntry) (entryMemSpace memEntry)
           entryType (ArrayVar arrayEntry) =
             Array
             (entryArrayElemType arrayEntry)
@@ -247,8 +247,10 @@ compileProgSimply = compileProg defaultOperations Imp.DefaultSpace
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case t of
-  Basic bt -> return $ Left $ Imp.ScalarParam name bt
-  Mem size -> Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> asks envDefaultSpace)
+  Basic bt ->
+    return $ Left $ Imp.ScalarParam name bt
+  Mem size space ->
+    Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> pure space)
   Array bt shape _ -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
@@ -261,7 +263,7 @@ data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] MemLocation
 
 fparamSizes :: FParam -> HS.HashSet VName
 fparamSizes fparam
-  | Mem (Var size) <- paramType fparam = HS.singleton size
+  | Mem (Var size) _ <- paramType fparam = HS.singleton size
   | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ paramType fparam
   where name (Var v) = Just v
         name _       = Nothing
@@ -295,7 +297,7 @@ compileOutParams rts = do
   return (valdecls, outparams, Destination dests)
   where imp = lift . lift
 
-        mkParam (ReturnsMemory _) =
+        mkParam (ReturnsMemory {}) =
           fail "Functions may not explicitly return memory blocks."
         mkParam (ReturnsScalar t) = do
           out <- imp $ newVName "scalar_out"
@@ -383,8 +385,7 @@ compileLoopBody mergenames (Body _ bnds ses) = do
           emit $ Imp.DeclareScalar tmp bt
           emit $ Imp.SetScalar tmp $ compileSubExp se
           return $ emit $ Imp.SetScalar d $ Imp.ScalarVar tmp
-        Mem _ | Var v <- se -> do
-          space <- entryMemSpace <$> lookupMemory v
+        Mem _ space | Var v <- se -> do
           emit $ Imp.DeclareMem tmp space
           emit $ Imp.SetMem tmp v
           return $ emit $ Imp.SetMem d tmp
@@ -456,8 +457,8 @@ defCompilePrimOp (Destination [target]) (BinOp bop x y _) =
 defCompilePrimOp (Destination [_]) (Assert e loc) =
   emit $ Imp.Assert (compileSubExp e) loc
 
-defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e) = do
-  emit =<< (Imp.Allocate mem e' <$> asks envDefaultSpace)
+defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e space) = do
+  emit $ Imp.Allocate mem e' space
   case size of Just size' -> emit $ Imp.SetScalar size' e'
                Nothing    -> return ()
   where e' = compileSubExp e
@@ -756,9 +757,8 @@ declaringVar patElem m =
       let entry = ScalarVar ScalarEntry { entryScalarType    = bt
                                         }
       declaringVarEntry name entry m
-    Mem size -> do
+    Mem size space -> do
       size' <- subExpToDimSize size
-      space <- asks envDefaultSpace
       let entry = MemVar MemEntry {
               entryMemSize = size'
             , entryMemSpace = space

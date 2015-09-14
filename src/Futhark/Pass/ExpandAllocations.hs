@@ -58,18 +58,22 @@ transformExp (LoopOp (Kernel cs w thread_num ispace inps returns body))
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
   alloc_bnds <-
-    liftM concat $ forM (HM.toList thread_allocs) $ \(mem,per_thread_size) -> do
+    liftM concat $ forM (HM.toList thread_allocs) $ \(mem,(per_thread_size, space)) -> do
       total_size <- newVName "total_size"
       let sizepat = Pattern [] [PatElem (Ident total_size $ Basic Int) BindVar Scalar]
-          allocpat = Pattern [] [PatElem (Ident mem $ Mem $ Var total_size) BindVar Scalar]
+          allocpat = Pattern [] [PatElem
+                                 (Ident mem $ Mem (Var total_size) space)
+                                 BindVar Scalar]
       return [Let sizepat () $ PrimOp $ BinOp Times w per_thread_size Int,
-              Let allocpat () $ PrimOp $ Alloc $ Var total_size]
+              Let allocpat () $ PrimOp $ Alloc (Var total_size) space]
 
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
   let alloc_offsets =
         OffsetMap { offsetMap =
-                    HM.map (SE.STimes (SE.Id thread_num Int) . SE.intSubExpToScalExp)
+                    HM.map (SE.STimes (SE.Id thread_num Int) .
+                            SE.intSubExpToScalExp .
+                            fst)
                     thread_allocs
                   , indexVariable = thread_num
                   , kernelWidth = w
@@ -98,20 +102,22 @@ transformExtLambda lam = do
 -- further down, we will fail later.  If the size of one of the
 -- allocations is not free in the body, we return 'Left' and an
 -- error message.
-extractKernelAllocations :: Names -> Body -> Either String (Body, HM.HashMap VName SubExp)
+extractKernelAllocations :: Names -> Body
+                         -> Either String (Body, HM.HashMap VName (SubExp, Space))
 extractKernelAllocations bound_before_body body = do
   (allocs, bnds) <- mapAccumLM isAlloc HM.empty $ bodyBindings body
   return (body { bodyBindings = catMaybes bnds }, allocs)
   where bound_here = bound_before_body `HS.union` boundInBody body
 
-        isAlloc _ (Let (Pattern [] [patElem]) () (PrimOp (Alloc (Var v))))
+        isAlloc _ (Let (Pattern [] [patElem]) () (PrimOp (Alloc (Var v) _)))
           | v `HS.member` bound_here =
             throwError $ "Size " ++ pretty v ++
             " for block " ++ pretty patElem ++
             " is not lambda-invariant"
 
-        isAlloc allocs (Let (Pattern [] [patElem]) () (PrimOp (Alloc size))) =
-          return (HM.insert (patElemName patElem) size allocs, Nothing)
+        isAlloc allocs (Let (Pattern [] [patElem]) () (PrimOp (Alloc size space))) =
+          return (HM.insert (patElemName patElem) (size, space) allocs,
+                  Nothing)
 
         isAlloc allocs bnd =
           return (allocs, Just bnd)
@@ -152,7 +158,7 @@ offsetMemorySummariesInPattern offsets (Pattern ctx vals) =
                        offsetMemorySummariesInMemSummary offsets' $ patElemLore patElem
                   }
         inspectCtx ctx_offsets patElem
-          | Mem size <- patElemType patElem =
+          | Mem size _ <- patElemType patElem =
               offsetByIndex (patElemName patElem) size ctx_offsets
           | otherwise =
               ctx_offsets

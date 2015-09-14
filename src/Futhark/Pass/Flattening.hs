@@ -1330,7 +1330,7 @@ wrapInArrIdent sz (Ident vn tp) = do
   arrtp <- case tp of
     Basic bt                   -> return $ Array bt (Shape [sz]) Nonunique
     Array bt (Shape rest) uniq -> return $ Array bt (Shape $ sz:rest) uniq
-    Mem _ -> flatError MemTypeFound
+    Mem {} -> flatError MemTypeFound
   i <- newIdent (baseString vn ++ "_arr") arrtp
   addTypeIdent i
   return i

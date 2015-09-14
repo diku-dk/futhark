@@ -502,7 +502,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
                             mkLetM (addWisdomToPattern p e) e
   return ()
     where gatherPat acc (_, Basic _, _) = return acc
-          gatherPat acc (_, Mem   _, _) = return acc
+          gatherPat acc (_, Mem {}, _) = return acc
           gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
             foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
           gatherPat _ _ =
@@ -808,8 +808,8 @@ simplifyType :: MonadEngine m => Type -> m Type
 simplifyType (Array et shape u) = do
   dims <- mapM simplifySubExp $ shapeDims shape
   return $ Array et (Shape dims) u
-simplifyType (Mem size) =
-  Mem <$> simplifySubExp size
+simplifyType (Mem size space) =
+  Mem <$> simplifySubExp size <*> pure space
 simplifyType (Basic bt) =
   return $ Basic bt
 

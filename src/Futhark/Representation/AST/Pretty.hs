@@ -74,17 +74,23 @@ instance Pretty ExtDimSize where
 instance Pretty ExtShape where
   ppr = brackets . commasep . map ppr . extShapeDims
 
+instance Pretty Space where
+  ppr DefaultSpace = mempty
+  ppr (Space s)    = text "@" <> text s
+
 instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty (TypeBase ExtShape) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
     where f dim s = brackets $ s <> comma <> ppr dim
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty (TypeBase Rank) where
   ppr (Basic et) = ppr et
@@ -92,7 +98,8 @@ instance Pretty (TypeBase Rank) where
     where f s _ = brackets s
           u' | Unique <- u = star
              | otherwise = empty
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty Ident where
   ppr ident = ppr (identType ident) <+> ppr (identName ident)
@@ -197,7 +204,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
-  ppr (Alloc e) = text "alloc" <> apply [ppr e]
+  ppr (Alloc e DefaultSpace) = text "alloc" <> apply [ppr e]
+  ppr (Alloc e (Space sp)) = text "alloc" <> apply [ppr e, text sp]
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>

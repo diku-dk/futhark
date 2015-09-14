@@ -173,8 +173,8 @@ readsFromSet free =
     t <- lookupType var
     case t of
       Array {} -> return Nothing
-      Mem memsize -> Just <$> (Imp.MemoryUse var <$>
-                               ImpGen.subExpToDimSize memsize)
+      Mem memsize _ -> Just <$> (Imp.MemoryUse var <$>
+                                 ImpGen.subExpToDimSize memsize)
       Basic bt ->
         if bt == Cert
         then return Nothing
