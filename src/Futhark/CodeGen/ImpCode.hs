@@ -48,7 +48,7 @@ data Size = ConstSize Int32
 type MemSize = Size
 type DimSize = Size
 
-data Type = Scalar BasicType | Mem DimSize Space
+data Type = Scalar BasicType | Mem MemSize Space
 
 data Param = MemParam VName DimSize Space
            | ScalarParam VName BasicType
