@@ -186,6 +186,9 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
 instance FreeIn a => FreeIn [a] where
   freeIn = mconcat . map freeIn
 
+instance FreeIn Names where
+  freeIn = id
+
 instance FreeIn Bool where
   freeIn _ = mempty
 
