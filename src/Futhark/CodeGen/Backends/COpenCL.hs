@@ -7,7 +7,7 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Writer
 import Control.Monad.State
-import Data.Traversable hiding (forM, mapM)
+import Data.Traversable hiding (forM, mapM, sequence)
 import qualified Data.HashSet as HS
 import Data.List
 
@@ -224,8 +224,9 @@ callKernel kernel@(MapTranspose bt destmem destoffset srcmem srcoffset num_array
     assert(clSetKernelArg($id:kernel_name, 6, (FUT_BLOCK_DIM + 1) * FUT_BLOCK_DIM * sizeof($ty:ty), NULL)
            == CL_SUCCESS);
   }|]
-  kernel_size <- mapM (liftM roundedToBlockSize . GenericC.compileExp)
-                 [x_elems, y_elems, num_arrays]
+  kernel_size <- sequence [roundedToBlockSize <$> GenericC.compileExp x_elems,
+                           roundedToBlockSize <$> GenericC.compileExp y_elems,
+                           GenericC.compileExp num_arrays]
   let workgroup_size = Just [[C.cexp|FUT_BLOCK_DIM|], [C.cexp|FUT_BLOCK_DIM|], [C.cexp|1|]]
   launchKernel kernel_name kernel_size workgroup_size
   return GenericC.Done
