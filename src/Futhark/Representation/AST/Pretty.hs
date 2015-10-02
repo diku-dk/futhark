@@ -13,6 +13,7 @@ module Futhark.Representation.AST.Pretty
 
 import Data.Array (elems, listArray)
 import Data.Maybe
+import Data.Monoid
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
