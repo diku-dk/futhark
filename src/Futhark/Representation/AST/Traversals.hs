@@ -214,6 +214,20 @@ mapExpM tv (LoopOp (Kernel cs w index ispace inps rettype body)) =
               mapOnBody tv body)
   where (iparams, bounds) = unzip ispace
         (ts, perms) = unzip rettype
+mapExpM tv (LoopOp (ReduceKernel cs w
+                    (KernelSize num_workgroups workgroup_size per_thread_elements)
+                    red_fun fold_fun accs arrs)) =
+  LoopOp <$> (ReduceKernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              (KernelSize <$>
+               mapOnSubExp tv num_workgroups <*>
+               mapOnSubExp tv workgroup_size <*>
+               mapOnSubExp tv per_thread_elements) <*>
+              mapOnLambda tv red_fun <*>
+              mapOnLambda tv fold_fun <*>
+              mapM (mapOnSubExp tv) accs <*>
+              mapM (mapOnVName tv) arrs)
 mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
   SegOp <$> (pure SegReduce <*>
              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>

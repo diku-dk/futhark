@@ -70,6 +70,7 @@ Library
                    Futhark.CodeGen.KernelImp
                    Futhark.CodeGen.KernelImpGen
                    Futhark.CodeGen.OpenCL.Kernels
+                   Futhark.CodeGen.SetDefaultSpace
                    Futhark.Compiler
                    Futhark.Construct
                    Futhark.FreshNames
@@ -115,6 +116,7 @@ Library
                    Futhark.Pass.ExpandArrays
                    Futhark.Pass.ExplicitAllocations
                    Futhark.Pass.ExtractKernels
+                   Futhark.Pass.ExtractKernels.BlockedReduction
                    Futhark.Pass.ExtractKernels.Distribution
                    Futhark.Pass.ExtractKernels.ISRWIM
                    Futhark.Pass.FirstOrderTransform

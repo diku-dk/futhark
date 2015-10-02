@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpGen
   , ImpM
   , Env (envVtable, envDefaultSpace)
   , subImpM
+  , subImpM_
   , emit
   , collect
   , comment
@@ -40,6 +41,8 @@ module Futhark.CodeGen.ImpGen
   , declaringLParams
   , declaringVarEntry
   , withParams
+  , declaringBasicVar
+  , withBasicVar
   , compileBindings
   , writeExp
   , indexArray
@@ -48,6 +51,7 @@ module Futhark.CodeGen.ImpGen
   , varIndex
   , basicScalarSize
   , scalExpToImpExp
+  , dimSizeToExp
 
     -- * Typed enumerations
   , Count (..)
@@ -205,18 +209,22 @@ runImpM :: ImpM op a
         -> Either String (a, VNameSource, Imp.Code op)
 runImpM (ImpM m) comp = runRWST m . newEnv comp
 
-subImpM :: Operations op' -> ImpM op' ()
-        -> ImpM op (Imp.Code op')
+subImpM_ :: Operations op' -> ImpM op' a
+         -> ImpM op (Imp.Code op')
+subImpM_ ops m = snd <$> subImpM ops m
+
+subImpM :: Operations op' -> ImpM op' a
+        -> ImpM op (a, Imp.Code op')
 subImpM ops (ImpM m) = do
   env <- ask
   src <- getNameSource
-  case execRWST m env { envExpCompiler = opsExpCompiler ops
-                      , envCopyCompiler = opsCopyCompiler ops }
+  case runRWST m env { envExpCompiler = opsExpCompiler ops
+                     , envCopyCompiler = opsCopyCompiler ops }
        src of
     Left err -> fail err
-    Right (src', code) -> do
+    Right (x, src', code) -> do
       putNameSource src'
-      return code
+      return (x, code)
 
 -- | Execute a code generation action, returning the code that was
 -- emitted.
@@ -465,7 +473,7 @@ defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e space) = do
 
 defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
   t <- lookupType src
-  when (length idxs == arrayRank t ) $ do
+  when (length idxs == arrayRank t) $ do
     (srcmem, space, srcoffset) <-
       fullyIndexArray src $ map (`SE.subExpToScalExp` Int) idxs
     writeExp target $ index srcmem srcoffset (elemType t) space
@@ -519,7 +527,7 @@ defCompilePrimOp
   (Concat _ x ys _) = do
     et <- elemType <$> lookupType x
     offs_glb <- newVName "tmp_offs"
-    declaringBasicVar offs_glb Int $ do
+    withBasicVar offs_glb Int $ do
       emit $ Imp.DeclareScalar offs_glb Int
       emit $ Imp.SetScalar offs_glb $ Imp.Constant $ IntVal 0
       let destloc = MemLocation destmem destshape
@@ -686,6 +694,8 @@ defCompileLoopOp _ (Reduce {}) = soacError
 
 defCompileLoopOp _ (Kernel {}) = soacError
 
+defCompileLoopOp _ (ReduceKernel {}) = soacError
+
 soacError :: ImpM op a
 soacError = fail "SOAC encountered in code generator; should have been removed by first-order transform."
 
@@ -778,6 +788,10 @@ declaringVar patElem m =
 
 declaringBasicVar :: VName -> BasicType -> ImpM op a -> ImpM op a
 declaringBasicVar name bt =
+  declaringVarEntry name $ ScalarVar $ ScalarEntry bt
+
+withBasicVar :: VName -> BasicType -> ImpM op a -> ImpM op a
+withBasicVar name bt =
   local (insertInVtable name $ ScalarVar $ ScalarEntry bt)
 
 declaringLoopVars :: [VName] -> ImpM op a -> ImpM op a
@@ -785,7 +799,7 @@ declaringLoopVars = flip $ foldr declaringLoopVar
 
 declaringLoopVar :: VName -> ImpM op a -> ImpM op a
 declaringLoopVar name =
-  declaringBasicVar name Int
+  withBasicVar name Int
 
 -- | Remove the array targets.
 funcallTargets :: Destination -> ImpM op [VName]
@@ -1114,4 +1128,4 @@ simplifyScalExp :: ScalExp -> ScalExp
 simplifyScalExp se = AlgSimplify.simplify se mempty
 
 basicScalarSize :: BasicType -> ScalExp
-basicScalarSize = SE.Val . IntVal . fromIntegral . basicSize
+basicScalarSize = SE.Val . IntVal . basicSize

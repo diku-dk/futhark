@@ -183,8 +183,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
   ppr (Not e) = text "!" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
-  ppr (Abs e) = text "abs" <> pprPrec 9 e
-  ppr (Signum e) = text "signum" <> pprPrec 9 e
+  ppr (Abs e) = text "abs" <+> pprPrec 9 e
+  ppr (Signum e) = text "signum" <+> pprPrec 9 e
   ppr (Complement e) = text "~" <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
@@ -275,6 +275,15 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
             ppr name <+> text "<" <+> ppr bound
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> apply (map ppr perm)
+  ppr (ReduceKernel cs w
+       (KernelSize num_chunks workgroup_size per_thread_elements)
+       parfun seqfun es as) =
+    ppCertificates' cs <> text "reduceKernel" <>
+    parens (ppr w <> comma </>
+            ppr num_chunks <> comma <+> ppr workgroup_size <> comma <+> ppr per_thread_elements </>
+            braces (commasep $ map ppr es) <> comma </>
+            commasep (map ppr as) </>
+            ppr parfun <> comma </> ppr seqfun)
 
 instance PrettyLore lore => Pretty (KernelInput lore) where
   ppr inp = ppr (kernelInputType inp) <+>

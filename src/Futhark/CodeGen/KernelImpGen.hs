@@ -21,6 +21,8 @@ import qualified Futhark.CodeGen.KernelImp as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import Futhark.CodeGen.SetDefaultSpace
+import Futhark.Tools (partitionChunkedLambdaParameters)
 
 type CallKernelGen = ImpGen.ImpM Imp.CallKernel
 type InKernelGen = ImpGen.ImpM Imp.InKernel
@@ -35,7 +37,9 @@ inKernelOperations :: ImpGen.Operations Imp.InKernel
 inKernelOperations = ImpGen.defaultOperations
 
 compileProg :: Prog -> Either String Imp.Program
-compileProg = ImpGen.compileProg callKernelOperations $ Imp.Space "device"
+compileProg = liftM (setDefaultSpace (Imp.Space "device")) .
+              ImpGen.compileProg callKernelOperations
+              (Imp.Space "device")
 
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
@@ -65,46 +69,218 @@ kernelCompiler
         sequence_ $ zipWith3 (writeThreadResult indices) perms dest $ bodyResult body
 
   makeAllMemoryGlobal $ do
-    kernelbody <- ImpGen.subImpM inKernelOperations $
-                  ImpGen.withParams [global_thread_index_param] $
-                  ImpGen.declaringLParams (indices_lparams++map kernelInputParam inps) $ do
-                    ImpGen.comment "compute thread index" set_indices
-                    ImpGen.comment "read kernel parameters" read_params
-                    ImpGen.compileBindings kernel_bnds $
-                     ImpGen.comment "write kernel result" write_result
+    kernel_body <- ImpGen.subImpM_ inKernelOperations $
+                   ImpGen.withParams [global_thread_index_param] $
+                   ImpGen.declaringLParams (indices_lparams++map kernelInputParam inps) $ do
+                     ImpGen.comment "compute thread index" set_indices
+                     ImpGen.comment "read kernel parameters" read_params
+                     ImpGen.compileBindings kernel_bnds $
+                      ImpGen.comment "write kernel result" write_result
 
-    -- Find the memory blocks containing the output arrays.
-    let dest_mems = mapMaybe destMem dest
-        destMem (ImpGen.ArrayDestination
-                 (ImpGen.CopyIntoMemory
-                  (ImpGen.MemLocation mem _ _)) _) =
-          Just mem
-        destMem _ =
-          Nothing
+    -- Compute the variables that we need to pass to and from the
+    -- kernel.
+    uses <- computeKernelUses dest kernel_body bound_in_kernel
 
-    -- Compute the variables that we need to pass to the kernel.
-    reads_from <- readsFromSet $
-                  freeIn kernelbody `HS.difference`
-                  HS.fromList (dest_mems <> bound_in_kernel)
-
-    -- Compute what memory to copy out.  Must be allocated on device
-    -- before kernel execution anyway.
-    writes_to <- liftM catMaybes $ forM dest $ \case
-      (ImpGen.ArrayDestination
-       (ImpGen.CopyIntoMemory
-        (ImpGen.MemLocation mem _ _)) _) -> do
-        memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
-        return $ Just $ Imp.MemoryUse mem memsize
-      _ ->
-        return Nothing
-
-    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.GenericKernel {
+    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.MapKernel {
         Imp.kernelThreadNum = global_thread_index
-      , Imp.kernelBody = kernelbody
-      , Imp.kernelUses = nub $ reads_from ++ writes_to
+      , Imp.kernelBody = kernel_body
+      , Imp.kernelUses = uses
       , Imp.kernelSize = kernel_size
       }
     return ImpGen.Done
+
+kernelCompiler
+  (ImpGen.Destination dest)
+  (LoopOp (ReduceKernel _ w kernel_size reduce_lam fold_lam nes _)) = do
+
+    local_id <- newVName "local_id"
+    group_id <- newVName "group_id"
+    global_id <- newVName "global_id"
+    global_size <- newVName "global_size"
+    offset <- newVName "offset"
+    (num_groups, group_size, per_thread_chunk) <- compileKernelSize kernel_size
+
+    let fold_bnds = bodyBindings $ lambdaBody fold_lam
+        fold_lparams = lambdaParams fold_lam
+        (fold_chunk_param, _) =
+          partitionChunkedLambdaParameters $ lambdaParams fold_lam
+
+        reduce_bnds = bodyBindings $ lambdaBody reduce_lam
+        reduce_lparams = lambdaParams reduce_lam
+        (reduce_acc_params, reduce_arr_params) =
+          splitAt (length nes) $ lambdaParams reduce_lam
+
+    ((local_mems_params, perthread_mems_params, acc_local_mem),
+     compute_total_sizes) <-
+      ImpGen.subImpM inKernelOperations $
+      unzip3 <$> mapM createAccMem reduce_acc_params
+    let acc_mem_params = local_mems_params <> perthread_mems_params
+        num_elements = ImpGen.compileSubExp w
+
+    (call_with_prologue, prologue) <-
+      makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
+      ImpGen.withBasicVar local_id Int $
+      ImpGen.withBasicVar offset Int $
+      ImpGen.declaringBasicVar local_id Int $
+      ImpGen.declaringBasicVar group_id Int $
+      ImpGen.declaringBasicVar global_id Int $
+      ImpGen.declaringBasicVar global_size Int $
+      ImpGen.withParams acc_mem_params $
+      ImpGen.declaringLParams (fold_lparams++reduce_lparams) $ do
+
+        ImpGen.emit $
+          Imp.Op (Imp.GetLocalId local_id 0) <>
+          Imp.Op (Imp.GetGroupId group_id 0) <>
+          Imp.Op (Imp.GetGlobalSize global_size 0) <>
+          Imp.Op (Imp.GetGlobalId global_id 0) <>
+          compute_total_sizes
+
+        let write_fold_op_result = zipWithM_ writeOpResult
+                                   reduce_acc_params $
+                                   bodyResult $ lambdaBody fold_lam
+
+        apply_fold_op <-
+          ImpGen.subImpM_ inKernelOperations $ do
+            computeThreadChunkSize
+              (ImpGen.dimSizeToExp per_thread_chunk) num_elements
+              (Imp.ScalarVar global_id) $ paramName fold_chunk_param
+            ImpGen.compileBindings fold_bnds $
+              ImpGen.comment "write fold result" write_fold_op_result
+
+        neutral_fold_op <-
+          ImpGen.collect $ zipWithM_ writeOpResult reduce_acc_params nes
+
+        let thread_is_in_bounds =
+              Imp.BinOp Less
+              (Imp.ScalarVar global_id *
+               ImpGen.innerExp (ImpGen.dimSizeToExp per_thread_chunk))
+              (ImpGen.compileSubExp w)
+            fold_op = Imp.If thread_is_in_bounds apply_fold_op neutral_fold_op
+
+        write_fold_result <-
+          ImpGen.subImpM_ inKernelOperations $
+          zipWithM_ (writeFoldResult local_id) acc_local_mem reduce_acc_params
+
+        let read_reduce_args = zipWithM_ (readReduceArgument local_id offset)
+                               reduce_arr_params acc_local_mem
+            write_reduce_result = zipWithM_ writeOpResult
+                                  reduce_acc_params $
+                                  bodyResult $ lambdaBody reduce_lam
+
+        init_accum <-
+          ImpGen.subImpM_ inKernelOperations $
+          zipWithM readAccParam reduce_acc_params nes
+
+        reduce_op <-
+          ImpGen.subImpM_ inKernelOperations $ do
+            ImpGen.comment "read array element" read_reduce_args
+            ImpGen.compileBindings reduce_bnds $
+              ImpGen.comment "write reduction result" write_reduce_result
+
+        (output_params, write_result) <-
+          ImpGen.subImpM inKernelOperations $
+          zipWithM (writeFinalResult group_id) dest reduce_acc_params
+
+        let local_mem = acc_local_mem
+            bound_in_kernel = map paramName (lambdaParams fold_lam ++
+                                             lambdaParams reduce_lam) ++
+                              [lambdaIndex fold_lam,
+                               lambdaIndex reduce_lam,
+                               offset,
+                               local_id,
+                               group_id,
+                               global_size,
+                               global_id] ++
+                              map fst output_params ++
+                              map Imp.paramName local_mems_params
+
+        return $ \prologue -> do
+          uses <- computeKernelUses dest [freeIn prologue,
+                                          freeIn fold_op,
+                                          freeIn write_fold_result,
+                                          freeIn reduce_op,
+                                          freeIn write_result
+                                          ]
+                  bound_in_kernel
+
+          ImpGen.emit $ Imp.Op $ Imp.Reduce Imp.ReduceKernel
+            { Imp.reductionThreadNum = lambdaIndex fold_lam
+            , Imp.reductionOffsetName = offset
+            , Imp.reductionOutputParams = output_params
+            , Imp.reductionThreadLocalMemory = local_mem
+
+            , Imp.reductionPrologue = prologue
+            , Imp.reductionFoldOperation = fold_op
+            , Imp.reductionWriteFoldResult = write_fold_result
+            , Imp.reductionInitAccumulator = init_accum
+            , Imp.reductionReduceOperation = reduce_op
+            , Imp.reductionWriteFinalResult = write_result
+
+            , Imp.reductionNumGroups = num_groups
+            , Imp.reductionGroupSize = group_size
+
+            , Imp.reductionUses = uses
+            }
+          return ImpGen.Done
+    call_with_prologue prologue
+  where createAccMem param
+          | Basic bt <- paramType param = do
+              mem_shared <- newVName (baseString (paramName param) <> "_mem_shared")
+              mem_perthread <- newVName (baseString (paramName param) <> "_mem_perthread")
+              let perthread_size = Imp.ConstSize 1
+              total_size <- newVName "total_size"
+              return (Imp.MemParam mem_shared (Imp.VarSize total_size) $ Space "local",
+                      Imp.MemParam mem_perthread perthread_size $ Space "local",
+                      (Imp.VarSize total_size,
+                       perthread_size,
+                       bt,
+                       mem_shared,
+                       mem_perthread))
+          | otherwise =
+            fail "createAccMem: non-basic accumulator not supported"
+
+        readAccParam param ne
+          | Basic _ <- paramType param =
+              ImpGen.emit $ Imp.SetScalar (paramName param) $
+                ImpGen.compileSubExp ne
+          | otherwise =
+            fail "readAccParam: non-basic accumulator not supported"
+
+        writeOpResult param res
+          | Basic _ <- paramType param =
+              ImpGen.emit $ Imp.SetScalar (paramName param) $
+                ImpGen.compileSubExp res
+          | otherwise =
+            fail "writeOpResult: non-basic result not supported"
+
+
+        writeFoldResult local_id (_, _, bt, mem_shared, _mem_local) param
+          | Basic _ <- paramType param =
+              ImpGen.emit $
+              Imp.Write mem_shared (Imp.ScalarVar local_id) bt (Space "local") $
+              Imp.ScalarVar (paramName param)
+          | otherwise =
+              fail "writeFoldResult: non-basic result not supported"
+
+        readReduceArgument local_id offset param (_, _, bt, mem_shared, _mem_local)
+          | Basic _ <- paramType param =
+              ImpGen.emit $
+              Imp.SetScalar (paramName param) $
+              Imp.Index mem_shared i bt (Space "local")
+          | otherwise =
+              fail "readReduceArgument: non-basic argument not supported"
+          where i = Imp.ScalarVar local_id + Imp.ScalarVar offset
+
+        writeFinalResult group_id (ImpGen.ArrayDestination memloc _) acc_param
+          | Basic bt <- paramType acc_param,
+            ImpGen.CopyIntoMemory (ImpGen.MemLocation out_arr_mem _ _ixfun) <- memloc = do
+              let target = ImpGen.ArrayElemDestination
+                           out_arr_mem bt (Imp.Space "global") $
+                           ImpGen.bytes $ Imp.SizeOf bt * Imp.ScalarVar group_id
+              ImpGen.compileResultSubExp target $ Var $ paramName acc_param
+              return (out_arr_mem, Imp.ConstSize $ basicSize bt)
+        writeFinalResult _ _ _ =
+          fail "writeFinalResult: non-basic argument not supported"
 
 -- We generate a simple kernel for itoa and replicate.
 kernelCompiler target (PrimOp (Iota n)) = do
@@ -120,6 +296,13 @@ kernelCompiler target (PrimOp (Replicate n v)) = do
     LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0..arrayRank t])] (Body () [] [v])
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
+
+compileKernelSize :: KernelSize -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize)
+compileKernelSize (KernelSize num_groups group_size per_thread_elements) = do
+  num_groups' <- ImpGen.subExpToDimSize num_groups
+  group_size' <- ImpGen.subExpToDimSize group_size
+  per_thread_elements' <- ImpGen.subExpToDimSize per_thread_elements
+  return (num_groups', group_size', per_thread_elements')
 
 copyCompiler :: ImpGen.CopyCompiler Imp.CallKernel
 copyCompiler bt
@@ -159,12 +342,43 @@ copyCompiler bt
     ImpGen.emit $ Imp.DeclareScalar kernel_size Int
     ImpGen.emit $ Imp.SetScalar kernel_size $ product shape
 
-    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.GenericKernel {
+    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.MapKernel {
         Imp.kernelThreadNum = global_thread_index
       , Imp.kernelSize = Imp.VarSize kernel_size
       , Imp.kernelUses = nub $ reads_from ++ writes_to
       , Imp.kernelBody = body
       }
+
+computeKernelUses :: FreeIn a =>
+                     [ImpGen.ValueDestination]
+                  -> a -> [VName]
+                  -> ImpGen.ImpM op [Imp.KernelUse]
+computeKernelUses dest kernel_body bound_in_kernel = do
+    -- Find the memory blocks containing the output arrays.
+    let dest_mems = mapMaybe destMem dest
+        destMem (ImpGen.ArrayDestination
+                 (ImpGen.CopyIntoMemory
+                  (ImpGen.MemLocation mem _ _)) _) =
+          Just mem
+        destMem _ =
+          Nothing
+
+    -- Compute the variables that we need to pass to the kernel.
+    reads_from <- readsFromSet $
+                  freeIn kernel_body `HS.difference`
+                  HS.fromList (dest_mems <> bound_in_kernel)
+
+    -- Compute what memory to copy out.  Must be allocated on device
+    -- before kernel execution anyway.
+    writes_to <- liftM catMaybes $ forM dest $ \case
+      (ImpGen.ArrayDestination
+       (ImpGen.CopyIntoMemory
+        (ImpGen.MemLocation mem _ _)) _) -> do
+        memsize <- ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
+        return $ Just $ Imp.MemoryUse mem memsize
+      _ ->
+        return Nothing
+    return $ nub $ reads_from ++ writes_to
 
 readsFromSet :: Names -> ImpGen.ImpM op [Imp.KernelUse]
 readsFromSet free =
@@ -173,6 +387,7 @@ readsFromSet free =
     t <- lookupType var
     case t of
       Array {} -> return Nothing
+      Mem _ (Space "local") -> return Nothing
       Mem memsize _ -> Just <$> (Imp.MemoryUse var <$>
                                  ImpGen.subExpToDimSize memsize)
       Basic bt ->
@@ -256,3 +471,17 @@ isMapTranspose bt
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
           src_offset' <- ImpGen.scalExpToImpExp src_offset
           return (dest_offset', src_offset')
+
+computeThreadChunkSize :: ImpGen.Count ImpGen.Elements -> Imp.Exp -> Imp.Exp
+                       -> VName
+                       -> ImpGen.ImpM op ()
+computeThreadChunkSize chunk_per_thread num_elements thread_index chunk_var =
+  ImpGen.emit $
+  Imp.If is_last_thread
+  (Imp.SetScalar chunk_var last_thread_chunk)
+  (Imp.SetScalar chunk_var chunk_per_thread')
+  where last_thread_chunk =
+          num_elements - thread_index * chunk_per_thread'
+        is_last_thread =
+          Imp.BinOp Less num_elements ((thread_index + 1) * chunk_per_thread')
+        chunk_per_thread' = ImpGen.innerExp chunk_per_thread

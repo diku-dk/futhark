@@ -163,6 +163,9 @@ loopOpExtType (Kernel _ _ _ is _ returns _) =
   [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
+loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
+  staticShapes $
+  map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]

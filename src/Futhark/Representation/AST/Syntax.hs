@@ -55,6 +55,7 @@ module Futhark.Representation.AST.Syntax
   , Annotations.RetType
   , StreamForm(..)
   , KernelInput (..)
+  , KernelSize (..)
 
   -- * Definitions
   , ParamT (..)
@@ -265,8 +266,15 @@ data LoopOp lore
   | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
+
   | Kernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
     [(Type, [Int])] (Body lore)
+  | ReduceKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    (LambdaT lore)
+    [SubExp]
+    [VName]
 
 data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]
@@ -281,6 +289,12 @@ data KernelInput lore = KernelInput { kernelInputParam :: FParam lore
 deriving instance Annotations lore => Eq (KernelInput lore)
 deriving instance Annotations lore => Show (KernelInput lore)
 deriving instance Annotations lore => Ord (KernelInput lore)
+
+data KernelSize = KernelSize { kernelWorkgroups :: SubExp
+                             , kernelWorkgroupSize :: SubExp
+                             , kernelElementsPerThread :: SubExp
+                             }
+                deriving (Eq, Ord, Show)
 
 -- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
 -- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@

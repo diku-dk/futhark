@@ -832,7 +832,7 @@ applyFunReturns rets params args
                   _               -> mem
 
 -- | The size of a basic type in bytes.
-basicSize :: BasicType -> Int
+basicSize :: Num a => BasicType -> a
 basicSize Int = 4
 basicSize Bool = 1
 basicSize Char = 1

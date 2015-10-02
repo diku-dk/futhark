@@ -770,6 +770,9 @@ evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
 evalLoopOp (Kernel {}) =
   fail "Cannot interpret kernels."
 
+evalLoopOp (ReduceKernel {}) =
+  fail "Cannot interpret reduction kernels."
+
 evalLoopOp (Stream _ _ form elam arrs _) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs

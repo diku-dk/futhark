@@ -917,6 +917,9 @@ checkLoopOp (Kernel cs w index ispace inps returns body) = do
              pretty (kernelInputName inp) ++
              " does not use entire index space."
 
+checkLoopOp (ReduceKernel {}) =
+  return () -- It's all good.
+
 checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
   mapM_ (requireI [Basic Cert]) ass

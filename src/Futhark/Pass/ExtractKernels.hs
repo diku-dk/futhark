@@ -169,7 +169,9 @@ import Futhark.Pass
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
+import Futhark.Pass.ExtractKernels.BlockedReduction
 import Futhark.Util.Log
+import Futhark.Transform.Rename
 
 extractKernels :: Pass Basic Basic
 extractKernels =
@@ -243,22 +245,16 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
 transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
-transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) = do
-  (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
-  mapbnd' <- transformBinding mapbnd
-  localTypeEnv (typeEnvFromBindings mapbnd') $ do
-    redbnd' <- transformBinding redbnd
-    return $ mapbnd' ++ redbnd'
-
+transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) =
+  blockedReduction pat cs w lam1 lam2 nes arrs
+{-
 transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ redlam nes) maplam arrs _))) = do
   maplam' <- FOT.transformLambda =<<
              singletonChunkRedLikeStreamLambda (lambdaReturnType redlam) maplam
-  (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, redlam, maplam', nes, arrs)
-  mapbnd' <- transformBinding mapbnd
-  localTypeEnv (typeEnvFromBindings mapbnd') $ do
-    redbnd' <- transformBinding redbnd
-    return $ mapbnd' ++ redbnd'
-
+  redlam' <- FOT.transformLambda redlam
+  return [Let pat () $ LoopOp $
+          ReduceKernel cs w redlam' maplam' nes arrs]
+-}
 transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs c))) =
   localTypeEnv (typeEnvFromParams $ extLambdaParams lam) $ do
     body' <- transformBody $ extLambdaBody lam
@@ -270,10 +266,10 @@ transformBinding (Let res_pat () (LoopOp op))
     Just do_iswim <- iswim res_pat cs w scan_fun scan_input =
       transformBindings =<< runBinder_ do_iswim
 
-transformBinding (Let res_pat () (LoopOp op))
-  | Reduce cs w red_fun red_input <- op,
-    Just do_irwim <- irwim res_pat cs w red_fun red_input =
-      transformBindings =<< runBinder_ do_irwim
+transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
+  red_fun' <- renameLambda red_fun
+  blockedReduction pat cs w red_fun' red_fun nes arrs
+  where (nes, arrs) = unzip red_input
 
 transformBinding bnd = do
   e' <- mapExpM transform $ bindingExp bnd
@@ -416,6 +412,8 @@ unbalancedLambda lam =
         unbalancedBinding bound (LoopOp (Stream _ w _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (Kernel _ w _ _ _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (ReduceKernel _ w _ _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (DoLoop _ merge (ForLoop i iterations) body)) =
           iterations `subExpBound` bound ||

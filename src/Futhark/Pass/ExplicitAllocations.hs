@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections, LambdaCase #-}
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
@@ -155,15 +155,18 @@ runPatAllocM :: MonadFreshNames m =>
 runPatAllocM (PatAllocM m) memoryMap =
   modifyNameSource $ runState $ runReaderT (runWriterT m) memoryMap
 
+arraySizeInBytes :: Allocator m => Type -> m SubExp
+arraySizeInBytes t =
+  computeSize "bytes" $
+  SE.sproduct $
+  (SE.Val $ IntVal $ basicSize $ elemType t) :
+  map (`SE.subExpToScalExp` Int) (arrayDims t)
+
 allocForArray :: Allocator m =>
-                 Type -> m (SubExp, VName)
-allocForArray t = do
-  size <-
-    computeSize "bytes" $
-    SE.sproduct $
-    (SE.Val $ IntVal $ fromIntegral $ basicSize $ elemType t) :
-    map (`SE.subExpToScalExp` Int) (arrayDims t)
-  m <- allocateMemory "mem" size DefaultSpace
+                 Type -> Space -> m (SubExp, VName)
+allocForArray t space = do
+  size <- arraySizeInBytes t
+  m <- allocateMemory "mem" size space
   return (size, m)
 
 allocsForBinding :: Allocator m =>
@@ -277,7 +280,7 @@ summaryForBindage t BindVar
   | basicType t =
     return Scalar
   | otherwise = do
-    (_, m) <- allocForArray t
+    (_, m) <- allocForArray t DefaultSpace
     return $ directIndexFunction m t
 summaryForBindage _ (BindInPlace _ src _) =
   lookupSummary' src
@@ -299,13 +302,6 @@ memForBindee ident = do
 directIndexFunction :: VName -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ arrayDims t
-
-sizeOfMemoryBlock :: (Monad m, HasTypeEnv m) => VName -> m SubExp
-sizeOfMemoryBlock mem = do
-  t <- lookupType mem
-  case t of
-    Mem size _ -> return size
-    _          -> fail $ "sizeOfMemoryBlock: " <> pretty mem <> " not a memory block."
 
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
 lookupSummary name = asksMemoryMap $ fmap entryMemSummary . HM.lookup name
@@ -423,7 +419,7 @@ allocLinearArray :: String
                  -> VName -> AllocM (SubExp, VName, SubExp)
 allocLinearArray s v = do
   t <- lookupType v
-  (size, mem) <- allocForArray t
+  (size, mem) <- allocForArray t DefaultSpace
   v' <- newIdent s t
   let pat = Pattern [] [PatElem v' BindVar $ directIndexFunction mem t]
   addBinding $ Let pat () $ PrimOp $ Copy v
@@ -544,16 +540,19 @@ allocInExp (LoopOp (Kernel cs w index ispace inps returns body)) = do
                   summary = MemSummary mem ixfun'
               return inp { kernelInputParam = Param (kernelInputIdent inp) summary }
 
-allocInExp (LoopOp (Map cs w f arrs)) = do
-  f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
-  return $ LoopOp $ Map cs w f' arrs
-
-allocInExp (LoopOp (Reduce cs w f input)) = do
-  -- Create new memory blocks but use same index functions.
-  (new_summaries, new_arrs) <- unzip <$> mapM (duplicateArray "reduce") arrs
-  f' <- allocInReduceLambda f new_summaries
-  return $ LoopOp $ Reduce cs w f' $ zip accs new_arrs
-  where (accs,arrs) = unzip input
+allocInExp (LoopOp (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
+  acc_summaries <- mapM accumulatorSummary nes
+  arr_summaries <- mapM lookupSummary' arrs
+  fold_lam' <- allocInChunkedLambda (kernelElementsPerThread size)
+               fold_lam arr_summaries
+  par_acc_summaries <- mapM accumulatorSummary nes
+  red_lam' <- allocInReduceLambda red_lam (acc_summaries ++ par_acc_summaries) []
+  return $ LoopOp $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
+  where accumulatorSummary se =
+          subExpType se >>= \case
+            Basic _ -> return Scalar
+            t -> do (_, mem) <- allocForArray t $ Space "thread_local"
+                    return $ directIndexFunction mem t
 
 allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
@@ -571,26 +570,46 @@ allocInExp e = mapExpM alloc e
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
 
--- | Duplicate an array into a new memory block, but with the same
--- index function.
-duplicateArray :: String -> VName -> AllocM ((VName, IxFun.IxFun), VName)
-duplicateArray desc arr = do
-  (mem, ixfun) <- lookupArraySummary' arr
-  mem_size <- sizeOfMemoryBlock mem
-  new_mem <- letExp (desc <> "_" <> baseString arr <> "_mem") $
-             PrimOp $ Alloc mem_size DefaultSpace
-  new_arr <- newVName $ desc <> "_" <> baseString arr
-  new_arr_ident <- Ident new_arr <$> lookupType arr
-  let pat = Pattern [] [PatElem new_arr_ident BindVar $
-                        MemSummary new_mem ixfun]
-  addBinding =<< mkLetM pat (PrimOp $ Copy arr)
-  return ((new_mem, ixfun), new_arr)
-
-allocInMapLambda :: In.Lambda -> [MemSummary] -> AllocM Lambda
-allocInMapLambda lam input_summaries = do
+allocInChunkedLambda :: SubExp -> In.Lambda -> [MemSummary] -> AllocM Lambda
+allocInChunkedLambda thread_chunk lam arr_summaries = do
   let i = lambdaIndex lam
-  params' <-
-    forM (zip (lambdaParams lam) input_summaries) $ \(p,summary) ->
+      (chunk_size_param, chunked_params) =
+        partitionChunkedLambdaParameters $ lambdaParams lam
+  chunked_params' <-
+    forM (zip chunked_params arr_summaries) $ \(p,summary) ->
+    case (paramType p, summary) of
+     (_, Scalar) ->
+       fail $ "Passed a scalar for lambda parameter " ++ pretty p
+     (Array {}, MemSummary mem ixfun) ->
+       return p { paramLore =
+                     MemSummary mem $ IxFun.offsetIndex ixfun $
+                     SE.Id i Int * SE.intSubExpToScalExp thread_chunk
+                }
+     (_, _) ->
+       fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
+  allocInLambda i (Param (paramIdent chunk_size_param) Scalar : chunked_params')
+    (lambdaBody lam) (lambdaReturnType lam)
+
+allocInReduceLambda :: In.Lambda -> [MemSummary] -> [MemSummary] -> AllocM Lambda
+allocInReduceLambda lam acc_summaries arr_summaries = do
+  let i = lambdaIndex lam
+      (acc_params, arr_params) =
+        splitAt (length acc_summaries) $ lambdaParams lam
+  (acc_params', arr_params') <-
+    allocInFoldParameters i acc_params arr_params acc_summaries arr_summaries
+  allocInLambda i (acc_params' ++ arr_params')
+    (lambdaBody lam) (lambdaReturnType lam)
+
+allocInFoldParameters :: VName
+                      -> [In.LParam] -> [In.LParam]
+                      -> [MemSummary] -> [MemSummary]
+                      -> AllocM ([LParam], [LParam])
+allocInFoldParameters i acc_params arr_params acc_summaries arr_summaries = do
+  acc_params' <-
+    forM (zip acc_params acc_summaries) $ \(p,summary) ->
+    return p { paramLore = summary }
+  arr_params' <-
+    forM (zip arr_params arr_summaries) $ \(p,summary) ->
     case (paramType p, summary) of
      (_, Scalar) ->
        fail $ "Passed a scalar for lambda parameter " ++ pretty p
@@ -600,28 +619,7 @@ allocInMapLambda lam input_summaries = do
                 }
      _ ->
        return p { paramLore = Scalar }
-  allocInLambda i params' (lambdaBody lam) (lambdaReturnType lam)
-
-allocInReduceLambda :: In.Lambda
-                    -> [(VName, IxFun.IxFun)]
-                    -> AllocM Lambda
-allocInReduceLambda lam input_summaries = do
-  -- Idea: at index point 'i', the accumulator is at offset 'i' and
-  -- the element is at offset 'i+1'.
-  acc_params' <-
-    forM (zip acc_params input_summaries) $ \(acc_param, (mem, ixfun)) ->
-    return acc_param { paramLore =
-                          MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
-                     }
-  arr_params' <-
-    forM (zip arr_params input_summaries) $ \(arr_param, (mem, ixfun)) ->
-    return arr_param { paramLore =
-                          MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int + 1]
-                     }
-  allocInLambda i (acc_params' ++ arr_params') (lambdaBody lam) (lambdaReturnType lam)
-  where n = length input_summaries
-        i = lambdaIndex lam
-        (acc_params, arr_params) = splitAt n $ lambdaParams lam
+  return (acc_params', arr_params')
 
 allocInLambda :: VName -> [LParam] -> In.Body -> [Type]
               -> AllocM Lambda
