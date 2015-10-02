@@ -34,7 +34,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
     letSubExp "per_thread_elements" =<<
     eBinOp IntDivide
     (eBinOp Plus (eSubExp w)
-     (eBinOp Minus (eSubExp num_threads) (eSubExp $ Constant $ IntVal (-1)) Int)
+     (eBinOp Minus (eSubExp num_threads) (eSubExp $ Constant $ IntVal 1) Int)
      Int)
     (eSubExp num_threads) Int
 
