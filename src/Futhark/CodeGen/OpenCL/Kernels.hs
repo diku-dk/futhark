@@ -89,9 +89,9 @@ reduce red =
      /* in-wave reductions */
      uint wave_num = lid / WAVE_SIZE;
      uint wid = lid - (wave_num * WAVE_SIZE);
-     for (uint $id:offset = WAVE_SIZE/2; $id:offset; $id:offset >>= 1) {
+     for (uint $id:offset = 1; $id:offset < WAVE_SIZE; $id:offset *= 2) {
        /* in-wave reductions don't need a barrier */
-       if (wid < $id:offset) {
+       if ((wid & (2 * $id:offset - 1)) == 0) {
          $items:(reductionReduceOperation red)
          $items:(reductionWriteFoldResult red)
        }
