@@ -61,9 +61,11 @@ Library
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
+                   Futhark.CodeGen.Backends.GenericPython
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.SequentialC
+                   Futhark.CodeGen.Backends.SequentialPython
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpGen
@@ -227,6 +229,21 @@ Executable futhark-c
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
+
+Executable futhark-py
+  Main-is: src/futhark-py.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 text,
+                 filepath,
+                 process,
+                 transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
 
 Executable futharki
   Main-is: src/futharki.hs
