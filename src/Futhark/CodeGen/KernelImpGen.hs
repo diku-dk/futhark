@@ -309,8 +309,8 @@ copyCompiler bt
   destloc@(ImpGen.MemLocation destmem destshape destIxFun)
   srcloc@(ImpGen.MemLocation srcmem _ srcIxFun)
 
-  | Just (destoffset, srcoffset) <- isMapTranspose bt destloc srcloc,
-    [num_arrays, size_x, size_y] <- map ImpGen.sizeToExp destshape =
+  | Just (destoffset, srcoffset,
+          num_arrays, size_x, size_y) <- isMapTranspose bt destloc srcloc =
   ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
   num_arrays size_x size_y
 
@@ -452,25 +452,35 @@ readKernelInput inp =
         is = kernelInputIndices inp
 
 isMapTranspose :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
-               -> Maybe (Imp.Exp, Imp.Exp)
+               -> Maybe (Imp.Exp, Imp.Exp,
+                         Imp.Exp, Imp.Exp, Imp.Exp)
 isMapTranspose bt
-  (ImpGen.MemLocation _ _ destIxFun)
+  (ImpGen.MemLocation _ destshape destIxFun)
   (ImpGen.MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
-    perm == [0, 2, 1] =
+    permIsTranspose perm =
     isOk dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun,
-    perm == [0, 2, 1] =
+    permIsTranspose perm  =
     isOk dest_offset src_offset
   | otherwise =
     Nothing
   where bt_size = ImpGen.basicScalarSize bt
+        permIsTranspose = (`elem` [ [0, 2, 1], [1,0] ])
+
         isOk dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
           src_offset' <- ImpGen.scalExpToImpExp src_offset
-          return (dest_offset', src_offset')
+          (num_arrays, size_x, size_y) <- getSizes
+          return (dest_offset', src_offset',
+                  num_arrays, size_x, size_y)
+        getSizes =
+          case map ImpGen.sizeToExp destshape of
+            [num_arrays, size_x, size_y] -> Just (num_arrays, size_x, size_y)
+            [size_x, size_y]             -> Just (1, size_x, size_y)
+            _                            -> Nothing
 
 computeThreadChunkSize :: ImpGen.Count ImpGen.Elements -> Imp.Exp -> Imp.Exp
                        -> VName
