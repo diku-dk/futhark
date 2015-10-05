@@ -23,6 +23,13 @@ data PyStmt = If PyExp PyStmt PyStmt
             deriving (Eq, Show)
 
 
+instance Pretty PyExp where
+    ppr (Constant v) = text $ show v 
+    ppr (ScalarVariable n) = text n  
+    ppr (BinaryOp s e1 e2) = ppr e1 <> text s <> ppr e2 
+    ppr (SetScalar v e) = text v <> text "=" <> ppr e 
+  
+
 
             
             
