@@ -69,7 +69,8 @@ kernelCompiler
         sequence_ $ zipWith3 (writeThreadResult indices) perms dest $ bodyResult body
 
   makeAllMemoryGlobal $ do
-    kernel_body <- ImpGen.subImpM_ inKernelOperations $
+    kernel_body <- liftM (setBodySpace $ Imp.Space "global") $
+                   ImpGen.subImpM_ inKernelOperations $
                    ImpGen.withParams [global_thread_index_param] $
                    ImpGen.declaringLParams (indices_lparams++map kernelInputParam inps) $ do
                      ImpGen.comment "compute thread index" set_indices

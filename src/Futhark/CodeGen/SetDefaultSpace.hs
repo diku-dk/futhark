@@ -1,5 +1,7 @@
 module Futhark.CodeGen.SetDefaultSpace
-       (setDefaultSpace)
+       ( setDefaultSpace
+       , setBodySpace
+       )
        where
 
 import Futhark.CodeGen.ImpCode
