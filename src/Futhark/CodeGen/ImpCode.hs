@@ -38,6 +38,7 @@ import Language.Futhark.Core
 import Futhark.Representation.AST.Syntax (BinOp (..), Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
+import Futhark.Util.IntegralExp
 
 import Text.PrettyPrint.Mainland hiding (space)
 
@@ -138,11 +139,19 @@ instance Num Exp where
   fromInteger = Constant . IntVal . fromInteger
   negate = UnOp Negate
 
-instance Fractional Exp where
-  0 / _ = 0
-  x / 1 = x
-  x / y = BinOp Divide x y
-  fromRational = Constant . Float64Val . fromRational
+instance IntegralExp Exp where
+  0 `div` _ = 0
+  x `div` 1 = x
+  x `div` y = BinOp Divide x y
+  0 `mod` _ = 0
+  _ `mod` 1 = 0
+  x `mod` y = BinOp Mod x y
+  0 `quot` _ = 0
+  x `quot` 1 = x
+  x `quot` y = BinOp Quot x y
+  0 `rem` _ = 0
+  _ `rem` 1 = 0
+  x `rem` y = BinOp Rem x y
 
 instance Monoid (Code a) where
   mempty = Skip

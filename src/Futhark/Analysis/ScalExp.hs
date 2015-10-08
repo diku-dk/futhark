@@ -30,6 +30,7 @@ import Futhark.Representation.AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Construct
+import Futhark.Util.IntegralExp
 
 -----------------------------------------------------------------
 -- BINARY OPERATORS for Numbers                                --
@@ -61,6 +62,9 @@ data ScalExp= Val     BasicValue
             | STimes  ScalExp ScalExp
             | SPow    ScalExp ScalExp
             | SDivide ScalExp ScalExp
+            | SMod    ScalExp ScalExp
+            | SQuot   ScalExp ScalExp
+            | SRem    ScalExp ScalExp
             | MaxMin  Bool   [ScalExp]
             | RelExp  RelOp0  ScalExp
             | SLogAnd ScalExp ScalExp
@@ -86,11 +90,11 @@ instance Num ScalExp where
   fromInteger = Val . IntVal . fromInteger
   negate = SNeg
 
-instance Fractional ScalExp where
-  0 / _ = 0
-  x / 1 = x
-  x / y = SDivide x y
-  fromRational = Val . Float64Val . fromRational
+instance IntegralExp ScalExp where
+  quot = SQuot
+  rem = SRem
+  div = SDivide
+  mod = SMod
 
 instance Pretty ScalExp where
   pprPrec _ (Val val) = ppr $ BasicVal val
@@ -104,6 +108,9 @@ instance Pretty ScalExp where
   pprPrec prec (SPow x y) = ppBinOp prec "^" 6 6 x y
   pprPrec prec (STimes x y) = ppBinOp prec "*" 5 5 x y
   pprPrec prec (SDivide x y) = ppBinOp prec "/" 5 10 x y
+  pprPrec prec (SMod x y) = ppBinOp prec "%" 5 10 x y
+  pprPrec prec (SQuot x y) = ppBinOp prec "//" 5 10 x y
+  pprPrec prec (SRem x y) = ppBinOp prec "%%" 5 10 x y
   pprPrec prec (SLogOr x y) = ppBinOp prec "||" 0 0 x y
   pprPrec prec (SLogAnd x y) = ppBinOp prec "&&" 1 1 x y
   pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (Val $ IntVal 0)
@@ -131,6 +138,9 @@ instance Substitute ScalExp where
               SPow x y -> substituteNames subst x `SPow` substituteNames subst y
               STimes x y -> substituteNames subst x `STimes` substituteNames subst y
               SDivide x y -> substituteNames subst x `SDivide` substituteNames subst y
+              SMod x y -> substituteNames subst x `SMod` substituteNames subst y
+              SQuot x y -> substituteNames subst x `SDivide` substituteNames subst y
+              SRem x y -> substituteNames subst x `SRem` substituteNames subst y
               MaxMin m es -> MaxMin m $ map (substituteNames subst) es
               RelExp r x -> RelExp r $ substituteNames subst x
               SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
@@ -152,7 +162,10 @@ scalExpType (SPlus   e _) = scalExpType e
 scalExpType (SMinus  e _) = scalExpType e
 scalExpType (STimes  e _) = scalExpType e
 scalExpType (SDivide e _) = scalExpType e
+scalExpType (SMod _ _)    = Int
 scalExpType (SPow    e _) = scalExpType e
+scalExpType (SQuot _ _) = Int
+scalExpType (SRem _ _) = Int
 scalExpType (SLogAnd _ _) = Bool
 scalExpType (SLogOr  _ _) = Bool
 scalExpType (RelExp  _ _) = Bool
@@ -233,6 +246,9 @@ expandScalExp look (SPlus x y) = SPlus (expandScalExp look x) (expandScalExp loo
 expandScalExp look (SMinus x y) = SMinus (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (STimes x y) = STimes (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SDivide x y) = SDivide (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SMod x y) = SMod (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SQuot x y) = SQuot (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SRem x y) = SRem (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SPow x y) = SPow (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SLogAnd x y) = SLogAnd (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SLogOr x y) = SLogOr (expandScalExp look x) (expandScalExp look y)
@@ -290,6 +306,9 @@ fromScalExp' = convert
         convert (SDivide x y)
           | scalExpType x == Int = arithBinOp IntDivide x y
           | otherwise            = arithBinOp Divide x y
+        convert (SMod x y) = arithBinOp Mod x y
+        convert (SQuot x y) = arithBinOp Quot x y
+        convert (SRem x y) = arithBinOp Rem x y
         convert (SPow x y) = arithBinOp Pow x y
         convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y) Bool
         convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y) Bool
@@ -326,6 +345,9 @@ instance FreeIn ScalExp where
   freeIn (SPow x y)    = freeIn x <> freeIn y
   freeIn (STimes x y)  = freeIn x <> freeIn y
   freeIn (SDivide x y) = freeIn x <> freeIn y
+  freeIn (SMod x y) = freeIn x <> freeIn y
+  freeIn (SQuot x y) = freeIn x <> freeIn y
+  freeIn (SRem x y) = freeIn x <> freeIn y
   freeIn (SLogOr x y)  = freeIn x <> freeIn y
   freeIn (SLogAnd x y) = freeIn x <> freeIn y
   freeIn (RelExp LTH0 e) = freeIn e

@@ -76,7 +76,7 @@ import Data.List
 import Data.Traversable (forM)
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 
-import Prelude
+import Prelude hiding (div, quot)
 
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.CodeGen.ImpCode as Imp
@@ -84,6 +84,8 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util
+import Futhark.Util.IntegralExp
+
 import qualified Text.PrettyPrint.Mainland as PP
 
 -- | A substitute expression compiler, tried before the main
@@ -1120,7 +1122,9 @@ scalExpToImpExp (SE.SMinus e1 e2) =
 scalExpToImpExp (SE.STimes e1 e2) =
   (*) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.SDivide e1 e2) =
-  (/) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+  div <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+scalExpToImpExp (SE.SQuot e1 e2) =
+  quot <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp _ =
   Nothing
 

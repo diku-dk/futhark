@@ -28,7 +28,7 @@ import Proof.Equational
 import Data.Monoid
 import Data.Type.Equality hiding (outer)
 
-import Prelude
+import Prelude hiding (div, quot)
 
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -38,6 +38,7 @@ import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape hiding (sliceSizes)
+import Futhark.Util.IntegralExp
 
 import Text.PrettyPrint.Mainland
 
@@ -54,7 +55,7 @@ data IxFun :: * -> Nat -> * where
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
-instance (Fractional num, Eq num) => Eq (IxFun num n) where
+instance (IntegralExp num, Eq num) => Eq (IxFun num n) where
   Direct offset1 _ == Direct offset2 _ =
     offset1 == offset2
   Offset ixfun1 offset1 == Offset ixfun2 offset2 =
@@ -96,7 +97,7 @@ instance Pretty num => Pretty (IxFun num n) where
     ppr fun <> text "->" <>
     parens (commasep (map ppr $ Vec.toList oldshape))
 
-instance (Eq num, Fractional num, Substitute num) => Substitute (IxFun num n) where
+instance (Eq num, IntegralExp num, Substitute num) => Substitute (IxFun num n) where
   substituteNames subst (Direct offset n) =
     Direct (substituteNames subst offset) n
   substituteNames subst (Offset fun k) =
@@ -112,7 +113,7 @@ instance (Eq num, Fractional num, Substitute num) => Substitute (IxFun num n) wh
     (substituteNames subst fun)
     (Vec.map (substituteNames subst) newshape)
 
-instance (Eq num, Fractional num, Substitute num, Rename num) => Rename (IxFun num n) where
+instance (Eq num, IntegralExp num, Substitute num, Rename num) => Rename (IxFun num n) where
   -- Because there is no mapM-like function on sized vectors, we
   -- implement renaming by retrieving the substitution map, then using
   -- 'substituteNames'.  This is safe as index functions do not
@@ -121,7 +122,7 @@ instance (Eq num, Fractional num, Substitute num, Rename num) => Rename (IxFun n
     subst <- renamerSubstitutions
     return $ substituteNames subst ixfun
 
-index :: forall (n::Nat) num. Fractional num =>
+index :: forall (n::Nat) num. IntegralExp num =>
          IxFun num ('S n) -> Indices num ('S n) -> num -> num
 
 index (Direct offset dims) is element_size =
@@ -157,20 +158,20 @@ index (Reshape (fun :: IxFun num ('S m)) newshape) is element_size =
       new_indices = computeNewIndices innerslicesizes flatidx
   in index fun new_indices element_size
 
-computeNewIndices :: Fractional num =>
+computeNewIndices :: IntegralExp num =>
                      Vector num k -> num -> Indices num k
 computeNewIndices Nil _ =
   Nil
 computeNewIndices (size :- slices) i =
-  (i / size) :-
-  computeNewIndices slices (i - (i / size) * size)
+  (i `quot` size) :-
+  computeNewIndices slices (i - (i `quot` size) * size)
 
-computeFlatIndex :: Fractional num =>
+computeFlatIndex :: IntegralExp num =>
                     Shape num ('S k) -> Indices num ('S k) -> num
 computeFlatIndex dims is =
   flattenIndex (Vec.toList dims) (Vec.toList is)
 
-sliceSizes :: Fractional num =>
+sliceSizes :: IntegralExp num =>
               Shape num m -> Vector num ('S m)
 sliceSizes Nil =
   singleton 1
@@ -178,21 +179,21 @@ sliceSizes (n :- ns) =
   Vec.product (n :- ns) :-
   sliceSizes ns
 
-iota :: Fractional num =>
+iota :: IntegralExp num =>
         Shape num n -> IxFun num n
 iota = Direct 0
 
-offsetIndex :: Fractional num =>
+offsetIndex :: IntegralExp num =>
                IxFun num n -> num -> IxFun num n
 offsetIndex = Offset
 
-permute :: Fractional num =>
+permute :: IntegralExp num =>
            IxFun num n -> Perm.Permutation n -> IxFun num n
 permute (Permute ixfun oldperm) perm
   | Perm.invert oldperm == perm = ixfun
 permute ixfun perm = Permute ixfun perm
 
-reshape :: forall num m n.(Eq num, Fractional num) =>
+reshape :: forall num m n.(Eq num, IntegralExp num) =>
            IxFun num ('S m) -> ShapeChange num n -> IxFun num n
 reshape (Direct offset _) newshape =
   Direct offset $ Vec.map newDim newshape
@@ -231,7 +232,7 @@ reshape ixfun newshape =
       Reshape ixfun newshape
 
 applyInd :: forall num n m.
-            Fractional num =>
+            IntegralExp num =>
             SNat n -> IxFun num (m:+:n) -> Indices num m -> IxFun num n
 applyInd n (Index m_plus_n (ixfun :: IxFun num (k:+:(m:+:n))) (mis :: Indices num k)) is =
   Index n ixfun' is'
@@ -247,7 +248,7 @@ applyInd n (Index m_plus_n (ixfun :: IxFun num (k:+:(m:+:n))) (mis :: Indices nu
                  coerce (plusAssociative k m n) ixfun
 applyInd n ixfun is = Index n ixfun is
 
-offsetUnderlying :: Fractional num =>
+offsetUnderlying :: IntegralExp num =>
                     IxFun num n -> num -> IxFun num n
 offsetUnderlying (Direct offset dims) k =
   Direct (offset + k) dims
@@ -260,7 +261,7 @@ offsetUnderlying (Index n ixfun is) k =
 offsetUnderlying (Reshape ixfun dims) k =
   Reshape (offsetUnderlying ixfun k) dims
 
-underlyingOffset :: Fractional num =>
+underlyingOffset :: IntegralExp num =>
                     IxFun num n -> num
 underlyingOffset (Direct offset _) =
   offset
@@ -273,11 +274,11 @@ underlyingOffset (Index _ ixfun _) =
 underlyingOffset (Reshape ixfun _) =
   underlyingOffset ixfun
 
-codomain :: Fractional num =>
+codomain :: IntegralExp num =>
             IxFun num n -> SymSet n
 codomain = undefined
 
-rank :: Fractional num =>
+rank :: IntegralExp num =>
         IxFun num n -> SNat n
 rank (Direct _ dims) = sLength dims
 rank (Offset ixfun _) = rank ixfun
@@ -285,7 +286,7 @@ rank (Permute ixfun _) = rank ixfun
 rank (Index n _ _) = n
 rank (Reshape _ newshape) = sLength newshape
 
-shape :: Fractional num =>
+shape :: IntegralExp num =>
          IxFun num n -> Shape num n
 shape (Direct _ dims) =
   dims
@@ -313,7 +314,7 @@ shape (Reshape _ dims) =
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
-linearWithOffset :: forall n num. Fractional num =>
+linearWithOffset :: forall n num. IntegralExp num =>
                     IxFun num n -> num -> Maybe num
 linearWithOffset (Direct offset _) _ =
   Just offset
@@ -336,7 +337,7 @@ linearWithOffset (Index n ixfun (is :: Indices num m)) element_size = do
         m = Vec.sLength is
 linearWithOffset _ _ = Nothing
 
-rearrangeWithOffset :: forall n num. Fractional num =>
+rearrangeWithOffset :: forall n num. IntegralExp num =>
                        IxFun num n -> Maybe (num, Perm.Permutation n)
 rearrangeWithOffset (Permute (Direct offset _) perm) =
   Just (offset, perm)

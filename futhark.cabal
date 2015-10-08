@@ -169,6 +169,7 @@ Library
                    Futhark.Util.Options
                    Futhark.Util.Log
                    Futhark.Util.Truths
+                   Futhark.Util.IntegralExp
                    Futhark.Version
                    Language.Futhark
                    Language.Futhark.Attributes

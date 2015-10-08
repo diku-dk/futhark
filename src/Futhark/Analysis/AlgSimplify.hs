@@ -726,6 +726,21 @@ simplifyScal (SDivide e1o e2o) = do
         ee2' <- fromNumSofP ee2
         return $ SDivide ee1' ee2'
 
+simplifyScal (SMod e1o e2o) = do
+    e1' <- simplifyScal e1o
+    e2' <- simplifyScal e2o
+    return $ SQuot e1' e2'
+
+simplifyScal (SQuot e1o e2o) = do
+    e1' <- simplifyScal e1o
+    e2' <- simplifyScal e2o
+    return $ SQuot e1' e2'
+
+simplifyScal (SRem e1o e2o) = do
+    e1' <- simplifyScal e1o
+    e2' <- simplifyScal e2o
+    return $ SRem e1' e2'
+
 ---------------------------------------------------
 ---------------------------------------------------
 --- Power        related simplifications        ---
@@ -1097,6 +1112,12 @@ negateSimplified (STimes  e1 e2) = do
     (e1', e2') <- helperNegateMult e1 e2; return $ STimes  e1' e2'
 negateSimplified (SDivide e1 e2) = do
     (e1', e2') <- helperNegateMult e1 e2; return $ SDivide e1' e2'
+negateSimplified (SMod e1 e2) =
+    return $ SMod e1 e2
+negateSimplified (SQuot e1 e2) = do
+    (e1', e2') <- helperNegateMult e1 e2; return $ SQuot e1' e2'
+negateSimplified (SRem e1 e2) =
+    return $ SRem e1 e2
 negateSimplified (MaxMin ismin ts) = do
     ts' <- mapM negateSimplified ts; return $ MaxMin (not ismin) ts'
 negateSimplified (RelExp LEQ0 e) = do

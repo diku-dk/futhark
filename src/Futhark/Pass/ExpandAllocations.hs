@@ -12,7 +12,7 @@ import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
 
-import Prelude
+import Prelude hiding (div, quot)
 
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.MonadFreshNames
@@ -20,6 +20,7 @@ import Futhark.Representation.ExplicitMemory
 import Futhark.Tools
 import Futhark.Util
 import Futhark.Pass
+import Futhark.Util.IntegralExp
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
@@ -135,8 +136,8 @@ lookupOffset name = HM.lookup name . offsetMap
 offsetByIndex :: VName -> SubExp -> OffsetMap -> OffsetMap
 offsetByIndex name size (OffsetMap offsets index width) =
   OffsetMap (HM.insert name offset offsets) index width
-  where offset = SE.intSubExpToScalExp size /
-                 SE.intSubExpToScalExp width * SE.Id index Int
+  where offset = (SE.intSubExpToScalExp size `quot`
+                  SE.intSubExpToScalExp width) * SE.Id index Int
 
 offsetMemorySummariesInBody :: OffsetMap -> Body -> Body
 offsetMemorySummariesInBody offsets (Body attr bnds res) =
