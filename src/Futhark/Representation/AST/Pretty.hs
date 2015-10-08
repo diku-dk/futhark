@@ -363,6 +363,8 @@ instance Pretty BinOp where
   ppr Divide = text "/"
   ppr IntDivide = text "div"
   ppr Mod = text "%"
+  ppr Quot = text "//"
+  ppr Rem = text "%%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"

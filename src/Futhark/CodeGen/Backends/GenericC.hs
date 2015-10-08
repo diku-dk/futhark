@@ -742,6 +742,10 @@ compileExp (BinOp bop x y) = do
                     ($exp:x' > 0 && $exp:y' > 0) ||
                     ($exp:x' < 0 && $exp:y' < 0)) ?
                     0 : $exp:y')|]
+             Quot ->
+               [C.cexp|$exp:x' / $exp:y'|]
+             Rem ->
+               [C.cexp|$exp:x' % $exp:y'|]
 
 compileExp (UnsignedDivide x y) = do
   x' <- compileExp x

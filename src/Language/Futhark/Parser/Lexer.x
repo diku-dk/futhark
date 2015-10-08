@@ -40,6 +40,8 @@ tokens :-
   "*"                      { const TIMES }
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
+  "//"                     { const QUOT }
+  "%%"                     { const REM }
   "="                      { const EQU }
   "=="                     { const EQU2 }
   "<"                      { const LTH }

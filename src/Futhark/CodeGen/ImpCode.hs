@@ -286,6 +286,8 @@ precedence Times = 5
 precedence Divide = 5
 precedence IntDivide = 5
 precedence Mod = 5
+precedence Quot = 5
+precedence Rem = 5
 precedence Pow = 6
 
 rprecedence :: BinOp -> Int

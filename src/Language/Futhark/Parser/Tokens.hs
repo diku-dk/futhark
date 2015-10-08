@@ -32,6 +32,8 @@ data Token = IF
            | TIMES
            | DIVIDE
            | MOD
+           | QUOT
+           | REM
            | EQU
            | EQU2
            | LTH

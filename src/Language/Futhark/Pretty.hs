@@ -126,6 +126,8 @@ instance Pretty BinOp where
   ppr Times = text "*"
   ppr Divide = text "/"
   ppr Mod = text "%"
+  ppr Quot = text "//"
+  ppr Rem = text "%%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"
@@ -313,6 +315,8 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Times = 5
         precedence Divide = 5
         precedence Mod = 5
+        precedence Quot = 5
+        precedence Rem = 5
         precedence Pow = 6
         rprecedence Minus = 10
         rprecedence Divide = 10

@@ -138,6 +138,8 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Divide
            | IntDivide -- ^ Rounds towards negative infinity.
            | Mod
+           | Quot -- ^ Rounds towards zero.
+           | Rem
            | ShiftR
            | ShiftL
            | Band

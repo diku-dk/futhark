@@ -596,6 +596,10 @@ internaliseBinOp desc E.Pow x y t =
   simpleBinOp desc I.Pow x y t
 internaliseBinOp desc E.Mod x y t =
   simpleBinOp desc I.Mod x y t
+internaliseBinOp desc E.Quot x y t =
+  simpleBinOp desc I.Quot x y t
+internaliseBinOp desc E.Rem x y t =
+  simpleBinOp desc I.Rem x y t
 internaliseBinOp desc E.ShiftR x y t =
   simpleBinOp desc I.ShiftR x y t
 internaliseBinOp desc E.ShiftL x y t =

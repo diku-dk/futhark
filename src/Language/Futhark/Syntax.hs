@@ -264,6 +264,8 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Times
            | Divide
            | Mod
+           | Quot
+           | Rem
            | ShiftR
            | ShiftL
            | Band
