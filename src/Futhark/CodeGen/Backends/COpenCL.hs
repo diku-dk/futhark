@@ -255,31 +255,35 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       return [C.cexp|$id:local_work_size|]
 
   GenericC.stm [C.cstm|{
-    const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
-    struct timeval $id:time_start, $id:time_end, $id:time_diff;
-    fprintf(stderr, "kernel size %s: [", $string:(textual global_work_size));
-    $stms:(printKernelSize global_work_size)
-    fprintf(stderr, "]\n");
-    gettimeofday(&$id:time_start, NULL);
-    OPENCL_SUCCEED(
-      clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
-                             $id:global_work_size, $exp:local_work_size_arg,
-                             0, NULL, NULL));
-    OPENCL_SUCCEED(clFinish(fut_cl_queue));
-    gettimeofday(&$id:time_end, NULL);
-    timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
-    $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
-    $id:kernel_runs++;
-    fprintf(stderr, "kernel %s runtime: %dus\n",
-            $string:kernel_name,
-            (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
+    if ($exp:total_elements != 0) {
+      const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
+      struct timeval $id:time_start, $id:time_end, $id:time_diff;
+      fprintf(stderr, "kernel size %s: [", $string:(textual global_work_size));
+      $stms:(printKernelSize global_work_size)
+      fprintf(stderr, "]\n");
+      gettimeofday(&$id:time_start, NULL);
+      OPENCL_SUCCEED(
+        clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
+                               $id:global_work_size, $exp:local_work_size_arg,
+                               0, NULL, NULL));
+      OPENCL_SUCCEED(clFinish(fut_cl_queue));
+      gettimeofday(&$id:time_end, NULL);
+      timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
+      $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
+      $id:kernel_runs++;
+      fprintf(stderr, "kernel %s runtime: %dus\n",
+              $string:kernel_name,
+              (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
+    }
     }|]
   where kernel_total_runtime = kernel_name ++ "_total_runtime"
         kernel_runs = kernel_name ++ "_runs"
         kernel_rank = length kernel_dims
         kernel_dims' = map toInit kernel_dims
+        total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
         toInit e = [C.cinit|$exp:e|]
+        multExp x y = [C.cexp|$exp:x * $exp:y|]
 
         printKernelSize :: VName -> [C.Stm]
         printKernelSize global_work_size =
