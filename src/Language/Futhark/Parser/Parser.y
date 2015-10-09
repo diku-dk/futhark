@@ -125,6 +125,8 @@ import Language.Futhark.Parser.Lexer
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
+      stripe          { L $$ STRIPE }
+      unstripe          { L $$ UNSTRIPE }
       transpose       { L $$ TRANSPOSE }
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
@@ -341,6 +343,11 @@ Exp  :: { UncheckedExp }
 
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
                       { Rearrange $4 $7 $1 }
+
+     | stripe '(' Exp ',' Exp ')'
+                      { Stripe $3 $5 $1 }
+     | unstripe '(' Exp ',' Exp ')'
+                      { Unstripe $3 $5 $1 }
 
      | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
 

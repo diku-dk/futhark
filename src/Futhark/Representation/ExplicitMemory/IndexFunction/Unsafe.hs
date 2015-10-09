@@ -11,6 +11,8 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , offsetIndex
        , permute
        , reshape
+       , stripe
+       , unstripe
        , applyInd
        , offsetUnderlying
        , underlyingOffset
@@ -140,6 +142,16 @@ reshape (IxFun _ ixfun) newshape =
       IxFun (SS sn) $
       Safe.reshape ixfun $ Vec.unsafeFromList (SS sn) $
       map (fmap intSubExpToScalExp) newshape
+
+stripe :: IxFun -> ScalExp -> IxFun
+stripe (IxFun n ixfun) stride =
+  IxFun n $
+  Safe.stripe ixfun stride
+
+unstripe :: IxFun -> ScalExp -> IxFun
+unstripe (IxFun n ixfun) stride =
+  IxFun n $
+  Safe.unstripe ixfun stride
 
 applyInd :: IxFun -> Indices -> IxFun
 applyInd ixfun@(IxFun (snnat::SNat ('S n)) (f::Safe.IxFun ScalExp ('S n))) is =

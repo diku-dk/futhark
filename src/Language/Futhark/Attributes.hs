@@ -615,6 +615,8 @@ typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
 typeOf (Reshape shape  e _) =
   Rank (length shape) `setArrayShape` typeOf e
 typeOf (Rearrange _ e _) = typeOf e
+typeOf (Stripe _ e _) = typeOf e
+typeOf (Unstripe _ e _) = typeOf e
 typeOf (Transpose _ _ e _) = typeOf e
 typeOf (Map f arr _) = arrayType 1 et $ uniqueness et
   where et = lambdaType f [rowType $ typeOf arr]

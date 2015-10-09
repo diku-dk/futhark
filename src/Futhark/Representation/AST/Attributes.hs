@@ -7,6 +7,7 @@
 module Futhark.Representation.AST.Attributes
   ( module Futhark.Representation.AST.Attributes.Reshape
   , module Futhark.Representation.AST.Attributes.Rearrange
+  , module Futhark.Representation.AST.Attributes.Stripe
   , module Futhark.Representation.AST.Attributes.Types
   , module Futhark.Representation.AST.Attributes.Values
   , module Futhark.Representation.AST.Attributes.Constants
@@ -35,6 +36,7 @@ import Data.Maybe (mapMaybe)
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
+import Futhark.Representation.AST.Attributes.Stripe
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants

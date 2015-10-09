@@ -595,6 +595,16 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
 evalPrimOp (Rearrange _ perm arrexp) =
   single <$> permuteArray perm <$> lookupVar arrexp
 
+evalPrimOp (Stripe _ stride arrexp) =
+  single <$> (stripeArray <$> (asInt =<< evalSubExp stride) <*> lookupVar arrexp)
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
+        asInt _ = bad $ TypeError "evalPrimOp Stripe asInt"
+
+evalPrimOp (Unstripe _ stride arrexp) =
+  single <$> (unstripeArray <$> (asInt =<< evalSubExp stride) <*> lookupVar arrexp)
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
+        asInt _ = bad $ TypeError "evalPrimOp Unstripe asInt"
+
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt <=< evalSubExp) sizeexps
   arrval <- lookupVar arrexp

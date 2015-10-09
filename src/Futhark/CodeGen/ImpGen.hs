@@ -76,7 +76,7 @@ import Data.List
 import Data.Traversable (forM)
 import qualified Futhark.Analysis.AlgSimplify as AlgSimplify
 
-import Prelude hiding (div, quot)
+import Prelude hiding (div, quot, mod, rem)
 
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.CodeGen.ImpCode as Imp
@@ -567,6 +567,12 @@ defCompilePrimOp _ (Rearrange {}) =
   return ()
 
 defCompilePrimOp _ (Reshape {}) =
+  return ()
+
+defCompilePrimOp _ (Stripe {}) =
+  return ()
+
+defCompilePrimOp _ (Unstripe {}) =
   return ()
 
 defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
@@ -1125,6 +1131,29 @@ scalExpToImpExp (SE.SDivide e1 e2) =
   div <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.SQuot e1 e2) =
   quot <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+scalExpToImpExp (SE.SMod e1 e2) =
+  mod <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+scalExpToImpExp (SE.SRem e1 e2) =
+  rem <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
+scalExpToImpExp (SE.SSignum e) =
+  signum <$> scalExpToImpExp e
+scalExpToImpExp (SE.SAbs e) =
+  abs <$> scalExpToImpExp e
+scalExpToImpExp (SE.SNeg e) =
+  (0-) <$> scalExpToImpExp e
+scalExpToImpExp (SE.SOneIfZero e) =
+  oneIfZero <$> scalExpToImpExp e
+scalExpToImpExp (SE.SIfZero c t f) =
+  ifZero <$>
+  scalExpToImpExp c <*>
+  scalExpToImpExp t <*>
+  scalExpToImpExp f
+scalExpToImpExp (SE.SIfLessThan a b t f) =
+  ifLessThan <$>
+  scalExpToImpExp a <*>
+  scalExpToImpExp b <*>
+  scalExpToImpExp t <*>
+  scalExpToImpExp f
 scalExpToImpExp _ =
   Nothing
 

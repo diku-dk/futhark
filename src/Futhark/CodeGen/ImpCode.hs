@@ -105,12 +105,7 @@ data Exp = Constant BasicValue
          | Index VName Exp BasicType Space
          | ScalarVar VName
          | SizeOf BasicType
-         | UnsignedDivide Exp Exp -- Hack for doing address
-                                  -- calculations.  We should remove
-                                  -- this when we get around to
-                                  -- improving our binary operators
-                                  -- and scalar types.
-         | UnsignedMod Exp Exp -- Likewise.
+         | Cond Exp Exp Exp
            deriving (Eq, Show)
 
 data UnOp = Not -- ^ Boolean negation.
@@ -152,6 +147,14 @@ instance IntegralExp Exp where
   0 `rem` _ = 0
   _ `rem` 1 = 0
   x `rem` y = BinOp Rem x y
+
+instance IntegralCond Exp where
+  oneIfZero x =
+    Cond (BinOp Equal x 0) 1 x
+  ifZero c =
+    Cond (BinOp Equal c 0)
+  ifLessThan a b =
+    Cond (BinOp Less a b)
 
 instance Monoid (Code a) where
   mempty = Skip
@@ -249,16 +252,6 @@ instance Pretty Exp where
     pprPrec (precedence op) x <+/>
     ppr op <+>
     pprPrec (rprecedence op) y
-  pprPrec p (UnsignedDivide x y) =
-    parensIf (p >= precedence IntDivide) $
-    pprPrec (precedence IntDivide) x <+/>
-    text "///" <+>
-    pprPrec (rprecedence IntDivide) y
-  pprPrec p (UnsignedMod x y) =
-    parensIf (p >= precedence Mod) $
-    pprPrec (precedence Mod) x <+/>
-    text "%%" <+>
-    pprPrec (rprecedence Mod) y
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
   pprPrec _ (UnOp Complement x) =
@@ -277,6 +270,9 @@ instance Pretty Exp where
                                  Space s      -> text "@" <> text s
   pprPrec _ (SizeOf t) =
     text "sizeof" <> parens (ppr t)
+  pprPrec p (Cond c t f) =
+    parensIf (p >= 0) $
+    ppr c <+> text "?" <+> ppr t <+> text ":" <+> ppr f
 
 precedence :: BinOp -> Int
 precedence LogAnd = 0
@@ -411,12 +407,11 @@ instance FreeIn a => FreeIn (Code a) where
 instance FreeIn Exp where
   freeIn (Constant _) = mempty
   freeIn (BinOp _ x y) = freeIn x <> freeIn y
-  freeIn (UnsignedDivide x y) = freeIn x <> freeIn y
-  freeIn (UnsignedMod x y) = freeIn x <> freeIn y
   freeIn (UnOp _ x) = freeIn x
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
+  freeIn (Cond c t f) = freeIn c <> freeIn t <> freeIn f
 
 instance FreeIn Size where
   freeIn (VarSize name) = HS.singleton name

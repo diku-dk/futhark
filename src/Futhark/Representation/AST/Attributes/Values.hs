@@ -10,6 +10,8 @@ module Futhark.Representation.AST.Attributes.Values
 
          -- * Rearranging
        , permuteArray
+       , stripeArray
+       , unstripeArray
 
          -- * Miscellaneous
        , arrayString
@@ -22,6 +24,7 @@ import Data.List
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Rearrange
+import Futhark.Representation.AST.Attributes.Stripe
 
 -- | Return the type of the given value.
 valueType :: Value -> Type
@@ -64,6 +67,27 @@ permuteArray perm (ArrayVal inarr et oldshape) =
         picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]
 permuteArray _ v = v
 
+-- | Stripe the elements of an array value.  If the given value is
+-- not an array, it is returned unchanged.
+stripeArray :: Int -> Value -> Value
+stripeArray stride (ArrayVal inarr et shape) =
+  ArrayVal (listArray (0, upper_bound)
+            [ inarr ! i | i <- stripeIndices n stride ])
+  et shape
+  where upper_bound = snd $ bounds inarr
+        n = upper_bound + 1
+stripeArray _ v = v
+
+-- | Inversely stripe the elements of an array value.  If the given value is
+-- not an array, it is returned unchanged.
+unstripeArray :: Int -> Value -> Value
+unstripeArray stride (ArrayVal inarr et shape) =
+  ArrayVal (listArray (0, upper_bound)
+            [ inarr ! i | i <- stripeIndicesInverse n stride ])
+  et shape
+  where upper_bound = snd $ bounds inarr
+        n = upper_bound + 1
+unstripeArray _ v = v
 
 -- | If the given value is a nonempty array containing only
 -- characters, return the corresponding 'String', otherwise return
