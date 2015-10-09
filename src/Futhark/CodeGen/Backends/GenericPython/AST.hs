@@ -11,24 +11,22 @@ import Text.PrettyPrint.Mainland hiding (space)
 type VariableName = String
 
 data PyExp = Constant BasicValue
-           | ScalarVariable VariableName
+           | ScalarVar VariableName
            | BinaryOp String PyExp PyExp 
-           | SetScalar VariableName PyExp
              deriving (Eq, Show)
            
 data PyStmt = If PyExp PyStmt PyStmt
             | While PyExp PyStmt
             | For VariableName PyExp PyStmt
+            | SetScalar VariableName PyExp
             deriving (Eq, Show)
 
 
 instance Pretty PyExp where
     ppr (Constant v) = text $ show v 
-    ppr (ScalarVariable n) = text n  
+    ppr (ScalarVar n) = text n  
     ppr (BinaryOp s e1 e2) = ppr e1 <> text s <> ppr e2 
-    ppr (SetScalar v e) = text v <> text "=" <> ppr e 
   
-
 instance Pretty PyStmt where
   ppr (If cond tbranch fbranch) =
     text "if" <+> ppr cond <+> text ":" </>
@@ -41,6 +39,7 @@ instance Pretty PyStmt where
   ppr (For i limit body) =
     text  "for" <+> ppr i <+> text "in range" <+> parens (ppr limit) <+> text ":" </>
     indent 2 (ppr body)
+  ppr (SetScalar v e) = text v <> text "=" <> ppr e 
 
             
             
