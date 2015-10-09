@@ -3,7 +3,7 @@ module Futhark.CodeGen.Backends.GenericPython
 
 import Futhark.CodeGen.ImpCode
 
-import Futhark.CodeGen.Backends.GenericPythonAst
+import Futhark.CodeGen.Backends.GenericPython.AST
 
 compileProg :: Program () -> String
 compileProg p = "print 'Hello World!'\n"

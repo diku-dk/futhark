@@ -1,5 +1,4 @@
-
-module Futhark.CodeGen.Backends.GenericPythonAst
+module Futhark.CodeGen.Backends.GenericPython.AST
   ( PyExp(..) 
   , PyStmt(..)
   , module Language.Futhark.Core
