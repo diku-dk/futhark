@@ -52,8 +52,8 @@ flatIndex :: IntegralCond num => num -> num -> num -> num
 flatIndex elems_per_block num_blocks i =
   i `quot` elems_per_block + (i `rem` elems_per_block) * num_blocks
 
-  -- | Compute @i@ such that @j == flatIndex elems_per_block
-  -- num_blocks i@.
+-- | Compute @i@ such that @j == flatIndex elems_per_block
+-- num_blocks i@.
 flatIndexInv :: IntegralCond num => num -> num -> num -> num
 flatIndexInv elems_per_block num_blocks =
   flatIndex num_blocks elems_per_block
