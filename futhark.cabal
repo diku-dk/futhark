@@ -62,7 +62,7 @@ Library
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericPython
-                   Futhark.CodeGen.Backends.GenericPythonAst
+                   Futhark.CodeGen.Backends.GenericPython.AST
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.SequentialC
