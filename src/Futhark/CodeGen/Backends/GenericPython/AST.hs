@@ -1,5 +1,5 @@
 module Futhark.CodeGen.Backends.GenericPython.AST
-  ( PyExp(..) 
+  ( PyExp(..)
   , PyStmt(..)
   , module Language.Futhark.Core
   )
@@ -12,9 +12,9 @@ type VariableName = String
 
 data PyExp = Constant BasicValue
            | ScalarVar VariableName
-           | BinaryOp String PyExp PyExp 
+           | BinaryOp String PyExp PyExp
              deriving (Eq, Show)
-           
+
 data PyStmt = If PyExp PyStmt PyStmt
             | While PyExp PyStmt
             | For VariableName PyExp PyStmt
@@ -23,10 +23,10 @@ data PyStmt = If PyExp PyStmt PyStmt
 
 
 instance Pretty PyExp where
-    ppr (Constant v) = text $ show v 
-    ppr (ScalarVar n) = text n  
-    ppr (BinaryOp s e1 e2) = ppr e1 <> text s <> ppr e2 
-  
+    ppr (Constant v) = text $ show v
+    ppr (ScalarVar n) = text n
+    ppr (BinaryOp s e1 e2) = ppr e1 <> text s <> ppr e2
+
 instance Pretty PyStmt where
   ppr (If cond tbranch fbranch) =
     text "if" <+> ppr cond <+> text ":" </>
@@ -39,7 +39,4 @@ instance Pretty PyStmt where
   ppr (For i limit body) =
     text  "for" <+> ppr i <+> text "in range" <+> parens (ppr limit) <+> text ":" </>
     indent 2 (ppr body)
-  ppr (SetScalar v e) = text v <> text "=" <> ppr e 
-
-            
-            
+  ppr (SetScalar v e) = text v <> text "=" <> ppr e

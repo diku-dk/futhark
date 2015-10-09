@@ -52,7 +52,7 @@ compile config filepath = do
           let binpath = outputFilePath filepath config
               pypath = binpath `replaceExtension` "py"
           writeFile pypath pyprog
-          
+
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
 
 commandLineOptions :: [CompilerOption]
