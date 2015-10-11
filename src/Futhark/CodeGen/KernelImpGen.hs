@@ -99,7 +99,8 @@ kernelCompiler
     global_id <- newVName "global_id"
     global_size <- newVName "global_size"
     offset <- newVName "offset"
-    (num_groups, group_size, per_thread_chunk) <- compileKernelSize kernel_size
+    (num_groups, group_size, per_thread_chunk, _) <-
+      compileKernelSize kernel_size
 
     let fold_bnds = bodyBindings $ lambdaBody fold_lam
         fold_lparams = lambdaParams fold_lam
@@ -298,12 +299,14 @@ kernelCompiler target (PrimOp (Replicate n v)) = do
 kernelCompiler _ e =
   return $ ImpGen.CompileExp e
 
-compileKernelSize :: KernelSize -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize)
-compileKernelSize (KernelSize num_groups group_size per_thread_elements) = do
+compileKernelSize :: KernelSize
+                  -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize, Imp.DimSize)
+compileKernelSize (KernelSize num_groups group_size per_thread_elements offset_multiple) = do
   num_groups' <- ImpGen.subExpToDimSize num_groups
   group_size' <- ImpGen.subExpToDimSize group_size
   per_thread_elements' <- ImpGen.subExpToDimSize per_thread_elements
-  return (num_groups', group_size', per_thread_elements')
+  offset_multiple' <- ImpGen.subExpToDimSize offset_multiple
+  return (num_groups', group_size', per_thread_elements', offset_multiple')
 
 copyCompiler :: ImpGen.CopyCompiler Imp.CallKernel
 copyCompiler bt

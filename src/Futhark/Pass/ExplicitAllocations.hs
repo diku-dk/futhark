@@ -543,7 +543,7 @@ allocInExp (LoopOp (Kernel cs w index ispace inps returns body)) = do
 allocInExp (LoopOp (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
   acc_summaries <- mapM accumulatorSummary nes
   arr_summaries <- mapM lookupSummary' arrs
-  fold_lam' <- allocInChunkedLambda (kernelElementsPerThread size)
+  fold_lam' <- allocInChunkedLambda (kernelThreadOffsetMultiple size)
                fold_lam arr_summaries
   par_acc_summaries <- mapM accumulatorSummary nes
   red_lam' <- allocInReduceLambda red_lam (acc_summaries ++ par_acc_summaries) []

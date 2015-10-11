@@ -67,6 +67,68 @@ transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
   where form_idents = case form of ForLoop i _ -> [Ident i $ Basic Int]
                                    WhileLoop _ -> []
 
+transformBinding expmap (Let pat ()
+                         (LoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs)))
+  | num_chunks /= Constant (IntVal 1) = do
+  -- We want to pad and transpose the input arrays.
+
+  num_threads <- letSubExp "num_threads" $
+                 PrimOp $ BinOp Times num_chunks group_size Int
+
+  w' <- letSubExp "padded_size" =<<
+        eRoundToMultipleOf (eSubExp w) (eSubExp num_threads)
+  elements_per_thread <- letSubExp "elements_per_thread" $
+                         PrimOp $ BinOp Quot w' num_threads Int
+
+  padding <- letSubExp "padding" $ PrimOp $ BinOp Minus w' w Int
+
+  offset_multiple <-
+    letSubExp "offset_multiple" =<<
+    eDivRoundingUp (eSubExp w') (eSubExp num_threads)
+
+  let kernel_size' =
+        kernel_size { kernelThreadOffsetMultiple = offset_multiple }
+
+  arrs' <- mapM (padAndRearrange num_threads elements_per_thread padding w') arrs
+
+  addBinding $ Let pat () $ LoopOp $
+    ReduceKernel cs w kernel_size' parlam seqlam nes arrs'
+  return expmap
+  where num_chunks = kernelWorkgroups kernel_size
+        group_size = kernelWorkgroupSize kernel_size
+
+        padAndRearrange num_threads elements_per_thread padding w' arr = do
+          arr_t <- lookupType arr
+          let arr_shape = arrayShape arr_t
+              padding_shape = arr_shape `setOuterDim` padding
+              extradim_shape = Shape $
+                               [num_threads, elements_per_thread] ++
+                               arrayDims (rowType arr_t)
+          arr_padding <-
+            letExp (baseString arr <> "_padding") $
+            PrimOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
+          arr_padded <-
+            letExp (baseString arr <> "_padded") $
+            PrimOp $ Concat [] arr [arr_padding] w'
+          arr_extradim <-
+            letExp (baseString arr <> "_extradim") $
+            PrimOp $ Reshape cs (reshapeOuter [DimNew num_threads,
+                                               DimNew elements_per_thread]
+                                 1
+                                 arr_shape) arr_padded
+          arr_extradim_tr <-
+            letExp (baseString arr <> "_extradim_tr") $
+            PrimOp $ Rearrange [] ([1,0]++[2..arrayRank arr_t-1]) arr_extradim
+          arr_extradim_manifested <-
+            letExp (baseString arr <> "_extradim_manifested") $
+            PrimOp $ Copy arr_extradim_tr
+          arr_extradim_inv_tr <-
+            letExp (baseString arr <> "_extradim_inv_tr") $
+            PrimOp $ Rearrange [] ([1,0]++[2..arrayRank arr_t-1]) arr_extradim_manifested
+          letExp (baseString arr <> "_inv_tr") $
+            PrimOp $ Reshape [] (reshapeOuter [DimNew w'] 2 extradim_shape) arr_extradim_inv_tr
+
+
 transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
   body' <- bindingIdentTypes (Ident i (Basic Int) :
                               map ((`Ident` Basic Int) . fst) ispace ++

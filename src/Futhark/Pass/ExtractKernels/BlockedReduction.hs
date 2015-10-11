@@ -28,18 +28,16 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   chunk_size <- newVName "chunk_size"
 
   num_threads <-
-    letSubExp "num_thread" $ PrimOp $ BinOp Times num_chunks group_size Int
+    letSubExp "num_threads" $ PrimOp $ BinOp Times num_chunks group_size Int
+
+  let one = Constant $ IntVal 1
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
-    eBinOp IntDivide
-    (eBinOp Plus (eSubExp w)
-     (eBinOp Minus (eSubExp num_threads) (eSubExp $ Constant $ IntVal 1) Int)
-     Int)
-    (eSubExp num_threads) Int
+    eDivRoundingUp (eSubExp w) (eSubExp num_threads)
 
-  let step_one_size = KernelSize num_chunks group_size per_thread_elements
-      step_two_size = KernelSize (Constant $ IntVal 1) num_chunks (Constant $ IntVal 1)
+  let step_one_size = KernelSize num_chunks group_size per_thread_elements per_thread_elements
+      step_two_size = KernelSize one num_chunks one one
 
   loop_iterator <- newVName "i"
   seq_lam_index <- newVName "lam_index"

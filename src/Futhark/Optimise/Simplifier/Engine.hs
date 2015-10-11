@@ -653,19 +653,21 @@ simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
     return $ Kernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
 
-simplifyLoopOp (ReduceKernel cs w (KernelSize num_groups group_size thread_chunk)
+simplifyLoopOp (ReduceKernel cs w
+                (KernelSize num_groups group_size thread_chunk offset_multiple)
                 parlam seqlam nes arrs) = do
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
   num_groups' <- simplifySubExp num_groups
   group_size' <- simplifySubExp group_size
   thread_chunk' <- simplifySubExp thread_chunk
+  offset_multiple' <- simplifySubExp offset_multiple
   nes' <- mapM simplifySubExp nes
   arrs' <- mapM simplifyVName arrs
   parlam' <- simplifyLambda parlam w' $ map (const Nothing) nes
   seqlam' <- simplifyLambda seqlam w' $ map (const Nothing) nes
   return $ ReduceKernel cs' w'
-    (KernelSize num_groups' group_size' thread_chunk')
+    (KernelSize num_groups' group_size' thread_chunk' offset_multiple')
     parlam' seqlam' nes' arrs'
 
 simplifyLoopOp (Map cs w fun arrs) = do
