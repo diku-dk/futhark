@@ -542,7 +542,7 @@ simplifyBinOp _ _ (BinOp Times e1 e2 _)
   | otherwise = SubExp <$> numBinOp op e1 e2
     where op x y = Just $ x * y
 
-simplifyBinOp _ _ (BinOp Divide e1 e2 _)
+simplifyBinOp _ _ (BinOp FloatDiv e1 e2 _)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
@@ -555,7 +555,7 @@ simplifyBinOp _ _ (BinOp Mod e1 e2 _)
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = Just $ x `mod` y
 
-simplifyBinOp _ _ (BinOp IntDivide e1 e2 _)
+simplifyBinOp _ _ (BinOp Div e1 e2 _)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing

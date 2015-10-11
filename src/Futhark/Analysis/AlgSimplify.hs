@@ -485,11 +485,11 @@ linearForm idd (NSum terms tp) = do
                                             NProd (_:_) _ -> return t
                                             _ -> badAlgSimplifyM "linearForm: ILLEGAL111!!!!"
                                    t_scal <- fromNumSofP t0
-                                   simplifyScal $ SDivide t_scal (Id idd Int)
+                                   simplifyScal $ SDiv t_scal (Id idd Int)
                          ) terms
     let myiota  = [1..(length terms)]
     let ia_terms= filter (\(_,t)-> case t of
-                                     SDivide _ _ -> False
+                                     SDiv _ _ -> False
                                      _           -> True
                          ) (zip myiota terms_d_idd)
     let (a_inds, a_terms) = unzip ia_terms
@@ -695,17 +695,17 @@ simplifyScal (STimes e1o e2o) = do
 ---------------------------------------------------
 ---------------------------------------------------
 
-simplifyScal (SDivide e1o e2o) = do
+simplifyScal (SDiv e1o e2o) = do
     e1' <- simplifyScal e1o
     e2' <- simplifyScal e2o
 
     if isMaxMin e1' || isMaxMin e2'
-    then helperMultMinMax $ SDivide e1' e2'
-    else normalDivide e1' e2'
+    then helperMultMinMax $ SDiv e1' e2'
+    else normalFloatDiv e1' e2'
 
     where
-      normalDivide :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
-      normalDivide e1 e2
+      normalFloatDiv :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
+      normalFloatDiv e1 e2
         | e1 == e2                  = do one <- getPos1 $ scalExpType e1
                                          return $ Val one
 --        | e1 == (negateSimplified e2) = do mone<- getNeg1 $ scalExpType e1
@@ -727,7 +727,7 @@ simplifyScal (SDivide e1o e2o) = do
                                     case fs' of
                                       [] -> return e1''
                                       _  -> do e2'' <- fromNumSofP $ NProd fs' tp
-                                               return $ SDivide e1'' e2''
+                                               return $ SDiv e1'' e2''
 
               _ -> turnBackAndDiv e1' e2'
 
@@ -735,7 +735,7 @@ simplifyScal (SDivide e1o e2o) = do
       turnBackAndDiv ee1 ee2 = do
         ee1' <- fromNumSofP ee1
         ee2' <- fromNumSofP ee2
-        return $ SDivide ee1' ee2'
+        return $ SDiv ee1' ee2'
 
 simplifyScal (SMod e1o e2o) = do
     e1' <- simplifyScal e1o
@@ -820,8 +820,8 @@ helperMinusMinMax _ = do
 helperMultMinMax :: ScalExp -> AlgSimplifyM ScalExp
 helperMultMinMax (STimes  e em@(MaxMin{})) = helperTimesDivMinMax True  True  em e
 helperMultMinMax (STimes  em@(MaxMin{}) e) = helperTimesDivMinMax True  False em e
-helperMultMinMax (SDivide e em@(MaxMin{})) = helperTimesDivMinMax False True  em e
-helperMultMinMax (SDivide em@(MaxMin{}) e) = helperTimesDivMinMax False False em e
+helperMultMinMax (SDiv e em@(MaxMin{})) = helperTimesDivMinMax False True  em e
+helperMultMinMax (SDiv em@(MaxMin{}) e) = helperTimesDivMinMax False False em e
 helperMultMinMax _ = badAlgSimplifyM "helperMultMinMax: Reached unreachable case!"
 
 helperTimesDivMinMax :: Bool -> Bool -> ScalExp -> ScalExp -> AlgSimplifyM ScalExp
@@ -860,7 +860,7 @@ helperTimesDivMinMax isTimes isRev emo@(MaxMin{}) e = do
     where
         mkTimesDiv :: ScalExp -> ScalExp -> ScalExp
         mkTimesDiv e1 e2
-          | not isTimes = if isRev then SDivide e2 e1 else SDivide e1 e2
+          | not isTimes = if isRev then SDiv e2 e1 else SDiv e1 e2
           | isRev       = STimes e2 e1
           | otherwise   = STimes e1 e2
 
@@ -1124,8 +1124,8 @@ negateSimplified e@(SPow _ _) = do
     return $ STimes (Val m1) e
 negateSimplified (STimes  e1 e2) = do
     (e1', e2') <- helperNegateMult e1 e2; return $ STimes  e1' e2'
-negateSimplified (SDivide e1 e2) = do
-    (e1', e2') <- helperNegateMult e1 e2; return $ SDivide e1' e2'
+negateSimplified (SDiv e1 e2) = do
+    (e1', e2') <- helperNegateMult e1 e2; return $ SDiv e1' e2'
 negateSimplified (SMod e1 e2) =
     return $ SMod e1 e2
 negateSimplified (SQuot e1 e2) = do
@@ -1156,7 +1156,7 @@ helperNegateMult e1 e2 =
 toNumSofP :: ScalExp -> AlgSimplifyM NNumExp
 toNumSofP e@(Val  _) = return $ NProd [e] $ scalExpType e
 toNumSofP e@(Id _ _) = return $ NProd [e] $ scalExpType e
-toNumSofP e@(SDivide{}) = return $ NProd [e] $ scalExpType e
+toNumSofP e@(SDiv{}) = return $ NProd [e] $ scalExpType e
 toNumSofP e@(SPow{}   ) = return $ NProd [e] $ scalExpType e
 toNumSofP (SMinus _ _) = badAlgSimplifyM "toNumSofP: SMinus is not in SofP form!"
 toNumSofP (SNeg _) = badAlgSimplifyM "toNumSofP: SNeg is not in SofP form!"
@@ -1420,32 +1420,32 @@ tryDivTriv (SPow a e1) (SPow d e2)
                            p' <- simplifyNRel $ NRelExp LTH0 e2me1_sop
                            return $ if p' == LogCt True
                                     then (True,  SPow a e1me2)
-                                    else (False, SDivide (SPow a e1) (SPow d e2))
+                                    else (False, SDiv (SPow a e1) (SPow d e2))
 
             (Float32, Val (Float32Val 0.0))   -> return (True, Val one)
             (Float32, Val (Float32Val 1.0))   -> return (True, a)
-            (Float32, Val (Float32Val (-1.0)))-> return (True, SDivide (Val $ Float32Val 1.0) a)
+            (Float32, Val (Float32Val (-1.0)))-> return (True, SDiv (Val $ Float32Val 1.0) a)
             (Float64, Val (Float64Val 0.0))   -> return (True, Val one)
             (Float64, Val (Float64Val 1.0))   -> return (True, a)
-            (Float64, Val (Float64Val (-1.0)))-> return (True, SDivide (Val $ Float64Val 1.0) a)
-            (_, _) -> return (False, SDivide (SPow a e1) (SPow d e2))
+            (Float64, Val (Float64Val (-1.0)))-> return (True, SDiv (Val $ Float64Val 1.0) a)
+            (_, _) -> return (False, SDiv (SPow a e1) (SPow d e2))
 
-    | otherwise = return (False, SDivide (SPow a e1) (SPow d e2))
+    | otherwise = return (False, SDiv (SPow a e1) (SPow d e2))
 
 tryDivTriv (SPow a e1) b
     | a == b = do one <- getPos1 $ scalExpType a
                   tryDivTriv (SPow a e1) (SPow a (Val one))
-    | otherwise = return (False, SDivide (SPow a e1) b)
+    | otherwise = return (False, SDiv (SPow a e1) b)
 
 tryDivTriv b (SPow a e1)
     | a == b = do one <- getPos1 $ scalExpType a
                   tryDivTriv (SPow a (Val one)) (SPow a e1)
-    | otherwise = return (False, SDivide b (SPow a e1))
+    | otherwise = return (False, SDiv b (SPow a e1))
 
 tryDivTriv t f
     | t == f    = do one <- getPos1 $ scalExpType t
                      return (True,  Val one)
-    | otherwise = return (False, SDivide t f)
+    | otherwise = return (False, SDiv t f)
 
 
 {-
@@ -1491,7 +1491,7 @@ mkRelExp 3 =
         m_ij_m_1 = SMinus (Val (IntVal (-1))) (STimes i j)
         rel2 = RelExp LTH0 m_ij_m_1
 
---        simpl_exp = SDivide (MaxMin True [SMinus (Val (IntVal 0)) (STimes i j), SNeg (STimes i n) ])
+--        simpl_exp = SDiv (MaxMin True [SMinus (Val (IntVal 0)) (STimes i j), SNeg (STimes i n) ])
 --                         (STimes i j)
 --        rel4 = RelExp LTH0 simpl_exp
 

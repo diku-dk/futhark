@@ -599,9 +599,9 @@ internaliseBinOp desc E.Minus x y t =
 internaliseBinOp desc E.Times x y t =
   simpleBinOp desc I.Times x y t
 internaliseBinOp desc E.Divide x y Int =
-  simpleBinOp desc I.IntDivide x y Int
+  simpleBinOp desc I.Div x y Int
 internaliseBinOp desc E.Divide x y t =
-  simpleBinOp desc I.Divide x y t
+  simpleBinOp desc I.FloatDiv x y t
 internaliseBinOp desc E.Pow x y t =
   simpleBinOp desc I.Pow x y t
 internaliseBinOp desc E.Mod x y t =

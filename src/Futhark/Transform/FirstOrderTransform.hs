@@ -451,7 +451,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   thenbody <- runBodyBinder $ do
-      lUBexp <- eBinOp IntDivide
+      lUBexp <- eBinOp Div
                        (eBinOp Plus (pure $ PrimOp $ SubExp outersz)
                                     (eBinOp Minus (pure $ PrimOp $ SubExp $ Var chunkglb)
                                                   (pure $ PrimOp $ SubExp $ intconst 1) Int)

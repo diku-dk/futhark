@@ -137,7 +137,7 @@ instance Num Exp where
 instance IntegralExp Exp where
   0 `div` _ = 0
   x `div` 1 = x
-  x `div` y = BinOp Divide x y
+  x `div` y = BinOp FloatDiv x y
   0 `mod` _ = 0
   _ `mod` 1 = 0
   x `mod` y = BinOp Mod x y
@@ -288,8 +288,8 @@ precedence ShiftR = 3
 precedence Plus = 4
 precedence Minus = 4
 precedence Times = 5
-precedence Divide = 5
-precedence IntDivide = 5
+precedence FloatDiv = 5
+precedence Div = 5
 precedence Mod = 5
 precedence Quot = 5
 precedence Rem = 5
@@ -297,7 +297,7 @@ precedence Pow = 6
 
 rprecedence :: BinOp -> Int
 rprecedence Minus = 10
-rprecedence Divide = 10
+rprecedence FloatDiv = 10
 rprecedence op = precedence op
 
 instance Functor ProgramT where

@@ -215,7 +215,7 @@ eLambda lam args = do zipWithM_ letBindNames params $
 eDivRoundingUp :: MonadBinder m =>
                   m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
 eDivRoundingUp x y =
-  eBinOp IntDivide (eBinOp Plus x (eBinOp Minus y (eSubExp one) Int) Int) y Int
+  eBinOp Div (eBinOp Plus x (eBinOp Minus y (eSubExp one) Int) Int) y Int
   where one = Constant $ IntVal 1
 
 eRoundToMultipleOf :: MonadBinder m =>

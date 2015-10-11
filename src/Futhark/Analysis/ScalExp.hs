@@ -61,7 +61,7 @@ data ScalExp= Val     BasicValue
             | SMinus  ScalExp ScalExp
             | STimes  ScalExp ScalExp
             | SPow    ScalExp ScalExp
-            | SDivide ScalExp ScalExp
+            | SDiv ScalExp ScalExp
             | SMod    ScalExp ScalExp
             | SQuot   ScalExp ScalExp
             | SRem    ScalExp ScalExp
@@ -97,7 +97,7 @@ instance Num ScalExp where
 instance IntegralExp ScalExp where
   quot = SQuot
   rem = SRem
-  div = SDivide
+  div = SDiv
   mod = SMod
 
 instance IntegralCond ScalExp where
@@ -116,7 +116,7 @@ instance Pretty ScalExp where
   pprPrec prec (SMinus x y) = ppBinOp prec "-" 4 10 x y
   pprPrec prec (SPow x y) = ppBinOp prec "^" 6 6 x y
   pprPrec prec (STimes x y) = ppBinOp prec "*" 5 5 x y
-  pprPrec prec (SDivide x y) = ppBinOp prec "/" 5 10 x y
+  pprPrec prec (SDiv x y) = ppBinOp prec "/" 5 10 x y
   pprPrec prec (SMod x y) = ppBinOp prec "%" 5 10 x y
   pprPrec prec (SQuot x y) = ppBinOp prec "//" 5 10 x y
   pprPrec prec (SRem x y) = ppBinOp prec "%%" 5 10 x y
@@ -154,9 +154,9 @@ instance Substitute ScalExp where
               SMinus x y -> substituteNames subst x `SMinus` substituteNames subst y
               SPow x y -> substituteNames subst x `SPow` substituteNames subst y
               STimes x y -> substituteNames subst x `STimes` substituteNames subst y
-              SDivide x y -> substituteNames subst x `SDivide` substituteNames subst y
+              SDiv x y -> substituteNames subst x `SDiv` substituteNames subst y
               SMod x y -> substituteNames subst x `SMod` substituteNames subst y
-              SQuot x y -> substituteNames subst x `SDivide` substituteNames subst y
+              SQuot x y -> substituteNames subst x `SDiv` substituteNames subst y
               SRem x y -> substituteNames subst x `SRem` substituteNames subst y
               MaxMin m es -> MaxMin m $ map (substituteNames subst) es
               RelExp r x -> RelExp r $ substituteNames subst x
@@ -188,7 +188,7 @@ scalExpType (SSignum _) = Int
 scalExpType (SPlus   e _) = scalExpType e
 scalExpType (SMinus  e _) = scalExpType e
 scalExpType (STimes  e _) = scalExpType e
-scalExpType (SDivide e _) = scalExpType e
+scalExpType (SDiv e _) = scalExpType e
 scalExpType (SMod _ _)    = Int
 scalExpType (SPow    e _) = scalExpType e
 scalExpType (SQuot _ _) = Int
@@ -275,7 +275,7 @@ expandScalExp look (MaxMin b ses) = MaxMin b $ map (expandScalExp look) ses
 expandScalExp look (SPlus x y) = SPlus (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SMinus x y) = SMinus (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (STimes x y) = STimes (expandScalExp look x) (expandScalExp look y)
-expandScalExp look (SDivide x y) = SDivide (expandScalExp look x) (expandScalExp look y)
+expandScalExp look (SDiv x y) = SDiv (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SMod x y) = SMod (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SQuot x y) = SQuot (expandScalExp look x) (expandScalExp look y)
 expandScalExp look (SRem x y) = SRem (expandScalExp look x) (expandScalExp look y)
@@ -319,8 +319,8 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
                    [ (Plus, SPlus)
                    , (Minus, SMinus)
                    , (Times, STimes)
-                   , (Divide, SDivide)
-                   , (IntDivide, SDivide)
+                   , (FloatDiv, SDiv)
+                   , (Div, SDiv)
                    , (Pow, SPow)
                    , (LogAnd, SLogAnd)
                    , (LogOr, SLogOr)
@@ -343,9 +343,9 @@ fromScalExp' = convert
         convert (SPlus x y) = arithBinOp Plus x y
         convert (SMinus x y) = arithBinOp Minus x y
         convert (STimes x y) = arithBinOp Times x y
-        convert (SDivide x y)
-          | scalExpType x == Int = arithBinOp IntDivide x y
-          | otherwise            = arithBinOp Divide x y
+        convert (SDiv x y)
+          | scalExpType x == Int = arithBinOp Div x y
+          | otherwise            = arithBinOp FloatDiv x y
         convert (SMod x y) = arithBinOp Mod x y
         convert (SQuot x y) = arithBinOp Quot x y
         convert (SRem x y) = arithBinOp Rem x y
@@ -400,7 +400,7 @@ instance FreeIn ScalExp where
   freeIn (SMinus x y)  = freeIn x <> freeIn y
   freeIn (SPow x y)    = freeIn x <> freeIn y
   freeIn (STimes x y)  = freeIn x <> freeIn y
-  freeIn (SDivide x y) = freeIn x <> freeIn y
+  freeIn (SDiv x y) = freeIn x <> freeIn y
   freeIn (SMod x y) = freeIn x <> freeIn y
   freeIn (SQuot x y) = freeIn x <> freeIn y
   freeIn (SRem x y) = freeIn x <> freeIn y

@@ -108,10 +108,10 @@ asSegOp _          = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp Divide _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (Float32Val k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (Float64Val k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ _ _) = False
+  where safePrimOp (BinOp FloatDiv _ (Constant (IntVal k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ (Constant (Float64Val k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ _ _) = False
         safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
         safePrimOp (BinOp Mod _ (Constant (Float32Val k)) _) = k /= 0
         safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0

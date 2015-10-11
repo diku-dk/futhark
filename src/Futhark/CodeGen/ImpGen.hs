@@ -1127,7 +1127,7 @@ scalExpToImpExp (SE.SMinus e1 e2) =
   (-) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.STimes e1 e2) =
   (*) <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
-scalExpToImpExp (SE.SDivide e1 e2) =
+scalExpToImpExp (SE.SDiv e1 e2) =
   div <$> scalExpToImpExp e1 <*> scalExpToImpExp e2
 scalExpToImpExp (SE.SQuot e1 e2) =
   quot <$> scalExpToImpExp e1 <*> scalExpToImpExp e2

@@ -135,8 +135,8 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Minus
            | Pow
            | Times
-           | Divide
-           | IntDivide -- ^ Rounds towards negative infinity.
+           | FloatDiv
+           | Div -- ^ Rounds towards negative infinity.
            | Mod
            | Quot -- ^ Rounds towards zero.
            | Rem
