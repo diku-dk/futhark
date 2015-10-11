@@ -99,7 +99,7 @@ kernelCompiler
     global_id <- newVName "global_id"
     global_size <- newVName "global_size"
     offset <- newVName "offset"
-    (num_groups, group_size, per_thread_chunk, _) <-
+    (num_groups, group_size, per_thread_chunk, offset_multiple) <-
       compileKernelSize kernel_size
 
     let fold_bnds = bodyBindings $ lambdaBody fold_lam
@@ -144,7 +144,9 @@ kernelCompiler
         apply_fold_op <-
           ImpGen.subImpM_ inKernelOperations $ do
             computeThreadChunkSize
-              (ImpGen.dimSizeToExp per_thread_chunk) num_elements
+              (ImpGen.dimSizeToExp per_thread_chunk)
+              (ImpGen.dimSizeToExp offset_multiple)
+              num_elements
               (Imp.ScalarVar global_id) $ paramName fold_chunk_param
             ImpGen.compileBindings fold_bnds $
               ImpGen.comment "write fold result" write_fold_op_result
@@ -486,10 +488,12 @@ isMapTranspose bt
             [size_x, size_y]             -> Just (1, size_x, size_y)
             _                            -> Nothing
 
-computeThreadChunkSize :: ImpGen.Count ImpGen.Elements -> Imp.Exp -> Imp.Exp
+computeThreadChunkSize :: ImpGen.Count ImpGen.Elements
+                       -> ImpGen.Count ImpGen.Elements
+                       -> Imp.Exp -> Imp.Exp
                        -> VName
                        -> ImpGen.ImpM op ()
-computeThreadChunkSize chunk_per_thread num_elements thread_index chunk_var =
+computeThreadChunkSize chunk_per_thread offset_multiple num_elements thread_index chunk_var =
   ImpGen.emit $
   Imp.If is_last_thread
   (Imp.SetScalar chunk_var last_thread_chunk)
@@ -497,5 +501,6 @@ computeThreadChunkSize chunk_per_thread num_elements thread_index chunk_var =
   where last_thread_chunk =
           num_elements - thread_index * chunk_per_thread'
         is_last_thread =
-          Imp.BinOp Less num_elements ((thread_index + 1) * chunk_per_thread')
+          Imp.BinOp Less num_elements ((thread_index + 1) * offset_multiple')
         chunk_per_thread' = ImpGen.innerExp chunk_per_thread
+        offset_multiple' = ImpGen.innerExp offset_multiple
