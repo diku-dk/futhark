@@ -726,14 +726,6 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
           isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst merge
 
-expReturns look (AST.LoopOp (Reduce _ _ _ inputs)) =
-  forM arrs $ \arr -> do
-    (et, Shape dims, u, mem, ixfun) <- arrayVarReturns look arr
-    return $ ReturnsArray et (ExtShape $ map Free $ drop 1 dims) u $
-      Just $ ReturnsInBlock mem $ IxFun.applyInd ixfun [0]
-
-  where (_, arrs) = unzip inputs
-
 expReturns _ (AST.LoopOp op) =
   pure $ extReturns $ loopOpExtType op
 
