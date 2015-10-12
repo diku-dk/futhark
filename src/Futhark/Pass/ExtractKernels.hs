@@ -245,16 +245,17 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
 transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
-transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) =
-  blockedReduction pat cs w lam1 lam2 nes arrs
-{-
-transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ redlam nes) maplam arrs _))) = do
-  maplam' <- FOT.transformLambda =<<
-             singletonChunkRedLikeStreamLambda (lambdaReturnType redlam) maplam
-  redlam' <- FOT.transformLambda redlam
-  return [Let pat () $ LoopOp $
-          ReduceKernel cs w redlam' maplam' nes arrs]
--}
+transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) = do
+  lam1_sequential <- FOT.transformLambda lam1
+  lam2_sequential <- FOT.transformLambda lam2
+  blockedReduction pat cs w lam1_sequential lam2_sequential nes arrs
+
+transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
+  red_fun_sequential <- FOT.transformLambda red_fun
+  red_fun_sequential' <- renameLambda red_fun_sequential
+  blockedReduction pat cs w red_fun_sequential' red_fun_sequential nes arrs
+  where (nes, arrs) = unzip red_input
+
 transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs c))) =
   localTypeEnv (typeEnvFromParams $ extLambdaParams lam) $ do
     body' <- transformBody $ extLambdaBody lam
@@ -265,11 +266,6 @@ transformBinding (Let res_pat () (LoopOp op))
   | Scan cs w scan_fun scan_input <- op,
     Just do_iswim <- iswim res_pat cs w scan_fun scan_input =
       transformBindings =<< runBinder_ do_iswim
-
-transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
-  red_fun' <- renameLambda red_fun
-  blockedReduction pat cs w red_fun' red_fun nes arrs
-  where (nes, arrs) = unzip red_input
 
 transformBinding bnd = do
   e' <- mapExpM transform $ bindingExp bnd
