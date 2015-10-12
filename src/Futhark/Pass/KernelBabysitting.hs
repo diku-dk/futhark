@@ -100,10 +100,11 @@ transformBinding expmap (Let pat ()
         padAndRearrange num_threads elements_per_thread padding w' arr = do
           arr_t <- lookupType arr
           let arr_shape = arrayShape arr_t
+              row_dims = arrayDims (rowType arr_t)
               padding_shape = arr_shape `setOuterDim` padding
               extradim_shape = Shape $
-                               [num_threads, elements_per_thread] ++
-                               arrayDims (rowType arr_t)
+                               [num_threads, elements_per_thread] ++ row_dims
+              tr_perm = [1,0] ++ [2..shapeRank extradim_shape-1]
           arr_padding <-
             letExp (baseString arr <> "_padding") $
             PrimOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
@@ -112,19 +113,16 @@ transformBinding expmap (Let pat ()
             PrimOp $ Concat [] arr [arr_padding] w'
           arr_extradim <-
             letExp (baseString arr <> "_extradim") $
-            PrimOp $ Reshape cs (reshapeOuter [DimNew num_threads,
-                                               DimNew elements_per_thread]
-                                 1
-                                 arr_shape) arr_padded
+            PrimOp $ Reshape cs (map DimNew $ shapeDims extradim_shape) arr_padded
           arr_extradim_tr <-
             letExp (baseString arr <> "_extradim_tr") $
-            PrimOp $ Rearrange [] ([1,0]++[2..arrayRank arr_t-1]) arr_extradim
+            PrimOp $ Rearrange [] tr_perm arr_extradim
           arr_extradim_manifested <-
             letExp (baseString arr <> "_extradim_manifested") $
             PrimOp $ Copy arr_extradim_tr
           arr_extradim_inv_tr <-
             letExp (baseString arr <> "_extradim_inv_tr") $
-            PrimOp $ Rearrange [] ([1,0]++[2..arrayRank arr_t-1]) arr_extradim_manifested
+            PrimOp $ Rearrange [] tr_perm arr_extradim_manifested
           letExp (baseString arr <> "_inv_tr") $
             PrimOp $ Reshape [] (reshapeOuter [DimNew w'] 2 extradim_shape) arr_extradim_inv_tr
 
