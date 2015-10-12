@@ -53,8 +53,11 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   start_index <- newVName "start_index"
 
-  let merge_params = fold_acc_params
-      res = map paramName merge_params
+  ((merge_params, unique_nes), seq_copy_bnds) <-
+    collectBindings $
+    unzip <$> zipWithM mkMergeParam fold_acc_params nes
+
+  let res = map paramName merge_params
       form = ForLoop loop_iterator $ Var chunk_size
 
       compute_start_index =
@@ -72,8 +75,8 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
         lambdaBody fold_lam
       seq_loop =
         mkLet' [] res_idents $
-        LoopOp $ DoLoop res (zip merge_params nes) form seq_loop_body
-      seq_body = mkBody [seq_loop] $ map (Var . identName) res_idents
+        LoopOp $ DoLoop res (zip merge_params unique_nes) form seq_loop_body
+      seq_body = mkBody (seq_copy_bnds++[seq_loop]) $ map (Var . identName) res_idents
 
       seqlam = Lambda { lambdaParams = chunk_size_param : arr_chunk_params
                       , lambdaReturnType = lambdaReturnType fold_lam
@@ -116,3 +119,12 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
         mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
           arrayOfRow (identType ident) chunk_size
+
+        mkMergeParam acc_param (Var v) = do
+          v' <- letExp (baseString v ++ "_copy") $ PrimOp $ Copy v
+          return (acc_param { paramIdent =
+                              paramIdent acc_param `setIdentUniqueness` Unique
+                            },
+                  Var v')
+        mkMergeParam acc_param se =
+          return (acc_param, se)
