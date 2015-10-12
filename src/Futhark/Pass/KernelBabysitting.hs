@@ -91,8 +91,11 @@ transformBinding expmap (Let pat ()
 
   arrs' <- mapM (padAndRearrange num_threads elements_per_thread padding w') arrs
 
+  parlam' <- transformLambda parlam
+  seqlam' <- transformLambda seqlam
+
   addBinding $ Let pat () $ LoopOp $
-    ReduceKernel cs w kernel_size' parlam seqlam nes arrs'
+    ReduceKernel cs w kernel_size' parlam' seqlam' nes arrs'
   return expmap
   where num_chunks = kernelWorkgroups kernel_size
         group_size = kernelWorkgroupSize kernel_size
