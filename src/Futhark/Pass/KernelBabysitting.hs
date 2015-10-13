@@ -89,7 +89,7 @@ transformBinding expmap (Let pat ()
   let kernel_size' =
         kernel_size { kernelThreadOffsetMultiple = offset_multiple }
 
-  arrs' <- mapM (padAndRearrange num_threads elements_per_thread padding w') arrs
+  arrs' <- mapM (padAndRearrangeIf2D num_threads elements_per_thread padding w') arrs
 
   parlam' <- transformLambda parlam
   seqlam' <- transformLambda seqlam
@@ -100,8 +100,13 @@ transformBinding expmap (Let pat ()
   where num_chunks = kernelWorkgroups kernel_size
         group_size = kernelWorkgroupSize kernel_size
 
-        padAndRearrange num_threads elements_per_thread padding w' arr = do
+        padAndRearrangeIf2D num_threads elements_per_thread padding w' arr = do
           arr_t <- lookupType arr
+          if arrayRank arr_t == 1
+            then padAndRearrange num_threads elements_per_thread padding w' arr arr_t
+            else return arr
+
+        padAndRearrange num_threads elements_per_thread padding w' arr arr_t = do
           let arr_shape = arrayShape arr_t
               row_dims = arrayDims (rowType arr_t)
               padding_shape = arr_shape `setOuterDim` padding
