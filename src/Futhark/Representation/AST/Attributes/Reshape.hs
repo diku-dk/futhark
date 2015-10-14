@@ -58,14 +58,21 @@ shapeCoerce cs newdims arr =
 -- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
 reshapeOuter :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeOuter newshape n oldshape =
-  newshape ++ map DimCoercion (drop n (shapeDims oldshape))
+  newshape ++ map coercion_or_new (drop n (shapeDims oldshape))
+  where coercion_or_new
+          | length newshape == n = DimCoercion
+          | otherwise            = DimNew
 
 -- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
 -- @oldshape@) of @src@ with @newshape@.
 reshapeInner :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeInner newshape n oldshape =
-  map DimCoercion (take n (shapeDims oldshape)) ++ newshape
+  map coercion_or_new (take n (shapeDims oldshape)) ++ newshape
+  where coercion_or_new
+          | length newshape == m-n = DimCoercion
+          | otherwise              = DimNew
+        m = shapeRank oldshape
 
 -- | If the shape change is nothing but shape coercions, return the new dimensions.  Otherwise, return
 -- 'Nothing'.
