@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections, GeneralizedNewtypeDeriving #-}
 -- | Inspired by the paper "Defunctionalizing Push Arrays".
 module Futhark.CodeGen.ImpCode
   ( Program
@@ -17,6 +17,17 @@ module Futhark.CodeGen.ImpCode
   , Code (..)
   , Exp (..)
   , UnOp (..)
+
+    -- * Typed enumerations
+  , Count (..)
+  , Bytes
+  , Elements
+  , elements
+  , bytes
+  , write
+  , index
+  , withElemType
+
     -- * Analysis
   , functionsCalled
     -- * Re-exports from other modules.
@@ -35,9 +46,10 @@ import qualified Data.HashSet as HS
 import Prelude hiding (foldr)
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Syntax (BinOp (..))
+import Futhark.Representation.AST.Syntax (BinOp (..), Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
+import Futhark.Util.IntegralExp
 
 import Text.PrettyPrint.Mainland hiding (space)
 
@@ -48,20 +60,7 @@ data Size = ConstSize Int32
 type MemSize = Size
 type DimSize = Size
 
--- | The memory space of a block.  If 'DefaultSpace', this is the "default"
--- space, whatever that is.  The exact meaning of the 'SpaceID'
--- depends on the backend used.  In GPU kernels, for example, this is
--- used to distinguish between constant, global and shared memory
--- spaces.  In GPU-enabled host code, it is used to distinguish
--- between host memory ('DefaultSpace') and GPU space.
-data Space = DefaultSpace
-           | Space SpaceId
-             deriving (Show, Eq, Ord)
-
--- | A string representing a specific non-default memory space.
-type SpaceId = String
-
-data Type = Scalar BasicType | Mem DimSize Space
+data Type = Scalar BasicType | Mem MemSize Space
 
 data Param = MemParam VName DimSize Space
            | ScalarParam VName BasicType
@@ -111,18 +110,19 @@ data Code a = Skip
             | Op a
             deriving (Show)
 
+instance Monoid (Code a) where
+  mempty = Skip
+  Skip `mappend` y    = y
+  x    `mappend` Skip = x
+  x    `mappend` y    = x :>>: y
+
 data Exp = Constant BasicValue
          | BinOp BinOp Exp Exp
          | UnOp UnOp Exp
          | Index VName Exp BasicType Space
          | ScalarVar VName
          | SizeOf BasicType
-         | UnsignedDivide Exp Exp -- Hack for doing address
-                                  -- calculations.  We should remove
-                                  -- this when we get around to
-                                  -- improving our binary operators
-                                  -- and scalar types.
-         | UnsignedMod Exp Exp -- Likewise.
+         | Cond Exp Exp Exp
            deriving (Eq, Show)
 
 data UnOp = Not -- ^ Boolean negation.
@@ -151,17 +151,59 @@ instance Num Exp where
   fromInteger = Constant . IntVal . fromInteger
   negate = UnOp Negate
 
-instance Fractional Exp where
-  0 / _ = 0
-  x / 1 = x
-  x / y = BinOp Divide x y
-  fromRational = Constant . Float64Val . fromRational
+instance IntegralExp Exp where
+  0 `div` _ = 0
+  x `div` 1 = x
+  x `div` y = BinOp FloatDiv x y
+  0 `mod` _ = 0
+  _ `mod` 1 = 0
+  x `mod` y = BinOp Mod x y
+  0 `quot` _ = 0
+  x `quot` 1 = x
+  x `quot` y = BinOp Quot x y
+  0 `rem` _ = 0
+  _ `rem` 1 = 0
+  x `rem` y = BinOp Rem x y
 
-instance Monoid (Code a) where
-  mempty = Skip
-  Skip `mappend` y    = y
-  x    `mappend` Skip = x
-  x    `mappend` y    = x :>>: y
+instance IntegralCond Exp where
+  oneIfZero x =
+    Cond (BinOp Equal x 0) 1 x
+  ifZero c =
+    Cond (BinOp Equal c 0)
+  ifLessThan a b =
+    Cond (BinOp Less a b)
+
+-- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
+-- type.
+newtype Count u = Count { innerExp :: Exp }
+                deriving (Eq, Show, Num, IntegralExp)
+
+instance Pretty (Count u) where
+  ppr = ppr . innerExp
+
+-- | Phantom type for a count of elements.
+data Elements
+
+-- | Phanton type for a count of bytes.
+data Bytes
+
+elements :: Exp -> Count Elements
+elements = Count
+
+bytes :: Exp -> Count Bytes
+bytes = Count
+
+-- | Convert a count of elements into a count of bytes, given the
+-- per-element size.
+withElemType :: Count Elements -> BasicType -> Count Bytes
+withElemType (Count e) t = bytes $ e * SizeOf t
+
+-- | Typed wrapper around 'Index'.
+index :: VName -> Count Bytes -> BasicType -> Space -> Exp
+index name (Count e) = Index name e
+
+write :: VName -> Count Bytes -> BasicType -> Space -> Exp -> Code a
+write name (Count i) = Write name i
 
 -- Prettyprinting definitions.
 
@@ -245,10 +287,6 @@ instance Pretty op => Pretty (Code op) where
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
 
-instance Pretty Space where
-  ppr DefaultSpace = mempty
-  ppr (Space s)    = text "@" <> text s
-
 instance Pretty Exp where
   ppr = pprPrec (-1)
   pprPrec _ (Constant v) = ppr v
@@ -257,16 +295,6 @@ instance Pretty Exp where
     pprPrec (precedence op) x <+/>
     ppr op <+>
     pprPrec (rprecedence op) y
-  pprPrec p (UnsignedDivide x y) =
-    parensIf (p >= precedence IntDivide) $
-    pprPrec (precedence IntDivide) x <+/>
-    text "///" <+>
-    pprPrec (rprecedence IntDivide) y
-  pprPrec p (UnsignedMod x y) =
-    parensIf (p >= precedence Mod) $
-    pprPrec (precedence Mod) x <+/>
-    text "%%" <+>
-    pprPrec (rprecedence Mod) y
   pprPrec _ (UnOp Not x) =
     text "not" <+> ppr x
   pprPrec _ (UnOp Complement x) =
@@ -285,6 +313,9 @@ instance Pretty Exp where
                                  Space s      -> text "@" <> text s
   pprPrec _ (SizeOf t) =
     text "sizeof" <> parens (ppr t)
+  pprPrec p (Cond c t f) =
+    parensIf (p >= 0) $
+    ppr c <+> text "?" <+> ppr t <+> text ":" <+> ppr f
 
 precedence :: BinOp -> Int
 precedence LogAnd = 0
@@ -300,14 +331,16 @@ precedence ShiftR = 3
 precedence Plus = 4
 precedence Minus = 4
 precedence Times = 5
-precedence Divide = 5
-precedence IntDivide = 5
+precedence FloatDiv = 5
+precedence Div = 5
 precedence Mod = 5
+precedence Quot = 5
+precedence Rem = 5
 precedence Pow = 6
 
 rprecedence :: BinOp -> Int
 rprecedence Minus = 10
-rprecedence Divide = 10
+rprecedence FloatDiv = 10
 rprecedence op = precedence op
 
 instance Functor ProgramT where
@@ -417,12 +450,11 @@ instance FreeIn a => FreeIn (Code a) where
 instance FreeIn Exp where
   freeIn (Constant _) = mempty
   freeIn (BinOp _ x y) = freeIn x <> freeIn y
-  freeIn (UnsignedDivide x y) = freeIn x <> freeIn y
-  freeIn (UnsignedMod x y) = freeIn x <> freeIn y
   freeIn (UnOp _ x) = freeIn x
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
+  freeIn (Cond c t f) = freeIn c <> freeIn t <> freeIn f
 
 instance FreeIn Size where
   freeIn (VarSize name) = HS.singleton name

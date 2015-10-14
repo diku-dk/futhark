@@ -13,6 +13,7 @@ module Futhark.Representation.AST.Pretty
 
 import Data.Array (elems, listArray)
 import Data.Maybe
+import Data.Monoid
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
@@ -74,17 +75,23 @@ instance Pretty ExtDimSize where
 instance Pretty ExtShape where
   ppr = brackets . commasep . map ppr . extShapeDims
 
+instance Pretty Space where
+  ppr DefaultSpace = mempty
+  ppr (Space s)    = text "@" <> text s
+
 instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty (TypeBase ExtShape) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
     where f dim s = brackets $ s <> comma <> ppr dim
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty (TypeBase Rank) where
   ppr (Basic et) = ppr et
@@ -92,7 +99,8 @@ instance Pretty (TypeBase Rank) where
     where f s _ = brackets s
           u' | Unique <- u = star
              | otherwise = empty
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty Ident where
   ppr ident = ppr (identType ident) <+> ppr (identName ident)
@@ -176,8 +184,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
   ppr (Not e) = text "!" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
-  ppr (Abs e) = text "abs" <> pprPrec 9 e
-  ppr (Signum e) = text "signum" <> pprPrec 9 e
+  ppr (Abs e) = text "abs" <+> pprPrec 9 e
+  ppr (Signum e) = text "signum" <+> pprPrec 9 e
   ppr (Complement e) = text "~" <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
@@ -191,13 +199,18 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  ppr (Stripe cs stride v) =
+    ppCertificates cs <> text "stripe" <> apply [ppr stride, ppr v]
+  ppr (Unstripe cs stride v) =
+    ppCertificates cs <> text "unstripe" <> apply [ppr stride, ppr v]
   ppr (Split cs sizeexps a) =
     ppCertificates cs <> text "split" <> apply [apply (map ppr sizeexps), ppr a]
   ppr (Concat cs x ys _) =
     ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
-  ppr (Alloc e) = text "alloc" <> apply [ppr e]
+  ppr (Alloc e DefaultSpace) = text "alloc" <> apply [ppr e]
+  ppr (Alloc e (Space sp)) = text "alloc" <> apply [ppr e, text sp]
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>
@@ -267,6 +280,19 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
             ppr name <+> text "<" <+> ppr bound
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> apply (map ppr perm)
+  ppr (ReduceKernel cs w
+       (KernelSize num_chunks workgroup_size per_thread_elements offset_multiple)
+       parfun seqfun es as) =
+    ppCertificates' cs <> text "reduceKernel" <>
+    parens (ppr w <> comma </>
+            commasep [ppr num_chunks,
+                      ppr workgroup_size,
+                      ppr per_thread_elements,
+                      ppr offset_multiple
+                     ] </>
+            braces (commasep $ map ppr es) <> comma </>
+            commasep (map ppr as) </>
+            ppr parfun <> comma </> ppr seqfun)
 
 instance PrettyLore lore => Pretty (KernelInput lore) where
   ppr inp = ppr (kernelInputType inp) <+>
@@ -342,9 +368,11 @@ instance Pretty BinOp where
   ppr Minus = text "-"
   ppr Pow = text "pow"
   ppr Times = text "*"
-  ppr Divide = text "/"
-  ppr IntDivide = text "div"
+  ppr FloatDiv = text "/"
+  ppr Div = text "div"
   ppr Mod = text "%"
+  ppr Quot = text "//"
+  ppr Rem = text "%%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"

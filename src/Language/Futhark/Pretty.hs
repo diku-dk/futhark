@@ -126,6 +126,8 @@ instance Pretty BinOp where
   ppr Times = text "*"
   ppr Divide = text "/"
   ppr Mod = text "%"
+  ppr Quot = text "//"
+  ppr Rem = text "%%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"
@@ -210,6 +212,10 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     text "reshape" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  pprPrec _ (Stripe stride e _) =
+    text "stripe" <> apply [ppr stride, ppr e]
+  pprPrec _ (Unstripe stride e _) =
+    text "unstripe" <> apply [ppr stride, ppr e]
   pprPrec _ (Transpose 0 1 e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Transpose k n e _) =
@@ -313,6 +319,8 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Times = 5
         precedence Divide = 5
         precedence Mod = 5
+        precedence Quot = 5
+        precedence Rem = 5
         precedence Pow = 6
         rprecedence Minus = 10
         rprecedence Divide = 10

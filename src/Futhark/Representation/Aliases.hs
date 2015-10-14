@@ -283,7 +283,7 @@ mkPatternAliases pat e =
                   case (patElemBindage bindee, patElemRequires bindee) of
                     (BindInPlace {}, _) -> mempty
                     (_, Array {})       -> names
-                    (_, Mem _)          -> names
+                    (_, Mem _ _)        -> names
                     _                   -> mempty
 
 mkContextAliases :: forall anylore lore.

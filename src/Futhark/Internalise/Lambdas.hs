@@ -204,8 +204,8 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
                       return $ I.Array btp (I.Shape resdims) u
                     mkArrType (_, I.Basic btp ) =
                       return $ I.Basic btp
-                    mkArrType (_, I.Mem   se  ) =
-                      return $ I.Mem   se
+                    mkArrType (_, I.Mem se space) =
+                      return $ I.Mem se space
                 lamres <- bodyBind body
                 let (lamacc_res, lamarr_res) = (take acc_len lamres, drop acc_len lamres)
                     lamarr_idtps = concatMap (\(y,tp) -> case y of

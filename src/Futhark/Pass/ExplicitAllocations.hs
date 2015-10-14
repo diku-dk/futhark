@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections, LambdaCase #-}
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
@@ -38,7 +38,7 @@ data Entry = Entry { entryMemSummary :: MemSummary
 type MemoryMap = HM.HashMap VName Entry
 
 data AllocBinding = SizeComputation VName SE.ScalExp
-                  | Allocation VName SubExp
+                  | Allocation VName SubExp Space
                   | ArrayCopy VName Bindage VName
                     deriving (Eq, Ord, Show)
 
@@ -46,8 +46,8 @@ bindAllocBinding :: MonadBinder m => AllocBinding -> m ()
 bindAllocBinding (SizeComputation name se) = do
   e <- SE.fromScalExp' se
   letBindNames'_ [name] e
-bindAllocBinding (Allocation name size) =
-  letBindNames'_ [name] $ PrimOp $ Alloc size
+bindAllocBinding (Allocation name size space) =
+  letBindNames'_ [name] $ PrimOp $ Alloc size space
 bindAllocBinding (ArrayCopy name bindage src) =
   letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
 
@@ -60,10 +60,10 @@ class (MonadFreshNames m, HasTypeEnv m) => Allocator m where
   asksMemoryMap f = f <$> askMemoryMap
 
 allocateMemory :: Allocator m =>
-                  String -> SubExp -> m VName
-allocateMemory desc size = do
+                  String -> SubExp -> Space -> m VName
+allocateMemory desc size space = do
   v <- newVName desc
-  addAllocBinding $ Allocation v size
+  addAllocBinding $ Allocation v size space
   return v
 
 computeSize :: Allocator m =>
@@ -111,8 +111,8 @@ instance Allocator AllocM where
 
   addAllocBinding (SizeComputation name se) =
     letBindNames'_ [name] =<< SE.fromScalExp' se
-  addAllocBinding (Allocation name size) =
-    letBindNames'_ [name] $ PrimOp $ Alloc size
+  addAllocBinding (Allocation name size space) =
+    letBindNames'_ [name] $ PrimOp $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
     letBindNames_ [(name, bindage)] $ PrimOp $ SubExp $ Var src
 
@@ -155,15 +155,30 @@ runPatAllocM :: MonadFreshNames m =>
 runPatAllocM (PatAllocM m) memoryMap =
   modifyNameSource $ runState $ runReaderT (runWriterT m) memoryMap
 
+arraySizeInBytesExp :: Type -> SE.ScalExp
+arraySizeInBytesExp t =
+  SE.sproduct $
+  (SE.Val $ IntVal $ basicSize $ elemType t) :
+  map (`SE.subExpToScalExp` Int) (arrayDims t)
+
+arraySizeInBytes :: Allocator m => Type -> m SubExp
+arraySizeInBytes = computeSize "bytes" . arraySizeInBytesExp
+
 allocForArray :: Allocator m =>
-                 Type -> m (SubExp, VName)
-allocForArray t = do
-  size <-
-    computeSize "bytes" $
-    SE.sproduct $
-    (SE.Val $ IntVal $ fromIntegral $ basicSize $ elemType t) :
-    map (`SE.subExpToScalExp` Int) (arrayDims t)
-  m <- allocateMemory "mem" size
+                 Type -> Space -> m (SubExp, VName)
+allocForArray t space = do
+  size <- arraySizeInBytes t
+  m <- allocateMemory "mem" size space
+  return (size, m)
+
+-- | Allocate local-memory array.
+allocForLocalArray :: Allocator m =>
+                      SubExp -> Type -> m (SubExp, VName)
+allocForLocalArray workgroup_size t = do
+  size <- computeSize "local_bytes" $
+          arraySizeInBytesExp t *
+          SE.intSubExpToScalExp workgroup_size
+  m <- allocateMemory "local_mem" size $ Space "local"
   return (size, m)
 
 allocsForBinding :: Allocator m =>
@@ -205,7 +220,7 @@ allocsForPattern sizeidents validents rts = do
         summary <- lift $ summaryForBindage (identType ident) bindage
         return $ PatElem ident bindage summary
 
-      ReturnsMemory _ ->
+      ReturnsMemory {} ->
         return $ PatElem ident bindage Scalar
 
       ReturnsArray _ _ u (Just (ReturnsInBlock mem ixfun)) ->
@@ -277,7 +292,7 @@ summaryForBindage t BindVar
   | basicType t =
     return Scalar
   | otherwise = do
-    (_, m) <- allocForArray t
+    (_, m) <- allocForArray t DefaultSpace
     return $ directIndexFunction m t
 summaryForBindage _ (BindInPlace _ src _) =
   lookupSummary' src
@@ -289,7 +304,7 @@ memForBindee :: (MonadFreshNames m) =>
                    (Ident, MemSummary))
 memForBindee ident = do
   size <- newIdent (memname <> "_size") (Basic Int)
-  mem <- newIdent memname $ Mem $ Var $ identName size
+  mem <- newIdent memname $ Mem (Var $ identName size) DefaultSpace
   return (size,
           mem,
           (ident, directIndexFunction (identName mem) t))
@@ -299,13 +314,6 @@ memForBindee ident = do
 directIndexFunction :: VName -> Type -> MemSummary
 directIndexFunction mem t =
   MemSummary mem $ IxFun.iota $ arrayDims t
-
-sizeOfMemoryBlock :: (Monad m, HasTypeEnv m) => VName -> m SubExp
-sizeOfMemoryBlock mem = do
-  t <- lookupType mem
-  case t of
-    Mem size -> return size
-    _        -> fail $ "sizeOfMemoryBlock: " <> pretty mem <> " not a memory block."
 
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
 lookupSummary name = asksMemoryMap $ fmap entryMemSummary . HM.lookup name
@@ -396,11 +404,11 @@ ensureDirectArray v = do
       | IxFun.isDirect ixfun -> do
         memt <- lookupType mem
         case memt of
-          Mem size -> return (size, mem, Var v)
-          _        -> fail $
-                      pretty mem ++
-                      " should be a memory block but has type " ++
-                      pretty memt
+          Mem size _ -> return (size, mem, Var v)
+          _          -> fail $
+                        pretty mem ++
+                        " should be a memory block but has type " ++
+                        pretty memt
     _ ->
       -- We need to do a new allocation, copy 'v', and make a new
       -- binding for the size of the memory block.
@@ -423,7 +431,7 @@ allocLinearArray :: String
                  -> VName -> AllocM (SubExp, VName, SubExp)
 allocLinearArray s v = do
   t <- lookupType v
-  (size, mem) <- allocForArray t
+  (size, mem) <- allocForArray t DefaultSpace
   v' <- newIdent s t
   let pat = Pattern [] [PatElem v' BindVar $ directIndexFunction mem t]
   addBinding $ Let pat () $ PrimOp $ Copy v
@@ -455,7 +463,7 @@ memoryInRetType :: In.RetType -> RetType
 memoryInRetType (ExtRetType ts) =
   evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Basic t) = return $ ReturnsScalar t
-        addAttr (Mem _)  = fail "memoryInRetType: too much memory"
+        addAttr (Mem {})  = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get
           put $ i + 1
@@ -544,16 +552,12 @@ allocInExp (LoopOp (Kernel cs w index ispace inps returns body)) = do
                   summary = MemSummary mem ixfun'
               return inp { kernelInputParam = Param (kernelInputIdent inp) summary }
 
-allocInExp (LoopOp (Map cs w f arrs)) = do
-  f' <- allocInMapLambda f =<< mapM lookupSummary' arrs
-  return $ LoopOp $ Map cs w f' arrs
-
-allocInExp (LoopOp (Reduce cs w f input)) = do
-  -- Create new memory blocks but use same index functions.
-  (new_summaries, new_arrs) <- unzip <$> mapM (duplicateArray "reduce") arrs
-  f' <- allocInReduceLambda f new_summaries
-  return $ LoopOp $ Reduce cs w f' $ zip accs new_arrs
-  where (accs,arrs) = unzip input
+allocInExp (LoopOp (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
+  arr_summaries <- mapM lookupSummary' arrs
+  fold_lam' <- allocInChunkedLambda (kernelThreadOffsetMultiple size)
+               fold_lam arr_summaries
+  red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
+  return $ LoopOp $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
 
 allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
@@ -571,57 +575,72 @@ allocInExp e = mapExpM alloc e
                          , mapOnFParam = fail "Unhandled fparam in ExplicitAllocations"
                          }
 
--- | Duplicate an array into a new memory block, but with the same
--- index function.
-duplicateArray :: String -> VName -> AllocM ((VName, IxFun.IxFun), VName)
-duplicateArray desc arr = do
-  (mem, ixfun) <- lookupArraySummary' arr
-  mem_size <- sizeOfMemoryBlock mem
-  new_mem <- letExp (desc <> "_" <> baseString arr <> "_mem") $
-             PrimOp $ Alloc mem_size
-  new_arr <- newVName $ desc <> "_" <> baseString arr
-  new_arr_ident <- Ident new_arr <$> lookupType arr
-  let pat = Pattern [] [PatElem new_arr_ident BindVar $
-                        MemSummary new_mem ixfun]
-  addBinding =<< mkLetM pat (PrimOp $ Copy arr)
-  return ((new_mem, ixfun), new_arr)
-
-allocInMapLambda :: In.Lambda -> [MemSummary] -> AllocM Lambda
-allocInMapLambda lam input_summaries = do
+allocInChunkedLambda :: SubExp -> In.Lambda -> [MemSummary] -> AllocM Lambda
+allocInChunkedLambda thread_chunk lam arr_summaries = do
   let i = lambdaIndex lam
-  params' <-
-    forM (zip (lambdaParams lam) input_summaries) $ \(p,summary) ->
+      (chunk_size_param, chunked_params) =
+        partitionChunkedLambdaParameters $ lambdaParams lam
+  chunked_params' <-
+    forM (zip chunked_params arr_summaries) $ \(p,summary) ->
     case (paramType p, summary) of
      (_, Scalar) ->
        fail $ "Passed a scalar for lambda parameter " ++ pretty p
      (Array {}, MemSummary mem ixfun) ->
        return p { paramLore =
-                     MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
+                     MemSummary mem $ IxFun.offsetIndex ixfun $
+                     SE.Id i Int * SE.intSubExpToScalExp thread_chunk
                 }
-     _ ->
-       return p { paramLore = Scalar }
-  allocInLambda i params' (lambdaBody lam) (lambdaReturnType lam)
+     (_, _) ->
+       fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
+  allocInLambda i (Param (paramIdent chunk_size_param) Scalar : chunked_params')
+    (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceLambda :: In.Lambda
-                    -> [(VName, IxFun.IxFun)]
+                    -> SubExp
                     -> AllocM Lambda
-allocInReduceLambda lam input_summaries = do
-  -- Idea: at index point 'i', the accumulator is at offset 'i' and
-  -- the element is at offset 'i+1'.
+allocInReduceLambda lam workgroup_size = do
+  let i = lambdaIndex lam
+      (other_index_param, actual_params) =
+        partitionChunkedLambdaParameters $ lambdaParams lam
+      (acc_params, arr_params) =
+        splitAt (length actual_params `div` 2) actual_params
+      this_index = SE.Id i Int `SE.SRem`
+                   SE.intSubExpToScalExp workgroup_size
+      other_index = SE.Id (paramName other_index_param) Int
   acc_params' <-
-    forM (zip acc_params input_summaries) $ \(acc_param, (mem, ixfun)) ->
-    return acc_param { paramLore =
-                          MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
-                     }
+    allocInReduceParameters workgroup_size this_index acc_params
   arr_params' <-
-    forM (zip arr_params input_summaries) $ \(arr_param, (mem, ixfun)) ->
-    return arr_param { paramLore =
-                          MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int + 1]
-                     }
-  allocInLambda i (acc_params' ++ arr_params') (lambdaBody lam) (lambdaReturnType lam)
-  where n = length input_summaries
-        i = lambdaIndex lam
-        (acc_params, arr_params) = splitAt n $ lambdaParams lam
+    forM (zip arr_params $ map paramLore acc_params') $ \(param, attr) ->
+    case attr of
+      MemSummary mem _ -> return param {
+        paramLore = MemSummary mem $
+                    IxFun.applyInd
+                    (IxFun.iota $ workgroup_size : arrayDims (paramType param))
+                    [this_index + other_index]
+        }
+      Scalar ->
+        return param { paramLore = Scalar }
+
+  allocInLambda i (other_index_param { paramLore =  Scalar } :
+                   acc_params' ++ arr_params')
+    (lambdaBody lam) (lambdaReturnType lam)
+
+allocInReduceParameters :: SubExp
+                        -> SE.ScalExp
+                        -> [In.LParam]
+                        -> AllocM [LParam]
+allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
+  where allocInReduceParameter p =
+          case paramType p of
+            t@(Array {}) -> do
+              (_, shared_mem) <- allocForLocalArray workgroup_size t
+              let ixfun = IxFun.applyInd
+                          (IxFun.iota $ workgroup_size : arrayDims t)
+                          [local_id]
+              return p { paramLore = MemSummary shared_mem ixfun
+                       }
+            _ ->
+              return p { paramLore = Scalar }
 
 allocInLambda :: VName -> [LParam] -> In.Body -> [Type]
               -> AllocM Lambda
@@ -672,8 +691,8 @@ simplifiable =
                   Engine.simplifyExtShape shape <*>
                   pure u <*>
                   simplifyMemReturn ret
-                simplifyReturns (ReturnsMemory size) =
-                  ReturnsMemory <$> Engine.simplifySubExp size
+                simplifyReturns (ReturnsMemory size space) =
+                  ReturnsMemory <$> Engine.simplifySubExp size <*> pure space
                 simplifyMemReturn (ReturnsNewBlock i) =
                   return $ ReturnsNewBlock i
                 simplifyMemReturn (ReturnsInBlock v ixfun) =

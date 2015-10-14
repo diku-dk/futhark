@@ -87,6 +87,8 @@ import Language.Futhark.Parser.Lexer
       '*'             { L $$ TIMES }
       '/'             { L $$ DIVIDE }
       '%'             { L $$ MOD }
+      '//'            { L $$ QUOT }
+      '%%'            { L $$ REM }
       '='             { L $$ EQU }
       '=='            { L $$ EQU2 }
       '<'             { L $$ LTH }
@@ -123,6 +125,8 @@ import Language.Futhark.Parser.Lexer
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
+      stripe          { L $$ STRIPE }
+      unstripe          { L $$ UNSTRIPE }
       transpose       { L $$ TRANSPOSE }
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
@@ -165,7 +169,7 @@ import Language.Futhark.Parser.Lexer
 %left '<<' '>>'
 %left '+' '-'
 
-%left '*' '/' '%'
+%left '*' '/' '%' '//' '%%'
 %left pow
 %nonassoc '~' '!' signum abs
 
@@ -181,6 +185,8 @@ BinOp :: { (BinOp, SrcLoc) }
       | '*'     { (Times, $1) }
       | '/'     { (Divide, $1) }
       | '%'     { (Mod, $1) }
+      | '//'    { (Quot, $1) }
+      | '%%'    { (Rem, $1) }
       | '=='    { (Equal, $1) }
       | '<'     { (Less, $1) }
       | '<='    { (Leq, $1) }
@@ -292,6 +298,8 @@ Exp  :: { UncheckedExp }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
+     | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
+     | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
      | '-' Exp %prec '~' { UnOp Negate $2 $1 }
      | '!' Exp        { UnOp Not $2 $1 }
      | '~' Exp        { UnOp Complement $2 $1 }
@@ -335,6 +343,11 @@ Exp  :: { UncheckedExp }
 
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
                       { Rearrange $4 $7 $1 }
+
+     | stripe '(' Exp ',' Exp ')'
+                      { Stripe $3 $5 $1 }
+     | unstripe '(' Exp ',' Exp ')'
+                      { Unstripe $3 $5 $1 }
 
      | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
 

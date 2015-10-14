@@ -71,7 +71,7 @@ import Futhark.Representation.AST.Attributes.Rearrange
 rankShaped :: ArrayShape shape => TypeBase shape -> TypeBase Rank
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Basic et) = Basic et
-rankShaped (Mem size) = Mem size
+rankShaped (Mem size space) = Mem size space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -92,8 +92,8 @@ modifyArrayShape f (Array t ds u)
   | shapeRank ds' == 0 = Basic t
   | otherwise          = Array t (f ds) u
   where ds' = f ds
-modifyArrayShape _ (Basic t)      = Basic t
-modifyArrayShape _ (Mem size)     = Mem size
+modifyArrayShape _ (Basic t)        = Basic t
+modifyArrayShape _ (Mem size space) = Mem size space
 
 -- | Set the shape of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -144,8 +144,8 @@ staticShapes1 (Basic bt) =
   Basic bt
 staticShapes1 (Array bt (Shape shape) u) =
   Array bt (ExtShape $ map Free shape) u
-staticShapes1 (Mem size) =
-  Mem size
+staticShapes1 (Mem size space) =
+  Mem size space
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -269,7 +269,7 @@ diet :: TypeBase shape -> Diet
 diet (Basic _) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
-diet (Mem _) = Observe -- error "diet Mem"
+diet (Mem {}) = Observe
 
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it
@@ -293,7 +293,7 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   t1 == t2 &&
   shape1 `subShapeOf` shape2
 subtypeOf (Basic t1) (Basic t2) = t1 == t2
-subtypeOf (Mem _) (Mem _) = True
+subtypeOf (Mem _ space1) (Mem _ space2) = space1 == space2
 subtypeOf _ _ = False
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
@@ -341,8 +341,8 @@ shapeContextSize = HS.size . shapeContext
 hasStaticShape :: ExtType -> Maybe Type
 hasStaticShape (Basic bt) =
   Just $ Basic bt
-hasStaticShape (Mem size) =
-  Just $ Mem size
+hasStaticShape (Mem size space) =
+  Just $ Mem size space
 hasStaticShape (Array bt (ExtShape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
   where isFree (Free s) = Just s

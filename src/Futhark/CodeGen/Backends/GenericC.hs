@@ -715,7 +715,7 @@ compileExp (BinOp bop x y) = do
              Plus -> [C.cexp|$exp:x' + $exp:y'|]
              Minus -> [C.cexp|$exp:x' - $exp:y'|]
              Times -> [C.cexp|$exp:x' * $exp:y'|]
-             Divide -> [C.cexp|$exp:x' / $exp:y'|]
+             FloatDiv -> [C.cexp|$exp:x' / $exp:y'|]
              Pow -> [C.cexp|powl($exp:x',$exp:y')|]
              ShiftR -> [C.cexp|$exp:x' >> $exp:y'|]
              ShiftL -> [C.cexp|$exp:x' << $exp:y'|]
@@ -727,7 +727,7 @@ compileExp (BinOp bop x y) = do
              Equal -> [C.cexp|$exp:x' == $exp:y'|]
              Less -> [C.cexp|$exp:x' < $exp:y'|]
              Leq -> [C.cexp|$exp:x' <= $exp:y'|]
-             IntDivide ->
+             Div ->
                let q = [C.cexp|$exp:x' / $exp:y'|]
                    r = [C.cexp|$exp:x' % $exp:y'|]
                in [C.cexp|$exp:q -
@@ -742,20 +742,20 @@ compileExp (BinOp bop x y) = do
                     ($exp:x' > 0 && $exp:y' > 0) ||
                     ($exp:x' < 0 && $exp:y' < 0)) ?
                     0 : $exp:y')|]
-
-compileExp (UnsignedDivide x y) = do
-  x' <- compileExp x
-  y' <- compileExp y
-  return [C.cexp|$exp:x' / $exp:y'|]
-
-compileExp (UnsignedMod x y) = do
-  x' <- compileExp x
-  y' <- compileExp y
-  return [C.cexp|$exp:x' % $exp:y'|]
+             Quot ->
+               [C.cexp|$exp:x' / $exp:y'|]
+             Rem ->
+               [C.cexp|$exp:x' % $exp:y'|]
 
 compileExp (SizeOf t) =
   return [C.cexp|(sizeof($ty:t'))|]
   where t' = scalarTypeToCType t
+
+compileExp (Cond c t f) = do
+  c' <- compileExp c
+  t' <- compileExp t
+  f' <- compileExp f
+  return [C.cexp|$exp:c' ? $exp:t' : $exp:f'|]
 
 compileCode :: Code op -> CompilerM op s ()
 
