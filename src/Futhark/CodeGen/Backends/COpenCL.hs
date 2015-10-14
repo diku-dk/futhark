@@ -99,7 +99,6 @@ allocateOpenCLBuffer mem size "device" = do
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
-
 copyOpenCLMemory :: GenericC.Copy CallKernel ()
 -- The read/write/copy-buffer functions fail if the given offset is
 -- out of bounds, even if asked to read zero bytes.  We protect with a
@@ -145,6 +144,7 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ =
 
 openclMemoryType :: GenericC.MemoryType CallKernel ()
 openclMemoryType "device" = pure [C.cty|typename cl_mem|]
+openclMemoryType "local" = pure [C.cty|unsigned char|] -- dummy type
 openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
@@ -181,15 +181,14 @@ callKernel (Reduce kernel) = do
         num_workgroups = GenericC.dimSizeToExp $ reductionNumGroups kernel
         kernel_size = [C.cexp|$exp:workgroup_size * $exp:num_workgroups|]
 
-        mkLocalMemory i (_, elements_per_thread, bt, _, _) =
+        mkLocalMemory i (_, num_bytes) =
           GenericC.stm [C.cstm|{
                             assert(clSetKernelArg($id:kernel_name, $int:i,
-                                                  sizeof($ty:ty) * $exp:n * $exp:workgroup_size,
+                                                  $exp:num_bytes',
                                                   NULL)
                                    == CL_SUCCESS);
                         }|]
-          where n = GenericC.dimSizeToExp elements_per_thread
-                ty = GenericC.scalarTypeToCType bt
+          where num_bytes' = GenericC.dimSizeToExp num_bytes
 
         mkBuffer i (MemoryUse mem _) =
           GenericC.stm [C.cstm|{
@@ -317,12 +316,6 @@ instance Monoid OpenClRequirements where
     OpenClRequirements (nubBy cmpFst $ used1 <> used2) (nub $ pragmas1 ++ pragmas2)
     where cmpFst (x, _) (y, _) = x == y
 
-usedFunction :: String -> C.Func -> GenericC.CompilerM op UsedFunctions ()
-usedFunction name func = GenericC.modifyUserState insertIfMissing
-  where insertIfMissing funcs
-          | name `elem` map fst funcs = funcs
-          | otherwise                 = funcs ++ [(name, func)]
-
 inKernelOperations :: GenericC.Operations InKernel UsedFunctions
 inKernelOperations = GenericC.Operations
                      { GenericC.opsCompiler = kernelOps
@@ -354,16 +347,8 @@ inKernelOperations = GenericC.Operations
           fail "Cannot allocate memory in kernel"
 
         copyInKernel :: GenericC.Copy InKernel UsedFunctions
-        copyInKernel dest destidx (Space "global") src srcidx (Space "global") nbytes = do
-          usedFunction "memcpy" $
-            genericMemcpy [C.ctyquals|__global|] [C.ctyquals|__global|]
-          usedFunction "memmove" $
-            genericMemmove [C.ctyquals|__global|] [C.ctyquals|__global|]
-          GenericC.stm [C.cstm|memmove($id:dest + $exp:destidx,
-                                       $id:src + $exp:srcidx,
-                                       $exp:nbytes);|]
-        copyInKernel _ _ destspace _ _ srcspace _ =
-          error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+        copyInKernel _ _ _ _ _ _ _ =
+          fail $ "Cannot bulk copy in kernel."
 
         kernelMemoryType space = do
           quals <- pointerQuals space
@@ -394,7 +379,7 @@ compileKernel (Kernel kernel) =
             OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) [])
 
 compileKernel (Reduce kernel) =
-  let ((kernel_prologue, fold_body, red_body, init_accum,
+  let ((kernel_prologue, fold_body, red_body,
         write_fold_result, write_final_result), s) =
         GenericC.runCompilerM (Program []) inKernelOperations blankNameSource mempty $ do
           kernel_prologue_ <-
@@ -403,15 +388,13 @@ compileKernel (Reduce kernel) =
             GenericC.collect $ GenericC.compileCode $ reductionFoldOperation kernel
           red_body_ <-
             GenericC.collect $ GenericC.compileCode $ reductionReduceOperation kernel
-          init_accum_ <-
-            GenericC.collect $ GenericC.compileCode $ reductionInitAccumulator kernel
           write_fold_result_ <-
             GenericC.collect $ GenericC.compileCode $ reductionWriteFoldResult kernel
 
           write_final_result_ <-
             GenericC.collect $ GenericC.compileCode $ reductionWriteFinalResult kernel
 
-          return (kernel_prologue_, fold_body_, red_body_, init_accum_,
+          return (kernel_prologue_, fold_body_, red_body_,
                   write_fold_result_, write_final_result_)
 
       used_funs = GenericC.compUserState s
@@ -421,11 +404,11 @@ compileKernel (Reduce kernel) =
       kernel_funs = functionsCalled (reductionReduceOperation kernel) <>
                     functionsCalled (reductionFoldOperation kernel)
 
-      (local_memory_params, local_memory_decls) =
-        flip evalState (blankNameSource :: VNameSource) $ liftM unzip $
+      local_memory_params =
+        flip evalState (blankNameSource :: VNameSource) $
         mapM prepareLocalMemory $ reductionThreadLocalMemory kernel
 
-      prologue = kernel_prologue <> local_memory_decls
+      prologue = kernel_prologue
 
       opencl_kernel =
         Kernels.reduce Kernels.Reduction
@@ -434,10 +417,9 @@ compileKernel (Reduce kernel) =
          , Kernels.reductionOffsetName =
              textual $ reductionOffsetName kernel
          , Kernels.reductionInputArrayIndexName =
-             textual $ reductionThreadNum kernel
+             textual $ reductionKernelName kernel
 
          , Kernels.reductionPrologue = prologue
-         , Kernels.reductionInitAccumulator = init_accum
          , Kernels.reductionFoldOperation = fold_body
          , Kernels.reductionWriteFoldResult = write_fold_result
          , Kernels.reductionReduceOperation = red_body
@@ -449,12 +431,8 @@ compileKernel (Reduce kernel) =
 
   in Right ([(reduceKernelName kernel, opencl_kernel)],
             OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) [])
-  where prepareLocalMemory (_, per_thread_size, bt, shared_mem, local_mem) = do
-          let ty = GenericC.scalarTypeToCType bt
-              size = GenericC.dimSizeToExp per_thread_size
-          return ([C.cparam|__local volatile $ty:ty* restrict $id:shared_mem|],
-                  [C.citem|__local volatile $ty:ty* restrict $id:local_mem =
-                             $id:shared_mem + get_local_id(0) * $exp:size;|])
+  where prepareLocalMemory (mem, _) =
+          return ([C.cparam|__local volatile unsigned char* restrict $id:mem|])
 
 compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _) =
   Right ([(kernelName kernel, Kernels.mapTranspose (kernelName kernel) ty)],
@@ -727,7 +705,7 @@ mapKernelName :: MapKernel -> String
 mapKernelName = ("map_kernel_"++) . show . baseTag . kernelThreadNum
 
 reduceKernelName :: ReduceKernel -> String
-reduceKernelName = ("red_kernel_"++) . show . baseTag . reductionThreadNum
+reduceKernelName = ("red_kernel_"++) . show . baseTag . reductionKernelName
 
 kernelName :: CallKernel -> String
 kernelName (Kernel k) =
@@ -750,84 +728,3 @@ blockDim = 16
 
 blockDimPragma :: String
 blockDimPragma = "#define FUT_BLOCK_DIM " ++ show blockDim
-
--- | @memcpy@ parametrised by the address space of the destination and
--- source pointers.
-genericMemcpy :: [C.TypeQual] -> [C.TypeQual] -> C.Func
-genericMemcpy dest_quals src_quals =
-  [C.cfun|
-  // From musl.
-  $tyquals:dest_quals *memcpy($tyquals:dest_quals void *restrict dest,
-                              $tyquals:src_quals const void *restrict src,
-                              size_t n)
-  {
-    $tyquals:dest_quals unsigned char *d = dest;
-    $tyquals:src_quals const unsigned char *s = src;
-    // These were #defines in the musl source code.
-    size_t SS = sizeof(size_t);
-    size_t ALIGN = sizeof(size_t)-1;
-    size_t ONES=((size_t)-1/UCHAR_MAX);
-    if (((typename uintptr_t)d & ALIGN) != ((typename uintptr_t)s & ALIGN)) {
-      goto misaligned;
-    }
-    for (; ((typename uintptr_t)d & ALIGN) && n; n--) {
-      *d++ = *s++;
-    }
-    if (n) {
-      $tyquals:dest_quals size_t *wd = ($tyquals:dest_quals void *)d;
-      $tyquals:src_quals const size_t *ws = ($tyquals:src_quals const void *)s;
-      for (; n>=SS; n-=SS) *wd++ = *ws++;
-      d = ($tyquals:dest_quals void *)wd;
-      s = ($tyquals:dest_quals const void *)ws;
-
-      misaligned:
-      for (; n; n--) {
-        *d++ = *s++;
-      }
-    }
-    return dest;
-  }
-   |]
-
--- | @memmove@ parametrised by the address space of the destination and
--- source pointers.
-genericMemmove :: [C.TypeQual] -> [C.TypeQual] -> C.Func
-genericMemmove dest_quals src_quals =
-  [C.cfun|
-  // From musl.
-  $tyquals:dest_quals *memmove($tyquals:dest_quals void *dest,
-                               $tyquals:src_quals const void *src,
-                               size_t n)
-  {
-    $tyquals:dest_quals char *d = dest;
-    $tyquals:src_quals char *s = src;
-    size_t WS = sizeof(size_t);
-    if (d==s) { return d; }
-    if (s+n <= d || d+n <= s) { return memcpy(d, s, n); }
-    if (d<s) {
-      if ((typename uintptr_t)s % WS == (typename uintptr_t)d % WS) {
-        while ((typename uintptr_t)d % WS) {
-        if (!n--) { return dest; }
-          *d++ = *s++;
-        }
-        for (; n>=WS; n-=WS, d+=WS, s+=WS) {
-          *($tyquals:dest_quals size_t *)d = *($tyquals:src_quals size_t *)s;
-        }
-      }
-      for (; n; n--) { *d++ = *s++; }
-    } else {
-      if ((typename uintptr_t)s % WS == (typename uintptr_t)d % WS) {
-        while ((typename uintptr_t)(d+n) % WS) {
-          if (!n--) { return dest; }
-          d[n] = s[n];
-        }
-        while (n>=WS) {
-          n-=WS;
-          *($tyquals:dest_quals size_t *)(d+n) = *($tyquals:src_quals size_t *)(s+n);
-        }
-      }
-      while (n) { n--; d[n] = s[n]; }
-    }
-    return dest;
-  }
-   |]

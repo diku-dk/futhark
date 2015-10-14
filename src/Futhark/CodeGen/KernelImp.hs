@@ -51,10 +51,8 @@ data MapKernel = MapKernel { kernelThreadNum :: VName
 data ReduceKernel = ReduceKernel
                     { reductionReduceOperation :: Imp.Code InKernel
                     , reductionFoldOperation :: Imp.Code InKernel
-                    , reductionOutputParams :: [(VName,MemSize)]
+                    , reductionThreadLocalMemory :: [(VName, MemSize)]
                       -- ^ In-kernel name and per-workgroup size in bytes.
-                    , reductionThreadLocalMemory :: [(DimSize, DimSize, BasicType, VName, VName)]
-                    , reductionInitAccumulator :: Imp.Code InKernel
                     , reductionWriteFoldResult :: Imp.Code InKernel
                     , reductionPrologue :: Imp.Code InKernel
                     , reductionWriteFinalResult :: Imp.Code InKernel
@@ -63,9 +61,8 @@ data ReduceKernel = ReduceKernel
                     , reductionNumGroups :: DimSize
                     , reductionGroupSize :: DimSize
                     , reductionOffsetName :: VName
-                    , reductionThreadNum :: VName
-                      -- ^ Binding position - also serves as a unique
-                      -- name for the kernel.
+                    , reductionKernelName :: VName
+                      -- ^ Unique name for the kernel.
                     }
                     deriving (Show)
 

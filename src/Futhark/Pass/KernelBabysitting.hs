@@ -89,7 +89,7 @@ transformBinding expmap (Let pat ()
   let kernel_size' =
         kernel_size { kernelThreadOffsetMultiple = offset_multiple }
 
-  arrs' <- mapM (padAndRearrangeIf2D num_threads elements_per_thread padding w') arrs
+  arrs' <- mapM (rearrangeInput num_threads elements_per_thread padding w') arrs
 
   parlam' <- transformLambda parlam
   seqlam' <- transformLambda seqlam
@@ -100,40 +100,55 @@ transformBinding expmap (Let pat ()
   where num_chunks = kernelWorkgroups kernel_size
         group_size = kernelWorkgroupSize kernel_size
 
-        padAndRearrangeIf2D num_threads elements_per_thread padding w' arr = do
+        rearrangeInput num_threads elements_per_thread padding w' arr = do
           arr_t <- lookupType arr
-          if arrayRank arr_t == 1
-            then padAndRearrange num_threads elements_per_thread padding w' arr arr_t
-            else return arr
+          arr_padded <- padArray padding w' arr arr_t
+          let rearrange = if arrayRank arr_t == 1
+                          then rearrange1D
+                          else rearrangeMultiD
+          rearrange num_threads elements_per_thread w'
+            (baseString arr) arr_padded (rowType arr_t)
 
-        padAndRearrange num_threads elements_per_thread padding w' arr arr_t = do
+        padArray padding w' arr arr_t = do
           let arr_shape = arrayShape arr_t
-              row_dims = arrayDims (rowType arr_t)
               padding_shape = arr_shape `setOuterDim` padding
-              extradim_shape = Shape $
-                               [num_threads, elements_per_thread] ++ row_dims
-              tr_perm = [1,0] ++ [2..shapeRank extradim_shape-1]
           arr_padding <-
             letExp (baseString arr <> "_padding") $
             PrimOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
-          arr_padded <-
-            letExp (baseString arr <> "_padded") $
+          letExp (baseString arr <> "_padded") $
             PrimOp $ Concat [] arr [arr_padding] w'
+
+        rearrange1D num_threads elements_per_thread w' arr_name arr_padded row_type = do
+          let row_dims = arrayDims row_type
+              extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
+              tr_perm = [1,0] ++ [2..shapeRank extradim_shape-1]
           arr_extradim <-
-            letExp (baseString arr <> "_extradim") $
+            letExp (arr_name <> "_extradim") $
             PrimOp $ Reshape cs (map DimNew $ shapeDims extradim_shape) arr_padded
           arr_extradim_tr <-
-            letExp (baseString arr <> "_extradim_tr") $
+            letExp (arr_name <> "_extradim_tr") $
             PrimOp $ Rearrange [] tr_perm arr_extradim
           arr_extradim_manifested <-
-            letExp (baseString arr <> "_extradim_manifested") $
+            letExp (arr_name <> "_extradim_manifested") $
             PrimOp $ Copy arr_extradim_tr
           arr_extradim_inv_tr <-
-            letExp (baseString arr <> "_extradim_inv_tr") $
+            letExp (arr_name <> "_extradim_inv_tr") $
             PrimOp $ Rearrange [] tr_perm arr_extradim_manifested
-          letExp (baseString arr <> "_inv_tr") $
-            PrimOp $ Reshape [] (reshapeOuter [DimNew w'] 2 extradim_shape) arr_extradim_inv_tr
+          letExp (arr_name <> "_inv_tr") $
+            PrimOp $ Reshape [] (reshapeOuter [DimNew w'] 2 extradim_shape)
+            arr_extradim_inv_tr
 
+        rearrangeMultiD _ _ _ arr_name arr_padded row_type = do
+          let perm = coalescingPermutation 1 $ 1 + arrayRank row_type
+              inv_perm = rearrangeInverse perm
+          transposed <-
+            letExp (arr_name ++ "_tr") $
+            PrimOp $ Rearrange [] perm arr_padded
+          manifested <-
+            letExp (arr_name ++ "_tr_manifested") $
+            PrimOp $ Copy transposed
+          letExp (arr_name ++ "_inv_tr") $
+            PrimOp $ Rearrange [] inv_perm manifested
 
 transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
   body' <- bindingIdentTypes (Ident i (Basic Int) :

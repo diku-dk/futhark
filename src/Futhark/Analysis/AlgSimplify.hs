@@ -1176,7 +1176,7 @@ toNumSofP (SPlus  e1 e2)   = do
         (NProd{}, NProd{}   ) -> return $ NSum [e1', e2']   t
 toNumSofP me@(MaxMin{}) =
   return $ NProd [me] $ scalExpType me
-toNumSofP s_e = badAlgSimplifyM $ "toNumSofP: unimplemented!"++pretty s_e
+toNumSofP s_e = return $ NProd [s_e] $ scalExpType s_e
 
 
 fromNumSofP :: NNumExp -> AlgSimplifyM ScalExp

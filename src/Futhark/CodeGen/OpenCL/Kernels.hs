@@ -64,7 +64,6 @@ data Reduction = Reduction {
   , reductionOffsetName :: String
   , reductionKernelArgs :: [C.Param]
   , reductionPrologue :: [C.BlockItem]
-  , reductionInitAccumulator :: [C.BlockItem]
   , reductionFoldOperation :: [C.BlockItem]
   , reductionWriteFoldResult :: [C.BlockItem]
   , reductionReduceOperation :: [C.BlockItem]
@@ -76,9 +75,6 @@ reduce red =
   [C.cfun|
    __kernel void $id:(reductionKernelName red)($params:(reductionKernelArgs red))
    {
-     /* initialize */
-     uint $id:tid = get_global_id(0);
-
      $items:(reductionPrologue red)
 
      $items:(reductionFoldOperation red)
@@ -112,5 +108,4 @@ reduce red =
      }
    }
   |]
-  where tid = reductionInputArrayIndexName red
-        offset = reductionOffsetName red
+  where offset = reductionOffsetName red

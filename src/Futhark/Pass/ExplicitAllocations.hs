@@ -155,18 +155,30 @@ runPatAllocM :: MonadFreshNames m =>
 runPatAllocM (PatAllocM m) memoryMap =
   modifyNameSource $ runState $ runReaderT (runWriterT m) memoryMap
 
-arraySizeInBytes :: Allocator m => Type -> m SubExp
-arraySizeInBytes t =
-  computeSize "bytes" $
+arraySizeInBytesExp :: Type -> SE.ScalExp
+arraySizeInBytesExp t =
   SE.sproduct $
   (SE.Val $ IntVal $ basicSize $ elemType t) :
   map (`SE.subExpToScalExp` Int) (arrayDims t)
+
+arraySizeInBytes :: Allocator m => Type -> m SubExp
+arraySizeInBytes = computeSize "bytes" . arraySizeInBytesExp
 
 allocForArray :: Allocator m =>
                  Type -> Space -> m (SubExp, VName)
 allocForArray t space = do
   size <- arraySizeInBytes t
   m <- allocateMemory "mem" size space
+  return (size, m)
+
+-- | Allocate local-memory array.
+allocForLocalArray :: Allocator m =>
+                      SubExp -> Type -> m (SubExp, VName)
+allocForLocalArray workgroup_size t = do
+  size <- computeSize "local_bytes" $
+          arraySizeInBytesExp t *
+          SE.intSubExpToScalExp workgroup_size
+  m <- allocateMemory "local_mem" size $ Space "local"
   return (size, m)
 
 allocsForBinding :: Allocator m =>
@@ -541,18 +553,11 @@ allocInExp (LoopOp (Kernel cs w index ispace inps returns body)) = do
               return inp { kernelInputParam = Param (kernelInputIdent inp) summary }
 
 allocInExp (LoopOp (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
-  acc_summaries <- mapM accumulatorSummary nes
   arr_summaries <- mapM lookupSummary' arrs
   fold_lam' <- allocInChunkedLambda (kernelThreadOffsetMultiple size)
                fold_lam arr_summaries
-  par_acc_summaries <- mapM accumulatorSummary nes
-  red_lam' <- allocInReduceLambda red_lam (acc_summaries ++ par_acc_summaries) []
+  red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
   return $ LoopOp $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
-  where accumulatorSummary se =
-          subExpType se >>= \case
-            Basic _ -> return Scalar
-            t -> do (_, mem) <- allocForArray t $ Space "thread_local"
-                    return $ directIndexFunction mem t
 
 allocInExp (LoopOp (Scan {})) =
   fail "Cannot put explicit allocations in scan yet."
@@ -590,36 +595,52 @@ allocInChunkedLambda thread_chunk lam arr_summaries = do
   allocInLambda i (Param (paramIdent chunk_size_param) Scalar : chunked_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
-allocInReduceLambda :: In.Lambda -> [MemSummary] -> [MemSummary] -> AllocM Lambda
-allocInReduceLambda lam acc_summaries arr_summaries = do
+allocInReduceLambda :: In.Lambda
+                    -> SubExp
+                    -> AllocM Lambda
+allocInReduceLambda lam workgroup_size = do
   let i = lambdaIndex lam
+      (other_index_param, actual_params) =
+        partitionChunkedLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
-        splitAt (length acc_summaries) $ lambdaParams lam
-  (acc_params', arr_params') <-
-    allocInFoldParameters i acc_params arr_params acc_summaries arr_summaries
-  allocInLambda i (acc_params' ++ arr_params')
+        splitAt (length actual_params `div` 2) actual_params
+      this_index = SE.Id i Int `SE.SRem`
+                   SE.intSubExpToScalExp workgroup_size
+      other_index = SE.Id (paramName other_index_param) Int
+  acc_params' <-
+    allocInReduceParameters workgroup_size this_index acc_params
+  arr_params' <-
+    forM (zip arr_params $ map paramLore acc_params') $ \(param, attr) ->
+    case attr of
+      MemSummary mem _ -> return param {
+        paramLore = MemSummary mem $
+                    IxFun.applyInd
+                    (IxFun.iota $ workgroup_size : arrayDims (paramType param))
+                    [this_index + other_index]
+        }
+      Scalar ->
+        return param { paramLore = Scalar }
+
+  allocInLambda i (other_index_param { paramLore =  Scalar } :
+                   acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
-allocInFoldParameters :: VName
-                      -> [In.LParam] -> [In.LParam]
-                      -> [MemSummary] -> [MemSummary]
-                      -> AllocM ([LParam], [LParam])
-allocInFoldParameters i acc_params arr_params acc_summaries arr_summaries = do
-  acc_params' <-
-    forM (zip acc_params acc_summaries) $ \(p,summary) ->
-    return p { paramLore = summary }
-  arr_params' <-
-    forM (zip arr_params arr_summaries) $ \(p,summary) ->
-    case (paramType p, summary) of
-     (_, Scalar) ->
-       fail $ "Passed a scalar for lambda parameter " ++ pretty p
-     (Array {}, MemSummary mem ixfun) ->
-       return p { paramLore =
-                     MemSummary mem $ IxFun.applyInd ixfun [SE.Id i Int]
-                }
-     _ ->
-       return p { paramLore = Scalar }
-  return (acc_params', arr_params')
+allocInReduceParameters :: SubExp
+                        -> SE.ScalExp
+                        -> [In.LParam]
+                        -> AllocM [LParam]
+allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
+  where allocInReduceParameter p =
+          case paramType p of
+            t@(Array {}) -> do
+              (_, shared_mem) <- allocForLocalArray workgroup_size t
+              let ixfun = IxFun.applyInd
+                          (IxFun.iota $ workgroup_size : arrayDims t)
+                          [local_id]
+              return p { paramLore = MemSummary shared_mem ixfun
+                       }
+            _ ->
+              return p { paramLore = Scalar }
 
 allocInLambda :: VName -> [LParam] -> In.Body -> [Type]
               -> AllocM Lambda

@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections, GeneralizedNewtypeDeriving #-}
 -- | Inspired by the paper "Defunctionalizing Push Arrays".
 module Futhark.CodeGen.ImpCode
   ( Program
@@ -17,6 +17,17 @@ module Futhark.CodeGen.ImpCode
   , Code (..)
   , Exp (..)
   , UnOp (..)
+
+    -- * Typed enumerations
+  , Count (..)
+  , Bytes
+  , Elements
+  , elements
+  , bytes
+  , write
+  , index
+  , withElemType
+
     -- * Analysis
   , functionsCalled
     -- * Re-exports from other modules.
@@ -99,6 +110,12 @@ data Code a = Skip
             | Op a
             deriving (Show)
 
+instance Monoid (Code a) where
+  mempty = Skip
+  Skip `mappend` y    = y
+  x    `mappend` Skip = x
+  x    `mappend` y    = x :>>: y
+
 data Exp = Constant BasicValue
          | BinOp BinOp Exp Exp
          | UnOp UnOp Exp
@@ -156,11 +173,37 @@ instance IntegralCond Exp where
   ifLessThan a b =
     Cond (BinOp Less a b)
 
-instance Monoid (Code a) where
-  mempty = Skip
-  Skip `mappend` y    = y
-  x    `mappend` Skip = x
-  x    `mappend` y    = x :>>: y
+-- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
+-- type.
+newtype Count u = Count { innerExp :: Exp }
+                deriving (Eq, Show, Num, IntegralExp)
+
+instance Pretty (Count u) where
+  ppr = ppr . innerExp
+
+-- | Phantom type for a count of elements.
+data Elements
+
+-- | Phanton type for a count of bytes.
+data Bytes
+
+elements :: Exp -> Count Elements
+elements = Count
+
+bytes :: Exp -> Count Bytes
+bytes = Count
+
+-- | Convert a count of elements into a count of bytes, given the
+-- per-element size.
+withElemType :: Count Elements -> BasicType -> Count Bytes
+withElemType (Count e) t = bytes $ e * SizeOf t
+
+-- | Typed wrapper around 'Index'.
+index :: VName -> Count Bytes -> BasicType -> Space -> Exp
+index name (Count e) = Index name e
+
+write :: VName -> Count Bytes -> BasicType -> Space -> Exp -> Code a
+write name (Count i) = Write name i
 
 -- Prettyprinting definitions.
 

@@ -26,6 +26,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   group_size <- letSubExp "group_size" $
                 Apply (nameFromString "group_size") [] (basicRetType Int)
   chunk_size <- newVName "chunk_size"
+  other_index <- newVName "other_index"
 
   num_threads <-
     letSubExp "num_threads" $ PrimOp $ BinOp Times num_chunks group_size Int
@@ -48,6 +49,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   let (fold_acc_params, fold_arr_params) =
         splitAt (length nes) $ lambdaParams fold_lam
       chunk_size_param = Param (Ident chunk_size $ Basic Int) ()
+      other_index_param = Param (Ident other_index $ Basic Int) ()
   arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_arr_params
   res_idents <- mapM (newIdent' (<>"_res") . paramIdent) fold_acc_params
 
@@ -84,9 +86,13 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
                       , lambdaIndex = seq_lam_index
                       }
 
+      reduce_lam' = reduce_lam { lambdaParams = other_index_param :
+                                                lambdaParams reduce_lam
+                               }
+
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     LoopOp $ ReduceKernel cs w step_one_size reduce_lam seqlam nes arrs)
+     LoopOp $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes arrs)
 
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) merge_params
 
@@ -107,7 +113,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   addBinding $
     Let step_two_pat () $
     LoopOp $ ReduceKernel [] num_chunks step_two_size
-    reduce_lam identity_lam nes $ patternNames step_one_pat
+    reduce_lam' identity_lam nes $ patternNames step_one_pat
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
     addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [Constant $ IntVal 0]
