@@ -24,8 +24,6 @@ module Futhark.CodeGen.ImpCode
   , Elements
   , elements
   , bytes
-  , write
-  , index
   , withElemType
 
     -- * Analysis
@@ -89,14 +87,14 @@ data Code a = Skip
             | While Exp (Code a)
             | DeclareMem VName Space
             | DeclareScalar VName BasicType
-            | Allocate VName Exp Space
+            | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
-            | Copy VName Exp Space VName Exp Space Exp
+            | Copy VName (Count Bytes) Space VName (Count Bytes) Space (Count Bytes)
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName Exp BasicType Space Exp
+            | Write VName (Count Bytes) BasicType Space Exp
             | SetScalar VName Exp
             | SetMem VName VName
               -- ^ Must be in same space.
@@ -119,7 +117,7 @@ instance Monoid (Code a) where
 data Exp = Constant BasicValue
          | BinOp BinOp Exp Exp
          | UnOp UnOp Exp
-         | Index VName Exp BasicType Space
+         | Index VName (Count Bytes) BasicType Space
          | ScalarVar VName
          | SizeOf BasicType
          | Cond Exp Exp Exp
@@ -176,10 +174,7 @@ instance IntegralCond Exp where
 -- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
 -- type.
 newtype Count u = Count { innerExp :: Exp }
-                deriving (Eq, Show, Num, IntegralExp)
-
-instance Pretty (Count u) where
-  ppr = ppr . innerExp
+                deriving (Eq, Show, Num, IntegralExp, FreeIn, Pretty)
 
 -- | Phantom type for a count of elements.
 data Elements
@@ -197,13 +192,6 @@ bytes = Count
 -- per-element size.
 withElemType :: Count Elements -> BasicType -> Count Bytes
 withElemType (Count e) t = bytes $ e * SizeOf t
-
--- | Typed wrapper around 'Index'.
-index :: VName -> Count Bytes -> BasicType -> Space -> Exp
-index name (Count e) = Index name e
-
-write :: VName -> Count Bytes -> BasicType -> Space -> Exp -> Code a
-write name (Count i) = Write name i
 
 -- Prettyprinting definitions.
 

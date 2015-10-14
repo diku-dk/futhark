@@ -82,7 +82,6 @@ import Futhark.CodeGen.ImpCode
   (Count (..),
    Bytes, Elements,
    bytes, elements,
-   write, index,
    withElemType)
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
@@ -473,7 +472,7 @@ defCompilePrimOp (Destination [_]) (Assert e loc) =
   emit $ Imp.Assert (compileSubExp e) loc
 
 defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e space) = do
-  emit $ Imp.Allocate mem e' space
+  emit $ Imp.Allocate mem (bytes e') space
   case size of Just size' -> emit $ Imp.SetScalar size' e'
                Nothing    -> return ()
   where e' = compileSubExp e
@@ -483,7 +482,7 @@ defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
   when (length idxs == arrayRank t) $ do
     (srcmem, space, srcoffset) <-
       fullyIndexArray src $ map (`SE.subExpToScalExp` Int) idxs
-    writeExp target $ index srcmem srcoffset (elemType t) space
+    writeExp target $ Imp.Index srcmem srcoffset (elemType t) space
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory destlocation) _])
@@ -496,7 +495,7 @@ defCompilePrimOp
         (targetmem, space, targetoffset) <-
           fullyIndexArray' destlocation [varIndex i] $ elemType set
         emit $ Imp.For i (compileSubExp n) $
-          write targetmem targetoffset (elemType set) space $ compileSubExp se
+          Imp.Write targetmem targetoffset (elemType set) space $ compileSubExp se
         else case se of
         Constant {} ->
           throwError "Array value in replicate cannot be constant."
@@ -520,7 +519,7 @@ defCompilePrimOp
       (targetmem, space, targetoffset) <-
         fullyIndexArray' memlocation [varIndex i] Int
       emit $ Imp.For i (compileSubExp n) $
-        write targetmem targetoffset Int space $ Imp.ScalarVar i
+        Imp.Write targetmem targetoffset Int space $ Imp.ScalarVar i
 
 defCompilePrimOp (Destination [target]) (Copy src) =
   compileResultSubExp target $ Var src
@@ -557,7 +556,7 @@ defCompilePrimOp
       if basicType rt then do
         (targetmem, space, targetoffset) <-
           fullyIndexArray' memlocation [constIndex i] $ elemType rt
-        emit $ write targetmem targetoffset et space $ compileSubExp e
+        emit $ Imp.Write targetmem targetoffset et space $ compileSubExp e
       else case e of
         Constant {} ->
           throwError "defCompilePrimOp ArrayLit: Cannot have array constants."
@@ -612,7 +611,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
           code
         sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
     emit $ Imp.For i outer_dim $
-      Imp.SetScalar eqclass (index flagmem flagoffset Int space) <>
+      Imp.SetScalar eqclass (Imp.Index flagmem flagoffset Int space) <>
       sizeLoopBody
 
     -- We can now compute the starting offsets of each of the
@@ -654,7 +653,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
           code
         writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
     emit $ Imp.For i outer_dim $
-      Imp.SetScalar eqclass (index flagmem flagoffset Int space) <>
+      Imp.SetScalar eqclass (Imp.Index flagmem flagoffset Int space) <>
       writeLoopBody
     return ()
   where arrDestLoc (ArrayDestination (CopyIntoMemory destloc) _) =
@@ -715,7 +714,7 @@ writeExp :: ValueDestination -> Imp.Exp -> ImpM op ()
 writeExp (ScalarDestination target) e =
   emit $ Imp.SetScalar target e
 writeExp (ArrayElemDestination destmem bt space elemoffset) e =
-  emit $ write destmem elemoffset bt space e
+  emit $ Imp.Write destmem elemoffset bt space e
 writeExp target e =
   throwError $ "Cannot write " ++ pretty e ++ " to " ++ show target
 
@@ -856,7 +855,7 @@ compileResultSubExp (ScalarDestination name) se =
   compileScalarSubExpTo (ScalarDestination name) se
 
 compileResultSubExp (ArrayElemDestination destmem bt space elemoffset) se =
-  emit $ write destmem elemoffset bt space $ compileSubExp se
+  emit $ Imp.Write destmem elemoffset bt space $ compileSubExp se
 
 compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
   MemEntry memsize _ <- lookupMemory v
@@ -1054,7 +1053,7 @@ defaultCopy bt dest src n
       IxFun.linearWithOffset srcIxFun bt_size = do
         srcspace <- entryMemSpace <$> lookupMemory srcmem
         destspace <- entryMemSpace <$> lookupMemory destmem
-        emit $ memCopy
+        emit $ Imp.Copy
           destmem (bytes destoffset) destspace
           srcmem (bytes srcoffset) srcspace $
           (n * row_size) `withElemType` bt
@@ -1076,16 +1075,9 @@ copyElementWise bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $ foldl (.) id (zipWith Imp.For is bounds) $
-        write destmem (bytes $ fromJust $ scalExpToImpExp destidx) bt destspace $
-        index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
+        Imp.Write destmem (bytes $ fromJust $ scalExpToImpExp destidx) bt destspace $
+        Imp.Index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
   where bt_size = basicScalarSize bt
-
-memCopy :: VName -> Count Bytes -> Imp.Space
-        -> VName -> Count Bytes -> Imp.Space
-        -> Count Bytes
-        -> Imp.Code a
-memCopy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count n) =
-  Imp.Copy dest destoffset destspace src srcoffset srcspace n
 
 copyElem :: BasicType
          -> MemLocation -> [SE.ScalExp]
@@ -1100,7 +1092,8 @@ copyElem bt
     fullyIndexArray' destlocation destis bt
   (srcmem, srcspace, srcoffset) <-
     fullyIndexArray' srclocation srcis bt
-  return $ write targetmem targetoffset bt destspace $ index srcmem srcoffset bt srcspace
+  return $ Imp.Write targetmem targetoffset bt destspace $
+    Imp.Index srcmem srcoffset bt srcspace
 
   | otherwise = do
   destlocation' <- indexArray destlocation destis

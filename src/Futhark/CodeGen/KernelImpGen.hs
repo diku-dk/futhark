@@ -18,6 +18,7 @@ import Prelude
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.KernelImp as Imp
+import Futhark.CodeGen.KernelImp (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
@@ -243,7 +244,7 @@ kernelCompiler
         writeFoldResult local_id (mem, _) param
           | Basic _ <- paramType param =
               ImpGen.emit $
-              Imp.Write mem i bt (Space "local") $
+              Imp.Write mem (bytes i) bt (Space "local") $
               Imp.ScalarVar (paramName param)
           | otherwise =
               return ()
@@ -254,7 +255,7 @@ kernelCompiler
           | Basic _ <- paramType param =
               ImpGen.emit $
                 Imp.SetScalar (paramName param) $
-                Imp.Index mem i bt (Space "local")
+                Imp.Index mem (bytes i) bt (Space "local")
           | otherwise =
               return ()
           where i = (Imp.ScalarVar local_id + Imp.ScalarVar offset) * Imp.SizeOf bt
@@ -329,9 +330,9 @@ callKernelCopy bt
         srcspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory srcmem
         destspace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory destmem
         ImpGen.emit $ Imp.Copy
-          destmem destoffset destspace
-          srcmem srcoffset srcspace $
-          Imp.innerExp $ (n * row_size) `Imp.withElemType` bt
+          destmem (bytes destoffset) destspace
+          srcmem (bytes srcoffset) srcspace $
+          (n * row_size) `Imp.withElemType` bt
 
   | otherwise = do
   global_thread_index <- newVName "copy_global_thread_index"
@@ -347,8 +348,8 @@ callKernelCopy bt
     (_, destspace, destidx) <- ImpGen.fullyIndexArray' destloc dest_is bt
     (_, srcspace, srcidx) <- ImpGen.fullyIndexArray' srcloc src_is bt
 
-    let body = Imp.write destmem destidx bt destspace $
-               Imp.index srcmem srcidx bt srcspace
+    let body = Imp.Write destmem destidx bt destspace $
+               Imp.Index srcmem srcidx bt srcspace
 
     destmem_size <- ImpGen.entryMemSize <$> ImpGen.lookupMemory destmem
     let writes_to = [Imp.MemoryUse destmem destmem_size]
@@ -470,7 +471,7 @@ readKernelInput inp =
     (srcmem, space, srcoffset) <-
       ImpGen.fullyIndexArray arr $ map SE.intSubExpToScalExp is
     ImpGen.emit $ Imp.SetScalar name $
-      Imp.index srcmem srcoffset (elemType t) space
+      Imp.Index srcmem srcoffset (elemType t) space
   where arr = kernelInputArray inp
         name = kernelInputName inp
         t = kernelInputType inp

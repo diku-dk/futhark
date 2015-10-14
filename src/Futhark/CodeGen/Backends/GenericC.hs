@@ -678,12 +678,12 @@ compileExp (Constant val) = return $ compileBasicValue val
 compileExp (ScalarVar src) =
   return [C.cexp|$id:src|]
 
-compileExp (Index src iexp restype DefaultSpace) =
+compileExp (Index src (Count iexp) restype DefaultSpace) =
   derefPointer src
   <$> compileExp iexp
   <*> pure [C.cty|$ty:(scalarTypeToCType restype)*|]
 
-compileExp (Index src iexp restype (Space space)) =
+compileExp (Index src (Count iexp) restype (Space space)) =
   join $ asks envReadScalar
     <*> pure src <*> compileExp iexp
     <*> pure (scalarTypeToCType restype) <*> pure space
@@ -785,11 +785,11 @@ compileCode (Assert e loc) = do
                  }
           }|]
 
-compileCode (Allocate name e DefaultSpace) = do
+compileCode (Allocate name (Count e) DefaultSpace) = do
   size' <- compileExp e
   stm [C.cstm|$id:name = malloc($exp:size');|]
 
-compileCode (Allocate name e (Space space)) =
+compileCode (Allocate name (Count e) (Space space)) =
   join $ asks envAllocate <*> pure name <*> compileExp e <*> pure space
 
 compileCode (For i bound body) = do
@@ -813,7 +813,7 @@ compileCode (If cond tbranch fbranch) = do
   fbranch' <- collect $ compileCode fbranch
   stm [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
-compileCode (Copy dest destoffset DefaultSpace src srcoffset DefaultSpace size) = do
+compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
   size' <- compileExp size
@@ -821,21 +821,21 @@ compileCode (Copy dest destoffset DefaultSpace src srcoffset DefaultSpace size) 
                       $id:src + $exp:srcoffset',
                       $exp:size');|]
 
-compileCode (Copy dest destoffset destspace src srcoffset srcspace size) = do
+compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $ copy
     <$> pure dest <*> compileExp destoffset <*> pure destspace
     <*> pure src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
-compileCode (Write dest idx elemtype DefaultSpace elemexp) = do
+compileCode (Write dest (Count idx) elemtype DefaultSpace elemexp) = do
   deref <- derefPointer dest
            <$> compileExp idx
            <*> pure [C.cty|$ty:(scalarTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
-compileCode (Write dest idx elemtype (Space space) elemexp) =
+compileCode (Write dest (Count idx) elemtype (Space space) elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
     <*> compileExp idx

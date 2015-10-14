@@ -29,18 +29,18 @@ setParamSpace _ param =
 
 setBodySpace :: Space -> Code op -> Code op
 setBodySpace space (Allocate v e old_space) =
-  Allocate v (setExpSpace space e) $ setSpace space old_space
+  Allocate v (setCountSpace space e) $ setSpace space old_space
 setBodySpace space (DeclareMem name old_space) =
   DeclareMem name $ setSpace space old_space
 setBodySpace space (Copy dest dest_offset dest_space src src_offset src_space n) =
   Copy
-  dest (setExpSpace space dest_offset) dest_space'
-  src (setExpSpace space src_offset) src_space' $
-  setExpSpace space n
+  dest (setCountSpace space dest_offset) dest_space'
+  src (setCountSpace space src_offset) src_space' $
+  setCountSpace space n
   where dest_space' = setSpace space dest_space
         src_space' = setSpace space src_space
 setBodySpace space (Write dest dest_offset bt dest_space e) =
-  Write dest (setExpSpace space dest_offset) bt (setSpace space dest_space) $
+  Write dest (setCountSpace space dest_offset) bt (setSpace space dest_space) $
   setExpSpace space e
 setBodySpace space (c1 :>>: c2) =
   setBodySpace space c1 :>>: setBodySpace space c2
@@ -66,6 +66,10 @@ setBodySpace space (Assert e loc) =
   Assert (setExpSpace space e) loc
 setBodySpace _ (Op op) =
   Op op
+
+setCountSpace :: Space -> Count a -> Count a
+setCountSpace space (Count e) =
+  Count $ setExpSpace space e
 
 setExpSpace :: Space -> Exp -> Exp
 setExpSpace space (Index mem i bt DefaultSpace) =
