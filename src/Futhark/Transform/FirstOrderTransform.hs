@@ -87,9 +87,11 @@ transformBinding (Let pat () (LoopOp (Map cs width fun arrs))) = do
     x <- bindLambda fun (index cs arrs (Var i))
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
-  addBinding $ Let pat () $ LoopOp $
+  addBinding $ Let pat' () $ LoopOp $
     DoLoop outarrs_names (loopMerge outarrs (map Var resarr))
     (ForLoop i width) loopbody
+  where pat' = basicPattern' [] $ map (`setIdentUniqueness` Unique) $
+               patternValueIdents pat
 
 transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
   arrs <- forM inputs $ \input -> do
