@@ -94,13 +94,13 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (ReduceKernel _ w kernel_size reduce_lam fold_lam nes _)) = do
+  (LoopOp (ReduceKernel _ _ kernel_size reduce_lam fold_lam nes _)) = do
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
     global_id <- newVName "global_id"
 
-    (num_groups, group_size, per_thread_chunk, offset_multiple) <-
+    (num_groups, group_size, per_thread_chunk, num_elements, _) <-
       compileKernelSize kernel_size
 
     let fold_lparams = lambdaParams fold_lam
@@ -113,7 +113,6 @@ kernelCompiler
         (reduce_acc_params, reduce_arr_params) =
           splitAt (length nes) actual_reduce_params
 
-        num_elements = ImpGen.compileSubExp w
         offset = paramName other_index_param
 
     (acc_mem_params, acc_local_mem) <-
@@ -139,26 +138,14 @@ kernelCompiler
 
         reduce_acc_dest <- ImpGen.destinationFromParams reduce_acc_params
 
-        apply_fold_op <-
+        fold_op <-
           ImpGen.subImpM_ inKernelOperations $ do
             computeThreadChunkSize
+              (Imp.ScalarVar $ lambdaIndex fold_lam)
               (ImpGen.dimSizeToExp per_thread_chunk)
-              (ImpGen.dimSizeToExp offset_multiple)
-              num_elements
-              (Imp.ScalarVar global_id) $ paramName fold_chunk_param
+              (ImpGen.dimSizeToExp num_elements) $
+              paramName fold_chunk_param
             ImpGen.compileBody reduce_acc_dest $ lambdaBody fold_lam
-
-        neutral_fold_op <-
-          ImpGen.collect $
-          zipWithM_ ImpGen.compileResultSubExp
-          (ImpGen.valueDestinations reduce_acc_dest) nes
-
-        let thread_is_in_bounds =
-              Imp.BinOp Less
-              (Imp.ScalarVar global_id *
-               Imp.innerExp (ImpGen.dimSizeToExp per_thread_chunk))
-              (ImpGen.compileSubExp w)
-            fold_op = Imp.If thread_is_in_bounds apply_fold_op neutral_fold_op
 
         write_fold_result <-
           ImpGen.subImpM_ inKernelOperations $
@@ -301,13 +288,15 @@ kernelCompiler _ e =
   return $ ImpGen.CompileExp e
 
 compileKernelSize :: KernelSize
-                  -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize, Imp.DimSize)
-compileKernelSize (KernelSize num_groups group_size per_thread_elements offset_multiple) = do
+                  -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize, Imp.DimSize, Imp.DimSize)
+compileKernelSize (KernelSize num_groups group_size
+                   per_thread_elements num_elements offset_multiple) = do
   num_groups' <- ImpGen.subExpToDimSize num_groups
   group_size' <- ImpGen.subExpToDimSize group_size
   per_thread_elements' <- ImpGen.subExpToDimSize per_thread_elements
+  num_elements' <- ImpGen.subExpToDimSize num_elements
   offset_multiple' <- ImpGen.subExpToDimSize offset_multiple
-  return (num_groups', group_size', per_thread_elements', offset_multiple')
+  return (num_groups', group_size', per_thread_elements', num_elements', offset_multiple')
 
 callKernelCopy :: ImpGen.CopyCompiler Imp.CallKernel
 callKernelCopy bt
@@ -508,19 +497,37 @@ isMapTranspose bt
             [size_x, size_y]             -> Just (1, size_x, size_y)
             _                            -> Nothing
 
-computeThreadChunkSize :: Imp.Count Imp.Elements
+computeThreadChunkSize :: Imp.Exp
                        -> Imp.Count Imp.Elements
-                       -> Imp.Exp -> Imp.Exp
+                       -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM op ()
-computeThreadChunkSize chunk_per_thread offset_multiple num_elements thread_index chunk_var =
+computeThreadChunkSize thread_index elements_per_thread num_elements chunk_var = do
+  starting_point <- newVName "starting_point"
+  remaining_elements <- newVName "remaining_elements"
+
   ImpGen.emit $
-  Imp.If is_last_thread
-  (Imp.SetScalar chunk_var last_thread_chunk)
-  (Imp.SetScalar chunk_var chunk_per_thread')
-  where last_thread_chunk =
-          num_elements - thread_index * chunk_per_thread'
+    Imp.DeclareScalar starting_point Int
+  ImpGen.emit $
+    Imp.SetScalar starting_point $
+    thread_index * Imp.innerExp elements_per_thread
+
+  ImpGen.emit $
+    Imp.DeclareScalar remaining_elements Int
+  ImpGen.emit $
+    Imp.SetScalar remaining_elements $
+    Imp.innerExp num_elements - Imp.ScalarVar starting_point
+
+  let no_remaining_elements = Imp.BinOp Leq (Imp.ScalarVar remaining_elements) 0
+      beyond_bounds = Imp.BinOp Leq (Imp.innerExp num_elements) (Imp.ScalarVar starting_point)
+
+  ImpGen.emit $
+    Imp.If (Imp.BinOp LogOr no_remaining_elements beyond_bounds)
+    (Imp.SetScalar chunk_var 0)
+    (Imp.If is_last_thread
+     (Imp.SetScalar chunk_var $ Imp.innerExp last_thread_elements)
+     (Imp.SetScalar chunk_var $ Imp.innerExp elements_per_thread))
+  where last_thread_elements =
+          num_elements - Imp.elements thread_index * elements_per_thread
         is_last_thread =
-          Imp.BinOp Less num_elements ((thread_index + 1) * offset_multiple')
-        chunk_per_thread' = Imp.innerExp chunk_per_thread
-        offset_multiple' = Imp.innerExp offset_multiple
+          Imp.BinOp Less (Imp.innerExp num_elements) ((thread_index + 1) * Imp.innerExp elements_per_thread)

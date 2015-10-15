@@ -281,13 +281,14 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> apply (map ppr perm)
   ppr (ReduceKernel cs w
-       (KernelSize num_chunks workgroup_size per_thread_elements offset_multiple)
+       (KernelSize num_chunks workgroup_size per_thread_elements num_elements offset_multiple)
        parfun seqfun es as) =
     ppCertificates' cs <> text "reduceKernel" <>
     parens (ppr w <> comma </>
             commasep [ppr num_chunks,
                       ppr workgroup_size,
                       ppr per_thread_elements,
+                      ppr num_elements,
                       ppr offset_multiple
                      ] </>
             braces (commasep $ map ppr es) <> comma </>

@@ -299,6 +299,7 @@ deriving instance Annotations lore => Ord (KernelInput lore)
 data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelWorkgroupSize :: SubExp
                              , kernelElementsPerThread :: SubExp
+                             , kernelTotalElements :: SubExp
                              , kernelThreadOffsetMultiple :: SubExp
                              }
                 deriving (Eq, Ord, Show)

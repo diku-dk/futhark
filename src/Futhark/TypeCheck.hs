@@ -927,8 +927,42 @@ checkLoopOp (Kernel cs w index ispace inps returns body) = do
              pretty (kernelInputName inp) ++
              " does not use entire index space."
 
-checkLoopOp (ReduceKernel {}) =
-  return () -- It's all good.
+checkLoopOp (ReduceKernel cs w
+             (KernelSize num_groups workgroup_size
+              per_thread_elements num_elements offset_multiple)
+             parfun seqfun accexps arrexps) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  require [Basic Int] num_groups
+  require [Basic Int] workgroup_size
+  require [Basic Int] per_thread_elements
+  require [Basic Int] num_elements
+  require [Basic Int] offset_multiple
+  arrargs <- checkSOACArrayArgs w arrexps
+  accargs <- mapM checkArg accexps
+
+  case lambdaParams seqfun of
+    [] -> bad $ TypeError noLoc "Fold function takes no parameters."
+    chunk_param : _
+      | Basic Int <- paramType chunk_param -> do
+          let seq_args = (Basic Int, mempty, mempty) :
+                         [ (t `arrayOfRow` Var (paramName chunk_param), y, z)
+                         | (t, y, z) <- arrargs ]
+          checkLambda seqfun seq_args
+      | otherwise ->
+          bad $ TypeError noLoc "First parameter of fold function is not integer-typed."
+
+  let seqRetType = lambdaReturnType seqfun
+      asArg t = (t, mempty, mempty)
+  checkLambda parfun $ map asArg $ Basic Int : seqRetType ++ seqRetType
+  let acct = map argType accargs
+      parRetType = lambdaReturnType parfun
+  unless (acct `subtypesOf` seqRetType) $
+    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomap fold function returns type " ++ prettyTuple seqRetType ++ "."
+  unless (acct `subtypesOf` parRetType) $
+    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
 
 checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form

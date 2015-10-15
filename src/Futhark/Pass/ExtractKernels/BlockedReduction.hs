@@ -28,17 +28,18 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   chunk_size <- newVName "chunk_size"
   other_index <- newVName "other_index"
 
+  let one = Constant $ IntVal 1
+
   num_threads <-
     letSubExp "num_threads" $ PrimOp $ BinOp Times num_chunks group_size Int
-
-  let one = Constant $ IntVal 1
 
   per_thread_elements <-
     letSubExp "per_thread_elements" =<<
     eDivRoundingUp (eSubExp w) (eSubExp num_threads)
 
-  let step_one_size = KernelSize num_chunks group_size per_thread_elements per_thread_elements
-      step_two_size = KernelSize one num_chunks one one
+  let step_one_size = KernelSize num_chunks group_size
+                      per_thread_elements w per_thread_elements
+      step_two_size = KernelSize one num_chunks one num_chunks one
 
   loop_iterator <- newVName "i"
   seq_lam_index <- newVName "lam_index"
@@ -55,7 +56,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   start_index <- newVName "start_index"
 
-  ((merge_params, unique_nes), seq_copy_bnds) <-
+  ((merge_params, unique_nes), seq_copy_merge) <-
     collectBindings $
     unzip <$> zipWithM mkMergeParam fold_acc_params nes
 
@@ -71,14 +72,22 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
         [ mkLet' [] [paramIdent param] $ PrimOp $ Index [] arr [Var loop_iterator]
           | (param, arr) <- zip fold_arr_params $ map paramName arr_chunk_params ]
 
-      seq_loop_body =
-        (compute_start_index : compute_index : read_array_elements)
-        `insertBindings`
-        lambdaBody fold_lam
-      seq_loop =
+  seq_loop_body <-
+    runBodyBinder $ bindingParamTypes (lambdaParams fold_lam) $ do
+      mapM_ addBinding $ compute_start_index : compute_index : read_array_elements
+      let uniqueRes (Var v) = do
+            t <- lookupType v
+            if unique t || basicType t
+              then return $ Var v
+              else letSubExp "unique_res" $ PrimOp $ Copy v
+          uniqueRes se =
+            return se
+      resultBodyM =<< mapM uniqueRes =<< bodyBind (lambdaBody fold_lam)
+
+  let seq_loop =
         mkLet' [] res_idents $
         LoopOp $ DoLoop res (zip merge_params unique_nes) form seq_loop_body
-      seq_body = mkBody (seq_copy_bnds++[seq_loop]) $ map (Var . identName) res_idents
+      seq_body = mkBody (seq_copy_merge++[seq_loop]) $ map (Var . identName) res_idents
 
       seqlam = Lambda { lambdaParams = chunk_size_param : arr_chunk_params
                       , lambdaReturnType = lambdaReturnType fold_lam
@@ -94,7 +103,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
     (Let step_one_pat () $
      LoopOp $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes arrs)
 
-  identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) merge_params
+  identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
 
   elements <- zipWithM newIdent
               (map (baseString . paramName) identity_lam_params) $
