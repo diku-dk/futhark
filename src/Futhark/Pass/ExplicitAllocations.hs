@@ -313,7 +313,7 @@ memForBindee ident = do
 
 directIndexFunction :: VName -> Type -> MemSummary
 directIndexFunction mem t =
-  MemSummary mem $ IxFun.iota $ arrayDims t
+  MemSummary mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
 
 lookupSummary :: VName -> AllocM (Maybe MemSummary)
 lookupSummary name = asksMemoryMap $ fmap entryMemSummary . HM.lookup name
@@ -615,7 +615,8 @@ allocInReduceLambda lam workgroup_size = do
       MemSummary mem _ -> return param {
         paramLore = MemSummary mem $
                     IxFun.applyInd
-                    (IxFun.iota $ workgroup_size : arrayDims (paramType param))
+                    (IxFun.iota $ IxFun.shapeFromSubExps $
+                     workgroup_size : arrayDims (paramType param))
                     [this_index + other_index]
         }
       Scalar ->
@@ -635,7 +636,8 @@ allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
             t@(Array {}) -> do
               (_, shared_mem) <- allocForLocalArray workgroup_size t
               let ixfun = IxFun.applyInd
-                          (IxFun.iota $ workgroup_size : arrayDims t)
+                          (IxFun.iota $ IxFun.shapeFromSubExps $
+                           workgroup_size : arrayDims t)
                           [local_id]
               return p { paramLore = MemSummary shared_mem ixfun
                        }

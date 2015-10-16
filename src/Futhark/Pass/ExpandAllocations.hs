@@ -21,7 +21,6 @@ import Futhark.Representation.ExplicitMemory
 import Futhark.Tools
 import Futhark.Util
 import Futhark.Pass
-import Futhark.Util.IntegralExp
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
@@ -83,10 +82,8 @@ transformExp (LoopOp (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs))
   (fold_alloc_bnds, fold_alloc_offsets) <-
     expandedAllocations (Var num_threads) (lambdaIndex fold_lam) fold_lam_thread_allocs
 
-  let red_lam_body'' = if null red_alloc_bnds then red_lam_body'
-                       else offsetMemorySummariesInBody red_alloc_offsets red_lam_body'
-      fold_lam_body'' = if null fold_alloc_bnds then fold_lam_body'
-                        else offsetMemorySummariesInBody fold_alloc_offsets fold_lam_body'
+  let red_lam_body'' = offsetMemorySummariesInBody red_alloc_offsets red_lam_body'
+      fold_lam_body'' = offsetMemorySummariesInBody fold_alloc_offsets fold_lam_body'
       red_lam' = red_lam { lambdaBody = red_lam_body'' }
       fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
   return (num_threads_bnd : red_alloc_bnds <> fold_alloc_bnds,
@@ -141,8 +138,8 @@ extractKernelAllocations bound_before_body body = do
 expandedAllocations :: SubExp
                     -> VName
                     -> HM.HashMap VName (SubExp, Space)
-                    -> ExpandM ([Binding], OffsetMap)
-expandedAllocations w thread_index thread_allocs = do
+                    -> ExpandM ([Binding], RebaseMap)
+expandedAllocations num_threads thread_index thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
   alloc_bnds <-
@@ -152,48 +149,45 @@ expandedAllocations w thread_index thread_allocs = do
           allocpat = Pattern [] [PatElem
                                  (Ident mem $ Mem (Var total_size) space)
                                  BindVar Scalar]
-      return [Let sizepat () $ PrimOp $ BinOp Times w per_thread_size Int,
+      return [Let sizepat () $ PrimOp $ BinOp Times num_threads per_thread_size Int,
               Let allocpat () $ PrimOp $ Alloc (Var total_size) space]
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
   let alloc_offsets =
-        OffsetMap { offsetMap =
-                    HM.map (SE.STimes (SE.Id thread_index Int) .
-                            SE.intSubExpToScalExp .
-                            fst)
-                    thread_allocs
+        RebaseMap { rebaseMap =
+                    HM.map (const newBase) thread_allocs
                   , indexVariable = thread_index
-                  , kernelWidth = w
+                  , kernelWidth = num_threads
                   }
   return (alloc_bnds, alloc_offsets)
+  where newBase old_shape =
+          let perm = [length old_shape, 0] ++ [1..length old_shape-1]
+              root_ixfun = IxFun.iota (old_shape ++ [SE.intSubExpToScalExp num_threads])
+              permuted_ixfun = IxFun.permute root_ixfun perm
+              offset_ixfun = IxFun.applyInd permuted_ixfun [SE.Id thread_index Int]
+          in offset_ixfun
 
-data OffsetMap = OffsetMap {
-    offsetMap :: HM.HashMap VName SE.ScalExp
-    -- ^ A map from memory block names to offsets.
+data RebaseMap = RebaseMap {
+    rebaseMap :: HM.HashMap VName (IxFun.Shape -> IxFun.IxFun)
+    -- ^ A map from memory block names to new index function bases.
   , indexVariable :: VName
   , kernelWidth :: SubExp
   }
 
-lookupOffset :: VName -> OffsetMap -> Maybe SE.ScalExp
-lookupOffset name = HM.lookup name . offsetMap
+lookupNewBase :: VName -> RebaseMap -> Maybe (IxFun.Shape -> IxFun.IxFun)
+lookupNewBase name = HM.lookup name . rebaseMap
 
-offsetByIndex :: VName -> SubExp -> OffsetMap -> OffsetMap
-offsetByIndex name size (OffsetMap offsets index width) =
-  OffsetMap (HM.insert name offset offsets) index width
-  where offset = (SE.intSubExpToScalExp size `quot`
-                  SE.intSubExpToScalExp width) * SE.Id index Int
-
-offsetMemorySummariesInBody :: OffsetMap -> Body -> Body
+offsetMemorySummariesInBody :: RebaseMap -> Body -> Body
 offsetMemorySummariesInBody offsets (Body attr bnds res) =
   Body attr (snd $ mapAccumL offsetMemorySummariesInBinding offsets bnds) res
 
-offsetMemorySummariesInBinding :: OffsetMap -> Binding
-                               -> (OffsetMap, Binding)
+offsetMemorySummariesInBinding :: RebaseMap -> Binding
+                               -> (RebaseMap, Binding)
 offsetMemorySummariesInBinding offsets (Let pat attr e) =
   (offsets', Let pat' attr $ offsetMemorySummariesInExp offsets e)
   where (offsets', pat') = offsetMemorySummariesInPattern offsets pat
 
-offsetMemorySummariesInPattern :: OffsetMap -> Pattern -> (OffsetMap, Pattern)
+offsetMemorySummariesInPattern :: RebaseMap -> Pattern -> (RebaseMap, Pattern)
 offsetMemorySummariesInPattern offsets (Pattern ctx vals) =
   (offsets', Pattern ctx vals')
   where offsets' = foldl inspectCtx offsets ctx
@@ -203,23 +197,25 @@ offsetMemorySummariesInPattern offsets (Pattern ctx vals) =
                        offsetMemorySummariesInMemSummary offsets' $ patElemLore patElem
                   }
         inspectCtx ctx_offsets patElem
-          | Mem size _ <- patElemType patElem =
-              offsetByIndex (patElemName patElem) size ctx_offsets
+          | Mem _ _ <- patElemType patElem =
+              error $ unwords ["Cannot deal with existential memory block ",
+                               pretty (patElemName patElem),
+                               "when expanding inside kernels."]
           | otherwise =
               ctx_offsets
 
-offsetMemorySummariesInFParam :: OffsetMap -> FParam -> FParam
+offsetMemorySummariesInFParam :: RebaseMap -> FParam -> FParam
 offsetMemorySummariesInFParam offsets fparam =
   fparam { paramLore = offsetMemorySummariesInMemSummary offsets $ paramLore fparam }
 
-offsetMemorySummariesInMemSummary :: OffsetMap -> MemSummary -> MemSummary
+offsetMemorySummariesInMemSummary :: RebaseMap -> MemSummary -> MemSummary
 offsetMemorySummariesInMemSummary offsets (MemSummary mem ixfun)
-  | Just offset <- lookupOffset mem offsets =
-      MemSummary mem $ IxFun.offsetUnderlying ixfun offset
+  | Just new_base <- lookupNewBase mem offsets =
+      MemSummary mem $ IxFun.rebase (new_base $ IxFun.base ixfun) ixfun
 offsetMemorySummariesInMemSummary _ summary =
   summary
 
-offsetMemorySummariesInExp :: OffsetMap -> Exp -> Exp
+offsetMemorySummariesInExp :: RebaseMap -> Exp -> Exp
 offsetMemorySummariesInExp offsets (LoopOp (DoLoop res merge form body)) =
   LoopOp $ DoLoop res (zip mergeparams' mergeinit) form body'
   where (mergeparams, mergeinit) = unzip merge
@@ -230,7 +226,7 @@ offsetMemorySummariesInExp offsets e = mapExp recurse e
                                  , mapOnLambda = return . offsetMemorySummariesInLambda offsets
                                  }
 
-offsetMemorySummariesInLambda :: OffsetMap -> Lambda -> Lambda
+offsetMemorySummariesInLambda :: RebaseMap -> Lambda -> Lambda
 offsetMemorySummariesInLambda offsets lam =
   lam { lambdaParams = params,
         lambdaBody = body
