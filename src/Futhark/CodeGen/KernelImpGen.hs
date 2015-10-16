@@ -3,7 +3,7 @@ module Futhark.CodeGen.KernelImpGen
   ( compileProg
   )
   where
-import Debug.Trace
+
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Applicative
@@ -175,13 +175,7 @@ kernelCompiler
                               map Imp.paramName acc_mem_params
 
         return $ \prologue -> do
-          let msg = unlines ["prologue", pretty prologue,
-                             "fold_op", pretty fold_op,
-                             "write_fold_result", pretty write_fold_result,
-                             "reduce_op", pretty reduce_op,
-                             "write_result", pretty write_result
-                            ]
-          uses <- trace msg computeKernelUses dest [freeIn prologue,
+          uses <- computeKernelUses dest [freeIn prologue,
                                           freeIn fold_op,
                                           freeIn write_fold_result,
                                           freeIn reduce_op,
