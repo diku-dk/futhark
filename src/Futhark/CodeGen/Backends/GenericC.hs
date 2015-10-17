@@ -57,7 +57,7 @@ import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.Backends.GenericCReading
+import Futhark.CodeGen.Backends.GenericC.Reading
 import qualified Futhark.CodeGen.Backends.CUtils as C
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space)
