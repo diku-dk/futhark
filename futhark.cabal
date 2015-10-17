@@ -61,6 +61,7 @@ Library
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
+                   Futhark.CodeGen.Backends.GenericC.Options
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.COpenCL.Boilerplate

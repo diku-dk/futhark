@@ -29,7 +29,6 @@ compileProg :: Prog -> Either String String
 compileProg prog = do
   prog' <- KernelImpGen.compileProg prog
   let header = unlines [ "#include <CL/cl.h>\n"
-                       , "#include <err.h>\n"
                        , "#define FUT_KERNEL(s) #s"
                        , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
                        , blockDimPragma
@@ -38,8 +37,9 @@ compileProg prog = do
   let kernel_names = map fst kernels
   return $
     header ++
-    GenericC.compileProg operations () (openClDecls kernel_names $ openClProgram kernels requirements)
-    openClInit (openClReport kernel_names) prog'
+    GenericC.compileProg operations ()
+    (openClDecls kernel_names $ openClProgram kernels requirements)
+    openClInit (openClReport kernel_names) [] prog'
   where operations :: GenericC.Operations CallKernel ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel

@@ -59,6 +59,7 @@ import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericCReading
 import qualified Futhark.CodeGen.Backends.CUtils as C
+import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space)
 
 data CompilerState s = CompilerState {
@@ -366,15 +367,13 @@ readBasicStm :: C.Exp -> BasicType -> C.Stm
 readBasicStm place t
   | Just f <- readFun t =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          fprintf(stderr, "Syntax error when reading %s.\n", $string:(pretty t));
-                 exit(1);
+          errx(1, "Syntax error when reading %s.\n", $string:(pretty t));
         }|]
 readBasicStm _ Cert =
   [C.cstm|;|]
 readBasicStm _ t =
   [C.cstm|{
-        fprintf(stderr, "Cannot read %s.\n", $string:(pretty t));
-        exit(1);
+        errx(1, "Cannot read %s.\n", $string:(pretty t));
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
@@ -463,17 +462,13 @@ readInput memsizes (ArrayValue name t shape)
                        shape,
                        $int:(length shape))
             != 0) {
-          fprintf(stderr, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
-          exit(1);
+          errx(1, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
         }
         $stms:copyshape
         $stms:copymemsize
       }|]
   | otherwise =
-    [C.cstm|{
-       fprintf(stderr, "Cannot read %s.\n", $string:(pretty t));
-               exit(1);
-    }|]
+    [C.cstm|errx(1, "Cannot read %s.\n", $string:(pretty t));|]
 
 sizeVars :: [Param] -> HM.HashMap VName VName
 sizeVars = mconcat . map sizeVars'
@@ -514,14 +509,29 @@ unpackResult ret (MemParam name size (Space srcspace)) = do
   stm [C.cstm|$id:name = malloc($exp:size');|]
   copy name [C.cexp|0|] DefaultSpace ret [C.cexp|0|] (Space srcspace) size'
 
+timingOption :: Option
+timingOption =
+  Option { optionLongName = "write-runtime-to"
+         , optionShortName = Just 't'
+         , optionArgument = RequiredArgument
+         , optionAction =
+           [C.cstm|{
+  runtime_file = fopen(optarg, "w");
+  if (runtime_file == NULL) {
+    errx(1, "Cannot open %s: %s", optarg, strerror(errno));
+  }
+  }|]
+  }
+
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
 compileProg :: Operations op s
             -> s
             -> [C.Definition] -> [C.Stm] -> [C.Stm]
+            -> [Option]
             -> Program op
             -> String
-compileProg ops userstate decls pre_main_stms post_main_stms prog@(Program funs) =
+compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops blankNameSource userstate compileProg'
   in pretty [C.cunit|
@@ -534,6 +544,8 @@ $esc:("#include <sys/time.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
+$esc:("#include <err.h>")
+$esc:("#include <getopt.h>")
 
 $edecls:(typeDefinitions endstate)
 
@@ -558,20 +570,21 @@ $edecls:decls
 
 $edecls:(map funcToDef definitions)
 
+static typename FILE *runtime_file;
+
+$func:(generateOptionParser "parse_options" (timingOption:options))
+
 int main(int argc, char** argv) {
   struct timeval t_start, t_end, t_diff;
   unsigned long int elapsed_usec;
   $stms:(compInit endstate)
+  int parsed_options = parse_options(argc, argv);
+  argc -= parsed_options;
+  argv += parsed_options;
   $stms:pre_main_stms
   $stm:main;
   $stms:post_main_stms
-  if (argc == 3 && strcmp(argv[1], "-t") == 0) {
-    FILE* runtime_file;
-    runtime_file = fopen(argv[2], "w");
-    if (runtime_file == NULL) {
-      fprintf(stderr, "Cannot open %s: %s\n", argv[2], strerror(errno));
-      exit(1);
-    }
+  if (runtime_file != NULL) {
     timeval_subtract(&t_diff, &t_end, &t_start);
     elapsed_usec = t_diff.tv_sec*1e6+t_diff.tv_usec;
     fprintf(runtime_file, "%ld\n", elapsed_usec / 1000);
