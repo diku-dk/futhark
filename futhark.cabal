@@ -63,6 +63,7 @@ Library
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericCReading
                    Futhark.CodeGen.Backends.COpenCL
+                   Futhark.CodeGen.Backends.COpenCL.Boilerplate
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
