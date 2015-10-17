@@ -487,13 +487,7 @@ openClProgram kernels requirements =
 
 openClDecls :: [(String, C.Func)] -> OpenClRequirements -> [C.Definition]
 openClDecls kernels requirements =
-  clGlobals ++ kernelDeclarations ++ [openclErrorStringFunction,
-                                      openclSucceedFunction,
-                                      buildKernelFunction,
-                                      setupFunction,
-                                      numGroupsFunction,
-                                      groupSizeFunction
-                                     ]
+  clGlobals ++ kernelDeclarations ++ openclFunctions
   where clGlobals =
           [ [C.cedecl|typename cl_context fut_cl_context;|]
           , [C.cedecl|typename cl_command_queue fut_cl_queue;|]
@@ -510,118 +504,7 @@ openClDecls kernels requirements =
             ]
           | (name, _) <- kernels ]
 
-        setupFunction = [C.cedecl|
-void setup_opencl() {
-
-  typename cl_int error;
-  typename cl_platform_id platform;
-  typename cl_device_id device;
-  typename cl_uint platforms, devices;
-  // Fetch the Platform and Device IDs; we only want one.
-  error = clGetPlatformIDs(1, &platform, &platforms);
-  assert(error == 0);
-  assert(platforms > 0);
-  error = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &device, &devices);
-  assert(error == 0);
-  assert(devices > 0);
-  typename cl_context_properties properties[] = {
-    CL_CONTEXT_PLATFORM,
-    (typename cl_context_properties)platform,
-    0
-  };
-  // Note that nVidia's OpenCL requires the platform property
-  fut_cl_context = clCreateContext(properties, 1, &device, NULL, NULL, &error);
-  assert(error == 0);
-
-  fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
-  assert(error == 0);
-
-  // Some drivers complain if we compile empty programs, so bail out early if so.
-  if (strlen(fut_opencl_src) == 0) return;
-
-  // Build the OpenCL program.
-  size_t src_size;
-  typename cl_program prog;
-  fprintf(stderr, "look at me, loading this program:\n%s\n", fut_opencl_src);
-  error = 0;
-  src_size = sizeof(fut_opencl_src);
-  const char* src_ptr[] = {fut_opencl_src};
-  prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
-  assert(error == 0);
-  char compile_opts[1024];
-  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DWAVE_SIZE=32", FUT_BLOCK_DIM);
-  OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
-
-  // Load all the kernels.
-  $stms:(map (loadKernelByName . fst) kernels)
-}
-    |]
-
-        buildKernelFunction = [C.cedecl|
-typename cl_build_status build_opencl_program(typename cl_program program, typename cl_device_id device, const char* options) {
-  typename cl_int ret_val = clBuildProgram(program, 1, &device, options, NULL, NULL);
-
-  // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
-  if (ret_val != CL_SUCCESS && ret_val != CL_BUILD_PROGRAM_FAILURE) {
-    assert(ret_val == 0);
-  }
-
-  typename cl_build_status build_status;
-  ret_val = clGetProgramBuildInfo(program,
-                                  device,
-                                  CL_PROGRAM_BUILD_STATUS,
-                                  sizeof(cl_build_status),
-                                  &build_status,
-                                  NULL);
-  assert(ret_val == 0);
-
-  if (build_status != CL_SUCCESS) {
-    char *build_log;
-    size_t ret_val_size;
-    ret_val = clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size);
-    assert(ret_val == 0);
-
-    build_log = malloc(ret_val_size+1);
-    clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL);
-    assert(ret_val == 0);
-
-    // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
-    build_log[ret_val_size] = '\0';
-
-    fprintf(stderr, "Build log:\n%s", build_log);
-
-    free(build_log);
-  }
-
-  return build_status;
-}
-|]
-
-        numGroupsFunction = [C.cedecl|
-size_t futhark_num_groups() {
-  return 128; /* Must be a power of two */
-}
-|]
-
-        groupSizeFunction = [C.cedecl|
-size_t futhark_group_size() {
-  return 512;
-}
-|]
-
-        openclSucceedFunction = [C.cedecl|
-void opencl_succeed(unsigned int ret,
-                    const char *call,
-                    const char *file,
-                    int line) {
-  if (ret != CL_SUCCESS) {
-    errx(-1, "%s.%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
-        file, line, call, ret, opencl_error_string(ret));
-  }
-}
-|]
-
-        openclErrorStringFunction = [C.cedecl|
+        openclFunctions = [C.cunit|
 const char* opencl_error_string(unsigned int err)
 {
     switch (err) {
@@ -673,6 +556,107 @@ const char* opencl_error_string(unsigned int err)
         case CL_INVALID_MIP_LEVEL:                  return "Invalid mip-map level";
         default:                                    return "Unknown";
     }
+}
+
+void opencl_succeed(unsigned int ret,
+                    const char *call,
+                    const char *file,
+                    int line) {
+  if (ret != CL_SUCCESS) {
+    errx(-1, "%s.%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
+        file, line, call, ret, opencl_error_string(ret));
+  }
+}
+
+typename cl_build_status build_opencl_program(typename cl_program program, typename cl_device_id device, const char* options) {
+  typename cl_int ret_val = clBuildProgram(program, 1, &device, options, NULL, NULL);
+
+  // Avoid termination due to CL_BUILD_PROGRAM_FAILURE
+  if (ret_val != CL_SUCCESS && ret_val != CL_BUILD_PROGRAM_FAILURE) {
+    assert(ret_val == 0);
+  }
+
+  typename cl_build_status build_status;
+  ret_val = clGetProgramBuildInfo(program,
+                                  device,
+                                  CL_PROGRAM_BUILD_STATUS,
+                                  sizeof(cl_build_status),
+                                  &build_status,
+                                  NULL);
+  assert(ret_val == 0);
+
+  if (build_status != CL_SUCCESS) {
+    char *build_log;
+    size_t ret_val_size;
+    ret_val = clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &ret_val_size);
+    assert(ret_val == 0);
+
+    build_log = malloc(ret_val_size+1);
+    clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, ret_val_size, build_log, NULL);
+    assert(ret_val == 0);
+
+    // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
+    build_log[ret_val_size] = '\0';
+
+    fprintf(stderr, "Build log:\n%s", build_log);
+
+    free(build_log);
+  }
+
+  return build_status;
+}
+
+void setup_opencl() {
+
+  typename cl_int error;
+  typename cl_platform_id platform;
+  typename cl_device_id device;
+  typename cl_uint platforms, devices;
+  // Fetch the Platform and Device IDs; we only want one.
+  error = clGetPlatformIDs(1, &platform, &platforms);
+  assert(error == 0);
+  assert(platforms > 0);
+  error = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &device, &devices);
+  assert(error == 0);
+  assert(devices > 0);
+  typename cl_context_properties properties[] = {
+    CL_CONTEXT_PLATFORM,
+    (typename cl_context_properties)platform,
+    0
+  };
+  // Note that nVidia's OpenCL requires the platform property
+  fut_cl_context = clCreateContext(properties, 1, &device, NULL, NULL, &error);
+  assert(error == 0);
+
+  fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
+  assert(error == 0);
+
+  // Some drivers complain if we compile empty programs, so bail out early if so.
+  if (strlen(fut_opencl_src) == 0) return;
+
+  // Build the OpenCL program.
+  size_t src_size;
+  typename cl_program prog;
+  fprintf(stderr, "look at me, loading this program:\n%s\n", fut_opencl_src);
+  error = 0;
+  src_size = sizeof(fut_opencl_src);
+  const char* src_ptr[] = {fut_opencl_src};
+  prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
+  assert(error == 0);
+  char compile_opts[1024];
+  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DWAVE_SIZE=32", FUT_BLOCK_DIM);
+  OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
+
+  // Load all the kernels.
+  $stms:(map (loadKernelByName . fst) kernels)
+}
+
+size_t futhark_num_groups() {
+  return 128; /* Must be a power of two */
+}
+
+size_t futhark_group_size() {
+  return 512;
 }
 |]
 
