@@ -28,7 +28,7 @@ compileProg :: Prog -> Either String String
 compileProg prog = do
   prog' <- KernelImpGen.compileProg prog
   let header = unlines [ "#include <CL/cl.h>\n"
-                       , "#include <error.h>\n"
+                       , "#include <err.h>\n"
                        , "#define FUT_KERNEL(s) #s"
                        , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
                        , blockDimPragma
