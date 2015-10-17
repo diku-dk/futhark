@@ -26,13 +26,12 @@ import qualified Data.Text as T
 
 import Prelude hiding (id, (.))
 
-import qualified Text.PrettyPrint.Mainland as PP
-
 import Futhark.Representation.AST (Prog, pretty, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
 import Futhark.Util.Log
 import Futhark.MonadFreshNames
+import qualified Futhark.Util.Pretty as PP
 
 data CompileError = CompileError {
     errorDesc :: T.Text

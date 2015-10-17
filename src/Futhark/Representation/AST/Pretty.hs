@@ -15,8 +15,7 @@ import Data.Array (elems, listArray)
 import Data.Maybe
 import Data.Monoid
 
-import Text.PrettyPrint.Mainland hiding (pretty)
-import qualified Text.PrettyPrint.Mainland as PP
+import Futhark.Util.Pretty
 
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
@@ -414,11 +413,3 @@ ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
 ppCertificates' :: Certificates -> Doc
 ppCertificates' [] = empty
 ppCertificates' cs = ppCertificates cs <> line
-
--- | Prettyprint a list enclosed in curly braces.
-prettyTuple :: Pretty a => [a] -> String
-prettyTuple = PP.pretty 80 . ppTuple'
-
--- | Prettyprint a value, wrapped to 80 characters.
-pretty :: Pretty a => a -> String
-pretty = PP.pretty 80 . ppr

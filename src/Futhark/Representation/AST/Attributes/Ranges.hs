@@ -26,7 +26,7 @@ import Futhark.Analysis.ScalExp
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import qualified Text.PrettyPrint.Mainland as PP
+import qualified Futhark.Util.Pretty as PP
 
 -- | A known bound on a value.
 data KnownBound = VarBound VName

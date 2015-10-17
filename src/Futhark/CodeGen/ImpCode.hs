@@ -49,7 +49,7 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 
-import Text.PrettyPrint.Mainland hiding (space)
+import Futhark.Util.Pretty hiding (space)
 
 data Size = ConstSize Int32
           | VarSize VName

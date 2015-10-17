@@ -34,7 +34,7 @@ import Data.Loc (noLoc)
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import qualified Text.PrettyPrint.Mainland as PP
+import Data.Maybe
 
 import Prelude
 
@@ -43,7 +43,7 @@ import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases hiding (TypeEnv)
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
-import Data.Maybe
+import qualified Futhark.Util.Pretty as PP
 
 -- | Information about an error that occured during type checking.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -194,7 +194,7 @@ context s = local $ \env -> env { envContext = s : envContext env}
 
 message :: PP.Pretty a =>
            String -> a -> String
-message s x = PP.pretty 80 $
+message s x = PP.prettyDoc 80 $
               PP.text s PP.<+> PP.align (PP.ppr x)
 
 liftEither :: Either (ErrorCase lore) a -> TypeM lore a

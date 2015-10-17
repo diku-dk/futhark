@@ -53,14 +53,13 @@ import Prelude
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Text.PrettyPrint.Mainland hiding (space)
-
 import Futhark.CodeGen.ImpCode
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericCReading
 import qualified Futhark.CodeGen.Backends.CUtils as C
+import Futhark.Util.Pretty hiding (space)
 
 data CompilerState s = CompilerState {
     compTypeStructs :: [([Type], (C.Type, C.Definition))]
@@ -367,14 +366,14 @@ readBasicStm :: C.Exp -> BasicType -> C.Stm
 readBasicStm place t
   | Just f <- readFun t =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          fprintf(stderr, "Syntax error when reading %s.\n", $string:(prettyPrint t));
+          fprintf(stderr, "Syntax error when reading %s.\n", $string:(pretty t));
                  exit(1);
         }|]
 readBasicStm _ Cert =
   [C.cstm|;|]
 readBasicStm _ t =
   [C.cstm|{
-        fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
+        fprintf(stderr, "Cannot read %s.\n", $string:(pretty t));
         exit(1);
       }|]
 
@@ -472,7 +471,7 @@ readInput memsizes (ArrayValue name t shape)
       }|]
   | otherwise =
     [C.cstm|{
-       fprintf(stderr, "Cannot read %s.\n", $string:(prettyPrint t));
+       fprintf(stderr, "Cannot read %s.\n", $string:(pretty t));
                exit(1);
     }|]
 
@@ -525,7 +524,7 @@ compileProg :: Operations op s
 compileProg ops userstate decls pre_main_stms post_main_stms prog@(Program funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops blankNameSource userstate compileProg'
-  in pretty 80 $ ppr [C.cunit|
+  in pretty [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
@@ -780,7 +779,7 @@ compileCode (Assert e loc) = do
   stm [C.cstm|{
             if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
-                                   $string:(prettyPrint e), $string:(locStr loc));
+                                   $string:(pretty e), $string:(locStr loc));
                    abort();
                  }
           }|]
@@ -885,9 +884,6 @@ compileFunBody outputs code = do
     _        -> zipWithM_ setRetVal' [0..] outputs
   stm [C.cstm|return $id:retval;|]
 
-prettyPrint :: Pretty a => a -> String
-prettyPrint x = displayS (renderCompact $ ppr x) ""
-
 ppArrayType :: BasicType -> Int -> String
-ppArrayType t 0 = prettyPrint t
+ppArrayType t 0 = pretty t
 ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"

@@ -19,12 +19,12 @@ module Futhark.CodeGen.KernelImp
 import Data.Monoid
 
 import qualified Data.HashSet as HS
-import Text.PrettyPrint.Mainland
 
 import Futhark.CodeGen.ImpCode hiding (Program, Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
+import Futhark.Util.Pretty
 
 type Program = Imp.Program CallKernel
 type Function = Imp.Function CallKernel

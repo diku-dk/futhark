@@ -168,6 +168,7 @@ Library
                    Futhark.TypeCheck.TypeError
                    Futhark.Util
                    Futhark.Util.Options
+                   Futhark.Util.Pretty
                    Futhark.Util.Log
                    Futhark.Util.Truths
                    Futhark.Util.IntegralExp

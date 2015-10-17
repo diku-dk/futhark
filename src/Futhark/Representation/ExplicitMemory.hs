@@ -59,7 +59,6 @@ import Data.Maybe
 import Data.List
 import Data.Loc
 import Data.Monoid
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -83,6 +82,7 @@ import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Optimise.Simplifier.Simplifiable
+import qualified Futhark.Util.Pretty as PP
 
 -- | A lore containing explicit memory information.
 data ExplicitMemory = ExplicitMemory

@@ -24,13 +24,12 @@ import Data.Monoid
 
 import Prelude
 
-import Text.PrettyPrint.Mainland hiding (pretty)
-
 import Futhark.Representation.AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Construct
 import Futhark.Util.IntegralExp
+import Futhark.Util.Pretty hiding (pretty)
 
 -----------------------------------------------------------------
 -- BINARY OPERATORS for Numbers                                --

@@ -39,7 +39,6 @@ import qualified Data.HashSet as HS
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -48,6 +47,7 @@ import Futhark.Representation.Basic
 import Futhark.Transform.Substitute
 import Futhark.Tools
 import Futhark.Pass
+import qualified Futhark.Util.Pretty as PP
 
 {- -----------------------------------------------------------------------------
                        Understanding the code / transformation

@@ -58,7 +58,6 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -77,6 +76,7 @@ import Futhark.Binder
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 import Futhark.Representation.AST.Attributes.Ranges
+import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
 data Aliases lore = Aliases lore

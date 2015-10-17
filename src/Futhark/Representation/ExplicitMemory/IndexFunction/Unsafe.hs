@@ -36,7 +36,6 @@ import Data.Type.Ordinal
 import qualified Data.Vector.Sized as Vec
 import Proof.Equational
 import Data.Type.Equality hiding (outer)
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -52,7 +51,7 @@ import Futhark.Representation.ExplicitMemory.Permutation
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
 import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
 import Language.Futhark.Core
-import Futhark.Representation.AST.Pretty (pretty)
+import Futhark.Util.Pretty as PP
 
 data IxFun = forall c n .
              IxFun

@@ -42,8 +42,7 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape hiding (sliceSizes)
 import Futhark.Representation.AST.Attributes.Stripe
 import Futhark.Util.IntegralExp
-
-import Text.PrettyPrint.Mainland
+import Futhark.Util.Pretty
 
 type Shape num = Vector num
 type ShapeChange num = Vector (DimChange num)
