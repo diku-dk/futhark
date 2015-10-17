@@ -728,7 +728,7 @@ compileExp (BinOp bop x y) = do
              Minus -> [C.cexp|$exp:x' - $exp:y'|]
              Times -> [C.cexp|$exp:x' * $exp:y'|]
              FloatDiv -> [C.cexp|$exp:x' / $exp:y'|]
-             Pow -> [C.cexp|powl($exp:x',$exp:y')|]
+             Pow -> [C.cexp|pow($exp:x',$exp:y')|]
              ShiftR -> [C.cexp|$exp:x' >> $exp:y'|]
              ShiftL -> [C.cexp|$exp:x' << $exp:y'|]
              Band -> [C.cexp|$exp:x' & $exp:y'|]
