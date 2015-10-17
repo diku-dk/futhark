@@ -20,6 +20,7 @@ import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import Futhark.Representation.ExplicitMemory (Prog, pretty)
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.KernelImp
 import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
@@ -39,7 +40,7 @@ compileProg prog = do
     header ++
     GenericC.compileProg operations ()
     (openClDecls kernel_names $ openClProgram kernels requirements)
-    openClInit (openClReport kernel_names) [] prog'
+    openClInit (openClReport kernel_names) options prog'
   where operations :: GenericC.Operations CallKernel ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel
@@ -49,6 +50,18 @@ compileProg prog = do
                      , GenericC.opsCopy = copyOpenCLMemory
                      , GenericC.opsMemoryType = openclMemoryType
                      }
+
+        options = [ Option { optionLongName = "platform"
+                           , optionShortName = Just 'p'
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_preferred_platform = optarg;|]
+                           }
+                  , Option { optionLongName = "device"
+                           , optionShortName = Just 'd'
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_preferred_device = optarg;|]
+                           }
+                  ]
 
 writeOpenCLScalar :: GenericC.WriteScalar CallKernel ()
 writeOpenCLScalar mem i t "device" val = do

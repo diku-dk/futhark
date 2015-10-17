@@ -26,7 +26,20 @@ openClDecls kernel_names opencl_program =
         openclBoilerplate = [C.cunit|
 typename cl_context fut_cl_context;
 typename cl_command_queue fut_cl_queue;
+const char *cl_preferred_platform = "";
+const char *cl_preferred_device = "";
 int cl_verbosity = 1;
+
+static char *strclone(const char *str) {
+  size_t size = strlen(str) + 1;
+  char *copy = malloc(size);
+  if (copy == NULL) {
+    return NULL;
+  }
+
+  memcpy(copy, str, size);
+  return copy;
+}
 
 const char* opencl_error_string(unsigned int err)
 {
@@ -86,9 +99,146 @@ void opencl_succeed(unsigned int ret,
                     const char *file,
                     int line) {
   if (ret != CL_SUCCESS) {
-    errx(-1, "%s.%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
+    errx(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
         file, line, call, ret, opencl_error_string(ret));
   }
+}
+
+static char* opencl_platform_info(typename cl_platform_id platform,
+                                  typename cl_platform_info param) {
+  size_t req_bytes;
+  char *info;
+
+  OPENCL_SUCCEED(clGetPlatformInfo(platform, param, 0, NULL, &req_bytes));
+
+  info = malloc(req_bytes);
+
+  OPENCL_SUCCEED(clGetPlatformInfo(platform, param, req_bytes, info, NULL));
+
+  return info;
+}
+
+static char* opencl_device_info(typename cl_device_id device,
+                                typename cl_device_info param) {
+  size_t req_bytes;
+  char *info;
+
+  OPENCL_SUCCEED(clGetDeviceInfo(device, param, 0, NULL, &req_bytes));
+
+  info = malloc(req_bytes);
+
+  OPENCL_SUCCEED(clGetDeviceInfo(device, param, req_bytes, info, NULL));
+
+  return info;
+}
+
+struct opencl_device_option {
+  typename cl_platform_id platform;
+  typename cl_device_id device;
+  char *platform_name;
+  char *device_name;
+};
+
+static void opencl_all_device_options(struct opencl_device_option **devices_out,
+                                      size_t *num_devices_out) {
+  size_t num_devices = 0, num_devices_added = 0;
+
+  typename cl_platform_id *all_platforms;
+  typename cl_uint *platform_num_devices;
+
+  typename cl_uint num_platforms;
+
+  // Find the number of platforms.
+  OPENCL_SUCCEED(clGetPlatformIDs(0, NULL, &num_platforms));
+
+  // Make room for them.
+  all_platforms = calloc(num_platforms, sizeof(typename cl_platform_id));
+  platform_num_devices = calloc(num_platforms, sizeof(typename cl_uint));
+
+  // Fetch all the platforms.
+  OPENCL_SUCCEED(clGetPlatformIDs(num_platforms, all_platforms, NULL));
+
+  // Count the number of devices for each platform, as well as the
+  // total number of devices.
+  for (typename cl_uint i = 0; i < num_platforms; i++) {
+    if (clGetDeviceIDs(all_platforms[i], CL_DEVICE_TYPE_ALL,
+                       0, NULL, &platform_num_devices[i]) == CL_SUCCESS) {
+      num_devices += platform_num_devices[i];
+    } else {
+      platform_num_devices[i] = 0;
+    }
+  }
+
+  // Make room for all the device options.
+  struct opencl_device_option *devices =
+    calloc(num_devices, sizeof(struct opencl_device_option));
+
+  // Loop through the platforms, getting information about their devices.
+  for (typename cl_uint i = 0; i < num_platforms; i++) {
+    typename cl_platform_id platform = all_platforms[i];
+    typename cl_uint num_platform_devices = platform_num_devices[i];
+
+    if (num_platform_devices == 0) {
+      continue;
+    }
+
+    char *platform_name = opencl_platform_info(platform, CL_PLATFORM_NAME);
+    typename cl_device_id *platform_devices =
+      calloc(num_platform_devices, sizeof(typename cl_device_id));
+
+    // Fetch all the devices.
+    OPENCL_SUCCEED(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL,
+                                  num_platform_devices, platform_devices, NULL));
+
+    // Loop through the devices, adding them to the devices array.
+    for (typename cl_uint i = 0; i < num_platform_devices; i++) {
+      char *device_name = opencl_device_info(platform_devices[i], CL_DEVICE_NAME);
+      devices[num_devices_added].platform = platform;
+      devices[num_devices_added].device = platform_devices[i];
+      // We don't want the structs to share memory, so copy the platform name.
+      // Each device name is already unique.
+      devices[num_devices_added].platform_name = strclone(platform_name);
+      devices[num_devices_added].device_name = device_name;
+      num_devices_added++;
+    }
+    free(platform_devices);
+    free(platform_name);
+  }
+  free(all_platforms);
+  free(platform_num_devices);
+
+  *devices_out = devices;
+  *num_devices_out = num_devices;
+}
+
+static struct opencl_device_option get_preferred_device() {
+  struct opencl_device_option *devices;
+  size_t num_devices;
+
+  opencl_all_device_options(&devices, &num_devices);
+
+  for (size_t i = 0; i < num_devices; i++) {
+    struct opencl_device_option device = devices[i];
+    if (strstr(device.platform_name, cl_preferred_platform) != NULL &&
+        strstr(device.device_name, cl_preferred_device) != NULL) {
+      // Free all the platform and device names, except the ones we have chosen.
+      for (size_t j = 0; j < num_devices; j++) {
+        if (j != i) {
+          free(devices[j].platform_name);
+          free(devices[j].device_name);
+        }
+      }
+      free(devices);
+      return device;
+    }
+  }
+
+  errx(1, "Could not find acceptable OpenCL device.");
+}
+
+static void describe_device_option(struct opencl_device_option device) {
+  fprintf(stderr, "Using platform: %s\n", device.platform_name);
+  fprintf(stderr, "Using device: %s\n", device.device_name);
 }
 
 typename cl_build_status build_opencl_program(typename cl_program program, typename cl_device_id device, const char* options) {
@@ -129,66 +279,6 @@ typename cl_build_status build_opencl_program(typename cl_program program, typen
   return build_status;
 }
 
-typename cl_platform_id get_opencl_platform() {
-  typename cl_platform_id platform;
-  typename cl_uint platforms;
-  // Fetch the Platform and Device IDs; we only want one.
-  OPENCL_SUCCEED(clGetPlatformIDs(1, &platform, &platforms));
-  assert(platforms > 0);
-  return platform;
-}
-
-typename cl_device_id get_opencl_device(typename cl_platform_id platform) {
-  typename cl_device_id device;
-  typename cl_uint devices;
-  typename devices;
-  OPENCL_SUCCEED(clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &device, &devices));
-  assert(devices > 0);
-  return device;
-}
-
-char* opencl_platform_info(typename cl_platform_id platform,
-                           typename cl_platform_info param) {
-  size_t req_bytes;
-  char *info;
-
-  OPENCL_SUCCEED(clGetPlatformInfo(platform, param, 0, NULL, &req_bytes));
-
-  info = malloc(req_bytes);
-
-  OPENCL_SUCCEED(clGetPlatformInfo(platform, param, req_bytes, info, NULL));
-
-  return info;
-}
-
-void describe_opencl_platform(typename cl_platform_id platform) {
-  char* platform_name = opencl_platform_info(platform, CL_PLATFORM_NAME);
-  char* platform_vendor = opencl_platform_info(platform, CL_PLATFORM_VENDOR);
-  fprintf(stderr, "Using platform: %s (by %s)\n", platform_name, platform_vendor);
-  free(platform_name);
-  free(platform_vendor);
-}
-
-char* opencl_device_info(typename cl_device_id device,
-                         typename cl_device_info param) {
-  size_t req_bytes;
-  char *info;
-
-  OPENCL_SUCCEED(clGetDeviceInfo(device, param, 0, NULL, &req_bytes));
-
-  info = malloc(req_bytes);
-
-  OPENCL_SUCCEED(clGetDeviceInfo(device, param, req_bytes, info, NULL));
-
-  return info;
-}
-
-void describe_opencl_device(typename cl_device_id device) {
-  char* device_name = opencl_device_info(device, CL_DEVICE_NAME);
-  fprintf(stderr, "Using device: %s\n", device_name);
-  free(device_name);
-}
-
 void setup_opencl() {
 
   typename cl_int error;
@@ -196,15 +286,14 @@ void setup_opencl() {
   typename cl_device_id device;
   typename cl_uint platforms, devices;
 
-  platform = get_opencl_platform();
+  struct opencl_device_option device_option = get_preferred_device();
+
   if (cl_verbosity > 0) {
-    describe_opencl_platform(platform);
+    describe_device_option(device_option);
   }
 
-  device = get_opencl_device(platform);
-  if (cl_verbosity > 0) {
-    describe_opencl_device(device);
-  }
+  device = device_option.device;
+  platform = device_option.platform;
 
   typename cl_context_properties properties[] = {
     CL_CONTEXT_PLATFORM,
