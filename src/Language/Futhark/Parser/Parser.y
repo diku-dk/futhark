@@ -255,7 +255,9 @@ TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { let (ds, et) = $2
                        in ($3:ds, et) }
 
-TupleArrayElemTypes : TupleArrayElemType { [$1] }
+TupleArrayElemTypes : { [] }
+                    | TupleArrayElemType
+                      { [$1] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
