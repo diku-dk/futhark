@@ -401,11 +401,12 @@ linearWithOffset (Index n ixfun (is :: Indices num m)) element_size = do
         m = Vec.sLength is
 linearWithOffset _ _ = Nothing
 
-rearrangeWithOffset :: forall n c num. IntegralCond num =>
-                       IxFun num c n -> Maybe (num, Perm.Permutation n)
-rearrangeWithOffset (Permute (Direct _) perm) =
-  Just (0, perm)
-rearrangeWithOffset _ =
+rearrangeWithOffset :: IntegralCond num =>
+                       IxFun num c n -> num -> Maybe (num, Perm.Permutation n)
+rearrangeWithOffset (Permute ixfun perm) element_size = do
+  offset <- linearWithOffset ixfun element_size
+  return (offset, perm)
+rearrangeWithOffset _ _ =
   Nothing
 
 instance FreeIn num => FreeIn (IxFun num c n) where

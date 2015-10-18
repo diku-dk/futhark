@@ -220,9 +220,9 @@ linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ _ ixfun) =
   Safe.linearWithOffset ixfun
 
-rearrangeWithOffset :: IxFun -> Maybe (ScalExp, [Int])
-rearrangeWithOffset (IxFun _ n ixfun) = do
-  (offset, perm) <- Safe.rearrangeWithOffset ixfun
+rearrangeWithOffset :: IxFun -> ScalExp -> Maybe (ScalExp, [Int])
+rearrangeWithOffset (IxFun _ n ixfun) element_size = do
+  (offset, perm) <- Safe.rearrangeWithOffset ixfun element_size
   return (offset, Vec.toList $ Perm.apply perm $ Vec.unsafeFromList n [0..])
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)

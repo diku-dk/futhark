@@ -466,12 +466,12 @@ isMapTranspose :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
 isMapTranspose bt
   (ImpGen.MemLocation _ destshape destIxFun)
   (ImpGen.MemLocation _ _ srcIxFun)
-  | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun,
+  | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     permIsTranspose perm =
     isOk dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun,
+    Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     permIsTranspose perm  =
     isOk dest_offset src_offset
   | otherwise =
