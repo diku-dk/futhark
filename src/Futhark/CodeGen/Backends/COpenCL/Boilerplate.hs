@@ -271,7 +271,7 @@ typename cl_build_status build_opencl_program(typename cl_program program, typen
     // The spec technically does not say whether the build log is zero-terminated, so let's be careful.
     build_log[ret_val_size] = '\0';
 
-    fprintf(stderr, "Build log:\n%s", build_log);
+    fprintf(stderr, "Build log:\n%s\n", build_log);
 
     free(build_log);
   }
