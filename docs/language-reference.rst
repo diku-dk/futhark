@@ -5,7 +5,7 @@ Language Reference
 
 The builtin types in Futhark are ``int``, ``real``, ``bool`` and
 ``char``, as well as their combination in tuples and arrays.  An
-``int`` is currently 32 bits and ``real`` is a double-precision double
+``int`` is currently 32 bits and ``real`` is a double-precision float
 (64 bits).  This is likely to become configurable in the future.
 
 The following list describes every syntactical language construct in
