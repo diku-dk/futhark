@@ -587,7 +587,7 @@ int main(int argc, char** argv) {
   if (runtime_file != NULL) {
     timeval_subtract(&t_diff, &t_end, &t_start);
     elapsed_usec = t_diff.tv_sec*1e6+t_diff.tv_usec;
-    fprintf(runtime_file, "%ld\n", elapsed_usec / 1000);
+    fprintf(runtime_file, "%ld\n", elapsed_usec);
     fclose(runtime_file);
   }
   return 0;
