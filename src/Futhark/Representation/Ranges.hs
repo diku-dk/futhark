@@ -53,7 +53,6 @@ import qualified Data.HashSet as HS
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -71,6 +70,7 @@ import Futhark.Transform.Rename
 import Futhark.Binder
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
+import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
 data Ranges lore = Ranges lore

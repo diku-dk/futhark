@@ -34,7 +34,7 @@ import Data.Loc (noLoc)
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import qualified Text.PrettyPrint.Mainland as PP
+import Data.Maybe
 
 import Prelude
 
@@ -43,7 +43,7 @@ import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases hiding (TypeEnv)
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
-import Data.Maybe
+import qualified Futhark.Util.Pretty as PP
 
 -- | Information about an error that occured during type checking.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -194,7 +194,7 @@ context s = local $ \env -> env { envContext = s : envContext env}
 
 message :: PP.Pretty a =>
            String -> a -> String
-message s x = PP.pretty 80 $
+message s x = PP.prettyDoc 80 $
               PP.text s PP.<+> PP.align (PP.ppr x)
 
 liftEither :: Either (ErrorCase lore) a -> TypeM lore a
@@ -362,8 +362,8 @@ unifyTypes (Array t1 ds1 u1) (Array t2 ds2 u2)
   | shapeRank ds1 == shapeRank ds2 = do
   t <- t1 `unifyBasicTypes` t2
   Just $ Array t ds2 (u1 <> u2)
-unifyTypes (Mem size1) (Mem size2)
-  | size1 == size2 = Just $ Mem size1
+unifyTypes (Mem size1 space1) (Mem size2 space2)
+  | size1 == size2, space1 == space2 = Just $ Mem size1 space1
 unifyTypes _ _ = Nothing
 
 -- | As 'unifyTypes', but for element types.
@@ -703,6 +703,16 @@ checkPrimOp (Rearrange cs perm arr) = do
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError noLoc perm rank $ Just arr
 
+checkPrimOp (Stripe cs stride arr) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] stride
+  void $ checkArrIdent arr
+
+checkPrimOp (Unstripe cs stride arr) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] stride
+  void $ checkArrIdent arr
+
 checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
   mapM_ (require [Basic Int]) sizeexps
@@ -730,7 +740,7 @@ checkPrimOp (Copy e) =
 checkPrimOp (Assert e _) =
   require [Basic Bool] e
 
-checkPrimOp (Alloc e) =
+checkPrimOp (Alloc e _) =
   require [Basic Int] e
 
 checkPrimOp (Partition cs _ flags arrs) = do
@@ -916,6 +926,43 @@ checkLoopOp (Kernel cs w index ispace inps returns body) = do
              bad $ TypeError noLoc $ "Unique kernel input " ++
              pretty (kernelInputName inp) ++
              " does not use entire index space."
+
+checkLoopOp (ReduceKernel cs w
+             (KernelSize num_groups workgroup_size
+              per_thread_elements num_elements offset_multiple)
+             parfun seqfun accexps arrexps) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  require [Basic Int] num_groups
+  require [Basic Int] workgroup_size
+  require [Basic Int] per_thread_elements
+  require [Basic Int] num_elements
+  require [Basic Int] offset_multiple
+  arrargs <- checkSOACArrayArgs w arrexps
+  accargs <- mapM checkArg accexps
+
+  case lambdaParams seqfun of
+    [] -> bad $ TypeError noLoc "Fold function takes no parameters."
+    chunk_param : _
+      | Basic Int <- paramType chunk_param -> do
+          let seq_args = (Basic Int, mempty, mempty) :
+                         [ (t `arrayOfRow` Var (paramName chunk_param), y, z)
+                         | (t, y, z) <- arrargs ]
+          checkLambda seqfun seq_args
+      | otherwise ->
+          bad $ TypeError noLoc "First parameter of fold function is not integer-typed."
+
+  let seqRetType = lambdaReturnType seqfun
+      asArg t = (t, mempty, mempty)
+  checkLambda parfun $ map asArg $ Basic Int : seqRetType ++ seqRetType
+  let acct = map argType accargs
+      parRetType = lambdaReturnType parfun
+  unless (acct `subtypesOf` seqRetType) $
+    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomap fold function returns type " ++ prettyTuple seqRetType ++ "."
+  unless (acct `subtypesOf` parRetType) $
+    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
 
 checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
@@ -1113,9 +1160,11 @@ checkBinOp Plus e1 e2 t = checkPolyBinOp Plus [Float32, Float64, Int] e1 e2 t
 checkBinOp Minus e1 e2 t = checkPolyBinOp Minus [Float32, Float64, Int] e1 e2 t
 checkBinOp Pow e1 e2 t = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t
 checkBinOp Times e1 e2 t = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t
-checkBinOp Divide e1 e2 t = checkPolyBinOp Divide [Float32, Float64] e1 e2 t
-checkBinOp IntDivide e1 e2 t = checkPolyBinOp IntDivide [Int] e1 e2 t
+checkBinOp FloatDiv e1 e2 t = checkPolyBinOp FloatDiv [Float32, Float64] e1 e2 t
+checkBinOp Div e1 e2 t = checkPolyBinOp Div [Int] e1 e2 t
 checkBinOp Mod e1 e2 t = checkPolyBinOp Mod [Int] e1 e2 t
+checkBinOp Quot e1 e2 t = checkPolyBinOp Quot [Int] e1 e2 t
+checkBinOp Rem e1 e2 t = checkPolyBinOp Rem [Int] e1 e2 t
 checkBinOp ShiftR e1 e2 t = checkPolyBinOp ShiftR [Int] e1 e2 t
 checkBinOp ShiftL e1 e2 t = checkPolyBinOp ShiftL [Int] e1 e2 t
 checkBinOp Band e1 e2 t = checkPolyBinOp Band [Int] e1 e2 t

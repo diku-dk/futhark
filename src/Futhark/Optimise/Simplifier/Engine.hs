@@ -502,7 +502,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
                             mkLetM (addWisdomToPattern p e) e
   return ()
     where gatherPat acc (_, Basic _, _) = return acc
-          gatherPat acc (_, Mem   _, _) = return acc
+          gatherPat acc (_, Mem {}, _) = return acc
           gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
             foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
           gatherPat _ _ =
@@ -652,6 +652,25 @@ simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
              simplifyBody (map (diet . fst) returns) body
     return $ Kernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
+
+simplifyLoopOp (ReduceKernel cs w
+                (KernelSize num_groups group_size
+                 thread_chunk num_elements offset_multiple)
+                parlam seqlam nes arrs) = do
+  cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
+  num_groups' <- simplifySubExp num_groups
+  group_size' <- simplifySubExp group_size
+  thread_chunk' <- simplifySubExp thread_chunk
+  num_elements' <- simplifySubExp num_elements
+  offset_multiple' <- simplifySubExp offset_multiple
+  nes' <- mapM simplifySubExp nes
+  arrs' <- mapM simplifyVName arrs
+  parlam' <- simplifyLambda parlam w' $ map (const Nothing) nes
+  seqlam' <- simplifyLambda seqlam w' $ map (const Nothing) nes
+  return $ ReduceKernel cs' w'
+    (KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple')
+    parlam' seqlam' nes' arrs'
 
 simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs
@@ -808,8 +827,8 @@ simplifyType :: MonadEngine m => Type -> m Type
 simplifyType (Array et shape u) = do
   dims <- mapM simplifySubExp $ shapeDims shape
   return $ Array et (Shape dims) u
-simplifyType (Mem size) =
-  Mem <$> simplifySubExp size
+simplifyType (Mem size space) =
+  Mem <$> simplifySubExp size <*> pure space
 simplifyType (Basic bt) =
   return $ Basic bt
 

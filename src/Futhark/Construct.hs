@@ -21,6 +21,8 @@ module Futhark.Construct
   , eValue
   , eBody
   , eLambda
+  , eDivRoundingUp
+  , eRoundToMultipleOf
 
   , resultBody
   , resultBodyM
@@ -209,6 +211,20 @@ eLambda lam args = do zipWithM_ letBindNames params $
                       bodyBind $ lambdaBody lam
   where params = [ [(param, BindVar)] |
                    param <- map paramName $ lambdaParams lam ]
+
+eDivRoundingUp :: MonadBinder m =>
+                  m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
+eDivRoundingUp x y =
+  eBinOp Div (eBinOp Plus x (eBinOp Minus y (eSubExp one) Int) Int) y Int
+  where one = Constant $ IntVal 1
+
+eRoundToMultipleOf :: MonadBinder m =>
+                      m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
+eRoundToMultipleOf x d =
+  ePlus x (eMod (eMinus d (eMod x d)) d)
+  where eMod a b = eBinOp Mod a b Int
+        eMinus a b = eBinOp Minus a b Int
+        ePlus a b = eBinOp Plus a b Int
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>

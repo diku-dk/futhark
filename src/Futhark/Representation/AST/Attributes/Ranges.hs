@@ -26,7 +26,7 @@ import Futhark.Analysis.ScalExp
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
-import qualified Text.PrettyPrint.Mainland as PP
+import qualified Futhark.Util.Pretty as PP
 
 -- | A known bound on a value.
 data KnownBound = VarBound VName
@@ -154,10 +154,10 @@ primOpRanges (BinOp Minus x y t) =
   [scalExpRange $ SMinus (subExpToScalExp x t) (subExpToScalExp y t)]
 primOpRanges (BinOp Times x y t) =
   [scalExpRange $ STimes (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp IntDivide x y t) =
-  [scalExpRange $ SDivide (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp Divide x y t) =
-  [scalExpRange $ SDivide (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp Div x y t) =
+  [scalExpRange $ SDiv (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp FloatDiv x y t) =
+  [scalExpRange $ SDiv (subExpToScalExp x t) (subExpToScalExp y t)]
 primOpRanges (BinOp Pow x y t) =
   [scalExpRange $ SPow (subExpToScalExp x t) (subExpToScalExp y t)]
 

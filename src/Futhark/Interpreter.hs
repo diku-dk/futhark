@@ -451,16 +451,22 @@ evalPrimOp (BinOp Pow e1 e2 Float64) = evalFloat64BinOp (**) e1 e2
 evalPrimOp (BinOp Times e1 e2 Int) = evalIntBinOp (*) e1 e2
 evalPrimOp (BinOp Times e1 e2 Float32) = evalFloat32BinOp (*) e1 e2
 evalPrimOp (BinOp Times e1 e2 Float64) = evalFloat64BinOp (*) e1 e2
-evalPrimOp (BinOp IntDivide e1 e2 Int) = evalIntBinOpM div' e1 e2
+evalPrimOp (BinOp Div e1 e2 Int) = evalIntBinOpM div' e1 e2
   where div' _ 0 = bad DivisionByZero
         div' x y = return $ x `div` y
 evalPrimOp (BinOp Mod e1 e2 Int) = evalIntBinOpM mod' e1 e2
   where mod' _ 0 = bad DivisionByZero
         mod' x y = return $ x `mod` y
-evalPrimOp (BinOp Divide e1 e2 Float32) = evalFloat32BinOpM div' e1 e2
+evalPrimOp (BinOp Quot e1 e2 Int) = evalIntBinOpM quot' e1 e2
+  where quot' _ 0 = bad DivisionByZero
+        quot' x y = return $ x `quot` y
+evalPrimOp (BinOp Rem e1 e2 Int) = evalIntBinOpM rem' e1 e2
+  where rem' _ 0 = bad DivisionByZero
+        rem' x y = return $ x `rem` y
+evalPrimOp (BinOp FloatDiv e1 e2 Float32) = evalFloat32BinOpM div' e1 e2
   where div' _ 0 = bad  DivisionByZero
         div' x y = return $ x / y
-evalPrimOp (BinOp Divide e1 e2 Float64) = evalFloat64BinOpM div' e1 e2
+evalPrimOp (BinOp FloatDiv e1 e2 Float64) = evalFloat64BinOpM div' e1 e2
   where div' _ 0 = bad  DivisionByZero
         div' x y = return $ x / y
 evalPrimOp (BinOp ShiftR e1 e2 _) = evalIntBinOp shiftR' e1 e2
@@ -589,6 +595,16 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
 evalPrimOp (Rearrange _ perm arrexp) =
   single <$> permuteArray perm <$> lookupVar arrexp
 
+evalPrimOp (Stripe _ stride arrexp) =
+  single <$> (stripeArray <$> (asInt =<< evalSubExp stride) <*> lookupVar arrexp)
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
+        asInt _ = bad $ TypeError "evalPrimOp Stripe asInt"
+
+evalPrimOp (Unstripe _ stride arrexp) =
+  single <$> (unstripeArray <$> (asInt =<< evalSubExp stride) <*> lookupVar arrexp)
+  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
+        asInt _ = bad $ TypeError "evalPrimOp Unstripe asInt"
+
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt <=< evalSubExp) sizeexps
   arrval <- lookupVar arrexp
@@ -665,7 +681,7 @@ evalPrimOp (Partition _ n flags arrs) = do
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
 -- Alloc is not used in the interpreter, so just return whatever
-evalPrimOp (Alloc se) =
+evalPrimOp (Alloc se _) =
   single <$> evalSubExp se
 
 evalLoopOp :: forall lore . Lore lore => LoopOp lore -> FutharkM lore [Value]
@@ -769,6 +785,9 @@ evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
 
 evalLoopOp (Kernel {}) =
   fail "Cannot interpret kernels."
+
+evalLoopOp (ReduceKernel {}) =
+  fail "Cannot interpret reduction kernels."
 
 evalLoopOp (Stream _ _ form elam arrs _) = do
   let accs = getStreamAccums form

@@ -30,9 +30,10 @@ module Futhark.Representation.AST.Attributes.Reshape
 
 import Data.Foldable
 
-import Prelude hiding (sum, product)
+import Prelude hiding (sum, product, quot)
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Util.IntegralExp
 
 -- | The new dimension.
 newDim :: DimChange d -> d
@@ -57,14 +58,21 @@ shapeCoerce cs newdims arr =
 -- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
 reshapeOuter :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeOuter newshape n oldshape =
-  newshape ++ map DimCoercion (drop n (shapeDims oldshape))
+  newshape ++ map coercion_or_new (drop n (shapeDims oldshape))
+  where coercion_or_new
+          | length newshape == n = DimCoercion
+          | otherwise            = DimNew
 
 -- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
 -- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
 -- @oldshape@) of @src@ with @newshape@.
 reshapeInner :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeInner newshape n oldshape =
-  map DimCoercion (take n (shapeDims oldshape)) ++ newshape
+  map coercion_or_new (take n (shapeDims oldshape)) ++ newshape
+  where coercion_or_new
+          | length newshape == m-n = DimCoercion
+          | otherwise              = DimNew
+        m = shapeRank oldshape
 
 -- | If the shape change is nothing but shape coercions, return the new dimensions.  Otherwise, return
 -- 'Nothing'.
@@ -115,7 +123,7 @@ informReshape _ sc = sc
 -- list @is'@, which is into an array of shape @to_dims@.  @is@ must
 -- have the same length as @from_dims@, and @is'@ will have the same
 -- length as @to_dims@.
-reshapeIndex :: Fractional num =>
+reshapeIndex :: IntegralExp num =>
                 [num] -> [num] -> [num] -> [num]
 reshapeIndex to_dims from_dims is =
   unflattenIndex to_dims $ flattenIndex from_dims is
@@ -123,20 +131,20 @@ reshapeIndex to_dims from_dims is =
 -- | @unflattenIndex dims i@ computes a list of indices into an array
 -- with dimension @dims@ given the flat index @i@.  The resulting list
 -- will have the same size as @dims@.
-unflattenIndex :: Fractional num =>
+unflattenIndex :: IntegralExp num =>
                   [num] -> num -> [num]
 unflattenIndex = unflattenIndexFromSlices . drop 1 . sliceSizes
 
-unflattenIndexFromSlices :: Fractional num =>
+unflattenIndexFromSlices :: IntegralExp num =>
                             [num] -> num -> [num]
 unflattenIndexFromSlices [] _ = []
 unflattenIndexFromSlices (size : slices) i =
-  (i / size) : unflattenIndexFromSlices slices (i - (i / size) * size)
+  (i `quot` size) : unflattenIndexFromSlices slices (i - (i `quot` size) * size)
 
 -- | @flattenIndex dims is@ computes the flat index of @is@ into an
 -- array with dimensions @dims@.  The length of @dims@ and @is@ must
 -- be the same.
-flattenIndex :: Fractional num =>
+flattenIndex :: IntegralExp num =>
                 [num] -> [num] -> num
 flattenIndex dims is =
   sum $ zipWith (*) is slicesizes
@@ -146,7 +154,7 @@ flattenIndex dims is =
 -- will compute a length @n+1@ list of the size of each possible array
 -- slice.  The first element of this list will be the product of
 -- @dims@, and the last element will be 1.
-sliceSizes :: Fractional num =>
+sliceSizes :: IntegralExp num =>
               [num] -> [num]
 sliceSizes [] = [1]
 sliceSizes (n:ns) =

@@ -36,7 +36,7 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.AST.Pretty (pretty)
+import Futhark.Util.Pretty (pretty)
 import Futhark.Representation.AST.Syntax.Core hiding (Basic)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F

@@ -87,9 +87,11 @@ transformBinding (Let pat () (LoopOp (Map cs width fun arrs))) = do
     x <- bindLambda fun (index cs arrs (Var i))
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
-  addBinding $ Let pat () $ LoopOp $
+  addBinding $ Let pat' () $ LoopOp $
     DoLoop outarrs_names (loopMerge outarrs (map Var resarr))
     (ForLoop i width) loopbody
+  where pat' = basicPattern' [] $ map (`setIdentUniqueness` Unique) $
+               patternValueIdents pat
 
 transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
   arrs <- forM inputs $ \input -> do
@@ -451,7 +453,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   thenbody <- runBodyBinder $ do
-      lUBexp <- eBinOp IntDivide
+      lUBexp <- eBinOp Div
                        (eBinOp Plus (pure $ PrimOp $ SubExp outersz)
                                     (eBinOp Minus (pure $ PrimOp $ SubExp $ Var chunkglb)
                                                   (pure $ PrimOp $ SubExp $ intconst 1) Int)

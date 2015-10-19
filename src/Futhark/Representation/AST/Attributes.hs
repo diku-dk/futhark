@@ -7,6 +7,7 @@
 module Futhark.Representation.AST.Attributes
   ( module Futhark.Representation.AST.Attributes.Reshape
   , module Futhark.Representation.AST.Attributes.Rearrange
+  , module Futhark.Representation.AST.Attributes.Stripe
   , module Futhark.Representation.AST.Attributes.Types
   , module Futhark.Representation.AST.Attributes.Values
   , module Futhark.Representation.AST.Attributes.Constants
@@ -35,6 +36,7 @@ import Data.Maybe (mapMaybe)
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
+import Futhark.Representation.AST.Attributes.Stripe
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants
@@ -106,10 +108,10 @@ asSegOp _          = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp Divide _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (Float32Val k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (Float64Val k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ _ _) = False
+  where safePrimOp (BinOp FloatDiv _ (Constant (IntVal k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ (Constant (Float64Val k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ _ _) = False
         safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
         safePrimOp (BinOp Mod _ (Constant (Float32Val k)) _) = k /= 0
         safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0

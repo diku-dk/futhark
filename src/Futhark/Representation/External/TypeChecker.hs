@@ -725,6 +725,18 @@ checkExp (Rearrange perm arrexp pos) = do
   where name = case arrexp of Var v -> Just $ baseName $ identName v
                               _     -> Nothing
 
+checkExp (Stripe strideexp arrexp loc) = do
+  strideexp' <- require [Basic Int] =<< checkExp strideexp
+  arrexp' <- checkExp arrexp
+  _ <- rowTypeM arrexp' -- Just check that it's an array.
+  return $ Stripe strideexp' arrexp' loc
+
+checkExp (Unstripe strideexp arrexp loc) = do
+  strideexp' <- require [Basic Int] =<< checkExp strideexp
+  arrexp' <- checkExp arrexp
+  _ <- rowTypeM arrexp' -- Just check that it's an array.
+  return $ Unstripe strideexp' arrexp' loc
+
 checkExp (Transpose k n arrexp pos) = do
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') < reach + 1) $
@@ -1083,6 +1095,8 @@ checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t 
 checkBinOp Times e1 e2 t pos = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t pos
 checkBinOp Divide e1 e2 t pos = checkPolyBinOp Divide [Float32, Float64, Int] e1 e2 t pos
 checkBinOp Mod e1 e2 t pos = checkPolyBinOp Mod [Int] e1 e2 t pos
+checkBinOp Quot e1 e2 t pos = checkPolyBinOp Quot [Int] e1 e2 t pos
+checkBinOp Rem e1 e2 t pos = checkPolyBinOp Rem [Int] e1 e2 t pos
 checkBinOp ShiftR e1 e2 t pos = checkPolyBinOp ShiftR [Int] e1 e2 t pos
 checkBinOp ShiftL e1 e2 t pos = checkPolyBinOp ShiftL [Int] e1 e2 t pos
 checkBinOp Band e1 e2 t pos = checkPolyBinOp Band [Int] e1 e2 t pos

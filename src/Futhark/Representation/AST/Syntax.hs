@@ -14,6 +14,8 @@ module Futhark.Representation.AST.Syntax
   , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
+  , Space (..)
+  , SpaceId
   , TypeBase(..)
   , Type
   , ExtType
@@ -53,6 +55,7 @@ module Futhark.Representation.AST.Syntax
   , Annotations.RetType
   , StreamForm(..)
   , KernelInput (..)
+  , KernelSize (..)
 
   -- * Definitions
   , ParamT (..)
@@ -132,9 +135,11 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Minus
            | Pow
            | Times
-           | Divide
-           | IntDivide -- ^ Rounds towards negative infinity.
+           | FloatDiv
+           | Div -- ^ Rounds towards negative infinity.
            | Mod
+           | Quot -- ^ Rounds towards zero.
+           | Rem
            | ShiftR
            | ShiftL
            | Band
@@ -240,12 +245,16 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
+  | Stripe Certificates SubExp VName
+
+  | Unstripe Certificates SubExp VName
+
   | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element
     -- arrays.  If no arrays are given, the returned offsets are zero,
     -- and no arrays are returned.
 
-  | Alloc SubExp
+  | Alloc SubExp Space
     -- ^ Allocate a memory block.  This really should not be an
     -- expression, but what are you gonna do...
   deriving (Eq, Ord, Show)
@@ -263,8 +272,15 @@ data LoopOp lore
   | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
+
   | Kernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
     [(Type, [Int])] (Body lore)
+  | ReduceKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    (LambdaT lore)
+    [SubExp]
+    [VName]
 
 data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]
@@ -279,6 +295,14 @@ data KernelInput lore = KernelInput { kernelInputParam :: FParam lore
 deriving instance Annotations lore => Eq (KernelInput lore)
 deriving instance Annotations lore => Show (KernelInput lore)
 deriving instance Annotations lore => Ord (KernelInput lore)
+
+data KernelSize = KernelSize { kernelWorkgroups :: SubExp
+                             , kernelWorkgroupSize :: SubExp
+                             , kernelElementsPerThread :: SubExp
+                             , kernelTotalElements :: SubExp
+                             , kernelThreadOffsetMultiple :: SubExp
+                             }
+                deriving (Eq, Ord, Show)
 
 -- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
 -- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@

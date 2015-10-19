@@ -32,6 +32,8 @@ data Token = IF
            | TIMES
            | DIVIDE
            | MOD
+           | QUOT
+           | REM
            | EQU
            | EQU2
            | LTH
@@ -67,6 +69,8 @@ data Token = IF
            | REDUCE
            | RESHAPE
            | REARRANGE
+           | STRIPE
+           | UNSTRIPE
            | TRANSPOSE
            | ZIPWITH
            | ZIP

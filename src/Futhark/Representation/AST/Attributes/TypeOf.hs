@@ -108,6 +108,10 @@ primOpType (Reshape _ shape e) =
 primOpType (Rearrange _ perm e) =
   result <$> lookupType e
   where result t = [rearrangeType perm t]
+primOpType (Stripe _ _ e) =
+  pure <$> lookupType e
+primOpType (Unstripe _ _ e) =
+  pure <$> lookupType e
 primOpType (Split _ sizeexps e) =
   result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps
@@ -121,8 +125,8 @@ primOpType (Copy v) =
   where result t = [t `setUniqueness` Unique]
 primOpType (Assert _ _) =
   pure [Basic Cert]
-primOpType (Alloc e) =
-  pure [Mem e]
+primOpType (Alloc e space) =
+  pure [Mem e space]
 primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Basic Int) ++ ts
@@ -163,6 +167,9 @@ loopOpExtType (Kernel _ _ _ is _ returns _) =
   [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
+loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
+  staticShapes $
+  map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
@@ -303,8 +310,8 @@ withParamTypes = localTypeEnv . typeEnvFromParams
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Basic _) = tp
-substNamesInExtType subs (Mem se) =
-  Mem $ substNamesInSubExp subs se
+substNamesInExtType subs (Mem se space) =
+  Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
   let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
   in  Array btp shp' u

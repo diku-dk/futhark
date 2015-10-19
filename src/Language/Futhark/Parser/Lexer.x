@@ -40,6 +40,8 @@ tokens :-
   "*"                      { const TIMES }
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
+  "//"                     { const QUOT }
+  "%%"                     { const REM }
   "="                      { const EQU }
   "=="                     { const EQU2 }
   "<"                      { const LTH }
@@ -98,6 +100,8 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
+    "stripe"       -> STRIPE
+    "unstripe"     -> UNSTRIPE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE

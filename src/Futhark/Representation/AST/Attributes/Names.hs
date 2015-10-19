@@ -186,6 +186,9 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
 instance FreeIn a => FreeIn [a] where
   freeIn = mconcat . map freeIn
 
+instance FreeIn Names where
+  freeIn = id
+
 instance FreeIn Bool where
   freeIn _ = mempty
 
@@ -212,7 +215,7 @@ instance FreeIn ExtShape where
 
 instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
   freeIn (Array _ shape _) = freeIn shape
-  freeIn (Mem size)        = freeIn size
+  freeIn (Mem size _)      = freeIn size
   freeIn (Basic _)         = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where

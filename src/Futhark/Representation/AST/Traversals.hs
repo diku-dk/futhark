@@ -140,6 +140,12 @@ mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
 mapExpM tv (PrimOp (Rearrange cs perm e)) =
   PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
                  pure perm <*> mapOnVName tv e)
+mapExpM tv (PrimOp (Stripe cs stride v)) =
+  PrimOp <$> (pure Stripe <*> mapOnCertificates tv cs <*>
+                 mapOnSubExp tv stride <*> mapOnVName tv v)
+mapExpM tv (PrimOp (Unstripe cs stride v)) =
+  PrimOp <$> (pure Unstripe <*> mapOnCertificates tv cs <*>
+                 mapOnSubExp tv stride <*> mapOnVName tv v)
 mapExpM tv (PrimOp (Split cs sizeexps arrexp)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
               mapM (mapOnSubExp tv) sizeexps <*> mapOnVName tv arrexp)
@@ -149,8 +155,8 @@ mapExpM tv (PrimOp (Concat cs x ys size)) =
                  mapOnSubExp tv size)
 mapExpM tv (PrimOp (Copy e)) =
   PrimOp <$> (pure Copy <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Alloc e)) =
-  PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
+mapExpM tv (PrimOp (Alloc e space)) =
+  PrimOp <$> (Alloc <$> mapOnSubExp tv e <*> pure space)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Partition cs n flags arr)) =
@@ -214,6 +220,23 @@ mapExpM tv (LoopOp (Kernel cs w index ispace inps rettype body)) =
               mapOnBody tv body)
   where (iparams, bounds) = unzip ispace
         (ts, perms) = unzip rettype
+mapExpM tv (LoopOp (ReduceKernel cs w
+                    (KernelSize num_workgroups workgroup_size
+                     per_thread_elements num_elements offset_multiple)
+                    red_fun fold_fun accs arrs)) =
+  LoopOp <$> (ReduceKernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              (KernelSize <$>
+               mapOnSubExp tv num_workgroups <*>
+               mapOnSubExp tv workgroup_size <*>
+               mapOnSubExp tv per_thread_elements <*>
+               mapOnSubExp tv num_elements <*>
+               mapOnSubExp tv offset_multiple) <*>
+              mapOnLambda tv red_fun <*>
+              mapOnLambda tv fold_fun <*>
+              mapM (mapOnSubExp tv) accs <*>
+              mapM (mapOnVName tv) arrs)
 mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
   SegOp <$> (pure SegReduce <*>
              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
@@ -246,7 +269,7 @@ mapOnExtType tv (Array bt (ExtShape shape) u) =
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 mapOnExtType _ (Basic bt) = return $ Basic bt
-mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
 mapOnLoopForm :: (Monad m, Applicative m) =>
                  Mapper flore tlore m -> LoopForm -> m LoopForm
@@ -270,7 +293,7 @@ mapExp m = runIdentity . mapExpM m
 mapOnType :: (Applicative m, Monad m) =>
              Mapper flore tlore m -> Type -> m Type
 mapOnType _ (Basic bt) = return $ Basic bt
-mapOnType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 mapOnType tv (Array bt shape u) =
   Array bt <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape)) <*> pure u
 

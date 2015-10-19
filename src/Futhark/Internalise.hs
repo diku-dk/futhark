@@ -329,6 +329,16 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange [] perm v
 
+internaliseExp _ (E.Stripe stride e _) = do
+  e' <- internaliseExp1 "stride" stride
+  internaliseOperation "stripe" e $ \v ->
+    return $ I.Stripe [] e' v
+
+internaliseExp _ (E.Unstripe stride e _) = do
+  e' <- internaliseExp1 "stride" stride
+  internaliseOperation "unstripe" e $ \v ->
+    return $ I.Unstripe [] e' v
+
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" e $ \v -> do
@@ -589,13 +599,17 @@ internaliseBinOp desc E.Minus x y t =
 internaliseBinOp desc E.Times x y t =
   simpleBinOp desc I.Times x y t
 internaliseBinOp desc E.Divide x y Int =
-  simpleBinOp desc I.IntDivide x y Int
+  simpleBinOp desc I.Div x y Int
 internaliseBinOp desc E.Divide x y t =
-  simpleBinOp desc I.Divide x y t
+  simpleBinOp desc I.FloatDiv x y t
 internaliseBinOp desc E.Pow x y t =
   simpleBinOp desc I.Pow x y t
 internaliseBinOp desc E.Mod x y t =
   simpleBinOp desc I.Mod x y t
+internaliseBinOp desc E.Quot x y t =
+  simpleBinOp desc I.Quot x y t
+internaliseBinOp desc E.Rem x y t =
+  simpleBinOp desc I.Rem x y t
 internaliseBinOp desc E.ShiftR x y t =
   simpleBinOp desc I.ShiftR x y t
 internaliseBinOp desc E.ShiftL x y t =
