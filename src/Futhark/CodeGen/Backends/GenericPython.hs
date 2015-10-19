@@ -21,16 +21,32 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax (BinOp (..))
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.GenericPython.AST
-
+import Futhark.Util.Pretty(pretty)
 
 data CompilerEnv = CompilerEnv {
   envFtable     :: HM.HashMap Name [Imp.Type]
 }
+newCompilerEnv :: Imp.Program () 
+               -> CompilerEnv
+newCompilerEnv (Imp.Program funs) =
+  CompilerEnv { 
+               envFtable = ftable <> builtinFtable
+              }
+  where ftable = HM.fromList $ map funReturn funs
+        funReturn (name, Imp.Function outparams _ _ _ _) =
+          (name, paramsTypes outparams)
+        builtinFtable =
+          HM.map (map Imp.Scalar . snd) builtInFunctions
 
 
 data CompilerState = CompilerState {
   compNameSrc :: VNameSource
 }
+newCompilerState :: VNameSource -> CompilerState
+newCompilerState src = CompilerState {
+                                      compNameSrc = src
+                                     }
+
 
 newtype CompilerM a = CompilerM (RWS
                                   CompilerEnv
@@ -42,27 +58,75 @@ newtype CompilerM a = CompilerM (RWS
             MonadWriter [PyStmt])
 
 
-compileProg :: Imp.Program () -> String
-compileProg _ = "print 'Hello World!'\n"
 
+collect :: CompilerM () -> CompilerM [PyStmt]
+collect m = pass $ do
+  ((), w) <- listen m
+  return (w, const mempty)
+
+collect' :: CompilerM a -> CompilerM (a, [PyStmt])
+collect' m = pass $ do
+  (x, w) <- listen m
+  return ((x, w), const mempty)
+
+stm :: PyStmt -> CompilerM ()
+stm x = tell [x]
+
+stms :: [PyStmt] -> CompilerM ()
+stms = mapM_ stm
+
+paramsTypes :: [Imp.Param] -> [Imp.Type]
+paramsTypes = map paramType
+  where paramType (Imp.MemParam _ size space) = Imp.Mem size space
+        paramType (Imp.ScalarParam _ t) = Imp.Scalar t
+
+
+runCompilerM :: Imp.Program () -> VNameSource 
+             -> CompilerM a
+             -> a
+runCompilerM prog src (CompilerM m) =
+  fst $ evalRWS m (newCompilerEnv prog ) (newCompilerState src)
+
+
+compileProg :: Imp.Program () -> String
+compileProg prog@(Imp.Program funs) =
+  pretty $ PyProg $ runCompilerM prog blankNameSource (mapM compileFunc funs)
+
+compileFunc :: (Name, Imp.Function ()) -> CompilerM PyFunc
+compileFunc (fname, (Imp.Function outputs inputs body _ _)) = do
+  body' <- collect $ compileCode body
+  let inputs' = map (pretty . Imp.paramName) inputs
+  return $ PyFunc (nameToString fname) inputs' body'
 
 compileBinOp :: BinOp -> String
 compileBinOp op =
   case op of
     Plus -> "+"
     Minus -> "-"
-    _     -> undefined
+    Equal -> "=="
+    _ -> undefined
 
 compileExp :: Imp.Exp -> PyExp
 compileExp (Imp.Constant v) = Constant v
-compileExp (Imp.ScalarVar vname) = ScalarVar $ baseString vname
+compileExp (Imp.ScalarVar vname) = ScalarVar $ pretty vname
 compileExp (Imp.BinOp op exp1 exp2) = BinaryOp (compileBinOp op) (compileExp exp1) (compileExp exp2)
 compileExp _ = undefined
 
+-- get everything to work except memblocks and function calls
+compileCode :: Imp.Code () -> CompilerM ()
+compileCode (Imp.If cond tb fb) = do
+  let cond' = compileExp cond
+  tb' <- collect $ compileCode tb
+  fb' <- collect $ compileCode fb
+  stm $ If cond' tb' fb'
+compileCode (c1 Imp.:>>: c2) = do
+  compileCode c1
+  compileCode c2
+--compileCode (Imp.While cond body) = While (compileExp cond) (compileCode body)
+--compileCode (Imp.For i bound body) = For (baseString i) (compileExp bound) (compileCode body)
+compileCode (Imp.SetScalar vname exp1) =
+  stm $ AssignVar (pretty vname) (compileExp exp1)
+compileCode (Imp.DeclareScalar _ _) = return ()
+compileCode c = fail $ "This is not handled yet: " ++ pretty c
 
-compileCode :: Imp.Code a -> PyStmt
-compileCode (Imp.If cond tb fb) = If (compileExp cond) (compileCode tb) (compileCode fb)
-compileCode (Imp.While cond body) = While (compileExp cond) (compileCode body)
-compileCode (Imp.For i bound body) = For (baseString i) (compileExp bound) (compileCode body)
-compileCode (Imp.SetScalar vname exp1) = SetScalar (baseString vname) (compileExp exp1)
-compileCode _ = undefined
+
