@@ -1,13 +1,46 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Futhark.CodeGen.Backends.GenericPython
   ( compileProg,
     compileExp,
-    compileCode) where
+    compileCode,
+    CompilerEnv(..),
+    CompilerState(..)
+    ) where
 
-import qualified Futhark.CodeGen.ImpCode as Imp
+import Control.Applicative
+import Control.Monad.Identity
+import Control.Monad.State
+import Control.Monad.Reader
+import Control.Monad.Writer
+import Control.Monad.RWS
+import qualified Data.HashMap.Lazy as HM
 
+import Prelude
+
+import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax (BinOp (..))
-
+import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.CodeGen.Backends.GenericPython.AST
+
+
+data CompilerEnv = CompilerEnv {
+  envFtable     :: HM.HashMap Name [Imp.Type]
+}
+
+
+data CompilerState = CompilerState {
+  compNameSrc :: VNameSource
+}
+
+newtype CompilerM a = CompilerM (RWS
+                                  CompilerEnv
+                                  [PyStmt]
+                                  CompilerState a)
+  deriving (Functor, Applicative, Monad,
+            MonadState CompilerState,
+            MonadReader CompilerEnv,
+            MonadWriter [PyStmt])
+
 
 compileProg :: Imp.Program () -> String
 compileProg _ = "print 'Hello World!'\n"
