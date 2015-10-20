@@ -20,8 +20,10 @@ module Futhark.CodeGen.ImpCode.Kernels
 
 import Control.Monad.Writer
 import Data.List
-
 import qualified Data.HashSet as HS
+import Data.Traversable
+
+import Prelude
 
 import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
