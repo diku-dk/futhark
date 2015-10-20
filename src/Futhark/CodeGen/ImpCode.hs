@@ -1,5 +1,11 @@
 {-# LANGUAGE TupleSections, GeneralizedNewtypeDeriving #-}
--- | Inspired by the paper "Defunctionalizing Push Arrays".
+-- | Imperative intermediate language used as a stepping stone in code generation.
+--
+-- This is a generic representation parametrised on an extensible
+-- arbitrary operation.
+--
+-- Originally inspired by the paper "Defunctionalizing Push Arrays"
+-- (FHPC '14).
 module Futhark.CodeGen.ImpCode
   ( Program
   , ProgramT (..)

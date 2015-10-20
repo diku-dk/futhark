@@ -68,9 +68,11 @@ Library
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
+                   Futhark.CodeGen.ImpCode.Kernels
+                   Futhark.CodeGen.ImpCode.Sequential
                    Futhark.CodeGen.ImpGen
-                   Futhark.CodeGen.KernelImp
-                   Futhark.CodeGen.KernelImpGen
+                   Futhark.CodeGen.ImpGen.Kernels
+                   Futhark.CodeGen.ImpGen.Sequential
                    Futhark.CodeGen.OpenCL.Kernels
                    Futhark.CodeGen.SetDefaultSpace
                    Futhark.Compiler
