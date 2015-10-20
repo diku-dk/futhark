@@ -6,6 +6,7 @@ module Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
   )
   where
 
+import Control.Applicative
 import Control.Monad.State
 import Data.List
 import Data.Monoid
