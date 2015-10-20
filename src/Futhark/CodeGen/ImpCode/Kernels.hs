@@ -2,7 +2,6 @@
 -- of a kernel invocation.
 module Futhark.CodeGen.ImpCode.Kernels
   ( Program
-  , ProgramT (Program)
   , Function
   , FunctionT (Function)
   , Code
@@ -20,13 +19,13 @@ import Data.Monoid
 
 import qualified Data.HashSet as HS
 
-import Futhark.CodeGen.ImpCode hiding (Program, Function, Code)
+import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
 
-type Program = Imp.Program CallKernel
+type Program = Functions CallKernel
 type Function = Imp.Function CallKernel
 -- | Host-level code that can call kernels.
 type Code = Imp.Code CallKernel

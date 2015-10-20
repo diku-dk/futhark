@@ -170,9 +170,9 @@ envAllocate = opsAllocate . envOperations
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
 
-newCompilerEnv :: Program op -> Operations op s
+newCompilerEnv :: Functions op -> Operations op s
                -> CompilerEnv op s
-newCompilerEnv (Program funs) ops =
+newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
@@ -199,7 +199,7 @@ instance MonadFreshNames (CompilerM op s) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: Program op -> Operations op s -> VNameSource -> s
+runCompilerM :: Functions op -> Operations op s -> VNameSource -> s
              -> CompilerM op s a
              -> (a, CompilerState s)
 runCompilerM prog ops src userstate (CompilerM m) =
@@ -529,9 +529,9 @@ compileProg :: Operations op s
             -> s
             -> [C.Definition] -> [C.Stm] -> [C.Stm]
             -> [Option]
-            -> Program op
+            -> Functions op
             -> String
-compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Program funs) =
+compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Functions funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops blankNameSource userstate compileProg'
   in pretty [C.cunit|
