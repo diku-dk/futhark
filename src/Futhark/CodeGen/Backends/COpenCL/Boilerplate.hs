@@ -7,14 +7,13 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
-import Futhark.Util.Pretty
 
-openClDecls :: [String] -> [C.Definition] -> [C.Definition]
+openClDecls :: [String] -> String -> [C.Definition]
 openClDecls kernel_names opencl_program =
   kernelDeclarations ++ openclBoilerplate
   where kernelDeclarations =
-          [C.cedecl|$esc:("static const char fut_opencl_src[] = FUT_KERNEL(\n"++
-                         pretty opencl_program ++
+          [C.cedecl|$esc:("static const char fut_opencl_src[] = FUT_KERNEL(\n" ++
+                         opencl_program ++
                          ");")|] :
           concat
           [ [ [C.cedecl|static typename cl_kernel $id:name;|]

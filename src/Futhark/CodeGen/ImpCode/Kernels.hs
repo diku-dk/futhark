@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | Variation of "Futhark.CodeGen.ImpCode" that contains the notion
 -- of a kernel invocation.
 module Futhark.CodeGen.ImpCode.Kernels
@@ -12,10 +13,13 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelUse (..)
   , InKernel (..)
   , module Futhark.CodeGen.ImpCode
+  -- * Utility functions
+  , getKernels
   )
   where
 
-import Data.Monoid
+import Control.Monad.Writer
+import Data.List
 
 import qualified Data.HashSet as HS
 
@@ -68,6 +72,14 @@ data ReduceKernel = ReduceKernel
 data KernelUse = ScalarUse VName BasicType
                | MemoryUse VName Imp.DimSize
                  deriving (Eq, Show)
+
+getKernels :: Program -> [CallKernel]
+getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
+  where getFunKernels kernel =
+          tell [kernel] >> return kernel
+        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _) =
+          bt1 == bt2
+        sameKernel _ _ = False
 
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =
