@@ -35,7 +35,6 @@ module Futhark.CodeGen.ImpGen
   , compileSubExp
   , compileResultSubExp
   , subExpToDimSize
-  , sizeToExp
   , sizeToScalExp
   , declaringLParams
   , declaringVarEntry
@@ -51,7 +50,7 @@ module Futhark.CodeGen.ImpGen
   , varIndex
   , basicScalarSize
   , scalExpToImpExp
-  , dimSizeToExp
+  , Imp.dimSizeToExp
   , destinationFromParam
   , destinationFromParams
   , copyElementWise
@@ -539,7 +538,7 @@ defCompilePrimOp
           let srcloc = entryArrayLocation yentry
               rows = case entryArrayShape yentry of
                       []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
-                      r:_ -> innerExp $ dimSizeToExp r
+                      r:_ -> innerExp $ Imp.dimSizeToExp r
           copy et destloc srcloc (arrayOuterSize yentry)
           emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
 
@@ -831,16 +830,6 @@ subExpToDimSize (Constant (IntVal i)) =
 subExpToDimSize (Constant {}) =
   throwError "Size subexp is not a non-integer constant."
 
-dimSizeToExp :: Imp.DimSize -> Count Elements
-dimSizeToExp = elements . sizeToExp
-
-memSizeToExp :: Imp.MemSize -> Count Bytes
-memSizeToExp = bytes . sizeToExp
-
-sizeToExp :: Imp.Size -> Imp.Exp
-sizeToExp (Imp.VarSize v)   = Imp.ScalarVar v
-sizeToExp (Imp.ConstSize x) = Imp.Constant $ IntVal $ fromIntegral x
-
 sizeToScalExp :: Imp.Size -> SE.ScalExp
 sizeToScalExp (Imp.VarSize v)   = SE.Id v Int
 sizeToScalExp (Imp.ConstSize x) = SE.Val $ IntVal x
@@ -861,7 +850,7 @@ compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
       return ()
     Just memsizetarget' ->
       emit $ Imp.SetScalar memsizetarget' $
-      innerExp $ dimSizeToExp memsize
+      innerExp $ Imp.dimSizeToExp memsize
 
 compileResultSubExp (MemoryDestination {}) (Constant {}) =
   throwError "Memory destination result subexpression cannot be a constant."
@@ -885,12 +874,12 @@ compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
       emit $ Imp.SetMem mem srcmem
       case memsize of Nothing -> return ()
                       Just memsize' -> emit $ Imp.SetScalar memsize' $
-                                       innerExp $ memSizeToExp srcmemsize
+                                       innerExp $ Imp.memSizeToExp srcmemsize
   zipWithM_ maybeSetShape shape $ entryArrayShape arr
   where maybeSetShape Nothing _ =
           return ()
         maybeSetShape (Just dim) size =
-          emit $ Imp.SetScalar dim $ innerExp $ dimSizeToExp size
+          emit $ Imp.SetScalar dim $ innerExp $ Imp.dimSizeToExp size
 
 compileResultSubExp (ArrayDestination {}) (Constant {}) =
   throwError "Array destination result subexpression cannot be a constant."
@@ -1029,7 +1018,7 @@ subExpNotArray se = subExpType se >>= \case
 
 arrayOuterSize :: ArrayEntry -> Count Elements
 arrayOuterSize =
-  product . map dimSizeToExp . take 1 . entryArrayShape
+  product . map Imp.dimSizeToExp . take 1 . entryArrayShape
 
 -- More complicated read/write operations that use index functions.
 
@@ -1056,7 +1045,7 @@ defaultCopy bt dest src n
   | otherwise =
       copyElementWise bt dest src n
   where bt_size = basicScalarSize bt
-        row_size = product $ map dimSizeToExp $ drop 1 srcshape
+        row_size = product $ map Imp.dimSizeToExp $ drop 1 srcshape
         MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
@@ -1067,7 +1056,7 @@ copyElementWise bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem
       let ivars = map varIndex is
           destidx = simplifyScalExp $ IxFun.index destIxFun ivars bt_size
           srcidx = simplifyScalExp $ IxFun.index srcIxFun ivars bt_size
-          bounds = map innerExp $ n : drop 1 (map dimSizeToExp destshape)
+          bounds = map innerExp $ n : drop 1 (map Imp.dimSizeToExp destshape)
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $ foldl (.) id (zipWith Imp.For is bounds) $
@@ -1095,7 +1084,7 @@ copyElem bt
   destlocation' <- indexArray destlocation destis
   srclocation'  <- indexArray srclocation  srcis
   collect $ copy bt destlocation' srclocation' $
-    product $ map dimSizeToExp $ drop (length srcis) srcshape
+    product $ map Imp.dimSizeToExp $ drop (length srcis) srcshape
 
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =

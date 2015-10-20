@@ -322,7 +322,7 @@ callKernelCopy bt
 
   -- Note that the shape of the destination and the source are
   -- necessarily the same.
-  let shape = map ImpGen.sizeToExp destshape
+  let shape = map Imp.sizeToExp destshape
       shape_se = map ImpGen.sizeToScalExp destshape
       dest_is = unflattenIndex shape_se $ ImpGen.varIndex global_thread_index
       src_is = dest_is
@@ -486,7 +486,7 @@ isMapTranspose bt
           return (dest_offset', src_offset',
                   num_arrays, size_x, size_y)
         getSizes =
-          case map ImpGen.sizeToExp destshape of
+          case map Imp.sizeToExp destshape of
             [num_arrays, size_x, size_y] -> Just (num_arrays, size_x, size_y)
             [size_x, size_y]             -> Just (1, size_x, size_y)
             _                            -> Nothing

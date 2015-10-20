@@ -21,6 +21,7 @@ module Futhark.CodeGen.ImpCode
   , SpaceId
   , Code (..)
   , Exp (..)
+  , BinOp (..)
   , UnOp (..)
 
     -- * Typed enumerations
@@ -30,6 +31,11 @@ module Futhark.CodeGen.ImpCode
   , elements
   , bytes
   , withElemType
+
+    -- * Converting from sizes
+  , sizeToExp
+  , dimSizeToExp
+  , memSizeToExp
 
     -- * Analysis
   , functionsCalled
@@ -196,6 +202,16 @@ bytes = Count
 -- per-element size.
 withElemType :: Count Elements -> BasicType -> Count Bytes
 withElemType (Count e) t = bytes $ e * SizeOf t
+
+dimSizeToExp :: DimSize -> Count Elements
+dimSizeToExp = elements . sizeToExp
+
+memSizeToExp :: MemSize -> Count Bytes
+memSizeToExp = bytes . sizeToExp
+
+sizeToExp :: Size -> Exp
+sizeToExp (VarSize v)   = ScalarVar v
+sizeToExp (ConstSize x) = Constant $ IntVal $ fromIntegral x
 
 -- Prettyprinting definitions.
 
