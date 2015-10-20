@@ -28,4 +28,4 @@ type Code = Imp.Code Sequential
 data Sequential
 
 instance Pretty Sequential where
-  ppr _ = mempty
+  ppr _ = empty
