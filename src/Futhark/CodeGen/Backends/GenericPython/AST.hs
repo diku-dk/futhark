@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   , module Language.Futhark.Core
   , PyFunc(..)
   , PyProg(..)
+  , PyReturn(..)
   )
   where
 
@@ -29,14 +30,14 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
             | While PyExp [PyStmt]
             | For VariableName PyExp [PyStmt]
             | AssignVar VariableName PyExp
+            | Comment String [PyStmt]
+            | Assert PyExp String
             deriving (Eq, Show)
 
-data PyReturn = PyReturnScalar PyExp
-              | PyReturnTuple [PyExp]
-              | PyReturnList [PyExp]
+data PyReturn = PyReturnScalar String
+              | PyReturnTuple [String]
 
-
-data PyFunc = PyFunc String [String] [PyStmt] --PyReturn
+data PyFunc = PyFunc String [String] [PyStmt] PyReturn
 
 data PyProg = PyProg [PyFunc]
 
@@ -60,16 +61,18 @@ instance Pretty PyStmt where
     text  "for" <+> ppr i <+> text "in range" <+> parens (ppr limit) <+> text ":" </>
     indent 2 (stack $ map ppr body)
   ppr (AssignVar v e) = text v <+> text "=" <+> ppr e
+  ppr (Comment s body) = text "#" <> text s </> stack (map ppr body)
+  ppr (Assert e s) = text "assert" <+> ppr e <+> text "," <+> text s
 
 instance Pretty PyReturn where
-  ppr (PyReturnScalar expr) = ppr expr
-  ppr (PyReturnTuple exprs) = parens (stack $ map ppr exprs)
-  ppr (PyReturnList exprs) = text "[" <> stack (map ppr exprs) <> text "]"
+  ppr (PyReturnScalar var) = text "return" <+> text var
+  ppr (PyReturnTuple vars) = text "return" <+> parens (commasep $ map text vars)
 
 instance Pretty PyFunc where
-  ppr (PyFunc fname params body) =
+  ppr (PyFunc fname params body ret) =
     text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
-    indent 2 (stack (map ppr body))
+    indent 2 (stack (map ppr body)) </>
+    indent 2 (ppr ret)
 
 instance Pretty PyProg where
   ppr (PyProg funcs) = stack $ map ppr funcs

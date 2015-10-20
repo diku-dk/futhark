@@ -4,7 +4,9 @@ module Futhark.CodeGen.Backends.GenericPython
     compileExp,
     compileCode,
     CompilerEnv(..),
-    CompilerState(..)
+    CompilerState(..),
+    stms,
+    collect'
     ) where
 
 import Control.Applicative
@@ -71,12 +73,17 @@ paramsTypes = map paramType
   where paramType (Imp.MemParam _ size space) = Imp.Mem size space
         paramType (Imp.ScalarParam _ t) = Imp.Scalar t
 
+compileOutput :: [Imp.Param] -> PyReturn
+compileOutput [x] = PyReturnScalar $ (pretty . Imp.paramName) x
+
+--when more than one return, we will use tuples since they can handle different types. Tuples are also one of the faster containers for python.
+compileOutput x = PyReturnTuple $ map (pretty . Imp.paramName) x
+
 runCompilerM :: Imp.Program () -> VNameSource
              -> CompilerM a
              -> a
 runCompilerM prog src (CompilerM m) =
   fst $ evalRWS m (newCompilerEnv prog ) (newCompilerState src)
-
 
 compileProg :: Imp.Program () -> String
 compileProg prog@(Imp.Program funs) =
@@ -86,9 +93,8 @@ compileFunc :: (Name, Imp.Function ()) -> CompilerM PyFunc
 compileFunc (fname, Imp.Function outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (pretty . Imp.paramName) inputs
-  --let pyrettype = typeToPyType $ paramsTypes outputs
-  --let retval = PyStmt
-  return $ PyFunc (nameToString fname) inputs' body'
+  let ret = compileOutput outputs
+  return $ PyFunc (nameToString fname) inputs' body' ret
 
 --data UnOp = Not -- ^ Boolean negation.
 --          | Complement -- ^ Bitwise complement.
@@ -104,7 +110,7 @@ compileUnOp op =
     Imp.Complement -> "~"
     Imp.Negate -> "-"
     Imp.Abs -> "abs"
-    Imp.Signum -> undefined
+    Imp.Signum -> "numpy.sign" -- python does not implement sign, so we use numpy for this, and we have to use numpy for pyopencl anyway.
 
 --data BinOp = Plus -- Binary Ops for Numbers
 --           | Minus
@@ -136,14 +142,30 @@ compileBinOp op =
     Div -> "/"
     Times -> "*"
     Equal -> "=="
+    Mod -> "%"
+    ShiftR -> ">>"
+    ShiftL -> "<<"
+    Band -> "&"
+    Xor -> "^"
+    Bor -> "|"
+    LogAnd -> "&&"
+    LogOr -> "||"
+    Less -> "<"
+    Leq -> "<="
     _ -> undefined
 
 compileExp :: Imp.Exp -> PyExp
+
 compileExp (Imp.Constant v) = Constant v
+
 compileExp (Imp.ScalarVar vname) = ScalarVar $ pretty vname
+
 compileExp (Imp.BinOp op exp1 exp2) = BinaryOp (compileBinOp op) (compileExp exp1) (compileExp exp2)
-compileExp (Imp.UnOp op exp) = UnOp (compileUnOp op) (compileExp exp)
+
+compileExp (Imp.UnOp op exp1) = UnOp (compileUnOp op) (compileExp exp1)
+
 compileExp (Imp.Cond exp1 exp2 exp3) = Cond (compileExp exp1) (compileExp exp2) (compileExp exp3)
+
 compileExp _ = undefined
 
 -- get everything to work except memblocks and function calls
@@ -172,5 +194,13 @@ compileCode (Imp.SetScalar vname exp1) =
   stm $ AssignVar (pretty vname) (compileExp exp1)
 
 compileCode (Imp.DeclareScalar _ _) = return ()
+
+compileCode (Imp.Comment s code) = do
+  code' <- collect $ compileCode code
+  stm $ Comment s code'
+
+compileCode (Imp.Assert e loc) = do
+  let e' = compileExp e
+  stm $ Assert e' $ locStr loc
 
 compileCode c = fail $ "This is not handled yet: " ++ pretty c
