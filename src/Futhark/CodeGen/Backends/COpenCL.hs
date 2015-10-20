@@ -377,7 +377,7 @@ compileKernels kernels = do
 compileKernel :: CallKernel -> Either String ([(String, C.Func)], OpenClRequirements)
 compileKernel (Kernel kernel) =
   let (funbody, s) =
-        GenericC.runCompilerM (Program []) inKernelOperations blankNameSource mempty $
+        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.collect $ GenericC.compileCode $ kernelBody kernel
 
       used_funs = GenericC.compUserState s
@@ -396,7 +396,7 @@ compileKernel (Kernel kernel) =
 compileKernel (Reduce kernel) =
   let ((kernel_prologue, fold_body, red_body,
         write_fold_result, write_final_result), s) =
-        GenericC.runCompilerM (Program []) inKernelOperations blankNameSource mempty $ do
+        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
           kernel_prologue_ <-
             GenericC.collect $ GenericC.compileCode $ reductionPrologue kernel
           fold_body_ <-

@@ -1,7 +1,6 @@
 -- | Sequential imperative code.
 module Futhark.CodeGen.ImpCode.Sequential
        ( Program
-       , ProgramT (Program)
        , Function
        , FunctionT (Function)
        , Code
@@ -10,13 +9,13 @@ module Futhark.CodeGen.ImpCode.Sequential
        )
        where
 
-import Futhark.CodeGen.ImpCode hiding (Program, Function, Code)
+import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 
 import Futhark.Util.Pretty hiding (space)
 
 -- | An imperative program.
-type Program = Imp.Program Sequential
+type Program = Imp.Functions Sequential
 
 -- | An imperative function.
 type Function = Imp.Function Sequential

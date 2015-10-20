@@ -6,10 +6,10 @@ module Futhark.CodeGen.SetDefaultSpace
 
 import Futhark.CodeGen.ImpCode
 
-setDefaultSpace :: Space -> Program op -> Program op
-setDefaultSpace space (Program fundecs) =
-  Program [ (fname, setFunctionSpace space func)
-          | (fname, func) <- fundecs ]
+setDefaultSpace :: Space -> Functions op -> Functions op
+setDefaultSpace space (Functions fundecs) =
+  Functions [ (fname, setFunctionSpace space func)
+            | (fname, func) <- fundecs ]
 
 setFunctionSpace :: Space -> Function op -> Function op
 setFunctionSpace space (Function outputs inputs body results args) =
@@ -19,7 +19,6 @@ setFunctionSpace space (Function outputs inputs body results args) =
   (setBodySpace space body)
   results
   args
-
 
 setParamSpace :: Space -> Param -> Param
 setParamSpace space (MemParam name size DefaultSpace) =

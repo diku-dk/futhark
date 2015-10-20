@@ -2,7 +2,6 @@
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
-  , compileProgSimply
 
     -- * Pluggable Compiler
   , ExpCompiler
@@ -249,14 +248,11 @@ emit :: Imp.Code op -> ImpM op ()
 emit = tell
 
 compileProg :: Operations op -> Imp.Space
-            -> Prog -> Either String (Imp.Program op)
+            -> Prog -> Either String (Imp.Functions op)
 compileProg ops ds prog =
-  Imp.Program <$> snd <$> mapAccumLM (compileFunDec ops ds) src (progFunctions prog)
+  Imp.Functions <$> snd <$>
+  mapAccumLM (compileFunDec ops ds) src (progFunctions prog)
   where src = newNameSourceForProg prog
-
--- | 'compileProg' with 'defaultOperations' and 'DefaultSpace'.
-compileProgSimply :: Prog -> Either String (Imp.Program ())
-compileProgSimply = compileProg defaultOperations Imp.DefaultSpace
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case t of
