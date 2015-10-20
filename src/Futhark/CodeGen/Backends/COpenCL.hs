@@ -22,13 +22,13 @@ import Futhark.Representation.ExplicitMemory (Prog, pretty)
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.KernelImp
-import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
+import Futhark.CodeGen.ImpCode.Kernels
+import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGen
 import Futhark.MonadFreshNames
 
 compileProg :: Prog -> Either String String
 compileProg prog = do
-  prog' <- KernelImpGen.compileProg prog
+  prog' <- ImpGen.compileProg prog
   let header = unlines [ "#include <CL/cl.h>\n"
                        , "#define FUT_KERNEL(s) #s"
                        , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"

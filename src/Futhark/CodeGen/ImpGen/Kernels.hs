@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies, LambdaCase #-}
-module Futhark.CodeGen.KernelImpGen
+module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
   )
   where
@@ -17,8 +17,8 @@ import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
-import qualified Futhark.CodeGen.KernelImp as Imp
-import Futhark.CodeGen.KernelImp (bytes)
+import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
+import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun

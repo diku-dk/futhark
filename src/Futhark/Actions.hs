@@ -23,8 +23,8 @@ import Futhark.Representation.AST
 import Futhark.Representation.Basic (Basic)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
-import qualified Futhark.CodeGen.ImpGen as ImpGen
-import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
+import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
+import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 
 printAction :: PrettyLore lore => Action lore
@@ -61,14 +61,14 @@ impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
-         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGen.compileProgSimply
+         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenSequential.compileProg
          }
 
 kernelImpCodeGenAction :: Action ExplicitMemory
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = liftIO . either error (putStrLn . pretty) . KernelImpGen.compileProg
+         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenKernels.compileProg
          }
 
 interpret :: (Show error, PrettyLore lore) =>
