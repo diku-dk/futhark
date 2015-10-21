@@ -1,8 +1,13 @@
 {-# LANGUAGE TupleSections, GeneralizedNewtypeDeriving #-}
--- | Inspired by the paper "Defunctionalizing Push Arrays".
+-- | Imperative intermediate language used as a stepping stone in code generation.
+--
+-- This is a generic representation parametrised on an extensible
+-- arbitrary operation.
+--
+-- Originally inspired by the paper "Defunctionalizing Push Arrays"
+-- (FHPC '14).
 module Futhark.CodeGen.ImpCode
-  ( Program
-  , ProgramT (..)
+  ( Functions (..)
   , Function
   , FunctionT (..)
   , ValueDecl (..)
@@ -16,6 +21,7 @@ module Futhark.CodeGen.ImpCode
   , SpaceId
   , Code (..)
   , Exp (..)
+  , BinOp (..)
   , UnOp (..)
 
     -- * Typed enumerations
@@ -25,6 +31,11 @@ module Futhark.CodeGen.ImpCode
   , elements
   , bytes
   , withElemType
+
+    -- * Converting from sizes
+  , sizeToExp
+  , dimSizeToExp
+  , memSizeToExp
 
     -- * Analysis
   , functionsCalled
@@ -68,9 +79,8 @@ paramName :: Param -> VName
 paramName (MemParam name _ _) = name
 paramName (ScalarParam name _) = name
 
-newtype ProgramT a = Program [(Name, Function a)]
-
-type Program = ProgramT
+-- | A collection of imperative functions.
+newtype Functions a = Functions [(Name, Function a)]
 
 data ValueDecl = ArrayValue VName BasicType [DimSize]
                | ScalarValue BasicType VName
@@ -193,10 +203,20 @@ bytes = Count
 withElemType :: Count Elements -> BasicType -> Count Bytes
 withElemType (Count e) t = bytes $ e * SizeOf t
 
+dimSizeToExp :: DimSize -> Count Elements
+dimSizeToExp = elements . sizeToExp
+
+memSizeToExp :: MemSize -> Count Bytes
+memSizeToExp = bytes . sizeToExp
+
+sizeToExp :: Size -> Exp
+sizeToExp (VarSize v)   = ScalarVar v
+sizeToExp (ConstSize x) = Constant $ IntVal $ fromIntegral x
+
 -- Prettyprinting definitions.
 
-instance Pretty op => Pretty (ProgramT op) where
-  ppr (Program funs) = stack $ intersperse mempty $ map ppFun funs
+instance Pretty op => Pretty (Functions op) where
+  ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where ppFun (name, fun) =
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
@@ -331,15 +351,15 @@ rprecedence Minus = 10
 rprecedence FloatDiv = 10
 rprecedence op = precedence op
 
-instance Functor ProgramT where
+instance Functor Functions where
   fmap = fmapDefault
 
-instance Foldable ProgramT where
+instance Foldable Functions where
   foldMap = foldMapDefault
 
-instance Traversable ProgramT where
-  traverse f (Program funs) =
-    Program <$> traverse f' funs
+instance Traversable Functions where
+  traverse f (Functions funs) =
+    Functions <$> traverse f' funs
     where f' (name, fun) = (name,) <$> traverse f fun
 
 instance Functor FunctionT where

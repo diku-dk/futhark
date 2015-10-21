@@ -1,8 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | Variation of "Futhark.CodeGen.ImpCode" that contains the notion
 -- of a kernel invocation.
-module Futhark.CodeGen.KernelImp
+module Futhark.CodeGen.ImpCode.Kernels
   ( Program
-  , ProgramT (Program)
   , Function
   , FunctionT (Function)
   , Code
@@ -13,20 +13,25 @@ module Futhark.CodeGen.KernelImp
   , KernelUse (..)
   , InKernel (..)
   , module Futhark.CodeGen.ImpCode
+  -- * Utility functions
+  , getKernels
   )
   where
 
-import Data.Monoid
-
+import Control.Monad.Writer
+import Data.List
 import qualified Data.HashSet as HS
+import Data.Traversable
 
-import Futhark.CodeGen.ImpCode hiding (Program, Function, Code)
+import Prelude
+
+import Futhark.CodeGen.ImpCode hiding (Function, Code)
 import qualified Futhark.CodeGen.ImpCode as Imp
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
 
-type Program = Imp.Program CallKernel
+type Program = Functions CallKernel
 type Function = Imp.Function CallKernel
 -- | Host-level code that can call kernels.
 type Code = Imp.Code CallKernel
@@ -69,6 +74,14 @@ data ReduceKernel = ReduceKernel
 data KernelUse = ScalarUse VName BasicType
                | MemoryUse VName Imp.DimSize
                  deriving (Eq, Show)
+
+getKernels :: Program -> [CallKernel]
+getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
+  where getFunKernels kernel =
+          tell [kernel] >> return kernel
+        sameKernel (MapTranspose bt1 _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _) =
+          bt1 == bt2
+        sameKernel _ _ = False
 
 instance Pretty KernelUse where
   ppr (ScalarUse name t) =

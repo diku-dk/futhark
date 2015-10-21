@@ -21,7 +21,7 @@ import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax (BinOp (..))
-import qualified Futhark.CodeGen.ImpCode as Imp
+import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty(pretty)
 
@@ -29,8 +29,8 @@ data CompilerEnv = CompilerEnv {
   envFtable     :: HM.HashMap Name [Imp.Type]
 }
 
-newCompilerEnv :: Imp.Program () -> CompilerEnv
-newCompilerEnv (Imp.Program funs) =
+newCompilerEnv :: Imp.Program -> CompilerEnv
+newCompilerEnv (Imp.Functions funs) =
   CompilerEnv { envFtable = ftable <> builtinFtable }
   where ftable = HM.fromList $ map funReturn funs
         funReturn (name, Imp.Function outparams _ _ _ _) = (name, paramsTypes outparams)
@@ -79,17 +79,17 @@ compileOutput [x] = PyReturnScalar $ (pretty . Imp.paramName) x
 --when more than one return, we will use tuples since they can handle different types. Tuples are also one of the faster containers for python.
 compileOutput x = PyReturnTuple $ map (pretty . Imp.paramName) x
 
-runCompilerM :: Imp.Program () -> VNameSource
+runCompilerM :: Imp.Program -> VNameSource
              -> CompilerM a
              -> a
 runCompilerM prog src (CompilerM m) =
   fst $ evalRWS m (newCompilerEnv prog ) (newCompilerState src)
 
-compileProg :: Imp.Program () -> String
-compileProg prog@(Imp.Program funs) =
+compileProg :: Imp.Program -> String
+compileProg prog@(Imp.Functions funs) =
   pretty $ PyProg $ runCompilerM prog blankNameSource (mapM compileFunc funs)
 
-compileFunc :: (Name, Imp.Function ()) -> CompilerM PyFunc
+compileFunc :: (Name, Imp.Function) -> CompilerM PyFunc
 compileFunc (fname, Imp.Function outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (pretty . Imp.paramName) inputs
@@ -169,7 +169,7 @@ compileExp (Imp.Cond exp1 exp2 exp3) = Cond (compileExp exp1) (compileExp exp2) 
 compileExp _ = undefined
 
 -- get everything to work except memblocks and function calls
-compileCode :: Imp.Code () -> CompilerM ()
+compileCode :: Imp.Code -> CompilerM ()
 compileCode (Imp.If cond tb fb) = do
   let cond' = compileExp cond
   tb' <- collect $ compileCode tb

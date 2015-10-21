@@ -53,9 +53,8 @@ import Prelude
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.CodeGen.ImpCode
+import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
-import Futhark.Representation.AST.Syntax (BinOp (..))
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Reading
 import qualified Futhark.CodeGen.Backends.CUtils as C
@@ -170,9 +169,9 @@ envAllocate = opsAllocate . envOperations
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
 
-newCompilerEnv :: Program op -> Operations op s
+newCompilerEnv :: Functions op -> Operations op s
                -> CompilerEnv op s
-newCompilerEnv (Program funs) ops =
+newCompilerEnv (Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
               }
@@ -199,7 +198,7 @@ instance MonadFreshNames (CompilerM op s) where
   getNameSource = gets compNameSrc
   putNameSource src = modify $ \s -> s { compNameSrc = src }
 
-runCompilerM :: Program op -> Operations op s -> VNameSource -> s
+runCompilerM :: Functions op -> Operations op s -> VNameSource -> s
              -> CompilerM op s a
              -> (a, CompilerState s)
 runCompilerM prog ops src userstate (CompilerM m) =
@@ -529,9 +528,9 @@ compileProg :: Operations op s
             -> s
             -> [C.Definition] -> [C.Stm] -> [C.Stm]
             -> [Option]
-            -> Program op
+            -> Functions op
             -> String
-compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Program funs) =
+compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Functions funs) =
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops blankNameSource userstate compileProg'
   in pretty [C.cunit|
@@ -587,7 +586,7 @@ int main(int argc, char** argv) {
   if (runtime_file != NULL) {
     timeval_subtract(&t_diff, &t_end, &t_start);
     elapsed_usec = t_diff.tv_sec*1e6+t_diff.tv_usec;
-    fprintf(runtime_file, "%ld\n", elapsed_usec / 1000);
+    fprintf(runtime_file, "%ld\n", elapsed_usec);
     fclose(runtime_file);
   }
   return 0;
