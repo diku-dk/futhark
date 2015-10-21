@@ -12,6 +12,8 @@ import Data.List
 import Data.Monoid
 import qualified Data.HashSet as HS
 
+import Prelude
+
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
