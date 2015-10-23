@@ -205,9 +205,9 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       struct timeval $id:time_start, $id:time_end, $id:time_diff;
-      fprintf(stderr, "kernel size %s: [", $string:(textual global_work_size));
+      fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
       $stms:(printKernelSize global_work_size)
-      fprintf(stderr, "]\n");
+      fprintf(stderr, "].\n");
       gettimeofday(&$id:time_start, NULL);
       OPENCL_SUCCEED(
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
