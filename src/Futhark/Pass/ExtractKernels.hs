@@ -256,11 +256,27 @@ transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
   blockedReduction pat cs w red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
 
-transformBinding (Let pat () (LoopOp (Stream cs w form lam arrs c))) =
-  localTypeEnv (typeEnvFromParams $ extLambdaParams lam) $ do
-    body' <- transformBody $ extLambdaBody lam
-    let lam' = lam { extLambdaBody = body' }
-    return [Let pat () $ LoopOp $ Stream cs w form lam' arrs c]
+-- Streams can be handled in two different ways - either we
+-- sequentialise the body or we keep it parallel and distribute.
+transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ red_fun nes) fold_fun arrs _))) = do
+  -- We will sequentialise the body.  We do this by turning the stream
+  -- into a redomap with the chunk size set to one.
+  red_fun_sequential <- FOT.transformLambda red_fun
+  fold_fun_unchunked <- singletonChunkRedLikeStreamLambda
+                        (lambdaReturnType red_fun)
+                        fold_fun
+  fold_fun_unchunked_sequential <- FOT.transformLambda fold_fun_unchunked
+  blockedReduction pat cs w red_fun_sequential fold_fun_unchunked_sequential nes arrs
+
+transformBinding (Let pat () (LoopOp (Stream cs w (Sequential nes) fold_fun arrs _))) =
+  -- Remove the stream and leave the body parallel.  It will be
+  -- distributed.
+  runBinder_ $ sequentialStreamWholeArray pat cs w nes fold_fun arrs
+
+transformBinding (Let pat () (LoopOp (Stream cs w (MapLike _) map_fun arrs _))) =
+  -- Remove the stream and leave the body parallel.  It will be
+  -- distributed.
+  runBinder_ $ sequentialStreamWholeArray pat cs w [] map_fun arrs
 
 transformBinding (Let res_pat () (LoopOp op))
   | Scan cs w scan_fun scan_input <- op,
@@ -481,16 +497,9 @@ distributeMapBodyBindings acc [] =
 
 distributeMapBodyBindings acc
   (Let pat () (LoopOp (Stream cs w (Sequential accs) lam arrs _)):bnds) = do
-  let (body_bnds,res) = sequentialStreamWholeArray w accs lam arrs
-      reshapeRes t (Var v)
-        | null (arrayDims t) = PrimOp $ SubExp $ Var v
-        | otherwise          = shapeCoerce cs (arrayDims t) v
-      reshapeRes _ se      = PrimOp $ SubExp se
-      res_bnds = [ mkLet' [] [ident] $ reshapeRes (identType ident) se
-                 | (ident,se) <- zip (patternIdents pat) res ]
-  stream_bnds <- copyPropagateInBindings bindableSimpleOps $
-                 body_bnds ++ res_bnds
-  distributeMapBodyBindings acc $ stream_bnds ++ bnds
+  stream_bnds <- runBinder_ $ sequentialStreamWholeArray pat cs w accs lam arrs
+  stream_bnds' <- copyPropagateInBindings bindableSimpleOps stream_bnds
+  distributeMapBodyBindings acc $ stream_bnds' ++ bnds
 
 distributeMapBodyBindings acc
   (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs)):bnds) = do

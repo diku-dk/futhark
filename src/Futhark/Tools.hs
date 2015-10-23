@@ -17,6 +17,7 @@ import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
 import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -90,11 +91,11 @@ redomapToMapAndReduce (Pattern [] patelems) lore
 redomapToMapAndReduce _ _ _ =
   error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
 
-sequentialStreamWholeArray :: Bindable lore =>
-                              SubExp -> [SubExp]
-                           -> ExtLambdaT lore -> [VName]
-                           -> ([Binding lore], [SubExp])
-sequentialStreamWholeArray width accs lam arrs =
+sequentialStreamWholeArrayBindings :: Bindable lore =>
+                                      SubExp -> [SubExp]
+                                   -> ExtLambdaT lore -> [VName]
+                                   -> ([Binding lore], [SubExp])
+sequentialStreamWholeArrayBindings width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
@@ -111,6 +112,28 @@ sequentialStreamWholeArray width accs lam arrs =
 
       bodyResult $ extLambdaBody lam)
 
+sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
+                              Pattern (Lore m)
+                           -> Certificates
+                           -> SubExp -> [SubExp]
+                           -> ExtLambdaT (Lore m) -> [VName]
+                           -> m ()
+sequentialStreamWholeArray pat cs width nes fun arrs = do
+  let (body_bnds,res) = sequentialStreamWholeArrayBindings width nes fun arrs
+      reshapeRes t (Var v)
+        | null (arrayDims t) = PrimOp $ SubExp $ Var v
+        | otherwise          = shapeCoerce cs (arrayDims t) v
+      reshapeRes _ se        = PrimOp $ SubExp se
+      res_bnds =
+        [ mkLet' [] [ident] $ reshapeRes (identType ident) se
+        | (ident,se) <- zip (patternValueIdents pat) res]
+
+  mapM_ addBinding body_bnds
+  shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
+  forM_ (HM.toList shapemap) $ \(name,se) ->
+    when (name `elem` patternContextNames pat) $
+      addBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
+  mapM_ addBinding res_bnds
 singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
                                      [Type] -> ExtLambda lore -> m (Lambda lore)
 singletonChunkRedLikeStreamLambda acc_ts lam = do
