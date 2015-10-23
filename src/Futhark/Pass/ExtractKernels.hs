@@ -245,10 +245,15 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
 transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
-transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) = do
-  lam1_sequential <- FOT.transformLambda lam1
-  lam2_sequential <- FOT.transformLambda lam2
-  blockedReduction pat cs w lam1_sequential lam2_sequential nes arrs
+transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) =
+  if sequentialiseRedomapBody then do
+    lam1_sequential <- FOT.transformLambda lam1
+    lam2_sequential <- FOT.transformLambda lam2
+    blockedReduction pat cs w lam1_sequential lam2_sequential nes arrs
+  else do
+    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
+    return [mapbnd, redbnd]
+      where sequentialiseRedomapBody = True
 
 transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
   red_fun_sequential <- FOT.transformLambda red_fun
