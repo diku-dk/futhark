@@ -163,26 +163,6 @@ transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns b
             PrimOp $ Rearrange [] (rearrangeInverse perm) $
             patElemName new_pat_elem
 
-transformBinding expmap (Let pat () (LoopOp (Stream cs w form lam arrs _)))
-  | Just accs <- redForm form = do
-  let (body_bnds,res) = sequentialStreamWholeArray w accs lam arrs
-      reshapeRes t (Var v)
-        | null (arrayDims t) = PrimOp $ SubExp $ Var v
-        | otherwise          = shapeCoerce cs (arrayDims t) v
-      reshapeRes _ se        = PrimOp $ SubExp se
-      res_bnds =
-        [ mkLet' [] [ident] $ reshapeRes (identType ident) se
-        | (ident,se) <- zip (patternValueIdents pat) res]
-  expmap' <- foldM transformBinding expmap body_bnds
-  shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
-  forM_ (HM.toList shapemap) $ \(name,se) ->
-    when (name `elem` patternContextNames pat) $
-      void $ transformBinding expmap =<< mkLetNames' [name] (PrimOp $ SubExp se)
-  foldM transformBinding expmap' res_bnds
-  where redForm (RedLike _ _ accs) = Just accs
-        redForm (Sequential accs)  = Just accs
-        redForm _                  = Nothing
-
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
   ((), bnds) <- runBinder $ FOT.transformBinding $ Let pat () e'
