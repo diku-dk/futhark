@@ -284,7 +284,7 @@ kernelAndWorkgroupSize (Reduce kernel) =
 kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems) =
   ([roundedToBlockDim x_elems,
     roundedToBlockDim y_elems,
-    roundedToBlockDim num_arrays],
+    num_arrays],
    Just [transposeBlockDim, transposeBlockDim, 1])
   where roundedToBlockDim e =
           e + ((transposeBlockDim -
