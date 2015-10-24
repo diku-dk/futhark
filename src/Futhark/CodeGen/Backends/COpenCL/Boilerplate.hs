@@ -28,6 +28,7 @@ typename cl_command_queue fut_cl_queue;
 const char *cl_preferred_platform = "";
 const char *cl_preferred_device = "";
 int cl_verbosity = 1;
+static size_t cl_group_size = 512;
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
@@ -284,6 +285,7 @@ void setup_opencl() {
   typename cl_platform_id platform;
   typename cl_device_id device;
   typename cl_uint platforms, devices;
+  size_t max_group_size;
 
   struct opencl_device_option device_option = get_preferred_device();
 
@@ -293,6 +295,13 @@ void setup_opencl() {
 
   device = device_option.device;
   platform = device_option.platform;
+
+  OPENCL_SUCCEED(clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
+                                 sizeof(size_t), &max_group_size, NULL));
+
+  if (max_group_size < cl_group_size) {
+    cl_group_size = max_group_size;
+  }
 
   typename cl_context_properties properties[] = {
     CL_CONTEXT_PLATFORM,
@@ -330,7 +339,7 @@ size_t futhark_num_groups() {
 }
 
 size_t futhark_group_size() {
-  return 512;
+  return cl_group_size;
 }
 |]
 
