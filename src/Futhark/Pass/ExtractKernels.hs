@@ -506,11 +506,6 @@ distributeMapBodyBindings acc
   stream_bnds' <- copyPropagateInBindings bindableSimpleOps stream_bnds
   distributeMapBodyBindings acc $ stream_bnds' ++ bnds
 
-distributeMapBodyBindings acc
-  (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs)):bnds) = do
-    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
-    distributeMapBodyBindings acc $ mapbnd : redbnd : bnds
-
 distributeMapBodyBindings acc (bnd:bnds) =
   -- It is important that bnd is in scope if 'maybeDistributeBinding'
   -- wants to distribute, even if this causes the slightly silly
