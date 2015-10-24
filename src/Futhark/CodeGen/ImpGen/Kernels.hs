@@ -84,7 +84,7 @@ kernelCompiler
     -- kernel.
     uses <- computeKernelUses dest kernel_body bound_in_kernel
 
-    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.MapKernel {
+    ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
         Imp.kernelThreadNum = global_thread_index
       , Imp.kernelBody = kernel_body
       , Imp.kernelUses = uses
@@ -346,7 +346,7 @@ callKernelCopy bt
     ImpGen.emit $ Imp.SetScalar kernel_size $
       Imp.innerExp n * product (drop 1 shape)
 
-    ImpGen.emit $ Imp.Op $ Imp.Kernel Imp.MapKernel {
+    ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
         Imp.kernelThreadNum = global_thread_index
       , Imp.kernelSize = Imp.VarSize kernel_size
       , Imp.kernelUses = nub $ reads_from ++ writes_to
