@@ -38,6 +38,7 @@ tokens :-
   "-"                      { const MINUS }
   "~"                      { const TILDE }
   "*"                      { const TIMES }
+  "**"                     { const POW }
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
   "//"                     { const QUOT }
@@ -91,7 +92,6 @@ keyword s =
     "True"         -> TRUE
     "False"        -> FALSE
     "Checked"      -> CHECKED
-    "pow"          -> POW
     "abs"          -> ABS
     "signum"       -> SIGNUM
 
