@@ -122,7 +122,7 @@ instance Pretty UnOp where
 instance Pretty BinOp where
   ppr Plus = text "+"
   ppr Minus = text "-"
-  ppr Pow = text "pow"
+  ppr Pow = text "**"
   ppr Times = text "*"
   ppr Divide = text "/"
   ppr Mod = text "%"

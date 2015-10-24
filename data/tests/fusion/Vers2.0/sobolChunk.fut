@@ -40,7 +40,7 @@ fun [int] sobolIndI ( [[int]] dir_vs, int n ) =
     map( xorInds(n), dir_vs )
 
 fun [real] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
-    let divisor = 2.0 pow toFloat (num_bits) in
+    let divisor = 2.0 ** toFloat (num_bits) in
     let arri    = sobolIndI( dir_vs, n )     in
         map( fn real (int x) => toFloat(x) / divisor, arri )
 

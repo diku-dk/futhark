@@ -35,8 +35,8 @@ fun real binom(int expiry) =
   let qUR = q/stepR in
   let qDR = (1.0-q)/stepR in
 
-  let uPow = map(u pow, map(toFloat, iota(n+1))) in
-  let dPow = map(d pow, map(toFloat, map(n-, iota(n+1)))) in
+  let uPow = map(u **, map(toFloat, iota(n+1))) in
+  let dPow = map(d **, map(toFloat, map(n-, iota(n+1)))) in
   let st = map(toFloat(s0())*, map(*, zip(uPow, dPow))) in
   let finalPut = map(maxReal(0.0), map(toFloat(strike())-, st)) in
   loop (put = finalPut) = for j < n do

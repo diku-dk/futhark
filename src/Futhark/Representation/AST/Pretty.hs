@@ -366,7 +366,7 @@ instance PrettyLore lore => Pretty (Prog lore) where
 instance Pretty BinOp where
   ppr Plus = text "+"
   ppr Minus = text "-"
-  ppr Pow = text "pow"
+  ppr Pow = text "**"
   ppr Times = text "*"
   ppr FloatDiv = text "/"
   ppr Div = text "div"
