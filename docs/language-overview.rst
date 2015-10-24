@@ -130,7 +130,7 @@ Grammar of First-Order Fragment
    p : "{" `p` "," ...  "," `p` "}"
 
 .. productionlist::
-   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "pow"
+   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "**"
       : "==" | "<" | ">" | ">=" | "&&" | "||" "&" | "|"
 
 .. productionlist::
