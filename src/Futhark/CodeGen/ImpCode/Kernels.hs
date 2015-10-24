@@ -38,7 +38,7 @@ type Code = Imp.Code CallKernel
 -- | Code inside a kernel.
 type KernelCode = Imp.Code InKernel
 
-data CallKernel = Kernel MapKernel
+data CallKernel = Map MapKernel
                 | Reduce ReduceKernel
                 | MapTranspose BasicType VName Exp VName Exp Exp Exp Exp
             deriving (Show)
@@ -90,7 +90,7 @@ instance Pretty KernelUse where
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
 
 instance Pretty CallKernel where
-  ppr (Kernel k) = ppr k
+  ppr (Map k) = ppr k
   ppr (Reduce k) = ppr k
   ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y) =
     text "mapTranspose" <>

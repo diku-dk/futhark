@@ -108,7 +108,7 @@ compileKernels kernels = do
   return (concat funcs, mconcat reqs)
 
 compileKernel :: CallKernel -> Either String ([(String, C.Func)], OpenClRequirements)
-compileKernel (Kernel kernel) =
+compileKernel (Map kernel) =
   let (funbody, s) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.collect $ GenericC.compileCode $ kernelBody kernel
@@ -241,7 +241,7 @@ reduceKernelName :: ReduceKernel -> String
 reduceKernelName = ("red_kernel_"++) . show . baseTag . reductionKernelName
 
 kernelName :: CallKernel -> String
-kernelName (Kernel k) =
+kernelName (Map k) =
   mapKernelName k
 kernelName (Reduce k) =
   reduceKernelName k
@@ -255,7 +255,7 @@ callKernel kernel =
   where (kernel_size, workgroup_size) = kernelAndWorkgroupSize kernel
 
 kernelArgs :: CallKernel -> [KernelArg]
-kernelArgs (Kernel kernel) =
+kernelArgs (Map kernel) =
   map useToArg $ kernelUses kernel
 kernelArgs (Reduce kernel) =
   map (SharedMemoryArg . memSizeToExp . snd)
@@ -274,7 +274,7 @@ kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elem
           bytes $ (transposeBlockDim + 1) * transposeBlockDim * SizeOf bt
 
 kernelAndWorkgroupSize :: CallKernel -> ([Exp], Maybe [Exp])
-kernelAndWorkgroupSize (Kernel kernel) =
+kernelAndWorkgroupSize (Map kernel) =
   ([sizeToExp $ kernelSize kernel],
    Nothing)
 kernelAndWorkgroupSize (Reduce kernel) =
