@@ -85,10 +85,10 @@ kernelCompiler
     uses <- computeKernelUses dest kernel_body bound_in_kernel
 
     ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
-        Imp.kernelThreadNum = global_thread_index
-      , Imp.kernelBody = kernel_body
-      , Imp.kernelUses = uses
-      , Imp.kernelSize = kernel_size
+        Imp.mapKernelThreadNum = global_thread_index
+      , Imp.mapKernelBody = kernel_body
+      , Imp.mapKernelUses = uses
+      , Imp.mapKernelSize = kernel_size
       }
     return ImpGen.Done
 
@@ -98,7 +98,11 @@ kernelCompiler
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
+    in_wave_id <- newVName "in_wave_id"
     global_id <- newVName "global_id"
+    wave_size <- newVName "wave_size"
+    num_waves <- newVName "num_waves"
+    skip_waves <- newVName "skip_waves"
 
     (num_groups, group_size, per_thread_chunk, num_elements, _) <-
       compileKernelSize kernel_size
@@ -114,6 +118,9 @@ kernelCompiler
           splitAt (length nes) actual_reduce_params
 
         offset = paramName other_index_param
+        wave_id = Imp.BinOp Quot
+                  (Imp.ScalarVar local_id)
+                  (Imp.ScalarVar wave_size)
 
     (acc_mem_params, acc_local_mem) <-
       unzip <$> mapM (createAccMem group_size) reduce_acc_params
@@ -124,6 +131,10 @@ kernelCompiler
       ImpGen.declaringBasicVar local_id Int $
       ImpGen.declaringBasicVar group_id Int $
       ImpGen.declaringBasicVar global_id Int $
+      ImpGen.declaringBasicVar wave_size Int $
+      ImpGen.declaringBasicVar num_waves Int $
+      ImpGen.declaringBasicVar skip_waves Int $
+      ImpGen.declaringBasicVar in_wave_id Int $
       ImpGen.declaringBasicVar (lambdaIndex reduce_lam) Int $
       ImpGen.declaringBasicVar (lambdaIndex fold_lam) Int $
       ImpGen.withParams acc_mem_params $
@@ -133,8 +144,15 @@ kernelCompiler
           Imp.Op (Imp.GetLocalId local_id 0) <>
           Imp.Op (Imp.GetGroupId group_id 0) <>
           Imp.Op (Imp.GetGlobalId global_id 0) <>
+          Imp.Op (Imp.GetWaveSize wave_size) <>
           Imp.SetScalar (lambdaIndex reduce_lam) (Imp.ScalarVar global_id) <>
-          Imp.SetScalar (lambdaIndex fold_lam) (Imp.ScalarVar global_id)
+          Imp.SetScalar (lambdaIndex fold_lam) (Imp.ScalarVar global_id) <>
+          Imp.SetScalar num_waves (Imp.BinOp Quot
+                                   (Imp.innerExp (Imp.dimSizeToExp group_size) +
+                                    Imp.ScalarVar wave_size - 1)
+                                   (Imp.ScalarVar wave_size)) <>
+          Imp.SetScalar in_wave_id (Imp.ScalarVar local_id -
+                                    (wave_id * Imp.ScalarVar wave_size))
 
         reduce_acc_dest <- ImpGen.destinationFromParams reduce_acc_params
 
@@ -183,21 +201,56 @@ kernelCompiler
                                           ]
                   bound_in_kernel
 
-          ImpGen.emit $ Imp.Op $ Imp.Reduce Imp.ReduceKernel
-            { Imp.reductionKernelName = lambdaIndex fold_lam
-            , Imp.reductionOffsetName = offset
-            , Imp.reductionThreadLocalMemory = local_mem
+          let doing_in_wave_reductions =
+                Imp.BinOp Less (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
+              apply_in_in_wave_iteration =
+                Imp.BinOp Equal
+                (Imp.BinOp Band (Imp.ScalarVar in_wave_id) (2 * Imp.ScalarVar offset - 1)) 0
+              in_wave_reductions =
+                Imp.SetScalar offset 1 <>
+                Imp.While doing_in_wave_reductions
+                  (Imp.If apply_in_in_wave_iteration
+                   (reduce_op <> write_fold_result) mempty <>
+                   Imp.SetScalar offset (Imp.ScalarVar offset * 2))
 
-            , Imp.reductionPrologue = prologue
-            , Imp.reductionFoldOperation = fold_op
-            , Imp.reductionWriteFoldResult = write_fold_result
-            , Imp.reductionReduceOperation = reduce_op
-            , Imp.reductionWriteFinalResult = write_result
+              doing_cross_wave_reductions =
+                Imp.BinOp Less (Imp.ScalarVar skip_waves) $ Imp.ScalarVar num_waves
+              is_first_thread_in_wave =
+                Imp.BinOp Equal (Imp.ScalarVar in_wave_id) 0
+              wave_not_skipped =
+                Imp.BinOp Equal (Imp.BinOp Band wave_id
+                                 (2 * Imp.ScalarVar skip_waves - 1))
+                0
+              apply_in_cross_wave_iteration =
+                Imp.BinOp Band is_first_thread_in_wave wave_not_skipped
+              cross_wave_reductions =
+                Imp.SetScalar skip_waves 1 <>
+                Imp.While doing_cross_wave_reductions
+                  (Imp.Op Imp.Barrier <>
+                   Imp.SetScalar offset (Imp.ScalarVar skip_waves *
+                                         Imp.ScalarVar wave_size) <>
+                   Imp.If apply_in_cross_wave_iteration
+                   (reduce_op <> write_fold_result) mempty <>
+                   Imp.SetScalar skip_waves (Imp.ScalarVar skip_waves * 2))
 
-            , Imp.reductionNumGroups = num_groups
-            , Imp.reductionGroupSize = group_size
+              write_group_result =
+                Imp.If (Imp.BinOp Equal (Imp.ScalarVar local_id) 0)
+                write_result mempty
 
-            , Imp.reductionUses = uses
+              body = mconcat [prologue,
+                              fold_op,
+                              write_fold_result,
+                              in_wave_reductions,
+                              cross_wave_reductions,
+                              write_group_result]
+
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+            { Imp.kernelBody = body
+            , Imp.kernelLocalMemory = local_mem
+            , Imp.kernelUses = uses
+            , Imp.kernelNumGroups = num_groups
+            , Imp.kernelGroupSize = group_size
+            , Imp.kernelName = lambdaIndex fold_lam
             }
           return ImpGen.Done
     call_with_prologue prologue
@@ -347,10 +400,10 @@ callKernelCopy bt
       Imp.innerExp n * product (drop 1 shape)
 
     ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
-        Imp.kernelThreadNum = global_thread_index
-      , Imp.kernelSize = Imp.VarSize kernel_size
-      , Imp.kernelUses = nub $ reads_from ++ writes_to
-      , Imp.kernelBody = body
+        Imp.mapKernelThreadNum = global_thread_index
+      , Imp.mapKernelSize = Imp.VarSize kernel_size
+      , Imp.mapKernelUses = nub $ reads_from ++ writes_to
+      , Imp.mapKernelBody = body
       }
 
 -- | We have no bulk copy operation (e.g. memmove) inside kernels, so

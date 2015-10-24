@@ -89,6 +89,12 @@ inKernelOperations = GenericC.Operations
         kernelOps (GetGlobalSize v i) = do
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
           return GenericC.Done
+        kernelOps (GetWaveSize v) = do
+          GenericC.stm [C.cstm|$id:v = WAVE_SIZE;|]
+          return GenericC.Done
+        kernelOps Barrier = do
+          GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
+          return GenericC.Done
 
         cannotAllocate :: GenericC.Allocate InKernel UsedFunctions
         cannotAllocate _ =
@@ -111,79 +117,49 @@ compileKernel :: CallKernel -> Either String ([(String, C.Func)], OpenClRequirem
 compileKernel (Map kernel) =
   let (funbody, s) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
-        GenericC.collect $ GenericC.compileCode $ kernelBody kernel
+        GenericC.collect $ GenericC.compileCode $ mapKernelBody kernel
 
       used_funs = GenericC.compUserState s
 
-      params = map useAsParam $ kernelUses kernel
+      params = map useAsParam $ mapKernelUses kernel
 
-      kernel_funs = functionsCalled $ kernelBody kernel
+      kernel_funs = functionsCalled $ mapKernelBody kernel
 
   in Right ([(mapKernelName kernel,
              [C.cfun|__kernel void $id:(mapKernelName kernel) ($params:params) {
-                 const uint $id:(kernelThreadNum kernel) = get_global_id(0);
+                 const uint $id:(mapKernelThreadNum kernel) = get_global_id(0);
                  $items:funbody
              }|])],
             OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) [])
 
-compileKernel (Reduce kernel) =
-  let ((kernel_prologue, fold_body, red_body,
-        write_fold_result, write_final_result), s) =
-        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
-          kernel_prologue_ <-
-            GenericC.collect $ GenericC.compileCode $ reductionPrologue kernel
-          fold_body_ <-
-            GenericC.collect $ GenericC.compileCode $ reductionFoldOperation kernel
-          red_body_ <-
-            GenericC.collect $ GenericC.compileCode $ reductionReduceOperation kernel
-          write_fold_result_ <-
-            GenericC.collect $ GenericC.compileCode $ reductionWriteFoldResult kernel
-
-          write_final_result_ <-
-            GenericC.collect $ GenericC.compileCode $ reductionWriteFinalResult kernel
-
-          return (kernel_prologue_, fold_body_, red_body_,
-                  write_fold_result_, write_final_result_)
+compileKernel called@(CallKernel kernel) =
+  let (kernel_body, s) =
+        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
+        GenericC.collect $ GenericC.compileCode $ kernelBody kernel
 
       used_funs = GenericC.compUserState s
 
-      use_params = map useAsParam $ reductionUses kernel
+      use_params = map useAsParam $ kernelUses kernel
 
-      kernel_funs = functionsCalled (reductionReduceOperation kernel) <>
-                    functionsCalled (reductionFoldOperation kernel)
+      kernel_funs = functionsCalled $ kernelBody kernel
 
       local_memory_params =
         flip evalState (blankNameSource :: VNameSource) $
-        mapM prepareLocalMemory $ reductionThreadLocalMemory kernel
+        mapM prepareLocalMemory $ kernelLocalMemory kernel
 
-      prologue = kernel_prologue
+      params = local_memory_params ++ use_params
 
-      opencl_kernel =
-        Kernels.reduce Kernels.Reduction
-         { Kernels.reductionKernelName =
-            reduceKernelName kernel
-         , Kernels.reductionOffsetName =
-             textual $ reductionOffsetName kernel
-         , Kernels.reductionInputArrayIndexName =
-             textual $ reductionKernelName kernel
-
-         , Kernels.reductionPrologue = prologue
-         , Kernels.reductionFoldOperation = fold_body
-         , Kernels.reductionWriteFoldResult = write_fold_result
-         , Kernels.reductionReduceOperation = red_body
-         , Kernels.reductionWriteFinalResult = write_final_result
-
-         , Kernels.reductionKernelArgs =
-             local_memory_params ++ use_params
-         }
-
-  in Right ([(reduceKernelName kernel, opencl_kernel)],
+  in Right ([(name,
+             [C.cfun|__kernel void $id:name ($params:params) {
+                  $items:kernel_body
+             }|])],
             OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) [])
   where prepareLocalMemory (mem, _) =
           return ([C.cparam|__local volatile unsigned char* restrict $id:mem|])
+        name = calledKernelName called
 
 compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _) =
-  Right ([(kernelName kernel, Kernels.mapTranspose (kernelName kernel) ty)],
+  Right ([(calledKernelName kernel, Kernels.mapTranspose (calledKernelName kernel) ty)],
          mempty)
   where ty = GenericC.scalarTypeToCType bt
 
@@ -235,32 +211,29 @@ openClCode kernels requirements =
 
 
 mapKernelName :: MapKernel -> String
-mapKernelName = ("map_kernel_"++) . show . baseTag . kernelThreadNum
+mapKernelName = ("map_kernel_"++) . show . baseTag . mapKernelThreadNum
 
-reduceKernelName :: ReduceKernel -> String
-reduceKernelName = ("red_kernel_"++) . show . baseTag . reductionKernelName
-
-kernelName :: CallKernel -> String
-kernelName (Map k) =
+calledKernelName :: CallKernel -> String
+calledKernelName (Map k) =
   mapKernelName k
-kernelName (Reduce k) =
-  reduceKernelName k
-kernelName (MapTranspose bt _ _ _ _ _ _ _) =
+calledKernelName (CallKernel k) =
+  ("kernel_" ++) $ show $ baseTag $ kernelName k
+calledKernelName (MapTranspose bt _ _ _ _ _ _ _) =
   "fut_kernel_map_transpose_" ++ pretty bt
 
 callKernel :: CallKernel -> OpenCL
 callKernel kernel =
   LaunchKernel
-  (kernelName kernel) (kernelArgs kernel) kernel_size workgroup_size
+  (calledKernelName kernel) (kernelArgs kernel) kernel_size workgroup_size
   where (kernel_size, workgroup_size) = kernelAndWorkgroupSize kernel
 
 kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
-  map useToArg $ kernelUses kernel
-kernelArgs (Reduce kernel) =
+  map useToArg $ mapKernelUses kernel
+kernelArgs (CallKernel kernel) =
   map (SharedMemoryArg . memSizeToExp . snd)
-      (reductionThreadLocalMemory kernel) ++
-  map useToArg (reductionUses kernel)
+      (kernelLocalMemory kernel) ++
+  map useToArg (kernelUses kernel)
 kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems) =
   [ MemArg destmem
   , ValueArg destoffset Int
@@ -275,12 +248,12 @@ kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elem
 
 kernelAndWorkgroupSize :: CallKernel -> ([Exp], Maybe [Exp])
 kernelAndWorkgroupSize (Map kernel) =
-  ([sizeToExp $ kernelSize kernel],
+  ([sizeToExp $ mapKernelSize kernel],
    Nothing)
-kernelAndWorkgroupSize (Reduce kernel) =
-  ([sizeToExp (reductionNumGroups kernel) *
-    sizeToExp (reductionGroupSize kernel)],
-   Just [sizeToExp $ reductionGroupSize kernel])
+kernelAndWorkgroupSize (CallKernel kernel) =
+  ([sizeToExp (kernelNumGroups kernel) *
+    sizeToExp (kernelGroupSize kernel)],
+   Just [sizeToExp $ kernelGroupSize kernel])
 kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems) =
   ([roundedToBlockDim x_elems,
     roundedToBlockDim y_elems,
