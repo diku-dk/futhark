@@ -87,7 +87,7 @@ Evaluates to its value in the environment.
 Evaluate the binary arithmetic operator on its operands, which must
 both be of either type ``int`` or ``real``.  The following operators
 are supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``,
-``==``, ``<``, ``<=``, ``pow``.
+``==``, ``<``, ``<=``, ``**``.
 
 ``x`` *bitop* ``y``
 ~~~~~~~~~~~~~~~~~~~
