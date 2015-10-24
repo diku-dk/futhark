@@ -98,10 +98,8 @@ kernelCompiler
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
-    in_wave_id <- newVName "in_wave_id"
     global_id <- newVName "global_id"
     wave_size <- newVName "wave_size"
-    num_waves <- newVName "num_waves"
     skip_waves <- newVName "skip_waves"
 
     (num_groups, group_size, per_thread_chunk, num_elements, _) <-
@@ -118,9 +116,6 @@ kernelCompiler
           splitAt (length nes) actual_reduce_params
 
         offset = paramName other_index_param
-        wave_id = Imp.BinOp Quot
-                  (Imp.ScalarVar local_id)
-                  (Imp.ScalarVar wave_size)
 
     (acc_mem_params, acc_local_mem) <-
       unzip <$> mapM (createAccMem group_size) reduce_acc_params
@@ -132,9 +127,7 @@ kernelCompiler
       ImpGen.declaringBasicVar group_id Int $
       ImpGen.declaringBasicVar global_id Int $
       ImpGen.declaringBasicVar wave_size Int $
-      ImpGen.declaringBasicVar num_waves Int $
       ImpGen.declaringBasicVar skip_waves Int $
-      ImpGen.declaringBasicVar in_wave_id Int $
       ImpGen.declaringBasicVar (lambdaIndex reduce_lam) Int $
       ImpGen.declaringBasicVar (lambdaIndex fold_lam) Int $
       ImpGen.withParams acc_mem_params $
@@ -146,13 +139,7 @@ kernelCompiler
           Imp.Op (Imp.GetGlobalId global_id 0) <>
           Imp.Op (Imp.GetWaveSize wave_size) <>
           Imp.SetScalar (lambdaIndex reduce_lam) (Imp.ScalarVar global_id) <>
-          Imp.SetScalar (lambdaIndex fold_lam) (Imp.ScalarVar global_id) <>
-          Imp.SetScalar num_waves (Imp.BinOp Quot
-                                   (Imp.innerExp (Imp.dimSizeToExp group_size) +
-                                    Imp.ScalarVar wave_size - 1)
-                                   (Imp.ScalarVar wave_size)) <>
-          Imp.SetScalar in_wave_id (Imp.ScalarVar local_id -
-                                    (wave_id * Imp.ScalarVar wave_size))
+          Imp.SetScalar (lambdaIndex fold_lam) (Imp.ScalarVar global_id)
 
         reduce_acc_dest <- ImpGen.destinationFromParams reduce_acc_params
 
@@ -201,11 +188,31 @@ kernelCompiler
                                           ]
                   bound_in_kernel
 
-          let doing_in_wave_reductions =
+          -- wave_id, in_wave_id and num_waves will all be inlined
+          -- whereever they are used.  This leads to ugly code, but
+          -- declaring them as variables (and setting them) early in
+          -- the kernel dramatically reduces performance on NVIDIAs
+          -- OpenCL implementation.  I suspect it prevents unrolling
+          -- of the in-wave reduction loop.  It is possible that we
+          -- may be able to declare these as variables just preceding
+          -- the loops where they are used, without losing
+          -- performance.  This can be done when we become tired of
+          -- looking at ugly kernel code.
+          let wave_id = Imp.BinOp Quot
+                        (Imp.ScalarVar local_id)
+                        (Imp.ScalarVar wave_size)
+              in_wave_id = Imp.ScalarVar local_id -
+                           (wave_id * Imp.ScalarVar wave_size)
+              num_waves = Imp.BinOp Quot
+                          (Imp.innerExp (Imp.dimSizeToExp group_size) +
+                           Imp.ScalarVar wave_size - 1)
+                          (Imp.ScalarVar wave_size)
+
+              doing_in_wave_reductions =
                 Imp.BinOp Less (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
               apply_in_in_wave_iteration =
                 Imp.BinOp Equal
-                (Imp.BinOp Band (Imp.ScalarVar in_wave_id) (2 * Imp.ScalarVar offset - 1)) 0
+                (Imp.BinOp Band in_wave_id (2 * Imp.ScalarVar offset - 1)) 0
               in_wave_reductions =
                 Imp.SetScalar offset 1 <>
                 Imp.While doing_in_wave_reductions
@@ -214,15 +221,15 @@ kernelCompiler
                    Imp.SetScalar offset (Imp.ScalarVar offset * 2))
 
               doing_cross_wave_reductions =
-                Imp.BinOp Less (Imp.ScalarVar skip_waves) $ Imp.ScalarVar num_waves
+                Imp.BinOp Less (Imp.ScalarVar skip_waves) num_waves
               is_first_thread_in_wave =
-                Imp.BinOp Equal (Imp.ScalarVar in_wave_id) 0
+                Imp.BinOp Equal in_wave_id 0
               wave_not_skipped =
                 Imp.BinOp Equal (Imp.BinOp Band wave_id
                                  (2 * Imp.ScalarVar skip_waves - 1))
                 0
               apply_in_cross_wave_iteration =
-                Imp.BinOp Band is_first_thread_in_wave wave_not_skipped
+                Imp.BinOp LogAnd is_first_thread_in_wave wave_not_skipped
               cross_wave_reductions =
                 Imp.SetScalar skip_waves 1 <>
                 Imp.While doing_cross_wave_reductions
