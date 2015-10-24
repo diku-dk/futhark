@@ -9,7 +9,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , KernelCode
   , CallKernel (..)
   , MapKernel (..)
-  , ReduceKernel (..)
+  , Kernel (..)
   , KernelUse (..)
   , InKernel (..)
   , module Futhark.CodeGen.ImpCode
@@ -39,37 +39,34 @@ type Code = Imp.Code CallKernel
 type KernelCode = Imp.Code InKernel
 
 data CallKernel = Map MapKernel
-                | Reduce ReduceKernel
+                | CallKernel Kernel
                 | MapTranspose BasicType VName Exp VName Exp Exp Exp Exp
             deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
-data MapKernel = MapKernel { kernelThreadNum :: VName
+data MapKernel = MapKernel { mapKernelThreadNum :: VName
                              -- ^ Binding position - also serves as a unique
                              -- name for the kernel.
-                           , kernelBody :: Imp.Code InKernel
-                           , kernelUses :: [KernelUse]
-                           , kernelSize :: DimSize
+                           , mapKernelBody :: Imp.Code InKernel
+                           , mapKernelUses :: [KernelUse]
+                           , mapKernelSize :: DimSize
                            }
                      deriving (Show)
 
-data ReduceKernel = ReduceKernel
-                    { reductionReduceOperation :: Imp.Code InKernel
-                    , reductionFoldOperation :: Imp.Code InKernel
-                    , reductionThreadLocalMemory :: [(VName, MemSize)]
-                      -- ^ In-kernel name and per-workgroup size in bytes.
-                    , reductionWriteFoldResult :: Imp.Code InKernel
-                    , reductionPrologue :: Imp.Code InKernel
-                    , reductionWriteFinalResult :: Imp.Code InKernel
+data Kernel = Kernel
+              { kernelBody :: Imp.Code InKernel
+              , kernelLocalMemory :: [(VName, MemSize)]
+                -- ^ In-kernel name and per-workgroup size in bytes.
 
-                    , reductionUses :: [KernelUse]
-                    , reductionNumGroups :: DimSize
-                    , reductionGroupSize :: DimSize
-                    , reductionOffsetName :: VName
-                    , reductionKernelName :: VName
-                      -- ^ Unique name for the kernel.
-                    }
-                    deriving (Show)
+              , kernelUses :: [KernelUse]
+                -- ^ The host variables referenced by the kernel.
+
+              , kernelNumGroups :: DimSize
+              , kernelGroupSize :: DimSize
+              , kernelName :: VName
+                -- ^ Unique name for the kernel.
+              }
+            deriving (Show)
 
 data KernelUse = ScalarUse VName BasicType
                | MemoryUse VName Imp.DimSize
@@ -91,7 +88,7 @@ instance Pretty KernelUse where
 
 instance Pretty CallKernel where
   ppr (Map k) = ppr k
-  ppr (Reduce k) = ppr k
+  ppr (CallKernel k) = ppr k
   ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y) =
     text "mapTranspose" <>
     parens (ppr bt <> comma </>
@@ -103,24 +100,36 @@ instance Pretty CallKernel where
 
 instance Pretty MapKernel where
   ppr kernel =
-    text "kernel" <+> brace
-    (text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
-     text "body" <+> brace (ppr (kernelThreadNum kernel) <+>
+    text "mapKernel" <+> brace
+    (text "uses" <+> brace (commasep $ map ppr $ mapKernelUses kernel) </>
+     text "body" <+> brace (ppr (mapKernelThreadNum kernel) <+>
                             text "<- get_thread_number()" </>
-                            ppr (kernelBody kernel)))
+                            ppr (mapKernelBody kernel)))
 
-instance Pretty ReduceKernel where
-  ppr = text . show
+instance Pretty Kernel where
+  ppr kernel =
+    text "kernel" <+> brace
+    (text "groups" <+> brace (ppr $ kernelNumGroups kernel) </>
+     text "group_size" <+> brace (ppr $ kernelNumGroups kernel) </>
+     text "local_memory" <+> brace (commasep $
+                                    map ppLocalMemory $
+                                    kernelLocalMemory kernel) </>
+     text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
+     text "body" <+> brace (ppr $ kernelBody kernel))
+    where ppLocalMemory (name, size) =
+            ppr name <+> parens (ppr size <+> text "bytes")
 
 instance FreeIn MapKernel where
   freeIn kernel =
-    kernelThreadNum kernel `HS.delete` freeIn (kernelBody kernel)
+    mapKernelThreadNum kernel `HS.delete` freeIn (mapKernelBody kernel)
 
 data InKernel = GetGroupId VName Int
               | GetLocalId VName Int
               | GetLocalSize VName Int
               | GetGlobalSize VName Int
               | GetGlobalId VName Int
+              | GetWaveSize VName
+              | Barrier
               deriving (Show)
 
 instance Pretty InKernel where
@@ -139,6 +148,11 @@ instance Pretty InKernel where
   ppr (GetGlobalId dest i) =
     ppr dest <+> text "<-" <+>
     text "get_global_id" <> parens (ppr i)
+  ppr (GetWaveSize dest) =
+    ppr dest <+> text "<-" <+>
+    text "get_wave_size()"
+  ppr Barrier =
+    text "barrier()"
 
 instance FreeIn InKernel where
   freeIn = const mempty

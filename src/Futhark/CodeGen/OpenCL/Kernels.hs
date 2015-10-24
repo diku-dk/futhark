@@ -1,8 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Futhark.CodeGen.OpenCL.Kernels
        ( mapTranspose
-       , Reduction (..)
-       , reduce
        )
        where
 
@@ -57,55 +55,3 @@ mapTranspose kernel_name elem_type =
         odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
     }
   }|]
-
-data Reduction = Reduction {
-    reductionKernelName :: String
-  , reductionInputArrayIndexName :: String
-  , reductionOffsetName :: String
-  , reductionKernelArgs :: [C.Param]
-  , reductionPrologue :: [C.BlockItem]
-  , reductionFoldOperation :: [C.BlockItem]
-  , reductionWriteFoldResult :: [C.BlockItem]
-  , reductionReduceOperation :: [C.BlockItem]
-  , reductionWriteFinalResult :: [C.BlockItem]
-  }
-
-reduce :: Reduction -> C.Func
-reduce red =
-  [C.cfun|
-   __kernel void $id:(reductionKernelName red)($params:(reductionKernelArgs red))
-   {
-     $items:(reductionPrologue red)
-
-     $items:(reductionFoldOperation red)
-
-     uint lid = get_local_id(0);
-     $items:(reductionWriteFoldResult red)
-
-     /* in-wave reductions */
-     uint wave_num = lid / WAVE_SIZE;
-     uint wid = lid - (wave_num * WAVE_SIZE);
-     for (uint $id:offset = 1; $id:offset < WAVE_SIZE; $id:offset *= 2) {
-       /* in-wave reductions don't need a barrier */
-       if ((wid & (2 * $id:offset - 1)) == 0) {
-         $items:(reductionReduceOperation red)
-         $items:(reductionWriteFoldResult red)
-       }
-     }
-     /* cross-wave reductions */
-     uint num_waves = (get_local_size(0) + WAVE_SIZE - 1)/WAVE_SIZE;
-     for (uint skip_waves = 1; skip_waves < num_waves; skip_waves *=2) {
-       barrier(CLK_LOCAL_MEM_FENCE);
-       uint $id:offset = skip_waves * WAVE_SIZE;
-       if (wid == 0 && (wave_num & (2*skip_waves - 1)) == 0) {
-         $items:(reductionReduceOperation red)
-         $items:(reductionWriteFoldResult red)
-       }
-     }
-
-     if (lid == 0) {
-       $items:(reductionWriteFinalResult red)
-     }
-   }
-  |]
-  where offset = reductionOffsetName red
