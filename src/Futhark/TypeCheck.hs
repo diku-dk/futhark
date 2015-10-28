@@ -927,17 +927,10 @@ checkLoopOp (Kernel cs w index ispace inps returns body) = do
              pretty (kernelInputName inp) ++
              " does not use entire index space."
 
-checkLoopOp (ReduceKernel cs w
-             (KernelSize num_groups workgroup_size
-              per_thread_elements num_elements offset_multiple)
-             parfun seqfun accexps arrexps) = do
+checkLoopOp (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = do
   mapM_ (requireI [Basic Cert]) cs
   require [Basic Int] w
-  require [Basic Int] num_groups
-  require [Basic Int] workgroup_size
-  require [Basic Int] per_thread_elements
-  require [Basic Int] num_elements
-  require [Basic Int] offset_multiple
+  checkKernelSize kernel_size
   arrargs <- checkSOACArrayArgs w arrexps
   accargs <- mapM checkArg accexps
 
@@ -963,6 +956,26 @@ checkLoopOp (ReduceKernel cs w
   unless (acct `subtypesOf` parRetType) $
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
+
+checkLoopOp (ScanKernel cs w kernel_size fun input) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  checkKernelSize kernel_size
+  let (nes, arrs) = unzip input
+  arrargs <- checkSOACArrayArgs w arrs
+  accargs <- mapM checkArg nes
+  checkLambda fun $ accargs ++ arrargs
+  let startt      = map argType accargs
+      intupletype = map argType arrargs
+      funret      = lambdaReturnType fun
+  unless (startt `subtypesOf` funret) $
+    bad $ TypeError noLoc $
+    "Initial value is of type " ++ prettyTuple startt ++
+    ", but scan function returns type " ++ prettyTuple funret ++ "."
+  unless (intupletype `subtypesOf` funret) $
+    bad $ TypeError noLoc $
+    "Array element value is of type " ++ prettyTuple intupletype ++
+    ", but scan function returns type " ++ prettyTuple funret ++ "."
 
 checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
@@ -1196,6 +1209,16 @@ checkPolyBinOp op tl e1 e2 t = do
   require (map Basic tl) e2
   t' <- unifySubExpTypes e1 e2
   checkAnnotation (pretty op ++ " result") (Basic t) t'
+
+checkKernelSize :: Checkable lore =>
+                   KernelSize -> TypeM lore ()
+checkKernelSize (KernelSize num_groups workgroup_size
+                 per_thread_elements num_elements offset_multiple) = do
+  require [Basic Int] num_groups
+  require [Basic Int] workgroup_size
+  require [Basic Int] per_thread_elements
+  require [Basic Int] num_elements
+  require [Basic Int] offset_multiple
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b

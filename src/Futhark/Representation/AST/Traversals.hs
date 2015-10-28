@@ -220,23 +220,24 @@ mapExpM tv (LoopOp (Kernel cs w index ispace inps rettype body)) =
               mapOnBody tv body)
   where (iparams, bounds) = unzip ispace
         (ts, perms) = unzip rettype
-mapExpM tv (LoopOp (ReduceKernel cs w
-                    (KernelSize num_workgroups workgroup_size
-                     per_thread_elements num_elements offset_multiple)
-                    red_fun fold_fun accs arrs)) =
+mapExpM tv (LoopOp (ReduceKernel cs w kernel_size red_fun fold_fun accs arrs)) =
   LoopOp <$> (ReduceKernel <$>
               mapOnCertificates tv cs <*>
               mapOnSubExp tv w <*>
-              (KernelSize <$>
-               mapOnSubExp tv num_workgroups <*>
-               mapOnSubExp tv workgroup_size <*>
-               mapOnSubExp tv per_thread_elements <*>
-               mapOnSubExp tv num_elements <*>
-               mapOnSubExp tv offset_multiple) <*>
+              mapOnKernelSize tv kernel_size <*>
               mapOnLambda tv red_fun <*>
               mapOnLambda tv fold_fun <*>
               mapM (mapOnSubExp tv) accs <*>
               mapM (mapOnVName tv) arrs)
+mapExpM tv (LoopOp (ScanKernel cs w kernel_size fun input)) =
+  LoopOp <$> (ScanKernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              mapOnKernelSize tv kernel_size <*>
+              mapOnLambda tv fun <*>
+              (zip <$> mapM (mapOnSubExp tv) nes <*>
+                       mapM (mapOnVName tv) arrs))
+  where (nes, arrs) = unzip input
 mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
   SegOp <$> (pure SegReduce <*>
              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
@@ -260,6 +261,17 @@ mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
              mapOnVName tv counts <*>
              mapOnVName tv dataarr <*>
              Data.Traversable.mapM (mapOnVName tv) seg)
+
+mapOnKernelSize :: (Monad m, Applicative m) =>
+                   Mapper flore tlore m -> KernelSize -> m KernelSize
+mapOnKernelSize tv (KernelSize num_workgroups workgroup_size
+                    per_thread_elements num_elements offset_multiple) =
+  KernelSize <$>
+  mapOnSubExp tv num_workgroups <*>
+  mapOnSubExp tv workgroup_size <*>
+  mapOnSubExp tv per_thread_elements <*>
+  mapOnSubExp tv num_elements <*>
+  mapOnSubExp tv offset_multiple
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType

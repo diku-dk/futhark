@@ -281,6 +281,10 @@ data LoopOp lore
     (LambdaT lore)
     [SubExp]
     [VName]
+  | ScanKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    [(SubExp, VName)]
 
 data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]

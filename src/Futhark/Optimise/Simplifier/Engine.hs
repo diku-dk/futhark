@@ -653,24 +653,25 @@ simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
     return $ Kernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
 
-simplifyLoopOp (ReduceKernel cs w
-                (KernelSize num_groups group_size
-                 thread_chunk num_elements offset_multiple)
-                parlam seqlam nes arrs) = do
+simplifyLoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs) = do
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
-  num_groups' <- simplifySubExp num_groups
-  group_size' <- simplifySubExp group_size
-  thread_chunk' <- simplifySubExp thread_chunk
-  num_elements' <- simplifySubExp num_elements
-  offset_multiple' <- simplifySubExp offset_multiple
+  kernel_size' <- simplifyKernelSize kernel_size
   nes' <- mapM simplifySubExp nes
   arrs' <- mapM simplifyVName arrs
   parlam' <- simplifyLambda parlam w' $ map (const Nothing) nes
   seqlam' <- simplifyLambda seqlam w' $ map (const Nothing) nes
-  return $ ReduceKernel cs' w'
-    (KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple')
-    parlam' seqlam' nes' arrs'
+  return $ ReduceKernel cs' w' kernel_size' parlam' seqlam' nes' arrs'
+
+simplifyLoopOp (ScanKernel cs w kernel_size lam input) = do
+  let (nes, arrs) = unzip input
+  cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
+  kernel_size' <- simplifyKernelSize kernel_size
+  nes' <- mapM simplifySubExp nes
+  arrs' <- mapM simplifyVName arrs
+  lam' <- simplifyLambda lam w' $ map Just arrs'
+  return $ ScanKernel cs' w' kernel_size' lam' $ zip nes' arrs'
 
 simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs
@@ -761,6 +762,17 @@ simplifySubExp (Var name) = do
     _              -> do usedName name
                          return $ Var name
 simplifySubExp (Constant v) = return $ Constant v
+
+simplifyKernelSize :: MonadEngine m =>
+                      KernelSize -> m KernelSize
+simplifyKernelSize (KernelSize num_groups group_size
+                    thread_chunk num_elements offset_multiple) = do
+  num_groups' <- simplifySubExp num_groups
+  group_size' <- simplifySubExp group_size
+  thread_chunk' <- simplifySubExp thread_chunk
+  num_elements' <- simplifySubExp num_elements
+  offset_multiple' <- simplifySubExp offset_multiple
+  return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple'
 
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)

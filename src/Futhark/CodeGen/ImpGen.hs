@@ -702,6 +702,8 @@ defCompileLoopOp _ (Kernel {}) = soacError
 
 defCompileLoopOp _ (ReduceKernel {}) = soacError
 
+defCompileLoopOp _ (ScanKernel {}) = soacError
+
 soacError :: ImpM op a
 soacError = throwError "SOAC encountered in code generator; should have been removed by first-order transform."
 

@@ -279,20 +279,30 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
             ppr name <+> text "<" <+> ppr bound
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> apply (map ppr perm)
-  ppr (ReduceKernel cs w
-       (KernelSize num_chunks workgroup_size per_thread_elements num_elements offset_multiple)
-       parfun seqfun es as) =
+  ppr (ReduceKernel cs w kernel_size parfun seqfun es as) =
     ppCertificates' cs <> text "reduceKernel" <>
     parens (ppr w <> comma </>
-            commasep [ppr num_chunks,
-                      ppr workgroup_size,
-                      ppr per_thread_elements,
-                      ppr num_elements,
-                      ppr offset_multiple
-                     ] </>
+            ppr kernel_size </>
             braces (commasep $ map ppr es) <> comma </>
             commasep (map ppr as) </>
             ppr parfun <> comma </> ppr seqfun)
+  ppr (ScanKernel cs w kernel_size fun input) =
+    ppCertificates' cs <> text "scanKernel" <>
+    parens (ppr w <> comma </>
+            ppr kernel_size </>
+            braces (commasep $ map ppr es) <> comma </>
+            commasep (map ppr as) </>
+            ppr fun)
+    where (es, as) = unzip input
+
+instance Pretty KernelSize where
+  ppr (KernelSize num_chunks workgroup_size per_thread_elements num_elements offset_multiple) =
+    commasep [ppr num_chunks,
+              ppr workgroup_size,
+              ppr per_thread_elements,
+              ppr num_elements,
+              ppr offset_multiple
+             ]
 
 instance PrettyLore lore => Pretty (KernelInput lore) where
   ppr inp = ppr (kernelInputType inp) <+>
