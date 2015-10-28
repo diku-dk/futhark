@@ -123,7 +123,7 @@ Library
                    Futhark.Pass.ExpandArrays
                    Futhark.Pass.ExplicitAllocations
                    Futhark.Pass.ExtractKernels
-                   Futhark.Pass.ExtractKernels.BlockedReduction
+                   Futhark.Pass.ExtractKernels.BlockedKernel
                    Futhark.Pass.ExtractKernels.Distribution
                    Futhark.Pass.ExtractKernels.ISRWIM
                    Futhark.Pass.FirstOrderTransform

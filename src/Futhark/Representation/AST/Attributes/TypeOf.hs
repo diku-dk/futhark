@@ -164,12 +164,15 @@ loopOpExtType (Stream _ outersize form lam _ _) =
                 Sequential  acc -> acc
 loopOpExtType (Kernel _ _ _ is _ returns _) =
   staticShapes
-  [ rearrangeType perm (arrayOfShape t outer_shape)
+  [ rearrangeType perm (arrayOfShape t outer_shape) `setUniqueness` Unique
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
 loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
   staticShapes $
   map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
+loopOpExtType (ScanKernel _ width _ lam _) =
+  staticShapes $
+  map (`arrayOfRow` width) $ lambdaReturnType lam
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]

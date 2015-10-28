@@ -169,7 +169,7 @@ import Futhark.Pass
 import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
-import Futhark.Pass.ExtractKernels.BlockedReduction
+import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Util.Log
 import Futhark.Transform.Rename
 
@@ -260,6 +260,10 @@ transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
   red_fun_sequential' <- renameLambda red_fun_sequential
   blockedReduction pat cs w red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
+
+transformBinding (Let pat () (LoopOp (Scan cs w fun input))) = do
+  fun_sequential <- FOT.transformLambda fun
+  blockedScan pat cs w fun_sequential input
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
@@ -431,6 +435,8 @@ unbalancedLambda lam =
         unbalancedBinding bound (LoopOp (Kernel _ w _ _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (ReduceKernel _ w _ _ _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (LoopOp (ScanKernel _ w _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (DoLoop _ merge (ForLoop i iterations) body)) =
           iterations `subExpBound` bound ||
