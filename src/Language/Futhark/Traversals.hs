@@ -186,18 +186,25 @@ mapExpM tv (Concat x ys loc) =
        mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
-mapExpM tv (DoLoop mergepat mergeexp (ForLoop loopvar boundexp) loopbody letbody loc) =
+mapExpM tv (DoLoop mergepat mergeexp form loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
-       (ForLoop <$> mapOnIdent tv loopvar <*> mapOnExp tv boundexp) <*>
-       mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (DoLoop mergepat mergeexp (WhileLoop cond) loopbody letbody loc) =
-  pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
-       (WhileLoop <$> mapOnExp tv cond) <*>
+       mapLoopFormM tv form <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn
 mapExp m = runIdentity . mapExpM m
+
+mapLoopFormM :: (Applicative m, Monad m) =>
+                MapperBase tyf tyt vnf vnt m
+             -> LoopFormBase tyf vnf
+             -> m (LoopFormBase tyt vnt)
+mapLoopFormM tv (For FromUpTo lbound i ubound) =
+  For FromUpTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
+mapLoopFormM tv (For FromDownTo lbound i ubound) =
+  For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
+mapLoopFormM tv (While e) =
+  While <$> mapOnExp tv e
 
 -- | Reification of a left-reduction across a syntax tree.
 data Folder ty vn a m = Folder {

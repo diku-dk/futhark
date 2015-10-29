@@ -290,7 +290,7 @@ Exp  :: { UncheckedExp }
      | true           { Literal (BasicVal $ LogVal True) $1 }
      | false          { Literal (BasicVal $ LogVal False) $1 }
      | checked        { Literal (BasicVal Checked) $1 }
-     | Id             { Var $1 }
+     | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
@@ -420,15 +420,11 @@ Exp  :: { UncheckedExp }
      | Id Index
                       { Index $1 $2 (srclocOf $1) }
 
-     | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t (ForLoop $7 $9) $11 $13 $1) (tupIdExp $3) }
-     | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 (ForLoop $9 $11) $13 $15 $1 }
-
-     | loop '(' TupId ')' '=' while Exp do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t (WhileLoop $7) $9 $11 $1) (tupIdExp $3) }
-     | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
+     | loop '(' TupId ')' '=' LoopForm do Exp in Exp %prec letprec
+                      {% liftM (\t -> DoLoop $3 t $6 $8 $10 $1)
+                               (tupIdExp $3) }
+     | loop '(' TupId '=' Exp ')' '=' LoopForm do Exp in Exp %prec letprec
+                      { DoLoop $3 $5 $8 $10 $12 $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
                          { Stream (MapLike InOrder)  $3 $5 MinChunk $1 }
@@ -452,6 +448,16 @@ Exp  :: { UncheckedExp }
                          { Stream (Sequential $5) $3 $7 MinChunk $1 }
      | streamSeqMax    '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 MaxChunk $1 }
+
+LoopForm : for Id '<' Exp
+           { For FromUpTo (zeroExpression (srclocOf $1)) $2 $4 }
+         | for Exp '<=' Id '<' Exp
+           { For FromUpTo $2 $4 $6 }
+         | for Exp '>' Id '>=' Exp
+           { For FromDownTo $6 $4 $2 }
+         | for Exp '>' Id
+           { For FromDownTo (zeroExpression (srclocOf $1)) $4 $2 }
+         | while Exp      { While $2 }
 
 Index : '[' Exps ']'                  { $2 }
 
@@ -617,6 +623,9 @@ tupIdExp :: UncheckedTupIdent -> ParserMonad UncheckedExp
 tupIdExp (Id ident) = return $ Var ident
 tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
 tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+
+zeroExpression :: SrcLoc -> UncheckedExp
+zeroExpression = Literal (BasicVal $ IntVal 0)
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF

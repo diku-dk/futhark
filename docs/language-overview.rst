@@ -164,6 +164,15 @@ Grammar of First-Order Fragment
      :   "for" variable "<" `e` "do" `e`
      : "in" `e`
    e : "loop" (`p` "=" `e`) =
+     :   "for" `e` "<=" variable "<" `e` "do" `e`
+     : "in" `e`
+   e : "loop" (`p` "=" `e`) =
+     :   "for" `e` ">" variable "do" `e`
+     : "in" `e`
+   e : "loop" (`p` "=" `e`) =
+     :   "for" `e` ">" variable ">=" `e` "do" `e`
+     : "in" `e`
+   e : "loop" (`p` "=" `e`) =
      :   "while" `e` "do" `e`
      : "in" `e`
 
@@ -226,6 +235,11 @@ computations slightly more convenient, but primarily to express
 certain very specific forms of recursive functions, specifically those
 with a fixed iteration count.  This property is used for analysis and
 optimisation by the Futhark compiler.
+
+Apart from the ``i < n`` form, which loops from zero, Futhark also
+supports the ``v <= i < n`` form which starts at ``v``.  We can also
+invert the order of iteration by writitin ``n > i`` or ``n > i >= v``,
+which loops down from the upper bound to the lower.
 
 Apart from ``for``-loops, Futhark also supports ``while`` loops.
 These do not provide as much information to the compiler, but can be

@@ -949,10 +949,10 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
       mergeexp' <- checkExp mergeexp
       return $
         case form of
-          ForLoop (Ident loopvar _ _) _ ->
+          For _ _ (Ident loopvar _ _) _ ->
             let iparam = Ident loopvar (Basic Int) loc
             in (mergeexp', [iparam])
-          WhileLoop _ ->
+          While _ ->
             (mergeexp', [])
 
   -- Check the loop body.
@@ -960,19 +960,20 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   (loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm) <-
     binding bindExtra $ noDataflow $
     case form of
-      ForLoop (Ident loopvar _ loopvarloc) boundexp -> do
-        boundexp' <- require [Basic Int] =<< checkExp boundexp
+      For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
+        lboundexp' <- require [Basic Int] =<< checkExp lboundexp
+        uboundexp' <- require [Basic Int] =<< checkExp uboundexp
         firstscope $ do
           loopbody' <- checkExp loopbody
           let iparam = Ident loopvar (Basic Int) loc
           return (loopbody',
-                  ForLoop (Ident loopvar (Basic Int) loopvarloc) boundexp',
+                  For dir lboundexp' (Ident loopvar (Basic Int) loopvarloc) uboundexp',
                   [(Literal (BasicVal $ IntVal 0) loc, Observe)],
                   id,
                   HS.singleton iparam,
                   [iparam],
                   mempty)
-      WhileLoop condexp -> firstscope $ do
+      While condexp -> firstscope $ do
         (condexp', condflow) <-
           collectDataflow $ require [Basic Bool] =<< checkExp condexp
         (loopbody', bodyflow) <-
@@ -981,7 +982,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                 usageOccurences bodyflow
         cond <- newIdent "loop_cond" (Basic Bool) loc
         return (loopbody',
-                WhileLoop condexp',
+                While condexp',
                 [(Var cond, Observe)],
                 \inner -> LetPat (Id cond) condexp'
                           inner (srclocOf mergeexp),
