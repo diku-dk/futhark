@@ -986,7 +986,7 @@ simplifyDNF terms0 = do
     terms1 <- mapM (simplifyAndOr True) terms0
     let terms' = if [LogCt True] `elem` terms1 then [[LogCt True]]
                  else S.toList $ S.fromList $
-                        filter (not . (== [LogCt False])) terms1
+                        filter (/= [LogCt False]) terms1
     if null terms' then return [[LogCt False]]
     else do
         let len1terms = all ((1==) . length) terms'
@@ -1003,7 +1003,7 @@ simplifyAndOr is_and fs =
          -- False AND p == False
     then return [LogCt $ not is_and]
                     -- (i) p AND p == p,        (ii) True AND p == p
-    else do let fs' = S.toList . S.fromList . filter (not . (==LogCt is_and)) $ fs
+    else do let fs' = S.toList . S.fromList . filter (/=LogCt is_and) $ fs
             if null fs'
             then return [LogCt is_and]
             else do    -- IF p1 => p2 THEN   p1 AND p2 --> p1

@@ -33,12 +33,12 @@ extractPredicates =
           -- FIXME: the simplifier is not good enough at dead code
           -- elimination, and it does not do fixpoint iteration.  This
           -- is horrible.
-          predf' <- return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
+          predf' <- liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
                     renameFun predf
           return [predf',valf]
         simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules

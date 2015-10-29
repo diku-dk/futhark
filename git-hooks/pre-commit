@@ -33,7 +33,7 @@ hlintable() {
 
 futhark_hlint() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -i "Reduce duplication" -i "Use import/export shortcut" "$@"
+    hlint -i "Reduce duplication" -i "Use import/export shortcut" -i "Functor law" "$@"
 }
 
 # Run hlint on changed files.
