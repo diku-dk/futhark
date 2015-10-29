@@ -96,6 +96,13 @@ internaliseBodyBindings e m = do
     collectBindings $ m =<< internaliseExp "res" e
   (,x) <$> mkBodyM (otherbnds <> bnds) res
 
+extraBodyBindings :: [Binding]
+                  -> InternaliseM (Body, a)
+                  -> InternaliseM (Body, a)
+extraBodyBindings bnds m = do
+  (body, x) <- m
+  return (insertBindings bnds body, x)
+
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
 internaliseExp _ (E.Var var) = do
@@ -179,11 +186,28 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit_ts <- mapM subExpType mergeinit
 
   (wrap, form_contents) <- case form of
-    E.ForLoop i bound -> do
-      bound' <- internaliseExp1 "bound" bound
+    E.For dir lbound i ubound -> do
+      lbound' <- internaliseExp1 "lower_bound" lbound
+      ubound' <- internaliseExp1 "upper_bound" ubound
+      num_iterations <- letSubExp "num_iterations" $
+                        PrimOp $ I.BinOp I.Minus ubound' lbound' I.Int
       i' <- internaliseIdent i
-      return (bindingIdentTypes [I.Ident i' $ I.Basic I.Int], Left (i', bound'))
-    E.WhileLoop cond ->
+      j <- newVName $ baseString i'
+      let i_ident = I.Ident i' $ I.Basic I.Int
+      i_bnds <- case dir of
+        E.FromUpTo ->
+          return [mkLet' [] [i_ident] $
+                  I.PrimOp $ I.BinOp I.Plus lbound' (I.Var j) I.Int]
+        E.FromDownTo -> do
+          upper_bound_less_one <-
+            letSubExp "upper_bound_less_one" $
+            PrimOp $ I.BinOp I.Minus ubound' (intconst 1) I.Int
+          return [mkLet' [] [i_ident] $
+                  I.PrimOp $ I.BinOp I.Minus upper_bound_less_one (I.Var j) I.Int]
+      return ( bindingIdentTypes [I.Ident j $ I.Basic I.Int, i_ident] .
+               extraBodyBindings i_bnds
+             , Left (j, num_iterations))
+    E.While cond ->
       return (id, Right cond)
 
   mergeparams <- map E.toParam <$> flattenPattern mergepat
@@ -200,9 +224,9 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                       (map I.identType mergepat')
                       sets
       case form_contents of
-        Left (i', bound') ->
-          return (resultBody $ shapeargs ++ ses,
-                  (I.ForLoop i' bound',
+        Left (i', bound) ->
+             return (resultBody $ shapeargs ++ ses,
+                  (I.ForLoop i' bound,
                    shapepat,
                    mergepat',
                    map I.identName mergepat',

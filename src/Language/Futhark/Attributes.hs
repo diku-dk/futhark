@@ -757,7 +757,7 @@ progNames = execWriter . mapM funNames . progFunctions
 
         expNames e@(LetWith dest _ _ _ _ _) =
           one dest >> walkExpM names e
-        expNames e@(DoLoop _ _ (ForLoop i _) _ _ _) =
+        expNames e@(DoLoop _ _ (For _ _ i _) _ _ _) =
           one i >> walkExpM names e
         expNames e@(DoLoop {}) =
           walkExpM names e
@@ -780,10 +780,8 @@ mapTails f g (LetPat pat e body loc) =
   LetPat pat e (mapTails f g body) loc
 mapTails f g (LetWith dest src idxs ve body loc) =
   LetWith dest src idxs ve (mapTails f g body) loc
-mapTails f g (DoLoop pat me (ForLoop i bound) loopbody body loc) =
-  DoLoop pat me (ForLoop i bound) loopbody (mapTails f g body) loc
-mapTails f g (DoLoop pat me (WhileLoop cond) loopbody body loc) =
-  DoLoop pat me (WhileLoop cond) loopbody (mapTails f g body) loc
+mapTails f g (DoLoop pat me form loopbody body loc) =
+  DoLoop pat me form loopbody (mapTails f g body) loc
 mapTails f g (If c te fe t loc) =
   If c (mapTails f g te) (mapTails f g fe) (g t) loc
 mapTails f _ e = f e
@@ -810,13 +808,14 @@ freeInExp = execWriter . expFree
           mapM_ expFree idxs
           expFree ve
           binding (HS.singleton dest) $ expFree body
-        expFree (DoLoop pat mergeexp (ForLoop i boundexp) loopbody letbody _) = do
+        expFree (DoLoop pat mergeexp (For _ lbound i ubound) loopbody letbody _) = do
           expFree mergeexp
-          expFree boundexp
+          expFree lbound
+          expFree ubound
           binding (i `HS.insert` patIdentSet pat) $ do
             expFree loopbody
             expFree letbody
-        expFree (DoLoop pat mergeexp (WhileLoop cond) loopbody letbody _) = do
+        expFree (DoLoop pat mergeexp (While cond) loopbody letbody _) = do
           expFree mergeexp
           binding (patIdentSet pat) $ do
             expFree cond

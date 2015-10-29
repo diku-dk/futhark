@@ -254,14 +254,18 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+> equals <+>
-    (case form of
-       ForLoop i bound ->
-         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
-       WhileLoop cond ->
-         text "while" <+> ppr cond) <+>
+    ppr form <+>
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
+
+instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LoopFormBase ty vn) where
+  ppr (For FromUpTo lbound i ubound) =
+    text "for" <+> align (ppr lbound) <+> ppr i <+> text "<" <+> align (ppr ubound)
+  ppr (For FromDownTo lbound i ubound) =
+    text "for" <+> align (ppr ubound) <+> ppr i <+> text ">" <+> align (ppr lbound)
+  ppr (While cond) =
+    text "while" <+> ppr cond
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident

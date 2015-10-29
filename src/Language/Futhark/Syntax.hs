@@ -32,6 +32,7 @@ module Language.Futhark.Syntax
   , ParamBase
   , ExpBase(..)
   , LoopFormBase (..)
+  , ForLoopDirection (..)
   , LambdaBase(..)
   , TupIdentBase(..)
   , StreamForm(..)
@@ -482,9 +483,16 @@ instance Located (ExpBase ty vn) where
   locOf (Stream _ _ _ _   pos) = locOf pos
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
-data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
-                        | WhileLoop (ExpBase ty vn)
+data LoopFormBase ty vn = For ForLoopDirection (ExpBase ty vn) (IdentBase ty vn) (ExpBase ty vn)
+                        | While (ExpBase ty vn)
                           deriving (Eq, Ord, Show)
+
+-- | The iteration order of a @for@-loop.
+data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
+                                 -- just below the upper bound.
+                      | FromDownTo -- ^ Iterates from just below the
+                                   -- upper bound to the lower bound.
+                        deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc
