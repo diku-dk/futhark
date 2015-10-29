@@ -128,12 +128,12 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
         substInPatElem subst patElem = return $ substituteNames subst patElem
 
 simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
+simplifyShapeFun shapef = liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
                           renameFun shapef
   where simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules
 
