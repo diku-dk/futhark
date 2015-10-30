@@ -962,9 +962,10 @@ checkLoopOp (ScanKernel cs w kernel_size fun input) = do
   require [Basic Int] w
   checkKernelSize kernel_size
   let (nes, arrs) = unzip input
+      other_index_arg = (Basic Int, mempty, mempty)
   arrargs <- checkSOACArrayArgs w arrs
   accargs <- mapM checkArg nes
-  checkLambda fun $ accargs ++ arrargs
+  checkLambda fun $ other_index_arg : accargs ++ arrargs
   let startt      = map argType accargs
       intupletype = map argType arrargs
       funret      = lambdaReturnType fun

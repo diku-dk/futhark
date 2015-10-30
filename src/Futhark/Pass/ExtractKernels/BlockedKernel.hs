@@ -159,9 +159,13 @@ blockedScan :: (MonadFreshNames m, HasTypeEnv m) =>
             -> m [Binding]
 blockedScan pat cs w lam input = runBinder_ $ do
   first_scan_size <- blockedKernelSize w
+  other_index <- newVName "other_index"
+  let other_index_param = Param (Ident other_index $ Basic Int) ()
+      first_scan_lam = lam { lambdaParams = other_index_param : lambdaParams lam }
+
   in_workgroup_scanned <-
     letTupExp "in_workgroup_scanned" $
-    LoopOp $ ScanKernel cs w first_scan_size lam input
+    LoopOp $ ScanKernel cs w first_scan_size first_scan_lam input
 
   let num_groups = kernelWorkgroups first_scan_size
 
@@ -186,10 +190,10 @@ blockedScan pat cs w lam input = runBinder_ $ do
     letInPlace "last_in_groups" [] last_in_group_pre [zero] $ PrimOp $ SubExp ne
 
   let second_scan_size = KernelSize one num_groups one num_groups one
-  lam' <- renameLambda lam
+  second_scan_lam <- renameLambda first_scan_lam
   group_offsets <-
     letTupExp "group_offsets" $
-    LoopOp $ ScanKernel cs num_groups second_scan_size lam' $
+    LoopOp $ ScanKernel cs num_groups second_scan_size second_scan_lam $
     zip nes last_in_groups'
 
   lam'' <- renameLambda lam
