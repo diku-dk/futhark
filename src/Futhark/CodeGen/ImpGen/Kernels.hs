@@ -98,7 +98,6 @@ kernelCompiler
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
-    global_id <- newVName "global_id"
     wave_size <- newVName "wave_size"
     skip_waves <- newVName "skip_waves"
 
@@ -125,7 +124,6 @@ kernelCompiler
       ImpGen.withBasicVar local_id Int $
       ImpGen.declaringBasicVar local_id Int $
       ImpGen.declaringBasicVar group_id Int $
-      ImpGen.declaringBasicVar global_id Int $
       ImpGen.declaringBasicVar wave_size Int $
       ImpGen.declaringBasicVar skip_waves Int $
       ImpGen.declaringBasicVar (lambdaIndex reduce_lam) Int $
@@ -136,10 +134,9 @@ kernelCompiler
         ImpGen.emit $
           Imp.Op (Imp.GetLocalId local_id 0) <>
           Imp.Op (Imp.GetGroupId group_id 0) <>
-          Imp.Op (Imp.GetGlobalId global_id 0) <>
-          Imp.Op (Imp.GetWaveSize wave_size) <>
-          Imp.SetScalar (lambdaIndex reduce_lam) (Imp.ScalarVar global_id) <>
-          Imp.SetScalar (lambdaIndex fold_lam) (Imp.ScalarVar global_id)
+          Imp.Op (Imp.GetGlobalId (lambdaIndex reduce_lam) 0) <>
+          Imp.Op (Imp.GetGlobalId (lambdaIndex fold_lam) 0) <>
+          Imp.Op (Imp.GetWaveSize wave_size)
 
         reduce_acc_dest <- ImpGen.destinationFromParams reduce_acc_params
 
@@ -175,19 +172,10 @@ kernelCompiler
                                lambdaIndex reduce_lam,
                                offset,
                                local_id,
-                               group_id,
-                               global_id] ++
+                               group_id] ++
                               map Imp.paramName acc_mem_params
 
         return $ \prologue -> do
-          uses <- computeKernelUses dest [freeIn prologue,
-                                          freeIn fold_op,
-                                          freeIn write_fold_result,
-                                          freeIn reduce_op,
-                                          freeIn write_result
-                                          ]
-                  bound_in_kernel
-
           -- wave_id, in_wave_id and num_waves will all be inlined
           -- whereever they are used.  This leads to ugly code, but
           -- declaring them as variables (and setting them) early in
@@ -250,6 +238,8 @@ kernelCompiler
                               in_wave_reductions,
                               cross_wave_reductions,
                               write_group_result]
+
+          uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
           ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
             { Imp.kernelBody = body
