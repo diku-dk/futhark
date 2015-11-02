@@ -47,6 +47,8 @@ module Futhark.CodeGen.ImpGen
   , indexArray
   , fullyIndexArray
   , fullyIndexArray'
+  , readFromArray
+  , writeToArray
   , varIndex
   , basicScalarSize
   , scalExpToImpExp
@@ -474,10 +476,9 @@ defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e space) = do
 
 defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
   t <- lookupType src
-  when (length idxs == arrayRank t) $ do
-    (srcmem, space, srcoffset) <-
-      fullyIndexArray src $ map (`SE.subExpToScalExp` Int) idxs
-    writeExp target $ Imp.Index srcmem srcoffset (elemType t) space
+  when (length idxs == arrayRank t) $
+    writeExp target =<<
+    readFromArray src (map (`SE.subExpToScalExp` Int) idxs)
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory destlocation) _])
@@ -582,7 +583,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
     outer_dim <- compileSubExp <$> arraySize 0 <$> lookupType flags
     -- We will use 'i' to index the flag array and the value array.
     -- Note that they have the same outer size ('outer_dim').
-    (flagmem, space, flagoffset) <- fullyIndexArray flags [varIndex i]
+    read_flags_i <- readFromArray flags [varIndex i]
 
     -- First, for each of the 'n' output arrays, we compute the final
     -- size.  This is done by iterating through the flag array, but
@@ -606,7 +607,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
           code
         sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
     emit $ Imp.For i outer_dim $
-      Imp.SetScalar eqclass (Imp.Index flagmem flagoffset Int space) <>
+      Imp.SetScalar eqclass read_flags_i <>
       sizeLoopBody
 
     -- We can now compute the starting offsets of each of the
@@ -648,7 +649,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
           code
         writeLoopBody = HM.foldlWithKey' mkWriteLoopBody Imp.Skip offsets
     emit $ Imp.For i outer_dim $
-      Imp.SetScalar eqclass (Imp.Index flagmem flagoffset Int space) <>
+      Imp.SetScalar eqclass read_flags_i <>
       writeLoopBody
     return ()
   where arrDestLoc (ArrayDestination (CopyIntoMemory destloc) _) =
@@ -999,6 +1000,22 @@ fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
   case scalExpToImpExp $ IxFun.index ixfun indices $ basicScalarSize bt of
     Nothing -> throwError "fullyIndexArray': Cannot turn scalexp into impexp"
     Just e -> return (mem, space, bytes e)
+
+readFromArray :: VName -> [ScalExp]
+              -> ImpM op Imp.Exp
+readFromArray name indices = do
+  arr <- lookupArray name
+  (mem, space, i) <-
+    fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
+  return $ Imp.Index mem i (entryArrayElemType arr) space
+
+writeToArray :: VName -> [ScalExp] -> Imp.Exp
+             -> ImpM op ()
+writeToArray name indices v = do
+  arr <- lookupArray name
+  (mem, space, i) <-
+    fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
+  emit $ Imp.Write mem i (entryArrayElemType arr) space v
 
 indexArray :: MemLocation -> [ScalExp]
            -> ImpM op MemLocation
