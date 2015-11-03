@@ -862,6 +862,14 @@ compileCode (DeclareScalar name t) = do
   let ct = scalarTypeToCType t
   decl [C.cdecl|$ty:ct $id:name;|]
 
+-- For assignments of the form 'x = x OP e', we generate C assignment
+-- operators to make the resulting code slightly nicer.  This has no
+-- effect on performance.
+compileCode (SetScalar dest (BinOp op (ScalarVar x) y))
+  | dest == x, Just f <- assignmentOperator op = do
+      y' <- compileExp y
+      stm [C.cstm|$exp:(f dest y');|]
+
 compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
@@ -899,3 +907,9 @@ compileFunBody outputs code = do
 ppArrayType :: BasicType -> Int -> String
 ppArrayType t 0 = pretty t
 ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"
+
+assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
+assignmentOperator Plus  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
+assignmentOperator Minus = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
+assignmentOperator Times = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
+assignmentOperator _     = Nothing
