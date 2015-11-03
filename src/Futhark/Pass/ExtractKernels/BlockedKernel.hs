@@ -172,29 +172,38 @@ blockedScan pat cs w lam input = runBinder_ $ do
   lasts_map_index <- newVName "lasts_map_index"
   i <- newVName "i"
   lasts_map_body <- runBodyBinder $ do
-    last_in_group_index <-
-      letSubExp "last_in_group_index" $
-      PrimOp $ BinOp Times
-      (Var i) (kernelWorkgroupSize first_scan_size) Int
-    group_lasts <- forM in_workgroup_scanned $ \arr ->
-      letExp ("last_in_" ++ baseString arr) $
-      PrimOp $ Index [] arr [last_in_group_index]
+    read_lasts <- runBodyBinder $ do
+      last_in_group_index <-
+        letSubExp "last_in_group_index" =<<
+        eBinOp Minus
+        (eBinOp Times
+         (eSubExp $ Var i)
+         (eSubExp $ kernelWorkgroupSize first_scan_size)
+         Int)
+        (eSubExp $ intconst 1)
+        Int
+      eBody [pure $ PrimOp $ Index [] arr [last_in_group_index]
+            | arr <- in_workgroup_scanned ]
+
+    group_lasts <-
+      letTupExp "group_lasts" =<<
+      eIf (eBinOp Less (eSubExp $ intconst 0) (eSubExp $ Var i) Bool)
+      (pure read_lasts)
+      (eBody $ map eSubExp nes)
     return $ resultBody $ map Var group_lasts
   let lasts_map_returns = [ (rt, [0..arrayRank rt])
                           | rt <- lambdaReturnType lam ]
   last_in_groups <-
-    letTupExp "last_in_groups_pre" $
+    letTupExp "last_in_groups" $
     LoopOp $ Kernel [] num_groups lasts_map_index
     [(i, num_groups)] [] lasts_map_returns lasts_map_body
-  last_in_groups' <- forM (zip last_in_groups nes) $ \(last_in_group_pre, ne) ->
-    letInPlace "last_in_groups" [] last_in_group_pre [zero] $ PrimOp $ SubExp ne
 
   let second_scan_size = KernelSize one num_groups one num_groups one
   second_scan_lam <- renameLambda first_scan_lam
   group_offsets <-
     letTupExp "group_offsets" $
     LoopOp $ ScanKernel cs num_groups second_scan_size second_scan_lam $
-    zip nes last_in_groups'
+    zip nes last_in_groups
 
   lam'' <- renameLambda lam
   result_map_index <- newVName "result_map_index"
@@ -208,7 +217,7 @@ blockedScan pat cs w lam input = runBinder_ $ do
   result_map_body <- runBodyBinder $ do
     group_id <-
       letSubExp "group_id" $
-      PrimOp $ BinOp Rem
+      PrimOp $ BinOp Quot
       (Var j) (kernelWorkgroupSize first_scan_size) Int
     forM_ (zip acc_params group_offsets) $ \(acc, arr) ->
       letBindNames'_ [paramName acc] $
@@ -218,6 +227,5 @@ blockedScan pat cs w lam input = runBinder_ $ do
                            | rt <- lambdaReturnType lam ]
   letBind pat $ LoopOp $ Kernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
-  where zero = Constant $ IntVal 0
-        one = Constant $ IntVal 1
+  where one = Constant $ IntVal 1
         (nes, _) = unzip input
