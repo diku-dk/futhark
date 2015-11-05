@@ -39,8 +39,7 @@ fun real binom(int expiry) =
   let dPow = map(d **, map(toFloat, map(n-, iota(n+1)))) in
   let st = map(toFloat(s0())*, map(*, zip(uPow, dPow))) in
   let finalPut = map(maxReal(0.0), map(toFloat(strike())-, st)) in
-  loop (put = finalPut) = for j < n do
-    let i = n - j in
+  loop (put = finalPut) = for n+1 > i >= 1 do
     let {uPow_start, _} = split((i), uPow) in
     let {_, dPow_end} = split((n+1-i), dPow) in
     let st = map(toFloat(s0())*, map(*, zip(uPow_start, dPow_end))) in
