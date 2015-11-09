@@ -81,6 +81,8 @@ keyword s =
     "with"         -> WITH
     "int"          -> INT
     "real"         -> REAL
+    "float32"      -> FLOAT32
+    "float64"      -> FLOAT64
     "bool"         -> BOOL
     "cert"         -> CERT
     "char"         -> CHAR

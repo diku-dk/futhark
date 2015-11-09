@@ -3,11 +3,13 @@
 Language Reference
 ==================
 
-The builtin types in Futhark are ``int``, ``real``, ``bool`` and
-``char``, as well as their combination in tuples and arrays.  An
-``int`` is currently 32 bits and ``real`` is by default a
-double-precision float (64 bits).  Some compiler frontends permit
-configuration of whether ``real`` maps to a 32-bit or 64-bit float.
+The builtin types in Futhark are ``int``, ``real``, ``float32``,
+``float64``, ``bool`` and ``char``, as well as their combination in
+tuples and arrays.  An ``int`` is currently 32 bits and ``real`` is by
+default a double-precision float (64 bits).  Some compiler frontends
+permit configuration of whether ``real`` maps to a 32-bit or 64-bit
+float.  A ``float32`` is always a single-precision float and a
+``float64`` is a double-precision float.
 
 The following list describes every syntactical language construct in
 the language.  For convenience, we will sometimes talk of expressions
