@@ -74,6 +74,8 @@ import Language.Futhark.Parser.Lexer
       cert            { L $$ CERT }
       char            { L $$ CHAR }
       real            { L $$ REAL }
+      float32         { L $$ FLOAT32 }
+      float64         { L $$ FLOAT64 }
 
       id              { L _ (ID _) }
 
@@ -270,6 +272,8 @@ BasicType : int           { Int }
           | bool          { Bool }
           | cert          { Cert }
           | char          { Char }
+          | float32       { Float32 }
+          | float64       { Float64 }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }

@@ -22,6 +22,8 @@ data Token = IF
            | CERT
            | CHAR
            | REAL
+           | FLOAT32
+           | FLOAT64
            | ID { idName :: Name }
            | STRINGLIT { stringLit :: String }
            | INTLIT { intLit :: Int32 }
