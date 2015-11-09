@@ -265,13 +265,14 @@ mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    Mapper flore tlore m -> KernelSize -> m KernelSize
 mapOnKernelSize tv (KernelSize num_workgroups workgroup_size
-                    per_thread_elements num_elements offset_multiple) =
+                    per_thread_elements num_elements offset_multiple num_threads) =
   KernelSize <$>
   mapOnSubExp tv num_workgroups <*>
   mapOnSubExp tv workgroup_size <*>
   mapOnSubExp tv per_thread_elements <*>
   mapOnSubExp tv num_elements <*>
-  mapOnSubExp tv offset_multiple
+  mapOnSubExp tv offset_multiple <*>
+  mapOnSubExp tv num_threads
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType

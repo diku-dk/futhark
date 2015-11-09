@@ -240,12 +240,13 @@ instance FreeIn LoopForm where
 
 instance FreeIn KernelSize where
   freeIn (KernelSize num_workgroups workgroup_size elems_per_thread
-          num_elems thread_offset) =
+          num_elems thread_offset num_threads) =
     mconcat $ map freeIn [num_workgroups,
                           workgroup_size,
                           elems_per_thread,
                           num_elems,
-                          thread_offset]
+                          thread_offset,
+                          num_threads]
 
 instance FreeIn d => FreeIn (DimChange d) where
   freeIn = Data.Foldable.foldMap freeIn

@@ -305,6 +305,7 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelElementsPerThread :: SubExp
                              , kernelTotalElements :: SubExp
                              , kernelThreadOffsetMultiple :: SubExp
+                             , kernelNumThreads :: SubExp
                              }
                 deriving (Eq, Ord, Show)
 
