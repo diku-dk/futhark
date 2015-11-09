@@ -1213,13 +1213,14 @@ checkPolyBinOp op tl e1 e2 t = do
 
 checkKernelSize :: Checkable lore =>
                    KernelSize -> TypeM lore ()
-checkKernelSize (KernelSize num_groups workgroup_size
-                 per_thread_elements num_elements offset_multiple) = do
+checkKernelSize (KernelSize num_groups workgroup_size per_thread_elements
+                 num_elements offset_multiple num_threads) = do
   require [Basic Int] num_groups
   require [Basic Int] workgroup_size
   require [Basic Int] per_thread_elements
   require [Basic Int] num_elements
   require [Basic Int] offset_multiple
+  require [Basic Int] num_threads
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b

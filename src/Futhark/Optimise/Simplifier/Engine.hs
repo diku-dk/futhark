@@ -765,14 +765,15 @@ simplifySubExp (Constant v) = return $ Constant v
 
 simplifyKernelSize :: MonadEngine m =>
                       KernelSize -> m KernelSize
-simplifyKernelSize (KernelSize num_groups group_size
-                    thread_chunk num_elements offset_multiple) = do
+simplifyKernelSize (KernelSize num_groups group_size thread_chunk
+                    num_elements offset_multiple num_threads) = do
   num_groups' <- simplifySubExp num_groups
   group_size' <- simplifySubExp group_size
   thread_chunk' <- simplifySubExp thread_chunk
   num_elements' <- simplifySubExp num_elements
   offset_multiple' <- simplifySubExp offset_multiple
-  return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple'
+  num_threads' <- simplifySubExp num_threads
+  return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
 
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)

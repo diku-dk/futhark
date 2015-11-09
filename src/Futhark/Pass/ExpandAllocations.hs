@@ -72,24 +72,18 @@ transformExp (LoopOp (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs))
     Right (fold_lam_body', fold_lam_thread_allocs) <-
       extractKernelAllocations bound_in_fold_lam $ lambdaBody fold_lam = do
 
-  num_threads <- newVName "num_threads"
-  let num_threads_pat = Pattern [] [PatElem (Ident num_threads $ Basic Int) BindVar Scalar]
-      num_threads_bnd = Let num_threads_pat () $
-                        PrimOp $ BinOp Times num_chunks group_size Int
-
   (red_alloc_bnds, red_alloc_offsets) <-
-    expandedAllocations (Var num_threads) (lambdaIndex red_lam) red_lam_thread_allocs
+    expandedAllocations num_threads (lambdaIndex red_lam) red_lam_thread_allocs
   (fold_alloc_bnds, fold_alloc_offsets) <-
-    expandedAllocations (Var num_threads) (lambdaIndex fold_lam) fold_lam_thread_allocs
+    expandedAllocations num_threads (lambdaIndex fold_lam) fold_lam_thread_allocs
 
   let red_lam_body'' = offsetMemorySummariesInBody red_alloc_offsets red_lam_body'
       fold_lam_body'' = offsetMemorySummariesInBody fold_alloc_offsets fold_lam_body'
       red_lam' = red_lam { lambdaBody = red_lam_body'' }
       fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
-  return (num_threads_bnd : red_alloc_bnds <> fold_alloc_bnds,
+  return (red_alloc_bnds <> fold_alloc_bnds,
           LoopOp $ ReduceKernel cs w kernel_size red_lam' fold_lam' nes arrs)
-  where num_chunks = kernelWorkgroups kernel_size
-        group_size = kernelWorkgroupSize kernel_size
+  where num_threads = kernelNumThreads kernel_size
 
         bound_in_red_lam = HS.fromList $
                            lambdaIndex red_lam : map paramName (lambdaParams red_lam)

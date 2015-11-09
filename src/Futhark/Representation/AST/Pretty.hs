@@ -296,12 +296,15 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     where (es, as) = unzip input
 
 instance Pretty KernelSize where
-  ppr (KernelSize num_chunks workgroup_size per_thread_elements num_elements offset_multiple) =
+  ppr (KernelSize
+       num_chunks workgroup_size per_thread_elements
+       num_elements offset_multiple num_threads) =
     commasep [ppr num_chunks,
               ppr workgroup_size,
               ppr per_thread_elements,
               ppr num_elements,
-              ppr offset_multiple
+              ppr offset_multiple,
+              ppr num_threads
              ]
 
 instance PrettyLore lore => Pretty (KernelInput lore) where

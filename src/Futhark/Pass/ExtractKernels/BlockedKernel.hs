@@ -7,6 +7,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 import Control.Applicative
 import Control.Monad
 import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -29,7 +30,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   let one = Constant $ IntVal 1
       num_chunks = kernelWorkgroups step_one_size
-      step_two_size = KernelSize one num_chunks one num_chunks one
+      step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
 
   loop_iterator <- newVName "i"
   seq_lam_index <- newVName "lam_index"
@@ -149,7 +150,7 @@ blockedKernelSize w = do
     letSubExp "per_thread_elements" =<<
     eDivRoundingUp (eSubExp w) (eSubExp num_threads)
 
-  return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements
+  return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
 blockedScan :: (MonadFreshNames m, HasTypeEnv m) =>
                Pattern
@@ -160,72 +161,120 @@ blockedScan :: (MonadFreshNames m, HasTypeEnv m) =>
 blockedScan pat cs w lam input = runBinder_ $ do
   first_scan_size <- blockedKernelSize w
   other_index <- newVName "other_index"
-  let other_index_param = Param (Ident other_index $ Basic Int) ()
+  let num_groups = kernelWorkgroups first_scan_size
+      group_size = kernelWorkgroupSize first_scan_size
+      num_threads = kernelNumThreads first_scan_size
+      elems_per_thread = kernelElementsPerThread first_scan_size
+      other_index_param = Param (Ident other_index $ Basic Int) ()
       first_scan_lam = lam { lambdaParams = other_index_param : lambdaParams lam }
 
-  in_workgroup_scanned <-
-    letTupExp "in_workgroup_scanned" $
-    LoopOp $ ScanKernel cs w first_scan_size first_scan_lam input
+  sequential_scan_result <-
+    letTupExp "sequentially_scanned" $
+      LoopOp $ ScanKernel cs w first_scan_size first_scan_lam input
 
-  let num_groups = kernelWorkgroups first_scan_size
+  let (sequentially_scanned, all_group_sums) =
+        splitAt (length input) sequential_scan_result
 
-  lasts_map_index <- newVName "lasts_map_index"
-  i <- newVName "i"
-  lasts_map_body <- runBodyBinder $ do
-    read_lasts <- runBodyBinder $ do
-      last_in_group_index <-
-        letSubExp "last_in_group_index" =<<
-        eBinOp Minus
-        (eBinOp Times
-         (eSubExp $ Var i)
-         (eSubExp $ kernelWorkgroupSize first_scan_size)
-         Int)
-        (eSubExp $ intconst 1)
-        Int
-      eBody [pure $ PrimOp $ Index [] arr [last_in_group_index]
-            | arr <- in_workgroup_scanned ]
+  last_in_preceding_groups <- do
+    lasts_map_index <- newVName "lasts_map_index"
+    group_id <- newVName "group_id"
+    lasts_map_body <- runBodyBinder $ do
+      read_lasts <- runBodyBinder $ do
+        last_in_group_index <-
+          letSubExp "last_in_group_index" $
+          PrimOp $ BinOp Minus group_size (intconst 1) Int
+        carry_in_index <-
+          letSubExp "preceding_group" $ PrimOp $ BinOp Minus (Var group_id) one Int
+        let getLastInPrevious sums =
+              return $ PrimOp $ Index [] sums [carry_in_index, last_in_group_index]
+        eBody $ map getLastInPrevious all_group_sums
 
-    group_lasts <-
-      letTupExp "group_lasts" =<<
-      eIf (eBinOp Less (eSubExp $ intconst 0) (eSubExp $ Var i) Bool)
-      (pure read_lasts)
-      (eBody $ map eSubExp nes)
-    return $ resultBody $ map Var group_lasts
-  let lasts_map_returns = [ (rt, [0..arrayRank rt])
-                          | rt <- lambdaReturnType lam ]
-  last_in_groups <-
-    letTupExp "last_in_groups" $
-    LoopOp $ Kernel [] num_groups lasts_map_index
-    [(i, num_groups)] [] lasts_map_returns lasts_map_body
+      group_lasts <-
+        letTupExp "group_lasts" =<<
+        eIf (eBinOp Less (eSubExp $ intconst 0) (eSubExp $ Var group_id) Bool)
+        (pure read_lasts)
+        (eBody $ map eSubExp nes)
+      return $ resultBody $ map Var group_lasts
+    let lasts_map_returns = [ (rt, [0..arrayRank rt])
+                            | rt <- lambdaReturnType lam ]
+    letTupExp "last_in_preceding_groups" $
+      LoopOp $ Kernel [] num_groups lasts_map_index
+      [(group_id, num_groups)] [] lasts_map_returns lasts_map_body
 
-  let second_scan_size = KernelSize one num_groups one num_groups one
-  second_scan_lam <- renameLambda first_scan_lam
-  group_offsets <-
-    letTupExp "group_offsets" $
-    LoopOp $ ScanKernel cs num_groups second_scan_size second_scan_lam $
-    zip nes last_in_groups
+  group_carry_in <- do
+    let second_scan_size = KernelSize one num_groups one num_groups one num_groups
+    second_scan_lam <- renameLambda first_scan_lam
+    carry_in_scan_result <-
+      letTupExp "group_carry_in_and_junk" $
+      LoopOp $ ScanKernel cs num_groups second_scan_size second_scan_lam $
+      zip nes last_in_preceding_groups
+    forM (snd $ splitAt (length input) carry_in_scan_result) $ \arr ->
+      letExp "group_carry_in" $
+      PrimOp $ Index [] arr [zero]
 
-  lam'' <- renameLambda lam
+  chunk_carry_out <- do
+    lam'' <- renameLambda lam
+    chunk_carry_out_index <- newVName "chunk_carry_out_index"
+    group_id <- newVName "group_id"
+    elem_id <- newVName "elem_id"
+    let (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam''
+        chunk_carry_out_inputs =
+          zipWith (mkKernelInput [Var group_id]) acc_params group_carry_in ++
+          zipWith (mkKernelInput [Var group_id, Var elem_id]) arr_params all_group_sums
+
+    let chunk_carry_out_returns = [ (rt, [0..arrayRank rt+1])
+                                 | rt <- lambdaReturnType lam ]
+    letTupExp "chunk_carry_out" $
+      LoopOp $ Kernel [] num_threads chunk_carry_out_index
+      [(group_id, num_groups),
+       (elem_id, group_size)]
+      chunk_carry_out_inputs chunk_carry_out_returns $ lambdaBody lam''
+
+  chunk_carry_out_flat <- forM chunk_carry_out $ \arr ->
+    letExp "chunk_carry_out_flat" $
+    PrimOp $ Reshape [] [DimNew num_threads] arr
+
+  lam''' <- renameLambda lam
   result_map_index <- newVName "result_map_index"
-  let j = lambdaIndex lam''
-      (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam''
-      mkResultInput p arr = KernelInput { kernelInputParam = p
-                                        , kernelInputArray = arr
-                                        , kernelInputIndices = [Var j]
-                                        }
-      result_inputs = zipWith mkResultInput arr_params in_workgroup_scanned
-  result_map_body <- runBodyBinder $ do
-    group_id <-
-      letSubExp "group_id" $
-      PrimOp $ BinOp Quot
-      (Var j) (kernelWorkgroupSize first_scan_size) Int
-    forM_ (zip acc_params group_offsets) $ \(acc, arr) ->
-      letBindNames'_ [paramName acc] $
-      PrimOp $ Index [] arr [group_id]
-    resultBody <$> bodyBind (lambdaBody lam'')
+  let j = lambdaIndex lam'''
+      (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam'''
+      result_inputs = zipWith (mkKernelInput [Var j]) arr_params sequentially_scanned
+
+  result_map_body <- runBodyBinder $
+                     localTypeEnv (inputTypes result_inputs)  $ do
+    thread_id <-
+      letSubExp "thread_id" $
+      PrimOp $ BinOp Quot (Var j) elems_per_thread Int
+    let do_nothing =
+          pure $ resultBody $ map (Var . paramName) arr_params
+        add_carry_in = runBodyBinder $ do
+          forM_ (zip acc_params chunk_carry_out_flat) $ \(p, arr) -> do
+            carry_in_index <-
+              letSubExp "carry_in_index" $
+              PrimOp $ BinOp Minus thread_id one Int
+            letBindNames'_ [paramName p] $
+              PrimOp $ Index [] arr [carry_in_index]
+          return $ lambdaBody lam'''
+    group_lasts <-
+      letTupExp "final_result" =<<
+        eIf (eBinOp Equal (eSubExp $ intconst 0) (eSubExp $ Var j) Bool)
+        do_nothing
+        add_carry_in
+    return $ resultBody $ map Var group_lasts
   let result_map_returns = [ (rt, [0..arrayRank rt])
                            | rt <- lambdaReturnType lam ]
   letBind pat $ LoopOp $ Kernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
   where one = Constant $ IntVal 1
+        zero = Constant $ IntVal 0
         (nes, _) = unzip input
+
+        mkKernelInput :: [SubExp] -> FParam -> VName -> KernelInput Basic
+        mkKernelInput indices p arr = KernelInput { kernelInputParam = p
+                                                  , kernelInputArray = arr
+                                                  , kernelInputIndices = indices
+                                                  }
+
+        inputTypes inps = HM.fromList [ (kernelInputName inp,
+                                         kernelInputType inp)
+                                      | inp <- inps ]
