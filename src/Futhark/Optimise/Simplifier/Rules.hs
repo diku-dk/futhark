@@ -562,6 +562,18 @@ simplifyBinOp _ _ (BinOp Div e1 e2 _)
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = return $ x `div` y
 
+simplifyBinOp _ _ (BinOp Rem e1 e2 _)
+  | isCt0 e2 = Nothing
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = Just $ x `rem` y
+
+simplifyBinOp _ _ (BinOp Quot e1 e2 _)
+  | isCt0 e1 = Just $ SubExp e1
+  | isCt1 e2 = Just $ SubExp e1
+  | isCt0 e2 = Nothing
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x `quot` y
+
 simplifyBinOp _ typeOf (BinOp Pow e1 e2 _)
   | isCt0 e2 =
     case typeOf e1 of
