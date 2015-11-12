@@ -143,7 +143,8 @@ compileKernel called@(CallKernel kernel) =
 
       kernel_funs = functionsCalled $ kernelBody kernel
 
-      local_memory_params =
+      (local_memory_params, local_memory_init) =
+        unzip $
         flip evalState (blankNameSource :: VNameSource) $
         mapM prepareLocalMemory $ kernelLocalMemory kernel
 
@@ -151,11 +152,15 @@ compileKernel called@(CallKernel kernel) =
 
   in Right ([(name,
              [C.cfun|__kernel void $id:name ($params:params) {
+                  $items:local_memory_init
                   $items:kernel_body
              }|])],
             OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) [])
-  where prepareLocalMemory (mem, _) =
-          return ([C.cparam|__local volatile unsigned char* restrict $id:mem|])
+  where prepareLocalMemory (mem, _, bt) = do
+          mem_aligned <- newVName $ baseString mem ++ "_aligned"
+          let bt' = GenericC.scalarTypeToCType bt
+          return ([C.cparam|__local volatile $ty:bt'* restrict $id:mem_aligned|],
+                  [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
         name = calledKernelName called
 
 compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _) =
@@ -231,9 +236,10 @@ kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
   map useToArg $ mapKernelUses kernel
 kernelArgs (CallKernel kernel) =
-  map (SharedMemoryArg . memSizeToExp . snd)
+  map (SharedMemoryArg . memSizeToExp . localMemorySize)
       (kernelLocalMemory kernel) ++
   map useToArg (kernelUses kernel)
+  where localMemorySize (_, size, _) = size
 kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems) =
   [ MemArg destmem
   , ValueArg destoffset Int

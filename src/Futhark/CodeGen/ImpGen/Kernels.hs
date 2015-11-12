@@ -165,8 +165,7 @@ kernelCompiler
           ImpGen.subImpM_ inKernelOperations $
           zipWithM_ (writeFinalResult [group_id]) dest reduce_acc_params
 
-        let local_mem = acc_local_mem
-            bound_in_kernel = map paramName (lambdaParams fold_lam ++
+        let bound_in_kernel = map paramName (lambdaParams fold_lam ++
                                              lambdaParams reduce_lam) ++
                               [lambdaIndex fold_lam,
                                lambdaIndex reduce_lam,
@@ -238,6 +237,8 @@ kernelCompiler
                               in_wave_reductions,
                               cross_wave_reductions,
                               write_group_result]
+
+              local_mem = map (ensureAlignment $ alignmentMap body) acc_local_mem
 
           uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
@@ -427,7 +428,7 @@ kernelCompiler
 
         return $ \body -> do
 
-          let local_mem = acc_local_mem
+          let local_mem = map (ensureAlignment $ alignmentMap body) acc_local_mem
               bound_in_kernel = map paramName (lambdaParams lam) ++
                                 [lambdaIndex lam,
                                  local_id,
@@ -777,3 +778,24 @@ computeThreadChunkSize thread_index elements_per_thread num_elements chunk_var =
           num_elements - Imp.elements thread_index * elements_per_thread
         is_last_thread =
           Imp.BinOp Less (Imp.innerExp num_elements) ((thread_index + 1) * Imp.innerExp elements_per_thread)
+
+type AlignmentMap = HM.HashMap VName BasicType
+
+lookupAlignment :: VName -> AlignmentMap -> BasicType
+lookupAlignment = HM.lookupDefault smallestType
+
+smallestType :: BasicType
+smallestType = Bool
+
+alignmentMap :: Imp.KernelCode  -> AlignmentMap
+alignmentMap = HM.map alignment . Imp.memoryUsage (const mempty)
+  where alignment = HS.foldr mostRestrictive smallestType
+        mostRestrictive bt1 bt2 =
+          if (basicSize bt1 :: Int) > basicSize bt2
+          then bt1 else bt2
+
+ensureAlignment :: AlignmentMap
+                -> (VName, Imp.Size)
+                -> (VName, Imp.Size, BasicType)
+ensureAlignment alignments (name, size) =
+  (name, size, lookupAlignment name alignments)
