@@ -81,6 +81,9 @@ data BasicType = Int
                | Cert
                  deriving (Eq, Ord, Show, Enum, Bounded)
 
+instance Hashable BasicType where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
+
 -- | Non-array values.
 data BasicValue = IntVal !Int32
                 | Float32Val !Float

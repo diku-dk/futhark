@@ -55,8 +55,9 @@ data MapKernel = MapKernel { mapKernelThreadNum :: VName
 
 data Kernel = Kernel
               { kernelBody :: Imp.Code InKernel
-              , kernelLocalMemory :: [(VName, MemSize)]
-                -- ^ In-kernel name and per-workgroup size in bytes.
+              , kernelLocalMemory :: [(VName, MemSize, BasicType)]
+                -- ^ In-kernel name, per-workgroup size in bytes, and
+                -- alignment restriction.
 
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
@@ -116,8 +117,9 @@ instance Pretty Kernel where
                                     kernelLocalMemory kernel) </>
      text "uses" <+> brace (commasep $ map ppr $ kernelUses kernel) </>
      text "body" <+> brace (ppr $ kernelBody kernel))
-    where ppLocalMemory (name, size) =
-            ppr name <+> parens (ppr size <+> text "bytes")
+    where ppLocalMemory (name, size, bt) =
+            ppr name <+> parens (ppr size <+> text "bytes" <> comma <+>
+                                text "align to" <+> ppr bt)
 
 instance FreeIn MapKernel where
   freeIn kernel =
