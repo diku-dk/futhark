@@ -16,6 +16,7 @@ import Data.List
 import Prelude
 
 import Futhark.MonadFreshNames
+import Futhark.Transform.Rename
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
@@ -151,7 +152,8 @@ kernelCompiler
 
         write_fold_result <-
           ImpGen.subImpM_ inKernelOperations $
-          zipWithM_ (copyParamToLocalMemory local_id) acc_local_mem reduce_acc_params
+          zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
+          acc_local_mem reduce_acc_params
 
         let read_reduce_args = zipWithM_ (readReduceArgument local_id offset)
                                reduce_arr_params acc_local_mem
@@ -270,9 +272,10 @@ kernelCompiler
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
     wave_size <- newVName "wave_size"
-    skip_threads <- newVName "skip_threads"
     global_id <- newVName "global_id"
     thread_chunk_size <- newVName "thread_chunk_size"
+
+    renamed_lam <- renameLambda lam
 
     (num_groups, local_size, elements_per_thread, num_elements, _, _) <-
       compileKernelSize kernel_size
@@ -291,11 +294,11 @@ kernelCompiler
       ImpGen.declaringBasicVar group_id Int $
       ImpGen.declaringBasicVar wave_size Int $
       ImpGen.declaringBasicVar thread_chunk_size Int $
-      ImpGen.declaringBasicVar skip_threads Int $
       ImpGen.declaringBasicVar (lambdaIndex lam) Int $
       ImpGen.declaringBasicVar global_id Int $
       ImpGen.withParams acc_mem_params $
-      ImpGen.declaringLParams (lambdaParams lam) $ do
+      ImpGen.declaringLParams (lambdaParams lam) $
+      ImpGen.declaringLParams (lambdaParams renamed_lam) $ do
 
         ImpGen.emit $
           Imp.Op (Imp.GetLocalId local_id 0) <>
@@ -314,8 +317,6 @@ kernelCompiler
 
         x_dest <- ImpGen.destinationFromParams x_params
         y_dest <- ImpGen.destinationFromParams y_params
-        op_to_x <- ImpGen.collect $ ImpGen.compileBody x_dest $ lambdaBody lam
-        op_to_y <- ImpGen.collect $ ImpGen.compileBody y_dest $ lambdaBody lam
 
         let readScanElement param inp_arr
               | Basic _ <- paramType param = do
@@ -325,7 +326,7 @@ kernelCompiler
                   ImpGen.emit $
                     Imp.SetScalar (paramName param) read_input
               | otherwise =
-                  fail "loadIntoLocalMemory: cannot handle array accumulator yet."
+                  fail "readScanElement: cannot handle array accumulator yet."
 
         computeThreadChunkSize
           (Imp.ScalarVar global_id)
@@ -334,6 +335,8 @@ kernelCompiler
           thread_chunk_size
         elements_scanned <- newVName "elements_scanned"
 
+        zipWithM_ ImpGen.compileResultSubExp
+          (ImpGen.valueDestinations x_dest) nes
         zipWithM_ ImpGen.compileResultSubExp
           (ImpGen.valueDestinations x_dest) nes
 
@@ -345,6 +348,7 @@ kernelCompiler
         write_arrs <-
           ImpGen.collect $ zipWithM_ writeScanElement arrs_dest x_params
 
+        op_to_x <- ImpGen.collect $ ImpGen.compileBody x_dest $ lambdaBody lam
         ImpGen.emit $
           Imp.Comment "sequentially scan a chunk" $
           Imp.For elements_scanned (Imp.ScalarVar thread_chunk_size) $
@@ -354,75 +358,46 @@ kernelCompiler
             Imp.SetScalar (lambdaIndex lam)
             (Imp.BinOp Plus (Imp.ScalarVar $ lambdaIndex lam) 1)
 
-        zipWithM_ (copyParamToLocalMemory local_id) acc_local_mem x_params
+        zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
+          acc_local_mem x_params
 
-        forM_ (zip x_params y_params) $ \(x_param, y_param) ->
-          case paramType x_param of
-            Basic _ -> ImpGen.emit $ Imp.SetScalar (paramName y_param) $
-                       Imp.ScalarVar $ paramName x_param
-            _       -> return ()
+        let wave_id = Imp.BinOp Quot
+                      (Imp.ScalarVar local_id)
+                      (Imp.ScalarVar wave_size)
+            in_wave_id = Imp.ScalarVar local_id -
+                         (wave_id * Imp.ScalarVar wave_size)
+            inWaveScan' = inWaveScan (Imp.ScalarVar wave_size) local_id acc_local_mem
 
-        let readOperand i param (l_mem, _)
-              | Basic _ <- paramType param =
-                  ImpGen.emit $
-                  Imp.SetScalar (paramName param) $
-                  Imp.Index l_mem (bytes i') bt (Space "local")
-              | otherwise =
-                  ImpGen.emit $
-                  Imp.SetScalar (paramName other_index_param) i
-              where i' = i * Imp.SizeOf bt
-                    bt = elemType $ paramType param
-        read_operands <-
+        inWaveScan' lam
+        ImpGen.emit $ Imp.Op Imp.Barrier
+
+        pack_wave_results <-
           ImpGen.collect $
-          zipWithM_ (readOperand $
-                     Imp.ScalarVar local_id -
-                     Imp.ScalarVar skip_threads)
+          zipWithM_ (writeParamToLocalMemory wave_id) acc_local_mem y_params
+
+        let last_in_wave =
+              Imp.BinOp Equal in_wave_id $ Imp.ScalarVar wave_size - 1
+        ImpGen.emit $ Imp.If last_in_wave pack_wave_results mempty
+
+        ImpGen.emit $ Imp.Op Imp.Barrier
+
+        let is_first_wave = Imp.BinOp Equal wave_id 0
+        scan_first_wave <- ImpGen.collect $ inWaveScan' renamed_lam
+        ImpGen.emit $ Imp.If is_first_wave scan_first_wave mempty
+
+        ImpGen.emit $ Imp.Op Imp.Barrier
+
+        read_carry_in <-
+          ImpGen.collect $
+          zipWithM_ (readParamFromLocalMemory
+                     (paramName other_index_param) (wave_id - 1))
           x_params acc_local_mem
 
-        let writeLocalResult i param (l_mem, _)
-              | Basic _ <- paramType param =
-                  ImpGen.emit $
-                  Imp.Write l_mem (bytes i') bt (Space "local") $
-                  Imp.ScalarVar $ paramName param
-              | otherwise =
-                  return ()
-              where i' = i * Imp.SizeOf bt
-                    bt = elemType $ paramType param
-
-        write_operation_result <-
-          ImpGen.collect $
-          zipWithM_ (writeLocalResult $ Imp.ScalarVar local_id)
-          y_params acc_local_mem
-
-        ImpGen.emit $ Imp.SetScalar skip_threads 1
-
-        let thread_active = Imp.BinOp Leq (Imp.ScalarVar skip_threads) $
-                            Imp.ScalarVar local_id
-
+        op_to_y <- ImpGen.collect $ ImpGen.compileBody y_dest $ lambdaBody lam
         ImpGen.emit $
-          Imp.Comment "in-wave scan (no barriers needed)" $
-          Imp.While (Imp.BinOp Less
-                     (Imp.ScalarVar skip_threads)
-                     (Imp.ScalarVar wave_size)) $
-          Imp.If thread_active
-          (Imp.Comment "read operands" read_operands <>
-           Imp.Comment "perform operation" op_to_y <>
-           Imp.Comment "write result" write_operation_result)
-          mempty <>
-          Imp.SetScalar skip_threads (Imp.ScalarVar skip_threads * 2)
-
-        ImpGen.emit $
-          Imp.Comment "cross-wave scan (memory barrier needed)" $
-          Imp.While (Imp.BinOp Less
-                   (Imp.ScalarVar skip_threads) $
-                   Imp.innerExp $ ImpGen.dimSizeToExp local_size) $
-          Imp.Op Imp.Barrier <>
-          Imp.If thread_active
-          (Imp.Comment "read operands" read_operands <>
-           Imp.Comment "perform operation" op_to_y <>
-           Imp.Comment "write result" write_operation_result)
-          mempty <>
-          Imp.SetScalar skip_threads (Imp.ScalarVar skip_threads * 2)
+          Imp.If is_first_wave mempty $
+          Imp.Comment "read operands" read_carry_in <>
+          Imp.Comment "perform operation" op_to_y
 
         zipWithM_ (writeFinalResult [group_id, local_id]) partials_dest y_params
 
@@ -430,6 +405,7 @@ kernelCompiler
 
           let local_mem = map (ensureAlignment $ alignmentMap body) acc_local_mem
               bound_in_kernel = map paramName (lambdaParams lam) ++
+                                map paramName (lambdaParams renamed_lam) ++
                                 [lambdaIndex lam,
                                  local_id,
                                  group_id,
@@ -707,17 +683,30 @@ createAccMem local_size param
       fail $ "createAccMem: cannot deal with accumulator param " ++
       pretty param
 
-copyParamToLocalMemory :: VName -> (VName, t) -> FParam
-                       -> ImpGen.ImpM op ()
-copyParamToLocalMemory local_id (mem, _) param
+writeParamToLocalMemory :: Imp.Exp -> (VName, t) -> FParam
+                        -> ImpGen.ImpM op ()
+writeParamToLocalMemory i (mem, _) param
   | Basic _ <- paramType param =
       ImpGen.emit $
-      Imp.Write mem (bytes i) bt (Space "local") $
+      Imp.Write mem (bytes i') bt (Space "local") $
       Imp.ScalarVar (paramName param)
   | otherwise =
       return ()
-  where bt = elemType $ paramType param
-        i = Imp.ScalarVar local_id * Imp.SizeOf bt
+  where i' = i * Imp.SizeOf bt
+        bt = elemType $ paramType param
+
+readParamFromLocalMemory :: VName -> Imp.Exp -> ParamT attr -> (VName, t)
+                         -> ImpGen.ImpM op ()
+readParamFromLocalMemory index i param (l_mem, _)
+  | Basic _ <- paramType param =
+      ImpGen.emit $
+      Imp.SetScalar (paramName param) $
+      Imp.Index l_mem (bytes i') bt (Space "local")
+  | otherwise =
+      ImpGen.emit $
+      Imp.SetScalar index i
+  where i' = i * Imp.SizeOf bt
+        bt = elemType $ paramType param
 
 writeFinalResult :: [VName]
                  -> ImpGen.ValueDestination
@@ -778,6 +767,50 @@ computeThreadChunkSize thread_index elements_per_thread num_elements chunk_var =
           num_elements - Imp.elements thread_index * elements_per_thread
         is_last_thread =
           Imp.BinOp Less (Imp.innerExp num_elements) ((thread_index + 1) * Imp.innerExp elements_per_thread)
+
+inWaveScan :: Imp.Exp
+           -> VName
+           -> [(VName, t)]
+           -> Lambda
+           -> ImpGen.ImpM op ()
+inWaveScan wave_size local_id acc_local_mem scan_lam = do
+  skip_threads <- newVName "skip_threads"
+  let in_wave_thread_active =
+        Imp.BinOp Leq (Imp.ScalarVar skip_threads) in_wave_id
+      (other_index_param, actual_params) =
+        partitionChunkedLambdaParameters $ lambdaParams scan_lam
+      (x_params, y_params) =
+        splitAt (length actual_params `div` 2) actual_params
+  read_operands <-
+    ImpGen.collect $
+    zipWithM_ (readParamFromLocalMemory (paramName other_index_param) $
+               Imp.ScalarVar local_id -
+               Imp.ScalarVar skip_threads)
+    x_params acc_local_mem
+  scan_y_dest <- ImpGen.destinationFromParams y_params
+
+  -- Set initial y values
+  zipWithM_ (readParamFromLocalMemory (lambdaIndex scan_lam) $ Imp.ScalarVar local_id)
+    y_params acc_local_mem
+
+  op_to_y <- ImpGen.collect $ ImpGen.compileBody scan_y_dest $ lambdaBody scan_lam
+  write_operation_result <-
+    ImpGen.collect $
+    zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
+    acc_local_mem y_params
+  ImpGen.emit $
+    Imp.Comment "in-wave scan (no barriers needed)" $
+    Imp.DeclareScalar skip_threads Int <>
+    Imp.SetScalar skip_threads 1 <>
+    Imp.While (Imp.BinOp Less (Imp.ScalarVar skip_threads) wave_size)
+    (Imp.If in_wave_thread_active
+     (Imp.Comment "read operands" read_operands <>
+      Imp.Comment "perform operation" op_to_y <>
+      Imp.Comment "write result" write_operation_result)
+     mempty <>
+     Imp.SetScalar skip_threads (Imp.ScalarVar skip_threads * 2))
+  where wave_id = Imp.BinOp Quot (Imp.ScalarVar local_id) wave_size
+        in_wave_id = Imp.ScalarVar local_id - wave_id * wave_size
 
 type AlignmentMap = HM.HashMap VName BasicType
 
