@@ -65,10 +65,9 @@ fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
 
 fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let sob_fact= 1.0 / toFloat(1 << num_bits)       in
-  let sob_beg = sobolIndI(dir_vs, n+1)             in
   let contrbs = map( fn [int] (int k) =>
                         let sob = k + n in
-                        if(k==0) then sob_beg
+                        if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
                    , iota(chunk) )                 in
   let vct_ints= scan( fn [int] ([int] x, [int] y) => 
