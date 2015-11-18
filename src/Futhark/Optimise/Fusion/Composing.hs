@@ -30,8 +30,6 @@ import Futhark.Binder
   (Bindable(..), insertBinding, insertBindings, mkLet')
 import Futhark.Construct (mapResult)
 
---import Debug.Trace
-
 -- | Something that can be used as a SOAC input.  As far as this
 -- module is concerned, this means supporting just a single operation.
 class (Ord a, Eq a) => Input a where

@@ -18,7 +18,7 @@ module Futhark.Representation.ExplicitMemory.Permutation
 
 import Data.Type.Natural
 import Data.Vector.Sized
-import Text.PrettyPrint.Mainland
+import Futhark.Util.Pretty
 
 -- | The value 'i :<->: j' represents the action of swapping the
 -- elements at index 'i' and 'i'.

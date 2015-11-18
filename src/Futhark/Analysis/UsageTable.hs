@@ -31,7 +31,7 @@ import qualified Data.Set as S
 
 import Prelude hiding (lookup)
 
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Representation.AST
 
 newtype UsageTable = UsageTable (HM.HashMap VName Usages)

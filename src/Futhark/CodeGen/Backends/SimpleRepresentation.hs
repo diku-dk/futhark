@@ -5,6 +5,7 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , tupleField
   , tupleFieldExp
   , funName
+  , defaultMemBlockType
   , builtInFunctionDefs
     -- * Specific builtin functions
   , c_toFloat32, c_trunc32, c_log32, c_sqrt32, c_exp32
@@ -48,6 +49,10 @@ funName = ("futhark_"++) . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
+
+-- | The type of memory blocks in the default memory space.
+defaultMemBlockType :: C.Type
+defaultMemBlockType = [C.cty|unsigned char*|]
 
 c_toFloat32 :: C.Func
 c_toFloat32 = [C.cfun|

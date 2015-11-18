@@ -5,7 +5,10 @@
 -- embellishments we need here.  This is an internal, desugared
 -- representation.
 module Futhark.Representation.AST.Attributes
-  ( module Futhark.Representation.AST.Attributes.Types
+  ( module Futhark.Representation.AST.Attributes.Reshape
+  , module Futhark.Representation.AST.Attributes.Rearrange
+  , module Futhark.Representation.AST.Attributes.Stripe
+  , module Futhark.Representation.AST.Attributes.Types
   , module Futhark.Representation.AST.Attributes.Values
   , module Futhark.Representation.AST.Attributes.Constants
   , module Futhark.Representation.AST.Attributes.TypeOf
@@ -16,8 +19,6 @@ module Futhark.Representation.AST.Attributes
 
   -- * Extra tools
   , funDecByName
-  , reshapeOuter
-  , reshapeInner
   , asPrimOp
   , asLoopOp
   , asSegOp
@@ -25,11 +26,17 @@ module Futhark.Representation.AST.Attributes
   , loopResultValues
   , getStreamAccums
   , getStreamOrder
+  , subExpVars
+  , shapeVars
   )
   where
 
 import Data.List
+import Data.Maybe (mapMaybe)
 
+import Futhark.Representation.AST.Attributes.Reshape
+import Futhark.Representation.AST.Attributes.Rearrange
+import Futhark.Representation.AST.Attributes.Stripe
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants
@@ -80,17 +87,6 @@ loopResultValues patidents res mergeparams ses =
 funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
 funDecByName fname = find ((fname ==) . funDecName) . progFunctions
 
--- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
--- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
-reshapeOuter :: [SubExp] -> Int -> Shape -> [SubExp]
-reshapeOuter newshape n oldshape = newshape ++ drop n (shapeDims oldshape)
-
--- | @reshapeInner newshape n oldshape@ returns a 'Reshape' expression
--- that replaces the inner @m-n@ dimensions (where @m@ is the rank of
--- @oldshape@) of @src@ with @newshape@.
-reshapeInner :: [SubExp] -> Int -> Shape -> [SubExp]
-reshapeInner newshape n oldshape = take n (shapeDims oldshape) ++ newshape
-
 -- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.
 asPrimOp :: Exp lore -> Maybe (PrimOp lore)
 asPrimOp (PrimOp op) = Just op
@@ -112,10 +108,10 @@ asSegOp _          = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp Divide _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (Float32Val k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ (Constant (Float64Val k)) _) = k /= 0
-        safePrimOp (BinOp Divide _ _ _) = False
+  where safePrimOp (BinOp FloatDiv _ (Constant (IntVal k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ (Constant (Float32Val k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ (Constant (Float64Val k)) _) = k /= 0
+        safePrimOp (BinOp FloatDiv _ _ _) = False
         safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
         safePrimOp (BinOp Mod _ (Constant (Float32Val k)) _) = k /= 0
         safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0
@@ -133,3 +129,15 @@ safeExp (Apply {}) = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
   all (safeExp . bindingExp) (bodyBindings fbranch)
+
+-- | Return the variable names used in 'Var' subexpressions.  May contain
+-- duplicates.
+subExpVars :: [SubExp] -> [VName]
+subExpVars = mapMaybe subExpVar
+  where subExpVar (Var v)       = Just v
+        subExpVar (Constant {}) = Nothing
+
+-- | Return the variable dimension sizes.  May contain
+-- duplicates.
+shapeVars :: Shape -> [VName]
+shapeVars = subExpVars . shapeDims

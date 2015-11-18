@@ -1,10 +1,11 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.Optimise.Fusion ( fuseProg )
+module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
 import Control.Monad.State
 import Control.Applicative
 import Control.Monad.Reader
+import Control.Monad.Except
 
 import Data.Hashable
 import Data.Maybe
@@ -18,13 +19,12 @@ import Prelude
 
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Optimise.SimpleOpts
+import Futhark.Optimise.SimplifyLambda
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import Futhark.Renamer
-
---import Debug.Trace
+import Futhark.Transform.Rename
+import Futhark.Pass
 
 data VarEntry = IsArray Ident SOAC.ArrayTransforms
               | IsNotArray Ident
@@ -48,9 +48,17 @@ arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
   where asArray (name, IsArray ident ts) = Just (name, (ident, ts))
         asArray (_, IsNotArray _)        = Nothing
 
-newtype FusionGM a = FusionGM (StateT VNameSource (ReaderT FusionGEnv (Either Error)) a)
+data Error = Error String
+
+instance Show Error where
+  show (Error msg) =
+    "Fusion error:\n" ++ msg
+
+newtype FusionGM a = FusionGM (ExceptT Error (StateT VNameSource (Reader FusionGEnv)) a)
   deriving (Monad, Applicative, Functor,
-            MonadState VNameSource, MonadReader FusionGEnv)
+            MonadError Error,
+            MonadState VNameSource,
+            MonadReader FusionGEnv)
 
 instance MonadFreshNames FusionGM where
   getNameSource = get
@@ -148,19 +156,27 @@ bindRes rrr = local (\x -> x { fusedRes = rrr })
 -- state refers to the fresh-names engine.
 -- The reader hides the vtable that associates ... to ... (fill in, please).
 -- The 'Either' monad is used for error handling.
-runFusionGatherM :: VNameSource -> FusionGM a -> FusionGEnv -> Either Error (a, VNameSource)
-runFusionGatherM src (FusionGM a) =
-  runReaderT (runStateT a src)
+runFusionGatherM :: MonadFreshNames m =>
+                    FusionGM a -> FusionGEnv -> m (Either Error a)
+runFusionGatherM (FusionGM a) env =
+  modifyNameSource $ \src -> runReader (runStateT (runExceptT a) src) env
 
 badFusionGM :: Error -> FusionGM a
-badFusionGM = FusionGM . lift . lift . Left
+badFusionGM = throwError
 
 ------------------------------------------------------------------------
 --- Fusion Entry Points: gather the to-be-fused kernels@pgm level    ---
 ---    and fuse them in a second pass!                               ---
 ------------------------------------------------------------------------
 
-fuseProg :: Prog -> Either Error Prog
+fuseSOACs :: Pass Basic Basic
+fuseSOACs =
+  Pass { passName = "Fuse SOACs"
+       , passDescription = "Perform higher-order optimisation, i.e., fusion."
+       , passFunction = fuseProg
+       }
+
+fuseProg :: Prog -> PassM Prog
 fuseProg prog = do
   let env  = FusionGEnv { soacs = HM.empty
                         , varsInScope = HM.empty
@@ -168,13 +184,12 @@ fuseProg prog = do
                         , program = prog
                         }
       funs = progFunctions prog
-      src  = newNameSourceForProg prog
-  (ks,src') <- runFusionGatherM src (mapM fusionGatherFun funs) env
+  ks <- liftEitherM $ runFusionGatherM (mapM fusionGatherFun funs) env
   let ks'    = map cleanFusionResult ks
   let succc = any rsucc ks'
   if not succc
   then return prog
-  else do (funs',_) <- runFusionGatherM src' (zipWithM fuseInFun ks' funs) env
+  else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
           return $ renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
@@ -262,14 +277,6 @@ soacInputs soac = do
   other_nms <- expandSoacInpArr other_nms0
   return (inp_nms, other_nms)
 
-{-
-addNewKer :: FusedRes -> ([Ident], SOAC) -> FusionGM FusedRes
-addNewKer res (idd, soac) = do
-  (inp_nms, other_nms) <- soacInputs soac
-  let used_inps = filter (isInpArrInResModKers res HS.empty) inp_nms
-  let ufs = HS.unions [unfusable res, HS.fromList used_inps, HS.fromList other_nms]
-  addNewKerWithUnfusable res (idd, soac) ufs
--}
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
@@ -770,7 +777,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simpleOptLambda prog lam (SOAC.width new_soac) args
+  lam' <- simplifyLambda prog lam (SOAC.width new_soac) args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

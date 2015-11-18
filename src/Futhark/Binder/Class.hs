@@ -17,6 +17,7 @@ module Futhark.Binder.Class
   , letBindNames'
   , letBindNames_
   , letBindNames'_
+  , collectBindings_
   , bodyBind
   )
 where
@@ -30,8 +31,8 @@ import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
-import Futhark.Substitute
-import Futhark.Renamer (Renameable)
+import Futhark.Transform.Substitute
+import Futhark.Transform.Rename (Renameable)
 
 -- | A lore that supports some basic facilities.
 class (Lore.Lore lore,
@@ -123,6 +124,10 @@ letBindNames_ names e = void $ letBindNames names e
 letBindNames'_ :: MonadBinder m =>
                   [VName] -> Exp (Lore m) -> m ()
 letBindNames'_ names e = void $ letBindNames' names e
+
+collectBindings_ :: MonadBinder m => m a -> m [Binding (Lore m)]
+collectBindings_ = liftM snd . collectBindings
+
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]
 bodyBind (Body _ bnds es) = do

@@ -58,7 +58,6 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -72,11 +71,12 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import qualified Futhark.Representation.AST.Lore as Lore
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Binder
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 import Futhark.Representation.AST.Attributes.Ranges
+import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
 data Aliases lore = Aliases lore
@@ -173,7 +173,7 @@ instance (PrettyLore lore) => PrettyLore (Aliases lore) where
     where expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
             als -> Just $ oneline $
-                   PP.text "// Consumes " <> PP.commasep (map PP.ppr als)
+                   PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
 
           patElemAttrs =
             maybeComment $ mapMaybe patElemAttr $ patternElements pat
@@ -213,7 +213,7 @@ aliasComment name als =
   case HS.toList als of
     [] -> Nothing
     als' -> Just $ oneline $
-            PP.text "// " <> PP.ppr name <> PP.text " aliases " <>
+            PP.text "-- " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
 resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
@@ -222,7 +222,7 @@ resultAliasComment name als =
   case HS.toList als of
     [] -> Nothing
     als' -> Just $ oneline $
-            PP.text "// Result of " <> PP.ppr name <> PP.text " aliases " <>
+            PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
 removeAliases :: Rephraser (Aliases lore) lore
@@ -283,7 +283,7 @@ mkPatternAliases pat e =
                   case (patElemBindage bindee, patElemRequires bindee) of
                     (BindInPlace {}, _) -> mempty
                     (_, Array {})       -> names
-                    (_, Mem _)          -> names
+                    (_, Mem _ _)        -> names
                     _                   -> mempty
 
 mkContextAliases :: forall anylore lore.

@@ -15,6 +15,8 @@ module Futhark.Representation.AST.Syntax.Core
          , ExtShape(..)
          , Rank(..)
          , ArrayShape(..)
+         , Space (..)
+         , SpaceId
          , TypeBase(..)
          , Type
          , ExtType
@@ -120,14 +122,24 @@ instance ArrayShape Rank where
   stripDims n (Rank x) = Rank $ x - n
   subShapeOf = (==)
 
+-- | The memory space of a block.  If 'DefaultSpace', this is the "default"
+-- space, whatever that is.  The exact meaning of the 'SpaceID'
+-- depends on the backend used.  In GPU kernels, for example, this is
+-- used to distinguish between constant, global and shared memory
+-- spaces.  In GPU-enabled host code, it is used to distinguish
+-- between host memory ('DefaultSpace') and GPU space.
+data Space = DefaultSpace
+           | Space SpaceId
+             deriving (Show, Eq, Ord)
+
+-- | A string representing a specific non-default memory space.
+type SpaceId = String
+
 -- | An Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
 data TypeBase shape = Basic BasicType
                     | Array BasicType shape Uniqueness
-                    | Mem SubExp
-                      -- ^ 1st arg: array's element type, 2nd arg:
-                      -- lengths of dimensions, 3rd arg: uniqueness
-                      -- attribute
+                    | Mem SubExp Space
                     deriving (Show, Eq, Ord)
 
 -- | A type with shape information, used for describing the type of

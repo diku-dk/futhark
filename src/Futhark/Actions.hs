@@ -1,64 +1,75 @@
 module Futhark.Actions
   ( printAction
-  , externaliseAction
   , interpretAction
   , impCodeGenAction
   , kernelImpCodeGenAction
-  , seqCodegenAction
+  , seqCodeGenAction
   , rangeAction
   )
 where
 
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.List
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 
-import Futhark.Externalise
+import Prelude
+
 import Futhark.Pipeline
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
-import Futhark.Representation.AST hiding (Basic)
+import Futhark.Representation.AST
+import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
-import qualified Futhark.CodeGen.ImpGen as ImpGen
-import qualified Futhark.CodeGen.KernelImpGen as KernelImpGen
+import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
+import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 
-printAction :: Action
-printAction = polyAction "prettyprinter" act
-  where act (ExplicitMemory prog) = pp prog
-        act (Basic prog) = pp prog
-        pp :: PrettyLore lore => Prog lore -> IO ()
-        pp = putStrLn . pretty . aliasAnalysis
-
-externaliseAction :: Action
-externaliseAction = basicAction "externalise" $
-                    putStrLn . pretty . externaliseProg
+printAction :: PrettyLore lore => Action lore
+printAction =
+  Action { actionName = "Prettyprint"
+         , actionDescription = "Prettyprint the resulting internal representation on standard output."
+         , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+         }
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
-                -> Action
-interpretAction = polyAction "interpreter" . act
-  where act parser (ExplicitMemory prog) = interpret parser prog
-        act parser (Basic prog)          = interpret parser prog
+                -> Action Basic
+interpretAction parser =
+  Action { actionName = "Interpret"
+         , actionDescription = "Run the program via an interpreter."
+         , actionProcedure = liftIO . interpret parser
+         }
 
-rangeAction :: Action
-rangeAction = polyAction "print ranges" act
-  where act (ExplicitMemory prog) = pp prog
-        act (Basic prog) = pp prog
-        pp :: PrettyLore lore => Prog lore -> IO ()
-        pp = putStrLn . pretty . rangeAnalysis
+rangeAction :: PrettyLore lore => Action lore
+rangeAction =
+    Action { actionName = "Range analysis"
+           , actionDescription = "Print the program with range annotations added."
+           , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis
+           }
 
-seqCodegenAction :: Action
-seqCodegenAction = explicitMemoryAction "sequential code generator" $
-                   either error putStrLn . SequentialC.compileProg
+seqCodeGenAction :: Action ExplicitMemory
+seqCodeGenAction =
+  Action { actionName = "Compile sequentially"
+         , actionDescription = "Translate program into sequential C and write it on standard output."
+         , actionProcedure = liftIO . either error putStrLn . SequentialC.compileProg
+         }
 
-impCodeGenAction :: Action
-impCodeGenAction = explicitMemoryAction "imperative code generator" $
-                   either error (putStrLn . pretty) . ImpGen.compileProgSimply
 
-kernelImpCodeGenAction :: Action
-kernelImpCodeGenAction = explicitMemoryAction "imperative code with kernels generator" $
-                         either error (putStrLn . pretty) . KernelImpGen.compileProg
+impCodeGenAction :: Action ExplicitMemory
+impCodeGenAction =
+  Action { actionName = "Compile imperative"
+         , actionDescription = "Translate program into imperative IL and write it on standard output."
+         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenSequential.compileProg
+         }
+
+kernelImpCodeGenAction :: Action ExplicitMemory
+kernelImpCodeGenAction =
+  Action { actionName = "Compile imperative kernels"
+         , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
+         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenKernels.compileProg
+         }
 
 interpret :: (Show error, PrettyLore lore) =>
              (FilePath -> String -> Either error [Value])

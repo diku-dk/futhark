@@ -23,7 +23,7 @@ import Prelude
 
 import Futhark.Construct
 import Futhark.Representation.AST
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.RuleM
 

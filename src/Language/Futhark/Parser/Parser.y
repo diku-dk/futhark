@@ -74,6 +74,8 @@ import Language.Futhark.Parser.Lexer
       cert            { L $$ CERT }
       char            { L $$ CHAR }
       real            { L $$ REAL }
+      float32         { L $$ FLOAT32 }
+      float64         { L $$ FLOAT64 }
 
       id              { L _ (ID _) }
 
@@ -87,6 +89,8 @@ import Language.Futhark.Parser.Lexer
       '*'             { L $$ TIMES }
       '/'             { L $$ DIVIDE }
       '%'             { L $$ MOD }
+      '//'            { L $$ QUOT }
+      '%%'            { L $$ REM }
       '='             { L $$ EQU }
       '=='            { L $$ EQU2 }
       '<'             { L $$ LTH }
@@ -123,6 +127,8 @@ import Language.Futhark.Parser.Lexer
       reduce          { L $$ REDUCE }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
+      stripe          { L $$ STRIPE }
+      unstripe          { L $$ UNSTRIPE }
       transpose       { L $$ TRANSPOSE }
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
@@ -165,7 +171,7 @@ import Language.Futhark.Parser.Lexer
 %left '<<' '>>'
 %left '+' '-'
 
-%left '*' '/' '%'
+%left '*' '/' '%' '//' '%%'
 %left pow
 %nonassoc '~' '!' signum abs
 
@@ -181,6 +187,8 @@ BinOp :: { (BinOp, SrcLoc) }
       | '*'     { (Times, $1) }
       | '/'     { (Divide, $1) }
       | '%'     { (Mod, $1) }
+      | '//'    { (Quot, $1) }
+      | '%%'    { (Rem, $1) }
       | '=='    { (Equal, $1) }
       | '<'     { (Less, $1) }
       | '<='    { (Leq, $1) }
@@ -249,7 +257,9 @@ TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { let (ds, et) = $2
                        in ($3:ds, et) }
 
-TupleArrayElemTypes : TupleArrayElemType { [$1] }
+TupleArrayElemTypes : { [] }
+                    | TupleArrayElemType
+                      { [$1] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
@@ -262,6 +272,8 @@ BasicType : int           { Int }
           | bool          { Bool }
           | cert          { Cert }
           | char          { Char }
+          | float32       { Float32 }
+          | float64       { Float64 }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
@@ -282,7 +294,7 @@ Exp  :: { UncheckedExp }
      | true           { Literal (BasicVal $ LogVal True) $1 }
      | false          { Literal (BasicVal $ LogVal False) $1 }
      | checked        { Literal (BasicVal Checked) $1 }
-     | Id             { Var $1 }
+     | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
@@ -292,6 +304,8 @@ Exp  :: { UncheckedExp }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
      | Exp '/' Exp    { BinOp Divide $1 $3 NoInfo $2 }
      | Exp '%' Exp    { BinOp Mod $1 $3 NoInfo $2 }
+     | Exp '//' Exp   { BinOp Quot $1 $3 NoInfo $2 }
+     | Exp '%%' Exp   { BinOp Rem $1 $3 NoInfo $2 }
      | '-' Exp %prec '~' { UnOp Negate $2 $1 }
      | '!' Exp        { UnOp Not $2 $1 }
      | '~' Exp        { UnOp Complement $2 $1 }
@@ -335,6 +349,11 @@ Exp  :: { UncheckedExp }
 
      | rearrange '(' '(' NaturalInts ')' ',' Exp ')'
                       { Rearrange $4 $7 $1 }
+
+     | stripe '(' Exp ',' Exp ')'
+                      { Stripe $3 $5 $1 }
+     | unstripe '(' Exp ',' Exp ')'
+                      { Unstripe $3 $5 $1 }
 
      | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
 
@@ -405,15 +424,11 @@ Exp  :: { UncheckedExp }
      | Id Index
                       { Index $1 $2 (srclocOf $1) }
 
-     | loop '(' TupId ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t (ForLoop $7 $9) $11 $13 $1) (tupIdExp $3) }
-     | loop '(' TupId '=' Exp ')' '=' for Id '<' Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 (ForLoop $9 $11) $13 $15 $1 }
-
-     | loop '(' TupId ')' '=' while Exp do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t (WhileLoop $7) $9 $11 $1) (tupIdExp $3) }
-     | loop '(' TupId '=' Exp ')' '=' while Exp do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 (WhileLoop $9) $11 $13 $1 }
+     | loop '(' TupId ')' '=' LoopForm do Exp in Exp %prec letprec
+                      {% liftM (\t -> DoLoop $3 t $6 $8 $10 $1)
+                               (tupIdExp $3) }
+     | loop '(' TupId '=' Exp ')' '=' LoopForm do Exp in Exp %prec letprec
+                      { DoLoop $3 $5 $8 $10 $12 $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
                          { Stream (MapLike InOrder)  $3 $5 MinChunk $1 }
@@ -437,6 +452,16 @@ Exp  :: { UncheckedExp }
                          { Stream (Sequential $5) $3 $7 MinChunk $1 }
      | streamSeqMax    '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 MaxChunk $1 }
+
+LoopForm : for Id '<' Exp
+           { For FromUpTo (zeroExpression (srclocOf $1)) $2 $4 }
+         | for Exp '<=' Id '<' Exp
+           { For FromUpTo $2 $4 $6 }
+         | for Exp '>' Id '>=' Exp
+           { For FromDownTo $6 $4 $2 }
+         | for Exp '>' Id
+           { For FromDownTo (zeroExpression (srclocOf $1)) $4 $2 }
+         | while Exp      { While $2 }
 
 Index : '[' Exps ']'                  { $2 }
 
@@ -603,6 +628,9 @@ tupIdExp (Id ident) = return $ Var ident
 tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
 tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
+zeroExpression :: SrcLoc -> UncheckedExp
+zeroExpression = Literal (BasicVal $ IntVal 0)
+
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF
 
@@ -624,7 +652,7 @@ getRealValue x = do f <- lift $ asks parserRealFun
 
 getFunName :: Name -> ParserMonad Name
 getFunName name = do substs <- lift $ asks parserFunMap
-                     return $ fromMaybe name $ HM.lookup name substs
+                     return $ HM.lookupDefault name name substs
 
 readLine :: ParserMonad String
 readLine = lift $ lift $ lift readLineFromMonad

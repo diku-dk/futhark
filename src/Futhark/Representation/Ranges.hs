@@ -53,7 +53,6 @@ import qualified Data.HashSet as HS
 import Data.Hashable
 import Data.Maybe
 import Data.Monoid
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Prelude
 
@@ -67,10 +66,11 @@ import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Binder
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
+import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
 data Ranges lore = Ranges lore
@@ -134,7 +134,7 @@ instance (PrettyLore lore) => PrettyLore (Ranges lore) where
               (Nothing, Nothing) -> Nothing
               range ->
                 Just $ oneline $
-                PP.text "// " <> PP.ppr (patElemName patelem) <> PP.text " range: " <>
+                PP.text "-- " <> PP.ppr (patElemName patelem) <> PP.text " range: " <>
                 PP.ppr range
           oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
 

@@ -1,5 +1,5 @@
 -- ==
--- structure distributed { Map 3 }
+-- structure distributed { Kernel 2 Map 0 }
 --
 
 fun [[int]] main(int outer_loop_count, [int] a) =

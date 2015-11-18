@@ -56,10 +56,10 @@ import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Binder
 import Futhark.Construct
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
 import Futhark.Representation.AST.Attributes.Ranges

@@ -14,6 +14,8 @@ module Futhark.Representation.AST.Syntax
   , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
+  , Space (..)
+  , SpaceId
   , TypeBase(..)
   , Type
   , ExtType
@@ -41,6 +43,8 @@ module Futhark.Representation.AST.Syntax
   , SegOp (..)
   , ScanType(..)
   , BinOp (..)
+  , DimChange (..)
+  , ShapeChange
   , ExpT(..)
   , Exp
   , LoopForm (..)
@@ -50,6 +54,8 @@ module Futhark.Representation.AST.Syntax
   , ExtLambda
   , Annotations.RetType
   , StreamForm(..)
+  , KernelInput (..)
+  , KernelSize (..)
 
   -- * Definitions
   , ParamT (..)
@@ -66,7 +72,10 @@ module Futhark.Representation.AST.Syntax
   )
   where
 
+import Control.Applicative
+import Data.Foldable
 import Data.Monoid
+import Data.Traversable
 import Data.Loc
 
 import Prelude
@@ -126,9 +135,11 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Minus
            | Pow
            | Times
-           | Divide
-           | IntDivide -- ^ Rounds towards negative infinity.
+           | FloatDiv
+           | Div -- ^ Rounds towards negative infinity.
            | Mod
+           | Quot -- ^ Rounds towards zero.
+           | Rem
            | ShiftR
            | ShiftL
            | Band
@@ -141,6 +152,33 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Less
            | Leq
              deriving (Eq, Ord, Enum, Bounded, Show)
+
+-- | The new dimension in a 'Reshape'-like operation.  This allows us to
+-- disambiguate "real" reshapes, that change the actual shape of the
+-- array, from type coercions that are just present to make the types
+-- work out.
+data DimChange d = DimCoercion d
+                   -- ^ The new dimension is guaranteed to be numerically
+                   -- equal to the old one.
+                 | DimNew d
+                   -- ^ The new dimension is not necessarily numerically
+                   -- equal to the old one.
+                 deriving (Eq, Ord, Show)
+
+instance Functor DimChange where
+  fmap f (DimCoercion d) = DimCoercion $ f d
+  fmap f (DimNew      d) = DimNew $ f d
+
+instance Foldable DimChange where
+  foldMap f (DimCoercion d) = f d
+  foldMap f (DimNew      d) = f d
+
+instance Traversable DimChange where
+  traverse f (DimCoercion d) = DimCoercion <$> f d
+  traverse f (DimNew      d) = DimNew <$> f d
+
+-- | A list of 'DimChange's, indicating the new dimensions of an array.
+type ShapeChange d = [DimChange d]
 
 data PrimOp lore
   = SubExp SubExp
@@ -198,7 +236,7 @@ data PrimOp lore
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
-  | Reshape Certificates [SubExp] VName
+  | Reshape Certificates (ShapeChange SubExp) VName
    -- ^ 1st arg is the new shape, 2nd arg is the input array *)
 
   | Rearrange Certificates [Int] VName
@@ -207,12 +245,16 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
+  | Stripe Certificates SubExp VName
+
+  | Unstripe Certificates SubExp VName
+
   | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element
     -- arrays.  If no arrays are given, the returned offsets are zero,
     -- and no arrays are returned.
 
-  | Alloc SubExp
+  | Alloc SubExp Space
     -- ^ Allocate a memory block.  This really should not be an
     -- expression, but what are you gonna do...
   deriving (Eq, Ord, Show)
@@ -230,13 +272,42 @@ data LoopOp lore
   | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
---  | Stream  Certificates [SubExp] [VName] (ExtLambdaT lore)
+
+  | Kernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
+    [(Type, [Int])] (Body lore)
+  | ReduceKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    (LambdaT lore)
+    [SubExp]
+    [VName]
+  | ScanKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    [(SubExp, VName)]
 
 data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]
                       | Sequential [SubExp]
                         deriving (Eq, Ord, Show)
 
+data KernelInput lore = KernelInput { kernelInputParam :: FParam lore
+                                    , kernelInputArray :: VName
+                                    , kernelInputIndices :: [SubExp]
+                                    }
+
+deriving instance Annotations lore => Eq (KernelInput lore)
+deriving instance Annotations lore => Show (KernelInput lore)
+deriving instance Annotations lore => Ord (KernelInput lore)
+
+data KernelSize = KernelSize { kernelWorkgroups :: SubExp
+                             , kernelWorkgroupSize :: SubExp
+                             , kernelElementsPerThread :: SubExp
+                             , kernelTotalElements :: SubExp
+                             , kernelThreadOffsetMultiple :: SubExp
+                             , kernelNumThreads :: SubExp
+                             }
+                deriving (Eq, Ord, Show)
 
 -- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
 -- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@

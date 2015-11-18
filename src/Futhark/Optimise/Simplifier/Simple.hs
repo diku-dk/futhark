@@ -92,6 +92,10 @@ instance Engine.Simplifiable lore =>
                  pretty name ++ " in symbol table."
 
 instance Engine.Simplifiable lore =>
+         LocalTypeEnv (SimpleM lore) where
+  localTypeEnv types = Engine.localVtable (<>ST.fromTypeEnv types)
+
+instance Engine.Simplifiable lore =>
          MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Wise lore
   mkLetM pat e = do

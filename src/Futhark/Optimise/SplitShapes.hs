@@ -20,21 +20,25 @@ import Prelude
 import Futhark.Representation.Basic
 import Futhark.Tools
 import Futhark.MonadFreshNames
-import Futhark.Renamer
-import Futhark.Substitute
+import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.DeadVarElim
+import Futhark.Pass
 
 -- | Perform the transformation on a program.
-splitShapes :: Prog -> Prog
-splitShapes prog =
-  Prog { progFunctions = runSplitM m HM.empty $ newNameSourceForProg prog }
-  where m = do let origfuns = progFunctions prog
-               (substs, newfuns) <-
-                 unzip <$> map extract <$>
-                 makeFunSubsts origfuns
-               mapM (substCalls substs) $ origfuns ++ concat newfuns
+splitShapes :: Pass Basic Basic
+splitShapes =
+  Pass { passName = "Split shapes"
+       , passDescription = "Optimise shape computation"
+       , passFunction = \prog -> Prog <$> runSplitM (m prog) HM.empty
+       }
+  where m prog = do
+          let origfuns = progFunctions prog
+          (substs, newfuns) <-
+            unzip <$> map extract <$> makeFunSubsts origfuns
+          mapM (substCalls substs) $ origfuns ++ concat newfuns
         extract (fname, (shapefun, valfun)) =
           ((fname, (funDecName shapefun, funDecRetType shapefun,
                     funDecName valfun, funDecRetType valfun)),
@@ -49,9 +53,9 @@ newtype SplitM a = SplitM (ReaderT TypeEnv
                            MonadFreshNames,
                            HasTypeEnv, LocalTypeEnv)
 
-runSplitM :: SplitM a -> TypeEnv -> VNameSource -> a
-runSplitM (SplitM m) =
-  evalState . runReaderT m
+runSplitM :: MonadFreshNames m => SplitM a -> TypeEnv -> m a
+runSplitM (SplitM m) env =
+  modifyNameSource $ runState (runReaderT m env)
 
 makeFunSubsts :: [FunDec] -> SplitM [(Name, (FunDec, FunDec))]
 makeFunSubsts fundecs =
@@ -124,12 +128,12 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
         substInPatElem subst patElem = return $ substituteNames subst patElem
 
 simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyShapeFun shapef = return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
-                          return . deadCodeElimFun =<< simplifyFun' =<<
+simplifyShapeFun shapef = liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
+                          liftM deadCodeElimFun . simplifyFun' =<<
                           renameFun shapef
   where simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules
 

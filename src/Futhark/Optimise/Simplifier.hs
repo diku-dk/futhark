@@ -28,12 +28,13 @@ import Futhark.Optimise.Simplifier.Simplify
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProgWithRules :: Simplifiable lore =>
+simplifyProgWithRules :: (MonadFreshNames m, Simplifiable lore) =>
                          SimpleOps (SimpleM lore)
                       -> RuleBook (SimpleM lore)
-                      -> Prog lore -> Prog lore
+                      -> Prog lore -> m (Prog lore)
 simplifyProgWithRules simpl rules =
-  removeProgWisdom . simplifyProg simpl rules
+  liftM removeProgWisdom .
+  simplifyProg simpl rules
 
 -- | Simplify just a single function declaration.
 simplifyFunWithRules :: (MonadFreshNames m, Simplifiable lore) =>

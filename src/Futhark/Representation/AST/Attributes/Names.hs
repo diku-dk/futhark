@@ -26,6 +26,9 @@ module Futhark.Representation.AST.Attributes.Names
 
 import Control.Monad.Writer
 import qualified Data.HashSet as HS
+import Data.Foldable (foldMap)
+
+import Prelude
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
@@ -87,6 +90,19 @@ freeWalker = identityWalker {
           binding (HS.fromList (map paramName mergepat)) $ do
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
+
+        expFree (LoopOp (Kernel cs w index ispace inps returns body)) = do
+          tell $ freeIn w
+          tell $ freeIn cs
+          tell $ freeIn index
+          tell $ freeIn $ map snd ispace
+          tell $ freeIn $ map fst returns
+          binding (HS.fromList $ index : map fst ispace) $ do
+            tell $ freeIn $ map kernelInputParam inps
+            tell $ freeIn $ map kernelInputArray inps
+            tell $ freeIn $ map kernelInputIndices inps
+            binding (HS.fromList $ map kernelInputName inps) $
+              bodyFree body
 
         expFree e = walkExpM freeWalker e
 
@@ -170,6 +186,9 @@ instance (FreeIn a, FreeIn b, FreeIn c) => FreeIn (a,b,c) where
 instance FreeIn a => FreeIn [a] where
   freeIn = mconcat . map freeIn
 
+instance FreeIn Names where
+  freeIn = id
+
 instance FreeIn Bool where
   freeIn _ = mempty
 
@@ -196,7 +215,7 @@ instance FreeIn ExtShape where
 
 instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
   freeIn (Array _ shape _) = freeIn shape
-  freeIn (Mem size)        = freeIn size
+  freeIn (Mem size _)      = freeIn size
   freeIn (Basic _)         = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where
@@ -218,6 +237,19 @@ instance FreeIn ExtRetType where
 instance FreeIn LoopForm where
   freeIn (ForLoop _ bound) = freeIn bound
   freeIn (WhileLoop cond) = freeIn cond
+
+instance FreeIn KernelSize where
+  freeIn (KernelSize num_workgroups workgroup_size elems_per_thread
+          num_elems thread_offset num_threads) =
+    mconcat $ map freeIn [num_workgroups,
+                          workgroup_size,
+                          elems_per_thread,
+                          num_elems,
+                          thread_offset,
+                          num_threads]
+
+instance FreeIn d => FreeIn (DimChange d) where
+  freeIn = Data.Foldable.foldMap freeIn
 
 -- | Return the set of all variable names bound in a program.
 progNames :: Prog lore -> Names
@@ -246,6 +278,12 @@ progNames = execWriter . mapM funNames . progFunctions
                        WhileLoop _ ->
                          return ()
           bodyNames loopbody
+
+        expNames (LoopOp (Kernel _ _ index ispace inps _ body)) = do
+          one index
+          mapM_ (one . kernelInputName) inps
+          mapM_ (one . fst) ispace
+          bodyNames body
 
         expNames e = walkExpM names e
 

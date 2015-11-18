@@ -6,6 +6,7 @@ module Main ( ProgramTest (..)
             , TestCase (..)
             , main) where
 
+import Control.Category ((>>>))
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad hiding (forM_)
@@ -35,14 +36,18 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.AST.Pretty (pretty)
+import Futhark.Util.Pretty (pretty)
 import Futhark.Representation.AST.Syntax.Core hiding (Basic)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
-import Futhark.Metrics
+import Futhark.Representation.Basic (Basic)
+import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
-import qualified Futhark.Passes as Passes
+import Futhark.Pass.Simplify
+import Futhark.Pass.ExtractKernels
+import Futhark.Passes
+import Futhark.Util.Log
 
 import Futhark.Util.Options
 
@@ -78,7 +83,7 @@ instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
 
-data StructureTest = StructureTest FutharkConfig AstMetrics
+data StructureTest = StructureTest (Pipeline Basic Basic) AstMetrics
 
 instance Show StructureTest where
   show (StructureTest _ metrics) =
@@ -190,16 +195,14 @@ parseExpectedStructure =
   lexstr "structure" *>
   (StructureTest <$> parsePipeline <*> parseMetrics)
 
-parsePipeline :: Parser FutharkConfig
+parsePipeline :: Parser (Pipeline Basic Basic)
 parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
                 pure defaultPipelineConfig
   where defaultPipelineConfig =
-          newFutharkConfig { futharkPipeline = Passes.standardPipeline }
+          standardPipeline
         distributePipelineConfig =
-          newFutharkConfig { futharkPipeline = Passes.standardPipeline ++
-                                               [Passes.distributeKernels,
-                                                Passes.eotransform]
-                           }
+          standardPipeline >>>
+          passes [extractKernels, simplifyBasic]
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ liftM HM.fromList $ many $
@@ -269,20 +272,18 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-optimisedProgramMetrics :: FutharkConfig -> FilePath -> TestM AstMetrics
-optimisedProgramMetrics config program = do
-  res <- io $ runPipelineOnProgram config program
+optimisedProgramMetrics :: Pipeline Basic Basic -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics pipeline program = do
+  res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
-    (_, Left err) ->
-      throwError $ errorDesc err
-    (_, Right (Basic prog)) ->
+    (Left err, msgs) ->
+      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
+    (Right prog, _) ->
       return $ progMetrics prog
-    (_, Right (ExplicitMemory _)) ->
-      throwError "Compiling for metrics resulted in non-basic program"
 
 testMetrics :: FilePath -> StructureTest -> TestM ()
-testMetrics program (StructureTest config expected) = context "Checking metrics" $ do
-  actual <- optimisedProgramMetrics config program
+testMetrics program (StructureTest pipeline expected) = context "Checking metrics" $ do
+  actual <- optimisedProgramMetrics pipeline program
   mapM_ (ok actual) $ HM.toList expected
   where ok metrics (name, expected_occurences) =
           case HM.lookup name metrics of
@@ -338,12 +339,14 @@ checkError (ThisError regex_s regex) err
 checkError _ _ =
   return ()
 
-runResult :: ExitCode -> String -> String -> TestM RunResult
-runResult ExitSuccess stdout_s _ =
+runResult :: FilePath -> ExitCode -> String -> String -> TestM RunResult
+runResult program ExitSuccess stdout_s _ =
   case parseValuesFromString "stdout" stdout_s of
-    Left e   -> throwError $ show e
+    Left e   -> do
+      actual <- io $ writeOutFile program "actual" stdout_s
+      throwError $ show e <> "\n(See " <> actual <> ")"
     Right vs -> return $ SuccessResult vs
-runResult (ExitFailure code) _ stderr_s =
+runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
 getValues :: MonadIO m => FilePath -> Values -> m [Value]
@@ -370,7 +373,7 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = d
     ExitFailure 127 ->
       throwError $ progNotFound futharki
     _               ->
-      compareResult program expectedResult' =<< runResult code output err
+      compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
 compileTestProgram :: String -> FilePath -> TestRun -> TestM ()
@@ -389,9 +392,11 @@ compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
   -- no path component.
   (progCode, output, progerr) <-
     io $ readProcessWithExitCode ("." </> binOutputf) [] input
-  compareResult program expectedResult' =<< runResult progCode output progerr
+  withExceptT validating $
+    compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
+        validating = ("validating test result:\n"++)
 
 justCompileTestProgram :: String -> FilePath -> TestM ()
 justCompileTestProgram futharkc program =

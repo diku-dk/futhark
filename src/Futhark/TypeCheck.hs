@@ -34,17 +34,16 @@ import Data.Loc (noLoc)
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
-import qualified Text.PrettyPrint.Mainland as PP
+import Data.Maybe
 
 import Prelude
 
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases hiding (TypeEnv)
-import Futhark.MonadFreshNames
 import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
-import Data.Maybe
+import qualified Futhark.Util.Pretty as PP
 
 -- | Information about an error that occured during type checking.
 data TypeError lore = Error [String] (ErrorCase lore)
@@ -161,13 +160,12 @@ data TypeEnv lore =
 newtype TypeM lore a = TypeM (RWST
                               (TypeEnv lore)     -- Reader
                               Dataflow           -- Writer
-                              (NameSource VName) -- State
+                              ()                 -- State
                               (Either (TypeError lore)) -- Inner monad
                               a)
   deriving (Monad, Functor, Applicative,
             MonadReader (TypeEnv lore),
-            MonadWriter Dataflow,
-            MonadState VNameSource)
+            MonadWriter Dataflow)
 
 instance HasTypeEnv (TypeM lore) where
   lookupType name = do (t, _, _) <- lookupVar name
@@ -176,9 +174,9 @@ instance HasTypeEnv (TypeM lore) where
     where varType (name, Bound t _ _ ) = Just (name, t)
           varType (_,    WasConsumed)  = Nothing
 
-runTypeM :: TypeEnv lore -> NameSource VName -> TypeM lore a
+runTypeM :: TypeEnv lore -> TypeM lore a
          -> Either (TypeError lore) a
-runTypeM env src (TypeM m) = fst <$> evalRWST m env src
+runTypeM env (TypeM m) = fst <$> evalRWST m env ()
 
 bad :: ErrorCase lore -> TypeM lore a
 bad e = do
@@ -196,12 +194,8 @@ context s = local $ \env -> env { envContext = s : envContext env}
 
 message :: PP.Pretty a =>
            String -> a -> String
-message s x = PP.pretty 80 $
+message s x = PP.prettyDoc 80 $
               PP.text s PP.<+> PP.align (PP.ppr x)
-
-instance MonadFreshNames (TypeM lore) where
-  getNameSource = get
-  putNameSource = put
 
 liftEither :: Either (ErrorCase lore) a -> TypeM lore a
 liftEither = either bad return
@@ -368,8 +362,8 @@ unifyTypes (Array t1 ds1 u1) (Array t2 ds2 u2)
   | shapeRank ds1 == shapeRank ds2 = do
   t <- t1 `unifyBasicTypes` t2
   Just $ Array t ds2 (u1 <> u2)
-unifyTypes (Mem size1) (Mem size2)
-  | size1 == size2 = Just $ Mem size1
+unifyTypes (Mem size1 space1) (Mem size2 space2)
+  | size1 == size2, space1 == space2 = Just $ Mem size1 space1
 unifyTypes _ _ = Nothing
 
 -- | As 'unifyTypes', but for element types.
@@ -445,11 +439,10 @@ checkProg' checkoccurs prog = do
                         , envContext = []
                         }
 
-  runTypeM typeenv src $
+  runTypeM typeenv $
     mapM_ (noDataflow . checkFun) $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
-    src = newNameSourceForProg prog'
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of
@@ -688,10 +681,20 @@ checkPrimOp (Replicate countexp valexp) = do
 checkPrimOp (Scratch _ shape) =
   mapM_ checkSubExp shape
 
-checkPrimOp (Reshape cs shapeexps arrexp) = do
+checkPrimOp (Reshape cs newshape arrexp) = do
+  rank <- arrayRank <$> checkArrIdent arrexp
   mapM_ (requireI [Basic Cert]) cs
-  mapM_ (require [Basic Int]) shapeexps
-  void $ checkArrIdent arrexp
+  mapM_ (require [Basic Int] . newDim) newshape
+  zipWithM_ (checkDimChange rank) newshape [0..]
+  where checkDimChange _ (DimNew _) _ =
+          return ()
+        checkDimChange rank (DimCoercion se) i
+          | i >= rank =
+            bad $ TypeError noLoc $
+            "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se ++
+            ", but array " ++ pretty arrexp ++ " has only " ++ pretty rank ++ " dimensions"
+          | otherwise =
+            return ()
 
 checkPrimOp (Rearrange cs perm arr) = do
   mapM_ (requireI [Basic Cert]) cs
@@ -699,6 +702,16 @@ checkPrimOp (Rearrange cs perm arr) = do
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError noLoc perm rank $ Just arr
+
+checkPrimOp (Stripe cs stride arr) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] stride
+  void $ checkArrIdent arr
+
+checkPrimOp (Unstripe cs stride arr) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] stride
+  void $ checkArrIdent arr
 
 checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Basic Cert]) cs
@@ -727,7 +740,7 @@ checkPrimOp (Copy e) =
 checkPrimOp (Assert e _) =
   require [Basic Bool] e
 
-checkPrimOp (Alloc e) =
+checkPrimOp (Alloc e _) =
   require [Basic Int] e
 
 checkPrimOp (Partition cs _ flags arrs) = do
@@ -866,6 +879,104 @@ checkLoopOp (Redomap ass size outerfun innerfun accexps arrexps) = do
   unless (acct `subtypesOf` outerRetType) $
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
+
+checkLoopOp (Kernel cs w index ispace inps returns body) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  mapM_ (require [Basic Int]) bounds
+  index_param <- basicFParamM index Int
+  iparams' <- forM iparams $ \iparam -> basicFParamM iparam Int
+  forM_ returns $ \(t, perm) ->
+    let return_rank = arrayRank t + rank
+    in unless (sort perm == [0..return_rank - 1]) $
+       bad $ TypeError noLoc $
+       "Permutation " ++ pretty perm ++
+       " not valid for returning " ++ pretty t ++
+       " from a rank " ++ pretty rank ++ " kernel."
+  checkFun' (nameFromString "<kernel body>",
+             staticShapes rettype,
+             funParamsToIdentsAndLores $ index_param : iparams' ++ map kernelInputParam inps,
+             body) $ do
+    checkFunParams $ map kernelInputParam inps
+    mapM_ checkKernelInput inps
+    checkBody body
+    bodyt <- bodyExtType body
+    unless (map rankShaped bodyt `subtypesOf`
+            map rankShaped (staticShapes rettype)) $
+      bad $
+      ReturnTypeError noLoc (nameFromString "<kernel body>")
+      (Several $ staticShapes rettype)
+      (Several bodyt)
+  where (iparams, bounds) = unzip ispace
+        rank = length ispace
+        (rettype, _) = unzip returns
+        checkKernelInput inp = do
+          checkExp $ PrimOp $ Index []
+            (kernelInputArray inp) (kernelInputIndices inp)
+
+          arr_t <- lookupType $ kernelInputArray inp
+          unless (stripArray (length $ kernelInputIndices inp) arr_t `subtypeOf`
+                  kernelInputType inp) $
+            bad $ TypeError noLoc $
+            "Kernel input " ++ pretty inp ++ " has inconsistent type."
+
+          let uses_all_iparams =
+                all (`elem` kernelInputIndices inp) $ map Var iparams
+          when (unique (kernelInputType inp) && not uses_all_iparams) $
+             bad $ TypeError noLoc $ "Unique kernel input " ++
+             pretty (kernelInputName inp) ++
+             " does not use entire index space."
+
+checkLoopOp (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  checkKernelSize kernel_size
+  arrargs <- checkSOACArrayArgs w arrexps
+  accargs <- mapM checkArg accexps
+
+  case lambdaParams seqfun of
+    [] -> bad $ TypeError noLoc "Fold function takes no parameters."
+    chunk_param : _
+      | Basic Int <- paramType chunk_param -> do
+          let seq_args = (Basic Int, mempty, mempty) :
+                         [ (t `arrayOfRow` Var (paramName chunk_param), y, z)
+                         | (t, y, z) <- arrargs ]
+          checkLambda seqfun seq_args
+      | otherwise ->
+          bad $ TypeError noLoc "First parameter of fold function is not integer-typed."
+
+  let seqRetType = lambdaReturnType seqfun
+      asArg t = (t, mempty, mempty)
+  checkLambda parfun $ map asArg $ Basic Int : seqRetType ++ seqRetType
+  let acct = map argType accargs
+      parRetType = lambdaReturnType parfun
+  unless (acct `subtypesOf` seqRetType) $
+    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomap fold function returns type " ++ prettyTuple seqRetType ++ "."
+  unless (acct `subtypesOf` parRetType) $
+    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
+
+checkLoopOp (ScanKernel cs w kernel_size fun input) = do
+  mapM_ (requireI [Basic Cert]) cs
+  require [Basic Int] w
+  checkKernelSize kernel_size
+  let (nes, arrs) = unzip input
+      other_index_arg = (Basic Int, mempty, mempty)
+  arrargs <- checkSOACArrayArgs w arrs
+  accargs <- mapM checkArg nes
+  checkLambda fun $ other_index_arg : accargs ++ arrargs
+  let startt      = map argType accargs
+      intupletype = map argType arrargs
+      funret      = lambdaReturnType fun
+  unless (startt `subtypesOf` funret) $
+    bad $ TypeError noLoc $
+    "Initial value is of type " ++ prettyTuple startt ++
+    ", but scan function returns type " ++ prettyTuple funret ++ "."
+  unless (intupletype `subtypesOf` funret) $
+    bad $ TypeError noLoc $
+    "Array element value is of type " ++ prettyTuple intupletype ++
+    ", but scan function returns type " ++ prettyTuple funret ++ "."
 
 checkLoopOp (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
@@ -1063,9 +1174,11 @@ checkBinOp Plus e1 e2 t = checkPolyBinOp Plus [Float32, Float64, Int] e1 e2 t
 checkBinOp Minus e1 e2 t = checkPolyBinOp Minus [Float32, Float64, Int] e1 e2 t
 checkBinOp Pow e1 e2 t = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t
 checkBinOp Times e1 e2 t = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t
-checkBinOp Divide e1 e2 t = checkPolyBinOp Divide [Float32, Float64] e1 e2 t
-checkBinOp IntDivide e1 e2 t = checkPolyBinOp IntDivide [Int] e1 e2 t
+checkBinOp FloatDiv e1 e2 t = checkPolyBinOp FloatDiv [Float32, Float64] e1 e2 t
+checkBinOp Div e1 e2 t = checkPolyBinOp Div [Int] e1 e2 t
 checkBinOp Mod e1 e2 t = checkPolyBinOp Mod [Int] e1 e2 t
+checkBinOp Quot e1 e2 t = checkPolyBinOp Quot [Int] e1 e2 t
+checkBinOp Rem e1 e2 t = checkPolyBinOp Rem [Int] e1 e2 t
 checkBinOp ShiftR e1 e2 t = checkPolyBinOp ShiftR [Int] e1 e2 t
 checkBinOp ShiftL e1 e2 t = checkPolyBinOp ShiftL [Int] e1 e2 t
 checkBinOp Band e1 e2 t = checkPolyBinOp Band [Int] e1 e2 t
@@ -1097,6 +1210,17 @@ checkPolyBinOp op tl e1 e2 t = do
   require (map Basic tl) e2
   t' <- unifySubExpTypes e1 e2
   checkAnnotation (pretty op ++ " result") (Basic t) t'
+
+checkKernelSize :: Checkable lore =>
+                   KernelSize -> TypeM lore ()
+checkKernelSize (KernelSize num_groups workgroup_size per_thread_elements
+                 num_elements offset_multiple num_threads) = do
+  require [Basic Int] num_groups
+  require [Basic Int] workgroup_size
+  require [Basic Int] per_thread_elements
+  require [Basic Int] num_elements
+  require [Basic Int] offset_multiple
+  require [Basic Int] num_threads
 
 sequentially :: Checkable lore =>
                 TypeM lore a -> (a -> Dataflow -> TypeM lore b) -> TypeM lore b

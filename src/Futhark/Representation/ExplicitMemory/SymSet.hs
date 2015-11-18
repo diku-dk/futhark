@@ -35,7 +35,7 @@ data SetOp = Intersect | Union
 
 data SymSet :: Nat -> * where
   SetOp :: SetOp -> SNat n -> SymSet n -> SNat m -> SymSet m -> SymSet (n :+: m)
-  Empty :: SymSet Z
+  Empty :: SymSet 'Z
   Bound :: Vec.Vector VName n
         -> HM.HashMap VName Range
         -> ScalExp -> SymSet n
@@ -45,7 +45,7 @@ sParameters (SetOp _ n _ m _) = n %:+ m
 sParameters Empty = SZ
 sParameters (Bound params _ _) = Vec.sLength params
 
-singleton :: ScalExp -> SymSet Z
+singleton :: ScalExp -> SymSet 'Z
 singleton = Bound Vec.Nil HM.empty
 
 union :: SymSet n -> SymSet m -> SymSet (n :+: m)
@@ -60,7 +60,7 @@ null (SetOp Intersect _ x _ y) = null x `SLogOr` null y
 null (SetOp Union _ _ _ _) = Val $ LogVal False
 null (Bound {}) = Val $ LogVal False
 
-empty :: SymSet Z
+empty :: SymSet 'Z
 empty = Empty
 
 freeVars :: SymSet a -> HS.HashSet VName
@@ -71,14 +71,14 @@ freeVars (Bound vars ranged e) =
   HS.fromList (Vec.toList vars ++ HM.keys ranged)
 
 fix :: forall k .
-       Ordinal (S k) -> Range -> SymSet (S k) -> SymSet k
+       Ordinal ('S k) -> Range -> SymSet ('S k) -> SymSet k
 fix i replacement (Bound vars ranged sexp) =
   Bound vars' (HM.insert replacee replacement ranged) sexp
   where vars' :: Vec.Vector VName k
         replacee :: VName
         (vars',replacee) = findReplacee 0 vars
         findReplacee :: forall m.
-                        Int -> Vec.Vector VName (S m)
+                        Int -> Vec.Vector VName ('S m)
                      -> (Vec.Vector VName m, VName)
         findReplacee j (x Vec.:- xs)
           | ordToInt i == j = (xs, x)
@@ -99,12 +99,12 @@ fix i replacement (SetOp op (n::SNat n) x (m::SNat m) y) =
                           boolToPropLeq (SS inat) n
           in case propToBoolLeq nLeastOne of
             Dict ->
-              let nWithS :: n :=: S (n :-: One)
+              let nWithS :: n :=: 'S (n :-: One)
                   nWithS = Refl `trans` eqSuccMinus n sOne
                   sizeCorrect :: ((n :-: One) :+: m) :=: k
                   sizeCorrect =
                     sym $ Refl `trans`
-                    minusCongEq (Refl :: S k :=: (n :+: m)) sOne `trans`
+                    minusCongEq (Refl :: 'S k :=: (n :+: m)) sOne `trans`
                     plusMinusSwapL n m sOne
                   i' :: Ordinal n
                   i' = sNatToOrd' n inat
@@ -117,16 +117,16 @@ fix i replacement (SetOp op (n::SNat n) x (m::SNat m) y) =
         (SFalse, STrue) ->
           let mLeastOne :: Leq One m
               mLeastOne = boolToPropLeq sOne (SS (inat %:- n)) `leqTrans` mInBounds
-              mInBounds :: Leq (S (i :-: n)) m
+              mInBounds :: Leq ('S (i :-: n)) m
               mInBounds = boolToPropLeq (SS (inat %:- n)) m
           in case propToBoolLeq mLeastOne of
             Dict ->
-              let mWithS :: m :=: S (m :-: One)
+              let mWithS :: m :=: 'S (m :-: One)
                   mWithS = Refl `trans` eqSuccMinus m sOne
                   sizeCorrect :: (n :+: (m :-: One)) :=: k
                   sizeCorrect =
                     sym $ Refl `trans`
-                    minusCongEq (Refl :: S k :=: (n :+: m)) sOne `trans`
+                    minusCongEq (Refl :: 'S k :=: (n :+: m)) sOne `trans`
                     plusMinusSwapR n m sOne
                   i' :: Ordinal m
                   i' = sNatToOrd' m (inat %:- n)

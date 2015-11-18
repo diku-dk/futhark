@@ -1,14 +1,11 @@
 -- | This module implements a compiler pass for inlining functions,
 -- then removing those that have become dead.
 module Futhark.Optimise.InliningDeadFun
-  ( CallGraph
-  , buildCallGraph
-  , aggInlineDriver
-  , deadFunElim
+  ( inlineAggressively
+  , removeDeadFunctions
   )
   where
 
-import Control.Arrow
 import Control.Applicative
 import Control.Monad.Reader
 
@@ -19,35 +16,36 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Representation.Basic
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
-import Futhark.Optimise.Errors
 import Futhark.Binder
+import Futhark.Pass
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
 
-type CGM = ReaderT CGEnv (Either Error)
+type CGM = Reader CGEnv
 
-runCGM :: CGM a -> CGEnv -> Either Error a
-runCGM = runReaderT
-
-badCGM :: Error -> CGM a
-badCGM = lift . Left
+runCGM :: CGM a -> CGEnv -> a
+runCGM = runReader
 
 ------------------------------------------------------------------
 ------------------------------------------------------------------
 ------------------------------------------------------------------
 ------------------------------------------------------------------
--- | @aggInlineDriver prog@ performs aggressive inlining for all
+-- | This pass performs aggressive inlining for all
 -- functions in @prog@ by repeatedly inlining the functions with
--- empty-apply-callee set into other callers.  Afterwards, all dead
--- functions are removed.
-aggInlineDriver :: Prog -> Either Error Prog
-aggInlineDriver prog = do
-  cg  <- buildCallGraph prog
-  env <- CGEnv <$> buildFunctionTable prog
-  renameProg <$> (deadFunElim =<< runCGM (aggInlining cg) env)
+-- empty-apply-callee set into other callers.
+inlineAggressively :: Pass Basic Basic
+inlineAggressively =
+  Pass { passName = "inline functions"
+       , passDescription = "Inline all non-recursive functions."
+       , passFunction = inline
+       }
+  where inline prog = do
+          let cg = buildCallGraph prog
+              env = CGEnv $ buildFunctionTable prog
+          return $ renameProg $ runCGM (aggInlining cg) env
 
 -- | Bind a name as a common (non-merge) variable.
 bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
@@ -60,67 +58,40 @@ bindVarsFtab = foldl bindVarFtab
 bindingFtab :: [(Name, FunDec)] -> CGM a -> CGM a
 bindingFtab bnds = local (`bindVarsFtab` bnds)
 
--- | Remove the binding for a name.
-remVarFtab :: CGEnv -> Name -> CGEnv
-remVarFtab env name = env { envFtable = HM.delete name $ envFtable env }
-
-remVarsFtab :: CGEnv -> [Name] -> CGEnv
-remVarsFtab = foldl remVarFtab
-
-remBindingsFtab :: [Name] -> CGM a -> CGM a
-remBindingsFtab keys = local (`remVarsFtab` keys)
-
-
-
 aggInlining :: CallGraph -> CGM Prog
 aggInlining cg = do
-    let inlcand    = HM.keys (HM.filter funHasNoCalls cg)
-    let inlinf     = getInlineOps inlcand cg
-    let work       = HM.toList inlinf
+    to_be_inlined <- filter funHasNoCalls <$> asks (HM.elems . envFtable)
+    let names_of_to_be_inlined = map funDecName to_be_inlined
 
-    if null work
-    -- a fix point has been reached, hence gather the program from the
-    -- hashtable and return it.
-    then Prog <$> asks (HM.elems . envFtable)
+    if not $ any (callsAnyOf names_of_to_be_inlined) $ HM.elems cg
+    -- Nothing to inline, hence gather the program from the ftable and
+    -- return it.
+      then Prog <$> asks (HM.elems . envFtable)
 
-    -- Remove the to-be-inlined functions from the Call Graph, and
+    -- Remove the to-be-inlined functions from the call graph, and
     -- then, for each caller that exhibits to-be-inlined callees
     -- perform the inlining. Finally, update the `ftable' and iterate
-    -- to a fix point. At this point it is guaranteed that `work' is
-    -- not empty, hence there are functions to be inlined in each
-    -- caller function (from `work').
-    else do let cg'  = HM.map ( \(callees,l) -> ( (\\) callees inlcand, l ) ) cg
-            let work'= map ( \(x,(y,_)) -> (x,y) ) work
-            newfuns  <- mapM processfun work'
-            let newfunnms  = fst (unzip work')
-            remBindingsFtab  newfunnms $
-                bindingFtab (zip newfunnms newfuns) $
-                aggInlining cg'
+    -- to a fix point.
+      else do let cg' = HM.map (\\names_of_to_be_inlined) cg
+                  processFun fname fundec
+                    | Just True <- callsAnyOf names_of_to_be_inlined <$>
+                                   HM.lookup fname cg =
+                        doInlineInCaller fundec to_be_inlined
+                    | otherwise =
+                        fundec
+
+              newfuns <- HM.mapWithKey processFun <$> asks envFtable
+              bindingFtab (HM.toList newfuns) $ aggInlining cg'
     where
-        processfun :: (Name, [Name]) -> CGM FunDec
-        processfun (fname, inlcallees) = do
-            f  <- asks $ HM.lookup fname . envFtable
-            case f of
-                Nothing -> badCGM $ FunctionNotInFtab fname
-                Just ff -> do
-                    tobeinl <- mapM getFromFtable inlcallees
-                    return $ doInlineInCaller ff tobeinl
+        known_funs = HM.keys cg
 
-        getFromFtable :: Name -> CGM FunDec
-        getFromFtable fname = do
-            f <- asks $ HM.lookup fname . envFtable
-            case f of
-                Nothing -> badCGM $ FunctionNotInFtab fname
-                Just ff -> return ff
+        callsAnyOf to_be_inlined = any (`elem` to_be_inlined)
 
-        getInlineOps :: [Name] -> CallGraph -> CallGraph
-        getInlineOps inlcand =
-            HM.filter (\(callees,_) -> not (null callees)) .
-            HM.map (first $ intersect inlcand)
-
-        funHasNoCalls :: ([Name],[Name]) -> Bool
-        funHasNoCalls (callees,_) = null callees
-
+        funHasNoCalls :: FunDec -> Bool
+        funHasNoCalls fundec =
+          case HM.lookup (funDecName fundec) cg of
+            Just calls | not $ any (`elem` known_funs) calls -> True
+            _                                                -> False
 
 -- | @doInlineInCaller caller inlcallees@ inlines in @calleer@ the functions
 -- in @inlcallees@. At this point the preconditions are that if @inlcallees@
@@ -164,7 +135,7 @@ inlineInBody
       reshapeIfNecessary ident se
         | t@(Array {}) <- identType ident,
           Var v <- se =
-            mkLet' [] [ident] $ PrimOp $ Reshape [] (arrayDims t) v
+            mkLet' [] [ident] $ shapeCoerce [] (arrayDims t) v
         | otherwise =
           mkLet' [] [ident] $ PrimOp $ SubExp se
 inlineInBody inlcallees (Body () (bnd:bnds) res) =
@@ -191,17 +162,18 @@ inlineInLambda inlcallees (Lambda i params body ret) =
 inlineInExtLambda :: [FunDec] -> ExtLambda -> ExtLambda
 inlineInExtLambda inlcallees (ExtLambda i params body ret) =
   ExtLambda i params (inlineInBody inlcallees body) ret
-------------------------------------------------------------------
-------------------  Dead Function Elimination --------------------
-------------------------------------------------------------------
--- | @deadFunElim prog@ removes the functions that are unreachable from
+
+-- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
--- The functions called (indirectly) via SOACs are obviously considered.
-deadFunElim :: Prog -> Either Error Prog
-deadFunElim prog = do
-  ftable <- buildFunctionTable prog
-  cg     <- buildCallGraph prog
-  let ftable' = HM.filter (isFunInCallGraph cg) ftable
-  return $ Prog $ HM.elems ftable'
-  where
-    isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg
+removeDeadFunctions :: Pass Basic Basic
+removeDeadFunctions =
+  Pass { passName = "Remove dead functions"
+       , passDescription = "Remove the functions that are unreachable from the main function"
+       , passFunction = return . pass
+       }
+  where pass prog =
+          let ftable = buildFunctionTable prog
+              cg     = buildCallGraph prog
+              ftable' = HM.filter (isFunInCallGraph cg) ftable
+          in Prog $ HM.elems ftable'
+        isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg

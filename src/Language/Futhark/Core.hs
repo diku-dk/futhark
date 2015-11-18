@@ -81,6 +81,9 @@ data BasicType = Int
                | Cert
                  deriving (Eq, Ord, Show, Enum, Bounded)
 
+instance Hashable BasicType where
+  hashWithSalt salt = hashWithSalt salt . fromEnum
+
 -- | Non-array values.
 data BasicValue = IntVal !Int32
                 | Float32Val !Float
@@ -148,6 +151,9 @@ builtInFunctions = HM.fromList $ map namify
                    ,("sqrt64", (Float64, [Float64]))
                    ,("log64", (Float64, [Float64]))
                    ,("exp64", (Float64, [Float64]))
+
+                   ,("num_groups", (Int, []))
+                   ,("group_size", (Int, []))
                    ]
   where namify (k,v) = (nameFromString k, v)
 

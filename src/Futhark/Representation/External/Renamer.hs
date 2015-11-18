@@ -235,8 +235,9 @@ renameExp (LetPat pat e body pos) = do
 renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
   mergeexp' <- renameExp mergeexp
   case form of
-    ForLoop loopvar bound -> do
-      bound' <- renameExp bound
+    For dir lbound loopvar ubound -> do
+      lbound' <- renameExp lbound
+      ubound' <- renameExp ubound
       bind (patternNames mergepat) $ do
         mergepat' <- renamePattern mergepat
         letbody' <- renameExp letbody
@@ -244,15 +245,15 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
           loopvar'  <- repl loopvar
           loopbody' <- renameExp loopbody
           return $ DoLoop mergepat' mergeexp'
-            (ForLoop loopvar' bound') loopbody' letbody' pos
-    WhileLoop cond ->
+            (For dir lbound' loopvar' ubound') loopbody' letbody' pos
+    While cond ->
       bind (patternNames mergepat) $ do
         mergepat' <- renamePattern mergepat
         letbody' <- renameExp letbody
         cond' <- renameExp cond
         loopbody' <- renameExp loopbody
         return $ DoLoop mergepat' mergeexp'
-          (WhileLoop cond') loopbody' letbody' pos
+          (While cond') loopbody' letbody' pos
 renameExp (Stream form lam arr ii pos) = do
   form' <- case form of
                MapLike o -> return $ MapLike o

@@ -257,6 +257,12 @@ bindLoopVar var bound =
         clampUpper = case bound of Var v -> ST.isAtLeast v 1
                                    _     -> id
 
+bindLoopVars :: MonadEngine m => [(VName,SubExp)] -> m a -> m a
+bindLoopVars []                  m =
+  m
+bindLoopVars ((var,bound):lvars) m =
+  bindLoopVar var bound $ bindLoopVars lvars m
+
 hoistBindings :: MonadEngine m =>
                  RuleBook m -> BlockPred (Lore m)
               -> ST.SymbolTable (Lore m) -> UT.UsageTable
@@ -364,6 +370,10 @@ hasFree ks _ need = ks `intersects` requires need
 isNotSafe :: BlockPred m
 isNotSafe _ = not . safeExp . bindingExp
 
+isInPlaceBound :: BlockPred m
+isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
+                   patternElements . bindingPattern
+
 isNotCheap :: BlockPred m
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
@@ -399,7 +409,7 @@ hoistCommon :: MonadEngine m =>
 hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   (body1, needs1) <- listenNeed $ localVtable vtablef1 m1
   (body2, needs2) <- listenNeed $ localVtable vtablef2 m2
-  let block = isNotSafe `orIf` isNotCheap
+  let block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (body1', safe1, f1) <-
@@ -492,7 +502,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
                             mkLetM (addWisdomToPattern p e) e
   return ()
     where gatherPat acc (_, Basic _, _) = return acc
-          gatherPat acc (_, Mem   _, _) = return acc
+          gatherPat acc (_, Mem {}, _) = return acc
           gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
             foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
           gatherPat _ _ =
@@ -601,29 +611,67 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   where fparamnames = HS.fromList (map (paramName . fst) merge)
 
 simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
-  cs'   <- simplifyCerts      cs
-  form' <- simplifyStreamForm form
+  cs' <- simplifyCerts      cs
+  outerdim' <- simplifySubExp outerdim
+  form' <- simplifyStreamForm outerdim' form
   arr' <- mapM simplifyVName  arr
   vtab <- getVtable
   let (chunk:_) = extLambdaParams lam
-      se_outer = case outerdim of
+      se_outer = case outerdim' of
                     Var idd    -> fromMaybe (SExp.Id idd Int) (ST.lookupScalExp idd vtab)
                     Constant c -> SExp.Val c
       se_1 = SExp.Val $ IntVal 1
       -- extension: one may similarly treat iota stream-array case,
       -- by setting the bounds to [0, se_outer-1]
       parbnds  = [ (chunk, se_1, se_outer) ]
-  lam' <- simplifyExtLambda parbnds lam outerdim
-  return $ Stream cs' outerdim form' lam' arr' ii
-  where simplifyStreamForm (MapLike o) = return $ MapLike o
-        simplifyStreamForm (RedLike o lam0 acc) = do
+  lam' <- simplifyExtLambda parbnds lam outerdim'
+  return $ Stream cs' outerdim' form' lam' arr' ii
+  where simplifyStreamForm _ (MapLike o) = return $ MapLike o
+        simplifyStreamForm outerdim' (RedLike o lam0 acc) = do
             acc'  <- mapM simplifySubExp acc
-            lam0' <- simplifyLambda lam0 outerdim $
-                        replicate (length $ lambdaParams lam0) Nothing
+            lam0' <- simplifyLambda lam0 outerdim' $
+                     replicate (length $ lambdaParams lam0) Nothing
             return $ RedLike o lam0' acc'
-        simplifyStreamForm (Sequential acc) = do
+        simplifyStreamForm _ (Sequential acc) = do
             acc'  <- mapM simplifySubExp acc
             return $ Sequential acc'
+
+simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
+  cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
+  ispace' <- forM ispace $ \(i, bound) -> do
+    bound' <- simplifySubExp bound
+    return (i, bound')
+  returns' <- forM returns $ \(t, perm) -> do
+    t' <- simplifyType t
+    return (t', perm)
+  enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
+    inps' <- mapM simplifyKernelInput inps
+    body' <- bindFParams (map kernelInputParam inps') $
+             blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
+             simplifyBody (map (diet . fst) returns) body
+    return $ Kernel cs' w' index ispace' inps' returns' body'
+  where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
+
+simplifyLoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs) = do
+  cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
+  kernel_size' <- simplifyKernelSize kernel_size
+  nes' <- mapM simplifySubExp nes
+  arrs' <- mapM simplifyVName arrs
+  parlam' <- simplifyLambda parlam w' $ map (const Nothing) nes
+  seqlam' <- simplifyLambda seqlam w' $ map (const Nothing) nes
+  return $ ReduceKernel cs' w' kernel_size' parlam' seqlam' nes' arrs'
+
+simplifyLoopOp (ScanKernel cs w kernel_size lam input) = do
+  let (nes, arrs) = unzip input
+  cs' <- simplifyCerts cs
+  w' <- simplifySubExp w
+  kernel_size' <- simplifyKernelSize kernel_size
+  nes' <- mapM simplifySubExp nes
+  arrs' <- mapM simplifyVName arrs
+  lam' <- simplifyLambda lam w' $ map Just arrs'
+  return $ ScanKernel cs' w' kernel_size' lam' $ zip nes' arrs'
 
 simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs
@@ -715,6 +763,18 @@ simplifySubExp (Var name) = do
                          return $ Var name
 simplifySubExp (Constant v) = return $ Constant v
 
+simplifyKernelSize :: MonadEngine m =>
+                      KernelSize -> m KernelSize
+simplifyKernelSize (KernelSize num_groups group_size thread_chunk
+                    num_elements offset_multiple num_threads) = do
+  num_groups' <- simplifySubExp num_groups
+  group_size' <- simplifySubExp group_size
+  thread_chunk' <- simplifySubExp thread_chunk
+  num_elements' <- simplifySubExp num_elements
+  offset_multiple' <- simplifySubExp offset_multiple
+  num_threads' <- simplifySubExp num_threads
+  return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
+
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)
                 -> [ExtType]
@@ -780,8 +840,8 @@ simplifyType :: MonadEngine m => Type -> m Type
 simplifyType (Array et shape u) = do
   dims <- mapM simplifySubExp $ shapeDims shape
   return $ Array et (Shape dims) u
-simplifyType (Mem size) =
-  Mem <$> simplifySubExp size
+simplifyType (Mem size space) =
+  Mem <$> simplifySubExp size <*> pure space
 simplifyType (Basic bt) =
   return $ Basic bt
 
@@ -888,6 +948,14 @@ simplifyCerts = liftM (nub . concat) . mapM check
                                   return [idd']
             _ -> do usedName idd
                     return [idd]
+
+simplifyKernelInput :: MonadEngine m =>
+                       KernelInput (InnerLore m) -> m (KernelInput (Lore m))
+simplifyKernelInput (KernelInput param arr is) = do
+  param' <- simplifyParam simplifyFParamLore param
+  arr' <- simplifyVName arr
+  is' <- mapM simplifySubExp is
+  return $ KernelInput param' arr' is'
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
