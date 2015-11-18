@@ -22,7 +22,7 @@ fun [[real]] main(
 ) =
   let arr    = reshape( (num_dates*num_und), arr_usz ) in
   let bb_data= map(fn [real] ([int] row) =>
-                        map(toFloat64,row)
+                        map(toFloat,row)
                   , bb_inds )   in
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat

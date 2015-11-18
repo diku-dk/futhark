@@ -57,7 +57,7 @@ import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, paramL
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Analysis.ScalExp
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Representation.AST.Attributes.Ranges
   (Range, ScalExpRange, Ranged)

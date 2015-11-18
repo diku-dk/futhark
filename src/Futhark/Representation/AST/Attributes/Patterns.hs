@@ -26,6 +26,10 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternSize
          -- * Bindage
        , bindageRequires
+         -- * Kernel inputs
+       , kernelInputName
+       , kernelInputType
+       , kernelInputIdent
        )
        where
 
@@ -105,3 +109,12 @@ patternValueTypes = map identType . patternValueIdents
 -- | Return the number of names bound by the 'Pattern'.
 patternSize :: Pattern lore -> Int
 patternSize (Pattern context values) = length context + length values
+
+kernelInputName :: KernelInput lore -> VName
+kernelInputName = paramName . kernelInputParam
+
+kernelInputType :: KernelInput lore -> Type
+kernelInputType = paramType . kernelInputParam
+
+kernelInputIdent :: KernelInput lore -> Ident
+kernelInputIdent = paramIdent . kernelInputParam

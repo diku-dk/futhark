@@ -38,6 +38,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , varInput
   , identInput
   , isVarInput
+  , isVarishInput
   , addTransform
   , addTransforms
   , InputArray (..)
@@ -82,20 +83,20 @@ import qualified Futhark.Representation.AST as Futhark
 import Futhark.Representation.AST
   hiding (Map, Reduce, Scan, Redomap, Stream,
           Var, Iota, Rearrange, Reshape, Replicate)
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 import Futhark.Construct
-import Futhark.Renamer (renameLambda)
+import Futhark.Transform.Rename (renameLambda)
 import Futhark.MonadFreshNames
 
 -- | A single, simple transformation.  If you want several, don't just
 -- create a list, use 'ArrayTransforms' instead.
 data ArrayTransform = Rearrange Certificates [Int]
                     -- ^ A permutation of an otherwise valid input.
-                    | Reshape Certificates [SubExp]
+                    | Reshape Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of an otherwise valid input.
-                    | ReshapeOuter Certificates [SubExp]
+                    | ReshapeOuter Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of the outer dimension.
-                    | ReshapeInner Certificates [SubExp]
+                    | ReshapeInner Certificates (ShapeChange SubExp)
                     -- ^ A reshaping of everything but the outer dimension.
                     | Replicate SubExp
                     -- ^ Replicate the rows of the array a number of times.
@@ -205,7 +206,7 @@ identityTransform _ = False
 
 combineTransforms :: ArrayTransform -> ArrayTransform -> Maybe ArrayTransform
 combineTransforms (Rearrange cs2 perm2) (Rearrange cs1 perm1) =
-  Just $ Rearrange (cs1++cs2) $ perm2 `permuteCompose` perm1
+  Just $ Rearrange (cs1++cs2) $ perm2 `rearrangeCompose` perm1
 combineTransforms _ _ = Nothing
 
 -- | Given an expression, determine whether the expression represents
@@ -263,6 +264,15 @@ identInput v = Input (ArrayTransforms Seq.empty) $ Var (identName v) (identType 
 isVarInput :: Input -> Maybe VName
 isVarInput (Input ts (Var v _)) | nullTransforms ts = Just v
 isVarInput _                                        = Nothing
+
+-- | If the given input is a plain variable input, with no non-vacuous transforms,
+-- return the variable.
+isVarishInput :: Input -> Maybe VName
+isVarishInput (Input ts ia@(Var v _))
+  | nullTransforms ts = Just v
+  | Reshape [] [DimCoercion _] :< ts' <- viewf ts =
+      isVarishInput $ Input ts' ia
+isVarishInput _ = Nothing
 
 -- | Add a transformation to the end of the transformation list.
 addTransform :: ArrayTransform -> Input -> Input
@@ -324,16 +334,15 @@ inputType (Input (ArrayTransforms ts) ia) =
           where u | unique t  = Unique
                   | otherwise = Nonunique
         transformType t (Rearrange _ perm) =
-          let Shape oldshape = arrayShape t
-          in t `setArrayShape` Shape (permuteShape perm oldshape)
+          rearrangeType perm t
         transformType t (Reshape _ shape) =
-          t `setArrayShape` Shape shape
+          t `setArrayShape` newShape shape
         transformType t (ReshapeOuter _ shape) =
           let Shape oldshape = arrayShape t
-          in t `setArrayShape` Shape (shape ++ drop 1 oldshape)
+          in t `setArrayShape` Shape (newDims shape ++ drop 1 oldshape)
         transformType t (ReshapeInner _ shape) =
           let Shape oldshape = arrayShape t
-          in t `setArrayShape` Shape (take 1 oldshape ++ shape)
+          in t `setArrayShape` Shape (take 1 oldshape ++ newDims shape)
 
 -- | Return the row type of an input.  Just a convenient alias.
 inputRowType :: Input -> Type
@@ -367,15 +376,15 @@ transformRows (ArrayTransforms ts) =
 transformTypeRows :: ArrayTransforms -> Type -> Type
 transformTypeRows (ArrayTransforms ts) = flip (Foldable.foldl transform) ts
   where transform t (Rearrange _ perm) =
-          t `setArrayShape` Shape (permuteShape (0:map (+1) perm) $ arrayDims t)
+          t `setArrayShape` Shape (rearrangeShape (0:map (+1) perm) $ arrayDims t)
         transform t (Reshape _ shape) =
-          t `setArrayShape` Shape shape
+          t `setArrayShape` newShape shape
         transform t (ReshapeOuter _ shape) =
           let outer:oldshape = arrayDims t
-          in t `setArrayShape` Shape (outer : shape ++ drop 1 oldshape)
+          in t `setArrayShape` Shape (outer : newDims shape ++ drop 1 oldshape)
         transform t (ReshapeInner _ shape) =
           let outer:inner:_ = arrayDims t
-          in t `setArrayShape` Shape (outer : inner : shape)
+          in t `setArrayShape` Shape (outer : inner : newDims shape)
         transform t (Replicate n) =
           let outer:shape = arrayDims t
           in t `setArrayShape` Shape (outer : n : shape)

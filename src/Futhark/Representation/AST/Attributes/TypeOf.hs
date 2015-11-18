@@ -49,6 +49,7 @@ import Data.Traversable hiding (mapM)
 import Prelude hiding (mapM)
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
@@ -103,10 +104,14 @@ primOpType (Reshape _ [] e) =
   where result t = [Basic $ elemType t]
 primOpType (Reshape _ shape e) =
   result <$> lookupType e
-  where result t = [t `setArrayShape` Shape shape]
+  where result t = [t `setArrayShape` newShape shape]
 primOpType (Rearrange _ perm e) =
   result <$> lookupType e
-  where result t = [t `setArrayShape` Shape (permuteShape perm $ arrayDims t)]
+  where result t = [rearrangeType perm t]
+primOpType (Stripe _ _ e) =
+  pure <$> lookupType e
+primOpType (Unstripe _ _ e) =
+  pure <$> lookupType e
 primOpType (Split _ sizeexps e) =
   result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps
@@ -120,8 +125,8 @@ primOpType (Copy v) =
   where result t = [t `setUniqueness` Unique]
 primOpType (Assert _ _) =
   pure [Basic Cert]
-primOpType (Alloc e) =
-  pure [Mem e]
+primOpType (Alloc e space) =
+  pure [Mem e space]
 primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Basic Int) ++ ts
@@ -157,6 +162,21 @@ loopOpExtType (Stream _ outersize form lam _ _) =
                 MapLike _ -> []
                 RedLike _ _ acc -> acc
                 Sequential  acc -> acc
+loopOpExtType (Kernel _ _ _ is _ returns _) =
+  staticShapes
+  [ rearrangeType perm (arrayOfShape t outer_shape) `setUniqueness` Unique
+  | (t, perm) <- returns ]
+  where outer_shape = Shape $ map snd is
+loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
+  staticShapes $
+  map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
+loopOpExtType (ScanKernel _ _ size lam _) =
+  staticShapes $
+  map (`arrayOfRow` width) (lambdaReturnType lam) ++
+  map ((`arrayOfRow` kernelWorkgroups size) .
+       (`arrayOfRow` kernelWorkgroupSize size))
+  (lambdaReturnType lam)
+  where width = kernelTotalElements size
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
@@ -297,15 +317,15 @@ withParamTypes = localTypeEnv . typeEnvFromParams
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
 substNamesInExtType _ tp@(Basic _) = tp
-substNamesInExtType subs (Mem se) =
-  Mem $ substNamesInSubExp subs se
+substNamesInExtType subs (Mem se space) =
+  Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
   let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
   in  Array btp shp' u
 substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
 substNamesInSubExp _ e@(Constant _) = e
 substNamesInSubExp subs (Var idd) =
-  fromMaybe (Var idd) (HM.lookup idd subs)
+  HM.lookupDefault (Var idd) idd subs
 substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o

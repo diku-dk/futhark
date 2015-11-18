@@ -5,7 +5,7 @@ import Control.Monad
 
 import Language.Futhark.Parser
 import Futhark.Version
-import Futhark.Pipeline
+import Futhark.Passes
 import Futhark.Compiler
 import Futhark.Util.Options
 
@@ -34,7 +34,7 @@ repl = do
 
 interpret :: FutharkConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram config $ interpretAction' $ futharkRealConfiguration config
+  runCompilerOnProgram config standardPipeline $ interpretAction' $ futharkRealConfiguration config
 
 interpreterConfig :: FutharkConfig
 interpreterConfig = newFutharkConfig

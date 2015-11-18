@@ -14,8 +14,11 @@ module Futhark.Representation.AST.Attributes.TypeEnv
 
 import Control.Applicative
 import Control.Monad.Reader
+import qualified Control.Monad.RWS.Strict
+import qualified Control.Monad.RWS.Lazy
 import Data.List
 import Data.Maybe
+import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
@@ -35,7 +38,7 @@ class Applicative m => HasTypeEnv m where
   -- the type environment.
   lookupType :: VName -> m Type
   lookupType name =
-    fromMaybe notFound <$> HM.lookup name <$> askTypeEnv
+    HM.lookupDefault notFound name <$> askTypeEnv
     where notFound =
             error $ "TypeEnv.lookupType: Name " ++ textual name ++
             " not found in type environment."
@@ -45,6 +48,14 @@ class Applicative m => HasTypeEnv m where
   askTypeEnv :: m TypeEnv
 
 instance (Applicative m, Monad m) => HasTypeEnv (ReaderT TypeEnv m) where
+  askTypeEnv = ask
+
+instance (Applicative m, Monad m, Monoid w) =>
+         HasTypeEnv (Control.Monad.RWS.Strict.RWST TypeEnv w s m) where
+  askTypeEnv = ask
+
+instance (Applicative m, Monad m, Monoid w) =>
+         HasTypeEnv (Control.Monad.RWS.Lazy.RWST TypeEnv w s m) where
   askTypeEnv = ask
 
 -- | The class of monads that not only provide a 'TypeEnv', but also
@@ -58,6 +69,15 @@ class (HasTypeEnv m, Monad m) => LocalTypeEnv m where
 
 instance (Applicative m, Monad m) => LocalTypeEnv (ReaderT TypeEnv m) where
   localTypeEnv = local . HM.union
+
+instance (Applicative m, Monad m, Monoid w) =>
+         LocalTypeEnv (Control.Monad.RWS.Strict.RWST TypeEnv w s m) where
+  localTypeEnv = local . HM.union
+
+instance (Applicative m, Monad m, Monoid w) =>
+         LocalTypeEnv (Control.Monad.RWS.Lazy.RWST TypeEnv w s m) where
+  localTypeEnv = local . HM.union
+
 
 -- | A monad transformer that carries around an extended 'TypeEnv'.
 -- Its 'lookupType' method will first look in the extended 'TypeEnv',

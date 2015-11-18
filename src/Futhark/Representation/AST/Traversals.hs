@@ -135,11 +135,17 @@ mapExpM tv (PrimOp (Scratch t shape)) =
   PrimOp <$> (Scratch t <$> mapM (mapOnSubExp tv) shape)
 mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
   PrimOp <$> (pure Reshape <*> mapOnCertificates tv cs <*>
-                 mapM (mapOnSubExp tv) shape <*>
+                 mapM (Data.Traversable.traverse (mapOnSubExp tv)) shape <*>
                  mapOnVName tv arrexp)
 mapExpM tv (PrimOp (Rearrange cs perm e)) =
   PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
                  pure perm <*> mapOnVName tv e)
+mapExpM tv (PrimOp (Stripe cs stride v)) =
+  PrimOp <$> (pure Stripe <*> mapOnCertificates tv cs <*>
+                 mapOnSubExp tv stride <*> mapOnVName tv v)
+mapExpM tv (PrimOp (Unstripe cs stride v)) =
+  PrimOp <$> (pure Unstripe <*> mapOnCertificates tv cs <*>
+                 mapOnSubExp tv stride <*> mapOnVName tv v)
 mapExpM tv (PrimOp (Split cs sizeexps arrexp)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
               mapM (mapOnSubExp tv) sizeexps <*> mapOnVName tv arrexp)
@@ -149,8 +155,8 @@ mapExpM tv (PrimOp (Concat cs x ys size)) =
                  mapOnSubExp tv size)
 mapExpM tv (PrimOp (Copy e)) =
   PrimOp <$> (pure Copy <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Alloc e)) =
-  PrimOp <$> (pure Alloc <*> mapOnSubExp tv e)
+mapExpM tv (PrimOp (Alloc e space)) =
+  PrimOp <$> (Alloc <$> mapOnSubExp tv e <*> pure space)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Partition cs n flags arr)) =
@@ -203,6 +209,35 @@ mapExpM tv (LoopOp (Stream cs size form lam arrs ii)) =
                  mapM (mapOnSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapM (mapOnSubExp tv) acc
+mapExpM tv (LoopOp (Kernel cs w index ispace inps rettype body)) =
+  LoopOp <$> (Kernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              mapOnVName tv index <*>
+              (zip iparams <$> mapM (mapOnSubExp tv) bounds) <*>
+              mapM (mapOnKernelInput tv) inps <*>
+              (zip <$> mapM (mapOnType tv) ts <*> pure perms) <*>
+              mapOnBody tv body)
+  where (iparams, bounds) = unzip ispace
+        (ts, perms) = unzip rettype
+mapExpM tv (LoopOp (ReduceKernel cs w kernel_size red_fun fold_fun accs arrs)) =
+  LoopOp <$> (ReduceKernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              mapOnKernelSize tv kernel_size <*>
+              mapOnLambda tv red_fun <*>
+              mapOnLambda tv fold_fun <*>
+              mapM (mapOnSubExp tv) accs <*>
+              mapM (mapOnVName tv) arrs)
+mapExpM tv (LoopOp (ScanKernel cs w kernel_size fun input)) =
+  LoopOp <$> (ScanKernel <$>
+              mapOnCertificates tv cs <*>
+              mapOnSubExp tv w <*>
+              mapOnKernelSize tv kernel_size <*>
+              mapOnLambda tv fun <*>
+              (zip <$> mapM (mapOnSubExp tv) nes <*>
+                       mapM (mapOnVName tv) arrs))
+  where (nes, arrs) = unzip input
 mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
   SegOp <$> (pure SegReduce <*>
              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
@@ -227,6 +262,18 @@ mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
              mapOnVName tv dataarr <*>
              Data.Traversable.mapM (mapOnVName tv) seg)
 
+mapOnKernelSize :: (Monad m, Applicative m) =>
+                   Mapper flore tlore m -> KernelSize -> m KernelSize
+mapOnKernelSize tv (KernelSize num_workgroups workgroup_size
+                    per_thread_elements num_elements offset_multiple num_threads) =
+  KernelSize <$>
+  mapOnSubExp tv num_workgroups <*>
+  mapOnSubExp tv workgroup_size <*>
+  mapOnSubExp tv per_thread_elements <*>
+  mapOnSubExp tv num_elements <*>
+  mapOnSubExp tv offset_multiple <*>
+  mapOnSubExp tv num_threads
+
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> ExtType -> m ExtType
 mapOnExtType tv (Array bt (ExtShape shape) u) =
@@ -235,7 +282,7 @@ mapOnExtType tv (Array bt (ExtShape shape) u) =
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
 mapOnExtType _ (Basic bt) = return $ Basic bt
-mapOnExtType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
 mapOnLoopForm :: (Monad m, Applicative m) =>
                  Mapper flore tlore m -> LoopForm -> m LoopForm
@@ -244,6 +291,14 @@ mapOnLoopForm tv (ForLoop i bound) =
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 
+mapOnKernelInput :: (Monad m, Applicative m) =>
+                    Mapper flore tlore m -> KernelInput flore
+                 -> m (KernelInput tlore)
+mapOnKernelInput tv (KernelInput param arr is) =
+  KernelInput <$> mapOnFParam tv param <*>
+                  mapOnVName tv arr <*>
+                  mapM (mapOnSubExp tv) is
+
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
@@ -251,7 +306,7 @@ mapExp m = runIdentity . mapExpM m
 mapOnType :: (Applicative m, Monad m) =>
              Mapper flore tlore m -> Type -> m Type
 mapOnType _ (Basic bt) = return $ Basic bt
-mapOnType tv (Mem size) = Mem <$> mapOnSubExp tv size
+mapOnType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 mapOnType tv (Array bt shape u) =
   Array bt <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape)) <*> pure u
 

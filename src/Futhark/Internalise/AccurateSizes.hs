@@ -42,49 +42,54 @@ argShapes shapes valts valargts =
           | Just se <- HM.lookup name mapping = se
           | otherwise                         = Constant (IntVal 0)
 
-ensureResultShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
-                     SrcLoc -> [Type] -> Body lore
-                  -> m (Body lore)
-ensureResultShape loc =
-  ensureResultExtShape loc . staticShapes
+ensureResultShape :: MonadBinder m =>
+                     (m Certificates -> m Certificates)
+                  -> SrcLoc -> [Type] -> Body (Lore m)
+                  -> m (Body (Lore m))
+ensureResultShape asserting loc =
+  ensureResultExtShape asserting loc . staticShapes
 
-ensureResultExtShape :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
-                        SrcLoc -> [ExtType] -> Body lore
-                     -> m (Body lore)
-ensureResultExtShape loc rettype body =
-  runBodyBinder $ insertBindingsM $ do
+ensureResultExtShape :: MonadBinder m =>
+                        (m Certificates -> m Certificates)
+                     -> SrcLoc -> [ExtType] -> Body (Lore m)
+                     -> m (Body (Lore m))
+ensureResultExtShape asserting loc rettype body =
+  insertBindingsM $ do
     es <- bodyBind body
     let assertProperShape t se =
           let name = "result_proper_shape"
-          in ensureExtShape loc t name se
+          in ensureExtShape asserting loc t name se
     reses <- zipWithM assertProperShape rettype es
     mkBodyM [] reses
 
 ensureExtShape :: MonadBinder m =>
-                  SrcLoc -> ExtType -> String -> SubExp
+                  (m Certificates -> m Certificates)
+               -> SrcLoc -> ExtType -> String -> SubExp
                -> m SubExp
-ensureExtShape loc t name orig
+ensureExtShape asserting loc t name orig
   | Array{} <- t, Var v <- orig =
-    Var <$> ensureShapeVar loc t name v
+    Var <$> ensureShapeVar asserting loc t name v
   | otherwise = return orig
 
 ensureShape :: MonadBinder m =>
-               SrcLoc -> Type -> String -> SubExp
+               (m Certificates -> m Certificates)
+            -> SrcLoc -> Type -> String -> SubExp
             -> m SubExp
-ensureShape loc = ensureExtShape loc . staticShapes1
+ensureShape asserting loc = ensureExtShape asserting loc . staticShapes1
 
 ensureShapeVar :: MonadBinder m =>
-                    SrcLoc -> ExtType -> String -> VName
-                 -> m VName
-ensureShapeVar loc t name v
+                  (m Certificates -> m Certificates)
+               -> SrcLoc -> ExtType -> String -> VName
+               -> m VName
+ensureShapeVar asserting loc t name v
   | Array{} <- t = do
     newshape <- arrayDims <$> removeExistentials t <$> lookupType v
     oldshape <- arrayDims <$> lookupType v
     let checkDim desired has =
           letExp "shape_cert" =<<
           eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
-    certs <- zipWithM checkDim newshape oldshape
-    letExp name $ PrimOp $ Reshape certs newshape v
+    certs <- asserting $ zipWithM checkDim newshape oldshape
+    letExp name $ shapeCoerce certs newshape v
   | otherwise = return v
 
 removeExistentials :: ExtType -> Type -> Type

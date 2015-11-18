@@ -6,6 +6,8 @@ module Futhark.Tools
   , nonuniqueParams
   , redomapToMapAndReduce
   , sequentialStreamWholeArray
+  , singletonChunkRedLikeStreamLambda
+  , partitionChunkedLambdaParameters
   , intraproceduralTransformation
   , boundInBody
   )
@@ -14,6 +16,8 @@ where
 import Control.Applicative
 import Control.Monad.Identity
 import Control.Monad.State
+import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -87,18 +91,18 @@ redomapToMapAndReduce (Pattern [] patelems) lore
 redomapToMapAndReduce _ _ _ =
   error "redomapToMapAndReduce does not handle an empty 'patternContextElements'"
 
-sequentialStreamWholeArray :: Bindable lore =>
-                              SubExp -> [SubExp]
-                           -> ExtLambdaT lore -> [VName]
-                           -> ([Binding lore], [SubExp])
-sequentialStreamWholeArray width accs lam arrs =
+sequentialStreamWholeArrayBindings :: Bindable lore =>
+                                      SubExp -> [SubExp]
+                                   -> ExtLambdaT lore -> [VName]
+                                   -> ([Binding lore], [SubExp])
+sequentialStreamWholeArrayBindings width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
-        partitionParameters $ extLambdaParams lam
+        partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
-                   PrimOp $ Reshape [] (arrayDims $ paramType arr_param) arr
+                   PrimOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
   in (chunk_bnd :
@@ -107,14 +111,72 @@ sequentialStreamWholeArray width accs lam arrs =
       bodyBindings (extLambdaBody lam),
 
       bodyResult $ extLambdaBody lam)
-  where partitionParameters [] =
-          error "sequentialStreamWholeArray: lambda takes no parameters"
-        partitionParameters (chunk_param : params) =
-          let (acc_params, arr_params) = splitAt (length accs) params
-          in (chunk_param, acc_params, arr_params)
 
-intraproceduralTransformation :: (FunDec fromlore -> State VNameSource (FunDec tolore))
-                              -> Prog fromlore -> Prog tolore
+sequentialStreamWholeArray :: (MonadBinder m, Bindable (Lore m)) =>
+                              Pattern (Lore m)
+                           -> Certificates
+                           -> SubExp -> [SubExp]
+                           -> ExtLambdaT (Lore m) -> [VName]
+                           -> m ()
+sequentialStreamWholeArray pat cs width nes fun arrs = do
+  let (body_bnds,res) = sequentialStreamWholeArrayBindings width nes fun arrs
+      reshapeRes t (Var v)
+        | null (arrayDims t) = PrimOp $ SubExp $ Var v
+        | otherwise          = shapeCoerce cs (arrayDims t) v
+      reshapeRes _ se        = PrimOp $ SubExp se
+      res_bnds =
+        [ mkLet' [] [ident] $ reshapeRes (identType ident) se
+        | (ident,se) <- zip (patternValueIdents pat) res]
+
+  mapM_ addBinding body_bnds
+  shapemap <- shapeMapping (patternValueTypes pat) <$> mapM subExpType res
+  forM_ (HM.toList shapemap) $ \(name,se) ->
+    when (name `elem` patternContextNames pat) $
+      addBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
+  mapM_ addBinding res_bnds
+singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
+                                     [Type] -> ExtLambda lore -> m (Lambda lore)
+singletonChunkRedLikeStreamLambda acc_ts lam = do
+  -- The accumulator params are OK, but we need array params without
+  -- the chunk part.
+  let (chunk_param, acc_params, arr_params) =
+        partitionChunkedFoldParameters (length acc_ts) $ extLambdaParams lam
+  unchunked_arr_params <- forM arr_params $ \arr_param ->
+    flip Param () <$>
+    newIdent (baseString (paramName arr_param) <> "_unchunked")
+    (rowType $ paramType arr_param)
+  let chunk_name = paramName chunk_param
+      chunk_bnd = mkLet' [] [paramIdent chunk_param] $
+                  PrimOp $ SubExp $ Constant $ IntVal 1
+      arr_bnds = [ mkLet' [] [paramIdent arr_param] $
+                   PrimOp $ Replicate (Var chunk_name) $
+                   Var $ paramName unchunked_arr_param |
+                   (arr_param, unchunked_arr_param) <-
+                     zip arr_params unchunked_arr_params ]
+      unchunked_body = insertBindings (chunk_bnd:arr_bnds) $ extLambdaBody lam
+  return Lambda { lambdaBody = unchunked_body
+                , lambdaParams = acc_params <> unchunked_arr_params
+                , lambdaReturnType = acc_ts
+                , lambdaIndex = extLambdaIndex lam
+                }
+
+partitionChunkedFoldParameters :: Int -> [Param attr]
+                               -> (Param attr, [Param attr], [Param attr])
+partitionChunkedFoldParameters _ [] =
+  error "partitionChunkedFoldParameters: lambda takes no parameters"
+partitionChunkedFoldParameters num_accs (chunk_param : params) =
+  let (acc_params, arr_params) = splitAt num_accs params
+  in (chunk_param, acc_params, arr_params)
+
+partitionChunkedLambdaParameters :: [Param attr]
+                               -> (Param attr, [Param attr])
+partitionChunkedLambdaParameters [] =
+  error "partitionChunkedLambdaParameters: lambda takes no parameters"
+partitionChunkedLambdaParameters (chunk_param : params) =
+  (chunk_param, params)
+
+intraproceduralTransformation :: MonadFreshNames m =>
+                                 (FunDec fromlore -> State VNameSource (FunDec tolore))
+                              -> Prog fromlore -> m (Prog tolore)
 intraproceduralTransformation ft prog =
-  evalState (Prog <$> mapM ft (progFunctions prog)) src
-  where src = newNameSourceForProg prog
+  modifyNameSource $ runState $ Prog <$> mapM ft (progFunctions prog)

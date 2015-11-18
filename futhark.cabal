@@ -29,7 +29,7 @@ Library
                  mtl >= 2.2.1,
                  transformers >= 0.3,
                  srcloc >= 0.4,
-                 language-c-quote >= 0.11,
+                 language-c-quote == 0.11,
                  mainland-pretty >= 0.4,
                  hashable >= 1.2.1.0,
                  unordered-containers >= 0.2.3.3,
@@ -50,33 +50,36 @@ Library
                    Futhark.Analysis.HORepresentation.MapNest
                    Futhark.Analysis.HORepresentation.SOAC
                    Futhark.Analysis.HORepresentation.SOACNest
-                   Futhark.Analysis.ScalExp
-                   Futhark.Analysis.SymbolTable
                    Futhark.Analysis.Range
                    Futhark.Analysis.Rephrase
-                   Futhark.Analysis.UsageTable
+                   Futhark.Analysis.ScalExp
+                   Futhark.Analysis.SymbolTable
                    Futhark.Analysis.Usage
+                   Futhark.Analysis.UsageTable
+                   Futhark.Analysis.Metrics
                    Futhark.Binder
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
-                   Futhark.CodeGen.Backends.GenericCReading
-                   Futhark.CodeGen.Backends.OpenCL
+                   Futhark.CodeGen.Backends.GenericC.Options
+                   Futhark.CodeGen.Backends.GenericC.Reading
+                   Futhark.CodeGen.Backends.COpenCL
+                   Futhark.CodeGen.Backends.COpenCL.Boilerplate
                    Futhark.CodeGen.Backends.SequentialC
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
-                   Futhark.CodeGen.KernelImp
+                   Futhark.CodeGen.ImpCode.Kernels
+                   Futhark.CodeGen.ImpCode.OpenCL
+                   Futhark.CodeGen.ImpCode.Sequential
                    Futhark.CodeGen.ImpGen
-                   Futhark.CodeGen.KernelImpGen
-                   Futhark.CopyPropagate
+                   Futhark.CodeGen.ImpGen.Kernels
+                   Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
+                   Futhark.CodeGen.ImpGen.OpenCL
+                   Futhark.CodeGen.ImpGen.Sequential
+                   Futhark.CodeGen.OpenCL.Kernels
+                   Futhark.CodeGen.SetDefaultSpace
                    Futhark.Compiler
                    Futhark.Construct
-                   Futhark.DistributeKernels
-                   Futhark.DistributeKernels.Distribution
-                   Futhark.ExplicitAllocations
-                   Futhark.Externalise
-                   Futhark.FirstOrderTransform
-                   Futhark.Flattening
                    Futhark.FreshNames
                    Futhark.Internalise
                    Futhark.Internalise.AccurateSizes
@@ -85,14 +88,11 @@ Library
                    Futhark.Internalise.Monad
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
-                   Futhark.KernelSequentialisation
-                   Futhark.Metrics
                    Futhark.MonadFreshNames
                    Futhark.NeedNames
-                   Futhark.Optimise.DoubleBuffer
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
-                   Futhark.Optimise.Errors
+                   Futhark.Optimise.DoubleBuffer
                    Futhark.Optimise.Fusion
                    Futhark.Optimise.Fusion.Composing
                    Futhark.Optimise.Fusion.LoopKernel
@@ -101,7 +101,6 @@ Library
                    Futhark.Optimise.InPlaceLowering
                    Futhark.Optimise.InPlaceLowering.LowerIntoBinding
                    Futhark.Optimise.InPlaceLowering.SubstituteIndices
-                   Futhark.Optimise.SimpleOpts
                    Futhark.Optimise.Simplifier
                    Futhark.Optimise.Simplifier.Apply
                    Futhark.Optimise.Simplifier.ClosedForm
@@ -111,15 +110,28 @@ Library
                    Futhark.Optimise.Simplifier.RuleM
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simple
-                   Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.Simplifier.Simplifiable
+                   Futhark.Optimise.Simplifier.Simplify
+                   Futhark.Optimise.SimplifyLambda
                    Futhark.Optimise.SplitShapes
                    Futhark.Optimise.SuffCond
                    Futhark.Optimise.SuffCond.GenPredicates
                    Futhark.Optimise.SuffCond.OptPredicates
+                   Futhark.Pass
                    Futhark.Passes
+                   Futhark.Pass.ExpandAllocations
+                   Futhark.Pass.ExpandArrays
+                   Futhark.Pass.ExplicitAllocations
+                   Futhark.Pass.ExtractKernels
+                   Futhark.Pass.ExtractKernels.BlockedKernel
+                   Futhark.Pass.ExtractKernels.Distribution
+                   Futhark.Pass.ExtractKernels.ISRWIM
+                   Futhark.Pass.FirstOrderTransform
+                   Futhark.Pass.Flattening
+                   Futhark.Pass.KernelBabysitting
+                   Futhark.Pass.Simplify
+                   Futhark.Pass.Untrace
                    Futhark.Pipeline
-                   Futhark.Renamer
                    Futhark.Representation.Aliases
                    Futhark.Representation.AST
                    Futhark.Representation.AST.Annotations
@@ -130,13 +142,16 @@ Library
                    Futhark.Representation.AST.Attributes.Names
                    Futhark.Representation.AST.Attributes.Patterns
                    Futhark.Representation.AST.Attributes.Ranges
+                   Futhark.Representation.AST.Attributes.Rearrange
+                   Futhark.Representation.AST.Attributes.Reshape
+                   Futhark.Representation.AST.Attributes.Stripe
                    Futhark.Representation.AST.Attributes.TypeEnv
                    Futhark.Representation.AST.Attributes.TypeOf
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values
                    Futhark.Representation.AST.Lore
-                   Futhark.Representation.AST.RetType
                    Futhark.Representation.AST.Pretty
+                   Futhark.Representation.AST.RetType
                    Futhark.Representation.AST.Syntax
                    Futhark.Representation.AST.Syntax.Core
                    Futhark.Representation.AST.Traversals
@@ -151,15 +166,20 @@ Library
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
                    Futhark.Representation.Ranges
-                   Futhark.Substitute
                    Futhark.Tools
+                   Futhark.Transform.CopyPropagate
+                   Futhark.Transform.FirstOrderTransform
+                   Futhark.Transform.Rename
+                   Futhark.Transform.Substitute
                    Futhark.TypeCheck
                    Futhark.TypeCheck.TypeError
-                   Futhark.Untrace
-                   Futhark.Version
                    Futhark.Util
-                   Futhark.Util.Truths
                    Futhark.Util.Options
+                   Futhark.Util.Pretty
+                   Futhark.Util.Log
+                   Futhark.Util.Truths
+                   Futhark.Util.IntegralExp
+                   Futhark.Version
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
@@ -187,9 +207,6 @@ Library
 
   Ghc-prof-options:   -fprof-auto
 
-  if impl(ghc >= 7.10.1)
-     Ghc-Options:       -Wall -fno-warn-unticked-promoted-constructors
-
 Executable futhark
   Main-is: src/futhark.hs
 
@@ -197,6 +214,7 @@ Executable futhark
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
@@ -212,6 +230,7 @@ Executable futhark-c
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 text,
                  filepath,
                  process,
                  transformers,
@@ -228,6 +247,7 @@ Executable futharki
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
@@ -266,12 +286,12 @@ Executable futhark-opencl
                  filepath,
                  process,
                  transformers,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
 
 Test-suite unit
   Type:              exitcode-stdio-1.0
@@ -298,8 +318,8 @@ Test-suite unit
                  Futhark.Optimise.AlgSimplifyTests
                  Futhark.Representation.AST.AttributesTests
                  Futhark.Representation.AST.Attributes.ValuesTests
+                 Futhark.Representation.AST.Attributes.ReshapeTests
                  Futhark.Representation.AST.Syntax.CoreTests
                  Futhark.Representation.AST.SyntaxTests
-                 Futhark.Representation.AttributesTests
                  Language.Futhark.CoreTests
                  Language.Futhark.SyntaxTests

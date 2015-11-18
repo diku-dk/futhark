@@ -11,7 +11,7 @@
 -- loop-invariant, although the initial size may differ from the size
 -- produced by the loop result.
 module Futhark.Optimise.DoubleBuffer
-       ( optimiseProg )
+       ( doubleBuffer )
        where
 
 import           Control.Applicative
@@ -27,9 +27,14 @@ import           Futhark.MonadFreshNames
 import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import           Futhark.Pass
 
-optimiseProg :: Prog -> Prog
-optimiseProg = intraproceduralTransformation optimiseFunDec
+doubleBuffer :: Pass ExplicitMemory ExplicitMemory
+doubleBuffer =
+  Pass { passName = "Double buffer"
+       , passDescription = "Perform double buffering for merge parameters of sequential loops."
+       , passFunction = intraproceduralTransformation optimiseFunDec
+       }
 
 optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec
 optimiseFunDec fundec = do
@@ -72,7 +77,7 @@ optimiseLoop mergeparams body = do
   let body' = doubleBufferResult (map fst mergeparams) buffered body
   return (allocs, mergeparams, body')
 
-data DoubleBuffer = BufferAlloc VName SubExp
+data DoubleBuffer = BufferAlloc VName SubExp Space
                   | BufferCopy VName IxFun.IxFun VName
                     -- ^ First name is the memory block to copy to,
                     -- second is the name of the array copy.
@@ -97,12 +102,12 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
               Just $ Var v
 
         buffer fparam = case paramType fparam of
-          Mem size
+          Mem size space
             | Just size' <- loopInvariantSize size -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
                 modify $ HM.insert (paramName fparam) bufname
-                return $ BufferAlloc bufname size'
+                return $ BufferAlloc bufname size' space
           Array {}
             | MemSummary mem ixfun <- paramLore fparam -> do
                 buffered <- gets $ HM.lookup mem
@@ -116,10 +121,10 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
 
 allocBindings :: [DoubleBuffer] -> [Binding]
 allocBindings = mapMaybe allocation
-  where allocation (BufferAlloc name size) =
+  where allocation (BufferAlloc name size space) =
           Just $
-          Let (Pattern [] [PatElem (Ident name $ Mem size) BindVar Scalar]) () $
-          PrimOp $ Alloc size
+          Let (Pattern [] [PatElem (Ident name $ Mem size space) BindVar Scalar]) () $
+          PrimOp $ Alloc size space
         allocation _ =
           Nothing
 
@@ -128,7 +133,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
   let (copybnds,ses) =
         unzip $ zipWith3 buffer mergeparams buffered res
   in Body () (bnds++catMaybes copybnds) ses
-  where buffer _ (BufferAlloc bufname _) _ =
+  where buffer _ (BufferAlloc bufname _ _) _ =
           (Nothing, Var bufname)
 
         buffer fparam (BufferCopy bufname ixfun copyname) (Var v) =

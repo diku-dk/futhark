@@ -26,9 +26,9 @@ import Data.List
 import Prelude
 
 import Futhark.Representation.Basic
-import Futhark.Renamer (renameLambda)
+import Futhark.Transform.Rename (renameLambda)
+import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import Futhark.Substitute
 import qualified Futhark.Representation.AST as Futhark
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
@@ -207,7 +207,7 @@ removeUnusedParams l inps =
 -- unmodified.
 mapFusionOK :: [VName] -> FusedKer -> Bool
 mapFusionOK outVars ker = any (`elem` inpIds) outVars
-  where inpIds = mapMaybe SOAC.isVarInput (inputs ker)
+  where inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
@@ -536,7 +536,7 @@ pullRearrange :: SOACNest -> SOAC.ArrayTransforms
 pullRearrange nest ots = do
   nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
-  if permuteReach perm <= mapDepth nest' then
+  if rearrangeReach perm <= mapDepth nest' then
     let -- Expand perm to cover the full extent of the input dimensionality
         perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
@@ -552,8 +552,8 @@ pushRearrange :: [VName] -> SOACNest -> SOAC.ArrayTransforms
 pushRearrange inpIds nest ots = do
   nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
-  if permuteReach perm <= mapDepth nest' then do
-    let invertRearrange = SOAC.Rearrange [] $ permuteInverse perm
+  if rearrangeReach perm <= mapDepth nest' then do
+    let invertRearrange = SOAC.Rearrange [] $ rearrangeInverse perm
         nest'' = MapNest.toSOACNest $
                  inputs' `MapNest.setInputs`
                  rearrangeReturnTypes nest' perm
@@ -571,18 +571,15 @@ rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
     drop 1 $ iterate (map rowType) ts)
    outer_indices)
   inps
-  where rearrange t = setArrayDims t $
-                      permuteShape (perm ++ [length perm..arrayRank t-1]) $
-                      arrayDims t
-        origts = MapNest.typeOf nest
-        ts =  map rearrange origts
+  where origts = MapNest.typeOf nest
+        ts =  map (rearrangeType perm) origts
 
         orig_indices =
           map MapNest.nestingIndex nestings ++ [Nest.nestBodyIndex body]
 
         (outer_indices,inner_index) =
           case reverse $
-               permuteShape (take (length orig_indices) perm) orig_indices of
+               rearrangeShape (take (length orig_indices) perm) orig_indices of
            i:is -> (reverse is, i)
            []   -> ([], Nest.nestBodyIndex body)
 
@@ -594,7 +591,7 @@ rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
 fixupInputs :: [VName] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
   case mapMaybe inputRearrange $ filter exposable inps of
-    perm:_ -> do inps' <- mapM (fixupInput (permuteReach perm) perm) inps
+    perm:_ -> do inps' <- mapM (fixupInput (rearrangeReach perm) perm) inps
                  return (perm, inps')
     _    -> Nothing
   where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
@@ -605,7 +602,7 @@ fixupInputs inpIds inps =
 
         fixupInput d perm inp
           | SOAC.inputRank inp >= d =
-              Just $ SOAC.addTransform (SOAC.Rearrange [] $ permuteInverse perm) inp
+              Just $ SOAC.addTransform (SOAC.Rearrange [] $ rearrangeInverse perm) inp
           | otherwise = Nothing
 
 pullReshape :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
@@ -642,7 +639,7 @@ pullReshape nest ots
   -- only has the significance of making the generated code look
   -- very slightly neater.
   op' <- foldM outernest ([] `Nest.setCombCertificates` op) $
-         drop 1 $ reverse $ drop 1 $ tails shape
+         drop 1 $ reverse $ drop 1 $ tails $ newDims shape
   let nest'   = Nest.SOACNest {
                   Nest.inputs    = inputs'
                 , Nest.operation =

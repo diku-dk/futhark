@@ -725,6 +725,18 @@ checkExp (Rearrange perm arrexp pos) = do
   where name = case arrexp of Var v -> Just $ baseName $ identName v
                               _     -> Nothing
 
+checkExp (Stripe strideexp arrexp loc) = do
+  strideexp' <- require [Basic Int] =<< checkExp strideexp
+  arrexp' <- checkExp arrexp
+  _ <- rowTypeM arrexp' -- Just check that it's an array.
+  return $ Stripe strideexp' arrexp' loc
+
+checkExp (Unstripe strideexp arrexp loc) = do
+  strideexp' <- require [Basic Int] =<< checkExp strideexp
+  arrexp' <- checkExp arrexp
+  _ <- rowTypeM arrexp' -- Just check that it's an array.
+  return $ Unstripe strideexp' arrexp' loc
+
 checkExp (Transpose k n arrexp pos) = do
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') < reach + 1) $
@@ -902,83 +914,6 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
   -- finally return type-checked stream!
   return $ Stream form' lam' arr' ii pos
 
-
-
-
-{-
-checkExp (Stream chunk i acc arr lam@AnonymFun{} pos) = do
-  let lit_int0 = Literal (BasicVal $ IntVal 0) pos
-  [(_,  intarg),(acc',accarg),(arr',arrarg)] <-
-        mapM checkArg [lit_int0, acc, arr]
-  -- arr must have an array type
-  unless (isArrayType $ typeOf arr') $
-    bad $ TypeError pos "Stream with input array of non-array type."
-  -- the plan is to create a lambda function in which `chunk'
-  -- and `i' are parameters and to type check this lambda
-  (lam_ps, lam_bdy, rtp, lp) <-
-      case lam of
-         AnonymFun ps bd t lpos -> return (ps,bd,t,lpos)
-         _ -> bad $ TypeError pos "Stream with a curried fun (not implemented yet)."
-  -- make a fake lambda with `chunk' and `i' as parameters, THEN
-  -- (i) properly check the lambda on its parameter and
-  --(ii) make some fake arguments, which do not alias `arr', and
-  --     check that aliases of `arr' are not used inside lam.
-  let fake_pars= Ident (identName chunk) (Basic Int) lp :
-                 Ident (identName i    ) (Basic Int) lp : lam_ps
-      fake_lam = AnonymFun fake_pars lam_bdy rtp lp
-  fake_lam' <-   checkLambda fake_lam [intarg, intarg, accarg,  arrarg]
-  let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
-  (_, dflow)<- collectDataflow $
-                 checkLambda fake_lam [intarg, intarg, accarg, fakearg]
-  let arr_aliasses = HS.toList $ aliases $ typeOf arr'
-  let usages = usageMap $ usageOccurences dflow
-  when (any (`HM.member` usages) arr_aliasses) $
-     bad $ TypeError pos "Stream with input array used inside lambda."
-  -- check that the result type of lambda matches the accumulator part
-  let (AnonymFun (chunk':(i':lam_pars')) lam_body' rtp' lpos') = fake_lam'
-  let lam' = AnonymFun lam_pars' lam_body' rtp' lpos'
-  _ <- case rtp' of
-        Tuple res_tps ->
-            unless (typeOf acc' `subtypeOf` removeShapeAnnotations (head res_tps)) $
-              bad $ TypeError pos ("Stream with accumulator-type missmatch"++
-                                   "or result arrays of non-array type.")
-        _ ->unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
-              bad $ TypeError pos "Stream with accumulator-type missmatch."
-  -- check outerdim of Lambda's streamed-in array params are NOT specified,
-  -- and that return type inner dimens are all specified but not as other
-  -- lambda parameters!
-  let chunk_str = textual $ identName chunk
-  let [_, lam_arr_tp] = map identType lam_ps
-  let outer_dims = arrayDims lam_arr_tp
-  _ <- case head outer_dims of
-        AnyDim      -> return ()
-        NamedDim _  -> return ()
-        ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
-                                            " be specified since it is "++chunk_str++"by default.")
-  _ <- case rtp of
-        Tuple res_tps -> do
-            let res_arr_tps = tail res_tps
-            if all isArrayType res_arr_tps
-            then do let lam_params = HS.fromList $ identName chunk : identName i : map identName lam_ps
-                        arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
-                        boundDim (NamedDim name) = return $ Just name
-                        boundDim (ConstDim _   ) = return Nothing
-                        boundDim _               =
-                            bad $ TypeError pos $ "Stream's lambda: inner dimensions of the"++
-                                                  " streamed-result arrays MUST be specified!"
-                    rtp_iner_syms <- catMaybes <$> mapM boundDim arr_iner_dims
-                    case find (`HS.member` lam_params) rtp_iner_syms of
-                      Just name -> bad $ TypeError pos $
-                                          "Stream's lambda: " ++ textual (baseName name) ++
-                                          " cannot specify an inner result shape"
-                      _ -> return ()
-            else bad $ TypeError pos "Stream with result arrays of non-array type."
-        _ -> return ()-- means that no array is streamed out!
-  -- finally return type-checked stream!
-  return $ Stream (fromParam chunk') (fromParam i') acc' arr' lam' pos
--}
-
-
 checkExp (Stream _ _ _ _ pos) =
   bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
@@ -1014,10 +949,10 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
       mergeexp' <- checkExp mergeexp
       return $
         case form of
-          ForLoop (Ident loopvar _ _) _ ->
+          For _ _ (Ident loopvar _ _) _ ->
             let iparam = Ident loopvar (Basic Int) loc
             in (mergeexp', [iparam])
-          WhileLoop _ ->
+          While _ ->
             (mergeexp', [])
 
   -- Check the loop body.
@@ -1025,19 +960,20 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   (loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm) <-
     binding bindExtra $ noDataflow $
     case form of
-      ForLoop (Ident loopvar _ loopvarloc) boundexp -> do
-        boundexp' <- require [Basic Int] =<< checkExp boundexp
+      For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
+        lboundexp' <- require [Basic Int] =<< checkExp lboundexp
+        uboundexp' <- require [Basic Int] =<< checkExp uboundexp
         firstscope $ do
           loopbody' <- checkExp loopbody
           let iparam = Ident loopvar (Basic Int) loc
           return (loopbody',
-                  ForLoop (Ident loopvar (Basic Int) loopvarloc) boundexp',
+                  For dir lboundexp' (Ident loopvar (Basic Int) loopvarloc) uboundexp',
                   [(Literal (BasicVal $ IntVal 0) loc, Observe)],
                   id,
                   HS.singleton iparam,
                   [iparam],
                   mempty)
-      WhileLoop condexp -> firstscope $ do
+      While condexp -> firstscope $ do
         (condexp', condflow) <-
           collectDataflow $ require [Basic Bool] =<< checkExp condexp
         (loopbody', bodyflow) <-
@@ -1046,7 +982,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                 usageOccurences bodyflow
         cond <- newIdent "loop_cond" (Basic Bool) loc
         return (loopbody',
-                WhileLoop condexp',
+                While condexp',
                 [(Var cond, Observe)],
                 \inner -> LetPat (Id cond) condexp'
                           inner (srclocOf mergeexp),
@@ -1160,6 +1096,8 @@ checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t 
 checkBinOp Times e1 e2 t pos = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t pos
 checkBinOp Divide e1 e2 t pos = checkPolyBinOp Divide [Float32, Float64, Int] e1 e2 t pos
 checkBinOp Mod e1 e2 t pos = checkPolyBinOp Mod [Int] e1 e2 t pos
+checkBinOp Quot e1 e2 t pos = checkPolyBinOp Quot [Int] e1 e2 t pos
+checkBinOp Rem e1 e2 t pos = checkPolyBinOp Rem [Int] e1 e2 t pos
 checkBinOp ShiftR e1 e2 t pos = checkPolyBinOp ShiftR [Int] e1 e2 t pos
 checkBinOp ShiftL e1 e2 t pos = checkPolyBinOp ShiftL [Int] e1 e2 t pos
 checkBinOp Band e1 e2 t pos = checkPolyBinOp Band [Int] e1 e2 t pos

@@ -1,24 +1,29 @@
 module Futhark.Optimise.SuffCond
        (
-         optimiseProg
+         Futhark.Optimise.SuffCond.optimisePredicates
        )
        where
 
 import Control.Monad.State
 
 import Futhark.Representation.Basic
-import Futhark.Renamer
+import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simplify (bindableSimpleOps)
 import Futhark.Optimise.DeadVarElim
+import Futhark.Pass
 
-optimiseProg :: Prog -> Prog
-optimiseProg prog =
-  let m = optimisePredicates standardRules =<< extractPredicates prog
-  in evalState m $ newNameSourceForProg prog
+optimisePredicates :: Pass Basic Basic
+optimisePredicates =
+  Pass { passName = "Optimise predicates"
+       , passDescription = "Optimise predicates by extracting sufficient conditions."
+       , passFunction =
+         Futhark.Optimise.SuffCond.OptPredicates.optimisePredicates standardRules
+         <=< extractPredicates
+       }
 
 extractPredicates :: MonadFreshNames m => Prog -> m Prog
 extractPredicates =
@@ -28,12 +33,12 @@ extractPredicates =
           -- FIXME: the simplifier is not good enough at dead code
           -- elimination, and it does not do fixpoint iteration.  This
           -- is horrible.
-          predf' <- return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
-                    return . deadCodeElimFun =<< simplifyFun' =<<
+          predf' <- liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
+                    liftM deadCodeElimFun . simplifyFun' =<<
                     renameFun predf
           return [predf',valf]
         simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules

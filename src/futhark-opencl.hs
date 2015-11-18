@@ -1,6 +1,10 @@
 module Main (main) where
 
+import Control.Category ((>>>))
+import Control.Monad
 import Data.Maybe
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.FilePath
 import System.Process
 import System.IO
@@ -10,8 +14,21 @@ import System.Console.GetOpt
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
-import qualified Futhark.CodeGen.Backends.OpenCL as OpenCL
+import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.ExplicitMemory (ExplicitMemory)
+import Futhark.Pass.ExplicitAllocations
+import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
+import Futhark.Optimise.InPlaceLowering
+import Futhark.Optimise.CSE
+import Futhark.Pass.Simplify
+import Futhark.Pass.ExtractKernels
+import Futhark.Pass.ExpandArrays
+import Futhark.Pass.KernelBabysitting
+import Futhark.Pass.ExpandAllocations
 import Futhark.Util.Options
+import Futhark.Util.Log
+import Futhark.Optimise.DoubleBuffer
+import Futhark.Representation.AST.Pretty
 
 main :: IO ()
 main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
@@ -21,18 +38,18 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
 
 compile :: CompilerConfig -> FilePath -> IO ()
 compile config filepath = do
-  (msgs, res) <- runPipelineOnProgram (futharkConfig config) filepath
-  hPutStr stderr msgs
+  (res, msgs) <- runPipelineOnProgram (futharkConfig config) compilerPipeline filepath
+  when (isJust $ compilerVerbose config) $
+    T.hPutStr stderr $ toText msgs
   case res of
     Left err -> do
-      hPutStrLn stderr $ errorDesc err
+      dumpError (futharkConfig config) err
       exitWith $ ExitFailure 2
-    Right (Basic _) ->
-      error "Pipeline produced program without memory annotations."
-    Right (ExplicitMemory prog) ->
-      case OpenCL.compileProg prog of
+    Right prog ->
+      case COpenCL.compileProg prog of
         Left err -> do
-          hPutStrLn stderr err
+          dumpError (futharkConfig config) $
+            CompileError (T.pack err) $ T.pack $ pretty prog
           exitWith $ ExitFailure 2
         Right cprog -> do
           let binpath = outputFilePath filepath config
@@ -87,22 +104,31 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkPipeline = compilerPipeline
-                   , futharkVerbose = compilerVerbose config
+  newFutharkConfig { futharkVerbose = compilerVerbose config
                    , futharkRealConfiguration = compilerRealConfiguration config
                    , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
-compilerPipeline :: [Pass]
+-- XXX: this pipeline is a total hack - note that we run distribution
+-- multiple times.
+compilerPipeline :: Pipeline Basic ExplicitMemory
 compilerPipeline =
-  standardPipeline ++
-  [ sequentialiseKernels
-  , eotransform
-  , inPlaceLowering
-  , explicitMemory
-  , eotransform
-  , commonSubexpressionElimination
-  , eotransform
-  , doubleBuffer
-  , eotransform
-  ]
+  standardPipeline >>>
+  passes [ extractKernels
+         , extractKernels
+         , simplifyBasic
+         , expandArrays
+         , simplifyBasic
+         , babysitKernels
+         , simplifyBasic
+         , inPlaceLowering
+         ] >>>
+  onePass explicitAllocations >>>
+  passes [ simplifyExplicitMemory
+         , performCSE
+         , simplifyExplicitMemory
+         , doubleBuffer
+         , simplifyExplicitMemory
+         , expandAllocations
+         , simplifyExplicitMemory
+         ]

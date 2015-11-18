@@ -18,6 +18,7 @@ module Futhark.Representation.AST.Attributes.Types
 
        , arrayOf
        , arrayOfRow
+       , arrayOfShape
        , setOuterSize
        , setOuterDim
        , setArrayDims
@@ -28,6 +29,9 @@ module Futhark.Representation.AST.Attributes.Types
        , arraysSize
        , rowType
        , elemType
+
+       , transposeType
+       , rearrangeType
 
        , diet
        , dietingAs
@@ -61,12 +65,13 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Attributes.Constants
+import Futhark.Representation.AST.Attributes.Rearrange
 
 -- | Remove shape information from a type.
 rankShaped :: ArrayShape shape => TypeBase shape -> TypeBase Rank
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
 rankShaped (Basic et) = Basic et
-rankShaped (Mem size) = Mem size
+rankShaped (Mem size space) = Mem size space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -87,8 +92,8 @@ modifyArrayShape f (Array t ds u)
   | shapeRank ds' == 0 = Basic t
   | otherwise          = Array t (f ds) u
   where ds' = f ds
-modifyArrayShape _ (Basic t)      = Basic t
-modifyArrayShape _ (Mem size)     = Mem size
+modifyArrayShape _ (Basic t)        = Basic t
+modifyArrayShape _ (Mem size space) = Mem size space
 
 -- | Set the shape of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -139,8 +144,8 @@ staticShapes1 (Basic bt) =
   Basic bt
 staticShapes1 (Array bt (Shape shape) u) =
   Array bt (ExtShape $ map Free shape) u
-staticShapes1 (Mem size) =
-  Mem size
+staticShapes1 (Mem size space) =
+  Mem size space
 
 -- | @arrayOf t s u@ constructs an array type.  The convenience
 -- compared to using the 'Array' constructor directly is that @t@ can
@@ -163,9 +168,15 @@ arrayOf (Mem {}) _ _ =
 
 -- | Construct an array whose rows are the given type, and the outer
 -- size is the given 'SubExp'.  This is just a convenient wrapper
--- around 'arrayOfRow'.
+-- around 'arrayOf'.
 arrayOfRow :: Type -> SubExp -> Type
 arrayOfRow t size = arrayOf t (Shape [size]) (uniqueness t)
+
+-- | Construct an array whose rows are the given type, and the outer
+-- size is the given 'Shape'.  This is just a convenient wrapper
+-- around 'arrayOf'.
+arrayOfShape :: Type -> Shape -> Type
+arrayOfShape t shape = arrayOf t shape (uniqueness t)
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -240,13 +251,25 @@ elemType (Array t _ _) = t
 elemType (Basic t)     = t
 elemType (Mem {})      = error "elemType Mem"
 
+-- | Swap the two outer dimensions of the type.
+transposeType :: Type -> Type
+transposeType = rearrangeType [1,0]
+
+-- | Rearrange the dimensions of the type.  If the length of the
+-- permutation does not match the rank of the type, the permutation
+-- will be extended with identity.
+rearrangeType :: [Int] -> Type -> Type
+rearrangeType perm t =
+  t `setArrayShape` Shape (rearrangeShape perm' $ arrayDims t)
+  where perm' = perm ++ [length perm .. arrayRank t - 1]
+
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape -> Diet
 diet (Basic _) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
-diet (Mem _) = Observe -- error "diet Mem"
+diet (Mem {}) = Observe
 
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it
@@ -270,7 +293,7 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   t1 == t2 &&
   shape1 `subShapeOf` shape2
 subtypeOf (Basic t1) (Basic t2) = t1 == t2
-subtypeOf (Mem _) (Mem _) = True
+subtypeOf (Mem _ space1) (Mem _ space2) = space1 == space2
 subtypeOf _ _ = False
 
 -- | @xs \`subtypesOf\` ys@ is true if @xs@ is the same size as @ys@,
@@ -318,8 +341,8 @@ shapeContextSize = HS.size . shapeContext
 hasStaticShape :: ExtType -> Maybe Type
 hasStaticShape (Basic bt) =
   Just $ Basic bt
-hasStaticShape (Mem size) =
-  Just $ Mem size
+hasStaticShape (Mem size space) =
+  Just $ Mem size space
 hasStaticShape (Array bt (ExtShape shape) u) =
   Array bt <$> (Shape <$> mapM isFree shape) <*> pure u
   where isFree (Free s) = Just s

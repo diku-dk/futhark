@@ -13,9 +13,9 @@ module Futhark.Representation.AST.Pretty
 
 import Data.Array (elems, listArray)
 import Data.Maybe
+import Data.Monoid
 
-import Text.PrettyPrint.Mainland hiding (pretty)
-import qualified Text.PrettyPrint.Mainland as PP
+import Futhark.Util.Pretty
 
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
@@ -74,17 +74,23 @@ instance Pretty ExtDimSize where
 instance Pretty ExtShape where
   ppr = brackets . commasep . map ppr . extShapeDims
 
+instance Pretty Space where
+  ppr DefaultSpace = mempty
+  ppr (Space s)    = text "@" <> text s
+
 instance Pretty (TypeBase Shape) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty (TypeBase ExtShape) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
     where f dim s = brackets $ s <> comma <> ppr dim
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty (TypeBase Rank) where
   ppr (Basic et) = ppr et
@@ -92,7 +98,8 @@ instance Pretty (TypeBase Rank) where
     where f s _ = brackets s
           u' | Unique <- u = star
              | otherwise = empty
-  ppr (Mem s) = text "mem" <> parens (ppr s)
+  ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
+  ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty Ident where
   ppr ident = ppr (identType ident) <+> ppr (identName ident)
@@ -176,8 +183,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
   ppr (Not e) = text "!" <+> pprPrec 9 e
   ppr (Negate e) = text "-" <> pprPrec 9 e
-  ppr (Abs e) = text "abs" <> pprPrec 9 e
-  ppr (Signum e) = text "signum" <> pprPrec 9 e
+  ppr (Abs e) = text "abs" <+> pprPrec 9 e
+  ppr (Signum e) = text "signum" <+> pprPrec 9 e
   ppr (Complement e) = text "~" <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
@@ -191,13 +198,18 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  ppr (Stripe cs stride v) =
+    ppCertificates cs <> text "stripe" <> apply [ppr stride, ppr v]
+  ppr (Unstripe cs stride v) =
+    ppCertificates cs <> text "unstripe" <> apply [ppr stride, ppr v]
   ppr (Split cs sizeexps a) =
     ppCertificates cs <> text "split" <> apply [apply (map ppr sizeexps), ppr a]
   ppr (Concat cs x ys _) =
     ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
-  ppr (Alloc e) = text "alloc" <> apply [ppr e]
+  ppr (Alloc e DefaultSpace) = text "alloc" <> apply [ppr e]
+  ppr (Alloc e (Space sp)) = text "alloc" <> apply [ppr e, text sp]
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>
@@ -254,6 +266,53 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (Scan cs size lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
+  ppr (Kernel cs w index ispace inps returns body) =
+    ppCertificates' cs <> text "kernel" <+>
+    align (parens (text "width:" <+> ppr w) </>
+           parens (text "index:" <+> ppr index) </>
+           parens (stack $ punctuate semi $ map ppBound ispace) </>
+           parens (stack $ punctuate semi $ map ppr inps) </>
+           parens (stack $ punctuate semi $ map ppRet returns) </>
+           text "do") </>
+    indent 2 (ppr body)
+    where ppBound (name, bound) =
+            ppr name <+> text "<" <+> ppr bound
+          ppRet (t, perm) =
+            ppr t <+> text "permuted" <+> apply (map ppr perm)
+  ppr (ReduceKernel cs w kernel_size parfun seqfun es as) =
+    ppCertificates' cs <> text "reduceKernel" <>
+    parens (ppr w <> comma </>
+            ppr kernel_size </>
+            braces (commasep $ map ppr es) <> comma </>
+            commasep (map ppr as) </>
+            ppr parfun <> comma </> ppr seqfun)
+  ppr (ScanKernel cs w kernel_size fun input) =
+    ppCertificates' cs <> text "scanKernel" <>
+    parens (ppr w <> comma </>
+            ppr kernel_size </>
+            braces (commasep $ map ppr es) <> comma </>
+            commasep (map ppr as) </>
+            ppr fun)
+    where (es, as) = unzip input
+
+instance Pretty KernelSize where
+  ppr (KernelSize
+       num_chunks workgroup_size per_thread_elements
+       num_elements offset_multiple num_threads) =
+    commasep [ppr num_chunks,
+              ppr workgroup_size,
+              ppr per_thread_elements,
+              ppr num_elements,
+              ppr offset_multiple,
+              ppr num_threads
+             ]
+
+instance PrettyLore lore => Pretty (KernelInput lore) where
+  ppr inp = ppr (kernelInputType inp) <+>
+            ppr (kernelInputName inp) <+>
+            text "<-" <+>
+            ppr (kernelInputArray inp) <>
+            brackets (commasep (map ppr $ kernelInputIndices inp))
 
 instance PrettyLore lore => Pretty (SegOp lore) where
   ppr (SegReduce cs size lam inputs descp) =
@@ -320,11 +379,13 @@ instance PrettyLore lore => Pretty (Prog lore) where
 instance Pretty BinOp where
   ppr Plus = text "+"
   ppr Minus = text "-"
-  ppr Pow = text "pow"
+  ppr Pow = text "**"
   ppr Times = text "*"
-  ppr Divide = text "/"
-  ppr IntDivide = text "div"
+  ppr FloatDiv = text "/"
+  ppr Div = text "div"
   ppr Mod = text "%"
+  ppr Quot = text "//"
+  ppr Rem = text "%%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"
@@ -335,6 +396,10 @@ instance Pretty BinOp where
   ppr Equal = text "=="
   ppr Less = text "<"
   ppr Leq = text "<="
+
+instance Pretty d => Pretty (DimChange d) where
+  ppr (DimCoercion se) = text "~" <> ppr se
+  ppr (DimNew      se) = ppr se
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =
@@ -361,11 +426,3 @@ ppCertificates cs = text "<" <> commasep (map ppr cs) <> text ">"
 ppCertificates' :: Certificates -> Doc
 ppCertificates' [] = empty
 ppCertificates' cs = ppCertificates cs <> line
-
--- | Prettyprint a list enclosed in curly braces.
-prettyTuple :: Pretty a => [a] -> String
-prettyTuple = PP.pretty 80 . ppTuple'
-
--- | Prettyprint a value, wrapped to 80 characters.
-pretty :: Pretty a => a -> String
-pretty = PP.pretty 80 . ppr

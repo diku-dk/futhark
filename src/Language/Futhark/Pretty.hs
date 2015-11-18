@@ -122,10 +122,12 @@ instance Pretty UnOp where
 instance Pretty BinOp where
   ppr Plus = text "+"
   ppr Minus = text "-"
-  ppr Pow = text "pow"
+  ppr Pow = text "**"
   ppr Times = text "*"
   ppr Divide = text "/"
   ppr Mod = text "%"
+  ppr Quot = text "//"
+  ppr Rem = text "%%"
   ppr ShiftR = text ">>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"
@@ -210,6 +212,10 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     text "reshape" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
+  pprPrec _ (Stripe stride e _) =
+    text "stripe" <> apply [ppr stride, ppr e]
+  pprPrec _ (Unstripe stride e _) =
+    text "unstripe" <> apply [ppr stride, ppr e]
   pprPrec _ (Transpose 0 1 e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Transpose k n e _) =
@@ -248,14 +254,18 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     aliasComment pat $
     text "loop" <+> parens (ppr pat <+> equals <+> ppr initexp) <+> equals <+>
-    (case form of
-       ForLoop i bound ->
-         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
-       WhileLoop cond ->
-         text "while" <+> ppr cond) <+>
+    ppr form <+>
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
+
+instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LoopFormBase ty vn) where
+  ppr (For FromUpTo lbound i ubound) =
+    text "for" <+> align (ppr lbound) <+> ppr i <+> text "<" <+> align (ppr ubound)
+  ppr (For FromDownTo lbound i ubound) =
+    text "for" <+> align (ppr ubound) <+> ppr i <+> text ">" <+> align (ppr lbound)
+  ppr (While cond) =
+    text "while" <+> ppr cond
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
   ppr (Id ident)     = ppr ident
@@ -313,6 +323,8 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Times = 5
         precedence Divide = 5
         precedence Mod = 5
+        precedence Quot = 5
+        precedence Rem = 5
         precedence Pow = 6
         rprecedence Minus = 10
         rprecedence Divide = 10

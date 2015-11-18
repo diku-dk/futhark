@@ -32,6 +32,7 @@ module Language.Futhark.Syntax
   , ParamBase
   , ExpBase(..)
   , LoopFormBase (..)
+  , ForLoopDirection (..)
   , LambdaBase(..)
   , TupIdentBase(..)
   , StreamForm(..)
@@ -264,6 +265,8 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Times
            | Divide
            | Mod
+           | Quot
+           | Rem
            | ShiftR
            | ShiftL
            | Band
@@ -370,6 +373,10 @@ data ExpBase ty vn =
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
+            | Stripe (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+
+            | Unstripe (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
@@ -458,6 +465,8 @@ instance Located (ExpBase ty vn) where
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ _ _ pos) = locOf pos
   locOf (Rearrange _ _ pos) = locOf pos
+  locOf (Stripe _ _ pos) = locOf pos
+  locOf (Unstripe _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ pos) = locOf pos
@@ -474,9 +483,16 @@ instance Located (ExpBase ty vn) where
   locOf (Stream _ _ _ _   pos) = locOf pos
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
-data LoopFormBase ty vn = ForLoop (IdentBase ty vn) (ExpBase ty vn)
-                        | WhileLoop (ExpBase ty vn)
+data LoopFormBase ty vn = For ForLoopDirection (ExpBase ty vn) (IdentBase ty vn) (ExpBase ty vn)
+                        | While (ExpBase ty vn)
                           deriving (Eq, Ord, Show)
+
+-- | The iteration order of a @for@-loop.
+data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
+                                 -- just below the upper bound.
+                      | FromDownTo -- ^ Iterates from just below the
+                                   -- upper bound to the lower bound.
+                        deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
 data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase vn) SrcLoc

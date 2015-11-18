@@ -56,6 +56,10 @@ primOpAliases (Reshape _ _ e) =
   [vnameAliases e]
 primOpAliases (Rearrange _ _ e) =
   [vnameAliases e]
+primOpAliases (Stripe _ _ e) =
+  [vnameAliases e]
+primOpAliases (Unstripe _ _ e) =
+  [vnameAliases e]
 primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
 primOpAliases (Concat _ x ys _) =
@@ -64,7 +68,7 @@ primOpAliases (Copy {}) =
   [mempty]
 primOpAliases (Assert {}) =
   [mempty]
-primOpAliases (Alloc _) =
+primOpAliases (Alloc {}) =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr
@@ -89,6 +93,12 @@ loopOpAliases (Stream _ _ form lam _ _) =
   in  a1 ++ bodyAliases (extLambdaBody lam)
 loopOpAliases (ConcatMap {}) =
   [mempty]
+loopOpAliases (Kernel _ _ _ _ _ returns _) =
+  map (const mempty) returns
+loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
+  map (const mempty) nes
+loopOpAliases (ScanKernel _ _ _ lam _) =
+  replicate (length (lambdaReturnType lam) * 2) mempty
 
 segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
 segOpAliases (SegReduce _ _ f _ _) =

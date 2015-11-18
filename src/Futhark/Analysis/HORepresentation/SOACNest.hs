@@ -38,7 +38,7 @@ import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import Futhark.Substitute
+import Futhark.Transform.Substitute
 
 -- Current problems:
 --

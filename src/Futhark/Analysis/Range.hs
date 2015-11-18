@@ -186,7 +186,7 @@ refineUpperBound :: Out.Bound -> Out.Bound -> Out.Bound
 refineUpperBound = flip Out.minimumBound
 
 lookupRange :: Out.VName -> RangeM Out.Range
-lookupRange = liftM (fromMaybe Out.unknownRange) . asks . HM.lookup
+lookupRange = asks . HM.lookupDefault Out.unknownRange
 
 simplifyPatRanges :: Out.Pattern lore
                   -> RangeM (Out.Pattern lore)

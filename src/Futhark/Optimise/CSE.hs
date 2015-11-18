@@ -8,13 +8,16 @@ import qualified Data.Map.Lazy as M
 
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Annotations as Annotations
-import Futhark.Substitute
-import Futhark.Binder (Proper)
+import Futhark.Transform.Substitute
+import Futhark.Pass
+import Futhark.Tools
 
 performCSE :: Proper lore =>
-              Prog lore -> Prog lore
-performCSE prog =
-  prog { progFunctions = map cseInFunDec $ progFunctions prog }
+              Pass lore lore
+performCSE = simplePass
+             "CSE"
+             "Combine common subexpressions." $
+             intraproceduralTransformation $ return . cseInFunDec
 
 cseInFunDec :: Proper lore =>
                FunDec lore -> FunDec lore
@@ -78,7 +81,7 @@ cseInBinding (Let pat eattr e) m = do
                 ]
           m lets
   where bad (Array _ _ Unique) = True
-        bad (Mem _)            = True
+        bad (Mem {})           = True
         bad _                  = False
         setPatElemName patElem name =
           patElem { patElemIdent = Ident name $ identType $ patElemIdent patElem }

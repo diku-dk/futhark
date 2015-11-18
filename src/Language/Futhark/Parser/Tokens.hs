@@ -22,6 +22,8 @@ data Token = IF
            | CERT
            | CHAR
            | REAL
+           | FLOAT32
+           | FLOAT64
            | ID { idName :: Name }
            | STRINGLIT { stringLit :: String }
            | INTLIT { intLit :: Int32 }
@@ -32,6 +34,8 @@ data Token = IF
            | TIMES
            | DIVIDE
            | MOD
+           | QUOT
+           | REM
            | EQU
            | EQU2
            | LTH
@@ -67,6 +71,8 @@ data Token = IF
            | REDUCE
            | RESHAPE
            | REARRANGE
+           | STRIPE
+           | UNSTRIPE
            | TRANSPOSE
            | ZIPWITH
            | ZIP

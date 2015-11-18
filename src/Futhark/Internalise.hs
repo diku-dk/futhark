@@ -6,7 +6,6 @@
 --
 module Futhark.Internalise
   ( internaliseProg
-  , internaliseType
   , internaliseValue
   )
   where
@@ -22,9 +21,9 @@ import Data.Traversable (mapM)
 import Data.Loc
 import Futhark.Representation.External as E
 import Futhark.Representation.Basic as I
-import Futhark.Renamer as I
+import Futhark.Transform.Rename as I
+import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import Futhark.Substitute
 
 import Futhark.Internalise.Monad
 import Futhark.Internalise.AccurateSizes
@@ -71,7 +70,7 @@ internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
-    body' <- ensureResultExtShape loc rettype' firstbody
+    body' <- ensureResultExtShape asserting loc rettype' firstbody
     let mkFParam = flip Param ()
     return $ FunDec
       fname (ExtRetType rettype')
@@ -96,6 +95,13 @@ internaliseBodyBindings e m = do
   ((Body _ bnds res,x), otherbnds) <-
     collectBindings $ m =<< internaliseExp "res" e
   (,x) <$> mkBodyM (otherbnds <> bnds) res
+
+extraBodyBindings :: [Binding]
+                  -> InternaliseM (Body, a)
+                  -> InternaliseM (Body, a)
+extraBodyBindings bnds m = do
+  (body, x) <- m
+  return (insertBindings bnds body, x)
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
@@ -180,11 +186,28 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit_ts <- mapM subExpType mergeinit
 
   (wrap, form_contents) <- case form of
-    E.ForLoop i bound -> do
-      bound' <- internaliseExp1 "bound" bound
+    E.For dir lbound i ubound -> do
+      lbound' <- internaliseExp1 "lower_bound" lbound
+      ubound' <- internaliseExp1 "upper_bound" ubound
+      num_iterations <- letSubExp "num_iterations" $
+                        PrimOp $ I.BinOp I.Minus ubound' lbound' I.Int
       i' <- internaliseIdent i
-      return (bindingIdentTypes [I.Ident i' $ I.Basic I.Int], Left (i', bound'))
-    E.WhileLoop cond ->
+      j <- newVName $ baseString i'
+      let i_ident = I.Ident i' $ I.Basic I.Int
+      i_bnds <- case dir of
+        E.FromUpTo ->
+          return [mkLet' [] [i_ident] $
+                  I.PrimOp $ I.BinOp I.Plus lbound' (I.Var j) I.Int]
+        E.FromDownTo -> do
+          upper_bound_less_one <-
+            letSubExp "upper_bound_less_one" $
+            PrimOp $ I.BinOp I.Minus ubound' (intconst 1) I.Int
+          return [mkLet' [] [i_ident] $
+                  I.PrimOp $ I.BinOp I.Minus upper_bound_less_one (I.Var j) I.Int]
+      return ( bindingIdentTypes [I.Ident j $ I.Basic I.Int, i_ident] .
+               extraBodyBindings i_bnds
+             , Left (j, num_iterations))
+    E.While cond ->
       return (id, Right cond)
 
   mergeparams <- map E.toParam <$> flattenPattern mergepat
@@ -201,9 +224,9 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                       (map I.identType mergepat')
                       sets
       case form_contents of
-        Left (i', bound') ->
-          return (resultBody $ shapeargs ++ ses,
-                  (I.ForLoop i' bound',
+        Left (i', bound) ->
+             return (resultBody $ shapeargs ++ ses,
+                  (I.ForLoop i' bound,
                    shapepat,
                    mergepat',
                    map I.identName mergepat',
@@ -266,7 +289,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   idxcs' <- boundsChecks loc srcs idxs'
   let comb sname ve' = do
         rowtype <- I.stripArray (length idxs) <$> lookupType sname
-        ve'' <- ensureShape loc rowtype "lw_val_correct_shape" ve'
+        ve'' <- ensureShape asserting loc rowtype "lw_val_correct_shape" ve'
         letInPlace "letwith_dst" idxcs' sname idxs' $
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
@@ -309,10 +332,11 @@ internaliseExp _ (E.Zip (e:es) loc) = do
           outer:inner -> do
             cmp <- letSubExp "zip_cmp" $ I.PrimOp $
                    I.BinOp I.Equal e_outer outer I.Bool
-            c   <- letExp "zip_assert" $ I.PrimOp $
+            c   <- assertingOne $
+                   letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
-            letExp (postfix e_unchecked' "_zip_res") $ I.PrimOp $
-              I.Reshape [c] (e_outer:inner) e_unchecked'
+            letExp (postfix e_unchecked' "_zip_res") $
+              shapeCoerce c (e_outer:inner) e_unchecked'
   es' <- mapM (mapM reshapeToOuter) es_unchecked'
   return $ concatMap (map I.Var) $ e' : es'
 
@@ -329,16 +353,27 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange [] perm v
 
+internaliseExp _ (E.Stripe stride e _) = do
+  e' <- internaliseExp1 "stride" stride
+  internaliseOperation "stripe" e $ \v ->
+    return $ I.Stripe [] e' v
+
+internaliseExp _ (E.Unstripe stride e _) = do
+  e' <- internaliseExp1 "stride" stride
+  internaliseOperation "unstripe" e $ \v ->
+    return $ I.Unstripe [] e' v
+
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" e $ \v -> do
     -- The resulting shape needs to have the same number of elements
     -- as the original shape.
     dims <- I.arrayDims <$> lookupType v
-    shapeOk <- letExp "shape_ok" =<<
+    shapeOk <- assertingOne $
+               letExp "shape_ok" =<<
                eAssert (eBinOp I.Equal (prod dims) (prod shape') I.Bool)
                loc
-    return $ I.Reshape [shapeOk] shape' v
+    return $ I.Reshape shapeOk (DimNew <$> shape') v
   where prod l = foldBinOp I.Times (intconst 1) l I.Int
 
 internaliseExp _ (E.Split splitexps arrexp loc) = do
@@ -348,11 +383,12 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
   arrayOuterdim <- arraysSize 0 <$> mapM lookupType arrs
 
   -- Assertions
-  let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
+  indexAsserts <- asserting $ do
+    let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
                      (I.intconst 0:splits') (splits'++[arrayOuterdim])
-  indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
-  indexAsserts <- mapM (\cnd -> letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc)
-                  indexChecks
+    indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
+    forM indexChecks$ \cnd ->
+      letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
   let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp I.Minus end beg I.Int)
@@ -379,11 +415,12 @@ internaliseExp desc (E.Concat x ys loc) = do
               eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m I.Bool) loc
             x_inner_dims  = drop 1 $ I.arrayDims xt
             ys_inner_dims = map (drop 1 . I.arrayDims) yts
-        matchcs <- concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
+        matchcs <- asserting $
+                   concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
                         yt <- lookupType yarr
-                        letExp "concat_y_reshaped" $ I.PrimOp $
-                          I.Reshape matchcs (arraySize 0 yt : x_inner_dims) yarr
+                        letExp "concat_y_reshaped" $
+                          shapeCoerce matchcs (arraySize 0 yt : x_inner_dims) yarr
         return $ I.PrimOp $ I.Concat [] xarr yarrs' ressize
   letSubExps desc =<< zipWithM conc xs (transpose yss)
 
@@ -393,7 +430,7 @@ internaliseExp desc (E.Concat x ys loc) = do
 
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToVars "map_arr" arr
-  lam' <- internaliseMapLambda internaliseLambda lam $ map I.Var arrs
+  lam' <- internaliseMapLambda internaliseLambda asserting lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.LoopOp $ I.Map [] w lam' arrs
 
@@ -402,10 +439,10 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   nes <- internaliseExp "reduce_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
     rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape loc rowtype "reduce_ne_right_shape" ne'
+    ensureShape asserting loc rowtype "reduce_ne_right_shape" ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
+  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.LoopOp $ I.Reduce [] w lam' input
@@ -415,10 +452,10 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   nes <- internaliseExp "scan_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
     rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape loc rowtype "scan_ne_right_shape" ne'
+    ensureShape asserting loc rowtype "scan_ne_right_shape" ne'
   nests <- mapM I.subExpType nes'
   arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda lam nests arrts
+  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.LoopOp $ I.Scan [] w lam' input
@@ -460,8 +497,8 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
                         | t <- acc_tps ]
   nests <- mapM I.subExpType nes
-  lam1' <- internaliseFoldLambda internaliseLambda lam1 nests acc_arr_tps
-  lam2' <- internaliseRedomapInnerLambda internaliseLambda lam2
+  lam1' <- internaliseFoldLambda internaliseLambda asserting lam1 nests acc_arr_tps
+  lam2' <- internaliseRedomapInnerLambda internaliseLambda asserting lam2
            nes (map I.Var arrs')
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.LoopOp $
@@ -481,7 +518,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
                               | t <- rowts
                              ]
                  lamf = AnonymFun remparams body lamrtp pos
-             lam'' <- internaliseStreamLambda internaliseLambda lamf accs' lam_arrs'
+             lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
              return $ lam'' { extLambdaParams = I.Param chunk' () : extLambdaParams lam'' }
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
@@ -489,7 +526,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
                  acctps <- mapM I.subExpType accs'
                  outsz  <- arraysSize 0 <$> mapM lookupType arrs'
                  let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) (I.uniqueness t) | t <- acctps ]
-                 lam0'  <- internaliseFoldLambda internaliseLambda lam0 acctps acc_arr_tps
+                 lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
                  return $ I.RedLike o lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
@@ -586,13 +623,17 @@ internaliseBinOp desc E.Minus x y t =
 internaliseBinOp desc E.Times x y t =
   simpleBinOp desc I.Times x y t
 internaliseBinOp desc E.Divide x y Int =
-  simpleBinOp desc I.IntDivide x y Int
+  simpleBinOp desc I.Div x y Int
 internaliseBinOp desc E.Divide x y t =
-  simpleBinOp desc I.Divide x y t
+  simpleBinOp desc I.FloatDiv x y t
 internaliseBinOp desc E.Pow x y t =
   simpleBinOp desc I.Pow x y t
 internaliseBinOp desc E.Mod x y t =
   simpleBinOp desc I.Mod x y t
+internaliseBinOp desc E.Quot x y t =
+  simpleBinOp desc I.Quot x y t
+internaliseBinOp desc E.Rem x y t =
+  simpleBinOp desc I.Rem x y t
 internaliseBinOp desc E.ShiftR x y t =
   simpleBinOp desc I.ShiftR x y t
 internaliseBinOp desc E.ShiftL x y t =
@@ -757,13 +798,26 @@ binOpCurriedToLambda op t e swap = do
           E.BinOp op x' y' t noLoc,
           E.vacuousShapeAnnotations $ E.toDecl t)
 
-boundsChecks :: SrcLoc -> [VName] -> [I.SubExp] -> InternaliseM I.Certificates
-boundsChecks _ []    _  = return []
-boundsChecks loc (v:_) es = do
+-- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
+-- just return an empty list.
+asserting :: InternaliseM I.Certificates
+          -> InternaliseM I.Certificates
+asserting m = do
   doBoundsChecks <- asks envDoBoundsChecks
   if doBoundsChecks
-  then zipWithM (boundsCheck loc v) [0..] es
+  then m
   else return []
+
+-- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
+-- just return an empty list.
+assertingOne :: InternaliseM VName
+             -> InternaliseM I.Certificates
+assertingOne m = asserting $ liftM pure m
+
+boundsChecks :: SrcLoc -> [VName] -> [I.SubExp] -> InternaliseM I.Certificates
+boundsChecks _ []    _  = return []
+boundsChecks loc (v:_) es =
+  asserting $ zipWithM (boundsCheck loc v) [0..] es
 
 boundsCheck :: SrcLoc -> VName -> Int -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc v i e = do

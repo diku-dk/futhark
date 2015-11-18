@@ -38,8 +38,11 @@ tokens :-
   "-"                      { const MINUS }
   "~"                      { const TILDE }
   "*"                      { const TIMES }
+  "**"                     { const POW }
   "/"                      { const DIVIDE }
   "%"                      { const MOD }
+  "//"                     { const QUOT }
+  "%%"                     { const REM }
   "="                      { const EQU }
   "=="                     { const EQU2 }
   "<"                      { const LTH }
@@ -78,6 +81,8 @@ keyword s =
     "with"         -> WITH
     "int"          -> INT
     "real"         -> REAL
+    "float32"      -> FLOAT32
+    "float64"      -> FLOAT64
     "bool"         -> BOOL
     "cert"         -> CERT
     "char"         -> CHAR
@@ -89,7 +94,6 @@ keyword s =
     "True"         -> TRUE
     "False"        -> FALSE
     "Checked"      -> CHECKED
-    "pow"          -> POW
     "abs"          -> ABS
     "signum"       -> SIGNUM
 
@@ -98,6 +102,8 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
+    "stripe"       -> STRIPE
+    "unstripe"     -> UNSTRIPE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE
