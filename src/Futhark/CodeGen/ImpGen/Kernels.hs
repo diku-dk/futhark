@@ -337,8 +337,6 @@ kernelCompiler
 
         zipWithM_ ImpGen.compileResultSubExp
           (ImpGen.valueDestinations x_dest) nes
-        zipWithM_ ImpGen.compileResultSubExp
-          (ImpGen.valueDestinations x_dest) nes
 
         read_params <-
           ImpGen.collect $ zipWithM_ readScanElement y_params arrs
