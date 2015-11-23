@@ -141,8 +141,8 @@ cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody
   where cheapBody (Body _ bnds _) = all cheapBinding bnds
         cheapBinding (Let _ _ e) = cheap e
-        cheap (LoopOp {}) = False
-        cheap (Apply {}) = False
+        cheap LoopOp{} = False
+        cheap Apply{} = False
         cheap (If _ tbranch fbranch _) = cheapBody tbranch && cheapBody fbranch
         cheap _ = True
 

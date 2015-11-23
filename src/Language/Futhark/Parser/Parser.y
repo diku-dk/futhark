@@ -3,7 +3,7 @@
 module Language.Futhark.Parser.Parser
   ( prog
   , expression
-  , pattern
+  , tupId
   , lambda
   , futharktype
   , intValue
@@ -44,7 +44,7 @@ import Language.Futhark.Parser.Lexer
 
 %name prog Prog
 %name expression Exp
-%name pattern TupId
+%name tupId TupId
 %name lambda FunAbstr
 %name futharktype Type
 %name intValue IntValue

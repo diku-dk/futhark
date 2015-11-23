@@ -163,9 +163,9 @@ data MemSummary = Scalar
 
 instance Ord MemSummary where
   Scalar <= Scalar = True
-  Scalar <= MemSummary {} = True
+  Scalar <= MemSummary{} = True
   MemSummary x _ <= MemSummary y _ = x <= y
-  MemSummary {} <= Scalar = False
+  MemSummary{} <= Scalar = False
 
 instance FreeIn MemSummary where
   freeIn (MemSummary ident ixfun) = freeIn ident <> freeIn ixfun
@@ -374,7 +374,7 @@ instance TypeCheck.Checkable ExplicitMemory where
     TypeCheck.matchExtReturnType fname ts result
     mapM_ checkResultSubExp result
     where ts = map returnsToType rettype
-          checkResultSubExp (Constant {}) =
+          checkResultSubExp Constant{} =
             return ()
           checkResultSubExp (Var v) = do
             attr <- lookupSummary v
@@ -423,7 +423,7 @@ matchPatternToReturns wrong pat rt = do
 
     matchBindee bindee (ReturnsScalar bt) =
       matchType bindee $ Basic bt
-    matchBindee bindee (ReturnsMemory size@(Constant {}) space) =
+    matchBindee bindee (ReturnsMemory size@Constant{} space) =
       matchType bindee $ Mem size space
     matchBindee bindee (ReturnsMemory (Var size) space) = do
       popSizeIfInCtx size
@@ -490,7 +490,7 @@ matchPatternToReturns wrong pat rt = do
           case patElemType memBindee of
             Mem (Var size) _ ->
               popSizeIfInCtx size
-            Mem (Constant {}) _ ->
+            Mem Constant{} _ ->
               return ()
             _ ->
               lift $ wrong $ pretty memBindee ++ " is not a memory block."
@@ -501,9 +501,9 @@ matchPatternToReturns wrong pat rt = do
       popSizeIfInCtx v --  *May* be bound here.
     matchArrayDim (Var v) (Ext _) =
       popSizeFromCtx v --  *Has* to be bound here.
-    matchArrayDim (Constant {}) (Free _) =
+    matchArrayDim Constant{} (Free _) =
       return ()
-    matchArrayDim (Constant {}) (Ext _) =
+    matchArrayDim Constant{} (Ext _) =
       lift $ wrong
       "Existential dimension in expression return, but constant in pattern."
 
@@ -717,11 +717,11 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
                 | otherwise ->
                   return (ReturnsArray bt shape u $
                           Just $ ReturnsInBlock mem ixfun)
-              (Array {}, _) ->
+              (Array{}, _) ->
                 fail "expReturns: result is not a merge variable."
               (Basic bt, _) ->
                 return $ ReturnsScalar bt
-              (Mem {}, _) ->
+              (Mem{}, _) ->
                 fail "expReturns: loop returns memory block explicitly."
           isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst merge
@@ -755,7 +755,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
         return $ ReturnsScalar $ basicValueType val
       inspect (Basic bt) (Var _) =
         return $ ReturnsScalar bt
-      inspect (Mem {}) (Var _) =
+      inspect Mem{} (Var _) =
         -- FIXME
         fail "bodyReturns: cannot handle bodies returning memory yet."
       inspect (Array et shape u) (Var v) = do

@@ -681,7 +681,7 @@ exposeInputs inpIds ker = do
               return (ker' { fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
             _ -> fail "Cannot expose"
 
-        exposed (SOAC.Input ts (SOAC.Var {}))
+        exposed (SOAC.Input ts SOAC.Var{})
           | SOAC.nullTransforms ts = True
         exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
 

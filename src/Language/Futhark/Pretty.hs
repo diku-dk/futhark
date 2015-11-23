@@ -37,7 +37,7 @@ aliasComment :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => TupIdentBase ty v
 aliasComment pat d = case aliasComment' pat of
                        []   -> d
                        l:ls -> foldl (</>) l ls </> d
-  where aliasComment' (Wildcard {}) = []
+  where aliasComment' Wildcard{} = []
         aliasComment' (TupId pats _) = concatMap aliasComment' pats
         aliasComment' (Id ident) =
           case maybe [] (clean . HS.toList . aliases)
@@ -59,7 +59,7 @@ instance Pretty Value where
   ppr v@(ArrayVal a t)
     | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
-    | Array {} <- t = brackets $ commastack $ map ppr $ elems a
+    | Array{} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance Pretty Uniqueness where
@@ -142,13 +142,13 @@ instance Pretty BinOp where
   ppr Geq = text "<="
 
 hasArrayLit :: ExpBase ty vn -> Bool
-hasArrayLit (ArrayLit {}) = True
+hasArrayLit ArrayLit{} = True
 hasArrayLit (TupLit es2 _) = any hasArrayLit es2
 hasArrayLit (Literal val _) = hasArrayVal val
 hasArrayLit _ = False
 
 hasArrayVal :: Value -> Bool
-hasArrayVal (ArrayVal {}) = True
+hasArrayVal ArrayVal{} = True
 hasArrayVal (TupVal vs) = any hasArrayVal vs
 hasArrayVal _ = False
 
@@ -161,8 +161,8 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     | otherwise          = braces $ commasep $ map ppr es
   pprPrec _ (ArrayLit es rt _) =
     case unboxType rt of
-      Just (Array {}) -> brackets $ commastack $ map ppr es
-      _               -> brackets $ commasep $ map ppr es
+      Just Array{} -> brackets $ commastack $ map ppr es
+      _            -> brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
   pprPrec _ (UnOp op e _) = ppr op <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
@@ -179,17 +179,17 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     ppr body
     where mparens = if p == -1 then id else parens
           linebreak = case e of
-                        Map {} -> True
-                        Reduce {} -> True
-                        Filter {} -> True
-                        Redomap {} -> True
-                        Scan {} -> True
-                        DoLoop {} -> True
-                        LetPat {} -> True
-                        LetWith {} -> True
-                        Literal (ArrayVal {}) _ -> False
-                        If {} -> True
-                        ArrayLit {} -> False
+                        Map{} -> True
+                        Reduce{} -> True
+                        Filter{} -> True
+                        Redomap{} -> True
+                        Scan{} -> True
+                        DoLoop{} -> True
+                        LetPat{} -> True
+                        LetWith{} -> True
+                        Literal ArrayVal{} _ -> False
+                        If{} -> True
+                        ArrayLit{} -> False
                         _ -> hasArrayLit e
   pprPrec _ (LetWith dest src idxs ve body _)
     | dest == src =

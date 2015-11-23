@@ -163,7 +163,7 @@ arrayOf t s _
   | 0 <- shapeRank s = t
 arrayOf (Basic et) size u =
   Array et size u
-arrayOf (Mem {}) _ _ =
+arrayOf Mem{} _ _ =
   error "arrayOf Mem"
 
 -- | Construct an array whose rows are the given type, and the outer
@@ -240,8 +240,8 @@ rowType = stripArray 1
 -- | A type is a basic type if it is not an array or memory block and
 -- any component types are basic types.
 basicType :: TypeBase shape -> Bool
-basicType (Array {}) = False
-basicType (Mem {}) = False
+basicType Array{} = False
+basicType Mem{} = False
 basicType _ = True
 
 -- | Returns the bottommost type of an array.  For @[[int]]@, this
@@ -249,7 +249,7 @@ basicType _ = True
 elemType :: TypeBase shape -> BasicType
 elemType (Array t _ _) = t
 elemType (Basic t)     = t
-elemType (Mem {})      = error "elemType Mem"
+elemType Mem{}      = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
 transposeType :: Type -> Type
@@ -269,7 +269,7 @@ diet :: TypeBase shape -> Diet
 diet (Basic _) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
-diet (Mem {}) = Observe
+diet Mem{} = Observe
 
 -- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
 -- reflect how it is consumed according to @d@ - if it is consumed, it

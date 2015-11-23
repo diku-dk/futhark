@@ -540,8 +540,8 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
       return acc'
     _ ->
       addBindingToKernel bnd acc
-  where isMap (LoopOp (Map {})) = True
-        isMap _                 = False
+  where isMap (LoopOp Map{}) = True
+        isMap _              = False
 
 -- We keep reduce and scan in the program if they can be distributed
 -- by themselves, as this means they can be turned into segmented
@@ -574,15 +574,15 @@ maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
         reduceOrScan _ =
            Nothing
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp (Copy {}))) acc = do
+maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc = do
   acc' <- distribute acc
   distribute =<< addBindingToKernel bnd acc'
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp (Rearrange {}))) acc = do
+maybeDistributeBinding bnd@(Let _ _ (PrimOp Rearrange{})) acc = do
   acc' <- distribute acc
   distribute =<< addBindingToKernel bnd acc'
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp (Reshape {}))) acc = do
+maybeDistributeBinding bnd@(Let _ _ (PrimOp Reshape{})) acc = do
   acc' <- distribute acc
   distribute =<< addBindingToKernel bnd acc'
 

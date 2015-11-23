@@ -643,10 +643,10 @@ fusionGatherExp fres (If cond e_then e_else _) = do
 --- directly in let exp, i.e., let x = e)
 -----------------------------------------------------------------------------------
 
-fusionGatherExp _ (LoopOp (Map     {})) = errorIllegal "map"
-fusionGatherExp _ (LoopOp (Reduce  {})) = errorIllegal "reduce"
-fusionGatherExp _ (LoopOp (Scan    {})) = errorIllegal "scan"
-fusionGatherExp _ (LoopOp (Redomap {})) = errorIllegal "redomap"
+fusionGatherExp _ (LoopOp Map{}) = errorIllegal "map"
+fusionGatherExp _ (LoopOp Reduce{}) = errorIllegal "reduce"
+fusionGatherExp _ (LoopOp Scan{}) = errorIllegal "scan"
+fusionGatherExp _ (LoopOp Redomap{}) = errorIllegal "redomap"
 
 -----------------------------------
 ---- Generic Traversal         ----

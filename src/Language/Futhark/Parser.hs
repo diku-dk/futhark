@@ -107,7 +107,7 @@ parseExp = parse expression
 -- 'FilePath' as the source name for error messages.
 parsePattern :: RealConfiguration -> FilePath -> String
              -> Either ParseError UncheckedTupIdent
-parsePattern = parse pattern
+parsePattern = parse tupId
 
 -- | Parse an Futhark type from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

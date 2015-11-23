@@ -185,8 +185,8 @@ summariseLoop updates usedInBody resmap merge =
 
         merge_param_names = map (paramName . fst) merge
 
-        loopInvariant (Var v)       = v `notElem` merge_param_names
-        loopInvariant (Constant {}) = True
+        loopInvariant (Var v)    = v `notElem` merge_param_names
+        loopInvariant Constant{} = True
 
 data LoopResultSummary =
   LoopResultSummary { resultSubExp :: SubExp

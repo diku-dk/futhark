@@ -1385,7 +1385,7 @@ checkTupleArrayElem :: VarName vn =>
                        SrcLoc
                     -> DeclTupleArrayElemTypeBase (ID vn)
                     -> TypeM vn ()
-checkTupleArrayElem _ (BasicArrayElem {}) =
+checkTupleArrayElem _ BasicArrayElem{} =
   return ()
 checkTupleArrayElem loc (ArrayArrayElem at) =
   checkArrayType loc at

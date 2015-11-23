@@ -167,9 +167,9 @@ instance PrettyLore lore => Pretty (Binding lore) where
       (False, Nothing) -> equals <+> align e'
     where e' = ppr e
           linebreak = case e of
-                        LoopOp {} -> True
-                        If {} -> True
-                        PrimOp (ArrayLit {}) -> False
+                        LoopOp{} -> True
+                        If{} -> True
+                        PrimOp ArrayLit{} -> False
                         _ -> False
 
 instance PrettyLore lore => Pretty (PrimOp lore) where

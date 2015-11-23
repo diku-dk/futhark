@@ -117,15 +117,15 @@ safeExp (PrimOp op) = safePrimOp op
         safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0
         safePrimOp (BinOp Mod _ _ _) = False
         safePrimOp (BinOp Pow _ _ _) = False
-        safePrimOp (BinOp {}) = True
-        safePrimOp (SubExp {}) = True
-        safePrimOp (Not {}) = True
-        safePrimOp (Negate {}) = True
-        safePrimOp (Alloc {}) = True
+        safePrimOp BinOp{} = True
+        safePrimOp SubExp{} = True
+        safePrimOp Not{} = True
+        safePrimOp Negate{} = True
+        safePrimOp Alloc{} = True
         safePrimOp _ = False
 safeExp (LoopOp _) = False
 safeExp (SegOp _) = False
-safeExp (Apply {}) = False
+safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
   all (safeExp . bindingExp) (bodyBindings fbranch)
@@ -134,8 +134,8 @@ safeExp (If _ tbranch fbranch _) =
 -- duplicates.
 subExpVars :: [SubExp] -> [VName]
 subExpVars = mapMaybe subExpVar
-  where subExpVar (Var v)       = Just v
-        subExpVar (Constant {}) = Nothing
+  where subExpVar (Var v)    = Just v
+        subExpVar Constant{} = Nothing
 
 -- | Return the variable dimension sizes.  May contain
 -- duplicates.

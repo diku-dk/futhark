@@ -61,32 +61,32 @@ expMetrics (Apply fname _ _) =
 
 primOpMetrics :: PrimOp lore -> MetricsM ()
 primOpMetrics (SubExp _) = seen "SubExp"
-primOpMetrics (ArrayLit {}) = seen "ArrayLit"
-primOpMetrics (BinOp {}) = seen "BinOp"
-primOpMetrics (Not {}) = seen "Not"
-primOpMetrics (Negate {}) = seen "Negate"
-primOpMetrics (Complement {}) = seen "Complement"
-primOpMetrics (Abs {}) = seen "Abs"
-primOpMetrics (Signum {}) = seen "Signum"
-primOpMetrics (Assert {}) = seen "Assert"
-primOpMetrics (Index {}) = seen "Index"
-primOpMetrics (Split {}) = seen "Split"
-primOpMetrics (Concat {}) = seen "Concat"
-primOpMetrics (Copy {}) = seen "Copy"
-primOpMetrics (Iota {}) = seen "Iota"
-primOpMetrics (Replicate {}) = seen "Replicate"
-primOpMetrics (Scratch {}) = seen "Scratch"
-primOpMetrics (Reshape {}) = seen "Reshape"
-primOpMetrics (Rearrange {}) = seen "Rearrange"
-primOpMetrics (Stripe {}) = seen "Stripe"
-primOpMetrics (Unstripe {}) = seen "Unstripe"
-primOpMetrics (Partition {}) = seen "Partition"
-primOpMetrics (Alloc {}) = seen "Alloc"
+primOpMetrics ArrayLit{} = seen "ArrayLit"
+primOpMetrics BinOp{} = seen "BinOp"
+primOpMetrics Not{} = seen "Not"
+primOpMetrics Negate{} = seen "Negate"
+primOpMetrics Complement{} = seen "Complement"
+primOpMetrics Abs{} = seen "Abs"
+primOpMetrics Signum{} = seen "Signum"
+primOpMetrics Assert{} = seen "Assert"
+primOpMetrics Index{} = seen "Index"
+primOpMetrics Split{} = seen "Split"
+primOpMetrics Concat{} = seen "Concat"
+primOpMetrics Copy{} = seen "Copy"
+primOpMetrics Iota{} = seen "Iota"
+primOpMetrics Replicate{} = seen "Replicate"
+primOpMetrics Scratch{} = seen "Scratch"
+primOpMetrics Reshape{} = seen "Reshape"
+primOpMetrics Rearrange{} = seen "Rearrange"
+primOpMetrics Stripe{} = seen "Stripe"
+primOpMetrics Unstripe{} = seen "Unstripe"
+primOpMetrics Partition{} = seen "Partition"
+primOpMetrics Alloc{} = seen "Alloc"
 
 loopOpMetrics :: LoopOp lore -> MetricsM ()
-loopOpMetrics (DoLoop _ _ (ForLoop {}) body) =
+loopOpMetrics (DoLoop _ _ ForLoop{} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
-loopOpMetrics (DoLoop _ _ (WhileLoop {}) body) =
+loopOpMetrics (DoLoop _ _ WhileLoop{} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 loopOpMetrics (Map _ _ fun _) =
   inside "Map" $ lambdaMetrics fun
@@ -114,7 +114,7 @@ segOpMetrics (SegScan _ _ ScanInclusive fun _ _) =
   inside "SegScanInclusive" $ lambdaMetrics fun
 segOpMetrics (SegScan _ _ ScanExclusive fun _ _) =
   inside "SegScanExclusive" $ lambdaMetrics fun
-segOpMetrics (SegReplicate{}) =
+segOpMetrics SegReplicate{} =
   seen "SegReplicate"
 
 lambdaMetrics :: Lambda lore -> MetricsM ()

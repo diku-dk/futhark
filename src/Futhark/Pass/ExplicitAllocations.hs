@@ -252,7 +252,7 @@ allocsForPattern sizeidents validents rts = do
           summary <- lift $ summaryForBindage (identType ident) bindage
           return $ PatElem ident bindage summary
 
-      ReturnsArray _ _ u (Just (ReturnsNewBlock {}))
+      ReturnsArray _ _ u (Just ReturnsNewBlock{})
         | BindInPlace _ _ is <- bindage -> do
             -- The expression returns its own memory, but the pattern
             -- wants to store it somewhere else.  We first let it
@@ -283,7 +283,7 @@ allocsForPattern sizeidents validents rts = do
           postbnds)
   where knownShape = mapM known . extShapeDims
         known (Free v) = Just v
-        known (Ext {}) = Nothing
+        known Ext{} = Nothing
 
 summaryForBindage :: Allocator m =>
                      Type -> Bindage
@@ -446,7 +446,7 @@ funcallArgs args = do
   return $ map (,Observe) (memsizeargs <> memargs) <> valargs
 
 linearFuncallArg :: Type -> SubExp -> WriterT ([SubExp], [SubExp]) AllocM SubExp
-linearFuncallArg (Array {}) (Var v) = do
+linearFuncallArg Array{} (Var v) = do
   (size, mem, arg') <- lift $ ensureDirectArray v
   tell ([size], [Var mem])
   return arg'
@@ -463,7 +463,7 @@ memoryInRetType :: In.RetType -> RetType
 memoryInRetType (ExtRetType ts) =
   evalState (mapM addAttr ts) $ startOfFreeIDRange ts
   where addAttr (Basic t) = return $ ReturnsScalar t
-        addAttr (Mem {})  = fail "memoryInRetType: too much memory"
+        addAttr Mem{} = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get
           put $ i + 1
@@ -483,7 +483,7 @@ allocInBody (Body _ bnds res) =
   allocInBindings bnds $ \bnds' -> do
     (ses, allocs) <- collectBindings $ mapM ensureDirect res
     return $ Body () (bnds'<>allocs) ses
-  where ensureDirect se@(Constant {}) = return se
+  where ensureDirect se@Constant{} = return se
         ensureDirect (Var v) = do
           bt <- basicType <$> lookupType v
           if bt
@@ -563,9 +563,9 @@ allocInExp (LoopOp (ScanKernel cs w size lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
   return $ LoopOp $ ScanKernel cs w size lam' input
 
-allocInExp (LoopOp (Scan {})) =
+allocInExp (LoopOp Scan{}) =
   fail "Cannot put explicit allocations in scan yet."
-allocInExp (LoopOp (Redomap {})) =
+allocInExp (LoopOp Redomap{}) =
   fail "Cannot put explicit allocations in redomap yet."
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
@@ -637,7 +637,7 @@ allocInReduceParameters :: SubExp
 allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
   where allocInReduceParameter p =
           case paramType p of
-            t@(Array {}) -> do
+            t@Array{} -> do
               (_, shared_mem) <- allocForLocalArray workgroup_size t
               let ixfun = IxFun.applyInd
                           (IxFun.iota $ IxFun.shapeFromSubExps $

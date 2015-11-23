@@ -1372,13 +1372,13 @@ isSafeToMapExp (LoopOp _) = return False
 isSafeToMapExp (SegOp _) = return False
 isSafeToMapExp (If _ e1 e2 _) =
   liftM2 (&&) (isSafeToMapBody e1) (isSafeToMapBody e2)
-isSafeToMapExp (Apply{}) =
+isSafeToMapExp Apply{} =
   flatError $ Error "TODO: isSafeToMap not implemented for Apply"
 
 isSafeToMapType :: Type -> FlatM Bool
-isSafeToMapType (Mem{}) = flatError MemTypeFound
+isSafeToMapType Mem{} = flatError MemTypeFound
 isSafeToMapType (Basic _) = return True
-isSafeToMapType (Array{}) = return False
+isSafeToMapType Array{} = return False
 
 --------------------------------------------------------------------------------
 

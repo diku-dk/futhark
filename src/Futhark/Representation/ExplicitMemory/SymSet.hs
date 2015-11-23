@@ -58,7 +58,7 @@ null :: SymSet n -> ScalExp
 null Empty = Val $ LogVal True
 null (SetOp Intersect _ x _ y) = null x `SLogOr` null y
 null (SetOp Union _ _ _ _) = Val $ LogVal False
-null (Bound {}) = Val $ LogVal False
+null Bound{} = Val $ LogVal False
 
 empty :: SymSet 'Z
 empty = Empty

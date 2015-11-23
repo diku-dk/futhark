@@ -307,7 +307,7 @@ compileOutParams rts = do
   return (valdecls, outparams, Destination dests)
   where imp = lift . lift
 
-        mkParam (ReturnsMemory {}) =
+        mkParam ReturnsMemory{} =
           throwError "Functions may not explicitly return memory blocks."
         mkParam (ReturnsScalar t) = do
           out <- imp $ newVName "scalar_out"
@@ -493,7 +493,7 @@ defCompilePrimOp
         emit $ Imp.For i (compileSubExp n) $
           Imp.Write targetmem targetoffset (elemType set) space $ compileSubExp se
         else case se of
-        Constant {} ->
+        Constant{} ->
           throwError "Array value in replicate cannot be constant."
         Var v -> do
           targetloc <-
@@ -504,7 +504,7 @@ defCompilePrimOp
           emit =<< (Imp.For i (compileSubExp n) <$>
             collect (copy elemt targetloc src_loc src_elements))
 
-defCompilePrimOp (Destination [_]) (Scratch {}) =
+defCompilePrimOp (Destination [_]) Scratch{} =
   return ()
 
 defCompilePrimOp
@@ -520,7 +520,7 @@ defCompilePrimOp
 defCompilePrimOp (Destination [target]) (Copy src) =
   compileResultSubExp target $ Var src
 
-defCompilePrimOp _ (Split {}) =
+defCompilePrimOp _ Split{} =
   return () -- Yes, really.
 
 defCompilePrimOp
@@ -562,16 +562,16 @@ defCompilePrimOp
           copy et targetloc srcloc elements_per_row
   where et = elemType rt
 
-defCompilePrimOp _ (Rearrange {}) =
+defCompilePrimOp _ Rearrange{} =
   return ()
 
-defCompilePrimOp _ (Reshape {}) =
+defCompilePrimOp _ Reshape{} =
   return ()
 
-defCompilePrimOp _ (Stripe {}) =
+defCompilePrimOp _ Stripe{} =
   return ()
 
-defCompilePrimOp _ (Unstripe {}) =
+defCompilePrimOp _ Unstripe{} =
   return ()
 
 defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
@@ -687,23 +687,23 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
     where mergepat = map fst merge
           mergenames = map paramName mergepat
 
-defCompileLoopOp _ (Map {}) = soacError
+defCompileLoopOp _ Map{} = soacError
 
-defCompileLoopOp _ (ConcatMap {}) = soacError
+defCompileLoopOp _ ConcatMap{} = soacError
 
-defCompileLoopOp _ (Scan {}) = soacError
+defCompileLoopOp _ Scan{} = soacError
 
-defCompileLoopOp _ (Redomap {}) = soacError
+defCompileLoopOp _ Redomap{} = soacError
 
-defCompileLoopOp _ (Stream {}) = soacError
+defCompileLoopOp _ Stream{} = soacError
 
-defCompileLoopOp _ (Reduce {}) = soacError
+defCompileLoopOp _ Reduce{} = soacError
 
-defCompileLoopOp _ (Kernel {}) = soacError
+defCompileLoopOp _ Kernel{} = soacError
 
-defCompileLoopOp _ (ReduceKernel {}) = soacError
+defCompileLoopOp _ ReduceKernel{} = soacError
 
-defCompileLoopOp _ (ScanKernel {}) = soacError
+defCompileLoopOp _ ScanKernel{} = soacError
 
 soacError :: ImpM op a
 soacError = throwError "SOAC encountered in code generator; should have been removed by first-order transform."
@@ -816,7 +816,7 @@ funcallTargets (Destination dests) =
   liftM concat $ mapM funcallTarget dests
   where funcallTarget (ScalarDestination name) =
           return [name]
-        funcallTarget (ArrayElemDestination {}) =
+        funcallTarget ArrayElemDestination{} =
           throwError "Cannot put scalar function return in-place yet." -- FIXME
         funcallTarget (ArrayDestination (CopyIntoMemory _) shape) =
           return $ catMaybes shape
@@ -830,7 +830,7 @@ subExpToDimSize (Var v) =
   return $ Imp.VarSize v
 subExpToDimSize (Constant (IntVal i)) =
   return $ Imp.ConstSize $ fromIntegral i
-subExpToDimSize (Constant {}) =
+subExpToDimSize Constant{} =
   throwError "Size subexp is not a non-integer constant."
 
 sizeToScalExp :: Imp.Size -> SE.ScalExp
@@ -855,7 +855,7 @@ compileResultSubExp (MemoryDestination mem memsizetarget) (Var v) = do
       emit $ Imp.SetScalar memsizetarget' $
       innerExp $ Imp.dimSizeToExp memsize
 
-compileResultSubExp (MemoryDestination {}) (Constant {}) =
+compileResultSubExp MemoryDestination{} Constant{} =
   throwError "Memory destination result subexpression cannot be a constant."
 
 compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
@@ -884,7 +884,7 @@ compileResultSubExp (ArrayDestination memdest shape) (Var v) = do
         maybeSetShape (Just dim) size =
           emit $ Imp.SetScalar dim $ innerExp $ Imp.dimSizeToExp size
 
-compileResultSubExp (ArrayDestination {}) (Constant {}) =
+compileResultSubExp ArrayDestination{} Constant{} =
   throwError "Array destination result subexpression cannot be a constant."
 
 compileScalarSubExpTo :: ValueDestination -> SubExp -> ImpM op ()

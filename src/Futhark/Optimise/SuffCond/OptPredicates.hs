@@ -408,7 +408,7 @@ suffScalExp name vtable = asSuffScalExp =<< ST.lookup name vtable
           | otherwise = ST.asScalExp entry
 
 sufficientSubExp :: MonadFreshNames m => SubExp -> VariantM m SubExp
-sufficientSubExp se@(Constant {}) = return se
+sufficientSubExp se@Constant{} = return se
 sufficientSubExp (Var v) =
   maybe (Var v) Var .
   (snd <=< ST.entryLetBoundLore <=< ST.lookup v) <$>
@@ -476,7 +476,7 @@ forbiddenExp context = isNothing . walkExpM walk
         forbiddenVar = (`forbiddenIn` context)
 
         forbiddenSubExp (Var v) = v `forbiddenIn` context
-        forbiddenSubExp (Constant {}) = False
+        forbiddenSubExp Constant{} = False
 
         forbiddenBody = any (isForbidden . snd . bindingLore) . bodyBindings
 
