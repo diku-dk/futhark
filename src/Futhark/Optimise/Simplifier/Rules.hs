@@ -108,8 +108,8 @@ liftIdentityMapping _ (Let pat _ (LoopOp (Map cs outersize fun arrs))) =
         rettype = lambdaReturnType fun
         ses = bodyResult $ lambdaBody fun
 
-        freeOrConst (Var v)       = v `HS.member` free
-        freeOrConst (Constant {}) = True
+        freeOrConst (Var v)    = v `HS.member` free
+        freeOrConst Constant{} = True
 
         checkInvariance :: (PatElem lore, SubExp, Type)
                         -> ([(Pattern lore, Exp lore)],
@@ -758,7 +758,7 @@ simplifyIndexing defOf typeOf idd inds =
     Just (Copy src)
       -- We cannot just remove a copy of a rearrange, because it might
       -- be important for coalescing.
-      | Just (PrimOp (Rearrange {})) <- defOf src ->
+      | Just (PrimOp Rearrange{}) <- defOf src ->
           Nothing
       | Just dims <- arrayDims <$> typeOf (Var src),
         length inds == length dims ->
@@ -1023,7 +1023,7 @@ copyScratchToScratch defOf typeOf (Copy src) = do
     else Nothing
   where isActuallyScratch v =
           case asPrimOp =<< defOf v of
-            Just (Scratch {}) -> True
+            Just Scratch{} -> True
             Just (Rearrange _ _ v') -> isActuallyScratch v'
             Just (Reshape _ _ v') -> isActuallyScratch v'
             _ -> False
@@ -1059,7 +1059,7 @@ removeScratchValue :: MonadBinder m => TopDownRule m
 removeScratchValue _ (Let
                       (Pattern [] [PatElem v (BindInPlace _ src _) _])
                       _
-                      (PrimOp (Scratch {}))) =
+                      (PrimOp Scratch{})) =
     letBindNames'_ [identName v] $ PrimOp $ SubExp $ Var src
 removeScratchValue _ _ =
   cannotSimplify

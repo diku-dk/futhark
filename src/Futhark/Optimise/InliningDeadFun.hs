@@ -133,7 +133,7 @@ inlineInBody
           ses
 
       reshapeIfNecessary ident se
-        | t@(Array {}) <- identType ident,
+        | t@Array{} <- identType ident,
           Var v <- se =
             mkLet' [] [ident] $ shapeCoerce [] (arrayDims t) v
         | otherwise =

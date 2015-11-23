@@ -433,9 +433,9 @@ instance FreeIn a => FreeIn (Code a) where
     i `HS.delete` (freeIn bound <> freeIn body)
   freeIn (While cond body) =
     freeIn cond <> freeIn body
-  freeIn (DeclareMem {}) =
+  freeIn DeclareMem{} =
     mempty
-  freeIn (DeclareScalar {}) =
+  freeIn DeclareScalar{} =
     mempty
   freeIn (Allocate name size _) =
     freeIn name <> freeIn size
@@ -516,13 +516,13 @@ memoryUsage f (Comment _ c) =
   memoryUsage f c
 memoryUsage f (Op op) =
   f op
-memoryUsage _ (SetMem {}) =
+memoryUsage _ SetMem{} =
   HM.empty
 memoryUsage _ Skip =
   HM.empty
-memoryUsage _ (DeclareMem {})  =
+memoryUsage _ DeclareMem{}  =
   HM.empty
-memoryUsage _ (DeclareScalar {})  =
+memoryUsage _ DeclareScalar{}  =
   HM.empty
 
 expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet BasicType)
@@ -539,5 +539,5 @@ expMemoryUsage (ScalarVar _) =
   HM.empty
 expMemoryUsage (SizeOf _) =
   HM.empty
-expMemoryUsage (Constant {}) =
+expMemoryUsage Constant{} =
   HM.empty

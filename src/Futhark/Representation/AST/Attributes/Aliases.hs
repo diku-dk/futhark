@@ -32,25 +32,25 @@ vnameAliases :: VName -> Names
 vnameAliases = HS.singleton
 
 subExpAliases :: SubExp -> Names
-subExpAliases (Constant {}) = mempty
-subExpAliases (Var v)       = vnameAliases v
+subExpAliases Constant{} = mempty
+subExpAliases (Var v)    = vnameAliases v
 
 primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
-primOpAliases (BinOp {}) = [mempty]
-primOpAliases (Not {}) = [mempty]
-primOpAliases (Complement {}) = [mempty]
-primOpAliases (Negate {}) = [mempty]
-primOpAliases (Abs {}) = [mempty]
-primOpAliases (Signum {}) = [mempty]
+primOpAliases BinOp{} = [mempty]
+primOpAliases Not{} = [mempty]
+primOpAliases Complement{} = [mempty]
+primOpAliases Negate{} = [mempty]
+primOpAliases Abs{} = [mempty]
+primOpAliases Signum{} = [mempty]
 primOpAliases (Index _ ident _) =
   [vnameAliases ident]
-primOpAliases (Iota {}) =
+primOpAliases Iota{} =
   [mempty]
 primOpAliases (Replicate _ e) =
   [subExpAliases e]
-primOpAliases (Scratch {}) =
+primOpAliases Scratch{} =
   [mempty]
 primOpAliases (Reshape _ _ e) =
   [vnameAliases e]
@@ -64,11 +64,11 @@ primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
 primOpAliases (Concat _ x ys _) =
   [vnameAliases x <> mconcat (map vnameAliases ys)]
-primOpAliases (Copy {}) =
+primOpAliases Copy{} =
   [mempty]
-primOpAliases (Assert {}) =
+primOpAliases Assert{} =
   [mempty]
-primOpAliases (Alloc {}) =
+primOpAliases Alloc{} =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr
@@ -91,7 +91,7 @@ loopOpAliases (Stream _ _ form lam _ _) =
              RedLike _ lam0 _ -> bodyAliases $ lambdaBody lam0
              Sequential _     -> []
   in  a1 ++ bodyAliases (extLambdaBody lam)
-loopOpAliases (ConcatMap {}) =
+loopOpAliases ConcatMap{} =
   [mempty]
 loopOpAliases (Kernel _ _ _ _ _ returns _) =
   map (const mempty) returns
@@ -105,7 +105,7 @@ segOpAliases (SegReduce _ _ f _ _) =
   map (const mempty) $ lambdaReturnType f
 segOpAliases (SegScan _ _ _ f _ _) =
   map (const mempty) $ lambdaReturnType f
-segOpAliases (SegReplicate{}) =
+segOpAliases SegReplicate{} =
   [mempty]
 -- TODO: Troels, should this be vnameAliases ?
 
@@ -138,7 +138,7 @@ returnAliases rts args = map returnType' rts
           mempty
         returnType' (Basic _) =
           mempty
-        returnType' (Mem {}) =
+        returnType' Mem{} =
           error "returnAliases Mem"
 
 maskAliases :: Names -> Diet -> Names

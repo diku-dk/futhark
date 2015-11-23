@@ -203,7 +203,7 @@ instance FreeIn Ident where
 
 instance FreeIn SubExp where
   freeIn (Var v) = freeIn v
-  freeIn (Constant {}) = mempty
+  freeIn Constant{} = mempty
 
 instance FreeIn Shape where
   freeIn = mconcat . map freeIn . shapeDims

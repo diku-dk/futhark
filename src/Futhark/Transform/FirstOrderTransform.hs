@@ -264,7 +264,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexp
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
+transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
   -- 1.) trivial step: find and build some of the basic things you need
   let accexps = getStreamAccums    form
       lampars = extLambdaParams     lam
@@ -296,7 +296,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
   -- 2.) Make the existential induction variables, allocated-size variables,
   --       and all possible instantiations of the existential types, i.e.,
   --       inside and outside the loop body!
-  assocs   <- mkExistAssocs outersz arrrtps pattern
+  assocs   <- mkExistAssocs outersz arrrtps respat
   initrtps <- forM (zip arrrtps assocs) $ \ (tp,(_,mub)) -> do
                 let deflt0= case mub of
                               UnknownBd -> outersz
@@ -470,7 +470,7 @@ transformBinding (Let pattern () (LoopOp (Stream cs _ form lam arrexps _))) = do
   elsebody <- runBodyBinder $ do
       fakeoutarrs <- resultArray  initrtps
       return $ resultBody (accexps ++ map Var fakeoutarrs)
-  addBinding =<< liftM (Let pattern ()) (eIf (pure $ PrimOp $ SubExp $ Constant $ LogVal True)
+  addBinding =<< liftM (Let respat ()) (eIf (pure $ PrimOp $ SubExp $ Constant $ LogVal True)
                                          (pure thenbody)
                                          (pure elsebody))
   where myMkLet :: Exp -> Ident -> Binding

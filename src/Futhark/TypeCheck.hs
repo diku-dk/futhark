@@ -329,7 +329,7 @@ lookupAliases name = do (_, _, als) <- lookupVar name
                         return $ HS.insert name als
 
 subExpAliasesM :: SubExp -> TypeM lore Names
-subExpAliasesM (Constant {}) = return mempty
+subExpAliasesM Constant{} = return mempty
 subExpAliasesM (Var v)       = lookupAliases v
 
 lookupFun :: forall lore.Lore lore =>
@@ -412,9 +412,9 @@ checkArrIdent :: VName -> TypeM lore Type
 checkArrIdent v = do
   t <- lookupType v
   case t of
-    (Array {}) -> return t
-    _          -> bad $ NotAnArray noLoc (PrimOp $ SubExp $ Var v) $
-                  justOne $ staticShapes1 t
+    Array{} -> return t
+    _       -> bad $ NotAnArray noLoc (PrimOp $ SubExp $ Var v) $
+               justOne $ staticShapes1 t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type

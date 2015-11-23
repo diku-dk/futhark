@@ -492,7 +492,7 @@ applyMode mode test =
   test { testAction = applyModeToAction mode $ testAction test }
 
 applyModeToAction :: TestMode -> TestAction -> TestAction
-applyModeToAction _ a@(CompileTimeFailure {}) =
+applyModeToAction _ a@CompileTimeFailure{} =
   a
 applyModeToAction OnlyTypeCheck (RunCases _) =
   RunCases []

@@ -53,7 +53,7 @@ type ExpMap = HM.HashMap VName Exp
 nonlinearInMemory :: VName -> ExpMap -> Bool
 nonlinearInMemory name m =
   case HM.lookup name m of
-    Just (PrimOp (Rearrange {})) -> True
+    Just (PrimOp Rearrange{}) -> True
     Just (PrimOp (Reshape _ _ arr)) -> nonlinearInMemory arr m
     _ -> False
 
@@ -204,7 +204,7 @@ rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
                     SequentialiseM ([PatElem], [(Type, [Int])])
 rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
-  where rearrangeReturn (PatElem ident BindVar ()) (t@(Array {}), perm) = do
+  where rearrangeReturn (PatElem ident BindVar ()) (t@Array{}, perm) = do
           name_tr <- newVName $ baseString (identName ident) <> "_tr_res"
           let perm' = rearrangeShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
               ident' = Ident name_tr $ rearrangeType perm' $ identType ident

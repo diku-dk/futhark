@@ -96,8 +96,8 @@ optimiseBody (Body als bnds res) = do
   bnds' <- deepen $ optimiseBindings bnds $
     mapM_ seen res
   return $ Body als bnds' res
-  where seen (Constant {}) = return ()
-        seen (Var v)       = seenVar v
+  where seen Constant{} = return ()
+        seen (Var v)    = seenVar v
 
 optimiseBindings :: [Binding Basic]
                  -> ForwardingM ()
@@ -266,8 +266,8 @@ areAvailableBefore ses point = do
   nameNs <- mapM bindingNumber names
   return $ all (< pointN) nameNs
   where names = mapMaybe isVar ses
-        isVar (Var v)       = Just v
-        isVar (Constant {}) = Nothing
+        isVar (Var v)    = Just v
+        isVar Constant{} = Nothing
 
 isInCurrentBody :: VName -> ForwardingM Bool
 isInCurrentBody name = do

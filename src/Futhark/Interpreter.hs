@@ -494,7 +494,7 @@ evalPrimOp (BinOp Leq e1 e2 _) = do
   v2 <- evalSubExp e2
   return [BasicVal $ LogVal (v1<=v2)]
 
-evalPrimOp (BinOp {}) = bad $ TypeError "evalPrimOp Binop"
+evalPrimOp BinOp{} = bad $ TypeError "evalPrimOp Binop"
 
 evalPrimOp (Not e) = do
   v <- evalSubExp e
@@ -783,13 +783,13 @@ evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalLoopOp (Kernel {}) =
+evalLoopOp Kernel{} =
   fail "Cannot interpret kernels."
 
-evalLoopOp (ReduceKernel {}) =
+evalLoopOp ReduceKernel{} =
   fail "Cannot interpret reduction kernels."
 
-evalLoopOp (ScanKernel {}) =
+evalLoopOp ScanKernel{} =
   fail "Cannot interpret scan kernels."
 
 evalLoopOp (Stream _ _ form elam arrs _) = do

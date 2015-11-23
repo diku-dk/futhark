@@ -107,11 +107,11 @@ expandInBinding (Let pat () e) = do
           then expandInPattern pat
           else return pat
   return $ Let pat' () e'
-  where expandForExp (LoopOp (DoLoop {}))    = False
-        expandForExp (PrimOp (Index {}))     = False
-        expandForExp (PrimOp (Reshape {}))   = False
-        expandForExp (PrimOp (Rearrange {})) = False
-        expandForExp _                       = True
+  where expandForExp (LoopOp DoLoop{})    = False
+        expandForExp (PrimOp Index{})     = False
+        expandForExp (PrimOp Reshape{})   = False
+        expandForExp (PrimOp Rearrange{}) = False
+        expandForExp _                    = True
 
 expandInPattern :: Pattern -> ExpandM Pattern
 expandInPattern pat@(Pattern context values) = do

@@ -609,7 +609,7 @@ typeOf (Index ident idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
 typeOf (Iota _ _) = Array $ BasicArray Int (Rank 1) Nonunique mempty
-typeOf (Size {}) = Basic Int
+typeOf Size{} = Basic Int
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
   where u = uniqueness $ typeOf e
 typeOf (Reshape shape  e _) =
@@ -733,10 +733,10 @@ lambdaReturnType (CurryBinOpRight _ _ t _)  = toDecl t
 lambdaParamDiets :: LambdaBase ty vn -> [Diet]
 lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
 lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
-lambdaParamDiets (UnOpFun {}) = [Observe]
-lambdaParamDiets (BinOpFun {}) = [Observe, Observe]
-lambdaParamDiets (CurryBinOpLeft {}) = [Observe]
-lambdaParamDiets (CurryBinOpRight {}) = [Observe]
+lambdaParamDiets UnOpFun{} = [Observe]
+lambdaParamDiets BinOpFun{} = [Observe, Observe]
+lambdaParamDiets CurryBinOpLeft{} = [Observe]
+lambdaParamDiets CurryBinOpRight{} = [Observe]
 
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
@@ -759,7 +759,7 @@ progNames = execWriter . mapM funNames . progFunctions
           one dest >> walkExpM names e
         expNames e@(DoLoop _ _ (For _ _ i _) _ _ _) =
           one i >> walkExpM names e
-        expNames e@(DoLoop {}) =
+        expNames e@DoLoop{} =
           walkExpM names e
         expNames e = walkExpM names e
 
@@ -767,8 +767,8 @@ progNames = execWriter . mapM funNames . progFunctions
           mapM_ one params >> expNames body
         lambdaNames (CurryFun _ exps _ _) =
           mapM_ expNames exps
-        lambdaNames (UnOpFun {}) = return ()
-        lambdaNames (BinOpFun {}) = return ()
+        lambdaNames UnOpFun{} = return ()
+        lambdaNames BinOpFun{} = return ()
         lambdaNames (CurryBinOpLeft _ e _ _) = expNames e
         lambdaNames (CurryBinOpRight _ e _ _) = expNames e
 
@@ -841,9 +841,9 @@ freeInLambda (AnonymFun params body rettype _) =
     where params' = map identName params
 freeInLambda (CurryFun _ exps _ _) =
   HS.unions (map freeInExp exps)
-freeInLambda (UnOpFun {}) =
+freeInLambda UnOpFun{} =
   mempty
-freeInLambda (BinOpFun {}) =
+freeInLambda BinOpFun{} =
   mempty
 freeInLambda (CurryBinOpLeft _ e _ _) =
   freeInExp e

@@ -173,7 +173,7 @@ inResultName :: MonadEngine m => VName -> m ()
 inResultName = tellNeed . Need [] . UT.inResultUsage
 
 asserted :: MonadEngine m => SubExp -> m ()
-asserted (Constant {}) =
+asserted Constant{} =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp name <$> getVtable
@@ -377,24 +377,24 @@ isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
 isNotCheap :: BlockPred m
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
-        cheap (PrimOp (BinOp {}))   = True
-        cheap (PrimOp (SubExp {}))  = True
-        cheap (PrimOp (Not {}))     = True
-        cheap (PrimOp (Negate {}))  = True
-        cheap (LoopOp {})           = False
-        cheap _                     = True -- Used to be False, but
-                                           -- let's try it out.
+        cheap (PrimOp BinOp{})   = True
+        cheap (PrimOp SubExp{})  = True
+        cheap (PrimOp Not{})     = True
+        cheap (PrimOp Negate{})  = True
+        cheap LoopOp{}           = False
+        cheap _                  = True -- Used to be False, but
+                                        -- let's try it out.
 
 isUnique :: BlockPred lore
 isUnique _ = any unique . patternTypes . bindingPattern
 
 isAlloc :: BlockPred lore
-isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
-isAlloc _ _                             = False
+isAlloc _ (Let _ _ (PrimOp Alloc{})) = True
+isAlloc _ _                          = False
 
 isResultAlloc :: BlockPred lore
 isResultAlloc usage (Let (Pattern [] [bindee]) _
-                     (PrimOp (Alloc {}))) =
+                     (PrimOp Alloc{})) =
   UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ = False
 

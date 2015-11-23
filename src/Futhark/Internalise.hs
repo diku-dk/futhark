@@ -532,7 +532,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $
     I.LoopOp $ I.Stream [] w form' lam' arrs' ii
-internaliseExp _ (E.Stream{}) =
+internaliseExp _ E.Stream{} =
   fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 
 internaliseExp desc (E.ConcatMap lam arr arrs _) = do
