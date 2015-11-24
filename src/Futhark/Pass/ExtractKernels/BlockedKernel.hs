@@ -257,7 +257,7 @@ blockedScan pat cs w lam input = runBinder_ $ do
           return $ lambdaBody lam'''
     group_lasts <-
       letTupExp "final_result" =<<
-        eIf (eBinOp Equal (eSubExp $ intconst 0) (eSubExp $ Var j) Bool)
+        eIf (eBinOp Equal (eSubExp $ intconst 0) (eSubExp thread_id) Bool)
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
