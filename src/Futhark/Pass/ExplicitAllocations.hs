@@ -559,9 +559,9 @@ allocInExp (LoopOp (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
   return $ LoopOp $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
 
-allocInExp (LoopOp (ScanKernel cs w size lam input)) = do
+allocInExp (LoopOp (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
-  return $ LoopOp $ ScanKernel cs w size lam' input
+  return $ LoopOp $ ScanKernel cs w size order lam' input
 
 allocInExp (LoopOp Scan{}) =
   fail "Cannot put explicit allocations in scan yet."

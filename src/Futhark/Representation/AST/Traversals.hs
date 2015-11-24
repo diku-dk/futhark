@@ -229,11 +229,12 @@ mapExpM tv (LoopOp (ReduceKernel cs w kernel_size red_fun fold_fun accs arrs)) =
               mapOnLambda tv fold_fun <*>
               mapM (mapOnSubExp tv) accs <*>
               mapM (mapOnVName tv) arrs)
-mapExpM tv (LoopOp (ScanKernel cs w kernel_size fun input)) =
+mapExpM tv (LoopOp (ScanKernel cs w kernel_size order fun input)) =
   LoopOp <$> (ScanKernel <$>
               mapOnCertificates tv cs <*>
               mapOnSubExp tv w <*>
               mapOnKernelSize tv kernel_size <*>
+              pure order <*>
               mapOnLambda tv fun <*>
               (zip <$> mapM (mapOnSubExp tv) nes <*>
                        mapM (mapOnVName tv) arrs))

@@ -436,7 +436,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (ReduceKernel _ w _ _ _ _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (ScanKernel _ w _ _ _)) =
+        unbalancedBinding bound (LoopOp (ScanKernel _ w _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (DoLoop _ merge (ForLoop i iterations) body)) =
           iterations `subExpBound` bound ||

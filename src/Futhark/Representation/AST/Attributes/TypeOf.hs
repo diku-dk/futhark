@@ -170,13 +170,12 @@ loopOpExtType (Kernel _ _ _ is _ returns _) =
 loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
   staticShapes $
   map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
-loopOpExtType (ScanKernel _ _ size lam _) =
+loopOpExtType (ScanKernel _ w size _ lam _) =
   staticShapes $
-  map (`arrayOfRow` width) (lambdaReturnType lam) ++
+  map (`arrayOfRow` w) (lambdaReturnType lam) ++
   map ((`arrayOfRow` kernelWorkgroups size) .
        (`arrayOfRow` kernelWorkgroupSize size))
   (lambdaReturnType lam)
-  where width = kernelTotalElements size
 
 -- | The type of a segmented operation.
 segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]

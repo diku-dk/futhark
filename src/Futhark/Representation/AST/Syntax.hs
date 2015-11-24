@@ -56,6 +56,7 @@ module Futhark.Representation.AST.Syntax
   , StreamForm(..)
   , KernelInput (..)
   , KernelSize (..)
+  , ScanKernelOrder (..)
 
   -- * Definitions
   , ParamT (..)
@@ -283,6 +284,7 @@ data LoopOp lore
     [VName]
   | ScanKernel Certificates SubExp
     KernelSize
+    ScanKernelOrder
     (LambdaT lore)
     [(SubExp, VName)]
 
@@ -308,6 +310,10 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelNumThreads :: SubExp
                              }
                 deriving (Eq, Ord, Show)
+
+data ScanKernelOrder = ScanTransposed
+                     | ScanFlat
+                     deriving (Eq, Ord, Show)
 
 -- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
 -- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@

@@ -957,7 +957,7 @@ checkLoopOp (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
 
-checkLoopOp (ScanKernel cs w kernel_size fun input) = do
+checkLoopOp (ScanKernel cs w kernel_size _ fun input) = do
   mapM_ (requireI [Basic Cert]) cs
   require [Basic Int] w
   checkKernelSize kernel_size
