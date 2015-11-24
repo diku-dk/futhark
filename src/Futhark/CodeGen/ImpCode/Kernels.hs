@@ -111,7 +111,7 @@ instance Pretty Kernel where
   ppr kernel =
     text "kernel" <+> brace
     (text "groups" <+> brace (ppr $ kernelNumGroups kernel) </>
-     text "group_size" <+> brace (ppr $ kernelNumGroups kernel) </>
+     text "group_size" <+> brace (ppr $ kernelGroupSize kernel) </>
      text "local_memory" <+> brace (commasep $
                                     map ppLocalMemory $
                                     kernelLocalMemory kernel) </>
