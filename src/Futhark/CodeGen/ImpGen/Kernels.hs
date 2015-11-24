@@ -266,7 +266,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (ScanKernel _ _ kernel_size lam input)) = do
+  (LoopOp (ScanKernel _ _ kernel_size order lam input)) = do
     let (nes, arrs) = unzip input
         (arrs_dest, partials_dest) = splitAt (length input) dest
     local_id <- newVName "local_id"
@@ -341,7 +341,26 @@ kernelCompiler
         read_params <-
           ImpGen.collect $ zipWithM_ readScanElement y_params arrs
 
-        let writeScanElement = writeFinalResult [lambdaIndex lam]
+        let indices = case order of
+              ScanTransposed -> [elements_scanned, global_id]
+              ScanFlat       -> [global_id, elements_scanned]
+            writeScanElement (ImpGen.ArrayDestination
+                              (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun))
+                              setdims) =
+              writeFinalResult indices $
+              ImpGen.ArrayDestination
+              (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun'))
+              setdims
+              where ixfun' = explodeOuterDimension
+                             (Shape $ map sizeToSubExp dims)
+                             (kernelElementsPerThread kernel_size)
+                             (kernelNumThreads kernel_size)
+                             ixfun
+            writeScanElement _ =
+              const $ fail "writeScanElement: invalid destination"
+
+            sizeToSubExp (Imp.ConstSize k) = Constant $ IntVal k
+            sizeToSubExp (Imp.VarSize v)   = Var v
 
         write_arrs <-
           ImpGen.collect $ zipWithM_ writeScanElement arrs_dest x_params
@@ -830,3 +849,8 @@ ensureAlignment :: AlignmentMap
                 -> (VName, Imp.Size, BasicType)
 ensureAlignment alignments (name, size) =
   (name, size, lookupAlignment name alignments)
+
+explodeOuterDimension :: Shape -> SubExp -> SubExp -> IxFun.IxFun -> IxFun.IxFun
+explodeOuterDimension orig_shape n m ixfun =
+  IxFun.reshape ixfun explode_dims
+  where explode_dims = reshapeOuter [DimNew n, DimNew m] 1 orig_shape

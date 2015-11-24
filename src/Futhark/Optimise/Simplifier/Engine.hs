@@ -663,7 +663,7 @@ simplifyLoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs) = do
   seqlam' <- simplifyLambda seqlam w' $ map (const Nothing) nes
   return $ ReduceKernel cs' w' kernel_size' parlam' seqlam' nes' arrs'
 
-simplifyLoopOp (ScanKernel cs w kernel_size lam input) = do
+simplifyLoopOp (ScanKernel cs w kernel_size order lam input) = do
   let (nes, arrs) = unzip input
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
@@ -671,7 +671,7 @@ simplifyLoopOp (ScanKernel cs w kernel_size lam input) = do
   nes' <- mapM simplifySubExp nes
   arrs' <- mapM simplifyVName arrs
   lam' <- simplifyLambda lam w' $ map Just arrs'
-  return $ ScanKernel cs' w' kernel_size' lam' $ zip nes' arrs'
+  return $ ScanKernel cs' w' kernel_size' order lam' $ zip nes' arrs'
 
 simplifyLoopOp (Map cs w fun arrs) = do
   cs' <- simplifyCerts cs

@@ -170,7 +170,7 @@ blockedScan pat cs w lam input = runBinder_ $ do
 
   sequential_scan_result <-
     letTupExp "sequentially_scanned" $
-      LoopOp $ ScanKernel cs w first_scan_size first_scan_lam input
+      LoopOp $ ScanKernel cs w first_scan_size ScanFlat first_scan_lam input
 
   let (sequentially_scanned, all_group_sums) =
         splitAt (length input) sequential_scan_result
@@ -206,7 +206,7 @@ blockedScan pat cs w lam input = runBinder_ $ do
     second_scan_lam <- renameLambda first_scan_lam
     carry_in_scan_result <-
       letTupExp "group_carry_in_and_junk" $
-      LoopOp $ ScanKernel cs num_groups second_scan_size second_scan_lam $
+      LoopOp $ ScanKernel cs num_groups second_scan_size ScanFlat second_scan_lam $
       zip nes last_in_preceding_groups
     forM (snd $ splitAt (length input) carry_in_scan_result) $ \arr ->
       letExp "group_carry_in" $

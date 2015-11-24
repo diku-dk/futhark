@@ -286,10 +286,11 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
             braces (commasep $ map ppr es) <> comma </>
             commasep (map ppr as) </>
             ppr parfun <> comma </> ppr seqfun)
-  ppr (ScanKernel cs w kernel_size fun input) =
+  ppr (ScanKernel cs w kernel_size order fun input) =
     ppCertificates' cs <> text "scanKernel" <>
     parens (ppr w <> comma </>
-            ppr kernel_size </>
+            ppr kernel_size <> comma </>
+            ppr order <> comma </>
             braces (commasep $ map ppr es) <> comma </>
             commasep (map ppr as) </>
             ppr fun)
@@ -306,6 +307,10 @@ instance Pretty KernelSize where
               ppr offset_multiple,
               ppr num_threads
              ]
+
+instance Pretty ScanKernelOrder where
+  ppr ScanFlat = text "flat"
+  ppr ScanTransposed = text "transposed"
 
 instance PrettyLore lore => Pretty (KernelInput lore) where
   ppr inp = ppr (kernelInputType inp) <+>

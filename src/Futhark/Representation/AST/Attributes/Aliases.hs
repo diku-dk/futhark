@@ -97,7 +97,7 @@ loopOpAliases (Kernel _ _ _ _ _ returns _) =
   map (const mempty) returns
 loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
   map (const mempty) nes
-loopOpAliases (ScanKernel _ _ _ lam _) =
+loopOpAliases (ScanKernel _ _ _ _ lam _) =
   replicate (length (lambdaReturnType lam) * 2) mempty
 
 segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
