@@ -263,7 +263,7 @@ transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
 
 transformBinding (Let pat () (LoopOp (Scan cs w fun input))) = do
   fun_sequential <- FOT.transformLambda fun
-  blockedScan pat cs w fun_sequential input
+  runBinder_ $ blockedScan pat cs w fun_sequential input
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
@@ -352,6 +352,9 @@ instance Monoid PostKernels where
 postKernelBindings :: PostKernels -> [Binding]
 postKernelBindings (PostKernels kernels) = concat kernels
 
+typeEnvFromKernelAcc :: KernelAcc -> TypeEnv
+typeEnvFromKernelAcc = typeEnvFromPattern . fst . fst . kernelTargets
+
 addBindingToKernel :: (HasTypeEnv m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
 addBindingToKernel bnd acc = do
@@ -366,6 +369,10 @@ newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
 
 instance HasTypeEnv KernelM where
   askTypeEnv = asks kernelTypeEnv
+
+instance LocalTypeEnv KernelM where
+  localTypeEnv types = local $ \env ->
+    env { kernelTypeEnv = kernelTypeEnv env <> types }
 
 instance MonadLogger KernelM where
   addLog msgs = tell mempty { accLog = msgs }
@@ -543,36 +550,21 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
   where isMap (LoopOp Map{}) = True
         isMap _              = False
 
--- We keep reduce and scan in the program if they can be distributed
--- by themselves, as this means they can be turned into segmented
--- parallel operations.  We currently sequentialise their lambda
--- bodies.  This may lose us some parallelism as it is possible there
--- may have been maps in there that we could interchange out via
--- transposition.
+-- If the scan can be distributed by itself, we will turn it into a
+-- segmented scan.
 --
--- If the reduce or scan cannot be distributed by itself, it will be
+-- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeBinding bnd@(Let _ _ (LoopOp op)) acc
-  | Just (lam, call_with_new_lam) <- reduceOrScan op =
-      distributeSingleBinding acc bnd >>= \case
-        Just (kernels, res, nest, acc') -> do
-          addKernels kernels
-          lam' <- FOT.transformLambda lam
-          (w_bnds, kern_bnd) <-
-            constructKernel nest $
-            mkBody [bnd { bindingExp = call_with_new_lam lam' }] res
-          kern_bnd' <- runBinder_ $ FOT.transformBindingRecursively kern_bnd
-          addKernel $ w_bnds++kern_bnd'
-          return acc'
-        _ ->
-          addBindingToKernel bnd acc
-
-  where reduceOrScan (Scan cs w lam input) =
-          Just (lam, \lam' -> LoopOp $ Scan cs w lam' input)
-        reduceOrScan (Reduce cs w lam input) =
-          Just (lam, \lam' -> LoopOp $ Reduce cs w lam' input)
-        reduceOrScan _ =
-           Nothing
+maybeDistributeBinding bnd@(Let _ _ (LoopOp (Scan cs w lam input))) acc =
+  distributeSingleBinding acc bnd >>= \case
+    Just (kernels, _, nest, acc') -> do
+      addKernels kernels
+      lam' <- FOT.transformLambda lam
+      localTypeEnv (typeEnvFromKernelAcc acc') $
+        segmentedScanKernel nest cs w lam' input
+      return acc'
+    _ ->
+      addBindingToKernel bnd acc
 
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc = do
   acc' <- distribute acc
@@ -620,3 +612,58 @@ distributeSingleBinding acc bnd = do
                          KernelAcc { kernelTargets = targets'
                                    , kernelBindings = []
                                    })
+
+segmentedScanKernel :: KernelNest
+                    -> Certificates -> SubExp -> Lambda -> [(SubExp, VName)]
+                    -> KernelM ()
+segmentedScanKernel nest cs segment_size lam scan_inps = (addKernel=<<) . runBinder_ $ do
+  let pat = loopNestingPattern $ fst nest
+  (pre_bnds, nesting_size, _ispace, kernel_inps, _rets) <- flatKernel nest
+  mapM_ addBinding pre_bnds
+
+  -- We must make sure all inputs are of size
+  -- segment_size*nesting_size.
+  total_num_elements <-
+    letSubExp "total_num_elements" $ PrimOp $ BinOp Times segment_size nesting_size Int
+  let flatten =
+        Reshape [] [DimNew total_num_elements]
+      outerInput (ne, arr) =
+        case find ((==arr) . kernelInputName) kernel_inps of
+          Just inp -> do
+            -- FIXME: what if inp is not big enough?
+            inp_flat <-
+              letExp (baseString (kernelInputArray inp) ++ "_flat") $
+              PrimOp $ flatten $ kernelInputArray inp
+            return (ne, inp_flat)
+          Nothing -> do
+            -- This input is something that is free outside the loop
+            -- nesting.  We will have to replicate it and then
+            -- flatten.
+            arr_repd <-
+              letExp (baseString arr ++ "_repd") $
+              PrimOp $ Replicate segment_size $ Var arr
+            arr_repd_flat <-
+              letExp (baseString arr ++ "_repd_flat") $
+              PrimOp $ flatten arr_repd
+            return (ne, arr_repd_flat)
+  scan_inps' <- mapM outerInput scan_inps
+
+  let flatPatElem pat_elem t = do
+        let u = uniqueness $ patElemType pat_elem
+            t' = arrayOf t (Shape [total_num_elements]) u
+        ident <- newIdent (baseString (patElemName pat_elem) ++ "_flat") t'
+        return $ PatElem ident BindVar ()
+  flat_pat <- Pattern [] <$>
+              zipWithM flatPatElem
+              (patternValueElements pat)
+              (lambdaReturnType lam)
+
+  blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
+
+  forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
+    \(dst_pat_elem, flat) -> do
+      let ident = patElemIdent dst_pat_elem
+          bindage = patElemBindage dst_pat_elem
+          dims = arrayDims $ identType ident
+      addBinding $ mkLet [] [(ident, bindage)] $
+        PrimOp $ Reshape [] (map DimNew dims) flat

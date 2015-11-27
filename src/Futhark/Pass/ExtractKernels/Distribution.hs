@@ -24,6 +24,7 @@ module Futhark.Pass.ExtractKernels.Distribution
        , KernelNest
        , kernelNestWidths
        , constructKernel
+       , flatKernel
 
        , tryDistribute
        , tryDistributeBinding
@@ -183,7 +184,7 @@ kernelNestWidths = map loopNestingWidth . kernelNestLoops
 constructKernel :: MonadFreshNames m =>
                    KernelNest -> Body -> m ([Binding], Binding)
 constructKernel kernel_nest inner_body = do
-  (w_bnds, w, ispace, inps, rts) <- constructKernel' kernel_nest
+  (w_bnds, w, ispace, inps, rts) <- flatKernel kernel_nest
   let rank = length ispace
       returns = [ (rt, [0..rank + arrayRank rt - 1]) | rt <- rts ]
   index <- newVName "kernel_thread_index"
@@ -193,32 +194,51 @@ constructKernel kernel_nest inner_body = do
   where
     first_nest = fst kernel_nest
 
-    constructKernel' (MapNesting pat _ nesting_w i params_and_arrs, []) =
-      return ([], nesting_w, [(i,nesting_w)], inps, map rowType $ patternTypes pat)
-      where inps = [ KernelInput (Param (paramIdent param) ()) arr [Var i] |
-                     (param, arr) <- params_and_arrs ]
+-- | Flatten a kernel nesting to:
+--
+--  (0) Ancillary prologue bindings.
+--
+--  (1) The total number of threads, equal to the product of all
+--  nesting widths, and equal to the product of the index space.
+--
+--  (2) The index space.
+--
+--  (3) The kernel inputs - not that some of these may be unused.
+--
+--  (4) The per-thread return type.
+flatKernel :: MonadFreshNames m =>
+              KernelNest
+           -> m ([Binding],
+                 SubExp,
+                 [(VName, SubExp)],
+                 [KernelInput Basic],
+                 [TypeBase Shape])
+flatKernel (MapNesting pat _ nesting_w i params_and_arrs, []) =
+  return ([], nesting_w, [(i,nesting_w)], inps, map rowType $ patternTypes pat)
+  where inps = [ KernelInput (Param (paramIdent param) ()) arr [Var i] |
+                 (param, arr) <- params_and_arrs ]
 
-    constructKernel' (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
-      (w_bnds, w, ispace, inps, returns) <- constructKernel' (nest, nests)
+flatKernel (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
+  (w_bnds, w, ispace, inps, returns) <- flatKernel (nest, nests)
 
-      w' <- newVName "kernel_w"
-      let w_bnd = mkLet' [] [Ident w' $ Basic Int] $
-                  PrimOp $ BinOp Times w nesting_w Int
+  w' <- newVName "kernel_w"
+  let w_bnd = mkLet' [] [Ident w' $ Basic Int] $
+              PrimOp $ BinOp Times w nesting_w Int
 
-      let inps' = map fixupInput inps
-          isParam inp =
-            snd <$> find ((==kernelInputArray inp) . paramName . fst) params_and_arrs
-          fixupInput inp
-            | Just arr <- isParam inp =
-                inp { kernelInputArray = arr
-                    , kernelInputIndices = Var i : kernelInputIndices inp }
-            | otherwise =
-                inp
+  let inps' = map fixupInput inps
+      isParam inp =
+        snd <$> find ((==kernelInputArray inp) . paramName . fst) params_and_arrs
+      fixupInput inp
+        | Just arr <- isParam inp =
+            inp { kernelInputArray = arr
+                , kernelInputIndices = Var i : kernelInputIndices inp }
+        | otherwise =
+            inp
 
-      return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps <> inps', returns)
-      where extra_inps =
-              [ KernelInput (Param (paramIdent param `setIdentUniqueness` Nonunique) ()) arr [Var i] |
-                (param, arr) <- params_and_arrs ]
+  return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps <> inps', returns)
+  where extra_inps =
+          [ KernelInput (Param (paramIdent param `setIdentUniqueness` Nonunique) ()) arr [Var i] |
+            (param, arr) <- params_and_arrs ]
 
 -- | Description of distribution to do.
 data DistributionBody = DistributionBody {
