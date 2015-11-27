@@ -1,6 +1,8 @@
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( blockedReduction
        , blockedScan
+       , blockedSegmentedScan
        )
        where
 
@@ -152,13 +154,13 @@ blockedKernelSize w = do
 
   return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
-blockedScan :: (MonadFreshNames m, HasTypeEnv m) =>
+blockedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
                Pattern
             -> Certificates -> SubExp
             -> Lambda
             -> [(SubExp, VName)]
-            -> m [Binding]
-blockedScan pat cs w lam input = runBinder_ $ do
+            -> m ()
+blockedScan pat cs w lam input = do
   first_scan_size <- blockedKernelSize w
   other_index <- newVName "other_index"
   let num_groups = kernelWorkgroups first_scan_size
@@ -263,7 +265,7 @@ blockedScan pat cs w lam input = runBinder_ $ do
     return $ resultBody $ map Var group_lasts
   let result_map_returns = [ (rt, [0..arrayRank rt])
                            | rt <- lambdaReturnType lam ]
-  letBind pat $ LoopOp $ Kernel [] w result_map_index
+  letBind_ pat $ LoopOp $ Kernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
   where one = Constant $ IntVal 1
         zero = Constant $ IntVal 0
@@ -278,3 +280,62 @@ blockedScan pat cs w lam input = runBinder_ $ do
         inputTypes inps = HM.fromList [ (kernelInputName inp,
                                          kernelInputType inp)
                                       | inp <- inps ]
+
+blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+                        SubExp
+                     -> Pattern
+                     -> Certificates
+                     -> SubExp
+                     -> Lambda
+                     -> [(SubExp, VName)]
+                     -> m ()
+blockedSegmentedScan segment_size pat cs w lam input = do
+  unused_flag_array <- newIdent "unused_flag_array" $
+                       arrayOf (Basic Bool) (Shape [w]) Nonunique
+
+  x_flag <- newVName "x_flag"
+  y_flag <- newVName "y_flag"
+  let x_flag_param = Param (Ident x_flag $ Basic Bool) ()
+      y_flag_param = Param (Ident y_flag $ Basic Bool) ()
+      (x_params, y_params) = splitAt (length input) $ lambdaParams lam
+      params = [x_flag_param] ++ x_params ++ [y_flag_param] ++ y_params
+
+  body <- runBodyBinder $ localTypeEnv (typeEnvFromParams params) $ do
+    new_flag <- letSubExp "new_flag" $
+                PrimOp $ BinOp LogOr (Var x_flag) (Var y_flag) Bool
+    seg_res <- letTupExp "seg_res" $ If (Var y_flag)
+      (resultBody $ map (Var . paramName) y_params)
+      (lambdaBody lam)
+      (staticShapes $ lambdaReturnType lam)
+    return $ resultBody $ new_flag : map Var seg_res
+
+  flags_global_index <- newVName "flags_global_index"
+  flags_i <- newVName "flags_i"
+  flags_body <-
+    runBodyBinder $ localTypeEnv (HM.singleton flags_i $ Basic Int) $ do
+      segment_index <- letSubExp "segment_index" $
+                       PrimOp $ BinOp Rem (Var flags_i) segment_size Int
+      start_of_segment <- letSubExp "start_of_segment" $
+                          PrimOp $ BinOp Equal segment_index zero Bool
+      flag <- letSubExp "flag" $
+              If start_of_segment (resultBody [true]) (resultBody [false]) [Basic Bool]
+      return $ resultBody [flag]
+  flags <-
+    letExp "flags" $ LoopOp $ Kernel [] w flags_global_index
+    [(flags_i, w)] []
+    [(Basic Bool, [0])]
+    flags_body
+
+  let lam' = Lambda { lambdaIndex = lambdaIndex lam
+                    , lambdaParams = params
+                    , lambdaBody = body
+                    , lambdaReturnType = Basic Bool : lambdaReturnType lam
+                    }
+      pat' = pat { patternValueElements = PatElem unused_flag_array BindVar () :
+                                          patternValueElements pat
+                 }
+      input' = (false, flags) : input
+  blockedScan pat' cs w lam' input'
+  where zero = Constant $ IntVal 0
+        true = Constant $ LogVal True
+        false = Constant $ LogVal False
