@@ -33,6 +33,8 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , module Futhark.Representation.AST.Attributes.TypeEnv
        , typeEnvFromBindings
        , typeEnvFromParams
+       , typeEnvFromPattern
+       , typeEnvFromIdents
        , withParamTypes
        )
        where
@@ -298,16 +300,20 @@ applyExtType (ExtRetType extret) params args =
 -- | Create a type environment consisting of the names bound in the
 -- list of bindings.
 typeEnvFromBindings :: [Binding lore] -> TypeEnv
-typeEnvFromBindings = HM.fromList . concatMap assoc
-  where assoc bnd =
-          [ (identName ident, identType ident)
-          | ident <- patternIdents $ bindingPattern bnd
-          ]
+typeEnvFromBindings = mconcat . map (typeEnvFromPattern . bindingPattern)
 
 -- | Create a type environment from function parameters.
 typeEnvFromParams :: [Param attr] -> TypeEnv
-typeEnvFromParams = HM.fromList . map assoc
-  where assoc param = (paramName param, paramType param)
+typeEnvFromParams = typeEnvFromIdents . map paramIdent
+
+-- | Create a type environment from 'Ident's.
+typeEnvFromIdents :: [Ident] -> TypeEnv
+typeEnvFromIdents = HM.fromList . map assoc
+  where assoc param = (identName param, identType param)
+
+-- | Create a type environment a pattern.
+typeEnvFromPattern :: Pattern lore -> TypeEnv
+typeEnvFromPattern = typeEnvFromIdents . patternIdents
 
 -- | Execute an action with a locally extended type environment.
 withParamTypes :: LocalTypeEnv m =>
