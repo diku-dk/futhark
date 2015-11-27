@@ -254,7 +254,7 @@ kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elem
 
 kernelAndWorkgroupSize :: CallKernel -> ([Exp], Maybe [Exp])
 kernelAndWorkgroupSize (Map kernel) =
-  ([sizeToExp $ mapKernelSize kernel],
+  ([mapKernelSize kernel],
    Nothing)
 kernelAndWorkgroupSize (CallKernel kernel) =
   ([sizeToExp (kernelNumGroups kernel) *
