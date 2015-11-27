@@ -49,15 +49,15 @@ kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (Kernel _ w global_thread_index ispace inps returns body)) = do
+  (LoopOp (Kernel _ _ global_thread_index ispace inps returns body)) = do
 
-  kernel_size <- ImpGen.subExpToDimSize w
+  let kernel_size = product $ map (ImpGen.compileSubExp . snd) ispace
 
-  let global_thread_index_param = Imp.ScalarParam global_thread_index Int
+      global_thread_index_param = Imp.ScalarParam global_thread_index Int
       shape = map (ImpGen.compileSubExp . snd) ispace
       indices = map fst ispace
 
-  let indices_lparams = [ Param (Ident index $ Basic Int) Scalar | index <- indices ]
+      indices_lparams = [ Param (Ident index $ Basic Int) Scalar | index <- indices ]
       bound_in_kernel = global_thread_index : indices ++ map kernelInputName inps
       kernel_bnds = bodyBindings body
 
@@ -449,10 +449,26 @@ kernelCompiler target (PrimOp (Iota n)) = do
   global_thread_index <- newVName "global_thread_index"
   kernelCompiler target $
     LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
-kernelCompiler target (PrimOp (Replicate n v)) = do
+
+kernelCompiler target (PrimOp (Replicate n (Var v))) = do
+  global_thread_index <- newVName "global_thread_index"
+  t <- lookupType v
+  let row_rank = arrayRank t
+      row_dims = arrayDims t
   i <- newVName "i"
+  js <- replicateM row_rank $ newVName "j"
+  input_name <- newVName "input"
+  let indices = (i,n) : zip js row_dims
+      input = KernelInput (Param (Ident input_name $ Basic $ elemType t) Scalar)
+              v (map Var js)
+  kernelCompiler target $ LoopOp $
+        Kernel [] n global_thread_index indices [input] [(t,[0..row_rank])]
+        (Body () [] [Var input_name])
+
+kernelCompiler target (PrimOp (Replicate n v)) = do
   global_thread_index <- newVName "global_thread_index"
   t <- subExpType v
+  i <- newVName "i"
   kernelCompiler target $
     LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0..arrayRank t])] (Body () [] [v])
 
@@ -533,7 +549,7 @@ callKernelCopy bt
 
     ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
-      , Imp.mapKernelSize = Imp.VarSize kernel_size
+      , Imp.mapKernelSize = Imp.ScalarVar kernel_size
       , Imp.mapKernelUses = nub $ reads_from ++ writes_to
       , Imp.mapKernelBody = body
       }
