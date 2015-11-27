@@ -7,6 +7,7 @@ module Language.Futhark.Parser.Lexer
   , L(..)
   ) where
 
+import Data.Char (ord)
 import Data.Loc hiding (L)
 import Data.Int (Int32)
 
