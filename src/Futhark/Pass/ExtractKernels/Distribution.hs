@@ -56,7 +56,7 @@ import Prelude
 
 type Target = (Pattern, Result)
 
--- ^ First pair element is the very innermost ("current") target.  In
+-- | First pair element is the very innermost ("current") target.  In
 -- the list, the outermost target comes first.
 type Targets = (Target, [Target])
 
