@@ -239,7 +239,7 @@ removeInvariantKernelOutputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace
         then cannotSimplify
         else do
           flat <- letExp "kernel_invariant_flat" $ PrimOp $ Replicate w se
-          let shape = map (DimNew . snd) ispace ++ map DimCoercion (arrayDims t)
+          let shape = map DimNew $ map snd ispace ++ arrayDims t
           letBind_ (Pattern [] [pat_elem]) $ PrimOp $ Reshape cs shape flat
       letBind_ pat' $ LoopOp $
         Kernel cs w index ispace inps variant_returns
