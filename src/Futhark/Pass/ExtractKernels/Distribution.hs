@@ -13,6 +13,7 @@ module Futhark.Pass.ExtractKernels.Distribution
        , pushInnerTarget
 
        , LoopNesting (..)
+       , ppLoopNesting
 
        , Nesting (..)
        , Nestings
@@ -23,6 +24,7 @@ module Futhark.Pass.ExtractKernels.Distribution
 
        , KernelNest
        , kernelNestWidths
+       , boundInKernelNest
        , constructKernel
        , flatKernel
 
@@ -177,6 +179,12 @@ newKernel nest = (nest, [])
 
 kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
+
+boundInKernelNest :: KernelNest -> Names
+boundInKernelNest = HS.fromList .
+                    map paramName .
+                    concatMap (map fst . loopNestingParamsAndArrs) .
+                    kernelNestLoops
 
 kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
