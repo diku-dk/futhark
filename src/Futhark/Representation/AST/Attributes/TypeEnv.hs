@@ -38,7 +38,7 @@ class Applicative m => HasTypeEnv m where
   -- the type environment.
   lookupType :: VName -> m Type
   lookupType name =
-    HM.lookupDefault notFound name <$> askTypeEnv
+    asksTypeEnv $ HM.lookupDefault notFound name
     where notFound =
             error $ "TypeEnv.lookupType: Name " ++ textual name ++
             " not found in type environment."
@@ -46,6 +46,11 @@ class Applicative m => HasTypeEnv m where
   -- | Return the type environment contained in the applicative
   -- functor.
   askTypeEnv :: m TypeEnv
+
+  -- | Return the result of applying some function to the type
+  -- environment.
+  asksTypeEnv :: (TypeEnv -> a) -> m a
+  asksTypeEnv f = f <$> askTypeEnv
 
 instance (Applicative m, Monad m) => HasTypeEnv (ReaderT TypeEnv m) where
   askTypeEnv = ask
