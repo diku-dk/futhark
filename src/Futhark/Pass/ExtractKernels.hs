@@ -153,6 +153,7 @@ module Futhark.Pass.ExtractKernels
 import Control.Arrow (second)
 import Control.Applicative
 import Control.Monad.RWS.Strict
+import Control.Monad.Trans.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
@@ -343,17 +344,19 @@ instance Monoid KernelRes where
     KernelRes (ks1 <> ks2) (log1 <> log2)
   mempty = KernelRes mempty mempty
 
-newtype PostKernels = PostKernels [[Binding]]
+newtype PostKernel = PostKernel { unPostKernel :: [Binding] }
+
+newtype PostKernels = PostKernels [PostKernel]
 
 instance Monoid PostKernels where
   mempty = PostKernels mempty
   PostKernels xs `mappend` PostKernels ys = PostKernels $ ys ++ xs
 
 postKernelBindings :: PostKernels -> [Binding]
-postKernelBindings (PostKernels kernels) = concat kernels
+postKernelBindings (PostKernels kernels) = concatMap unPostKernel kernels
 
 typeEnvFromKernelAcc :: KernelAcc -> TypeEnv
-typeEnvFromKernelAcc = typeEnvFromPattern . fst . fst . kernelTargets
+typeEnvFromKernelAcc = typeEnvFromPattern . fst . outerTarget . kernelTargets
 
 addBindingToKernel :: (HasTypeEnv m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
@@ -389,7 +392,7 @@ addKernels :: PostKernels -> KernelM ()
 addKernels ks = tell $ mempty { accPostKernels = ks }
 
 addKernel :: [Binding] -> KernelM ()
-addKernel bnds = addKernels $ PostKernels [bnds]
+addKernel bnds = addKernels $ PostKernels [PostKernel bnds]
 
 withBinding :: Binding -> KernelM a -> KernelM a
 withBinding bnd = local $ \env ->
@@ -558,11 +561,15 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
 maybeDistributeBinding bnd@(Let _ _ (LoopOp (Scan cs w lam input))) acc =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, _, nest, acc') -> do
-      addKernels kernels
       lam' <- FOT.transformLambda lam
       localTypeEnv (typeEnvFromKernelAcc acc') $
-        segmentedScanKernel nest cs w lam' input
-      return acc'
+        segmentedScanKernel nest cs w lam' input >>= \case
+          Nothing ->
+            addBindingToKernel bnd acc
+          Just bnds -> do
+            addKernels kernels
+            addKernel bnds
+            return acc'
     _ ->
       addBindingToKernel bnd acc
 
@@ -606,7 +613,7 @@ distributeSingleBinding acc bnd = do
       tryDistributeBinding nest targets bnd >>= \case
         Nothing -> return Nothing
         Just (res, targets', new_kernel_nest) ->
-          return $ Just (PostKernels [distributed_bnds],
+          return $ Just (PostKernels [PostKernel distributed_bnds],
                          res,
                          new_kernel_nest,
                          KernelAcc { kernelTargets = targets'
@@ -615,55 +622,75 @@ distributeSingleBinding acc bnd = do
 
 segmentedScanKernel :: KernelNest
                     -> Certificates -> SubExp -> Lambda -> [(SubExp, VName)]
-                    -> KernelM ()
-segmentedScanKernel nest cs segment_size lam scan_inps = (addKernel=<<) . runBinder_ $ do
-  let pat = loopNestingPattern $ fst nest
-  (pre_bnds, nesting_size, _ispace, kernel_inps, _rets) <- flatKernel nest
-  mapM_ addBinding pre_bnds
+                    -> KernelM (Maybe [Binding])
+segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
+  -- We must verify that array inputs to the scan are inputs to the
+  -- outermost loop nesting or free in the loop nest, and that none of
+  -- the names bound by the loop nest are used in the lambda.
+  -- Furthermore, the neutral elements must be free in the loop nest.
 
-  -- We must make sure all inputs are of size
-  -- segment_size*nesting_size.
-  total_num_elements <-
-    letSubExp "total_num_elements" $ PrimOp $ BinOp Times segment_size nesting_size Int
-  let flatten =
-        Reshape [] [DimNew total_num_elements]
-      outerInput (ne, arr) =
+  let bound_by_nest = boundInKernelNest nest
+
+  (pre_bnds, nesting_size, ispace, kernel_inps, _rets) <- flatKernel nest
+
+  unless (HS.null $ freeInLambda lam `HS.intersection` bound_by_nest) $
+    fail "Lambda uses nest-bound parameters."
+
+  let indices = map fst ispace
+
+      prepareInput (ne, arr) = do
+        case ne of
+          Var v | v `HS.member` bound_by_nest ->
+                    fail "Neutral element bound in nest"
+          _ -> return ()
+
         case find ((==arr) . kernelInputName) kernel_inps of
-          Just inp -> do
-            -- FIXME: what if inp is not big enough?
-            inp_flat <-
-              letExp (baseString (kernelInputArray inp) ++ "_flat") $
-              PrimOp $ flatten $ kernelInputArray inp
-            return (ne, inp_flat)
-          Nothing -> do
-            -- This input is something that is free outside the loop
-            -- nesting.  We will have to replicate it and then
-            -- flatten.
-            arr_repd <-
-              letExp (baseString arr ++ "_repd") $
-              PrimOp $ Replicate segment_size $ Var arr
-            arr_repd_flat <-
-              letExp (baseString arr ++ "_repd_flat") $
-              PrimOp $ flatten arr_repd
-            return (ne, arr_repd_flat)
-  scan_inps' <- mapM outerInput scan_inps
+          Just inp | kernelInputIndices inp == map Var indices ->
+            return $ return (ne, kernelInputArray inp)
+          Nothing | not (arr `HS.member` bound_by_nest) -> return $ do
+                      -- This input is something that is free outside
+                      -- the loop nesting. We will have to replicate
+                      -- it.
+                      arr' <- letExp (baseString arr ++ "_repd") $
+                              PrimOp $ Replicate segment_size $ Var arr
+                      return (ne, arr')
+          _ ->
+            fail "Input not free or outermost."
 
-  let flatPatElem pat_elem t = do
-        let u = uniqueness $ patElemType pat_elem
-            t' = arrayOf t (Shape [total_num_elements]) u
-        ident <- newIdent (baseString (patElemName pat_elem) ++ "_flat") t'
-        return $ PatElem ident BindVar ()
-  flat_pat <- Pattern [] <$>
-              zipWithM flatPatElem
-              (patternValueElements pat)
-              (lambdaReturnType lam)
+  mk_inps <- mapM prepareInput scan_inps
 
-  blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
+  lift $ runBinder_ $ do
+    mapM_ addBinding pre_bnds
 
-  forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
-    \(dst_pat_elem, flat) -> do
-      let ident = patElemIdent dst_pat_elem
-          bindage = patElemBindage dst_pat_elem
-          dims = arrayDims $ identType ident
-      addBinding $ mkLet [] [(ident, bindage)] $
-        PrimOp $ Reshape [] (map DimNew dims) flat
+    -- We must make sure all inputs are of size
+    -- segment_size*nesting_size.
+    total_num_elements <-
+      letSubExp "total_num_elements" $ PrimOp $ BinOp Times segment_size nesting_size Int
+
+    let flatten (ne, arr) = do
+          arr' <- letExp (baseString arr ++ "_flat") $
+                  PrimOp $ Reshape [] [DimNew total_num_elements] arr
+          return (ne, arr')
+
+    scan_inps' <- mapM flatten =<< sequence mk_inps
+
+    let pat = loopNestingPattern $ fst nest
+        flatPatElem pat_elem t = do
+          let u = uniqueness $ patElemType pat_elem
+              t' = arrayOf t (Shape [total_num_elements]) u
+          ident <- newIdent (baseString (patElemName pat_elem) ++ "_flat") t'
+          return $ PatElem ident BindVar ()
+    flat_pat <- Pattern [] <$>
+                zipWithM flatPatElem
+                (patternValueElements pat)
+                (lambdaReturnType lam)
+
+    blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
+
+    forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
+      \(dst_pat_elem, flat) -> do
+        let ident = patElemIdent dst_pat_elem
+            bindage = patElemBindage dst_pat_elem
+            dims = arrayDims $ identType ident
+        addBinding $ mkLet [] [(ident, bindage)] $
+          PrimOp $ Reshape [] (map DimNew dims) flat
