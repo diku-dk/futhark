@@ -503,13 +503,15 @@ seqLoopBinding :: SeqLoop -> Binding
 seqLoopBinding (SeqLoop pat ret merge form body) =
   Let pat () $ LoopOp $ DoLoop ret merge form body
 
-interchangeLoop :: MonadBinder m =>
+interchangeLoop :: (MonadBinder m, LocalTypeEnv m) =>
                    SeqLoop -> LoopNesting
                 -> m SeqLoop
 interchangeLoop
   (SeqLoop loop_pat ret merge form body)
   (MapNesting pat cs w i params_and_arrs) = do
-    merge_expanded <- mapM expand merge
+    merge_expanded <-
+      localTypeEnv (typeEnvFromParams $ map fst params_and_arrs) $
+      mapM expand merge
 
     let ret_params_mask = map ((`elem` ret) . paramName . fst) merge
         ret_expanded = [ paramName param
@@ -526,7 +528,7 @@ interchangeLoop
     -- small simplification, we just remove the parameter outright if
     -- it is not used anymore.  This might happen if the parameter was
     -- used just as the inital value of a merge parameter.
-    ((params', arrs'), copy_bnds) <-
+    ((params', arrs'), pre_copy_bnds) <-
       runBinder $ bindingParamTypes new_params $
       unzip <$> catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
@@ -537,7 +539,7 @@ interchangeLoop
 
     return $
       SeqLoop pat ret_expanded merge_expanded form $
-      mkBody (copy_bnds++[map_bnd]) res
+      mkBody (pre_copy_bnds++[map_bnd]) res
   where free_in_body = freeInBody body
 
         copyOrRemoveParam (param, arr)
@@ -554,8 +556,11 @@ interchangeLoop
             return $ Just (param, arr)
 
         expandedInit _ (Var v)
-          | Just arr <- snd <$> find ((==v).paramName.fst) params_and_arrs =
-              return $ Var arr
+          | Just (param, arr) <-
+              find ((==v).paramName.fst) params_and_arrs =
+              if unique $ paramType param
+              then return $ Var arr
+              else letSubExp (baseString v ++ "_copy") $ PrimOp $ Copy arr
         expandedInit param_name se =
           letSubExp (param_name <> "_expanded_init") $
             PrimOp $ Replicate w se
@@ -563,7 +568,7 @@ interchangeLoop
         expand (merge_param, merge_init) = do
           expanded_param <-
             newIdent (param_name <> "_expanded") $
-            arrayOfRow (paramType merge_param) w
+            arrayOf (paramType merge_param) (Shape [w]) Unique
           expanded_init <- expandedInit param_name merge_init
           return (Param expanded_param (), expanded_init)
             where param_name = baseString $ paramName merge_param
@@ -572,7 +577,7 @@ interchangeLoop
           patElem { patElemIdent = expandIdent $ patElemIdent patElem }
 
         expandIdent ident =
-          ident { identType = arrayOfRow (identType ident) w }
+          ident { identType = arrayOf (identType ident) (Shape [w]) Unique }
 
 interchangeLoops :: (MonadFreshNames m, HasTypeEnv m) =>
                     KernelNest -> SeqLoop

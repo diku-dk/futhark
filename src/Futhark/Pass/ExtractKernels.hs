@@ -271,10 +271,9 @@ transformBinding (Let pat () (LoopOp (Scan cs w fun input))) = do
 transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ red_fun nes) fold_fun arrs _))) = do
   -- We will sequentialise the body.  We do this by turning the stream
   -- into a redomap with the chunk size set to one.
+  acc_ts <- mapM subExpType nes
   red_fun_sequential <- FOT.transformLambda red_fun
-  fold_fun_unchunked <- singletonChunkRedLikeStreamLambda
-                        (lambdaReturnType red_fun)
-                        fold_fun
+  fold_fun_unchunked <- singletonChunkRedLikeStreamLambda acc_ts fold_fun
   fold_fun_unchunked_sequential <- FOT.transformLambda fold_fun_unchunked
   blockedReduction pat cs w red_fun_sequential fold_fun_unchunked_sequential nes arrs
 
@@ -545,8 +544,9 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
     Just (kernels, res, nest, acc')
       | length res == patternSize pat -> do
       addKernels kernels
-      addKernel =<<
-        interchangeLoops nest (SeqLoop pat ret merge form body)
+      localTypeEnv (typeEnvFromKernelAcc acc') $
+        addKernel =<<
+          interchangeLoops nest (SeqLoop pat ret merge form body)
       return acc'
     _ ->
       addBindingToKernel bnd acc

@@ -168,7 +168,8 @@ arrayOf Mem{} _ _ =
 
 -- | Construct an array whose rows are the given type, and the outer
 -- size is the given 'SubExp'.  This is just a convenient wrapper
--- around 'arrayOf'.
+-- around 'arrayOf'.  The uniqueness of the resulting array will be
+-- 'Unique' if the element is a unique array, otherwise 'Nonunique'.
 arrayOfRow :: Type -> SubExp -> Type
 arrayOfRow t size = arrayOf t (Shape [size]) (uniqueness t)
 

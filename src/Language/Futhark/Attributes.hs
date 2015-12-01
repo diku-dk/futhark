@@ -618,10 +618,10 @@ typeOf (Rearrange _ e _) = typeOf e
 typeOf (Stripe _ e _) = typeOf e
 typeOf (Unstripe _ e _) = typeOf e
 typeOf (Transpose _ _ e _) = typeOf e
-typeOf (Map f arr _) = arrayType 1 et $ uniqueness et
+typeOf (Map f arr _) = arrayType 1 et Unique `setAliases` HS.empty
   where et = lambdaType f [rowType $ typeOf arr]
 typeOf (ConcatMap f _ _ _) =
-  fromDecl $ removeShapeAnnotations t
+  fromDecl $ removeShapeAnnotations t `setUniqueness` Unique
   where t = lambdaReturnType f
 typeOf (Reduce fun start arr _) =
   removeShapeAnnotations $
@@ -630,7 +630,7 @@ typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique
 typeOf (Unzip _ ts _) =
   Tuple $ map (\t -> arrayType 1 t $ uniqueness t) ts
 typeOf (Scan fun start arr _) =
-  arrayType 1 et $ uniqueness et
+  arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
 typeOf (Filter _ arr _) =
   typeOf arr
@@ -639,20 +639,24 @@ typeOf (Partition funs arr _) =
 typeOf (Redomap _ innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = removeShapeAnnotations $
-                  lambdaType innerfun [typeOf start, rowType $ typeOf arr]
+                  lambdaType innerfun [typeOf start, rowType $ typeOf arr] `setUniqueness`
+                  Unique
   in  if res_el_tp == acc_tp
       then res_el_tp
       else case res_el_tp of
              Tuple [_,el_tp] ->
-                 Tuple [acc_tp, arrayType 1 el_tp $ uniqueness el_tp]
+                 Tuple [acc_tp, arrayType 1 el_tp Unique]
              _ -> acc_tp -- NOT reachable
 typeOf (Stream form lam arr _ _) =
   case form of
     MapLike{}       -> lambdaType lam [Basic Int, typeOf arr]
+                       `setUniqueness` Unique
     RedLike _ _ acc -> lambdaType lam [Basic Int, typeOf acc, typeOf arr]
+                       `setUniqueness` Unique
     Sequential  acc -> lambdaType lam [Basic Int, typeOf acc, typeOf arr]
-typeOf (Concat x ys _) = typeOf x `setUniqueness` u
-  where u = uniqueness (typeOf x) <> mconcat (map (uniqueness . typeOf) ys)
+                       `setUniqueness` Unique
+typeOf (Concat x _ _) =
+  typeOf x `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Split splitexps e _) =
   Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
