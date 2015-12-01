@@ -909,7 +909,7 @@ lookupArray name = do
   res <- asks $ HM.lookup name . envVtable
   case res of
     Just (ArrayVar entry) -> return entry
-    _                    -> throwError $ "Unknown array: " ++ textual name
+    _                     -> throwError $ "Unknown array: " ++ textual name
 
 arrayLocation :: VName -> ImpM op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
