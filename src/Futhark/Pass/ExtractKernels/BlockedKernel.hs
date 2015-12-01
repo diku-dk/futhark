@@ -232,9 +232,10 @@ blockedScan pat cs w lam input = do
        (elem_id, group_size)]
       chunk_carry_out_inputs chunk_carry_out_returns $ lambdaBody lam''
 
-  chunk_carry_out_flat <- forM chunk_carry_out $ \arr ->
+  chunk_carry_out_flat <- forM chunk_carry_out $ \arr -> do
+    arr_shape <- arrayShape <$> lookupType arr
     letExp "chunk_carry_out_flat" $
-    PrimOp $ Reshape [] [DimNew num_threads] arr
+      PrimOp $ Reshape [] (reshapeOuter [DimNew num_threads] 2 arr_shape) arr
 
   lam''' <- renameLambda lam
   result_map_index <- newVName "result_map_index"
