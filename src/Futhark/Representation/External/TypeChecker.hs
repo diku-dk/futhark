@@ -745,17 +745,28 @@ checkExp (Transpose k n arrexp pos) = do
   return $ Transpose k n arrexp' pos
   where reach = max k $ n + k
 
-checkExp (Zip arrexps pos) = do
+checkExp (Zip arrexps loc) = do
   arrexps' <- mapM (checkExp . fst) arrexps
-  inelemts <- mapM rowTypeM arrexps'
-  inelemts' <- zipWithM (checkAnnotation pos "operand element") (map snd arrexps) inelemts
-  return $ Zip (zip arrexps' inelemts') pos
+  arrts <- forM arrexps' $ \arrexp -> do
+    let arrt = typeOf arrexp
+    when (arrayRank arrt < 1) $
+      bad $ TypeError (srclocOf arrexp) $
+      "Type of expression is not array, but " ++ ppType arrt ++ "."
+    return arrt
+  arrts' <- zipWithM (checkAnnotation loc "operand element") (map snd arrexps) arrts
+  return $ Zip (zip arrexps' arrts') loc
 
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
-  case peelArray 1 $ typeOf e' of
-    Just (Tuple ts) -> return $ Unzip e' ts pos
-    _ -> bad $ TypeError pos $ "Argument to unzip is not an array of tuples, but " ++ ppType (typeOf e') ++ "."
+  case typeOf e' of
+    Array (TupleArray ets shape u) ->
+      let componentType et =
+            arrayOf (tupleArrayElemToType et) shape u
+      in return $ Unzip e' (map componentType ets) pos
+    t ->
+      bad $ TypeError pos $
+      "Argument to unzip is not an array of tuples, but " ++
+      ppType t ++ "."
 
 checkExp (Map fun arrexp pos) = do
   (arrexp', arg) <- checkSOACArrayArg arrexp

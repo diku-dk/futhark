@@ -59,6 +59,8 @@ module Language.Futhark.Attributes
   , setUniqueness
   , unifyUniqueness
 
+  , tupleArrayElemToType
+
   -- ** Removing and adding names
   --
   -- $names
@@ -618,7 +620,9 @@ typeOf (Rearrange _ e _) = typeOf e
 typeOf (Stripe _ e _) = typeOf e
 typeOf (Unstripe _ e _) = typeOf e
 typeOf (Transpose _ _ e _) = typeOf e
-typeOf (Map f arr _) = arrayType 1 et Unique `setAliases` HS.empty
+typeOf (Map f arr _) = arrayType 1 et Unique
+                       `setAliases` HS.empty
+                       `setUniqueness` Unique
   where et = lambdaType f [rowType $ typeOf arr]
 typeOf (ConcatMap f _ _ _) =
   fromDecl $ removeShapeAnnotations t `setUniqueness` Unique
@@ -626,9 +630,9 @@ typeOf (ConcatMap f _ _ _) =
 typeOf (Reduce fun start arr _) =
   removeShapeAnnotations $
   lambdaType fun [typeOf start, rowType (typeOf arr)]
-typeOf (Zip es _) = arrayType 1 (Tuple $ map snd es) Nonunique
+typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . snd) es) Nonunique
 typeOf (Unzip _ ts _) =
-  Tuple $ map (\t -> arrayType 1 t $ uniqueness t) ts
+  Tuple ts
 typeOf (Scan fun start arr _) =
   arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]

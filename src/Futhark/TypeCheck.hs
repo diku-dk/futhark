@@ -485,12 +485,6 @@ funParamsToIdentsAndLores = map identAndLore
   where identAndLore fparam = (paramIdent fparam,
                                FunBound $ paramLore fparam)
 
-checkFunParams :: Checkable lore =>
-                  [FParam lore] -> TypeM lore ()
-checkFunParams = mapM_ $ \param ->
-  context ("In function parameter " ++ pretty param) $
-  checkFParamLore (paramIdent param) (paramLore param)
-
 checkAnonymousFun :: Checkable lore =>
                      (Name, [Type], [LParam (Aliases lore)], BodyT (Aliases lore))
                   -> TypeM lore ()
@@ -499,8 +493,23 @@ checkAnonymousFun (fname, rettype, params, body) =
              staticShapes rettype,
              [ (paramIdent param, LambdaBound $ paramLore param) | param <- params ],
              body) $ do
+    checkLambdaParams params
     mapM_ checkType rettype
     checkLambdaBody rettype body
+
+checkFunParams :: Checkable lore =>
+                  [FParam lore] -> TypeM lore ()
+checkFunParams = mapM_ $ \param ->
+  context ("In function parameter " ++ pretty param) $ do
+    checkType $ paramType param
+    checkFParamLore (paramIdent param) (paramLore param)
+
+checkLambdaParams :: Checkable lore =>
+                     [LParam lore] -> TypeM lore ()
+checkLambdaParams = mapM_ $ \param ->
+  context ("In lambda parameter " ++ pretty param) $ do
+    checkType $ paramType param
+    checkLParamLore (paramIdent param) (paramLore param)
 
 checkFun' :: (Checkable lore) =>
              (Name,
@@ -1425,6 +1434,7 @@ class (FreeIn (Annotations.Exp lore),
   checkExpLore :: Annotations.Exp lore -> TypeM lore ()
   checkBodyLore :: Annotations.Body lore -> TypeM lore ()
   checkFParamLore :: Ident -> Annotations.FParam lore -> TypeM lore ()
+  checkLParamLore :: Ident -> Annotations.LParam lore -> TypeM lore ()
   checkLetBoundLore :: Ident -> Annotations.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->

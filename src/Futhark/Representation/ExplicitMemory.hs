@@ -355,6 +355,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore = checkMemSummary
+  checkLParamLore = checkMemSummary
   checkLetBoundLore = checkMemSummary
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   basicFParam _ name t =

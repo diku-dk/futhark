@@ -433,12 +433,12 @@ data ExpBase ty vn =
 
             | Zip [(ExpBase ty vn, ty vn)] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
-            -- The type paired to each expression is the element type
-            -- of the array returned by that expression.
+            -- The type paired to each expression is the full type of
+            -- the array returned by that expression.
 
             | Unzip (ExpBase ty vn) [ty vn] SrcLoc
-            -- ^ Unzip that can unzip tuples of arbitrary size.  The
-            -- types are the elements of the tuple.
+            -- ^ Unzip that can unzip to tuples of arbitrary size.
+            -- The types are the elements of the tuple.
 
               deriving (Eq, Ord, Show)
 

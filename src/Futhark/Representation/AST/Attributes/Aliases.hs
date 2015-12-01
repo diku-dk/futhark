@@ -48,8 +48,8 @@ primOpAliases (Index _ ident _) =
   [vnameAliases ident]
 primOpAliases Iota{} =
   [mempty]
-primOpAliases (Replicate _ e) =
-  [subExpAliases e]
+primOpAliases Replicate{} =
+  [mempty]
 primOpAliases Scratch{} =
   [mempty]
 primOpAliases (Reshape _ _ e) =
@@ -62,8 +62,8 @@ primOpAliases (Unstripe _ _ e) =
   [vnameAliases e]
 primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
-primOpAliases (Concat _ x ys _) =
-  [vnameAliases x <> mconcat (map vnameAliases ys)]
+primOpAliases Concat{} =
+  [mempty]
 primOpAliases Copy{} =
   [mempty]
 primOpAliases Assert{} =
