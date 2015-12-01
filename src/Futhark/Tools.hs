@@ -134,6 +134,7 @@ sequentialStreamWholeArray pat cs width nes fun arrs = do
     when (name `elem` patternContextNames pat) $
       addBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
   mapM_ addBinding res_bnds
+
 singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
                                      [Type] -> ExtLambda lore -> m (Lambda lore)
 singletonChunkRedLikeStreamLambda acc_ts lam = do
