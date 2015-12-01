@@ -450,27 +450,27 @@ kernelCompiler target (PrimOp (Iota n)) = do
   kernelCompiler target $
     LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
 
-kernelCompiler target (PrimOp (Replicate n (Var v))) = do
+kernelCompiler target (PrimOp (Replicate n se)) = do
   global_thread_index <- newVName "global_thread_index"
-  t <- lookupType v
+  t <- subExpType se
   let row_rank = arrayRank t
       row_dims = arrayDims t
   i <- newVName "i"
   js <- replicateM row_rank $ newVName "j"
-  input_name <- newVName "input"
   let indices = (i,n) : zip js row_dims
-      input = KernelInput (Param (Ident input_name $ Basic $ elemType t) Scalar)
-              v (map Var js)
-  kernelCompiler target $ LoopOp $
-        Kernel [] n global_thread_index indices [input] [(t,[0..row_rank])]
-        (Body () [] [Var input_name])
-
-kernelCompiler target (PrimOp (Replicate n v)) = do
-  global_thread_index <- newVName "global_thread_index"
-  t <- subExpType v
-  i <- newVName "i"
-  kernelCompiler target $
-    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0..arrayRank t])] (Body () [] [v])
+  kernelCompiler target =<<
+    case se of
+      Var v | row_rank > 0 -> do
+        input_name <- newVName "input"
+        let input = KernelInput (Param (Ident input_name $ Basic $ elemType t) Scalar)
+                    v (map Var js)
+        return $
+          LoopOp $ Kernel [] n global_thread_index indices [input]
+          [(t,[0..row_rank])] (Body () [] [Var input_name])
+      _ ->
+        return $
+        LoopOp $ Kernel [] n global_thread_index [(i,n)] []
+        [(t,[0..arrayRank t])] (Body () [] [se])
 
 -- Allocation in the "local" space is just a placeholder.
 kernelCompiler _ (PrimOp (Alloc _ (Space "local"))) =
