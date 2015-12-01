@@ -687,7 +687,9 @@ internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
   let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
-  params <- mapM (newIdent "not_curried") rowtypes
+  params <- mapM (newIdent "not_curried") $
+            zipWith I.setUniqueness rowtypes $
+            map I.uniqueness $ drop (length curargs') paramts
   let valargs = curargs' ++ map (I.Var . I.identName) params
       valargs_types = curarg_types ++ rowtypes
       diets = map I.diet paramts

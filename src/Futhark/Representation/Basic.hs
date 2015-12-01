@@ -102,6 +102,7 @@ instance TypeCheck.Checkable Basic where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore _ = return
+  checkLParamLore _ = return
   checkLetBoundLore _ = return
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern pat e = do
