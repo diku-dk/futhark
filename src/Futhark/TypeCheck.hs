@@ -995,7 +995,7 @@ checkLoopOp (Stream ass size form lam arrexps _) = do
                        accargs ++ map asArg lamarrs'
   let acc_len= length accexps
   let lamrtp = take acc_len $ extLambdaReturnType lam
-  unless (all (uncurry (==)) $ zip lamrtp (staticShapes $ map (\(y,_,_)->y) accargs)) $
+  unless (subtypesOf (staticShapes $ map (\(y,_,_)->y) accargs) lamrtp) $
     bad $ TypeError noLoc "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of

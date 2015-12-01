@@ -67,7 +67,7 @@ subExpType (Var name)     = lookupType name
 -- an array with size equal to the outermost dimension of the first
 -- element of @arrts@.
 mapType :: SubExp -> Lambda lore -> [Type]
-mapType outersize f = [ arrayOf t (Shape [outersize]) (uniqueness t)
+mapType outersize f = [ arrayOf t (Shape [outersize]) Unique
                       | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
@@ -98,7 +98,7 @@ primOpType (Iota ne) =
   pure [arrayOf (Basic Int) (Shape [ne]) Nonunique]
 primOpType (Replicate ne e) =
   result <$> subExpType e
-  where result t = [arrayOf t (Shape [ne]) $ uniqueness t]
+  where result t = [arrayOf t (Shape [ne]) Unique]
 primOpType (Scratch t shape) =
   pure [arrayOf (Basic t) (Shape shape) Unique]
 primOpType (Reshape _ [] e) =
@@ -117,11 +117,10 @@ primOpType (Unstripe _ _ e) =
 primOpType (Split _ sizeexps e) =
   result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps
-primOpType (Concat _ x ys ressize) =
-  result <$> lookupType x <*> traverse lookupType ys
-  where result xt yts =
-          let u = uniqueness xt <> mconcat (map uniqueness yts)
-          in [xt `setUniqueness` u `setOuterSize` ressize]
+primOpType (Concat _ x _ ressize) =
+  result <$> lookupType x
+  where result xt =
+          [xt `setUniqueness` Unique `setOuterSize` ressize]
 primOpType (Copy v) =
   result <$> lookupType v
   where result t = [t `setUniqueness` Unique]
@@ -145,7 +144,9 @@ loopOpExtType (ConcatMap _ _ f _) =
 loopOpExtType (Reduce _ _ fun _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ width lam _) =
-  staticShapes $ map (`arrayOfRow` width) $ lambdaReturnType lam
+  staticShapes $
+  map ((`setUniqueness` Unique) . (`arrayOfRow` width)) $
+  lambdaReturnType lam
 loopOpExtType (Redomap _ outersize outerfun innerfun _ _) =
   staticShapes $
   let acc_tp    = lambdaReturnType outerfun
@@ -153,10 +154,10 @@ loopOpExtType (Redomap _ outersize outerfun innerfun _ _) =
       res_el_tp = drop (length acc_tp) acc_el_tp
   in  case res_el_tp of
         [] -> acc_tp
-        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) (uniqueness eltp) |
+        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) Unique |
                           eltp <- res_el_tp ]
 loopOpExtType (Stream _ outersize form lam _ _) =
-  map (substNamesInExtType substs) rtp
+  map (substNamesInExtType substs . (`setUniqueness` Unique)) rtp
   where nms = map paramName $ take (1 + length accs) params
         substs = HM.fromList $ zip nms (outersize:accs)
         ExtLambda _ params _ rtp = lam

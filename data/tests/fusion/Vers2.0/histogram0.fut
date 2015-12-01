@@ -7,7 +7,7 @@
 -- }
 fun *[real,n_histo] main(int n_histo, int n_image) =
   let A = iota(n_image) in
-  streamRedPerMax( fn [real] ([real] a, [real] b) =>
+  streamRedPerMax( fn *[real] ([real] a, [real] b) =>
                         zipWith( +, a, b )
                  , fn *[real] (int chunk, *[real] acc, [int] a) =>
                         loop (acc) = for i < chunk do

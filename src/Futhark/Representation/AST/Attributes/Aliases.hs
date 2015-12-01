@@ -78,7 +78,7 @@ loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
   zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
 loopOpAliases (Map _ _ f _) =
-  bodyAliases $ lambdaBody f
+  map (const mempty) $ lambdaReturnType f
 loopOpAliases (Reduce _ _ f _) =
   map (const mempty) $ lambdaReturnType f
 loopOpAliases (Scan _ _ f _) =
