@@ -274,7 +274,7 @@ data LoopOp lore
   | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
 
-  | Kernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
+  | MapKernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
     [(Type, [Int])] (Body lore)
   | ReduceKernel Certificates SubExp
     KernelSize

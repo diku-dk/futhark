@@ -4,7 +4,7 @@
 -- ==
 --
 -- structure distributed {
---   Kernel 4
+--   MapKernel 4
 --   Map 0
 --   DoLoop 3
 --   Reduce 0

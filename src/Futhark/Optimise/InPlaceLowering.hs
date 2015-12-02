@@ -148,12 +148,12 @@ optimiseExp (LoopOp (DoLoop res merge form body)) =
     return $ LoopOp $ DoLoop res merge form body'
   where boundInForm (ForLoop i _) = [Ident i $ Basic Int]
         boundInForm (WhileLoop _) = []
-optimiseExp (LoopOp (Kernel cs w index ispace inps returns body)) =
+optimiseExp (LoopOp (MapKernel cs w index ispace inps returns body)) =
   bindingIdents [Ident index $ Basic Int] $
   bindingIdents (map ((`Ident` Basic Int) . fst) ispace) $
   bindingFParams (map kernelInputParam inps) $ do
     body' <- optimiseBody body
-    return $ LoopOp $ Kernel cs w index ispace inps returns body'
+    return $ LoopOp $ MapKernel cs w index ispace inps returns body'
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   , mapOnLambda = optimiseLambda

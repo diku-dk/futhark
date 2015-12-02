@@ -93,7 +93,7 @@ loopOpAliases (Stream _ _ form lam _ _) =
   in  a1 ++ bodyAliases (extLambdaBody lam)
 loopOpAliases ConcatMap{} =
   [mempty]
-loopOpAliases (Kernel _ _ _ _ _ returns _) =
+loopOpAliases (MapKernel _ _ _ _ _ returns _) =
   map (const mempty) returns
 loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
   map (const mempty) nes

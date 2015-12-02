@@ -198,7 +198,7 @@ constructKernel kernel_nest inner_body = do
   index <- newVName "kernel_thread_index"
   return (w_bnds,
           Let (loopNestingPattern first_nest) () $ LoopOp $
-          Kernel (loopNestingCertificates first_nest) w index ispace inps returns inner_body)
+          MapKernel (loopNestingCertificates first_nest) w index ispace inps returns inner_body)
   where
     first_nest = fst kernel_nest
 
@@ -612,7 +612,7 @@ fullIndexInput ispace =
 
 kernelIsRearrange :: Binding -> Maybe Binding
 kernelIsRearrange (Let outer_pat _
-                   (LoopOp (Kernel outer_cs _ _ ispace [inp] [_] body)))
+                   (LoopOp (MapKernel outer_cs _ _ ispace [inp] [_] body)))
   | Just (PrimOp (Rearrange inner_cs perm arr)) <- singleExpBody body,
     map (Var . fst) ispace == kernelInputIndices inp,
     arr == kernelInputName inp =
@@ -625,7 +625,7 @@ kernelIsRearrange _ = Nothing
 
 kernelIsReshape :: Binding -> Maybe Binding
 kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
-                 (LoopOp (Kernel outer_cs _ _ ispace inps [_] body)))
+                 (LoopOp (MapKernel outer_cs _ _ ispace inps [_] body)))
   | Just (PrimOp (Reshape inner_cs new_inner_shape arr)) <- singleExpBody body,
     Just inp <- fullIndexInput ispace inps,
     map (Var . fst) ispace == kernelInputIndices inp,
@@ -641,7 +641,7 @@ kernelIsReshape _ = Nothing
 
 kernelIsCopy :: Binding -> Maybe Binding
 kernelIsCopy (Let pat ()
-              (LoopOp (Kernel _ _ _ ispace inps [_] body)))
+              (LoopOp (MapKernel _ _ _ ispace inps [_] body)))
   | Just (PrimOp (Copy arr)) <- singleExpBody body,
     Just inp <- fullIndexInput ispace inps,
     map (Var . fst) ispace == kernelInputIndices inp,

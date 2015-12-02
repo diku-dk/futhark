@@ -783,8 +783,8 @@ evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalLoopOp Kernel{} =
-  fail "Cannot interpret kernels."
+evalLoopOp MapKernel{} =
+  fail "Cannot interpret map kernels."
 
 evalLoopOp ReduceKernel{} =
   fail "Cannot interpret reduction kernels."

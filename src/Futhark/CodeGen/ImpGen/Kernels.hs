@@ -49,7 +49,7 @@ kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (Kernel _ _ global_thread_index ispace inps returns body)) = do
+  (LoopOp (MapKernel _ _ global_thread_index ispace inps returns body)) = do
 
   let kernel_size = product $ map (ImpGen.compileSubExp . snd) ispace
 
@@ -448,7 +448,7 @@ kernelCompiler target (PrimOp (Iota n)) = do
   i <- newVName "i"
   global_thread_index <- newVName "global_thread_index"
   kernelCompiler target $
-    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
+    LoopOp $ MapKernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
 
 kernelCompiler target (PrimOp (Replicate n se)) = do
   global_thread_index <- newVName "global_thread_index"
@@ -465,11 +465,11 @@ kernelCompiler target (PrimOp (Replicate n se)) = do
         let input = KernelInput (Param (Ident input_name $ Basic $ elemType t) Scalar)
                     v (map Var js)
         return $
-          LoopOp $ Kernel [] n global_thread_index indices [input]
+          LoopOp $ MapKernel [] n global_thread_index indices [input]
           [(t,[0..row_rank])] (Body () [] [Var input_name])
       _ ->
         return $
-        LoopOp $ Kernel [] n global_thread_index [(i,n)] []
+        LoopOp $ MapKernel [] n global_thread_index [(i,n)] []
         [(t,[0..arrayRank t])] (Body () [] [se])
 
 -- Allocation in the "local" space is just a placeholder.

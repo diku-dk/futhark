@@ -699,7 +699,7 @@ defCompileLoopOp _ Stream{} = soacError
 
 defCompileLoopOp _ Reduce{} = soacError
 
-defCompileLoopOp _ Kernel{} = soacError
+defCompileLoopOp _ MapKernel{} = soacError
 
 defCompileLoopOp _ ReduceKernel{} = soacError
 

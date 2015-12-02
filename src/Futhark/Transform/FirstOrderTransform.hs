@@ -55,12 +55,12 @@ transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) =
         formIdents (WhileLoop _) =
           []
 
-transformBindingRecursively (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
+transformBindingRecursively (Let pat () (LoopOp (MapKernel cs w i ispace inps returns body))) = do
   body' <- bindingIdentTypes (Ident i (Basic Int) :
                               map ((`Ident` Basic Int) . fst) ispace ++
                               map kernelInputIdent inps) $
            transformBody body
-  addBinding $ Let pat () $ LoopOp $ Kernel cs w i ispace inps returns body'
+  addBinding $ Let pat () $ LoopOp $ MapKernel cs w i ispace inps returns body'
 
 transformBindingRecursively (Let pat () e) =
   transformBinding =<< liftM (Let pat ()) (mapExpM transform e)

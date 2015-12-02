@@ -266,8 +266,8 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (Scan cs size lam inputs) =
     ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Kernel cs w index ispace inps returns body) =
-    ppCertificates' cs <> text "kernel" <+>
+  ppr (MapKernel cs w index ispace inps returns body) =
+    ppCertificates' cs <> text "mapKernel" <+>
     align (parens (text "width:" <+> ppr w) </>
            parens (text "index:" <+> ppr index) </>
            parens (stack $ punctuate semi $ map ppBound ispace) </>

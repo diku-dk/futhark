@@ -636,7 +636,7 @@ simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
             acc'  <- mapM simplifySubExp acc
             return $ Sequential acc'
 
-simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
+simplifyLoopOp (MapKernel cs w index ispace inps returns body) = do
   cs' <- simplifyCerts cs
   w' <- simplifySubExp w
   ispace' <- forM ispace $ \(i, bound) -> do
@@ -650,7 +650,7 @@ simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
     body' <- bindFParams (map kernelInputParam inps') $
              blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
              simplifyBody (map (diet . fst) returns) body
-    return $ Kernel cs' w' index ispace' inps' returns' body'
+    return $ MapKernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
 
 simplifyLoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs) = do

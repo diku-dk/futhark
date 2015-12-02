@@ -533,13 +533,13 @@ allocInExp (LoopOp (DoLoop res merge form
         formBinds (WhileLoop _) =
           id
 
-allocInExp (LoopOp (Kernel cs w index ispace inps returns body)) = do
+allocInExp (LoopOp (MapKernel cs w index ispace inps returns body)) = do
   inps' <- mapM allocInKernelInput inps
   let mem_map = paramsSummary (map kernelInputParam inps') <> ispace_map
   localMemoryMap (mem_map <>) $ do
     body' <- allocInBindings (bodyBindings body) $ \bnds' ->
       return $ Body () bnds' $ bodyResult body
-    return $ LoopOp $ Kernel cs w index ispace inps' returns body'
+    return $ LoopOp $ MapKernel cs w index ispace inps' returns body'
   where ispace_map = HM.fromList [ (i, Entry Scalar $ Basic Int)
                                  | i <- index : map fst ispace ]
         allocInKernelInput inp

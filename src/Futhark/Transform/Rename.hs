@@ -229,7 +229,7 @@ instance Renameable lore => Rename (Exp lore) where
           cond'     <- rename cond
           return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
             (WhileLoop cond') loopbody'
-  rename (LoopOp (Kernel cs w index ispace inps returns body)) = do
+  rename (LoopOp (MapKernel cs w index ispace inps returns body)) = do
     cs' <- rename cs
     w' <- rename w
     returns' <- forM returns $ \(t, perm) -> do
@@ -237,7 +237,7 @@ instance Renameable lore => Rename (Exp lore) where
       return (t', perm)
     bind (index : map fst ispace ++ map kernelInputName inps) $
       LoopOp <$>
-      (Kernel cs' w' <$>
+      (MapKernel cs' w' <$>
        rename index <*> rename ispace <*> rename inps <*> pure returns' <*> rename body)
   rename e = mapExpM mapper e
     where mapper = Mapper {
