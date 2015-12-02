@@ -889,7 +889,7 @@ checkLoopOp (Redomap ass size outerfun innerfun accexps arrexps) = do
     bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-checkLoopOp (Kernel cs w index ispace inps returns body) = do
+checkLoopOp (MapKernel cs w index ispace inps returns body) = do
   mapM_ (requireI [Basic Cert]) cs
   require [Basic Int] w
   mapM_ (require [Basic Int]) bounds

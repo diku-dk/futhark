@@ -441,7 +441,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (Stream _ w _ _ _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (Kernel _ w _ _ _ _ _)) =
+        unbalancedBinding bound (LoopOp (MapKernel _ w _ _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (ReduceKernel _ w _ _ _ _ _)) =
           w `subExpBound` bound

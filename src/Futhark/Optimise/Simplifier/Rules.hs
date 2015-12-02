@@ -189,10 +189,10 @@ removeUnusedMapInput _ _ = cannotSimplify
 
 -- | Remove inputs that are not used inside the @kernel@.
 removeUnusedKernelInputs :: MonadBinder m => TopDownRule m
-removeUnusedKernelInputs _ (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
+removeUnusedKernelInputs _ (Let pat _ (LoopOp (MapKernel cs w index ispace inps returns body)))
   | (used,unused) <- partition usedInput inps,
     not (null unused) =
-      letBind_ pat $ LoopOp $ Kernel cs w index ispace used returns body
+      letBind_ pat $ LoopOp $ MapKernel cs w index ispace used returns body
   where used_in_body = freeInBody body
         usedInput inp = kernelInputName inp `HS.member` used_in_body
 removeUnusedKernelInputs _ _ = cannotSimplify
@@ -200,7 +200,7 @@ removeUnusedKernelInputs _ _ = cannotSimplify
 -- | Kernel inputs are indexes into arrays.  Based on how those arrays
 -- are defined, we may be able to simplify the input.
 simplifyKernelInputs :: (MonadBinder m, LocalTypeEnv m) => TopDownRule m
-simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
+simplifyKernelInputs vtable (Let pat _ (LoopOp (MapKernel cs w index ispace inps returns body)))
   | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
     inps /= catMaybes inps' = do
       body' <- localTypeEnv index_env $ insertBindingsM $ do
@@ -208,7 +208,7 @@ simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps re
            letBindNames'_ [name] $ PrimOp $ SubExp se
          return body
       letBind_ pat $ LoopOp $
-        Kernel (cs++concat extra_cs) w index ispace
+        MapKernel (cs++concat extra_cs) w index ispace
         (catMaybes inps') returns body'
   where defOf = (`ST.lookupExp` vtable)
         typeOf (Var v) = ST.lookupType v vtable
@@ -226,7 +226,7 @@ simplifyKernelInputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps re
 simplifyKernelInputs _ _ = cannotSimplify
 
 removeInvariantKernelOutputs :: MonadBinder m => TopDownRule m
-removeInvariantKernelOutputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace inps returns body)))
+removeInvariantKernelOutputs vtable (Let pat _ (LoopOp (MapKernel cs w index ispace inps returns body)))
   | (invariant, variant) <-
       partitionEithers $ zipWith3 isInvariant
       (patternValueElements pat) returns $ bodyResult body,
@@ -242,7 +242,7 @@ removeInvariantKernelOutputs vtable (Let pat _ (LoopOp (Kernel cs w index ispace
           let shape = map DimNew $ map snd ispace ++ arrayDims t
           letBind_ (Pattern [] [pat_elem]) $ PrimOp $ Reshape cs shape flat
       letBind_ pat' $ LoopOp $
-        Kernel cs w index ispace inps variant_returns
+        MapKernel cs w index ispace inps variant_returns
         body { bodyResult = variant_result }
   where isInvariant pat_elem ret (Var v)
           | Just _ <- ST.lookupType v vtable = Left (pat_elem, ret, Var v)

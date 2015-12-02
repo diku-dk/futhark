@@ -100,8 +100,8 @@ loopOpMetrics (Redomap _ _ fun1 fun2 _ _) =
   inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
 loopOpMetrics (Stream _ _ _ lam _ _) =
   inside "Stream" $ extLambdaMetrics lam
-loopOpMetrics (Kernel _ _ _ _ _ _ body) =
-  inside "Kernel" $ bodyMetrics body
+loopOpMetrics (MapKernel _ _ _ _ _ _ body) =
+  inside "MapKernel" $ bodyMetrics body
 loopOpMetrics (ReduceKernel _ _ _ lam1 lam2 _ _) =
   inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
 loopOpMetrics (ScanKernel _ _ _ _ lam _) =

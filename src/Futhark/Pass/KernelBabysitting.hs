@@ -136,7 +136,7 @@ transformBinding expmap (Let pat ()
         num_threads = kernelNumThreads kernel_size
         (nes, arrs) = unzip input
 
-transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns body))) = do
+transformBinding expmap (Let pat () (LoopOp (MapKernel cs w i ispace inps returns body))) = do
   body' <- bindingIdentTypes (Ident i (Basic Int) :
                               map ((`Ident` Basic Int) . fst) ispace ++
                               map kernelInputIdent inps) $
@@ -149,7 +149,7 @@ transformBinding expmap (Let pat () (LoopOp (Kernel cs w i ispace inps returns b
   let value_elems = patternValueElements pat
   (value_elems', returns') <- rearrangeReturns num_is value_elems returns
   let pat' = Pattern [] value_elems'
-  addBinding $ Let pat' () $ LoopOp $ Kernel cs w i ispace inps' returns' body'
+  addBinding $ Let pat' () $ LoopOp $ MapKernel cs w i ispace inps' returns' body'
   mapM_ maybeRearrangeResult $ zip3 value_elems value_elems' returns'
   return expmap
   where num_is = length ispace

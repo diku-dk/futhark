@@ -165,7 +165,7 @@ loopOpExtType (Stream _ outersize form lam _ _) =
                 MapLike _ -> []
                 RedLike _ _ acc -> acc
                 Sequential  acc -> acc
-loopOpExtType (Kernel _ _ _ is _ returns _) =
+loopOpExtType (MapKernel _ _ _ is _ returns _) =
   staticShapes
   [ rearrangeType perm (arrayOfShape t outer_shape) `setUniqueness` Unique
   | (t, perm) <- returns ]

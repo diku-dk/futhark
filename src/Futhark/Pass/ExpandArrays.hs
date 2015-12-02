@@ -57,11 +57,11 @@ transformExtLambda lam = do
 
 transformExp :: MonadFreshNames m =>
                 Exp -> m ([Binding], Exp)
-transformExp (LoopOp (Kernel cs w thread_num ispace inps returns body)) = do
+transformExp (LoopOp (MapKernel cs w thread_num ispace inps returns body)) = do
   (body', expanded) <- expandInKernel thread_num ispace inps $ expandInBody body
   let inps' = inps ++ map expandedInput expanded
   return (map expansionBinding expanded,
-          LoopOp $ Kernel cs w thread_num ispace inps' returns body')
+          LoopOp $ MapKernel cs w thread_num ispace inps' returns body')
 transformExp e =
   return ([], e)
 

@@ -200,7 +200,7 @@ blockedScan pat cs w lam input = do
     let lasts_map_returns = [ (rt, [0..arrayRank rt])
                             | rt <- lambdaReturnType lam ]
     letTupExp "last_in_preceding_groups" $
-      LoopOp $ Kernel [] num_groups lasts_map_index
+      LoopOp $ MapKernel [] num_groups lasts_map_index
       [(group_id, num_groups)] [] lasts_map_returns lasts_map_body
 
   group_carry_in <- do
@@ -227,7 +227,7 @@ blockedScan pat cs w lam input = do
     let chunk_carry_out_returns = [ (rt, [0..arrayRank rt+1])
                                  | rt <- lambdaReturnType lam ]
     letTupExp "chunk_carry_out" $
-      LoopOp $ Kernel [] num_threads chunk_carry_out_index
+      LoopOp $ MapKernel [] num_threads chunk_carry_out_index
       [(group_id, num_groups),
        (elem_id, group_size)]
       chunk_carry_out_inputs chunk_carry_out_returns $ lambdaBody lam''
@@ -266,7 +266,7 @@ blockedScan pat cs w lam input = do
     return $ resultBody $ map Var group_lasts
   let result_map_returns = [ (rt, [0..arrayRank rt])
                            | rt <- lambdaReturnType lam ]
-  letBind_ pat $ LoopOp $ Kernel [] w result_map_index
+  letBind_ pat $ LoopOp $ MapKernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
   where one = Constant $ IntVal 1
         zero = Constant $ IntVal 0
@@ -322,7 +322,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
               If start_of_segment (resultBody [true]) (resultBody [false]) [Basic Bool]
       return $ resultBody [flag]
   flags <-
-    letExp "flags" $ LoopOp $ Kernel [] w flags_global_index
+    letExp "flags" $ LoopOp $ MapKernel [] w flags_global_index
     [(flags_i, w)] []
     [(Basic Bool, [0])]
     flags_body

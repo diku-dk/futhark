@@ -209,8 +209,8 @@ mapExpM tv (LoopOp (Stream cs size form lam arrs ii)) =
                  mapM (mapOnSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapM (mapOnSubExp tv) acc
-mapExpM tv (LoopOp (Kernel cs w index ispace inps rettype body)) =
-  LoopOp <$> (Kernel <$>
+mapExpM tv (LoopOp (MapKernel cs w index ispace inps rettype body)) =
+  LoopOp <$> (MapKernel <$>
               mapOnCertificates tv cs <*>
               mapOnSubExp tv w <*>
               mapOnVName tv index <*>
