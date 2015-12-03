@@ -361,7 +361,6 @@ createKernelNest (inner_nest, nests) distrib_body = do
                 HS.fromList $ map paramName actual_params
 
               nest'' =
-                makeUnconsumedParametersNonunique consumed_in_kernel $
                 removeUnusedNestingParts free_in_kernel $
                 MapNesting pat cs w i $ zip actual_params actual_arrs
 
@@ -412,18 +411,6 @@ createKernelNest (inner_nest, nests) distrib_body = do
             identity_map
             (patternIdents $ fst $ outerTarget kernel_targets)
             ((`pushOuterTarget` kernel_targets) . expand_target)
-
-makeUnconsumedParametersNonunique :: Names -> LoopNesting -> LoopNesting
-makeUnconsumedParametersNonunique consumed (MapNesting pat cs w i params_and_arrs) =
-  MapNesting pat cs w i $ map checkIfConsumed params_and_arrs
-  where checkIfConsumed (param, arr)
-          | paramName param `HS.member` consumed = (param, arr)
-          | otherwise                            = (makeNonunique param, arr)
-        makeNonunique param =
-          param { paramIdent =
-                     (paramIdent param)
-                     { identType = setUniqueness (paramType param) Nonunique }
-                }
 
 removeUnusedNestingParts :: Names -> LoopNesting -> LoopNesting
 removeUnusedNestingParts used (MapNesting pat cs w i params_and_arrs) =
