@@ -13,6 +13,7 @@ module Futhark.MonadFreshNames
   , newID
   , newIDFromString
   , newVName
+  , newVName'
   , newIdent
   , newIdent'
   , newIdents
@@ -96,6 +97,11 @@ newIDFromString s = newID $ varName s Nothing
 -- | Produce a fresh 'VName', using the given base name as a template.
 newVName :: MonadFreshNames m => String -> m VName
 newVName = newID . nameFromString
+
+-- | Produce a fresh 'VName', using the given name as a template, but
+-- possibly appending something more..
+newVName' :: MonadFreshNames m => (String -> String) -> String -> m VName
+newVName' f = newID . nameFromString . f
 
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
