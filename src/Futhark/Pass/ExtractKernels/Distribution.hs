@@ -590,7 +590,19 @@ interchangeLoops nest loop = do
   return $ bnds ++ [seqLoopBinding loop']
 
 optimiseKernel :: Binding -> Binding
-optimiseKernel bnd = fromMaybe bnd $ tryOptimiseKernel bnd
+optimiseKernel bnd = fromMaybe bnd_unique $
+                     tryOptimiseKernel bnd
+  where bnd_unique =
+          bnd { bindingPattern = uniquePattern $ bindingPattern bnd }
+
+-- | Make all pattern elements unique.
+uniquePattern :: Pattern -> Pattern
+uniquePattern (Pattern ctx vals) =
+  Pattern (map uniquePatElem ctx) (map uniquePatElem vals)
+  where uniquePatElem pat_elem =
+          pat_elem { patElemIdent = uniqueIdent $ patElemIdent pat_elem }
+        uniqueIdent =
+          (`setIdentUniqueness` Unique)
 
 tryOptimiseKernel :: Binding -> Maybe Binding
 tryOptimiseKernel bnd = kernelIsRearrange bnd <|>
@@ -612,15 +624,16 @@ fullIndexInput ispace =
   find $ (==map (Var . fst) ispace) . kernelInputIndices
 
 kernelIsRearrange :: Binding -> Maybe Binding
-kernelIsRearrange (Let outer_pat _
+kernelIsRearrange (Let (Pattern [] [outer_patElem]) _
                    (LoopOp (MapKernel outer_cs _ _ ispace [inp] [_] body)))
   | Just (PrimOp (Rearrange inner_cs perm arr)) <- singleExpBody body,
     map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp =
+    arr == kernelInputName inp,
+    not (unique $ patElemType outer_patElem) =
       let rank = length ispace
           cs' = outer_cs ++ inner_cs
           perm' = [0..rank-1] ++ map (rank+) perm
-      in Just $ Let outer_pat () $
+      in Just $ Let (Pattern [] [outer_patElem]) () $
          PrimOp $ Rearrange cs' perm' $ kernelInputArray inp
 kernelIsRearrange _ = Nothing
 
@@ -630,7 +643,8 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
   | Just (PrimOp (Reshape inner_cs new_inner_shape arr)) <- singleExpBody body,
     Just inp <- fullIndexInput ispace inps,
     map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp =
+    arr == kernelInputName inp,
+    not (unique $ patElemType outer_patElem) =
       let new_outer_shape =
             take (length new_shape - length new_inner_shape) new_shape
           cs' = outer_cs ++ inner_cs
