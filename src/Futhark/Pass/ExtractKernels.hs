@@ -668,8 +668,13 @@ segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
       letSubExp "total_num_elements" $ PrimOp $ BinOp Times segment_size nesting_size Int
 
     let flatten (ne, arr) = do
+          ne_shape <- arrayShape <$> subExpType ne
+          arr_shape <- arrayShape <$> lookupType arr
+          let reshape = reshapeOuter [DimNew total_num_elements]
+                        (shapeRank arr_shape - shapeRank ne_shape)
+                        arr_shape
           arr' <- letExp (baseString arr ++ "_flat") $
-                  PrimOp $ Reshape [] [DimNew total_num_elements] arr
+                  PrimOp $ Reshape [] reshape arr
           return (ne, arr')
 
     scan_inps' <- mapM flatten =<< sequence mk_inps
