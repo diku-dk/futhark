@@ -222,7 +222,8 @@ flatKernel :: MonadFreshNames m =>
                  [KernelInput Basic],
                  [TypeBase Shape])
 flatKernel (MapNesting pat _ nesting_w i params_and_arrs, []) =
-  return ([], nesting_w, [(i,nesting_w)], inps, map rowType $ patternTypes pat)
+  return ([], nesting_w, [(i,nesting_w)], inps,
+          map (rowType . (`setUniqueness` Nonunique)) $ patternTypes pat)
   where inps = [ KernelInput (Param (paramIdent param) ()) arr [Var i] |
                  (param, arr) <- params_and_arrs ]
 
