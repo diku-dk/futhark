@@ -31,20 +31,23 @@ nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
                    [LParam lore] -> m ([LParam lore], [Binding lore])
 nonuniqueParams params =
   modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
-  collectBindings $ forM params $ \param -> do
-    param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
-    let param' = Param param_name $ paramType param
-    bindingIdentTypes [paramIdent param'] $
-      letBindNames_ [(paramName param,BindVar)] $
-      PrimOp $ Copy $ paramName param'
-    return param'
+  collectBindings $ forM params $ \param ->
+    if not $ basicType $ paramType param then do
+      param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
+      let param' = Param param_name $ paramType param
+      bindingIdentTypes [paramIdent param'] $
+        letBindNames_ [(paramName param,BindVar)] $
+        PrimOp $ Copy $ paramName param'
+      return param'
+    else
+      return param
 
 nonuniqueFParams :: (MonadFreshNames m, Bindable lore) =>
                     [FParam lore] -> m ([FParam lore], [Binding lore])
 nonuniqueFParams params =
   modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
   collectBindings $ forM params $ \param ->
-  if unique (paramDeclType param) then do
+  if unique $ paramDeclType param then do
     param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
     let param' = Param param_name $ paramDeclType param `setUniqueness` Nonunique
     bindingIdentTypes [paramIdent param'] $
