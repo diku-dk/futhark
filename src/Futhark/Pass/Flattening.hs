@@ -368,7 +368,7 @@ createSegDescsForArray (Ident vn (Array _ (Shape (dim0:dims@(_:_))) _)) = do
       liftM (unzip . reverse . (\(res,_,_,_) -> res)) $
         foldM  (\(res,dimouter,n::Int,_:dimrest) diminner -> do
                    let segname = baseString vn ++ "_seg" ++ show n
-                   seg <- newIdent segname (Array Int (Shape [dimouter]) Nonunique)
+                   seg <- newIdent segname (Array Int (Shape [dimouter]) NoUniqueness)
                    addTypeIdent seg
                    segsize <- createFlattenedDims (n+1) (dimouter, diminner)
                    return ((dimouter:dimrest, (seg, Regular)):res, segsize, n+1, dimrest)
@@ -516,19 +516,19 @@ transformMain (FunDec name (ExtRetType rettypes) params _) = do
                        flat_args
                        (ExtRetType flatex_tps)
   (flatrestps, extra_sizes) <- instantiateShapes' flatex_tps
-  callresidents <- mapM (newIdent "tmpres") flatrestps
+  callresidents <- mapM (newIdent "tmpres" . fromDecl) flatrestps
   let callpat = patternFromIdents extra_sizes callresidents
   let call_bnd = Let callpat () call_exp
 
   (realrestps, _) <- instantiateShapes' rettypes
-  realresidents <- mapM (newIdent "res") realrestps
+  realresidents <- mapM (newIdent "res" . fromDecl) realrestps
   -- This groups the flattened results returned from the function
   -- call, putting segment descriptors and data arrays together in one group
   let callresidents_grouped =
         reverse $ snd $
           foldl (\(takefrom,res) n -> (drop n takefrom, take n takefrom : res))
                 (callresidents,[])
-                (map (fromMaybe 1 . dimentionality) realrestps)
+                (map (fromMaybe 1 . dimentionality . fromDecl) realrestps)
   fromflat_bnds <-
     liftM concat $ zipWithM fromFlat realresidents callresidents_grouped
 
@@ -677,10 +677,7 @@ transformFun (FunDec name rettype params body) = do
                                 (map paramIdent params)
   body' <- transformBody body
   idents' <- liftM (uncurry (++)) $ convertToFlat $ map paramIdent params
-  let params' = map (\i -> Param { paramIdent = i
-                                 , paramLore = ()
-                                 }
-                    ) idents'
+  let params' = map (\(Ident k t) -> Param k $ t `toDecl` Nonunique) idents'
   return $ FunDec name' rettype' params' body'
   where
     rettype' = convertExtRetType rettype
@@ -815,7 +812,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
             case argarr of
               Just val -> do
                 val_tp <- lookupType arg
-                return $ Just (Param (Ident arg val_tp) (), identName val)
+                return $ Just (Param arg val_tp, identName val)
               Nothing -> return Nothing
       argarrs' <- mapM (liftM identName . getDataArray1) argarrs
 
@@ -1051,7 +1048,7 @@ pullOutOfMap mapInfo (argsneeded, _)
   -- other calls (through mapLetArray)
   intmres_vns' <- mapM newName intmres_vns
   intmres_tps <- mapM lookupType intmres_vns
-  let intmres_params = map (`Param` ()) $ zipWith Ident intmres_vns' intmres_tps
+  let intmres_params = zipWith Param intmres_vns' intmres_tps
   intmres_arrs <- mapM (findTarget1 mapInfo) intmres_vns
 
   --
@@ -1224,7 +1221,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
 
         return (Var $ identName sumident, [sumbnd]))
 
-  let tmptp = Array Int (Shape [segsum]) Nonunique
+  let tmptp = Array Int (Shape [segsum]) NoUniqueness
 
   repident <- newIdent "segiota_rep" tmptp
   let repexp = PrimOp $ Replicate segsum (Constant $ IntVal 1)
@@ -1236,7 +1233,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident BindVar ()]) ()
   let scanbnd = Let (Pattern [] [PatElem scanident BindVar ()]) () scanexp
 
   resarr <- newIdent (baseString (identName resident) ++ "_arr")
-                     (Array Int (Shape [mapSize mapinfo, subexp]) Nonunique)
+                     (Array Int (Shape [mapSize mapinfo, subexp]) NoUniqueness)
 
   addMapLetArray (identName resident) resarr
   addTypeIdent resarr
@@ -1328,7 +1325,7 @@ findTarget1 mapInfo vn =
 wrapInArrIdent :: SubExp -> Ident -> FlatM Ident
 wrapInArrIdent sz (Ident vn tp) = do
   arrtp <- case tp of
-    Basic bt                   -> return $ Array bt (Shape [sz]) Nonunique
+    Basic bt                   -> return $ Array bt (Shape [sz]) NoUniqueness
     Array bt (Shape rest) uniq -> return $ Array bt (Shape $ sz:rest) uniq
     Mem {} -> flatError MemTypeFound
   i <- newIdent (baseString vn ++ "_arr") arrtp

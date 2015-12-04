@@ -106,15 +106,15 @@ irwim res_pat cs w red_fun red_input
       addBinding $ Let res_pat () $ LoopOp $ Map map_cs map_w map_fun' map_arrs'
   | otherwise = Nothing
 
-removeParamOuterDim :: Param attr -> Param attr
+removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
   let t = rowType $ paramType param
-  in param { paramIdent = (paramIdent param) { identType = t } }
+  in param { paramAttr = t }
 
-setParamOuterDimTo :: SubExp -> Param attr -> Param attr
+setParamOuterDimTo :: SubExp -> LParam -> LParam
 setParamOuterDimTo w param =
   let t = setOuterDimTo w $ paramType param
-  in param { paramIdent = (paramIdent param) { identType = t } }
+  in param { paramAttr = t }
 
 setIdentOuterDimTo :: SubExp -> Ident -> Ident
 setIdentOuterDimTo w ident =

@@ -4,6 +4,7 @@ module Futhark.Tools
     module Futhark.Construct
 
   , nonuniqueParams
+  , nonuniqueFParams
   , redomapToMapAndReduce
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
@@ -30,19 +31,28 @@ nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
                    [LParam lore] -> m ([LParam lore], [Binding lore])
 nonuniqueParams params =
   modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
+  collectBindings $ forM params $ \param -> do
+    param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
+    let param' = Param param_name $ paramType param
+    bindingIdentTypes [paramIdent param'] $
+      letBindNames_ [(paramName param,BindVar)] $
+      PrimOp $ Copy $ paramName param'
+    return param'
+
+nonuniqueFParams :: (MonadFreshNames m, Bindable lore) =>
+                    [FParam lore] -> m ([FParam lore], [Binding lore])
+nonuniqueFParams params =
+  modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
   collectBindings $ forM params $ \param ->
-    if unique $ paramType param then do
-      param' <- Param <$>
-                (nonuniqueParam <$> newIdent' (++"_nonunique") (paramIdent param)) <*>
-                pure ()
-      bindingIdentTypes [paramIdent param'] $
-        letBindNames_ [(paramName param,BindVar)] $
-        PrimOp $ Copy $ paramName param'
-      return param'
-    else
-      return param
-  where nonuniqueParam ident =
-          ident { identType = identType ident `setUniqueness` Nonunique }
+  if unique (paramDeclType param) then do
+    param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
+    let param' = Param param_name $ paramDeclType param `setUniqueness` Nonunique
+    bindingIdentTypes [paramIdent param'] $
+      letBindNames_ [(paramName param,BindVar)] $
+      PrimOp $ Copy $ paramName param'
+    return param'
+  else
+    return param
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).
@@ -143,9 +153,9 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length acc_ts) $ extLambdaParams lam
   unchunked_arr_params <- forM arr_params $ \arr_param ->
-    flip Param () <$>
-    newIdent (baseString (paramName arr_param) <> "_unchunked")
-    (rowType $ paramType arr_param)
+    Param <$>
+    newVName (baseString (paramName arr_param) <> "_unchunked") <*>
+    pure (rowType $ paramType arr_param)
   let chunk_name = paramName chunk_param
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $
                   PrimOp $ SubExp $ Constant $ IntVal 1

@@ -87,7 +87,7 @@ substituteIndicesInExp substs e = do
         -- of all this substitute business.
         copyAnyConsumed (LoopOp (DoLoop _ merge _ _)) =
           let consumingSubst substs' (fparam, Var v)
-                | unique (paramType fparam),
+                | unique (paramDeclType fparam),
                   Just (cs2, src2, is2) <- lookup v substs = do
                     row <- letExp (baseString v ++ "_row") $
                            PrimOp $ Index cs2 (identName src2) is2

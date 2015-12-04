@@ -40,7 +40,7 @@ import Futhark.Util
 data InterpreterError lore =
       MissingEntryPoint Name
       -- ^ The specified start function does not exist.
-    | InvalidFunctionArguments Name (Maybe [TypeBase Rank]) [TypeBase Rank]
+    | InvalidFunctionArguments Name (Maybe [TypeBase Rank NoUniqueness]) [TypeBase Rank NoUniqueness]
       -- ^ The arguments given to a function were mistyped.
     | IndexOutOfBounds String [Int] [Int]
       -- ^ First @Int@ is array shape, second is attempted index.
@@ -309,15 +309,14 @@ runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 runThisFun :: Lore lore => FunDec lore -> [Value] -> FunTable lore
            -> (Either (InterpreterError lore) [Value], Trace)
 runThisFun (FunDec fname _ fparams _) args ftable
-  | length argtypes == length fparams,
-    subtypesOf argtypes paramtypes =
+  | argtypes == paramtypes =
     runFutharkM (evalFuncall fname args) futharkenv
   | otherwise =
     (Left $ InvalidFunctionArguments fname
      (Just paramtypes)
      argtypes,
      mempty)
-  where argtypes = map (rankShaped . (`setUniqueness` Unique) . valueType) args
+  where argtypes = map (rankShaped . valueType) args
         paramtypes = map (rankShaped . paramType) fparams
         futharkenv = FutharkEnv { envVtable = HM.empty
                                 , envFtable = ftable
@@ -984,7 +983,7 @@ applyConcatMapLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Va
 applyConcatMapLambda (Lambda i params body rettype) valargs = do
   v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) (shapes ++ valargs)) $
        evalBody body
-  let rettype' = [ arrayOf t (ExtShape [Ext 0]) $ uniqueness t
+  let rettype' = [ arrayOf t (ExtShape [Ext 0]) NoUniqueness
                  | t <- staticShapes rettype ]
   checkReturnShapes rettype' v
   return v
@@ -1003,7 +1002,7 @@ applyConcatMapLambda (Lambda i params body rettype) valargs = do
                   paramName)
              shapeparams
 
-checkReturnShapes :: [ExtType] -> [Value] -> FutharkM lore ()
+checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM lore ()
 checkReturnShapes = zipWithM_ checkShape
   where checkShape t val = do
           let valshape = map (BasicVal . IntVal . fromIntegral) $ valueShape val

@@ -17,6 +17,8 @@ module Futhark.MonadFreshNames
   , newIdent
   , newIdent'
   , newIdents
+  , newParam
+  , newParam'
   , newNameSourceForProg
   , module Futhark.FreshNames
   ) where
@@ -124,6 +126,22 @@ newIdent' f ident =
 newIdents :: MonadFreshNames m =>
              String -> [Type] -> m [Ident]
 newIdents = mapM . newIdent
+
+-- | Produce a fresh 'Param', using the given name as a template.
+newParam :: MonadFreshNames m =>
+            String -> attr -> m (Param attr)
+newParam s t = do
+  s' <- newID $ varName s Nothing
+  return $ Param s' t
+
+-- | Produce a fresh 'Param', using the given 'Param' as a template,
+-- but possibly modifying the name.
+newParam' :: MonadFreshNames m =>
+             (String -> String)
+          -> Param attr -> m (Param attr)
+newParam' f param =
+  newParam (f $ nameToString $ baseName $ paramName param)
+           (paramAttr param)
 
 -- | Create a new 'NameSource' that will never produce any of the
 -- names used as variables in the given program.

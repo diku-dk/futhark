@@ -53,7 +53,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (elem, lookup)
 
-import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, paramLore, lookupType)
+import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, lookupType)
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Analysis.ScalExp
@@ -108,9 +108,9 @@ data LetBoundEntry lore =
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
-              , paramLore         :: Annotations.FParam lore
+              , paramLore          :: Annotations.FParam lore
               , fparamBindingDepth :: Int
-              , paramType         :: Type
+              , paramType          :: DeclType
               }
 
 data LParamEntry lore =
@@ -195,7 +195,7 @@ asExp = liftM (bindingExp . letBoundBinding) . isVarBound
 entryType :: Entry lore -> Type
 entryType (LetBound entry) = letBoundType entry
 entryType (LParam entry)   = lparamType entry
-entryType (FParam entry)   = paramType entry
+entryType (FParam entry)   = fromDecl $ paramType entry
 entryType (LoopVar _)      = Basic Int
 entryType (FreeVar entry)  = freeVarType entry
 
@@ -391,22 +391,25 @@ insertBinding bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
   where names = patternNames $ bindingPattern bnd
 
-insertFParam :: AST.FParam lore
+insertFParam :: Annotations.Annotations lore =>
+                AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
 insertFParam fparam = insertEntry name entry
-  where name = paramName fparam
+  where name = AST.paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
-                                   , paramLore = AST.paramLore fparam
+                                   , paramLore = AST.paramAttr fparam
                                    , fparamBindingDepth = 0
-                                   , paramType = AST.paramType fparam
+                                   , paramType = AST.paramDeclType fparam
                                    }
 
-insertFParams :: [AST.FParam lore] -> SymbolTable lore
+insertFParams :: Annotations.Annotations lore =>
+                 [AST.FParam lore] -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
-insertLParamWithRange :: LParam lore -> ScalExpRange -> SymbolTable lore
+insertLParamWithRange :: Annotations.Annotations lore =>
+                         LParam lore -> ScalExpRange -> SymbolTable lore
                       -> SymbolTable lore
 insertLParamWithRange param range vtable =
   -- We know that the sizes in the type of param are at least zero,
@@ -417,16 +420,18 @@ insertLParamWithRange param range vtable =
                                   , lparamBindingDepth = 0
                                   , lparamType = AST.paramType param
                                   }
-        name = paramName param
+        name = AST.paramName param
         sizevars = mapMaybe isVar $ arrayDims $ AST.paramType param
         isVar (Var v) = Just v
         isVar _       = Nothing
 
-insertLParam :: LParam lore -> SymbolTable lore -> SymbolTable lore
+insertLParam :: Annotations.Annotations lore =>
+                LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing)
 
-insertArrayLParam :: LParam lore -> Maybe VName -> SymbolTable lore
+insertArrayLParam :: Annotations.Annotations lore =>
+                     LParam lore -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =
   -- We now know that the outer size of 'array' is at least one, and

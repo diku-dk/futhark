@@ -75,7 +75,8 @@ fuseMaps :: (Input input, Bindable lore) =>
                                    -- the resulting SOAC.
 fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
-          lam2 { lambdaParams = map (`Param` ()) $ lam2redparams ++ HM.keys inputmap
+          lam2 { lambdaParams = [ Param name t
+                                | Ident name t <- lam2redparams ++ HM.keys inputmap ]
                , lambdaBody   = new_body2'
                }
         let_i_j = mkLet' [] [Ident (lambdaIndex lam1) $ Basic Int] $

@@ -30,11 +30,11 @@ shapeBody shapenames ts body =
     return $ resultBody $ argShapes shapenames ts sets
 
 annotateArrayShape :: ArrayShape shape =>
-                      TypeBase shape -> [Int] -> TypeBase Shape
+                      TypeBase shape u -> [Int] -> TypeBase Shape u
 annotateArrayShape t newshape =
   t `setArrayShape` Shape (take (arrayRank t) (map intconst $ newshape ++ repeat 0))
 
-argShapes :: [VName] -> [Type] -> [Type] -> [SubExp]
+argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
 argShapes shapes valts valargts =
   map addShape shapes
   where mapping = shapeMapping valts valargts

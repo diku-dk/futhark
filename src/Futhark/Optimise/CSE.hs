@@ -80,9 +80,9 @@ cseInBinding (Let pat eattr e) m = do
                   let patElem' = setPatElemName patElem name
                 ]
           m lets
-  where bad (Array _ _ Unique) = True
-        bad Mem{}              = True
-        bad _                  = False
+  where bad Array{} = True
+        bad Mem{}   = True
+        bad _       = False
         setPatElemName patElem name =
           patElem { patElemIdent = Ident name $ identType $ patElemIdent patElem }
 

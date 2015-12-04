@@ -1,12 +1,12 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | Inspecing and modifying 'Pattern's, function parameters and
 -- pattern elements.
 module Futhark.Representation.AST.Attributes.Patterns
        (
          -- * Function parameters
          paramIdent
-       , paramName
        , paramType
-       , paramLore
+       , paramDeclType
          -- * Pattern elements
        , patElemIdent
        , patElemName
@@ -34,15 +34,21 @@ module Futhark.Representation.AST.Attributes.Patterns
        where
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Types (stripArray, setUniqueness)
+import Futhark.Representation.AST.Attributes.Types
+  (stripArray, Typed(..), DeclTyped(..))
+import qualified Futhark.Representation.AST.Annotations as Annotations
 
--- | The name of the 'Ident' bound by an 'FParam'.
-paramName :: ParamT attr -> VName
-paramName = identName . paramIdent
+-- | The 'Type' of a parameter.
+paramType :: Typed attr => ParamT attr -> Type
+paramType = typeOf
 
--- | The type of the 'Ident' bound by an 'FParam'.
-paramType :: ParamT attr -> Type
-paramType = identType . paramIdent
+-- | The 'DeclType' of a parameter.
+paramDeclType :: DeclTyped attr => ParamT attr -> DeclType
+paramDeclType = declTypeOf
+
+-- | An 'Ident' corresponding to a parameter.
+paramIdent :: Typed attr => ParamT attr -> Ident
+paramIdent param = Ident (paramName param) (typeOf param)
 
 -- | The name of the ident bound by a 'PatElem'.
 patElemName :: PatElemT attr -> VName
@@ -63,7 +69,7 @@ bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
 bindageRequires t (BindInPlace _ _ is) =
-  stripArray (length is) t `setUniqueness` Nonunique
+  stripArray (length is) t
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
@@ -113,8 +119,10 @@ patternSize (Pattern context values) = length context + length values
 kernelInputName :: KernelInput lore -> VName
 kernelInputName = paramName . kernelInputParam
 
-kernelInputType :: KernelInput lore -> Type
-kernelInputType = paramType . kernelInputParam
+kernelInputType :: Typed (Annotations.LParam lore) =>
+                   KernelInput lore -> Type
+kernelInputType = typeOf . kernelInputParam
 
-kernelInputIdent :: KernelInput lore -> Ident
+kernelInputIdent :: Typed (Annotations.LParam lore) =>
+                    KernelInput lore -> Ident
 kernelInputIdent = paramIdent . kernelInputParam

@@ -80,8 +80,7 @@ instance Lore.Lore Basic where
   loopResultContext _ res merge =
     loopShapeContext res $ map paramIdent merge
 
-  applyRetType _ ret =
-    applyExtType ret . map paramIdent
+  applyRetType _ = applyExtType
 
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
@@ -101,19 +100,19 @@ type PatElem = AST.PatElem Basic
 instance TypeCheck.Checkable Basic where
   checkExpLore = return
   checkBodyLore = return
-  checkFParamLore _ = return
-  checkLParamLore _ = return
+  checkFParamLore _ = TypeCheck.checkType
+  checkLParamLore _ = TypeCheck.checkType
   checkLetBoundLore _ = return
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern pat e = do
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
   basicFParam _ name t =
-    AST.Param (Ident name (AST.Basic t)) ()
+    AST.Param name (AST.Basic t)
   basicLParam _ name t =
-    AST.Param (Ident name (AST.Basic t)) ()
+    AST.Param name (AST.Basic t)
   matchReturnType name (ExtRetType ts) =
-    TypeCheck.matchExtReturnType name ts
+    TypeCheck.matchExtReturnType name $ map fromDecl ts
 
 instance Renameable Basic where
 instance Substitutable Basic where
@@ -162,8 +161,8 @@ removeLore =
   Rephraser { rephraseExpLore = const ()
             , rephraseLetBoundLore = const ()
             , rephraseBodyLore = const ()
-            , rephraseFParamLore = const ()
-            , rephraseLParamLore = const ()
+            , rephraseFParamLore = declTypeOf
+            , rephraseLParamLore = typeOf
             , rephraseRetType = removeRetTypeLore
             }
 

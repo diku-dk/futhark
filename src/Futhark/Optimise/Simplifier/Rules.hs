@@ -211,12 +211,12 @@ simplifyKernelInputs vtable (Let pat _ (LoopOp (MapKernel cs w index ispace inps
         MapKernel (cs++concat extra_cs) w index ispace
         (catMaybes inps') returns body'
   where defOf = (`ST.lookupExp` vtable)
-        typeOf (Var v) = ST.lookupType v vtable
-        typeOf (Constant v) = Just $ Basic $ basicValueType v
+        seType (Var v) = ST.lookupType v vtable
+        seType (Constant v) = Just $ Basic $ basicValueType v
         index_env = HM.fromList $ zip (map fst ispace) $ repeat $ Basic Int
 
         simplifyInput inp@(KernelInput param arr is) =
-          case simplifyIndexing defOf typeOf arr is of
+          case simplifyIndexing defOf seType arr is of
             Just (IndexResult inp_cs arr' is') ->
               (Just $ KernelInput param arr' is', inp_cs, Nothing)
             Just (SubExpResult se) ->
@@ -293,7 +293,7 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form bo
                     loopResultContext (representative :: Lore m) respat (map fst merge) ++
                     respat
         (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
-        references name = maybe [] (HS.toList . freeIn . paramLore) $
+        references name = maybe [] (HS.toList . freeIn) $
                           find ((name==) . paramName) $
                           map fst merge
 removeUnusedLoopResult _ _ = cannotSimplify
@@ -334,15 +334,13 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
        letBind_ pat $ LoopOp $ DoLoop respat merge' form body''
   where (mergepat, _) = unzip merge
         explicitlyReturned = (`elem` respat) . paramName
-        patAnnotNames = mconcat [ freeIn (paramType bindee) <>
-                                  freeIn (paramLore bindee)
-                                | bindee <- mergepat ]
+        patAnnotNames = mconcat $ map freeIn mergepat
         referencedInPat = (`HS.member` patAnnotNames) . paramName
         referencedInForm = (`HS.member` freeIn form) . paramName
 
         dummyBindings = map dummyBinding
         dummyBinding ((p,e), _)
-          | unique (paramType p),
+          | unique (paramDeclType p),
             Var v <- e            = ([paramName p], PrimOp $ Copy v)
           | otherwise             = ([paramName p], PrimOp $ SubExp e)
 removeRedundantMergeVariables _ _ =
@@ -415,7 +413,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)
-          | not (unique (paramType mergeParam)),
+          | not (unique (paramDeclType mergeParam)),
             isInvariant resExp =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
@@ -458,10 +456,10 @@ type LetTopDownRule lore u = VarLookup lore -> TypeLookup
 
 letRule :: MonadBinder m => LetTopDownRule (Lore m) u -> TopDownRule m
 letRule rule vtable (Let pat _ (PrimOp op)) =
-  letBind_ pat =<< liftMaybe (PrimOp <$> rule defOf typeOf op)
+  letBind_ pat =<< liftMaybe (PrimOp <$> rule defOf seType op)
   where defOf = (`ST.lookupExp` vtable)
-        typeOf (Var v) = ST.lookupType v vtable
-        typeOf (Constant v) = Just $ Basic $ basicValueType v
+        seType (Var v) = ST.lookupType v vtable
+        seType (Constant v) = Just $ Basic $ basicValueType v
 letRule _ _ _ =
   cannotSimplify
 
@@ -501,15 +499,15 @@ simplifKnownIterationLoop _ (Let pat _
         asVar (Constant v) = letExp "named" $ PrimOp $ SubExp $ Constant v
 
         setParamName param name =
-          param { paramIdent = (paramIdent param) { identName = name } }
+          param { paramName = name }
 simplifKnownIterationLoop _ _ =
   cannotSimplify
 
 simplifyRearrange :: LetTopDownRule lore u
 
 -- Handle identity permutation.
-simplifyRearrange _ typeOf (Rearrange _ perm e)
-  | Just t <- typeOf $ Var e,
+simplifyRearrange _ seType (Rearrange _ perm e)
+  | Just t <- seType $ Var e,
     perm == [0..arrayRank t - 1] = Just $ SubExp $ Var e
 
 simplifyRearrange defOf _ (Rearrange cs perm v) =
@@ -574,9 +572,9 @@ simplifyBinOp _ _ (BinOp Quot e1 e2 _)
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = return $ x `quot` y
 
-simplifyBinOp _ typeOf (BinOp Pow e1 e2 _)
+simplifyBinOp _ seType (BinOp Pow e1 e2 _)
   | isCt0 e2 =
-    case typeOf e1 of
+    case seType e1 of
       Just (Basic Int)     -> binOpRes $ IntVal 1
       Just (Basic Float32) -> binOpRes $ Float32Val 1.0
       Just (Basic Float64) -> binOpRes $ Float64Val 1.0
@@ -715,8 +713,8 @@ simplifyAssert _ _ _ =
   Nothing
 
 simplifyIndex :: LetTopDownRule lore u
-simplifyIndex defOf typeOf (Index cs idd inds) =
-  case simplifyIndexing defOf typeOf idd inds of
+simplifyIndex defOf seType (Index cs idd inds) =
+  case simplifyIndexing defOf seType idd inds of
     Just (SubExpResult se) ->
       Just $ SubExp se
     Just (IndexResult extra_cs idd' inds') ->
@@ -731,7 +729,7 @@ data IndexResult = IndexResult Certificates VName [SubExp]
 simplifyIndexing :: VarLookup lore -> TypeLookup
                  -> VName -> [SubExp]
                  -> Maybe IndexResult
-simplifyIndexing defOf typeOf idd inds =
+simplifyIndexing defOf seType idd inds =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
@@ -760,26 +758,26 @@ simplifyIndexing defOf typeOf idd inds =
       -- be important for coalescing.
       | Just (PrimOp Rearrange{}) <- defOf src ->
           Nothing
-      | Just dims <- arrayDims <$> typeOf (Var src),
+      | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims ->
           Just $ IndexResult [] src inds
 
     Just (Reshape cs newshape src)
       | Just newdims <- shapeCoercion newshape,
-        Just olddims <- arrayDims <$> typeOf (Var src),
+        Just olddims <- arrayDims <$> seType (Var src),
         changed_dims <- zipWith (/=) newdims olddims,
         not $ or $ drop (length inds) changed_dims ->
         Just $ IndexResult cs src inds
 
       | Just newdims <- shapeCoercion newshape,
-        Just olddims <- arrayDims <$> typeOf (Var src),
+        Just olddims <- arrayDims <$> seType (Var src),
         length newshape == length inds,
         length olddims == length newdims ->
         Just $ IndexResult cs src inds
 
 
     Just (Reshape cs [_] v2)
-      | Just [_] <- arrayDims <$> typeOf (Var v2) ->
+      | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ IndexResult cs v2 inds
 
     _ -> Nothing
@@ -878,7 +876,7 @@ simplifyBoolBranch _
     (Body _ [] [Constant (LogVal False)])
     _)) =
   letBind_ pat $ PrimOp $ SubExp cond
--- When typeOf(x)==bool, if c then x else y == (c && x) || (!c && y)
+-- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
 simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
   | Body _ [] [tres] <- tb,
     Body _ [] [fres] <- fb,
@@ -987,8 +985,8 @@ simplifyScalExp vtable (Let pat _ e) = do
         mkConj (x:xs) = foldl SE.SLogAnd x xs
 
 simplifyIdentityReshape :: LetTopDownRule lore u
-simplifyIdentityReshape _ typeOf (Reshape _ newshape v)
-  | Just t <- typeOf $ Var v,
+simplifyIdentityReshape _ seType (Reshape _ newshape v)
+  | Just t <- seType $ Var v,
     newDims newshape == arrayDims t = -- No-op reshape.
     Just $ SubExp $ Var v
 simplifyIdentityReshape _ _ _ = Nothing
@@ -1006,8 +1004,8 @@ simplifyReshapeScratch defOf _ (Reshape _ newshape v)
 simplifyReshapeScratch _ _ _ = Nothing
 
 improveReshape :: LetTopDownRule lore u
-improveReshape _ typeOf (Reshape cs newshape v)
-  | Just t <- typeOf $ Var v,
+improveReshape _ seType (Reshape cs newshape v)
+  | Just t <- seType $ Var v,
     newshape' <- informReshape (arrayDims t) newshape,
     newshape' /= newshape =
       Just $ Reshape cs newshape' v
@@ -1016,8 +1014,8 @@ improveReshape _ _ _ = Nothing
 -- | If we are copying a scratch array (possibly indirectly), just turn it into a scratch by
 -- itself.
 copyScratchToScratch :: LetTopDownRule lore u
-copyScratchToScratch defOf typeOf (Copy src) = do
-  t <- typeOf $ Var src
+copyScratchToScratch defOf seType (Copy src) = do
+  t <- seType $ Var src
   if isActuallyScratch src then
     Just $ Scratch (elemType t) (arrayDims t)
     else Nothing
@@ -1034,7 +1032,7 @@ removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
 removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
   t <- lookupType v
   let originalNotUsedAnymore =
-        unique t && not (any (`UT.used` used) $ vnameAliases v)
+        not (any (`UT.used` used) $ vnameAliases v)
   if basicType t || originalNotUsedAnymore
     then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
     else cannotSimplify

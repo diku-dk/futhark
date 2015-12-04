@@ -57,6 +57,7 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.TypeEnv
+import qualified Futhark.Representation.AST.Annotations as Annotations
 
 -- | The type of a subexpression.
 subExpType :: HasTypeEnv m => SubExp -> m Type
@@ -67,7 +68,7 @@ subExpType (Var name)     = lookupType name
 -- an array with size equal to the outermost dimension of the first
 -- element of @arrts@.
 mapType :: SubExp -> Lambda lore -> [Type]
-mapType outersize f = [ arrayOf t (Shape [outersize]) Unique
+mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
                       | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
@@ -76,9 +77,8 @@ primOpType :: HasTypeEnv m =>
 primOpType (SubExp se) =
   pure <$> subExpType se
 primOpType (ArrayLit es rt) =
-  arrays <$> traverse subExpType es
+  pure [arrayOf rt (Shape [n]) NoUniqueness]
   where n = Constant (value (length es))
-        arrays ts = [arrayOf rt (Shape [n]) $ mconcat $ map uniqueness ts]
 primOpType (BinOp _ _ _ t) =
   pure [Basic t]
 primOpType (Not _) =
@@ -95,12 +95,12 @@ primOpType (Index _ ident idx) =
   result <$> lookupType ident
   where result t = [stripArray (length idx) t]
 primOpType (Iota ne) =
-  pure [arrayOf (Basic Int) (Shape [ne]) Nonunique]
+  pure [arrayOf (Basic Int) (Shape [ne]) NoUniqueness]
 primOpType (Replicate ne e) =
   result <$> subExpType e
-  where result t = [arrayOf t (Shape [ne]) Unique]
+  where result t = [arrayOf t (Shape [ne]) NoUniqueness]
 primOpType (Scratch t shape) =
-  pure [arrayOf (Basic t) (Shape shape) Unique]
+  pure [arrayOf (Basic t) (Shape shape) NoUniqueness]
 primOpType (Reshape _ [] e) =
   result <$> lookupType e
   where result t = [Basic $ elemType t]
@@ -120,10 +120,9 @@ primOpType (Split _ sizeexps e) =
 primOpType (Concat _ x _ ressize) =
   result <$> lookupType x
   where result xt =
-          [xt `setUniqueness` Unique `setOuterSize` ressize]
+          [xt `setOuterSize` ressize]
 primOpType (Copy v) =
-  result <$> lookupType v
-  where result t = [t `setUniqueness` Unique]
+  pure <$> lookupType v
 primOpType (Assert _ _) =
   pure [Basic Cert]
 primOpType (Alloc e space) =
@@ -133,20 +132,19 @@ primOpType (Partition _ n _ arrays) =
   where result ts = replicate n (Basic Int) ++ ts
 
 -- | The type of a loop operation.
-loopOpExtType :: LoopOp lore -> [ExtType]
+loopOpExtType :: Typed (Annotations.FParam lore) =>
+                 LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (paramIdent . fst) merge
 loopOpExtType (Map _ size f _) =
   staticShapes $ mapType size f
 loopOpExtType (ConcatMap _ _ f _) =
-  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) Unique
+  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) NoUniqueness
   | t <- lambdaReturnType f ]
 loopOpExtType (Reduce _ _ fun _) =
   staticShapes $ lambdaReturnType fun
 loopOpExtType (Scan _ width lam _) =
-  staticShapes $
-  map ((`setUniqueness` Unique) . (`arrayOfRow` width)) $
-  lambdaReturnType lam
+  staticShapes $ map (`arrayOfRow` width) $ lambdaReturnType lam
 loopOpExtType (Redomap _ outersize outerfun innerfun _ _) =
   staticShapes $
   let acc_tp    = lambdaReturnType outerfun
@@ -154,10 +152,10 @@ loopOpExtType (Redomap _ outersize outerfun innerfun _ _) =
       res_el_tp = drop (length acc_tp) acc_el_tp
   in  case res_el_tp of
         [] -> acc_tp
-        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) Unique |
+        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) NoUniqueness |
                           eltp <- res_el_tp ]
 loopOpExtType (Stream _ outersize form lam _ _) =
-  map (substNamesInExtType substs . (`setUniqueness` Unique)) rtp
+  map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
         substs = HM.fromList $ zip nms (outersize:accs)
         ExtLambda _ params _ rtp = lam
@@ -167,7 +165,7 @@ loopOpExtType (Stream _ outersize form lam _ _) =
                 Sequential  acc -> acc
 loopOpExtType (MapKernel _ _ _ is _ returns _) =
   staticShapes
-  [ rearrangeType perm (arrayOfShape t outer_shape) `setUniqueness` Unique
+  [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
 loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
@@ -188,19 +186,22 @@ segOpExtType (SegScan _ _ _ _ inputs _) =
   staticShapes <$> traverse (lookupType . snd) inputs
 segOpExtType (SegReplicate _ _ dataarr _) =
   result <$> lookupType dataarr
-  where result t = [Array (elemType t) (ExtShape [Ext 0]) Nonunique]
+  where result t = [Array (elemType t) (ExtShape [Ext 0]) NoUniqueness]
 
 -- | The type of an expression.
-expExtType :: (HasTypeEnv m, IsRetType (RetType lore)) =>
+expExtType :: (HasTypeEnv m, IsRetType (RetType lore),
+              Typed (Annotations.FParam lore)) =>
               Exp lore -> m [ExtType]
-expExtType (Apply _ _ rt) = pure $ retTypeValues rt
+expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
 expExtType (LoopOp op)    = pure $ loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
 expExtType (SegOp op)     = segOpExtType op
 
 -- | The number of values returned by an expression.
-expExtTypeSize :: IsRetType (RetType lore) => Exp lore -> Int
+expExtTypeSize :: (IsRetType (RetType lore),
+                   Typed (Annotations.FParam lore)) =>
+                  Exp lore -> Int
 expExtTypeSize = length . feelBad . expExtType
 
 -- FIXME, this is a horrible quick hack.
@@ -229,14 +230,14 @@ bodyExtType (Body _ bnds res) =
 
 -- | Given an the return type of a function and the values returned by
 -- that function, return the size context.
-valueShapeContext :: [ExtType] -> [Value] -> [Value]
+valueShapeContext :: [TypeBase ExtShape u] -> [Value] -> [Value]
 valueShapeContext rettype values =
   map (BasicVal . value) $ extractShapeContext rettype $ map valueShape values
 
 -- | Given the return type of a function and the subexpressions
 -- returned by that function, return the size context.
 subExpShapeContext :: HasTypeEnv m =>
-                      [ExtType] -> [SubExp] -> m [SubExp]
+                      [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
   extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
 
@@ -267,22 +268,23 @@ loopExtType res merge =
 -- subexpressions (with associated type) as arguments to a function of
 -- the given return type and parameters.  Returns 'Nothing' if the
 -- application is invalid.
-applyExtType :: ExtRetType -> [Ident]
-             -> [(SubExp,Type)]
+applyExtType :: Typed attr =>
+                ExtRetType -> [Param attr]
+             -> [(SubExp, Type)]
              -> Maybe ExtRetType
 applyExtType (ExtRetType extret) params args =
   if length args == length params &&
-     and (zipWith subtypeOf
+     and (zipWith (==)
           (map rankShaped argtypes)
           (map rankShaped paramtypes))
   then Just $ ExtRetType $ map correctDims extret
   else Nothing
   where argtypes = map snd args
-        paramtypes = map identType params
+        paramtypes = map typeOf params
 
         parammap :: HM.HashMap VName SubExp
         parammap = HM.fromList $
-                   zip (map identName params) (map fst args)
+                   zip (map paramName params) (map fst args)
 
         correctDims t =
           t `setArrayShape`
@@ -304,7 +306,7 @@ typeEnvFromBindings :: [Binding lore] -> TypeEnv
 typeEnvFromBindings = mconcat . map (typeEnvFromPattern . bindingPattern)
 
 -- | Create a type environment from function parameters.
-typeEnvFromParams :: [Param attr] -> TypeEnv
+typeEnvFromParams :: Typed attr => [Param attr] -> TypeEnv
 typeEnvFromParams = typeEnvFromIdents . map paramIdent
 
 -- | Create a type environment from 'Ident's.
@@ -317,7 +319,7 @@ typeEnvFromPattern :: Pattern lore -> TypeEnv
 typeEnvFromPattern = typeEnvFromIdents . patternIdents
 
 -- | Execute an action with a locally extended type environment.
-withParamTypes :: LocalTypeEnv m =>
+withParamTypes :: (LocalTypeEnv m, Typed attr) =>
                   [Param attr] -> m a -> m a
 withParamTypes = localTypeEnv . typeEnvFromParams
 

@@ -99,6 +99,7 @@ analyseExp e = Out.mapExpM analyse e
                      , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
                      , Out.mapOnRetType = return
                      , Out.mapOnFParam = return
+                     , Out.mapOnLParam = return
                      }
 
 analyseLambda :: Lore lore =>
@@ -131,7 +132,8 @@ type RangeM = Reader RangeEnv
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 
-bindFunParams :: [Out.ParamT attr] -> RangeM a -> RangeM a
+bindFunParams :: Out.Typed attr =>
+                 [Out.ParamT attr] -> RangeM a -> RangeM a
 bindFunParams []             m =
   m
 bindFunParams (param:params) m = do

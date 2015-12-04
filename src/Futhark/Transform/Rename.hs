@@ -177,7 +177,7 @@ instance Rename SubExp where
   rename (Constant v) = return $ Constant v
 
 instance Rename attr => Rename (ParamT attr) where
-  rename (Param ident attr) = Param <$> rename ident <*> rename attr
+  rename (Param name attr) = Param <$> rename name <*> rename attr
 
 instance Renameable lore => Rename (Pattern lore) where
   rename (Pattern context values) = Pattern <$> rename context <*> rename values
@@ -249,10 +249,11 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnCertificates = mapM rename
                     , mapOnRetType = rename
                     , mapOnFParam = rename
+                    , mapOnLParam = rename
                     }
 
-instance (Rename shape) =>
-         Rename (TypeBase shape) where
+instance Rename shape =>
+         Rename (TypeBase shape u) where
   rename (Array et size u) = do
     size' <- rename size
     return $ Array et size' u

@@ -192,7 +192,8 @@ eValue (ArrayVal a bt shape) = do
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (Constant . IntVal . fromIntegral) rowshape) Nonunique
+      rowtype = Array bt (Shape $ map (Constant . IntVal . fromIntegral) rowshape)
+                NoUniqueness
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ PrimOp $ ArrayLit ses rowtype
 
@@ -248,8 +249,8 @@ binOpLambda bop t = do
     return $ resultBody [res]
   return Lambda {
              lambdaIndex      = i
-           , lambdaParams     = [Param (Ident x (Basic t)) (),
-                                 Param (Ident y (Basic t)) ()]
+           , lambdaParams     = [Param x (Basic t),
+                                 Param y (Basic t)]
            , lambdaReturnType = [Basic t]
            , lambdaBody       = body
            }
@@ -291,13 +292,13 @@ mapResult f (Body _ bnds res) =
   in mkBody (bnds<>bnds2) newres
 
 -- | Instantiate all existential parts dimensions of the given
--- 'RetType', using a monadic action to create the necessary
--- 'SubExp's.  You should call this function within some monad that
--- allows you to collect the actions performed (say, 'Writer').
+-- type, using a monadic action to create the necessary 'SubExp's.
+-- You should call this function within some monad that allows you to
+-- collect the actions performed (say, 'Writer').
 instantiateShapes :: Monad m =>
                      (Int -> m SubExp)
-                  -> [TypeBase ExtShape]
-                  -> m [TypeBase Shape]
+                  -> [TypeBase ExtShape u]
+                  -> m [TypeBase Shape u]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
           shape <- mapM instantiate' $ extShapeDims $ arrayShape t
@@ -312,8 +313,8 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
         instantiate' (Free se) = return se
 
 instantiateShapes' :: MonadFreshNames m =>
-                      [TypeBase ExtShape]
-                   -> m ([TypeBase Shape], [Ident])
+                      [TypeBase ExtShape u]
+                   -> m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
   where instantiate _ = do v <- lift $ newIdent "size" (Basic Int)

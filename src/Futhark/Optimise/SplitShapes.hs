@@ -74,15 +74,14 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   -- The shape function should not consume its arguments - if it wants
   -- to do in-place stuff, it needs to copy them first.  In most
   -- cases, these copies will be removed by the simplifier.
-  ((shapeParams, cpybnds),_) <- runBinderEmptyEnv $ nonuniqueParams params
+  ((shapeParams, cpybnds),_) <- runBinderEmptyEnv $ nonuniqueFParams params
 
   -- Give names to the existentially quantified sizes of the return
   -- type.  These will be passed as parameters to the value function.
-  (staticRettype, shapeidents) <-
+  (staticRettype, valueShapeParams) <-
     runWriterT $
     instantiateShapes instantiate $ retTypeValues rettype
-  let valueShapeParams = map (`Param` ()) shapeidents
-      valueParams = valueShapeParams ++ params
+  let valueParams = valueShapeParams ++ params
       valueRettype = ExtRetType $ staticShapes staticRettype
 
   localTypeEnv (typeEnvFromBindings bodybnds <>
@@ -93,7 +92,7 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
     valueBody <- substituteExtResultShapes staticRettype body
 
     let shapeBody = mkBody (cpybnds <> bodybnds) shapes
-        fShape = FunDec shapeFname (ExtRetType $ staticShapes shapetypes)
+        fShape = FunDec shapeFname (ExtRetType $ staticShapes $ map (`toDecl` Unique) shapetypes)
                  shapeParams
                  shapeBody
         fValue = FunDec valueFname valueRettype
@@ -103,11 +102,11 @@ functionSlices (FunDec fname rettype params body@(Body _ bodybnds bodyres)) = do
   where shapeFname = fname <> nameFromString "_shape"
         valueFname = fname <> nameFromString "_value"
 
-        instantiate _ = do v <- lift $ newIdent "precomp_shape" (Basic Int)
-                           tell [v]
-                           return $ Var $ identName v
+        instantiate _ = do p <- lift $ newParam "precomp_shape" (Basic Int)
+                           tell [p]
+                           return $ Var $ paramName p
 
-substituteExtResultShapes :: [Type] -> Body -> SplitM Body
+substituteExtResultShapes :: [DeclType] -> Body -> SplitM Body
 substituteExtResultShapes rettype (Body _ bnds res) = do
   compshapes <- typesShapes <$> mapM subExpType res
   let subst = HM.fromList $ mapMaybe isSubst $ zip compshapes $ typesShapes rettype
@@ -164,7 +163,7 @@ substCalls subst fundec = do
           return $ lam { lambdaBody = body }
 
         treatBinding (Let pat _ (Apply fname args _))
-          | Just (shapefun,shapetype,valfun,_) <- lookup fname subst =
+          | Just (shapefun,shapetype,valfun,valtype) <- lookup fname subst =
             liftM snd . runBinderEmptyEnv $ do
               let (vs,vals) =
                     splitAt (length $ retTypeValues shapetype) $
@@ -172,8 +171,7 @@ substCalls subst fundec = do
               letBind_ (Pattern [] vs) $
                 Apply shapefun args shapetype
               letBind_ (Pattern [] vals) $
-                Apply valfun ([(Var $ patElemName v,Observe) | v <- vs]++args)
-                (ExtRetType $ staticShapes $ map patElemType vals)
+                Apply valfun ([(Var $ patElemName v,Observe) | v <- vs]++args) valtype
 
         treatBinding (Let pat _ e) = do
           e' <- mapExpM mapper e

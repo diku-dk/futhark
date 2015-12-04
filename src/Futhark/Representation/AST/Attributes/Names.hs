@@ -213,14 +213,14 @@ instance FreeIn ExtShape where
     where freeInExtDimSize (Free se) = freeIn se
           freeInExtDimSize (Ext _)   = mempty
 
-instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape) where
+instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape
   freeIn (Mem size _)      = freeIn size
   freeIn (Basic _)         = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where
-  freeIn (Param ident attr) =
-    freeIn ident <> freeIn attr
+  freeIn (Param _ attr) =
+    freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where
   freeIn (PatElem ident bindage attr) =

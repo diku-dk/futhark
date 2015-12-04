@@ -38,30 +38,19 @@ usageInExp (Apply _ args _) =
 usageInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
-          | (v,se) <- merge, unique $ paramType v ]
-usageInExp (LoopOp (Map _ _ f args)) =
-  mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ vnameAliases se
-          | (v,se) <- zip (lambdaParams f) args,
-            unique $ paramType v ]
-usageInExp (LoopOp (Reduce _ _ f args)) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map subExpAliases acc ++
-                       map vnameAliases arr,
-            unique $ paramType v ]
-  where (acc, arr) = unzip args
-usageInExp (LoopOp (Scan _ _ f args)) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map subExpAliases acc ++
-                       map vnameAliases arr,
-            unique $ paramType v ]
-  where (acc, arr) = unzip args
-usageInExp (LoopOp (Redomap _ _ _ f acc arr)) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map subExpAliases acc ++
-                       map vnameAliases arr,
-            unique $ paramType v ]
+          | (v,se) <- merge, unique $ paramDeclType v ]
+usageInExp (LoopOp (Map _ _ f _)) =
+  usageInLambda f
+usageInExp (LoopOp (Reduce _ _ f _)) =
+  usageInLambda f
+usageInExp (LoopOp (Scan _ _ f _)) =
+  usageInLambda f
+usageInExp (LoopOp (Redomap _ _ _ f _ _)) =
+  usageInLambda f
 usageInExp _ = UT.empty
+
+usageInLambda :: Aliased lore => Lambda lore -> UT.UsageTable
+usageInLambda =
+  mconcat .
+  map UT.consumedUsage .
+  HS.toList . consumedInBody . lambdaBody

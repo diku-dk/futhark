@@ -80,7 +80,7 @@ transformBinding (Let pat () (LoopOp (Map cs width fun arrs))) = do
       out_ts = mapType width fun
   resarr <- resultArray out_ts
   outarrs <- forM out_ts $ \t ->
-             newIdent "map_outarr" $ t `setUniqueness` Unique
+             newIdent "map_outarr" t
   let outarrs_names = map identName outarrs
       i_ident = Ident i $ Basic Int
   loopbody <- runBodyBinder $ bindingIdentTypes (i_ident:outarrs) $ do
@@ -90,8 +90,7 @@ transformBinding (Let pat () (LoopOp (Map cs width fun arrs))) = do
   addBinding $ Let pat' () $ LoopOp $
     DoLoop outarrs_names (loopMerge outarrs (map Var resarr))
     (ForLoop i width) loopbody
-  where pat' = basicPattern' [] $ map (`setIdentUniqueness` Unique) $
-               patternValueIdents pat
+  where pat' = basicPattern' [] $ patternValueIdents pat
 
 transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
   arrs <- forM inputs $ \input -> do
@@ -140,10 +139,7 @@ transformBinding (Let pat () (LoopOp (ConcatMap cs _ fun inputs))) = do
 transformBinding (Let pat () (LoopOp (Reduce cs width fun args))) = do
   (acc, initacc) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
-  let arrus = map (uniqueness . paramType) $
-              snd $ splitAt (length args) $ lambdaParams fun
-  inarrs <- forM (zip arrts arrus) $ \(t,u) ->
-            newIdent "reduce_inarr" (setUniqueness t u)
+  inarrs <- mapM (newIdent "reduce_inarr") arrts
   loopbody <- runBodyBinder $ bindingIdentTypes (inarrs++acc) $ do
     acc' <- bindLambda fun
             (map (PrimOp . SubExp . Var . identName) acc ++
@@ -160,8 +156,7 @@ transformBinding (Let pat () (LoopOp (Scan cs width fun args))) = do
   (acc, initacc) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
-  arr <- forM arrts $ \t ->
-    newIdent "scan_arr" $ t `setUniqueness` Unique
+  arr <- mapM (newIdent "scan_arr" ) arrts
   let arr_names = map identName arr
   loopbody <- insertBindingsM $ bindingIdentTypes (acc++arr) $ do
     x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
@@ -184,17 +179,14 @@ transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexp
   let acc_num     = length accexps
   let res_tps     = lambdaReturnType innerfun
   let map_arr_tps = drop acc_num res_tps
-  let res_ts = [ arrayOf t (Shape [width]) (uniqueness t)
+  let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                | t <- map_arr_tps ]
-  let arrus = map (uniqueness . paramType) $
-              snd $ splitAt acc_num $ lambdaParams innerfun
-      accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
+  let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
   maparrs <- resultArray res_ts
-  outarrs <- forM res_ts $ \t ->
-             newIdent "redomap_outarr" $ t `setUniqueness` Unique
+  outarrs <- mapM (newIdent "redomap_outarr") res_ts
   -- for the REDUCE part
   (acc, initacc) <- newFold $ zip accexps accts
-  inarrs <- mapM (newIdent "redomap_inarr") $ zipWith setUniqueness arrts arrus
+  inarrs <- mapM (newIdent "redomap_inarr") arrts
   loopbody <- runBodyBinder $ bindingIdentTypes (inarrs++acc++outarrs) $ do
     accxis<- bindLambda innerfun
              (map (PrimOp . SubExp . Var . identName) acc ++
@@ -208,7 +200,6 @@ transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexp
     (loopMerge (inarrs++acc++outarrs)
      (map Var arrexps++initacc++map Var maparrs))
     (ForLoop i width) loopbody
-
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
@@ -279,11 +270,6 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
                 chnk:_ -> return chnk
                 _ -> fail "FirstOrderTransform Stream: chunk error!"
   outersz  <- arraysSize 0 <$> mapM lookupType arrexps
-{-
-  let chunkglb_val = case ii of
-                       MinChunk -> intconst 1
-                       MaxChunk -> outersz
--}
   let chunkglb_val = case form of
                        Sequential{} -> intconst 1
                        _            -> outersz
@@ -291,8 +277,6 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
   let acc_num = length accexps
       arrrtps = drop acc_num lamrtps
       sub_chko= HM.fromList [(paramName chunkloc, outersz)]
-      arruniq = map (uniqueness . paramType)
-                    (snd $ splitAt (acc_num+1) lampars)
   -- 2.) Make the existential induction variables, allocated-size variables,
   --       and all possible instantiations of the existential types, i.e.,
   --       inside and outside the loop body!
@@ -307,7 +291,7 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
                     dims  = extShapeDims $ arrayShape tp
                     dims' = map (exToNormShapeDim deflt sub_chko) dims
                     restp :: Type
-                    restp = Array (elemType tp) (Shape dims') (uniqueness tp)
+                    restp = Array (elemType tp) (Shape dims') NoUniqueness
                 return restp
   (mexistszs,mexistinds,botharrtps) <-
     unzip3 <$> forM (zip assocs initrtps) (mkAllExistIdAndTypes outersz)
@@ -317,13 +301,13 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
       patarrnms = map (textual . identName) (fst $ unzip assocs)
   -- various result array identifiers
   outarrinit <- forM (zip initrtps  patarrnms) $ \(t,nm) ->
-                    newIdent (nm++"_init") $ t `setUniqueness` Unique
+                    newIdent (nm++"_init") t
   outarrloop <- forM (zip lftedrtps1 patarrnms) $ \(t,nm) ->
-                    newIdent (nm++"_loop") $ t `setUniqueness` Unique
+                    newIdent (nm++"_loop") t
   strmresarrl<- forM (zip lftedrtps2 patarrnms) $ \(t,nm) ->
-                    newIdent (nm++"_resL") $ t `setUniqueness` Unique
+                    newIdent (nm++"_resL") t
   strmresarr <- forM (zip exactrtps patarrnms) $ \(t,nm) ->
-                    newIdent (nm++"_resE") $ t `setUniqueness` Unique
+                    newIdent (nm++"_resE") t
   strmresacc <- mapM (newIdent "stream_accres" <=< subExpType) accexps
   -- various stream array identifiers and outer sizes
   acc0     <- mapM (newIdent "acc" <=< subExpType) accexps
@@ -340,9 +324,6 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
       accxis <- bodyBind =<< do
           -- for accumulators:
           forM_ (zip accpars argsacc) $ \(param, arg) ->
-            if unique (paramType param) then
-              letBindNames' [paramName param] =<< eCopy (pure arg)
-            else
               letBindNames' [paramName param] arg
           -- ilam := i*chunk_glb, the local chunk inside the loop
           ilamexp <- eBinOp Times
@@ -387,15 +368,15 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
                              Int
           addBinding $ myMkLet diff1exp diff1id
           -- split input streams into current chunk and rest of stream
-          forM_ (zip3 arrpars arrexps arruniq) $
-            \(param, inarr, u) -> do
+          forM_ (zip arrpars arrexps) $
+            \(param, inarr) -> do
                 atp <- lookupType inarr
                 let anm = textual inarr
                 (dt1,t2,dt4) <- case atp of
                     Array bt (Shape (_:dims)) _ ->
-                        return ( Array bt (Shape $ Var (identName diff1id):dims) u
-                               , Array bt (Shape $ Var chunkglb           :dims) u
-                               , Array bt (Shape $ Var (identName diffid ):dims) u )
+                        return ( Array bt (Shape $ Var (identName diff1id):dims) NoUniqueness
+                               , Array bt (Shape $ Var chunkglb           :dims) NoUniqueness
+                               , Array bt (Shape $ Var (identName diffid ):dims) NoUniqueness)
                     _ -> fail "FirstOrderTransform(Stream): array of not array type"
                 id1 <- newIdent "dead" dt1
                 id2 <- newIdent (anm++"_chg" ) t2
@@ -405,15 +386,12 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
                 let split1= PrimOp $ Split [] [Var $ identName diff1id, Var chunkglb] inarr
                 _ <- letBindNames' [identName id1, identName id2] split1
                 -- a_cg* := copy(a_cg)
-                id' <- case u of
-                        Unique -> do _ <- letBindNames' [identName id3] =<<
-                                            eCopy (pure (PrimOp $ SubExp $ Var $ identName id2))
-                                     return id3
-                        _      ->    return id2
+                letBindNames'_ [identName id3] =<<
+                  eCopy (pure (PrimOp $ SubExp $ Var $ identName id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
                 let split2= PrimOp $ Split [] [Var $ identName diffid,
                                                Var $ paramName chunkloc] $
-                                     identName id'
+                                     identName id3
                 letBindNames' [identName id4, paramName param] split2
           return $ Body (bodyLore lambody) (bodyBindings lambody) (bodyResult lambody)
       -- make copy-out epilogue for result arrays
@@ -587,7 +565,7 @@ transformBinding (Let respat () (LoopOp (Stream cs _ form lam arrexps _))) = do
                         allocifexp <- eIf isempty emptybranch otherbranch
                         bnew'' <- newIdent (textual (identName glboutid)++"_res") $
                                            Array (elemType oldbtp)
-                                           (Shape $ Var (identName resallocid):olddims) Unique
+                                           (Shape $ Var (identName resallocid):olddims) NoUniqueness
                         let patresbnd = mkLet' [resallocid] [bnew''] allocifexp
                         addBinding patresbnd
                         return (Var $ identName k, bnew'', Just newszid, Just resallocid)
@@ -651,7 +629,7 @@ index :: Certificates -> [VName] -> SubExp -> [Exp]
 index cs arrs i = flip map arrs $ \arr ->
   PrimOp $ Index cs arr [i]
 
-resultArray :: [TypeBase Shape] -> Binder Basic [VName]
+resultArray :: [Type] -> Binder Basic [VName]
 resultArray = mapM oneArray
   where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
 
@@ -669,14 +647,12 @@ pexp = pure . PrimOp . SubExp
 bindLambda :: Lambda -> [Exp] -> Binder Basic [SubExp]
 bindLambda (Lambda _ params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
-    if unique (paramType param) then
-      letBindNames' [paramName param] =<< eCopy (pure arg)
-    else
-      letBindNames' [paramName param] arg
+    letBindNames' [paramName param] arg
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
-loopMerge vars vals = [ (Param var (), val) | (var,val) <- zip vars vals ]
+loopMerge vars vals = [ (Param pname $ toDecl ptype Unique, val)
+                      | (Ident pname ptype,val) <- zip vars vals ]
 
 
 withUpperBound :: Bool

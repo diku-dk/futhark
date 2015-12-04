@@ -10,6 +10,7 @@ module Futhark.Representation.AST.Syntax.Core
 
          -- * Types
          , Uniqueness(..)
+         , NoUniqueness(..)
          , Shape(..)
          , ExtDimSize(..)
          , ExtShape(..)
@@ -20,6 +21,8 @@ module Futhark.Representation.AST.Syntax.Core
          , TypeBase(..)
          , Type
          , ExtType
+         , DeclType
+         , DeclExtType
          , Diet(..)
 
          -- * Values
@@ -135,21 +138,33 @@ data Space = DefaultSpace
 -- | A string representing a specific non-default memory space.
 type SpaceId = String
 
+-- | A fancier name for '()' - encodes no uniqueness information.
+data NoUniqueness = NoUniqueness
+                  deriving (Eq, Ord, Show)
+
 -- | An Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
-data TypeBase shape = Basic BasicType
-                    | Array BasicType shape Uniqueness
-                    | Mem SubExp Space
+data TypeBase shape u = Basic BasicType
+                      | Array BasicType shape u
+                      | Mem SubExp Space
                     deriving (Show, Eq, Ord)
 
 -- | A type with shape information, used for describing the type of
--- a computation.
-type Type = TypeBase Shape
+-- variables.
+type Type = TypeBase Shape NoUniqueness
 
 -- | A type with existentially quantified shapes - used as part of
 -- function (and function-like) return types.  Generally only makes
 -- sense when used in a list.
-type ExtType = TypeBase ExtShape
+type ExtType = TypeBase ExtShape NoUniqueness
+
+-- | A type with shape and uniqueness information, used declaring
+-- return- and parameters types.
+type DeclType = TypeBase Shape Uniqueness
+
+-- | An 'ExtType' with uniqueness information, used for function
+-- return types.
+type DeclExtType = TypeBase ExtShape Uniqueness
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking three arguments of
@@ -195,15 +210,18 @@ data SubExp = Constant BasicValue
 
 -- | A function parameter.
 data ParamT attr = Param
-                   { paramIdent :: Ident
-                     -- ^ Name and type of the function parameter.
-                   , paramLore :: attr
+                   { paramName :: VName
+                     -- ^ Name of the parameter.
+                   , paramAttr :: attr
                      -- ^ Function parameter attribute.
                    }
                    deriving (Ord, Show, Eq)
 
 -- | A type alias for namespace control.
 type Param = ParamT
+
+instance Functor ParamT where
+  fmap f (Param name attr) = Param name (f attr)
 
 -- | How a name in a let-binding is bound - either as a plain
 -- variable, or in the form of an in-place update.

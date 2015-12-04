@@ -52,7 +52,7 @@ class (Lore.Lore lore,
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Proper lore, Annotations.FParam lore ~ (), Annotations.LParam lore ~ ()) =>
+class (Proper lore, Annotations.FParam lore ~ DeclType, Annotations.LParam lore ~ Type) =>
       Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore

@@ -139,13 +139,11 @@ inPlaceInput name t = do
   input_name    <- newVName $ baseString name <> "_expanded_slice"
   kernel_dims <- asks $ map snd . envKernelSpace
   kernel_indices <- asks $ map fst . envKernelSpace
-  let new_input_ident = Ident input_name unique_t
-      new_input = KernelInput (Param new_input_ident ()) expanded_name $
+  let new_input = KernelInput (Param input_name t) expanded_name $
                   map Var kernel_indices
-      expanded_t = arrayOfShape unique_t $ Shape kernel_dims
+      expanded_t = arrayOfShape t $ Shape kernel_dims
   tell [ExpandedArray new_input expanded_name expanded_t]
   return $ BindInPlace [] input_name []
-  where unique_t = t `setUniqueness` Unique
 
 expandInExp :: Exp -> ExpandM Exp
 expandInExp (LoopOp (DoLoop res merge form body)) =

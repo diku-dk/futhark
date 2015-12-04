@@ -57,8 +57,8 @@ rephrasePatElem rephraser (PatElem ident (BindInPlace cs src is) from) =
   PatElem ident (BindInPlace cs src is) $ rephraser from
 
 rephraseParam :: (from -> to) -> ParamT from -> ParamT to
-rephraseParam rephraser (Param ident from) =
-  Param ident $ rephraser from
+rephraseParam rephraser (Param name from) =
+  Param name $ rephraser from
 
 rephraseBody :: Rephraser from to -> Body from -> Body to
 rephraseBody rephraser (Body lore bnds res) =
@@ -88,4 +88,5 @@ mapper rephraser = identityMapper {
   , mapOnExtLambda = return . rephraseExtLambda rephraser
   , mapOnRetType = return . rephraseRetType rephraser
   , mapOnFParam = return . rephraseParam (rephraseFParamLore rephraser)
+  , mapOnLParam = return . rephraseParam (rephraseLParamLore rephraser)
   }

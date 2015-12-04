@@ -27,8 +27,8 @@ class (Lore lore,
        Pretty (RetType lore),
        Pretty (Pattern lore),
        Pretty (Annotations.LetBound lore),
-       Pretty (Annotations.FParam lore),
-       Pretty (Annotations.LParam lore)) => PrettyLore lore where
+       Pretty (ParamT (Annotations.FParam lore)),
+       Pretty (ParamT (Annotations.LParam lore))) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -49,6 +49,9 @@ commastack = align . stack . punctuate comma
 instance Pretty Uniqueness where
   ppr Unique = star
   ppr Nonunique = empty
+
+instance Pretty NoUniqueness where
+  ppr _ = mempty
 
 instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
@@ -78,26 +81,24 @@ instance Pretty Space where
   ppr DefaultSpace = mempty
   ppr (Space s)    = text "@" <> text s
 
-instance Pretty (TypeBase Shape) where
+instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Basic et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
-instance Pretty (TypeBase ExtShape) where
+instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Basic et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
     where f dim s = brackets $ s <> comma <> ppr dim
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
-instance Pretty (TypeBase Rank) where
+instance Pretty u => Pretty (TypeBase Rank u) where
   ppr (Basic et) = ppr et
-  ppr (Array et (Rank n) u) = u' <> foldl f (ppr et) [1..n]
+  ppr (Array et (Rank n) u) = ppr u <> foldl f (ppr et) [1..n]
     where f s _ = brackets s
-          u' | Unique <- u = star
-             | otherwise = empty
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
@@ -148,11 +149,15 @@ instance Pretty attr => Pretty (PatElemT attr) where
             parens (ppr attr)) <>
     brackets (commasep $ map ppr is)
 
-instance Pretty attr => Pretty (ParamT attr) where
-  ppr (Param ident attr) =
-    ppr (identType ident) <+>
-    ppr (identName ident) <+>
-    parens (ppr attr)
+instance Pretty (ParamT DeclType) where
+  ppr (Param name t) =
+    ppr t <+>
+    ppr name
+
+instance Pretty (ParamT Type) where
+  ppr (Param name t) =
+    ppr t <+>
+    ppr name
 
 instance PrettyLore lore => Pretty (Binding lore) where
   ppr bnd@(Let pat _ e) =

@@ -37,6 +37,7 @@ module Futhark.CodeGen.ImpGen
   , subExpToDimSize
   , sizeToScalExp
   , declaringLParams
+  , declaringFParams
   , declaringVarEntry
   , withParams
   , declaringBasicVar
@@ -200,7 +201,7 @@ instance HasTypeEnv (ImpM op) where
             Array
             (entryArrayElemType arrayEntry)
             (Shape $ map dimSizeToSubExp $ entryArrayShape arrayEntry)
-            Nonunique -- Arbitrary
+            NoUniqueness
           entryType (ScalarVar scalarEntry) =
             Basic $ entryScalarType scalarEntry
 
@@ -256,18 +257,16 @@ compileProg ops ds prog =
   where src = newNameSourceForProg prog
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
-compileInParam fparam = case t of
-  Basic bt ->
+compileInParam fparam = case paramAttr fparam of
+  Scalar bt ->
     return $ Left $ Imp.ScalarParam name bt
-  Mem size space ->
+  MemMem size space ->
     Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> pure space)
-  Array bt shape _ -> do
+  ArrayMem bt shape _ mem ixfun -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
     return $ Right $ ArrayDecl name bt shape' $
       MemLocation mem shape' ixfun
   where name = paramName fparam
-        t    = paramType fparam
-        MemSummary mem ixfun = paramLore fparam
 
 data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] MemLocation
 
@@ -752,11 +751,12 @@ declaringVars = flip $ foldr declaringVar
 
 declaringFParams :: [FParam] -> ImpM op a -> ImpM op a
 declaringFParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramLore fparam)
+  where toPatElem fparam = PatElem (paramIdent fparam) BindVar
+                           (const NoUniqueness <$> paramAttr fparam)
 
 declaringLParams :: [LParam] -> ImpM op a -> ImpM op a
 declaringLParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramLore fparam)
+  where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramAttr fparam)
 
 declaringVarEntry :: VName -> VarEntry -> ImpM op a -> ImpM op a
 declaringVarEntry name entry m = do
@@ -771,22 +771,21 @@ declaringVarEntry name entry m = do
 
 declaringVar :: PatElem -> ImpM op a -> ImpM op a
 declaringVar patElem m =
-  case patElemType patElem of
-    Basic bt -> do
+  case patElemLore patElem of
+    Scalar bt -> do
       let entry = ScalarVar ScalarEntry { entryScalarType    = bt
                                         }
       declaringVarEntry name entry m
-    Mem size space -> do
+    MemMem size space -> do
       size' <- subExpToDimSize size
       let entry = MemVar MemEntry {
               entryMemSize = size'
             , entryMemSpace = space
             }
       declaringVarEntry name entry m
-    Array bt shape _ -> do
+    ArrayMem bt shape _ mem ixfun -> do
       shape' <- mapM subExpToDimSize $ shapeDims shape
-      let MemSummary mem ixfun = patElemLore patElem
-          location = MemLocation mem shape' ixfun
+      let location = MemLocation mem shape' ixfun
           entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt
@@ -921,10 +920,10 @@ lookupMemory name = do
     Just (MemVar entry) -> return entry
     _                   -> throwError $ "Unknown memory block: " ++ textual name
 
-destinationFromParam :: Param MemSummary -> ImpM op ValueDestination
+destinationFromParam :: Param (MemBound u) -> ImpM op ValueDestination
 destinationFromParam param
-  | MemSummary mem ixfun <- paramLore param = do
-      let dims = arrayDims $ paramType param
+  | ArrayMem _ shape _ mem ixfun <- paramAttr param = do
+      let dims = shapeDims shape
       memloc <- MemLocation mem <$> mapM subExpToDimSize dims <*> pure ixfun
       return $
         ArrayDestination (CopyIntoMemory memloc)
@@ -932,7 +931,7 @@ destinationFromParam param
   | otherwise =
       return $ ScalarDestination $ paramName param
 
-destinationFromParams :: [Param MemSummary] -> ImpM op Destination
+destinationFromParams :: [Param (MemBound u)] -> ImpM op Destination
 destinationFromParams = liftM Destination . mapM destinationFromParam
 
 destinationFromPattern :: Pattern -> ImpM op Destination
