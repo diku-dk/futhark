@@ -54,7 +54,7 @@ bindableSimpleOps :: (Engine.MonadEngine m,
                      SimpleOps m
 bindableSimpleOps =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  return return return simplifyRetType'
+  return Engine.simplifyType Engine.simplifyType simplifyRetType'
   where mkLetS' _ pat e = return $
                           mkLet (map asPair $ patternContextElements pat)
                           (map asPair $ patternValueElements pat)
