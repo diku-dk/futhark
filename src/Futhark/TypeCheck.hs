@@ -1338,12 +1338,11 @@ checkFuncall :: Checkable lore =>
                 Maybe Name
              -> [DeclType] -> [Arg]
              -> TypeM lore ()
-checkFuncall fname params args = do
+checkFuncall fname paramts args = do
   let argts = map argType args
-      paramts = params
   unless (validApply paramts argts) $
     bad $ ParameterMismatch fname noLoc
-          (Right $ map (justOne . staticShapes1 . fromDecl) params) $
+          (Right $ map (justOne . staticShapes1 . fromDecl) paramts) $
           map (justOne . staticShapes1 . argType) args
   forM_ (zip (map diet paramts) args) $ \(d, (_, als, dflow)) -> do
     maybeCheckOccurences $ usageOccurences dflow
