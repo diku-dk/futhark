@@ -231,10 +231,10 @@ instance PP.Pretty u => PP.Pretty (MemBound u) where
     PP.ppr mem <> PP.text "->" <> PP.ppr ixfun
 
 instance PP.Pretty (Param (MemBound Uniqueness)) where
-  ppr = undefined
+  ppr = PP.ppr . fmap declTypeOf
 
 instance PP.Pretty (Param (MemBound NoUniqueness)) where
-  ppr = undefined
+  ppr = PP.ppr . fmap typeOf
 
 -- | A description of the memory properties of an array being returned
 -- by an operation.  Note that the 'Eq' and 'Ord' instances are
