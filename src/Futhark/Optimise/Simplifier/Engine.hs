@@ -45,6 +45,7 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyVName
        , simplifyExtType
        , simplifyExtShape
+       , simplifyType
        ) where
 
 import Control.Applicative
@@ -346,6 +347,9 @@ isFalse b _ _ = not b
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
 
+isConsumed :: BlockPred lore
+isConsumed utable = any (`UT.isConsumed` utable) . patternNames . bindingPattern
+
 blockIf :: MonadEngine m =>
            BlockPred (Lore m)
         -> m Result -> m (Body (Lore m))
@@ -597,7 +601,7 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   loopbody' <- enterLoop $ enterBody $
                bindFParams mergepat' $
                blockIf
-               (hasFree boundnames `orIf` isResultAlloc) $
+               (hasFree boundnames `orIf` isConsumed `orIf` isResultAlloc) $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
@@ -645,7 +649,7 @@ simplifyLoopOp (MapKernel cs w index ispace inps returns body) = do
   enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
     inps' <- mapM simplifyKernelInput inps
     body' <- bindLParams (map kernelInputParam inps') $
-             blockIf (hasFree bound_here `orIf` isAlloc) $
+             blockIf (hasFree bound_here `orIf` isConsumed `orIf` isAlloc) $
              simplifyBody (map (const Observe) returns) body
     return $ MapKernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
@@ -827,7 +831,7 @@ simplifyExtShape = liftM ExtShape . mapM simplifyDim . extShapeDims
   where simplifyDim (Free se) = Free <$> simplifySubExp se
         simplifyDim (Ext x)   = return $ Ext x
 
-simplifyType :: MonadEngine m => Type -> m Type
+simplifyType :: MonadEngine m => TypeBase Shape u -> m (TypeBase Shape u)
 simplifyType (Array et shape u) = do
   dims <- mapM simplifySubExp $ shapeDims shape
   return $ Array et (Shape dims) u
@@ -862,7 +866,7 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
     bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isAlloc) $
+    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` isAlloc) $
       simplifyBody (map (const Observe) rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda i params' body' rettype'
@@ -880,7 +884,7 @@ simplifyExtLambda parbnds lam@(ExtLambda index params body rettype) w = do
   body' <- enterLoop $ enterBody $
            bindLoopVar index w $
            bindLParams params' $
-           blockIf (hasFree paramnames) $
+           blockIf (hasFree paramnames `orIf` isConsumed) $
            localVtable extendSymTab $
            simplifyBody (map (const Observe) rettype) body
   let bodyres = bodyResult body'
