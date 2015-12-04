@@ -129,7 +129,7 @@ rephraseWithInvariance :: Body -> S.Body Invariance'
 rephraseWithInvariance = rephraseBody rephraser
   where rephraser = Rephraser { rephraseExpLore = const TooVariant
                               , rephraseLetBoundLore = const Nothing
-                              , rephraseFParamLore = const ()
+                              , rephraseFParamLore = declTypeOf
                               , rephraseBodyLore = const ()
                               , rephraseRetType = id
                               }
@@ -454,7 +454,7 @@ removeInvariance :: Rephraser Invariance' Basic
 removeInvariance = Rephraser { rephraseExpLore = const ()
                              , rephraseLetBoundLore = const ()
                              , rephraseBodyLore = const ()
-                             , rephraseFParamLore = const ()
+                             , rephraseFParamLore = declTypeOf
                              , rephraseRetType = id
                              }
 

@@ -54,10 +54,10 @@ buildFtable = runInternaliseM True HM.empty .
   where inspect (fname, rettype, params, _, _) =
           bindingParams params $ \shapes values -> do
             (rettype', _) <- internaliseReturnType rettype
-            let shapenames = map I.identName shapes
+            let shapenames = map I.paramName shapes
             return (fname,
                     FunBinding { internalFun = (shapenames,
-                                                map I.identType values,
+                                                map I.paramDeclType values,
                                                 applyExtType
                                                 (ExtRetType rettype')
                                                 (shapes++values)
@@ -70,11 +70,11 @@ internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
-    body' <- ensureResultExtShape asserting loc rettype' firstbody
-    let mkFParam = flip Param ()
+    body' <- ensureResultExtShape asserting loc
+             (map I.fromDecl rettype') firstbody
     return $ FunDec
       fname (ExtRetType rettype')
-      (map mkFParam $ shapeparams ++ params')
+      (shapeparams ++ params')
       body'
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
@@ -148,7 +148,10 @@ internaliseExp desc (E.Apply fname args _ _)
   | "trace" <- nameToString fname = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
-  rettype <- ExtRetType <$> staticShapes <$> mapM (subExpType . fst) args''
+  rettype <- ExtRetType <$>
+             map (`I.toDecl` Nonunique) <$>
+             staticShapes <$>
+             mapM (subExpType . fst) args''
   letTupExp' desc $ I.Apply fname args'' rettype
   where tag ses = [ (se, I.Observe) | se <- ses ]
 
@@ -216,12 +219,12 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
     internaliseBodyBindings loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let shapeinit = argShapes
-                      (map I.identName shapepat)
-                      (map I.identType mergepat')
+                      (map I.paramName shapepat)
+                      (map I.paramType mergepat')
                       mergeinit_ts
           shapeargs = argShapes
-                      (map I.identName shapepat)
-                      (map I.identType mergepat')
+                      (map I.paramName shapepat)
+                      (map I.paramType mergepat')
                       sets
       case form_contents of
         Left (i', bound) ->
@@ -229,7 +232,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                   (I.ForLoop i' bound,
                    shapepat,
                    mergepat',
-                   map I.identName mergepat',
+                   map I.paramName mergepat',
                    mergeinit,
                    []))
         Right cond -> do
@@ -239,14 +242,14 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           -- next iteration?).  This is safe, as the type rules for
           -- the external language guarantees that 'cond' does not
           -- consume anything.
-          loop_while <- newIdent "loop_while" $ I.Basic Bool
+          loop_while <- newParam "loop_while" $ I.Basic Bool
           (loop_cond, loop_cond_bnds) <-
             collectBindings $ internaliseExp1 "loop_cond" cond
-          let initsubst = [ (I.identName mergeparam, initval)
+          let initsubst = [ (I.paramName mergeparam, initval)
                             | (mergeparam, initval) <-
                                zip (shapepat++mergepat') (shapeinit++mergeinit)
                             ]
-              endsubst = [ (I.identName mergeparam, endval)
+              endsubst = [ (I.paramName mergeparam, endval)
                          | (mergeparam, endval) <-
                               zip (shapepat++mergepat') (shapeargs++ses)
                          ]
@@ -258,10 +261,10 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
             shadowIdentsInExp endsubst loop_cond_bnds loop_cond
           return (mkBody loop_end_cond_bnds $
                   shapeargs++[loop_end_cond]++ses,
-                  (I.WhileLoop $ I.identName loop_while,
+                  (I.WhileLoop $ I.paramName loop_while,
                    shapepat,
                    loop_while : mergepat',
-                   map I.identName mergepat',
+                   map I.paramName mergepat',
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
 
@@ -270,12 +273,11 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit_ts' <- mapM subExpType mergeinit'
 
   let mergeexp' = argShapes
-                  (map I.identName shapepat)
-                  (map I.identType mergepat')
+                  (map I.paramName shapepat)
+                  (map I.paramType mergepat')
                   mergeinit_ts' ++
                   mergeinit'
-      merge = [ (Param ident (), e) |
-                (ident, e) <- zip (shapepat ++ mergepat') mergeexp' ]
+      merge = zip (shapepat ++ mergepat') mergeexp'
       loop = I.LoopOp $ I.DoLoop res merge form' loopbody'
   loopt <- I.expExtType loop
   bindingTupIdent mergepat loopt $ \mergepat'' -> do
@@ -494,8 +496,8 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   nes <- internaliseExp "redomap_ne" ne
   acc_tps <- mapM I.subExpType nes
   outersize <- arraysSize 0 <$> mapM lookupType arrs'
-  let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
-                        | t <- acc_tps ]
+  let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) NoUniqueness
+                    | t <- acc_tps ]
   nests <- mapM I.subExpType nes
   lam1' <- internaliseFoldLambda internaliseLambda asserting lam1 nests acc_arr_tps
   lam2' <- internaliseRedomapInnerLambda internaliseLambda asserting lam2
@@ -513,19 +515,19 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
   lam'  <- bindingParams [E.toParam chunk] $ \_ [chunk'] -> do
              rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
              let lam_arrs' = [ I.arrayOf t
-                              (Shape [I.Var $ I.identName chunk'])
-                              (I.uniqueness t)
+                              (Shape [I.Var $ I.paramName chunk'])
+                              NoUniqueness
                               | t <- rowts
                              ]
                  lamf = AnonymFun remparams body lamrtp pos
              lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
-             return $ lam'' { extLambdaParams = I.Param chunk' () : extLambdaParams lam'' }
+             return $ lam'' { extLambdaParams = fmap I.fromDecl chunk' : extLambdaParams lam'' }
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
              E.RedLike o lam0 _ -> do
                  acctps <- mapM I.subExpType accs'
                  outsz  <- arraysSize 0 <$> mapM lookupType arrs'
-                 let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) (I.uniqueness t) | t <- acctps ]
+                 let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) NoUniqueness | t <- acctps ]
                  lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
                  return $ I.RedLike o lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'
@@ -673,24 +675,22 @@ internaliseLambda (E.AnonymFun params body rettype _) (Just rowtypes) = do
   (body', params') <- bindingLambdaParams params rowtypes $
                       internaliseBody body
   (rettype', _) <- internaliseReturnType rettype
-  return (map (`Param` ()) params', body', rettype')
+  return (params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.AnonymFun params body rettype _) Nothing = do
   (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
     body' <- internaliseBody body
     (rettype', _) <- internaliseReturnType rettype
     return (body', shapeparams ++ valparams, rettype')
-  return (map (`Param` ()) params', body', rettype')
+  return (map (fmap I.fromDecl) params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
   fun_entry <- lookupFunction fname
   let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
-  params <- mapM (newIdent "not_curried") $
-            zipWith I.setUniqueness rowtypes $
-            map I.uniqueness $ drop (length curargs') paramts
-  let valargs = curargs' ++ map (I.Var . I.identName) params
+  params <- mapM (newParam "not_curried") rowtypes
+  let valargs = curargs' ++ map (I.Var . I.paramName) params
       valargs_types = curarg_types ++ rowtypes
       diets = map I.diet paramts
       shapeargs = argShapes shapes paramts valargs_types
@@ -706,7 +706,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
         res <- letTupExp "curried_fun_result" $
                I.Apply fname allargs $ ExtRetType ts
         resultBodyM $ map I.Var res
-      return (map (`Param` ()) params, funbody, ts)
+      return (params, funbody, map I.fromDecl ts)
 
 internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
   fun_entry <- lookupFunction fname
@@ -721,9 +721,9 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
                    , E.identSrcLoc = noLoc
                    }
   bindingParams ext_params $ \shape_params value_params -> do
-    let params = shape_params ++ value_params
-        valargs = curargs' ++ map (I.Var . I.identName) value_params
-        valargs_types = curarg_types ++ map I.identType value_params
+    let params = map (fmap I.fromDecl) $ shape_params ++ value_params
+        valargs = curargs' ++ map (I.Var . I.paramName) value_params
+        valargs_types = curarg_types ++ map I.paramType value_params
         diets = map I.diet paramts
         shapeargs = argShapes shapes paramts valargs_types
         allargs = zip shapeargs (repeat I.Observe) ++
@@ -738,7 +738,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
           res <- letTupExp "curried_fun_result" $
                  I.Apply fname allargs $ ExtRetType ts
           resultBodyM $ map I.Var res
-        return (map (`Param` ()) params, funbody, ts)
+        return (params, funbody, map I.fromDecl ts)
 
 internaliseLambda (E.UnOpFun unop t loc) rowts = do
   (params, body, rettype) <- unOpFunToLambda unop t

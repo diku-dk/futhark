@@ -115,7 +115,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
 
         mkMerges :: (MonadFreshNames m, Bindable lore) =>
                     [LoopResultSummary]
-                 -> m ([(ParamT (), SubExp)], [Binding lore], [Binding lore])
+                 -> m ([(Param DeclType, SubExp)], [Binding lore], [Binding lore])
         mkMerges summaries = do
           ((origmerge, extramerge), (prebnds, postbnds)) <-
             runWriterT $ partitionEithers <$> mapM mkMerge summaries
@@ -134,7 +134,10 @@ lowerUpdateIntoLoop updates pat res merge body = do
             tell ([mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary],
                   [mkLet' [] [elmident] $ PrimOp $ Index []
                    (identName $ updateBindee update) (updateIndices update)])
-            return $ Right (Param mergeident (), Var source)
+            return $ Right (Param
+                            (identName mergeident)
+                            (toDecl (identType mergeident) Unique),
+                            Var source)
           | otherwise = return $ Left $ mergeParam summary
 
         mkResAndPat summaries =
@@ -157,7 +160,7 @@ summariseLoop :: MonadFreshNames m =>
                  [DesiredUpdate]
               -> Names
               -> [(SubExp, Maybe Ident)]
-              -> [(ParamT (), SubExp)]
+              -> [(Param DeclType, SubExp)]
               -> Maybe (m [LoopResultSummary])
 summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
@@ -191,7 +194,7 @@ summariseLoop updates usedInBody resmap merge =
 data LoopResultSummary =
   LoopResultSummary { resultSubExp :: SubExp
                     , inPatternAs :: Maybe Ident
-                    , mergeParam :: (ParamT (), SubExp)
+                    , mergeParam :: (Param DeclType, SubExp)
                     , relatedUpdate :: Maybe (DesiredUpdate, Ident)
                     }
   deriving (Show)

@@ -109,7 +109,7 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
                 modify $ HM.insert (paramName fparam) bufname
                 return $ BufferAlloc bufname size' space
           Array {}
-            | MemSummary mem ixfun <- paramLore fparam -> do
+            | ArrayMem _ _ _ mem ixfun <- paramAttr fparam -> do
                 buffered <- gets $ HM.lookup mem
                 case buffered of
                   Just bufname -> do
@@ -123,7 +123,7 @@ allocBindings :: [DoubleBuffer] -> [Binding]
 allocBindings = mapMaybe allocation
   where allocation (BufferAlloc name size space) =
           Just $
-          Let (Pattern [] [PatElem (Ident name $ Mem size space) BindVar Scalar]) () $
+          Let (Pattern [] [PatElem (Ident name $ Mem size space) BindVar $ MemMem size space]) () $
           PrimOp $ Alloc size space
         allocation _ =
           Nothing
@@ -141,7 +141,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
           -- based on the type of the function parameter.
           let t = resultType $ paramType fparam
               ident = Ident copyname t
-              summary = MemSummary bufname ixfun
+              summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness bufname ixfun
               copybnd = Let (Pattern [] [PatElem ident BindVar summary]) () $
                         PrimOp $ Copy v
           in (Just copybnd, Var copyname)

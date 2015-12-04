@@ -385,9 +385,6 @@ isNotCheap _ = not . cheapBnd
         cheap _                  = True -- Used to be False, but
                                         -- let's try it out.
 
-isUnique :: BlockPred lore
-isUnique _ = any unique . patternTypes . bindingPattern
-
 isAlloc :: BlockPred lore
 isAlloc _ (Let _ _ (PrimOp Alloc{})) = True
 isAlloc _ _                          = False
@@ -469,13 +466,12 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
     -- Array values are non-unique, so we may need to copy them.
     Just vs -> do let vs' = valueShapeContext (retTypeValues rettype) vs ++ vs
                   bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
-                    case uniqueness $ identType p of
+                    case uniqueness $ toDecl (identType p) Unique of
                       Unique    -> mkLetNamesM' [identName p] =<< eCopy (eValue v)
                       Nonunique -> mkLetNamesM' [identName p] =<< eValue v
                   mapM_ (simplifyBinding . removeBindingWisdom) bnds
     Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
-                  t <- expExtType e'
-                  pat' <- blockUsage $ simplifyPattern pat t
+                  pat' <- blockUsage $ simplifyPattern pat
                   inspectBinding =<<
                     mkLetM (addWisdomToPattern pat' e') e'
 
@@ -488,14 +484,13 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
   (newpats,newsubexps) <- unzip <$> reverse <$>
                           foldM gatherPat [] (zip3 rtp rtp' argpattps)
   newexps' <- forM newsubexps $ simplifyExp . PrimOp . SubExp
-  newpats' <- forM (zip newpats newexps') $ \(p,e) ->
-                    simplifyPattern p =<< expExtType e
+  newpats' <- mapM simplifyPattern newpats
   let rmvdpatels = concatMap patternElements newpats
       patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
   pat' <- let (ctx,vals) = splitAt (length patels' - length rtp') patels'
-          in simplifyPattern (Pattern ctx vals) rtp'
+          in simplifyPattern $ Pattern ctx vals
   let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
-  newpats'' <- forM newpatexps' $ \(p,e)->simplifyPattern p =<< expExtType e
+  newpats'' <- mapM simplifyPattern $ newpats' ++ [pat']
   let (_,newexps'') = unzip newpatexps'
   let newpatexps''= zip newpats'' newexps''
   _ <- forM newpatexps'' $ \(p,e) -> inspectBinding =<<
@@ -523,7 +518,7 @@ simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
-  pat' <- simplifyPattern pat =<< expExtType e'
+  pat' <- simplifyPattern pat
   inspectBinding =<<
     mkLetM (addWisdomToPattern pat' e') e'
 
@@ -546,7 +541,7 @@ simplifyExp (If cond tbranch fbranch ts) = do
   -- across branches.
   cond' <- simplifySubExp cond
   ts' <- mapM simplifyExtType ts
-  let ds = map diet ts'
+  let ds = map (const Observe) ts'
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
@@ -574,6 +569,8 @@ simplifyExpBase = mapExpM hoist
                 , mapOnRetType = simplifyRetType
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
+                , mapOnLParam =
+                  fail "Unhandled LParam in simplification engine."
                 }
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
@@ -582,7 +579,7 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexp) = unzip merge
   mergepat' <- mapM (simplifyParam simplifyFParamLore) mergepat
   mergeexp' <- mapM simplifySubExp mergeexp
-  let diets = map (diet . paramType) mergepat'
+  let diets = map (diet . paramDeclType) mergepat'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar boundexp -> do
       boundexp' <- simplifySubExp boundexp
@@ -600,7 +597,7 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   loopbody' <- enterLoop $ enterBody $
                bindFParams mergepat' $
                blockIf
-               (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
+               (hasFree boundnames `orIf` isResultAlloc) $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
@@ -647,9 +644,9 @@ simplifyLoopOp (MapKernel cs w index ispace inps returns body) = do
     return (t', perm)
   enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
     inps' <- mapM simplifyKernelInput inps
-    body' <- bindFParams (map kernelInputParam inps') $
-             blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
-             simplifyBody (map (diet . fst) returns) body
+    body' <- bindLParams (map kernelInputParam inps') $
+             blockIf (hasFree bound_here `orIf` isAlloc) $
+             simplifyBody (map (const Observe) returns) body
     return $ MapKernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
 
@@ -777,18 +774,13 @@ simplifyKernelSize (KernelSize num_groups group_size thread_chunk
 
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)
-                -> [ExtType]
                 -> m (Pattern (InnerLore m))
-simplifyPattern pat ets =
+simplifyPattern pat =
   Pattern <$>
-  zipWithM inspect (patternContextElements pat) (repeat Nonunique) <*>
-  zipWithM inspect (patternValueElements pat) (map uniqueness ets)
-  where inspect (PatElem ident bindage lore) u = do
-          t <- simplifyType $ identType ident
-          let ident' =
-                case bindage of
-                  BindVar -> ident { identType = t `setUniqueness` u }
-                  _       -> ident { identType = t }
+  mapM inspect (patternContextElements pat) <*>
+  mapM inspect (patternValueElements pat)
+  where inspect (PatElem ident bindage lore) = do
+          ident' <- simplifyIdentBinding ident
           bindage' <- simplifyBindage bindage
           lore'  <- simplifyLetBoundLore lore
           return $ PatElem ident' bindage' lore'
@@ -811,10 +803,9 @@ simplifyIdentBinding v = do
 
 simplifyParam :: MonadEngine m =>
                  (attr -> m attr) -> ParamT attr -> m (ParamT attr)
-simplifyParam simplifyAttribute (Param ident attr) = do
-  ident' <- simplifyIdentBinding ident
+simplifyParam simplifyAttribute (Param name attr) = do
   attr' <- simplifyAttribute attr
-  return $ Param ident' attr'
+  return $ Param name attr'
 
 simplifyVName :: MonadEngine m => VName -> m VName
 simplifyVName v = do
@@ -826,7 +817,7 @@ simplifyVName v = do
                         return v
 
 simplifyExtType :: MonadEngine m =>
-                   TypeBase ExtShape -> m (TypeBase ExtShape)
+                   TypeBase ExtShape u -> m (TypeBase ExtShape u)
 simplifyExtType t = do shape <- simplifyExtShape $ arrayShape t
                        return $ t `setArrayShape` shape
 
@@ -871,8 +862,8 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
     bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
-      simplifyBody (map diet rettype) body
+    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isAlloc) $
+      simplifyBody (map (const Observe) rettype) body
   rettype' <- mapM simplifyType rettype
   return $ Lambda i params' body' rettype'
 
@@ -889,9 +880,9 @@ simplifyExtLambda parbnds lam@(ExtLambda index params body rettype) w = do
   body' <- enterLoop $ enterBody $
            bindLoopVar index w $
            bindLParams params' $
-           blockIf (hasFree paramnames `orIf` isUnique) $
+           blockIf (hasFree paramnames) $
            localVtable extendSymTab $
-           simplifyBody (map diet rettype) body
+           simplifyBody (map (const Observe) rettype) body
   let bodyres = bodyResult body'
       bodyenv = typeEnvFromBindings $ bodyBindings body'
   rettype'' <- bindLParams params' $
@@ -952,7 +943,7 @@ simplifyCerts = liftM (nub . concat) . mapM check
 simplifyKernelInput :: MonadEngine m =>
                        KernelInput (InnerLore m) -> m (KernelInput (Lore m))
 simplifyKernelInput (KernelInput param arr is) = do
-  param' <- simplifyParam simplifyFParamLore param
+  param' <- simplifyParam simplifyLParamLore param
   arr' <- simplifyVName arr
   is' <- mapM simplifySubExp is
   return $ KernelInput param' arr' is'

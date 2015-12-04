@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies, LambdaCase #-}
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
@@ -57,7 +58,7 @@ kernelCompiler
       shape = map (ImpGen.compileSubExp . snd) ispace
       indices = map fst ispace
 
-      indices_lparams = [ Param (Ident index $ Basic Int) Scalar | index <- indices ]
+      indices_lparams = [ Param index (Scalar Int) | index <- indices ]
       bound_in_kernel = global_thread_index : indices ++ map kernelInputName inps
       kernel_bnds = bodyBindings body
 
@@ -75,7 +76,7 @@ kernelCompiler
     kernel_body <- liftM (setBodySpace $ Imp.Space "global") $
                    ImpGen.subImpM_ inKernelOperations $
                    ImpGen.withParams [global_thread_index_param] $
-                   ImpGen.declaringLParams (indices_lparams++map kernelInputParam inps) $ do
+                   ImpGen.declaringLParams (indices_lparams ++ map kernelInputParam inps) $ do
                      ImpGen.comment "compute thread index" set_indices
                      ImpGen.comment "read kernel parameters" read_params
                      ImpGen.compileBindings kernel_bnds $
@@ -462,7 +463,7 @@ kernelCompiler target (PrimOp (Replicate n se)) = do
     case se of
       Var v | row_rank > 0 -> do
         input_name <- newVName "input"
-        let input = KernelInput (Param (Ident input_name $ Basic $ elemType t) Scalar)
+        let input = KernelInput (Param input_name $ Scalar $ elemType t)
                     v (map Var js)
         return $
           LoopOp $ MapKernel [] n global_thread_index indices [input]
@@ -706,8 +707,7 @@ createAccMem local_size param
         Imp.SizeOf bt * Imp.innerExp (ImpGen.dimSizeToExp local_size)
       return (Imp.MemParam mem_shared (Imp.VarSize total_size) $ Space "local",
               (mem_shared, Imp.VarSize total_size))
-  | Array {} <- paramType param,
-    MemSummary mem _ <- paramLore param = do
+  | ArrayMem _ _ _ mem _ <- paramAttr param = do
       mem_size <-
         ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
       return (Imp.MemParam mem mem_size $ Space "local",
@@ -716,7 +716,8 @@ createAccMem local_size param
       fail $ "createAccMem: cannot deal with accumulator param " ++
       pretty param
 
-writeParamToLocalMemory :: Imp.Exp -> (VName, t) -> FParam
+writeParamToLocalMemory :: Typed (MemBound u) =>
+                           Imp.Exp -> (VName, t) -> Param (MemBound u)
                         -> ImpGen.ImpM op ()
 writeParamToLocalMemory i (mem, _) param
   | Basic _ <- paramType param =
@@ -728,7 +729,8 @@ writeParamToLocalMemory i (mem, _) param
   where i' = i * Imp.SizeOf bt
         bt = elemType $ paramType param
 
-readParamFromLocalMemory :: VName -> Imp.Exp -> ParamT attr -> (VName, t)
+readParamFromLocalMemory :: Typed (MemBound u) =>
+                            VName -> Imp.Exp -> Param (MemBound u) -> (VName, t)
                          -> ImpGen.ImpM op ()
 readParamFromLocalMemory index i param (l_mem, _)
   | Basic _ <- paramType param =
@@ -741,9 +743,10 @@ readParamFromLocalMemory index i param (l_mem, _)
   where i' = i * Imp.SizeOf bt
         bt = elemType $ paramType param
 
-writeFinalResult :: [VName]
+writeFinalResult :: Typed (MemBound u) =>
+                    [VName]
                  -> ImpGen.ValueDestination
-                 -> FParam
+                 -> Param (MemBound u)
                  -> ImpGen.ImpM op ()
 writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
   | ImpGen.CopyIntoMemory

@@ -59,7 +59,7 @@ transformExp (LoopOp (MapKernel cs w thread_num ispace inps returns body))
 
   (alloc_bnds, alloc_offsets) <- expandedAllocations w thread_num thread_allocs
   let body'' = if null alloc_bnds then body'
-               else offsetMemorySummariesInBody alloc_offsets body'
+               else offsetMemoryInBody alloc_offsets body'
 
   return (alloc_bnds, LoopOp $ MapKernel cs w thread_num ispace inps returns body'')
   where bound_before_body =
@@ -77,8 +77,8 @@ transformExp (LoopOp (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs))
   (fold_alloc_bnds, fold_alloc_offsets) <-
     expandedAllocations num_threads (lambdaIndex fold_lam) fold_lam_thread_allocs
 
-  let red_lam_body'' = offsetMemorySummariesInBody red_alloc_offsets red_lam_body'
-      fold_lam_body'' = offsetMemorySummariesInBody fold_alloc_offsets fold_lam_body'
+  let red_lam_body'' = offsetMemoryInBody red_alloc_offsets red_lam_body'
+      fold_lam_body'' = offsetMemoryInBody fold_alloc_offsets fold_lam_body'
       red_lam' = red_lam { lambdaBody = red_lam_body'' }
       fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
   return (red_alloc_bnds <> fold_alloc_bnds,
@@ -139,10 +139,10 @@ expandedAllocations num_threads thread_index thread_allocs = do
   alloc_bnds <-
     liftM concat $ forM (HM.toList thread_allocs) $ \(mem,(per_thread_size, space)) -> do
       total_size <- newVName "total_size"
-      let sizepat = Pattern [] [PatElem (Ident total_size $ Basic Int) BindVar Scalar]
+      let sizepat = Pattern [] [PatElem (Ident total_size $ Basic Int) BindVar $ Scalar Int]
           allocpat = Pattern [] [PatElem
                                  (Ident mem $ Mem (Var total_size) space)
-                                 BindVar Scalar]
+                                 BindVar $ MemMem (Var total_size) space]
       return [Let sizepat () $ PrimOp $ BinOp Times num_threads per_thread_size Int,
               Let allocpat () $ PrimOp $ Alloc (Var total_size) space]
   -- Fix every reference to the memory blocks to be offset by the
@@ -171,24 +171,24 @@ data RebaseMap = RebaseMap {
 lookupNewBase :: VName -> RebaseMap -> Maybe (IxFun.Shape -> IxFun.IxFun)
 lookupNewBase name = HM.lookup name . rebaseMap
 
-offsetMemorySummariesInBody :: RebaseMap -> Body -> Body
-offsetMemorySummariesInBody offsets (Body attr bnds res) =
-  Body attr (snd $ mapAccumL offsetMemorySummariesInBinding offsets bnds) res
+offsetMemoryInBody :: RebaseMap -> Body -> Body
+offsetMemoryInBody offsets (Body attr bnds res) =
+  Body attr (snd $ mapAccumL offsetMemoryInBinding offsets bnds) res
 
-offsetMemorySummariesInBinding :: RebaseMap -> Binding
+offsetMemoryInBinding :: RebaseMap -> Binding
                                -> (RebaseMap, Binding)
-offsetMemorySummariesInBinding offsets (Let pat attr e) =
-  (offsets', Let pat' attr $ offsetMemorySummariesInExp offsets e)
-  where (offsets', pat') = offsetMemorySummariesInPattern offsets pat
+offsetMemoryInBinding offsets (Let pat attr e) =
+  (offsets', Let pat' attr $ offsetMemoryInExp offsets e)
+  where (offsets', pat') = offsetMemoryInPattern offsets pat
 
-offsetMemorySummariesInPattern :: RebaseMap -> Pattern -> (RebaseMap, Pattern)
-offsetMemorySummariesInPattern offsets (Pattern ctx vals) =
+offsetMemoryInPattern :: RebaseMap -> Pattern -> (RebaseMap, Pattern)
+offsetMemoryInPattern offsets (Pattern ctx vals) =
   (offsets', Pattern ctx vals')
   where offsets' = foldl inspectCtx offsets ctx
         vals' = map inspectVal vals
         inspectVal patElem =
           patElem { patElemLore =
-                       offsetMemorySummariesInMemSummary offsets' $ patElemLore patElem
+                       offsetMemoryInMemBound offsets' $ patElemLore patElem
                   }
         inspectCtx ctx_offsets patElem
           | Mem _ _ <- patElemType patElem =
@@ -198,32 +198,32 @@ offsetMemorySummariesInPattern offsets (Pattern ctx vals) =
           | otherwise =
               ctx_offsets
 
-offsetMemorySummariesInFParam :: RebaseMap -> FParam -> FParam
-offsetMemorySummariesInFParam offsets fparam =
-  fparam { paramLore = offsetMemorySummariesInMemSummary offsets $ paramLore fparam }
+offsetMemoryInParam :: RebaseMap -> Param (MemBound u) -> Param (MemBound u)
+offsetMemoryInParam offsets fparam =
+  fparam { paramAttr = offsetMemoryInMemBound offsets $ paramAttr fparam }
 
-offsetMemorySummariesInMemSummary :: RebaseMap -> MemSummary -> MemSummary
-offsetMemorySummariesInMemSummary offsets (MemSummary mem ixfun)
+offsetMemoryInMemBound :: RebaseMap -> MemBound u -> MemBound u
+offsetMemoryInMemBound offsets (ArrayMem bt shape u mem ixfun)
   | Just new_base <- lookupNewBase mem offsets =
-      MemSummary mem $ IxFun.rebase (new_base $ IxFun.base ixfun) ixfun
-offsetMemorySummariesInMemSummary _ summary =
+      ArrayMem bt shape u mem $ IxFun.rebase (new_base $ IxFun.base ixfun) ixfun
+offsetMemoryInMemBound _ summary =
   summary
 
-offsetMemorySummariesInExp :: RebaseMap -> Exp -> Exp
-offsetMemorySummariesInExp offsets (LoopOp (DoLoop res merge form body)) =
+offsetMemoryInExp :: RebaseMap -> Exp -> Exp
+offsetMemoryInExp offsets (LoopOp (DoLoop res merge form body)) =
   LoopOp $ DoLoop res (zip mergeparams' mergeinit) form body'
   where (mergeparams, mergeinit) = unzip merge
-        body' = offsetMemorySummariesInBody offsets body
-        mergeparams' = map (offsetMemorySummariesInFParam offsets) mergeparams
-offsetMemorySummariesInExp offsets e = mapExp recurse e
-  where recurse = identityMapper { mapOnBody = return . offsetMemorySummariesInBody offsets
-                                 , mapOnLambda = return . offsetMemorySummariesInLambda offsets
+        body' = offsetMemoryInBody offsets body
+        mergeparams' = map (offsetMemoryInParam offsets) mergeparams
+offsetMemoryInExp offsets e = mapExp recurse e
+  where recurse = identityMapper { mapOnBody = return . offsetMemoryInBody offsets
+                                 , mapOnLambda = return . offsetMemoryInLambda offsets
                                  }
 
-offsetMemorySummariesInLambda :: RebaseMap -> Lambda -> Lambda
-offsetMemorySummariesInLambda offsets lam =
+offsetMemoryInLambda :: RebaseMap -> Lambda -> Lambda
+offsetMemoryInLambda offsets lam =
   lam { lambdaParams = params,
         lambdaBody = body
       }
-  where params = map (offsetMemorySummariesInFParam offsets) $ lambdaParams lam
-        body = offsetMemorySummariesInBody offsets $ lambdaBody lam
+  where params = map (offsetMemoryInParam offsets) $ lambdaParams lam
+        body = offsetMemoryInBody offsets $ lambdaBody lam

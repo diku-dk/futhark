@@ -79,8 +79,10 @@ instance Substitute Bindage where
     (map (substituteNames substs) is)
 
 instance Substitute attr => Substitute (ParamT attr) where
-  substituteNames substs (Param ident attr) =
-    Param (substituteNames substs ident) (substituteNames substs attr)
+  substituteNames substs (Param name attr) =
+    Param
+    (substituteNames substs name)
+    (substituteNames substs attr)
 
 instance Substitutable lore => Substitute (Pattern lore) where
   substituteNames substs (Pattern context values) =
@@ -110,6 +112,7 @@ replace substs = Mapper {
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
+                 , mapOnLParam = return . substituteNames substs
                  }
 
 instance Substitute Rank where
@@ -133,7 +136,7 @@ instance Substitute ExtDimSize where
 instance Substitute Names where
   substituteNames = HS.map . substituteNames
 
-instance (Substitute shape) => Substitute (TypeBase shape) where
+instance Substitute shape => Substitute (TypeBase shape u) where
   substituteNames _ (Basic et) = Basic et
   substituteNames substs (Array et sz u) =
     Array et (substituteNames substs sz) u

@@ -681,8 +681,7 @@ segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
 
     let pat = loopNestingPattern $ fst nest
         flatPatElem pat_elem t = do
-          let u = uniqueness $ patElemType pat_elem
-              t' = arrayOf t (Shape [total_num_elements]) u
+          let t' = arrayOfRow t total_num_elements
           ident <- newIdent (baseString (patElemName pat_elem) ++ "_flat") t'
           return $ PatElem ident BindVar ()
     flat_pat <- Pattern [] <$>

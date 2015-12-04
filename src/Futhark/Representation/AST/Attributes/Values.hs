@@ -31,7 +31,7 @@ valueType :: Value -> Type
 valueType (BasicVal v) =
   Basic $ basicValueType v
 valueType (ArrayVal _ et shape) =
-  Array et (Shape $ map (Constant . IntVal . fromIntegral) shape) Nonunique
+  Array et (Shape $ map (Constant . IntVal . fromIntegral) shape) NoUniqueness
 
 -- | Return the size of the first dimension of an array, or zero for
 -- non-arrays.

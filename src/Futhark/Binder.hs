@@ -152,7 +152,7 @@ bindingIdentTypes idents = localTypeEnv types
 
 -- | Add the names and types from the given list of 'Param's to the
 -- type environment while executing the given action.
-bindingParamTypes :: (Applicative m, Monad m) =>
+bindingParamTypes :: (Applicative m, Monad m, Typed attr) =>
                      [ParamT attr] -> BinderT lore m a
                   -> BinderT lore m a
 bindingParamTypes = bindingIdentTypes . map paramIdent

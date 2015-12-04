@@ -44,7 +44,7 @@ genPredicate :: MonadFreshNames m => FunDec -> m (FunDec, FunDec)
 genPredicate (FunDec fname rettype params body) = do
   pred_ident <- newIdent "pred" $ Basic Bool
   cert_ident <- newIdent "pred_cert" $ Basic Cert
-  ((pred_params, bnds),_) <- runBinderEmptyEnv $ nonuniqueParams params
+  ((pred_params, bnds),_) <- runBinderEmptyEnv $ nonuniqueFParams params
   let env = GenEnv cert_ident (dataDependencies body) mempty
   (pred_body, Body _ val_bnds val_res) <- runGenM env $ splitFunBody body
   let pred_args = [ (Var arg, Observe) | arg <- map paramName params ]
@@ -123,15 +123,15 @@ splitBinding bnd@(Let pat _ (LoopOp (Redomap cs w outerfun innerfun acc arr))) =
 
 splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
   (predbody, valbody) <- splitBody body
-  ok <- newIdent "loop_ok" (Basic Bool)
-  predbody' <- conjoinLoopBody (identName ok) predbody
-  let predloop = LoopOp $ DoLoop (respat++[identName ok])
-                 (merge++[(Param ok (),constant True)]) form
+  ok <- newParam "loop_ok" $ Basic Bool
+  predbody' <- conjoinLoopBody (paramName ok) predbody
+  let predloop = LoopOp $ DoLoop (respat++[paramName ok])
+                 (merge++[(ok,constant True)]) form
                  predbody'
       valloop = LoopOp $ DoLoop respat merge form valbody
-  return ([mkLet' [] (idents<>[ok]) predloop],
+  return ([mkLet' [] (idents<>[paramIdent ok]) predloop],
           mkLet' [] idents valloop,
-          Just $ Var $ identName ok)
+          Just $ Var $ paramName ok)
   where
     idents = patternIdents pat
     conjoinLoopBody ok (Body _ bnds res) = do
@@ -224,13 +224,13 @@ allTrue cs w predfun args = do
   return (andbnd,
           Var $ identName andchecks)
   where predConjFun = do
-          acc <- newIdent "acc" (Basic Bool)
-          res <- newIdent "res" (Basic Bool)
+          acc <- newParam "acc" $ Basic Bool
+          res <- newIdent "res" $ Basic Bool
           let Body _ predbnds [se] = lambdaBody predfun -- XXX
-              andbnd = mkLet' [] [res] $ PrimOp $ BinOp LogAnd (Var $ identName acc) se Bool
+              andbnd = mkLet' [] [res] $ PrimOp $ BinOp LogAnd (Var $ paramName acc) se Bool
               body = mkBody (predbnds++[andbnd]) [Var $ identName res]
           return Lambda { lambdaIndex = lambdaIndex predfun
-                        , lambdaParams = Param acc () : lambdaParams predfun
+                        , lambdaParams = acc : lambdaParams predfun
                         , lambdaReturnType = [Basic Bool]
                         , lambdaBody = body
                         }

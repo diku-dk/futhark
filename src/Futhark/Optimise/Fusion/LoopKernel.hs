@@ -614,14 +614,12 @@ pullReshape nest ots
                 Nest.inputs nest
       inputTypes = map SOAC.inputType inputs'
       outernest inner outershape = do
-        let addDims t = arrayOf t (Shape outershape) $ uniqueness t
+        let addDims t = arrayOf t (Shape outershape) NoUniqueness
             retTypes = map addDims $ Nest.returnType op
 
-        ps <- forM (zip (Nest.params op) inputTypes) $
-              \(p, inpt) -> do
-                let t = rowType (stripArray (length outershape-1) inpt)
-                        `setUniqueness` uniqueness (identType p)
-                newIdent "pullReshape_param" t
+        ps <- forM inputTypes $ \inpt -> do
+          let t = rowType (stripArray (length outershape-1) inpt)
+          newIdent "pullReshape_param" t
 
         bnds <- forM retTypes $ \_ ->
                   newNameFromString "pullReshape_bnd"

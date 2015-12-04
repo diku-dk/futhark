@@ -35,7 +35,7 @@ import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
 import Prelude hiding (mapM)
 
 data FunBinding = FunBinding
-                  { internalFun :: ([VName], [Type],
+                  { internalFun :: ([VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.DeclType, [E.DeclType])
                   }

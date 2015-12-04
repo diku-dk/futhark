@@ -113,8 +113,7 @@ instance FreeIn LoopNesting where
 consumedIn :: LoopNesting -> Names
 consumedIn (MapNesting pat _ _ _ params_and_arrs) =
   consumedInPattern pat <>
-  mconcat (map (vnameAliases . snd)
-           (filter (unique . paramType . fst) params_and_arrs))
+  mconcat (map (vnameAliases . snd) params_and_arrs)
 
 data Nesting = Nesting { nestingLetBound :: Names
                        , nestingLoop :: LoopNesting
@@ -220,11 +219,11 @@ flatKernel :: MonadFreshNames m =>
                  SubExp,
                  [(VName, SubExp)],
                  [KernelInput Basic],
-                 [TypeBase Shape])
+                 [Type])
 flatKernel (MapNesting pat _ nesting_w i params_and_arrs, []) =
   return ([], nesting_w, [(i,nesting_w)], inps,
-          map (rowType . (`setUniqueness` Nonunique)) $ patternTypes pat)
-  where inps = [ KernelInput (Param (paramIdent param) ()) arr [Var i] |
+          map rowType $ patternTypes pat)
+  where inps = [ KernelInput param arr [Var i] |
                  (param, arr) <- params_and_arrs ]
 
 flatKernel (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
@@ -246,7 +245,7 @@ flatKernel (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
 
   return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps <> inps', returns)
   where extra_inps =
-          [ KernelInput (Param (paramIdent param `setIdentUniqueness` Nonunique) ()) arr [Var i] |
+          [ KernelInput param arr [Var i] |
             (param, arr) <- params_and_arrs ]
 
 -- | Description of distribution to do.
@@ -340,11 +339,11 @@ createKernelNest (inner_nest, nests) distrib_body = do
                 Nothing -> do
                   arr <- newIdent (baseString pname ++ "_r") $
                          arrayOfRow ptype w
-                  return (Param (Ident pname ptype) (),
+                  return (Param pname ptype,
                           arr,
                           True)
                 Just arr ->
-                  return (Param (Ident pname ptype) (),
+                  return (Param pname ptype,
                           arr,
                           False)
 
@@ -507,7 +506,8 @@ interchangeLoop
                          used]
         loop_pat_expanded =
           Pattern [] $ map expandPatElem $ patternElements loop_pat
-        new_params = map fst merge
+        new_params = [ Param pname $ fromDecl ptype
+                     | (Param pname ptype, _) <- merge ]
         new_arrs = map (paramName . fst) merge_expanded
         rettype = map rowType $ patternTypes loop_pat_expanded
 
@@ -533,39 +533,30 @@ interchangeLoop
         copyOrRemoveParam (param, arr)
           | not (paramName param `HS.member` free_in_body) =
             return Nothing
-          | unique $ paramType param = do
-              arr' <- newVName $ baseString arr <> "_interchange_copy"
-              let arr_t = arrayOfRow (paramType param) w
-              addBinding $
-                Let (basicPattern' [] [Ident arr' arr_t]) () $
-                PrimOp $ Copy arr
-              return $ Just (param, arr')
           | otherwise =
             return $ Just (param, arr)
 
         expandedInit _ (Var v)
-          | Just (param, arr) <-
+          | Just (_, arr) <-
               find ((==v).paramName.fst) params_and_arrs =
-              if unique $ paramType param
-              then return $ Var arr
-              else letSubExp (baseString v ++ "_copy") $ PrimOp $ Copy arr
+              return $ Var arr
         expandedInit param_name se =
           letSubExp (param_name <> "_expanded_init") $
             PrimOp $ Replicate w se
 
         expand (merge_param, merge_init) = do
           expanded_param <-
-            newIdent (param_name <> "_expanded") $
-            arrayOf (paramType merge_param) (Shape [w]) Unique
+            newParam (param_name <> "_expanded") $
+            arrayOf (paramDeclType merge_param) (Shape [w]) Unique
           expanded_init <- expandedInit param_name merge_init
-          return (Param expanded_param (), expanded_init)
+          return (expanded_param, expanded_init)
             where param_name = baseString $ paramName merge_param
 
         expandPatElem patElem =
           patElem { patElemIdent = expandIdent $ patElemIdent patElem }
 
         expandIdent ident =
-          ident { identType = arrayOf (identType ident) (Shape [w]) Unique }
+          ident { identType = arrayOfRow (identType ident) w  }
 
 interchangeLoops :: (MonadFreshNames m, HasTypeEnv m) =>
                     KernelNest -> SeqLoop
@@ -577,19 +568,8 @@ interchangeLoops nest loop = do
   return $ bnds ++ [seqLoopBinding loop']
 
 optimiseKernel :: Binding -> Binding
-optimiseKernel bnd = fromMaybe bnd_unique $
+optimiseKernel bnd = fromMaybe bnd $
                      tryOptimiseKernel bnd
-  where bnd_unique =
-          bnd { bindingPattern = uniquePattern $ bindingPattern bnd }
-
--- | Make all pattern elements unique.
-uniquePattern :: Pattern -> Pattern
-uniquePattern (Pattern ctx vals) =
-  Pattern (map uniquePatElem ctx) (map uniquePatElem vals)
-  where uniquePatElem pat_elem =
-          pat_elem { patElemIdent = uniqueIdent $ patElemIdent pat_elem }
-        uniqueIdent =
-          (`setIdentUniqueness` Unique)
 
 tryOptimiseKernel :: Binding -> Maybe Binding
 tryOptimiseKernel bnd = kernelIsRearrange bnd <|>
@@ -615,8 +595,7 @@ kernelIsRearrange (Let (Pattern [] [outer_patElem]) _
                    (LoopOp (MapKernel outer_cs _ _ ispace [inp] [_] body)))
   | Just (PrimOp (Rearrange inner_cs perm arr)) <- singleExpBody body,
     map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp,
-    not (unique $ patElemType outer_patElem) =
+    arr == kernelInputName inp =
       let rank = length ispace
           cs' = outer_cs ++ inner_cs
           perm' = [0..rank-1] ++ map (rank+) perm
@@ -630,8 +609,7 @@ kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
   | Just (PrimOp (Reshape inner_cs new_inner_shape arr)) <- singleExpBody body,
     Just inp <- fullIndexInput ispace inps,
     map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp,
-    not (unique $ patElemType outer_patElem) =
+    arr == kernelInputName inp =
       let new_outer_shape =
             take (length new_shape - length new_inner_shape) new_shape
           cs' = outer_cs ++ inner_cs

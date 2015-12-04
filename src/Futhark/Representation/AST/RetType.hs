@@ -20,12 +20,12 @@ class (Show rt, Eq rt, Ord rt) => IsRetType rt where
 
   -- | Extract the simple type from the return type - although this
   -- may still involve an existential shape context.
-  retTypeValues :: rt -> [ExtType]
+  retTypeValues :: rt -> [DeclExtType]
 
 -- | A simple return type that is just a list of 'ExtType's.  The
 -- reason we do not simply use a list is that we want to define our
 -- own prettyprinting instance.
-newtype ExtRetType = ExtRetType [ExtType]
+newtype ExtRetType = ExtRetType [DeclExtType]
                    deriving (Eq, Ord, Show)
 
 instance IsRetType ExtRetType where

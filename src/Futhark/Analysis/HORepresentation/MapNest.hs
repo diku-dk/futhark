@@ -24,9 +24,10 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import Futhark.Transform.Substitute
-import Futhark.Representation.AST
+import Futhark.Representation.AST hiding (typeOf)
 import Futhark.MonadFreshNames
 import Futhark.Binder (Bindable)
+import Futhark.Representation.AST.Annotations (Annotations)
 
 data Nesting lore = Nesting {
     nestingIndex        :: VName
@@ -40,16 +41,16 @@ data MapNest lore = MapNest Certificates (Nest.NestBody lore) [Nesting lore] [SO
 
 typeOf :: MapNest lore -> [Type]
 typeOf (MapNest _ body nests inps) =
-  [ arrayOf t (Shape [outersize]) (uniqueness t) | t <- innersizes ]
+  map (`arrayOfRow` outersize) innersizes
   where innersizes = case nests of []     -> Nest.nestBodyReturnType body
                                    nest:_ -> nestingReturnType nest
         outersize = arraysSize 0 $ map SOAC.inputType inps
 
 
-params :: MapNest lore -> [VName]
+params :: Annotations lore => MapNest lore -> [VName]
 params (MapNest _ body [] _)       =
   map identName $ Nest.nestBodyParams body
-params (MapNest _ _    (nest:_) _) =
+params (MapNest _ _ (nest:_) _) =
   nestingParamNames nest
 
 inputs :: MapNest lore -> [SOAC.Input]
@@ -115,7 +116,8 @@ fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs body)) = do
             Nest.Fun l { lambdaBody =
                             substituteNames subst $ lambdaBody l
                        , lambdaParams =
-                         lambdaParams l ++ map (`Param` ()) newParams
+                         lambdaParams l ++ [ Param name t
+                                           | Ident name t <- newParams ]
                        }
   return $ Just $
          if HM.null subst
@@ -131,7 +133,7 @@ toSOACNest (MapNest cs body ns inps) =
 toSOACNest' :: Certificates
             -> Nest.NestBody lore
             -> [Nesting lore]
-            -> [TypeBase Shape]
+            -> [Type]
             -> Nest.Combinator lore
 toSOACNest' cs body [] _ =
   Nest.Map cs body
@@ -182,6 +184,6 @@ fixInputs ourInps childInps =
           return (remPs, (p', pInp) : newInps)
 
     inspect (remPs, newInps) (param, SOAC.Input ts ia) = do
-      newParam <- newNameFromString (baseString param ++ "_rep")
-      return (remPs, (newParam,
+      param' <- newNameFromString (baseString param ++ "_rep")
+      return (remPs, (param',
                       SOAC.Input (ts SOAC.|> SOAC.Replicate ourWidth) ia) : newInps)

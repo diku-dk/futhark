@@ -48,8 +48,8 @@ data SimpleOps m =
 bindableSimpleOps :: (Engine.MonadEngine m,
                       Bindable (Engine.InnerLore m),
                       Annotations.LetBound (Engine.InnerLore m) ~ (),
-                      Annotations.FParam (Engine.InnerLore m) ~ (),
-                      Annotations.LParam (Engine.InnerLore m) ~ (),
+                      Annotations.FParam (Engine.InnerLore m) ~ DeclType,
+                      Annotations.LParam (Engine.InnerLore m) ~ Type,
                       RetType (Engine.InnerLore m) ~ ExtRetType) =>
                      SimpleOps m
 bindableSimpleOps =

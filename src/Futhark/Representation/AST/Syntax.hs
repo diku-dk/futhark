@@ -9,6 +9,7 @@ module Futhark.Representation.AST.Syntax
 
   -- * Types
   , Uniqueness(..)
+  , NoUniqueness(..)
   , Shape(..)
   , ExtDimSize(..)
   , ExtShape(..)
@@ -19,6 +20,8 @@ module Futhark.Representation.AST.Syntax
   , TypeBase(..)
   , Type
   , ExtType
+  , DeclType
+  , DeclExtType
   , Diet(..)
 
   -- * Values
@@ -293,7 +296,7 @@ data StreamForm lore  = MapLike    StreamOrd
                       | Sequential [SubExp]
                         deriving (Eq, Ord, Show)
 
-data KernelInput lore = KernelInput { kernelInputParam :: FParam lore
+data KernelInput lore = KernelInput { kernelInputParam :: LParam lore
                                     , kernelInputArray :: VName
                                     , kernelInputIndices :: [SubExp]
                                     }

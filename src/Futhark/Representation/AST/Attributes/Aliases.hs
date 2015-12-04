@@ -115,7 +115,7 @@ ifAliases (als1,cons1) (als2,cons2) =
   where notConsumed = not . (`HS.member` cons)
         cons = cons1 <> cons2
 
-funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape] -> [Names]
+funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
@@ -130,7 +130,7 @@ aliasesOf (SegOp op) = segOpAliases op
 aliasesOf (Apply _ args t) =
   funcallAliases args $ retTypeValues t
 
-returnAliases :: [TypeBase shape1] -> [(Names, Diet)] -> [Names]
+returnAliases :: [TypeBase shaper Uniqueness] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts
   where returnType' (Array _ _ Nonunique) =
           mconcat $ map (uncurry maskAliases) args
@@ -158,24 +158,19 @@ consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
 consumedInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat (map (subExpAliases . snd) $
-           filter (unique . paramType . fst) merge)
-consumedInExp (LoopOp (Map _ _ lam arrs)) =
-  consumedByLambda lam $ map vnameAliases arrs
-consumedInExp (LoopOp (Reduce _ _ lam input)) =
-  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
-  where (accs, arrs) = unzip input
-consumedInExp (LoopOp (Scan _ _ lam input)) =
-  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
-  where (accs, arrs) = unzip input
-consumedInExp (LoopOp (Redomap _ _ _ lam accs arrs)) =
-  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
+           filter (unique . paramDeclType . fst) merge)
+consumedInExp (LoopOp (Map _ _ lam _)) =
+  consumedByLambda lam
+consumedInExp (LoopOp (Reduce _ _ lam _)) =
+  consumedByLambda lam
+consumedInExp (LoopOp (Scan _ _ lam _)) =
+  consumedByLambda lam
+consumedInExp (LoopOp (Redomap _ _ _ lam _ _)) =
+  consumedByLambda lam
 consumedInExp _ = mempty
 
-consumedByLambda :: Lambda lore -> [Names] -> Names
-consumedByLambda lam param_als =
-  mconcat [ als
-          | (param, als) <- zip (lambdaParams lam) param_als,
-            unique $ paramType param ]
+consumedByLambda :: Aliased lore => Lambda lore -> Names
+consumedByLambda = consumedInBody . lambdaBody
 
 consumedInPattern :: Pattern lore -> Names
 consumedInPattern pat =

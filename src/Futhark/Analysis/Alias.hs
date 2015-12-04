@@ -85,6 +85,7 @@ analyseExp e = Out.mapExp analyse e
                      , Out.mapOnExtLambda = return . analyseExtLambda
                      , Out.mapOnRetType = return
                      , Out.mapOnFParam = return
+                     , Out.mapOnLParam = return
                      }
 
 analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore

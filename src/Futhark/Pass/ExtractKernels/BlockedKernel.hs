@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( blockedReduction
@@ -37,13 +38,13 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   loop_iterator <- newVName "i"
   seq_lam_index <- newVName "lam_index"
   step_one_pat <- basicPattern' [] <$>
-                      mapM (mkIntermediateIdent num_chunks) (patternIdents pat)
+                  mapM (mkIntermediateIdent num_chunks) (patternIdents pat)
   step_two_pat <- basicPattern' [] <$>
-             mapM (mkIntermediateIdent $ Constant $ IntVal 1) (patternIdents pat)
+                  mapM (mkIntermediateIdent $ Constant $ IntVal 1) (patternIdents pat)
   let (fold_acc_params, fold_arr_params) =
         splitAt (length nes) $ lambdaParams fold_lam
-      chunk_size_param = Param (Ident chunk_size $ Basic Int) ()
-      other_index_param = Param (Ident other_index $ Basic Int) ()
+      chunk_size_param = Param chunk_size (Basic Int)
+      other_index_param = Param other_index (Basic Int)
   arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_arr_params
   res_idents <- mapM (newIdent' (<>"_res") . paramIdent) fold_acc_params
 
@@ -68,14 +69,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   seq_loop_body <-
     runBodyBinder $ bindingParamTypes (lambdaParams fold_lam) $ do
       mapM_ addBinding $ compute_start_index : compute_index : read_array_elements
-      let uniqueRes (Var v) = do
-            t <- lookupType v
-            if unique t || basicType t
-              then return $ Var v
-              else letSubExp "unique_res" $ PrimOp $ Copy v
-          uniqueRes se =
-            return se
-      resultBodyM =<< mapM uniqueRes =<< bodyBind (lambdaBody fold_lam)
+      resultBodyM =<< bodyBind (lambdaBody fold_lam)
 
   let seq_loop =
         mkLet' [] res_idents $
@@ -119,23 +113,20 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
     addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [Constant $ IntVal 0]
-  where mkArrChunkParam chunk_size arr_param = do
-          ident <- newIdent (baseString (paramName arr_param) <> "_chunk") $
-                   arrayOfRow (paramType arr_param) chunk_size
-          return $ Param ident ()
+  where mkArrChunkParam chunk_size arr_param =
+          newParam (baseString (paramName arr_param) <> "_chunk") $
+            arrayOfRow (paramType arr_param) chunk_size
 
         mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
           arrayOfRow (identType ident) chunk_size
 
-        mkMergeParam acc_param (Var v) = do
+        mkMergeParam (Param pname ptype) (Var v) = do
           v' <- letExp (baseString v ++ "_copy") $ PrimOp $ Copy v
-          return (acc_param { paramIdent =
-                              paramIdent acc_param `setIdentUniqueness` Unique
-                            },
+          return (Param pname $ toDecl ptype Unique,
                   Var v')
         mkMergeParam acc_param se =
-          return (acc_param, se)
+          return (acc_param { paramAttr = toDecl (paramAttr acc_param) Unique }, se)
 
 blockedKernelSize :: MonadBinder m =>
                      SubExp -> m KernelSize
@@ -167,7 +158,7 @@ blockedScan pat cs w lam input = do
       group_size = kernelWorkgroupSize first_scan_size
       num_threads = kernelNumThreads first_scan_size
       elems_per_thread = kernelElementsPerThread first_scan_size
-      other_index_param = Param (Ident other_index $ Basic Int) ()
+      other_index_param = Param other_index (Basic Int)
       first_scan_lam = lam { lambdaParams = other_index_param : lambdaParams lam }
 
   sequential_scan_result <-
@@ -272,7 +263,7 @@ blockedScan pat cs w lam input = do
         zero = Constant $ IntVal 0
         (nes, _) = unzip input
 
-        mkKernelInput :: [SubExp] -> FParam -> VName -> KernelInput Basic
+        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Basic
         mkKernelInput indices p arr = KernelInput { kernelInputParam = p
                                                   , kernelInputArray = arr
                                                   , kernelInputIndices = indices
@@ -292,12 +283,12 @@ blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
                      -> m ()
 blockedSegmentedScan segment_size pat cs w lam input = do
   unused_flag_array <- newIdent "unused_flag_array" $
-                       arrayOf (Basic Bool) (Shape [w]) Nonunique
+                       arrayOf (Basic Bool) (Shape [w]) NoUniqueness
 
   x_flag <- newVName "x_flag"
   y_flag <- newVName "y_flag"
-  let x_flag_param = Param (Ident x_flag $ Basic Bool) ()
-      y_flag_param = Param (Ident y_flag $ Basic Bool) ()
+  let x_flag_param = Param x_flag $ Basic Bool
+      y_flag_param = Param y_flag $ Basic Bool
       (x_params, y_params) = splitAt (length input) $ lambdaParams lam
       params = [x_flag_param] ++ x_params ++ [y_flag_param] ++ y_params
 

@@ -47,8 +47,10 @@ subShapeTests =
                     show expected) $
           shape1 `subShapeOf` shape2 @?= expected
 
+instance Arbitrary NoUniqueness where
+  arbitrary = pure NoUniqueness
 
-instance Arbitrary shape => Arbitrary (TypeBase shape) where
+instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
   arbitrary =
     oneof [ Basic <$> arbitrary
           , Array <$> arbitrary <*> arbitrary <*> arbitrary

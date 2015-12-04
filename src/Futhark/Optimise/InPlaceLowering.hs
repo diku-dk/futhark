@@ -87,7 +87,7 @@ inPlaceLowering = simplePass
 optimiseFunDec :: MonadFreshNames m => FunDec Basic -> m (FunDec Basic)
 optimiseFunDec fundec =
   modifyNameSource $ runForwardingM $
-  bindingFParams (funDecParams fundec) $ do
+  bindingParams (funDecParams fundec) $ do
     body <- optimiseBody $ funDecBody fundec
     return $ fundec { funDecBody = body }
 
@@ -143,7 +143,7 @@ optimiseInBinding (Let pat attr e) = do
 optimiseExp :: Exp Basic -> ForwardingM (Exp Basic)
 optimiseExp (LoopOp (DoLoop res merge form body)) =
   bindingIdents (boundInForm form) $
-  bindingFParams (map fst merge) $ do
+  bindingParams (map fst merge) $ do
     body' <- optimiseBody body
     return $ LoopOp $ DoLoop res merge form body'
   where boundInForm (ForLoop i _) = [Ident i $ Basic Int]
@@ -151,7 +151,7 @@ optimiseExp (LoopOp (DoLoop res merge form body)) =
 optimiseExp (LoopOp (MapKernel cs w index ispace inps returns body)) =
   bindingIdents [Ident index $ Basic Int] $
   bindingIdents (map ((`Ident` Basic Int) . fst) ispace) $
-  bindingFParams (map kernelInputParam inps) $ do
+  bindingParams (map kernelInputParam inps) $ do
     body' <- optimiseBody body
     return $ LoopOp $ MapKernel cs w index ispace inps returns body'
 optimiseExp e = mapExpM optimise e
@@ -219,14 +219,15 @@ runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown sr
                                , topDownDepth = 0
                                }
 
-bindingFParams :: [FParam Basic]
-               -> ForwardingM a
-               -> ForwardingM a
-bindingFParams fparams = local $ \(TopDown n vtable d) ->
+bindingParams :: Typed attr =>
+                 [Param attr]
+              -> ForwardingM a
+              -> ForwardingM a
+bindingParams params = local $ \(TopDown n vtable d) ->
   let entry fparam =
         (paramName fparam,
          Entry n mempty d False $ paramType fparam)
-      entries = HM.fromList $ map entry fparams
+      entries = HM.fromList $ map entry params
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingBinding :: Binding Basic

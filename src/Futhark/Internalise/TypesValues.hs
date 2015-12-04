@@ -5,6 +5,7 @@ module Futhark.Internalise.TypesValues
     internaliseReturnType
   , internaliseParamTypes
   , internaliseType
+  , internaliseTypeWithUniqueness
   , internaliseUniqueness
 
   -- * Internalising values
@@ -30,14 +31,14 @@ internaliseUniqueness E.Nonunique = I.Nonunique
 internaliseUniqueness E.Unique = I.Unique
 
 internaliseParamTypes :: [E.TypeBase E.ShapeDecl als VName]
-                      -> InternaliseM ([[I.TypeBase ExtShape]],
+                      -> InternaliseM ([[I.TypeBase ExtShape Uniqueness]],
                                        HM.HashMap VName Int)
 internaliseParamTypes ts = do
   (ts', (_, subst)) <- runStateT (mapM (internaliseDeclType' BindDims) ts) (0, HM.empty)
   return (ts', subst)
 
 internaliseReturnType :: E.TypeBase E.ShapeDecl als VName
-                      -> InternaliseM ([I.TypeBase ExtShape],
+                      -> InternaliseM ([I.TypeBase ExtShape Uniqueness],
                                        HM.HashMap VName Int)
 internaliseReturnType t = do
   (t', (_, subst)) <- runStateT (internaliseDeclType' AssertDims t) (0, HM.empty)
@@ -49,7 +50,7 @@ data DimDeclInterpretation = AssertDims
 internaliseDeclType' :: DimDeclInterpretation
                      -> E.TypeBase E.ShapeDecl als VName
                      -> StateT (Int, HM.HashMap VName Int)
-                        InternaliseM [I.TypeBase ExtShape]
+                        InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Basic bt) =
   return [I.Basic bt]
 internaliseDeclType' ddi (E.Tuple ets) =
@@ -104,8 +105,14 @@ internaliseDeclType' ddi (E.Array at) =
             _        -> fail $ "Shape declaration " ++ pretty name ++ " not found"
 
 internaliseType :: Ord vn =>
-                   E.TypeBase E.Rank als vn -> [I.TypeBase ExtShape]
-internaliseType = flip evalState 0 . internaliseType'
+                   E.TypeBase E.Rank als vn
+                -> [I.TypeBase ExtShape NoUniqueness]
+internaliseType = map I.fromDecl . internaliseTypeWithUniqueness
+
+internaliseTypeWithUniqueness :: Ord vn =>
+                                 E.TypeBase E.Rank als vn
+                              -> [I.TypeBase ExtShape Uniqueness]
+internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
   where internaliseType' (E.Basic bt) =
           return [I.Basic bt]
         internaliseType' (E.Tuple ets) =
@@ -123,9 +130,9 @@ internaliseType = flip evalState 0 . internaliseType'
           innerdims <- map Ext <$> replicateM (E.shapeRank shape - 1) newId
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
           return [ I.arrayOf t (ExtShape $ outerdim : innerdims) $
-                   if I.unique t then Unique
-                   else if I.basicType t then u
-                        else I.uniqueness t
+                    if I.unique t then Unique
+                    else if I.basicType t then u
+                         else I.uniqueness t
                  | t <- ts ]
 
         internaliseTupleArrayElem (BasicArrayElem bt _) =
