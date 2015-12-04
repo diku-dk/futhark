@@ -647,11 +647,13 @@ pexp = pure . PrimOp . SubExp
 bindLambda :: Lambda -> [Exp] -> Binder Basic [SubExp]
 bindLambda (Lambda _ params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
-    letBindNames' [paramName param] arg
+    if basicType $ paramType param
+    then letBindNames' [paramName param] arg
+    else letBindNames' [paramName param] =<< eCopy (pure arg)
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
-loopMerge vars vals = [ (Param pname $ toDecl ptype Unique, val)
+loopMerge vars vals = [ (Param pname $ toDecl ptype Nonunique, val)
                       | (Ident pname ptype,val) <- zip vars vals ]
 
 
