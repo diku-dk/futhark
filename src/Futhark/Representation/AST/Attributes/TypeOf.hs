@@ -274,7 +274,7 @@ applyExtType :: Typed attr =>
              -> Maybe ExtRetType
 applyExtType (ExtRetType extret) params args =
   if length args == length params &&
-     and (zipWith (==)
+     and (zipWith subtypeOf
           (map rankShaped argtypes)
           (map rankShaped paramtypes))
   then Just $ ExtRetType $ map correctDims extret
