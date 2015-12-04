@@ -576,8 +576,8 @@ fromExp _ = pure $ Left NotSOAC
 -- | To-Stream translation of SOACs.
 --   Returns the Stream SOAC and the
 --   extra-accumulator body-result ident if any.
-soacToStream :: (MonadFreshNames m, Bindable lore) =>
-                SOAC lore -> m (SOAC lore,[Ident])
+soacToStream :: (MonadFreshNames m, Bindable lore)
+                => SOAC lore -> m (SOAC lore,[Ident])
 soacToStream soac = do
   chunk_param <- newParam "chunk" $ Basic Int
   let chvar= Futhark.Var $ paramName chunk_param
@@ -591,17 +591,16 @@ soacToStream soac = do
     -- let strm_resids = map(f,a_ch) in strm_resids
     Map{}  -> do
       -- the array and accumulator result types
-      let -- the chunked-outersize of the array result and input types
-          loutps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- lambdaReturnType lam ]
-          lintps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- map paramType $ lambdaParams lam ]
+      let arrrtps= mapType w lam
+      -- the chunked-outersize of the array result and input types
+          loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
+          lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
-      strm_resids <- mapM (newParam "res") loutps
+      strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
       let insoac = Futhark.Map cs w lam' $ map paramName strm_inpids
-          insbnd = mkLet' [] (map paramIdent strm_resids) $ LoopOp insoac
-          strmbdy= mkBody [insbnd] $ map (Futhark.Var . paramName) strm_resids
+          insbnd = mkLet' [] strm_resids $ LoopOp insoac
+          strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
           strmlam= Lambda i strmpar strmbdy loutps
       -- map(f,a) creates a stream with NO accumulators
@@ -616,20 +615,18 @@ soacToStream soac = do
     Scan _ _ nesinps -> do
       -- the array and accumulator result types
       let nes = fst $ unzip nesinps
-          (acc_params, _) = splitAt (length nes) $ lambdaParams lam
           accrtps= lambdaReturnType lam
-          -- the chunked-outersize of the array result and input types
-          loutps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- lambdaReturnType lam ]
-          lintps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- map paramType acc_params ]
+          arrrtps= mapType w lam
+      -- the chunked-outersize of the array result and input types
+          loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
+          lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
 
       scan0_ids  <- mapM (newIdent "resarr0") loutps
-      lastel_ids <- mapM (newIdent "lstel") accrtps
-      inpacc_ids <- mapM (newParam "inpacc") lintps
+      lastel_ids <- mapM (newIdent "lstel")   accrtps
+      inpacc_ids <- mapM (newParam "inpacc")  accrtps
       outszm1id  <- newIdent "szm1" $ Basic Int
       -- 1. let scan0_ids   = scan(+,nes,a_ch)             in
       let insoac = Futhark.Scan cs w lam' $ zip nes (map paramName strm_inpids)
@@ -647,15 +644,16 @@ soacToStream soac = do
                                            [Futhark.Var $ identName outszm1id]
                            ) lastel_ids scan0_ids
       -- 5. let acc'        = acc + lasteel_ids            in
-      addlelbdy <- mkPlusBnds lam $
-                   map Futhark.Var (map paramName inpacc_ids++map identName lastel_ids)
+      addlelbdy <- mkPlusBnds lam $ map Futhark.Var $
+                   map paramName inpacc_ids++map identName lastel_ids
       -- Finally, construct the stream
       let (addlelbnd,addlelres) = (bodyBindings addlelbdy, bodyResult addlelbdy)
           strmbdy= mkBody (insbnd:mapbnd:outszm1bnd:lelbnds++addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda i strmpar strmbdy (accrtps++loutps)
-      return (Stream cs (Sequential nes) strmlam MinChunk inps, map paramIdent inpacc_ids)
+      return (Stream cs (Sequential nes) strmlam MinChunk inps,
+              map paramIdent inpacc_ids)
     -- Reduce(+,nes,a) => is translated in strem's body to:
     -- 1. let acc0_ids = reduce(+,nes,a_ch) in
     -- 2. let acc'     = acc + acc0_ids    in
@@ -663,21 +661,19 @@ soacToStream soac = do
     Reduce _ _ nesinps -> do
       -- the array and accumulator result types
       let nes = fst $ unzip nesinps
-          (acc_params, _) = splitAt (length nes) $ lambdaParams lam
           accrtps= lambdaReturnType lam
       -- the chunked-outersize of the array result and input types
-          lintps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- map paramType acc_params ]
+          lintps = [ arrayOfRow t chvar
+                   | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
       strm_inpids <- mapM (newParam "inp") lintps
-      inpacc_ids <- mapM (newParam "inpacc")  lintps
+      inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let acc0_ids = reduce(+,nes,a_ch) in
       let insoac = Futhark.Reduce cs w lam' $ zip nes (map paramName strm_inpids)
           insbnd = mkLet' [] acc0_ids $ LoopOp insoac
       -- 2. let acc'     = acc + acc0_ids    in
-      addaccbdy <- mkPlusBnds lam $
-                   map Futhark.Var $
+      addaccbdy <- mkPlusBnds lam $ map Futhark.Var $
                    map paramName inpacc_ids++map identName acc0_ids
       -- Construct the stream
       let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
@@ -694,21 +690,17 @@ soacToStream soac = do
       -- the array and accumulator result types
       let accrtps= take (length nes) $ lambdaReturnType lam
           arrrtps= drop (length nes) $ mapType w lam
-          (_, arr_params) = splitAt (length nes) $ lambdaParams lam
       -- the chunked-outersize of the array result and input types
-          loutps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- map rowType   arrrtps ]
-          lintps = [ arrayOf t (Shape [chvar]) NoUniqueness
-                   | t <- map paramType arr_params ]
+          loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
+          lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
-      inpacc_ids <- mapM (newParam "inpacc") accrtps
-      acc0_ids   <- mapM (newIdent "acc0") accrtps
+      inpacc_ids <- mapM (newParam "inpacc")  accrtps
+      acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
       let insoac = Futhark.Redomap cs w lamin lam' nes (map paramName strm_inpids)
-          insbnd = mkLet' [] (acc0_ids++strm_resids) $
-                   LoopOp insoac
+          insbnd = mkLet' [] (acc0_ids++strm_resids) $ LoopOp insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lamin $ map Futhark.Var $
                    map paramName inpacc_ids++map identName acc0_ids
