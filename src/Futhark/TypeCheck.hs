@@ -1357,7 +1357,7 @@ checkLambda (Lambda i params body ret) args = do
   mapM_ checkType ret
   iparam <- basicLParamM i Int
   if length params == length args then do
-    checkFuncall Nothing (map ((`toDecl` Unique) . paramType) params) args
+    checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
     noConsume $ checkAnonymousFun
       (nameFromString "<anonymous>", ret, iparam:params, body)
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
@@ -1373,7 +1373,7 @@ checkConcatMapLambda (Lambda i params body rettype) args = do
       rettype' = [ arrayOf t (ExtShape [Ext 0]) Nonunique
                  | t <- staticShapes rettype ]
   if length elemparams == length args then do
-    checkFuncall Nothing (map ((`toDecl` Unique) . paramType) elemparams) args
+    checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) elemparams) args
     noConsume $ checkFun' (fname,
                           rettype',
                           [ (paramName param,
@@ -1391,7 +1391,7 @@ checkExtLambda :: Checkable lore =>
 checkExtLambda (ExtLambda i params body rettype) args =
   if length params == length args then do
     iparam <- basicLParamM i Int
-    checkFuncall Nothing (map ((`toDecl` Unique) . paramType) params) args
+    checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
     let fname = nameFromString "<anonymous>"
     noConsume $ checkFun' (fname,
                           map (`toDecl` Nonunique) rettype,
