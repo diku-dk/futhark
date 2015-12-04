@@ -359,7 +359,7 @@ matchSubExpTypes :: SubExp -> SubExp -> TypeM lore Type
 matchSubExpTypes e1 e2 = do
   t1 <- subExpType e1
   t2 <- subExpType e2
-  if t1 == t2
+  if t1 `subtypeOf` t2
     then return t1 -- arbitrary
     else bad $
          UnifyError (PrimOp $ SubExp e1) (justOne $ staticShapes1 t1)
@@ -1102,7 +1102,7 @@ checkExp (If e1 e2 e3 ts) = do
   tell dflow
   ts2 <- bodyExtType e2
   ts3 <- bodyExtType e3
-  unless ((ts2 `generaliseExtTypes` ts3) == ts) $
+  unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ts) $
     bad $ TypeError noLoc $
     unlines ["If-expression branches have types",
              "  " ++ prettyTuple ts2 ++ ", and",
@@ -1319,7 +1319,7 @@ validApply :: ArrayShape shape =>
            -> Bool
 validApply expected got =
   length got == length expected &&
-  and (zipWith (==)
+  and (zipWith subtypeOf
        (map rankShaped got)
        (map (fromDecl . rankShaped) expected))
 
