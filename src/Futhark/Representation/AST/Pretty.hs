@@ -223,7 +223,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
 instance PrettyLore lore => Pretty (LoopOp lore) where
   ppr (DoLoop res mergepat form loopbody) =
     text "loop" <+> braces (commasep $ map ppr res) <+>
-    text "<-" <+> ppPattern (map paramIdent pat) <+> equals <+> ppTuple' initexp </>
+    text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
     (case form of
       ForLoop i bound ->
         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
@@ -362,14 +362,14 @@ instance PrettyLore lore => Pretty (Lambda lore) where
     maybe id (</>) (ppLambdaLore lambda) $
     text "fn" <+> ppTuple' rettype <+>
     parens (ppr index <> semi <+>
-            commasep (map (ppr . paramIdent) params)) <+>
+            commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
   ppr (ExtLambda index params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
     parens (ppr index <> semi <+>
-            commasep (map (ppr . paramIdent) params)) <+>
+            commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where
@@ -380,7 +380,7 @@ instance PrettyLore lore => Pretty (FunDec lore) where
     maybe id (</>) (ppFunDecLore fundec) $
     text "fun" <+> ppr rettype <+>
     text (nameToString name) <//>
-    apply (map (ppr . paramIdent) args) <+>
+    apply (map ppr args) <+>
     equals </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (Prog lore) where
@@ -423,7 +423,7 @@ ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
-ppPattern :: [Ident] -> Doc
+ppPattern :: Pretty a => [a] -> Doc
 ppPattern = braces . commasep . map ppr
 
 ppTuple' :: Pretty a => [a] -> Doc
