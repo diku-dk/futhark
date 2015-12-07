@@ -24,11 +24,11 @@ data Token = IF
            | REAL
            | FLOAT32
            | FLOAT64
-           | ID { idName :: Name }
-           | STRINGLIT { stringLit :: String }
-           | INTLIT { intLit :: Int32 }
-           | REALLIT { realLit :: Double }
-           | CHARLIT { charLit :: Char }
+           | ID Name
+           | STRINGLIT String
+           | INTLIT Int32
+           | REALLIT Double
+           | CHARLIT Char
            | PLUS
            | MINUS
            | TIMES
