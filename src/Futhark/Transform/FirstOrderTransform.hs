@@ -140,13 +140,14 @@ transformBinding (Let pat () (LoopOp (Reduce cs width fun args))) = do
   (acc, initacc) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   inarrs <- mapM (newIdent "reduce_inarr") arrts
+  arrexps' <- mapM (copyIfArray . Var) arrexps
   loopbody <- runBodyBinder $ bindingIdentTypes (inarrs++acc) $ do
     acc' <- bindLambda fun
             (map (PrimOp . SubExp . Var . identName) acc ++
              index cs (map identName inarrs) (Var i))
     return $ resultBody (map (Var . identName) inarrs ++ acc')
   addBinding $ Let pat () $ LoopOp $
-    DoLoop (map identName acc) (loopMerge (inarrs++acc) (map Var arrexps++initacc))
+    DoLoop (map identName acc) (loopMerge (inarrs++acc) (arrexps'++initacc))
     (ForLoop i width) loopbody
   where i = lambdaIndex fun
         (accexps, arrexps) = unzip args
@@ -182,6 +183,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexp
   let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                | t <- map_arr_tps ]
   let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
+  arrexps' <- mapM (copyIfArray . Var) arrexps
   maparrs <- resultArray res_ts
   outarrs <- mapM (newIdent "redomap_outarr") res_ts
   -- for the REDUCE part
@@ -198,7 +200,7 @@ transformBinding (Let pat () (LoopOp (Redomap cs width _ innerfun accexps arrexp
   addBinding $ Let pat () $ LoopOp $
     DoLoop (map identName $ acc++outarrs)
     (loopMerge (inarrs++acc++outarrs)
-     (map Var arrexps++initacc++map Var maparrs))
+     (arrexps'++initacc++map Var maparrs))
     (ForLoop i width) loopbody
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
