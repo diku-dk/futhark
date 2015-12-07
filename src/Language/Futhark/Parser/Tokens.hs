@@ -89,7 +89,6 @@ data Token = IF
            | TILDE
            | AND
            | OR
-           | OP
            | EMPTY
            | COPY
            | ASSERT
