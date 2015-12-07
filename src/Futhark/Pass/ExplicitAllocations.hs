@@ -272,7 +272,8 @@ allocsForPattern sizeidents validents rts = do
                     [PatElem mem     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
-              return $ PatElem tmp_buffer BindVar $ ArrayMem bt shape u (identName mem) ixfun
+              return $ PatElem tmp_buffer BindVar $
+                ArrayMem bt (stripDims (length is) shape) u (identName mem) ixfun
 
         ReturnsArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
