@@ -413,7 +413,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)
-          | not (unique (paramDeclType mergeParam)),
+          | not (unique (paramDeclType mergeParam)) || arrayRank (paramDeclType mergeParam) == 1,
             isInvariant resExp =
           let (bnd, explpat'') =
                 removeFromResult (mergeParam,mergeInit) explpat'
