@@ -147,7 +147,6 @@ import Language.Futhark.Parser.Lexer
       signum          { L $$ SIGNUM }
       '&&'            { L $$ AND }
       '||'            { L $$ OR }
-      op              { L $$ OP }
       empty           { L $$ EMPTY }
       copy            { L $$ COPY }
       while           { L $$ WHILE }

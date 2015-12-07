@@ -91,7 +91,6 @@ keyword s =
     "fn"           -> FN
     "for"          -> FOR
     "do"           -> DO
-    "op"           -> OP
     "True"         -> TRUE
     "False"        -> FALSE
     "Checked"      -> CHECKED
