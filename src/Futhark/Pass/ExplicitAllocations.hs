@@ -249,7 +249,7 @@ allocsForPattern sizeidents validents rts = do
                       [ArrayCopy (identName ident) bindage $
                        identName tmp_buffer])
                 return $ PatElem tmp_buffer BindVar $
-                  ArrayMem bt shape u mem ixfun
+                  ArrayMem bt (stripDims (length is) shape) u mem ixfun
 
         ReturnsArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
