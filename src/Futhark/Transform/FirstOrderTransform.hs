@@ -653,7 +653,7 @@ bindLambda (Lambda _ params body _) args = do
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(FParam, SubExp)]
-loopMerge vars vals = [ (Param pname $ toDecl ptype Nonunique, val)
+loopMerge vars vals = [ (Param pname $ toDecl ptype Unique, val)
                       | (Ident pname ptype,val) <- zip vars vals ]
 
 
