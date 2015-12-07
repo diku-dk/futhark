@@ -633,18 +633,17 @@ instance PrettyLore ExplicitMemory where
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppExpLore _ = Nothing
 
-bindeeAnnot :: (a -> VName) -> (a -> MemBound u)
+bindeeAnnot :: PP.Pretty u =>
+               (a -> VName) -> (a -> MemBound u)
             -> a -> Maybe PP.Doc
 bindeeAnnot bindeeName bindeeLore bindee =
   case bindeeLore bindee of
-    ArrayMem _ _ _ ident fun ->
+    attr@ArrayMem{} ->
       Just $
       PP.text "-- " <>
       PP.ppr (bindeeName bindee) <>
-      PP.text "@" <>
-      PP.ppr ident <>
-      PP.text "->" <>
-      PP.ppr fun
+      PP.text " :: " <>
+      PP.ppr attr
     MemMem {} ->
       Nothing
     Scalar _ ->
