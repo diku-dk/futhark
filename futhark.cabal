@@ -110,7 +110,6 @@ Library
                    Futhark.Optimise.Simplifier.RuleM
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simple
-                   Futhark.Optimise.Simplifier.Simplifiable
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.SimplifyLambda
                    Futhark.Optimise.SplitShapes

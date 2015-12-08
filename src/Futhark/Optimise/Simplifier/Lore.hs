@@ -26,7 +26,6 @@ import Futhark.Representation.Aliases
   (unNames, Names' (..), VarAliases, ConsumedInExp)
 import qualified Futhark.Representation.Aliases as Aliases
 import qualified Futhark.Representation.Ranges as Ranges
-import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Binder
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
@@ -67,7 +66,6 @@ instance Renameable lore => Renameable (Wise lore) where
 instance Substitutable lore => Substitutable (Wise lore) where
 instance PrettyLore lore => PrettyLore (Wise lore) where
 instance Proper lore => Proper (Wise lore) where
-instance Proper lore => Simplifiable (Wise lore) where
 
 instance Lore.Lore lore => Aliased (Wise lore) where
   bodyAliases body =

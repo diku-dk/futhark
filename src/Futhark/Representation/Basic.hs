@@ -63,7 +63,6 @@ import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
 import Futhark.Representation.AST.Attributes.Ranges
-import Futhark.Optimise.Simplifier.Simplifiable
 
 -- This module could be written much nicer if Haskell had functors
 -- like Standard ML.  Instead, we have to abuse the namespace/module
@@ -123,8 +122,6 @@ instance Ranged Basic where
     replicate (length $ bodyResult body) (Nothing, Nothing)
   patternRanges pat =
     replicate (patternSize pat) (Nothing, Nothing)
-
-instance Simplifiable Basic where
 
 instance Bindable Basic where
   mkBody = AST.Body ()
