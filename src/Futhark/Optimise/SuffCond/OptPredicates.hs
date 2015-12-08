@@ -453,7 +453,6 @@ instance PrettyLore Invariance' where
 instance Substitutable Invariance' where
 instance Renameable Invariance' where
 instance Proper Invariance' where
-instance Simplify.Simplifiable Invariance' where
 
 type Invariance = Wise Invariance'
 

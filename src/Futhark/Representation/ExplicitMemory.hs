@@ -81,7 +81,6 @@ import Futhark.Binder
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.Representation.AST.Attributes.Ranges
-import Futhark.Optimise.Simplifier.Simplifiable
 import qualified Futhark.Util.Pretty as PP
 
 -- | A lore containing explicit memory information.
@@ -144,8 +143,6 @@ instance Ranged ExplicitMemory where
     replicate (length $ bodyResult body) (Nothing, Nothing)
   patternRanges pat =
     replicate (patternSize pat) (Nothing, Nothing)
-
-instance Simplifiable ExplicitMemory where
 
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.

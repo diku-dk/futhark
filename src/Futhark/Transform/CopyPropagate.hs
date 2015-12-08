@@ -5,6 +5,7 @@ module Futhark.Transform.CopyPropagate
        (copyPropagateInBindings)
        where
 
+import Futhark.Binder.Class (Proper)
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import Futhark.Optimise.Simplifier.Simplify
@@ -12,7 +13,7 @@ import Futhark.Optimise.Simplifier.Lore
 
 copyPropagateInBindings :: (MonadFreshNames m,
                             HasTypeEnv m,
-                            Simplifiable lore) =>
+                            Proper lore) =>
                            SimpleOps (SimpleM lore)
                         -> [Binding lore]
                         -> m [Binding lore]
