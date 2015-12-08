@@ -328,7 +328,7 @@ lookupFun fname args = do
     Nothing -> bad $ UnknownFunctionError fname noLoc
     Just (ftype, params) -> do
       argts <- mapM subExpType args
-      case applyRetType (representative :: lore) ftype params $
+      case applyRetType ftype params $
            zip args argts of
         Nothing ->
           bad $ ParameterMismatch (Just fname) noLoc

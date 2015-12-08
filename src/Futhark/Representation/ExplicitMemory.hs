@@ -106,6 +106,8 @@ instance IsRetType [FunReturns] where
 
   basicRetType t = [ReturnsScalar t]
 
+  applyRetType = applyFunReturns
+
 instance Annotations.Annotations ExplicitMemory where
   type LetBound ExplicitMemory = MemBound NoUniqueness
   type FParam   ExplicitMemory = MemBound Uniqueness
@@ -135,8 +137,6 @@ instance Lore.Lore ExplicitMemory where
               Nothing
           isMergeParam var =
             find ((==var) . paramName) mergevars
-
-  applyRetType _ = applyFunReturns
 
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.
@@ -890,12 +890,13 @@ boundInBindings (bnd:bnds) =
           | bindee <- patternElements $ bindingPattern bnd
           ]
 
-applyFunReturns :: [FunReturns]
-                -> [FParam]
+applyFunReturns :: Typed attr =>
+                   [FunReturns]
+                -> [Param attr]
                 -> [(SubExp,Type)]
                 -> Maybe [FunReturns]
 applyFunReturns rets params args
-  | Just _ <- applyExtType rettype params args =
+  | Just _ <- applyRetType rettype params args =
     Just $ map correctDims rets
   | otherwise =
     Nothing
