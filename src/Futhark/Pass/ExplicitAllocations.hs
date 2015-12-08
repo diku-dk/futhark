@@ -709,24 +709,24 @@ simplifiable =
         simplifyMemBound (Scalar bt) =
           return $ Scalar bt
         simplifyMemBound (MemMem size space) =
-          MemMem <$> Engine.simplifySubExp size <*> pure space
+          MemMem <$> Engine.simplify size <*> pure space
         simplifyMemBound (ArrayMem bt shape u mem ixfun) =
-          ArrayMem bt shape u <$> Engine.simplifyVName mem <*> pure ixfun
+          ArrayMem bt shape u <$> Engine.simplify mem <*> pure ixfun
 
         simplifyRetType' = mapM simplifyReturns
           where simplifyReturns (ReturnsScalar bt) =
                   return $ ReturnsScalar bt
                 simplifyReturns (ReturnsArray bt shape u ret) =
                   ReturnsArray bt <$>
-                  Engine.simplifyExtShape shape <*>
+                  Engine.simplify shape <*>
                   pure u <*>
                   simplifyMemReturn ret
                 simplifyReturns (ReturnsMemory size space) =
-                  ReturnsMemory <$> Engine.simplifySubExp size <*> pure space
+                  ReturnsMemory <$> Engine.simplify size <*> pure space
                 simplifyMemReturn (ReturnsNewBlock i) =
                   return $ ReturnsNewBlock i
                 simplifyMemReturn (ReturnsInBlock v ixfun) =
-                  ReturnsInBlock <$> Engine.simplifyVName v <*>
+                  ReturnsInBlock <$> Engine.simplify v <*>
                   pure ixfun
 
 bindPatternWithAllocations :: MonadBinder m =>

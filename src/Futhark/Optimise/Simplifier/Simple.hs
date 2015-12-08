@@ -53,7 +53,7 @@ bindableSimpleOps :: (Engine.MonadEngine m,
                      SimpleOps m
 bindableSimpleOps =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  Engine.simplifyType Engine.simplifyType Engine.simplifyType simplifyRetType'
+  Engine.simplify Engine.simplify Engine.simplify simplifyRetType'
   where mkLetS' _ pat e = return $
                           mkLet (map asPair $ patternContextElements pat)
                           (map asPair $ patternValueElements pat)
@@ -62,7 +62,7 @@ bindableSimpleOps =
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
         simplifyRetType' =
-          liftM ExtRetType . mapM Engine.simplifyExtType . retTypeValues
+          liftM ExtRetType . mapM Engine.simplify . retTypeValues
 
 newtype SimpleM lore a =
   SimpleM (RWS

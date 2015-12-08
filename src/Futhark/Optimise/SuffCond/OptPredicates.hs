@@ -355,18 +355,18 @@ instance MonadFreshNames m =>
         Simplify.defaultInspectBinding $ Let pat' lore e
 
   simplifyLetBoundLore (Nothing, tp) = do
-    tp' <- Simplify.simplifyType tp
+    tp' <- Simplify.simplify tp
     return (Nothing, tp')
   simplifyLetBoundLore (Just v, tp) = do
-    v' <- Simplify.simplifyVName v
-    tp' <- Simplify.simplifyType tp
+    v' <- Simplify.simplify v
+    tp' <- Simplify.simplify tp
     return (Just v', tp')
 
   simplifyFParamLore =
     return
 
   simplifyRetType    =
-    liftM ExtRetType . mapM Simplify.simplifyExtType . retTypeValues
+    liftM ExtRetType . mapM Simplify.simplify . retTypeValues
 
 makeSufficientBinding :: MonadFreshNames m => S.Binding Invariance -> VariantM m ()
 makeSufficientBinding bnd = do
