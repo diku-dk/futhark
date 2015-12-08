@@ -144,7 +144,7 @@ analyseBody _ sctable (Body _ [] _) =
   sctable
 
 analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [] [patElem]) _ e):bnds) res) =
-  let vtable' = ST.insertBinding bnd vtable
+  let vtable' = error "lores are wrong, but nobody cares about this module!" -- ST.insertBinding bnd vtable
       -- Construct a new sctable for recurrences.
       sctable' = case (analyseExp vtable e,
                        simplify <$> ST.lookupScalExp name vtable') of
@@ -161,7 +161,7 @@ analyseBody vtable sctable (Body bodylore (bnd@(Let (Pattern [] [patElem]) _ e):
         types = ST.typeEnv vtable
         simplify se = AS.simplify se ranges
 analyseBody vtable sctable (Body bodylore (bnd:bnds) res) =
-  analyseBody (ST.insertBinding bnd vtable) sctable $ Body bodylore bnds res
+  analyseBody (error "see above" {- ST.insertBinding bnd vtable -}) sctable $ Body bodylore bnds res
 
 rangesRep :: ST.SymbolTable lore -> AS.RangesRep
 rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings

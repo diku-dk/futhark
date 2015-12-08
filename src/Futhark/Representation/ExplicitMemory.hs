@@ -80,7 +80,6 @@ import Futhark.Transform.Substitute
 import Futhark.Binder
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
-import Futhark.Representation.AST.Attributes.Ranges
 import qualified Futhark.Util.Pretty as PP
 
 -- | A lore containing explicit memory information.
@@ -137,12 +136,6 @@ instance Lore.Lore ExplicitMemory where
             find ((==var) . paramName) mergevars
 
   applyRetType _ = applyFunReturns
-
-instance Ranged ExplicitMemory where
-  bodyRanges body =
-    replicate (length $ bodyResult body) (Nothing, Nothing)
-  patternRanges pat =
-    replicate (patternSize pat) (Nothing, Nothing)
 
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.
