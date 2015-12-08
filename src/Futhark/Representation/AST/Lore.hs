@@ -35,12 +35,3 @@ class Annotations.Annotations lore => Lore lore where
                 Exp lore ->
                 m [Maybe SubExp]
   expContext = expExtContext
-
-  -- | Given a function return type, the parameters of the function,
-  -- and the arguments for a concrete call, return the instantiated
-  -- return type for the concrete call, if valid.
-  applyRetType :: lore
-               -> RetType lore
-               -> [FParam lore]
-               -> [(SubExp, Type)]
-               -> Maybe (RetType lore)

@@ -59,9 +59,6 @@ instance Lore.Lore lore => Lore.Lore (Wise lore) where
   loopResultContext (Wise lore) =
     Lore.loopResultContext lore
 
-  applyRetType (Wise lore) =
-    Lore.applyRetType lore
-
 instance Renameable lore => Renameable (Wise lore) where
 instance Substitutable lore => Substitutable (Wise lore) where
 instance PrettyLore lore => PrettyLore (Wise lore) where

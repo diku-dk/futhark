@@ -78,8 +78,6 @@ instance Lore.Lore Basic where
   loopResultContext _ res merge =
     loopShapeContext res $ map paramIdent merge
 
-  applyRetType _ = applyExtType
-
 type Prog = AST.Prog Basic
 type PrimOp = AST.PrimOp Basic
 type LoopOp = AST.LoopOp Basic

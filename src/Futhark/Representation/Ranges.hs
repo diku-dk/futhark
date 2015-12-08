@@ -99,9 +99,6 @@ instance Lore.Lore lore => Lore.Lore (Ranges lore) where
   loopResultContext (Ranges lore) =
     Lore.loopResultContext lore
 
-  applyRetType (Ranges lore) =
-    Lore.applyRetType lore
-
 instance Lore.Lore lore => Ranged (Ranges lore) where
   bodyRanges = fst . bodyLore
   patternRanges = map (fst . patElemAttr) . patternElements

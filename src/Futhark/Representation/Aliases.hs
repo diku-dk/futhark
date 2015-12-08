@@ -134,9 +134,6 @@ instance Lore.Lore lore => Lore.Lore (Aliases lore) where
   loopResultContext (Aliases lore) =
     loopResultContext lore
 
-  applyRetType (Aliases lore) =
-    applyRetType lore
-
   expContext pat e =
     expContext (removePatternAliases pat) (removeExpAliases e)
 

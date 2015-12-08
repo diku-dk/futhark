@@ -58,7 +58,7 @@ buildFtable = runInternaliseM True HM.empty .
             return (fname,
                     FunBinding { internalFun = (shapenames,
                                                 map I.paramDeclType values,
-                                                applyExtType
+                                                applyRetType
                                                 (ExtRetType rettype')
                                                 (shapes++values)
                                                )

@@ -25,7 +25,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , subExpShapeContext
        , loopShapeContext
        , loopExtType
-       , applyExtType
 
        -- * Return type
        , module Futhark.Representation.AST.RetType
@@ -263,42 +262,6 @@ loopExtType res merge =
   existentialiseExtTypes inaccessible $ staticShapes $ map identType res'
   where inaccessible = HS.fromList $ map identName merge
         res' = mapMaybe (\name -> find ((==name) . identName) merge) res
-
--- | Produce the return type resulting from providing the given
--- subexpressions (with associated type) as arguments to a function of
--- the given return type and parameters.  Returns 'Nothing' if the
--- application is invalid.
-applyExtType :: Typed attr =>
-                ExtRetType -> [Param attr]
-             -> [(SubExp, Type)]
-             -> Maybe ExtRetType
-applyExtType (ExtRetType extret) params args =
-  if length args == length params &&
-     and (zipWith subtypeOf
-          (map rankShaped argtypes)
-          (map rankShaped paramtypes))
-  then Just $ ExtRetType $ map correctDims extret
-  else Nothing
-  where argtypes = map snd args
-        paramtypes = map typeOf params
-
-        parammap :: HM.HashMap VName SubExp
-        parammap = HM.fromList $
-                   zip (map paramName params) (map fst args)
-
-        correctDims t =
-          t `setArrayShape`
-          ExtShape (map correctDim $ extShapeDims $ arrayShape t)
-
-        correctDim (Ext i) =
-          Ext i
-        correctDim (Free (Constant v)) =
-          Free $ Constant v
-        correctDim (Free (Var v))
-          | Just se <- HM.lookup v parammap =
-            Free se
-          | otherwise =
-            Free $ Var v
 
 -- | Create a type environment consisting of the names bound in the
 -- list of bindings.
