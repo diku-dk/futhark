@@ -354,20 +354,6 @@ instance MonadFreshNames m =>
         makeSufficientBinding =<< mkLetM (addWisdomToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
-  simplifyLetBoundLore (Nothing, tp) = do
-    tp' <- Simplify.simplify tp
-    return (Nothing, tp')
-  simplifyLetBoundLore (Just v, tp) = do
-    v' <- Simplify.simplify v
-    tp' <- Simplify.simplify tp
-    return (Just v', tp')
-
-  simplifyFParamLore =
-    return
-
-  simplifyRetType    =
-    liftM ExtRetType . mapM Simplify.simplify . retTypeValues
-
 makeSufficientBinding :: MonadFreshNames m => S.Binding Invariance -> VariantM m ()
 makeSufficientBinding bnd = do
   context <- getContext

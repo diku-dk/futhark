@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Pass.Simplify
   ( simplify
   , simplifyBasic
@@ -10,14 +11,14 @@ import Control.Monad
 import qualified Futhark.Representation.Basic as R
 import qualified Futhark.Representation.ExplicitMemory as R
 
-import Futhark.Binder.Class (Proper)
 import qualified Futhark.Pass.ExplicitAllocations
 import Futhark.Optimise.Simplifier
 import Futhark.Optimise.Simplifier.Simple
+import Futhark.Optimise.Simplifier.Engine (MonadEngine)
 import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 
-simplify :: Proper lore =>
+simplify :: MonadEngine (SimpleM lore) =>
             SimpleOps (SimpleM lore)
          -> RuleBook (SimpleM lore)
          -> Pass lore lore
