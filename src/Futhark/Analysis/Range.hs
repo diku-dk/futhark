@@ -144,7 +144,8 @@ bindFunParams (param:params) m = do
   where bindFunParam = HM.insert (In.paramName param) Out.unknownRange
         dims = In.arrayDims $ In.paramType param
 
-bindPattern :: Out.Pattern lore -> RangeM a -> RangeM a
+bindPattern :: Out.Annotations lore =>
+               Out.Pattern lore -> RangeM a -> RangeM a
 bindPattern pat m = do
   ranges <- rangesRep
   local bindPatElems $
@@ -153,7 +154,7 @@ bindPattern pat m = do
   where bindPatElems env =
           foldl bindPatElem env $ Out.patternElements pat
         bindPatElem env patElem =
-          HM.insert (Out.patElemName patElem) (fst $ Out.patElemLore patElem) env
+          HM.insert (Out.patElemName patElem) (fst $ Out.patElemAttr patElem) env
         dims = nub $ concatMap Out.arrayDims $ Out.patternTypes pat
 
 refineDimensionRanges :: AS.RangesRep -> [Out.SubExp]
@@ -195,7 +196,7 @@ simplifyPatRanges :: Out.Pattern lore
 simplifyPatRanges (Out.Pattern context values) =
   Out.Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do
-          let (range, innerattr) = Out.patElemLore patElem
+          let (range, innerattr) = Out.patElemAttr patElem
           range' <- simplifyRange range
           return $ Out.setPatElemLore patElem (range', innerattr)
 

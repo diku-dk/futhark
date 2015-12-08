@@ -54,6 +54,7 @@ module Futhark.Representation.AST.Attributes.Types
 
        , Typed (..)
        , DeclTyped (..)
+       , SetType (..)
        )
        where
 
@@ -465,6 +466,12 @@ instance Typed Ident where
 instance Typed attr => Typed (Param attr) where
   typeOf = typeOf . paramAttr
 
+instance Typed attr => Typed (PatElemT attr) where
+  typeOf = typeOf . patElemAttr
+
+instance Typed b => Typed (a,b) where
+  typeOf = typeOf . snd
+
 -- | Typeclass for things that contain 'DeclType's.
 class DeclTyped t where
   declTypeOf :: t -> DeclType
@@ -474,3 +481,17 @@ instance DeclTyped DeclType where
 
 instance DeclTyped attr => DeclTyped (Param attr) where
   declTypeOf = declTypeOf . paramAttr
+
+-- | Typeclass for things whose type can be changed.
+class SetType a where
+  setType :: a -> Type -> a
+
+instance SetType Type where
+  setType _ t = t
+
+instance SetType b => SetType (a, b) where
+  setType (a, b) t = (a, setType b t)
+
+instance SetType attr => SetType (PatElemT attr) where
+  setType (PatElem name bindage attr) t =
+    PatElem name bindage $ setType attr t

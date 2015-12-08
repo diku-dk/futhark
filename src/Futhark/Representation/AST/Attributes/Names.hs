@@ -223,8 +223,8 @@ instance FreeIn attr => FreeIn (ParamT attr) where
     freeIn attr
 
 instance FreeIn attr => FreeIn (PatElemT attr) where
-  freeIn (PatElem ident bindage attr) =
-    freeIn ident <> freeIn bindage <> freeIn attr
+  freeIn (PatElem _ bindage attr) =
+    freeIn bindage <> freeIn attr
 
 instance FreeIn Bindage where
   freeIn BindVar = mempty

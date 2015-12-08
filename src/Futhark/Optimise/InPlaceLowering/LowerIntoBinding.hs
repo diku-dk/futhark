@@ -21,7 +21,8 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.InPlaceLowering.SubstituteIndices
 
 data DesiredUpdate =
-  DesiredUpdate { updateBindee :: Ident
+  DesiredUpdate { updateName :: VName -- ^ Name of result.
+                , updateType :: Type -- ^ Type of result.
                 , updateCertificates :: Certificates
                 , updateSource :: VName
                 , updateIndices :: [SubExp]
@@ -44,16 +45,16 @@ lowerUpdate (Let pat _ (LoopOp (DoLoop res merge form body))) updates = do
       postbnds
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
-  [DesiredUpdate bindee cs src is val]
+  [DesiredUpdate bindee_nm bindee_tp cs src is val]
   | patternNames pat == [src] =
-    Just $ return [mkLet [] [(bindee,BindInPlace cs v is)] $
+    Just $ return [mkLet [] [(Ident bindee_nm bindee_tp,BindInPlace cs v is)] $
                    PrimOp $ SubExp $ Var val]
 lowerUpdate
-  (Let (Pattern [] [PatElem v BindVar _]) _ e)
-  [DesiredUpdate bindee cs src is val]
-  | identName v == val =
-    Just $ return [mkLet [] [(bindee,BindInPlace cs src is)] e,
-                   mkLet' [] [v] $ PrimOp $ Index cs (identName bindee) is]
+  (Let (Pattern [] [PatElem v BindVar v_attr]) _ e)
+  [DesiredUpdate bindee_nm bindee_tp cs src is val]
+  | v == val =
+      Just $ return [mkLet [] [(Ident bindee_nm bindee_tp,BindInPlace cs src is)] e,
+                     mkLet' [] [Ident v $ typeOf v_attr] $ PrimOp $ Index cs bindee_nm is]
 lowerUpdate _ _ =
   Nothing
 
@@ -124,16 +125,16 @@ lowerUpdateIntoLoop updates pat res merge body = do
         mkMerge summary
           | Just (update, mergeident) <- relatedUpdate summary = do
             source <- newVName "modified_source"
-            let updpat = [((updateBindee update) { identName = source },
+            let updpat = [(Ident source $ updateType update,
                            BindInPlace
                            (updateCertificates update)
                            (updateSource update)
                            (updateIndices update))]
                 elmident = Ident (updateValue update) $
-                           rowType $ identType $ updateBindee update
+                           rowType $ updateType update
             tell ([mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary],
                   [mkLet' [] [elmident] $ PrimOp $ Index []
-                   (identName $ updateBindee update) (updateIndices update)])
+                   (updateName update) (updateIndices update)])
             return $ Right (Param
                             (identName mergeident)
                             (toDecl (identType mergeident) Unique),
@@ -150,7 +151,7 @@ lowerUpdateIntoLoop updates pat res merge body = do
 
         mkResAndPat' summary
           | Just (update, mergeident) <- relatedUpdate summary =
-              Just $ Right (updateBindee update, mergeident)
+              Just $ Right (Ident (updateName update) (updateType update), mergeident)
           | Just v <- inPatternAs summary =
               Just $ Left (v, paramIdent $ fst $ mergeParam summary)
           | otherwise =
@@ -170,7 +171,7 @@ summariseLoop updates usedInBody resmap merge =
             then Nothing
             else if hasLoopInvariantShape fparam then Just $ do
               ident <-
-                newIdent "lowered_array" $ identType $ updateBindee update
+                newIdent "lowered_array" $ updateType update
               return LoopResultSummary { resultSubExp = se
                                        , inPatternAs = Just v
                                        , mergeParam = (fparam, mergeinit)
@@ -203,9 +204,9 @@ indexSubstitutions :: [LoopResultSummary]
                    -> IndexSubstitutions
 indexSubstitutions = mapMaybe getSubstitution
   where getSubstitution res = do
-          (DesiredUpdate _ cs _ is _, mergeident) <- relatedUpdate res
+          (DesiredUpdate _ _ cs _ is _, Ident nm tp) <- relatedUpdate res
           let name = paramName $ fst $ mergeParam res
-          return (name, (cs, mergeident, is))
+          return (name, (cs, nm, tp, is))
 
 manipulateResult :: (Bindable lore, MonadFreshNames m) =>
                     [LoopResultSummary]
@@ -220,10 +221,10 @@ manipulateResult summaries substs = do
       case relatedUpdate summary of
         Nothing -> Left $ resultSubExp summary
         Just _  -> Right $ resultSubExp summary
-    substRes (Var res_v) (subst_v, (_, v, _))
+    substRes (Var res_v) (subst_v, (_, nm, _, _))
       | res_v == subst_v =
-        return $ Var $ identName v
-    substRes res_se (_, (cs, v, is)) = do
-      v' <- newIdent' (++"_updated") v
-      tell [mkLet [] [(v', BindInPlace cs (identName v) is)] $ PrimOp $ SubExp res_se]
+        return $ Var nm
+    substRes res_se (_, (cs, nm, tp, is)) = do
+      v' <- newIdent' (++"_updated") $ Ident nm tp
+      tell [mkLet [] [(v', BindInPlace cs nm is)] $ PrimOp $ SubExp res_se]
       return $ Var $ identName v'

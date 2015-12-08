@@ -309,7 +309,8 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
 typeEnv :: SymbolTable lore -> TypeEnv
 typeEnv = HM.map entryType . bindings
 
-defBndEntry :: SymbolTable lore
+defBndEntry :: Annotations lore =>
+               SymbolTable lore
             -> PatElem lore
             -> Range
             -> Binding lore
@@ -317,7 +318,7 @@ defBndEntry :: SymbolTable lore
 defBndEntry vtable patElem range bnd =
   LetBoundEntry {
       letBoundRange = simplifyRange $ scalExpRange range
-    , letBoundLore = patElemLore patElem
+    , letBoundLore = patElemAttr patElem
     , letBoundBinding = bnd
     , letBoundScalExp =
       runReader (toScalExp (`lookupScalExp` vtable) (bindingExp bnd)) types

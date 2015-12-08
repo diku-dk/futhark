@@ -102,7 +102,7 @@ instance TypeCheck.Checkable Basic where
   checkBodyLore = return
   checkFParamLore _ = TypeCheck.checkType
   checkLParamLore _ = TypeCheck.checkType
-  checkLetBoundLore _ = return
+  checkLetBoundLore _ = TypeCheck.checkType
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   matchPattern pat e = do
     et <- expExtType e
@@ -133,14 +133,14 @@ instance Bindable Basic where
   mkLetNames names e = do
     et <- expExtType e
     (ts, shapes) <- instantiateShapes' et
-    let shapeElems = [ AST.PatElem shapeident BindVar ()
-                     | shapeident <- shapes
+    let shapeElems = [ AST.PatElem shape BindVar shapet
+                     | Ident shape shapet <- shapes
                      ]
         mkValElem (name, BindVar) t =
-          return $ AST.PatElem (Ident name t) BindVar ()
+          return $ AST.PatElem name BindVar t
         mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
           srct <- lookupType src
-          return $ AST.PatElem (Ident name srct) bindage ()
+          return $ AST.PatElem name bindage srct
     valElems <- zipWithM mkValElem names ts
     return $ AST.Let (AST.Pattern shapeElems valElems) () e
 
@@ -149,7 +149,7 @@ instance PrettyLore Basic where
 basicPattern :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Pattern
 basicPattern context values =
   AST.Pattern (map patElem context) (map patElem values)
-  where patElem (ident,bindage) = AST.PatElem ident bindage ()
+  where patElem (Ident name t,bindage) = AST.PatElem name bindage t
 
 basicPattern' :: [Ident] -> [Ident] -> Pattern
 basicPattern' context values =
@@ -159,7 +159,7 @@ basicPattern' context values =
 removeLore :: Lore.Lore lore => Rephraser lore Basic
 removeLore =
   Rephraser { rephraseExpLore = const ()
-            , rephraseLetBoundLore = const ()
+            , rephraseLetBoundLore = typeOf
             , rephraseBodyLore = const ()
             , rephraseFParamLore = declTypeOf
             , rephraseLParamLore = typeOf

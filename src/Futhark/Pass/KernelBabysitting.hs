@@ -96,12 +96,9 @@ transformBinding expmap (Let pat ()
 
   let (seq_pat_elems, group_pat_elems) =
         splitAt (length input) $ patternElements pat
-      adjust pat_elem = do
-        ident' <- adjustIdent $ patElemIdent pat_elem
-        return pat_elem { patElemIdent = ident' }
-      adjustIdent ident = do
-        ident' <- newIdent' (++"_padded") ident
-        return ident' { identType = setOuterSize (identType ident') w' }
+      adjust (PatElem name bindage t) = do
+        name' <- newVName (baseString name ++ "_padded")
+        return $ PatElem name' bindage $ setOuterSize t w'
   seq_pat_elems' <- mapM adjust seq_pat_elems
   let scan_pat = Pattern [] (seq_pat_elems'++group_pat_elems)
 
@@ -239,11 +236,10 @@ rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
                     SequentialiseM ([PatElem], [(Type, [Int])])
 rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
-  where rearrangeReturn (PatElem ident BindVar ()) (t@Array{}, perm) = do
-          name_tr <- newVName $ baseString (identName ident) <> "_tr_res"
+  where rearrangeReturn (PatElem name BindVar namet) (t@Array{}, perm) = do
+          name_tr <- newVName $ baseString name <> "_tr_res"
           let perm' = rearrangeShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
-              ident' = Ident name_tr $ rearrangeType perm' $ identType ident
-              new_pat_elem = PatElem ident' BindVar ()
+              new_pat_elem = PatElem name_tr BindVar $ rearrangeType perm' namet
           return (new_pat_elem, (t, perm'))
         rearrangeReturn pat_elem (t, perm) =
           return (pat_elem, (t, perm))

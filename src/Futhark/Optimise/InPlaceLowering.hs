@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
@@ -125,9 +126,9 @@ optimiseBindings (bnd:bnds) m = do
   where boundHere = patternNames $ bindingPattern bnd
 
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
-            | [PatElem v (BindInPlace cs src [i]) _] <- patternElements pat,
+            | [PatElem v (BindInPlace cs src [i]) attr] <- patternElements pat,
               PrimOp (SubExp (Var ve)) <- e = do
-                forwarded <- maybeForward ve v cs src i
+                forwarded <- maybeForward ve v (typeOf attr) cs src i
                 return $ if forwarded
                          then bnds'
                          else bnd' : bnds'
@@ -191,7 +192,7 @@ instance Monoid BottomUp where
 
 updateBinding :: DesiredUpdate -> Binding Basic
 updateBinding fwd =
-  mkLet [] [(updateBindee fwd,
+  mkLet [] [(Ident (updateName fwd) (updateType fwd),
              BindInPlace
              (updateCertificates fwd)
              (updateSource fwd)
@@ -236,7 +237,7 @@ bindingBinding :: Binding Basic
 bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
   let entries = HM.fromList $ map entry $ patternElements pat
       entry patElem =
-        let (aliases, ()) = patElemLore patElem
+        let (aliases, _) = patElemAttr patElem
         in (patElemName patElem,
             Entry n (unNames aliases) d True $ patElemType patElem)
   in TopDown (n+1) (HM.union entries vtable) d
@@ -297,9 +298,9 @@ tapBottomUp m = do (x,bup) <- listen m
                    return (x, bup)
 
 maybeForward :: VName
-             -> Ident -> Certificates -> VName -> SubExp
+             -> VName -> Type -> Certificates -> VName -> SubExp
              -> ForwardingM Bool
-maybeForward v dest cs src i = do
+maybeForward v dest_nm dest_tp cs src i = do
   -- Checks condition (2)
   available <- [i,Var src] `areAvailableBefore` v
   -- ...subcondition, the certificates must also.
@@ -310,7 +311,7 @@ maybeForward v dest cs src i = do
   optimisable <- isOptimisable v
   not_basic <- not <$> basicType <$> lookupType v
   if available && certs_available && samebody && optimisable && not_basic then do
-    let fwd = DesiredUpdate dest cs src [i] v
+    let fwd = DesiredUpdate dest_nm dest_tp cs src [i] v
     tell mempty { forwardThese = [fwd] }
     return True
     else return False

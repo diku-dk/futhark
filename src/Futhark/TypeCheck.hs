@@ -483,13 +483,13 @@ checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
 checkFunParams = mapM_ $ \param ->
   context ("In function parameter " ++ pretty param) $
-    checkFParamLore (paramIdent param) (paramAttr param)
+    checkFParamLore (paramName param) (paramAttr param)
 
 checkLambdaParams :: Checkable lore =>
                      [LParam lore] -> TypeM lore ()
 checkLambdaParams = mapM_ $ \param ->
   context ("In lambda parameter " ++ pretty param) $
-    checkLParamLore (paramIdent param) (paramAttr param)
+    checkLParamLore (paramName param) (paramAttr param)
 
 checkFun' :: (Checkable lore) =>
              (Name,
@@ -1199,10 +1199,9 @@ checkKernelSize (KernelSize num_groups workgroup_size per_thread_elements
 
 checkPatElem :: Checkable lore =>
                 PatElem lore -> TypeM lore ()
-checkPatElem (PatElem ident bindage attr) = do
-  checkBndSizes ident
+checkPatElem (PatElem name bindage attr) = do
   checkBindage bindage
-  checkLetBoundLore ident attr
+  checkLetBoundLore name attr
 
 checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
@@ -1229,30 +1228,29 @@ checkBinding pat e m = do
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
     matchPattern (removePatternAliases pat) (removeExpAliases e)
   binding (zip (identsAndLore pat)
-           (map (unNames . fst . patElemLore) $
+           (map (unNames . fst . patElemAttr) $
             patternElements pat)) $ do
     mapM_ checkPatElem (patternElements $ removePatternAliases pat)
     m
   where identsAndLore = map identAndLore . patternElements . removePatternAliases
-        identAndLore bindee = (patElemIdent bindee, LetBound $ patElemLore bindee)
+        identAndLore bindee = (patElemIdent bindee, LetBound $ patElemAttr bindee)
 
-matchExtPattern :: [PatElem lore] -> [ExtType] -> TypeM lore ()
+matchExtPattern :: Checkable lore => [PatElem lore] -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
   unless (length restpat == length ts') $
     bad $ InvalidPatternError (Several pat) (Several ts) Nothing noLoc
   evalStateT (zipWithM_ checkBinding' restpat ts') []
-  where checkBinding' patElem@(PatElem (Ident name namet) _ _) t = do
+  where checkBinding' patElem@(PatElem name _ _) t = do
           lift $ checkAnnotation ("binding of variable " ++ textual name)
             (patElemRequires patElem) t
-          add $ Ident name namet
+          add name
 
-        add ident = do
-          bnd <- gets $ find (==ident)
-          case bnd of
-            Nothing -> modify (ident:)
-            Just (Ident name _) ->
-              lift $ bad $ DupPatternError name noLoc noLoc
+        add name = do
+          seen <- gets $ elem name
+          if seen
+            then lift $ bad $ DupPatternError name noLoc noLoc
+            else modify (name:)
 
 matchExtReturnType :: Name -> [ExtType] -> Result
                    -> TypeM lore ()
@@ -1263,7 +1261,8 @@ matchExtReturnType fname rettype ses = do
           (Several rettype)
           (Several ts)
 
-patternContext :: [PatElemT attr] -> [ExtType] ->
+patternContext :: Typed attr =>
+                  [PatElemT attr] -> [ExtType] ->
                   Either String ([Type], [PatElemT attr], [PatElemT attr])
 patternContext pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
@@ -1283,12 +1282,6 @@ patternContext pat rt = do
                 return $ Var $ patElemName v
             (_, Nothing) ->
               lift $ Left "Pattern cannot match context"
-
-checkBndSizes :: Checkable lore =>
-                 Ident -> TypeM lore ()
-checkBndSizes (Ident _ t) = do
-  let dims = arrayDims t
-  mapM_ (require [Basic Int]) dims
 
 validApply :: ArrayShape shape =>
               [TypeBase shape Uniqueness]
@@ -1394,9 +1387,9 @@ class (FreeIn (Annotations.Exp lore),
        Lore lore, PrettyLore lore) => Checkable lore where
   checkExpLore :: Annotations.Exp lore -> TypeM lore ()
   checkBodyLore :: Annotations.Body lore -> TypeM lore ()
-  checkFParamLore :: Ident -> Annotations.FParam lore -> TypeM lore ()
-  checkLParamLore :: Ident -> Annotations.LParam lore -> TypeM lore ()
-  checkLetBoundLore :: Ident -> Annotations.LetBound lore -> TypeM lore ()
+  checkFParamLore :: VName -> Annotations.FParam lore -> TypeM lore ()
+  checkLParamLore :: VName -> Annotations.LParam lore -> TypeM lore ()
+  checkLetBoundLore :: VName -> Annotations.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()

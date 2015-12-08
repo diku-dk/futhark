@@ -236,6 +236,9 @@ instance PP.Pretty (Param (MemBound Uniqueness)) where
 instance PP.Pretty (Param (MemBound NoUniqueness)) where
   ppr = PP.ppr . fmap typeOf
 
+instance PP.Pretty (PatElemT (MemBound NoUniqueness)) where
+  ppr = PP.ppr . fmap typeOf
+
 -- | A description of the memory properties of an array being returned
 -- by an operation.  Note that the 'Eq' and 'Ord' instances are
 -- useless (everything is equal).  This type is merely a building
@@ -498,7 +501,7 @@ matchPatternToReturns wrong pat rt = do
       popSizeIfInCtx size
       matchType bindee $ Mem (Var size) space
     matchBindee bindee (ReturnsArray et shape _ rets)
-      | ArrayMem _ _ _ mem bindeeIxFun <- patElemLore bindee = do
+      | ArrayMem _ _ _ mem bindeeIxFun <- patElemAttr bindee = do
           case rets of
             Nothing -> return ()
             Just (ReturnsInBlock retmem retIxFun) -> do
@@ -584,12 +587,12 @@ varMemBound name = do
     TypeCheck.FunBound summary -> return $ fmap (const NoUniqueness) summary
     TypeCheck.LambdaBound summary -> return summary
 
-checkMemBound :: Ident -> MemBound u
+checkMemBound :: VName -> MemBound u
              -> TypeCheck.TypeM ExplicitMemory ()
 checkMemBound _ (Scalar _) = return ()
 checkMemBound _ (MemMem size _) =
   TypeCheck.require [Basic Int] size
-checkMemBound ident (ArrayMem _ _ _ v ixfun) = do
+checkMemBound name (ArrayMem _ shape _ v ixfun) = do
   t <- lookupType v
   case t of
     Mem{} ->
@@ -603,11 +606,11 @@ checkMemBound ident (ArrayMem _ _ _ v ixfun) = do
   TypeCheck.context ("in index function " ++ pretty ixfun) $ do
     traverse_ (TypeCheck.requireI [Basic Int]) $ freeIn ixfun
     let ixfun_rank = IxFun.rank ixfun
-        ident_rank = arrayRank $ identType ident
+        ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
       TypeCheck.bad $ TypeCheck.TypeError noLoc $
       "Arity of index function (" ++ pretty ixfun_rank ++
-      ") does not match rank of array " ++ pretty ident ++
+      ") does not match rank of array " ++ pretty name ++
       " (" ++ show ident_rank ++ ")"
 
 instance Renameable ExplicitMemory where
@@ -656,7 +659,7 @@ lparamAnnot :: LParam -> Maybe PP.Doc
 lparamAnnot = bindeeAnnot paramName paramAttr
 
 patElemAnnot :: PatElem -> Maybe PP.Doc
-patElemAnnot = bindeeAnnot patElemName patElemLore
+patElemAnnot = bindeeAnnot patElemName patElemAttr
 
 -- | Convet a 'Returns' to an 'Type' by throwing away memory
 -- information.
@@ -833,7 +836,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
         memsummary <- do
           summary <- case HM.lookup v boundHere of
             Nothing -> lift $ look v
-            Just bindee -> return $ patElemLore bindee
+            Just bindee -> return $ patElemAttr bindee
 
           case summary of
             Scalar _ ->

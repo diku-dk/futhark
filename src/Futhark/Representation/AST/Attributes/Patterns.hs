@@ -9,10 +9,8 @@ module Futhark.Representation.AST.Attributes.Patterns
        , paramDeclType
          -- * Pattern elements
        , patElemIdent
-       , patElemName
        , patElemType
        , patElemRequires
-       , patElemLore
        , setPatElemLore
        , patternElements
        , patternIdents
@@ -50,18 +48,18 @@ paramDeclType = declTypeOf
 paramIdent :: Typed attr => ParamT attr -> Ident
 paramIdent param = Ident (paramName param) (typeOf param)
 
--- | The name of the ident bound by a 'PatElem'.
-patElemName :: PatElemT attr -> VName
-patElemName = identName . patElemIdent
+-- | An 'Ident' corresponding to a pattern element.
+patElemIdent :: Typed attr => PatElemT attr -> Ident
+patElemIdent pelem = Ident (patElemName pelem) (typeOf pelem)
 
 -- | The type of a name bound by a 'PatElem'.
-patElemType :: PatElemT attr -> Type
-patElemType = identType . patElemIdent
+patElemType :: Typed attr => PatElemT attr -> Type
+patElemType = typeOf
 
 -- | The type of the value being bound by a 'PatElem'.
-patElemRequires :: PatElemT attr -> Type
-patElemRequires (PatElem ident bindage _) =
-  bindageRequires (identType ident) bindage
+patElemRequires :: Typed attr => PatElemT attr -> Type
+patElemRequires (PatElem _ bindage attr) =
+  bindageRequires (typeOf attr) bindage
 
 -- | The type of the value being bound by an pattern element with the
 -- given result 'Type' and 'Bindage'.
@@ -81,35 +79,35 @@ patternElements :: Pattern lore -> [PatElem lore]
 patternElements pat = patternContextElements pat ++ patternValueElements pat
 
 -- | Return a list of the 'Ident's bound by the 'Pattern'.
-patternIdents :: Pattern lore -> [Ident]
+patternIdents :: Annotations.Annotations lore => Pattern lore -> [Ident]
 patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
 
 -- | Return a list of the context 'Ident's bound by the 'Pattern'.
-patternContextIdents :: Pattern lore -> [Ident]
+patternContextIdents :: Annotations.Annotations lore => Pattern lore -> [Ident]
 patternContextIdents = map patElemIdent . patternContextElements
 
 -- | Return a list of the value 'Ident's bound by the 'Pattern'.
-patternValueIdents :: Pattern lore -> [Ident]
+patternValueIdents :: Annotations.Annotations lore => Pattern lore -> [Ident]
 patternValueIdents = map patElemIdent . patternValueElements
 
 -- | Return a list of the 'Name's bound by the 'Pattern'.
 patternNames :: Pattern lore -> [VName]
-patternNames = map identName . patternIdents
+patternNames = map patElemName . patternElements
 
 -- | Return a list of the 'Name's bound by the context part of the 'Pattern'.
 patternContextNames :: Pattern lore -> [VName]
-patternContextNames = map identName . patternContextIdents
+patternContextNames = map patElemName . patternContextElements
 
 -- | Return a list of the 'Name's bound by the value part of the 'Pattern'.
 patternValueNames :: Pattern lore -> [VName]
-patternValueNames = map identName . patternValueIdents
+patternValueNames = map patElemName . patternValueElements
 
 -- | Return a list of the 'types's bound by the 'Pattern'.
-patternTypes :: Pattern lore -> [Type]
+patternTypes :: Annotations.Annotations lore => Pattern lore -> [Type]
 patternTypes = map identType . patternIdents
 
 -- | Return a list of the 'types's bound by the value part of the 'Pattern'.
-patternValueTypes :: Pattern lore -> [Type]
+patternValueTypes :: Annotations.Annotations lore => Pattern lore -> [Type]
 patternValueTypes = map identType . patternValueIdents
 
 -- | Return the number of names bound by the 'Pattern'.

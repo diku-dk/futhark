@@ -288,7 +288,7 @@ removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form bo
           map patElemName (filter interestingBindee $ patternElements pat)
         interestingBindee bindee =
           any (`elem` patNames) $
-          freeIn (patElemLore bindee) <> freeIn (patElemType bindee)
+          freeIn (patElemAttr bindee) <> freeIn (patElemType bindee)
         taggedpat = zip (patternElements pat) $
                     loopResultContext (representative :: Lore m) respat (map fst merge) ++
                     respat
@@ -1058,7 +1058,7 @@ removeScratchValue _ (Let
                       (Pattern [] [PatElem v (BindInPlace _ src _) _])
                       _
                       (PrimOp Scratch{})) =
-    letBindNames'_ [identName v] $ PrimOp $ SubExp $ Var src
+    letBindNames'_ [v] $ PrimOp $ SubExp $ Var src
 removeScratchValue _ _ =
   cannotSimplify
 

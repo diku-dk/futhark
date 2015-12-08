@@ -77,14 +77,12 @@ cseInBinding (Let pat eattr e) m = do
           let lets =
                 [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var $ patElemName patElem
                 | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
-                  let patElem' = setPatElemName patElem name
+                  let patElem' = patElem { patElemName = name }
                 ]
           m lets
   where bad Array{} = True
         bad Mem{}   = True
         bad _       = False
-        setPatElemName patElem name =
-          patElem { patElemIdent = Ident name $ identType $ patElemIdent patElem }
 
 type ExpressionSubstitutions lore = M.Map (Annotations.Exp lore, Exp lore) (Pattern lore)
 type NameSubstitutions = HM.HashMap VName VName

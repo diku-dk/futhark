@@ -282,9 +282,6 @@ blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
                      -> [(SubExp, VName)]
                      -> m ()
 blockedSegmentedScan segment_size pat cs w lam input = do
-  unused_flag_array <- newIdent "unused_flag_array" $
-                       arrayOf (Basic Bool) (Shape [w]) NoUniqueness
-
   x_flag <- newVName "x_flag"
   y_flag <- newVName "y_flag"
   let x_flag_param = Param x_flag $ Basic Bool
@@ -318,12 +315,14 @@ blockedSegmentedScan segment_size pat cs w lam input = do
     [(Basic Bool, [0])]
     flags_body
 
+  unused_flag_array <- newVName "unused_flag_array"
   let lam' = Lambda { lambdaIndex = lambdaIndex lam
                     , lambdaParams = params
                     , lambdaBody = body
                     , lambdaReturnType = Basic Bool : lambdaReturnType lam
                     }
-      pat' = pat { patternValueElements = PatElem unused_flag_array BindVar () :
+      pat' = pat { patternValueElements = PatElem unused_flag_array BindVar
+                                          (arrayOf (Basic Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }
       input' = (false, flags) : input

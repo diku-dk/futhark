@@ -751,12 +751,12 @@ declaringVars = flip $ foldr declaringVar
 
 declaringFParams :: [FParam] -> ImpM op a -> ImpM op a
 declaringFParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (paramIdent fparam) BindVar
+  where toPatElem fparam = PatElem (paramName fparam) BindVar
                            (const NoUniqueness <$> paramAttr fparam)
 
 declaringLParams :: [LParam] -> ImpM op a -> ImpM op a
 declaringLParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (paramIdent fparam) BindVar (paramAttr fparam)
+  where toPatElem fparam = PatElem (paramName fparam) BindVar (paramAttr fparam)
 
 declaringVarEntry :: VName -> VarEntry -> ImpM op a -> ImpM op a
 declaringVarEntry name entry m = do
@@ -771,7 +771,7 @@ declaringVarEntry name entry m = do
 
 declaringVar :: PatElem -> ImpM op a -> ImpM op a
 declaringVar patElem m =
-  case patElemLore patElem of
+  case patElemAttr patElem of
     Scalar bt -> do
       let entry = ScalarVar ScalarEntry { entryScalarType    = bt
                                         }
