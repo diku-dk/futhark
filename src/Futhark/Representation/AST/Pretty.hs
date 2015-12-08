@@ -28,7 +28,8 @@ class (Lore lore,
        Pretty (Pattern lore),
        Pretty (Annotations.LetBound lore),
        Pretty (ParamT (Annotations.FParam lore)),
-       Pretty (ParamT (Annotations.LParam lore))) => PrettyLore lore where
+       Pretty (ParamT (Annotations.LParam lore)),
+       Pretty (PatElemT (Annotations.LetBound lore))) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -121,33 +122,27 @@ bindingAnnotation bnd doc =
     Nothing    -> doc
     Just annot -> annot </> doc
 
-instance Pretty (PatternT lore) where
-  ppr = braces . commasep . map ppElem . patternElements
-    where ppElem (PatElem ident BindVar _) =
-            ppr (identType ident) <+>
-            ppr (identName ident)
-          ppElem (PatElem ident (BindInPlace cs src is) _) =
-            ppCertificates cs <>
-            parens (ppr (identType ident) <+>
-                    ppr (identName ident) <+>
-                    text "<-" <+>
-                    ppr src) <>
-            brackets (commasep $ map ppr is)
+instance PrettyLore lore => Pretty (PatternT lore) where
+  ppr = braces . commasep . map ppr . patternElements
 
-instance Pretty attr => Pretty (PatElemT attr) where
-  ppr (PatElem ident BindVar attr) =
-    ppr (identType ident) <+>
-    ppr (identName ident) <+>
-    parens (ppr attr)
+instance Pretty (PatElemT b) => Pretty (PatElemT (a,b)) where
+  ppr = ppr . fmap snd
 
-  ppr (PatElem ident (BindInPlace cs src is) attr) =
+instance Pretty (PatElemT Type) where
+  ppr (PatElem name BindVar t) =
+    ppr t <+>
+    ppr name
+
+  ppr (PatElem name (BindInPlace cs src is) t) =
     ppCertificates cs <>
-    parens (ppr (identType ident) <+>
-            ppr (identName ident) <+>
+    parens (ppr t <+>
+            ppr name <+>
             text "<-" <+>
-            ppr src <>
-            parens (ppr attr)) <>
+            ppr src) <>
     brackets (commasep $ map ppr is)
+
+instance Pretty (ParamT b) => Pretty (ParamT (a,b)) where
+  ppr = ppr . fmap snd
 
 instance Pretty (ParamT DeclType) where
   ppr (Param name t) =

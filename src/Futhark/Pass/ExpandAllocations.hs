@@ -139,10 +139,9 @@ expandedAllocations num_threads thread_index thread_allocs = do
   alloc_bnds <-
     liftM concat $ forM (HM.toList thread_allocs) $ \(mem,(per_thread_size, space)) -> do
       total_size <- newVName "total_size"
-      let sizepat = Pattern [] [PatElem (Ident total_size $ Basic Int) BindVar $ Scalar Int]
-          allocpat = Pattern [] [PatElem
-                                 (Ident mem $ Mem (Var total_size) space)
-                                 BindVar $ MemMem (Var total_size) space]
+      let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar Int]
+          allocpat = Pattern [] [PatElem mem BindVar $
+                                 MemMem (Var total_size) space]
       return [Let sizepat () $ PrimOp $ BinOp Times num_threads per_thread_size Int,
               Let allocpat () $ PrimOp $ Alloc (Var total_size) space]
   -- Fix every reference to the memory blocks to be offset by the
@@ -187,8 +186,8 @@ offsetMemoryInPattern offsets (Pattern ctx vals) =
   where offsets' = foldl inspectCtx offsets ctx
         vals' = map inspectVal vals
         inspectVal patElem =
-          patElem { patElemLore =
-                       offsetMemoryInMemBound offsets' $ patElemLore patElem
+          patElem { patElemAttr =
+                       offsetMemoryInMemBound offsets' $ patElemAttr patElem
                   }
         inspectCtx ctx_offsets patElem
           | Mem _ _ <- patElemType patElem =

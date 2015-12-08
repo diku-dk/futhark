@@ -10,7 +10,7 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Representation.AST.Syntax
 
-expExtContext :: (HasTypeEnv m, Monad m) =>
+expExtContext :: (Annotations lore, HasTypeEnv m, Monad m) =>
                  Pattern lore -> Exp lore -> m [Maybe SubExp]
 expExtContext pat (If _ tbranch fbranch _) = do
   ttype <- bodyExtType tbranch

@@ -128,7 +128,7 @@ generateOptimisedPredicates'
 rephraseWithInvariance :: Body -> S.Body Invariance'
 rephraseWithInvariance = rephraseBody rephraser
   where rephraser = Rephraser { rephraseExpLore = const TooVariant
-                              , rephraseLetBoundLore = const Nothing
+                              , rephraseLetBoundLore = \x -> (Nothing, x)
                               , rephraseFParamLore = declTypeOf
                               , rephraseBodyLore = const ()
                               , rephraseRetType = id
@@ -290,7 +290,8 @@ instance MonadFreshNames m => MonadBinder (VariantM m) where
     let explore = if forbiddenExp context e
                   then TooVariant
                   else Invariant
-        pat' = Pattern [] [ S.PatElem v BindVar Nothing | v <- patternIdents pat ]
+        pat' = Pattern [] [ S.PatElem nm BindVar (Nothing,tp)
+                          | Ident nm tp <- patternIdents pat ]
     return $ mkWiseLetBinding pat' explore e
 
   mkBodyM bnds res =
@@ -347,13 +348,19 @@ instance MonadFreshNames m =>
                             map identName vs
                        }
             tagPatElem patElem v =
-              patElem `setPatElemLore` (fst $ patElemLore patElem, Just v)
-            suffpat = Pattern [] [ S.PatElem v BindVar Nothing | v <- vs ]
+              patElem `setPatElemLore` (fst $ patElemAttr patElem, (Just v, patElemType patElem))
+            suffpat = Pattern [] [ S.PatElem nm BindVar (Nothing, tp)
+                                 | Ident nm tp <- vs ]
         makeSufficientBinding =<< mkLetM (addWisdomToPattern suffpat suffe) suffe
         Simplify.defaultInspectBinding $ Let pat' lore e
 
-  simplifyLetBoundLore Nothing  = return Nothing
-  simplifyLetBoundLore (Just v) = Just <$> Simplify.simplifyVName v
+  simplifyLetBoundLore (Nothing, tp) = do
+    tp' <- Simplify.simplifyType tp
+    return (Nothing, tp')
+  simplifyLetBoundLore (Just v, tp) = do
+    v' <- Simplify.simplifyVName v
+    tp' <- Simplify.simplifyType tp
+    return (Just v', tp')
 
   simplifyFParamLore =
     return
@@ -402,8 +409,8 @@ makeSufficientBinding' _ bnd = Simplify.defaultInspectBinding bnd
 suffScalExp :: VName -> ST.SymbolTable Invariance -> Maybe ScalExp
 suffScalExp name vtable = asSuffScalExp =<< ST.lookup name vtable
   where asSuffScalExp entry
-          | Just (_, Just suff) <- ST.entryLetBoundLore entry,
-            Just se             <- suffScalExp suff vtable =
+          | Just (_, (Just suff, _)) <- ST.entryLetBoundLore entry,
+            Just se                  <- suffScalExp suff vtable =
               Just se
           | otherwise = ST.asScalExp entry
 
@@ -411,7 +418,7 @@ sufficientSubExp :: MonadFreshNames m => SubExp -> VariantM m SubExp
 sufficientSubExp se@Constant{} = return se
 sufficientSubExp (Var v) =
   maybe (Var v) Var .
-  (snd <=< ST.entryLetBoundLore <=< ST.lookup v) <$>
+  (fst . snd <=< ST.entryLetBoundLore <=< ST.lookup v) <$>
   Simplify.getVtable
 
 scalExpUsesNoForbidden :: Context m -> ScalExp -> Bool
@@ -436,7 +443,7 @@ isForbidden TooVariant = True
 
 data Invariance' = Invariance'
 instance Annotations.Annotations Invariance' where
-  type LetBound Invariance' = Maybe VName
+  type LetBound Invariance' = (Maybe VName, Type)
   type Exp Invariance' = Variance
 instance Lore.Lore Invariance' where
   representative = Invariance'
@@ -452,7 +459,7 @@ type Invariance = Wise Invariance'
 
 removeInvariance :: Rephraser Invariance' Basic
 removeInvariance = Rephraser { rephraseExpLore = const ()
-                             , rephraseLetBoundLore = const ()
+                             , rephraseLetBoundLore = snd
                              , rephraseBodyLore = const ()
                              , rephraseFParamLore = declTypeOf
                              , rephraseRetType = id

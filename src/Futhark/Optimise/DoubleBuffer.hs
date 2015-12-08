@@ -123,7 +123,7 @@ allocBindings :: [DoubleBuffer] -> [Binding]
 allocBindings = mapMaybe allocation
   where allocation (BufferAlloc name size space) =
           Just $
-          Let (Pattern [] [PatElem (Ident name $ Mem size space) BindVar $ MemMem size space]) () $
+          Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
           PrimOp $ Alloc size space
         allocation _ =
           Nothing
@@ -140,9 +140,8 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
           -- To construct the copy we will need to figure out its type
           -- based on the type of the function parameter.
           let t = resultType $ paramType fparam
-              ident = Ident copyname t
               summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness bufname ixfun
-              copybnd = Let (Pattern [] [PatElem ident BindVar summary]) () $
+              copybnd = Let (Pattern [] [PatElem copyname BindVar summary]) () $
                         PrimOp $ Copy v
           in (Just copybnd, Var copyname)
 

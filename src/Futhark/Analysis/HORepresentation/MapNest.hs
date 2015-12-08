@@ -27,7 +27,6 @@ import Futhark.Transform.Substitute
 import Futhark.Representation.AST hiding (typeOf)
 import Futhark.MonadFreshNames
 import Futhark.Binder (Bindable)
-import Futhark.Representation.AST.Annotations (Annotations)
 
 data Nesting lore = Nesting {
     nestingIndex        :: VName

@@ -552,11 +552,8 @@ interchangeLoop
           return (expanded_param, expanded_init)
             where param_name = baseString $ paramName merge_param
 
-        expandPatElem patElem =
-          patElem { patElemIdent = expandIdent $ patElemIdent patElem }
-
-        expandIdent ident =
-          ident { identType = arrayOfRow (identType ident) w  }
+        expandPatElem (PatElem name bindage t) =
+          PatElem name bindage $ arrayOfRow t w
 
 interchangeLoops :: (MonadFreshNames m, HasTypeEnv m) =>
                     KernelNest -> SeqLoop

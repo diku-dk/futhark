@@ -77,13 +77,13 @@ instance Lore.Lore lore => Aliased (Wise lore) where
     let ((_, consumed, _) ,_) = bodyLore body
     in unNames consumed
   patternAliases =
-    map (unNames . fst . fst . patElemLore) . patternElements
+    map (unNames . fst . fst . patElemAttr) . patternElements
 
 instance Lore.Lore lore => Ranged (Wise lore) where
   bodyRanges body =
     let ((_, _, ranges) ,_) = bodyLore body
     in ranges
-  patternRanges = map (snd . fst . patElemLore) . patternElements
+  patternRanges = map (snd . fst . patElemAttr) . patternElements
 
 removeWisdom :: Rephraser (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = snd
@@ -120,7 +120,7 @@ addWisdomToPattern pat e =
   (zipWith addRanges valals ranges)
   where (ctxals, valals) = Aliases.mkPatternAliases pat e
         addRanges patElem range =
-          let (als,innerlore) = patElemLore patElem
+          let (als,innerlore) = patElemAttr patElem
           in patElem `setPatElemLore` ((als, range), innerlore)
         ranges = expRanges e
 

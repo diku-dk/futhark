@@ -73,6 +73,7 @@ module Futhark.Representation.AST.Syntax
 
   -- * Miscellaneous
   , Names
+  , Annotations
   )
   where
 

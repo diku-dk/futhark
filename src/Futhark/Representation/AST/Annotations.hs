@@ -12,12 +12,12 @@ class (Show (LetBound l), Show (Exp l), Show (Body l), Show (FParam l), Show (LP
        Eq (LetBound l), Eq (Exp l), Eq (Body l), Eq (FParam l), Eq (LParam l), Eq (RetType l),
        Ord (LetBound l), Ord (Exp l), Ord (Body l), Ord (FParam l), Ord (LParam l), Ord (RetType l),
        IsRetType (RetType l),
-       Typed (FParam l), Typed (LParam l),
+       Typed (FParam l), Typed (LParam l), Typed (LetBound l),
        DeclTyped (FParam l))
       => Annotations l where
   -- | Annotation for every binding.
   type LetBound l :: *
-  type LetBound l = ()
+  type LetBound l = Type
   -- | Annotation for every expression.
   type Exp l :: *
   type Exp l = ()

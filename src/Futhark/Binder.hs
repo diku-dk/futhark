@@ -126,13 +126,13 @@ runBinderEmptyEnv :: MonadFreshNames m =>
 runBinderEmptyEnv m =
   modifyNameSource $ runState $ runBinderT m mempty
 
-addBinderBinding :: Monad m =>
+addBinderBinding :: (Annotations lore, Monad m) =>
                     Binding lore -> BinderT lore m ()
 addBinderBinding binding = do
   tell $ DL.singleton binding
   BinderT $ modify (`HM.union` typeEnvFromBindings [binding])
 
-collectBinderBindings :: Monad m =>
+collectBinderBindings :: (Annotations lore, Monad m) =>
                          BinderT lore m a
                       -> BinderT lore m (a, [Binding lore])
 collectBinderBindings m = pass $ do

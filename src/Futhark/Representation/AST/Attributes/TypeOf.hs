@@ -219,7 +219,7 @@ instance HasTypeEnv FeelBad where
   askTypeEnv = pure mempty
 
 -- | The type of a body.
-bodyExtType :: (HasTypeEnv m, Monad m) =>
+bodyExtType :: (Annotations lore, HasTypeEnv m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound <$> staticShapes <$>
@@ -302,7 +302,7 @@ applyExtType (ExtRetType extret) params args =
 
 -- | Create a type environment consisting of the names bound in the
 -- list of bindings.
-typeEnvFromBindings :: [Binding lore] -> TypeEnv
+typeEnvFromBindings :: Annotations lore => [Binding lore] -> TypeEnv
 typeEnvFromBindings = mconcat . map (typeEnvFromPattern . bindingPattern)
 
 -- | Create a type environment from function parameters.
@@ -315,7 +315,7 @@ typeEnvFromIdents = HM.fromList . map assoc
   where assoc param = (identName param, identType param)
 
 -- | Create a type environment a pattern.
-typeEnvFromPattern :: Pattern lore -> TypeEnv
+typeEnvFromPattern :: Annotations.Annotations lore => Pattern lore -> TypeEnv
 typeEnvFromPattern = typeEnvFromIdents . patternIdents
 
 -- | Execute an action with a locally extended type environment.

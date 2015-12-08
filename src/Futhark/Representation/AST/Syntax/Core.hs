@@ -236,16 +236,21 @@ data Bindage = BindVar -- ^ Bind as normal.
                -- (if necessary).
                   deriving (Ord, Show, Eq)
 
--- | An element of a pattern - consisting of an 'Ident' (essentially a
+-- | An element of a pattern - consisting of an name (essentially a
 -- pair of the name andtype), a 'Bindage', and an addditional
--- parametric attribute.
-data PatElemT attr = PatElem { patElemIdent :: Ident
-                               -- ^ The ident bound by a 'PatElem'.
+-- parametric attribute.  This attribute is what is expected to
+-- contain the type of the resulting variable.
+data PatElemT attr = PatElem { patElemName :: VName
+                               -- ^ The name being bound.
                              , patElemBindage :: Bindage
-                             , patElemLore :: attr
+                               -- ^ How the name is bound.
+                             , patElemAttr :: attr
                                -- ^ Pattern element attribute.
                              }
                    deriving (Ord, Show, Eq)
+
+instance Functor PatElemT where
+  fmap f (PatElem name bindage attr) = PatElem name bindage (f attr)
 
 -- | A set of names.
 type Names = HS.HashSet VName

@@ -47,14 +47,14 @@ data SimpleOps m =
 
 bindableSimpleOps :: (Engine.MonadEngine m,
                       Bindable (Engine.InnerLore m),
-                      Annotations.LetBound (Engine.InnerLore m) ~ (),
+                      Annotations.LetBound (Engine.InnerLore m) ~ Type,
                       Annotations.FParam (Engine.InnerLore m) ~ DeclType,
                       Annotations.LParam (Engine.InnerLore m) ~ Type,
                       RetType (Engine.InnerLore m) ~ ExtRetType) =>
                      SimpleOps m
 bindableSimpleOps =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  return Engine.simplifyType Engine.simplifyType simplifyRetType'
+  Engine.simplifyType Engine.simplifyType Engine.simplifyType simplifyRetType'
   where mkLetS' _ pat e = return $
                           mkLet (map asPair $ patternContextElements pat)
                           (map asPair $ patternValueElements pat)

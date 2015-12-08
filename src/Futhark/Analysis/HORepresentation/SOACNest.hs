@@ -40,7 +40,6 @@ import Futhark.Binder
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Transform.Substitute
-import Futhark.Representation.AST.Annotations (Annotations)
 
 -- Current problems:
 --

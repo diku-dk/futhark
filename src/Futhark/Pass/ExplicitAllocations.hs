@@ -214,27 +214,27 @@ allocsForPattern :: Allocator m =>
                     [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
                  -> m ([PatElem], [PatElem], [AllocBinding])
 allocsForPattern sizeidents validents rts = do
-  let sizes' = [ PatElem size BindVar $ Scalar Int | size <- sizeidents ]
+  let sizes' = [ PatElem size BindVar $ Scalar Int | size <- map identName sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
     runWriterT $ forM (zip validents rts) $ \((ident,bindage), rt) -> do
       let shape = arrayShape $ identType ident
       case rt of
         ReturnsScalar _ -> do
           summary <- lift $ summaryForBindage (identType ident) bindage
-          return $ PatElem ident bindage summary
+          return $ PatElem (identName ident) bindage summary
 
         ReturnsMemory size space ->
-          return $ PatElem ident bindage $ MemMem size space
+          return $ PatElem (identName ident) bindage $ MemMem size space
 
         ReturnsArray bt _ u (Just (ReturnsInBlock mem ixfun)) ->
           case bindage of
             BindVar ->
-              return $ PatElem ident bindage $
+              return $ PatElem (identName ident) bindage $
               ArrayMem bt shape u mem ixfun
             BindInPlace _ src is -> do
               (destmem,destixfun) <- lift $ lookupArraySummary' src
               if destmem == mem && destixfun == ixfun
-                then return $ PatElem ident bindage $
+                then return $ PatElem (identName ident) bindage $
                      ArrayMem bt shape u mem ixfun
                 else do
                 -- The expression returns at some specific memory
@@ -248,13 +248,13 @@ allocsForPattern sizeidents validents rts = do
                 tell ([], [],
                       [ArrayCopy (identName ident) bindage $
                        identName tmp_buffer])
-                return $ PatElem tmp_buffer BindVar $
+                return $ PatElem (identName tmp_buffer) BindVar $
                   ArrayMem bt (stripDims (length is) shape) u mem ixfun
 
         ReturnsArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
             summary <- lift $ summaryForBindage (identType ident) bindage
-            return $ PatElem ident bindage summary
+            return $ PatElem (identName ident) bindage summary
 
         ReturnsArray bt _ u (Just ReturnsNewBlock{})
           | BindInPlace _ _ is <- bindage -> do
@@ -268,19 +268,19 @@ allocsForPattern sizeidents validents rts = do
                             newIdent (baseString (identName ident)<>"_ext_buffer")
                             (stripArray (length is) $ identType ident)
               (memsize,mem,(_,ixfun)) <- lift $ memForBindee tmp_buffer
-              tell ([PatElem memsize BindVar $ Scalar Int],
-                    [PatElem mem     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
+              tell ([PatElem (identName memsize) BindVar $ Scalar Int],
+                    [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
-              return $ PatElem tmp_buffer BindVar $
+              return $ PatElem (identName tmp_buffer) BindVar $
                 ArrayMem bt (stripDims (length is) shape) u (identName mem) ixfun
 
         ReturnsArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
-          tell ([PatElem memsize BindVar $ Scalar Int],
-                [PatElem mem     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
+          tell ([PatElem (identName memsize) BindVar $ Scalar Int],
+                [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                 [])
-          return $ PatElem ident' bindage $ ArrayMem bt shape u (identName mem) ixfun
+          return $ PatElem (identName ident') bindage $ ArrayMem bt shape u (identName mem) ixfun
 
   return (memsizes <> mems <> sizes',
           vals,
@@ -343,7 +343,7 @@ lookupArraySummary' name = do
 
 patElemSummary :: PatElem -> (VName, Entry)
 patElemSummary bindee = (patElemName bindee,
-                        Entry (patElemLore bindee))
+                         Entry (patElemAttr bindee))
 
 bindeesSummary :: [PatElem] -> MemoryMap
 bindeesSummary = HM.fromList . map patElemSummary
@@ -437,7 +437,7 @@ ensureArrayIn t mem ixfun (Var v) = do
     then return $ Var v
     else do copy <- newIdent (baseString v ++ "_copy") t
             let summary = ArrayMem (elemType t) (arrayShape t) NoUniqueness mem ixfun
-                pat = Pattern [] [PatElem copy BindVar summary]
+                pat = Pattern [] [PatElem (identName copy) BindVar summary]
             letBind_ pat $ PrimOp $ Copy v
             return $ Var $ identName copy
 
@@ -447,7 +447,7 @@ allocLinearArray s v = do
   t <- lookupType v
   (size, mem) <- allocForArray t DefaultSpace
   v' <- newIdent s t
-  let pat = Pattern [] [PatElem v' BindVar $
+  let pat = Pattern [] [PatElem (identName v') BindVar $
                         directIndexFunction (elemType t) (arrayShape t)
                         NoUniqueness mem t]
   addBinding $ Let pat () $ PrimOp $ Copy v
@@ -527,7 +527,7 @@ allocInBinding :: In.Binding -> AllocM ()
 allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
   e' <- allocInExp e
   let sizeidents = map patElemIdent sizeElems
-      validents = [ (ident, bindage) | PatElem ident bindage () <- valElems ]
+      validents = [ (Ident name t, bindage) | PatElem name bindage t <- valElems ]
   (bnd, bnds) <- allocsForBinding sizeidents validents e'
   addBinding bnd
   mapM_ bindAllocBinding bnds

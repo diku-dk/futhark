@@ -1,4 +1,5 @@
-{-# LANGUAGE TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, ScopedTypeVariables, FlexibleInstances #-}
 -- | A representation where all bindings are annotated with aliasing
 -- information.
 module Futhark.Representation.Aliases
@@ -163,11 +164,11 @@ instance Proper lore => Proper (Aliases lore) where
 instance Lore.Lore lore => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
-  patternAliases = map (unNames . fst . patElemLore) . patternElements
+  patternAliases = map (unNames . fst . patElemAttr) . patternElements
 
 instance (PrettyLore lore) => PrettyLore (Aliases lore) where
   ppBindingLore binding@(Let pat (consumed,_) _) =
-    maybeComment $ catMaybes [patElemAttrs,
+    maybeComment $ catMaybes [patElemComments,
                               expAttr,
                               ppBindingLore $ removeBindingAliases binding]
     where expAttr = case HS.toList $ unNames consumed of
@@ -175,13 +176,11 @@ instance (PrettyLore lore) => PrettyLore (Aliases lore) where
             als -> Just $ oneline $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
 
-          patElemAttrs =
-            maybeComment $ mapMaybe patElemAttr $ patternElements pat
+          patElemComments =
+            maybeComment $ mapMaybe patElemComment $ patternElements pat
 
-          patElemAttr patelem =
-            oneline <$>
-            aliasComment (patElemName patelem)
-            (unNames . fst . patElemLore $ patelem)
+          patElemComment (PatElem name _ (Names' als, _)) =
+            oneline <$> aliasComment name als
 
   ppFunDecLore = ppFunDecLore . removeFunDecAliases
   ppLambdaLore = ppLambdaLore . removeLambdaAliases
@@ -278,7 +277,7 @@ mkPatternAliases pat e =
   in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
-            bindee `setPatElemLore` (Names' names', patElemLore bindee)
+            bindee `setPatElemLore` (Names' names', patElemAttr bindee)
           where names' =
                   case (patElemBindage bindee, patElemRequires bindee) of
                     (BindInPlace {}, _) -> mempty

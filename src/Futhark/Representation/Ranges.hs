@@ -1,4 +1,7 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | A representation where all bindings are annotated with range
 -- information.
 module Futhark.Representation.Ranges
@@ -101,7 +104,7 @@ instance Lore.Lore lore => Lore.Lore (Ranges lore) where
 
 instance Lore.Lore lore => Ranged (Ranges lore) where
   bodyRanges = fst . bodyLore
-  patternRanges = map (fst . patElemLore) . patternElements
+  patternRanges = map (fst . patElemAttr) . patternElements
 
 type Prog lore = AST.Prog (Ranges lore)
 type PrimOp lore = AST.PrimOp (Ranges lore)
@@ -121,16 +124,16 @@ instance Proper lore => Proper (Ranges lore) where
 
 instance (PrettyLore lore) => PrettyLore (Ranges lore) where
   ppBindingLore binding@(Let pat _ _) =
-    case catMaybes [patElemAttrs,
+    case catMaybes [patElemComments,
                     ppBindingLore $ removeBindingRanges binding] of
       [] -> Nothing
       ls -> Just $ PP.folddoc (PP.</>) ls
-    where patElemAttrs =
-            case mapMaybe patElemAttr $ patternElements pat of
+    where patElemComments =
+            case mapMaybe patElemComment $ patternElements pat of
               []    -> Nothing
               attrs -> Just $ PP.folddoc (PP.</>) attrs
-          patElemAttr patelem =
-            case fst . patElemLore $ patelem of
+          patElemComment patelem =
+            case fst . patElemAttr $ patelem of
               (Nothing, Nothing) -> Nothing
               range ->
                 Just $ oneline $
@@ -190,7 +193,7 @@ mkPatternRanges pat e =
   (map (`addRanges` unknownRange) $ patternContextElements pat,
    zipWith addRanges (patternValueElements pat) ranges)
   where addRanges patElem range =
-          let innerlore = patElemLore patElem
+          let innerlore = patElemAttr patElem
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
 

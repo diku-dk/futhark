@@ -783,11 +783,10 @@ simplifyPattern pat =
   Pattern <$>
   mapM inspect (patternContextElements pat) <*>
   mapM inspect (patternValueElements pat)
-  where inspect (PatElem ident bindage lore) = do
-          ident' <- simplifyIdentBinding ident
+  where inspect (PatElem name bindage lore) = do
           bindage' <- simplifyBindage bindage
           lore'  <- simplifyLetBoundLore lore
-          return $ PatElem ident' bindage' lore'
+          return $ PatElem name bindage' lore'
 
 simplifyBindage :: MonadEngine m =>
                    Bindage
@@ -799,11 +798,6 @@ simplifyBindage (BindInPlace cs src is) =
   simplifyCerts cs <*>
   simplifyVName src <*>
   mapM simplifySubExp is
-
-simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
-simplifyIdentBinding v = do
-  t' <- simplifyType $ identType v
-  return v { identType = t' }
 
 simplifyParam :: MonadEngine m =>
                  (attr -> m attr) -> ParamT attr -> m (ParamT attr)
