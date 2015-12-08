@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- |
 --
 -- Apply the simplification engine
@@ -17,7 +18,6 @@ module Futhark.Optimise.Simplifier
 
 import Control.Monad
 
-import Futhark.Binder.Class (Proper)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Lore
@@ -25,11 +25,12 @@ import Futhark.Optimise.Simplifier.Lore
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.Engine (MonadEngine)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProgWithRules :: (MonadFreshNames m, Proper lore) =>
+simplifyProgWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
                          SimpleOps (SimpleM lore)
                       -> RuleBook (SimpleM lore)
                       -> Prog lore -> m (Prog lore)
@@ -38,7 +39,7 @@ simplifyProgWithRules simpl rules =
   simplifyProg simpl rules
 
 -- | Simplify just a single function declaration.
-simplifyFunWithRules :: (MonadFreshNames m, Proper lore) =>
+simplifyFunWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
                         SimpleOps (SimpleM lore)
                      -> RuleBook (SimpleM lore)
                      -> FunDec lore
@@ -48,7 +49,7 @@ simplifyFunWithRules simpl rules =
   simplifyFun simpl rules
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambdaWithRules :: (MonadFreshNames m, HasTypeEnv m, Proper lore) =>
+simplifyLambdaWithRules :: (MonadFreshNames m, HasTypeEnv m, MonadEngine (SimpleM lore)) =>
                            SimpleOps (SimpleM lore)
                         -> RuleBook (SimpleM lore)
                         -> Prog lore

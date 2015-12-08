@@ -103,7 +103,11 @@ emptyState = State { stateVtable = ST.empty }
 class (MonadBinder m,
        Proper (Lore m),
        Proper (InnerLore m),
-       Lore m ~ Wise (InnerLore m)) => MonadEngine m where
+       Lore m ~ Wise (InnerLore m),
+       Simplifiable (Annotations.LetBound (InnerLore m)),
+       Simplifiable (Annotations.FParam (InnerLore m)),
+       Simplifiable (Annotations.LParam (InnerLore m)),
+       Simplifiable (Annotations.RetType (InnerLore m))) => MonadEngine m where
   type InnerLore m
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a
@@ -117,14 +121,6 @@ class (MonadBinder m,
   simplifyBody = defaultSimplifyBody
   inspectBinding :: Binding (Lore m) -> m ()
   inspectBinding = defaultInspectBinding
-  simplifyLetBoundLore :: Annotations.LetBound (InnerLore m)
-                       -> m (Annotations.LetBound (InnerLore m))
-  simplifyFParamLore :: Annotations.FParam (InnerLore m)
-                     -> m (Annotations.FParam (InnerLore m))
-  simplifyLParamLore :: Annotations.LParam (InnerLore m)
-                     -> m (Annotations.LParam (InnerLore m))
-  simplifyRetType :: Annotations.RetType (InnerLore m)
-                  -> m (Annotations.RetType (InnerLore m))
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
@@ -457,7 +453,7 @@ simplifyBinding :: MonadEngine m =>
 -- access to the full program.  This is a bit of a hack.
 simplifyBinding (Let pat _ (Apply fname args rettype)) = do
   args' <- mapM (simplify . fst) args
-  rettype' <- simplifyRetType rettype
+  rettype' <- simplify rettype
   prog <- asksEngineEnv envProgram
   vtable <- getVtable
   case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
@@ -564,7 +560,7 @@ simplifyExpBase = mapExpM hoist
                 , mapOnExtLambda = fail "Unhandled existential lambda in simplification engine."
                 , mapOnVName = simplify
                 , mapOnCertificates = simplify
-                , mapOnRetType = simplifyRetType
+                , mapOnRetType = simplify
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
                 , mapOnLParam =
@@ -575,7 +571,7 @@ simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
 simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexp) = unzip merge
-  mergepat' <- mapM (simplifyParam simplifyFParamLore) mergepat
+  mergepat' <- mapM (simplifyParam simplify) mergepat
   mergeexp' <- mapM simplify mergeexp
   let diets = map (diet . paramDeclType) mergepat'
   (form', boundnames, wrapbody) <- case form of
@@ -750,6 +746,16 @@ simplifySegOp (SegReplicate cs counts dataarr seg) = do
 class Simplifiable e where
   simplify :: MonadEngine m => e -> m e
 
+instance (Simplifiable a, Simplifiable b) => Simplifiable (a, b) where
+  simplify (x,y) = do
+    x' <- simplify x
+    y' <- simplify y
+    return (x', y')
+
+instance Simplifiable a => Simplifiable (Maybe a) where
+  simplify Nothing = return Nothing
+  simplify (Just x) = Just <$> simplify x
+
 instance Simplifiable SubExp where
   simplify (Var name) = do
     bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
@@ -773,6 +779,9 @@ instance Simplifiable KernelSize where
     num_threads' <- simplify num_threads
     return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
 
+instance Simplifiable ExtRetType where
+  simplify = liftM ExtRetType . mapM simplify . retTypeValues
+
 simplifyPattern :: MonadEngine m =>
                    Pattern (InnerLore m)
                 -> m (Pattern (InnerLore m))
@@ -782,7 +791,7 @@ simplifyPattern pat =
   mapM inspect (patternValueElements pat)
   where inspect (PatElem name bindage lore) = do
           bindage' <- simplify bindage
-          lore'  <- simplifyLetBoundLore lore
+          lore'  <- simplify lore
           return $ PatElem name bindage' lore'
 
 instance Simplifiable Bindage where
@@ -846,7 +855,7 @@ simplifyLambdaMaybeHoist :: MonadEngine m =>
                          -> SubExp -> [Maybe VName]
                          -> m (Lambda (Lore m))
 simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
-  params' <- mapM (simplifyParam simplifyLParamLore) params
+  params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ boundByLambda lam
@@ -866,7 +875,7 @@ simplifyExtLambda :: MonadEngine m =>
                   -> SubExp
                   -> m (ExtLambda (Lore m))
 simplifyExtLambda parbnds lam@(ExtLambda index params body rettype) w = do
-  params' <- mapM (simplifyParam simplifyLParamLore) params
+  params' <- mapM (simplifyParam simplify) params
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
   body' <- enterLoop $ enterBody $
@@ -934,7 +943,7 @@ instance Simplifiable Certificates where
 simplifyKernelInput :: MonadEngine m =>
                        KernelInput (InnerLore m) -> m (KernelInput (Lore m))
 simplifyKernelInput (KernelInput param arr is) = do
-  param' <- simplifyParam simplifyLParamLore param
+  param' <- simplifyParam simplify param
   arr' <- simplify arr
   is' <- mapM simplify is
   return $ KernelInput param' arr' is'
@@ -942,7 +951,7 @@ simplifyKernelInput (KernelInput param arr is) = do
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body) = do
-  rettype' <- simplifyRetType rettype
+  rettype' <- simplify rettype
   body' <- bindFParams params $ insertAllBindings $
            simplifyBody (map diet $ retTypeValues rettype') body
   return $ FunDec fname rettype' params body'

@@ -1,4 +1,7 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Optimise.Simplifier.Simple
        ( SimpleOps (..)
        , SimpleM
@@ -34,26 +37,13 @@ data SimpleOps m =
             , mkLetNamesS :: ST.SymbolTable (Lore m)
                              -> [(VName,Bindage)] -> Exp (Lore m)
                              -> m (Binding (Lore m))
-            , simplifyLetBoundLore :: Annotations.LetBound (Engine.InnerLore m)
-                                      -> m (Annotations.LetBound (Engine.InnerLore m))
-            , simplifyFParamLore :: Annotations.FParam (Engine.InnerLore m)
-                                    -> m (Annotations.FParam (Engine.InnerLore m))
-            , simplifyLParamLore :: Annotations.LParam (Engine.InnerLore m)
-                                    -> m (Annotations.LParam (Engine.InnerLore m))
-            , simplifyRetType :: Annotations.RetType (Engine.InnerLore m)
-                                 -> m (Annotations.RetType (Engine.InnerLore m))
             }
 
 bindableSimpleOps :: (Engine.MonadEngine m,
-                      Bindable (Engine.InnerLore m),
-                      Annotations.LetBound (Engine.InnerLore m) ~ Type,
-                      Annotations.FParam (Engine.InnerLore m) ~ DeclType,
-                      Annotations.LParam (Engine.InnerLore m) ~ Type,
-                      RetType (Engine.InnerLore m) ~ ExtRetType) =>
+                      Bindable (Engine.InnerLore m)) =>
                      SimpleOps m
 bindableSimpleOps =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  Engine.simplify Engine.simplify Engine.simplify simplifyRetType'
   where mkLetS' _ pat e = return $
                           mkLet (map asPair $ patternContextElements pat)
                           (map asPair $ patternValueElements pat)
@@ -61,8 +51,6 @@ bindableSimpleOps =
           where asPair patElem = (patElemIdent patElem, patElemBindage patElem)
         mkBodyS' _ bnds res = return $ mkBody bnds res
         mkLetNamesS' _ = mkLetNames
-        simplifyRetType' =
-          liftM ExtRetType . mapM Engine.simplify . retTypeValues
 
 newtype SimpleM lore a =
   SimpleM (RWS
@@ -79,7 +67,7 @@ instance MonadFreshNames (SimpleM lore) where
   getNameSource   = snd <$> get
   putNameSource y = modify $ \(x, _) -> (x,y)
 
-instance (Proper lore) => HasTypeEnv (SimpleM lore) where
+instance Engine.MonadEngine (SimpleM lore) => HasTypeEnv (SimpleM lore) where
   askTypeEnv = ST.typeEnv <$> Engine.getVtable
   lookupType name = do
     vtable <- Engine.getVtable
@@ -89,10 +77,10 @@ instance (Proper lore) => HasTypeEnv (SimpleM lore) where
                  "SimpleM.lookupType: cannot find variable " ++
                  pretty name ++ " in symbol table."
 
-instance (Proper lore) => LocalTypeEnv (SimpleM lore) where
+instance Engine.MonadEngine (SimpleM lore) => LocalTypeEnv (SimpleM lore) where
   localTypeEnv types = Engine.localVtable (<>ST.fromTypeEnv types)
 
-instance (Proper lore) => MonadBinder (SimpleM lore) where
+instance Engine.MonadEngine (SimpleM lore) => MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Wise lore
   mkLetM pat e = do
     vtable <- Engine.getVtable
@@ -110,7 +98,11 @@ instance (Proper lore) => MonadBinder (SimpleM lore) where
   addBinding      = Engine.addBindingEngine
   collectBindings = Engine.collectBindingsEngine
 
-instance (Proper lore) => Engine.MonadEngine (SimpleM lore) where
+instance (Proper lore,
+          Engine.Simplifiable (Annotations.LetBound lore),
+          Engine.Simplifiable (Annotations.FParam lore),
+          Engine.Simplifiable (Annotations.LParam lore),
+          Engine.Simplifiable (Annotations.RetType lore)) => Engine.MonadEngine (SimpleM lore) where
   type InnerLore (SimpleM lore) = lore
   askEngineEnv = snd <$> ask
   localEngineEnv = local . second
@@ -120,18 +112,6 @@ instance (Proper lore) => Engine.MonadEngine (SimpleM lore) where
   putEngineState x = modify $ \(_, y) -> (x,y)
   passNeed = pass
   simplifyBody = Engine.defaultSimplifyBody
-  simplifyLetBoundLore lore = do
-    simpl <- fst <$> ask
-    simplifyLetBoundLore simpl lore
-  simplifyFParamLore lore = do
-    simpl <- fst <$> ask
-    simplifyFParamLore simpl lore
-  simplifyLParamLore lore = do
-    simpl <- fst <$> ask
-    simplifyLParamLore simpl lore
-  simplifyRetType restype = do
-    simpl <- fst <$> ask
-    simplifyRetType simpl restype
 
 runSimpleM :: SimpleM lore a
            -> SimpleOps (SimpleM lore)

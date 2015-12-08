@@ -693,8 +693,6 @@ simplifiable :: (Engine.MonadEngine m,
                 SimpleOps m
 simplifiable =
   SimpleOps mkLetS' mkBodyS' mkLetNamesS'
-  simplifyMemBound simplifyMemBound simplifyMemBound
-  simplifyRetType'
   where mkLetS' _ pat e =
           return $ mkWiseLetBinding (removePatternWisdom pat) () e
 
@@ -705,29 +703,6 @@ simplifiable =
                   removeExpWisdom e
           return $ mkWiseLetBinding pat' () e
           where env = vtableToAllocEnv vtable
-
-        simplifyMemBound (Scalar bt) =
-          return $ Scalar bt
-        simplifyMemBound (MemMem size space) =
-          MemMem <$> Engine.simplify size <*> pure space
-        simplifyMemBound (ArrayMem bt shape u mem ixfun) =
-          ArrayMem bt shape u <$> Engine.simplify mem <*> pure ixfun
-
-        simplifyRetType' = mapM simplifyReturns
-          where simplifyReturns (ReturnsScalar bt) =
-                  return $ ReturnsScalar bt
-                simplifyReturns (ReturnsArray bt shape u ret) =
-                  ReturnsArray bt <$>
-                  Engine.simplify shape <*>
-                  pure u <*>
-                  simplifyMemReturn ret
-                simplifyReturns (ReturnsMemory size space) =
-                  ReturnsMemory <$> Engine.simplify size <*> pure space
-                simplifyMemReturn (ReturnsNewBlock i) =
-                  return $ ReturnsNewBlock i
-                simplifyMemReturn (ReturnsInBlock v ixfun) =
-                  ReturnsInBlock <$> Engine.simplify v <*>
-                  pure ixfun
 
 bindPatternWithAllocations :: MonadBinder m =>
                               MemoryMap -> [(VName, Bindage)] -> Exp

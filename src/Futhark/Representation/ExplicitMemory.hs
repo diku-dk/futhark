@@ -81,6 +81,7 @@ import Futhark.Binder
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import qualified Futhark.Util.Pretty as PP
+import qualified Futhark.Optimise.Simplifier.Engine as Engine
 
 -- | A lore containing explicit memory information.
 data ExplicitMemory = ExplicitMemory
@@ -213,6 +214,14 @@ instance Rename (MemBound u) where
   rename (Scalar bt) =
     return (Scalar bt)
 
+instance Engine.Simplifiable (MemBound u) where
+  simplify (Scalar bt) =
+    return $ Scalar bt
+  simplify (MemMem size space) =
+    MemMem <$> Engine.simplify size <*> pure space
+  simplify (ArrayMem bt shape u mem ixfun) =
+    ArrayMem bt shape u <$> Engine.simplify mem <*> pure ixfun
+
 instance PP.Pretty u => PP.Pretty (MemBound u) where
   ppr (Scalar bt) = PP.ppr bt
   ppr (MemMem size space) = PP.ppr (Mem size space :: Type)
@@ -313,6 +322,26 @@ instance Rename a => Rename (Returns u a) where
     ReturnsMemory <$> rename size <*> pure space
   rename (ReturnsArray bt shape u summary) =
     ReturnsArray bt <$> rename shape <*> pure u <*> rename summary
+
+instance Engine.Simplifiable a => Engine.Simplifiable (Returns u a) where
+  simplify (ReturnsScalar bt) =
+    return $ ReturnsScalar bt
+  simplify (ReturnsArray bt shape u ret) =
+    ReturnsArray bt <$>
+    Engine.simplify shape <*>
+    pure u <*>
+    Engine.simplify ret
+  simplify (ReturnsMemory size space) =
+    ReturnsMemory <$> Engine.simplify size <*> pure space
+
+instance Engine.Simplifiable MemReturn where
+  simplify (ReturnsNewBlock i) =
+    return $ ReturnsNewBlock i
+  simplify (ReturnsInBlock v ixfun) =
+    ReturnsInBlock <$> Engine.simplify v <*> pure ixfun
+
+instance Engine.Simplifiable [FunReturns] where
+  simplify = mapM Engine.simplify
 
 instance PP.Pretty (Returns Uniqueness MemReturn) where
   ppr = PP.ppr . funReturnsToExpReturns

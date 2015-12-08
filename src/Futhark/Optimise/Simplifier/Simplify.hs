@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Optimise.Simplifier.Simplify
   ( SimpleOps (..)
   , SimpleM
@@ -11,7 +12,6 @@ module Futhark.Optimise.Simplifier.Simplify
 
 import Data.Monoid
 
-import Futhark.Binder.Class (Proper)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
@@ -24,7 +24,7 @@ import Futhark.Tools (intraproceduralTransformation)
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProg :: (MonadFreshNames m, Proper lore) =>
+simplifyProg :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Prog lore
@@ -37,7 +37,7 @@ simplifyProg simpl rules prog =
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyFun :: (MonadFreshNames m, Proper lore) =>
+simplifyFun :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                SimpleOps (SimpleM lore)
             -> RuleBook (SimpleM lore)
             -> FunDec lore
@@ -45,7 +45,7 @@ simplifyFun :: (MonadFreshNames m, Proper lore) =>
 simplifyFun simpl rules =
   simplifyFun' simpl rules Nothing
 
-simplifyFun' :: (MonadFreshNames m, Proper lore) =>
+simplifyFun' :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Maybe (Prog lore)
@@ -56,7 +56,7 @@ simplifyFun' simpl rules prog fundec =
   Engine.emptyEnv rules prog
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Proper lore) =>
+simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Maybe (Prog lore)
@@ -70,7 +70,7 @@ simplifyLambda simpl rules prog lam w args = do
     Engine.emptyEnv rules prog
 
 -- | Simplify a list of 'Binding's.
-simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Proper lore) =>
+simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
                     SimpleOps (SimpleM lore)
                  -> RuleBook (SimpleM lore)
                  -> Maybe (Prog lore) -> [Binding lore]
