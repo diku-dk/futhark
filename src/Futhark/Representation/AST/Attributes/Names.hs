@@ -40,7 +40,8 @@ freeWalker :: (FreeIn (Annotations.Exp lore),
                FreeIn (Annotations.Body lore),
                FreeIn (Annotations.FParam lore),
                FreeIn (Annotations.LParam lore),
-               FreeIn (Annotations.LetBound lore)) =>
+               FreeIn (Annotations.LetBound lore),
+               FreeIn (Op lore)) =>
               Walker lore (Writer Names)
 freeWalker = identityWalker {
                walkOnSubExp = subExpFree
@@ -50,6 +51,7 @@ freeWalker = identityWalker {
              , walkOnExtLambda = extLambdaFree
              , walkOnVName = tell . HS.singleton
              , walkOnCertificates = tell . HS.fromList
+             , walkOnOp = tell . freeIn
              }
   where subExpFree = tell . freeIn
 
@@ -111,7 +113,8 @@ freeInBody :: (FreeIn (Annotations.Exp lore),
                FreeIn (Annotations.Body lore),
                FreeIn (Annotations.FParam lore),
                FreeIn (Annotations.LParam lore),
-               FreeIn (Annotations.LetBound lore)) =>
+               FreeIn (Annotations.LetBound lore),
+               FreeIn (Op lore)) =>
               Body lore -> Names
 freeInBody = execWriter . walkOnBody freeWalker
 
@@ -121,7 +124,8 @@ freeInExp :: (FreeIn (Annotations.Exp lore),
               FreeIn (Annotations.Body lore),
               FreeIn (Annotations.FParam lore),
               FreeIn (Annotations.LParam lore),
-              FreeIn (Annotations.LetBound lore)) =>
+              FreeIn (Annotations.LetBound lore),
+              FreeIn (Op lore)) =>
              Exp lore -> Names
 freeInExp = execWriter . walkExpM freeWalker
 
@@ -131,7 +135,8 @@ freeInBinding :: (FreeIn (Annotations.Exp lore),
                   FreeIn (Annotations.Body lore),
                   FreeIn (Annotations.FParam lore),
                   FreeIn (Annotations.LParam lore),
-                  FreeIn (Annotations.LetBound lore)) =>
+                  FreeIn (Annotations.LetBound lore),
+                  FreeIn (Op lore)) =>
                  Binding lore -> Names
 freeInBinding = execWriter . walkOnBinding freeWalker
 
@@ -141,7 +146,8 @@ freeInLambda :: (FreeIn (Annotations.Exp lore),
                  FreeIn (Annotations.Body lore),
                  FreeIn (Annotations.FParam lore),
                  FreeIn (Annotations.LParam lore),
-                 FreeIn (Annotations.LetBound lore)) =>
+                 FreeIn (Annotations.LetBound lore),
+                 FreeIn (Op lore)) =>
                 Lambda lore -> Names
 freeInLambda (Lambda index params body rettype) =
   inRet <> inParams <> inBody
@@ -156,7 +162,8 @@ freeInExtLambda :: (FreeIn (Annotations.Exp lore),
                     FreeIn (Annotations.Body lore),
                     FreeIn (Annotations.FParam lore),
                     FreeIn (Annotations.LParam lore),
-                    FreeIn (Annotations.LetBound lore)) =>
+                    FreeIn (Annotations.LetBound lore),
+                    FreeIn (Op lore)) =>
                    ExtLambda lore -> Names
 freeInExtLambda (ExtLambda index params body rettype) =
   inRet <> inParams <> inBody

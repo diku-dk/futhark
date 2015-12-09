@@ -50,6 +50,7 @@ module Futhark.Representation.AST.Syntax
   , ShapeChange
   , ExpT(..)
   , Exp
+  , Annotations.Op
   , LoopForm (..)
   , LambdaT(..)
   , Lambda
@@ -393,6 +394,8 @@ data ExpT lore
   | Apply  Name [(SubExp, Diet)] (Annotations.RetType lore)
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
+
+  | Op (Annotations.Op lore)
 
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)

@@ -1,8 +1,15 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 -- | Abstract Syntax Tree metrics.  This is used in the @futhark-test@ program.
 module Futhark.Analysis.Metrics
        ( AstMetrics
        , progMetrics
+
+         -- * Extensibility
+       , OpMetrics
+       , seen
+       , inside
        ) where
 
 import Control.Monad.Writer
@@ -14,6 +21,12 @@ import Futhark.Representation.AST
 
 type AstMetrics = HM.HashMap Text Int
 
+class OpMetrics op where
+  opMetrics :: op -> MetricsM ()
+
+instance OpMetrics () where
+  opMetrics () = return ()
+
 -- | This wrapper is just to define a 'Monoid' instance.
 newtype CountMetrics = CountMetrics { actualMetrics :: AstMetrics }
 
@@ -22,7 +35,8 @@ instance Monoid CountMetrics where
 
   mappend (CountMetrics x) (CountMetrics y) = CountMetrics $ HM.unionWith (+) x y
 
-type MetricsM = Writer CountMetrics
+newtype MetricsM a = MetricsM { runMetricsM :: Writer CountMetrics a }
+                   deriving (Monad, Applicative, Functor, MonadWriter CountMetrics)
 
 seen :: Text -> MetricsM ()
 seen k = tell $ CountMetrics $ HM.singleton k 1
@@ -35,19 +49,19 @@ inside what m = seen what >> censor addWhat m
         addWhat' new_metrics k v =
           HM.insert (what <> "/" <> k) v new_metrics
 
-progMetrics :: Prog lore -> AstMetrics
-progMetrics = actualMetrics . execWriter . mapM_ funDecMetrics . progFunctions
+progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
+progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDecMetrics . progFunctions
 
-funDecMetrics :: FunDec lore -> MetricsM ()
+funDecMetrics :: OpMetrics (Op lore) => FunDec lore -> MetricsM ()
 funDecMetrics = bodyMetrics . funDecBody
 
-bodyMetrics :: Body lore -> MetricsM ()
+bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
 bodyMetrics = mapM_ bindingMetrics . bodyBindings
 
-bindingMetrics :: Binding lore -> MetricsM ()
+bindingMetrics :: OpMetrics (Op lore) => Binding lore -> MetricsM ()
 bindingMetrics = expMetrics . bindingExp
 
-expMetrics :: Exp lore -> MetricsM ()
+expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
 expMetrics (PrimOp op) =
   seen "PrimOp" >> primOpMetrics op
 expMetrics (LoopOp op) =
@@ -58,6 +72,8 @@ expMetrics (If _ tb fb _) =
   inside "If" $ bodyMetrics tb >> bodyMetrics fb
 expMetrics (Apply fname _ _) =
   seen $ "Apply" <> fromString (nameToString fname)
+expMetrics (Op op) =
+  opMetrics op
 
 primOpMetrics :: PrimOp lore -> MetricsM ()
 primOpMetrics (SubExp _) = seen "SubExp"
@@ -83,7 +99,7 @@ primOpMetrics Unstripe{} = seen "Unstripe"
 primOpMetrics Partition{} = seen "Partition"
 primOpMetrics Alloc{} = seen "Alloc"
 
-loopOpMetrics :: LoopOp lore -> MetricsM ()
+loopOpMetrics :: OpMetrics (Op lore) => LoopOp lore -> MetricsM ()
 loopOpMetrics (DoLoop _ _ ForLoop{} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 loopOpMetrics (DoLoop _ _ WhileLoop{} body) =
@@ -107,7 +123,7 @@ loopOpMetrics (ReduceKernel _ _ _ lam1 lam2 _ _) =
 loopOpMetrics (ScanKernel _ _ _ _ lam _) =
   inside "ScanKernel" $ lambdaMetrics lam
 
-segOpMetrics :: SegOp lore -> MetricsM ()
+segOpMetrics :: OpMetrics (Op lore) => SegOp lore -> MetricsM ()
 segOpMetrics (SegReduce _ _ fun _ _) =
   inside "SegReduce" $ lambdaMetrics fun
 segOpMetrics (SegScan _ _ ScanInclusive fun _ _) =
@@ -117,8 +133,8 @@ segOpMetrics (SegScan _ _ ScanExclusive fun _ _) =
 segOpMetrics SegReplicate{} =
   seen "SegReplicate"
 
-lambdaMetrics :: Lambda lore -> MetricsM ()
+lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody
 
-extLambdaMetrics :: ExtLambda lore -> MetricsM ()
+extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody

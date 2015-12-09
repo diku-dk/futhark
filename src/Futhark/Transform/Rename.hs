@@ -39,7 +39,8 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes
+import Futhark.Representation.AST.RetType
+import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Traversals
 import Futhark.FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames(..),
@@ -250,6 +251,7 @@ instance Renameable lore => Rename (Exp lore) where
                     , mapOnRetType = rename
                     , mapOnFParam = rename
                     , mapOnLParam = rename
+                    , mapOnOp = rename
                     }
 
 instance Rename shape =>
@@ -310,5 +312,6 @@ class (Rename (Annotations.LetBound lore),
        Rename (Annotations.Body lore),
        Rename (Annotations.FParam lore),
        Rename (Annotations.LParam lore),
-       Rename (Annotations.RetType lore)) =>
+       Rename (Annotations.RetType lore),
+       Rename (Op lore)) =>
       Renameable lore where

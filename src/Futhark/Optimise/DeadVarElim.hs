@@ -127,6 +127,7 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnLParam = \lparam -> do
                    seen $ freeIn lparam
                    return lparam
+                 , mapOnOp = \op -> seen (freeIn op) >> return op
                  }
 
 deadCodeElimVName :: VName -> DCElimM VName

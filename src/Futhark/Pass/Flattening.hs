@@ -1375,6 +1375,7 @@ isSafeToMapExp (If _ e1 e2 _) =
   liftM2 (&&) (isSafeToMapBody e1) (isSafeToMapBody e2)
 isSafeToMapExp Apply{} =
   flatError $ Error "TODO: isSafeToMap not implemented for Apply"
+isSafeToMapExp (Op ()) = return True
 
 isSafeToMapType :: Type -> FlatM Bool
 isSafeToMapType Mem{} = flatError MemTypeFound

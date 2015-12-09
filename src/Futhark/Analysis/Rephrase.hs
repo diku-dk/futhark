@@ -22,6 +22,7 @@ data Rephraser from to
               , rephraseLParamLore :: Annotations.LParam from -> Annotations.LParam to
               , rephraseBodyLore :: Annotations.Body from -> Annotations.Body to
               , rephraseRetType :: RetType from -> RetType to
+              , rephraseOp :: Op from -> Op to
               }
 
 rephraseProg :: Rephraser from to -> Prog from -> Prog to
@@ -89,4 +90,5 @@ mapper rephraser = identityMapper {
   , mapOnRetType = return . rephraseRetType rephraser
   , mapOnFParam = return . rephraseParam (rephraseFParamLore rephraser)
   , mapOnLParam = return . rephraseParam (rephraseLParamLore rephraser)
+  , mapOnOp = return . rephraseOp rephraser
   }

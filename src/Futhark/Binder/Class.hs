@@ -44,6 +44,8 @@ class (Lore.Lore lore,
        FreeIn (Annotations.FParam lore),
        FreeIn (Annotations.LParam lore),
        FreeIn (Annotations.RetType lore),
+       FreeIn (Annotations.Op lore),
+       IsOp (Op lore),
        IsRetType (RetType lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an

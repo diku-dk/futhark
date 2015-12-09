@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
 -- | This representation requires that every array is given
 -- information about which memory block is it based in, and how array
 -- elements map to memory block offsets.  SOACs are not supported, so
@@ -6,6 +6,7 @@
 module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
+       , SizeOf (..)
        , MemBound (..)
        , MemReturn (..)
        , Returns (..)
@@ -82,6 +83,12 @@ import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
+import Futhark.Optimise.Simplifier.Lore
+import Futhark.Representation.Aliases (Aliases, removeExpAliases)
+import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Representation.Ranges (Ranges, removeExpRanges)
+import Futhark.Representation.AST.Attributes.Ranges
+import qualified Futhark.Analysis.Range as Range
 
 -- | A lore containing explicit memory information.
 data ExplicitMemory = ExplicitMemory
@@ -108,11 +115,79 @@ instance IsRetType [FunReturns] where
 
   applyRetType = applyFunReturns
 
+data SizeOf inner = SizeOf BasicType
+                  | ParExp (AST.Exp inner)
+            deriving (Eq, Ord, Show)
+
+instance Proper inner => FreeIn (SizeOf inner) where
+  freeIn (SizeOf _) = mempty
+  freeIn (ParExp e) = freeInExp e
+
+instance Proper inner => TypedOp (SizeOf inner) where
+  opType (SizeOf _) = pure [Basic Int]
+  opType (ParExp e) = expExtType e
+
+instance Aliased inner => AliasedOp (SizeOf inner) where
+  opAliases (SizeOf _) = [mempty]
+  opAliases (ParExp e) = aliasesOf e
+
+  consumedInOp (SizeOf _) = mempty
+  consumedInOp (ParExp e) = consumedInExp e
+
+instance CanBeAliased (SizeOf ExplicitMemory) where
+  type OpWithAliases (SizeOf ExplicitMemory) = SizeOf (Aliases ExplicitMemory)
+  removeOpAliases (SizeOf bt) = SizeOf bt
+  removeOpAliases (ParExp e) = ParExp $ removeExpAliases e
+
+  addOpAliases (SizeOf bt) = SizeOf bt
+  addOpAliases (ParExp e) = ParExp $ Alias.analyseExp e
+
+instance (Proper inner, Ranged inner) => RangedOp (SizeOf inner) where
+  opRanges (SizeOf _) =
+    [(Just $ ScalarBound 0,
+      Just $ ScalarBound $ fromInteger $
+      foldl max 0 $ map basicSize [minBound..maxBound])]
+  opRanges (ParExp e) = expRanges e
+
+instance CanBeRanged (SizeOf ExplicitMemory) where
+  type OpWithRanges (SizeOf ExplicitMemory) = SizeOf (Ranges ExplicitMemory)
+  removeOpRanges (SizeOf bt) = SizeOf bt
+  removeOpRanges (ParExp e) = ParExp $ removeExpRanges e
+
+  addOpRanges (SizeOf bt) = SizeOf bt
+  addOpRanges (ParExp e) = ParExp $ Range.runRangeM $ Range.analyseExp e
+
+instance Renameable inner => Rename (SizeOf inner) where
+  rename (SizeOf bt) = pure $ SizeOf bt
+  rename (ParExp e) = ParExp <$> rename e
+
+instance Substitutable inner => Substitute (SizeOf inner) where
+  substituteNames _ (SizeOf bt) = SizeOf bt
+  substituteNames subst (ParExp e) = ParExp $ substituteNames subst e
+
+instance PrettyLore inner => PP.Pretty (SizeOf inner) where
+  ppr (SizeOf bt) = PP.text "sizeOf" <> PP.parens (PP.ppr bt)
+  ppr (ParExp e) = PP.ppr e
+
+instance Proper inner => IsOp (SizeOf inner) where
+  safeOp (SizeOf _) = True
+  safeOp (ParExp e)= safeExp e
+
+instance CanBeWise (SizeOf ExplicitMemory) where
+  type OpWithWisdom (SizeOf ExplicitMemory) = SizeOf (Wise ExplicitMemory)
+  removeOpWisdom (SizeOf bt) = SizeOf bt
+  removeOpWisdom (ParExp e) = ParExp $ removeExpWisdom e
+
+instance Engine.SimplifiableOp ExplicitMemory (SizeOf ExplicitMemory) where
+  simplifyOp (SizeOf bt) = return $ SizeOf bt
+  simplifyOp (ParExp e) = ParExp <$> Engine.simplifyExp e
+
 instance Annotations.Annotations ExplicitMemory where
   type LetBound ExplicitMemory = MemBound NoUniqueness
   type FParam   ExplicitMemory = MemBound Uniqueness
   type LParam   ExplicitMemory = MemBound NoUniqueness
   type RetType  ExplicitMemory = [FunReturns]
+  type Op       ExplicitMemory = SizeOf ExplicitMemory
 
 instance Lore.Lore ExplicitMemory where
   representative = ExplicitMemory
@@ -447,6 +522,9 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkLParamLore = checkMemBound
   checkLetBoundLore = checkMemBound
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
+  checkOp (SizeOf _) = return ()
+  checkOp (ParExp e) = TypeCheck.checkExp e
+
   basicFParam _ name t =
     AST.Param name (Scalar t)
   basicLParam _ name t =
@@ -834,6 +912,12 @@ expReturns look (If _ b1 b2 ts) = do
   return $
     map bodyReturnsToExpReturns $
     generaliseReturns b1t b2t
+
+expReturns _ (Op (SizeOf _)) =
+  return [ReturnsScalar Int]
+
+expReturns look (Op (ParExp e)) =
+  expReturns look e
 
 -- | The return information of a body.  This can be seen as the
 -- "return type with memory annotations" of the body.

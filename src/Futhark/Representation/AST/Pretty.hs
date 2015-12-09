@@ -29,7 +29,8 @@ class (Lore lore,
        Pretty (Annotations.LetBound lore),
        Pretty (ParamT (Annotations.FParam lore)),
        Pretty (ParamT (Annotations.LParam lore)),
-       Pretty (PatElemT (Annotations.LetBound lore))) => PrettyLore lore where
+       Pretty (PatElemT (Annotations.LetBound lore)),
+       Pretty (Annotations.Op lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc
@@ -168,6 +169,7 @@ instance PrettyLore lore => Pretty (Binding lore) where
     where e' = ppr e
           linebreak = case e of
                         LoopOp{} -> True
+                        Op{} -> True
                         If{} -> True
                         PrimOp ArrayLit{} -> False
                         _ -> False
@@ -351,6 +353,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
   ppr (SegOp op) = ppr op
   ppr (Apply fname args _) = text (nameToString fname) <>
                              apply (map (align . ppr . fst) args)
+  ppr (Op op) = ppr op
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr lambda@(Lambda index params body rettype) =
