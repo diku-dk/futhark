@@ -8,7 +8,6 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Binder (Proper)
 

@@ -418,6 +418,7 @@ evalExp (Apply fname args rettype) = do
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
 evalExp (SegOp op) = evalSegOp op
+evalExp (Op _) = fail "Cannot evaluate Op"
 
 evalPrimOp :: Lore lore => PrimOp lore -> FutharkM lore [Value]
 

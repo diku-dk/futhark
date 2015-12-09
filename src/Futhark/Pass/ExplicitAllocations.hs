@@ -597,6 +597,7 @@ allocInExp e = mapExpM alloc e
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
+                         , mapOnOp = undefined
                          }
 
 allocInChunkedLambda :: SubExp -> In.Lambda -> [MemBound NoUniqueness] -> AllocM Lambda

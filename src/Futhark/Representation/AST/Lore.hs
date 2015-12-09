@@ -9,7 +9,7 @@ import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes.TypeEnv
 import Futhark.Representation.AST.Attributes.Context
 
-class Annotations.Annotations lore => Lore lore where
+class (Annotations.Annotations lore) => Lore lore where
   -- | A constant used to disambiguate method calls.  XXX, this is a
   -- hack to get around mising type application in Haskell, sometimes
   -- resulting in ambiguous types.

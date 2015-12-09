@@ -73,6 +73,7 @@ data Mapper flore tlore m = Mapper {
   , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
   , mapOnLParam :: LParam flore -> m (LParam tlore)
+  , mapOnOp :: Op flore -> m (Op tlore)
   }
 
 -- | A mapper that simply returns the tree verbatim.
@@ -87,6 +88,7 @@ identityMapper = Mapper {
                  , mapOnRetType = return
                  , mapOnFParam = return
                  , mapOnLParam = return
+                 , mapOnOp = return
                  }
 
 -- | Map across the bindings of a 'Body'.
@@ -264,6 +266,8 @@ mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
              mapOnVName tv counts <*>
              mapOnVName tv dataarr <*>
              Data.Traversable.mapM (mapOnVName tv) seg)
+mapExpM tv (Op op) =
+  Op <$> mapOnOp tv op
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    Mapper flore tlore m -> KernelSize -> m KernelSize
@@ -325,6 +329,7 @@ data Folder a lore m = Folder {
   , foldOnRetType :: a -> RetType lore -> m a
   , foldOnFParam :: a -> FParam lore -> m a
   , foldOnLParam :: a -> LParam lore -> m a
+  , foldOnOp :: a -> Op lore -> m a
   }
 
 -- | A folding operation where the accumulator is returned verbatim.
@@ -340,6 +345,7 @@ identityFolder = Folder {
                  , foldOnRetType = const . return
                  , foldOnFParam = const . return
                  , foldOnLParam = const . return
+                 , foldOnOp = const . return
                  }
 
 foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
@@ -353,6 +359,7 @@ foldMapper f = Mapper {
                , mapOnRetType = wrap foldOnRetType
                , mapOnFParam = wrap foldOnFParam
                , mapOnLParam = wrap foldOnLParam
+               , mapOnOp = wrap foldOnOp
                }
   where wrap op k = do
           v <- get
@@ -388,6 +395,7 @@ data Walker lore m = Walker {
   , walkOnRetType :: RetType lore -> m ()
   , walkOnFParam :: FParam lore -> m ()
   , walkOnLParam :: LParam lore -> m ()
+  , walkOnOp :: Op lore -> m ()
   }
 
 -- | A no-op traversal.
@@ -403,6 +411,7 @@ identityWalker = Walker {
                  , walkOnRetType = const $ return ()
                  , walkOnFParam = const $ return ()
                  , walkOnLParam = const $ return ()
+                 , walkOnOp = const $ return ()
                  }
 
 walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
@@ -416,6 +425,7 @@ walkMapper f = Mapper {
                , mapOnRetType = wrap walkOnRetType
                , mapOnFParam = wrap walkOnFParam
                , mapOnLParam = wrap walkOnLParam
+               , mapOnOp = wrap walkOnOp
                }
   where wrap op k = op f k >> return k
 

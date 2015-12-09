@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Actions
   ( printAction
   , interpretAction
@@ -26,8 +27,9 @@ import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
+import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 
-printAction :: PrettyLore lore => Action lore
+printAction :: (PrettyLore lore, CanBeAliased (Op lore)) => Action lore
 printAction =
   Action { actionName = "Prettyprint"
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
@@ -42,7 +44,7 @@ interpretAction parser =
          , actionProcedure = liftIO . interpret parser
          }
 
-rangeAction :: PrettyLore lore => Action lore
+rangeAction :: (PrettyLore lore, CanBeRanged (Op lore)) => Action lore
 rangeAction =
     Action { actionName = "Range analysis"
            , actionDescription = "Print the program with range annotations added."

@@ -113,6 +113,7 @@ replace substs = Mapper {
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
                  , mapOnLParam = return . substituteNames substs
+                 , mapOnOp = return . substituteNames substs
                  }
 
 instance Substitute Rank where
@@ -180,5 +181,6 @@ class (Substitute (Annotations.Exp lore),
        Substitute (Annotations.LetBound lore),
        Substitute (Annotations.FParam lore),
        Substitute (Annotations.LParam lore),
-       Substitute (Annotations.RetType lore)) =>
+       Substitute (Annotations.RetType lore),
+       Substitute (Op lore)) =>
       Substitutable lore where

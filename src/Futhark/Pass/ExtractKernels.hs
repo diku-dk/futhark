@@ -467,6 +467,8 @@ unbalancedLambda lam =
 
         unbalancedBinding _ (PrimOp _) =
           False
+        unbalancedBinding _ (Op _) =
+          False
         unbalancedBinding _ (Apply fname _ _) =
           not $ isBuiltInFunction fname
 

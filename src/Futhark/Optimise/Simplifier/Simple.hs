@@ -102,7 +102,8 @@ instance (Proper lore,
           Engine.Simplifiable (Annotations.LetBound lore),
           Engine.Simplifiable (Annotations.FParam lore),
           Engine.Simplifiable (Annotations.LParam lore),
-          Engine.Simplifiable (Annotations.RetType lore)) => Engine.MonadEngine (SimpleM lore) where
+          Engine.Simplifiable (Annotations.RetType lore),
+          Engine.SimplifiableOp lore (Op lore)) => Engine.MonadEngine (SimpleM lore) where
   type InnerLore (SimpleM lore) = lore
   askEngineEnv = snd <$> ask
   localEngineEnv = local . second

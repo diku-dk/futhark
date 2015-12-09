@@ -33,6 +33,7 @@ module Futhark.Optimise.Simplifier.Engine
        , defaultSimplifyBody
        , defaultInspectBinding
          -- * Building blocks
+       , SimplifiableOp (..)
        , Simplifiable (..)
        , simplifyBinding
        , simplifyResult
@@ -59,7 +60,6 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -107,8 +107,9 @@ class (MonadBinder m,
        Simplifiable (Annotations.LetBound (InnerLore m)),
        Simplifiable (Annotations.FParam (InnerLore m)),
        Simplifiable (Annotations.LParam (InnerLore m)),
-       Simplifiable (Annotations.RetType (InnerLore m))) => MonadEngine m where
-  type InnerLore m
+       Simplifiable (Annotations.RetType (InnerLore m)),
+       SimplifiableOp (InnerLore m) (Op (InnerLore m))) => MonadEngine m where
+  type InnerLore m :: *
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a
   tellNeed :: Need (Lore m) -> m ()
@@ -361,7 +362,7 @@ insertAllBindings = blockIf $ \_ _ -> True
 hasFree :: Proper lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
 
-isNotSafe :: BlockPred m
+isNotSafe :: Proper lore => BlockPred lore
 isNotSafe _ = not . safeExp . bindingExp
 
 isInPlaceBound :: BlockPred m
@@ -565,6 +566,8 @@ simplifyExpBase = mapExpM hoist
                   fail "Unhandled FParam in simplification engine."
                 , mapOnLParam =
                   fail "Unhandled LParam in simplification engine."
+                , mapOnOp =
+                  simplifyOp
                 }
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
@@ -742,6 +745,12 @@ simplifySegOp (SegReplicate cs counts dataarr seg) = do
   dataarr' <- simplify dataarr
   seg' <- Data.Traversable.mapM simplify seg
   return $ SegReplicate cs' counts' dataarr' seg'
+
+class CanBeWise op => SimplifiableOp lore op where
+  simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)
+
+instance SimplifiableOp lore () where
+  simplifyOp () = return ()
 
 class Simplifiable e where
   simplify :: MonadEngine m => e -> m e

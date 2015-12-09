@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# Language FlexibleInstances, FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Aliases
        ( vnameAliases
@@ -10,6 +11,9 @@ module Futhark.Representation.AST.Attributes.Aliases
        , consumedInBinding
        , consumedInExp
        , consumedInPattern
+       -- * Extensibility
+       , AliasedOp (..)
+       , CanBeAliased (..)
        )
        where
 
@@ -18,12 +22,16 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Util.Pretty (Pretty)
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.Representation.AST.Attributes.Names (FreeIn)
+import Futhark.Transform.Substitute (Substitute)
+import Futhark.Transform.Rename (Rename)
 
-class Lore lore => Aliased lore where
+class (Lore lore, AliasedOp (Op lore)) => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
   patternAliases :: Pattern lore -> [Names]
@@ -119,7 +127,7 @@ funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
-aliasesOf :: Aliased lore => Exp lore -> [Names]
+aliasesOf :: (Aliased lore) => Exp lore -> [Names]
 aliasesOf (If _ tb fb _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)
@@ -129,6 +137,7 @@ aliasesOf (LoopOp op) = loopOpAliases op
 aliasesOf (SegOp op) = segOpAliases op
 aliasesOf (Apply _ args t) =
   funcallAliases args $ retTypeValues t
+aliasesOf (Op op) = opAliases op
 
 returnAliases :: [TypeBase shaper Uniqueness] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts
@@ -167,6 +176,7 @@ consumedInExp (LoopOp (Scan _ _ lam _)) =
   consumedByLambda lam
 consumedInExp (LoopOp (Redomap _ _ _ lam _ _)) =
   consumedByLambda lam
+consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
 
 consumedByLambda :: Aliased lore => Lambda lore -> Names
@@ -178,3 +188,28 @@ consumedInPattern pat =
            patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
         consumedInBindage (BindInPlace _ src _) = vnameAliases src
+
+class AliasedOp op where
+  opAliases :: op -> [Names]
+  consumedInOp :: op -> Names
+
+instance AliasedOp () where
+  opAliases () = []
+  consumedInOp () = mempty
+
+class (AliasedOp (OpWithAliases op),
+       Eq (OpWithAliases op),
+       Ord (OpWithAliases op),
+       Show (OpWithAliases op),
+       Pretty (OpWithAliases op),
+       FreeIn (OpWithAliases op),
+       Substitute (OpWithAliases op),
+       Rename (OpWithAliases op)) => CanBeAliased op where
+  type OpWithAliases op :: *
+  removeOpAliases :: OpWithAliases op -> op
+  addOpAliases :: op -> OpWithAliases op
+
+instance CanBeAliased () where
+  type OpWithAliases () = ()
+  removeOpAliases = id
+  addOpAliases = id

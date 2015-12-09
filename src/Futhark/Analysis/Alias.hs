@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 -- | Alias analysis of a full Futhark program.  Takes as input a
 -- program with an arbitrary lore and produces one with aliases.  This
 -- module does not implement the aliasing logic itself, and derives
@@ -8,6 +9,7 @@ module Futhark.Analysis.Alias
        ( aliasAnalysis
          -- * Ad-hoc utilities
        , analyseBinding
+       , analyseExp
        )
        where
 
@@ -20,20 +22,24 @@ import qualified Futhark.Representation.Aliases as Out
 import Prelude
 
 -- | Perform alias analysis on a Futhark program.
-aliasAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
+aliasAnalysis :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+                 In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
-analyseFun :: Lore lore => In.FunDec lore -> Out.FunDec lore
+analyseFun :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+              In.FunDec lore -> Out.FunDec lore
 analyseFun (In.FunDec fname restype params body) =
   Out.FunDec fname restype params body'
   where body' = analyseBody body
 
-analyseBody :: Lore lore => In.Body lore -> Out.Body lore
+analyseBody :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+               In.Body lore -> Out.Body lore
 analyseBody (In.Body lore origbnds result) =
   let bnds' = map analyseBinding origbnds
   in Out.mkAliasedBody lore bnds' result
 
-analyseBinding :: Lore lore => In.Binding lore -> Out.Binding lore
+analyseBinding :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+                  In.Binding lore -> Out.Binding lore
 analyseBinding (In.Let pat lore e) =
   let e' = analyseExp e
       pat' = Out.addAliasesToPattern pat e'
@@ -41,7 +47,8 @@ analyseBinding (In.Let pat lore e) =
                lore)
   in Out.Let pat' lore' e'
 
-analyseExp :: Lore lore => In.Exp lore -> Out.Exp lore
+analyseExp :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+              In.Exp lore -> Out.Exp lore
 analyseExp (Out.LoopOp (In.Map cs size lam args)) =
   Out.LoopOp $
   Out.Map cs size (analyseLambda lam) args
@@ -86,15 +93,18 @@ analyseExp e = Out.mapExp analyse e
                      , Out.mapOnRetType = return
                      , Out.mapOnFParam = return
                      , Out.mapOnLParam = return
+                     , Out.mapOnOp = return . Out.addOpAliases
                      }
 
-analyseLambda :: Lore lore => In.Lambda lore -> Out.Lambda lore
+analyseLambda :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+                 In.Lambda lore -> Out.Lambda lore
 analyseLambda lam =
   let body = analyseBody $ In.lambdaBody lam
   in lam { Out.lambdaBody = body
          , Out.lambdaParams = In.lambdaParams lam
          }
-analyseExtLambda :: Lore lore => In.ExtLambda lore -> Out.ExtLambda lore
+analyseExtLambda :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+                    In.ExtLambda lore -> Out.ExtLambda lore
 analyseExtLambda lam =
   let body = analyseBody $ In.extLambdaBody lam
   in lam { Out.extLambdaBody = body

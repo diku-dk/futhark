@@ -100,6 +100,7 @@ instance TypeCheck.Checkable Basic where
   checkLParamLore _ = TypeCheck.checkType
   checkLetBoundLore _ = TypeCheck.checkType
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
+  checkOp () = return ()
   matchPattern pat e = do
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
@@ -152,6 +153,7 @@ removeLore =
             , rephraseFParamLore = declTypeOf
             , rephraseLParamLore = typeOf
             , rephraseRetType = removeRetTypeLore
+            , rephraseOp = const ()
             }
 
 removeProgLore :: Lore.Lore lore => AST.Prog lore -> Prog

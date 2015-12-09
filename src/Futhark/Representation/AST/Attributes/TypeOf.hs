@@ -35,6 +35,9 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , typeEnvFromPattern
        , typeEnvFromIdents
        , withParamTypes
+
+         -- * Extensibility
+       , TypedOp(..)
        )
        where
 
@@ -188,18 +191,22 @@ segOpExtType (SegReplicate _ _ dataarr _) =
   where result t = [Array (elemType t) (ExtShape [Ext 0]) NoUniqueness]
 
 -- | The type of an expression.
-expExtType :: (HasTypeEnv m, IsRetType (RetType lore),
-              Typed (Annotations.FParam lore)) =>
+expExtType :: (HasTypeEnv m,
+               IsRetType (RetType lore),
+               Typed (Annotations.FParam lore),
+               TypedOp (Annotations.Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
 expExtType (LoopOp op)    = pure $ loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
 expExtType (SegOp op)     = segOpExtType op
+expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.
 expExtTypeSize :: (IsRetType (RetType lore),
-                   Typed (Annotations.FParam lore)) =>
+                   Typed (Annotations.FParam lore),
+                   TypedOp (Annotations.Op lore)) =>
                   Exp lore -> Int
 expExtTypeSize = length . feelBad . expExtType
 
@@ -300,3 +307,9 @@ substNamesInSubExp subs (Var idd) =
 substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
+
+class TypedOp op where
+  opType :: HasTypeEnv m => op -> m [ExtType]
+
+instance TypedOp () where
+  opType () = pure []

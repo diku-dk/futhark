@@ -19,6 +19,7 @@ module Futhark.TypeCheck
   , require
   , requireI
   , checkSubExp
+  , checkExp
   , checkType
   , checkExtType
   , matchExtPattern
@@ -53,7 +54,7 @@ data TypeError lore = Error [String] (ErrorCase lore)
 type ErrorCase lore =
   GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (Annotations.LetBound lore)))
 
-instance PrettyLore lore => Show (TypeError lore) where
+instance Checkable lore => Show (TypeError lore) where
   show (Error [] err) =
     show err
   show (Error msgs err) =
@@ -1112,6 +1113,8 @@ checkExp (Apply fname args rettype_annot) = do
     ++ " but annotation is " ++ pretty rettype_annot
   checkFuncall (Just fname) paramtypes argflows
 
+checkExp (Op op) = checkOp op
+
 checkSOACArrayArgs :: Checkable lore =>
                       SubExp -> [VName] -> TypeM lore [Arg]
 checkSOACArrayArgs width vs =
@@ -1384,6 +1387,7 @@ checkExtLambda (ExtLambda i params body rettype) args =
 class (FreeIn (Annotations.Exp lore),
        FreeIn (Annotations.LetBound lore),
        FreeIn (Annotations.Body lore),
+       CanBeAliased (Op lore),
        Lore lore, PrettyLore lore) => Checkable lore where
   checkExpLore :: Annotations.Exp lore -> TypeM lore ()
   checkBodyLore :: Annotations.Body lore -> TypeM lore ()
@@ -1391,6 +1395,7 @@ class (FreeIn (Annotations.Exp lore),
   checkLParamLore :: VName -> Annotations.LParam lore -> TypeM lore ()
   checkLetBoundLore :: VName -> Annotations.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
+  checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore ->
                   TypeM lore ()
   basicFParam :: lore -> VName -> BasicType -> AST.FParam lore

@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
 -- | Utility declarations for performing range analysis.
 module Futhark.Representation.AST.Attributes.Ranges
        ( Bound
@@ -11,6 +13,8 @@ module Futhark.Representation.AST.Attributes.Ranges
        , Ranged (..)
        , subExpRange
        , expRanges
+       , RangedOp (..)
+       , CanBeRanged (..)
        )
        where
 
@@ -119,7 +123,7 @@ type ScalExpRange = (Maybe ScalExp, Maybe ScalExp)
 
 -- | The lore has embedded range information.  Note that it may not be
 -- up to date, unless whatever maintains the syntax tree is careful.
-class Lore lore => Ranged lore where
+class (Lore lore, RangedOp (Op lore)) => Ranged lore where
   -- | The range of the value parts of the 'Body'.
   bodyRanges :: Body lore -> [Range]
 
@@ -191,7 +195,7 @@ primOpRanges _ =
   [unknownRange]
 
 -- | Ranges of the value parts of the expression.
-expRanges :: Ranged lore =>
+expRanges :: (Ranged lore, TypedOp (Op lore)) =>
              Exp lore -> [Range]
 expRanges (PrimOp op) =
   primOpRanges op
@@ -225,3 +229,20 @@ expRanges (LoopOp (DoLoop res merge (ForLoop i iterations) body)) =
         returnedBound _ _ = Nothing
 expRanges e =
   replicate (expExtTypeSize e) unknownRange
+
+class IsOp op => RangedOp op where
+  opRanges :: op -> [Range]
+
+instance RangedOp () where
+  opRanges () = []
+
+class (RangedOp (OpWithRanges op), IsOp (OpWithRanges op)) =>
+      CanBeRanged op where
+  type OpWithRanges op :: *
+  removeOpRanges :: OpWithRanges op -> op
+  addOpRanges :: op -> OpWithRanges op
+
+instance CanBeRanged () where
+  type OpWithRanges () = ()
+  removeOpRanges = id
+  addOpRanges = id

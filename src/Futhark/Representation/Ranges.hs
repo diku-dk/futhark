@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -84,22 +85,26 @@ type VarRange = Range
 -- | Ranges about a body.
 type BodyRanges = [Range]
 
-instance Annotations.Annotations lore => Annotations.Annotations (Ranges lore) where
+instance (Annotations.Annotations lore, CanBeRanged (Op lore)) =>
+         Annotations.Annotations (Ranges lore) where
   type LetBound (Ranges lore) = (VarRange, Annotations.LetBound lore)
   type Exp (Ranges lore) = Annotations.Exp lore
   type Body (Ranges lore) = (BodyRanges, Annotations.Body lore)
   type FParam (Ranges lore) = Annotations.FParam lore
   type LParam (Ranges lore) = Annotations.LParam lore
   type RetType (Ranges lore) = Annotations.RetType lore
+  type Op (Ranges lore) = OpWithRanges (Op lore)
 
-instance Lore.Lore lore => Lore.Lore (Ranges lore) where
+instance (Lore.Lore lore, CanBeRanged (Op lore)) =>
+         Lore.Lore (Ranges lore) where
   representative =
     Ranges Lore.representative
 
   loopResultContext (Ranges lore) =
     Lore.loopResultContext lore
 
-instance Lore.Lore lore => Ranged (Ranges lore) where
+instance (Lore.Lore lore, CanBeRanged (Op lore)) =>
+         Ranged (Ranges lore) where
   bodyRanges = fst . bodyLore
   patternRanges = map (fst . patElemAttr) . patternElements
 
@@ -115,11 +120,14 @@ type ExtLambda lore = AST.ExtLambda (Ranges lore)
 type FunDec lore = AST.FunDec (Ranges lore)
 type RetType lore = AST.RetType (Ranges lore)
 
-instance Renameable lore => Renameable (Ranges lore) where
-instance Substitutable lore => Substitutable (Ranges lore) where
-instance Proper lore => Proper (Ranges lore) where
+instance (Renameable lore, CanBeRanged (Op lore)) =>
+         Renameable (Ranges lore) where
+instance (Substitutable lore, CanBeRanged (Op lore)) =>
+         Substitutable (Ranges lore) where
+instance (Proper lore, CanBeRanged (Op lore)) =>
+         Proper (Ranges lore) where
 
-instance (PrettyLore lore) => PrettyLore (Ranges lore) where
+instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) where
   ppBindingLore binding@(Let pat _ _) =
     case catMaybes [patElemComments,
                     ppBindingLore $ removeBindingRanges binding] of
@@ -141,48 +149,56 @@ instance (PrettyLore lore) => PrettyLore (Ranges lore) where
   ppFunDecLore = ppFunDecLore . removeFunDecRanges
   ppExpLore = ppExpLore . removeExpRanges
 
-removeRanges :: Rephraser (Ranges lore) lore
+removeRanges :: CanBeRanged (Op lore) => Rephraser (Ranges lore) lore
 removeRanges = Rephraser { rephraseExpLore = id
                          , rephraseLetBoundLore = snd
                          , rephraseBodyLore = snd
                          , rephraseFParamLore = id
                          , rephraseLParamLore = id
                          , rephraseRetType = id
+                         , rephraseOp = removeOpRanges
                          }
 
-removeProgRanges :: AST.Prog (Ranges lore) -> AST.Prog lore
+removeProgRanges :: CanBeRanged (Op lore) =>
+                    AST.Prog (Ranges lore) -> AST.Prog lore
 removeProgRanges = rephraseProg removeRanges
 
-removeFunDecRanges :: AST.FunDec (Ranges lore) -> AST.FunDec lore
+removeFunDecRanges :: CanBeRanged (Op lore) =>
+                      AST.FunDec (Ranges lore) -> AST.FunDec lore
 removeFunDecRanges = rephraseFunDec removeRanges
 
-removeExpRanges :: AST.Exp (Ranges lore) -> AST.Exp lore
+removeExpRanges :: CanBeRanged (Op lore) =>
+                   AST.Exp (Ranges lore) -> AST.Exp lore
 removeExpRanges = rephraseExp removeRanges
 
-removeBodyRanges :: AST.Body (Ranges lore) -> AST.Body lore
+removeBodyRanges :: CanBeRanged (Op lore) =>
+                    AST.Body (Ranges lore) -> AST.Body lore
 removeBodyRanges = rephraseBody removeRanges
 
-removeBindingRanges :: AST.Binding (Ranges lore) -> AST.Binding lore
+removeBindingRanges :: CanBeRanged (Op lore) =>
+                       AST.Binding (Ranges lore) -> AST.Binding lore
 removeBindingRanges = rephraseBinding removeRanges
 
-removeLambdaRanges :: AST.Lambda (Ranges lore) -> AST.Lambda lore
+removeLambdaRanges :: CanBeRanged (Op lore) =>
+                      AST.Lambda (Ranges lore) -> AST.Lambda lore
 removeLambdaRanges = rephraseLambda removeRanges
 
-removePatternRanges :: AST.Pattern (Ranges lore) -> AST.Pattern lore
+removePatternRanges :: CanBeRanged (Op lore) =>
+                       AST.Pattern (Ranges lore) -> AST.Pattern lore
 removePatternRanges = rephrasePattern removeRanges
 
-addRangesToPattern :: Lore.Lore lore =>
+addRangesToPattern :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
                       AST.Pattern lore -> Exp lore -> Pattern lore
 addRangesToPattern pat e =
   uncurry AST.Pattern $ mkPatternRanges pat e
 
-mkRangedBody :: Lore.Lore lore =>
-                 Annotations.Body lore -> [Binding lore] -> Result
-              -> Body lore
+mkRangedBody :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
+                Annotations.Body lore -> [Binding lore] -> Result
+             -> Body lore
 mkRangedBody innerlore bnds res =
   AST.Body (mkBodyRanges bnds res, innerlore) bnds res
 
-mkPatternRanges :: Lore.Lore lore =>
+mkPatternRanges :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
                    AST.Pattern lore -> Exp lore
                 -> ([PatElemT (Annotations.LetBound (Ranges lore))],
                     [PatElemT (Annotations.LetBound (Ranges lore))])
@@ -213,7 +229,7 @@ mkBodyRanges bnds = map $ removeUnknownBounds . subExpRange
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-mkRangedLetBinding :: Lore.Lore lore =>
+mkRangedLetBinding :: (Proper lore, CanBeRanged (Op lore)) =>
                       AST.Pattern lore -> Annotations.Exp lore -> Exp lore
                    -> Binding lore
 mkRangedLetBinding pat explore e =

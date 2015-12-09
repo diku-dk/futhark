@@ -441,6 +441,10 @@ defCompileExp _ (SegOp op) =
   "ImpGen called on Segmented Operator, this is not supported. " ++
   pretty (SegOp op)
 
+defCompileExp _ (Op op) =
+  throwError $
+  "defCompileExp called on Op: " ++ pretty op
+
 defCompilePrimOp :: Destination -> PrimOp -> ImpM op ()
 
 defCompilePrimOp (Destination [target]) (SubExp se) =
