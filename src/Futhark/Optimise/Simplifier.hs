@@ -65,25 +65,24 @@ simplifyLambdaWithRules :: (MonadFreshNames m, HasTypeEnv m, MonadEngine (Simple
                            SimpleOps (SimpleM lore)
                         -> RuleBook (SimpleM lore)
                         -> HoistBlockers (SimpleM lore)
-                        -> Prog lore
                         -> Lambda lore
                         -> SubExp
                         -> [Maybe VName]
                         -> m (Lambda lore)
-simplifyLambdaWithRules simpl rules blockers prog lam w args =
+simplifyLambdaWithRules simpl rules blockers lam w args =
   liftM removeLambdaWisdom $
-  simplifyLambda simpl rules blockers (Just prog) lam w args
+  simplifyLambda simpl rules blockers lam w args
 
 -- | Simplify a list of 'Binding's.
 simplifyBindingsWithRules :: (MonadFreshNames m, HasTypeEnv m, MonadEngine (SimpleM lore)) =>
                              SimpleOps (SimpleM lore)
                           -> RuleBook (SimpleM lore)
                           -> HoistBlockers (SimpleM lore)
-                          -> Maybe (Prog lore) -> [Binding lore]
+                          -> [Binding lore]
                           -> m [Binding lore]
-simplifyBindingsWithRules simpl rules blockers prog bnds =
+simplifyBindingsWithRules simpl rules blockers bnds =
   map removeBindingWisdom <$>
-  simplifyBindings simpl rules blockers prog bnds
+  simplifyBindings simpl rules blockers bnds
 
 simplifyBasicish :: (MonadFreshNames m, Bindable lore,
                      Simplifiable (Annotations.LetBound lore),

@@ -41,7 +41,6 @@ data FusionGEnv = FusionGEnv {
   -- ^ Mapping from variable name to its entire family.
   , varsInScope:: HM.HashMap VName VarEntry
   , fusedRes   :: FusedRes
-  , program    :: Prog
   }
 
 arrsInScope :: FusionGEnv -> HM.HashMap VName (Ident, SOAC.ArrayTransforms)
@@ -182,7 +181,6 @@ fuseProg prog = do
   let env  = FusionGEnv { soacs = HM.empty
                         , varsInScope = HM.empty
                         , fusedRes = mkFreshFusionRes
-                        , program = prog
                         }
       funs = progFunctions prog
   ks <- liftEitherM $ runFusionGatherM (mapM fusionGatherFun funs) env
@@ -777,11 +775,10 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
 
 insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
 insertKerSOAC names ker body = do
-  prog <- asks program
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simplifyLambda prog lam (SOAC.width new_soac) args
+  lam' <- simplifyLambda lam (SOAC.width new_soac) args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

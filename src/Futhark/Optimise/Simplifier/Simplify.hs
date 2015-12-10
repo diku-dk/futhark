@@ -30,60 +30,48 @@ simplifyProg :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
              -> Engine.HoistBlockers (SimpleM lore)
              -> Prog lore
              -> m (Prog (Wise lore))
-simplifyProg simpl rules blockers prog =
-  intraproceduralTransformation
-  (simplifyFun' simpl rules blockers (Just prog))
-  prog
+simplifyProg simpl rules blockers =
+  intraproceduralTransformation $
+  simplifyFun simpl rules blockers
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
 simplifyFun :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
-               SimpleOps (SimpleM lore)
-            -> RuleBook (SimpleM lore)
-            -> Engine.HoistBlockers (SimpleM lore)
-            -> FunDec lore
-            -> m (FunDec (Wise lore))
-simplifyFun simpl rules blockers =
-  simplifyFun' simpl rules blockers Nothing
-
-simplifyFun' :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Engine.HoistBlockers (SimpleM lore)
-             -> Maybe (Prog lore)
              -> FunDec lore
              -> m (FunDec (Wise lore))
-simplifyFun' simpl rules blockers prog fundec =
+simplifyFun simpl rules blockers fundec =
   modifyNameSource $ runSimpleM (Engine.simplifyFun fundec) simpl $
-  Engine.emptyEnv rules blockers prog
+  Engine.emptyEnv rules blockers
 
 -- | Simplify just a single 'Lambda'.
 simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Engine.HoistBlockers (SimpleM lore)
-               -> Maybe (Prog lore)
                -> Lambda lore -> SubExp -> [Maybe VName]
                -> m (Lambda (Wise lore))
-simplifyLambda simpl rules blockers prog lam w args = do
+simplifyLambda simpl rules blockers lam w args = do
   types <- askTypeEnv
   let m = Engine.localVtable (<> ST.fromTypeEnv types) $
           Engine.simplifyLambdaNoHoisting lam w args
   modifyNameSource $ runSimpleM m simpl $
-    Engine.emptyEnv rules blockers prog
+    Engine.emptyEnv rules blockers
 
 -- | Simplify a list of 'Binding's.
 simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
                     SimpleOps (SimpleM lore)
                  -> RuleBook (SimpleM lore)
                  -> Engine.HoistBlockers (SimpleM lore)
-                 -> Maybe (Prog lore) -> [Binding lore]
+                 -> [Binding lore]
                  -> m [Binding (Wise lore)]
-simplifyBindings simpl rules blockers prog bnds = do
+simplifyBindings simpl rules blockers bnds = do
   types <- askTypeEnv
   let m = Engine.localVtable (<> ST.fromTypeEnv types) $
           fmap snd $ Engine.collectBindingsEngine $
           mapM_ Engine.simplifyBinding bnds
   modifyNameSource $ runSimpleM m simpl $
-    Engine.emptyEnv rules blockers prog
+    Engine.emptyEnv rules blockers

@@ -102,7 +102,6 @@ Library
                    Futhark.Optimise.InPlaceLowering.LowerIntoBinding
                    Futhark.Optimise.InPlaceLowering.SubstituteIndices
                    Futhark.Optimise.Simplifier
-                   Futhark.Optimise.Simplifier.Apply
                    Futhark.Optimise.Simplifier.ClosedForm
                    Futhark.Optimise.Simplifier.Engine
                    Futhark.Optimise.Simplifier.Lore

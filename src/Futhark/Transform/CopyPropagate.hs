@@ -20,4 +20,4 @@ copyPropagateInBindings :: (MonadFreshNames m,
                         -> [Binding lore]
                         -> m [Binding lore]
 copyPropagateInBindings simpl =
-  simplifyBindingsWithRules simpl ([], []) noExtraHoistBlockers Nothing
+  simplifyBindingsWithRules simpl ([], []) noExtraHoistBlockers

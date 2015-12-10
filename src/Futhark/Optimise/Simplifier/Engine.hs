@@ -69,7 +69,6 @@ import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
-import Futhark.Optimise.Simplifier.Apply
 import Futhark.Construct
 import Futhark.Optimise.Simplifier.Lore
 import qualified Futhark.Analysis.ScalExp as SE
@@ -96,8 +95,7 @@ data HoistBlockers m = HoistBlockers
 noExtraHoistBlockers :: HoistBlockers m
 noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks
 
-data Env m = Env { envProgram       :: Maybe (Prog (InnerLore m))
-                 , envRules         :: RuleBook m
+data Env m = Env { envRules         :: RuleBook m
                  , envAliases       :: AliasMap
                  , envHoistBlockers :: HoistBlockers m
                  }
@@ -105,11 +103,9 @@ data Env m = Env { envProgram       :: Maybe (Prog (InnerLore m))
 emptyEnv :: MonadEngine m =>
             RuleBook m
          -> HoistBlockers m
-         -> Maybe (Prog (InnerLore m))
          -> Env m
-emptyEnv rules blockers prog =
-  Env { envProgram = prog
-      , envRules = rules
+emptyEnv rules blockers =
+  Env { envRules = rules
       , envAliases = mempty
       , envHoistBlockers = blockers
       }
@@ -202,11 +198,6 @@ asserted (Var name) = do
 tapUsage :: MonadEngine m => m a -> m (a, UT.UsageTable)
 tapUsage m = do (x,needs) <- listenNeed m
                 return (x, usageTable needs)
-
-blockUsage :: MonadEngine m => m a -> m a
-blockUsage m = passNeed $ do
-  (x, _) <- listenNeed m
-  return (x, const mempty)
 
 censorUsage :: MonadEngine m =>
                (UT.UsageTable -> UT.UsageTable)
@@ -461,25 +452,6 @@ isDoLoopResult = mapM_ checkForVar
 simplifyBinding :: MonadEngine m =>
                    Binding (InnerLore m)
                 -> m ()
--- The simplification rules cannot handle Apply, because it requires
--- access to the full program.  This is a bit of a hack.
-simplifyBinding (Let pat _ (Apply fname args rettype)) = do
-  args' <- mapM (simplify . fst) args
-  rettype' <- simplify rettype
-  prog <- asksEngineEnv envProgram
-  vtable <- getVtable
-  case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
-    -- Array values are non-unique, so we may need to copy them.
-    Just vs -> do let vs' = valueShapeContext (retTypeValues rettype) vs ++ vs
-                  bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
-                    case uniqueness $ toDecl (identType p) Unique of
-                      Unique    -> mkLetNamesM' [identName p] =<< eCopy (eValue v)
-                      Nonunique -> mkLetNamesM' [identName p] =<< eValue v
-                  mapM_ (simplifyBinding . removeBindingWisdom) bnds
-    Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
-                  pat' <- blockUsage $ simplifyPattern pat
-                  inspectBinding =<<
-                    mkLetM (addWisdomToPattern pat' e') e'
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
