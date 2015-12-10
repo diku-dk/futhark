@@ -43,7 +43,6 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
-  , ScanType(..)
   , BinOp (..)
   , DimChange (..)
   , ShapeChange
@@ -308,19 +307,6 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
 data ScanKernelOrder = ScanTransposed
                      | ScanFlat
                      deriving (Eq, Ord, Show)
-
--- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
--- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@
--- Exclusive = @[ ne, ne `op` x_1, ... , ne `op` x_1 ... `op` x_{n-1} ]@
---
--- Both versions generate arrays of the same size as @xs@ (this is not
--- always the semantics).
---
--- An easy way to remember which is which, is that inclusive /includes/
--- the last element in the calculation, whereas the exclusive does not
-data ScanType = ScanInclusive
-              | ScanExclusive
-              deriving(Eq, Ord, Show)
 
 data LoopForm = ForLoop VName SubExp
               | WhileLoop VName
