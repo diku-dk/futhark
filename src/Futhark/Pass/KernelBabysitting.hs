@@ -20,7 +20,6 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.SOACS
 import Futhark.Tools
 import Futhark.Pass
-import qualified Futhark.Transform.FirstOrderTransform as FOT
 
 babysitKernels :: Pass SOACS SOACS
 babysitKernels =
@@ -162,14 +161,8 @@ transformBinding expmap (Let pat () (LoopOp (MapKernel cs w i ispace inps return
 
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
-  ((), bnds) <- runBinder $ FOT.transformBinding $ Let pat () e'
-  foldM addBinding' expmap bnds
-  where addBinding' expmap' bnd = do
-          addBinding bnd
-          return $
-            HM.fromList [ (name, bindingExp bnd)
-                        | name <- patternNames $ bindingPattern bnd ]
-            <> expmap'
+  addBinding $ Let pat () e'
+  return $ HM.fromList [ (name, e') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper SOACS SOACS SequentialiseM
 transform = identityMapper { mapOnBody = transformBody
