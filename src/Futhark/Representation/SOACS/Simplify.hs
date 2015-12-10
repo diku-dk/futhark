@@ -47,7 +47,7 @@ simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasTypeEnv m, MonadFreshNames m) =>
-                  Prog -> Lambda -> SubExp -> [Maybe VName] -> m Lambda
+                  Lambda -> SubExp -> [Maybe VName] -> m Lambda
 simplifyLambda =
   Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
