@@ -12,10 +12,13 @@ module Futhark.Analysis.Metrics
        , inside
        ) where
 
+import Control.Applicative
 import Control.Monad.Writer
 import Data.Text (Text)
 import Data.String
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.Representation.AST
 
