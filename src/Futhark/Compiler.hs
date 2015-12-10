@@ -11,6 +11,7 @@ module Futhark.Compiler
        )
 where
 
+import Control.Applicative
 import Data.Monoid
 import Control.Monad
 import Data.Maybe
