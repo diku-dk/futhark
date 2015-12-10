@@ -34,10 +34,12 @@ callKernelOperations :: ImpGen.Operations Imp.CallKernel
 callKernelOperations =
   ImpGen.Operations { ImpGen.opsExpCompiler = kernelCompiler
                     , ImpGen.opsCopyCompiler = callKernelCopy
+                    , ImpGen.opsOpCompiler = allocCompiler
                     }
 
+
 inKernelOperations :: ImpGen.Operations Imp.InKernel
-inKernelOperations = ImpGen.defaultOperations
+inKernelOperations = (ImpGen.defaultOperations cannotAllocInKernel)
                      { ImpGen.opsCopyCompiler = inKernelCopy }
 
 compileProg :: Prog -> Either String Imp.Program
@@ -45,12 +47,18 @@ compileProg = liftM (setDefaultSpace (Imp.Space "device")) .
               ImpGen.compileProg callKernelOperations
               (Imp.Space "device")
 
+allocCompiler :: ImpGen.Destination -> Op ExplicitMemory
+              -> ImpGen.ImpM Imp.CallKernel ()
+allocCompiler dest (Alloc e space) =
+  ImpGen.compileAlloc dest e space
+
+cannotAllocInKernel :: ImpGen.Destination -> Op ExplicitMemory
+                    -> ImpGen.ImpM Imp.InKernel ()
+cannotAllocInKernel _ _ =
+  throwError "Cannot allocate memory in kernel."
+
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
-
-kernelCompiler (ImpGen.Destination [ImpGen.MemoryDestination mem size]) (Op (Alloc e space)) = do
-  ImpGen.compileAlloc mem size e space
-  return ImpGen.Done
 
 kernelCompiler
   (ImpGen.Destination dest)
