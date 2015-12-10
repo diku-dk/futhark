@@ -30,8 +30,9 @@ import qualified Futhark.Representation.External as E
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
+import Futhark.MonadFreshNames
 import Futhark.Representation.AST
-import qualified Futhark.Representation.Basic as I
+import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
 import Futhark.Util.Log
 
@@ -56,7 +57,7 @@ dumpError config err = do
     _ -> return ()
 
 runCompilerOnProgram :: FutharkConfig
-                     -> Pipeline I.Basic lore
+                     -> Pipeline I.SOACS lore
                      -> Action lore
                      -> FilePath
                      -> IO ()
@@ -79,7 +80,7 @@ runCompilerOnProgram config pipeline action file = do
         Right () -> return ()
 
 runPipelineOnProgram :: FutharkConfig
-                     -> Pipeline I.Basic tolore
+                     -> Pipeline I.SOACS tolore
                      -> FilePath
                      -> IO (Either CompileError (Prog tolore), Log)
 runPipelineOnProgram config pipeline file = do
@@ -87,7 +88,7 @@ runPipelineOnProgram config pipeline file = do
   runPipelineOnSource config pipeline file contents
 
 runPipelineOnSource :: FutharkConfig
-                    -> Pipeline I.Basic tolore
+                    -> Pipeline I.SOACS tolore
                     -> FilePath
                     -> String
                     -> IO (Either CompileError (Prog tolore), Log)
@@ -97,8 +98,10 @@ runPipelineOnSource config pipeline filename srccode = do
               (Right prog, msgs) -> return (Right prog, msgs)
   where futharkc' = do
           parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
-          ext_prog    <- typeCheckSourceProgram parsed_prog
-          case internaliseProg (futharkBoundsCheck config) $ E.tagProg ext_prog of
+          tagged_ext_prog <- E.tagProg <$> typeCheckSourceProgram parsed_prog
+          putNameSource $ E.newNameSourceForProg tagged_ext_prog
+          res <- internaliseProg (futharkBoundsCheck config) tagged_ext_prog
+          case res of
             Left err ->
               compileErrorS "During internalisation:" err
             Right int_prog -> do
@@ -128,7 +131,7 @@ typeCheckInternalProgram prog =
     Left err -> compileError (T.pack $ "After internalisation:\n" ++ show err) prog
     Right () -> return ()
 
-interpretAction' :: RealConfiguration -> Action I.Basic
+interpretAction' :: RealConfiguration -> Action I.SOACS
 interpretAction' rconf =
   interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]

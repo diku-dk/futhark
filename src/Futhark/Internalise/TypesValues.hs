@@ -21,7 +21,7 @@ import Data.List
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.External as E
-import Futhark.Representation.Basic as I
+import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
 
 import Prelude hiding (mapM)

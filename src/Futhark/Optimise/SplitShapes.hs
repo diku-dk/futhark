@@ -17,8 +17,8 @@ import Data.Maybe
 
 import Prelude
 
-import Futhark.Representation.Basic
-import Futhark.Representation.Basic.Simplify
+import Futhark.Representation.SOACS
+import Futhark.Representation.SOACS.Simplify
 import Futhark.Tools
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
@@ -27,7 +27,7 @@ import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 
 -- | Perform the transformation on a program.
-splitShapes :: Pass Basic Basic
+splitShapes :: Pass SOACS SOACS
 splitShapes =
   Pass { passName = "Split shapes"
        , passDescription = "Optimise shape computation"

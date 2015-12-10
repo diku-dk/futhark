@@ -13,7 +13,7 @@ module Futhark.NeedNames
 import Control.Applicative
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 
 -- | The central monad itself.

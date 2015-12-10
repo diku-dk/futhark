@@ -16,11 +16,17 @@ module Futhark.Optimise.Simplifier
   , RuleBook
   , noExtraHoistBlockers
   , HoistBlockers (..)
+  , simplifyBasicish
   )
   where
 
+import Data.Functor
 import Control.Monad
 
+import Prelude
+
+import qualified Futhark.Representation.AST.Annotations as Annotations
+import Futhark.Binder.Class (Bindable)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Lore
@@ -29,7 +35,7 @@ import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
 import Futhark.Optimise.Simplifier.Engine
-  (MonadEngine, HoistBlockers(..), noExtraHoistBlockers)
+  (MonadEngine, HoistBlockers(..), noExtraHoistBlockers, Simplifiable, SimplifiableOp)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
@@ -78,3 +84,13 @@ simplifyBindingsWithRules :: (MonadFreshNames m, HasTypeEnv m, MonadEngine (Simp
 simplifyBindingsWithRules simpl rules blockers prog bnds =
   map removeBindingWisdom <$>
   simplifyBindings simpl rules blockers prog bnds
+
+simplifyBasicish :: (MonadFreshNames m, Bindable lore,
+                     Simplifiable (Annotations.LetBound lore),
+                     Simplifiable (Annotations.FParam lore),
+                     Simplifiable (Annotations.LParam lore),
+                     Simplifiable (Annotations.RetType lore),
+                     SimplifiableOp lore (Op lore)) =>
+                    Prog lore -> m (Prog lore)
+simplifyBasicish =
+  simplifyProgWithRules bindableSimpleOps standardRules noExtraHoistBlockers

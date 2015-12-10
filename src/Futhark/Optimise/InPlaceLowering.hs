@@ -67,7 +67,7 @@ import Data.Maybe
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Optimise.InPlaceLowering.LowerIntoBinding
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -77,7 +77,7 @@ import Futhark.Tools (intraproceduralTransformation)
 import Prelude hiding (any, mapM_, elem, all)
 
 -- | Apply the in-place lowering optimisation to the given program.
-inPlaceLowering :: Pass Basic Basic
+inPlaceLowering :: Pass SOACS SOACS
 inPlaceLowering = simplePass
                   "In-place lowering"
                   "Lower in-place updates into loops" $
@@ -85,14 +85,14 @@ inPlaceLowering = simplePass
                   intraproceduralTransformation optimiseFunDec .
                   aliasAnalysis
 
-optimiseFunDec :: MonadFreshNames m => FunDec Basic -> m (FunDec Basic)
+optimiseFunDec :: MonadFreshNames m => FunDec SOACS -> m (FunDec SOACS)
 optimiseFunDec fundec =
   modifyNameSource $ runForwardingM $
   bindingParams (funDecParams fundec) $ do
     body <- optimiseBody $ funDecBody fundec
     return $ fundec { funDecBody = body }
 
-optimiseBody :: Body Basic -> ForwardingM (Body Basic)
+optimiseBody :: Body SOACS -> ForwardingM (Body SOACS)
 optimiseBody (Body als bnds res) = do
   bnds' <- deepen $ optimiseBindings bnds $
     mapM_ seen res
@@ -100,9 +100,9 @@ optimiseBody (Body als bnds res) = do
   where seen Constant{} = return ()
         seen (Var v)    = seenVar v
 
-optimiseBindings :: [Binding Basic]
+optimiseBindings :: [Binding SOACS]
                  -> ForwardingM ()
-                 -> ForwardingM [Binding Basic]
+                 -> ForwardingM [Binding SOACS]
 optimiseBindings [] m = m >> return []
 
 optimiseBindings (bnd:bnds) m = do
@@ -135,13 +135,13 @@ optimiseBindings (bnd:bnds) m = do
         checkIfForwardableUpdate bnd' bnds' =
           return $ bnd' : bnds'
 
-optimiseInBinding :: Binding Basic
-                  -> ForwardingM (Binding Basic)
+optimiseInBinding :: Binding SOACS
+                  -> ForwardingM (Binding SOACS)
 optimiseInBinding (Let pat attr e) = do
   e' <- optimiseExp e
   return $ Let pat attr e'
 
-optimiseExp :: Exp Basic -> ForwardingM (Exp Basic)
+optimiseExp :: Exp SOACS -> ForwardingM (Exp SOACS)
 optimiseExp (LoopOp (DoLoop res merge form body)) =
   bindingIdents (boundInForm form) $
   bindingParams (map fst merge) $ do
@@ -160,8 +160,8 @@ optimiseExp e = mapExpM optimise e
                                   , mapOnLambda = optimiseLambda
                                   }
 
-optimiseLambda :: Lambda Basic
-               -> ForwardingM (Lambda Basic)
+optimiseLambda :: Lambda SOACS
+               -> ForwardingM (Lambda SOACS)
 optimiseLambda lam =
   bindingIdents (map paramIdent $ lambdaParams lam) $ do
     optbody <- optimiseBody $ lambdaBody lam
@@ -190,7 +190,7 @@ instance Monoid BottomUp where
     BottomUp (seen1 `mappend` seen2) (forward1 `mappend` forward2)
   mempty = BottomUp mempty mempty
 
-updateBinding :: DesiredUpdate -> Binding Basic
+updateBinding :: DesiredUpdate -> Binding SOACS
 updateBinding fwd =
   mkLet [] [(Ident (updateName fwd) (updateType fwd),
              BindInPlace
@@ -231,7 +231,7 @@ bindingParams params = local $ \(TopDown n vtable d) ->
       entries = HM.fromList $ map entry params
   in TopDown (n+1) (HM.union entries vtable) d
 
-bindingBinding :: Binding Basic
+bindingBinding :: Binding SOACS
                -> ForwardingM a
                -> ForwardingM a
 bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->

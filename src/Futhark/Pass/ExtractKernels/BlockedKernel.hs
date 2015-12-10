@@ -14,7 +14,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -145,7 +145,7 @@ blockedKernelSize w = do
 
   return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
-blockedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+blockedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
                Pattern
             -> Certificates -> SubExp
             -> Lambda
@@ -263,7 +263,7 @@ blockedScan pat cs w lam input = do
         zero = Constant $ IntVal 0
         (nes, _) = unzip input
 
-        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Basic
+        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput SOACS
         mkKernelInput indices p arr = KernelInput { kernelInputParam = p
                                                   , kernelInputArray = arr
                                                   , kernelInputIndices = indices
@@ -273,7 +273,7 @@ blockedScan pat cs w lam input = do
                                          kernelInputType inp)
                                       | inp <- inps ]
 
-blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
                         SubExp
                      -> Pattern
                      -> Certificates

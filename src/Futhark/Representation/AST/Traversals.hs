@@ -45,7 +45,6 @@ module Futhark.Representation.AST.Traversals
   , walkExpM
   , walkExp
   -- * Simple wrappers
-  , foldlPattern
   )
   where
 
@@ -172,45 +171,6 @@ mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
               mapOnLoopForm tv form <*>
               mapOnBody tv loopbody)
   where (vs,es) = unzip mergepat
-mapExpM tv (LoopOp (Map cs size fun arrexps)) =
-  LoopOp <$> (pure Map <*>
-              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnLambda tv fun <*> mapM (mapOnVName tv) arrexps)
-mapExpM tv (LoopOp (ConcatMap cs size fun arrexps)) =
-  LoopOp <$> (pure ConcatMap <*>
-              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnLambda tv fun <*> mapM (mapM (mapOnVName tv)) arrexps)
-mapExpM tv (LoopOp (Reduce cs size fun inputs)) =
-  LoopOp <$> (pure Reduce <*>
-              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnLambda tv fun <*>
-              (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                       mapM (mapOnVName tv) arrexps))
-  where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Scan cs size fun inputs)) =
-  LoopOp <$> (pure Scan <*>
-              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnLambda tv fun <*>
-              (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                       mapM (mapOnVName tv) arrexps))
-  where (startexps, arrexps) = unzip inputs
-mapExpM tv (LoopOp (Redomap cs size redfun mapfun accexps arrexps)) =
-  LoopOp <$> (pure Redomap <*>
-              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-              mapM (mapOnSubExp tv) accexps <*> mapM (mapOnVName tv) arrexps)
-mapExpM tv (LoopOp (Stream cs size form lam arrs ii)) =
-  LoopOp <$> (pure Stream <*>
-              mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnStreamForm form <*> mapOnExtLambda tv lam <*>
-              mapM (mapOnVName tv) arrs <*> pure ii)
-  where mapOnStreamForm (MapLike o) = pure $ MapLike o
-        mapOnStreamForm (RedLike o lam0 acc) =
-            pure RedLike <*> pure o  <*>
-                 mapOnLambda tv lam0 <*>
-                 mapM (mapOnSubExp tv) acc
-        mapOnStreamForm (Sequential acc) =
-            pure Sequential <*> mapM (mapOnSubExp tv) acc
 mapExpM tv (LoopOp (MapKernel cs w index ispace inps rettype body)) =
   LoopOp <$> (MapKernel <$>
               mapOnCertificates tv cs <*>
@@ -364,11 +324,6 @@ foldMapper f = Mapper {
           put =<< lift (op f v k)
           return k
 
--- | Perform a left-reduction across the bindings of a
--- body.
-foldBody :: (a -> Binding lore -> a) -> a -> Body lore -> a
-foldBody f a = foldl f a . bodyBindings
-
 -- | Perform a left-reduction across the immediate children of a body.
 -- The reduction does not descend recursively into subterms and is
 -- done left-to-right.
@@ -435,20 +390,3 @@ walkExpM f = void . mapExpM m
 -- | As 'walkExp', but runs in the 'Identity' monad..
 walkExp :: Walker lore Identity -> Exp lore -> ()
 walkExp f = runIdentity . walkExpM f
-
--- | Common case of 'foldExp', where only 'Exp's are taken into
--- account.
-foldlPattern :: (a -> Exp lore -> a) ->
-                a -> Exp lore -> a
-foldlPattern expf = foldExp m
-  where m = identityFolder {
-              foldOnBinding = \x (Let _ _ e) -> return $ expf x e
-            , foldOnBody = \x -> return . foldBody onBinding x
-            , foldOnLambda =
-              \x ->
-                return . foldBody onBinding x . lambdaBody
-            , foldOnExtLambda =
-              \x ->
-                return . foldBody onBinding x . extLambdaBody
-            }
-        onBinding x (Let _ _ e) = expf x e

@@ -6,8 +6,8 @@ module Futhark.Optimise.SuffCond
 
 import Control.Monad.State
 
-import Futhark.Representation.Basic
-import Futhark.Representation.Basic.Simplify
+import Futhark.Representation.SOACS
+import Futhark.Representation.SOACS.Simplify
 import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
@@ -16,7 +16,7 @@ import Futhark.Optimise.Simplifier
 import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 
-optimisePredicates :: Pass Basic Basic
+optimisePredicates :: Pass SOACS SOACS
 optimisePredicates =
   Pass { passName = "Optimise predicates"
        , passDescription = "Optimise predicates by extracting sufficient conditions."

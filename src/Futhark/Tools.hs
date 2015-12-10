@@ -1,4 +1,6 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Tools
   (
     module Futhark.Construct
@@ -23,6 +25,7 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Representation.AST
+import Futhark.Representation.SOACS.SOAC
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.MonadFreshNames
 import Futhark.Construct
@@ -65,7 +68,7 @@ nonuniqueFParams params =
 -- add the new idents to the 'TypeEnv'.
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
-redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore) =>
+redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>
                          PatternT lore -> Annotations.Exp lore
                       -> ( Certificates, SubExp
                          , LambdaT lore, LambdaT lore, [SubExp]
@@ -78,10 +81,10 @@ redomapToMapAndReduce (Pattern [] patelems) lore
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
       map_bnd = mkLet [] map_pat $
-                LoopOp $ Map certs outersz newmap_lam arrs
+                Op $ Map certs outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
       red_bnd = Let (Pattern [] patelems) lore $
-                LoopOp $ Reduce certs outersz redlam red_args
+                Op $ Reduce certs outersz redlam red_args
   return (map_bnd, red_bnd)
   where
     accMapPatElem pe = do

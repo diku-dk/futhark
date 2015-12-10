@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 -- | High-level representation of SOACs.  When performing
 -- SOAC-transformations, operating on normal 'Exp' values is somewhat
 -- of a nuisance, as they can represent terms that are not proper
@@ -80,9 +81,9 @@ import Data.Traversable
 import Prelude hiding (mapM)
 
 import qualified Futhark.Representation.AST as Futhark
+import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Representation.AST
-  hiding (Map, Reduce, Scan, Redomap, Stream,
-          Var, Iota, Rearrange, Reshape, Replicate,
+  hiding (Var, Iota, Rearrange, Reshape, Replicate,
           typeOf)
 import Futhark.Transform.Substitute
 import Futhark.Construct
@@ -485,36 +486,36 @@ width (Stream  _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
 
 -- | Convert a SOAC to the corresponding expression.
-toExp :: (MonadBinder m) =>
+toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
          SOAC (Lore m) -> m (Exp (Lore m))
 
 -- XXX: the other part of the zero-input hack (see fromExp).
 toExp (Map cs l as)
   | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
       new_index <- newVName $ baseString $ lambdaIndex l
-      LoopOp <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
+      Op <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
 toExp (Redomap cs redlam l acc as)
   | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
       new_index <- newVName $ baseString $ lambdaIndex l
-      LoopOp <$> (Futhark.Redomap cs w redlam l { lambdaIndex = new_index } acc <$> inputsToSubExps as)
+      Op <$> (Futhark.Redomap cs w redlam l { lambdaIndex = new_index } acc <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
 
 toExp (Map cs l as) =
-  LoopOp <$> (Futhark.Map cs w l <$> inputsToSubExps as)
+  Op <$> (Futhark.Map cs w l <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
 toExp (Reduce cs l args) =
-  LoopOp <$> (Futhark.Reduce cs w l <$> (zip es <$> inputsToSubExps as))
+  Op <$> (Futhark.Reduce cs w l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
         w = arraysSize 0 $ map inputType as
 toExp (Scan cs l args) =
-  LoopOp <$> (Futhark.Scan cs w l <$> (zip es <$> inputsToSubExps as))
+  Op <$> (Futhark.Scan cs w l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
         w = arraysSize 0 $ map inputType as
 toExp (Redomap cs l1 l2 es as) =
-  LoopOp <$> (Futhark.Redomap cs w l1 l2 es <$> inputsToSubExps as)
+  Op <$> (Futhark.Redomap cs w l1 l2 es <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
-toExp (Stream  cs form lam ii inps) = LoopOp <$> do
+toExp (Stream  cs form lam ii inps) = Op <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
       extlam = ExtLambda (lambdaIndex lam) (lambdaParams lam) (lambdaBody lam) extrtp
       w = arraysSize 0 $ map inputType inps
@@ -532,36 +533,36 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: (Bindable lore, HasTypeEnv f) =>
+fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasTypeEnv f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
 -- | XXX: ugly hack to deal with the lack of support for zero-input
 -- SOACs.  If we encounter one of these (and it is a map or redomap),
 -- we add a dummy iota input.  This really should go away, because it
 -- is not robust.
-fromExp (LoopOp (Futhark.Map cs w lam [])) =
+fromExp (Op (Futhark.Map cs w lam [])) =
   let iota_input = Input mempty $ Iota w
       lam' = lam
              { lambdaParams = [Param (lambdaIndex lam) (Basic Int)] }
   in pure $ Right $ Map cs lam' [iota_input]
-fromExp (LoopOp (Futhark.Redomap cs w redlam lam acc [])) =
+fromExp (Op (Futhark.Redomap cs w redlam lam acc [])) =
   let iota_input = Input mempty $ Iota w
       lam' = lam
              { lambdaParams = lambdaParams lam ++
                               [Param (lambdaIndex lam) (Basic Int)] }
   in pure $ Right $ Redomap cs redlam lam' acc [iota_input]
 
-fromExp (LoopOp (Futhark.Map cs _ l as)) =
+fromExp (Op (Futhark.Map cs _ l as)) =
   Right <$> Map cs l <$> traverse varInput as
-fromExp (LoopOp (Futhark.Reduce cs _ l args)) = do
+fromExp (Op (Futhark.Reduce cs _ l args)) = do
   let (es,as) = unzip args
   Right <$> Reduce cs l <$> zip es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Scan cs _ l args)) = do
+fromExp (Op (Futhark.Scan cs _ l args)) = do
   let (es,as) = unzip args
   Right <$> Scan cs l <$> zip es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Redomap cs _ l1 l2 es as)) =
+fromExp (Op (Futhark.Redomap cs _ l1 l2 es as)) =
   Right <$> Redomap cs l1 l2 es <$> traverse varInput as
-fromExp (LoopOp (Futhark.Stream cs _ form extlam as ii)) = do
+fromExp (Op (Futhark.Stream cs _ form extlam as ii)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
   if length mrtps == length rtps
@@ -576,8 +577,8 @@ fromExp _ = pure $ Left NotSOAC
 -- | To-Stream translation of SOACs.
 --   Returns the Stream SOAC and the
 --   extra-accumulator body-result ident if any.
-soacToStream :: (MonadFreshNames m, Bindable lore)
-                => SOAC lore -> m (SOAC lore,[Ident])
+soacToStream :: (MonadFreshNames m, Bindable lore, Op lore ~ Futhark.SOAC lore) =>
+                SOAC lore -> m (SOAC lore,[Ident])
 soacToStream soac = do
   chunk_param <- newParam "chunk" $ Basic Int
   let chvar= Futhark.Var $ paramName chunk_param
@@ -599,7 +600,7 @@ soacToStream soac = do
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
       let insoac = Futhark.Map cs w lam' $ map paramName strm_inpids
-          insbnd = mkLet' [] strm_resids $ LoopOp insoac
+          insbnd = mkLet' [] strm_resids $ Op insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
           strmlam= Lambda i strmpar strmbdy loutps
@@ -630,10 +631,10 @@ soacToStream soac = do
       outszm1id  <- newIdent "szm1" $ Basic Int
       -- 1. let scan0_ids   = scan(+,nes,a_ch)             in
       let insoac = Futhark.Scan cs w lam' $ zip nes (map paramName strm_inpids)
-          insbnd = mkLet' [] scan0_ids $ LoopOp insoac
+          insbnd = mkLet' [] scan0_ids $ Op insoac
       -- 2. let strm_resids = map (acc `+`,nes, scan0_ids) in
       maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam
-      let mapbnd = mkLet' [] strm_resids $ LoopOp $
+      let mapbnd = mkLet' [] strm_resids $ Op $
                    Futhark.Map cs w maplam $ map identName scan0_ids
       -- 3. let outerszm1id = sizeof(0,strm_resids) - 1    in
           outszm1bnd = mkLet' [] [outszm1id] $ PrimOp $
@@ -671,7 +672,7 @@ soacToStream soac = do
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let acc0_ids = reduce(+,nes,a_ch) in
       let insoac = Futhark.Reduce cs w lam' $ zip nes (map paramName strm_inpids)
-          insbnd = mkLet' [] acc0_ids $ LoopOp insoac
+          insbnd = mkLet' [] acc0_ids $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lam $ map Futhark.Var $
                    map paramName inpacc_ids++map identName acc0_ids
@@ -700,7 +701,7 @@ soacToStream soac = do
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
       let insoac = Futhark.Redomap cs w lamin lam' nes (map paramName strm_inpids)
-          insbnd = mkLet' [] (acc0_ids++strm_resids) $ LoopOp insoac
+          insbnd = mkLet' [] (acc0_ids++strm_resids) $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lamin $ map Futhark.Var $
                    map paramName inpacc_ids++map identName acc0_ids

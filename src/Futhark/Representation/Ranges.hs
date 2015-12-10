@@ -49,6 +49,7 @@ module Futhark.Representation.Ranges
        , removeBodyRanges
        , removeBindingRanges
        , removeLambdaRanges
+       , removeExtLambdaRanges
        , removePatternRanges
        )
 where
@@ -182,6 +183,10 @@ removeBindingRanges = rephraseBinding removeRanges
 removeLambdaRanges :: CanBeRanged (Op lore) =>
                       AST.Lambda (Ranges lore) -> AST.Lambda lore
 removeLambdaRanges = rephraseLambda removeRanges
+
+removeExtLambdaRanges :: CanBeRanged (Op lore) =>
+                         AST.ExtLambda (Ranges lore) -> AST.ExtLambda lore
+removeExtLambdaRanges = rephraseExtLambda removeRanges
 
 removePatternRanges :: CanBeRanged (Op lore) =>
                        AST.Pattern (Ranges lore) -> AST.Pattern lore

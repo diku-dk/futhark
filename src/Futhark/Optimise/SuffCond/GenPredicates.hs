@@ -19,7 +19,7 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Analysis.DataDependencies
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
@@ -93,32 +93,32 @@ splitBinding bnd@(Let pat _ (PrimOp (Assert (Var v) _))) = do
                  PrimOp $ SubExp (Var $ identName cert_ident),
                  Just $ Var v)
 
-splitBinding bnd@(Let pat _ (LoopOp (Map cs w fun args))) = do
+splitBinding bnd@(Let pat _ (Op (Map cs w fun args))) = do
   (predbody, valfun, ok) <- splitMap cs w fun args
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Map cs w valfun args,
+          Op $ Map cs w valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Reduce cs w fun args))) = do
+splitBinding bnd@(Let pat _ (Op (Reduce cs w fun args))) = do
   (predbody, valfun, ok) <- splitReduce cs w fun args
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Reduce cs w valfun args,
+          Op $ Reduce cs w valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Scan cs w fun args))) = do
+splitBinding bnd@(Let pat _ (Op (Scan cs w fun args))) = do
   (predbody, valfun, ok) <- splitReduce cs w fun args
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Scan cs w valfun args,
+          Op $ Scan cs w valfun args,
           ok)
 
-splitBinding bnd@(Let pat _ (LoopOp (Redomap cs w outerfun innerfun acc arr))) = do
+splitBinding bnd@(Let pat _ (Op (Redomap cs w outerfun innerfun acc arr))) = do
   (predbody, valfun, ok) <- splitRedomap cs w innerfun acc arr
   return (predbody ++ [bnd],
           mkLet' [] (patternIdents pat) $
-          LoopOp $ Redomap cs w outerfun valfun acc arr,
+          Op $ Redomap cs w outerfun valfun acc arr,
           ok)
 
 splitBinding (Let pat _ (LoopOp (DoLoop respat merge form body))) = do
@@ -219,7 +219,7 @@ allTrue cs w predfun args = do
   andchecks <- newIdent "allTrue" (Basic Bool)
   andfun <- binOpLambda LogAnd Bool
   innerfun <- predConjFun
-  let andbnd = mkLet' [] [andchecks] $ LoopOp $
+  let andbnd = mkLet' [] [andchecks] $ Op $
                Redomap cs w andfun innerfun [constant True] args
   return (andbnd,
           Var $ identName andchecks)

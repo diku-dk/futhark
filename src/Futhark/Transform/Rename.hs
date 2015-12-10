@@ -54,10 +54,10 @@ runRenamer m src = runReader (runStateT m src) env
 -- program are unaffected, under the assumption that the program was
 -- correct to begin with.  In particular, the renaming may make an
 -- invalid program valid.
-renameProg :: Renameable lore => Prog lore -> Prog lore
-renameProg prog = Prog $ fst $
-                  runRenamer (mapM rename $ progFunctions prog) src
-  where src = blankNameSource
+renameProg :: (Renameable lore, MonadFreshNames m) =>
+              Prog lore -> m (Prog lore)
+renameProg prog = modifyNameSource $
+                  runRenamer $ Prog <$> mapM rename (progFunctions prog)
 
 -- | Rename bound variables such that each is unique.  The semantics
 -- of the expression is unaffected, under the assumption that the

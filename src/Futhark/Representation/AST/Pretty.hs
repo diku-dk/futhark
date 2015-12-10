@@ -8,6 +8,9 @@ module Futhark.Representation.AST.Pretty
   ( prettyTuple
   , pretty
   , PrettyLore (..)
+  , ppCertificates
+  , ppCertificates'
+  , ppTuple'
   )
   where
 
@@ -222,45 +225,6 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
-  ppr (Map cs size lam as) =
-    ppCertificates' cs <> ppSOAC "map" size [lam] Nothing as
-  ppr (ConcatMap cs size lam as) =
-    ppCertificates' cs <> text "concatMap" <>
-    parens (ppr size <> comma </>
-            pprConcatLam lam <> comma </>
-            commasep (map (braces . commasep . map ppr) as))
-    where pprConcatLam (Lambda index params body rettype) =
-            text "fn" <+>
-            braces (commasep $ map (brackets . ppr) rettype) <+>
-            parens (ppr index <> semi <+> commasep (map ppr params)) <+>
-            text "=>" </> indent 2 (ppr body)
-  ppr (Reduce cs size lam inputs) =
-    ppCertificates' cs <> ppSOAC "reduce" size [lam] (Just es) as
-    where (es, as) = unzip inputs
-  ppr (Redomap cs size outer inner es as) =
-    ppCertificates' cs <> text "redomap" <>
-    parens (ppr size <> comma </> ppr outer <> comma </> ppr inner <> comma </>
-            commasep (braces (commasep $ map ppr es) : map ppr as))
-  ppr (Stream cs size form lam arrs ii) =
-    let intent_str = if ii==MaxChunk then "Max" else ""
-    in ppCertificates' cs <> case form of
-          MapLike o ->
-            let ord_str = if o == Disorder then "Per" else ""
-            in  text ("streamMap"++ord_str++intent_str) <>
-                parens (ppr size <> comma </> ppr lam <> comma </>
-                        commasep (map ppr arrs) )
-          RedLike o lam0 acc ->
-            let ord_str = if o == Disorder then "Per" else ""
-            in  text ("streamRed"++ord_str++intent_str) <>
-                parens (ppr size <> comma </> ppr lam0 </> comma </> ppr lam </>
-                        commasep ( braces (commasep $ map ppr acc) : map ppr arrs ))
-          Sequential acc ->
-                text "streamSeq" <>
-                parens (ppr size <> comma </> ppr lam <> comma </>
-                        commasep ( braces (commasep $ map ppr acc) : map ppr arrs ))
-  ppr (Scan cs size lam inputs) =
-    ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
-    where (es, as) = unzip inputs
   ppr (MapKernel cs w index ispace inps returns body) =
     ppCertificates' cs <> text "mapKernel" <+>
     align (parens (text "width:" <+> ppr w) </>
@@ -401,18 +365,6 @@ instance Pretty BinOp where
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se
   ppr (DimNew      se) = ppr se
-
-ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
-ppSOAC name size funs es as =
-  text name <> parens (ppr size <> comma </>
-                       ppList funs </>
-                       commasep (es' ++ map ppr as))
-  where es' = maybe [] ((:[]) . ppTuple') es
-
-ppList :: Pretty a => [a] -> Doc
-ppList as = case map ppr as of
-              []     -> empty
-              a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
 
 ppPattern :: Pretty a => [a] -> Doc
 ppPattern = braces . commasep . map ppr

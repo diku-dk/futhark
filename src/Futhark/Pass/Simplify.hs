@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Futhark.Pass.Simplify
   ( simplify
-  , simplifyBasic
+  , simplifySOACS
   , simplifyExplicitMemory
   )
   where
@@ -9,8 +9,8 @@ module Futhark.Pass.Simplify
 import Control.Monad
 import Control.Monad.State
 
-import qualified Futhark.Representation.Basic as R
-import qualified Futhark.Representation.Basic.Simplify as R
+import qualified Futhark.Representation.SOACS as R
+import qualified Futhark.Representation.SOACS.Simplify as R
 import qualified Futhark.Representation.ExplicitMemory as R
 import qualified Futhark.Representation.ExplicitMemory.Simplify as R
 
@@ -36,8 +36,8 @@ simplify f =
   where pass = liftM deadCodeElim . f
         num_passes = 5
 
-simplifyBasic :: Pass R.Basic R.Basic
-simplifyBasic = simplify R.simplifyBasic
+simplifySOACS :: Pass R.SOACS R.SOACS
+simplifySOACS = simplify R.simplifySOACS
 
 simplifyExplicitMemory :: Pass R.ExplicitMemory R.ExplicitMemory
 simplifyExplicitMemory = simplify R.simplifyExplicitMemory

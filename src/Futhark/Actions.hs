@@ -21,7 +21,7 @@ import Futhark.Pipeline
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
 import Futhark.Representation.AST
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
@@ -37,7 +37,7 @@ printAction =
          }
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
-                -> Action Basic
+                -> Action SOACS
 interpretAction parser =
   Action { actionName = "Interpret"
          , actionDescription = "Run the program via an interpreter."
@@ -73,9 +73,9 @@ kernelImpCodeGenAction =
          , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenKernels.compileProg
          }
 
-interpret :: (Show error, PrettyLore lore) =>
+interpret :: Show error =>
              (FilePath -> String -> Either error [Value])
-          -> Prog lore -> IO ()
+          -> Prog SOACS -> IO ()
 interpret parseValues prog =
   case funDecByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."

@@ -153,8 +153,6 @@ Library
                    Futhark.Representation.AST.Syntax
                    Futhark.Representation.AST.Syntax.Core
                    Futhark.Representation.AST.Traversals
-                   Futhark.Representation.Basic
-                   Futhark.Representation.Basic.Simplify
                    Futhark.Representation.ExplicitMemory
                    Futhark.Representation.ExplicitMemory.IndexFunction
                    Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
@@ -165,6 +163,9 @@ Library
                    Futhark.Representation.External
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
+                   Futhark.Representation.SOACS
+                   Futhark.Representation.SOACS.Simplify
+                   Futhark.Representation.SOACS.SOAC
                    Futhark.Representation.Ranges
                    Futhark.Tools
                    Futhark.Transform.CopyPropagate

@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Analysis.HORepresentation.MapNest
   ( Nesting (..)
   , MapNest (..)
@@ -23,6 +24,7 @@ import Prelude
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
+import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Transform.Substitute
 import Futhark.Representation.AST hiding (typeOf)
 import Futhark.MonadFreshNames
@@ -58,11 +60,13 @@ inputs (MapNest _ _ _ inps) = inps
 setInputs :: [SOAC.Input] -> MapNest lore -> MapNest lore
 setInputs inps (MapNest cs body ns _) = MapNest cs body ns inps
 
-fromSOACNest :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m) =>
+fromSOACNest :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m,
+                 Op lore ~ Futhark.SOAC lore) =>
                 SOACNest lore -> m (Maybe (MapNest lore))
 fromSOACNest = fromSOACNest' mempty
 
-fromSOACNest' :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m) =>
+fromSOACNest' :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m,
+                 Op lore ~ Futhark.SOAC lore) =>
                  [Ident]
               -> SOACNest lore
               -> m (Maybe (MapNest lore))

@@ -10,6 +10,8 @@ module Futhark.Analysis.Alias
          -- * Ad-hoc utilities
        , analyseBinding
        , analyseExp
+       , analyseLambda
+       , analyseExtLambda
        )
        where
 
@@ -49,33 +51,6 @@ analyseBinding (In.Let pat lore e) =
 
 analyseExp :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
               In.Exp lore -> Out.Exp lore
-analyseExp (Out.LoopOp (In.Map cs size lam args)) =
-  Out.LoopOp $
-  Out.Map cs size (analyseLambda lam) args
-analyseExp (Out.LoopOp (In.ConcatMap cs size lam args)) =
-  Out.LoopOp $
-  Out.ConcatMap cs size (analyseLambda lam) args
-analyseExp (Out.LoopOp (In.Reduce cs size lam input)) =
-  Out.LoopOp $
-  Out.Reduce cs size (analyseLambda lam) input
-analyseExp (Out.LoopOp (In.Scan cs size lam input)) =
-  Out.LoopOp $
-  Out.Scan cs size (analyseLambda lam) input
-analyseExp (Out.LoopOp (In.Redomap cs size outerlam innerlam acc arr)) =
-  Out.LoopOp $
-  Out.Redomap cs size
-   (analyseLambda outerlam)
-   (analyseLambda innerlam)
-   acc arr
-analyseExp (Out.LoopOp (In.Stream cs size form lam arr ii)) =
-  Out.LoopOp $
-  Out.Stream cs size (analyseStreamForm form)
-                     (analyseExtLambda lam) arr ii
-  where analyseStreamForm (In.RedLike o lam0 acc) =
-            Out.RedLike o (analyseLambda lam0) acc
-        analyseStreamForm (In.Sequential acc) = Out.Sequential acc
-        analyseStreamForm (In.MapLike    o  ) = Out.MapLike    o
-
 analyseExp (Out.SegOp (In.SegReduce cs size lam input descp)) =
   Out.SegOp $
   Out.SegReduce cs size (analyseLambda lam) input descp

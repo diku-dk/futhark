@@ -7,6 +7,7 @@ module Futhark.Optimise.Simplifier.Lore
          Wise (..)
        , removeBindingWisdom
        , removeLambdaWisdom
+       , removeExtLambdaWisdom
        , removeProgWisdom
        , removeFunDecWisdom
        , removeExpWisdom
@@ -107,6 +108,9 @@ removeBindingWisdom = rephraseBinding removeWisdom
 
 removeLambdaWisdom :: CanBeWise (Op lore) => Lambda (Wise lore) -> Lambda lore
 removeLambdaWisdom = rephraseLambda removeWisdom
+
+removeExtLambdaWisdom :: CanBeWise (Op lore) => ExtLambda (Wise lore) -> ExtLambda lore
+removeExtLambdaWisdom = rephraseExtLambda removeWisdom
 
 removeExpWisdom :: CanBeWise (Op lore) => Exp (Wise lore) -> Exp lore
 removeExpWisdom = rephraseExp removeWisdom

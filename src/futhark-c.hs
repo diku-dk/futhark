@@ -14,7 +14,7 @@ import System.Console.GetOpt
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
@@ -106,11 +106,11 @@ futharkConfig config =
                    , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
-compilerPipeline :: Pipeline Basic ExplicitMemory
+compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =
   standardPipeline >>>
   passes [ firstOrderTransform
-         , simplifyBasic
+         , simplifySOACS
          , inPlaceLowering
          ] >>>
   onePass explicitAllocations >>>

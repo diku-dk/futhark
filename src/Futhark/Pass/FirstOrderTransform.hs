@@ -4,10 +4,10 @@ module Futhark.Pass.FirstOrderTransform
   where
 
 import Futhark.Transform.FirstOrderTransform (transformProg)
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Pass
 
-firstOrderTransform :: Pass Basic Basic
+firstOrderTransform :: Pass SOACS SOACS
 firstOrderTransform = simplePass
                       "first order transform"
                       "Transform all second-order array combinators to for-loops."
