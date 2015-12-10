@@ -11,14 +11,17 @@ module Futhark.Internalise
   where
 
 import Control.Applicative
-import Control.Monad.State  hiding (mapM)
-import Control.Monad.Reader hiding (mapM)
+import Control.Monad.State  hiding (mapM, sequence)
+import Control.Monad.Reader hiding (mapM, sequence)
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 import Data.Monoid
 import Data.List
-import Data.Traversable (mapM)
+import Data.Traversable (mapM, sequence)
 import Data.Loc
+
+import Prelude hiding (mapM, sequence)
+
 import Futhark.Representation.External as E
 import Futhark.Representation.SOACS as I
 import Futhark.Transform.Rename as I
@@ -30,7 +33,6 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Prelude hiding (mapM)
 
 -- | Convert a program in external Futhark to a program in internal
 -- Futhark.  If the boolean parameter is false, do not add bounds

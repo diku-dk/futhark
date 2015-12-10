@@ -11,6 +11,7 @@ module Futhark.Representation.SOACS.Simplify
        )
 where
 
+import Control.Applicative
 import Control.Monad
 import Data.Either
 import Data.List hiding (any, all)
@@ -18,6 +19,8 @@ import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
+
+import Prelude hiding (any, all)
 
 import Futhark.Representation.SOACS hiding (Lore)
 import qualified Futhark.Representation.AST as AST
@@ -35,8 +38,6 @@ import Futhark.Transform.Substitute
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
-
-import Prelude hiding (any, all)
 
 simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =

@@ -15,6 +15,7 @@ module Futhark.Representation.SOACS.SOAC
        )
        where
 
+import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
 import qualified Data.HashMap.Lazy as HM
@@ -30,7 +31,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, comma, commasep, Doc, empty, Pretty, parens, text)
+  ((</>), (<+>), ppr, comma, commasep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -531,5 +532,5 @@ ppSOAC name size funs es as =
 
 ppList :: Pretty a => [a] -> Doc
 ppList as = case map ppr as of
-              []     -> empty
+              []     -> mempty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
