@@ -69,12 +69,6 @@ analyseExp (Out.LoopOp (In.Stream cs size form lam arr ii)) =
         analyseStreamForm (In.Sequential acc) = Out.Sequential acc
         analyseStreamForm (In.MapLike    o  ) = Out.MapLike    o
 
-analyseExp (Out.SegOp (In.SegReduce cs size lam input descp)) =
-  Out.SegOp $
-  Out.SegReduce cs size (analyseLambda lam) input descp
-analyseExp (Out.SegOp (In.SegScan cs size st lam input descp)) =
-  Out.SegOp $
-  Out.SegScan cs size st (analyseLambda lam) input descp
 analyseExp e = Out.mapExp analyse e
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return

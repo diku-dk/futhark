@@ -34,10 +34,7 @@ import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.Simplify
-import Futhark.Optimise.SuffCond
-import Futhark.Optimise.SplitShapes
 import Futhark.Optimise.InPlaceLowering
-import Futhark.Pass.Flattening
 import Futhark.Optimise.DoubleBuffer
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExpandArrays
@@ -201,10 +198,7 @@ commandLineOptions =
   , basicPassOption fuseSOACs "o"
   , basicPassOption inlineAggressively []
   , basicPassOption removeDeadFunctions []
-  , basicPassOption optimisePredicates []
-  , basicPassOption splitShapes []
   , basicPassOption inPlaceLowering []
-  , basicPassOption flattenProg []
   , basicPassOption babysitKernels []
   , basicPassOption expandArrays []
   , basicPassOption extractKernels []
