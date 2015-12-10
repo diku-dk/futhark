@@ -897,59 +897,12 @@ checkLoopOp (ScanKernel cs w kernel_size _ fun input) = do
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
-checkSegOp :: Checkable lore =>
-              SegOp lore -> TypeM lore ()
-
-checkSegOp (SegReduce _ size _ _ descp_exp) = do
-  descp_arg <- checkArg $ Var descp_exp
-  require [Basic Int] size
-  let descp_tp = argType descp_arg
-  unless (elemType descp_tp == Int) $
-    bad $ TypeError noLoc $
-    "Array descriptor is of type " ++ pretty descp_tp ++
-    ", but should be [Int]"
-
--- SegScan is mostly identical to SegReduced. Duplicated for clarity.
-checkSegOp (SegScan _ size _ _ _ descp_exp) = do
-  descp_arg <- checkArg $ Var descp_exp
-  require [Basic Int] size
-  let descp_tp = argType descp_arg
-  unless (elemType descp_tp == Int) $
-    bad $ TypeError noLoc $
-    "Array descriptor is of type " ++ pretty descp_tp ++
-    ", but should be [Int]"
-
-checkSegOp (SegReplicate ass counts_vn data_vn mb_seg_vn) = do
-  seg_tp <- case mb_seg_vn of
-         Just vn -> liftM argType $ checkArg $ Var vn
-         Nothing -> do data_tp <- liftM argType $ checkArg $ Var data_vn
-                       return $ arrayOf (Basic Int) (arrayShape data_tp) NoUniqueness
-  mapM_ (requireI [Basic Cert]) ass
-  counts_arg <- checkArg $ Var counts_vn
-  let counts_tp = argType counts_arg
-  -- TODO: Not sure Troels is happy about this
-  unless (arrayDims counts_tp == arrayDims seg_tp) $
-    bad $ TypeError noLoc $
-    "Arrays should have same shapes " ++ pretty counts_tp ++ " , " ++
-    pretty seg_tp
-  unless (elemType counts_tp == Int && not (null (arrayDims counts_tp))) $
-    bad $ TypeError noLoc $
-    "Array is of type " ++ pretty counts_tp ++
-    ", but should be [Int] (segreplicate)"
-  unless (elemType seg_tp == Int && not (null (arrayDims seg_tp))) $
-    bad $ TypeError noLoc $
-    "Array is of type " ++ pretty seg_tp ++
-    ", but should be [Int] (segreplicate)"
-
-
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()
 
 checkExp (PrimOp op) = checkPrimOp op
 
 checkExp (LoopOp op) = checkLoopOp op
-
-checkExp (SegOp op) = checkSegOp op
 
 checkExp (If e1 e2 e3 ts) = do
   require [Basic Bool] e1

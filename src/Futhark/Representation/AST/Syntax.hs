@@ -43,7 +43,6 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
-  , SegOp (..)
   , ScanType(..)
   , BinOp (..)
   , DimChange (..)
@@ -279,6 +278,10 @@ data LoopOp lore
     (LambdaT lore)
     [(SubExp, VName)]
 
+deriving instance Annotations lore => Eq (LoopOp lore)
+deriving instance Annotations lore => Show (LoopOp lore)
+deriving instance Annotations lore => Ord (LoopOp lore)
+
 data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]
                       | Sequential [SubExp]
@@ -319,48 +322,6 @@ data ScanType = ScanInclusive
               | ScanExclusive
               deriving(Eq, Ord, Show)
 
--- | Segmented version of SOACS that use flat array representation.
--- This means a /single/ flat array for data, and segment descriptors
--- (integer arrays) for each dimension of the array.
---
--- For example the array
--- @ [ [ [1,2] , [3,4,5] ]
---   , [ [6]             ]
---   , []
---   ]
--- @
---
--- Can be represented as
--- @ data  = [1,2, 3,4,5, 6    ]
---   seg_1 = [2,   3,     1,   ]
---   seg_0 = [2,          1,  0]
--- @
-data SegOp lore = SegReduce Certificates SubExp (LambdaT lore) [(SubExp, VName)] VName
-                  -- ^ @map (\xs -> reduce(op,ne,xs), xss@ can loosely
-                  -- be transformed into
-                  -- @segreduce(op, ne, xss_flat, xss_descpritor)@
-                  --
-                  -- Note that this requires the neutral element to be constant
-                | SegScan Certificates SubExp ScanType (LambdaT lore) [(SubExp, VName)] VName
-                  -- ^ Identical to 'Scan', except that the last arg
-                  -- is a segment descriptor.
-                | SegReplicate Certificates VName VName (Maybe VName)
-                  -- ^ @segreplicate(counts,data,seg)@ splits the
-                  -- @data@ array into subarrays based on the lengths
-                  -- given in @seg@. Subarray @sa_i@ is replicated
-                  -- @counts_i@ times.
-                  --
-                  -- If @seg@ is @Nothing@, this is the same as
-                  -- @seg = replicate (length counts) 1@
-                  --
-                  -- It should always be the case that
-                  -- @length(counts) == length(seg)@
-                deriving (Eq, Ord, Show)
-
-deriving instance Annotations lore => Eq (LoopOp lore)
-deriving instance Annotations lore => Show (LoopOp lore)
-deriving instance Annotations lore => Ord (LoopOp lore)
-
 data LoopForm = ForLoop VName SubExp
               | WhileLoop VName
               deriving (Eq, Show, Ord)
@@ -374,8 +335,6 @@ data ExpT lore
     -- ^ A simple (non-recursive) operation.
 
   | LoopOp (LoopOp lore)
-
-  | SegOp (SegOp lore)
 
   | Apply  Name [(SubExp, Diet)] (Annotations.RetType lore)
 

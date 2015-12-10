@@ -201,29 +201,6 @@ mapExpM tv (LoopOp (ScanKernel cs w kernel_size order fun input)) =
               (zip <$> mapM (mapOnSubExp tv) nes <*>
                        mapM (mapOnVName tv) arrs))
   where (nes, arrs) = unzip input
-mapExpM tv (SegOp (SegReduce cs size fun inputs descp_exp)) =
-  SegOp <$> (pure SegReduce <*>
-             mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-              mapOnLambda tv fun <*>
-              (zip <$> mapM (mapOnSubExp tv) startexps <*>
-                        mapM (mapOnVName tv) flatarr_exps) <*>
-              mapOnVName tv descp_exp)
-    where (startexps, flatarr_exps) = unzip inputs
-mapExpM tv (SegOp (SegScan cs size st fun inputs descp_exp)) =
-  SegOp <$> (pure SegScan <*>
-             mapOnCertificates tv cs <*> mapOnSubExp tv size <*>
-             pure st <*>
-             mapOnLambda tv fun <*>
-             (zip <$> mapM (mapOnSubExp tv) startexps <*>
-              mapM (mapOnVName tv) flatarr_exps) <*>
-             mapOnVName tv descp_exp)
-    where (startexps, flatarr_exps) = unzip inputs
-mapExpM tv (SegOp (SegReplicate cs counts dataarr seg)) =
-  SegOp <$> (pure SegReplicate <*>
-             mapOnCertificates tv cs <*>
-             mapOnVName tv counts <*>
-             mapOnVName tv dataarr <*>
-             Data.Traversable.mapM (mapOnVName tv) seg)
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
 

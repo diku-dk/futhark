@@ -15,7 +15,6 @@ module Futhark.Representation.AST.Pretty
   where
 
 import Data.Array (elems, listArray)
-import Data.Maybe
 import Data.Monoid
 
 import Futhark.Util.Pretty
@@ -278,36 +277,12 @@ instance PrettyLore lore => Pretty (KernelInput lore) where
             ppr (kernelInputArray inp) <>
             brackets (commasep (map ppr $ kernelInputIndices inp))
 
-instance PrettyLore lore => Pretty (SegOp lore) where
-  ppr (SegReduce cs size lam inputs descp) =
-    ppCertificates' cs <> text "segreduce" <>
-    parens (ppr size <> comma </> ppr lam <> comma </>
-            ppTuple' nes <> comma <+>
-            ppTuple' flatarrs <> comma <+>
-            ppr descp)
-    where
-      (nes, flatarrs) = unzip inputs
-  ppr (SegScan cs size st lam inputs descp) =
-    ppCertificates' cs <> text "segscan" <> ppScanType st <>
-    parens (ppr size <> comma </> ppr lam <> comma </>
-            ppTuple' nes <> comma <+>
-            ppTuple' flatarrs <> comma <+>
-            ppr descp)
-    where
-      (nes, flatarrs) = unzip inputs
-      ppScanType ScanInclusive = text "inc"
-      ppScanType ScanExclusive = text "exc"
-  ppr (SegReplicate cs counts dataarr seg) =
-    ppCertificates' cs <> text "segreplicate" <>
-    parens (commasep $ map ppr $ catMaybes [Just counts, Just dataarr, seg])
-
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
                      text "then" <+> align (ppr t) </>
                      text "else" <+> align (ppr f)
   ppr (PrimOp op) = ppr op
   ppr (LoopOp op) = ppr op
-  ppr (SegOp op) = ppr op
   ppr (Apply fname args _) = text (nameToString fname) <>
                              apply (map (align . ppr . fst) args)
   ppr (Op op) = ppr op

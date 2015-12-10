@@ -56,7 +56,6 @@ import Control.Monad.Writer
 import Data.Either
 import Data.Hashable
 import Data.List
-import qualified Data.Traversable
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -515,8 +514,6 @@ simplifyExp (If cond tbranch fbranch ts) = do
 
 simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
 
-simplifyExp (SegOp op) = SegOp <$> simplifySegOp op
-
 simplifyExp e = simplifyExpBase e
 
 simplifyExpBase :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
@@ -611,33 +608,6 @@ simplifyLoopOp (ScanKernel cs w kernel_size order lam input) = do
   lam' <- simplifyLambda lam w' $ map Just arrs'
   return $ ScanKernel cs' w' kernel_size' order lam' $ zip nes' arrs'
 
-simplifySegOp :: MonadEngine m => SegOp (InnerLore m) -> m (SegOp (Lore m))
-simplifySegOp (SegReduce cs w fun input descp) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplify cs
-  w' <- simplify w
-  acc' <- mapM simplify acc
-  arrs' <- mapM simplify arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  descp' <- simplify descp
-  return $ SegReduce cs' w' fun' (zip acc' arrs') descp'
-
-simplifySegOp (SegScan cs w st fun input descp) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplify cs
-  w' <- simplify w
-  acc' <- mapM simplify acc
-  arrs' <- mapM simplify arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  descp' <- simplify descp
-  return $ SegScan cs' w' st fun' (zip acc' arrs') descp'
-
-simplifySegOp (SegReplicate cs counts dataarr seg) = do
-  cs' <- simplify cs
-  counts' <- simplify counts
-  dataarr' <- simplify dataarr
-  seg' <- Data.Traversable.mapM simplify seg
-  return $ SegReplicate cs' counts' dataarr' seg'
 
 class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op where
   simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)

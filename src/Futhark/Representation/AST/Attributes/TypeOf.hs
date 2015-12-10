@@ -151,16 +151,6 @@ loopOpExtType (ScanKernel _ w size _ lam _) =
        (`arrayOfRow` kernelWorkgroupSize size))
   (lambdaReturnType lam)
 
--- | The type of a segmented operation.
-segOpExtType :: HasTypeEnv m => SegOp lore -> m [ExtType]
-segOpExtType (SegReduce _ size fun _ _) =
-  pure $ staticShapes $ mapType size fun
-segOpExtType (SegScan _ _ _ _ inputs _) =
-  staticShapes <$> traverse (lookupType . snd) inputs
-segOpExtType (SegReplicate _ _ dataarr _) =
-  result <$> lookupType dataarr
-  where result t = [Array (elemType t) (ExtShape [Ext 0]) NoUniqueness]
-
 -- | The type of an expression.
 expExtType :: (HasTypeEnv m,
                IsRetType (RetType lore),
@@ -171,7 +161,6 @@ expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
 expExtType (LoopOp op)    = pure $ loopOpExtType op
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
-expExtType (SegOp op)     = segOpExtType op
 expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.

@@ -436,11 +436,6 @@ defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
 defCompileExp targets (LoopOp op) = defCompileLoopOp targets op
 
-defCompileExp _ (SegOp op) =
-  throwError $
-  "ImpGen called on Segmented Operator, this is not supported. " ++
-  pretty (SegOp op)
-
 defCompileExp _ (Op op) =
   throwError $
   "defCompileExp called on Op: " ++ pretty op

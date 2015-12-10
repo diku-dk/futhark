@@ -22,7 +22,6 @@ module Futhark.Representation.AST.Attributes
   , funDecByName
   , asPrimOp
   , asLoopOp
-  , asSegOp
   , safeExp
   , loopResultValues
   , getStreamAccums
@@ -104,11 +103,6 @@ asLoopOp :: Exp lore -> Maybe (LoopOp lore)
 asLoopOp (LoopOp op) = Just op
 asLoopOp _           = Nothing
 
--- | If the expression is a 'SegOp', return that 'SegOp', otherwise 'Nothing'.
-asSegOp :: Exp lore -> Maybe (SegOp lore)
-asSegOp (SegOp op) = Just op
-asSegOp _          = Nothing
-
 -- | An expression is safe if it is always well-defined (assuming that
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
@@ -130,7 +124,6 @@ safeExp (PrimOp op) = safePrimOp op
         safePrimOp Negate{} = True
         safePrimOp _ = False
 safeExp (LoopOp _) = False
-safeExp (SegOp _) = False
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&
