@@ -4,6 +4,7 @@ module Futhark.CodeGen.ImpGen
     compileProg
 
     -- * Pluggable Compiler
+  , OpCompiler
   , ExpCompiler
   , ExpCompilerResult (..)
   , CopyCompiler
@@ -90,6 +91,9 @@ import Futhark.MonadFreshNames
 import Futhark.Util
 import Futhark.Util.IntegralExp
 
+-- | How to compile an 'Op'.
+type OpCompiler op = Destination -> Op ExplicitMemory -> ImpM op ()
+
 -- | A substitute expression compiler, tried before the main
 -- expression compilation function.
 type ExpCompiler op = Destination -> Exp -> ImpM op (ExpCompilerResult op)
@@ -113,15 +117,17 @@ type CopyCompiler op = BasicType
                        -> ImpM op ()
 
 data Operations op = Operations { opsExpCompiler :: ExpCompiler op
+                                , opsOpCompiler :: OpCompiler op
                                 , opsCopyCompiler :: CopyCompiler op
                                 }
 
 -- | An operations set for which the expression compiler always
 -- returns 'CompileExp'.
-defaultOperations :: Operations op
-defaultOperations = Operations { opsExpCompiler = const $ return . CompileExp
-                               , opsCopyCompiler = defaultCopy
-                               }
+defaultOperations :: OpCompiler op -> Operations op
+defaultOperations opc = Operations { opsExpCompiler = const $ return . CompileExp
+                                   , opsOpCompiler = opc
+                                   , opsCopyCompiler = defaultCopy
+                                   }
 
 -- | When an array is declared, this is where it is stored.
 data MemLocation = MemLocation VName [Imp.DimSize] IxFun.IxFun
@@ -171,6 +177,7 @@ data ArrayMemoryDestination = SetMemory VName (Maybe VName)
 data Env op = Env {
     envVtable :: HM.HashMap VName VarEntry
   , envExpCompiler :: ExpCompiler op
+  , envOpCompiler :: OpCompiler op
   , envCopyCompiler :: CopyCompiler op
   , envDefaultSpace :: Imp.Space
   }
@@ -178,6 +185,7 @@ data Env op = Env {
 newEnv :: Operations op -> Imp.Space -> Env op
 newEnv ops ds = Env { envVtable = HM.empty
                     , envExpCompiler = opsExpCompiler ops
+                    , envOpCompiler = opsOpCompiler ops
                     , envCopyCompiler = opsCopyCompiler ops
                     , envDefaultSpace = ds
                     }
@@ -225,7 +233,9 @@ subImpM ops (ImpM m) = do
   env <- ask
   src <- getNameSource
   case runRWST m env { envExpCompiler = opsExpCompiler ops
-                     , envCopyCompiler = opsCopyCompiler ops }
+                     , envCopyCompiler = opsCopyCompiler ops
+                     , envOpCompiler = opsOpCompiler ops
+                     }
        src of
     Left err -> throwError err
     Right (x, src', code) -> do
@@ -436,9 +446,9 @@ defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
 defCompileExp targets (LoopOp op) = defCompileLoopOp targets op
 
-defCompileExp _ (Op op) =
-  throwError $
-  "defCompileExp called on Op: " ++ pretty op
+defCompileExp dest (Op op) = do
+  opc <- asks envOpCompiler
+  opc dest op
 
 defCompilePrimOp :: Destination -> PrimOp -> ImpM op ()
 
@@ -1085,16 +1095,18 @@ copyElem bt
   collect $ copy bt destlocation' srclocation' $
     product $ map Imp.dimSizeToExp $ drop (length srcis) srcshape
 
--- | @compileAlloc memvar sizevar size space@ allocates @n@ bytes of memory in @space@,
--- writing the resulting memory block to @mem@ and the size to
--- @sizevar@ (if not 'Nothing'),
-compileAlloc :: VName -> Maybe VName -> SubExp -> Space
+-- | @compileAlloc dest size space@ allocates @n@ bytes of memory in @space@,
+-- writing the result to @dest@, which must be a single
+-- 'MemoryDestination',
+compileAlloc :: Destination -> SubExp -> Space
              -> ImpM op ()
-compileAlloc mem sizevar e space = do
+compileAlloc (Destination [MemoryDestination mem sizevar]) e space = do
   emit $ Imp.Allocate mem (Imp.bytes e') space
   case sizevar of Just sizevar' -> emit $ Imp.SetScalar sizevar' e'
                   Nothing       -> return ()
     where e' = compileSubExp e
+compileAlloc dest _ _ =
+  throwError $ "compileAlloc: Invalid destination: " ++ show dest
 
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =
