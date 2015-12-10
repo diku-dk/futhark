@@ -415,7 +415,6 @@ evalExp (Apply fname args rettype) = do
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
-evalExp (SegOp op) = evalSegOp op
 evalExp (Op op) = evalSOAC op
 
 evalPrimOp :: PrimOp -> FutharkM [Value]
@@ -806,96 +805,6 @@ evalSOAC (Redomap _ w _ innerfun accexp arrexps) = do
                 res_arr = drop acc_len res_lam
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
-
-evalSegOp :: SegOp SOACS -> FutharkM [Value]
-
-evalSegOp (SegReduce _ _ fun inputs descparr_exp) = do
-  let (ne_exps, flatarr_exps) = unzip inputs
-  startaccs <- mapM evalSubExp ne_exps
-  segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp
-  vss <- mapM (arrToList <=< lookupVar) flatarr_exps
-  let vss' = transpose vss
-
-  when (any (<0) segments) $ bad . TypeError $
-    "evalSegOp SegReduce segment with negative length"
-  unless (length vss' == sum segments) $ bad . TypeError $
-    unwords["evalSegOp SegReduce segment size (", show $ sum segments, ")"
-           ,"was not equal to array length (", show $ length vss', ")"
-           ]
-
-  let segmented_arrs =
-        reverse $ fst $
-                  foldl (\(res,rest) n -> (take n rest : res, drop n rest))
-                        ([], vss') segments
-
-  let foldfun acc (i,x) = applyLambda fun i $ acc ++ x
-  let runReduce = foldM foldfun startaccs . zip [0..]
-  res <- mapM runReduce segmented_arrs
-  arrays (map valueType startaccs) res
-  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
-        asInt _ = bad $ TypeError "evalSegOp SegReduce asInt"
-
-evalSegOp (SegScan _ _ st fun inputs descparr_exp) = do
-  let (ne_exps, flatarr_exps) = unzip inputs
-  startaccs <- mapM evalSubExp ne_exps
-  segments <- mapM asInt <=< arrToList <=< lookupVar $ descparr_exp
-  vss <- mapM (arrToList <=< lookupVar) flatarr_exps
-  let vss' = transpose vss
-
-  when (any (<0) segments) $ bad . TypeError $
-    "evalSegOp SegScan segment with negative length"
-  unless (length vss' == sum segments) $ bad . TypeError $
-    unwords["evalSegOp SegScan segment size (", show $ sum segments, ")"
-           ,"was not equal to array length (", show $ length vss', ")"
-           ]
-
-  let segmented_arrs =
-        reverse $ fst $
-                  foldl (\(res,rest) n -> (take n rest : res, drop n rest))
-                        ([], vss') segments
-
-  let runscan segarr =
-        liftM (reverse . snd) $ foldM scanfun (startaccs, []) $
-        zip [0..] segarr
-  res <- liftM concat $ mapM runscan segmented_arrs
-  arrays (map valueType startaccs) res
-  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
-        asInt _ = bad $ TypeError "evalSegOp SegScan asInt"
-
-        scanfun (acc, l) (i,x) = do
-            acc' <- applyLambda fun i $ acc ++ x
-            let l' = case st of
-                       ScanInclusive -> acc' : l
-                       ScanExclusive -> acc  : l
-            return (acc', l')
-
-evalSegOp (SegReplicate _ counts_vn dataarr_vn mb_seg_vn) = do
-  vs <- (arrToList <=< lookupVar) dataarr_vn
-  vs_tp <- liftM valueType $ lookupVar dataarr_vn
-  counts <- mapM asInt <=< arrToList <=< lookupVar $ counts_vn
-  segments <- case mb_seg_vn of
-    Nothing -> return $ map (const 1) counts
-    Just vn -> mapM asInt <=< arrToList <=< lookupVar $ vn
-
-  when (any (<0) segments) $ bad . TypeError $
-    "evalSegOp SegReplicate segment with negative length"
-  unless (length vs == sum segments) $ bad . TypeError $
-    unwords["evalSegOp SegReplicate segment size (", show $ sum segments, ")"
-           ,"was not equal to array length (", show $ length vs, ")"
-           ]
-
-  let segmented_arrs =
-        reverse $ fst $
-                  foldl (\(res,rest) n -> (take n rest : res, drop n rest))
-                        ([], vs) segments
-
-  let result = concat $ zipWith (\c arr -> concat $ replicate c arr)
-                                counts segmented_arrs
-
-  return [ BasicVal $ IntVal $ fromIntegral $ length result
-         , arrayVal result (elemType vs_tp) [length result] ]
-  where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
-        asInt _ = bad $ TypeError "evalSegOp SegReplicate asInt"
 
 evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do

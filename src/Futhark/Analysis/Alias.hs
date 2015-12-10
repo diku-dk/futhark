@@ -51,13 +51,7 @@ analyseBinding (In.Let pat lore e) =
 
 analyseExp :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
               In.Exp lore -> Out.Exp lore
-analyseExp (Out.SegOp (In.SegReduce cs size lam input descp)) =
-  Out.SegOp $
-  Out.SegReduce cs size (analyseLambda lam) input descp
-analyseExp (Out.SegOp (In.SegScan cs size st lam input descp)) =
-  Out.SegOp $
-  Out.SegScan cs size st (analyseLambda lam) input descp
-analyseExp e = Out.mapExp analyse e
+analyseExp = Out.mapExp analyse
   where analyse =
           Out.Mapper { Out.mapOnSubExp = return
                      , Out.mapOnCertificates = return

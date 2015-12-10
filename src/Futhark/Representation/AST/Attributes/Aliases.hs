@@ -90,15 +90,6 @@ loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
 loopOpAliases (ScanKernel _ _ _ _ lam _) =
   replicate (length (lambdaReturnType lam) * 2) mempty
 
-segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
-segOpAliases (SegReduce _ _ f _ _) =
-  map (const mempty) $ lambdaReturnType f
-segOpAliases (SegScan _ _ _ f _ _) =
-  map (const mempty) $ lambdaReturnType f
-segOpAliases SegReplicate{} =
-  [mempty]
--- TODO: Troels, should this be vnameAliases ?
-
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
   map (HS.filter notConsumed) $ zipWith mappend als1 als2
@@ -116,7 +107,6 @@ aliasesOf (If _ tb fb _) =
   (bodyAliases fb, consumedInBody fb)
 aliasesOf (PrimOp op) = primOpAliases op
 aliasesOf (LoopOp op) = loopOpAliases op
-aliasesOf (SegOp op) = segOpAliases op
 aliasesOf (Apply _ args t) =
   funcallAliases args $ retTypeValues t
 aliasesOf (Op op) = opAliases op

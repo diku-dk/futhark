@@ -111,10 +111,6 @@ Library
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simple
                    Futhark.Optimise.Simplifier.Simplify
-                   Futhark.Optimise.SplitShapes
-                   Futhark.Optimise.SuffCond
-                   Futhark.Optimise.SuffCond.GenPredicates
-                   Futhark.Optimise.SuffCond.OptPredicates
                    Futhark.Pass
                    Futhark.Passes
                    Futhark.Pass.ExpandAllocations
@@ -125,7 +121,6 @@ Library
                    Futhark.Pass.ExtractKernels.Distribution
                    Futhark.Pass.ExtractKernels.ISRWIM
                    Futhark.Pass.FirstOrderTransform
-                   Futhark.Pass.Flattening
                    Futhark.Pass.KernelBabysitting
                    Futhark.Pass.Simplify
                    Futhark.Pass.Untrace
