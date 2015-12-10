@@ -1,10 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
--- | The OpenCL code generator is a fragile and sensitive thing and it
--- needs a carefully massaged program to work at all.
---
--- This pass will turn SOACs into sequential loops.  The only
--- difference from first order transform is another approach to
--- stream.
+-- | Do various kernel optimisations - mostly related to coalescing.
 module Futhark.Pass.KernelBabysitting
        ( babysitKernels )
        where
@@ -24,7 +19,7 @@ import Futhark.Pass
 babysitKernels :: Pass SOACS SOACS
 babysitKernels =
   Pass { passName = "babysit kernels"
-       , passDescription = "Remove stream and transpose kernel input arrays for better performance."
+       , passDescription = "Transpose kernel input arrays for better performance."
        , passFunction = intraproceduralTransformation transformFunDec
        }
 
@@ -35,9 +30,9 @@ transformFunDec fundec = do
   where m = bindingIdentTypes (map paramIdent $ funDecParams fundec) $
             transformBody $ funDecBody fundec
 
-type SequentialiseM = Binder SOACS
+type BabysitM = Binder SOACS
 
-transformBody :: Body -> SequentialiseM Body
+transformBody :: Body -> BabysitM Body
 transformBody (Body () bnds res) = insertBindingsM $ do
   foldM_ transformBinding HM.empty bnds
   return $ resultBody res
@@ -56,7 +51,7 @@ nonlinearInMemory name m =
     Just (PrimOp (Reshape _ _ arr)) -> nonlinearInMemory arr m
     _ -> False
 
-transformBinding :: ExpMap -> Binding -> SequentialiseM ExpMap
+transformBinding :: ExpMap -> Binding -> BabysitM ExpMap
 
 transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
   body' <- bindingParamTypes (map fst merge) $ bindingIdentTypes form_idents $
@@ -164,26 +159,26 @@ transformBinding expmap (Let pat () e) = do
   addBinding $ Let pat () e'
   return $ HM.fromList [ (name, e') | name <- patternNames pat ] <> expmap
 
-transform :: Mapper SOACS SOACS SequentialiseM
+transform :: Mapper SOACS SOACS BabysitM
 transform = identityMapper { mapOnBody = transformBody
                            , mapOnLambda = transformLambda
                            , mapOnExtLambda = transformExtLambda
                            }
 
-transformLambda :: Lambda -> SequentialiseM Lambda
+transformLambda :: Lambda -> BabysitM Lambda
 transformLambda lam = do
   body' <- bindingParamTypes (lambdaParams lam) $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }
 
-transformExtLambda :: ExtLambda -> SequentialiseM ExtLambda
+transformExtLambda :: ExtLambda -> BabysitM ExtLambda
 transformExtLambda lam = do
   body' <- bindingParamTypes (extLambdaParams lam) $
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
 rearrangeInputs :: ExpMap -> [VName] -> [KernelInput SOACS]
-                -> SequentialiseM [KernelInput SOACS]
+                -> BabysitM [KernelInput SOACS]
 rearrangeInputs expmap is = mapM maybeRearrangeInput
   where
     iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
@@ -226,7 +221,7 @@ coalescingPermutation num_is rank =
   [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..rank-1]
 
 rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
-                    SequentialiseM ([PatElem], [(Type, [Int])])
+                    BabysitM ([PatElem], [(Type, [Int])])
 rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
   where rearrangeReturn (PatElem name BindVar namet) (t@Array{}, perm) = do
@@ -238,7 +233,7 @@ rearrangeReturns num_is pat_elems returns =
           return (pat_elem, (t, perm))
 
 paddedScanReduceInput :: SubExp -> KernelSize
-                      -> SequentialiseM (KernelSize, SubExp, SubExp)
+                      -> BabysitM (KernelSize, SubExp, SubExp)
 paddedScanReduceInput w kernel_size = do
   w' <- letSubExp "padded_size" =<<
         eRoundToMultipleOf (eSubExp w) (eSubExp num_threads)
@@ -255,7 +250,7 @@ paddedScanReduceInput w kernel_size = do
 
 rearrangeScanReduceInput :: Certificates
                          -> SubExp -> SubExp -> SubExp -> VName
-                         -> SequentialiseM VName
+                         -> BabysitM VName
 rearrangeScanReduceInput cs num_threads padding w' arr = do
   elements_per_thread <- letSubExp "elements_per_thread" $
                          PrimOp $ BinOp Quot w' num_threads Int
