@@ -34,6 +34,7 @@ module Futhark.CodeGen.ImpGen
     -- * Building Blocks
   , compileSubExp
   , compileResultSubExp
+  , compileAlloc
   , subExpToDimSize
   , sizeToScalExp
   , declaringLParams
@@ -57,7 +58,6 @@ module Futhark.CodeGen.ImpGen
   , destinationFromParam
   , destinationFromParams
   , copyElementWise
-
   )
   where
 
@@ -1084,6 +1084,17 @@ copyElem bt
   srclocation'  <- indexArray srclocation  srcis
   collect $ copy bt destlocation' srclocation' $
     product $ map Imp.dimSizeToExp $ drop (length srcis) srcshape
+
+-- | @compileAlloc memvar sizevar size space@ allocates @n@ bytes of memory in @space@,
+-- writing the resulting memory block to @mem@ and the size to
+-- @sizevar@ (if not 'Nothing'),
+compileAlloc :: VName -> Maybe VName -> SubExp -> Space
+             -> ImpM op ()
+compileAlloc mem sizevar e space = do
+  emit $ Imp.Allocate mem (Imp.bytes e') space
+  case sizevar of Just sizevar' -> emit $ Imp.SetScalar sizevar' e'
+                  Nothing       -> return ()
+    where e' = compileSubExp e
 
 scalExpToImpExp :: ScalExp -> Maybe Imp.Exp
 scalExpToImpExp (SE.Val x) =

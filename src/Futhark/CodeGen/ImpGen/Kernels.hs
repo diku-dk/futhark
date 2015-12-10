@@ -48,6 +48,10 @@ compileProg = liftM (setDefaultSpace (Imp.Space "device")) .
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
 
+kernelCompiler (ImpGen.Destination [ImpGen.MemoryDestination mem size]) (Op (Alloc e space)) = do
+  ImpGen.compileAlloc mem size e space
+  return ImpGen.Done
+
 kernelCompiler
   (ImpGen.Destination dest)
   (LoopOp (MapKernel _ _ global_thread_index ispace inps returns body)) = do

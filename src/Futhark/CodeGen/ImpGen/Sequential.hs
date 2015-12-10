@@ -13,10 +13,7 @@ compileProg :: Prog -> Either String Imp.Program
 compileProg = ImpGen.compileProg ops Imp.DefaultSpace
   where ops = ImpGen.defaultOperations { ImpGen.opsExpCompiler = expCompiler }
         expCompiler (ImpGen.Destination [ImpGen.MemoryDestination mem size]) (Op (Alloc e space)) = do
-          ImpGen.emit $ Imp.Allocate mem (Imp.bytes e') space
-          case size of Just size' -> ImpGen.emit $ Imp.SetScalar size' e'
-                       Nothing    -> return ()
+          ImpGen.compileAlloc mem size e space
           return ImpGen.Done
-            where e' = ImpGen.compileSubExp e
         expCompiler _ e =
           return $ ImpGen.CompileExp e
