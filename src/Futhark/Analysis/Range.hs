@@ -4,6 +4,8 @@ module Futhark.Analysis.Range
        , runRangeM
        , RangeM
        , analyseExp
+       , analyseLambda
+       , analyseExtLambda
        )
        where
 
@@ -69,34 +71,7 @@ analyseBinding (In.Let pat lore e) = do
 analyseExp :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
               In.Exp lore
            -> RangeM (Out.Exp lore)
-analyseExp (Out.LoopOp (In.Map cs w lam args)) =
-  Out.LoopOp <$>
-  (Out.Map cs w <$> analyseLambda lam <*> pure args)
-analyseExp (Out.LoopOp (In.ConcatMap cs w lam args)) =
-  Out.LoopOp <$>
-  (Out.ConcatMap cs w <$> analyseLambda lam <*> pure args)
-analyseExp (Out.LoopOp (In.Reduce cs w lam input)) =
-  Out.LoopOp <$>
-  (Out.Reduce cs w <$> analyseLambda lam <*> pure input)
-analyseExp (Out.LoopOp (In.Scan cs w lam input)) =
-  Out.LoopOp <$>
-  (Out.Scan cs w <$> analyseLambda lam <*> pure input)
-analyseExp (Out.LoopOp (In.Redomap cs w outerlam innerlam acc arr)) =
-  Out.LoopOp <$>
-  (Out.Redomap cs w <$>
-   analyseLambda outerlam <*>
-   analyseLambda innerlam <*>
-   pure acc <*> pure arr)
-analyseExp (Out.LoopOp (In.Stream cs w form lam arr ii)) =
-  Out.LoopOp <$>
-  (Out.Stream cs w <$> analyseStreamForm form <*> analyseExtLambda lam <*>
-                       pure arr <*> pure ii)
-  where analyseStreamForm (In.MapLike    o  ) = return $ Out.MapLike o
-        analyseStreamForm (In.Sequential acc) = return $ Out.Sequential acc
-        analyseStreamForm (In.RedLike o lam0 acc) = do
-            lam0' <- analyseLambda lam0
-            return $ Out.RedLike o lam0' acc
-analyseExp e = Out.mapExpM analyse e
+analyseExp = Out.mapExpM analyse
   where analyse =
           In.Mapper { In.mapOnSubExp = return
                     , In.mapOnCertificates = return

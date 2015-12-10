@@ -7,9 +7,11 @@ module Futhark.Analysis.Metrics
        , progMetrics
 
          -- * Extensibility
-       , OpMetrics
+       , OpMetrics(..)
        , seen
        , inside
+       , MetricsM
+       , bodyMetrics
        ) where
 
 import Control.Applicative
@@ -106,18 +108,6 @@ loopOpMetrics (DoLoop _ _ ForLoop{} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 loopOpMetrics (DoLoop _ _ WhileLoop{} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
-loopOpMetrics (Map _ _ fun _) =
-  inside "Map" $ lambdaMetrics fun
-loopOpMetrics (Reduce _ _ fun _) =
-  inside "Reduce" $ lambdaMetrics fun
-loopOpMetrics (Scan _ _ fun _) =
-  inside "Scan" $ lambdaMetrics fun
-loopOpMetrics (ConcatMap _ _ fun _) =
-  inside "ConcatMap" $ lambdaMetrics fun
-loopOpMetrics (Redomap _ _ fun1 fun2 _ _) =
-  inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
-loopOpMetrics (Stream _ _ _ lam _ _) =
-  inside "Stream" $ extLambdaMetrics lam
 loopOpMetrics (MapKernel _ _ _ _ _ _ body) =
   inside "MapKernel" $ bodyMetrics body
 loopOpMetrics (ReduceKernel _ _ _ lam1 lam2 _ _) =
@@ -137,6 +127,3 @@ segOpMetrics SegReplicate{} =
 
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody
-
-extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
-extLambdaMetrics = bodyMetrics . extLambdaBody

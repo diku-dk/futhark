@@ -14,7 +14,7 @@ import System.Console.GetOpt
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
@@ -111,16 +111,16 @@ futharkConfig config =
 
 -- XXX: this pipeline is a total hack - note that we run distribution
 -- multiple times.
-compilerPipeline :: Pipeline Basic ExplicitMemory
+compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =
   standardPipeline >>>
   passes [ extractKernels
          , extractKernels
-         , simplifyBasic
+         , simplifySOACS
          , expandArrays
-         , simplifyBasic
+         , simplifySOACS
          , babysitKernels
-         , simplifyBasic
+         , simplifySOACS
          , inPlaceLowering
          ] >>>
   onePass explicitAllocations >>>

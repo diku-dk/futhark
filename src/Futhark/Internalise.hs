@@ -20,7 +20,7 @@ import Data.List
 import Data.Traversable (mapM)
 import Data.Loc
 import Futhark.Representation.External as E
-import Futhark.Representation.Basic as I
+import Futhark.Representation.SOACS as I
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
@@ -35,17 +35,18 @@ import Prelude hiding (mapM)
 -- | Convert a program in external Futhark to a program in internal
 -- Futhark.  If the boolean parameter is false, do not add bounds
 -- checks to array indexing.
-internaliseProg :: Bool -> E.Prog -> Either String I.Prog
-internaliseProg doBoundsCheck prog =
-  liftM I.renameProg $ flip evalStateT src $ do
+internaliseProg :: MonadFreshNames m =>
+                   Bool -> E.Prog -> m (Either String I.Prog)
+internaliseProg doBoundsCheck prog = do
+  res <- do
     ftable_attempt <- buildFtable prog
     case ftable_attempt of
-      Left err -> lift $ Left err
+      Left err -> return $ Left err
       Right ftable -> do
         funs <- runInternaliseM doBoundsCheck ftable $
                 mapM internaliseFun $ E.progFunctions prog
-        lift $ fmap I.Prog funs
-  where src = E.newNameSourceForProg prog
+        return $ fmap I.Prog funs
+  sequence $ fmap I.renameProg res
 
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
@@ -434,7 +435,7 @@ internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToVars "map_arr" arr
   lam' <- internaliseMapLambda internaliseLambda asserting lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.LoopOp $ I.Map [] w lam' arrs
+  letTupExp' desc $ I.Op $ I.Map [] w lam' arrs
 
 internaliseExp desc (E.Reduce lam ne arr loc) = do
   arrs <- internaliseExpToVars "reduce_arr" arr
@@ -447,7 +448,7 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.LoopOp $ I.Reduce [] w lam' input
+  letTupExp' desc $ I.Op $ I.Reduce [] w lam' input
 
 internaliseExp desc (E.Scan lam ne arr loc) = do
   arrs <- internaliseExpToVars "scan_arr" arr
@@ -460,13 +461,13 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.LoopOp $ I.Scan [] w lam' input
+  letTupExp' desc $ I.Op $ I.Scan [] w lam' input
 
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] w lam' arrs
+  flags <- letExp "filter_partition_flags" $ I.Op $ I.Map [] w lam' arrs
   filter_size <- newIdent "filter_size" $ I.Basic Int
   filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
   addBinding $ mkLet' [] (filter_size : filter_perms) $
@@ -480,7 +481,7 @@ internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] w lam' arrs
+  flags <- letExp "partition_partition_flags" $ I.Op $ I.Map [] w lam' arrs
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
@@ -503,7 +504,7 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
   lam2' <- internaliseRedomapInnerLambda internaliseLambda asserting lam2
            nes (map I.Var arrs')
   w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $ I.LoopOp $
+  letTupExp' desc $ I.Op $
     I.Redomap [] w lam1' lam2' nes arrs'
 
 internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr ii _) = do
@@ -533,7 +534,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
              E.Sequential _ -> return $ I.Sequential accs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $
-    I.LoopOp $ I.Stream [] w form' lam' arrs' ii
+    I.Op $ I.Stream [] w form' lam' arrs' ii
 internaliseExp _ E.Stream{} =
   fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 
@@ -542,7 +543,7 @@ internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arrs' <- mapM (internaliseExpToVars "concatMap_arr") arrs
   lam' <- internaliseConcatMapLambda internaliseLambda lam
   w <- arraysSize 0 <$> mapM lookupType arr'
-  letTupExp' desc $ I.LoopOp $ I.ConcatMap [] w lam' $ arr':arrs'
+  letTupExp' desc $ I.Op $ I.ConcatMap [] w lam' $ arr':arrs'
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 

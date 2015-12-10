@@ -22,6 +22,7 @@ import Control.Category
 import Control.Monad
 import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
+import Control.Monad.State
 import qualified Data.Text as T
 
 import Prelude hiding (id, (.))
@@ -38,17 +39,23 @@ data CompileError = CompileError {
   , errorData :: T.Text
   }
 
-newtype FutharkM a = FutharkM (ExceptT CompileError (WriterT Log IO) a)
+newtype FutharkM a = FutharkM (ExceptT CompileError (StateT VNameSource (WriterT Log IO)) a)
                      deriving (Applicative, Functor, Monad,
                                MonadWriter Log,
                                MonadError CompileError,
+                               MonadState VNameSource,
                                MonadIO)
+
+instance MonadFreshNames FutharkM where
+  getNameSource = get
+  putNameSource = put
 
 instance MonadLogger FutharkM where
   addLog = tell
 
 runFutharkM :: FutharkM a -> IO (Either CompileError a, Log)
-runFutharkM (FutharkM m) = runWriterT $ runExceptT m
+runFutharkM (FutharkM m) =
+  runWriterT (evalStateT (runExceptT m) blankNameSource)
 
 compileError :: (MonadError CompileError m, PP.Pretty err) =>
                 T.Text -> err -> m a
@@ -122,8 +129,7 @@ runPass :: Pass fromlore tolore
         -> Prog fromlore
         -> FutharkM (Prog tolore)
 runPass pass prog = do
-  let (res, logged) = runPassM (passFunction pass prog) $
-                      newNameSourceForProg prog
+  (res, logged) <- runPassM (passFunction pass prog)
   tell logged
   case res of Left err -> compileError err ()
               Right x  -> return x

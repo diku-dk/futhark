@@ -16,7 +16,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.NeedNames
 import Futhark.MonadFreshNames
 

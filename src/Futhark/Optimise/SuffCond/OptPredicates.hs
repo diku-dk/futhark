@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -w #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, TypeFamilies, MultiParamTypeClasses #-}
 module Futhark.Optimise.SuffCond.OptPredicates
        (
          optimisePredicates
@@ -20,8 +20,8 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Transform.Rename
-import Futhark.Representation.Basic
-import Futhark.Representation.Basic.Simplify
+import Futhark.Representation.SOACS
+import Futhark.Representation.SOACS.Simplify
 import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.ScalExp (ScalExp)
@@ -41,7 +41,7 @@ import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as S
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Optimise.Simplifier.Lore
-  (Wise, mkWiseBody, mkWiseLetBinding, removeExpWisdom, addWisdomToPattern)
+  (Wise, mkWiseBody, mkWiseLetBinding, removeExpWisdom, removeFunDecWisdom, addWisdomToPattern)
 import Futhark.Representation.AST.Attributes.Ranges
 
 import Prelude hiding (any)
@@ -94,7 +94,7 @@ maybeOptimiseFun :: MonadFreshNames m =>
                     RuleBook (VariantM m) -> FunDec -> m [FunDec]
 maybeOptimiseFun rules fundec@(FunDec _ ret _ body)
   | [Basic Bool] <- retTypeValues ret = do
-  let sctable = analyseBody (ST.empty :: ST.SymbolTable Basic) mempty body
+  let sctable = analyseBody (ST.empty :: ST.SymbolTable SOACS) mempty body
   generateOptimisedPredicates rules fundec sctable
 maybeOptimiseFun _ _ = return []
 
@@ -116,7 +116,7 @@ generateOptimisedPredicates'
   case res of
     (body', True) -> do
       fundec <- simplifyFunWithRules bindableSimpleOps basicRules Simplify.noExtraHoistBlockers $
-                FunDec fname' rettype params (removeBodyLore body')
+                error "optPredicates is dead" $ FunDec fname' rettype params body'
       return $ Just fundec
     _          -> return Nothing
   where fname' = fname <> nameFromString suff
@@ -133,6 +133,7 @@ rephraseWithInvariance = rephraseBody rephraser
                               , rephraseFParamLore = declTypeOf
                               , rephraseBodyLore = const ()
                               , rephraseRetType = id
+                              , rephraseOp = error "OptPredicates is dead"
                               }
 
 data SCEntry = SufficientCond [[ScalExp]]
@@ -140,7 +141,7 @@ data SCEntry = SufficientCond [[ScalExp]]
 
 type SCTable = HM.HashMap VName SCEntry
 
-analyseBody :: ST.SymbolTable Basic -> SCTable -> Body -> SCTable
+analyseBody :: ST.SymbolTable SOACS -> SCTable -> Body -> SCTable
 analyseBody _ sctable (Body _ [] _) =
   sctable
 
@@ -171,7 +172,7 @@ rangesRep = HM.filter nonEmptyRange . HM.map toRep . ST.bindings
           where (lower, upper) = ST.valueRange entry
         nonEmptyRange (_, lower, upper) = isJust lower || isJust upper
 
-analyseExp :: ST.SymbolTable Basic -> Exp -> Maybe SCTable
+analyseExp :: ST.SymbolTable SOACS -> Exp -> Maybe SCTable
 analyseExp vtable (LoopOp (DoLoop _ _ (ForLoop i bound) body)) =
   Just $ analyseExpBody vtable' body
   where vtable' = clampLower $ clampUpper vtable
@@ -181,12 +182,12 @@ analyseExp vtable (LoopOp (DoLoop _ _ (ForLoop i bound) body)) =
                                    Constant {} -> id
 analyseExp vtable (LoopOp (DoLoop _ _ _ body)) =
   Just $ analyseExpBody vtable body
-analyseExp vtable (LoopOp (Map _ _ fun arrs)) =
+analyseExp vtable (Op (Map _ _ fun arrs)) =
   Just $ analyseExpBody vtable' $ lambdaBody fun
   where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $
                   zip params $ map Just arrs
         params = lambdaParams fun
-analyseExp vtable (LoopOp (Redomap _ _ outerfun innerfun acc arrs)) =
+analyseExp vtable (Op (Redomap _ _ outerfun innerfun acc arrs)) =
   Just $ analyseExpBody vtable' (lambdaBody innerfun) <>
          analyseExpBody vtable (lambdaBody outerfun)
   where vtable' = foldr (uncurry ST.insertArrayLParam) vtable $
@@ -197,7 +198,7 @@ analyseExp vtable (If cond tbranch fbranch _) =
          analyseExpBody (ST.updateBounds False cond vtable) fbranch
 analyseExp _ _ = Nothing
 
-analyseExpBody :: ST.SymbolTable Basic -> Body -> SCTable
+analyseExpBody :: ST.SymbolTable SOACS -> Body -> SCTable
 analyseExpBody vtable = analyseBody vtable mempty
 
 data Sufficiency = Sufficient
@@ -432,18 +433,20 @@ data Invariance' = Invariance'
 instance Annotations.Annotations Invariance' where
   type LetBound Invariance' = (Maybe VName, Type)
   type Exp Invariance' = Variance
+  type Op Invariance' = SOAC Invariance'
 instance Lore.Lore Invariance' where
   representative = Invariance'
-  loopResultContext _ = loopResultContext (representative :: Basic)
+  loopResultContext _ = loopResultContext (representative :: SOACS)
 instance Ranged Invariance' where
 instance PrettyLore Invariance' where
 instance Substitutable Invariance' where
 instance Renameable Invariance' where
 instance Proper Invariance' where
+instance Simplify.SimplifiableOp Invariance' (SOAC Invariance') where
 
 type Invariance = Wise Invariance'
 
-removeInvariance :: Rephraser Invariance' Basic
+removeInvariance :: Rephraser Invariance' SOACS
 removeInvariance = Rephraser { rephraseExpLore = const ()
                              , rephraseLetBoundLore = snd
                              , rephraseBodyLore = const ()

@@ -53,6 +53,7 @@ module Futhark.Representation.Aliases
        , removeBodyAliases
        , removeBindingAliases
        , removeLambdaAliases
+       , removeExtLambdaAliases
        , removePatternAliases
        )
 where
@@ -266,6 +267,10 @@ removeBindingAliases = rephraseBinding removeAliases
 removeLambdaAliases :: CanBeAliased (Op lore) =>
                        AST.Lambda (Aliases lore) -> AST.Lambda lore
 removeLambdaAliases = rephraseLambda removeAliases
+
+removeExtLambdaAliases :: CanBeAliased (Op lore) =>
+                          AST.ExtLambda (Aliases lore) -> AST.ExtLambda lore
+removeExtLambdaAliases = rephraseExtLambda removeAliases
 
 removePatternAliases :: CanBeAliased (Op lore) =>
                         AST.Pattern (Aliases lore) -> AST.Pattern lore

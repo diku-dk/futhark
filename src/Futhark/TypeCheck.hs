@@ -6,6 +6,7 @@ module Futhark.TypeCheck
   , checkProgNoUniqueness
   , TypeError
   , ErrorCase
+
     -- * Extensionality
   , TypeM
   , bad
@@ -14,7 +15,13 @@ module Futhark.TypeCheck
   , Checkable (..)
   , module Futhark.TypeCheck.TypeError
   , lookupVar
+  , lookupAliases
   , VarBindingLore (..)
+  , Occurences
+  , UsageMap
+  , usageMap
+  , collectOccurences
+
     -- * Checkers
   , require
   , requireI
@@ -24,6 +31,12 @@ module Futhark.TypeCheck
   , checkExtType
   , matchExtPattern
   , matchExtReturnType
+  , argType
+  , checkArg
+  , checkSOACArrayArgs
+  , checkLambda
+  , checkExtLambda
+  , checkConcatMapLambda
   )
   where
 
@@ -793,77 +806,6 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
                  " is not a merge variable."
       Just _  -> return ()
 
-checkLoopOp (Map ass size fun arrexps) = do
-  mapM_ (requireI [Basic Cert]) ass
-  require [Basic Int] size
-  arrargs <- checkSOACArrayArgs size arrexps
-  void $ checkLambda fun arrargs
-
-checkLoopOp (ConcatMap cd size fun inarrs) = do
-  mapM_ (requireI [Basic Cert]) cd
-  require [Basic Int] size
-  forM_ inarrs $ \inarr -> do
-    args <- mapM (checkArg . Var) inarr
-    void $ checkConcatMapLambda fun args
-
-checkLoopOp (Reduce ass size fun inputs) = do
-  let (startexps, arrexps) = unzip inputs
-  mapM_ (requireI [Basic Cert]) ass
-  require [Basic Int] size
-  startargs <- mapM checkArg startexps
-  arrargs   <- checkSOACArrayArgs size arrexps
-  checkLambda fun $ startargs ++ arrargs
-  let startt      = map argType startargs
-      intupletype = map argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    bad $ TypeError noLoc $
-    "Accumulator is of type " ++ prettyTuple startt ++
-    ", but reduce function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    bad $ TypeError noLoc $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but reduce function returns type " ++ prettyTuple funret ++ "."
-
--- Scan is exactly identical to Reduce.  Duplicate for clarity anyway.
-checkLoopOp (Scan ass size fun inputs) = do
-  let (startexps, arrexps) = unzip inputs
-  mapM_ (requireI [Basic Cert]) ass
-  require [Basic Int] size
-  startargs <- mapM checkArg startexps
-  arrargs   <- checkSOACArrayArgs size arrexps
-  checkLambda fun $ startargs ++ arrargs
-  let startt      = map argType startargs
-      intupletype = map argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    bad $ TypeError noLoc $
-    "Initial value is of type " ++ prettyTuple startt ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    bad $ TypeError noLoc $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-
-checkLoopOp (Redomap ass size outerfun innerfun accexps arrexps) = do
-  mapM_ (requireI [Basic Cert]) ass
-  require [Basic Int] size
-  arrargs <- checkSOACArrayArgs size arrexps
-  accargs <- mapM checkArg accexps
-  checkLambda innerfun $ accargs ++ arrargs
-  let innerRetType = lambdaReturnType innerfun
-      innerAccType = take (length accexps) innerRetType
-      asArg t = (t, mempty)
-  checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
-  let acct = map argType accargs
-      outerRetType = lambdaReturnType outerfun
-  unless (acct == innerAccType ) $
-    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap inner reduction returns type " ++ prettyTuple innerRetType ++ "."
-  unless (acct == outerRetType) $
-    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
-
 checkLoopOp (MapKernel cs w index ispace inps returns body) = do
   mapM_ (requireI [Basic Cert]) cs
   require [Basic Int] w
@@ -955,81 +897,10 @@ checkLoopOp (ScanKernel cs w kernel_size _ fun input) = do
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
-checkLoopOp (Stream ass size form lam arrexps _) = do
-  let accexps = getStreamAccums form
-  mapM_ (requireI [Basic Cert]) ass
-  require [Basic Int] size
-  accargs <- mapM checkArg accexps
-  arrargs <- mapM lookupType arrexps
-  _ <- checkSOACArrayArgs size arrexps
-  let chunk = head $ extLambdaParams lam
-  let asArg t = (t, mempty)
-      inttp   = Basic Int
-      lamarrs'= map (`setOuterSize` Var (paramName chunk)) arrargs
-  checkExtLambda lam $ asArg inttp :
-                       accargs ++ map asArg lamarrs'
-  let acc_len= length accexps
-  let lamrtp = take acc_len $ extLambdaReturnType lam
-  unless (staticShapes (map argType accargs) == lamrtp) $
-    bad $ TypeError noLoc "Stream with inconsistent accumulator type in lambda."
-  -- check reduce's lambda, if any
-  _ <- case form of
-        RedLike _ lam0 _ -> do
-            let acct = map argType accargs
-                outerRetType = lambdaReturnType lam0
-            checkLambda lam0 (accargs ++ accargs)
-            unless (acct == outerRetType) $
-                bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-                      ", but stream's reduce lambda returns type " ++ prettyTuple outerRetType ++ "."
-        _ -> return ()
-  -- just get the dflow of lambda on the fakearg, which does not alias
-  -- arr, so we can later check that aliases of arr are not used inside lam.
-  -- let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
-  let fake_lamarrs' = map asArg lamarrs'
-  (_,occurs) <- collectOccurences $
-                checkExtLambda lam $ asArg inttp :
-                                     accargs ++ fake_lamarrs'
-  let usages = usageMap occurs
-  arr_aliases <- mapM lookupAliases arrexps
-  let aliased_syms = HS.toList $ HS.fromList $ concatMap HS.toList arr_aliases
-  when (any (`HM.member` usages) aliased_syms) $
-     bad $ TypeError noLoc "Stream with input array used inside lambda."
-  -- check outerdim of Lambda's streamed-in array params are NOT specified,
-  -- and that return type inner dimens are all specified but not as other
-  -- lambda parameters!
-  let lamarr_rtp = drop acc_len $ extLambdaReturnType lam
-      lamarr_ptp = map paramType $ drop (acc_len+1) $ extLambdaParams lam
-      names_lamparams = HS.fromList $ map paramName $ extLambdaParams lam
-  _ <- mapM (checkOuterDim (paramName chunk) . head .    shapeDims . arrayShape) lamarr_ptp
-  _ <- mapM (checkInnerDim names_lamparams   . tail . extShapeDims . arrayShape) lamarr_rtp
-  return ()
-    where checkOuterDim chunknm outdim = do
-            let chunk_str = textual chunknm
-            case outdim of
-                    Constant _ ->
-                      bad $ TypeError noLoc ("Stream: outer dimension of stream should NOT"++
-                                             " be specified since it is "++chunk_str++"by default.")
-                    Var idd    ->
-                      if idd == chunknm then return True
-                      else bad $ TypeError noLoc ("Stream: outer dimension of stream should NOT"++
-                                                  " be specified since it is "++chunk_str++"by default.")
-          boundDim (Free (Var idd)) = return $ Just idd
-          boundDim (Free _        ) = return Nothing
-          boundDim (Ext  _        ) =
-            bad $ TypeError noLoc $ "Stream's lambda: inner dimensions of the"++
-                                    " streamed-out arrays MUST be specified!"
-          checkInnerDim lamparnms innerdims = do
-            rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
-            case find (`HS.member` lamparnms) rtp_iner_syms of
-                Just name -> bad $ TypeError noLoc $
-                                   "Stream's lambda: " ++ textual (baseName name) ++
-                                   " cannot specify an inner result shape"
-                _ -> return True
-
 checkSegOp :: Checkable lore =>
               SegOp lore -> TypeM lore ()
 
-checkSegOp (SegReduce ass size fun inputs descp_exp) = do
+checkSegOp (SegReduce _ size _ _ descp_exp) = do
   descp_arg <- checkArg $ Var descp_exp
   require [Basic Int] size
   let descp_tp = argType descp_arg
@@ -1037,10 +908,9 @@ checkSegOp (SegReduce ass size fun inputs descp_exp) = do
     bad $ TypeError noLoc $
     "Array descriptor is of type " ++ pretty descp_tp ++
     ", but should be [Int]"
-  checkLoopOp $ Reduce ass size fun inputs
 
 -- SegScan is mostly identical to SegReduced. Duplicated for clarity.
-checkSegOp (SegScan ass size _ fun inputs descp_exp) = do
+checkSegOp (SegScan _ size _ _ _ descp_exp) = do
   descp_arg <- checkArg $ Var descp_exp
   require [Basic Int] size
   let descp_tp = argType descp_arg
@@ -1048,7 +918,6 @@ checkSegOp (SegScan ass size _ fun inputs descp_exp) = do
     bad $ TypeError noLoc $
     "Array descriptor is of type " ++ pretty descp_tp ++
     ", but should be [Int]"
-  checkLoopOp $ Scan ass size fun inputs
 
 checkSegOp (SegReplicate ass counts_vn data_vn mb_seg_vn) = do
   seg_tp <- case mb_seg_vn of

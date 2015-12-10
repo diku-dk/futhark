@@ -17,9 +17,10 @@ import qualified Data.List         as L
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS hiding (SOAC(..))
+import qualified Futhark.Representation.SOACS as Futhark
 import Futhark.MonadFreshNames
-import Futhark.Representation.Basic.Simplify
+import Futhark.Representation.SOACS.Simplify
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
@@ -169,7 +170,7 @@ badFusionGM = throwError
 ---    and fuse them in a second pass!                               ---
 ------------------------------------------------------------------------
 
-fuseSOACs :: Pass Basic Basic
+fuseSOACs :: Pass SOACS SOACS
 fuseSOACs =
   Pass { passName = "Fuse SOACs"
        , passDescription = "Perform higher-order optimisation, i.e., fusion."
@@ -190,7 +191,7 @@ fuseProg prog = do
   if not succc
   then return prog
   else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
-          return $ renameProg $ Prog funs'
+          renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
 fusionGatherFun fundec =
@@ -522,10 +523,10 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
 -- A reduce is translated to a redomap and treated from there.
-fusionGatherBody fres (Body blore (Let pat bndtp (LoopOp (Reduce cs w lam args)):bnds) res) = do
+fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w lam args)):bnds) res) = do
   let (ne, arrs) = unzip args
-      equivsoac = Redomap cs w lam lam ne arrs
-  fusionGatherBody fres $ Body blore (Let pat bndtp (LoopOp equivsoac):bnds) res
+      equivsoac = Futhark.Redomap cs w lam lam ne arrs
+  fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
 fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
   maybesoac <- SOAC.fromExp e
@@ -643,10 +644,10 @@ fusionGatherExp fres (If cond e_then e_else _) = do
 --- directly in let exp, i.e., let x = e)
 -----------------------------------------------------------------------------------
 
-fusionGatherExp _ (LoopOp Map{}) = errorIllegal "map"
-fusionGatherExp _ (LoopOp Reduce{}) = errorIllegal "reduce"
-fusionGatherExp _ (LoopOp Scan{}) = errorIllegal "scan"
-fusionGatherExp _ (LoopOp Redomap{}) = errorIllegal "redomap"
+fusionGatherExp _ (Op Futhark.Map{}) = errorIllegal "map"
+fusionGatherExp _ (Op Futhark.Reduce{}) = errorIllegal "reduce"
+fusionGatherExp _ (Op Futhark.Scan{}) = errorIllegal "scan"
+fusionGatherExp _ (Op Futhark.Redomap{}) = errorIllegal "redomap"
 
 -----------------------------------
 ---- Generic Traversal         ----
@@ -736,10 +737,13 @@ fuseInExp (LoopOp (DoLoop res mergepat form loopbody)) =
 
 fuseInExp e = mapExpM fuseIn e
 
-fuseIn :: Mapper Basic Basic FusionGM
+fuseIn :: Mapper SOACS SOACS FusionGM
 fuseIn = identityMapper {
            mapOnBody    = fuseInBody
          , mapOnLambda  = fuseInLambda
+         , mapOnOp      = mapSOACM identitySOACMapper
+                          { mapOnSOACLambda = fuseInLambda
+                          }
          }
 
 fuseInLambda :: Lambda -> FusionGM Lambda

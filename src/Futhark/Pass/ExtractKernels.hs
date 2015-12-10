@@ -162,7 +162,8 @@ import Data.List
 import Prelude
 
 import Futhark.Optimise.Simplifier.Simple (bindableSimpleOps)
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
+import Futhark.Representation.SOACS.Simplify()
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
@@ -174,7 +175,7 @@ import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Util.Log
 import Futhark.Transform.Rename
 
-extractKernels :: Pass Basic Basic
+extractKernels :: Pass SOACS SOACS
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
@@ -219,10 +220,10 @@ transformBindings (bnd:bnds) =
       transformBindings $ bnds' <> bnds
 
 sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
-sequentialisedUnbalancedBinding bnd@(Let _ _ (LoopOp (Map _ _ lam _)))
+sequentialisedUnbalancedBinding bnd@(Let _ _ (Op (Map _ _ lam _)))
   | unbalancedLambda lam =
     Just <$> runBinder_ (FOT.transformBinding bnd)
-sequentialisedUnbalancedBinding bnd@(Let _ _ (LoopOp (Redomap _ _ lam1 lam2 _ _)))
+sequentialisedUnbalancedBinding bnd@(Let _ _ (Op (Redomap _ _ lam1 lam2 _ _)))
   | unbalancedLambda lam1 || unbalancedLambda lam2 =
     Just <$> runBinder_ (FOT.transformBinding bnd)
 sequentialisedUnbalancedBinding _ =
@@ -243,10 +244,10 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
         boundInForm (WhileLoop _) = id
         mergeparams = map fst mergepat
 
-transformBinding (Let pat () (LoopOp (Map cs w lam arrs))) =
+transformBinding (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
-transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) =
+transformBinding (Let pat () (Op (Redomap cs w lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
     lam1_sequential <- FOT.transformLambda lam1
     lam2_sequential <- FOT.transformLambda lam2
@@ -256,19 +257,19 @@ transformBinding (Let pat () (LoopOp (Redomap cs w lam1 lam2 nes arrs))) =
     return [mapbnd, redbnd]
       where sequentialiseRedomapBody = True
 
-transformBinding (Let pat () (LoopOp (Reduce cs w red_fun red_input))) = do
+transformBinding (Let pat () (Op (Reduce cs w red_fun red_input))) = do
   red_fun_sequential <- FOT.transformLambda red_fun
   red_fun_sequential' <- renameLambda red_fun_sequential
   blockedReduction pat cs w red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
 
-transformBinding (Let pat () (LoopOp (Scan cs w fun input))) = do
+transformBinding (Let pat () (Op (Scan cs w fun input))) = do
   fun_sequential <- FOT.transformLambda fun
   runBinder_ $ blockedScan pat cs w fun_sequential input
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ red_fun nes) fold_fun arrs _))) = do
+transformBinding (Let pat () (Op (Stream cs w (RedLike _ red_fun nes) fold_fun arrs _))) = do
   -- We will sequentialise the body.  We do this by turning the stream
   -- into a redomap with the chunk size set to one.
   acc_ts <- mapM subExpType nes
@@ -277,17 +278,17 @@ transformBinding (Let pat () (LoopOp (Stream cs w (RedLike _ red_fun nes) fold_f
   fold_fun_unchunked_sequential <- FOT.transformLambda fold_fun_unchunked
   blockedReduction pat cs w red_fun_sequential fold_fun_unchunked_sequential nes arrs
 
-transformBinding (Let pat () (LoopOp (Stream cs w (Sequential nes) fold_fun arrs _))) =
+transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs _))) =
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   runBinder_ $ sequentialStreamWholeArray pat cs w nes fold_fun arrs
 
-transformBinding (Let pat () (LoopOp (Stream cs w (MapLike _) map_fun arrs _))) =
+transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs _))) =
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   runBinder_ $ sequentialStreamWholeArray pat cs w [] map_fun arrs
 
-transformBinding (Let res_pat () (LoopOp op))
+transformBinding (Let res_pat () (Op op))
   | Scan cs w scan_fun scan_input <- op,
     Just do_iswim <- iswim res_pat cs w scan_fun scan_input =
       transformBindings =<< runBinder_ do_iswim
@@ -307,7 +308,7 @@ transformLambda lam =
 data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 
 mapLoopExp :: MapLoop -> Exp
-mapLoopExp (MapLoop cs w lam arrs) = LoopOp $ Map cs w lam arrs
+mapLoopExp (MapLoop cs w lam arrs) = Op $ Map cs w lam arrs
 
 distributeMap :: (HasTypeEnv m, MonadFreshNames m, MonadLogger m) =>
                  Pattern -> MapLoop -> m [Binding]
@@ -429,17 +430,17 @@ unbalancedLambda lam =
           bodyBindings body
 
         -- XXX - our notion of balancing is probably still too naive.
-        unbalancedBinding bound (LoopOp (Map _ w _ _)) =
+        unbalancedBinding bound (Op (Map _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (Reduce _ w _ _)) =
+        unbalancedBinding bound (Op (Reduce _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (Scan _ w _ _)) =
+        unbalancedBinding bound (Op (Scan _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (Redomap _ w _ _ _ _)) =
+        unbalancedBinding bound (Op (Redomap _ w _ _ _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (ConcatMap _ w _ _)) =
+        unbalancedBinding bound (Op (ConcatMap _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (Stream _ w _ _ _ _)) =
+        unbalancedBinding bound (Op (Stream _ w _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (LoopOp (MapKernel _ w _ _ _ _ _)) =
           w `subExpBound` bound
@@ -466,8 +467,6 @@ unbalancedLambda lam =
           w `HS.member` bound
 
         unbalancedBinding _ (PrimOp _) =
-          False
-        unbalancedBinding _ (Op _) =
           False
         unbalancedBinding _ (Apply fname _ _) =
           not $ isBuiltInFunction fname
@@ -509,7 +508,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                            , lambdaParams = used_params
                            , lambdaIndex = lambdaIndex lam
                            }
-         in addBindingToKernel (Let pat () $ LoopOp $ Map cs w lam' used_arrs)
+         in addBindingToKernel (Let pat () $ Op $ Map cs w lam' used_arrs)
             acc' { kernelBindings = [] }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
@@ -518,7 +517,7 @@ distributeMapBodyBindings acc [] =
   return acc
 
 distributeMapBodyBindings acc
-  (Let pat () (LoopOp (Stream cs w (Sequential accs) lam arrs _)):bnds) = do
+  (Let pat () (Op (Stream cs w (Sequential accs) lam arrs _)):bnds) = do
   stream_bnds <- runBinder_ $ sequentialStreamWholeArray pat cs w accs lam arrs
   stream_bnds' <- copyPropagateInBindings bindableSimpleOps stream_bnds
   distributeMapBodyBindings acc $ stream_bnds' ++ bnds
@@ -533,7 +532,7 @@ distributeMapBodyBindings acc (bnd:bnds) =
 
 maybeDistributeBinding :: Binding -> KernelAcc
                        -> KernelM KernelAcc
-maybeDistributeBinding bnd@(Let pat _ (LoopOp (Map cs w lam arrs))) acc =
+maybeDistributeBinding bnd@(Let pat _ (Op (Map cs w lam arrs))) acc =
   -- Only distribute inside the map if we can distribute everything
   -- following the map.
   distributeIfPossible acc >>= \case
@@ -552,15 +551,15 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
       return acc'
     _ ->
       addBindingToKernel bnd acc
-  where isMap (LoopOp Map{}) = True
-        isMap _              = False
+  where isMap (Op Map{}) = True
+        isMap _          = False
 
 -- If the scan can be distributed by itself, we will turn it into a
 -- segmented scan.
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeBinding bnd@(Let _ _ (LoopOp (Scan cs w lam input))) acc =
+maybeDistributeBinding bnd@(Let _ _ (Op (Scan cs w lam input))) acc =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, _, nest, acc') -> do
       lam' <- FOT.transformLambda lam

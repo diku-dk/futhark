@@ -17,12 +17,12 @@ import Data.Monoid
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Tools
 import Futhark.Pass
 import qualified Futhark.Transform.FirstOrderTransform as FOT
 
-babysitKernels :: Pass Basic Basic
+babysitKernels :: Pass SOACS SOACS
 babysitKernels =
   Pass { passName = "babysit kernels"
        , passDescription = "Remove stream and transpose kernel input arrays for better performance."
@@ -36,7 +36,7 @@ transformFunDec fundec = do
   where m = bindingIdentTypes (map paramIdent $ funDecParams fundec) $
             transformBody $ funDecBody fundec
 
-type SequentialiseM = Binder Basic
+type SequentialiseM = Binder SOACS
 
 transformBody :: Body -> SequentialiseM Body
 transformBody (Body () bnds res) = insertBindingsM $ do
@@ -171,7 +171,7 @@ transformBinding expmap (Let pat () e) = do
                         | name <- patternNames $ bindingPattern bnd ]
             <> expmap'
 
-transform :: Mapper Basic Basic SequentialiseM
+transform :: Mapper SOACS SOACS SequentialiseM
 transform = identityMapper { mapOnBody = transformBody
                            , mapOnLambda = transformLambda
                            , mapOnExtLambda = transformExtLambda
@@ -189,8 +189,8 @@ transformExtLambda lam = do
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
-rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Basic]
-                -> SequentialiseM [KernelInput Basic]
+rearrangeInputs :: ExpMap -> [VName] -> [KernelInput SOACS]
+                -> SequentialiseM [KernelInput SOACS]
 rearrangeInputs expmap is = mapM maybeRearrangeInput
   where
     iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .

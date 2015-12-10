@@ -32,12 +32,11 @@ import Data.Maybe
 
 import Prelude
 
-import Futhark.Representation.AST.Lore (Lore)
-import Futhark.Representation.AST
+import Futhark.Representation.SOACS
 import Futhark.Util
 
 -- | An error happened during execution, and this is why.
-data InterpreterError lore =
+data InterpreterError =
       MissingEntryPoint Name
       -- ^ The specified start function does not exist.
     | InvalidFunctionArguments Name (Maybe [TypeBase Rank NoUniqueness]) [TypeBase Rank NoUniqueness]
@@ -51,7 +50,7 @@ data InterpreterError lore =
       -- ^ Called @iota(n)@ where @n@ was negative.
     | NegativeReplicate Int
       -- ^ Called @replicate(n, x)@ where @n@ was negative.
-    | InvalidArrayShape (Exp lore) [Int] [Int]
+    | InvalidArrayShape Exp [Int] [Int]
       -- ^ First @Int@ is old shape, second is attempted new shape.
     | ZipError [Int]
       -- ^ The arguments to @zip@ were of different lengths.
@@ -62,7 +61,7 @@ data InterpreterError lore =
     | DivisionByZero
       -- ^ Attempted to divide by zero.
 
-instance PrettyLore lore => Show (InterpreterError lore) where
+instance Show InterpreterError where
   show (MissingEntryPoint fname) =
     "Program entry point '" ++ nameToString fname ++ "' not defined."
   show (InvalidFunctionArguments fname Nothing got) =
@@ -95,33 +94,33 @@ instance PrettyLore lore => Show (InterpreterError lore) where
   show DivisionByZero =
     "Division by zero."
 
-type FunTable lore = HM.HashMap Name ([Value] -> FutharkM lore [Value])
+type FunTable = HM.HashMap Name ([Value] -> FutharkM [Value])
 
 type VTable = HM.HashMap VName Value
 
-data FutharkEnv lore = FutharkEnv { envVtable :: VTable
-                                  , envFtable :: FunTable lore
-                                  }
+data FutharkEnv = FutharkEnv { envVtable :: VTable
+                             , envFtable :: FunTable
+                             }
 
 -- | A list of the prettyprinted values that were passed to @trace@
 type Trace = [String]
 
-newtype FutharkM lore a = FutharkM (ReaderT (FutharkEnv lore)
-                                    (ExceptT (InterpreterError lore)
-                                     (Writer Trace)) a)
+newtype FutharkM a = FutharkM (ReaderT FutharkEnv
+                               (ExceptT InterpreterError
+                                (Writer Trace)) a)
   deriving (Monad, Applicative, Functor,
-            MonadReader (FutharkEnv lore),
+            MonadReader FutharkEnv,
             MonadWriter Trace)
 
-runFutharkM :: FutharkM lore a -> FutharkEnv lore
-            -> (Either (InterpreterError lore) a, Trace)
+runFutharkM :: FutharkM a -> FutharkEnv
+            -> (Either InterpreterError a, Trace)
 runFutharkM (FutharkM m) env = runWriter $ runExceptT $ runReaderT m env
 
-bad :: InterpreterError lore -> FutharkM lore a
+bad :: InterpreterError -> FutharkM a
 bad = FutharkM . throwError
 
 bindVar :: Bindage -> Value
-        -> FutharkM lore Value
+        -> FutharkM Value
 
 bindVar BindVar val =
   return val
@@ -152,15 +151,15 @@ bindVar (BindInPlace _ src is) val = do
         asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
 bindVars :: [(Ident, Bindage, Value)]
-         -> FutharkM lore VTable
+         -> FutharkM VTable
 bindVars bnds = do
   let (idents, bindages, vals) = unzip3 bnds
   HM.fromList . zip (map identName idents) <$>
     zipWithM bindVar bindages vals
 
 binding :: [(Ident, Bindage, Value)]
-        -> FutharkM lore a
-        -> FutharkM lore a
+        -> FutharkM a
+        -> FutharkM a
 binding bnds m = do
   vtable <- bindVars bnds
   local (extendVtable vtable) $ do
@@ -185,19 +184,19 @@ binding bnds m = do
         ppDim (Constant v) _ = pretty v
         ppDim e            v = pretty e ++ "=" ++ pretty v
 
-lookupVar :: VName -> FutharkM lore Value
+lookupVar :: VName -> FutharkM Value
 lookupVar vname = do
   val <- asks $ HM.lookup vname . envVtable
   case val of Just val' -> return val'
               Nothing   -> bad $ TypeError $ "lookupVar " ++ textual vname
 
-lookupFun :: Name -> FutharkM lore ([Value] -> FutharkM lore [Value])
+lookupFun :: Name -> FutharkM ([Value] -> FutharkM [Value])
 lookupFun fname = do
   fun <- asks $ HM.lookup fname . envFtable
   case fun of Just fun' -> return fun'
               Nothing   -> bad $ TypeError $ "lookupFun " ++ textual fname
 
-arrToList :: Value -> FutharkM lore [Value]
+arrToList :: Value -> FutharkM [Value]
 arrToList (ArrayVal l _ [_]) =
   return $ map BasicVal $ elems l
 arrToList (ArrayVal l bt (_:rowshape)) =
@@ -213,7 +212,7 @@ arrayVal vs bt shape =
         flatten (BasicVal bv)      = [bv]
         flatten (ArrayVal arr _ _) = elems arr
 
-arrays :: [Type] -> [[Value]] -> FutharkM lore [Value]
+arrays :: [Type] -> [[Value]] -> FutharkM [Value]
 arrays ts vs = zipWithM arrays' ts vs'
   where vs' = case vs of
           [] -> replicate (length ts) []
@@ -224,7 +223,7 @@ arrays ts vs = zipWithM arrays' ts vs'
         asInt (BasicVal (IntVal x)) = return x
         asInt _                     = bad $ TypeError "bindVar BindInPlace"
 
-soacArrays :: SubExp -> [VName] -> FutharkM lore [[Value]]
+soacArrays :: SubExp -> [VName] -> FutharkM [[Value]]
 soacArrays w [] = do
   w' <- asInt =<< evalSubExp w
   return $ genericReplicate w' []
@@ -233,7 +232,7 @@ soacArrays w [] = do
 soacArrays _ names = transpose <$> mapM (arrToList <=< lookupVar) names
 
 indexArray :: String -> [Int] -> [Int]
-           -> FutharkM lore Int
+           -> FutharkM Int
 indexArray name shape is
   | and (zipWith (<=) is shape),
     all (0<=) is,
@@ -258,8 +257,8 @@ indexArray name shape is
 -- you'll get an error from the interpreter - it may just as well
 -- silently return a wrong value.  You are, however, guaranteed that
 -- the initial call to 'prog' is properly checked.
-runFun :: Lore lore => Name -> [Value] -> Prog lore
-       -> (Either (InterpreterError lore) [Value], Trace)
+runFun :: Name -> [Value] -> Prog
+       -> (Either InterpreterError [Value], Trace)
 runFun fname mainargs prog = do
   let ftable = buildFunTable prog
       futharkenv = FutharkEnv { envVtable = HM.empty
@@ -275,8 +274,8 @@ runFun fname mainargs prog = do
 
 -- | Like 'runFun', but prepends parameters corresponding to the
 -- required shape context of the function being called.
-runFunWithShapes :: Lore lore => Name -> [Value] -> Prog lore
-                 -> (Either (InterpreterError lore) [Value], Trace)
+runFunWithShapes :: Name -> [Value] -> Prog
+                 -> (Either InterpreterError [Value], Trace)
 runFunWithShapes fname valargs prog = do
   let ftable = buildFunTable prog
       futharkenv = FutharkEnv { envVtable = HM.empty
@@ -302,12 +301,12 @@ runFunWithShapes fname valargs prog = do
              shapeparams
 
 -- | As 'runFun', but throws away the trace.
-runFunNoTrace :: Lore lore => Name -> [Value] -> Prog lore
-              -> Either (InterpreterError lore) [Value]
+runFunNoTrace :: Name -> [Value] -> Prog
+              -> Either InterpreterError [Value]
 runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
-runThisFun :: Lore lore => FunDec lore -> [Value] -> FunTable lore
-           -> (Either (InterpreterError lore) [Value], Trace)
+runThisFun :: FunDec -> [Value] -> FunTable
+           -> (Either InterpreterError [Value], Trace)
 runThisFun (FunDec fname _ fparams _) args ftable
   | argtypes == paramtypes =
     runFutharkM (evalFuncall fname args) futharkenv
@@ -322,8 +321,7 @@ runThisFun (FunDec fname _ fparams _) args ftable
                                 , envFtable = ftable
                                 }
 
-buildFunTable :: Lore lore =>
-                 Prog lore -> FunTable lore
+buildFunTable :: Prog -> FunTable
 buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
@@ -338,7 +336,7 @@ buildFunTable = foldl expand builtins . progFunctions
 --------------------------------------------
 --------------------------------------------
 
-builtins :: HM.HashMap Name ([Value] -> FutharkM lore [Value])
+builtins :: HM.HashMap Name ([Value] -> FutharkM [Value])
 builtins = HM.fromList $ map namify
            [("toFloat32", builtin "toFloat32")
            ,("trunc32", builtin "trunc32")
@@ -353,7 +351,7 @@ builtins = HM.fromList $ map namify
            ,("exp64", builtin "exp64")]
   where namify (k,v) = (nameFromString k, v)
 
-builtin :: String -> [Value] -> FutharkM lore [Value]
+builtin :: String -> [Value] -> FutharkM [Value]
 builtin "toFloat32" [BasicVal (IntVal x)] =
   return [BasicVal $ Float32Val $ fromIntegral x]
 builtin "trunc32" [BasicVal (Float32Val x)] =
@@ -381,25 +379,25 @@ builtin fname args =
 single :: Value -> [Value]
 single v = [v]
 
-evalSubExp :: SubExp -> FutharkM lore Value
+evalSubExp :: SubExp -> FutharkM Value
 evalSubExp (Var ident)  = lookupVar ident
 evalSubExp (Constant v) = return $ BasicVal v
 
-evalBody :: Lore lore => Body lore -> FutharkM lore [Value]
+evalBody :: Body -> FutharkM [Value]
 
 evalBody (Body _ [] es) =
   mapM evalSubExp es
 
-evalBody (Body lore (Let pat _ e:bnds) res) = do
+evalBody (Body () (Let pat _ e:bnds) res) = do
   v <- evalExp e
   binding (zip3
            (map patElemIdent patElems)
            (map patElemBindage patElems)
            v) $
-    evalBody $ Body lore bnds res
+    evalBody $ Body () bnds res
   where patElems = patternElements pat
 
-evalExp :: Lore lore => Exp lore -> FutharkM lore [Value]
+evalExp :: Exp -> FutharkM [Value]
 evalExp (If e1 e2 e3 rettype) = do
   v <- evalSubExp e1
   vs <- case v of BasicVal (LogVal True)  -> evalBody e2
@@ -418,9 +416,9 @@ evalExp (Apply fname args rettype) = do
 evalExp (PrimOp op) = evalPrimOp op
 evalExp (LoopOp op) = evalLoopOp op
 evalExp (SegOp op) = evalSegOp op
-evalExp (Op _) = fail "Cannot evaluate Op"
+evalExp (Op op) = evalSOAC op
 
-evalPrimOp :: Lore lore => PrimOp lore -> FutharkM lore [Value]
+evalPrimOp :: PrimOp -> FutharkM [Value]
 
 evalPrimOp (SubExp se) =
   single <$> evalSubExp se
@@ -680,7 +678,7 @@ evalPrimOp (Partition _ n flags arrs) = do
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
-evalLoopOp :: forall lore . Lore lore => LoopOp lore -> FutharkM lore [Value]
+evalLoopOp :: LoopOp -> FutharkM [Value]
 
 evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
   bound <- evalSubExp boundexp
@@ -690,7 +688,7 @@ evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
       vs <- foldM iteration mergestart [0..n-1]
       binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
         mapM lookupVar $
-        loopResultContext (representative :: lore) respat mergepat ++ respat
+        loopResultContext (representative :: SOACS) respat mergepat ++ respat
     _ -> bad $ TypeError "evalBody DoLoop for"
   where (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
@@ -708,18 +706,48 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
             case condv of
               BasicVal (LogVal False) ->
                 mapM lookupVar $
-                loopResultContext (representative :: lore) respat mergepat ++
+                loopResultContext (representative :: SOACS) respat mergepat ++
                 respat
               BasicVal (LogVal True) ->
                 iteration =<< evalBody loopbody
               _ ->
                 bad $ TypeError "evalBody DoLoop while"
 
-evalLoopOp (Map _ w fun arrexps) = do
+evalLoopOp MapKernel{} =
+  fail "Cannot interpret map kernels."
+
+evalLoopOp ReduceKernel{} =
+  fail "Cannot interpret reduction kernels."
+
+evalLoopOp ScanKernel{} =
+  fail "Cannot interpret scan kernels."
+
+evalSOAC :: SOAC SOACS -> FutharkM [Value]
+
+evalSOAC (Stream _ _ form elam arrs _) = do
+  let accs = getStreamAccums form
+  accvals <- mapM evalSubExp accs
+  arrvals <- mapM lookupVar  arrs
+  let ExtLambda i elam_params elam_body elam_rtp = elam
+      bind_i = (Ident i (Basic Int),
+                BindVar,
+                BasicVal $ IntVal 0)
+  let fun funargs = binding (bind_i :
+                             zip3 (map paramIdent elam_params)
+                                  (repeat BindVar)
+                                  funargs) $
+                    evalBody elam_body
+  -- get the outersize of the input array(s), and use it as chunk!
+  let (ArrayVal _ _ (outersize:_)) = head arrvals
+  let chunkval = BasicVal $ IntVal $ fromIntegral outersize
+  vs <- fun (chunkval:accvals++arrvals)
+  return $ valueShapeContext elam_rtp vs ++ vs
+
+evalSOAC (Map _ w fun arrexps) = do
   vss' <- zipWithM (applyLambda fun) [0..] =<< soacArrays w arrexps
   arrays (lambdaReturnType fun) vss'
 
-evalLoopOp (ConcatMap _ _ fun inputs) = do
+evalSOAC (ConcatMap _ _ fun inputs) = do
   inputs' <- mapM (mapM lookupVar) inputs
   vss <- mapM (mapM asArray <=< applyConcatMapLambda fun) inputs'
   innershapes <- mapM (mapM (asInt <=< evalSubExp) . arrayDims) $
@@ -737,17 +765,17 @@ evalLoopOp (ConcatMap _ _ fun inputs) = do
                       zip3 innershapes arrs $ lambdaReturnType fun ]
   return $ ctx ++ vs
   where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
-        asInt _                     = bad $ TypeError "evalLoopOp asInt"
+        asInt _                     = bad $ TypeError "evalSOAC asInt"
         asArray (ArrayVal a _ (n:_)) = return (a, n)
-        asArray _                    = bad $ TypeError "evalLoopOp asArray"
+        asArray _                    = bad $ TypeError "evalSOAC asArray"
 
-evalLoopOp (Reduce _ w fun inputs) = do
+evalSOAC (Reduce _ w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
   let foldfun acc (i, x) = applyLambda fun i $ acc ++ x
   foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
 
-evalLoopOp (Scan _ w fun inputs) = do
+evalSOAC (Scan _ w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   (acc, vals') <- foldM scanfun (startvals, []) =<<
@@ -757,7 +785,7 @@ evalLoopOp (Scan _ w fun inputs) = do
             acc' <- applyLambda fun i $ acc ++ x
             return (acc', acc' : l)
 
-evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
+evalSOAC (Redomap _ w _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   if res_len == acc_len
   then foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
@@ -779,35 +807,7 @@ evalLoopOp (Redomap _ w _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalLoopOp MapKernel{} =
-  fail "Cannot interpret map kernels."
-
-evalLoopOp ReduceKernel{} =
-  fail "Cannot interpret reduction kernels."
-
-evalLoopOp ScanKernel{} =
-  fail "Cannot interpret scan kernels."
-
-evalLoopOp (Stream _ _ form elam arrs _) = do
-  let accs = getStreamAccums form
-  accvals <- mapM evalSubExp accs
-  arrvals <- mapM lookupVar  arrs
-  let ExtLambda i elam_params elam_body elam_rtp = elam
-      bind_i = (Ident i (Basic Int),
-                BindVar,
-                BasicVal $ IntVal 0)
-  let fun funargs = binding (bind_i :
-                             zip3 (map paramIdent elam_params)
-                                  (repeat BindVar)
-                                  funargs) $
-                    evalBody elam_body
-  -- get the outersize of the input array(s), and use it as chunk!
-  let (ArrayVal _ _ (outersize:_)) = head arrvals
-  let chunkval = BasicVal $ IntVal $ fromIntegral outersize
-  vs <- fun (chunkval:accvals++arrvals)
-  return $ valueShapeContext elam_rtp vs ++ vs
-
-evalSegOp :: forall lore . Lore lore => SegOp lore -> FutharkM lore [Value]
+evalSegOp :: SegOp SOACS -> FutharkM [Value]
 
 evalSegOp (SegReduce _ _ fun inputs descparr_exp) = do
   let (ne_exps, flatarr_exps) = unzip inputs
@@ -897,19 +897,19 @@ evalSegOp (SegReplicate _ counts_vn dataarr_vn mb_seg_vn) = do
   where asInt (BasicVal (IntVal x)) = return $ fromIntegral x
         asInt _ = bad $ TypeError "evalSegOp SegReplicate asInt"
 
-evalFuncall :: Name -> [Value] -> FutharkM lore [Value]
+evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do
   fun <- lookupFun fname
   fun args
 
 evalIntBinOp :: (Int32 -> Int32 -> Int32) -> SubExp -> SubExp
-             -> FutharkM lore [Value]
+             -> FutharkM [Value]
 evalIntBinOp op = evalIntBinOpM $ \x y -> return $ op x y
 
-evalIntBinOpM :: (Int32 -> Int32 -> FutharkM lore Int32)
+evalIntBinOpM :: (Int32 -> Int32 -> FutharkM Int32)
               -> SubExp
               -> SubExp
-              -> FutharkM lore [Value]
+              -> FutharkM [Value]
 evalIntBinOpM op e1 e2 = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
@@ -921,13 +921,13 @@ evalIntBinOpM op e1 e2 = do
       bad $ TypeError "evalIntBinOpM"
 
 evalFloat32BinOp :: (Float -> Float -> Float) -> SubExp -> SubExp
-                 -> FutharkM lore [Value]
+                 -> FutharkM [Value]
 evalFloat32BinOp op = evalFloat32BinOpM $ \x y -> return $ op x y
 
-evalFloat32BinOpM :: (Float -> Float -> FutharkM lore Float)
+evalFloat32BinOpM :: (Float -> Float -> FutharkM Float)
                   -> SubExp
                   -> SubExp
-                  -> FutharkM lore [Value]
+                  -> FutharkM [Value]
 evalFloat32BinOpM op e1 e2 = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
@@ -939,13 +939,13 @@ evalFloat32BinOpM op e1 e2 = do
       bad $ TypeError $ "evalFloat32BinOpM " ++ pretty v1 ++ " " ++ pretty v2
 
 evalFloat64BinOp :: (Double -> Double -> Double) -> SubExp -> SubExp
-                 -> FutharkM lore [Value]
+                 -> FutharkM [Value]
 evalFloat64BinOp op = evalFloat64BinOpM $ \x y -> return $ op x y
 
-evalFloat64BinOpM :: (Double -> Double -> FutharkM lore Double)
+evalFloat64BinOpM :: (Double -> Double -> FutharkM Double)
                   -> SubExp
                   -> SubExp
-                  -> FutharkM lore [Value]
+                  -> FutharkM [Value]
 evalFloat64BinOpM op e1 e2 = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
@@ -956,7 +956,7 @@ evalFloat64BinOpM op e1 e2 = do
     _ ->
       bad $ TypeError $ "evalFloat64BinOpM " ++ pretty v1 ++ " " ++ pretty v2
 
-evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> FutharkM lore [Value]
+evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> FutharkM [Value]
 evalBoolBinOp op e1 e2 = do
   v1 <- evalSubExp e1
   v2 <- evalSubExp e2
@@ -966,7 +966,7 @@ evalBoolBinOp op e1 e2 = do
     _ ->
       bad $ TypeError $ "evalBoolBinOp " ++ pretty v1 ++ " " ++ pretty v2
 
-applyLambda :: Lore lore => Lambda lore -> Int32 -> [Value] -> FutharkM lore [Value]
+applyLambda :: Lambda -> Int32 -> [Value] -> FutharkM [Value]
 applyLambda (Lambda i params body rettype) j args = do
   v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) args) $
        evalBody body
@@ -976,7 +976,7 @@ applyLambda (Lambda i params body rettype) j args = do
                  BindVar,
                  BasicVal $ IntVal j)
 
-applyConcatMapLambda :: Lore lore => Lambda lore -> [Value] -> FutharkM lore [Value]
+applyConcatMapLambda :: Lambda -> [Value] -> FutharkM [Value]
 applyConcatMapLambda (Lambda i params body rettype) valargs = do
   v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) (shapes ++ valargs)) $
        evalBody body
@@ -999,7 +999,7 @@ applyConcatMapLambda (Lambda i params body rettype) valargs = do
                   paramName)
              shapeparams
 
-checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM lore ()
+checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM ()
 checkReturnShapes = zipWithM_ checkShape
   where checkShape t val = do
           let valshape = map (BasicVal . IntVal . fromIntegral) $ valueShape val

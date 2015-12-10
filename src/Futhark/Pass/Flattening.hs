@@ -43,7 +43,7 @@ import Data.Maybe
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Transform.Substitute
 import Futhark.Tools
 import Futhark.Pass
@@ -407,7 +407,7 @@ setupDataArray i =
 
 --------------------------------------------------------------------------------
 
-flattenProg :: Pass Basic Basic
+flattenProg :: Pass SOACS SOACS
 flattenProg =
   Pass { passName = "flattening"
        , passDescription = "Perform flattening transformation"
@@ -700,7 +700,7 @@ transformBody (Body () bindings ses) = do
 -- Only maps needs to be transformed, @map f xs@ ~~> @f^ xs@
 transformBinding :: Binding -> FlatM [Binding]
 transformBinding topBnd@(Let (Pattern [] pats) ()
-                             (LoopOp (Map certs w lambda arrs))) = do
+                             (Op (Map certs w lambda arrs))) = do
   tell [StartBnd "transformBinding" topBnd]
   -- Checking if a Variable use is safe requires knowledge of the type
   -- Consider writing isSafeToMap??? differently. TODO
@@ -722,11 +722,11 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
        addDataArray i_name $ Ident i_name tp
      arrs' <- mapM (liftM identName . getDataArray1) arrs
      return [Let (Pattern [] pats) ()
-                 (LoopOp (Map certs w lambda arrs'))]
+                 (Op (Map certs w lambda arrs'))]
    _ -> do
      loopinv_arrvns <-
        filter (`notElem` arrs) <$> filterM (liftM isJust . vnDimentionality)
-       (HS.toList $ freeInExp (LoopOp $ Map certs w lambda arrs))
+       (HS.toList $ freeIn $ Map certs w lambda arrs)
      unless (null loopinv_arrvns) $
        flatError $ Error $ "We only handle intermediate results currently" ++
                            "but these where loop invariant: " ++
@@ -835,7 +835,7 @@ transformBinding topBnd@(Let (Pattern [] pats) ()
                                  , lambdaReturnType = toreturn_tps
                                  }
 
-      let theMapExp = LoopOp $ Map certs w wrappedlambda argarrs'
+      let theMapExp = Op $ Map certs w wrappedlambda argarrs'
       return $ Let pat () theMapExp
 
 transformBinding topbnd@(Let (Pattern [] [PatElem resident_name BindVar resident_tp]) ()
@@ -895,7 +895,7 @@ transformBinding topbnd@(Let (Pattern [] [PatElem resident_name BindVar resident
       return (merged, catMaybes [merge_bnd] : res)
 
 
-transformBinding topbnd@(Let pat () (LoopOp (Redomap certs w lam1 lam2 accs arrs))) = do
+transformBinding topbnd@(Let pat () (Op (Redomap certs w lam1 lam2 accs arrs))) = do
   tell [StartBnd "transformBinding" topbnd]
   (map_bnd, red_bnd) <-
     redomapToMapAndReduce pat () (certs, w, lam1, lam2, accs, arrs)
@@ -983,7 +983,7 @@ pullOutOfMap mapInfo _
 
 pullOutOfMap mapInfo (argsneeded, _)
                      (Let (Pattern [] pats) ()
-                          (LoopOp (Map certs w lambda arrs))) = do
+                          (Op (Map certs w lambda arrs))) = do
   -- For all argNeeded that are not already being mapped over:
   --
   -- 1) if they where created as an intermediate result in the outer map,
@@ -1079,7 +1079,7 @@ pullOutOfMap mapInfo (argsneeded, _)
   pats' <- mapM unflattenRes pats
 
   let mapBnd' = Let (Pattern [] pats') ()
-                    (LoopOp (Map (certs ++ mapCerts mapInfo)
+                    (Op (Map (certs ++ mapCerts mapInfo)
                                  w
                                  lambda'
                                  (map identName newInnerIdents)))
@@ -1167,7 +1167,7 @@ pullOutOfMap mapInfo (argsneeded, _)
 
 pullOutOfMap mapInfo _
                      topBnd@(Let (Pattern [] pats) letlore
-                                 (LoopOp (Reduce certs w lambda args))) = do
+                                 (Op (Reduce certs w lambda args))) = do
   ok <- isSafeToMapBody $ lambdaBody lambda
   if not ok
   then flatError . Error $ "map of reduce with \"advanced\" operator"
@@ -1247,7 +1247,7 @@ pullOutOfMap mapinfo _ (Let (Pattern [] [PatElem resident_name BindVar resident_
 
 
 pullOutOfMap mapinfo bndinfo
-             (Let pat () (LoopOp (Redomap certs w lam1 lam2 accs arrs))) = do
+             (Let pat () (Op (Redomap certs w lam1 lam2 accs arrs))) = do
   -- Remember that reduce function must be @a -> a -> a@
   -- This means that the result of the map must be of type @a@.
   (map_bnd, red_bnd) <-
@@ -1375,7 +1375,7 @@ isSafeToMapExp (If _ e1 e2 _) =
   liftM2 (&&) (isSafeToMapBody e1) (isSafeToMapBody e2)
 isSafeToMapExp Apply{} =
   flatError $ Error "TODO: isSafeToMap not implemented for Apply"
-isSafeToMapExp (Op ()) = return True
+isSafeToMapExp (Op _) = return False
 
 isSafeToMapType :: Type -> FlatM Bool
 isSafeToMapType Mem{} = flatError MemTypeFound
@@ -1402,7 +1402,7 @@ segscanPlus w st arr segdescp = do
 reducePlus :: SubExp -> VName -> FlatM Exp
 reducePlus w arr = do
   lambda <- binOpLambda Plus Int
-  return $ LoopOp $ Reduce [] w lambda [(Constant $ IntVal 0, arr)]
+  return $ Op $ Reduce [] w lambda [(Constant $ IntVal 0, arr)]
 
 --------------------------------------------------------------------------------
 

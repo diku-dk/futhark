@@ -27,7 +27,7 @@ import qualified Data.DList as DL
 import Data.List
 
 import qualified Futhark.Representation.External as E
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import qualified Futhark.Binder as B
 import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
@@ -62,7 +62,7 @@ initialFtable = HM.map addBuiltin builtInFunctions
            const $ Just $ ExtRetType [Basic t])
           (E.Basic t, map E.Basic paramts)
 
-newtype InternaliseM  a = InternaliseM (BinderT Basic
+newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (ReaderT InternaliseEnv
                                          (StateT VNameSource
                                           (Except String)))
@@ -81,7 +81,7 @@ instance HasTypeEnv InternaliseM where
   askTypeEnv = InternaliseM askTypeEnv
 
 instance MonadBinder InternaliseM where
-  type Lore InternaliseM = Basic
+  type Lore InternaliseM = SOACS
   mkLetM pat e = InternaliseM $ mkLetM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e

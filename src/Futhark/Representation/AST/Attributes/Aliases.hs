@@ -83,22 +83,6 @@ loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
   zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
-loopOpAliases (Map _ _ f _) =
-  map (const mempty) $ lambdaReturnType f
-loopOpAliases (Reduce _ _ f _) =
-  map (const mempty) $ lambdaReturnType f
-loopOpAliases (Scan _ _ f _) =
-  map (const mempty) $ lambdaReturnType f
-loopOpAliases (Redomap _ _ _ innerfun _ _) =
-  map (const mempty) $ lambdaReturnType innerfun
-loopOpAliases (Stream _ _ form lam _ _) =
-  let a1 = case form of
-             MapLike _        -> []
-             RedLike _ lam0 _ -> bodyAliases $ lambdaBody lam0
-             Sequential _     -> []
-  in  a1 ++ bodyAliases (extLambdaBody lam)
-loopOpAliases ConcatMap{} =
-  [mempty]
 loopOpAliases (MapKernel _ _ _ _ _ returns _) =
   map (const mempty) returns
 loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
@@ -166,19 +150,8 @@ consumedInExp (If _ tb fb _) =
 consumedInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat (map (subExpAliases . snd) $
            filter (unique . paramDeclType . fst) merge)
-consumedInExp (LoopOp (Map _ _ lam _)) =
-  consumedByLambda lam
-consumedInExp (LoopOp (Reduce _ _ lam _)) =
-  consumedByLambda lam
-consumedInExp (LoopOp (Scan _ _ lam _)) =
-  consumedByLambda lam
-consumedInExp (LoopOp (Redomap _ _ _ lam _ _)) =
-  consumedByLambda lam
 consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
-
-consumedByLambda :: Aliased lore => Lambda lore -> Names
-consumedByLambda = consumedInBody . lambdaBody
 
 consumedInPattern :: Pattern lore -> Names
 consumedInPattern pat =

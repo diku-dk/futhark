@@ -684,18 +684,6 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
     where mergepat = map fst merge
           mergenames = map paramName mergepat
 
-defCompileLoopOp _ Map{} = soacError
-
-defCompileLoopOp _ ConcatMap{} = soacError
-
-defCompileLoopOp _ Scan{} = soacError
-
-defCompileLoopOp _ Redomap{} = soacError
-
-defCompileLoopOp _ Stream{} = soacError
-
-defCompileLoopOp _ Reduce{} = soacError
-
 defCompileLoopOp _ MapKernel{} = soacError
 
 defCompileLoopOp _ ReduceKernel{} = soacError

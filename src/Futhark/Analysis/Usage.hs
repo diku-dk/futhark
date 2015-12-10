@@ -1,6 +1,9 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Analysis.Usage
        ( usageInBinding
        , usageInExp
+
+       , UsageInOp(..)
        )
        where
 
@@ -11,7 +14,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Binder (Proper)
 
-usageInBinding :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
+usageInBinding :: (Proper lore, Aliased lore, UsageInOp (Op lore)) => Binding lore -> UT.UsageTable
 usageInBinding (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,
@@ -29,7 +32,7 @@ usageInBinding (Let pat lore e) =
         consumptionInPatElem _ =
           mempty
 
-usageInExp :: Aliased lore => Exp lore -> UT.UsageTable
+usageInExp :: (Aliased lore, UsageInOp (Op lore)) => Exp lore -> UT.UsageTable
 usageInExp (Apply _ args _) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases arg
@@ -38,18 +41,12 @@ usageInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
           | (v,se) <- merge, unique $ paramDeclType v ]
-usageInExp (LoopOp (Map _ _ f _)) =
-  usageInLambda f
-usageInExp (LoopOp (Reduce _ _ f _)) =
-  usageInLambda f
-usageInExp (LoopOp (Scan _ _ f _)) =
-  usageInLambda f
-usageInExp (LoopOp (Redomap _ _ _ f _ _)) =
-  usageInLambda f
+usageInExp (Op op) =
+  usageInOp op
 usageInExp _ = UT.empty
 
-usageInLambda :: Aliased lore => Lambda lore -> UT.UsageTable
-usageInLambda =
-  mconcat .
-  map UT.consumedUsage .
-  HS.toList . consumedInBody . lambdaBody
+class UsageInOp op where
+  usageInOp :: op -> UT.UsageTable
+
+instance UsageInOp () where
+  usageInOp () = mempty

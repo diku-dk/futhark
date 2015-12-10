@@ -40,7 +40,7 @@ import Futhark.Util.Pretty (pretty)
 import Futhark.Representation.AST.Syntax.Core hiding (Basic)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
@@ -83,7 +83,7 @@ instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
 
-data StructureTest = StructureTest (Pipeline Basic Basic) AstMetrics
+data StructureTest = StructureTest (Pipeline SOACS SOACS) AstMetrics
 
 instance Show StructureTest where
   show (StructureTest _ metrics) =
@@ -195,14 +195,14 @@ parseExpectedStructure =
   lexstr "structure" *>
   (StructureTest <$> parsePipeline <*> parseMetrics)
 
-parsePipeline :: Parser (Pipeline Basic Basic)
+parsePipeline :: Parser (Pipeline SOACS SOACS)
 parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
                 pure defaultPipelineConfig
   where defaultPipelineConfig =
           standardPipeline
         distributePipelineConfig =
           standardPipeline >>>
-          passes [extractKernels, simplifyBasic]
+          passes [extractKernels, simplifySOACS]
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ liftM HM.fromList $ many $
@@ -272,7 +272,7 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-optimisedProgramMetrics :: Pipeline Basic Basic -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics :: Pipeline SOACS SOACS -> FilePath -> TestM AstMetrics
 optimisedProgramMetrics pipeline program = do
   res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of

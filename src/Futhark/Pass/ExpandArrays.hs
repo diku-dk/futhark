@@ -11,11 +11,11 @@ import qualified Data.HashSet as HS
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Tools
 import Futhark.Pass
 
-expandArrays :: Pass Basic Basic
+expandArrays :: Pass SOACS SOACS
 expandArrays = simplePass
                "expand arrays"
                "Expand arrays inside kernels" $
@@ -68,7 +68,7 @@ transformExp e =
 type ExpandM = RWS ExpandEnv [ExpandedArray] VNameSource
 
 data ExpandedArray =
-  ExpandedArray { expandedInput :: KernelInput Basic
+  ExpandedArray { expandedInput :: KernelInput SOACS
                 , _expandedName :: VName
                 , _expandedType :: Type
                 }
@@ -85,7 +85,7 @@ variantIn :: Names -> ExpandM a -> ExpandM a
 variantIn names = local $ \env -> env { envKernelVariant = names <> envKernelVariant env }
 
 expandInKernel :: MonadFreshNames m =>
-                  VName -> [(VName, SubExp)] -> [KernelInput Basic]
+                  VName -> [(VName, SubExp)] -> [KernelInput SOACS]
                -> ExpandM a
                -> m (a, [ExpandedArray])
 expandInKernel thread_num ispace inps m =

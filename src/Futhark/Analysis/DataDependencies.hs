@@ -9,7 +9,6 @@ module Futhark.Analysis.DataDependencies
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.Binder (Proper)
 
@@ -38,68 +37,10 @@ dataDependencies' startdeps = foldl grow startdeps . bodyBindings
                 (bodyResult fb)
           in HM.unions [branchdeps, deps, tdeps, fdeps]
 
-        grow deps (Let pat _ (LoopOp (Map cs _ fun arrs))) =
-          let pardeps = mkDeps (map paramIdent $ lambdaParams fun) $
-                        soacArgDeps deps cs $ map (depsOfVar deps) arrs
-              deps' = dataDependencies' (pardeps `HM.union` deps) $
-                      lambdaBody fun
-              resdeps = HM.fromList $ zip (patternNames pat) $
-                        lambdaDeps deps' fun
-          in resdeps `HM.union` deps'
-
-        grow deps (Let pat _ (LoopOp (Reduce cs _ fun args))) =
-          foldDeps deps pat cs fun acc arr
-          where (acc,arr) = unzip args
-
-        grow deps (Let pat _ (LoopOp (Scan cs _ fun args))) =
-          foldDeps deps pat cs fun acc arr
-          where (acc,arr) = unzip args
-
-        grow deps (Let pat _ (LoopOp (Redomap cs _ outerfun innerfun acc arr))) =
-          let (deps', seconddeps) =
-                foldDeps' deps cs innerfun
-                (map (depsOf deps) acc) (map (depsOfVar deps) arr)
-              (outerdeps, names) =
-                foldDeps' deps cs outerfun seconddeps seconddeps
-          in mkDeps (patternIdents pat) names `HM.union` outerdeps `HM.union` deps'
-
         grow deps (Let pat _ e) =
           let free = freeInExp e
               freeDeps = HS.unions $ map (depsOfVar deps) $ HS.toList free
           in HM.fromList [ (name, freeDeps) | name <- patternNames pat ] `HM.union` deps
-
-foldDeps' :: Proper lore =>
-             Dependencies
-          -> Certificates -> Lambda lore -> [Names] -> [Names]
-          -> (Dependencies, [Names])
-foldDeps' deps cs fun acc arr =
-  let pardeps = HM.fromList $ zip (map paramName $ lambdaParams fun) $
-                soacArgDeps deps cs $ acc++arr
-      deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun
-  in (deps', lambdaDeps deps' fun)
-
-foldDeps :: Proper lore =>
-            Dependencies
-         -> Pattern lore -> Certificates -> Lambda lore -> [SubExp] -> [VName]
-         -> HM.HashMap VName Names
-foldDeps deps pat cs fun acc arr =
-  let pardeps = HM.fromList $ zip (map paramName $ lambdaParams fun) $
-                soacArgDeps deps cs $
-                map (depsOf deps) acc ++ map (depsOfVar deps) arr
-      deps' = dataDependencies' (pardeps `HM.union` deps) $ lambdaBody fun
-      resdeps = HM.fromList $ zip (patternNames pat) $
-                lambdaDeps deps' fun
-  in resdeps `HM.union` deps'
-
-lambdaDeps :: FreeIn (Annotations.Exp lore) => Dependencies -> Lambda lore -> [Names]
-lambdaDeps deps fun =
-  map (depsOf deps) $ bodyResult $ lambdaBody fun
-
-soacArgDeps :: Dependencies
-            -> [VName] -> [Names] -> [HS.HashSet VName]
-soacArgDeps deps cs args =
-  let cdeps = HS.unions $ map (depsOf deps . Var) cs
-  in map (HS.union cdeps) args
 
 depsOf :: Dependencies -> SubExp -> Names
 depsOf _ (Constant _) = HS.empty
@@ -107,6 +48,3 @@ depsOf deps (Var v)   = depsOfVar deps v
 
 depsOfVar :: Dependencies -> VName -> Names
 depsOfVar deps name = HS.insert name $ HM.lookupDefault HS.empty name deps
-
-mkDeps :: [Ident] -> [Names] -> Dependencies
-mkDeps idents names = HM.fromList $ zip (map identName idents) names

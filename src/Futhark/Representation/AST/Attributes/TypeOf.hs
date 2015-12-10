@@ -136,33 +136,6 @@ loopOpExtType :: Typed (Annotations.FParam lore) =>
                  LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (paramIdent . fst) merge
-loopOpExtType (Map _ size f _) =
-  staticShapes $ mapType size f
-loopOpExtType (ConcatMap _ _ f _) =
-  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) NoUniqueness
-  | t <- lambdaReturnType f ]
-loopOpExtType (Reduce _ _ fun _) =
-  staticShapes $ lambdaReturnType fun
-loopOpExtType (Scan _ width lam _) =
-  staticShapes $ map (`arrayOfRow` width) $ lambdaReturnType lam
-loopOpExtType (Redomap _ outersize outerfun innerfun _ _) =
-  staticShapes $
-  let acc_tp    = lambdaReturnType outerfun
-      acc_el_tp = lambdaReturnType innerfun
-      res_el_tp = drop (length acc_tp) acc_el_tp
-  in  case res_el_tp of
-        [] -> acc_tp
-        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) NoUniqueness |
-                          eltp <- res_el_tp ]
-loopOpExtType (Stream _ outersize form lam _ _) =
-  map (substNamesInExtType substs) rtp
-  where nms = map paramName $ take (1 + length accs) params
-        substs = HM.fromList $ zip nms (outersize:accs)
-        ExtLambda _ params _ rtp = lam
-        accs = case form of
-                MapLike _ -> []
-                RedLike _ _ acc -> acc
-                Sequential  acc -> acc
 loopOpExtType (MapKernel _ _ _ is _ returns _) =
   staticShapes
   [ rearrangeType perm (arrayOfShape t outer_shape)
@@ -290,21 +263,6 @@ typeEnvFromPattern = typeEnvFromIdents . patternIdents
 withParamTypes :: (LocalTypeEnv m, Typed attr) =>
                   [Param attr] -> m a -> m a
 withParamTypes = localTypeEnv . typeEnvFromParams
-
-substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
-substNamesInExtType _ tp@(Basic _) = tp
-substNamesInExtType subs (Mem se space) =
-  Mem (substNamesInSubExp subs se) space
-substNamesInExtType subs (Array btp shp u) =
-  let shp' = ExtShape $ map (substNamesInExtDimSize subs) (extShapeDims shp)
-  in  Array btp shp' u
-substNamesInSubExp :: HM.HashMap VName SubExp -> SubExp -> SubExp
-substNamesInSubExp _ e@(Constant _) = e
-substNamesInSubExp subs (Var idd) =
-  HM.lookupDefault (Var idd) idd subs
-substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
-substNamesInExtDimSize _ (Ext o) = Ext o
-substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
 class TypedOp op where
   opType :: HasTypeEnv m => op -> m [ExtType]

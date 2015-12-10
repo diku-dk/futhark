@@ -7,12 +7,12 @@ module Futhark.Pass.Untrace
   ( untraceProg )
   where
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Pass
 import Futhark.Tools
 
 -- | Remove all special debugging function calls from the program.
-untraceProg :: Pass Basic Basic
+untraceProg :: Pass SOACS SOACS
 untraceProg = simplePass
               "untrace"
               "Remove debugging annotations from program." $

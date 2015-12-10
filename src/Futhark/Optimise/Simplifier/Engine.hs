@@ -24,6 +24,7 @@ module Futhark.Optimise.Simplifier.Engine
        , emptyEnv
        , HoistBlockers(..)
        , noExtraHoistBlockers
+       , BlockPred
        , State
        , emptyState
        , Need
@@ -39,12 +40,14 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyBinding
        , simplifyResult
        , simplifyExp
+       , simplifyPattern
        , simplifyFun
        , simplifyLambda
        , simplifyLambdaNoHoisting
        , simplifyExtLambda
+       , bindLParams
 
-       , BlockPred
+       , tapUsage
        ) where
 
 import Control.Applicative
@@ -69,8 +72,8 @@ import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
 import Futhark.Optimise.Simplifier.Apply
 import Futhark.Construct
-import qualified Futhark.Analysis.ScalExp as SExp
 import Futhark.Optimise.Simplifier.Lore
+import qualified Futhark.Analysis.ScalExp as SE
 
 type NeedSet lore = [Binding lore]
 
@@ -333,7 +336,7 @@ requires bnd =
   `HS.difference` HS.fromList (provides bnd)) <>
   freeInExp (bindingExp bnd)
 
-expandUsage :: (Proper lore, Aliased lore) =>
+expandUsage :: (Proper lore, Aliased lore, UsageInOp (Op lore)) =>
                UT.UsageTable -> Binding lore -> UT.UsageTable
 expandUsage utable bnd = utable <> usageInBinding bnd <> usageThroughAliases
   where pat = bindingPattern bnd
@@ -479,47 +482,6 @@ simplifyBinding (Let pat _ (Apply fname args rettype)) = do
                   inspectBinding =<<
                     mkLetM (addWisdomToPattern pat' e') e'
 
-simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
-  lss' <- simplifyExp lss
-  rtp <- expExtType lss
-  rtp' <- expExtType lss'
-  let patels      = patternElements pat
-      argpattps   = map patElemType $ drop (length patels - length rtp) patels
-  (newpats,newsubexps) <- unzip <$> reverse <$>
-                          foldM gatherPat [] (zip3 rtp rtp' argpattps)
-  newexps' <- forM newsubexps $ simplifyExp . PrimOp . SubExp
-  newpats' <- mapM simplifyPattern newpats
-  let rmvdpatels = concatMap patternElements newpats
-      patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
-  pat' <- let (ctx,vals) = splitAt (length patels' - length rtp') patels'
-          in simplifyPattern $ Pattern ctx vals
-  let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
-  newpats'' <- mapM simplifyPattern $ newpats' ++ [pat']
-  let (_,newexps'') = unzip newpatexps'
-  let newpatexps''= zip newpats'' newexps''
-  _ <- forM newpatexps'' $ \(p,e) -> inspectBinding =<<
-                            mkLetM (addWisdomToPattern p e) e
-  return ()
-    where gatherPat acc (_, Basic _, _) = return acc
-          gatherPat acc (_, Mem {}, _) = return acc
-          gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
-            foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
-          gatherPat _ _ =
-            fail $ "In simplifyBinding \"let pat = stream()\": "++
-                   " reached unreachable case!"
-          gatherShape acc (Ext i, Free se', Var pid) = do
-            let patind  = elemIndex pid $
-                          map patElemName $ patternElements pat
-            case patind of
-              Just k -> return $ (Pattern [] [patternElements pat !! k], se') : acc
-              Nothing-> fail $ "In simplifyBinding \"let pat = stream()\": pat "++
-                               "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
-          gatherShape _ (Free se, Ext i', _) =
-            fail $ "In simplifyBinding \"let pat = stream()\": "++
-                   " previous known dimension: " ++ pretty se ++
-                   " becomes existential: ?" ++ show i' ++ "!"
-          gatherShape acc _ = return acc
-
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
   pat' <- simplifyPattern pat
@@ -611,32 +573,6 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   return $ DoLoop respat merge' form' loopbody'
   where fparamnames = HS.fromList (map (paramName . fst) merge)
 
-simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
-  cs' <- simplify      cs
-  outerdim' <- simplify outerdim
-  form' <- simplifyStreamForm outerdim' form
-  arr' <- mapM simplify  arr
-  vtab <- getVtable
-  let (chunk:_) = extLambdaParams lam
-      se_outer = case outerdim' of
-                    Var idd    -> fromMaybe (SExp.Id idd Int) (ST.lookupScalExp idd vtab)
-                    Constant c -> SExp.Val c
-      se_1 = SExp.Val $ IntVal 1
-      -- extension: one may similarly treat iota stream-array case,
-      -- by setting the bounds to [0, se_outer-1]
-      parbnds  = [ (chunk, se_1, se_outer) ]
-  lam' <- simplifyExtLambda parbnds lam outerdim'
-  return $ Stream cs' outerdim' form' lam' arr' ii
-  where simplifyStreamForm _ (MapLike o) = return $ MapLike o
-        simplifyStreamForm outerdim' (RedLike o lam0 acc) = do
-            acc'  <- mapM simplify acc
-            lam0' <- simplifyLambda lam0 outerdim' $
-                     replicate (length $ lambdaParams lam0) Nothing
-            return $ RedLike o lam0' acc'
-        simplifyStreamForm _ (Sequential acc) = do
-            acc'  <- mapM simplify acc
-            return $ Sequential acc'
-
 simplifyLoopOp (MapKernel cs w index ispace inps returns body) = do
   cs' <- simplify cs
   w' <- simplify w
@@ -675,57 +611,6 @@ simplifyLoopOp (ScanKernel cs w kernel_size order lam input) = do
   lam' <- simplifyLambda lam w' $ map Just arrs'
   return $ ScanKernel cs' w' kernel_size' order lam' $ zip nes' arrs'
 
-simplifyLoopOp (Map cs w fun arrs) = do
-  cs' <- simplify cs
-  w' <- simplify w
-  arrs' <- mapM simplify arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  return $ Map cs' w' fun' arrs'
-
-simplifyLoopOp (ConcatMap cs w fun arrs) = do
-  cs' <- simplify cs
-  w' <- simplify w
-  arrs' <- mapM (mapM simplify) arrs
-  fun' <- simplifyLambda fun w $ map (const Nothing) $ lambdaParams fun
-  return $ ConcatMap cs' w' fun' arrs'
-
-simplifyLoopOp (Reduce cs w fun input) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplify cs
-  w' <- simplify w
-  acc' <- mapM simplify acc
-  arrs' <- mapM simplify arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  return $ Reduce cs' w' fun' (zip acc' arrs')
-
-simplifyLoopOp (Scan cs w fun input) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplify cs
-  w' <- simplify w
-  acc' <- mapM simplify acc
-  arrs' <- mapM simplify arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  return $ Scan cs' w' fun' (zip acc' arrs')
-
-simplifyLoopOp (Redomap cs w outerfun innerfun acc arrs) = do
-  cs' <- simplify cs
-  w' <- simplify w
-  acc' <- mapM simplify acc
-  arrs' <- mapM simplify arrs
-  outerfun' <- simplifyLambda outerfun w $
-               replicate (length $ lambdaParams outerfun) Nothing
-  (innerfun', used) <- tapUsage $ simplifyLambda innerfun w $ map Just arrs
-  (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-  return $ Redomap cs' w' outerfun' innerfun'' acc' arrs''
-  where removeUnusedParams used lam arrinps
-          | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
-              let (arrparams', arrinps') =
-                    unzip $ filter ((`UT.used` used) . paramName . fst) $
-                    zip arrparams arrinps
-              in return (lam { lambdaParams = accparams ++ arrparams' },
-                         arrinps')
-          | otherwise = return (lam, arrinps)
-
 simplifySegOp :: MonadEngine m => SegOp (InnerLore m) -> m (SegOp (Lore m))
 simplifySegOp (SegReduce cs w fun input descp) = do
   let (acc, arrs) = unzip input
@@ -754,7 +639,7 @@ simplifySegOp (SegReplicate cs counts dataarr seg) = do
   seg' <- Data.Traversable.mapM simplify seg
   return $ SegReplicate cs' counts' dataarr' seg'
 
-class CanBeWise op => SimplifiableOp lore op where
+class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op where
   simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)
 
 instance SimplifiableOp lore () where
@@ -888,57 +773,28 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
   return $ Lambda i params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
-                    [(LParam (Lore m), SExp.ScalExp, SExp.ScalExp)]
-                  ->    ExtLambda (InnerLore m)
+                     ExtLambda (InnerLore m)
                   -> SubExp
+                  -> [(LParam (Lore m), SE.ScalExp, SE.ScalExp)]
                   -> m (ExtLambda (Lore m))
-simplifyExtLambda parbnds lam@(ExtLambda index params body rettype) w = do
+simplifyExtLambda lam@(ExtLambda index params body rettype) w parbnds = do
   params' <- mapM (simplifyParam simplify) params
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
+  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   body' <- enterLoop $ enterBody $
            bindLoopVar index w $
            bindLParams params' $
-           blockIf (hasFree paramnames `orIf` isConsumed) $
            localVtable extendSymTab $
+           blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
            simplifyBody (map (const Observe) rettype) body
-  let bodyres = bodyResult body'
-      bodyenv = typeEnvFromBindings $ bodyBindings body'
-  rettype'' <- bindLParams params' $
-               zipWithM (refineArrType bodyenv params') bodyres rettype'
-  return $ ExtLambda index params' body' rettype''
-    where extendSymTab vtb =
-            foldl (\ vt (i,l,u) ->
-                        let i_name = paramName i
-                        in  ST.setUpperBound i_name u $
-                            ST.setLowerBound i_name l vt
-                  ) vtb parbnds
-          refineArrType :: MonadEngine m =>
-                           TypeEnv -> [LParam (Lore m)] -> SubExp -> ExtType -> m ExtType
-          refineArrType bodyenv pars x (Array btp shp u) = do
-            vtab <- ST.bindings <$> getVtable
-            dsx <- flip extendedTypeEnv bodyenv $
-                   shapeDims <$> arrayShape <$> subExpType x
-            let parnms = map paramName pars
-                dsrtpx =  extShapeDims shp
-                (resdims,_) =
-                    foldl (\ (lst,i) el ->
-                            case el of
-                              (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
-                              ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
-                              (Free (Var tid), Var pid) ->
-                                if not (HM.member tid vtab) &&
-                                        HM.member pid vtab
-                                then (lst++[Free (Var pid)], i)
-                                else (lst++[Free (Var tid)], i)
-                              (Ext _, Var pid) ->
-                                if HM.member pid vtab ||
-                                   pid `elem` parnms
-                                then (lst ++ [Free (Var pid)], i)
-                                else (lst ++ [Ext i],        i+1)
-                          ) ([],0) (zip dsrtpx dsx)
-            return $ Array btp (ExtShape resdims) u
-          refineArrType _ _ _ tp = return tp
+  return $ ExtLambda index params' body' rettype'
+  where extendSymTab vtb =
+          foldl (\ vt (i,l,u) ->
+                   let i_name = paramName i
+                   in  ST.setUpperBound i_name u $
+                       ST.setLowerBound i_name l vt
+                ) vtb parbnds
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()

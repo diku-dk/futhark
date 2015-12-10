@@ -46,7 +46,7 @@ import Data.List
 import Data.Ord
 
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
@@ -218,7 +218,7 @@ flatKernel :: MonadFreshNames m =>
            -> m ([Binding],
                  SubExp,
                  [(VName, SubExp)],
-                 [KernelInput Basic],
+                 [KernelInput SOACS],
                  [Type])
 flatKernel (MapNesting pat _ nesting_w i params_and_arrs, []) =
   return ([], nesting_w, [(i,nesting_w)], inps,
@@ -522,7 +522,7 @@ interchangeLoop
 
     let lam = Lambda i (params'<>new_params) body rettype
         map_bnd = Let loop_pat_expanded () $
-                  LoopOp $ Map cs w lam $ arrs' <> new_arrs
+                  Op $ Map cs w lam $ arrs' <> new_arrs
         res = map Var $ patternNames loop_pat_expanded
 
     return $

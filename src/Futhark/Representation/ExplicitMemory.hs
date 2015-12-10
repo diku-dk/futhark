@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
 -- | This representation requires that every array is given
 -- information about which memory block is it based in, and how array
@@ -87,6 +88,7 @@ import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Aliases (Aliases)
 import Futhark.Representation.Ranges (Ranges)
 import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Analysis.Usage
 
 -- | A lore containing explicit memory information.
 data ExplicitMemory = ExplicitMemory
@@ -157,6 +159,9 @@ instance PrettyLore inner => PP.Pretty (MemOp inner) where
 
 instance Proper inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
+
+instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (MemOp lore) where
+  usageInOp Alloc {} = mempty
 
 instance CanBeWise (MemOp ExplicitMemory) where
   type OpWithWisdom (MemOp ExplicitMemory) = MemOp (Wise ExplicitMemory)

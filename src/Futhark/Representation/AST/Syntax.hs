@@ -262,18 +262,8 @@ data PrimOp lore
   deriving (Eq, Ord, Show)
 
 data LoopOp lore
-  = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+   = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
     -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
-
-  | Map Certificates SubExp (LambdaT lore) [VName]
-    -- ^ @map(+1, {1,2,..,n}) = [2,3,..,n+1]@.
-
-  | ConcatMap Certificates SubExp (LambdaT lore) [[VName]]
-
-  | Reduce  Certificates SubExp (LambdaT lore) [(SubExp, VName)]
-  | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
-  | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
-  | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
 
   | MapKernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
     [(Type, [Int])] (Body lore)

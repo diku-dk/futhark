@@ -21,7 +21,7 @@ import Data.List
 import Data.Traversable (mapM)
 
 import Futhark.Representation.External as E
-import Futhark.Representation.Basic as I
+import Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad

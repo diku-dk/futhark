@@ -14,7 +14,7 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.Basic as In
+import qualified Futhark.Representation.SOACS as In
 import Futhark.Optimise.Simplifier.Lore
   (Wise,
    mkWiseBody,
@@ -470,7 +470,7 @@ linearFuncallArg Array{} (Var v) = do
 linearFuncallArg _ arg =
   return arg
 
-explicitAllocations :: Pass In.Basic ExplicitMemory
+explicitAllocations :: Pass In.SOACS ExplicitMemory
 explicitAllocations = simplePass
                       "explicit allocations"
                       "Transform program to explicit memory representation" $
@@ -583,10 +583,6 @@ allocInExp (LoopOp (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
   return $ LoopOp $ ScanKernel cs w size order lam' input
 
-allocInExp (LoopOp Scan{}) =
-  fail "Cannot put explicit allocations in scan yet."
-allocInExp (LoopOp Redomap{}) =
-  fail "Cannot put explicit allocations in redomap yet."
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)
@@ -598,7 +594,8 @@ allocInExp e = mapExpM alloc e
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
-                         , mapOnOp = fail "Unhandled Op in ExplicitAllocations"
+                         , mapOnOp = \op ->
+                             fail $ "Unhandled Op in ExplicitAllocations: " ++ pretty op
                          }
 
 allocInChunkedLambda :: SubExp -> In.Lambda -> [MemBound NoUniqueness] -> AllocM Lambda

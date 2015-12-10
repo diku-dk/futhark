@@ -11,10 +11,10 @@ import Data.Monoid
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Tools
 
-iswim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+iswim :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
@@ -24,7 +24,7 @@ iswim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
 iswim res_pat cs w scan_fun scan_input
   | Body () [bnd] res <- lambdaBody scan_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    LoopOp (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
+    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
     map paramName (lambdaParams scan_fun) == map_arrs = Just $ do
       let (accs, arrs) = unzip scan_input
       arrs' <- forM arrs $ \arr -> do
@@ -49,14 +49,14 @@ iswim res_pat cs w scan_fun scan_input
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
           map_body = mkBody [Let (setPatternOuterDimTo w $ bindingPattern bnd) () $
-                             LoopOp $ Scan cs w scan_fun' scan_input']
+                             Op $ Scan cs w scan_fun' scan_input']
                             res
 
       res_pat' <- liftM (basicPattern' []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addBinding $ Let res_pat' () $ LoopOp $ Map map_cs map_w map_fun' map_arrs'
+      addBinding $ Let res_pat' () $ Op $ Map map_cs map_w map_fun' map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
@@ -65,7 +65,7 @@ iswim res_pat cs w scan_fun scan_input
                      PrimOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
-irwim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+irwim :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
@@ -75,7 +75,7 @@ irwim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
 irwim res_pat cs w red_fun red_input
   | Body () [bnd] res <- lambdaBody red_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    LoopOp (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
+    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
     map paramName (lambdaParams red_fun) == map_arrs = Just $ do
       let (accs, arrs) = unzip red_input
       arrs' <- forM arrs $ \arr -> do
@@ -100,10 +100,10 @@ irwim res_pat cs w red_fun red_input
                        uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
           map_body = mkBody [Let (stripPatternOuterDim $ bindingPattern bnd) () $
-                             LoopOp $ Reduce cs w red_fun' red_input']
+                             Op $ Reduce cs w red_fun' red_input']
                             res
 
-      addBinding $ Let res_pat () $ LoopOp $ Map map_cs map_w map_fun' map_arrs'
+      addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' map_arrs'
   | otherwise = Nothing
 
 removeParamOuterDim :: LParam -> LParam

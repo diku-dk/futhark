@@ -10,16 +10,10 @@ module Futhark.Optimise.Simplifier.Apply
 
 import Futhark.Representation.AST.Lore (Lore)
 import Futhark.Representation.AST
-import qualified Futhark.Interpreter as Interp
 import qualified Futhark.Analysis.SymbolTable as ST
 
 simplifyApply :: Lore lore =>
                  Prog lore -> ST.SymbolTable anylore -> Name -> [(SubExp,Diet)]
               -> Maybe [Value]
-simplifyApply program vtable fname args = do
-  vals <- allArgsAreValues $ map fst args
-  either (const Nothing) Just $ Interp.runFunNoTrace fname vals program
-  where allArgsAreValues = mapM argIsValue
-
-        argIsValue (Constant val) = Just $ BasicVal val
-        argIsValue (Var v)        = ST.lookupValue v vtable
+simplifyApply _ _ _ _ =
+  fail "not now"

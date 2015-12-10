@@ -25,11 +25,11 @@ import Data.List
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS hiding (SOAC(..))
+import qualified Futhark.Representation.SOACS as Futhark
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import qualified Futhark.Representation.AST as Futhark
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
@@ -37,13 +37,13 @@ import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
 
-type SOAC = SOAC.SOAC Basic
-type SOACNest = Nest.SOACNest Basic
-type MapNest = MapNest.MapNest Basic
+type SOAC = SOAC.SOAC SOACS
+type SOACNest = Nest.SOACNest SOACS
+type MapNest = MapNest.MapNest SOACS
 
 -- XXX: This function is very gross.
 transformOutput :: SOAC.ArrayTransforms -> [VName] -> SOAC
-                -> Binder Basic ()
+                -> Binder SOACS ()
 transformOutput ts names soac = do
   validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf soac
   e <- SOAC.toExp soac
@@ -416,7 +416,7 @@ toNestedSeqStream   (SOAC.Stream cs form lam ii arrs) = do
                               (_,     MaxChunk) -> (MaxChunk, MaxChunk)
                               (_,     MinChunk) -> (MaxChunk, MinChunk)
       insoac   = Futhark.Stream cs w form inner_extlam instrm_inarrs ii_inner
-      lam_bind = mkLet' [] instrm_resids $ LoopOp insoac
+      lam_bind = mkLet' [] instrm_resids $ Op insoac
       lam_body = mkBody [lam_bind] $ map (Futhark.Var . identName) instrm_resids
       lam' = lam { lambdaBody = lam_body }
   return $ SOAC.Stream cs (Sequential nes) lam' ii_outer arrs
