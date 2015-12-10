@@ -295,7 +295,7 @@ transformBinding (Let res_pat () (Op op))
 
 transformBinding bnd = do
   e' <- mapExpM transform $ bindingExp bnd
-  return [bnd { bindingExp = e' }]
+  runBinder_ $ FOT.transformBinding bnd { bindingExp = e' }
   where transform = identityMapper { mapOnLambda = transformLambda }
 
 transformLambda :: Lambda -> DistribM Lambda
