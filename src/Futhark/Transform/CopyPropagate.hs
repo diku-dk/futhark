@@ -8,9 +8,10 @@ module Futhark.Transform.CopyPropagate
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
-import Futhark.Optimise.Simplifier.Simplify
-import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.Engine (MonadEngine)
+import Futhark.Optimise.Simplifier
+  (simplifyBindingsWithRules, noExtraHoistBlockers)
 
 copyPropagateInBindings :: (MonadFreshNames m,
                             HasTypeEnv m,
@@ -19,5 +20,4 @@ copyPropagateInBindings :: (MonadFreshNames m,
                         -> [Binding lore]
                         -> m [Binding lore]
 copyPropagateInBindings simpl =
-  fmap (map removeBindingWisdom) .
-  simplifyBindings simpl ([], []) Nothing
+  simplifyBindingsWithRules simpl ([], []) noExtraHoistBlockers Nothing

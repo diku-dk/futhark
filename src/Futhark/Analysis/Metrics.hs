@@ -97,7 +97,6 @@ primOpMetrics Rearrange{} = seen "Rearrange"
 primOpMetrics Stripe{} = seen "Stripe"
 primOpMetrics Unstripe{} = seen "Unstripe"
 primOpMetrics Partition{} = seen "Partition"
-primOpMetrics Alloc{} = seen "Alloc"
 
 loopOpMetrics :: OpMetrics (Op lore) => LoopOp lore -> MetricsM ()
 loopOpMetrics (DoLoop _ _ ForLoop{} body) =

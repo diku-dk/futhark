@@ -12,10 +12,11 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 compileProg :: Prog -> Either String Imp.Program
 compileProg = ImpGen.compileProg ops Imp.DefaultSpace
   where ops = ImpGen.defaultOperations { ImpGen.opsExpCompiler = expCompiler }
-        expCompiler (ImpGen.Destination [d]) (Op (SizeOf bt)) = do
-          ImpGen.writeExp d $ Imp.SizeOf bt
+        expCompiler (ImpGen.Destination [ImpGen.MemoryDestination mem size]) (Op (Alloc e space)) = do
+          ImpGen.emit $ Imp.Allocate mem (Imp.bytes e') space
+          case size of Just size' -> ImpGen.emit $ Imp.SetScalar size' e'
+                       Nothing    -> return ()
           return ImpGen.Done
-        expCompiler _ (Op (ParExp e)) =
-          return $ ImpGen.CompileExp e
+            where e' = ImpGen.compileSubExp e
         expCompiler _ e =
           return $ ImpGen.CompileExp e

@@ -259,10 +259,6 @@ data PrimOp lore
     -- ^ First variable is the flag array, second is the element
     -- arrays.  If no arrays are given, the returned offsets are zero,
     -- and no arrays are returned.
-
-  | Alloc SubExp Space
-    -- ^ Allocate a memory block.  This really should not be an
-    -- expression, but what are you gonna do...
   deriving (Eq, Ord, Show)
 
 data LoopOp lore

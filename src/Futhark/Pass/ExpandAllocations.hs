@@ -116,13 +116,13 @@ extractKernelAllocations bound_before_body body = do
   return (body { bodyBindings = catMaybes bnds }, allocs)
   where bound_here = bound_before_body `HS.union` boundInBody body
 
-        isAlloc _ (Let (Pattern [] [patElem]) () (PrimOp (Alloc (Var v) _)))
+        isAlloc _ (Let (Pattern [] [patElem]) () (Op (Alloc (Var v) _)))
           | v `HS.member` bound_here =
             throwError $ "Size " ++ pretty v ++
             " for block " ++ pretty patElem ++
             " is not lambda-invariant"
 
-        isAlloc allocs (Let (Pattern [] [patElem]) () (PrimOp (Alloc size space))) =
+        isAlloc allocs (Let (Pattern [] [patElem]) () (Op (Alloc size space))) =
           return (HM.insert (patElemName patElem) (size, space) allocs,
                   Nothing)
 
@@ -143,7 +143,7 @@ expandedAllocations num_threads thread_index thread_allocs = do
           allocpat = Pattern [] [PatElem mem BindVar $
                                  MemMem (Var total_size) space]
       return [Let sizepat () $ PrimOp $ BinOp Times num_threads per_thread_size Int,
-              Let allocpat () $ PrimOp $ Alloc (Var total_size) space]
+              Let allocpat () $ Op $ Alloc (Var total_size) space]
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
   let alloc_offsets =

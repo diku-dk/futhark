@@ -40,11 +40,6 @@ class (Lore lore,
   ppExpLore :: Exp lore -> Maybe Doc
   ppExpLore = const Nothing
 
--- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
--- parentheses.
-apply :: [Doc] -> Doc
-apply = parens . commasep . map align
-
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
@@ -210,8 +205,6 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
-  ppr (Alloc e DefaultSpace) = text "alloc" <> apply [ppr e]
-  ppr (Alloc e (Space sp)) = text "alloc" <> apply [ppr e, text sp]
   ppr (Partition cs n flags arrs) =
     ppCertificates' cs <>
     text "partition" <>

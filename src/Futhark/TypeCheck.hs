@@ -722,9 +722,6 @@ checkPrimOp (Copy e) =
 checkPrimOp (Assert e _) =
   require [Basic Bool] e
 
-checkPrimOp (Alloc e _) =
-  require [Basic Int] e
-
 checkPrimOp (Partition cs _ flags arrs) = do
   mapM_ (requireI [Basic Cert]) cs
   flagst <- lookupType flags

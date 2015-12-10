@@ -27,7 +27,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as I
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.Optimise.Simplifier.Simplify (SimpleOps (..))
+import Futhark.Optimise.Simplifier.Simple (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Pass
 
@@ -44,12 +44,13 @@ data AllocBinding = SizeComputation VName SE.ScalExp
                   | ArrayCopy VName Bindage VName
                     deriving (Eq, Ord, Show)
 
-bindAllocBinding :: MonadBinder m => AllocBinding -> m ()
+bindAllocBinding :: (MonadBinder m, Op (Lore m) ~ MemOp (Lore m)) =>
+                    AllocBinding -> m ()
 bindAllocBinding (SizeComputation name se) = do
   e <- SE.fromScalExp' se
   letBindNames'_ [name] e
 bindAllocBinding (Allocation name size space) =
-  letBindNames'_ [name] $ PrimOp $ Alloc size space
+  letBindNames'_ [name] $ Op $ Alloc size space
 bindAllocBinding (ArrayCopy name bindage src) =
   letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
 
@@ -114,7 +115,7 @@ instance Allocator AllocM where
   addAllocBinding (SizeComputation name se) =
     letBindNames'_ [name] =<< SE.fromScalExp' se
   addAllocBinding (Allocation name size space) =
-    letBindNames'_ [name] $ PrimOp $ Alloc size space
+    letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =
     letBindNames_ [(name, bindage)] $ PrimOp $ SubExp $ Var src
 
@@ -597,7 +598,7 @@ allocInExp e = mapExpM alloc e
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
-                         , mapOnOp = undefined
+                         , mapOnOp = fail "Unhandled Op in ExplicitAllocations"
                          }
 
 allocInChunkedLambda :: SubExp -> In.Lambda -> [MemBound NoUniqueness] -> AllocM Lambda
@@ -705,7 +706,7 @@ simplifiable =
           return $ mkWiseLetBinding pat' () e
           where env = vtableToAllocEnv vtable
 
-bindPatternWithAllocations :: MonadBinder m =>
+bindPatternWithAllocations :: (MonadBinder m, Op (Lore m) ~ MemOp (Lore m)) =>
                               MemoryMap -> [(VName, Bindage)] -> Exp
                            -> m Pattern
 bindPatternWithAllocations memoryMap names e = do

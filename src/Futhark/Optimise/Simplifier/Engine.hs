@@ -13,8 +13,7 @@
 --    "Futhark.Optimise.Simplification.Rules").
 --
 -- If you just want to run the simplifier as simply as possible, you
--- may prefer to use the "Futhark.Optimise.Simplifier" or
--- "Futhark.Optimise.Simplifier.Simplify" modules.
+-- may prefer to use the "Futhark.Optimise.Simplifier" module.
 --
 module Futhark.Optimise.Simplifier.Engine
        ( -- * Monadic interface
@@ -23,6 +22,8 @@ module Futhark.Optimise.Simplifier.Engine
        , collectBindingsEngine
        , Env
        , emptyEnv
+       , HoistBlockers(..)
+       , noExtraHoistBlockers
        , State
        , emptyState
        , Need
@@ -42,6 +43,8 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyLambda
        , simplifyLambdaNoHoisting
        , simplifyExtLambda
+
+       , BlockPred
        ) where
 
 import Control.Applicative
@@ -81,18 +84,32 @@ instance Monoid (Need lore) where
 
 type AliasMap = HM.HashMap VName Names
 
-data Env m = Env { envProgram   :: Maybe (Prog (InnerLore m))
-                 , envRules     :: RuleBook m
-                 , envAliases   :: AliasMap
+data HoistBlockers m = HoistBlockers
+                       { blockHoistPar :: BlockPred (Lore m)
+                         -- ^ Blocker for hoisting out of parallel loops.
+                       , blockHoistSeq :: BlockPred (Lore m)
+                         -- ^ Blocker for hoisting out of sequential loops.
+                       }
+
+noExtraHoistBlockers :: HoistBlockers m
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks
+
+data Env m = Env { envProgram       :: Maybe (Prog (InnerLore m))
+                 , envRules         :: RuleBook m
+                 , envAliases       :: AliasMap
+                 , envHoistBlockers :: HoistBlockers m
                  }
 
 emptyEnv :: MonadEngine m =>
             RuleBook m
-         -> Maybe (Prog (InnerLore m)) -> Env m
-emptyEnv rules prog =
+         -> HoistBlockers m
+         -> Maybe (Prog (InnerLore m))
+         -> Env m
+emptyEnv rules blockers prog =
   Env { envProgram = prog
       , envRules = rules
       , envAliases = mempty
+      , envHoistBlockers = blockers
       }
 data State m = State { stateVtable :: ST.SymbolTable (Lore m)
                      }
@@ -332,6 +349,9 @@ intersects a b = not $ HS.null $ a `HS.intersection` b
 
 type BlockPred lore = UT.UsageTable -> Binding lore -> Bool
 
+neverBlocks :: BlockPred lore
+neverBlocks _ _ = False
+
 isFalse :: Bool -> BlockPred lore
 isFalse b _ _ = not b
 
@@ -379,17 +399,6 @@ isNotCheap _ = not . cheapBnd
         cheap LoopOp{}           = False
         cheap _                  = True -- Used to be False, but
                                         -- let's try it out.
-
-isAlloc :: BlockPred lore
-isAlloc _ (Let _ _ (PrimOp Alloc{})) = True
-isAlloc _ _                          = False
-
-isResultAlloc :: BlockPred lore
-isResultAlloc usage (Let (Pattern [] [bindee]) _
-                     (PrimOp Alloc{})) =
-  UT.isInResult (patElemName bindee) usage
-isResultAlloc _ _ = False
-
 hoistCommon :: MonadEngine m =>
                m Result
             -> (ST.SymbolTable (Lore m)
@@ -588,13 +597,11 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
       return (WhileLoop cond',
               fparamnames,
               id)
-  -- Blocking hoisting of all unique bindings is probably too
-  -- conservative, but there is currently no nice way to mark
-  -- consumption of the loop body result.
+  seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   loopbody' <- enterLoop $ enterBody $
                bindFParams mergepat' $
                blockIf
-               (hasFree boundnames `orIf` isConsumed `orIf` isResultAlloc) $
+               (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
@@ -639,10 +646,11 @@ simplifyLoopOp (MapKernel cs w index ispace inps returns body) = do
   returns' <- forM returns $ \(t, perm) -> do
     t' <- simplify t
     return (t', perm)
+  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
     inps' <- mapM simplifyKernelInput inps
     body' <- bindLParams (map kernelInputParam inps') $
-             blockIf (hasFree bound_here `orIf` isConsumed `orIf` isAlloc) $
+             blockIf (hasFree bound_here `orIf` isConsumed `orIf` par_blocker) $
              simplifyBody (map (const Observe) returns) body
     return $ MapKernel cs' w' index ispace' inps' returns' body'
   where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
@@ -868,12 +876,13 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ boundByLambda lam
+  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   body' <-
     enterLoop $ enterBody $
     bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` isAlloc) $
+    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
       simplifyBody (map (const Observe) rettype) body
   rettype' <- mapM simplify rettype
   return $ Lambda i params' body' rettype'
