@@ -7,12 +7,12 @@ module Futhark.Optimise.SuffCond
 import Control.Monad.State
 
 import Futhark.Representation.Basic
+import Futhark.Representation.Basic.Simplify
 import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Optimise.SuffCond.OptPredicates
 import Futhark.Optimise.SuffCond.GenPredicates
 import Futhark.Optimise.Simplifier
-import Futhark.Optimise.Simplifier.Simplify (bindableSimpleOps)
 import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 
@@ -33,12 +33,11 @@ extractPredicates =
           -- FIXME: the simplifier is not good enough at dead code
           -- elimination, and it does not do fixpoint iteration.  This
           -- is horrible.
-          predf' <- liftM deadCodeElimFun . simplifyFun' =<<
-                    liftM deadCodeElimFun . simplifyFun' =<<
-                    liftM deadCodeElimFun . simplifyFun' =<<
-                    liftM deadCodeElimFun . simplifyFun' =<<
-                    liftM deadCodeElimFun . simplifyFun' =<<
-                    liftM deadCodeElimFun . simplifyFun' =<<
+          predf' <- liftM deadCodeElimFun . simplifyFun =<<
+                    liftM deadCodeElimFun . simplifyFun =<<
+                    liftM deadCodeElimFun . simplifyFun =<<
+                    liftM deadCodeElimFun . simplifyFun =<<
+                    liftM deadCodeElimFun . simplifyFun =<<
+                    liftM deadCodeElimFun . simplifyFun =<<
                     renameFun predf
           return [predf',valf]
-        simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules

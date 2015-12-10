@@ -4,6 +4,8 @@ module Futhark.Util.Pretty
        , pretty
        , prettyDoc
        , prettyTuple
+
+       , apply
        )
        where
 
@@ -24,3 +26,8 @@ ppTuple' ets = braces $ commasep $ map ppr ets
 -- | Prettyprint a list enclosed in curly braces.
 prettyTuple :: Pretty a => [a] -> String
 prettyTuple = PP.pretty 80 . ppTuple'
+
+-- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
+-- parentheses.
+apply :: [Doc] -> Doc
+apply = parens . commasep . map align

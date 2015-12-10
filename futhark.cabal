@@ -111,7 +111,6 @@ Library
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simple
                    Futhark.Optimise.Simplifier.Simplify
-                   Futhark.Optimise.SimplifyLambda
                    Futhark.Optimise.SplitShapes
                    Futhark.Optimise.SuffCond
                    Futhark.Optimise.SuffCond.GenPredicates
@@ -155,10 +154,12 @@ Library
                    Futhark.Representation.AST.Syntax.Core
                    Futhark.Representation.AST.Traversals
                    Futhark.Representation.Basic
+                   Futhark.Representation.Basic.Simplify
                    Futhark.Representation.ExplicitMemory
                    Futhark.Representation.ExplicitMemory.IndexFunction
                    Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
                    Futhark.Representation.ExplicitMemory.Permutation
+                   Futhark.Representation.ExplicitMemory.Simplify
                    Futhark.Representation.ExplicitMemory.SymSet
                    Futhark.Representation.ExplicitMemory.SymSet.Unsafe
                    Futhark.Representation.External

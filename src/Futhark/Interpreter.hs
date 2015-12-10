@@ -680,10 +680,6 @@ evalPrimOp (Partition _ n flags arrs) = do
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
--- Alloc is not used in the interpreter, so just return whatever
-evalPrimOp (Alloc se _) =
-  single <$> evalSubExp se
-
 evalLoopOp :: forall lore . Lore lore => LoopOp lore -> FutharkM lore [Value]
 
 evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do

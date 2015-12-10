@@ -21,6 +21,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Transform.Rename
 import Futhark.Representation.Basic
+import Futhark.Representation.Basic.Simplify
 import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Analysis.ScalExp (ScalExp)
@@ -32,7 +33,7 @@ import qualified Futhark.Optimise.Simplifier.Engine as Simplify
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier
   (simplifyFunWithRules, basicRules)
-import Futhark.Optimise.Simplifier.Simplify
+import Futhark.Optimise.Simplifier.Simple
   (bindableSimpleOps)
 import Futhark.Transform.Substitute
 import qualified Futhark.Representation.AST.Lore as Lore
@@ -114,12 +115,12 @@ generateOptimisedPredicates'
          rephraseWithInvariance body
   case res of
     (body', True) -> do
-      fundec <- simplifyFunWithRules bindableSimpleOps basicRules $
+      fundec <- simplifyFunWithRules bindableSimpleOps basicRules Simplify.noExtraHoistBlockers $
                 FunDec fname' rettype params (removeBodyLore body')
       return $ Just fundec
     _          -> return Nothing
   where fname' = fname <> nameFromString suff
-        env = Env { envSimplifyEnv = Simplify.emptyEnv rules Nothing
+        env = Env { envSimplifyEnv = Simplify.emptyEnv rules Simplify.noExtraHoistBlockers Nothing
                   , envSCTable = sctable
                   , envMaxLoops = depth
                   , envGeneratingSuff = Sufficient

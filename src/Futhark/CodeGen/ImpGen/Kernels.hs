@@ -474,7 +474,7 @@ kernelCompiler target (PrimOp (Replicate n se)) = do
         [(t,[0..arrayRank t])] (Body () [] [se])
 
 -- Allocation in the "local" space is just a placeholder.
-kernelCompiler _ (PrimOp (Alloc _ (Space "local"))) =
+kernelCompiler _ (Op (Alloc _ (Space "local"))) =
   return ImpGen.Done
 
 kernelCompiler _ e =

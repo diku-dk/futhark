@@ -19,7 +19,7 @@ import Prelude
 
 import Futhark.Representation.Basic
 import Futhark.MonadFreshNames
-import Futhark.Optimise.SimplifyLambda
+import Futhark.Representation.Basic.Simplify
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC

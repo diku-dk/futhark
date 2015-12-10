@@ -127,8 +127,6 @@ primOpType (Copy v) =
   pure <$> lookupType v
 primOpType (Assert _ _) =
   pure [Basic Cert]
-primOpType (Alloc e space) =
-  pure [Mem e space]
 primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Basic Int) ++ ts

@@ -471,12 +471,6 @@ defCompilePrimOp (Destination [target]) (BinOp bop x y _) =
 defCompilePrimOp (Destination [_]) (Assert e loc) =
   emit $ Imp.Assert (compileSubExp e) loc
 
-defCompilePrimOp (Destination [MemoryDestination mem size]) (Alloc e space) = do
-  emit $ Imp.Allocate mem (bytes e') space
-  case size of Just size' -> emit $ Imp.SetScalar size' e'
-               Nothing    -> return ()
-  where e' = compileSubExp e
-
 defCompilePrimOp (Destination [target]) (Index _ src idxs) = do
   t <- lookupType src
   when (length idxs == arrayRank t) $

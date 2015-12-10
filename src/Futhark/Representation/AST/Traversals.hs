@@ -159,8 +159,6 @@ mapExpM tv (PrimOp (Concat cs x ys size)) =
                  mapOnSubExp tv size)
 mapExpM tv (PrimOp (Copy e)) =
   PrimOp <$> (pure Copy <*> mapOnVName tv e)
-mapExpM tv (PrimOp (Alloc e space)) =
-  PrimOp <$> (Alloc <$> mapOnSubExp tv e <*> pure space)
 mapExpM tv (PrimOp (Assert e loc)) =
   PrimOp <$> (pure Assert <*> mapOnSubExp tv e <*> pure loc)
 mapExpM tv (PrimOp (Partition cs n flags arr)) =

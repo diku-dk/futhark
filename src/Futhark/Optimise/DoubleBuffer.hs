@@ -124,7 +124,7 @@ allocBindings = mapMaybe allocation
   where allocation (BufferAlloc name size space) =
           Just $
           Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
-          PrimOp $ Alloc size space
+          Op $ Alloc size space
         allocation _ =
           Nothing
 

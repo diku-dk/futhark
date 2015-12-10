@@ -18,12 +18,11 @@ import Data.Maybe
 import Prelude
 
 import Futhark.Representation.Basic
+import Futhark.Representation.Basic.Simplify
 import Futhark.Tools
 import Futhark.MonadFreshNames
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Optimise.Simplifier
-import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 
@@ -127,14 +126,13 @@ substituteExtResultShapes rettype (Body _ bnds res) = do
         substInPatElem subst patElem = return $ substituteNames subst patElem
 
 simplifyShapeFun :: MonadFreshNames m => FunDec -> m FunDec
-simplifyShapeFun shapef = liftM deadCodeElimFun . simplifyFun' =<<
-                          liftM deadCodeElimFun . simplifyFun' =<<
-                          liftM deadCodeElimFun . simplifyFun' =<<
-                          liftM deadCodeElimFun . simplifyFun' =<<
-                          liftM deadCodeElimFun . simplifyFun' =<<
-                          liftM deadCodeElimFun . simplifyFun' =<<
+simplifyShapeFun shapef = liftM deadCodeElimFun . simplifyFun =<<
+                          liftM deadCodeElimFun . simplifyFun =<<
+                          liftM deadCodeElimFun . simplifyFun =<<
+                          liftM deadCodeElimFun . simplifyFun =<<
+                          liftM deadCodeElimFun . simplifyFun =<<
+                          liftM deadCodeElimFun . simplifyFun =<<
                           renameFun shapef
-  where simplifyFun' = simplifyFunWithRules bindableSimpleOps basicRules
 
 cheapFun :: FunDec -> Bool
 cheapFun  = cheapBody . funDecBody

@@ -7,22 +7,23 @@ module Futhark.Pass.Simplify
   where
 
 import Control.Monad
+import Control.Monad.State
 
 import qualified Futhark.Representation.Basic as R
+import qualified Futhark.Representation.Basic.Simplify as R
 import qualified Futhark.Representation.ExplicitMemory as R
+import qualified Futhark.Representation.ExplicitMemory.Simplify as R
 
-import qualified Futhark.Pass.ExplicitAllocations
-import Futhark.Optimise.Simplifier
-import Futhark.Optimise.Simplifier.Simple
-import Futhark.Optimise.Simplifier.Engine (MonadEngine)
 import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
+import Futhark.MonadFreshNames
+import Futhark.Representation.AST.Syntax
+import Futhark.Binder.Class (Proper)
 
-simplify :: MonadEngine (SimpleM lore) =>
-            SimpleOps (SimpleM lore)
-         -> RuleBook (SimpleM lore)
+simplify :: Proper lore =>
+            (Prog lore -> State VNameSource (Prog lore))
          -> Pass lore lore
-simplify simpl rules =
+simplify f =
   simplePass
   "simplify"
   "Perform simple enabling optimisations." $
@@ -32,11 +33,11 @@ simplify simpl rules =
   -- number of times and hope that it is enough.  Will be fixed later;
   -- promise.
   foldl (<=<) return (replicate num_passes pass)
-  where pass = liftM deadCodeElim . simplifyProgWithRules simpl rules
+  where pass = liftM deadCodeElim . f
         num_passes = 5
 
 simplifyBasic :: Pass R.Basic R.Basic
-simplifyBasic = simplify bindableSimpleOps basicRules
+simplifyBasic = simplify R.simplifyBasic
 
 simplifyExplicitMemory :: Pass R.ExplicitMemory R.ExplicitMemory
-simplifyExplicitMemory = simplify Futhark.Pass.ExplicitAllocations.simplifiable standardRules
+simplifyExplicitMemory = simplify R.simplifyExplicitMemory
