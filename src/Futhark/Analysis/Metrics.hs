@@ -52,8 +52,6 @@ expMetrics (PrimOp op) =
   seen "PrimOp" >> primOpMetrics op
 expMetrics (LoopOp op) =
   seen "LoopOp" >> loopOpMetrics op
-expMetrics (SegOp op) =
-  seen "SegOp" >> segOpMetrics op
 expMetrics (If _ tb fb _) =
   inside "If" $ bodyMetrics tb >> bodyMetrics fb
 expMetrics (Apply fname _ _) =
@@ -106,16 +104,6 @@ loopOpMetrics (ReduceKernel _ _ _ lam1 lam2 _ _) =
   inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
 loopOpMetrics (ScanKernel _ _ _ _ lam _) =
   inside "ScanKernel" $ lambdaMetrics lam
-
-segOpMetrics :: SegOp lore -> MetricsM ()
-segOpMetrics (SegReduce _ _ fun _ _) =
-  inside "SegReduce" $ lambdaMetrics fun
-segOpMetrics (SegScan _ _ ScanInclusive fun _ _) =
-  inside "SegScanInclusive" $ lambdaMetrics fun
-segOpMetrics (SegScan _ _ ScanExclusive fun _ _) =
-  inside "SegScanExclusive" $ lambdaMetrics fun
-segOpMetrics SegReplicate{} =
-  seen "SegReplicate"
 
 lambdaMetrics :: Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

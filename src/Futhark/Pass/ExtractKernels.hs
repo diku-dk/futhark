@@ -458,13 +458,6 @@ unbalancedLambda lam =
         unbalancedBinding bound (If _ tbranch fbranch _) =
           unbalancedBody bound tbranch || unbalancedBody bound fbranch
 
-        unbalancedBinding bound (SegOp (SegReduce _ w _ _ _)) =
-          w `subExpBound` bound
-        unbalancedBinding bound (SegOp (SegScan _ w _ _ _ _)) =
-          w `subExpBound` bound
-        unbalancedBinding bound (SegOp (SegReplicate _ w _ _)) =
-          w `HS.member` bound
-
         unbalancedBinding _ (PrimOp _) =
           False
         unbalancedBinding _ (Apply fname _ _) =
