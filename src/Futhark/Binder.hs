@@ -144,17 +144,17 @@ collectBinderBindings m = pass $ do
 -- | Add the names and types from the given list of 'Ident's to the
 -- type environment while executing the given action.  This is used to
 -- deal with function parameters and loop merge variables.
-bindingIdentTypes :: (Applicative m, Monad m) =>
-                     [Ident] -> BinderT lore m a
-                  -> BinderT lore m a
+bindingIdentTypes :: LocalTypeEnv m =>
+                     [Ident] -> m a
+                  -> m a
 bindingIdentTypes idents = localTypeEnv types
   where types = HM.fromList $ map (identName &&& identType) idents
 
 -- | Add the names and types from the given list of 'Param's to the
 -- type environment while executing the given action.
-bindingParamTypes :: (Applicative m, Monad m, Typed attr) =>
-                     [ParamT attr] -> BinderT lore m a
-                  -> BinderT lore m a
+bindingParamTypes :: (LocalTypeEnv m, Typed attr) =>
+                     [ParamT attr] -> m a
+                  -> m a
 bindingParamTypes = bindingIdentTypes . map paramIdent
 
 -- Utility instance defintions for MTL classes.  These require
