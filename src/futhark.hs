@@ -273,7 +273,8 @@ main = mainWithOptions newConfig commandLineOptions compile
   where compile [file] config =
           Just $ do
             (res, msgs) <- runFutharkM $ m file config
-            liftIO $ T.hPutStrLn stderr $ toText msgs
+            when (isJust $ futharkVerbose $ futharkConfig config) $
+              liftIO $ T.hPutStrLn stderr $ toText msgs
             case res of
               Left err -> do
                 dumpError (futharkConfig config) err
