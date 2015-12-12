@@ -1,13 +1,10 @@
 module Main (main) where
 
 import Control.Category ((>>>))
-import Control.Monad
+import Control.Monad.IO.Class
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import System.FilePath
 import System.Process
-import System.IO
 import System.Exit
 import System.Console.GetOpt
 
@@ -26,40 +23,34 @@ import Futhark.Pass.ExpandArrays
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExpandAllocations
 import Futhark.Util.Options
-import Futhark.Util.Log
 import Futhark.Optimise.DoubleBuffer
-import Futhark.Representation.AST.Pretty
 
 main :: IO ()
 main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 
-
 compile :: CompilerConfig -> FilePath -> IO ()
-compile config filepath = do
-  (res, msgs) <- runPipelineOnProgram (futharkConfig config) compilerPipeline filepath
-  when (isJust $ compilerVerbose config) $
-    T.hPutStr stderr $ toText msgs
-  case res of
-    Left err -> do
-      dumpError (futharkConfig config) err
-      exitWith $ ExitFailure 2
-    Right (src, prog) ->
-      case COpenCL.compileProg (src, prog) of
-        Left err -> do
-          dumpError (futharkConfig config) $
-            CompileError (T.pack err) $ T.pack $ pretty prog
-          exitWith $ ExitFailure 2
-        Right cprog -> do
+compile config filepath =
+  runCompilerOnProgram (futharkConfig config)
+  compilerPipeline (openclCodeAction filepath config) filepath
+
+openclCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
+openclCodeAction filepath config =
+  Action { actionName = "Compile OpenCL"
+         , actionDescription = "Generate OpenCL/C code from optimised Futhark program."
+         , actionProcedure = procedure
+         }
+  where procedure prog = do
+          cprog <- either compileFail return =<< COpenCL.compileProg prog
           let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
-          writeFile cpath cprog
+          liftIO $ writeFile cpath cprog
           (gccCode, _, gccerr) <-
-            readProcessWithExitCode "gcc"
+            liftIO $ readProcessWithExitCode "gcc"
             [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"] ""
           case gccCode of
-            ExitFailure code -> error $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
+            ExitFailure code -> compileFail $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
             ExitSuccess      -> return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
@@ -109,8 +100,6 @@ futharkConfig config =
                    , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
--- XXX: this pipeline is a total hack - note that we run distribution
--- multiple times.
 compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =
   standardPipeline >>>

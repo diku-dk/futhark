@@ -33,7 +33,7 @@ printAction :: (PrettyLore lore, CanBeAliased (Op lore)) => Action lore
 printAction =
   Action { actionName = "Prettyprint"
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
-         , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis . snd
+         , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
          }
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
@@ -41,21 +41,22 @@ interpretAction :: Show error => (FilePath -> String -> Either error [Value])
 interpretAction parser =
   Action { actionName = "Interpret"
          , actionDescription = "Run the program via an interpreter."
-         , actionProcedure = liftIO . interpret parser . snd
+         , actionProcedure = liftIO . interpret parser
          }
 
 rangeAction :: (PrettyLore lore, CanBeRanged (Op lore)) => Action lore
 rangeAction =
     Action { actionName = "Range analysis"
            , actionDescription = "Print the program with range annotations added."
-           , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis . snd
+           , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis
            }
 
 seqCodeGenAction :: Action ExplicitMemory
 seqCodeGenAction =
   Action { actionName = "Compile sequentially"
          , actionDescription = "Translate program into sequential C and write it on standard output."
-         , actionProcedure = liftIO . either error putStrLn . SequentialC.compileProg
+         , actionProcedure = either compileFail (liftIO . putStrLn) <=<
+                             SequentialC.compileProg
          }
 
 
@@ -63,14 +64,16 @@ impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
-         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenSequential.compileProg
+         , actionProcedure = either compileFail (liftIO . putStrLn . pretty) <=<
+                             ImpGenSequential.compileProg
          }
 
 kernelImpCodeGenAction :: Action ExplicitMemory
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenKernels.compileProg
+         , actionProcedure = either compileFail (liftIO . putStrLn . pretty) <=<
+                             ImpGenKernels.compileProg
          }
 
 interpret :: Show error =>

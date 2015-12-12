@@ -9,9 +9,9 @@ import Futhark.Representation.ExplicitMemory
 
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.FreshNames
+import Futhark.MonadFreshNames
 
-compileProg :: (VNameSource, Prog) -> Either String Imp.Program
+compileProg :: MonadFreshNames m => Prog -> m (Either String Imp.Program)
 compileProg = ImpGen.compileProg ops Imp.DefaultSpace
   where ops = ImpGen.defaultOperations opCompiler
         opCompiler dest (Alloc e space) =

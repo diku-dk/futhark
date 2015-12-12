@@ -1,13 +1,10 @@
 module Main (main) where
 
 import Control.Category ((>>>))
-import Control.Monad
+import Control.Monad.IO.Class
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import System.FilePath
 import System.Process
-import System.IO
 import System.Exit
 import System.Console.GetOpt
 
@@ -23,9 +20,7 @@ import Futhark.Optimise.CSE
 import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.Simplify
 import Futhark.Util.Options
-import Futhark.Util.Log
 import Futhark.Optimise.DoubleBuffer
-import Futhark.Representation.AST.Pretty
 
 main :: IO ()
 main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
@@ -33,30 +28,26 @@ main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
         inspectNonOptions _      _      = Nothing
 
 compile :: CompilerConfig -> FilePath -> IO ()
-compile config filepath = do
-  (res, msgs) <- runPipelineOnProgram (futharkConfig config) compilerPipeline filepath
-  when (isJust $ compilerVerbose config) $
-    T.hPutStr stderr $ toText msgs
-  case res of
-    Left err -> do
-      dumpError (futharkConfig config) err
-      exitWith $ ExitFailure 2
-    Right (src, prog) ->
-      case SequentialC.compileProg (src, prog) of
-        Left err -> do
-          dumpError (futharkConfig config) $
-            CompileError (T.pack err) $
-            T.pack $ pretty prog
-          exitWith $ ExitFailure 2
-        Right cprog -> do
+compile config filepath =
+  runCompilerOnProgram (futharkConfig config)
+  compilerPipeline (cCodeAction filepath config) filepath
+
+cCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
+cCodeAction filepath config =
+  Action { actionName = "Compile sequential C"
+         , actionDescription = "Generate sequential C code from optimised Futhark program."
+         , actionProcedure = procedure
+         }
+  where procedure prog = do
+          cprog <- either compileFail return =<< SequentialC.compileProg prog
           let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
-          writeFile cpath cprog
+          liftIO $ writeFile cpath cprog
           (gccCode, _, gccerr) <-
-            readProcessWithExitCode "gcc"
+            liftIO $ readProcessWithExitCode "gcc"
             [cpath, "-o", binpath, "-lm", "-O3", "-std=c99"] ""
           case gccCode of
-            ExitFailure code -> error $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
+            ExitFailure code -> compileFail $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
             ExitSuccess      -> return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))

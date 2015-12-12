@@ -78,18 +78,15 @@ runCompilerOnProgram config pipeline action file = do
           prog <- runPipelineOnSource config pipeline file source
           when (isJust $ futharkVerbose config) $
             liftIO $ hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
-          src <- getNameSource
-          actionProcedure action (src, prog)
+          actionProcedure action prog
 
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS tolore
                      -> FilePath
-                     -> IO (Either CompileError (VNameSource, Prog tolore), Log)
-runPipelineOnProgram config pipeline file = runFutharkM $ do
+                     -> FutharkM (Prog tolore)
+runPipelineOnProgram config pipeline file = do
   source <- liftIO $ readFile file
-  prog <- runPipelineOnSource config pipeline file source
-  src <- getNameSource
-  return (src, prog)
+  runPipelineOnSource config pipeline file source
 
 runPipelineOnSource :: FutharkConfig
                     -> Pipeline I.SOACS tolore

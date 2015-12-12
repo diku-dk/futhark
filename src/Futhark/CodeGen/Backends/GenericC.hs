@@ -524,16 +524,18 @@ timingOption =
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
-compileProg :: Operations op s
+compileProg :: MonadFreshNames m =>
+               Operations op s
             -> s
             -> [C.Definition] -> [C.Stm] -> [C.Stm]
             -> [Option]
             -> Functions op
-            -> String
-compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Functions funs) =
+            -> m String
+compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Functions funs) = do
+  src <- getNameSource
   let ((prototypes, definitions, main), endstate) =
-        runCompilerM prog ops blankNameSource userstate compileProg'
-  in pretty [C.cunit|
+        runCompilerM prog ops src userstate compileProg'
+  return $ pretty [C.cunit|
 $esc:("#include <stdio.h>")
 $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
