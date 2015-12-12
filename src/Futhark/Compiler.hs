@@ -96,24 +96,23 @@ runPipelineOnSource :: FutharkConfig
                     -> String
                     -> IO (Either CompileError (VNameSource, Prog tolore), Log)
 runPipelineOnSource config pipeline filename srccode = runFutharkM $ do
-  prog <- futharkc'
-  src <- getNameSource
-  return (src, prog)
-  where futharkc' = do
-          parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
-          tagged_ext_prog <- E.tagProg <$> typeCheckSourceProgram parsed_prog
-          putNameSource $ E.newNameSourceForProg tagged_ext_prog
-          res <- internaliseProg (futharkBoundsCheck config) tagged_ext_prog
-          case res of
-            Left err ->
-              compileErrorS "During internalisation:" err
-            Right int_prog -> do
-              typeCheckInternalProgram int_prog
-              runPasses pipeline pipeline_config int_prog
-        pipeline_config =
+  parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
+  tagged_ext_prog <- E.tagProg <$> typeCheckSourceProgram parsed_prog
+  putNameSource $ E.newNameSourceForProg tagged_ext_prog
+  res <- internaliseProg (futharkBoundsCheck config) tagged_ext_prog
+  case res of
+    Left err ->
+      compileErrorS "During internalisation:" err
+    Right int_prog -> do
+      typeCheckInternalProgram int_prog
+      prog <- runPasses pipeline pipeline_config int_prog
+      src <- getNameSource
+      return (src, prog)
+  where pipeline_config =
           PipelineConfig { pipelineVerbose = isJust $ futharkVerbose config
                          , pipelineValidate = True
                          }
+
 parseSourceProgram :: RealConfiguration -> FilePath -> String
                    -> FutharkM E.UncheckedProg
 parseSourceProgram rconf filename file_contents =
