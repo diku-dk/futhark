@@ -66,7 +66,8 @@ runCompilerOnProgram :: FutharkConfig
                      -> IO ()
 runCompilerOnProgram config pipeline action file = do
   (res, msgs) <- runFutharkM compile
-  liftIO $ T.hPutStrLn stderr $ toText msgs
+  when (isJust $ futharkVerbose config) $
+    liftIO $ T.hPutStrLn stderr $ toText msgs
   case res of
     Left err -> liftIO $ do
       dumpError config err
