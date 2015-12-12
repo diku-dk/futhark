@@ -3,6 +3,7 @@ module Futhark.Compiler
        (
          runPipelineOnProgram
        , runCompilerOnProgram
+       , runPipelineOnSource
        , interpretAction'
        , FutharkConfig (..)
        , newFutharkConfig
@@ -14,6 +15,7 @@ where
 import Control.Applicative
 import Data.Monoid
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.Maybe
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
@@ -63,39 +65,38 @@ runCompilerOnProgram :: FutharkConfig
                      -> FilePath
                      -> IO ()
 runCompilerOnProgram config pipeline action file = do
-  (res, msgs) <- runPipelineOnProgram config pipeline file
-  T.hPutStrLn stderr $ toText msgs
+  (res, msgs) <- runFutharkM compile
+  liftIO $ T.hPutStrLn stderr $ toText msgs
   case res of
-    Left err -> do
+    Left err -> liftIO $ do
       dumpError config err
       exitWith $ ExitFailure 2
-    Right (src, prog) -> do
-      when (isJust $ futharkVerbose config) $
-        hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
-      (action_res, action_msgs) <- runFutharkM $ do
-        putNameSource src
-        runActionProcedure action prog
-      T.hPutStrLn stderr $ toText action_msgs
-      case action_res of
-        Left err -> do
-          dumpError config err
-          exitWith $ ExitFailure 2
-        Right _ -> return ()
+    Right () ->
+      return ()
+  where compile = do
+          source <- liftIO $ readFile file
+          prog <- runPipelineOnSource config pipeline file source
+          when (isJust $ futharkVerbose config) $
+            liftIO $ hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
+          src <- getNameSource
+          actionProcedure action (src, prog)
 
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS tolore
                      -> FilePath
                      -> IO (Either CompileError (VNameSource, Prog tolore), Log)
-runPipelineOnProgram config pipeline file = do
-  contents <- readFile file
-  runPipelineOnSource config pipeline file contents
+runPipelineOnProgram config pipeline file = runFutharkM $ do
+  source <- liftIO $ readFile file
+  prog <- runPipelineOnSource config pipeline file source
+  src <- getNameSource
+  return (src, prog)
 
 runPipelineOnSource :: FutharkConfig
                     -> Pipeline I.SOACS tolore
                     -> FilePath
                     -> String
-                    -> IO (Either CompileError (VNameSource, Prog tolore), Log)
-runPipelineOnSource config pipeline filename srccode = runFutharkM $ do
+                    -> FutharkM (Prog tolore)
+runPipelineOnSource config pipeline filename srccode = do
   parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
   tagged_ext_prog <- E.tagProg <$> typeCheckSourceProgram parsed_prog
   putNameSource $ E.newNameSourceForProg tagged_ext_prog
@@ -105,9 +106,7 @@ runPipelineOnSource config pipeline filename srccode = runFutharkM $ do
       compileErrorS "During internalisation:" err
     Right int_prog -> do
       typeCheckInternalProgram int_prog
-      prog <- runPasses pipeline pipeline_config int_prog
-      src <- getNameSource
-      return (src, prog)
+      runPasses pipeline pipeline_config int_prog
   where pipeline_config =
           PipelineConfig { pipelineVerbose = isJust $ futharkVerbose config
                          , pipelineValidate = True

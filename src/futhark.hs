@@ -6,6 +6,7 @@ import Data.Maybe
 import Control.Category (id)
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -29,7 +30,6 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.AST (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
-import Futhark.MonadFreshNames
 import qualified Futhark.Util.Pretty as PP
 
 import Futhark.Pass.Untrace
@@ -272,21 +272,22 @@ main :: IO ()
 main = mainWithOptions newConfig commandLineOptions compile
   where compile [file] config =
           Just $ do
-            (res, msgs) <- runPipelineOnProgram (futharkConfig config) id file
-            T.hPutStr stderr $ toText msgs
+            (res, msgs) <- runFutharkM $ m file config
+            liftIO $ T.hPutStrLn stderr $ toText msgs
             case res of
               Left err -> do
                 dumpError (futharkConfig config) err
                 exitWith $ ExitFailure 2
-              Right (src, prog) ->
-                runPolyPasses config (src, prog)
+              Right () -> return ()
         compile _      _      =
           Nothing
+        m file config = do
+          source <- liftIO $ readFile file
+          prog <- runPipelineOnSource (futharkConfig config) id file source
+          runPolyPasses config prog
 
-runPolyPasses :: Config -> (VNameSource, SOACS.Prog) -> IO ()
-runPolyPasses config (src, prog) = do
-  (res, msgs) <- runFutharkM $ do
-    putNameSource src
+runPolyPasses :: Config -> SOACS.Prog -> FutharkM ()
+runPolyPasses config prog = do
     prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (futharkPipeline config)
     case (prog', futharkAction config) of
       (SOACS soacs_prog, SOACSAction action) ->
@@ -309,14 +310,6 @@ runPolyPasses config (src, prog) = do
                       " expects " ++ representation action ++ " representation, but got " ++
                      representation prog' ++ ".") $
         pretty prog'
-  when (isJust $ futharkVerbose $ futharkConfig config) $
-    T.hPutStr stderr $ toText msgs
-  case res of
-    Left err -> do
-      dumpError (futharkConfig config) err
-      exitWith $ ExitFailure 2
-    Right () ->
-      return ()
   where pipeline_config =
           PipelineConfig { pipelineVerbose = isJust $ futharkVerbose $ futharkConfig config
                          , pipelineValidate = True

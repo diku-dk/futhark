@@ -214,6 +214,7 @@ Executable futhark
                  array >= 0.4,
                  mtl >= 2.2.1,
                  text,
+                 transformers,
                  futhark
 
   Default-Language:   Haskell2010
