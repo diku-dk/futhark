@@ -11,8 +11,9 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import Futhark.FreshNames
 
-compileProg :: Prog -> Either String String
+compileProg :: (VNameSource, Prog) -> Either String String
 compileProg = fmap (GenericC.compileProg operations () [] [] [] []) .
               ImpGen.compileProg
   where operations :: GenericC.Operations Imp.Sequential ()

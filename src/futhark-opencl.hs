@@ -45,8 +45,8 @@ compile config filepath = do
     Left err -> do
       dumpError (futharkConfig config) err
       exitWith $ ExitFailure 2
-    Right prog ->
-      case COpenCL.compileProg prog of
+    Right (src, prog) ->
+      case COpenCL.compileProg (src, prog) of
         Left err -> do
           dumpError (futharkConfig config) $
             CompileError (T.pack err) $ T.pack $ pretty prog

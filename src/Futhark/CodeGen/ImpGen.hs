@@ -260,11 +260,10 @@ emit :: Imp.Code op -> ImpM op ()
 emit = tell
 
 compileProg :: Operations op -> Imp.Space
-            -> Prog -> Either String (Imp.Functions op)
-compileProg ops ds prog =
+            -> (VNameSource, Prog) -> Either String (Imp.Functions op)
+compileProg ops ds (src, prog) =
   Imp.Functions <$> snd <$>
   mapAccumLM (compileFunDec ops ds) src (progFunctions prog)
-  where src = newNameSourceForProg prog
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramAttr fparam of

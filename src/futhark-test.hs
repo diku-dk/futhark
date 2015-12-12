@@ -284,14 +284,14 @@ optimisedProgramMetrics (SOACSPipeline pipeline) program = do
   case res of
     (Left err, msgs) ->
       throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
-    (Right prog, _) ->
+    (Right (_, prog), _) ->
       return $ progMetrics prog
 optimisedProgramMetrics (KernelsPipeline pipeline) program = do
   res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
       throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
-    (Right prog, _) ->
+    (Right (_, prog), _) ->
       return $ progMetrics prog
 
 testMetrics :: FilePath -> StructureTest -> TestM ()

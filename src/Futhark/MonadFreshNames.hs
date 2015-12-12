@@ -19,7 +19,6 @@ module Futhark.MonadFreshNames
   , newIdents
   , newParam
   , newParam'
-  , newNameSourceForProg
   , module Futhark.FreshNames
   ) where
 
@@ -37,7 +36,6 @@ import Data.Monoid
 import Prelude
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Names (progNames)
 import qualified Futhark.FreshNames as FreshNames
 import Futhark.FreshNames hiding (newName, newID, newVName)
 
@@ -142,11 +140,6 @@ newParam' :: MonadFreshNames m =>
 newParam' f param =
   newParam (f $ nameToString $ baseName $ paramName param)
            (paramAttr param)
-
--- | Create a new 'NameSource' that will never produce any of the
--- names used as variables in the given program.
-newNameSourceForProg :: Prog lore -> VNameSource
-newNameSourceForProg = newNameSource . progNames
 
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.

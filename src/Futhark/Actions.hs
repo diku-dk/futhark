@@ -33,7 +33,7 @@ printAction :: (PrettyLore lore, CanBeAliased (Op lore)) => Action lore
 printAction =
   Action { actionName = "Prettyprint"
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
-         , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
+         , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis . snd
          }
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
@@ -41,14 +41,14 @@ interpretAction :: Show error => (FilePath -> String -> Either error [Value])
 interpretAction parser =
   Action { actionName = "Interpret"
          , actionDescription = "Run the program via an interpreter."
-         , actionProcedure = liftIO . interpret parser
+         , actionProcedure = liftIO . interpret parser . snd
          }
 
 rangeAction :: (PrettyLore lore, CanBeRanged (Op lore)) => Action lore
 rangeAction =
     Action { actionName = "Range analysis"
            , actionDescription = "Print the program with range annotations added."
-           , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis
+           , actionProcedure = liftIO . putStrLn . pretty . rangeAnalysis . snd
            }
 
 seqCodeGenAction :: Action ExplicitMemory

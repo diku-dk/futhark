@@ -4,6 +4,7 @@ module Futhark.Pipeline
        , Pipeline
        , PipelineConfig (..)
        , Action (..)
+       , runActionProcedure
 
        , FutharkM
        , runFutharkM
@@ -68,8 +69,13 @@ compileErrorS s e = throwError $ CompileError s $ T.pack e
 data Action lore =
   Action { actionName :: String
          , actionDescription :: String
-         , actionProcedure :: Prog lore -> FutharkM ()
+         , actionProcedure :: (VNameSource, Prog lore) -> FutharkM ()
          }
+
+runActionProcedure :: Action lore -> Prog lore -> FutharkM ()
+runActionProcedure action prog = do
+  src <- getNameSource
+  actionProcedure action (src, prog)
 
 data PipelineConfig =
   PipelineConfig { pipelineVerbose :: Bool
@@ -100,7 +106,8 @@ runPipeline p cfg prog a = do
   prog' <- runPasses p cfg prog
   when (pipelineVerbose cfg) $ logMsg $
     "Running action " <> T.pack (actionName a)
-  actionProcedure a prog'
+  src <- getNameSource
+  actionProcedure a (src, prog')
 
 onePass :: Checkable tolore =>
            Pass fromlore tolore -> Pipeline fromlore tolore

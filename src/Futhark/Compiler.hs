@@ -69,21 +69,23 @@ runCompilerOnProgram config pipeline action file = do
     Left err -> do
       dumpError config err
       exitWith $ ExitFailure 2
-    Right prog -> do
+    Right (src, prog) -> do
       when (isJust $ futharkVerbose config) $
         hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
-      (action_res, action_msgs) <- runFutharkM $ actionProcedure action prog
+      (action_res, action_msgs) <- runFutharkM $ do
+        putNameSource src
+        runActionProcedure action prog
       T.hPutStrLn stderr $ toText action_msgs
       case action_res of
         Left err -> do
           dumpError config err
           exitWith $ ExitFailure 2
-        Right () -> return ()
+        Right _ -> return ()
 
 runPipelineOnProgram :: FutharkConfig
                      -> Pipeline I.SOACS tolore
                      -> FilePath
-                     -> IO (Either CompileError (Prog tolore), Log)
+                     -> IO (Either CompileError (VNameSource, Prog tolore), Log)
 runPipelineOnProgram config pipeline file = do
   contents <- readFile file
   runPipelineOnSource config pipeline file contents
@@ -92,11 +94,11 @@ runPipelineOnSource :: FutharkConfig
                     -> Pipeline I.SOACS tolore
                     -> FilePath
                     -> String
-                    -> IO (Either CompileError (Prog tolore), Log)
-runPipelineOnSource config pipeline filename srccode = do
-  res <- runFutharkM futharkc'
-  case res of (Left err, msgs)  -> return (Left err, msgs)
-              (Right prog, msgs) -> return (Right prog, msgs)
+                    -> IO (Either CompileError (VNameSource, Prog tolore), Log)
+runPipelineOnSource config pipeline filename srccode = runFutharkM $ do
+  prog <- futharkc'
+  src <- getNameSource
+  return (src, prog)
   where futharkc' = do
           parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
           tagged_ext_prog <- E.tagProg <$> typeCheckSourceProgram parsed_prog
