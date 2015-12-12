@@ -280,18 +280,18 @@ progNotFound s = s ++ ": command not found"
 
 optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
 optimisedProgramMetrics (SOACSPipeline pipeline) program = do
-  res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
+  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
       throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
-    (Right (_, prog), _) ->
+    (Right prog, _) ->
       return $ progMetrics prog
 optimisedProgramMetrics (KernelsPipeline pipeline) program = do
-  res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
+  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
       throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
-    (Right (_, prog), _) ->
+    (Right prog, _) ->
       return $ progMetrics prog
 
 testMetrics :: FilePath -> StructureTest -> TestM ()

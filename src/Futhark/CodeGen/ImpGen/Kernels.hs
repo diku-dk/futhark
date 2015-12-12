@@ -42,10 +42,10 @@ inKernelOperations :: ImpGen.Operations Imp.InKernel
 inKernelOperations = (ImpGen.defaultOperations cannotAllocInKernel)
                      { ImpGen.opsCopyCompiler = inKernelCopy }
 
-compileProg :: (VNameSource, Prog) -> Either String Imp.Program
-compileProg = liftM (setDefaultSpace (Imp.Space "device")) .
-              ImpGen.compileProg
-              callKernelOperations (Imp.Space "device")
+compileProg :: MonadFreshNames m => Prog -> m (Either String Imp.Program)
+compileProg prog =
+  fmap (setDefaultSpace (Imp.Space "device")) <$>
+  ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
 
 opCompiler :: ImpGen.Destination -> Op ExplicitMemory
               -> ImpGen.ImpM Imp.CallKernel ()

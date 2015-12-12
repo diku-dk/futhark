@@ -291,18 +291,18 @@ runPolyPasses config prog = do
     prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (futharkPipeline config)
     case (prog', futharkAction config) of
       (SOACS soacs_prog, SOACSAction action) ->
-        runActionProcedure action soacs_prog
+        actionProcedure action soacs_prog
       (Kernels kernels_prog, KernelsAction action) ->
-        runActionProcedure action kernels_prog
+        actionProcedure action kernels_prog
       (ExplicitMemory mem_prog, ExplicitMemoryAction action) ->
-        runActionProcedure action mem_prog
+        actionProcedure action mem_prog
 
       (SOACS soacs_prog, PolyAction soacs_action _ _) ->
-        runActionProcedure soacs_action soacs_prog
+        actionProcedure soacs_action soacs_prog
       (Kernels kernels_prog, PolyAction _ kernels_action _) ->
-        runActionProcedure kernels_action kernels_prog
+        actionProcedure kernels_action kernels_prog
       (ExplicitMemory mem_prog, PolyAction _ _ mem_action) ->
-        runActionProcedure mem_action mem_prog
+        actionProcedure mem_action mem_prog
 
       (_, action) ->
         compileError (T.pack $ "Action " <>

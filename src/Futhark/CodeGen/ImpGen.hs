@@ -259,11 +259,14 @@ comment desc m = do code <- collect m
 emit :: Imp.Code op -> ImpM op ()
 emit = tell
 
-compileProg :: Operations op -> Imp.Space
-            -> (VNameSource, Prog) -> Either String (Imp.Functions op)
-compileProg ops ds (src, prog) =
-  Imp.Functions <$> snd <$>
-  mapAccumLM (compileFunDec ops ds) src (progFunctions prog)
+compileProg :: MonadFreshNames m =>
+               Operations op -> Imp.Space
+            -> Prog -> m (Either String (Imp.Functions op))
+compileProg ops ds prog =
+  modifyNameSource $ \src ->
+  case mapAccumLM (compileFunDec ops ds) src (progFunctions prog) of
+    Left err -> (Left err, src)
+    Right (src', funs) -> (Right $ Imp.Functions funs, src')
 
 compileInParam :: FParam -> ImpM op (Either Imp.Param ArrayDecl)
 compileInParam fparam = case paramAttr fparam of

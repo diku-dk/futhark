@@ -4,10 +4,11 @@ module Futhark.CodeGen.Backends.COpenCL
   ) where
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding (mapM)
+import Data.Traversable
 import Data.List
 
-import Prelude
+import Prelude hiding (mapM)
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -20,19 +21,21 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: (VNameSource, Prog) -> Either String String
-compileProg (src, prog) = do
-  Program opencl_code kernel_names prog' <- ImpGen.compileProg (src, prog)
-  let header = unlines [ "#include <CL/cl.h>\n"
-                       , "#define FUT_KERNEL(s) #s"
-                       , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
-                       , blockDimPragma
-                       ]
-  return $
-    header ++
-    GenericC.compileProg operations ()
-    (openClDecls kernel_names opencl_code)
-    openClInit (openClReport kernel_names) options prog'
+compileProg :: MonadFreshNames m => Prog -> m (Either String String)
+compileProg prog = do
+  res <- ImpGen.compileProg prog
+  case res of
+    Left err -> return $ Left err
+    Right (Program opencl_code kernel_names prog') -> do
+      let header = unlines [ "#include <CL/cl.h>\n"
+                           , "#define FUT_KERNEL(s) #s"
+                           , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
+                           , blockDimPragma
+                           ]
+      cprog <- GenericC.compileProg operations ()
+               (openClDecls kernel_names opencl_code)
+               openClInit (openClReport kernel_names) options prog'
+      return $ Right $ header ++ cprog
   where operations :: GenericC.Operations OpenCL ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel
