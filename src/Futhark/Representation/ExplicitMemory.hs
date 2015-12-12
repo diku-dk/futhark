@@ -749,9 +749,9 @@ bindeeAnnot bindeeName bindeeLore bindee =
     attr@ArrayMem{} ->
       Just $
       PP.text "-- " <>
-      PP.ppr (bindeeName bindee) <>
-      PP.text " :: " <>
-      PP.ppr attr
+      PP.oneLine (PP.ppr (bindeeName bindee) <>
+                  PP.text " :: " <>
+                  PP.ppr attr)
     MemMem {} ->
       Nothing
     Scalar _ ->

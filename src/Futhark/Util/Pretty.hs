@@ -6,6 +6,7 @@ module Futhark.Util.Pretty
        , prettyTuple
 
        , apply
+       , oneLine
        )
        where
 
@@ -31,3 +32,7 @@ prettyTuple = PP.pretty 80 . ppTuple'
 -- parentheses.
 apply :: [Doc] -> Doc
 apply = parens . commasep . map align
+
+-- | Make sure that the given document is printed on just a single line.
+oneLine :: PP.Doc -> PP.Doc
+oneLine s = PP.text $ PP.displayS (PP.renderCompact s) ""
