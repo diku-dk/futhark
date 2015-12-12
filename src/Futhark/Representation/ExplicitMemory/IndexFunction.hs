@@ -260,7 +260,7 @@ reshape ixfun newshape =
                   Vec.map DimCoercion $ Vec.take (Vec.sLength is) $ shape ixfun'
                 newshape' :: ShapeChange num (k :+: 'S m)
                 newshape' = Vec.append unchanged_shape newshape
-            in Index sm (reshape ixfun'' newshape') is
+            in applyInd sm (reshape ixfun'' newshape') is
 
           Reshape _ _ ->
             Reshape ixfun newshape
@@ -358,23 +358,24 @@ base (Stripe ixfun _) =
 base (Unstripe ixfun _) =
   base ixfun
 
-rebase :: IxFun num k c
+rebase :: (Eq num, IntegralCond num) =>
+          IxFun num k c
        -> IxFun num c n
        -> IxFun num k n
 rebase new_base (Direct _) =
   new_base
 rebase new_base (Offset ixfun o) =
-  Offset (rebase new_base ixfun) o
+  offsetIndex (rebase new_base ixfun) o
 rebase new_base (Permute ixfun perm) =
-  Permute (rebase new_base ixfun) perm
+  permute (rebase new_base ixfun) perm
 rebase new_base (Index n ixfun is) =
-  Index n (rebase new_base ixfun) is
+  applyInd n (rebase new_base ixfun) is
 rebase new_base (Reshape ixfun new_shape) =
-  Reshape (rebase new_base ixfun) new_shape
+  reshape (rebase new_base ixfun) new_shape
 rebase new_base (Stripe ixfun stride) =
-  Stripe (rebase new_base ixfun) stride
+  stripe (rebase new_base ixfun) stride
 rebase new_base (Unstripe ixfun stride) =
-  Unstripe (rebase new_base ixfun) stride
+  unstripe (rebase new_base ixfun) stride
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
