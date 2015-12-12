@@ -10,6 +10,7 @@ import Futhark.Representation.ExplicitMemory (Prog)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as OpenCL
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import Futhark.CodeGen.ImpGen.Kernels.ToOpenCL
+import Futhark.FreshNames
 
-compileProg :: Prog -> Either String OpenCL.Program
+compileProg :: (VNameSource, Prog) -> Either String OpenCL.Program
 compileProg = kernelsToOpenCL <=< ImpGenKernels.compileProg

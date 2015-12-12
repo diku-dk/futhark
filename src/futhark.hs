@@ -29,6 +29,7 @@ import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.AST (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
+import Futhark.MonadFreshNames
 import qualified Futhark.Util.Pretty as PP
 
 import Futhark.Pass.Untrace
@@ -277,29 +278,30 @@ main = mainWithOptions newConfig commandLineOptions compile
               Left err -> do
                 dumpError (futharkConfig config) err
                 exitWith $ ExitFailure 2
-              Right prog ->
-                runPolyPasses config prog
+              Right (src, prog) ->
+                runPolyPasses config (src, prog)
         compile _      _      =
           Nothing
 
-runPolyPasses :: Config -> SOACS.Prog -> IO ()
-runPolyPasses config prog = do
+runPolyPasses :: Config -> (VNameSource, SOACS.Prog) -> IO ()
+runPolyPasses config (src, prog) = do
   (res, msgs) <- runFutharkM $ do
+    putNameSource src
     prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (futharkPipeline config)
     case (prog', futharkAction config) of
       (SOACS soacs_prog, SOACSAction action) ->
-        actionProcedure action soacs_prog
+        runActionProcedure action soacs_prog
       (Kernels kernels_prog, KernelsAction action) ->
-        actionProcedure action kernels_prog
+        runActionProcedure action kernels_prog
       (ExplicitMemory mem_prog, ExplicitMemoryAction action) ->
-        actionProcedure action mem_prog
+        runActionProcedure action mem_prog
 
       (SOACS soacs_prog, PolyAction soacs_action _ _) ->
-        actionProcedure soacs_action soacs_prog
+        runActionProcedure soacs_action soacs_prog
       (Kernels kernels_prog, PolyAction _ kernels_action _) ->
-        actionProcedure kernels_action kernels_prog
+        runActionProcedure kernels_action kernels_prog
       (ExplicitMemory mem_prog, PolyAction _ _ mem_action) ->
-        actionProcedure mem_action mem_prog
+        runActionProcedure mem_action mem_prog
 
       (_, action) ->
         compileError (T.pack $ "Action " <>

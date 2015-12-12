@@ -41,8 +41,8 @@ compile config filepath = do
     Left err -> do
       dumpError (futharkConfig config) err
       exitWith $ ExitFailure 2
-    Right prog ->
-      case SequentialC.compileProg prog of
+    Right (src, prog) ->
+      case SequentialC.compileProg (src, prog) of
         Left err -> do
           dumpError (futharkConfig config) $
             CompileError (T.pack err) $

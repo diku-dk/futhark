@@ -20,9 +20,9 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: Prog -> Either String String
-compileProg prog = do
-  Program opencl_code kernel_names prog' <- ImpGen.compileProg prog
+compileProg :: (VNameSource, Prog) -> Either String String
+compileProg (src, prog) = do
+  Program opencl_code kernel_names prog' <- ImpGen.compileProg (src, prog)
   let header = unlines [ "#include <CL/cl.h>\n"
                        , "#define FUT_KERNEL(s) #s"
                        , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"

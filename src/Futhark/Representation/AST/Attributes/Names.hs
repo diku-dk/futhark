@@ -16,7 +16,6 @@ module Futhark.Representation.AST.Attributes.Names
          , freeInLambda
          , freeInExtLambda
          -- * Bound Names
-         , progNames
          , boundInBody
          , boundByBindings
          , boundByLambda
@@ -234,46 +233,6 @@ instance FreeIn LoopForm where
 
 instance FreeIn d => FreeIn (DimChange d) where
   freeIn = Data.Foldable.foldMap freeIn
-
--- | Return the set of all variable names bound in a program.
-progNames :: Prog lore -> Names
-progNames = execWriter . mapM funNames . progFunctions
-  where names = identityWalker {
-                  walkOnBinding = bindingNames
-                , walkOnBody = bodyNames
-                , walkOnLambda = lambdaNames
-                , walkOnExtLambda = extLambdaNames
-                }
-
-        one = tell . HS.singleton
-        funNames fundec = do
-          mapM_ (one . paramName) $ funDecParams fundec
-          bodyNames $ funDecBody fundec
-
-        bodyNames = mapM_ bindingNames . bodyBindings
-
-        bindingNames (Let pat _ e) =
-          mapM_ one (patternNames pat) >> expNames e
-
-        expNames (LoopOp (DoLoop _ pat form loopbody)) = do
-          mapM_ (one . paramName . fst) pat
-          case form of ForLoop i _ ->
-                         one i
-                       WhileLoop _ ->
-                         return ()
-          bodyNames loopbody
-
-        expNames e = walkExpM names e
-
-        lambdaNames (Lambda index params body _) = do
-          one index
-          mapM_ (one . paramName) params
-          bodyNames body
-
-        extLambdaNames (ExtLambda index params body _) = do
-          one index
-          mapM_ (one . paramName) params
-          bodyNames body
 
 -- | The names bound by the bindings immediately in a 'Body'.
 boundInBody :: Body lore -> Names
