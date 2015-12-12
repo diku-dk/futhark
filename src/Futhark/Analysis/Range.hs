@@ -6,6 +6,7 @@ module Futhark.Analysis.Range
        , analyseExp
        , analyseLambda
        , analyseExtLambda
+       , analyseBody
        )
        where
 

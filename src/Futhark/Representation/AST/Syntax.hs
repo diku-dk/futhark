@@ -56,9 +56,6 @@ module Futhark.Representation.AST.Syntax
   , ExtLambda
   , Annotations.RetType
   , StreamForm(..)
-  , KernelInput (..)
-  , KernelSize (..)
-  , ScanKernelOrder (..)
 
   -- * Definitions
   , ParamT (..)
@@ -263,20 +260,6 @@ data LoopOp lore
    = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
     -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
 
-  | MapKernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
-    [(Type, [Int])] (Body lore)
-  | ReduceKernel Certificates SubExp
-    KernelSize
-    (LambdaT lore)
-    (LambdaT lore)
-    [SubExp]
-    [VName]
-  | ScanKernel Certificates SubExp
-    KernelSize
-    ScanKernelOrder
-    (LambdaT lore)
-    [(SubExp, VName)]
-
 deriving instance Annotations lore => Eq (LoopOp lore)
 deriving instance Annotations lore => Show (LoopOp lore)
 deriving instance Annotations lore => Ord (LoopOp lore)
@@ -285,28 +268,6 @@ data StreamForm lore  = MapLike    StreamOrd
                       | RedLike    StreamOrd (LambdaT lore) [SubExp]
                       | Sequential [SubExp]
                         deriving (Eq, Ord, Show)
-
-data KernelInput lore = KernelInput { kernelInputParam :: LParam lore
-                                    , kernelInputArray :: VName
-                                    , kernelInputIndices :: [SubExp]
-                                    }
-
-deriving instance Annotations lore => Eq (KernelInput lore)
-deriving instance Annotations lore => Show (KernelInput lore)
-deriving instance Annotations lore => Ord (KernelInput lore)
-
-data KernelSize = KernelSize { kernelWorkgroups :: SubExp
-                             , kernelWorkgroupSize :: SubExp
-                             , kernelElementsPerThread :: SubExp
-                             , kernelTotalElements :: SubExp
-                             , kernelThreadOffsetMultiple :: SubExp
-                             , kernelNumThreads :: SubExp
-                             }
-                deriving (Eq, Ord, Show)
-
-data ScanKernelOrder = ScanTransposed
-                     | ScanFlat
-                     deriving (Eq, Ord, Show)
 
 data LoopForm = ForLoop VName SubExp
               | WhileLoop VName

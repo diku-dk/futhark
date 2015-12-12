@@ -12,11 +12,11 @@ import Data.Monoid
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.SOACS
+import Futhark.Representation.Kernels
 import Futhark.Tools
 import Futhark.Pass
 
-babysitKernels :: Pass SOACS SOACS
+babysitKernels :: Pass Kernels Kernels
 babysitKernels =
   Pass { passName = "babysit kernels"
        , passDescription = "Transpose kernel input arrays for better performance."
@@ -30,7 +30,7 @@ transformFunDec fundec = do
   where m = bindingIdentTypes (map paramIdent $ funDecParams fundec) $
             transformBody $ funDecBody fundec
 
-type BabysitM = Binder SOACS
+type BabysitM = Binder Kernels
 
 transformBody :: Body -> BabysitM Body
 transformBody (Body () bnds res) = insertBindingsM $ do
@@ -62,7 +62,7 @@ transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
                                    WhileLoop _ -> []
 
 transformBinding expmap (Let pat ()
-                         (LoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs)))
+                         (Op (ReduceKernel cs w kernel_size parlam seqlam nes arrs)))
   | num_groups /= Constant (IntVal 1) = do
   -- We want to pad and transpose the input arrays.
 
@@ -72,14 +72,14 @@ transformBinding expmap (Let pat ()
   parlam' <- transformLambda parlam
   seqlam' <- transformLambda seqlam
 
-  addBinding $ Let pat () $ LoopOp $
+  addBinding $ Let pat () $ Op $
     ReduceKernel cs w' kernel_size' parlam' seqlam' nes arrs'
   return expmap
   where num_groups = kernelWorkgroups kernel_size
         num_threads = kernelNumThreads kernel_size
 
 transformBinding expmap (Let pat ()
-                         (LoopOp (ScanKernel cs w kernel_size ScanFlat lam input)))
+                         (Op (ScanKernel cs w kernel_size ScanFlat lam input)))
   | num_groups /= Constant (IntVal 1) = do
   -- We want to pad and transpose the input arrays.
 
@@ -96,7 +96,7 @@ transformBinding expmap (Let pat ()
   seq_pat_elems' <- mapM adjust seq_pat_elems
   let scan_pat = Pattern [] (seq_pat_elems'++group_pat_elems)
 
-  addBinding $ Let scan_pat () $ LoopOp $
+  addBinding $ Let scan_pat () $ Op $
     ScanKernel cs w' kernel_size' ScanTransposed lam' $ zip nes arrs'
   forM_ (zip seq_pat_elems' seq_pat_elems) $ \(padded_pat_elem, dest_pat_elem) -> do
     let perm = [1,0] ++ [2..arrayRank (patElemType padded_pat_elem)]
@@ -127,7 +127,7 @@ transformBinding expmap (Let pat ()
         num_threads = kernelNumThreads kernel_size
         (nes, arrs) = unzip input
 
-transformBinding expmap (Let pat () (LoopOp (MapKernel cs w i ispace inps returns body))) = do
+transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
   body' <- bindingIdentTypes (Ident i (Basic Int) :
                               map ((`Ident` Basic Int) . fst) ispace ++
                               map kernelInputIdent inps) $
@@ -140,7 +140,7 @@ transformBinding expmap (Let pat () (LoopOp (MapKernel cs w i ispace inps return
   let value_elems = patternValueElements pat
   (value_elems', returns') <- rearrangeReturns num_is value_elems returns
   let pat' = Pattern [] value_elems'
-  addBinding $ Let pat' () $ LoopOp $ MapKernel cs w i ispace inps' returns' body'
+  addBinding $ Let pat' () $ Op $ MapKernel cs w i ispace inps' returns' body'
   mapM_ maybeRearrangeResult $ zip3 value_elems value_elems' returns'
   return expmap
   where num_is = length ispace
@@ -159,7 +159,7 @@ transformBinding expmap (Let pat () e) = do
   addBinding $ Let pat () e'
   return $ HM.fromList [ (name, e') | name <- patternNames pat ] <> expmap
 
-transform :: Mapper SOACS SOACS BabysitM
+transform :: Mapper Kernels Kernels BabysitM
 transform = identityMapper { mapOnBody = transformBody
                            , mapOnLambda = transformLambda
                            , mapOnExtLambda = transformExtLambda
@@ -177,8 +177,8 @@ transformExtLambda lam = do
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
-rearrangeInputs :: ExpMap -> [VName] -> [KernelInput SOACS]
-                -> BabysitM [KernelInput SOACS]
+rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Kernels]
+                -> BabysitM [KernelInput Kernels]
 rearrangeInputs expmap is = mapM maybeRearrangeInput
   where
     iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .

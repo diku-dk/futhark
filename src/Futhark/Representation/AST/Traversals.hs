@@ -32,6 +32,7 @@ module Futhark.Representation.AST.Traversals
   , mapBody
   , mapExpM
   , mapExp
+  , mapOnType
 
   -- * Folding
   , Folder(..)
@@ -103,7 +104,8 @@ mapExpM :: (Applicative m, Monad m) =>
 mapExpM tv (PrimOp (SubExp se)) =
   PrimOp <$> (SubExp <$> mapOnSubExp tv se)
 mapExpM tv (PrimOp (ArrayLit els rowt)) =
-  PrimOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*> mapOnType tv rowt)
+  PrimOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*>
+              mapOnType (mapOnSubExp tv) rowt)
 mapExpM tv (PrimOp (BinOp bop x y t)) =
   PrimOp <$> (pure (BinOp bop) <*>
                  mapOnSubExp tv x <*> mapOnSubExp tv y <*>
@@ -171,50 +173,8 @@ mapExpM tv (LoopOp (DoLoop res mergepat form loopbody)) =
               mapOnLoopForm tv form <*>
               mapOnBody tv loopbody)
   where (vs,es) = unzip mergepat
-mapExpM tv (LoopOp (MapKernel cs w index ispace inps rettype body)) =
-  LoopOp <$> (MapKernel <$>
-              mapOnCertificates tv cs <*>
-              mapOnSubExp tv w <*>
-              mapOnVName tv index <*>
-              (zip iparams <$> mapM (mapOnSubExp tv) bounds) <*>
-              mapM (mapOnKernelInput tv) inps <*>
-              (zip <$> mapM (mapOnType tv) ts <*> pure perms) <*>
-              mapOnBody tv body)
-  where (iparams, bounds) = unzip ispace
-        (ts, perms) = unzip rettype
-mapExpM tv (LoopOp (ReduceKernel cs w kernel_size red_fun fold_fun accs arrs)) =
-  LoopOp <$> (ReduceKernel <$>
-              mapOnCertificates tv cs <*>
-              mapOnSubExp tv w <*>
-              mapOnKernelSize tv kernel_size <*>
-              mapOnLambda tv red_fun <*>
-              mapOnLambda tv fold_fun <*>
-              mapM (mapOnSubExp tv) accs <*>
-              mapM (mapOnVName tv) arrs)
-mapExpM tv (LoopOp (ScanKernel cs w kernel_size order fun input)) =
-  LoopOp <$> (ScanKernel <$>
-              mapOnCertificates tv cs <*>
-              mapOnSubExp tv w <*>
-              mapOnKernelSize tv kernel_size <*>
-              pure order <*>
-              mapOnLambda tv fun <*>
-              (zip <$> mapM (mapOnSubExp tv) nes <*>
-                       mapM (mapOnVName tv) arrs))
-  where (nes, arrs) = unzip input
 mapExpM tv (Op op) =
   Op <$> mapOnOp tv op
-
-mapOnKernelSize :: (Monad m, Applicative m) =>
-                   Mapper flore tlore m -> KernelSize -> m KernelSize
-mapOnKernelSize tv (KernelSize num_workgroups workgroup_size
-                    per_thread_elements num_elements offset_multiple num_threads) =
-  KernelSize <$>
-  mapOnSubExp tv num_workgroups <*>
-  mapOnSubExp tv workgroup_size <*>
-  mapOnSubExp tv per_thread_elements <*>
-  mapOnSubExp tv num_elements <*>
-  mapOnSubExp tv offset_multiple <*>
-  mapOnSubExp tv num_threads
 
 mapOnExtType :: (Monad m, Applicative m) =>
                 Mapper flore tlore m -> TypeBase ExtShape u -> m (TypeBase ExtShape u)
@@ -233,24 +193,16 @@ mapOnLoopForm tv (ForLoop i bound) =
 mapOnLoopForm tv (WhileLoop cond) =
   WhileLoop <$> mapOnVName tv cond
 
-mapOnKernelInput :: (Monad m, Applicative m) =>
-                    Mapper flore tlore m -> KernelInput flore
-                 -> m (KernelInput tlore)
-mapOnKernelInput tv (KernelInput param arr is) =
-  KernelInput <$> mapOnLParam tv param <*>
-                  mapOnVName tv arr <*>
-                  mapM (mapOnSubExp tv) is
-
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper flore tlore Identity -> Exp flore -> Exp tlore
 mapExp m = runIdentity . mapExpM m
 
 mapOnType :: (Applicative m, Monad m) =>
-             Mapper flore tlore m -> Type -> m Type
+             (SubExp -> m SubExp) -> Type -> m Type
 mapOnType _ (Basic bt) = return $ Basic bt
-mapOnType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
-mapOnType tv (Array bt shape u) =
-  Array bt <$> (Shape <$> mapM (mapOnSubExp tv) (shapeDims shape)) <*> pure u
+mapOnType f (Mem size space) = Mem <$> f size <*> pure space
+mapOnType f (Array bt shape u) =
+  Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u
 
 -- | Reification of a left-reduction across a syntax tree.
 data Folder a lore m = Folder {

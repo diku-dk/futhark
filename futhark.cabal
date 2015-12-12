@@ -119,6 +119,7 @@ Library
                    Futhark.Pass.ExtractKernels.BlockedKernel
                    Futhark.Pass.ExtractKernels.Distribution
                    Futhark.Pass.ExtractKernels.ISRWIM
+                   Futhark.Pass.ExtractKernels.Interchange
                    Futhark.Pass.FirstOrderTransform
                    Futhark.Pass.KernelBabysitting
                    Futhark.Pass.Simplify
@@ -160,6 +161,9 @@ Library
                    Futhark.Representation.SOACS
                    Futhark.Representation.SOACS.Simplify
                    Futhark.Representation.SOACS.SOAC
+                   Futhark.Representation.Kernels
+                   Futhark.Representation.Kernels.Simplify
+                   Futhark.Representation.Kernels.Kernel
                    Futhark.Representation.Ranges
                    Futhark.Tools
                    Futhark.Transform.CopyPropagate

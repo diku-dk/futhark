@@ -14,7 +14,7 @@ import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.SOACS as In
+import qualified Futhark.Representation.Kernels as In
 import Futhark.Optimise.Simplifier.Lore
   (Wise,
    mkWiseBody,
@@ -470,7 +470,7 @@ linearFuncallArg Array{} (Var v) = do
 linearFuncallArg _ arg =
   return arg
 
-explicitAllocations :: Pass In.SOACS ExplicitMemory
+explicitAllocations :: Pass In.Kernels ExplicitMemory
 explicitAllocations = simplePass
                       "explicit allocations"
                       "Transform program to explicit memory representation" $
@@ -550,13 +550,13 @@ allocInExp (LoopOp (DoLoop res merge form
         formBinds (WhileLoop _) =
           id
 
-allocInExp (LoopOp (MapKernel cs w index ispace inps returns body)) = do
+allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
   inps' <- mapM allocInKernelInput inps
   let mem_map = paramsSummary (map kernelInputParam inps') <> ispace_map
   localMemoryMap (mem_map <>) $ do
     body' <- allocInBindings (bodyBindings body) $ \bnds' ->
       return $ Body () bnds' $ bodyResult body
-    return $ LoopOp $ MapKernel cs w index ispace inps' returns body'
+    return $ Op $ Inner $ MapKernel cs w index ispace inps' returns body'
   where ispace_map = HM.fromList [ (i, Entry $ Scalar Int)
                                  | i <- index : map fst ispace ]
         allocInKernelInput inp =
@@ -572,16 +572,16 @@ allocInExp (LoopOp (MapKernel cs w index ispace inps returns body)) = do
             Mem size shape ->
               return inp { kernelInputParam = Param (kernelInputName inp) $ MemMem size shape }
 
-allocInExp (LoopOp (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
+allocInExp (Op (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
   arr_summaries <- mapM lookupSummary' arrs
   fold_lam' <- allocInChunkedLambda (kernelThreadOffsetMultiple size)
                fold_lam arr_summaries
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
-  return $ LoopOp $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
+  return $ Op $ Inner $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
 
-allocInExp (LoopOp (ScanKernel cs w size order lam input)) = do
+allocInExp (Op (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
-  return $ LoopOp $ ScanKernel cs w size order lam' input
+  return $ Op $ Inner $ ScanKernel cs w size order lam' input
 
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args

@@ -32,9 +32,9 @@ type InKernelGen = ImpGen.ImpM Imp.InKernel
 
 callKernelOperations :: ImpGen.Operations Imp.CallKernel
 callKernelOperations =
-  ImpGen.Operations { ImpGen.opsExpCompiler = kernelCompiler
+  ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
                     , ImpGen.opsCopyCompiler = callKernelCopy
-                    , ImpGen.opsOpCompiler = allocCompiler
+                    , ImpGen.opsOpCompiler = opCompiler
                     }
 
 
@@ -47,10 +47,12 @@ compileProg = liftM (setDefaultSpace (Imp.Space "device")) .
               ImpGen.compileProg callKernelOperations
               (Imp.Space "device")
 
-allocCompiler :: ImpGen.Destination -> Op ExplicitMemory
+opCompiler :: ImpGen.Destination -> Op ExplicitMemory
               -> ImpGen.ImpM Imp.CallKernel ()
-allocCompiler dest (Alloc e space) =
+opCompiler dest (Alloc e space) =
   ImpGen.compileAlloc dest e space
+opCompiler dest (Inner kernel) =
+  kernelCompiler dest kernel
 
 cannotAllocInKernel :: ImpGen.Destination -> Op ExplicitMemory
                     -> ImpGen.ImpM Imp.InKernel ()
@@ -58,11 +60,12 @@ cannotAllocInKernel _ _ =
   throwError "Cannot allocate memory in kernel."
 
 -- | Recognise kernels (maps), give everything else back.
-kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
+kernelCompiler :: ImpGen.Destination -> Kernel ExplicitMemory
+               -> ImpGen.ImpM Imp.CallKernel ()
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (MapKernel _ _ global_thread_index ispace inps returns body)) = do
+  (MapKernel _ _ global_thread_index ispace inps returns body) = do
 
   let kernel_size = product $ map (ImpGen.compileSubExp . snd) ispace
 
@@ -104,11 +107,10 @@ kernelCompiler
       , Imp.mapKernelUses = uses
       , Imp.mapKernelSize = kernel_size
       }
-    return ImpGen.Done
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (ReduceKernel _ _ kernel_size reduce_lam fold_lam nes _)) = do
+  (ReduceKernel _ _ kernel_size reduce_lam fold_lam nes _) = do
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
@@ -265,7 +267,6 @@ kernelCompiler
             , Imp.kernelGroupSize = group_size
             , Imp.kernelName = lambdaIndex fold_lam
             }
-          return ImpGen.Done
     call_with_prologue prologue
   where readReduceArgument local_id offset param (mem, _)
           | Basic _ <- paramType param =
@@ -279,7 +280,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (ScanKernel _ _ kernel_size order lam input)) = do
+  (ScanKernel _ _ kernel_size order lam input) = do
     let (nes, arrs) = unzip input
         (arrs_dest, partials_dest) = splitAt (length input) dest
     local_id <- newVName "local_id"
@@ -452,18 +453,19 @@ kernelCompiler
             , Imp.kernelGroupSize = local_size
             , Imp.kernelName = lambdaIndex lam
             }
-          return ImpGen.Done
 
     call_with_body body
 
+expCompiler :: ImpGen.ExpCompiler Imp.CallKernel
 -- We generate a simple kernel for itoa and replicate.
-kernelCompiler target (PrimOp (Iota n)) = do
+expCompiler target (PrimOp (Iota n)) = do
   i <- newVName "i"
   global_thread_index <- newVName "global_thread_index"
   kernelCompiler target $
-    LoopOp $ MapKernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
+    MapKernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
+  return ImpGen.Done
 
-kernelCompiler target (PrimOp (Replicate n se)) = do
+expCompiler target (PrimOp (Replicate n se)) = do
   global_thread_index <- newVName "global_thread_index"
   t <- subExpType se
   let row_rank = arrayRank t
@@ -478,18 +480,19 @@ kernelCompiler target (PrimOp (Replicate n se)) = do
         let input = KernelInput (Param input_name $ Scalar $ elemType t)
                     v (map Var js)
         return $
-          LoopOp $ MapKernel [] n global_thread_index indices [input]
+          MapKernel [] n global_thread_index indices [input]
           [(t,[0..row_rank])] (Body () [] [Var input_name])
       _ ->
         return $
-        LoopOp $ MapKernel [] n global_thread_index [(i,n)] []
+        MapKernel [] n global_thread_index [(i,n)] []
         [(t,[0..arrayRank t])] (Body () [] [se])
-
--- Allocation in the "local" space is just a placeholder.
-kernelCompiler _ (Op (Alloc _ (Space "local"))) =
   return ImpGen.Done
 
-kernelCompiler _ e =
+-- Allocation in the "local" space is just a placeholder.
+expCompiler _ (Op (Alloc _ (Space "local"))) =
+  return ImpGen.Done
+
+expCompiler _ e =
   return $ ImpGen.CompileExp e
 
 compileKernelSize :: KernelSize

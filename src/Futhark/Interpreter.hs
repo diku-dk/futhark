@@ -712,15 +712,6 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
               _ ->
                 bad $ TypeError "evalBody DoLoop while"
 
-evalLoopOp MapKernel{} =
-  fail "Cannot interpret map kernels."
-
-evalLoopOp ReduceKernel{} =
-  fail "Cannot interpret reduction kernels."
-
-evalLoopOp ScanKernel{} =
-  fail "Cannot interpret scan kernels."
-
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
 evalSOAC (Stream _ _ form elam arrs _) = do

@@ -1,4 +1,6 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | The code generator cannot handle the array combinators (@map@ and
 -- friends), so this module was written to transform them into the
 -- equivalent do-loops.  The transformation is currently rather naive,
@@ -6,10 +8,10 @@
 -- transformations in-place.
 module Futhark.Transform.FirstOrderTransform
   ( transformProg
-  , transformBinding
+
+  , Transformer
   , transformBindingRecursively
   , transformLambda
-
   , transformSOAC
   )
   where
@@ -22,6 +24,7 @@ import Data.List
 
 import Prelude
 
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.SOACS hiding (Lore)
 import Futhark.Transform.Rename
@@ -29,10 +32,14 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 
 -- | Perform the first-order transformation on an Futhark program.
-transformProg :: MonadFreshNames m => Prog -> m Prog
+transformProg :: (MonadFreshNames m, Bindable tolore,
+                  Annotations.LetBound SOACS ~ Annotations.LetBound tolore) =>
+                 Prog -> m (AST.Prog tolore)
 transformProg = intraproceduralTransformation transformFunDec
 
-transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
+transformFunDec :: (MonadFreshNames m, Bindable tolore,
+                    Annotations.LetBound SOACS ~ Annotations.LetBound tolore) =>
+                   FunDec -> m (AST.FunDec tolore)
 transformFunDec (FunDec fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
@@ -41,56 +48,55 @@ transformFunDec (FunDec fname rettype params body) = do
     transformBody body
   return $ FunDec fname rettype params body'
 
-transformBody :: Body -> Binder SOACS Body
+-- | The constraints that a monad must uphold in order to be used for
+-- first-order transformation.
+type Transformer m = (MonadBinder m,
+                      Bindable (Lore m),
+                      LocalTypeEnv m,
+                      Annotations.LetBound SOACS ~ Annotations.LetBound (Lore m))
+
+transformBody :: Transformer m =>
+                 Body -> m (AST.Body (Lore m))
 transformBody (Body () bnds res) = insertBindingsM $ do
   mapM_ transformBindingRecursively bnds
   return $ resultBody res
 
 -- | First transform any nested 'Body' or 'Lambda' elements, then
--- apply 'transformBinding'.
-transformBindingRecursively :: Binding -> Binder SOACS ()
+-- apply 'transformSOAC' if the expression is a SOAC.
+transformBindingRecursively :: Transformer m =>
+                               Binding -> m ()
 
 transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) = do
   body' <- bindingIdentTypes (formIdents form ++ map (paramIdent . fst) merge) $
            transformBody body
-  addBinding $ Let pat () $ LoopOp $ DoLoop res merge form body'
+  letBind_ (reBasicPattern pat) $ LoopOp $ DoLoop res (map cast merge) form body'
   where formIdents (ForLoop i _) =
           [Ident i $ Basic Int]
         formIdents (WhileLoop _) =
           []
+        cast (Param name t, se) = (Param name t, se)
 
-transformBindingRecursively (Let pat () (LoopOp (MapKernel cs w i ispace inps returns body))) = do
-  body' <- bindingIdentTypes (Ident i (Basic Int) :
-                              map ((`Ident` Basic Int) . fst) ispace ++
-                              map kernelInputIdent inps) $
-           transformBody body
-  addBinding $ Let pat () $ LoopOp $ MapKernel cs w i ispace inps returns body'
-
-transformBindingRecursively (Let pat () e) =
-  transformBinding =<< liftM (Let pat ()) (mapExpM transform e)
-  where transform = identityMapper { mapOnBody = transformBody
-                                   , mapOnLambda = transformLambda
-                                   , mapOnExtLambda = transformExtLambda
-                                   , mapOnOp = mapSOACM soacTransform
-                                   }
-        soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
+transformBindingRecursively (Let pat () (Op soac)) =
+  transformSOAC (reBasicPattern pat) =<< mapSOACM soacTransform soac
+  where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
                                            , mapOnSOACExtLambda = transformExtLambda
                                            }
 
--- | Transform a single binding _without_ recursing further.  This
--- means that if called on a 'Map' binding, the resulting loop may
--- still contain SOACs in its body.  Use 'transformBindingRecursively'
--- if this is not what you want.
-transformBinding :: Binding -> Binder SOACS ()
-transformBinding (Let pat () (Op soac)) =
-  transformSOAC pat soac
-transformBinding bnd =
-  addBinding bnd
+transformBindingRecursively (Let pat () e) =
+  letBind_ (reBasicPattern pat) =<< mapExpM transform e
+  where transform = identityMapper { mapOnBody = transformBody
+                                   , mapOnLambda = transformLambda
+                                   , mapOnExtLambda = transformExtLambda
+                                   , mapOnRetType = return
+                                   , mapOnFParam = return
+                                   , mapOnLParam = return
+                                   , mapOnOp = fail "Unhandled Op in first order transform"
+                                   }
 
 -- | Transform a single 'SOAC' into a do-loop.  The body of the lambda
 -- is untouched, and may or may not contain further 'SOAC's depending
 -- on the given lore.
-transformSOAC :: (MonadBinder m, Bindable (Lore m), LocalTypeEnv m) =>
+transformSOAC :: Transformer m =>
                  AST.Pattern (Lore m)
               -> SOAC (Lore m)
               -> m ()
@@ -474,9 +480,10 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
     eIf (pure $ PrimOp $ SubExp $ Constant $ LogVal True)
     (pure thenbody)
     (pure elsebody)
-  where myLetBind :: (MonadBinder m, Bindable (Lore m)) =>
+  where myLetBind :: Transformer m =>
                      AST.Exp (Lore m) -> Ident -> m ()
         myLetBind e idd = addBinding $ mkLet' [] [idd] e
+
         exToNormShapeDim :: SubExp -> HM.HashMap VName SubExp -> ExtDimSize -> SubExp
         exToNormShapeDim d _ (Ext   _) = d
         exToNormShapeDim _ _ (Free c@(Constant _)) = c
@@ -486,6 +493,7 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
         existUpperBound outerSize b =
             if not b then UnknownBd
             else UpperBd outerSize
+
         -- | Assumes rtps are the array result types and pat is the
         -- pattern result of stream in let bound.  Result is a list of
         -- tuples: (1st) the ident of the array in pattern, (2rd) the
@@ -506,7 +514,8 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
                     _        ->
                         fail "FirstOrderTrabsform(Stream), mkExistAssocs: Empty Array Shape!"
           forM (zip rtps arrpatels) processAssoc
-        mkAllExistIdAndTypes :: (MonadBinder m, Bindable (Lore m)) =>
+
+        mkAllExistIdAndTypes :: Transformer m =>
                                 SubExp
                              -> ( (Ident, MEQType), Type )
                              -> m (Maybe (Ident, Ident, SubExp),
@@ -535,7 +544,8 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
                    , (lftedtype1,lftedtype2,exacttype) )
         mkAllExistIdAndTypes _ _ =
             fail "FirstOrderTransform(Stream): failed in mkAllExistIdAndTypes"
-        mkOutArrEpilogue :: (MonadBinder m, Bindable (Lore m)) =>
+
+        mkOutArrEpilogue :: Transformer m =>
                             Certificates -> SubExp
                          -> (( Maybe (Ident,Ident,SubExp)
                              , Maybe (Ident,Ident,SubExp))
@@ -620,8 +630,11 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
             return (malloc', mind', glboutBdId)
 
 -- | Recursively first-order-transform a lambda.
-transformLambda :: (MonadFreshNames m, HasTypeEnv m) =>
-                   Lambda -> m Lambda
+transformLambda :: (MonadFreshNames m,
+                    Bindable lore,
+                    LocalTypeEnv m,
+                    Annotations.LetBound SOACS ~ Annotations.LetBound lore) =>
+                   Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda i params body rettype) = do
   body' <- runBodyBinder $
            bindingIdentTypes [Ident i $ Basic Int] $
@@ -629,15 +642,18 @@ transformLambda (Lambda i params body rettype) = do
   return $ Lambda i params body' rettype
 
 -- | Recursively first-order-transform a lambda.
-transformExtLambda :: (MonadFreshNames m, HasTypeEnv m) =>
-                      ExtLambda -> m ExtLambda
+transformExtLambda :: (MonadFreshNames m,
+                       Bindable lore,
+                       LocalTypeEnv m,
+                       Annotations.LetBound SOACS ~ Annotations.LetBound lore) =>
+                      ExtLambda -> m (AST.ExtLambda lore)
 transformExtLambda (ExtLambda i params body rettype) = do
   body' <- runBodyBinder $
            bindingIdentTypes [Ident i $ Basic Int] $
            bindingParamTypes params $ transformBody body
   return $ ExtLambda i params body' rettype
 
-newFold :: MonadBinder m =>
+newFold :: Transformer m =>
            [(SubExp,Type)]
         -> m ([Ident], [SubExp])
 newFold accexps_and_types = do
@@ -646,7 +662,7 @@ newFold accexps_and_types = do
   return (acc, initacc)
   where (acc_exps, acc_types) = unzip accexps_and_types
 
-copyIfArray :: MonadBinder m =>
+copyIfArray :: Transformer m =>
                SubExp -> m SubExp
 copyIfArray (Constant v) = return $ Constant v
 copyIfArray (Var v) = do
@@ -660,11 +676,11 @@ index :: Certificates -> [VName] -> SubExp
 index cs arrs i = flip map arrs $ \arr ->
   PrimOp $ Index cs arr [i]
 
-resultArray :: MonadBinder m => [Type] -> m [VName]
+resultArray :: Transformer m => [Type] -> m [VName]
 resultArray = mapM oneArray
   where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
 
-letwith :: MonadBinder m =>
+letwith :: Transformer m =>
            Certificates -> [VName] -> m (AST.Exp (Lore m)) -> [AST.Exp (Lore m)]
         -> m [VName]
 letwith cs ks i vs = do
@@ -677,7 +693,7 @@ letwith cs ks i vs = do
 pexp :: Applicative f => SubExp -> f (AST.Exp lore)
 pexp = pure . PrimOp . SubExp
 
-bindLambda :: MonadBinder m =>
+bindLambda :: Transformer m =>
               AST.Lambda (Lore m) -> [AST.Exp (Lore m)]
            -> m [SubExp]
 bindLambda (Lambda _ params body _) args = do

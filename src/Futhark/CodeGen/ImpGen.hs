@@ -689,15 +689,6 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
     where mergepat = map fst merge
           mergenames = map paramName mergepat
 
-defCompileLoopOp _ MapKernel{} = soacError
-
-defCompileLoopOp _ ReduceKernel{} = soacError
-
-defCompileLoopOp _ ScanKernel{} = soacError
-
-soacError :: ImpM op a
-soacError = throwError "SOAC encountered in code generator; should have been removed by first-order transform."
-
 writeExp :: ValueDestination -> Imp.Exp -> ImpM op ()
 writeExp (ScalarDestination target) e =
   emit $ Imp.SetScalar target e

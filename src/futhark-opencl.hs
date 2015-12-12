@@ -114,13 +114,12 @@ futharkConfig config =
 compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =
   standardPipeline >>>
-  passes [ extractKernels
-         , extractKernels
-         , simplifySOACS
+  onePass extractKernels >>>
+  passes [ simplifyKernels
          , expandArrays
-         , simplifySOACS
+         , simplifyKernels
          , babysitKernels
-         , simplifySOACS
+         , simplifyKernels
          , inPlaceLowering
          ] >>>
   onePass explicitAllocations >>>

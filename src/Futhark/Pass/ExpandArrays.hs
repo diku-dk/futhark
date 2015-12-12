@@ -11,11 +11,11 @@ import qualified Data.HashSet as HS
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.SOACS
+import Futhark.Representation.Kernels
 import Futhark.Tools
 import Futhark.Pass
 
-expandArrays :: Pass SOACS SOACS
+expandArrays :: Pass Kernels Kernels
 expandArrays = simplePass
                "expand arrays"
                "Expand arrays inside kernels" $
@@ -57,18 +57,18 @@ transformExtLambda lam = do
 
 transformExp :: MonadFreshNames m =>
                 Exp -> m ([Binding], Exp)
-transformExp (LoopOp (MapKernel cs w thread_num ispace inps returns body)) = do
+transformExp (Op (MapKernel cs w thread_num ispace inps returns body)) = do
   (body', expanded) <- expandInKernel thread_num ispace inps $ expandInBody body
   let inps' = inps ++ map expandedInput expanded
   return (map expansionBinding expanded,
-          LoopOp $ MapKernel cs w thread_num ispace inps' returns body')
+          Op $ MapKernel cs w thread_num ispace inps' returns body')
 transformExp e =
   return ([], e)
 
 type ExpandM = RWS ExpandEnv [ExpandedArray] VNameSource
 
 data ExpandedArray =
-  ExpandedArray { expandedInput :: KernelInput SOACS
+  ExpandedArray { expandedInput :: KernelInput Kernels
                 , _expandedName :: VName
                 , _expandedType :: Type
                 }
@@ -85,7 +85,7 @@ variantIn :: Names -> ExpandM a -> ExpandM a
 variantIn names = local $ \env -> env { envKernelVariant = names <> envKernelVariant env }
 
 expandInKernel :: MonadFreshNames m =>
-                  VName -> [(VName, SubExp)] -> [KernelInput SOACS]
+                  VName -> [(VName, SubExp)] -> [KernelInput Kernels]
                -> ExpandM a
                -> m (a, [ExpandedArray])
 expandInKernel thread_num ispace inps m =

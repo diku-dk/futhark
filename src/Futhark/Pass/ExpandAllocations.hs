@@ -53,7 +53,7 @@ transformBinding (Let pat () e) = do
                                    }
 
 transformExp :: Exp -> ExpandM ([Binding], Exp)
-transformExp (LoopOp (MapKernel cs w thread_num ispace inps returns body))
+transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
   -- Extract allocations from the body.
   | Right (body', thread_allocs) <- extractKernelAllocations bound_before_body body = do
 
@@ -61,11 +61,11 @@ transformExp (LoopOp (MapKernel cs w thread_num ispace inps returns body))
   let body'' = if null alloc_bnds then body'
                else offsetMemoryInBody alloc_offsets body'
 
-  return (alloc_bnds, LoopOp $ MapKernel cs w thread_num ispace inps returns body'')
+  return (alloc_bnds, Op $ Inner $ MapKernel cs w thread_num ispace inps returns body'')
   where bound_before_body =
           HS.fromList $ map fst ispace ++ map kernelInputName inps
 
-transformExp (LoopOp (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs))
+transformExp (Op (Inner (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs)))
   -- Extract allocations from the lambdas.
   | Right (red_lam_body', red_lam_thread_allocs) <-
       extractKernelAllocations bound_in_red_lam $ lambdaBody red_lam,
@@ -82,7 +82,7 @@ transformExp (LoopOp (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs))
       red_lam' = red_lam { lambdaBody = red_lam_body'' }
       fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
   return (red_alloc_bnds <> fold_alloc_bnds,
-          LoopOp $ ReduceKernel cs w kernel_size red_lam' fold_lam' nes arrs)
+          Op $ Inner $ ReduceKernel cs w kernel_size red_lam' fold_lam' nes arrs)
   where num_threads = kernelNumThreads kernel_size
 
         bound_in_red_lam = HS.fromList $

@@ -10,6 +10,7 @@ module Futhark.Analysis.Alias
          -- * Ad-hoc utilities
        , analyseBinding
        , analyseExp
+       , analyseBody
        , analyseLambda
        , analyseExtLambda
        )

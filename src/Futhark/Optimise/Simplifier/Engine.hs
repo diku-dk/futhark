@@ -20,11 +20,14 @@ module Futhark.Optimise.Simplifier.Engine
          MonadEngine(..)
        , addBindingEngine
        , collectBindingsEngine
-       , Env
+       , Env (envHoistBlockers)
        , emptyEnv
        , HoistBlockers(..)
        , noExtraHoistBlockers
        , BlockPred
+       , orIf
+       , hasFree
+       , isConsumed
        , State
        , emptyState
        , Need
@@ -45,7 +48,12 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyLambda
        , simplifyLambdaNoHoisting
        , simplifyExtLambda
+       , simplifyParam
        , bindLParams
+       , bindLoopVars
+       , enterLoop
+
+       , blockIf
 
        , tapUsage
        ) where
@@ -229,7 +237,7 @@ localVtable f m = do
   return x
 
 enterLoop :: MonadEngine m => m a -> m a
-enterLoop = localVtable ST.deepen
+enterLoop = enterBody . localVtable ST.deepen
 
 enterBody :: MonadEngine m => m a -> m a
 enterBody = censorUsage UT.leftScope
@@ -529,7 +537,7 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
               fparamnames,
               id)
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
-  loopbody' <- enterLoop $ enterBody $
+  loopbody' <- enterLoop $
                bindFParams mergepat' $
                blockIf
                (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
@@ -541,45 +549,6 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   consumeResult $ zip diets mergeexp'
   return $ DoLoop respat merge' form' loopbody'
   where fparamnames = HS.fromList (map (paramName . fst) merge)
-
-simplifyLoopOp (MapKernel cs w index ispace inps returns body) = do
-  cs' <- simplify cs
-  w' <- simplify w
-  ispace' <- forM ispace $ \(i, bound) -> do
-    bound' <- simplify bound
-    return (i, bound')
-  returns' <- forM returns $ \(t, perm) -> do
-    t' <- simplify t
-    return (t', perm)
-  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
-    inps' <- mapM simplifyKernelInput inps
-    body' <- bindLParams (map kernelInputParam inps') $
-             blockIf (hasFree bound_here `orIf` isConsumed `orIf` par_blocker) $
-             simplifyBody (map (const Observe) returns) body
-    return $ MapKernel cs' w' index ispace' inps' returns' body'
-  where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
-
-simplifyLoopOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs) = do
-  cs' <- simplify cs
-  w' <- simplify w
-  kernel_size' <- simplify kernel_size
-  nes' <- mapM simplify nes
-  arrs' <- mapM simplify arrs
-  parlam' <- simplifyLambda parlam w' $ map (const Nothing) nes
-  seqlam' <- simplifyLambda seqlam w' $ map (const Nothing) nes
-  return $ ReduceKernel cs' w' kernel_size' parlam' seqlam' nes' arrs'
-
-simplifyLoopOp (ScanKernel cs w kernel_size order lam input) = do
-  let (nes, arrs) = unzip input
-  cs' <- simplify cs
-  w' <- simplify w
-  kernel_size' <- simplify kernel_size
-  nes' <- mapM simplify nes
-  arrs' <- mapM simplify arrs
-  lam' <- simplifyLambda lam w' $ map Just arrs'
-  return $ ScanKernel cs' w' kernel_size' order lam' $ zip nes' arrs'
-
 
 class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op where
   simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)
@@ -611,17 +580,6 @@ instance Simplifiable SubExp where
                            return $ Var name
   simplify (Constant v) =
     return $ Constant v
-
-instance Simplifiable KernelSize where
-  simplify (KernelSize num_groups group_size thread_chunk
-            num_elements offset_multiple num_threads) = do
-    num_groups' <- simplify num_groups
-    group_size' <- simplify group_size
-    thread_chunk' <- simplify thread_chunk
-    num_elements' <- simplify num_elements
-    offset_multiple' <- simplify offset_multiple
-    num_threads' <- simplify num_threads
-    return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
 
 instance Simplifiable ExtRetType where
   simplify = liftM ExtRetType . mapM simplify . retTypeValues
@@ -705,7 +663,7 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
       paramnames = HS.fromList $ boundByLambda lam
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   body' <-
-    enterLoop $ enterBody $
+    enterLoop $
     bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
@@ -724,7 +682,7 @@ simplifyExtLambda lam@(ExtLambda index params body rettype) w parbnds = do
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  body' <- enterLoop $ enterBody $
+  body' <- enterLoop $
            bindLoopVar index w $
            bindLParams params' $
            localVtable extendSymTab $
@@ -755,14 +713,6 @@ instance Simplifiable Certificates where
                                     return [idd']
               _ -> do usedName idd
                       return [idd]
-
-simplifyKernelInput :: MonadEngine m =>
-                       KernelInput (InnerLore m) -> m (KernelInput (Lore m))
-simplifyKernelInput (KernelInput param arr is) = do
-  param' <- simplifyParam simplify param
-  arr' <- simplify arr
-  is' <- mapM simplify is
-  return $ KernelInput param' arr' is'
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))

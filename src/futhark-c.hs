@@ -109,8 +109,8 @@ futharkConfig config =
 compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =
   standardPipeline >>>
-  passes [ firstOrderTransform
-         , simplifySOACS
+  onePass firstOrderTransform >>>
+  passes [ simplifyKernels
          , inPlaceLowering
          ] >>>
   onePass explicitAllocations >>>

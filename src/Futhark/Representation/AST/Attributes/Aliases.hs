@@ -83,12 +83,6 @@ loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
   map snd $ filter fst $
   zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
-loopOpAliases (MapKernel _ _ _ _ _ returns _) =
-  map (const mempty) returns
-loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
-  map (const mempty) nes
-loopOpAliases (ScanKernel _ _ _ _ lam _) =
-  replicate (length (lambdaReturnType lam) * 2) mempty
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =

@@ -1,9 +1,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
--- | A simple representation with SOACs and nested parallelism.
-module Futhark.Representation.SOACS
+-- | A representation with flat parallelism via GPU-oriented kernels.
+module Futhark.Representation.Kernels
        ( -- * The Lore definition
-         SOACS
+         Kernels
          -- * Syntax types
        , Prog
        , Body
@@ -24,7 +24,7 @@ module Futhark.Representation.SOACS
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
-       , module Futhark.Representation.SOACS.SOAC
+       , module Futhark.Representation.Kernels.Kernel
        , AST.LambdaT(Lambda)
        , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
@@ -51,7 +51,7 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, FParam, LParam,
           RetType, PatElem)
-import Futhark.Representation.SOACS.SOAC
+import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
@@ -67,40 +67,40 @@ import Futhark.Analysis.Rephrase
 -- system.
 
 -- | The lore for the basic representation.
-data SOACS = SOACS
+data Kernels = Kernels
 
-instance Annotations.Annotations SOACS where
-  type Op SOACS = SOAC SOACS
+instance Annotations.Annotations Kernels where
+  type Op Kernels = Kernel Kernels
 
-instance Lore.Lore SOACS where
-  representative = Futhark.Representation.SOACS.SOACS
+instance Lore.Lore Kernels where
+  representative = Futhark.Representation.Kernels.Kernels
 
   loopResultContext _ res merge =
     loopShapeContext res $ map paramIdent merge
 
-type Prog = AST.Prog SOACS
-type PrimOp = AST.PrimOp SOACS
-type LoopOp = AST.LoopOp SOACS
-type Exp = AST.Exp SOACS
-type Body = AST.Body SOACS
-type Binding = AST.Binding SOACS
-type Pattern = AST.Pattern SOACS
-type Lambda = AST.Lambda SOACS
-type ExtLambda = AST.ExtLambda SOACS
-type FunDec = AST.FunDecT SOACS
-type FParam = AST.FParam SOACS
-type LParam = AST.LParam SOACS
-type RetType = AST.RetType SOACS
-type PatElem = AST.PatElem SOACS
+type Prog = AST.Prog Kernels
+type PrimOp = AST.PrimOp Kernels
+type LoopOp = AST.LoopOp Kernels
+type Exp = AST.Exp Kernels
+type Body = AST.Body Kernels
+type Binding = AST.Binding Kernels
+type Pattern = AST.Pattern Kernels
+type Lambda = AST.Lambda Kernels
+type ExtLambda = AST.ExtLambda Kernels
+type FunDec = AST.FunDecT Kernels
+type FParam = AST.FParam Kernels
+type LParam = AST.LParam Kernels
+type RetType = AST.RetType Kernels
+type PatElem = AST.PatElem Kernels
 
-instance TypeCheck.Checkable SOACS where
+instance TypeCheck.Checkable Kernels where
   checkExpLore = return
   checkBodyLore = return
   checkFParamLore _ = TypeCheck.checkType
   checkLParamLore _ = TypeCheck.checkType
   checkLetBoundLore _ = TypeCheck.checkType
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  checkOp = typeCheckSOAC
+  checkOp = typeCheckKernel
   matchPattern pat e = do
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
@@ -111,11 +111,11 @@ instance TypeCheck.Checkable SOACS where
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 
-instance Renameable SOACS where
-instance Substitutable SOACS where
-instance Proper SOACS where
+instance Renameable Kernels where
+instance Substitutable Kernels where
+instance Proper Kernels where
 
-instance Bindable SOACS where
+instance Bindable Kernels where
   mkBody = AST.Body ()
   mkLet context values =
     AST.Let (basicPattern context values) ()
@@ -133,9 +133,9 @@ instance Bindable SOACS where
     valElems <- zipWithM mkValElem names ts
     return $ AST.Let (AST.Pattern shapeElems valElems) () e
 
-instance PrettyLore SOACS where
+instance PrettyLore Kernels where
 
-removeLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => Rephraser lore SOACS
+removeLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => Rephraser lore Kernels
 removeLore =
   Rephraser { rephraseExpLore = const ()
             , rephraseLetBoundLore = typeOf
@@ -146,13 +146,13 @@ removeLore =
             , rephraseOp = id
             }
 
-removeProgLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => AST.Prog lore -> Prog
+removeProgLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => AST.Prog lore -> Prog
 removeProgLore = rephraseProg removeLore
 
-removeFunDecLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => AST.FunDec lore -> FunDec
+removeFunDecLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => AST.FunDec lore -> FunDec
 removeFunDecLore = rephraseFunDec removeLore
 
-removeBodyLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => AST.Body lore -> Body
+removeBodyLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
 
 removeRetTypeLore :: IsRetType rt => rt -> RetType

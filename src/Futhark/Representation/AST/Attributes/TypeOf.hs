@@ -136,20 +136,6 @@ loopOpExtType :: Typed (Annotations.FParam lore) =>
                  LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (paramIdent . fst) merge
-loopOpExtType (MapKernel _ _ _ is _ returns _) =
-  staticShapes
-  [ rearrangeType perm (arrayOfShape t outer_shape)
-  | (t, perm) <- returns ]
-  where outer_shape = Shape $ map snd is
-loopOpExtType (ReduceKernel _ _ size parlam _ _ _) =
-  staticShapes $
-  map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
-loopOpExtType (ScanKernel _ w size _ lam _) =
-  staticShapes $
-  map (`arrayOfRow` w) (lambdaReturnType lam) ++
-  map ((`arrayOfRow` kernelWorkgroups size) .
-       (`arrayOfRow` kernelWorkgroupSize size))
-  (lambdaReturnType lam)
 
 -- | The type of an expression.
 expExtType :: (HasTypeEnv m,
