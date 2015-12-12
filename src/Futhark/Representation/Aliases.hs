@@ -180,14 +180,14 @@ instance (PrettyLore lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
                               ppBindingLore $ removeBindingAliases binding]
     where expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
-            als -> Just $ oneline $
+            als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
 
           patElemComments =
             maybeComment $ mapMaybe patElemComment $ patternElements pat
 
           patElemComment (PatElem name _ (Names' als, _)) =
-            oneline <$> aliasComment name als
+            PP.oneLine <$> aliasComment name als
 
   ppFunDecLore = ppFunDecLore . removeFunDecAliases
   ppLambdaLore = ppLambdaLore . removeLambdaAliases
@@ -206,9 +206,6 @@ instance (PrettyLore lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
   ppExpLore e =
     ppExpLore $ removeExpAliases e
 
-oneline :: PP.Doc -> PP.Doc
-oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
-
 maybeComment :: [PP.Doc] -> Maybe PP.Doc
 maybeComment [] = Nothing
 maybeComment cs = Just $ PP.folddoc (PP.</>) cs
@@ -218,7 +215,7 @@ aliasComment :: (PP.Pretty a, PP.Pretty b) =>
 aliasComment name als =
   case HS.toList als of
     [] -> Nothing
-    als' -> Just $ oneline $
+    als' -> Just $ PP.oneLine $
             PP.text "-- " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
@@ -227,7 +224,7 @@ resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
 resultAliasComment name als =
   case HS.toList als of
     [] -> Nothing
-    als' -> Just $ oneline $
+    als' -> Just $ PP.oneLine $
             PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
