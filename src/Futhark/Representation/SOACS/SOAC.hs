@@ -474,9 +474,6 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Stream _ _ _ lam _ _) =
     inside "Stream" $ extLambdaMetrics lam
 
-lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
-lambdaMetrics = bodyMetrics . lambdaBody
-
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
 

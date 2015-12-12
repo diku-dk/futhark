@@ -41,6 +41,7 @@ import Futhark.Representation.AST.Syntax.Core hiding (Basic)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
 import Futhark.Representation.SOACS (SOACS)
+import Futhark.Representation.Kernels (Kernels)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
@@ -83,7 +84,10 @@ instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
 
-data StructureTest = StructureTest (Pipeline SOACS SOACS) AstMetrics
+data StructurePipeline = KernelsPipeline (Pipeline SOACS Kernels)
+                       | SOACSPipeline (Pipeline SOACS SOACS)
+
+data StructureTest = StructureTest StructurePipeline AstMetrics
 
 instance Show StructureTest where
   show (StructureTest _ metrics) =
@@ -193,16 +197,18 @@ restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
 parseExpectedStructure :: Parser StructureTest
 parseExpectedStructure =
   lexstr "structure" *>
-  (StructureTest <$> parsePipeline <*> parseMetrics)
+  (StructureTest <$> optimisePipeline <*> parseMetrics)
 
-parsePipeline :: Parser (Pipeline SOACS SOACS)
-parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
-                pure defaultPipelineConfig
+optimisePipeline :: Parser StructurePipeline
+optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
+                   pure defaultPipelineConfig
   where defaultPipelineConfig =
-          standardPipeline
+          SOACSPipeline standardPipeline
         distributePipelineConfig =
+          KernelsPipeline $
           standardPipeline >>>
-          passes [extractKernels, simplifySOACS]
+          onePass extractKernels >>>
+          onePass simplifyKernels
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ liftM HM.fromList $ many $
@@ -272,8 +278,15 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-optimisedProgramMetrics :: Pipeline SOACS SOACS -> FilePath -> TestM AstMetrics
-optimisedProgramMetrics pipeline program = do
+optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics (SOACSPipeline pipeline) program = do
+  res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
+  case res of
+    (Left err, msgs) ->
+      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
+    (Right prog, _) ->
+      return $ progMetrics prog
+optimisedProgramMetrics (KernelsPipeline pipeline) program = do
   res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->

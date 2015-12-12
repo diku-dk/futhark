@@ -21,6 +21,8 @@ module Futhark.TypeCheck
   , UsageMap
   , usageMap
   , collectOccurences
+  , basicLParamM
+  , basicFParamM
 
     -- * Checkers
   , require
@@ -37,6 +39,9 @@ module Futhark.TypeCheck
   , checkLambda
   , checkExtLambda
   , checkConcatMapLambda
+  , checkFun'
+  , checkLambdaParams
+  , checkBody
   )
   where
 
@@ -470,14 +475,6 @@ funParamsToNamesTypesAndLores = map nameTypeAndLore
                                   paramDeclType fparam,
                                   FunBound $ paramAttr fparam)
 
-lamParamsToNamesTypesAndLores :: Checkable lore =>
-                                 [LParam lore]
-                              -> [(VName, DeclType, VarBindingLore lore)]
-lamParamsToNamesTypesAndLores = map nameTypeAndLore
-  where nameTypeAndLore fparam = (paramName fparam,
-                                  toDecl (paramType fparam) Unique,
-                                  LambdaBound $ paramAttr fparam)
-
 checkAnonymousFun :: Checkable lore =>
                      (Name, [Type], [LParam (Aliases lore)], BodyT (Aliases lore))
                   -> TypeM lore ()
@@ -806,97 +803,6 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
                  " is not a merge variable."
       Just _  -> return ()
 
-checkLoopOp (MapKernel cs w index ispace inps returns body) = do
-  mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] w
-  mapM_ (require [Basic Int]) bounds
-  index_param <- basicLParamM index Int
-  iparams' <- forM iparams $ \iparam -> basicLParamM iparam Int
-  forM_ returns $ \(t, perm) ->
-    let return_rank = arrayRank t + rank
-    in unless (sort perm == [0..return_rank - 1]) $
-       bad $ TypeError noLoc $
-       "Permutation " ++ pretty perm ++
-       " not valid for returning " ++ pretty t ++
-       " from a rank " ++ pretty rank ++ " kernel."
-  checkFun' (nameFromString "<kernel body>",
-             map (`toDecl` Nonunique) $ staticShapes rettype,
-             lamParamsToNamesTypesAndLores $ index_param : iparams' ++ map kernelInputParam inps,
-             body) $ do
-    checkLambdaParams $ map kernelInputParam inps
-    mapM_ checkKernelInput inps
-    checkBody body
-    bodyt <- bodyExtType body
-    unless (map rankShaped bodyt ==
-            map rankShaped (staticShapes rettype)) $
-      bad $
-      ReturnTypeError noLoc (nameFromString "<kernel body>")
-      (Several $ staticShapes rettype)
-      (Several bodyt)
-  where (iparams, bounds) = unzip ispace
-        rank = length ispace
-        (rettype, _) = unzip returns
-        checkKernelInput inp = do
-          checkExp $ PrimOp $ Index []
-            (kernelInputArray inp) (kernelInputIndices inp)
-
-          arr_t <- lookupType $ kernelInputArray inp
-          unless (stripArray (length $ kernelInputIndices inp) arr_t ==
-                  kernelInputType inp) $
-            bad $ TypeError noLoc $
-            "Kernel input " ++ pretty inp ++ " has inconsistent type."
-
-checkLoopOp (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = do
-  mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] w
-  checkKernelSize kernel_size
-  arrargs <- checkSOACArrayArgs w arrexps
-  accargs <- mapM checkArg accexps
-
-  case lambdaParams seqfun of
-    [] -> bad $ TypeError noLoc "Fold function takes no parameters."
-    chunk_param : _
-      | Basic Int <- paramType chunk_param -> do
-          let seq_args = (Basic Int, mempty) :
-                         [ (t `arrayOfRow` Var (paramName chunk_param), als)
-                         | (t, als) <- arrargs ]
-          checkLambda seqfun seq_args
-      | otherwise ->
-          bad $ TypeError noLoc "First parameter of fold function is not integer-typed."
-
-  let seqRetType = lambdaReturnType seqfun
-      asArg t = (t, mempty)
-  checkLambda parfun $ map asArg $ Basic Int : seqRetType ++ seqRetType
-  let acct = map argType accargs
-      parRetType = lambdaReturnType parfun
-  unless (acct == seqRetType) $
-    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap fold function returns type " ++ prettyTuple seqRetType ++ "."
-  unless (acct == parRetType) $
-    bad $ TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
-
-checkLoopOp (ScanKernel cs w kernel_size _ fun input) = do
-  mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] w
-  checkKernelSize kernel_size
-  let (nes, arrs) = unzip input
-      other_index_arg = (Basic Int, mempty)
-  arrargs <- checkSOACArrayArgs w arrs
-  accargs <- mapM checkArg nes
-  checkLambda fun $ other_index_arg : accargs ++ arrargs
-  let startt      = map argType accargs
-      intupletype = map argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    bad $ TypeError noLoc $
-    "Initial value is of type " ++ prettyTuple startt ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    bad $ TypeError noLoc $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()
 
@@ -1007,17 +913,6 @@ checkPolyBinOp op tl e1 e2 t = do
   require (map Basic tl) e2
   t' <- matchSubExpTypes e1 e2
   checkAnnotation (pretty op ++ " result") (Basic t) t'
-
-checkKernelSize :: Checkable lore =>
-                   KernelSize -> TypeM lore ()
-checkKernelSize (KernelSize num_groups workgroup_size per_thread_elements
-                 num_elements offset_multiple num_threads) = do
-  require [Basic Int] num_groups
-  require [Basic Int] workgroup_size
-  require [Basic Int] per_thread_elements
-  require [Basic Int] num_elements
-  require [Basic Int] offset_multiple
-  require [Basic Int] num_threads
 
 checkPatElem :: Checkable lore =>
                 PatElem lore -> TypeM lore ()

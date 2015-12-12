@@ -38,6 +38,7 @@ module Futhark.Representation.ExplicitMemory
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
+       , module Futhark.Representation.Kernels.Kernel
        , AST.LambdaT(Lambda)
        , AST.ExtLambdaT(ExtLambda)
        , AST.BodyT(Body)
@@ -66,6 +67,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
+import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
@@ -117,57 +119,76 @@ instance IsRetType [FunReturns] where
 data MemOp inner = Alloc SubExp Space
                    -- ^ Allocate a memory block.  This really should not be an
                    -- expression, but what are you gonna do...
+                 | Inner (Kernel inner)
             deriving (Eq, Ord, Show)
 
 instance Proper inner => FreeIn (MemOp inner) where
   freeIn (Alloc size _) = freeIn size
+  freeIn (Inner k) = freeIn k
 
 instance Proper inner => TypedOp (MemOp inner) where
   opType (Alloc size space) = pure [Mem size space]
+  opType (Inner k) = opType k
 
-instance Aliased inner => AliasedOp (MemOp inner) where
+instance (Proper inner, Aliased inner) => AliasedOp (MemOp inner) where
   opAliases Alloc{} = [mempty]
+  opAliases (Inner k) = opAliases k
 
   consumedInOp Alloc{} = mempty
+  consumedInOp (Inner k) = consumedInOp k
 
 instance CanBeAliased (MemOp ExplicitMemory) where
   type OpWithAliases (MemOp ExplicitMemory) = MemOp (Aliases ExplicitMemory)
   removeOpAliases (Alloc se space) = Alloc se space
+  removeOpAliases (Inner k) = Inner $ removeOpAliases k
 
   addOpAliases (Alloc se space) = Alloc se space
+  addOpAliases (Inner k) = Inner $ addOpAliases k
 
 instance (Proper inner, Ranged inner) => RangedOp (MemOp inner) where
   opRanges (Alloc _ _) =
     [unknownRange]
+  opRanges (Inner k) =
+    opRanges k
 
 instance CanBeRanged (MemOp ExplicitMemory) where
   type OpWithRanges (MemOp ExplicitMemory) = MemOp (Ranges ExplicitMemory)
   removeOpRanges (Alloc size space) = Alloc size space
+  removeOpRanges (Inner k) = Inner $ removeOpRanges k
 
   addOpRanges (Alloc size space) = Alloc size space
+  addOpRanges (Inner k) = Inner $ addOpRanges k
 
-instance Renameable inner => Rename (MemOp inner) where
+instance Proper inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
+  rename (Inner k) = Inner <$> rename k
 
-instance Substitutable inner => Substitute (MemOp inner) where
+instance Proper inner => Substitute (MemOp inner) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
+  substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
 instance PrettyLore inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e DefaultSpace) = PP.text "alloc" <> PP.apply [PP.ppr e]
   ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
+  ppr (Inner k) = PP.ppr k
 
 instance Proper inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
+  safeOp (Inner k) = safeOp k
 
 instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (MemOp lore) where
   usageInOp Alloc {} = mempty
+  usageInOp (Inner k) = usageInOp k
 
 instance CanBeWise (MemOp ExplicitMemory) where
   type OpWithWisdom (MemOp ExplicitMemory) = MemOp (Wise ExplicitMemory)
   removeOpWisdom (Alloc size space) = Alloc size space
+  removeOpWisdom (Inner k) = Inner $ removeOpWisdom k
 
-instance Engine.SimplifiableOp ExplicitMemory (MemOp ExplicitMemory) where
+instance Engine.SimplifiableOp ExplicitMemory (Kernel ExplicitMemory) =>
+         Engine.SimplifiableOp ExplicitMemory (MemOp ExplicitMemory) where
   simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
+  simplifyOp (Inner k) = Inner <$> Engine.simplifyOp k
 
 instance Annotations.Annotations ExplicitMemory where
   type LetBound ExplicitMemory = MemBound NoUniqueness
@@ -510,6 +531,7 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkLetBoundLore = checkMemBound
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
   checkOp (Alloc size _) = TypeCheck.require [Basic Int] size
+  checkOp (Inner k) = typeCheckKernel k
 
   basicFParam _ name t =
     AST.Param name (Scalar t)
@@ -879,9 +901,6 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
           isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst merge
 
-expReturns _ (AST.LoopOp op) =
-  pure $ extReturns $ loopOpExtType op
-
 expReturns _ (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret
 
@@ -894,6 +913,9 @@ expReturns look (If _ b1 b2 ts) = do
 
 expReturns _ (Op (Alloc size space)) =
   return [ReturnsMemory size space]
+
+expReturns _ (Op (Inner k)) =
+  extReturns <$> opType k
 
 -- | The return information of a body.  This can be seen as the
 -- "return type with memory annotations" of the body.

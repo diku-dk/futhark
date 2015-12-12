@@ -93,19 +93,6 @@ freeWalker = identityWalker {
             mapM_ (tell . freeIn) mergepat
             bodyFree loopbody
 
-        expFree (LoopOp (MapKernel cs w index ispace inps returns body)) = do
-          tell $ freeIn w
-          tell $ freeIn cs
-          tell $ freeIn index
-          tell $ freeIn $ map snd ispace
-          tell $ freeIn $ map fst returns
-          binding (HS.fromList $ index : map fst ispace) $ do
-            tell $ freeIn $ map kernelInputParam inps
-            tell $ freeIn $ map kernelInputArray inps
-            tell $ freeIn $ map kernelInputIndices inps
-            binding (HS.fromList $ map kernelInputName inps) $
-              bodyFree body
-
         expFree e = walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given body.
@@ -245,16 +232,6 @@ instance FreeIn LoopForm where
   freeIn (ForLoop _ bound) = freeIn bound
   freeIn (WhileLoop cond) = freeIn cond
 
-instance FreeIn KernelSize where
-  freeIn (KernelSize num_workgroups workgroup_size elems_per_thread
-          num_elems thread_offset num_threads) =
-    mconcat $ map freeIn [num_workgroups,
-                          workgroup_size,
-                          elems_per_thread,
-                          num_elems,
-                          thread_offset,
-                          num_threads]
-
 instance FreeIn d => FreeIn (DimChange d) where
   freeIn = Data.Foldable.foldMap freeIn
 
@@ -285,12 +262,6 @@ progNames = execWriter . mapM funNames . progFunctions
                        WhileLoop _ ->
                          return ()
           bodyNames loopbody
-
-        expNames (LoopOp (MapKernel _ _ index ispace inps _ body)) = do
-          one index
-          mapM_ (one . kernelInputName) inps
-          mapM_ (one . fst) ispace
-          bodyNames body
 
         expNames e = walkExpM names e
 

@@ -59,6 +59,7 @@ class (Lore.Lore lore,
 class (Proper lore,
        Annotations.FParam lore ~ DeclType,
        Annotations.LParam lore ~ Type,
+       Annotations.RetType lore ~ ExtRetType,
        SetType (Annotations.LetBound lore)) =>
       Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore

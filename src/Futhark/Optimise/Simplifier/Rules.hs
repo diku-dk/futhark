@@ -6,6 +6,9 @@
 module Futhark.Optimise.Simplifier.Rules
   ( standardRules
   , basicRules
+
+  , simplifyIndexing
+  , IndexResult (..)
   )
 where
 
@@ -36,10 +39,7 @@ import Futhark.Transform.Substitute
 import Prelude hiding (any, all)
 
 topDownRules :: (MonadBinder m, LocalTypeEnv m) => TopDownRules m
-topDownRules = [ removeUnusedKernelInputs
-               , simplifyKernelInputs
-               , removeInvariantKernelOutputs
-               , hoistLoopInvariantMergeVariables
+topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
                , letRule simplifyRearrange
@@ -82,68 +82,6 @@ standardRules = (topDownRules, bottomUpRules)
 -- | Rules that only work on 'Basic' lores or similar.  Includes 'standardRules'.
 basicRules :: (MonadBinder m, LocalTypeEnv m) => RuleBook m
 basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
-
--- | Remove inputs that are not used inside the @kernel@.
-removeUnusedKernelInputs :: MonadBinder m => TopDownRule m
-removeUnusedKernelInputs _ (Let pat _ (LoopOp (MapKernel cs w index ispace inps returns body)))
-  | (used,unused) <- partition usedInput inps,
-    not (null unused) =
-      letBind_ pat $ LoopOp $ MapKernel cs w index ispace used returns body
-  where used_in_body = freeInBody body
-        usedInput inp = kernelInputName inp `HS.member` used_in_body
-removeUnusedKernelInputs _ _ = cannotSimplify
-
--- | Kernel inputs are indexes into arrays.  Based on how those arrays
--- are defined, we may be able to simplify the input.
-simplifyKernelInputs :: (MonadBinder m, LocalTypeEnv m) => TopDownRule m
-simplifyKernelInputs vtable (Let pat _ (LoopOp (MapKernel cs w index ispace inps returns body)))
-  | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
-    inps /= catMaybes inps' = do
-      body' <- localTypeEnv index_env $ insertBindingsM $ do
-         forM_ (catMaybes extra_bnds) $ \(name, se) ->
-           letBindNames'_ [name] $ PrimOp $ SubExp se
-         return body
-      letBind_ pat $ LoopOp $
-        MapKernel (cs++concat extra_cs) w index ispace
-        (catMaybes inps') returns body'
-  where defOf = (`ST.lookupExp` vtable)
-        seType (Var v) = ST.lookupType v vtable
-        seType (Constant v) = Just $ Basic $ basicValueType v
-        index_env = HM.fromList $ zip (map fst ispace) $ repeat $ Basic Int
-
-        simplifyInput inp@(KernelInput param arr is) =
-          case simplifyIndexing defOf seType arr is of
-            Just (IndexResult inp_cs arr' is') ->
-              (Just $ KernelInput param arr' is', inp_cs, Nothing)
-            Just (SubExpResult se) ->
-              (Nothing, [], Just (paramName param, se))
-            _ ->
-              (Just inp, [], Nothing)
-simplifyKernelInputs _ _ = cannotSimplify
-
-removeInvariantKernelOutputs :: MonadBinder m => TopDownRule m
-removeInvariantKernelOutputs vtable (Let pat _ (LoopOp (MapKernel cs w index ispace inps returns body)))
-  | (invariant, variant) <-
-      partitionEithers $ zipWith3 isInvariant
-      (patternValueElements pat) returns $ bodyResult body,
-    not $ null invariant = do
-      let (variant_pat_elems, variant_returns, variant_result) =
-            unzip3 variant
-          pat' = Pattern [] variant_pat_elems
-      forM_ invariant $ \(pat_elem, (t, perm), se) ->
-        if perm /= sort perm
-        then cannotSimplify
-        else do
-          flat <- letExp "kernel_invariant_flat" $ PrimOp $ Replicate w se
-          let shape = map DimNew $ map snd ispace ++ arrayDims t
-          letBind_ (Pattern [] [pat_elem]) $ PrimOp $ Reshape cs shape flat
-      letBind_ pat' $ LoopOp $
-        MapKernel cs w index ispace inps variant_returns
-        body { bodyResult = variant_result }
-  where isInvariant pat_elem ret (Var v)
-          | Just _ <- ST.lookupType v vtable = Left (pat_elem, ret, Var v)
-        isInvariant pat_elem ret se = Right (pat_elem, ret, se)
-removeInvariantKernelOutputs _ _ = cannotSimplify
 
 -- After removing a result, we may also have to remove some existential bindings.
 removeUnusedLoopResult :: forall m.MonadBinder m => BottomUpRule m

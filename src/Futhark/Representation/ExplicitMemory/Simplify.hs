@@ -12,6 +12,7 @@ import Futhark.Representation.AST.Syntax
           Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
           RetType)
 import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.Kernels.Simplify()
 import Futhark.Pass.ExplicitAllocations (simplifiable)
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Optimise.Simplifier.Engine as Engine

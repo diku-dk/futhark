@@ -12,6 +12,7 @@ module Futhark.Analysis.Metrics
        , inside
        , MetricsM
        , bodyMetrics
+       , lambdaMetrics
        ) where
 
 import Control.Applicative
@@ -106,12 +107,6 @@ loopOpMetrics (DoLoop _ _ ForLoop{} body) =
   inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
 loopOpMetrics (DoLoop _ _ WhileLoop{} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
-loopOpMetrics (MapKernel _ _ _ _ _ _ body) =
-  inside "MapKernel" $ bodyMetrics body
-loopOpMetrics (ReduceKernel _ _ _ lam1 lam2 _ _) =
-  inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
-loopOpMetrics (ScanKernel _ _ _ _ lam _) =
-  inside "ScanKernel" $ lambdaMetrics lam
 
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody

@@ -1,25 +1,37 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Futhark.Optimise.CSE
-       ( performCSE )
+       ( performCSE
+       , CSEInOp
+       )
        where
 
+import Control.Applicative
 import Control.Monad.Reader
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map.Lazy as M
 
+import Prelude
+
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Annotations as Annotations
+import qualified Futhark.Representation.Kernels.Kernel as Kernel
+import qualified Futhark.Representation.SOACS.SOAC as SOAC
+import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Transform.Substitute
 import Futhark.Pass
 import Futhark.Tools
 
-performCSE :: Proper lore =>
+performCSE :: CSEInOp lore (Op lore) =>
               Pass lore lore
 performCSE = simplePass
              "CSE"
              "Combine common subexpressions." $
              intraproceduralTransformation $ return . cseInFunDec
 
-cseInFunDec :: Proper lore =>
+cseInFunDec :: CSEInOp lore (Op lore) =>
                FunDec lore -> FunDec lore
 cseInFunDec fundec =
   fundec { funDecBody =
@@ -28,20 +40,26 @@ cseInFunDec fundec =
 
 type CSEM lore = Reader (CSEState lore)
 
-cseInBody :: Proper lore =>
+cseInBody :: CSEInOp lore (Op lore) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
   cseInBindings bnds $ do
     CSEState (_, nsubsts) <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
-cseInLambda :: Proper lore =>
+cseInLambda :: CSEInOp lore (Op lore) =>
                Lambda lore -> CSEM lore (Lambda lore)
 cseInLambda lam = do
   body' <- cseInBody $ lambdaBody lam
   return lam { lambdaBody = body' }
 
-cseInBindings :: Proper lore =>
+cseInExtLambda :: CSEInOp lore (Op lore) =>
+                  ExtLambda lore -> CSEM lore (ExtLambda lore)
+cseInExtLambda lam = do
+  body' <- cseInBody $ extLambdaBody lam
+  return lam { extLambdaBody = body' }
+
+cseInBindings :: CSEInOp lore (Op lore) =>
                  [Binding lore]
               -> CSEM lore (Body lore)
               -> CSEM lore (Body lore)
@@ -56,6 +74,7 @@ cseInBindings (bnd:bnds) m =
           return bnd' { bindingExp = e }
         cse = identityMapper { mapOnBody = cseInBody
                              , mapOnLambda = cseInLambda
+                             , mapOnOp = cseInOp
                              }
 
 cseInBinding :: Proper lore =>
@@ -105,3 +124,24 @@ addExpSubst :: Proper lore =>
             -> CSEState lore
 addExpSubst pat eattr e (CSEState (esubsts, nsubsts)) =
   CSEState (M.insert (eattr,e) pat esubsts, nsubsts)
+
+-- | The operations that permit CSE.
+class Proper lore => CSEInOp lore op where
+  cseInOp :: op -> CSEM lore op
+
+instance Proper lore => CSEInOp lore () where
+  cseInOp () = return ()
+
+instance CSEInOp lore (Op lore) => CSEInOp lore (Kernel.Kernel lore) where
+  cseInOp = Kernel.mapKernelM $
+            Kernel.KernelMapper return cseInLambda cseInBody
+            return return return
+
+instance CSEInOp lore (Op lore) => CSEInOp lore (ExplicitMemory.MemOp lore) where
+  cseInOp o@ExplicitMemory.Alloc{} = return o
+  cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> cseInOp k
+
+instance CSEInOp lore (Op lore) => CSEInOp lore (SOAC.SOAC lore) where
+  cseInOp = SOAC.mapSOACM $
+            SOAC.SOACMapper return cseInLambda cseInExtLambda
+            return return

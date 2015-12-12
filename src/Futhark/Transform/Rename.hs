@@ -22,6 +22,7 @@ module Futhark.Transform.Rename
   -- * Renaming annotations
   , RenameM
   , renamerSubstitutions
+  , bindingForRename
   , Rename (..)
   , Renameable
   )
@@ -156,6 +157,10 @@ instance Rename Ident where
     tp' <- rename tp
     return $ Ident name' tp'
 
+-- | Create a bunch of new names and bind them for substitution.
+bindingForRename :: [VName] -> RenameM a -> RenameM a
+bindingForRename = bind
+
 bind :: [VName] -> RenameM a -> RenameM a
 bind vars body = do
   vars' <- mapM new vars
@@ -230,16 +235,6 @@ instance Renameable lore => Rename (Exp lore) where
           cond'     <- rename cond
           return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
             (WhileLoop cond') loopbody'
-  rename (LoopOp (MapKernel cs w index ispace inps returns body)) = do
-    cs' <- rename cs
-    w' <- rename w
-    returns' <- forM returns $ \(t, perm) -> do
-      t' <- rename t
-      return (t', perm)
-    bind (index : map fst ispace ++ map kernelInputName inps) $
-      LoopOp <$>
-      (MapKernel cs' w' <$>
-       rename index <*> rename ispace <*> rename inps <*> pure returns' <*> rename body)
   rename e = mapExpM mapper e
     where mapper = Mapper {
                       mapOnBody = rename
@@ -279,10 +274,6 @@ instance Renameable lore => Rename (ExtLambda lore) where
       body' <- rename body
       rettype' <- rename rettype
       return $ ExtLambda index' params' body' rettype'
-
-instance Renameable lore => Rename (KernelInput lore) where
-  rename (KernelInput param arr is) =
-    KernelInput <$> rename param <*> rename arr <*> rename is
 
 instance Rename Names where
   rename = liftM HS.fromList . mapM rename . HS.toList

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | Inspecing and modifying 'Pattern's, function parameters and
 -- pattern elements.
 module Futhark.Representation.AST.Attributes.Patterns
@@ -24,10 +25,10 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternSize
          -- * Bindage
        , bindageRequires
-         -- * Kernel inputs
-       , kernelInputName
-       , kernelInputType
-       , kernelInputIdent
+         -- *
+       , basicPattern
+       , basicPattern'
+       , reBasicPattern
        )
        where
 
@@ -114,13 +115,25 @@ patternValueTypes = map identType . patternValueIdents
 patternSize :: Pattern lore -> Int
 patternSize (Pattern context values) = length context + length values
 
-kernelInputName :: KernelInput lore -> VName
-kernelInputName = paramName . kernelInputParam
+-- | Create a pattern using 'Type' as the attribute.
+basicPattern :: Annotations.LetBound lore ~ Type =>
+                [(Ident,Bindage)] -> [(Ident,Bindage)] -> Pattern lore
+basicPattern context values =
+  Pattern (map patElem context) (map patElem values)
+  where patElem (Ident name t,bindage) = PatElem name bindage t
 
-kernelInputType :: Typed (Annotations.LParam lore) =>
-                   KernelInput lore -> Type
-kernelInputType = typeOf . kernelInputParam
+-- | Like 'basicPattern', but all 'Bindage's are assumed to be
+-- 'BindVar'.
+basicPattern' :: Annotations.LetBound lore ~ Type =>
+                 [Ident] -> [Ident] -> Pattern lore
+basicPattern' context values =
+  basicPattern (map addBindVar context) (map addBindVar values)
+    where addBindVar name = (name, BindVar)
 
-kernelInputIdent :: Typed (Annotations.LParam lore) =>
-                    KernelInput lore -> Ident
-kernelInputIdent = paramIdent . kernelInputParam
+-- | Recast a pattern to another lore, if those use identical
+-- annotations.  FIXME: It is due to a misdesign that this is even
+-- necessary.
+reBasicPattern :: (Annotations.LetBound fromlore ~ attr,
+                   Annotations.LetBound tolore ~ attr) =>
+                  Pattern fromlore -> Pattern tolore
+reBasicPattern (Pattern ctx values) = Pattern ctx values

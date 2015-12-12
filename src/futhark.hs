@@ -22,11 +22,14 @@ import Futhark.Util.Options
 import Futhark.Pipeline
 import qualified Futhark.Representation.SOACS as SOACS
 import Futhark.Representation.SOACS (SOACS)
+import qualified Futhark.Representation.Kernels as Kernels
+import Futhark.Representation.Kernels (Kernels)
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
-import Futhark.Representation.AST (Prog)
+import Futhark.Representation.AST (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
+import qualified Futhark.Util.Pretty as PP
 
 import Futhark.Pass.Untrace
 import Futhark.Optimise.InliningDeadFun
@@ -50,18 +53,47 @@ data Config = Config { futharkConfig :: FutharkConfig
                      }
 
 data UntypedPassState = SOACS SOACS.Prog
+                      | Kernels Kernels.Prog
                       | ExplicitMemory ExplicitMemory.Prog
+
+class Representation s where
+  -- | A human-readable description of the representation expected or
+  -- contained, usable for error messages.
+  representation :: s -> String
+
+instance Representation UntypedPassState where
+  representation (SOACS _) = "SOACS"
+  representation (Kernels _) = "Kernels"
+  representation (ExplicitMemory _) = "ExplicitMemory"
+
+instance PP.Pretty UntypedPassState where
+  ppr (SOACS prog) = PP.ppr prog
+  ppr (Kernels prog) = PP.ppr prog
+  ppr (ExplicitMemory prog) = PP.ppr prog
 
 data UntypedPass = UntypedPass (UntypedPassState
                                 -> PipelineConfig
                                 -> FutharkM UntypedPassState)
 
 data UntypedAction = SOACSAction (Action SOACS)
+                   | KernelsAction (Action Kernels)
                    | ExplicitMemoryAction (Action ExplicitMemory)
-                   | PolyAction (Action SOACS) (Action ExplicitMemory)
+                   | PolyAction (Action SOACS) (Action Kernels) (Action ExplicitMemory)
+
+untypedActionName :: UntypedAction -> String
+untypedActionName (SOACSAction a) = actionName a
+untypedActionName (KernelsAction a) = actionName a
+untypedActionName (ExplicitMemoryAction a) = actionName a
+untypedActionName (PolyAction a _ _) = actionName a
+
+instance Representation UntypedAction where
+  representation (SOACSAction _) = "SOACS"
+  representation (KernelsAction _) = "Kernels"
+  representation (ExplicitMemoryAction _) = "ExplicitMemory"
+  representation PolyAction{} = "<any>"
 
 newConfig :: Config
-newConfig = Config newFutharkConfig [] $ PolyAction printAction printAction
+newConfig = Config newFutharkConfig [] $ PolyAction printAction printAction printAction
 
 changeFutharkConfig :: (FutharkConfig -> FutharkConfig)
                     -> Config -> Config
@@ -77,22 +109,31 @@ passOption desc pass short long =
   desc
 
 explicitMemoryProg :: String -> UntypedPassState -> FutharkM ExplicitMemory.Prog
-explicitMemoryProg name (SOACS prog) =
-  compileError (T.pack $
-                "Pass " ++ name ++
-                " expects ExplicitMemory representation, but got SOACS")
-  prog
 explicitMemoryProg _ (ExplicitMemory prog) =
   return prog
-
-basicProg :: String -> UntypedPassState -> FutharkM SOACS.Prog
-basicProg name (ExplicitMemory prog) =
+explicitMemoryProg name rep =
   compileError (T.pack $
                 "Pass " ++ name ++
-                " expects SOACS representation, but got ExplicitMemory")
-  prog
-basicProg _ (SOACS prog) =
+                " expects ExplicitMemory representation, but got " ++ representation rep) $
+  pretty rep
+
+soacsProg :: String -> UntypedPassState -> FutharkM SOACS.Prog
+soacsProg _ (SOACS prog) =
   return prog
+soacsProg name rep =
+  compileError (T.pack $
+                "Pass " ++ name ++
+                " expects SOACS representation, but got " ++ representation rep) $
+  pretty rep
+
+kernelsProg :: String -> UntypedPassState -> FutharkM Kernels.Prog
+kernelsProg _ (Kernels prog) =
+  return prog
+kernelsProg name rep =
+  compileError (T.pack $
+                "Pass " ++ name ++
+                " expects Kernels representation, but got " ++ representation rep) $
+  pretty rep
 
 typedPassOption :: Checkable tolore =>
                    (String -> UntypedPassState -> FutharkM (Prog fromlore))
@@ -108,9 +149,13 @@ typedPassOption getProg putProg pass short =
 
         long = [passLongOption pass]
 
-basicPassOption :: Pass SOACS SOACS -> String -> FutharkOption
-basicPassOption =
-  typedPassOption basicProg SOACS
+soacsPassOption :: Pass SOACS SOACS -> String -> FutharkOption
+soacsPassOption =
+  typedPassOption soacsProg SOACS
+
+kernelsPassOption :: Pass Kernels Kernels -> String -> FutharkOption
+kernelsPassOption =
+  typedPassOption kernelsProg Kernels
 
 explicitMemoryPassOption :: Pass ExplicitMemory ExplicitMemory -> String -> FutharkOption
 explicitMemoryPassOption =
@@ -121,6 +166,8 @@ simplifyOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
           SOACS <$> runPasses (onePass simplifySOACS) config prog
+        perform (Kernels prog) config =
+          Kernels <$> runPasses (onePass simplifyKernels) config prog
         perform (ExplicitMemory prog) config =
           ExplicitMemory <$> runPasses (onePass simplifyExplicitMemory) config prog
 
@@ -132,21 +179,24 @@ cseOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
           SOACS <$> runPasses (onePass performCSE) config prog
+        perform (Kernels prog) config =
+          Kernels <$> runPasses (onePass performCSE) config prog
         perform (ExplicitMemory prog) config =
           ExplicitMemory <$> runPasses (onePass performCSE) config prog
 
         long = [passLongOption pass]
         pass = performCSE :: Pass SOACS SOACS
 
-basicPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
+soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
                     -> FutharkOption
-basicPipelineOption desc pipeline =
+soacsPipelineOption desc pipeline =
   passOption desc $ UntypedPass pipelinePass
   where pipelinePass (SOACS prog) config =
           SOACS <$> runPasses pipeline config prog
-        pipelinePass (ExplicitMemory prog) _ =
-          compileError (T.pack "Expected SOACS representation, but got ExplicitMemory")
-          prog
+        pipelinePass rep _ =
+          compileErrorS (T.pack $ "Expected SOACS representation, but got " ++
+                         representation rep) $
+          pretty rep
 
 commandLineOptions :: [FutharkOption]
 commandLineOptions =
@@ -178,10 +228,10 @@ commandLineOptions =
                                                       futharkConfig opts })
     "Run the program via an interpreter."
      , Option [] ["range-analysis"]
-       (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction })
+       (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction rangeAction })
        "Print the program with range annotations added."
   , Option "p" ["print"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction })
+    (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
 
   , Option [] ["real-as-single"]
@@ -193,17 +243,17 @@ commandLineOptions =
      \config -> config { futharkRealConfiguration = RealAsFloat64 } )
     "Map 'real' to 64-bit floating point (the default)."
 
-  , basicPassOption untraceProg "u"
-  , basicPassOption firstOrderTransform "f"
-  , basicPassOption fuseSOACs "o"
-  , basicPassOption inlineAggressively []
-  , basicPassOption removeDeadFunctions []
-  , basicPassOption inPlaceLowering []
-  , basicPassOption babysitKernels []
-  , basicPassOption expandArrays []
-  , basicPassOption extractKernels []
+  , soacsPassOption untraceProg "u"
+  , typedPassOption soacsProg Kernels firstOrderTransform "f"
+  , soacsPassOption fuseSOACs "o"
+  , soacsPassOption inlineAggressively []
+  , soacsPassOption removeDeadFunctions []
+  , kernelsPassOption inPlaceLowering []
+  , kernelsPassOption babysitKernels []
+  , kernelsPassOption expandArrays []
+  , typedPassOption soacsProg Kernels extractKernels []
 
-  , typedPassOption basicProg ExplicitMemory explicitAllocations "a"
+  , typedPassOption kernelsProg ExplicitMemory explicitAllocations "a"
 
   , explicitMemoryPassOption doubleBuffer []
   , explicitMemoryPassOption expandAllocations []
@@ -211,10 +261,7 @@ commandLineOptions =
   , cseOption []
   , simplifyOption "e"
 
-  -- , passoption "Transform program to explicit memory representation" explicitMemory
-  --   "a" ["explicit-allocations"]
-
-  , basicPipelineOption "Run the default optimised pipeline"
+  , soacsPipelineOption "Run the default optimised pipeline"
     standardPipeline "s" ["standard"]
   ]
 
@@ -240,24 +287,26 @@ runPolyPasses config prog = do
   (res, msgs) <- runFutharkM $ do
     prog' <- foldM (runPolyPass pipeline_config) (SOACS prog) (futharkPipeline config)
     case (prog', futharkAction config) of
-      (SOACS basic_prog, SOACSAction action) ->
-        actionProcedure action basic_prog
-      (ExplicitMemory mem_prog, SOACSAction action) ->
-        compileError (T.pack $ "Action " <>
-                      actionName action <>
-                      " expects SOACS representation, but got ExplicitMemory.")
-        mem_prog
+      (SOACS soacs_prog, SOACSAction action) ->
+        actionProcedure action soacs_prog
+      (Kernels kernels_prog, KernelsAction action) ->
+        actionProcedure action kernels_prog
       (ExplicitMemory mem_prog, ExplicitMemoryAction action) ->
         actionProcedure action mem_prog
-      (SOACS basic_prog, ExplicitMemoryAction action) ->
+
+      (SOACS soacs_prog, PolyAction soacs_action _ _) ->
+        actionProcedure soacs_action soacs_prog
+      (Kernels kernels_prog, PolyAction _ kernels_action _) ->
+        actionProcedure kernels_action kernels_prog
+      (ExplicitMemory mem_prog, PolyAction _ _ mem_action) ->
+        actionProcedure mem_action mem_prog
+
+      (_, action) ->
         compileError (T.pack $ "Action " <>
-                      actionName action <>
-                      " expects ExplicitMemory representation, but got SOACS.")
-        basic_prog
-      (SOACS basic_prog, PolyAction basic_action _) ->
-        actionProcedure basic_action basic_prog
-      (ExplicitMemory mem_prog, PolyAction _ poly_action) ->
-        actionProcedure poly_action mem_prog
+                      untypedActionName action <>
+                      " expects " ++ representation action ++ " representation, but got " ++
+                     representation prog' ++ ".") $
+        pretty prog'
   when (isJust $ futharkVerbose $ futharkConfig config) $
     T.hPutStr stderr $ toText msgs
   case res of

@@ -14,7 +14,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.SOACS
+import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
@@ -88,7 +88,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     LoopOp $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes arrs)
+     Op $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes arrs)
 
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
 
@@ -108,7 +108,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   addBinding $
     Let step_two_pat () $
-    LoopOp $ ReduceKernel [] num_chunks step_two_size
+    Op $ ReduceKernel [] num_chunks step_two_size
     reduce_lam' identity_lam nes $ patternNames step_one_pat
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
@@ -145,7 +145,7 @@ blockedKernelSize w = do
 
   return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
-blockedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
+blockedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Kernels) =>
                Pattern
             -> Certificates -> SubExp
             -> Lambda
@@ -163,7 +163,7 @@ blockedScan pat cs w lam input = do
 
   sequential_scan_result <-
     letTupExp "sequentially_scanned" $
-      LoopOp $ ScanKernel cs w first_scan_size ScanFlat first_scan_lam input
+      Op $ ScanKernel cs w first_scan_size ScanFlat first_scan_lam input
 
   let (sequentially_scanned, all_group_sums) =
         splitAt (length input) sequential_scan_result
@@ -191,7 +191,7 @@ blockedScan pat cs w lam input = do
     let lasts_map_returns = [ (rt, [0..arrayRank rt])
                             | rt <- lambdaReturnType lam ]
     letTupExp "last_in_preceding_groups" $
-      LoopOp $ MapKernel [] num_groups lasts_map_index
+      Op $ MapKernel [] num_groups lasts_map_index
       [(group_id, num_groups)] [] lasts_map_returns lasts_map_body
 
   group_carry_in <- do
@@ -199,7 +199,7 @@ blockedScan pat cs w lam input = do
     second_scan_lam <- renameLambda first_scan_lam
     carry_in_scan_result <-
       letTupExp "group_carry_in_and_junk" $
-      LoopOp $ ScanKernel cs num_groups second_scan_size ScanFlat second_scan_lam $
+      Op $ ScanKernel cs num_groups second_scan_size ScanFlat second_scan_lam $
       zip nes last_in_preceding_groups
     forM (snd $ splitAt (length input) carry_in_scan_result) $ \arr ->
       letExp "group_carry_in" $
@@ -218,7 +218,7 @@ blockedScan pat cs w lam input = do
     let chunk_carry_out_returns = [ (rt, [0..arrayRank rt+1])
                                  | rt <- lambdaReturnType lam ]
     letTupExp "chunk_carry_out" $
-      LoopOp $ MapKernel [] num_threads chunk_carry_out_index
+      Op $ MapKernel [] num_threads chunk_carry_out_index
       [(group_id, num_groups),
        (elem_id, group_size)]
       chunk_carry_out_inputs chunk_carry_out_returns $ lambdaBody lam''
@@ -257,13 +257,13 @@ blockedScan pat cs w lam input = do
     return $ resultBody $ map Var group_lasts
   let result_map_returns = [ (rt, [0..arrayRank rt])
                            | rt <- lambdaReturnType lam ]
-  letBind_ pat $ LoopOp $ MapKernel [] w result_map_index
+  letBind_ pat $ Op $ MapKernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
   where one = Constant $ IntVal 1
         zero = Constant $ IntVal 0
         (nes, _) = unzip input
 
-        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput SOACS
+        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Kernels
         mkKernelInput indices p arr = KernelInput { kernelInputParam = p
                                                   , kernelInputArray = arr
                                                   , kernelInputIndices = indices
@@ -273,7 +273,7 @@ blockedScan pat cs w lam input = do
                                          kernelInputType inp)
                                       | inp <- inps ]
 
-blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
+blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Kernels) =>
                         SubExp
                      -> Pattern
                      -> Certificates
@@ -310,7 +310,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
               If start_of_segment (resultBody [true]) (resultBody [false]) [Basic Bool]
       return $ resultBody [flag]
   flags <-
-    letExp "flags" $ LoopOp $ MapKernel [] w flags_global_index
+    letExp "flags" $ Op $ MapKernel [] w flags_global_index
     [(flags_i, w)] []
     [(Basic Bool, [0])]
     flags_body

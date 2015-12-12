@@ -224,58 +224,6 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     ) <+> text "do" </>
     indent 2 (ppr loopbody)
     where (pat, initexp) = unzip mergepat
-  ppr (MapKernel cs w index ispace inps returns body) =
-    ppCertificates' cs <> text "mapKernel" <+>
-    align (parens (text "width:" <+> ppr w) </>
-           parens (text "index:" <+> ppr index) </>
-           parens (stack $ punctuate semi $ map ppBound ispace) </>
-           parens (stack $ punctuate semi $ map ppr inps) </>
-           parens (stack $ punctuate semi $ map ppRet returns) </>
-           text "do") </>
-    indent 2 (ppr body)
-    where ppBound (name, bound) =
-            ppr name <+> text "<" <+> ppr bound
-          ppRet (t, perm) =
-            ppr t <+> text "permuted" <+> apply (map ppr perm)
-  ppr (ReduceKernel cs w kernel_size parfun seqfun es as) =
-    ppCertificates' cs <> text "reduceKernel" <>
-    parens (ppr w <> comma </>
-            ppr kernel_size </>
-            braces (commasep $ map ppr es) <> comma </>
-            commasep (map ppr as) </>
-            ppr parfun <> comma </> ppr seqfun)
-  ppr (ScanKernel cs w kernel_size order fun input) =
-    ppCertificates' cs <> text "scanKernel" <>
-    parens (ppr w <> comma </>
-            ppr kernel_size <> comma </>
-            ppr order <> comma </>
-            braces (commasep $ map ppr es) <> comma </>
-            commasep (map ppr as) </>
-            ppr fun)
-    where (es, as) = unzip input
-
-instance Pretty KernelSize where
-  ppr (KernelSize
-       num_chunks workgroup_size per_thread_elements
-       num_elements offset_multiple num_threads) =
-    commasep [ppr num_chunks,
-              ppr workgroup_size,
-              ppr per_thread_elements,
-              ppr num_elements,
-              ppr offset_multiple,
-              ppr num_threads
-             ]
-
-instance Pretty ScanKernelOrder where
-  ppr ScanFlat = text "flat"
-  ppr ScanTransposed = text "transposed"
-
-instance PrettyLore lore => Pretty (KernelInput lore) where
-  ppr inp = ppr (kernelInputType inp) <+>
-            ppr (kernelInputName inp) <+>
-            text "<-" <+>
-            ppr (kernelInputArray inp) <>
-            brackets (commasep (map ppr $ kernelInputIndices inp))
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
