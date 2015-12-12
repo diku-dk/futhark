@@ -619,9 +619,9 @@ matchPatternToReturns wrong pat rt = do
                   " but annotation says block " ++ pretty mem ++
                   "."
               unless (bindeeIxFun == retIxFun) $
-                lift $ wrong $ "Bindee index function is " ++
-                pretty bindeeIxFun ++ ", but return index function is " ++
-                pretty retIxFun ++ "."
+                lift $ wrong $ "Bindee index function is:\n  " ++
+                pretty bindeeIxFun ++ "\nBut return index function is:\n  " ++
+                pretty retIxFun
 
             Just (ReturnsNewBlock _) ->
               popMemFromCtx mem
