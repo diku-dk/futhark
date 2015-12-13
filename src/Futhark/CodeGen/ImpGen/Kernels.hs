@@ -408,13 +408,17 @@ kernelCompiler
 
         let last_in_wave =
               Imp.BinOp Equal in_wave_id $ Imp.ScalarVar wave_size - 1
-        ImpGen.emit $ Imp.If last_in_wave pack_wave_results mempty
+        ImpGen.emit $
+          Imp.Comment "last thread of wave 'i' writes its result to offset 'i'" $
+          Imp.If last_in_wave pack_wave_results mempty
 
         ImpGen.emit $ Imp.Op Imp.Barrier
 
         let is_first_wave = Imp.BinOp Equal wave_id 0
         scan_first_wave <- ImpGen.collect $ inWaveScan' renamed_lam
-        ImpGen.emit $ Imp.If is_first_wave scan_first_wave mempty
+        ImpGen.emit $
+          Imp.Comment "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $
+          Imp.If is_first_wave scan_first_wave mempty
 
         ImpGen.emit $ Imp.Op Imp.Barrier
 
@@ -426,6 +430,7 @@ kernelCompiler
 
         op_to_y <- ImpGen.collect $ ImpGen.compileBody y_dest $ lambdaBody lam
         ImpGen.emit $
+          Imp.Comment "carry-in for every wave except the first" $
           Imp.If is_first_wave mempty $
           Imp.Comment "read operands" read_carry_in <>
           Imp.Comment "perform operation" op_to_y
