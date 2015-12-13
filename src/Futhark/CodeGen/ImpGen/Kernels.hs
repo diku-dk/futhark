@@ -355,9 +355,14 @@ kernelCompiler
         read_params <-
           ImpGen.collect $ zipWithM_ readScanElement y_params arrs
 
-        let indices = case order of
-              ScanTransposed -> [elements_scanned, global_id]
-              ScanFlat       -> [global_id, elements_scanned]
+        let (indices, explode_n, explode_m) = case order of
+              ScanTransposed -> ([elements_scanned, global_id],
+                                 kernelElementsPerThread kernel_size,
+                                 kernelNumThreads kernel_size)
+              ScanFlat       ->  ([global_id, elements_scanned],
+                                  kernelNumThreads kernel_size,
+                                  kernelElementsPerThread kernel_size)
+
             writeScanElement (ImpGen.ArrayDestination
                               (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun))
                               setdims) =
@@ -367,9 +372,7 @@ kernelCompiler
               setdims
               where ixfun' = explodeOuterDimension
                              (Shape $ map sizeToSubExp dims)
-                             (kernelElementsPerThread kernel_size)
-                             (kernelNumThreads kernel_size)
-                             ixfun
+                             explode_n explode_m ixfun
             writeScanElement _ =
               const $ fail "writeScanElement: invalid destination"
 
