@@ -23,6 +23,7 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
+import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
@@ -255,7 +256,6 @@ kernelType (ScanKernel _ w size _ lam _) =
        (`arrayOfRow` kernelWorkgroupSize size))
   (lambdaReturnType lam)
 
-
 instance Proper lore => TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType
 
@@ -281,6 +281,10 @@ instance (Proper lore,
   removeOpAliases = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaAliases)
                    (return . removeBodyAliases) return return return
+
+removeKernelInputAliases :: KernelInput (Aliases lore) -> KernelInput lore
+removeKernelInputAliases inp =
+  inp { kernelInputParam = kernelInputParam inp }
 
 instance Proper lore => IsOp (Kernel lore) where
   safeOp _ = False
@@ -325,13 +329,17 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
        "Permutation " ++ pretty perm ++
        " not valid for returning " ++ pretty t ++
        " from a rank " ++ pretty rank ++ " kernel."
+  inps' <- kernelInputsToNamesTypesAndLores $ map removeKernelInputAliases inps
   TC.checkFun' (nameFromString "<kernel body>",
                 map (`toDecl` Nonunique) $ staticShapes rettype,
-                lamParamsToNamesTypesAndLores $ index_param : iparams' ++ map kernelInputParam inps,
+                lamParamsToNamesTypesAndLores (index_param : iparams') ++ inps',
                 body) $ do
     TC.checkLambdaParams $ map kernelInputParam inps
     mapM_ checkKernelInput inps
-    TC.checkBody body
+    inps_als <- mapM (TC.lookupAliases . kernelInputArray) inps
+    let consumable_inps = consumableInputs (map fst ispace) $
+                          zip inps inps_als
+    TC.consumeOnlyParams consumable_inps $ TC.checkBody body
     bodyt <- bodyExtType body
     unless (map rankShaped bodyt ==
             map rankShaped (staticShapes rettype)) $
@@ -421,6 +429,23 @@ lamParamsToNamesTypesAndLores = map nameTypeAndLore
   where nameTypeAndLore fparam = (paramName fparam,
                                   toDecl (paramType fparam) Unique,
                                   TC.LambdaBound $ paramAttr fparam)
+
+kernelInputsToNamesTypesAndLores :: TC.Checkable lore =>
+                                    [KernelInput lore]
+                                 -> TC.TypeM lore
+                                    [(VName, DeclType, TC.VarBindingLore lore)]
+kernelInputsToNamesTypesAndLores = mapM nameTypeAndLore
+  where nameTypeAndLore input =
+          return (kernelInputName input,
+                  toDecl (kernelInputType input) Unique,
+                  TC.LambdaBound $ paramAttr $ kernelInputParam input)
+
+-- | A kernel input is consumable iff its indexing is a permutation of
+-- the full index space.
+consumableInputs :: [VName] -> [(KernelInput lore, Names)] -> [(VName, Names)]
+consumableInputs is = map (first kernelInputName) .
+                      filter ((==is_sorted) . sort . kernelInputIndices . fst)
+  where is_sorted = sort (map Var is)
 
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (MapKernel _ _ _ _ _ _ body) =

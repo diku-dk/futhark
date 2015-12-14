@@ -523,7 +523,7 @@ simplifyAssert _ _ _ =
 
 simplifyIndex :: LetTopDownRule lore u
 simplifyIndex defOf seType (Index cs idd inds) =
-  case simplifyIndexing defOf seType idd inds of
+  case simplifyIndexing defOf seType idd inds False of
     Just (SubExpResult se) ->
       Just $ SubExp se
     Just (IndexResult extra_cs idd' inds') ->
@@ -536,9 +536,9 @@ data IndexResult = IndexResult Certificates VName [SubExp]
                  | SubExpResult SubExp
 
 simplifyIndexing :: VarLookup lore -> TypeLookup
-                 -> VName -> [SubExp]
+                 -> VName -> [SubExp] -> Bool
                  -> Maybe IndexResult
-simplifyIndexing defOf seType idd inds =
+simplifyIndexing defOf seType idd inds consuming =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
@@ -551,8 +551,8 @@ simplifyIndexing defOf seType idd inds =
       Just $ IndexResult cs aa (ais ++ inds)
 
     Just (Replicate _ (Var vv))
-      | [_]   <- inds -> Just $ SubExpResult $ Var vv
-      | _:is' <- inds -> Just $ IndexResult [] vv is'
+      | [_]   <- inds, not consuming -> Just $ SubExpResult $ Var vv
+      | _:is' <- inds, not consuming -> Just $ IndexResult [] vv is'
 
     Just (Replicate _ val@(Constant _))
       | [_] <- inds -> Just $ SubExpResult val
@@ -568,7 +568,8 @@ simplifyIndexing defOf seType idd inds =
       | Just (PrimOp Rearrange{}) <- defOf src ->
           Nothing
       | Just dims <- arrayDims <$> seType (Var src),
-        length inds == length dims ->
+        length inds == length dims,
+        not consuming ->
           Just $ IndexResult [] src inds
 
     Just (Reshape cs newshape src)
