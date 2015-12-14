@@ -42,6 +42,7 @@ module Futhark.TypeCheck
   , checkFun'
   , checkLambdaParams
   , checkBody
+  , consumeOnlyParams
   )
   where
 

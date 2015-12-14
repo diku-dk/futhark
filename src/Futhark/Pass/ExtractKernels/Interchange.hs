@@ -81,7 +81,8 @@ interchangeLoop
         expand (merge_param, merge_init) = do
           expanded_param <-
             newParam (param_name <> "_expanded") $
-            arrayOf (paramDeclType merge_param) (Shape [w]) Nonunique
+            arrayOf (paramDeclType merge_param) (Shape [w]) $
+            uniqueness $ declTypeOf merge_param
           expanded_init <- expandedInit param_name merge_init
           return (expanded_param, expanded_init)
             where param_name = baseString $ paramName merge_param

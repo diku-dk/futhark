@@ -109,15 +109,17 @@ instance Engine.Simplifiable KernelSize where
     return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
 
 kernelRules :: (MonadBinder m,
-              LocalTypeEnv m,
-              Op (Lore m) ~ Kernel (Lore m)) => RuleBook m
+                LocalTypeEnv m,
+                Op (Lore m) ~ Kernel (Lore m),
+                Aliased (Lore m)) => RuleBook m
 kernelRules = (std_td_rules <> topDownRules,
              std_bu_rules <> bottomUpRules)
   where (std_td_rules, std_bu_rules) = standardRules
 
 topDownRules :: (MonadBinder m,
                  LocalTypeEnv m,
-                 Op (Lore m) ~ Kernel (Lore m)) => TopDownRules m
+                 Op (Lore m) ~ Kernel (Lore m),
+                 Aliased (Lore m)) => TopDownRules m
 topDownRules = [removeUnusedKernelInputs
                , simplifyKernelInputs
                , removeInvariantKernelOutputs
@@ -142,7 +144,8 @@ removeUnusedKernelInputs _ _ = cannotSimplify
 
 -- | Kernel inputs are indexes into arrays.  Based on how those arrays
 -- are defined, we may be able to simplify the input.
-simplifyKernelInputs :: (MonadBinder m, LocalTypeEnv m, Op (Lore m) ~ Kernel (Lore m)) =>
+simplifyKernelInputs :: (MonadBinder m, LocalTypeEnv m,
+                         Op (Lore m) ~ Kernel (Lore m), Aliased (Lore m)) =>
                         TopDownRule m
 simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
   | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
@@ -158,15 +161,17 @@ simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps ret
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Basic $ basicValueType v
         index_env = HM.fromList $ zip (map fst ispace) $ repeat $ Basic Int
+        consumed_in_body = consumedInBody body
 
         simplifyInput inp@(KernelInput param arr is) =
-          case simplifyIndexing defOf seType arr is of
+          case simplifyIndexing defOf seType arr is consumed of
             Just (IndexResult inp_cs arr' is') ->
               (Just $ KernelInput param arr' is', inp_cs, Nothing)
             Just (SubExpResult se) ->
               (Nothing, [], Just (paramName param, se))
             _ ->
               (Just inp, [], Nothing)
+          where consumed = paramName param `HS.member` consumed_in_body
 simplifyKernelInputs _ _ = cannotSimplify
 
 removeInvariantKernelOutputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>

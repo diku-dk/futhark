@@ -194,12 +194,15 @@ constructKernel kernel_nest inner_body = do
   (w_bnds, w, ispace, inps, rts) <- flatKernel kernel_nest
   let rank = length ispace
       returns = [ (rt, [0..rank + arrayRank rt - 1]) | rt <- rts ]
+      used_inps = filter inputIsUsed inps
   index <- newVName "kernel_thread_index"
   return (w_bnds,
           Let (loopNestingPattern first_nest) () $ Op $
-          MapKernel (loopNestingCertificates first_nest) w index ispace inps returns inner_body)
+          MapKernel (loopNestingCertificates first_nest) w index ispace used_inps returns inner_body)
   where
     first_nest = fst kernel_nest
+    inputIsUsed input = kernelInputName input `HS.member`
+                        freeInBody inner_body
 
 -- | Flatten a kernel nesting to:
 --
