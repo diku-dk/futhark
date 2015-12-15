@@ -192,14 +192,10 @@ instance (Proper lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases ConcatMap{} =
     [mempty]
 
-  consumedInOp (Map _ _ lam _) =
-    consumedByLambda lam
-  consumedInOp (Reduce _ _ lam _) =
-    consumedByLambda lam
-  consumedInOp (Scan _ _ lam _) =
-    consumedByLambda lam
-  consumedInOp (Redomap _ _ _ lam _ _) =
-    consumedByLambda lam
+  consumedInOp (Map _ _ lam arrs) =
+    HS.map consumedArray $ consumedByLambda lam
+    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
+          params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
   consumedInOp _ =
     mempty
 

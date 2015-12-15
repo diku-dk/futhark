@@ -181,6 +181,7 @@ boundFree fs = tellNeed $ Need [] $ UT.usages fs
 usedName :: MonadEngine m => VName -> m ()
 usedName = boundFree . HS.singleton
 
+-- | Register the fact that the given name is consumed.
 consumedName :: MonadEngine m => VName -> m ()
 consumedName = tellNeed . Need [] . UT.consumedUsage
 
@@ -670,6 +671,12 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
     blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
       simplifyBody (map (const Observe) rettype) body
   rettype' <- mapM simplify rettype
+  let consumed_in_body = consumedInBody body'
+      paramWasConsumed p (Just arr)
+        | p `HS.member` consumed_in_body = consumedName arr
+      paramWasConsumed _ _ =
+        return ()
+  zipWithM_ paramWasConsumed (map paramName params') arrs
   return $ Lambda i params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>

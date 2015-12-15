@@ -476,21 +476,6 @@ funParamsToNamesTypesAndLores = map nameTypeAndLore
                                   paramDeclType fparam,
                                   FunBound $ paramAttr fparam)
 
-checkAnonymousFun :: Checkable lore =>
-                     (Name, [Type], [LParam (Aliases lore)], BodyT (Aliases lore))
-                  -> TypeM lore ()
-checkAnonymousFun (fname, rettype, params, body) =
-  checkFun' (fname,
-             staticShapes $ map (`toDecl` Nonunique) rettype,
-             [ (paramName param,
-                toDecl (paramType param) Unique,
-                LambdaBound $ paramAttr param)
-             | param <- params ],
-             body) $ do
-    checkLambdaParams params
-    mapM_ checkType rettype
-    checkLambdaBody rettype body
-
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
 checkFunParams = mapM_ $ \param ->
@@ -1042,13 +1027,25 @@ checkFuncall fname paramts args = do
 
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore ()
-checkLambda (Lambda i params body ret) args = do
-  mapM_ checkType ret
+checkLambda (Lambda i params body rettype) args = do
+  mapM_ checkType rettype
   iparam <- basicLParamM i Int
+  let fname = nameFromString "<anonymous>"
   if length params == length args then do
-    checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
-    consumeOnlyParams (zip (map paramName params) (map argAliases args)) $
-      checkAnonymousFun (nameFromString "<anonymous>", ret, iparam:params, body)
+    checkFuncall Nothing
+      (map ((`toDecl` Nonunique) . paramType) $ iparam:params) $
+      (Basic Int, mempty) : args
+    checkFun' (fname,
+           staticShapes $ map (`toDecl` Nonunique) rettype,
+           [ (paramName param,
+              toDecl (paramType param) Unique,
+              LambdaBound $ paramAttr param)
+           | param <- iparam:params ],
+           body) $ do
+      checkLambdaParams params
+      mapM_ checkType rettype
+      consumeOnlyParams (zip (map paramName params) (map argAliases args)) $
+        checkLambdaBody rettype body
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkConcatMapLambda :: Checkable lore =>
