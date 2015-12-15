@@ -676,7 +676,7 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
         | p `HS.member` consumed_in_body = consumedName arr
       paramWasConsumed _ _ =
         return ()
-  zipWithM_ paramWasConsumed (map paramName params') arrs
+  zipWithM_ paramWasConsumed (map paramName arrayparams) arrs
   return $ Lambda i params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
