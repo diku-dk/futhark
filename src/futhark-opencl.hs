@@ -19,7 +19,6 @@ import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.CSE
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
-import Futhark.Pass.ExpandArrays
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExpandAllocations
 import Futhark.Util.Options
@@ -105,7 +104,6 @@ compilerPipeline =
   standardPipeline >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
-         , expandArrays
          , simplifyKernels
          , babysitKernels
          , simplifyKernels

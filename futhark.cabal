@@ -113,7 +113,6 @@ Library
                    Futhark.Pass
                    Futhark.Passes
                    Futhark.Pass.ExpandAllocations
-                   Futhark.Pass.ExpandArrays
                    Futhark.Pass.ExplicitAllocations
                    Futhark.Pass.ExtractKernels
                    Futhark.Pass.ExtractKernels.BlockedKernel
