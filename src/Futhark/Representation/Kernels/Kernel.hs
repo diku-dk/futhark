@@ -267,7 +267,12 @@ instance (Proper lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases (ScanKernel _ _ _ _ lam _) =
     replicate (length (lambdaReturnType lam) * 2) mempty
 
-  consumedInOp _ = mempty -- FIXME
+  consumedInOp (MapKernel _ _ _ _ inps _ body) =
+    HS.fromList $
+    map kernelInputArray $
+    filter ((`HS.member` consumed) . kernelInputName) inps
+    where consumed = consumedInBody body
+  consumedInOp _ = mempty
 
 instance (Proper lore,
           Proper (Aliases lore),
