@@ -29,14 +29,14 @@ import qualified Futhark.Analysis.SymbolTable as ST
 
 data SimpleOps m =
   SimpleOps { mkLetS :: ST.SymbolTable (Lore m)
-                        -> Pattern (Lore m) -> Exp (Lore m)
-                        -> m (Binding (Lore m))
+                     -> Pattern (Lore m) -> Exp (Lore m)
+                     -> m (Binding (Lore m))
             , mkBodyS :: ST.SymbolTable (Lore m)
-                         -> [Binding (Lore m)] -> Result
-                         -> m (Body (Lore m))
+                      -> [Binding (Lore m)] -> Result
+                      -> m (Body (Lore m))
             , mkLetNamesS :: ST.SymbolTable (Lore m)
-                             -> [(VName,Bindage)] -> Exp (Lore m)
-                             -> m (Binding (Lore m))
+                          -> [(VName,Bindage)] -> Exp (Lore m)
+                          -> m (Binding (Lore m))
             }
 
 bindableSimpleOps :: (Engine.MonadEngine m,

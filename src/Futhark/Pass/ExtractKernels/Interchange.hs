@@ -60,7 +60,7 @@ interchangeLoop
         res = map Var $ patternNames loop_pat_expanded
 
     return $
-      SeqLoop (reBasicPattern pat) ret_expanded merge_expanded form $
+      SeqLoop pat ret_expanded merge_expanded form $
       mkBody (pre_copy_bnds++[map_bnd]) res
   where free_in_body = freeInBody body
 

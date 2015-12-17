@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | Futhark prettyprinter.  This module defines 'Pretty' instances
@@ -27,8 +28,6 @@ import Futhark.Util
 -- | The class of lores whose annotations can be prettyprinted.
 class (Lore lore,
        Pretty (RetType lore),
-       Pretty (Pattern lore),
-       Pretty (Annotations.LetBound lore),
        Pretty (ParamT (Annotations.FParam lore)),
        Pretty (ParamT (Annotations.LParam lore)),
        Pretty (PatElemT (Annotations.LetBound lore)),
@@ -120,7 +119,7 @@ bindingAnnotation bnd doc =
     Nothing    -> doc
     Just annot -> annot </> doc
 
-instance PrettyLore lore => Pretty (PatternT lore) where
+instance Pretty (PatElemT attr) => Pretty (PatternT attr) where
   ppr = braces . commasep . map ppr . patternElements
 
 instance Pretty (PatElemT b) => Pretty (PatElemT (a,b)) where

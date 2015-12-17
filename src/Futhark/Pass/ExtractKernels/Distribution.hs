@@ -105,7 +105,7 @@ loopNestingParams  = map fst . loopNestingParamsAndArrs
 
 instance FreeIn LoopNesting where
   freeIn (MapNesting pat cs w _ params_and_arrs) =
-    freeInPattern pat <>
+    freeIn pat <>
     freeIn cs <>
     freeIn w <>
     freeIn params_and_arrs

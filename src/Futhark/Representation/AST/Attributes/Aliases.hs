@@ -5,8 +5,10 @@ module Futhark.Representation.AST.Attributes.Aliases
        , subExpAliases
        , primOpAliases
        , loopOpAliases
-       , aliasesOf
+       , expAliases
+       , patternAliases
        , Aliased (..)
+       , AliasesOf (..)
          -- * Consumption
        , consumedInBinding
        , consumedInExp
@@ -21,6 +23,7 @@ import Control.Arrow (first)
 import Data.Monoid
 import qualified Data.HashSet as HS
 
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Util.Pretty (Pretty)
 import Futhark.Representation.AST.Lore (Lore)
@@ -31,10 +34,10 @@ import Futhark.Representation.AST.Attributes.Names (FreeIn)
 import Futhark.Transform.Substitute (Substitute)
 import Futhark.Transform.Rename (Rename)
 
-class (Lore lore, AliasedOp (Op lore)) => Aliased lore where
+class (Lore lore, AliasedOp (Op lore),
+       AliasesOf (Annotations.LetBound lore)) => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
-  patternAliases :: Pattern lore -> [Names]
 
 vnameAliases :: VName -> Names
 vnameAliases = HS.singleton
@@ -94,16 +97,16 @@ funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
-aliasesOf :: (Aliased lore) => Exp lore -> [Names]
-aliasesOf (If _ tb fb _) =
+expAliases :: (Aliased lore) => Exp lore -> [Names]
+expAliases (If _ tb fb _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)
   (bodyAliases fb, consumedInBody fb)
-aliasesOf (PrimOp op) = primOpAliases op
-aliasesOf (LoopOp op) = loopOpAliases op
-aliasesOf (Apply _ args t) =
+expAliases (PrimOp op) = primOpAliases op
+expAliases (LoopOp op) = loopOpAliases op
+expAliases (Apply _ args t) =
   funcallAliases args $ retTypeValues t
-aliasesOf (Op op) = opAliases op
+expAliases (Op op) = opAliases op
 
 returnAliases :: [TypeBase shaper Uniqueness] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts
@@ -137,12 +140,23 @@ consumedInExp (LoopOp (DoLoop _ merge _ _)) =
 consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
 
-consumedInPattern :: Pattern lore -> Names
+patternAliases :: AliasesOf attr => PatternT attr -> [Names]
+patternAliases = map (aliasesOf . patElemAttr) . patternElements
+
+consumedInPattern :: PatternT attr -> Names
 consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
            patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
         consumedInBindage (BindInPlace _ src _) = vnameAliases src
+
+-- | Something that contains alias information.
+class AliasesOf a where
+  -- | The alias of the argument element.
+  aliasesOf :: a -> Names
+
+instance AliasesOf Names where
+  aliasesOf = id
 
 class AliasedOp op where
   opAliases :: op -> [Names]

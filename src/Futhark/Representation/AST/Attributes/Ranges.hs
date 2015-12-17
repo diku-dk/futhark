@@ -1,5 +1,9 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | Utility declarations for performing range analysis.
 module Futhark.Representation.AST.Attributes.Ranges
        ( Bound
@@ -10,8 +14,9 @@ module Futhark.Representation.AST.Attributes.Ranges
        , Range
        , unknownRange
        , ScalExpRange
-       , Ranged (..)
-       , subExpRange
+       , Ranged
+       , RangeOf (..)
+       , RangesOf (..)
        , expRanges
        , RangedOp (..)
        , CanBeRanged (..)
@@ -24,6 +29,7 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Prelude
 
+import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
 import Futhark.Analysis.ScalExp
@@ -123,17 +129,40 @@ type ScalExpRange = (Maybe ScalExp, Maybe ScalExp)
 
 -- | The lore has embedded range information.  Note that it may not be
 -- up to date, unless whatever maintains the syntax tree is careful.
-class (Lore lore, RangedOp (Op lore)) => Ranged lore where
-  -- | The range of the value parts of the 'Body'.
-  bodyRanges :: Body lore -> [Range]
+type Ranged lore = (Lore lore,
+                    RangedOp (Op lore),
+                    RangeOf (Annotations.LetBound lore),
+                    RangesOf (Annotations.Body lore))
 
-  -- | The range of the pattern elements.
-  patternRanges :: Pattern lore -> [Range]
+-- | Something that contains range information.
+class RangeOf a where
+  -- | The range of the argument element.
+  rangeOf :: a -> Range
 
--- | The range of a subexpression.
-subExpRange :: SubExp -> Range
-subExpRange se = (Just lower, Just upper)
-  where (lower, upper) = subExpKnownRange se
+instance RangeOf Range where
+  rangeOf = id
+
+instance RangeOf attr => RangeOf (PatElem attr) where
+  rangeOf = rangeOf . patElemAttr
+
+instance RangeOf SubExp where
+  rangeOf se = (Just lower, Just upper)
+    where (lower, upper) = subExpKnownRange se
+
+-- | Something that contains range information for several things,
+-- most notably 'Body' or 'Pattern'.
+class RangesOf a where
+  -- | The ranges of the argument.
+  rangesOf :: a -> [Range]
+
+instance RangeOf a => RangesOf [a] where
+  rangesOf = map rangeOf
+
+instance RangeOf attr => RangesOf (PatternT attr) where
+  rangesOf = map rangeOf . patternElements
+
+instance Ranged lore => RangesOf (Body lore) where
+  rangesOf = rangesOf . bodyLore
 
 subExpKnownRange :: SubExp -> (KnownBound, KnownBound)
 subExpKnownRange (Var v) =
@@ -150,7 +179,7 @@ scalExpRange se =
 
 primOpRanges :: PrimOp lore -> [Range]
 primOpRanges (SubExp se) =
-  [subExpRange se]
+  [rangeOf se]
 
 primOpRanges (BinOp Plus x y t) =
   [scalExpRange $ SPlus (subExpToScalExp x t) (subExpToScalExp y t)]
@@ -174,17 +203,17 @@ primOpRanges (Iota n) =
           Var v        -> Id v Int
           Constant val -> Val val
 primOpRanges (Replicate _ v) =
-  [subExpRange v]
+  [rangeOf v]
 primOpRanges (Rearrange _ _ v) =
-  [subExpRange $ Var v]
+  [rangeOf $ Var v]
 primOpRanges (Split _ sizeexps v) =
-  replicate (length sizeexps) $ subExpRange $ Var v
+  replicate (length sizeexps) $ rangeOf $ Var v
 primOpRanges (Copy se) =
-  [subExpRange $ Var se]
+  [rangeOf $ Var se]
 primOpRanges (Index _ v _) =
-  [subExpRange $ Var v]
+  [rangeOf $ Var v]
 primOpRanges (Partition _ n _ arr) =
-  replicate n unknownRange ++ map (subExpRange . Var) arr
+  replicate n unknownRange ++ map (rangeOf . Var) arr
 primOpRanges (ArrayLit (e:es) _) =
   [(Just lower, Just upper)]
   where (e_lower, e_upper) = subExpKnownRange e
@@ -203,12 +232,12 @@ expRanges (If _ tbranch fbranch _) =
   zip
   (zipWith minimumBound t_lower f_lower)
   (zipWith maximumBound t_upper f_upper)
-  where (t_lower, t_upper) = unzip $ bodyRanges tbranch
-        (f_lower, f_upper) = unzip $ bodyRanges fbranch
+  where (t_lower, t_upper) = unzip $ rangesOf tbranch
+        (f_lower, f_upper) = unzip $ rangesOf fbranch
 expRanges (LoopOp (DoLoop res merge (ForLoop i iterations) body)) =
   map returnedRange $
   filter ((`elem` res) . paramName . fst . fst) $
-  zip merge $ bodyRanges body
+  zip merge $ rangesOf body
   where bound_in_loop =
           HS.fromList $ i : map (paramName . fst) merge ++
           concatMap (patternNames . bindingPattern) (bodyBindings body)

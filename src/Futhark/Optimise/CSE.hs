@@ -103,7 +103,9 @@ cseInBinding (Let pat eattr e) m = do
         bad Mem{}   = True
         bad _       = False
 
-type ExpressionSubstitutions lore = M.Map (Annotations.Exp lore, Exp lore) (Pattern lore)
+type ExpressionSubstitutions lore = M.Map
+                                    (Annotations.Exp lore, Exp lore)
+                                    (Pattern lore)
 type NameSubstitutions = HM.HashMap VName VName
 
 newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitutions)
@@ -111,10 +113,10 @@ newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitution
 newCSEState :: CSEState lore
 newCSEState = CSEState (M.empty, HM.empty)
 
-mkSubsts :: Pattern lore -> Pattern lore -> HM.HashMap VName VName
+mkSubsts :: PatternT attr -> PatternT attr -> HM.HashMap VName VName
 mkSubsts pat vs = HM.fromList $ zip (patternNames pat) (patternNames vs)
 
-addNameSubst :: Pattern lore -> Pattern lore -> CSEState lore -> CSEState lore
+addNameSubst :: PatternT attr -> PatternT attr -> CSEState lore -> CSEState lore
 addNameSubst pat subpat (CSEState (esubsts, nsubsts)) =
   CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts)
 

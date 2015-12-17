@@ -48,7 +48,9 @@ Motivation:
 -- | @foldClosedForm look foldfun accargs arrargs@ determines whether
 -- each of the results of @foldfun@ can be expressed in a closed form.
 foldClosedForm :: MonadBinder m =>
-                  VarLookup (Lore m) -> Pattern (Lore m) -> Lambda (Lore m)
+                  VarLookup (Lore m)
+               -> Pattern (Lore m)
+               -> Lambda (Lore m)
                -> [SubExp] -> [VName]
                -> RuleM m ()
 
@@ -68,7 +70,7 @@ foldClosedForm look pat lam accs arrs = do
 -- | @loopClosedForm pat respat merge bound bodys@ determines whether
 -- the do-loop can be expressed in a closed form.
 loopClosedForm :: MonadBinder m =>
-                  Pattern (Lore m)
+                  PatternT attr
                -> [VName] -> [(FParam (Lore m),SubExp)]
                -> Names -> SubExp -> Body (Lore m)
                -> RuleM m ()

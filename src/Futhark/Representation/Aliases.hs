@@ -78,7 +78,7 @@ import Futhark.Transform.Rename
 import Futhark.Binder
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
-import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Representation.AST.Attributes.Ranges()
 import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
@@ -131,6 +131,9 @@ instance (Annotations.Annotations lore, CanBeAliased (Op lore)) =>
   type RetType (Aliases lore) = Annotations.RetType lore
   type Op (Aliases lore) = OpWithAliases (Op lore)
 
+instance AliasesOf (VarAliases, attr) where
+  aliasesOf = unNames . fst
+
 instance (Lore.Lore lore, CanBeAliased (Op lore)) => Lore.Lore (Aliases lore) where
   representative =
     Aliases representative
@@ -140,13 +143,6 @@ instance (Lore.Lore lore, CanBeAliased (Op lore)) => Lore.Lore (Aliases lore) wh
 
   expContext pat e =
     expContext (removePatternAliases pat) (removeExpAliases e)
-
-instance (Ranged lore,
-          CanBeAliased (Op lore),
-          CanBeRanged (Op lore),
-          RangedOp (OpWithAliases (Op lore))) => Ranged (Aliases lore) where
-  bodyRanges = bodyRanges . removeBodyAliases
-  patternRanges = patternRanges . removePatternAliases
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
@@ -171,7 +167,6 @@ instance (Proper lore,
 instance (Lore.Lore lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
-  patternAliases = map (unNames . fst . patElemAttr) . patternElements
 
 instance (PrettyLore lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) where
   ppBindingLore binding@(Let pat (consumed,_) _) =
@@ -266,12 +261,13 @@ removeExtLambdaAliases :: CanBeAliased (Op lore) =>
                           AST.ExtLambda (Aliases lore) -> AST.ExtLambda lore
 removeExtLambdaAliases = rephraseExtLambda removeAliases
 
-removePatternAliases :: CanBeAliased (Op lore) =>
-                        AST.Pattern (Aliases lore) -> AST.Pattern lore
-removePatternAliases = rephrasePattern removeAliases
+removePatternAliases :: AST.PatternT (Names', a)
+                     -> AST.PatternT a
+removePatternAliases = rephrasePattern snd
 
-addAliasesToPattern :: (Lore.Lore lore, CanBeAliased (Op lore)) =>
-                       AST.Pattern lore -> Exp lore -> Pattern lore
+addAliasesToPattern :: (Lore.Lore lore, CanBeAliased (Op lore), Typed attr) =>
+                       AST.PatternT attr -> Exp lore
+                    -> AST.PatternT (VarAliases, attr)
 addAliasesToPattern pat e =
   uncurry AST.Pattern $ mkPatternAliases pat e
 
@@ -280,15 +276,15 @@ mkAliasedBody :: (Lore.Lore lore, CanBeAliased (Op lore)) =>
 mkAliasedBody innerlore bnds res =
   AST.Body (mkBodyAliases bnds res, innerlore) bnds res
 
-mkPatternAliases :: (Lore.Lore anylore, Aliased lore, AliasedOp (Op lore)) =>
-                    AST.Pattern anylore -> AST.Exp lore
-                 -> ([PatElemT (VarAliases, Annotations.LetBound anylore)],
-                     [PatElemT (VarAliases, Annotations.LetBound anylore)])
+mkPatternAliases :: (Aliased lore, AliasedOp (Op lore), Typed attr) =>
+                    AST.PatternT attr -> AST.Exp lore
+                 -> ([PatElemT (VarAliases, attr)],
+                     [PatElemT (VarAliases, attr)])
 mkPatternAliases pat e =
   -- Some part of the pattern may  be the context.  This does not have
-  -- aliases from aliasesOf, so we  use a hack to compute some aliases
+  -- aliases from expAliases, so we  use a hack to compute some aliases
   -- from do-loops.  FIXME.  This should be more general.
-  let als = aliasesOf e
+  let als = expAliases e
       context_als = mkContextAliases pat e
   in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
@@ -301,9 +297,9 @@ mkPatternAliases pat e =
                     (_, Mem _ _)        -> names
                     _                   -> mempty
 
-mkContextAliases :: forall anylore lore.
-                    (Lore.Lore anylore, Aliased lore) =>
-                    AST.Pattern anylore -> AST.Exp lore
+mkContextAliases :: forall lore attr.
+                    Aliased lore =>
+                    AST.PatternT attr -> AST.Exp lore
                  -> [Names]
 mkContextAliases _ (AST.LoopOp (DoLoop res merge _ body)) =
   let ctx = loopResultContext (representative :: lore) res $ map fst merge
@@ -349,7 +345,8 @@ mkBodyAliases bnds res =
           where look k = HM.lookupDefault mempty k aliasmap
 
 mkAliasedLetBinding :: (Lore.Lore lore, CanBeAliased (Op lore)) =>
-                       AST.Pattern lore -> Annotations.Exp lore -> Exp lore
+                       AST.Pattern lore
+                    -> Annotations.Exp lore -> Exp lore
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e)

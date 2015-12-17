@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
 

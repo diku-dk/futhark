@@ -69,7 +69,7 @@ transformBindingRecursively :: Transformer m =>
 transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) = do
   body' <- bindingIdentTypes (formIdents form ++ map (paramIdent . fst) merge) $
            transformBody body
-  letBind_ (reBasicPattern pat) $ LoopOp $ DoLoop res (map cast merge) form body'
+  letBind_ pat $ LoopOp $ DoLoop res (map cast merge) form body'
   where formIdents (ForLoop i _) =
           [Ident i $ Basic Int]
         formIdents (WhileLoop _) =
@@ -77,13 +77,13 @@ transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) =
         cast (Param name t, se) = (Param name t, se)
 
 transformBindingRecursively (Let pat () (Op soac)) =
-  transformSOAC (reBasicPattern pat) =<< mapSOACM soacTransform soac
+  transformSOAC pat =<< mapSOACM soacTransform soac
   where soacTransform = identitySOACMapper { mapOnSOACLambda = transformLambda
                                            , mapOnSOACExtLambda = transformExtLambda
                                            }
 
 transformBindingRecursively (Let pat () e) =
-  letBind_ (reBasicPattern pat) =<< mapExpM transform e
+  letBind_ pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = transformBody
                                    , mapOnLambda = transformLambda
                                    , mapOnExtLambda = transformExtLambda

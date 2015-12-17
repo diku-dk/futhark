@@ -1,5 +1,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies, FlexibleInstances, FlexibleContexts, MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | This representation requires that every array is given
 -- information about which memory block is it based in, and how array
 -- elements map to memory block offsets.  SOACs are not supported, so
@@ -107,7 +108,7 @@ type FunDec = AST.FunDec ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
 type LParam = AST.LParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory
-type PatElem = AST.PatElem ExplicitMemory
+type PatElem = AST.PatElem (MemBound NoUniqueness)
 
 instance IsRetType [FunReturns] where
   retTypeValues = map returnsToType

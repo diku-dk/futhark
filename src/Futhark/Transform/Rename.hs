@@ -185,7 +185,7 @@ instance Rename SubExp where
 instance Rename attr => Rename (ParamT attr) where
   rename (Param name attr) = Param <$> rename name <*> rename attr
 
-instance Renameable lore => Rename (Pattern lore) where
+instance Rename attr => Rename (PatternT attr) where
   rename (Pattern context values) = Pattern <$> rename context <*> rename values
 
 instance Rename attr => Rename (PatElemT attr) where

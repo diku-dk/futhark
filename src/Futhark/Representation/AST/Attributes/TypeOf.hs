@@ -231,7 +231,7 @@ typeEnvFromIdents = HM.fromList . map assoc
   where assoc param = (identName param, identType param)
 
 -- | Create a type environment a pattern.
-typeEnvFromPattern :: Annotations.Annotations lore => Pattern lore -> TypeEnv
+typeEnvFromPattern :: Typed attr => PatternT attr -> TypeEnv
 typeEnvFromPattern = typeEnvFromIdents . patternIdents
 
 -- | Execute an action with a locally extended type environment.

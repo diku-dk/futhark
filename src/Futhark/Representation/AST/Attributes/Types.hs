@@ -483,7 +483,7 @@ instance DeclTyped attr => DeclTyped (Param attr) where
   declTypeOf = declTypeOf . paramAttr
 
 -- | Typeclass for things whose type can be changed.
-class SetType a where
+class Typed a => SetType a where
   setType :: a -> Type -> a
 
 instance SetType Type where

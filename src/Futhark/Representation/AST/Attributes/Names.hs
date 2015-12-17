@@ -12,7 +12,6 @@ module Futhark.Representation.AST.Attributes.Names
          , freeInBody
          , freeInExp
          , freeInBinding
-         , freeInPattern
          , freeInLambda
          , freeInExtLambda
          -- * Bound Names
@@ -67,14 +66,14 @@ freeWalker = identityWalker {
           tell $ freeIn annot
           expFree e
           binding (HS.fromList $ patternNames pat) $ do
-            tell $ freeInPattern pat
+            tell $ freeIn pat
             bodyFree $ Body lore bnds res
 
         bindingFree (Let pat annot e) = do
           tell $ freeIn annot
           expFree e
           binding (HS.fromList $ patternNames pat) $
-            tell $ freeInPattern pat
+            tell $ freeIn pat
 
         expFree (LoopOp (DoLoop _ merge (ForLoop i boundexp) loopbody)) = do
           let (mergepat, mergeexps) = unzip merge
@@ -158,10 +157,6 @@ freeInExtLambda (ExtLambda index params body rettype) =
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
         paramnames = index : map paramName params
 
-freeInPattern :: FreeIn (Annotations.LetBound lore) => Pattern lore -> Names
-freeInPattern (Pattern context values) =
-  mconcat $ map freeIn $ context ++ values
-
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.
 class FreeIn a where
@@ -233,6 +228,10 @@ instance FreeIn LoopForm where
 
 instance FreeIn d => FreeIn (DimChange d) where
   freeIn = Data.Foldable.foldMap freeIn
+
+instance FreeIn attr => FreeIn (PatternT attr) where
+  freeIn (Pattern context values) =
+    mconcat $ map freeIn $ context ++ values
 
 -- | The names bound by the bindings immediately in a 'Body'.
 boundInBody :: Body lore -> Names
