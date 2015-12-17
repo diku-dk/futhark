@@ -52,10 +52,10 @@ substituteIndicesInBinding substs (Let pat lore e) = do
   addBinding $ Let pat' lore e'
   return substs'
 
-substituteIndicesInPattern :: (MonadBinder m, Bindable (Lore m)) =>
+substituteIndicesInPattern :: (MonadBinder m, SetType attr) =>
                               IndexSubstitutions
-                           -> Pattern (Lore m)
-                           -> m (IndexSubstitutions, Pattern (Lore m))
+                           -> PatternT attr
+                           -> m (IndexSubstitutions, PatternT attr)
 substituteIndicesInPattern substs pat = do
   (substs', context) <- mapAccumLM sub substs $ patternContextElements pat
   (substs'', values) <- mapAccumLM sub substs' $ patternValueElements pat

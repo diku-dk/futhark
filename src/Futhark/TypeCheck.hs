@@ -901,7 +901,7 @@ checkPolyBinOp op tl e1 e2 t = do
   checkAnnotation (pretty op ++ " result") (Basic t) t'
 
 checkPatElem :: Checkable lore =>
-                PatElem lore -> TypeM lore ()
+                PatElem (Annotations.LetBound lore) -> TypeM lore ()
 checkPatElem (PatElem name bindage attr) = do
   checkBindage bindage
   checkLetBoundLore name attr
@@ -938,7 +938,9 @@ checkBinding pat e m = do
   where identsAndLore = map identAndLore . patternElements . removePatternAliases
         identAndLore bindee = (patElemIdent bindee, LetBound $ patElemAttr bindee)
 
-matchExtPattern :: Checkable lore => [PatElem lore] -> [ExtType] -> TypeM lore ()
+matchExtPattern :: Checkable lore =>
+                   [PatElem (Annotations.LetBound lore)]
+                -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
   unless (length restpat == length ts') $
@@ -1108,8 +1110,7 @@ class (FreeIn (Annotations.Exp lore),
   checkLetBoundLore :: VName -> Annotations.LetBound lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
-  matchPattern :: AST.Pattern lore -> AST.Exp lore ->
-                  TypeM lore ()
+  matchPattern :: AST.Pattern lore -> AST.Exp lore -> TypeM lore ()
   basicFParam :: lore -> VName -> BasicType -> AST.FParam lore
   basicLParam :: lore -> VName -> BasicType -> AST.LParam lore
   matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()

@@ -84,7 +84,7 @@ instance Substitute attr => Substitute (ParamT attr) where
     (substituteNames substs name)
     (substituteNames substs attr)
 
-instance Substitutable lore => Substitute (Pattern lore) where
+instance Substitute attr => Substitute (PatternT attr) where
   substituteNames substs (Pattern context values) =
     Pattern (substituteNames substs context) (substituteNames substs values)
 

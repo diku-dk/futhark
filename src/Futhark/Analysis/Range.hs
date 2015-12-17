@@ -128,8 +128,8 @@ bindFunParams (param:params) m = do
   where bindFunParam = HM.insert (In.paramName param) Out.unknownRange
         dims = In.arrayDims $ In.paramType param
 
-bindPattern :: (Out.Annotations lore, In.CanBeRanged (Out.Op lore)) =>
-               Out.Pattern lore -> RangeM a -> RangeM a
+bindPattern :: Out.Typed attr =>
+               Out.PatternT (Out.Range, attr) -> RangeM a -> RangeM a
 bindPattern pat m = do
   ranges <- rangesRep
   local bindPatElems $
@@ -175,8 +175,8 @@ refineUpperBound = flip Out.minimumBound
 lookupRange :: Out.VName -> RangeM Out.Range
 lookupRange = asks . HM.lookupDefault Out.unknownRange
 
-simplifyPatRanges :: Out.Pattern lore
-                  -> RangeM (Out.Pattern lore)
+simplifyPatRanges :: Out.PatternT (Out.Range, attr)
+                  -> RangeM (Out.PatternT (Out.Range, attr))
 simplifyPatRanges (Out.Pattern context values) =
   Out.Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do

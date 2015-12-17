@@ -91,7 +91,7 @@ type FunDec = AST.FunDecT SOACS
 type FParam = AST.FParam SOACS
 type LParam = AST.LParam SOACS
 type RetType = AST.RetType SOACS
-type PatElem = AST.PatElem SOACS
+type PatElem = AST.PatElem Type
 
 instance TypeCheck.Checkable SOACS where
   checkExpLore = return

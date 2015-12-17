@@ -1,6 +1,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | Definition of the lore used by the simplification engine.
 module Futhark.Optimise.Simplifier.Lore
        (
@@ -21,6 +22,7 @@ module Futhark.Optimise.Simplifier.Lore
        )
        where
 
+import Control.Applicative
 import Data.Monoid
 
 import Futhark.Representation.AST
@@ -41,13 +43,45 @@ import Prelude
 data Wise lore = Wise lore
 
 -- | The wisdom of the let-bound variable.
-type VarWisdom = (VarAliases, Range)
+data VarWisdom = VarWisdom { varWisdomAliases :: VarAliases
+                           , varWisdomRange :: Range
+                           }
+                  deriving (Eq, Ord, Show)
+
+instance Rename VarWisdom where
+  rename (VarWisdom als range) = VarWisdom <$> rename als <*> rename range
+
+instance Substitute VarWisdom where
+  substituteNames substs (VarWisdom als range) =
+    VarWisdom (substituteNames substs als) (substituteNames substs range)
+
+instance FreeIn VarWisdom where
+  freeIn (VarWisdom als range) = freeIn als <> freeIn range
 
 -- | Wisdom about an expression.
 type ExpWisdom = ConsumedInExp
 
 -- | Wisdom about a body.
-type BodyWisdom = ([VarAliases], ConsumedInExp, [Range])
+data BodyWisdom = BodyWisdom { bodyWisdomAliases :: [VarAliases]
+                             , bodyWisdomConsumed :: ConsumedInExp
+                             , bodyWisdomRanges :: [Range]
+                             }
+                  deriving (Eq, Ord, Show)
+
+instance Rename BodyWisdom where
+  rename (BodyWisdom als cons rs) =
+    BodyWisdom <$> rename als <*> rename cons <*> rename rs
+
+instance Substitute BodyWisdom where
+  substituteNames substs (BodyWisdom als cons rs) =
+    BodyWisdom
+    (substituteNames substs als)
+    (substituteNames substs cons)
+    (substituteNames substs rs)
+
+instance FreeIn BodyWisdom where
+  freeIn (BodyWisdom als cons rs) =
+    freeIn als <> freeIn cons <> freeIn rs
 
 instance (Annotations.Annotations lore,
           CanBeWise (Op lore)) => Annotations.Annotations (Wise lore) where
@@ -72,21 +106,18 @@ instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
 instance (Proper lore,
           CanBeWise (Op lore)) => Proper (Wise lore) where
 
-instance (Lore.Lore lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
-  bodyAliases body =
-    let ((aliases, _, _) ,_) = bodyLore body
-    in map unNames aliases
-  consumedInBody body =
-    let ((_, consumed, _) ,_) = bodyLore body
-    in unNames consumed
-  patternAliases =
-    map (unNames . fst . fst . patElemAttr) . patternElements
+instance AliasesOf (VarWisdom, attr) where
+  aliasesOf = unNames . varWisdomAliases . fst
 
-instance (Lore.Lore lore, CanBeWise (Op lore)) => Ranged (Wise lore) where
-  bodyRanges body =
-    let ((_, _, ranges) ,_) = bodyLore body
-    in ranges
-  patternRanges = map (snd . fst . patElemAttr) . patternElements
+instance RangeOf (VarWisdom, attr) where
+  rangeOf = varWisdomRange . fst
+
+instance RangesOf (BodyWisdom, attr) where
+  rangesOf = bodyWisdomRanges . fst
+
+instance (Lore.Lore lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
+  bodyAliases = map unNames . bodyWisdomAliases . fst . bodyLore
+  consumedInBody = unNames . bodyWisdomConsumed . fst . bodyLore
 
 removeWisdom :: CanBeWise (Op lore) => Rephraser (Wise lore) lore
 removeWisdom = Rephraser { rephraseExpLore = snd
@@ -119,30 +150,33 @@ removeBodyWisdom = rephraseBody removeWisdom
 removeExpWisdom :: CanBeWise (Op lore) => Exp (Wise lore) -> Exp lore
 removeExpWisdom = rephraseExp removeWisdom
 
-removePatternWisdom :: CanBeWise (Op lore) => Pattern (Wise lore) -> Pattern lore
-removePatternWisdom = rephrasePattern removeWisdom
+removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
+removePatternWisdom = rephrasePattern snd
 
 addWisdomToPattern :: (Proper lore, CanBeWise (Op lore)) =>
-                      Pattern lore -> Exp (Wise lore) -> Pattern (Wise lore)
+                      Pattern lore
+                   -> Exp (Wise lore)
+                   -> Pattern (Wise lore)
 addWisdomToPattern pat e =
   Pattern
   (map (`addRanges` unknownRange) ctxals)
   (zipWith addRanges valals ranges)
   where (ctxals, valals) = Aliases.mkPatternAliases pat e
         addRanges patElem range =
-          let (als,innerlore) = patElemAttr patElem
-          in patElem `setPatElemLore` ((als, range), innerlore)
+          let (als, innerlore) = patElemAttr patElem
+          in patElem `setPatElemLore` (VarWisdom als range, innerlore)
         ranges = expRanges e
 
 mkWiseBody :: (Proper lore, CanBeWise (Op lore)) =>
               Annotations.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
-  Body ((aliases, consumed, ranges), innerlore) bnds res
+  Body (BodyWisdom aliases consumed ranges, innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
         ranges = Ranges.mkBodyRanges bnds res
 
 mkWiseLetBinding :: (Proper lore, CanBeWise (Op lore)) =>
-                    Pattern lore -> Annotations.Exp lore -> Exp (Wise lore)
+                    Pattern lore
+                 -> Annotations.Exp lore -> Exp (Wise lore)
                  -> Binding (Wise lore)
 mkWiseLetBinding pat explore e =
   Let (addWisdomToPattern pat e)

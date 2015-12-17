@@ -135,7 +135,7 @@ deadCodeElimVName vnm = do
   seen $ HS.singleton vnm
   return vnm
 
-deadCodeElimPat :: Proper lore => Pattern lore -> DCElimM ()
+deadCodeElimPat :: FreeIn attr => PatternT attr -> DCElimM ()
 deadCodeElimPat = mapM_ deadCodeElimPatElem . patternElements
 
 deadCodeElimPatElem :: FreeIn attr => PatElemT attr -> DCElimM ()

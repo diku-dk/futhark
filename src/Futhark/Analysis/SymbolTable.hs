@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings)
   , empty
@@ -311,7 +313,7 @@ typeEnv = HM.map entryType . bindings
 
 defBndEntry :: Annotations lore =>
                SymbolTable lore
-            -> PatElem lore
+            -> PatElem (Annotations.LetBound lore)
             -> Range
             -> Binding lore
             -> LetBoundEntry lore
@@ -366,8 +368,8 @@ bindingEntries :: Ranged lore =>
                   Binding lore -> SymbolTable lore
                -> [LetBoundEntry lore]
 bindingEntries bnd@(Let pat _ _) vtable =
-  [ defBndEntry vtable patElem range bnd |
-    (patElem, range) <- zip (patternElements pat) (Ranges.patternRanges pat)
+  [ defBndEntry vtable pat_elem (Ranges.rangeOf pat_elem) bnd
+  | pat_elem <- patternElements pat
   ]
 
 insertEntry :: VName -> Entry lore -> SymbolTable lore

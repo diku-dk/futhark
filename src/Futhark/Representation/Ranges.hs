@@ -8,8 +8,6 @@
 module Futhark.Representation.Ranges
        ( -- * The Lore definition
          Ranges
-       , VarRange
-       , BodyRanges
        , module Futhark.Representation.AST.Attributes.Ranges
          -- * Syntax types
        , Prog
@@ -80,17 +78,11 @@ import qualified Futhark.Util.Pretty as PP
 -- | The lore for the basic representation.
 data Ranges lore = Ranges lore
 
--- | The ranges of the let-bound variable.
-type VarRange = Range
-
--- | Ranges about a body.
-type BodyRanges = [Range]
-
 instance (Annotations.Annotations lore, CanBeRanged (Op lore)) =>
          Annotations.Annotations (Ranges lore) where
-  type LetBound (Ranges lore) = (VarRange, Annotations.LetBound lore)
+  type LetBound (Ranges lore) = (Range, Annotations.LetBound lore)
   type Exp (Ranges lore) = Annotations.Exp lore
-  type Body (Ranges lore) = (BodyRanges, Annotations.Body lore)
+  type Body (Ranges lore) = ([Range], Annotations.Body lore)
   type FParam (Ranges lore) = Annotations.FParam lore
   type LParam (Ranges lore) = Annotations.LParam lore
   type RetType (Ranges lore) = Annotations.RetType lore
@@ -104,10 +96,11 @@ instance (Lore.Lore lore, CanBeRanged (Op lore)) =>
   loopResultContext (Ranges lore) =
     Lore.loopResultContext lore
 
-instance (Lore.Lore lore, CanBeRanged (Op lore)) =>
-         Ranged (Ranges lore) where
-  bodyRanges = fst . bodyLore
-  patternRanges = map (fst . patElemAttr) . patternElements
+instance RangeOf (Range, attr) where
+  rangeOf = fst
+
+instance RangesOf ([Range], attr) where
+  rangesOf = fst
 
 type Prog lore = AST.Prog (Ranges lore)
 type PrimOp lore = AST.PrimOp (Ranges lore)
@@ -188,12 +181,13 @@ removeExtLambdaRanges :: CanBeRanged (Op lore) =>
                          AST.ExtLambda (Ranges lore) -> AST.ExtLambda lore
 removeExtLambdaRanges = rephraseExtLambda removeRanges
 
-removePatternRanges :: CanBeRanged (Op lore) =>
-                       AST.Pattern (Ranges lore) -> AST.Pattern lore
-removePatternRanges = rephrasePattern removeRanges
+removePatternRanges :: AST.PatternT (Range, a)
+                    -> AST.PatternT a
+removePatternRanges = rephrasePattern snd
 
 addRangesToPattern :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
-                      AST.Pattern lore -> Exp lore -> Pattern lore
+                      AST.Pattern lore -> Exp lore
+                   -> Pattern lore
 addRangesToPattern pat e =
   uncurry AST.Pattern $ mkPatternRanges pat e
 
@@ -204,9 +198,10 @@ mkRangedBody innerlore bnds res =
   AST.Body (mkBodyRanges bnds res, innerlore) bnds res
 
 mkPatternRanges :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
-                   AST.Pattern lore -> Exp lore
-                -> ([PatElemT (Annotations.LetBound (Ranges lore))],
-                    [PatElemT (Annotations.LetBound (Ranges lore))])
+                   AST.Pattern lore
+                -> Exp lore
+                -> ([PatElem (Range, Annotations.LetBound lore)],
+                    [PatElem (Range, Annotations.LetBound lore)])
 mkPatternRanges pat e =
   (map (`addRanges` unknownRange) $ patternContextElements pat,
    zipWith addRanges (patternValueElements pat) ranges)
@@ -218,8 +213,8 @@ mkPatternRanges pat e =
 mkBodyRanges :: Lore.Lore lore =>
                 [AST.Binding lore]
              -> Result
-             -> BodyRanges
-mkBodyRanges bnds = map $ removeUnknownBounds . subExpRange
+             -> [Range]
+mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
   where boundInBnds =
           mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
         removeUnknownBounds (lower,upper) =
@@ -235,7 +230,9 @@ intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
 mkRangedLetBinding :: (Proper lore, CanBeRanged (Op lore)) =>
-                      AST.Pattern lore -> Annotations.Exp lore -> Exp lore
+                      AST.Pattern lore
+                   -> Annotations.Exp lore
+                   -> Exp lore
                    -> Binding lore
 mkRangedLetBinding pat explore e =
   Let (addRangesToPattern pat e) explore e

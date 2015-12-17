@@ -28,14 +28,12 @@ module Futhark.Representation.AST.Attributes.Patterns
          -- *
        , basicPattern
        , basicPattern'
-       , reBasicPattern
        )
        where
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Types
   (stripArray, Typed(..), DeclTyped(..))
-import qualified Futhark.Representation.AST.Annotations as Annotations
 
 -- | The 'Type' of a parameter.
 paramType :: Typed attr => ParamT attr -> Type
@@ -76,64 +74,54 @@ setPatElemLore (PatElem ident bindage _) =
   PatElem ident bindage
 
 -- | All pattern elements in the pattern - context first, then values.
-patternElements :: Pattern lore -> [PatElem lore]
+patternElements :: PatternT attr -> [PatElemT attr]
 patternElements pat = patternContextElements pat ++ patternValueElements pat
 
 -- | Return a list of the 'Ident's bound by the 'Pattern'.
-patternIdents :: Annotations.Annotations lore => Pattern lore -> [Ident]
+patternIdents :: Typed attr => PatternT attr -> [Ident]
 patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
 
 -- | Return a list of the context 'Ident's bound by the 'Pattern'.
-patternContextIdents :: Annotations.Annotations lore => Pattern lore -> [Ident]
+patternContextIdents :: Typed attr => PatternT attr -> [Ident]
 patternContextIdents = map patElemIdent . patternContextElements
 
 -- | Return a list of the value 'Ident's bound by the 'Pattern'.
-patternValueIdents :: Annotations.Annotations lore => Pattern lore -> [Ident]
+patternValueIdents :: Typed attr => PatternT attr -> [Ident]
 patternValueIdents = map patElemIdent . patternValueElements
 
 -- | Return a list of the 'Name's bound by the 'Pattern'.
-patternNames :: Pattern lore -> [VName]
+patternNames :: PatternT attr -> [VName]
 patternNames = map patElemName . patternElements
 
 -- | Return a list of the 'Name's bound by the context part of the 'Pattern'.
-patternContextNames :: Pattern lore -> [VName]
+patternContextNames :: PatternT attr -> [VName]
 patternContextNames = map patElemName . patternContextElements
 
 -- | Return a list of the 'Name's bound by the value part of the 'Pattern'.
-patternValueNames :: Pattern lore -> [VName]
+patternValueNames :: PatternT attr -> [VName]
 patternValueNames = map patElemName . patternValueElements
 
 -- | Return a list of the 'types's bound by the 'Pattern'.
-patternTypes :: Annotations.Annotations lore => Pattern lore -> [Type]
+patternTypes :: Typed attr => PatternT attr -> [Type]
 patternTypes = map identType . patternIdents
 
 -- | Return a list of the 'types's bound by the value part of the 'Pattern'.
-patternValueTypes :: Annotations.Annotations lore => Pattern lore -> [Type]
+patternValueTypes :: Typed attr => PatternT attr -> [Type]
 patternValueTypes = map identType . patternValueIdents
 
 -- | Return the number of names bound by the 'Pattern'.
-patternSize :: Pattern lore -> Int
+patternSize :: PatternT attr -> Int
 patternSize (Pattern context values) = length context + length values
 
 -- | Create a pattern using 'Type' as the attribute.
-basicPattern :: Annotations.LetBound lore ~ Type =>
-                [(Ident,Bindage)] -> [(Ident,Bindage)] -> Pattern lore
+basicPattern :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> PatternT Type
 basicPattern context values =
   Pattern (map patElem context) (map patElem values)
   where patElem (Ident name t,bindage) = PatElem name bindage t
 
 -- | Like 'basicPattern', but all 'Bindage's are assumed to be
 -- 'BindVar'.
-basicPattern' :: Annotations.LetBound lore ~ Type =>
-                 [Ident] -> [Ident] -> Pattern lore
+basicPattern' :: [Ident] -> [Ident] -> PatternT Type
 basicPattern' context values =
   basicPattern (map addBindVar context) (map addBindVar values)
     where addBindVar name = (name, BindVar)
-
--- | Recast a pattern to another lore, if those use identical
--- annotations.  FIXME: It is due to a misdesign that this is even
--- necessary.
-reBasicPattern :: (Annotations.LetBound fromlore ~ attr,
-                   Annotations.LetBound tolore ~ attr) =>
-                  Pattern fromlore -> Pattern tolore
-reBasicPattern (Pattern ctx values) = Pattern ctx values

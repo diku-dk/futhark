@@ -585,9 +585,9 @@ instance Simplifiable SubExp where
 instance Simplifiable ExtRetType where
   simplify = liftM ExtRetType . mapM simplify . retTypeValues
 
-simplifyPattern :: MonadEngine m =>
-                   Pattern (InnerLore m)
-                -> m (Pattern (InnerLore m))
+simplifyPattern :: (MonadEngine m, Simplifiable attr) =>
+                   PatternT attr
+                -> m (PatternT attr)
 simplifyPattern pat =
   Pattern <$>
   mapM inspect (patternContextElements pat) <*>

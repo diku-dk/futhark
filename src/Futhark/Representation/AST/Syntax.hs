@@ -86,24 +86,19 @@ import Futhark.Representation.AST.Annotations (Annotations)
 import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax.Core
 
-type PatElem lore = PatElemT (Annotations.LetBound lore)
-
 -- | A pattern is conceptually just a list of names and their types.
-data PatternT lore =
-  Pattern { patternContextElements :: [PatElem lore]
-          , patternValueElements   :: [PatElem lore]
+data PatternT attr =
+  Pattern { patternContextElements :: [PatElem attr]
+          , patternValueElements   :: [PatElem attr]
           }
-
-deriving instance Annotations lore => Ord (PatternT lore)
-deriving instance Annotations lore => Show (PatternT lore)
-deriving instance Annotations lore => Eq (PatternT lore)
+  deriving (Ord, Show, Eq)
 
 instance Monoid (PatternT lore) where
   mempty = Pattern [] []
   Pattern cs1 vs1 `mappend` Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 -- | A type alias for namespace control.
-type Pattern = PatternT
+type Pattern lore = PatternT (Annotations.LetBound lore)
 
 -- | A local variable binding.
 data Binding lore = Let { bindingPattern :: Pattern lore

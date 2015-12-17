@@ -225,11 +225,6 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
             (_,      _) ->
               (Nothing, explpat')
 
-        checkInvariance :: ((FParam (Lore m), SubExp), SubExp)
-                        -> ([(Ident, SubExp)], [(PatElem (Lore m), VName)],
-                            [(FParam (Lore m), SubExp)], [SubExp])
-                        -> ([(Ident, SubExp)], [(PatElem (Lore m), VName)],
-                            [(FParam (Lore m), SubExp)], [SubExp])
         checkInvariance
           ((mergeParam,mergeInit), resExp)
           (invariant, explpat', merge', resExps)

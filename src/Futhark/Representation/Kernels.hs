@@ -91,7 +91,7 @@ type FunDec = AST.FunDecT Kernels
 type FParam = AST.FParam Kernels
 type LParam = AST.LParam Kernels
 type RetType = AST.RetType Kernels
-type PatElem = AST.PatElem Kernels
+type PatElem = AST.PatElem Type
 
 instance TypeCheck.Checkable Kernels where
   checkExpLore = return

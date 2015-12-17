@@ -69,7 +69,7 @@ nonuniqueFParams params =
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>
-                         PatternT lore -> Annotations.Exp lore
+                         Pattern lore -> Annotations.Exp lore
                       -> ( Certificates, SubExp
                          , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
