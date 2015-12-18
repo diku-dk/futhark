@@ -59,7 +59,6 @@ import Data.Maybe
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases hiding (TypeEnv)
 import Futhark.TypeCheck.TypeError
@@ -71,7 +70,7 @@ data TypeError lore = Error [String] (ErrorCase lore)
 
 -- | What went wrong.
 type ErrorCase lore =
-  GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (Annotations.LetBound lore)))
+  GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (LetAttr lore)))
 
 instance Checkable lore => Show (TypeError lore) where
   show (Error [] err) =
@@ -83,9 +82,9 @@ instance Checkable lore => Show (TypeError lore) where
 -- named.
 type FunBinding lore = (RetType lore, [FParam lore])
 
-data VarBindingLore lore = LetBound (Annotations.LetBound lore)
-                         | FunBound (Annotations.FParam lore)
-                         | LambdaBound (Annotations.LParam lore)
+data VarBindingLore lore = LetBound (LetAttr lore)
+                         | FunBound (FParamAttr lore)
+                         | LambdaBound (LParamAttr lore)
 
 data VarBinding lore = Bound Type (VarBindingLore lore) Names
                      | WasConsumed
@@ -901,7 +900,7 @@ checkPolyBinOp op tl e1 e2 t = do
   checkAnnotation (pretty op ++ " result") (Basic t) t'
 
 checkPatElem :: Checkable lore =>
-                PatElem (Annotations.LetBound lore) -> TypeM lore ()
+                PatElem (LetAttr lore) -> TypeM lore ()
 checkPatElem (PatElem name bindage attr) = do
   checkBindage bindage
   checkLetBoundLore name attr
@@ -939,7 +938,7 @@ checkBinding pat e m = do
         identAndLore bindee = (patElemIdent bindee, LetBound $ patElemAttr bindee)
 
 matchExtPattern :: Checkable lore =>
-                   [PatElem (Annotations.LetBound lore)]
+                   [PatElem (LetAttr lore)]
                 -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
@@ -1098,16 +1097,16 @@ checkExtLambda (ExtLambda i params body rettype) args =
          " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
-class (FreeIn (Annotations.Exp lore),
-       FreeIn (Annotations.LetBound lore),
-       FreeIn (Annotations.Body lore),
+class (FreeIn (ExpAttr lore),
+       FreeIn (LetAttr lore),
+       FreeIn (BodyAttr lore),
        CanBeAliased (Op lore),
        Lore lore, PrettyLore lore) => Checkable lore where
-  checkExpLore :: Annotations.Exp lore -> TypeM lore ()
-  checkBodyLore :: Annotations.Body lore -> TypeM lore ()
-  checkFParamLore :: VName -> Annotations.FParam lore -> TypeM lore ()
-  checkLParamLore :: VName -> Annotations.LParam lore -> TypeM lore ()
-  checkLetBoundLore :: VName -> Annotations.LetBound lore -> TypeM lore ()
+  checkExpLore :: ExpAttr lore -> TypeM lore ()
+  checkBodyLore :: BodyAttr lore -> TypeM lore ()
+  checkFParamLore :: VName -> FParamAttr lore -> TypeM lore ()
+  checkLParamLore :: VName -> LParamAttr lore -> TypeM lore ()
+  checkLetBoundLore :: VName -> LetAttr lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   matchPattern :: AST.Pattern lore -> AST.Exp lore -> TypeM lore ()

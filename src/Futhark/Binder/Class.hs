@@ -27,7 +27,6 @@ import Control.Monad.Writer
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
@@ -38,15 +37,15 @@ import Futhark.Transform.Rename (Renameable)
 class (Lore.Lore lore,
        PrettyLore lore,
        Renameable lore, Substitutable lore,
-       FreeIn (Annotations.Exp lore),
-       FreeIn (Annotations.LetBound lore),
-       FreeIn (Annotations.Body lore),
-       FreeIn (Annotations.FParam lore),
-       FreeIn (Annotations.LParam lore),
-       FreeIn (Annotations.RetType lore),
-       FreeIn (Annotations.Op lore),
-       Typed (Annotations.FParam lore),
-       Typed (Annotations.LParam lore),
+       FreeIn (ExpAttr lore),
+       FreeIn (LetAttr lore),
+       FreeIn (BodyAttr lore),
+       FreeIn (FParamAttr lore),
+       FreeIn (LParamAttr lore),
+       FreeIn (RetType lore),
+       FreeIn (Op lore),
+       Typed (FParamAttr lore),
+       Typed (LParamAttr lore),
        IsOp (Op lore),
        IsRetType (RetType lore)) => Proper lore where
 
@@ -57,10 +56,10 @@ class (Lore.Lore lore,
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
 class (Proper lore,
-       Annotations.FParam lore ~ DeclType,
-       Annotations.LParam lore ~ Type,
-       Annotations.RetType lore ~ ExtRetType,
-       SetType (Annotations.LetBound lore)) =>
+       FParamAttr lore ~ DeclType,
+       LParamAttr lore ~ Type,
+       RetType lore ~ ExtRetType,
+       SetType (LetAttr lore)) =>
       Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore

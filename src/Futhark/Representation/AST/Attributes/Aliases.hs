@@ -23,7 +23,6 @@ import Control.Arrow (first)
 import Data.Monoid
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Util.Pretty (Pretty)
 import Futhark.Representation.AST.Lore (Lore)
@@ -35,7 +34,7 @@ import Futhark.Transform.Substitute (Substitute)
 import Futhark.Transform.Rename (Rename)
 
 class (Lore lore, AliasedOp (Op lore),
-       AliasesOf (Annotations.LetBound lore)) => Aliased lore where
+       AliasesOf (LetAttr lore)) => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
 

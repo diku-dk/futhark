@@ -16,7 +16,6 @@ import qualified Data.Map.Lazy as M
 import Prelude
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
@@ -104,7 +103,7 @@ cseInBinding (Let pat eattr e) m = do
         bad _       = False
 
 type ExpressionSubstitutions lore = M.Map
-                                    (Annotations.Exp lore, Exp lore)
+                                    (ExpAttr lore, Exp lore)
                                     (Pattern lore)
 type NameSubstitutions = HM.HashMap VName VName
 
@@ -121,7 +120,7 @@ addNameSubst pat subpat (CSEState (esubsts, nsubsts)) =
   CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts)
 
 addExpSubst :: Proper lore =>
-               Pattern lore -> Annotations.Exp lore -> Exp lore
+               Pattern lore -> ExpAttr lore -> Exp lore
             -> CSEState lore
             -> CSEState lore
 addExpSubst pat eattr e (CSEState (esubsts, nsubsts)) =

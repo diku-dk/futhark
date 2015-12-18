@@ -44,7 +44,6 @@ where
 
 import Control.Monad
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -69,7 +68,7 @@ import Futhark.Analysis.Rephrase
 -- | The lore for the basic representation.
 data SOACS = SOACS
 
-instance Annotations.Annotations SOACS where
+instance Annotations SOACS where
   type Op SOACS = SOAC SOACS
 
 instance Lore.Lore SOACS where

@@ -29,7 +29,6 @@ import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
 import Futhark.Analysis.ScalExp
@@ -131,8 +130,8 @@ type ScalExpRange = (Maybe ScalExp, Maybe ScalExp)
 -- up to date, unless whatever maintains the syntax tree is careful.
 type Ranged lore = (Lore lore,
                     RangedOp (Op lore),
-                    RangeOf (Annotations.LetBound lore),
-                    RangesOf (Annotations.Body lore))
+                    RangeOf (LetAttr lore),
+                    RangesOf (BodyAttr lore))
 
 -- | Something that contains range information.
 class RangeOf a where

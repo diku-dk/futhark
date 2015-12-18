@@ -6,6 +6,7 @@
 module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core
+  , module Futhark.Representation.AST.Annotations
 
   -- * Types
   , Uniqueness(..)
@@ -48,13 +49,11 @@ module Futhark.Representation.AST.Syntax
   , ShapeChange
   , ExpT(..)
   , Exp
-  , Annotations.Op
   , LoopForm (..)
   , LambdaT(..)
   , Lambda
   , ExtLambdaT (..)
   , ExtLambda
-  , Annotations.RetType
   , StreamForm(..)
 
   -- * Definitions
@@ -69,7 +68,6 @@ module Futhark.Representation.AST.Syntax
 
   -- * Miscellaneous
   , Names
-  , Annotations
   )
   where
 
@@ -82,8 +80,7 @@ import Data.Loc
 import Prelude
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Annotations (Annotations)
-import qualified Futhark.Representation.AST.Annotations as Annotations
+import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax.Core
 
 -- | A pattern is conceptually just a list of names and their types.
@@ -98,11 +95,11 @@ instance Monoid (PatternT lore) where
   Pattern cs1 vs1 `mappend` Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 -- | A type alias for namespace control.
-type Pattern lore = PatternT (Annotations.LetBound lore)
+type Pattern lore = PatternT (LetAttr lore)
 
 -- | A local variable binding.
 data Binding lore = Let { bindingPattern :: Pattern lore
-                        , bindingLore :: Annotations.Exp lore
+                        , bindingLore :: ExpAttr lore
                         , bindingExp :: Exp lore
                         }
 
@@ -115,7 +112,7 @@ type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body { bodyLore :: Annotations.Body lore
+data BodyT lore = Body { bodyLore :: BodyAttr lore
                        , bodyBindings :: [Binding lore]
                        , bodyResult :: Result
                        }
@@ -278,11 +275,11 @@ data ExpT lore
 
   | LoopOp (LoopOp lore)
 
-  | Apply  Name [(SubExp, Diet)] (Annotations.RetType lore)
+  | Apply  Name [(SubExp, Diet)] (RetType lore)
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
 
-  | Op (Annotations.Op lore)
+  | Op (Op lore)
 
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)
@@ -320,13 +317,13 @@ deriving instance Annotations lore => Ord (ExtLambdaT lore)
 
 type ExtLambda = ExtLambdaT
 
-type FParam lore = ParamT (Annotations.FParam lore)
+type FParam lore = ParamT (FParamAttr lore)
 
-type LParam lore = ParamT (Annotations.LParam lore)
+type LParam lore = ParamT (LParamAttr lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name
-                           , funDecRetType :: Annotations.RetType lore
+                           , funDecRetType :: RetType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore
                            }

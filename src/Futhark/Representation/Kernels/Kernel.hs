@@ -34,7 +34,6 @@ import Data.Loc (noLoc)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Binder.Class (Proper)
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
@@ -82,11 +81,11 @@ deriving instance Annotations lore => Ord (KernelInput lore)
 kernelInputName :: KernelInput lore -> VName
 kernelInputName = paramName . kernelInputParam
 
-kernelInputType :: Typed (Annotations.LParam lore) =>
+kernelInputType :: Typed (LParamAttr lore) =>
                    KernelInput lore -> Type
 kernelInputType = typeOf . kernelInputParam
 
-kernelInputIdent :: Typed (Annotations.LParam lore) =>
+kernelInputIdent :: Typed (LParamAttr lore) =>
                     KernelInput lore -> Ident
 kernelInputIdent = paramIdent . kernelInputParam
 
@@ -189,12 +188,12 @@ instance FreeIn KernelSize where
                           thread_offset,
                           num_threads]
 
-instance (FreeIn (Annotations.LParam lore)) =>
+instance (FreeIn (LParamAttr lore)) =>
          FreeIn (KernelInput lore) where
   freeIn (KernelInput param arr is) =
     freeIn param <> freeIn arr <> freeIn is
 
-instance (Proper lore, FreeIn (Annotations.LParam lore)) =>
+instance (Proper lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where
   freeIn (MapKernel cs w index ispace inps returns body) =
     freeIn w <> freeIn cs <> freeIn index <> freeIn (map snd ispace) <>

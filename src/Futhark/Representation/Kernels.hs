@@ -44,7 +44,6 @@ where
 
 import Control.Monad
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -69,7 +68,7 @@ import Futhark.Analysis.Rephrase
 -- | The lore for the basic representation.
 data Kernels = Kernels
 
-instance Annotations.Annotations Kernels where
+instance Annotations Kernels where
   type Op Kernels = Kernel Kernels
 
 instance Lore.Lore Kernels where

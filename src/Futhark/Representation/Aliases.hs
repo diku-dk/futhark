@@ -64,7 +64,6 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
@@ -121,14 +120,14 @@ type ConsumedInExp = Names'
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 
-instance (Annotations.Annotations lore, CanBeAliased (Op lore)) =>
-         Annotations.Annotations (Aliases lore) where
-  type LetBound (Aliases lore) = (VarAliases, Annotations.LetBound lore)
-  type Exp (Aliases lore) = (ConsumedInExp, Annotations.Exp lore)
-  type Body (Aliases lore) = (BodyAliasing, Annotations.Body lore)
-  type FParam (Aliases lore) = Annotations.FParam lore
-  type LParam (Aliases lore) = Annotations.LParam lore
-  type RetType (Aliases lore) = Annotations.RetType lore
+instance (Annotations lore, CanBeAliased (Op lore)) =>
+         Annotations (Aliases lore) where
+  type LetAttr (Aliases lore) = (VarAliases, LetAttr lore)
+  type ExpAttr (Aliases lore) = (ConsumedInExp, ExpAttr lore)
+  type BodyAttr (Aliases lore) = (BodyAliasing, BodyAttr lore)
+  type FParamAttr (Aliases lore) = FParamAttr lore
+  type LParamAttr (Aliases lore) = LParamAttr lore
+  type RetType (Aliases lore) = AST.RetType lore
   type Op (Aliases lore) = OpWithAliases (Op lore)
 
 instance AliasesOf (VarAliases, attr) where
@@ -272,7 +271,7 @@ addAliasesToPattern pat e =
   uncurry AST.Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: (Lore.Lore lore, CanBeAliased (Op lore)) =>
-                 Annotations.Body lore -> [Binding lore] -> Result -> Body lore
+                 BodyAttr lore -> [Binding lore] -> Result -> Body lore
 mkAliasedBody innerlore bnds res =
   AST.Body (mkBodyAliases bnds res, innerlore) bnds res
 
@@ -346,7 +345,7 @@ mkBodyAliases bnds res =
 
 mkAliasedLetBinding :: (Lore.Lore lore, CanBeAliased (Op lore)) =>
                        AST.Pattern lore
-                    -> Annotations.Exp lore -> Exp lore
+                    -> ExpAttr lore -> Exp lore
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e)
