@@ -25,7 +25,7 @@ import Data.List
 import Prelude
 
 import qualified Futhark.Representation.AST as AST
-import Futhark.Representation.SOACS hiding (Lore)
+import Futhark.Representation.SOACS
 import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Tools

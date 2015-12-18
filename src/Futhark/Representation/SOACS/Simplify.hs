@@ -22,7 +22,7 @@ import qualified Data.HashSet      as HS
 
 import Prelude hiding (any, all)
 
-import Futhark.Representation.SOACS hiding (Lore)
+import Futhark.Representation.SOACS
 import qualified Futhark.Representation.AST as AST
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
