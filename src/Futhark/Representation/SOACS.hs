@@ -69,7 +69,7 @@ instance Annotations SOACS where
   type Op SOACS = SOAC SOACS
 
 instance Attributes SOACS where
-  representative = Futhark.Representation.SOACS.SOACS
+  representative = SOACS
 
   loopResultContext _ res merge =
     loopShapeContext res $ map paramIdent merge
