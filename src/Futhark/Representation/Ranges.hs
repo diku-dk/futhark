@@ -59,7 +59,6 @@ import Data.Monoid
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
@@ -69,7 +68,6 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import Futhark.Transform.Rename
-import Futhark.Binder
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 import qualified Futhark.Util.Pretty as PP
@@ -87,13 +85,13 @@ instance (Annotations lore, CanBeRanged (Op lore)) =>
   type RetType (Ranges lore) = AST.RetType lore
   type Op (Ranges lore) = OpWithRanges (Op lore)
 
-instance (Lore.Lore lore, CanBeRanged (Op lore)) =>
-         Lore.Lore (Ranges lore) where
+instance (Attributes lore, CanBeRanged (Op lore)) =>
+         Attributes (Ranges lore) where
   representative =
-    Ranges Lore.representative
+    Ranges representative
 
   loopResultContext (Ranges lore) =
-    Lore.loopResultContext lore
+    loopResultContext lore
 
 instance RangeOf (Range, attr) where
   rangeOf = fst
@@ -117,8 +115,6 @@ instance (Renameable lore, CanBeRanged (Op lore)) =>
          Renameable (Ranges lore) where
 instance (Substitutable lore, CanBeRanged (Op lore)) =>
          Substitutable (Ranges lore) where
-instance (Proper lore, CanBeRanged (Op lore)) =>
-         Proper (Ranges lore) where
 
 instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) where
   ppBindingLore binding@(Let pat _ _) =
@@ -184,19 +180,19 @@ removePatternRanges :: AST.PatternT (Range, a)
                     -> AST.PatternT a
 removePatternRanges = rephrasePattern snd
 
-addRangesToPattern :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
+addRangesToPattern :: (Attributes lore, CanBeRanged (Op lore)) =>
                       AST.Pattern lore -> Exp lore
                    -> Pattern lore
 addRangesToPattern pat e =
   uncurry AST.Pattern $ mkPatternRanges pat e
 
-mkRangedBody :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
+mkRangedBody :: (Attributes lore, CanBeRanged (Op lore)) =>
                 BodyAttr lore -> [Binding lore] -> Result
              -> Body lore
 mkRangedBody innerlore bnds res =
   AST.Body (mkBodyRanges bnds res, innerlore) bnds res
 
-mkPatternRanges :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
+mkPatternRanges :: (Attributes lore, CanBeRanged (Op lore)) =>
                    AST.Pattern lore
                 -> Exp lore
                 -> ([PatElem (Range, LetAttr lore)],
@@ -209,7 +205,7 @@ mkPatternRanges pat e =
           in patElem `setPatElemLore` (range, innerlore)
         ranges = expRanges e
 
-mkBodyRanges :: Lore.Lore lore =>
+mkBodyRanges :: Attributes lore =>
                 [AST.Binding lore]
              -> Result
              -> [Range]
@@ -228,7 +224,7 @@ mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
 intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
-mkRangedLetBinding :: (Proper lore, CanBeRanged (Op lore)) =>
+mkRangedLetBinding :: (Attributes lore, CanBeRanged (Op lore)) =>
                       AST.Pattern lore
                    -> ExpAttr lore
                    -> Exp lore

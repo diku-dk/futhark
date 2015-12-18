@@ -264,7 +264,7 @@ data DistributionBody = DistributionBody {
 distributionInnerPattern :: DistributionBody -> Pattern
 distributionInnerPattern = fst . innerTarget . distributionTarget
 
-distributionBodyFromBindings :: (Proper lore, CanBeAliased (Op lore)) =>
+distributionBodyFromBindings :: (Attributes lore, CanBeAliased (Op lore)) =>
                                 Targets -> [AST.Binding lore] -> (DistributionBody, Result)
 distributionBodyFromBindings ((inner_pat, inner_res), targets) bnds =
   let bound_by_bnds = boundByBindings bnds
@@ -282,7 +282,7 @@ distributionBodyFromBindings ((inner_pat, inner_res), targets) bnds =
       },
       inner_res')
 
-distributionBodyFromBinding :: (Proper lore, CanBeAliased (Op lore)) =>
+distributionBodyFromBinding :: (Attributes lore, CanBeAliased (Op lore)) =>
                                Targets -> AST.Binding lore -> (DistributionBody, Result)
 distributionBodyFromBinding targets bnd =
   distributionBodyFromBindings targets [bnd]
@@ -482,7 +482,7 @@ tryDistribute nest targets bnds =
         inner_body = mkBody bnds inner_body_res
 
 tryDistributeBinding :: (MonadFreshNames m, HasTypeEnv m,
-                         Proper lore, CanBeAliased (Op lore)) =>
+                         Attributes lore, CanBeAliased (Op lore)) =>
                         Nestings -> Targets -> AST.Binding lore
                      -> m (Maybe (Result, Targets, KernelNest))
 tryDistributeBinding nest targets bnd =

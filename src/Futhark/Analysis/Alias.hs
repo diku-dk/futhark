@@ -18,30 +18,32 @@ module Futhark.Analysis.Alias
 
 import Data.Monoid
 
-import Futhark.Representation.AST.Lore (Lore)
+import Futhark.Representation.AST.Attributes (Attributes)
 import qualified Futhark.Representation.AST.Syntax as In
 import qualified Futhark.Representation.Aliases as Out
 
 import Prelude
 
 -- | Perform alias analysis on a Futhark program.
-aliasAnalysis :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+aliasAnalysis :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
                  In.Prog lore -> Out.Prog lore
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
-analyseFun :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+analyseFun :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
               In.FunDec lore -> Out.FunDec lore
 analyseFun (In.FunDec fname restype params body) =
   Out.FunDec fname restype params body'
   where body' = analyseBody body
 
-analyseBody :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+analyseBody :: (Attributes lore,
+                Out.CanBeAliased (In.Op lore)) =>
                In.Body lore -> Out.Body lore
 analyseBody (In.Body lore origbnds result) =
   let bnds' = map analyseBinding origbnds
   in Out.mkAliasedBody lore bnds' result
 
-analyseBinding :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+analyseBinding :: (Attributes lore,
+                   Out.CanBeAliased (In.Op lore)) =>
                   In.Binding lore -> Out.Binding lore
 analyseBinding (In.Let pat lore e) =
   let e' = analyseExp e
@@ -50,7 +52,7 @@ analyseBinding (In.Let pat lore e) =
                lore)
   in Out.Let pat' lore' e'
 
-analyseExp :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+analyseExp :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
               In.Exp lore -> Out.Exp lore
 analyseExp = Out.mapExp analyse
   where analyse =
@@ -66,14 +68,14 @@ analyseExp = Out.mapExp analyse
                      , Out.mapOnOp = return . Out.addOpAliases
                      }
 
-analyseLambda :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+analyseLambda :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
                  In.Lambda lore -> Out.Lambda lore
 analyseLambda lam =
   let body = analyseBody $ In.lambdaBody lam
   in lam { Out.lambdaBody = body
          , Out.lambdaParams = In.lambdaParams lam
          }
-analyseExtLambda :: (Lore lore, Out.CanBeAliased (In.Op lore)) =>
+analyseExtLambda :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
                     In.ExtLambda lore -> Out.ExtLambda lore
 analyseExtLambda lam =
   let body = analyseBody $ In.extLambdaBody lam

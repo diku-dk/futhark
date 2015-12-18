@@ -23,17 +23,12 @@ import Control.Arrow (first)
 import Data.Monoid
 import qualified Data.HashSet as HS
 
+import Futhark.Representation.AST.Attributes (IsOp)
 import Futhark.Representation.AST.Syntax
-import Futhark.Util.Pretty (Pretty)
-import Futhark.Representation.AST.Lore (Lore)
-import Futhark.Representation.AST.RetType
-import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
-import Futhark.Representation.AST.Attributes.Names (FreeIn)
-import Futhark.Transform.Substitute (Substitute)
-import Futhark.Transform.Rename (Rename)
+import Futhark.Representation.AST.Attributes.Types
 
-class (Lore lore, AliasedOp (Op lore),
+class (Annotations lore, AliasedOp (Op lore),
        AliasesOf (LetAttr lore)) => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
@@ -157,7 +152,7 @@ class AliasesOf a where
 instance AliasesOf Names where
   aliasesOf = id
 
-class AliasedOp op where
+class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]
   consumedInOp :: op -> Names
 
@@ -165,14 +160,7 @@ instance AliasedOp () where
   opAliases () = []
   consumedInOp () = mempty
 
-class (AliasedOp (OpWithAliases op),
-       Eq (OpWithAliases op),
-       Ord (OpWithAliases op),
-       Show (OpWithAliases op),
-       Pretty (OpWithAliases op),
-       FreeIn (OpWithAliases op),
-       Substitute (OpWithAliases op),
-       Rename (OpWithAliases op)) => CanBeAliased op where
+class AliasedOp (OpWithAliases op) => CanBeAliased op where
   type OpWithAliases op :: *
   removeOpAliases :: OpWithAliases op -> op
   addOpAliases :: op -> OpWithAliases op

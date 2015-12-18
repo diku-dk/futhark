@@ -71,7 +71,7 @@ instance (Applicative m, Monad m) => LocalTypeEnv (BinderT lore m) where
     modify (`HM.difference` types)
     return x
 
-instance (Proper lore, Bindable lore, MonadFreshNames m) =>
+instance (Attributes lore, Bindable lore, MonadFreshNames m) =>
          MonadBinder (BinderT lore m) where
   type Lore (BinderT lore m) = lore
   mkBodyM bnds res = return $ mkBody bnds res

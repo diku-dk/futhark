@@ -44,7 +44,6 @@ where
 
 import Control.Monad
 
-import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
@@ -71,7 +70,7 @@ data Kernels = Kernels
 instance Annotations Kernels where
   type Op Kernels = Kernel Kernels
 
-instance Lore.Lore Kernels where
+instance Attributes Kernels where
   representative = Futhark.Representation.Kernels.Kernels
 
   loopResultContext _ res merge =
@@ -112,7 +111,6 @@ instance TypeCheck.Checkable Kernels where
 
 instance Renameable Kernels where
 instance Substitutable Kernels where
-instance Proper Kernels where
 
 instance Bindable Kernels where
   mkBody = AST.Body ()
@@ -134,7 +132,7 @@ instance Bindable Kernels where
 
 instance PrettyLore Kernels where
 
-removeLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => Rephraser lore Kernels
+removeLore :: (Attributes lore, Op lore ~ Op Kernels) => Rephraser lore Kernels
 removeLore =
   Rephraser { rephraseExpLore = const ()
             , rephraseLetBoundLore = typeOf
@@ -145,13 +143,13 @@ removeLore =
             , rephraseOp = id
             }
 
-removeProgLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => AST.Prog lore -> Prog
+removeProgLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.Prog lore -> Prog
 removeProgLore = rephraseProg removeLore
 
-removeFunDecLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => AST.FunDec lore -> FunDec
+removeFunDecLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.FunDec lore -> FunDec
 removeFunDecLore = rephraseFunDec removeLore
 
-removeBodyLore :: (Lore.Lore lore, Op lore ~ Op Kernels) => AST.Body lore -> Body
+removeBodyLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
 
 removeRetTypeLore :: IsRetType rt => rt -> RetType

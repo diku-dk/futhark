@@ -27,13 +27,13 @@ import Data.Loc (noLoc)
 
 import Prelude
 
-import Futhark.Binder.Class (Proper)
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
   ((</>), (<+>), ppr, comma, commasep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplifier.Lore
@@ -118,7 +118,7 @@ mapSOACM tv (Stream cs size form lam arrs ii) =
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
 
-instance Proper lore => FreeIn (SOAC lore) where
+instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
     where walk f x = tell (f x) >> return x
           free = SOACMapper { mapOnSOACSubExp = walk freeIn
@@ -128,7 +128,7 @@ instance Proper lore => FreeIn (SOAC lore) where
                             , mapOnSOACCertificates = walk freeIn
                             }
 
-instance Proper lore => Substitute (SOAC lore) where
+instance Attributes lore => Substitute (SOAC lore) where
   substituteNames subst =
     runIdentity . mapSOACM substitute
     where substitute =
@@ -139,7 +139,7 @@ instance Proper lore => Substitute (SOAC lore) where
                        , mapOnSOACCertificates = return . substituteNames subst
                        }
 
-instance Proper lore => Rename (SOAC lore) where
+instance Attributes lore => Rename (SOAC lore) where
   rename = mapSOACM renamer
     where renamer = SOACMapper rename rename rename rename rename
 
@@ -172,10 +172,10 @@ soacType (Stream _ outersize form lam _ _) =
                 RedLike _ _ acc -> acc
                 Sequential  acc -> acc
 
-instance Proper lore => TypedOp (SOAC lore) where
+instance Attributes lore => TypedOp (SOAC lore) where
   opType = pure . soacType
 
-instance (Proper lore, Aliased lore) => AliasedOp (SOAC lore) where
+instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases (Map _ _ f _) =
     map (const mempty) $ lambdaReturnType f
   opAliases (Reduce _ _ f _) =
@@ -200,8 +200,8 @@ instance (Proper lore, Aliased lore) => AliasedOp (SOAC lore) where
   consumedInOp _ =
     mempty
 
-instance (Proper lore,
-          Proper (Aliases lore),
+instance (Attributes lore,
+          Attributes (Aliases lore),
           CanBeAliased (Op lore)) => CanBeAliased (SOAC lore) where
   type OpWithAliases (SOAC lore) = SOAC (Aliases lore)
 
@@ -230,7 +230,7 @@ instance (Proper lore,
     where remove = SOACMapper return (return . removeLambdaAliases)
                    (return . removeExtLambdaAliases) return return
 
-instance Proper lore => IsOp (SOAC lore) where
+instance Attributes lore => IsOp (SOAC lore) where
   safeOp _ = False
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
@@ -251,10 +251,10 @@ substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 consumedByLambda :: Aliased lore => Lambda lore -> Names
 consumedByLambda = consumedInBody . lambdaBody
 
-instance (Proper inner, Ranged inner) => RangedOp (SOAC inner) where
+instance (Attributes inner, Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange
 
-instance (Proper lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) where
+instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) where
   type OpWithRanges (SOAC lore) = SOAC (Ranges lore)
 
   removeOpRanges = runIdentity . mapSOACM remove
@@ -286,7 +286,7 @@ instance (Proper lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) where
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o lam0' acc
 
-instance (Proper lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
+instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
 
   removeOpWisdom = runIdentity . mapSOACM remove

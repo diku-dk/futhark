@@ -26,8 +26,8 @@ import Control.Applicative
 import Data.Monoid
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (unNames, Names' (..), VarAliases, ConsumedInExp)
 import qualified Futhark.Representation.Aliases as Aliases
@@ -92,18 +92,16 @@ instance (Annotations lore,
   type RetType (Wise lore) = RetType lore
   type Op (Wise lore) = OpWithWisdom (Op lore)
 
-instance (Lore.Lore lore, CanBeWise (Op lore)) => Lore.Lore (Wise lore) where
+instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
   representative =
-    Wise Lore.representative
+    Wise representative
 
   loopResultContext (Wise lore) =
-    Lore.loopResultContext lore
+    loopResultContext lore
 
 instance (Renameable lore, CanBeWise (Op lore)) => Renameable (Wise lore) where
 instance (Substitutable lore, CanBeWise (Op lore)) => Substitutable (Wise lore) where
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
-instance (Proper lore,
-          CanBeWise (Op lore)) => Proper (Wise lore) where
 
 instance AliasesOf (VarWisdom, attr) where
   aliasesOf = unNames . varWisdomAliases . fst
@@ -114,7 +112,7 @@ instance RangeOf (VarWisdom, attr) where
 instance RangesOf (BodyWisdom, attr) where
   rangesOf = bodyWisdomRanges . fst
 
-instance (Lore.Lore lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
+instance (Attributes lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
   bodyAliases = map unNames . bodyWisdomAliases . fst . bodyLore
   consumedInBody = unNames . bodyWisdomConsumed . fst . bodyLore
 
@@ -152,7 +150,7 @@ removeExpWisdom = rephraseExp removeWisdom
 removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
 removePatternWisdom = rephrasePattern snd
 
-addWisdomToPattern :: (Proper lore, CanBeWise (Op lore)) =>
+addWisdomToPattern :: (Attributes lore, CanBeWise (Op lore)) =>
                       Pattern lore
                    -> Exp (Wise lore)
                    -> Pattern (Wise lore)
@@ -166,14 +164,14 @@ addWisdomToPattern pat e =
           in patElem `setPatElemLore` (VarWisdom als range, innerlore)
         ranges = expRanges e
 
-mkWiseBody :: (Proper lore, CanBeWise (Op lore)) =>
+mkWiseBody :: (Attributes lore, CanBeWise (Op lore)) =>
               BodyAttr lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
   Body (BodyWisdom aliases consumed ranges, innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
         ranges = Ranges.mkBodyRanges bnds res
 
-mkWiseLetBinding :: (Proper lore, CanBeWise (Op lore)) =>
+mkWiseLetBinding :: (Attributes lore, CanBeWise (Op lore)) =>
                     Pattern lore
                  -> ExpAttr lore -> Exp (Wise lore)
                  -> Binding (Wise lore)

@@ -21,7 +21,8 @@ import qualified Data.HashSet      as HS
 
 import Prelude hiding (any, all)
 
-import Futhark.Representation.Kernels hiding (Lore)
+import Futhark.Representation.Kernels
+import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
@@ -47,7 +48,7 @@ simplifyLambda :: (HasTypeEnv m, MonadFreshNames m) =>
 simplifyLambda =
   Simplifier.simplifyLambdaWithRules bindableSimpleOps kernelRules Engine.noExtraHoistBlockers
 
-instance (Proper lore, Engine.SimplifiableOp lore (Op lore)) =>
+instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
          Engine.SimplifiableOp lore (Kernel lore) where
   simplifyOp (MapKernel cs w index ispace inps returns body) = do
     cs' <- Engine.simplify cs

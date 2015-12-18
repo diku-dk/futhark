@@ -10,7 +10,6 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST
-import Futhark.Binder (Proper)
 
 -- | A mapping from a variable name @v@, to those variables on which
 -- the value of @v@ is dependent.  The intuition is that we could
@@ -19,10 +18,10 @@ import Futhark.Binder (Proper)
 type Dependencies = HM.HashMap VName Names
 
 -- | Compute the data dependencies for an entire body.
-dataDependencies :: Proper lore => Body lore -> Dependencies
+dataDependencies :: Attributes lore => Body lore -> Dependencies
 dataDependencies = dataDependencies' HM.empty
 
-dataDependencies' :: Proper lore =>
+dataDependencies' :: Attributes lore =>
                      Dependencies -> Body lore -> Dependencies
 dataDependencies' startdeps = foldl grow startdeps . bodyBindings
   where grow deps (Let pat _ (If c tb fb _)) =

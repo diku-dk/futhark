@@ -31,7 +31,6 @@ import Prelude
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Attributes.Patterns
-import Futhark.Representation.AST.RetType
 
 freeWalker :: (FreeIn (ExpAttr lore),
                FreeIn (BodyAttr lore),

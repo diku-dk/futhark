@@ -141,7 +141,6 @@ Library
                    Futhark.Representation.AST.Attributes.TypeOf
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values
-                   Futhark.Representation.AST.Lore
                    Futhark.Representation.AST.Pretty
                    Futhark.Representation.AST.RetType
                    Futhark.Representation.AST.Syntax

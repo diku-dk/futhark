@@ -21,6 +21,7 @@ import Futhark.Pipeline
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
@@ -29,7 +30,7 @@ import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
 import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 
-printAction :: (PrettyLore lore, CanBeAliased (Op lore)) => Action lore
+printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
   Action { actionName = "Prettyprint"
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
@@ -44,7 +45,7 @@ interpretAction parser =
          , actionProcedure = liftIO . interpret parser
          }
 
-rangeAction :: (PrettyLore lore, CanBeRanged (Op lore)) => Action lore
+rangeAction :: (Attributes lore, CanBeRanged (Op lore)) => Action lore
 rangeAction =
     Action { actionName = "Range analysis"
            , actionDescription = "Print the program with range annotations added."

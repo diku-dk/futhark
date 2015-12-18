@@ -21,11 +21,12 @@ import Data.Monoid
 import Futhark.Util.Pretty
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes
+import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.Representation.AST.Attributes.Values
 import Futhark.Util
 
 -- | The class of lores whose annotations can be prettyprinted.
-class (Lore lore,
+class (Annotations lore,
        Pretty (RetType lore),
        Pretty (ParamT (FParamAttr lore)),
        Pretty (ParamT (LParamAttr lore)),

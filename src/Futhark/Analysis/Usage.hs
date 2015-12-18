@@ -11,10 +11,11 @@ import Data.Monoid
 import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Binder (Proper)
 
-usageInBinding :: (Proper lore, Aliased lore, UsageInOp (Op lore)) => Binding lore -> UT.UsageTable
+usageInBinding :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
+                  Binding lore -> UT.UsageTable
 usageInBinding (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,

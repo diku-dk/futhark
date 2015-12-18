@@ -128,7 +128,7 @@ type ScalExpRange = (Maybe ScalExp, Maybe ScalExp)
 
 -- | The lore has embedded range information.  Note that it may not be
 -- up to date, unless whatever maintains the syntax tree is careful.
-type Ranged lore = (Lore lore,
+type Ranged lore = (Attributes lore,
                     RangedOp (Op lore),
                     RangeOf (LetAttr lore),
                     RangesOf (BodyAttr lore))
@@ -264,7 +264,7 @@ class IsOp op => RangedOp op where
 instance RangedOp () where
   opRanges () = []
 
-class (RangedOp (OpWithRanges op), IsOp (OpWithRanges op)) =>
+class RangedOp (OpWithRanges op) =>
       CanBeRanged op where
   type OpWithRanges op :: *
   removeOpRanges :: OpWithRanges op -> op

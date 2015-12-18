@@ -34,7 +34,6 @@ import Data.Loc (noLoc)
 
 import Prelude
 
-import Futhark.Binder.Class (Proper)
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
@@ -46,6 +45,7 @@ import Futhark.Optimise.Simplifier.Lore
 import Futhark.Representation.Ranges
   (Ranges, removeLambdaRanges, removeBodyRanges)
 import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeBodyAliases)
 import Futhark.Analysis.Usage
@@ -193,7 +193,7 @@ instance (FreeIn (LParamAttr lore)) =>
   freeIn (KernelInput param arr is) =
     freeIn param <> freeIn arr <> freeIn is
 
-instance (Proper lore, FreeIn (LParamAttr lore)) =>
+instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where
   freeIn (MapKernel cs w index ispace inps returns body) =
     freeIn w <> freeIn cs <> freeIn index <> freeIn (map snd ispace) <>
@@ -212,7 +212,7 @@ instance (Proper lore, FreeIn (LParamAttr lore)) =>
                               , mapOnKernelLParam = walk freeIn
                               }
 
-instance Proper lore => Substitute (Kernel lore) where
+instance Attributes lore => Substitute (Kernel lore) where
   substituteNames subst =
     runIdentity . mapKernelM substitute
     where substitute =
@@ -228,7 +228,7 @@ instance Renameable lore => Rename (KernelInput lore) where
   rename (KernelInput param arr is) =
     KernelInput <$> rename param <*> rename arr <*> rename is
 
-instance Proper lore => Rename (Kernel lore) where
+instance Attributes lore => Rename (Kernel lore) where
   rename (MapKernel cs w index ispace inps returns body) = do
     cs' <- rename cs
     w' <- rename w
@@ -256,10 +256,10 @@ kernelType (ScanKernel _ w size _ lam _) =
        (`arrayOfRow` kernelWorkgroupSize size))
   (lambdaReturnType lam)
 
-instance Proper lore => TypedOp (Kernel lore) where
+instance Attributes lore => TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType
 
-instance (Proper lore, Aliased lore) => AliasedOp (Kernel lore) where
+instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases (MapKernel _ _ _ _ _ returns _) =
     map (const mempty) returns
   opAliases (ReduceKernel _ _ _ _ _ nes _) =
@@ -274,8 +274,8 @@ instance (Proper lore, Aliased lore) => AliasedOp (Kernel lore) where
     where consumed = consumedInBody body
   consumedInOp _ = mempty
 
-instance (Proper lore,
-          Proper (Aliases lore),
+instance (Attributes lore,
+          Attributes (Aliases lore),
           CanBeAliased (Op lore)) => CanBeAliased (Kernel lore) where
   type OpWithAliases (Kernel lore) = Kernel (Aliases lore)
 
@@ -291,13 +291,13 @@ removeKernelInputAliases :: KernelInput (Aliases lore) -> KernelInput lore
 removeKernelInputAliases inp =
   inp { kernelInputParam = kernelInputParam inp }
 
-instance Proper lore => IsOp (Kernel lore) where
+instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = False
 
-instance (Proper inner, Ranged inner) => RangedOp (Kernel inner) where
+instance (Attributes inner, Ranged inner) => RangedOp (Kernel inner) where
   opRanges op = replicate (length $ kernelType op) unknownRange
 
-instance (Proper lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) where
+instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) where
   type OpWithRanges (Kernel lore) = Kernel (Ranges lore)
 
   removeOpRanges = runIdentity . mapKernelM remove
@@ -307,7 +307,7 @@ instance (Proper lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) where
     where add = KernelMapper return Range.analyseLambda
                 Range.analyseBody return return return
 
-instance (Proper lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
+instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
 
   removeOpWisdom = runIdentity . mapKernelM remove

@@ -21,9 +21,8 @@ import Futhark.Optimise.DeadVarElim
 import Futhark.Pass
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Syntax
-import Futhark.Binder.Class (Proper)
 
-simplify :: Proper lore =>
+simplify :: R.Attributes lore =>
             (Prog lore -> State VNameSource (Prog lore))
          -> Pass lore lore
 simplify f =
