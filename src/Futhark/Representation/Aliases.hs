@@ -144,10 +144,6 @@ type ExtLambda lore = AST.ExtLambda (Aliases lore)
 type FunDec lore = AST.FunDec (Aliases lore)
 type RetType lore = AST.RetType (Aliases lore)
 
-instance (Renameable lore,
-          CanBeAliased (Op lore)) => Renameable (Aliases lore) where
-instance (Substitutable lore,
-          CanBeAliased (Op lore)) => Substitutable (Aliases lore) where
 instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
   representative =
     Aliases representative

@@ -1,4 +1,7 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- |
 --
 -- This module contains exports a single function, 'substituteNames',
@@ -172,13 +175,12 @@ instance Substitute d => Substitute (DimChange d) where
   substituteNames substs =
     fmap $ substituteNames substs
 
--- | The class of lores in which all annotations support name
+-- | Lores in which all annotations support name
 -- substitution.
-class (Substitute (ExpAttr lore),
-       Substitute (BodyAttr lore),
-       Substitute (LetAttr lore),
-       Substitute (FParamAttr lore),
-       Substitute (LParamAttr lore),
-       Substitute (RetType lore),
-       Substitute (Op lore)) =>
-      Substitutable lore where
+type Substitutable lore = (Substitute (ExpAttr lore),
+                           Substitute (BodyAttr lore),
+                           Substitute (LetAttr lore),
+                           Substitute (FParamAttr lore),
+                           Substitute (LParamAttr lore),
+                           Substitute (RetType lore),
+                           Substitute (Op lore))

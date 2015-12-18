@@ -693,8 +693,6 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
       ") does not match rank of array " ++ pretty name ++
       " (" ++ show ident_rank ++ ")"
 
-instance Renameable ExplicitMemory where
-instance Substitutable ExplicitMemory where
 instance Attributes ExplicitMemory where
   representative = ExplicitMemory
 
