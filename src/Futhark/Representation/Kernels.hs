@@ -69,7 +69,7 @@ instance Annotations Kernels where
   type Op Kernels = Kernel Kernels
 
 instance Attributes Kernels where
-  representative = Futhark.Representation.Kernels.Kernels
+  representative = Kernels
 
   loopResultContext _ res merge =
     loopShapeContext res $ map paramIdent merge
