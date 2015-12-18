@@ -2,8 +2,7 @@
 -- | This module defines a convenience typeclass for creating
 -- normalised programs.
 module Futhark.Binder.Class
-  ( Proper
-  , Bindable (..)
+  ( Bindable (..)
   , mkLet'
   , mkLetNames'
   , MonadBinder (..)
@@ -28,26 +27,7 @@ import Control.Monad.Writer
 import Prelude
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
-import Futhark.Transform.Substitute
-import Futhark.Transform.Rename (Renameable)
-
--- | A lore that supports some basic facilities.
-class (Lore.Lore lore,
-       PrettyLore lore,
-       Renameable lore, Substitutable lore,
-       FreeIn (ExpAttr lore),
-       FreeIn (LetAttr lore),
-       FreeIn (BodyAttr lore),
-       FreeIn (FParamAttr lore),
-       FreeIn (LParamAttr lore),
-       FreeIn (RetType lore),
-       FreeIn (Op lore),
-       Typed (FParamAttr lore),
-       Typed (LParamAttr lore),
-       IsOp (Op lore),
-       IsRetType (RetType lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an
 -- expression, within some monad.  Very important: the methods should
@@ -55,7 +35,7 @@ class (Lore.Lore lore,
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Proper lore,
+class (Attributes lore,
        FParamAttr lore ~ DeclType,
        LParamAttr lore ~ Type,
        RetType lore ~ ExtRetType,
@@ -75,7 +55,7 @@ class (Proper lore,
 -- effects!  They may be called more often than you think, and the
 -- results thrown away.  It is acceptable for them to create new
 -- bindings, however.
-class (Proper (Lore m),
+class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
        HasTypeEnv m) =>
       MonadBinder m where

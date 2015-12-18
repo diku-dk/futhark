@@ -76,7 +76,7 @@ cseInBindings (bnd:bnds) m =
                              , mapOnOp = cseInOp
                              }
 
-cseInBinding :: Proper lore =>
+cseInBinding :: Attributes lore =>
                 Binding lore
              -> ([Binding lore] -> CSEM lore a)
              -> CSEM lore a
@@ -119,7 +119,7 @@ addNameSubst :: PatternT attr -> PatternT attr -> CSEState lore -> CSEState lore
 addNameSubst pat subpat (CSEState (esubsts, nsubsts)) =
   CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts)
 
-addExpSubst :: Proper lore =>
+addExpSubst :: Attributes lore =>
                Pattern lore -> ExpAttr lore -> Exp lore
             -> CSEState lore
             -> CSEState lore
@@ -127,10 +127,10 @@ addExpSubst pat eattr e (CSEState (esubsts, nsubsts)) =
   CSEState (M.insert (eattr,e) pat esubsts, nsubsts)
 
 -- | The operations that permit CSE.
-class Proper lore => CSEInOp lore op where
+class Attributes lore => CSEInOp lore op where
   cseInOp :: op -> CSEM lore op
 
-instance Proper lore => CSEInOp lore () where
+instance Attributes lore => CSEInOp lore () where
   cseInOp () = return ()
 
 instance CSEInOp lore (Op lore) => CSEInOp lore (Kernel.Kernel lore) where

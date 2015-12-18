@@ -97,7 +97,7 @@ instance Engine.MonadEngine (SimpleM lore) => MonadBinder (SimpleM lore) where
   addBinding      = Engine.addBindingEngine
   collectBindings = Engine.collectBindingsEngine
 
-instance (Proper lore,
+instance (Attributes lore,
           Engine.Simplifiable (LetAttr lore),
           Engine.Simplifiable (FParamAttr lore),
           Engine.Simplifiable (LParamAttr lore),

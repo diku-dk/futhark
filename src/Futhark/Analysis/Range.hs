@@ -18,7 +18,6 @@ import Data.List
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.AST as In
 import qualified Futhark.Representation.Ranges as Out
@@ -29,27 +28,27 @@ import qualified Futhark.Representation.AST.Attributes.Ranges as In
 
 -- | Perform variable range analysis on the given program, returning a
 -- program with embedded range annotations.
-rangeAnalysis :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
+rangeAnalysis :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                  In.Prog lore -> Out.Prog lore
 rangeAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 -- Implementation
 
-analyseFun :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
+analyseFun :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
               In.FunDec lore -> Out.FunDec lore
 analyseFun (In.FunDec fname restype params body) =
   runRangeM $ bindFunParams params $ do
     body' <- analyseBody body
     return $ Out.FunDec fname restype params body'
 
-analyseBody :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
+analyseBody :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                In.Body lore
             -> RangeM (Out.Body lore)
 analyseBody (In.Body lore origbnds result) =
   analyseBindings origbnds $ \bnds' ->
     return $ Out.mkRangedBody lore bnds' result
 
-analyseBindings :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
+analyseBindings :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                    [In.Binding lore]
                 -> ([Out.Binding lore] -> RangeM a)
                 -> RangeM a
@@ -61,7 +60,7 @@ analyseBindings = analyseBindings' []
           bindPattern (Out.bindingPattern bnd') $
             analyseBindings' (bnd':acc) bnds m
 
-analyseBinding :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
+analyseBinding :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                   In.Binding lore
                -> RangeM (Out.Binding lore)
 analyseBinding (In.Let pat lore e) = do
@@ -69,7 +68,7 @@ analyseBinding (In.Let pat lore e) = do
   pat' <- simplifyPatRanges $ Out.addRangesToPattern pat e'
   return $ Out.Let pat' lore e'
 
-analyseExp :: (Lore.Lore lore, In.CanBeRanged (In.Op lore)) =>
+analyseExp :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
               In.Exp lore
            -> RangeM (Out.Exp lore)
 analyseExp = Out.mapExpM analyse
@@ -86,7 +85,7 @@ analyseExp = Out.mapExpM analyse
                     , In.mapOnOp = return . In.addOpRanges
                     }
 
-analyseLambda :: (Lore.Lore lore, In.CanBeRanged (Out.Op lore)) =>
+analyseLambda :: (In.Attributes lore, In.CanBeRanged (Out.Op lore)) =>
                  In.Lambda lore
               -> RangeM (Out.Lambda lore)
 analyseLambda lam = do
@@ -95,7 +94,7 @@ analyseLambda lam = do
                , Out.lambdaParams = In.lambdaParams lam
                }
 
-analyseExtLambda :: (Lore.Lore lore, In.CanBeRanged (Out.Op lore)) =>
+analyseExtLambda :: (In.Attributes lore, In.CanBeRanged (Out.Op lore)) =>
                     In.ExtLambda lore
                  -> RangeM (Out.ExtLambda lore)
 analyseExtLambda lam = do

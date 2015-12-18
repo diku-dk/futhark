@@ -15,7 +15,6 @@ import qualified Data.HashSet as HS
 import Prelude
 
 import Futhark.Representation.AST
-import Futhark.Binder
 
 -----------------------------------------------------------------
 -----------------------------------------------------------------
@@ -58,17 +57,17 @@ changed m = pass collect
         return (x, const $ res { resSuccess = True })
 
 -- | Applies Dead-Code Elimination to an entire program.
-deadCodeElim :: Proper lore => Prog lore -> Prog lore
+deadCodeElim :: Attributes lore => Prog lore -> Prog lore
 deadCodeElim = Prog . map deadCodeElimFun . progFunctions
 
 -- | Applies Dead-Code Elimination to just a single function.
-deadCodeElimFun :: Proper lore => FunDec lore -> FunDec lore
+deadCodeElimFun :: Attributes lore => FunDec lore -> FunDec lore
 deadCodeElimFun (FunDec fname rettype args body) =
   let body' = deadCodeElimBody body
   in FunDec fname rettype args body'
 
 -- | Applies Dead-Code Elimination to just a single body.
-deadCodeElimBody :: Proper lore => Body lore -> Body lore
+deadCodeElimBody :: Attributes lore => Body lore -> Body lore
 deadCodeElimBody = fst . runDCElimM . deadCodeElimBodyM
 
 --------------------------------------------------------------------
@@ -81,7 +80,7 @@ deadCodeElimSubExp :: SubExp -> DCElimM SubExp
 deadCodeElimSubExp (Var ident)  = Var <$> deadCodeElimVName ident
 deadCodeElimSubExp (Constant v) = return $ Constant v
 
-deadCodeElimBodyM :: Proper lore => Body lore -> DCElimM (Body lore)
+deadCodeElimBodyM :: Attributes lore => Body lore -> DCElimM (Body lore)
 
 deadCodeElimBodyM (Body bodylore (Let pat explore e:bnds) res) = do
   let idds = patternNames pat
@@ -100,7 +99,7 @@ deadCodeElimBodyM (Body bodylore [] es) = do
   seen $ freeIn bodylore
   Body bodylore [] <$> mapM deadCodeElimSubExp es
 
-deadCodeElimExp :: Proper lore => Exp lore -> DCElimM (Exp lore)
+deadCodeElimExp :: Attributes lore => Exp lore -> DCElimM (Exp lore)
 deadCodeElimExp (LoopOp (DoLoop respat merge form body)) = do
   let (mergepat, mergeexp) = unzip merge
   mapM_ deadCodeElimParam mergepat
@@ -151,7 +150,7 @@ deadCodeElimType t = do
   dims <- mapM deadCodeElimSubExp $ arrayDims t
   return $ t `setArrayDims` dims
 
-deadCodeElimLambda :: Proper lore =>
+deadCodeElimLambda :: Attributes lore =>
                       Lambda lore -> DCElimM (Lambda lore)
 deadCodeElimLambda (Lambda i params body rettype) = do
   body' <- deadCodeElimBodyM body
@@ -159,7 +158,7 @@ deadCodeElimLambda (Lambda i params body rettype) = do
   mapM_ deadCodeElimType rettype
   return $ Lambda i params body' rettype
 
-deadCodeElimExtLambda :: Proper lore =>
+deadCodeElimExtLambda :: Attributes lore =>
                          ExtLambda lore -> DCElimM (ExtLambda lore)
 deadCodeElimExtLambda (ExtLambda i params body rettype) = do
   body' <- deadCodeElimBodyM body

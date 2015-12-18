@@ -15,7 +15,6 @@ import qualified Data.HashSet as HS
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.RetType
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.

@@ -337,7 +337,7 @@ subExpAliasesM :: SubExp -> TypeM lore Names
 subExpAliasesM Constant{} = return mempty
 subExpAliasesM (Var v)    = lookupAliases v
 
-lookupFun :: forall lore.Lore lore =>
+lookupFun :: Attributes lore =>
              Name
           -> [SubExp]
           -> TypeM lore (RetType lore, [DeclType])
@@ -1097,11 +1097,7 @@ checkExtLambda (ExtLambda i params body rettype) args =
          " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 -- | The class of lores that can be type-checked.
-class (FreeIn (ExpAttr lore),
-       FreeIn (LetAttr lore),
-       FreeIn (BodyAttr lore),
-       CanBeAliased (Op lore),
-       Lore lore, PrettyLore lore) => Checkable lore where
+class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   checkExpLore :: ExpAttr lore -> TypeM lore ()
   checkBodyLore :: BodyAttr lore -> TypeM lore ()
   checkFParamLore :: VName -> FParamAttr lore -> TypeM lore ()

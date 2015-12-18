@@ -12,11 +12,9 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.Values
   , module Futhark.Representation.AST.Attributes.Constants
   , module Futhark.Representation.AST.Attributes.TypeOf
-  , module Futhark.Representation.AST.Attributes.Aliases
   , module Futhark.Representation.AST.Attributes.Patterns
   , module Futhark.Representation.AST.Attributes.Names
   , module Futhark.Representation.AST.RetType
-  , module Futhark.Representation.AST.Lore
 
   -- * Extra tools
   , funDecByName
@@ -30,6 +28,8 @@ module Futhark.Representation.AST.Attributes
   , shapeVars
 
   , IsOp (..)
+
+  , Attributes (..)
   )
   where
 
@@ -45,12 +45,12 @@ import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.TypeOf
-import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.Representation.AST.Attributes.Context
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Lore
-import Futhark.Transform.Rename (Rename)
-import Futhark.Transform.Substitute (Substitute)
+import Futhark.Representation.AST.Pretty
+import Futhark.Transform.Rename (Rename, Renameable)
+import Futhark.Transform.Substitute (Substitute, Substitutable)
 import Futhark.Util.Pretty (Pretty)
 
 -- | Get Stream's accumulators as a sub-expression list
@@ -153,3 +153,44 @@ class (Eq op, Ord op, Show op,
 
 instance IsOp () where
   safeOp () = True
+
+-- | Lore-specific attributes; also means the lore supports some basic
+-- facilities.
+class (Annotations lore,
+
+       PrettyLore lore,
+
+       Renameable lore, Substitutable lore,
+       FreeIn (ExpAttr lore),
+       FreeIn (LetAttr lore),
+       FreeIn (BodyAttr lore),
+       FreeIn (FParamAttr lore),
+       FreeIn (LParamAttr lore),
+       FreeIn (RetType lore),
+
+       IsOp (Op lore)) => Attributes lore where
+  -- | A constant used to disambiguate method calls.  XXX, this is a
+  -- hack to get around mising type application in Haskell, sometimes
+  -- resulting in ambiguous types.
+  representative :: lore
+
+  -- | A loop returns not only the values indicated in the result list
+  -- @res@, but may also have an existential context.  Thus,
+  -- @loopResult res merge@ returns those variables in @merge@ that
+  -- constitute the context.
+  loopResultContext :: lore
+                    -> [VName]
+                    -> [FParam lore]
+                    -> [VName]
+
+  -- | As far as possible, determine the subexpression to which ecah
+  -- context pattern element will be bound due to evaluation of the
+  -- given expression.  The resulting list must have the same number
+  -- of elements as there are context elements in the pattern.
+  --
+  -- The default method invokes 'expExtContext'.
+  expContext :: (HasTypeEnv m, Monad m) =>
+                Pattern lore ->
+                Exp lore ->
+                m [Maybe SubExp]
+  expContext = expExtContext

@@ -33,6 +33,7 @@ import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
 import Futhark.Transform.Substitute
 

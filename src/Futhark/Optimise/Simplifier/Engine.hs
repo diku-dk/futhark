@@ -72,6 +72,7 @@ import Data.Foldable (traverse_)
 import Prelude
 
 import Futhark.Representation.AST
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -123,8 +124,8 @@ emptyState :: State m
 emptyState = State { stateVtable = ST.empty }
 
 class (MonadBinder m,
-       Proper (Lore m),
-       Proper (InnerLore m),
+       Attributes (Lore m),
+       Attributes (InnerLore m),
        Lore m ~ Wise (InnerLore m),
        Simplifiable (LetAttr (InnerLore m)),
        Simplifiable (FParamAttr (InnerLore m)),
@@ -313,7 +314,7 @@ hoistBindings rules block vtable uses needs result = do
                 (uses'',bnds') <- simplifyBindings' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
 
-blockUnhoistedDeps :: Proper lore =>
+blockUnhoistedDeps :: Attributes lore =>
                       [Either (Binding lore) (Binding lore)]
                    -> [Either (Binding lore) (Binding lore)]
 blockUnhoistedDeps = snd . mapAccumL block HS.empty
@@ -325,16 +326,16 @@ blockUnhoistedDeps = snd . mapAccumL block HS.empty
           | otherwise =
             (blocked, Right need)
 
-provides :: Proper lore => Binding lore -> [VName]
+provides :: Attributes lore => Binding lore -> [VName]
 provides = patternNames . bindingPattern
 
-requires :: Proper lore => Binding lore -> Names
+requires :: Attributes lore => Binding lore -> Names
 requires bnd =
   (mconcat (map freeIn $ patternElements $ bindingPattern bnd)
   `HS.difference` HS.fromList (provides bnd)) <>
   freeInExp (bindingExp bnd)
 
-expandUsage :: (Proper lore, Aliased lore, UsageInOp (Op lore)) =>
+expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
                UT.UsageTable -> Binding lore -> UT.UsageTable
 expandUsage utable bnd = utable <> usageInBinding bnd <> usageThroughAliases
   where pat = bindingPattern bnd
@@ -380,10 +381,10 @@ blockIf block m = passNeed $ do
 insertAllBindings :: MonadEngine m => m Result -> m (Body (Lore m))
 insertAllBindings = blockIf $ \_ _ -> True
 
-hasFree :: Proper lore => Names -> BlockPred lore
+hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
 
-isNotSafe :: Proper lore => BlockPred lore
+isNotSafe :: Attributes lore => BlockPred lore
 isNotSafe _ = not . safeExp . bindingExp
 
 isInPlaceBound :: BlockPred m

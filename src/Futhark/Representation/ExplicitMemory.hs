@@ -65,7 +65,6 @@ import Data.Monoid
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Syntax
@@ -75,12 +74,12 @@ import Futhark.Representation.AST.Syntax
 import qualified Futhark.Analysis.ScalExp as SE
 
 import Futhark.TypeCheck.TypeError
-import Futhark.Representation.AST.Attributes hiding (Lore)
+import Futhark.Representation.AST.Attributes
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
-import Futhark.Binder
 import qualified Futhark.TypeCheck as TypeCheck
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import qualified Futhark.Util.Pretty as PP
@@ -122,15 +121,15 @@ data MemOp inner = Alloc SubExp Space
                  | Inner (Kernel inner)
             deriving (Eq, Ord, Show)
 
-instance Proper inner => FreeIn (MemOp inner) where
+instance Attributes inner => FreeIn (MemOp inner) where
   freeIn (Alloc size _) = freeIn size
   freeIn (Inner k) = freeIn k
 
-instance Proper inner => TypedOp (MemOp inner) where
+instance Attributes inner => TypedOp (MemOp inner) where
   opType (Alloc size space) = pure [Mem size space]
   opType (Inner k) = opType k
 
-instance (Proper inner, Aliased inner) => AliasedOp (MemOp inner) where
+instance (Attributes inner, Aliased inner) => AliasedOp (MemOp inner) where
   opAliases Alloc{} = [mempty]
   opAliases (Inner k) = opAliases k
 
@@ -145,7 +144,7 @@ instance CanBeAliased (MemOp ExplicitMemory) where
   addOpAliases (Alloc se space) = Alloc se space
   addOpAliases (Inner k) = Inner $ addOpAliases k
 
-instance (Proper inner, Ranged inner) => RangedOp (MemOp inner) where
+instance (Attributes inner, Ranged inner) => RangedOp (MemOp inner) where
   opRanges (Alloc _ _) =
     [unknownRange]
   opRanges (Inner k) =
@@ -159,11 +158,11 @@ instance CanBeRanged (MemOp ExplicitMemory) where
   addOpRanges (Alloc size space) = Alloc size space
   addOpRanges (Inner k) = Inner $ addOpRanges k
 
-instance Proper inner => Rename (MemOp inner) where
+instance Attributes inner => Rename (MemOp inner) where
   rename (Alloc size space) = Alloc <$> rename size <*> pure space
   rename (Inner k) = Inner <$> rename k
 
-instance Proper inner => Substitute (MemOp inner) where
+instance Attributes inner => Substitute (MemOp inner) where
   substituteNames subst (Alloc size space) = Alloc (substituteNames subst size) space
   substituteNames subst (Inner k) = Inner $ substituteNames subst k
 
@@ -172,7 +171,7 @@ instance PrettyLore inner => PP.Pretty (MemOp inner) where
   ppr (Alloc e (Space sp)) = PP.text "alloc" <> PP.apply [PP.ppr e, PP.text sp]
   ppr (Inner k) = PP.ppr k
 
-instance Proper inner => IsOp (MemOp inner) where
+instance Attributes inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
   safeOp (Inner k) = safeOp k
 
@@ -196,30 +195,6 @@ instance Annotations ExplicitMemory where
   type LParamAttr ExplicitMemory = MemBound NoUniqueness
   type RetType    ExplicitMemory = [FunReturns]
   type Op         ExplicitMemory = MemOp ExplicitMemory
-
-instance Lore.Lore ExplicitMemory where
-  representative = ExplicitMemory
-
-  loopResultContext _ res mergevars =
-    let shapeContextIdents = loopShapeContext res $ map paramIdent mergevars
-        memContextIdents = nub $ mapMaybe memIfNecessary res
-        memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
-    in memSizeContextIdents <> map identName memContextIdents <> shapeContextIdents
-    where memIfNecessary var =
-            case find ((==var) . paramName) mergevars of
-              Just fparam | ArrayMem _ _ _ mem _ <- paramAttr fparam,
-                            Just memparam <- isMergeParam mem ->
-                Just $ paramIdent memparam
-              _ ->
-                Nothing
-          memSizeIfNecessary ident
-            | Mem (Var sizevar) _ <- identType ident,
-              isJust $ isMergeParam sizevar =
-              Just sizevar
-            | otherwise =
-              Nothing
-          isMergeParam var =
-            find ((==var) . paramName) mergevars
 
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.
@@ -720,7 +695,29 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
 
 instance Renameable ExplicitMemory where
 instance Substitutable ExplicitMemory where
-instance Proper ExplicitMemory where
+instance Attributes ExplicitMemory where
+  representative = ExplicitMemory
+
+  loopResultContext _ res mergevars =
+    let shapeContextIdents = loopShapeContext res $ map paramIdent mergevars
+        memContextIdents = nub $ mapMaybe memIfNecessary res
+        memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
+    in memSizeContextIdents <> map identName memContextIdents <> shapeContextIdents
+    where memIfNecessary var =
+            case find ((==var) . paramName) mergevars of
+              Just fparam | ArrayMem _ _ _ mem _ <- paramAttr fparam,
+                            Just memparam <- isMergeParam mem ->
+                Just $ paramIdent memparam
+              _ ->
+                Nothing
+          memSizeIfNecessary ident
+            | Mem (Var sizevar) _ <- identType ident,
+              isJust $ isMergeParam sizevar =
+              Just sizevar
+            | otherwise =
+              Nothing
+          isMergeParam var =
+            find ((==var) . paramName) mergevars
 
 instance PrettyLore ExplicitMemory where
   ppBindingLore binding =

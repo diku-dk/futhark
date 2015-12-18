@@ -44,7 +44,6 @@ where
 
 import Control.Monad
 
-import qualified Futhark.Representation.AST.Lore as Lore
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
@@ -71,7 +70,7 @@ data SOACS = SOACS
 instance Annotations SOACS where
   type Op SOACS = SOAC SOACS
 
-instance Lore.Lore SOACS where
+instance Attributes SOACS where
   representative = Futhark.Representation.SOACS.SOACS
 
   loopResultContext _ res merge =
@@ -112,7 +111,6 @@ instance TypeCheck.Checkable SOACS where
 
 instance Renameable SOACS where
 instance Substitutable SOACS where
-instance Proper SOACS where
 
 instance Bindable SOACS where
   mkBody = AST.Body ()
@@ -134,7 +132,7 @@ instance Bindable SOACS where
 
 instance PrettyLore SOACS where
 
-removeLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => Rephraser lore SOACS
+removeLore :: (Attributes lore, Op lore ~ Op SOACS) => Rephraser lore SOACS
 removeLore =
   Rephraser { rephraseExpLore = const ()
             , rephraseLetBoundLore = typeOf
@@ -145,13 +143,13 @@ removeLore =
             , rephraseOp = id
             }
 
-removeProgLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => AST.Prog lore -> Prog
+removeProgLore :: (Attributes lore, Op lore ~ Op SOACS) => AST.Prog lore -> Prog
 removeProgLore = rephraseProg removeLore
 
-removeFunDecLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => AST.FunDec lore -> FunDec
+removeFunDecLore :: (Attributes lore, Op lore ~ Op SOACS) => AST.FunDec lore -> FunDec
 removeFunDecLore = rephraseFunDec removeLore
 
-removeBodyLore :: (Lore.Lore lore, Op lore ~ Op SOACS) => AST.Body lore -> Body
+removeBodyLore :: (Attributes lore, Op lore ~ Op SOACS) => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore
 
 removeRetTypeLore :: IsRetType rt => rt -> RetType

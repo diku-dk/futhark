@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Futhark.Representation.AST.Annotations
        ( Annotations (..)
+       ,  module Futhark.Representation.AST.RetType
        )
        where
 
