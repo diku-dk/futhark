@@ -99,8 +99,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
   loopResultContext (Wise lore) =
     loopResultContext lore
 
-instance (Renameable lore, CanBeWise (Op lore)) => Renameable (Wise lore) where
-instance (Substitutable lore, CanBeWise (Op lore)) => Substitutable (Wise lore) where
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
 
 instance AliasesOf (VarWisdom, attr) where

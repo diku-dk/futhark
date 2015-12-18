@@ -1,4 +1,7 @@
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | This module provides facilities for transforming Futhark programs such
 -- that names are unique, via the 'renameProg' function.
 -- Additionally, the module also supports adding integral \"tags\" to
@@ -295,12 +298,11 @@ instance Rename () where
 instance Rename ExtRetType where
   rename = liftM ExtRetType . mapM rename . retTypeValues
 
--- | A class for lores in which all annotations are renameable.
-class (Rename (LetAttr lore),
-       Rename (ExpAttr lore),
-       Rename (BodyAttr lore),
-       Rename (FParamAttr lore),
-       Rename (LParamAttr lore),
-       Rename (RetType lore),
-       Rename (Op lore)) =>
-      Renameable lore where
+-- | Lores in which all annotations are renameable.
+type Renameable lore = (Rename (LetAttr lore),
+                        Rename (ExpAttr lore),
+                        Rename (BodyAttr lore),
+                        Rename (FParamAttr lore),
+                        Rename (LParamAttr lore),
+                        Rename (RetType lore),
+                        Rename (Op lore))

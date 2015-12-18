@@ -53,10 +53,8 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import Futhark.Transform.Rename
 import Futhark.Binder
 import Futhark.Construct
-import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
 import Futhark.Analysis.Rephrase
 
@@ -108,9 +106,6 @@ instance TypeCheck.Checkable Kernels where
     AST.Param name (AST.Basic t)
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
-
-instance Renameable Kernels where
-instance Substitutable Kernels where
 
 instance Bindable Kernels where
   mkBody = AST.Body ()
