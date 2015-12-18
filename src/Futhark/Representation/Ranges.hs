@@ -60,7 +60,6 @@ import Data.Monoid
 import Prelude
 
 import qualified Futhark.Representation.AST.Lore as Lore
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
@@ -78,14 +77,14 @@ import qualified Futhark.Util.Pretty as PP
 -- | The lore for the basic representation.
 data Ranges lore = Ranges lore
 
-instance (Annotations.Annotations lore, CanBeRanged (Op lore)) =>
-         Annotations.Annotations (Ranges lore) where
-  type LetBound (Ranges lore) = (Range, Annotations.LetBound lore)
-  type Exp (Ranges lore) = Annotations.Exp lore
-  type Body (Ranges lore) = ([Range], Annotations.Body lore)
-  type FParam (Ranges lore) = Annotations.FParam lore
-  type LParam (Ranges lore) = Annotations.LParam lore
-  type RetType (Ranges lore) = Annotations.RetType lore
+instance (Annotations lore, CanBeRanged (Op lore)) =>
+         Annotations (Ranges lore) where
+  type LetAttr (Ranges lore) = (Range, LetAttr lore)
+  type ExpAttr (Ranges lore) = ExpAttr lore
+  type BodyAttr (Ranges lore) = ([Range], BodyAttr lore)
+  type FParamAttr (Ranges lore) = FParamAttr lore
+  type LParamAttr (Ranges lore) = LParamAttr lore
+  type RetType (Ranges lore) = AST.RetType lore
   type Op (Ranges lore) = OpWithRanges (Op lore)
 
 instance (Lore.Lore lore, CanBeRanged (Op lore)) =>
@@ -192,7 +191,7 @@ addRangesToPattern pat e =
   uncurry AST.Pattern $ mkPatternRanges pat e
 
 mkRangedBody :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
-                Annotations.Body lore -> [Binding lore] -> Result
+                BodyAttr lore -> [Binding lore] -> Result
              -> Body lore
 mkRangedBody innerlore bnds res =
   AST.Body (mkBodyRanges bnds res, innerlore) bnds res
@@ -200,8 +199,8 @@ mkRangedBody innerlore bnds res =
 mkPatternRanges :: (Lore.Lore lore, CanBeRanged (Op lore)) =>
                    AST.Pattern lore
                 -> Exp lore
-                -> ([PatElem (Range, Annotations.LetBound lore)],
-                    [PatElem (Range, Annotations.LetBound lore)])
+                -> ([PatElem (Range, LetAttr lore)],
+                    [PatElem (Range, LetAttr lore)])
 mkPatternRanges pat e =
   (map (`addRanges` unknownRange) $ patternContextElements pat,
    zipWith addRanges (patternValueElements pat) ranges)
@@ -231,7 +230,7 @@ intersects a b = not $ HS.null $ a `HS.intersection` b
 
 mkRangedLetBinding :: (Proper lore, CanBeRanged (Op lore)) =>
                       AST.Pattern lore
-                   -> Annotations.Exp lore
+                   -> ExpAttr lore
                    -> Exp lore
                    -> Binding lore
 mkRangedLetBinding pat explore e =

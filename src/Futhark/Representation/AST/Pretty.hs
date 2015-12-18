@@ -20,7 +20,6 @@ import Data.Monoid
 
 import Futhark.Util.Pretty
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes
 import Futhark.Util
@@ -28,10 +27,10 @@ import Futhark.Util
 -- | The class of lores whose annotations can be prettyprinted.
 class (Lore lore,
        Pretty (RetType lore),
-       Pretty (ParamT (Annotations.FParam lore)),
-       Pretty (ParamT (Annotations.LParam lore)),
-       Pretty (PatElemT (Annotations.LetBound lore)),
-       Pretty (Annotations.Op lore)) => PrettyLore lore where
+       Pretty (ParamT (FParamAttr lore)),
+       Pretty (ParamT (LParamAttr lore)),
+       Pretty (PatElemT (LetAttr lore)),
+       Pretty (Op lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
   ppFunDecLore :: FunDec lore -> Maybe Doc

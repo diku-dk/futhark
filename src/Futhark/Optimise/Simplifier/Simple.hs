@@ -19,7 +19,6 @@ import Control.Arrow (second)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -99,10 +98,10 @@ instance Engine.MonadEngine (SimpleM lore) => MonadBinder (SimpleM lore) where
   collectBindings = Engine.collectBindingsEngine
 
 instance (Proper lore,
-          Engine.Simplifiable (Annotations.LetBound lore),
-          Engine.Simplifiable (Annotations.FParam lore),
-          Engine.Simplifiable (Annotations.LParam lore),
-          Engine.Simplifiable (Annotations.RetType lore),
+          Engine.Simplifiable (LetAttr lore),
+          Engine.Simplifiable (FParamAttr lore),
+          Engine.Simplifiable (LParamAttr lore),
+          Engine.Simplifiable (RetType lore),
           Engine.SimplifiableOp lore (Op lore)) => Engine.MonadEngine (SimpleM lore) where
   type InnerLore (SimpleM lore) = lore
   askEngineEnv = snd <$> ask

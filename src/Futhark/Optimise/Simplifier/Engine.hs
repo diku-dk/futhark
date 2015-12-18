@@ -71,7 +71,6 @@ import Data.Foldable (traverse_)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
@@ -127,10 +126,10 @@ class (MonadBinder m,
        Proper (Lore m),
        Proper (InnerLore m),
        Lore m ~ Wise (InnerLore m),
-       Simplifiable (Annotations.LetBound (InnerLore m)),
-       Simplifiable (Annotations.FParam (InnerLore m)),
-       Simplifiable (Annotations.LParam (InnerLore m)),
-       Simplifiable (Annotations.RetType (InnerLore m)),
+       Simplifiable (LetAttr (InnerLore m)),
+       Simplifiable (FParamAttr (InnerLore m)),
+       Simplifiable (LParamAttr (InnerLore m)),
+       Simplifiable (RetType (InnerLore m)),
        SimplifiableOp (InnerLore m) (Op (InnerLore m))) => MonadEngine m where
   type InnerLore m :: *
   askEngineEnv :: m (Env m)

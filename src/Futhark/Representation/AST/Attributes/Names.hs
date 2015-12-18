@@ -30,15 +30,14 @@ import Prelude
 
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.RetType
 
-freeWalker :: (FreeIn (Annotations.Exp lore),
-               FreeIn (Annotations.Body lore),
-               FreeIn (Annotations.FParam lore),
-               FreeIn (Annotations.LParam lore),
-               FreeIn (Annotations.LetBound lore),
+freeWalker :: (FreeIn (ExpAttr lore),
+               FreeIn (BodyAttr lore),
+               FreeIn (FParamAttr lore),
+               FreeIn (LParamAttr lore),
+               FreeIn (LetAttr lore),
                FreeIn (Op lore)) =>
               Walker lore (Writer Names)
 freeWalker = identityWalker {
@@ -94,44 +93,44 @@ freeWalker = identityWalker {
         expFree e = walkExpM freeWalker e
 
 -- | Return the set of variable names that are free in the given body.
-freeInBody :: (FreeIn (Annotations.Exp lore),
-               FreeIn (Annotations.Body lore),
-               FreeIn (Annotations.FParam lore),
-               FreeIn (Annotations.LParam lore),
-               FreeIn (Annotations.LetBound lore),
+freeInBody :: (FreeIn (ExpAttr lore),
+               FreeIn (BodyAttr lore),
+               FreeIn (FParamAttr lore),
+               FreeIn (LParamAttr lore),
+               FreeIn (LetAttr lore),
                FreeIn (Op lore)) =>
               Body lore -> Names
 freeInBody = execWriter . walkOnBody freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- expression.
-freeInExp :: (FreeIn (Annotations.Exp lore),
-              FreeIn (Annotations.Body lore),
-              FreeIn (Annotations.FParam lore),
-              FreeIn (Annotations.LParam lore),
-              FreeIn (Annotations.LetBound lore),
+freeInExp :: (FreeIn (ExpAttr lore),
+              FreeIn (BodyAttr lore),
+              FreeIn (FParamAttr lore),
+              FreeIn (LParamAttr lore),
+              FreeIn (LetAttr lore),
               FreeIn (Op lore)) =>
              Exp lore -> Names
 freeInExp = execWriter . walkExpM freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- binding.
-freeInBinding :: (FreeIn (Annotations.Exp lore),
-                  FreeIn (Annotations.Body lore),
-                  FreeIn (Annotations.FParam lore),
-                  FreeIn (Annotations.LParam lore),
-                  FreeIn (Annotations.LetBound lore),
+freeInBinding :: (FreeIn (ExpAttr lore),
+                  FreeIn (BodyAttr lore),
+                  FreeIn (FParamAttr lore),
+                  FreeIn (LParamAttr lore),
+                  FreeIn (LetAttr lore),
                   FreeIn (Op lore)) =>
                  Binding lore -> Names
 freeInBinding = execWriter . walkOnBinding freeWalker
 
 -- | Return the set of variable names that are free in the given
 -- lambda, including shape annotations in the parameters.
-freeInLambda :: (FreeIn (Annotations.Exp lore),
-                 FreeIn (Annotations.Body lore),
-                 FreeIn (Annotations.FParam lore),
-                 FreeIn (Annotations.LParam lore),
-                 FreeIn (Annotations.LetBound lore),
+freeInLambda :: (FreeIn (ExpAttr lore),
+                 FreeIn (BodyAttr lore),
+                 FreeIn (FParamAttr lore),
+                 FreeIn (LParamAttr lore),
+                 FreeIn (LetAttr lore),
                  FreeIn (Op lore)) =>
                 Lambda lore -> Names
 freeInLambda (Lambda index params body rettype) =
@@ -143,11 +142,11 @@ freeInLambda (Lambda index params body rettype) =
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
-freeInExtLambda :: (FreeIn (Annotations.Exp lore),
-                    FreeIn (Annotations.Body lore),
-                    FreeIn (Annotations.FParam lore),
-                    FreeIn (Annotations.LParam lore),
-                    FreeIn (Annotations.LetBound lore),
+freeInExtLambda :: (FreeIn (ExpAttr lore),
+                    FreeIn (BodyAttr lore),
+                    FreeIn (FParamAttr lore),
+                    FreeIn (LParamAttr lore),
+                    FreeIn (LetAttr lore),
                     FreeIn (Op lore)) =>
                    ExtLambda lore -> Names
 freeInExtLambda (ExtLambda index params body rettype) =

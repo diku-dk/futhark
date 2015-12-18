@@ -25,7 +25,6 @@ import Control.Monad
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Binder.Class (Bindable)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
@@ -85,10 +84,10 @@ simplifyBindingsWithRules simpl rules blockers bnds =
   simplifyBindings simpl rules blockers bnds
 
 simplifyBasicish :: (MonadFreshNames m, Bindable lore,
-                     Simplifiable (Annotations.LetBound lore),
-                     Simplifiable (Annotations.FParam lore),
-                     Simplifiable (Annotations.LParam lore),
-                     Simplifiable (Annotations.RetType lore),
+                     Simplifiable (LetAttr lore),
+                     Simplifiable (FParamAttr lore),
+                     Simplifiable (LParamAttr lore),
+                     Simplifiable (RetType lore),
                      SimplifiableOp lore (Op lore)) =>
                     Prog lore -> m (Prog lore)
 simplifyBasicish =

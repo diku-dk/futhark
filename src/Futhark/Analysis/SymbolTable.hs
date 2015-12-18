@@ -57,7 +57,6 @@ import Prelude hiding (elem, lookup)
 
 import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, lookupType)
 import qualified Futhark.Representation.AST as AST
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Analysis.ScalExp
 import Futhark.Transform.Substitute
 import qualified Futhark.Analysis.AlgSimplify as AS
@@ -100,7 +99,7 @@ data LoopVarEntry lore =
 
 data LetBoundEntry lore =
   LetBoundEntry { letBoundRange        :: ScalExpRange
-                , letBoundLore         :: Annotations.LetBound lore
+                , letBoundLore         :: LetAttr lore
                 , letBoundBinding      :: Binding lore
                 , letBoundBindingDepth :: Int
                 , letBoundScalExp      :: Maybe ScalExp
@@ -110,7 +109,7 @@ data LetBoundEntry lore =
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
-              , paramLore          :: Annotations.FParam lore
+              , paramLore          :: FParamAttr lore
               , fparamBindingDepth :: Int
               , paramType          :: DeclType
               }
@@ -179,11 +178,11 @@ entryBinding :: Entry lore -> Maybe (Binding lore)
 entryBinding (LetBound entry) = Just $ letBoundBinding entry
 entryBinding _                = Nothing
 
-entryLetBoundLore :: Entry lore -> Maybe (Annotations.LetBound lore)
+entryLetBoundLore :: Entry lore -> Maybe (LetAttr lore)
 entryLetBoundLore (LetBound entry) = Just $ letBoundLore entry
 entryLetBoundLore _                = Nothing
 
-entryFParamLore :: Entry lore -> Maybe (Annotations.FParam lore)
+entryFParamLore :: Entry lore -> Maybe (FParamAttr lore)
 entryFParamLore (FParam entry) = Just $ paramLore entry
 entryFParamLore _              = Nothing
 
@@ -313,7 +312,7 @@ typeEnv = HM.map entryType . bindings
 
 defBndEntry :: Annotations lore =>
                SymbolTable lore
-            -> PatElem (Annotations.LetBound lore)
+            -> PatElem (LetAttr lore)
             -> Range
             -> Binding lore
             -> LetBoundEntry lore
@@ -394,7 +393,7 @@ insertBinding bnd vtable =
   insertEntries (zip names $ map LetBound $ bindingEntries bnd vtable) vtable
   where names = patternNames $ bindingPattern bnd
 
-insertFParam :: Annotations.Annotations lore =>
+insertFParam :: Annotations lore =>
                 AST.FParam lore
              -> SymbolTable lore
              -> SymbolTable lore
@@ -406,12 +405,12 @@ insertFParam fparam = insertEntry name entry
                                    , paramType = AST.paramDeclType fparam
                                    }
 
-insertFParams :: Annotations.Annotations lore =>
+insertFParams :: Annotations lore =>
                  [AST.FParam lore] -> SymbolTable lore
               -> SymbolTable lore
 insertFParams fparams symtable = foldr insertFParam symtable fparams
 
-insertLParamWithRange :: Annotations.Annotations lore =>
+insertLParamWithRange :: Annotations lore =>
                          LParam lore -> ScalExpRange -> SymbolTable lore
                       -> SymbolTable lore
 insertLParamWithRange param range vtable =
@@ -428,12 +427,12 @@ insertLParamWithRange param range vtable =
         isVar (Var v) = Just v
         isVar _       = Nothing
 
-insertLParam :: Annotations.Annotations lore =>
+insertLParam :: Annotations lore =>
                 LParam lore -> SymbolTable lore -> SymbolTable lore
 insertLParam param =
   insertLParamWithRange param (Nothing, Nothing)
 
-insertArrayLParam :: Annotations.Annotations lore =>
+insertArrayLParam :: Annotations lore =>
                      LParam lore -> Maybe VName -> SymbolTable lore
                   -> SymbolTable lore
 insertArrayLParam param (Just array) vtable =

@@ -26,7 +26,6 @@ import Prelude
 
 import Futhark.Representation.AST
 import Futhark.Representation.SOACS.SOAC
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.MonadFreshNames
 import Futhark.Construct
 
@@ -69,7 +68,7 @@ nonuniqueFParams params =
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>
-                         Pattern lore -> Annotations.Exp lore
+                         Pattern lore -> ExpAttr lore
                       -> ( Certificates, SubExp
                          , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])

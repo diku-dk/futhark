@@ -27,7 +27,6 @@ import Data.Monoid
 
 import Futhark.Representation.AST
 import qualified Futhark.Representation.AST.Lore as Lore
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.Aliases
   (unNames, Names' (..), VarAliases, ConsumedInExp)
@@ -83,14 +82,14 @@ instance FreeIn BodyWisdom where
   freeIn (BodyWisdom als cons rs) =
     freeIn als <> freeIn cons <> freeIn rs
 
-instance (Annotations.Annotations lore,
-          CanBeWise (Op lore)) => Annotations.Annotations (Wise lore) where
-  type LetBound (Wise lore) = (VarWisdom, Annotations.LetBound lore)
-  type Exp (Wise lore) = (ExpWisdom, Annotations.Exp lore)
-  type Body (Wise lore) = (BodyWisdom, Annotations.Body lore)
-  type FParam (Wise lore) = Annotations.FParam lore
-  type LParam (Wise lore) = Annotations.LParam lore
-  type RetType (Wise lore) = Annotations.RetType lore
+instance (Annotations lore,
+          CanBeWise (Op lore)) => Annotations (Wise lore) where
+  type LetAttr (Wise lore) = (VarWisdom, LetAttr lore)
+  type ExpAttr (Wise lore) = (ExpWisdom, ExpAttr lore)
+  type BodyAttr (Wise lore) = (BodyWisdom, BodyAttr lore)
+  type FParamAttr (Wise lore) = FParamAttr lore
+  type LParamAttr (Wise lore) = LParamAttr lore
+  type RetType (Wise lore) = RetType lore
   type Op (Wise lore) = OpWithWisdom (Op lore)
 
 instance (Lore.Lore lore, CanBeWise (Op lore)) => Lore.Lore (Wise lore) where
@@ -168,7 +167,7 @@ addWisdomToPattern pat e =
         ranges = expRanges e
 
 mkWiseBody :: (Proper lore, CanBeWise (Op lore)) =>
-              Annotations.Body lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
+              BodyAttr lore -> [Binding (Wise lore)] -> Result -> Body (Wise lore)
 mkWiseBody innerlore bnds res =
   Body (BodyWisdom aliases consumed ranges, innerlore) bnds res
   where (aliases, consumed) = Aliases.mkBodyAliases bnds res
@@ -176,7 +175,7 @@ mkWiseBody innerlore bnds res =
 
 mkWiseLetBinding :: (Proper lore, CanBeWise (Op lore)) =>
                     Pattern lore
-                 -> Annotations.Exp lore -> Exp (Wise lore)
+                 -> ExpAttr lore -> Exp (Wise lore)
                  -> Binding (Wise lore)
 mkWiseLetBinding pat explore e =
   Let (addWisdomToPattern pat e)

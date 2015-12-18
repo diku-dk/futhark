@@ -13,7 +13,6 @@ import Control.Monad.Identity
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.RetType
@@ -176,11 +175,11 @@ instance Substitute d => Substitute (DimChange d) where
 
 -- | The class of lores in which all annotations support name
 -- substitution.
-class (Substitute (Annotations.Exp lore),
-       Substitute (Annotations.Body lore),
-       Substitute (Annotations.LetBound lore),
-       Substitute (Annotations.FParam lore),
-       Substitute (Annotations.LParam lore),
-       Substitute (Annotations.RetType lore),
+class (Substitute (ExpAttr lore),
+       Substitute (BodyAttr lore),
+       Substitute (LetAttr lore),
+       Substitute (FParamAttr lore),
+       Substitute (LParamAttr lore),
+       Substitute (RetType lore),
        Substitute (Op lore)) =>
       Substitutable lore where

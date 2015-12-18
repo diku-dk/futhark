@@ -66,7 +66,6 @@ import Data.Monoid
 import Prelude
 
 import qualified Futhark.Representation.AST.Lore as Lore
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Syntax
@@ -191,12 +190,12 @@ instance Engine.SimplifiableOp ExplicitMemory (Kernel ExplicitMemory) =>
   simplifyOp (Alloc size space) = Alloc <$> Engine.simplify size <*> pure space
   simplifyOp (Inner k) = Inner <$> Engine.simplifyOp k
 
-instance Annotations.Annotations ExplicitMemory where
-  type LetBound ExplicitMemory = MemBound NoUniqueness
-  type FParam   ExplicitMemory = MemBound Uniqueness
-  type LParam   ExplicitMemory = MemBound NoUniqueness
-  type RetType  ExplicitMemory = [FunReturns]
-  type Op       ExplicitMemory = MemOp ExplicitMemory
+instance Annotations ExplicitMemory where
+  type LetAttr    ExplicitMemory = MemBound NoUniqueness
+  type FParamAttr ExplicitMemory = MemBound Uniqueness
+  type LParamAttr ExplicitMemory = MemBound NoUniqueness
+  type RetType    ExplicitMemory = [FunReturns]
+  type Op         ExplicitMemory = MemOp ExplicitMemory
 
 instance Lore.Lore ExplicitMemory where
   representative = ExplicitMemory

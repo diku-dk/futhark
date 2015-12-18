@@ -59,7 +59,6 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.TypeEnv
-import qualified Futhark.Representation.AST.Annotations as Annotations
 
 -- | The type of a subexpression.
 subExpType :: HasTypeEnv m => SubExp -> m Type
@@ -132,7 +131,7 @@ primOpType (Partition _ n _ arrays) =
   where result ts = replicate n (Basic Int) ++ ts
 
 -- | The type of a loop operation.
-loopOpExtType :: Typed (Annotations.FParam lore) =>
+loopOpExtType :: Typed (FParamAttr lore) =>
                  LoopOp lore -> [ExtType]
 loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (paramIdent . fst) merge
@@ -140,8 +139,8 @@ loopOpExtType (DoLoop res merge _ _) =
 -- | The type of an expression.
 expExtType :: (HasTypeEnv m,
                IsRetType (RetType lore),
-               Typed (Annotations.FParam lore),
-               TypedOp (Annotations.Op lore)) =>
+               Typed (FParamAttr lore),
+               TypedOp (Op lore)) =>
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
@@ -151,8 +150,8 @@ expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.
 expExtTypeSize :: (IsRetType (RetType lore),
-                   Typed (Annotations.FParam lore),
-                   TypedOp (Annotations.Op lore)) =>
+                   Typed (FParamAttr lore),
+                   TypedOp (Op lore)) =>
                   Exp lore -> Int
 expExtTypeSize = length . feelBad . expExtType
 

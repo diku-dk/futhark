@@ -24,7 +24,6 @@ import Data.List
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.SOACS hiding (Lore)
 import Futhark.Transform.Rename
@@ -33,12 +32,12 @@ import Futhark.Tools
 
 -- | Perform the first-order transformation on an Futhark program.
 transformProg :: (MonadFreshNames m, Bindable tolore,
-                  Annotations.LetBound SOACS ~ Annotations.LetBound tolore) =>
+                  LetAttr SOACS ~ LetAttr tolore) =>
                  Prog -> m (AST.Prog tolore)
 transformProg = intraproceduralTransformation transformFunDec
 
 transformFunDec :: (MonadFreshNames m, Bindable tolore,
-                    Annotations.LetBound SOACS ~ Annotations.LetBound tolore) =>
+                    LetAttr SOACS ~ LetAttr tolore) =>
                    FunDec -> m (AST.FunDec tolore)
 transformFunDec (FunDec fname rettype params body) = do
   (body',_) <-
@@ -53,7 +52,7 @@ transformFunDec (FunDec fname rettype params body) = do
 type Transformer m = (MonadBinder m,
                       Bindable (Lore m),
                       LocalTypeEnv m,
-                      Annotations.LetBound SOACS ~ Annotations.LetBound (Lore m))
+                      LetAttr SOACS ~ LetAttr (Lore m))
 
 transformBody :: Transformer m =>
                  Body -> m (AST.Body (Lore m))
@@ -633,7 +632,7 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
 transformLambda :: (MonadFreshNames m,
                     Bindable lore,
                     LocalTypeEnv m,
-                    Annotations.LetBound SOACS ~ Annotations.LetBound lore) =>
+                    LetAttr SOACS ~ LetAttr lore) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda i params body rettype) = do
   body' <- runBodyBinder $
@@ -645,7 +644,7 @@ transformLambda (Lambda i params body rettype) = do
 transformExtLambda :: (MonadFreshNames m,
                        Bindable lore,
                        LocalTypeEnv m,
-                       Annotations.LetBound SOACS ~ Annotations.LetBound lore) =>
+                       LetAttr SOACS ~ LetAttr lore) =>
                       ExtLambda -> m (AST.ExtLambda lore)
 transformExtLambda (ExtLambda i params body rettype) = do
   body' <- runBodyBinder $
