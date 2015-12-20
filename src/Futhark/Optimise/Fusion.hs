@@ -29,10 +29,10 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Transform.Rename
 import Futhark.Pass
 
-data VarEntry = IsArray VName SOAC.ArrayTransforms (NameType SOACS)
-              | IsNotArray VName (NameType SOACS)
+data VarEntry = IsArray VName SOAC.ArrayTransforms (NameInfo SOACS)
+              | IsNotArray VName (NameInfo SOACS)
 
-varEntryType :: VarEntry -> NameType SOACS
+varEntryType :: VarEntry -> NameInfo SOACS
 varEntryType (IsArray _ _ attr) =
   attr
 varEntryType (IsNotArray _ attr) =
@@ -68,9 +68,9 @@ instance MonadFreshNames FusionGM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv (NameType SOACS) FusionGM where
-  askTypeEnv = toTypeEnv <$> asks varsInScope
-    where toTypeEnv = HM.map varEntryType
+instance HasScope SOACS FusionGM where
+  askScope = toScope <$> asks varsInScope
+    where toScope = HM.map varEntryType
 
 ------------------------------------------------------------------------
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
@@ -87,8 +87,8 @@ bindVar :: FusionGEnv -> Ident -> FusionGEnv
 bindVar env (Ident name t) =
   env { varsInScope = HM.insert name entry $ varsInScope env }
   where entry = case t of
-          Array {} -> IsArray name mempty $ LetType t
-          _        -> IsNotArray name $ LetType t
+          Array {} -> IsArray name mempty $ LetInfo t
+          _        -> IsNotArray name $ LetInfo t
 
 bindVars :: FusionGEnv -> [Ident] -> FusionGEnv
 bindVars = foldl bindVar
@@ -111,7 +111,7 @@ bindingFParams = binding  . map paramIdent
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
 bindingFamilyVar faml env (Ident nm t) =
   env { soacs       = HM.insert nm faml $ soacs env
-      , varsInScope = HM.insert nm (IsArray nm mempty $ LetType t) $
+      , varsInScope = HM.insert nm (IsArray nm mempty $ LetInfo t) $
                       varsInScope env
       }
 

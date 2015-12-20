@@ -21,17 +21,16 @@ import Futhark.Representation.SOACS
 import Futhark.NeedNames
 import Futhark.MonadFreshNames
 
-newtype TryFusion a = TryFusion (ReaderT (TypeEnv (NameType SOACS))
+newtype TryFusion a = TryFusion (ReaderT (Scope SOACS)
                                  (StateT VNameSource Maybe)
                                  a)
   deriving (Functor, Applicative, Alternative, Monad,
-            MonadReader (TypeEnv (NameType SOACS)),
             MonadFreshNames,
-            HasTypeEnv (NameType SOACS),
-            LocalTypeEnv (NameType SOACS))
+            HasScope SOACS,
+            LocalScope SOACS)
 
 tryFusion :: MonadFreshNames m =>
-             TryFusion a -> TypeEnv (NameType SOACS) -> m (Maybe a)
+             TryFusion a -> Scope SOACS -> m (Maybe a)
 tryFusion (TryFusion m) types = modifyNameSource $ \src ->
   case runStateT (runReaderT m types) src of
     Just (x, src') -> (Just x, src')

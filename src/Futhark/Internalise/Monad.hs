@@ -76,8 +76,8 @@ instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv (NameType SOACS) InternaliseM where
-  askTypeEnv = InternaliseM askTypeEnv
+instance HasScope SOACS InternaliseM where
+  askScope = InternaliseM askScope
 
 instance MonadBinder InternaliseM where
   type Lore InternaliseM = SOACS
@@ -114,7 +114,11 @@ lookupFunction fname = do
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
 bindingIdentTypes idents (InternaliseM m) =
-  InternaliseM $ localTypeEnv (typeEnvFromIdents idents) m
+  InternaliseM $ localScope (typeEnvFromIdents idents) m
+
+typeEnvFromIdents :: [Ident] -> Scope SOACS
+typeEnvFromIdents = HM.fromList . map assoc
+  where assoc ident = (identName ident, LetInfo $ identType ident)
 
 bindingParamTypes :: [LParam] -> InternaliseM a
                   -> InternaliseM a

@@ -14,8 +14,8 @@ module Futhark.Optimise.Simplifier.Lore
        , removeExpWisdom
        , removePatternWisdom
        , removeBodyWisdom
-       , removeTypeEnvWisdom
-       , addTypeEnvWisdom
+       , removeScopeWisdom
+       , addScopeWisdom
        , addWisdomToPattern
        , mkWiseBody
        , mkWiseLetBinding
@@ -104,7 +104,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
     loopResultContext lore
 
   expContext pat e = do
-    types <- asksTypeEnv removeTypeEnvWisdom
+    types <- asksScope removeScopeWisdom
     runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
 
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
@@ -132,19 +132,19 @@ removeWisdom = Rephraser { rephraseExpLore = snd
                          , rephraseOp = removeOpWisdom
                          }
 
-removeTypeEnvWisdom :: TypeEnv (NameType (Wise lore)) -> TypeEnv (NameType lore)
-removeTypeEnvWisdom = HM.map unAlias
-  where unAlias (LetType (_, attr)) = LetType attr
-        unAlias (FParamType attr) = FParamType attr
-        unAlias (LParamType attr) = LParamType attr
-        unAlias IndexType = IndexType
+removeScopeWisdom :: Scope (Wise lore) -> Scope lore
+removeScopeWisdom = HM.map unAlias
+  where unAlias (LetInfo (_, attr)) = LetInfo attr
+        unAlias (FParamInfo attr) = FParamInfo attr
+        unAlias (LParamInfo attr) = LParamInfo attr
+        unAlias IndexInfo = IndexInfo
 
-addTypeEnvWisdom :: TypeEnv (NameType lore) -> TypeEnv (NameType (Wise lore))
-addTypeEnvWisdom = HM.map alias
-  where alias (LetType attr) = LetType (VarWisdom mempty unknownRange, attr)
-        alias (FParamType attr) = FParamType attr
-        alias (LParamType attr) = LParamType attr
-        alias IndexType = IndexType
+addScopeWisdom :: Scope lore -> Scope (Wise lore)
+addScopeWisdom = HM.map alias
+  where alias (LetInfo attr) = LetInfo (VarWisdom mempty unknownRange, attr)
+        alias (FParamInfo attr) = FParamInfo attr
+        alias (LParamInfo attr) = LParamInfo attr
+        alias IndexInfo = IndexInfo
 
 removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
 removeProgWisdom = rephraseProg removeWisdom
@@ -207,7 +207,7 @@ instance (Bindable lore,
     in mkWiseLetBinding pat' explore e
 
   mkLetNames names e = do
-    env <- asksTypeEnv removeTypeEnvWisdom
+    env <- asksScope removeScopeWisdom
     flip runReaderT env $ do
       Let pat explore _ <- mkLetNames names $ removeExpWisdom e
       return $ mkWiseLetBinding pat explore e

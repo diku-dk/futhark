@@ -36,7 +36,7 @@ nonuniqueParams params =
     if not $ basicType $ paramType param then do
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
       let param' = Param param_name $ paramType param
-      withLParamTypes [param'] $
+      localScope (scopeOfLParams [param']) $
         letBindNames_ [(paramName param,BindVar)] $
         PrimOp $ Copy $ paramName param'
       return param'
@@ -48,7 +48,7 @@ nonuniqueParams params =
 --
 -- Reuses the original pattern for the @reduce@, and creates a new
 -- pattern with new 'Ident's for the result of the @map@. Does /not/
--- add the new idents to the 'TypeEnv'.
+-- add the new idents to the 'Scope'.
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>

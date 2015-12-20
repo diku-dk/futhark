@@ -253,7 +253,7 @@ instance Substitute Input where
     Input (substituteNames substs ts) (substituteNames substs a)
 
 -- | Create a plain array variable input with no transformations.
-varInput :: HasTypeEnv t f => VName -> f Input
+varInput :: HasScope t f => VName -> f Input
 varInput v = withType <$> lookupType v
   where withType t = Input (ArrayTransforms Seq.empty) $ Var v t
 
@@ -288,7 +288,7 @@ addTransforms ts (Input ots ia) = Input (ots <> ts) ia
 
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
-inputFromSubExp :: HasTypeEnv t f => SubExp -> f (Maybe Input)
+inputFromSubExp :: HasScope t f => SubExp -> f (Maybe Input)
 inputFromSubExp (Futhark.Var v) = Just <$> varInput v
 inputFromSubExp _               = pure Nothing
 
@@ -533,7 +533,7 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasTypeEnv t f) =>
+fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
 -- | XXX: ugly hack to deal with the lack of support for zero-input

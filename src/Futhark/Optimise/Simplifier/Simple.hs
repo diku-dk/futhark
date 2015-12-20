@@ -70,8 +70,8 @@ instance MonadFreshNames (SimpleM lore) where
   putNameSource y = modify $ \(x, _) -> (x,y)
 
 instance Engine.MonadEngine (SimpleM lore) =>
-         HasTypeEnv (NameType (Wise lore)) (SimpleM lore) where
-  askTypeEnv = ST.typeEnv <$> Engine.getVtable
+         HasScope (Wise lore) (SimpleM lore) where
+  askScope = ST.typeEnv <$> Engine.getVtable
   lookupType name = do
     vtable <- Engine.getVtable
     case ST.lookupType name vtable of
@@ -81,8 +81,8 @@ instance Engine.MonadEngine (SimpleM lore) =>
                  pretty name ++ " in symbol table."
 
 instance Engine.MonadEngine (SimpleM lore) =>
-         LocalTypeEnv (NameType (Wise lore)) (SimpleM lore) where
-  localTypeEnv types = Engine.localVtable (<>ST.fromTypeEnv types)
+         LocalScope (Wise lore) (SimpleM lore) where
+  localScope types = Engine.localVtable (<>ST.fromScope types)
 
 instance Engine.MonadEngine (SimpleM lore) => MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Wise lore

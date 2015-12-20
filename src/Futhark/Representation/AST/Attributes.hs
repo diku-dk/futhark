@@ -190,7 +190,7 @@ class (Annotations lore,
   -- of elements as there are context elements in the pattern.
   --
   -- The default method invokes 'expExtContext'.
-  expContext :: (HasTypeEnv (NameType lore) m, Monad m) =>
+  expContext :: (HasScope lore m, Monad m) =>
                 Pattern lore ->
                 Exp lore ->
                 m [Maybe SubExp]

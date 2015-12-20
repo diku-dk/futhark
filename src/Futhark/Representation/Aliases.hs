@@ -53,7 +53,7 @@ module Futhark.Representation.Aliases
        , removeLambdaAliases
        , removeExtLambdaAliases
        , removePatternAliases
-       , removeTypeEnvAliases
+       , removeScopeAliases
        )
 where
 
@@ -154,7 +154,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) 
     loopResultContext lore
 
   expContext pat e = do
-    env <- asksTypeEnv removeTypeEnvAliases
+    env <- asksScope removeScopeAliases
     return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
@@ -226,12 +226,12 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseOp = removeOpAliases
                           }
 
-removeTypeEnvAliases :: TypeEnv (NameType (Aliases lore)) -> TypeEnv (NameType lore)
-removeTypeEnvAliases = HM.map unAlias
-  where unAlias (LetType (_, attr)) = LetType attr
-        unAlias (FParamType attr) = FParamType attr
-        unAlias (LParamType attr) = LParamType attr
-        unAlias IndexType = IndexType
+removeScopeAliases :: Scope (Aliases lore) -> Scope lore
+removeScopeAliases = HM.map unAlias
+  where unAlias (LetInfo (_, attr)) = LetInfo attr
+        unAlias (FParamInfo attr) = FParamInfo attr
+        unAlias (LParamInfo attr) = LParamInfo attr
+        unAlias IndexInfo = IndexInfo
 
 removeProgAliases :: CanBeAliased (Op lore) =>
                      AST.Prog (Aliases lore) -> AST.Prog lore
@@ -360,7 +360,7 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
     in mkAliasedLetBinding pat' explore e
 
   mkLetNames names e = do
-    env <- asksTypeEnv removeTypeEnvAliases
+    env <- asksScope removeScopeAliases
     flip runReaderT env $ do
       Let pat explore _ <- mkLetNames names $ removeExpAliases e
       return $ mkAliasedLetBinding pat explore e

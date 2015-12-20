@@ -26,10 +26,10 @@ type IndexSubstitution attr = (Certificates, VName, attr, [SubExp])
 type IndexSubstitutions attr = [(VName, IndexSubstitution attr)]
 
 typeEnvFromSubstitutions :: LetAttr lore ~ attr =>
-                            IndexSubstitutions attr -> TypeEnv (NameType lore)
+                            IndexSubstitutions attr -> Scope lore
 typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution . snd)
   where fromSubstitution (_, name, t, _) =
-          (name, LetType t)
+          (name, LetInfo t)
 
 substituteIndices :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ attr) =>
                      IndexSubstitutions attr -> [Binding lore]

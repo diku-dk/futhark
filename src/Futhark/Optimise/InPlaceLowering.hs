@@ -174,7 +174,7 @@ data Entry = Entry { entryNumber :: Int
                    , entryAliases :: Names
                    , entryDepth :: Int
                    , entryOptimisable :: Bool
-                   , entryType :: NameType (Aliases Kernels)
+                   , entryType :: NameInfo (Aliases Kernels)
                    }
 
 type VTable = HM.HashMap VName Entry
@@ -212,8 +212,8 @@ instance MonadFreshNames ForwardingM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv (NameType (Aliases Kernels)) ForwardingM where
-  askTypeEnv = HM.map entryType <$> asks topDownTable
+instance HasScope (Aliases Kernels) ForwardingM where
+  askScope = HM.map entryType <$> asks topDownTable
 
 runForwardingM :: ForwardingM a -> VNameSource -> (a, VNameSource)
 runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown src
@@ -223,7 +223,7 @@ runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown sr
                                , topDownDepth = 0
                                }
 
-bindingParams :: (attr -> NameType (Aliases Kernels))
+bindingParams :: (attr -> NameInfo (Aliases Kernels))
               -> [Param attr]
                -> ForwardingM a
                -> ForwardingM a
@@ -237,12 +237,12 @@ bindingParams f params = local $ \(TopDown n vtable d) ->
 bindingFParams :: [FParam (Aliases Kernels)]
                -> ForwardingM a
                -> ForwardingM a
-bindingFParams = bindingParams FParamType
+bindingFParams = bindingParams FParamInfo
 
 bindingLParams :: [LParam (Aliases Kernels)]
                -> ForwardingM a
                -> ForwardingM a
-bindingLParams = bindingParams LParamType
+bindingLParams = bindingParams LParamInfo
 
 bindingBinding :: Binding Kernels
                -> ForwardingM a
@@ -252,7 +252,7 @@ bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
       entry patElem =
         let (aliases, _) = patElemAttr patElem
         in (patElemName patElem,
-            Entry n (unNames aliases) d True $ LetType $ patElemAttr patElem)
+            Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingIndices :: [VName]
@@ -262,7 +262,7 @@ bindingIndices is = local $ \(TopDown n vtable d) ->
   let entries = HM.fromList $ map entry is
       entry v =
         (v,
-         Entry n mempty d False IndexType)
+         Entry n mempty d False IndexInfo)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int

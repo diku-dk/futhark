@@ -114,8 +114,7 @@ inlineInBody
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
-        (runReader (withShapes res') $
-         typeEnvFromBindings callbnds)
+        (runReader (withShapes res') $ scopeOf callbnds)
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
        FunDec _ _ fargs body:_ ->
