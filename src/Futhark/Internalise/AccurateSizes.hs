@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.AccurateSizes
   ( shapeBody
   , annotateArrayShape
@@ -20,7 +21,7 @@ import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.MonadFreshNames
 
-shapeBody :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+shapeBody :: (HasTypeEnv (NameType lore) m, MonadFreshNames m, Bindable lore) =>
              [VName] -> [Type] -> Body lore
           -> m (Body lore)
 shapeBody shapenames ts body =

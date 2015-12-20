@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
@@ -27,14 +29,14 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Transform.Rename
 import Futhark.Pass
 
-data VarEntry = IsArray Ident SOAC.ArrayTransforms
-              | IsNotArray Ident
+data VarEntry = IsArray VName SOAC.ArrayTransforms (NameType SOACS)
+              | IsNotArray VName (NameType SOACS)
 
-varEntryType :: VarEntry -> Type
-varEntryType (IsArray ident trns) =
-  SOAC.inputType $ SOAC.addTransforms trns $ SOAC.identInput ident
-varEntryType (IsNotArray ident) =
-  identType ident
+varEntryType :: VarEntry -> NameType SOACS
+varEntryType (IsArray _ _ attr) =
+  attr
+varEntryType (IsNotArray _ attr) =
+  attr
 
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
@@ -43,10 +45,12 @@ data FusionGEnv = FusionGEnv {
   , fusedRes   :: FusedRes
   }
 
-arrsInScope :: FusionGEnv -> HM.HashMap VName (Ident, SOAC.ArrayTransforms)
+arrsInScope :: FusionGEnv -> HM.HashMap VName (VName, Type, SOAC.ArrayTransforms)
 arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
-  where asArray (name, IsArray ident ts) = Just (name, (ident, ts))
-        asArray (_, IsNotArray _)        = Nothing
+  where asArray (name, IsArray srcname ts attr) =
+          Just (name, (srcname, typeOf attr, ts))
+        asArray (_, IsNotArray _ _) =
+          Nothing
 
 data Error = Error String
 
@@ -64,7 +68,7 @@ instance MonadFreshNames FusionGM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv FusionGM where
+instance HasTypeEnv (NameType SOACS) FusionGM where
   askTypeEnv = toTypeEnv <$> asks varsInScope
     where toTypeEnv = HM.map varEntryType
 
@@ -72,21 +76,19 @@ instance HasTypeEnv FusionGM where
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
 ------------------------------------------------------------------------
 
-arrayTransforms :: VName -> Type -> FusionGM (Ident, SOAC.ArrayTransforms)
+arrayTransforms :: VName -> Type -> FusionGM (VName, Type, SOAC.ArrayTransforms)
 arrayTransforms name t = do
   v' <- asks $ HM.lookup name . arrsInScope
   case v' of Just res -> return res
-             Nothing  -> return (Ident name t, SOAC.noTransforms)
+             Nothing  -> return (name, t, SOAC.noTransforms)
 
 -- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> Ident -> FusionGEnv
-bindVar env name =
-  env { varsInScope = HM.insert (identName name) entry $
-                      varsInScope env }
-  where entry = case identType name of
-          Array {} -> IsArray name mempty
-          _        -> IsNotArray name
-
+bindVar env (Ident name t) =
+  env { varsInScope = HM.insert name entry $ varsInScope env }
+  where entry = case t of
+          Array {} -> IsArray name mempty $ LetType t
+          _        -> IsNotArray name $ LetType t
 
 bindVars :: FusionGEnv -> [Ident] -> FusionGEnv
 bindVars = foldl bindVar
@@ -107,9 +109,10 @@ bindingFParams = binding  . map paramIdent
 
 -- | Binds an array name to the set of soac-produced vars
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
-bindingFamilyVar faml env nm =
-  env { soacs       = HM.insert (identName nm) faml $ soacs env
-      , varsInScope = HM.insert (identName nm) (IsArray nm mempty) $ varsInScope env
+bindingFamilyVar faml env (Ident nm t) =
+  env { soacs       = HM.insert nm faml $ soacs env
+      , varsInScope = HM.insert nm (IsArray nm mempty $ LetType t) $
+                      varsInScope env
       }
 
 checkForUpdates :: Pattern -> FusedRes -> FusionGM FusedRes
@@ -140,9 +143,9 @@ bindingFamily pat m = do
 bindingTransform :: Ident -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform v srcname trns = local $ \env ->
   case HM.lookup srcname $ varsInScope env of
-    Just (IsArray src' ts) ->
+    Just (IsArray src' ts attr) ->
       env { varsInScope =
-              HM.insert vname (IsArray src' $ ts SOAC.|> trns) $
+              HM.insert vname (IsArray src' (ts SOAC.|> trns) attr) $
               varsInScope env
           }
     _ -> bindVar env v
@@ -292,8 +295,8 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
 
 inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
 inlineSOACInput (SOAC.Input ts (SOAC.Var v t)) = do
-  (v2, ts2) <- arrayTransforms v t
-  return $ SOAC.Input (ts2<>ts) (SOAC.Var (identName v2) (identType v2))
+  (v2, t2, ts2) <- arrayTransforms v t
+  return $ SOAC.Input (ts2<>ts) (SOAC.Var v2 t2)
 inlineSOACInput input = return input
 
 inlineSOACInputs :: SOAC -> FusionGM SOAC
@@ -665,8 +668,8 @@ addVarToUnfusable :: FusedRes -> VName -> FusionGM FusedRes
 addVarToUnfusable fres name = do
   trns <- asks $ HM.lookup name . arrsInScope
   let name' = case trns of
-        Nothing       -> name
-        Just (orig,_) -> identName orig
+        Nothing         -> name
+        Just (orig,_,_) -> orig
   return fres { unfusable = HS.insert name' $ unfusable fres }
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by

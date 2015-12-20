@@ -55,6 +55,7 @@ where
 
 import Control.Applicative
 import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Foldable (traverse_)
@@ -85,7 +86,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as I
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Optimise.Simplifier.Lore
-import Futhark.Representation.Aliases (Aliases)
+import Futhark.Representation.Aliases (Aliases, removeTypeEnvAliases)
 import Futhark.Representation.Ranges (Ranges)
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Analysis.Usage
@@ -514,7 +515,8 @@ instance TypeCheck.Checkable ExplicitMemory where
     AST.Param name (Scalar t)
 
   matchPattern pat e = do
-    rt <- expReturns varMemBound e
+    rt <- runReaderT (expReturns (lift . varMemBound) e) =<<
+          asksTypeEnv removeTypeEnvAliases
     matchPatternToReturns (wrong rt) pat rt
     where wrong rt s = TypeCheck.bad $ TypeError noLoc $
                        ("Pattern\n" ++ TypeCheck.message "  " pat ++
@@ -528,7 +530,7 @@ instance TypeCheck.Checkable ExplicitMemory where
           checkResultSubExp Constant{} =
             return ()
           checkResultSubExp (Var v) = do
-            attr <- lookupSummary v
+            attr <- varMemBound v
             case attr of
               Scalar _ -> return ()
               MemMem{} -> return ()
@@ -540,12 +542,6 @@ instance TypeCheck.Checkable ExplicitMemory where
                     "Array " ++ pretty v ++
                     " returned by function, but has nontrivial index function" ++
                     pretty ixfun
-          lookupSummary name = do
-            (_, attr, _) <- TypeCheck.lookupVar name
-            case attr of
-              TypeCheck.LetBound summary -> return summary
-              TypeCheck.FunBound summary -> return $ fmap (const NoUniqueness) summary
-              TypeCheck.LambdaBound summary -> return $ fmap (const NoUniqueness) summary
 
 matchPatternToReturns :: Monad m =>
                          (String -> m ())
@@ -661,11 +657,12 @@ matchPatternToReturns wrong pat rt = do
 
 varMemBound :: VName -> TypeCheck.TypeM ExplicitMemory (MemBound NoUniqueness)
 varMemBound name = do
-  (_, attr, _) <- TypeCheck.lookupVar name
+  attr <- TypeCheck.lookupVar name
   case attr of
-    TypeCheck.LetBound summary -> return summary
-    TypeCheck.FunBound summary -> return $ fmap (const NoUniqueness) summary
-    TypeCheck.LambdaBound summary -> return summary
+    LetType (_, summary) -> return summary
+    FParamType summary -> return $ fmap (const NoUniqueness) summary
+    LParamType summary -> return summary
+    IndexType -> return $ Scalar Int
 
 checkMemBound :: VName -> MemBound u
              -> TypeCheck.TypeM ExplicitMemory ()
@@ -716,6 +713,23 @@ instance Attributes ExplicitMemory where
               Nothing
           isMergeParam var =
             find ((==var) . paramName) mergevars
+
+  expContext pat e = do
+    ext_context <- expExtContext pat e
+    case e of
+      If _ tbranch fbranch rettype | False -> do
+        treturns <- bodyReturns undefined rettype tbranch
+        freturns <- bodyReturns undefined rettype fbranch
+        let combreturns = generaliseReturns treturns freturns
+            ext_mapping =
+              returnsMapping (map patElemAttr $ patternValueElements pat) combreturns
+        return $ map (`HM.lookup` ext_mapping) $ patternContextNames pat
+      _ ->
+        return ext_context
+
+returnsMapping :: [MemBound NoUniqueness] -> [BodyReturns]
+               -> HM.HashMap VName SubExp
+returnsMapping = undefined
 
 instance PrettyLore ExplicitMemory where
   ppBindingLore binding =
@@ -786,7 +800,7 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-arrayVarReturns :: (Monad m, HasTypeEnv m) =>
+arrayVarReturns :: Monad m =>
                    (VName -> m (MemBound u))
                 -> VName
                 -> m (BasicType, Shape, VName, IxFun.IxFun)
@@ -798,7 +812,7 @@ arrayVarReturns look v = do
     _ ->
       fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
-varReturns :: (Monad m, HasTypeEnv m) =>
+varReturns :: Monad m =>
               (VName -> m (MemBound u))
            -> VName -> m ExpReturns
 varReturns look v = do
@@ -814,7 +828,7 @@ varReturns look v = do
 
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
-expReturns :: (Monad m, HasTypeEnv m) =>
+expReturns :: (Monad m, HasTypeEnv (NameType ExplicitMemory) m) =>
               (VName -> m (MemBound NoUniqueness)) -> Exp -> m [ExpReturns]
 
 expReturns look (AST.PrimOp (SubExp (Var v))) = do

@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -201,7 +201,7 @@ instance MonadFreshNames (ImpM op) where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv (ImpM op) where
+instance HasTypeEnv Type (ImpM op) where
   askTypeEnv = HM.map entryType <$> asks envVtable
     where entryType (MemVar memEntry) =
             Mem (dimSizeToSubExp $ entryMemSize memEntry) (entryMemSpace memEntry)
