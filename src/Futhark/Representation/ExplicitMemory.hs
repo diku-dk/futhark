@@ -18,6 +18,7 @@ module Futhark.Representation.ExplicitMemory
        , bodyReturns
        , returnsToType
        , generaliseReturns
+       , lookupMemBound
        , basicSize
          -- * Syntax types
        , Prog
@@ -515,7 +516,7 @@ instance TypeCheck.Checkable ExplicitMemory where
     AST.Param name (Scalar t)
 
   matchPattern pat e = do
-    rt <- runReaderT (expReturns (lift . varMemBound) e) =<<
+    rt <- runReaderT (expReturns e) =<<
           asksTypeEnv removeTypeEnvAliases
     matchPatternToReturns (wrong rt) pat rt
     where wrong rt s = TypeCheck.bad $ TypeError noLoc $
@@ -664,6 +665,16 @@ varMemBound name = do
     LParamType summary -> return summary
     IndexType -> return $ Scalar Int
 
+lookupMemBound :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+                  VName -> m (MemBound NoUniqueness)
+lookupMemBound name = do
+  info <- lookupInfo name
+  case info of
+    FParamType summary -> return $ fmap (const NoUniqueness) summary
+    LParamType summary -> return summary
+    LetType summary -> return summary
+    IndexType -> return $ Scalar Int
+
 checkMemBound :: VName -> MemBound u
              -> TypeCheck.TypeM ExplicitMemory ()
 checkMemBound _ (Scalar _) = return ()
@@ -718,8 +729,8 @@ instance Attributes ExplicitMemory where
     ext_context <- expExtContext pat e
     case e of
       If _ tbranch fbranch rettype | False -> do
-        treturns <- bodyReturns undefined rettype tbranch
-        freturns <- bodyReturns undefined rettype fbranch
+        treturns <- bodyReturns rettype tbranch
+        freturns <- bodyReturns rettype fbranch
         let combreturns = generaliseReturns treturns freturns
             ext_mapping =
               returnsMapping (map patElemAttr $ patternValueElements pat) combreturns
@@ -800,23 +811,21 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-arrayVarReturns :: Monad m =>
-                   (VName -> m (MemBound u))
-                -> VName
+arrayVarReturns :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+                   VName
                 -> m (BasicType, Shape, VName, IxFun.IxFun)
-arrayVarReturns look v = do
-  summary <- look v
+arrayVarReturns v = do
+  summary <- lookupMemBound v
   case summary of
     ArrayMem et shape _ mem ixfun ->
       return (et, Shape $ shapeDims shape, mem, ixfun)
     _ ->
       fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
-varReturns :: Monad m =>
-              (VName -> m (MemBound u))
-           -> VName -> m ExpReturns
-varReturns look v = do
-  summary <- look v
+varReturns :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+              VName -> m ExpReturns
+varReturns v = do
+  summary <- lookupMemBound v
   case summary of
     Scalar bt ->
       return $ ReturnsScalar bt
@@ -829,39 +838,39 @@ varReturns look v = do
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
 expReturns :: (Monad m, HasTypeEnv (NameType ExplicitMemory) m) =>
-              (VName -> m (MemBound NoUniqueness)) -> Exp -> m [ExpReturns]
+              Exp -> m [ExpReturns]
 
-expReturns look (AST.PrimOp (SubExp (Var v))) = do
-  r <- varReturns look v
+expReturns (AST.PrimOp (SubExp (Var v))) = do
+  r <- varReturns v
   return [r]
 
-expReturns look (AST.PrimOp (Reshape _ newshape v)) = do
-  (et, _, mem, ixfun) <- arrayVarReturns look v
+expReturns (AST.PrimOp (Reshape _ newshape v)) = do
+  (et, _, mem, ixfun) <- arrayVarReturns v
   return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
           IxFun.reshape ixfun newshape]
 
-expReturns look (AST.PrimOp (Rearrange _ perm v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns look v
+expReturns (AST.PrimOp (Rearrange _ perm v)) = do
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.permute ixfun perm
       dims'  = rearrangeShape perm dims
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns look (AST.PrimOp (Stripe _ stride v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns look v
+expReturns (AST.PrimOp (Stripe _ stride v)) = do
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.stripe ixfun (SE.intSubExpToScalExp stride)
   return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns look (AST.PrimOp (Unstripe _ stride v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns look v
+expReturns (AST.PrimOp (Unstripe _ stride v)) = do
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
   let ixfun' = IxFun.unstripe ixfun (SE.intSubExpToScalExp stride)
   return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
-  (et, shape, mem, ixfun) <- arrayVarReturns look v
+expReturns (AST.PrimOp (Split _ sizeexps v)) = do
+  (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
       offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n Int))
                 (SE.Val $ IntVal 0) sizeexps
@@ -871,8 +880,8 @@ expReturns look (AST.PrimOp (Split _ sizeexps v)) = do
                        Just $ ReturnsInBlock mem $ IxFun.offsetIndex ixfun offset)
            newShapes offsets
 
-expReturns look (AST.PrimOp (Index _ v is)) = do
-  (et, shape, mem, ixfun) <- arrayVarReturns look v
+expReturns (AST.PrimOp (Index _ v is)) = do
+  (et, shape, mem, ixfun) <- arrayVarReturns v
   case stripDims (length is) shape of
     Shape []     ->
       return [ReturnsScalar et]
@@ -882,10 +891,10 @@ expReturns look (AST.PrimOp (Index _ v is)) = do
              IxFun.applyInd ixfun
              (map (`SE.subExpToScalExp` Int) is)]
 
-expReturns _ (AST.PrimOp op) =
+expReturns (AST.PrimOp op) =
   extReturns <$> staticShapes <$> primOpType op
 
-expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
+expReturns (AST.LoopOp (DoLoop res merge _ _)) =
     return $
     evalState (mapM typeWithAttr $
                zip res $
@@ -910,29 +919,28 @@ expReturns _ (AST.LoopOp (DoLoop res merge _ _)) =
           isMergeVar = flip elem $ map paramName mergevars
           mergevars = map fst merge
 
-expReturns _ (Apply _ _ ret) =
+expReturns (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret
 
-expReturns look (If _ b1 b2 ts) = do
-  b1t <- bodyReturns look ts b1
-  b2t <- bodyReturns look ts b2
+expReturns (If _ b1 b2 ts) = do
+  b1t <- bodyReturns ts b1
+  b2t <- bodyReturns ts b2
   return $
     map bodyReturnsToExpReturns $
     generaliseReturns b1t b2t
 
-expReturns _ (Op (Alloc size space)) =
+expReturns (Op (Alloc size space)) =
   return [ReturnsMemory size space]
 
-expReturns _ (Op (Inner k)) =
+expReturns (Op (Inner k)) =
   extReturns <$> opType k
 
 -- | The return information of a body.  This can be seen as the
 -- "return type with memory annotations" of the body.
-bodyReturns :: Monad m =>
-               (VName -> m (MemBound NoUniqueness))
-            -> [ExtType] -> Body
+bodyReturns :: (Monad m, HasTypeEnv (NameType ExplicitMemory) m) =>
+               [ExtType] -> Body
             -> m [BodyReturns]
-bodyReturns look ts (AST.Body _ bnds res) = do
+bodyReturns ts (AST.Body _ bnds res) = do
   let boundHere = boundInBindings bnds
       inspect _ (Constant val) =
         return $ ReturnsScalar $ basicValueType val
@@ -945,7 +953,7 @@ bodyReturns look ts (AST.Body _ bnds res) = do
 
         memsummary <- do
           summary <- case HM.lookup v boundHere of
-            Nothing -> lift $ look v
+            Nothing -> lift $ lookupMemBound v
             Just bindee -> return $ patElemAttr bindee
 
           case summary of
