@@ -327,7 +327,7 @@ compileOutParams rts = do
         mkParam (ReturnsArray t shape _ lore) = do
           space <- asks envDefaultSpace
           (memout, memdestf) <- case lore of
-            ReturnsNewBlock x -> do
+            ReturnsNewBlock x _ -> do
               memout <- imp $ newVName "out_mem"
               (sizeout, destmemsize) <- ensureMemSizeOut x
               tell [Imp.MemParam memout (Imp.VarSize sizeout) space]
