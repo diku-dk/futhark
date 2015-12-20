@@ -145,7 +145,7 @@ blockedKernelSize w = do
 
   return $ KernelSize num_groups group_size per_thread_elements w per_thread_elements num_threads
 
-blockedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Kernels) =>
+blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern
             -> Certificates -> SubExp
             -> Lambda
@@ -269,7 +269,7 @@ blockedScan pat cs w lam input = do
                                                   , kernelInputIndices = indices
                                                   }
 
-blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Kernels) =>
+blockedSegmentedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                         SubExp
                      -> Pattern
                      -> Certificates
