@@ -71,10 +71,15 @@ class (Applicative m, Typed t) => HasTypeEnv t m | m -> t where
   -- | Return the type of the given variable, or fail if it is not in
   -- the type environment.
   lookupType :: VName -> m Type
-  lookupType name =
-    typeOf <$> asksTypeEnv (HM.lookupDefault notFound name)
+  lookupType = liftA typeOf . lookupInfo
+
+  -- | Return the info of the given variable, or fail if it is not in
+  -- the type environment.
+  lookupInfo :: VName -> m t
+  lookupInfo name =
+    asksTypeEnv (HM.lookupDefault notFound name)
     where notFound =
-            error $ "TypeEnv.lookupType: Name " ++ textual name ++
+            error $ "TypeEnv.lookupInfo: Name " ++ textual name ++
             " not found in type environment."
 
   -- | Return the type environment contained in the applicative

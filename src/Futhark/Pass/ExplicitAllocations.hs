@@ -31,15 +31,6 @@ import Futhark.Pass
 
 import Prelude
 
-type MemoryMap = HM.HashMap VName (MemBound NoUniqueness)
-
-memoryMap :: TypeEnv (NameType ExplicitMemory) -> MemoryMap
-memoryMap = HM.map memory
-  where memory IndexType = Scalar Int
-        memory (LetType attr) = attr
-        memory (FParamType attr) = const NoUniqueness <$> attr
-        memory (LParamType attr) = attr
-
 data AllocBinding = SizeComputation VName SE.ScalExp
                   | Allocation VName SubExp Space
                   | ArrayCopy VName Bindage VName
@@ -159,7 +150,7 @@ allocsForBinding :: Allocator m =>
                     [Ident] -> [(Ident,Bindage)] -> Exp
                  -> m (Binding, [AllocBinding])
 allocsForBinding sizeidents validents e = do
-  rts <- expReturns lookupSummary' e
+  rts <- expReturns e
   (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts
   return (Let (Pattern ctxElems valElems) () e,
           postbnds)
@@ -272,7 +263,7 @@ summaryForBindage t@(Array bt shape u) BindVar = do
   (_, m) <- allocForArray t DefaultSpace
   return $ directIndexFunction bt shape u m t
 summaryForBindage _ (BindInPlace _ src _) =
-  lookupSummary' src
+  lookupMemBound src
 
 memForBindee :: (MonadFreshNames m) =>
                 Ident
@@ -292,21 +283,9 @@ directIndexFunction :: BasicType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
   ArrayMem bt shape u mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
 
-lookupSummary :: VName -> AllocM (Maybe (MemBound NoUniqueness))
-lookupSummary name = asksTypeEnv $ HM.lookup name . memoryMap
-
-lookupSummary' :: Allocator m =>
-                  VName -> m (MemBound NoUniqueness)
-lookupSummary' name = do
-  res <- asksTypeEnv $ HM.lookup name . memoryMap
-  case res of
-    Just summary -> return summary
-    Nothing ->
-      fail $ "No memory summary for variable " ++ pretty name
-
 lookupArraySummary' :: Allocator m => VName -> m (VName, IxFun.IxFun)
 lookupArraySummary' name = do
-  summary <- lookupSummary' name
+  summary <- lookupMemBound name
   case summary of
     ArrayMem _ _ _ mem ixfun ->
       return (mem, ixfun)
@@ -389,9 +368,9 @@ allocInMergeParams merge m = do
 
 ensureDirectArray :: VName -> AllocM (SubExp, VName, SubExp)
 ensureDirectArray v = do
-  res <- lookupSummary v
+  res <- lookupMemBound v
   case res of
-    Just (ArrayMem _ _ _ mem ixfun)
+    ArrayMem _ _ _ mem ixfun
       | IxFun.isDirect ixfun -> do
         memt <- lookupType mem
         case memt of
@@ -549,7 +528,7 @@ allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
               return inp { kernelInputParam = Param (kernelInputName inp) $ MemMem size shape }
 
 allocInExp (Op (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
-  arr_summaries <- mapM lookupSummary' arrs
+  arr_summaries <- mapM lookupMemBound arrs
   fold_lam' <- allocInChunkedLambda (kernelThreadOffsetMultiple size)
                fold_lam arr_summaries
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
