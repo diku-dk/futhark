@@ -25,13 +25,13 @@ instance MonadFreshNames m => MonadFreshNames (RuleM m) where
   getNameSource = RuleM . lift $ getNameSource
   putNameSource = RuleM . lift . putNameSource
 
-instance (Monad m, HasTypeEnv t m) => HasTypeEnv t (RuleM m) where
+instance (Monad m, HasScope t m) => HasScope t (RuleM m) where
   lookupType = RuleM . lift . lookupType
-  askTypeEnv  = RuleM . lift $ askTypeEnv
+  askScope  = RuleM . lift $ askScope
 
-instance (Monad m, LocalTypeEnv t m) => LocalTypeEnv t (RuleM m) where
-  localTypeEnv types (RuleM m) = RuleM $ do
-    x <- lift $ localTypeEnv types $ runMaybeT m
+instance (Monad m, LocalScope t m) => LocalScope t (RuleM m) where
+  localScope types (RuleM m) = RuleM $ do
+    x <- lift $ localScope types $ runMaybeT m
     MaybeT $ return x
 
 instance MonadBinder m => MonadBinder (RuleM m) where

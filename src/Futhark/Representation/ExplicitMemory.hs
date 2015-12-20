@@ -85,7 +85,8 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as I
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Optimise.Simplifier.Lore
-import Futhark.Representation.Aliases (Aliases, removeTypeEnvAliases)
+import Futhark.Representation.Aliases
+  (Aliases, removeScopeAliases, removeExpAliases, removePatternAliases)
 import Futhark.Representation.Ranges (Ranges)
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Analysis.Usage
@@ -453,7 +454,7 @@ bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 -- | Similar to 'generaliseExtTypes', but also generalises the
 -- existentiality of memory returns.
-generaliseReturns :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+generaliseReturns :: (HasScope ExplicitMemory m, Monad m) =>
                      [BodyReturns] -> [BodyReturns] -> m [BodyReturns]
 generaliseReturns r1s r2s =
   evalStateT (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
@@ -530,9 +531,9 @@ instance TypeCheck.Checkable ExplicitMemory where
     AST.Param name (Scalar t)
 
   matchPattern pat e = do
-    rt <- runReaderT (expReturns e) =<<
-          asksTypeEnv removeTypeEnvAliases
-    matchPatternToReturns (wrong rt) pat rt
+    rt <- runReaderT (expReturns $ removeExpAliases e) =<<
+          asksScope removeScopeAliases
+    matchPatternToReturns (wrong rt) (removePatternAliases pat) rt
     where wrong rt s = TypeCheck.bad $ TypeError noLoc $
                        ("Pattern\n" ++ TypeCheck.message "  " pat ++
                         "\ncannot match result type\n") ++
@@ -674,20 +675,20 @@ varMemBound :: VName -> TypeCheck.TypeM ExplicitMemory (MemBound NoUniqueness)
 varMemBound name = do
   attr <- TypeCheck.lookupVar name
   case attr of
-    LetType (_, summary) -> return summary
-    FParamType summary -> return $ fmap (const NoUniqueness) summary
-    LParamType summary -> return summary
-    IndexType -> return $ Scalar Int
+    LetInfo (_, summary) -> return summary
+    FParamInfo summary -> return $ fmap (const NoUniqueness) summary
+    LParamInfo summary -> return summary
+    IndexInfo -> return $ Scalar Int
 
-lookupMemBound :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+lookupMemBound :: (HasScope ExplicitMemory m, Monad m) =>
                   VName -> m (MemBound NoUniqueness)
 lookupMemBound name = do
   info <- lookupInfo name
   case info of
-    FParamType summary -> return $ fmap (const NoUniqueness) summary
-    LParamType summary -> return summary
-    LetType summary -> return summary
-    IndexType -> return $ Scalar Int
+    FParamInfo summary -> return $ fmap (const NoUniqueness) summary
+    LParamInfo summary -> return summary
+    LetInfo summary -> return summary
+    IndexInfo -> return $ Scalar Int
 
 checkMemBound :: VName -> MemBound u
              -> TypeCheck.TypeM ExplicitMemory ()
@@ -835,7 +836,7 @@ extReturns ts =
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
-arrayVarReturns :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+arrayVarReturns :: (HasScope ExplicitMemory m, Monad m) =>
                    VName
                 -> m (BasicType, Shape, VName, IxFun.IxFun)
 arrayVarReturns v = do
@@ -846,7 +847,7 @@ arrayVarReturns v = do
     _ ->
       fail $ "arrayVarReturns: " ++ pretty v ++ " is not an array."
 
-varReturns :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+varReturns :: (HasScope ExplicitMemory m, Monad m) =>
               VName -> m ExpReturns
 varReturns v = do
   summary <- lookupMemBound v
@@ -861,7 +862,7 @@ varReturns v = do
 
 -- | The return information of an expression.  This can be seen as the
 -- "return type with memory annotations" of the expression.
-expReturns :: (Monad m, HasTypeEnv (NameType ExplicitMemory) m) =>
+expReturns :: (Monad m, HasScope ExplicitMemory m) =>
               Exp -> m [ExpReturns]
 
 expReturns (AST.PrimOp (SubExp (Var v))) = do
@@ -960,7 +961,7 @@ expReturns (Op (Inner k)) =
 
 -- | The return information of a body.  This can be seen as the
 -- "return type with memory annotations" of the body.
-bodyReturns :: (Monad m, HasTypeEnv (NameType ExplicitMemory) m) =>
+bodyReturns :: (Monad m, HasScope ExplicitMemory m) =>
                [ExtType] -> Body
             -> m [BodyReturns]
 bodyReturns ts (AST.Body _ bnds res) = do

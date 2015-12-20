@@ -86,6 +86,7 @@ import Futhark.CodeGen.ImpCode
    bytes, elements,
    withElemType)
 import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util
@@ -201,8 +202,8 @@ instance MonadFreshNames (ImpM op) where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv Type (ImpM op) where
-  askTypeEnv = HM.map entryType <$> asks envVtable
+instance HasScope SOACS (ImpM op) where
+  askScope = HM.map (LetInfo . entryType) <$> asks envVtable
     where entryType (MemVar memEntry) =
             Mem (dimSizeToSubExp $ entryMemSize memEntry) (entryMemSpace memEntry)
           entryType (ArrayVar arrayEntry) =

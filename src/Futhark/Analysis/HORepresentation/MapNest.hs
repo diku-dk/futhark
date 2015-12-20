@@ -62,13 +62,13 @@ setInputs :: [SOAC.Input] -> MapNest lore -> MapNest lore
 setInputs inps (MapNest cs body ns _) = MapNest cs body ns inps
 
 fromSOACNest :: (Bindable lore, MonadFreshNames m,
-                 LocalTypeEnv (NameType lore) m,
+                 LocalScope lore m,
                  Op lore ~ Futhark.SOAC lore) =>
                 SOACNest lore -> m (Maybe (MapNest lore))
 fromSOACNest = fromSOACNest' mempty
 
 fromSOACNest' :: (Bindable lore, MonadFreshNames m,
-                  LocalTypeEnv (NameType lore) m,
+                  LocalScope lore m,
                  Op lore ~ Futhark.SOAC lore) =>
                  [Ident]
               -> SOACNest lore

@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
 
@@ -228,6 +229,9 @@ instance Renameable lore => Rename (KernelInput lore) where
   rename (KernelInput param arr is) =
     KernelInput <$> rename param <*> rename arr <*> rename is
 
+instance Scoped lore (KernelInput lore) where
+  scopeOf inp = scopeOfLParams [kernelInputParam inp]
+
 instance Attributes lore => Rename (Kernel lore) where
   rename (MapKernel cs w index ispace inps returns body) = do
     cs' <- rename cs
@@ -337,8 +341,8 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
 
   TC.checkFun' (nameFromString "<kernel body>",
                 map (`toDecl` Nonunique) $ staticShapes rettype,
-                lamParamsToNameTypes (index_param : iparams') ++
-                kernelInputsToNameTypes inps,
+                lamParamsToNameInfos (index_param : iparams') ++
+                kernelInputsToNameInfos inps,
                 body) consumable_inps $ do
     TC.checkLambdaParams $ map kernelInputParam inps
     mapM_ checkKernelInput inps
@@ -425,18 +429,18 @@ typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
   TC.require [Basic Int] offset_multiple
   TC.require [Basic Int] num_threads
 
-lamParamsToNameTypes :: [LParam lore]
-                     -> [(VName, NameType lore)]
-lamParamsToNameTypes = map nameTypeAndLore
+lamParamsToNameInfos :: [LParam lore]
+                     -> [(VName, NameInfo lore)]
+lamParamsToNameInfos = map nameTypeAndLore
   where nameTypeAndLore fparam = (paramName fparam,
-                                  LParamType $ paramAttr fparam)
+                                  LParamInfo $ paramAttr fparam)
 
-kernelInputsToNameTypes :: [KernelInput lore]
-                        -> [(VName, NameType lore)]
-kernelInputsToNameTypes = map nameTypeAndLore
+kernelInputsToNameInfos :: [KernelInput lore]
+                        -> [(VName, NameInfo lore)]
+kernelInputsToNameInfos = map nameTypeAndLore
   where nameTypeAndLore input =
           (kernelInputName input,
-           LParamType $ paramAttr $ kernelInputParam input)
+           LParamInfo $ paramAttr $ kernelInputParam input)
 
 -- | A kernel input is consumable iff its indexing is a permutation of
 -- the full index space.

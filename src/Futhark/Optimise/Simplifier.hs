@@ -61,7 +61,7 @@ simplifyFunWithRules simpl rules blockers =
 
 -- | Simplify just a single 'Lambda'.
 simplifyLambdaWithRules :: (MonadFreshNames m,
-                            HasTypeEnv (NameType lore) m,
+                            HasScope lore m,
                             MonadEngine (SimpleM lore)) =>
                            SimpleOps (SimpleM lore)
                         -> RuleBook (SimpleM lore)
@@ -76,7 +76,7 @@ simplifyLambdaWithRules simpl rules blockers lam w args =
 
 -- | Simplify a list of 'Binding's.
 simplifyBindingsWithRules :: (MonadFreshNames m,
-                              HasTypeEnv (NameType lore) m,
+                              HasScope lore m,
                               MonadEngine (SimpleM lore)) =>
                              SimpleOps (SimpleM lore)
                           -> RuleBook (SimpleM lore)

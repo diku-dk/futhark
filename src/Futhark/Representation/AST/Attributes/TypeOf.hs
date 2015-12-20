@@ -5,8 +5,8 @@
 -- | This module provides facilities for obtaining the types of
 -- various Futhark constructs.  Typically, you will need to execute
 -- these in a context where type information is available as a
--- 'TypeEnv'; usually by using a monad that is an instance of
--- 'HasTypeEnv'.  The information is returned as a list of 'ExtType'
+-- 'Scope'; usually by using a monad that is an instance of
+-- 'HasScope'.  The information is returned as a list of 'ExtType'
 -- values - one for each of the values the Futhark construct returns.
 -- Some constructs (such as subexpressions) can produce only a single
 -- value, and their typing functions hence do not return a list.
@@ -32,16 +32,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        -- * Return type
        , module Futhark.Representation.AST.RetType
        -- * Type environment
-       , module Futhark.Representation.AST.Attributes.TypeEnv
-       , typeEnvFromBindings
-       , typeEnvFromLParams
-       , typeEnvFromFParams
-       , typeEnvFromPattern
-       , typeEnvFromIdents
-       , typeEnvFromLambda
-       , typeEnvFromExtLambda
-       , withLParamTypes
-       , withFParamTypes
+       , module Futhark.Representation.AST.Attributes.Scope
 
          -- * Extensibility
        , TypedOp(..)
@@ -54,7 +45,6 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
 import Data.Traversable hiding (mapM)
 
 import Prelude hiding (mapM)
@@ -65,10 +55,10 @@ import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
-import Futhark.Representation.AST.Attributes.TypeEnv
+import Futhark.Representation.AST.Attributes.Scope
 
 -- | The type of a subexpression.
-subExpType :: HasTypeEnv t m => SubExp -> m Type
+subExpType :: HasScope t m => SubExp -> m Type
 subExpType (Constant val) = pure $ Basic $ basicValueType val
 subExpType (Var name)     = lookupType name
 
@@ -80,7 +70,7 @@ mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
                       | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
-primOpType :: HasTypeEnv t m =>
+primOpType :: HasScope t m =>
               PrimOp lore -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
@@ -144,7 +134,7 @@ loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (paramIdent . fst) merge
 
 -- | The type of an expression.
-expExtType :: (HasTypeEnv t m,
+expExtType :: (HasScope lore m,
                IsRetType (RetType lore),
                Typed (FParamAttr lore),
                TypedOp (Op lore)) =>
@@ -161,26 +151,26 @@ expExtTypeSize :: (Annotations lore, TypedOp (Op lore)) =>
 expExtTypeSize = length . feelBad . expExtType
 
 -- FIXME, this is a horrible quick hack.
-newtype FeelBad a = FeelBad { feelBad :: a }
+newtype FeelBad lore a = FeelBad { feelBad :: a }
 
-instance Functor FeelBad where
+instance Functor (FeelBad lore) where
   fmap f = FeelBad . f . feelBad
 
-instance Applicative FeelBad where
+instance Applicative (FeelBad lore) where
   pure = FeelBad
   f <*> x = FeelBad $ feelBad f $ feelBad x
 
-instance HasTypeEnv Type FeelBad where
+instance Annotations lore => HasScope lore (FeelBad lore) where
   lookupType = const $ pure $ Basic Int
-  askTypeEnv = pure mempty
+  askScope = pure mempty
 
 -- | The type of a body.
-bodyExtType :: (Annotations lore, HasTypeEnv (NameType lore) m, Monad m) =>
+bodyExtType :: (Annotations lore, HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound <$> staticShapes <$>
-  extendedTypeEnv (traverse subExpType res) bndtypes
-  where bndtypes = typeEnvFromBindings bnds
+  extendedScope (traverse subExpType res) bndscope
+  where bndscope = scopeOf bnds
         boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
 
@@ -192,7 +182,7 @@ valueShapeContext rettype values =
 
 -- | Given the return type of a function and the subexpressions
 -- returned by that function, return the size context.
-subExpShapeContext :: HasTypeEnv t m =>
+subExpShapeContext :: HasScope t m =>
                       [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
   extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
@@ -220,57 +210,8 @@ loopExtType res merge =
   where inaccessible = HS.fromList $ map identName merge
         res' = mapMaybe (\name -> find ((==name) . identName) merge) res
 
--- | Create a type environment consisting of the names bound in the
--- list of bindings.
-typeEnvFromBindings :: Annotations lore => [Binding lore] -> TypeEnv (NameType lore)
-typeEnvFromBindings = mconcat . map (typeEnvFromPattern . bindingPattern)
-
--- | Create a type environment from lambda parameters.
-typeEnvFromLParams :: Annotations lore => [LParam lore] -> TypeEnv (NameType lore)
-typeEnvFromLParams = HM.fromList . map assoc
-  where assoc p = (paramName p, LParamType $ paramAttr p)
-
--- | Create a type environment from function parameters.
-typeEnvFromFParams :: Annotations lore => [FParam lore] -> TypeEnv (NameType lore)
-typeEnvFromFParams = HM.fromList . map assoc
-  where assoc p = (paramName p, FParamType $ paramAttr p)
-
--- | Create a type environment from a pattern represented as a list of 'Ident's.
-typeEnvFromIdents :: LetAttr lore ~ Type => [Ident] -> TypeEnv (NameType lore)
-typeEnvFromIdents = HM.fromList . map assoc
-  where assoc ident = (identName ident, LetType $ identType ident)
-
--- | Create a type environment from a pattern.
-typeEnvFromPattern :: Pattern lore -> TypeEnv (NameType lore)
-typeEnvFromPattern = HM.fromList . map assoc . patternElements
-  where assoc pat_elem = (patElemName pat_elem, LetType $ patElemAttr pat_elem)
-
--- | Create a type environment corresponding to what is bound inside a
--- 'Lambda'.
-typeEnvFromLambda :: Lambda lore -> TypeEnv (NameType lore)
-typeEnvFromLambda lam =
-  HM.insert (lambdaIndex lam) IndexType $
-  HM.fromList [ (paramName p, LParamType $ paramAttr p) | p <- lambdaParams lam ]
-
--- | Create a type environment corresponding to what is bound inside a
--- 'ExtLambda'.
-typeEnvFromExtLambda :: ExtLambda lore -> TypeEnv (NameType lore)
-typeEnvFromExtLambda lam =
-  HM.insert (extLambdaIndex lam) IndexType $
-  HM.fromList [ (paramName p, LParamType $ paramAttr p) | p <- extLambdaParams lam ]
-
--- | Execute an action with a locally extended type environment.
-withLParamTypes :: (Annotations lore, LocalTypeEnv (NameType lore) m) =>
-                   [LParam lore] -> m a -> m a
-withLParamTypes = localTypeEnv . typeEnvFromLParams
-
--- | Execute an action with a locally extended type environment.
-withFParamTypes :: (Annotations lore, LocalTypeEnv (NameType lore) m) =>
-                   [FParam lore] -> m a -> m a
-withFParamTypes = localTypeEnv . typeEnvFromFParams
-
 class TypedOp op where
-  opType :: HasTypeEnv t m => op -> m [ExtType]
+  opType :: HasScope t m => op -> m [ExtType]
 
 instance TypedOp () where
   opType () = pure []

@@ -21,8 +21,6 @@ import Control.Monad.State
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import Data.List
-import Data.Monoid
-
 import Prelude
 
 import qualified Futhark.Representation.AST as AST
@@ -43,7 +41,7 @@ transformFunDec :: (MonadFreshNames m, Bindable tolore,
 transformFunDec (FunDec fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
-    withFParamTypes params $
+    localScope (scopeOfFParams params) $
     insertBindingsM $
     transformBody body
   return $ FunDec fname rettype params body'
@@ -52,7 +50,7 @@ transformFunDec (FunDec fname rettype params body) = do
 -- first-order transformation.
 type Transformer m = (MonadBinder m,
                       Bindable (Lore m),
-                      LocalTypeEnv (NameType (Lore m)) m,
+                      LocalScope (Lore m) m,
                       LetAttr SOACS ~ LetAttr (Lore m),
                       LParamAttr SOACS ~ LParamAttr (Lore m))
 
@@ -68,13 +66,11 @@ transformBindingRecursively :: Transformer m =>
                                Binding -> m ()
 
 transformBindingRecursively (Let pat () (LoopOp (DoLoop res merge form body))) = do
-  body' <- localTypeEnv form_types $
-           withFParamTypes (map fst merge) $
+  body' <- localScope (scopeOfLoopForm form) $
+           localScope (scopeOfFParams $ map fst merge) $
            transformBody body
   letBind_ pat $ LoopOp $ DoLoop res (map cast merge) form body'
-  where form_types = case form of ForLoop i _ -> HM.singleton i IndexType
-                                  WhileLoop _ -> mempty
-        cast (Param name t, se) = (Param name t, se)
+  where cast (Param name t, se) = (Param name t, se)
 
 transformBindingRecursively (Let pat () (Op soac)) =
   transformSOAC pat =<< mapSOACM soacTransform soac
@@ -109,8 +105,8 @@ transformSOAC pat (Map cs width fun arrs) = do
   let outarrs_names = map identName outarrs
       merge = loopMerge outarrs (map Var resarr)
   loopbody <- runBodyBinder $
-              localTypeEnv (HM.insert i IndexType $
-                            typeEnvFromFParams $ map fst merge) $ do
+              localScope (HM.insert i IndexInfo $
+                          scopeOfFParams $ map fst merge) $ do
     x <- bindLambda fun (index cs arrs (Var i))
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
@@ -167,7 +163,7 @@ transformSOAC pat (Reduce cs width fun args) = do
   inarrs <- mapM (newIdent "reduce_inarr") arrts
   arrexps' <- mapM (copyIfArray . Var) arrexps
   let merge = loopMerge (inarrs++acc) (arrexps'++initacc)
-  loopbody <- runBodyBinder $ withFParamTypes (map fst merge) $ do
+  loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
     acc' <- bindLambda fun
             (map (PrimOp . SubExp . Var . identName) acc ++
              index cs (map identName inarrs) (Var i))
@@ -186,7 +182,7 @@ transformSOAC pat (Scan cs width fun args) = do
   arr <- mapM (newIdent "scan_arr" ) arrts
   let arr_names = map identName arr
       merge = loopMerge (acc ++ arr) (initacc ++ map Var initarr)
-  loopbody <- insertBindingsM $ withFParamTypes (map fst merge) $ do
+  loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
     x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
                               index cs arrexps (Var i))
     dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) x
@@ -217,7 +213,7 @@ transformSOAC pat (Redomap cs width _ innerfun accexps arrexps) = do
   (acc, initacc) <- newFold $ zip accexps accts
   inarrs <- mapM (newIdent "redomap_inarr") arrts
   let merge = loopMerge (inarrs++acc++outarrs) (arrexps'++initacc++map Var maparrs)
-  loopbody <- runBodyBinder $ withFParamTypes (map fst merge) $ do
+  loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
     accxis<- bindLambda innerfun
              (map (PrimOp . SubExp . Var . identName) acc ++
               index cs (map identName inarrs) (Var i))
@@ -349,8 +345,8 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
   loopcnt  <- newIdent "stream_N" $ Basic Int
   -- 3.) Transform the stream's lambda to a loop body
   loopbody <- runBodyBinder $
-              localTypeEnv (HM.singleton loopind IndexType) $
-              withFParamTypes (map fst merge) $ do
+              localScope (HM.singleton loopind IndexInfo) $
+              localScope (scopeOfFParams $ map fst merge) $ do
       let argsacc = map (PrimOp . SubExp . Var . identName) acc0
           accpars = take acc_num $ drop 1 lampars
           arrpars = drop (1 + acc_num) lampars
@@ -594,8 +590,8 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
                                 let alloc_merge = loopMerge [bnew] [Var bnew0]
                                 allocloopbody <-
                                   runBodyBinder $
-                                  localTypeEnv (HM.singleton alloclid IndexType) $
-                                  withFParamTypes (map fst alloc_merge) $ do
+                                  localScope (HM.singleton alloclid IndexInfo) $
+                                  localScope (scopeOfFParams $ map fst alloc_merge) $ do
                                     (aldest:_) <- letwith css [identName bnew] (pexp $ Var alloclid)
                                                   [PrimOp $ Index css (identName glboutid) [Var alloclid]]
                                     return $ resultBody [Var aldest]
@@ -619,8 +615,8 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
             let outmerge = loopMerge [glboutLid] [Var $ identName glboutid']
             -- make copy-out what was written in the current iteration
             loopbody <- runBodyBinder $
-                        localTypeEnv (HM.singleton loopid IndexType) $
-                        withFParamTypes (map fst outmerge) $ do
+                        localScope (HM.singleton loopid IndexInfo) $
+                        localScope (scopeOfFParams $ map fst outmerge) $ do
                 ivvplid <- newIdent "jj" $ Basic Int
                 ivvplidexp <- eBinOp Plus (pure $ PrimOp $ SubExp ivv)
                                           (pure $ PrimOp $ SubExp $ Var loopid) Int
@@ -637,28 +633,28 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
                     Bindable lore,
-                    LocalTypeEnv (NameType lore) m,
+                    LocalScope lore m,
                     LetAttr SOACS ~ LetAttr lore,
                     LParamAttr SOACS ~ LParamAttr lore) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda i params body rettype) = do
   body' <- runBodyBinder $
-           localTypeEnv (HM.singleton i IndexType) $
-           withLParamTypes params $
+           localScope (HM.singleton i IndexInfo) $
+           localScope (scopeOfLParams params) $
            transformBody body
   return $ Lambda i params body' rettype
 
 -- | Recursively first-order-transform a lambda.
 transformExtLambda :: (MonadFreshNames m,
                        Bindable lore,
-                       LocalTypeEnv (NameType lore) m,
+                       LocalScope lore m,
                        LetAttr SOACS ~ LetAttr lore,
                        LParamAttr SOACS ~ LParamAttr lore) =>
                       ExtLambda -> m (AST.ExtLambda lore)
 transformExtLambda (ExtLambda i params body rettype) = do
   body' <- runBodyBinder $
-           localTypeEnv (HM.singleton i IndexType) $
-           withLParamTypes params $
+           localScope (HM.singleton i IndexInfo) $
+           localScope (scopeOfLParams params) $
            transformBody body
   return $ ExtLambda i params body' rettype
 

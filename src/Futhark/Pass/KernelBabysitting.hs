@@ -27,7 +27,7 @@ transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec fundec = do
   (body', _) <- modifyNameSource $ runState (runBinderT m HM.empty)
   return fundec { funDecBody = body' }
-  where m = withFParamTypes (funDecParams fundec) $
+  where m = inScopeOf fundec $
             transformBody $ funDecBody fundec
 
 type BabysitM = Binder Kernels
@@ -54,12 +54,11 @@ nonlinearInMemory name m =
 transformBinding :: ExpMap -> Binding -> BabysitM ExpMap
 
 transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
-  body' <- withFParamTypes (map fst merge) $ localTypeEnv form_types $
+  body' <- localScope (scopeOfFParams $ map fst merge) $
+           localScope (scopeOfLoopForm form) $
            transformBody body
   addBinding $ Let pat () $ LoopOp $ DoLoop res merge form body'
   return expmap
-  where form_types = case form of ForLoop i _ -> HM.singleton i IndexType
-                                  WhileLoop _ -> mempty
 
 transformBinding expmap (Let pat ()
                          (Op (ReduceKernel cs w kernel_size parlam seqlam nes arrs)))
@@ -128,10 +127,9 @@ transformBinding expmap (Let pat ()
         (nes, arrs) = unzip input
 
 transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
-  body' <- localTypeEnv (HM.fromList $
-                         (i, IndexType) :
-                         [ (j, IndexType) | (j, _) <- ispace ]) $
-           withLParamTypes (map kernelInputParam inps) $
+  body' <- inScopeOf ((i, IndexInfo) :
+                      [ (j, IndexInfo) | (j, _) <- ispace ]) $
+           inScopeOf inps $
            transformBody body
   -- For every input that is an array, we transpose the next-outermost
   -- and outermost dimension.
@@ -168,13 +166,13 @@ transform = identityMapper { mapOnBody = transformBody
 
 transformLambda :: Lambda -> BabysitM Lambda
 transformLambda lam = do
-  body' <- withLParamTypes (lambdaParams lam) $
+  body' <- inScopeOf lam $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }
 
 transformExtLambda :: ExtLambda -> BabysitM ExtLambda
 transformExtLambda lam = do
-  body' <- withLParamTypes (extLambdaParams lam) $
+  body' <- inScopeOf lam $
            transformBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 

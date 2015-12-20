@@ -5,7 +5,7 @@
 module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings)
   , empty
-  , fromTypeEnv
+  , fromScope
     -- * Entries
   , Entry
   , deepen
@@ -81,8 +81,8 @@ instance Monoid (SymbolTable lore) where
 empty :: SymbolTable lore
 empty = SymbolTable 0 HM.empty
 
-fromTypeEnv :: Annotations lore => TypeEnv (NameType lore) -> SymbolTable lore
-fromTypeEnv = HM.foldlWithKey' insertFreeVar' empty
+fromScope :: Annotations lore => Scope lore -> SymbolTable lore
+fromScope = HM.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k attr = insertFreeVar k attr m
 
 deepen :: SymbolTable lore -> SymbolTable lore
@@ -121,7 +121,7 @@ data LParamEntry lore =
               }
 
 data FreeVarEntry lore =
-  FreeVarEntry { freeVarAttr         :: NameType lore
+  FreeVarEntry { freeVarAttr         :: NameInfo lore
                , freeVarBindingDepth :: Int
                , freeVarRange        :: ScalExpRange
                }
@@ -234,7 +234,7 @@ instance Substitutable lore => Substitute (LoopVarEntry lore) where
         , loopVarBindingDepth = loopVarBindingDepth entry
       }
 
-instance Substitute (NameType lore) => Substitute (FreeVarEntry lore) where
+instance Substitute (NameInfo lore) => Substitute (FreeVarEntry lore) where
   substituteNames substs entry =
     FreeVarEntry {
         freeVarRange = substituteNames substs $ freeVarRange entry
@@ -305,12 +305,12 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
-typeEnv :: SymbolTable lore -> TypeEnv (NameType lore)
+typeEnv :: SymbolTable lore -> Scope lore
 typeEnv = HM.map nameType . bindings
-  where nameType (LetBound entry) = LetType $ letBoundAttr entry
-        nameType (LoopVar _) = IndexType
-        nameType (FParam entry) = FParamType $ fparamAttr entry
-        nameType (LParam entry) = LParamType $ lparamAttr entry
+  where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
+        nameType (LoopVar _) = IndexInfo
+        nameType (FParam entry) = FParamInfo $ fparamAttr entry
+        nameType (LParam entry) = LParamInfo $ lparamAttr entry
         nameType (FreeVar entry) = freeVarAttr entry
 
 defBndEntry :: Annotations lore =>
@@ -458,7 +458,7 @@ insertLoopVar name bound = insertEntry name bind
           , loopVarBindingDepth = 0
           }
 
-insertFreeVar :: VName -> NameType lore -> SymbolTable lore -> SymbolTable lore
+insertFreeVar :: VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
 insertFreeVar name attr = insertEntry name entry
   where entry = FreeVar FreeVarEntry {
             freeVarAttr = attr

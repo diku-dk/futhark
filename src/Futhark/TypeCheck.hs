@@ -69,7 +69,8 @@ data TypeError lore = Error [String] (ErrorCase lore)
 
 -- | What went wrong.
 type ErrorCase lore =
-  GenTypeError VName (Exp lore) (Several ExtType) (Several (PatElemT (LetAttr lore)))
+  GenTypeError VName (Exp lore) (Several ExtType)
+  (Several (PatElemT (LetAttr (Aliases lore))))
 
 instance Checkable lore => Show (TypeError lore) where
   show (Error [] err) =
@@ -81,7 +82,7 @@ instance Checkable lore => Show (TypeError lore) where
 -- named.
 type FunBinding lore = (RetType lore, [FParam lore])
 
-data VarBinding lore = Bound (NameType (Aliases lore))
+data VarBinding lore = Bound (NameInfo (Aliases lore))
                      | WasConsumed
 
 data Usage = Consumed
@@ -180,9 +181,9 @@ newtype TypeM lore a = TypeM (RWST
             MonadWriter Consumption)
 
 instance Checkable lore =>
-         HasTypeEnv (NameType (Aliases lore)) (TypeM lore) where
+         HasScope (Aliases lore) (TypeM lore) where
   lookupType = fmap typeOf . lookupVar
-  askTypeEnv = asks $ HM.fromList . mapMaybe varType . HM.toList . envVtable
+  askScope = asks $ HM.fromList . mapMaybe varType . HM.toList . envVtable
     where varType (name, Bound attr) = Just (name, attr)
           varType (_, WasConsumed) = Nothing
 
@@ -282,11 +283,11 @@ expandAliases :: Names -> Env lore -> Names
 expandAliases names env = names `HS.union` aliasesOfAliases
   where aliasesOfAliases =  mconcat . map look . HS.toList $ names
         look k = case HM.lookup k $ envVtable env of
-          Just (Bound (LetType (als, _))) -> unNames als
+          Just (Bound (LetInfo (als, _))) -> unNames als
           _                               -> mempty
 
 binding :: Checkable lore =>
-           TypeEnv (NameType (Aliases lore))
+           Scope (Aliases lore)
         -> TypeM lore a
         -> TypeM lore a
 binding bnds = check . local (`bindVars` bnds)
@@ -297,8 +298,8 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar env name attr =
           let names = expandAliases (aliases attr) env
               inedges = HS.toList names
-              update (Bound (LetType (Names' thesenames, thisattr))) =
-                Bound $ LetType (Names' $ HS.insert name thesenames, thisattr)
+              update (Bound (LetInfo (Names' thesenames, thisattr))) =
+                Bound $ LetInfo (Names' $ HS.insert name thesenames, thisattr)
               update b = b
           in env { envVtable =
                       HM.insert name (Bound attr) $
@@ -320,7 +321,7 @@ binding bnds = check . local (`bindVars` bnds)
           tell $ Consumption $ unOccur boundnameset os
           return a
 
-lookupVar :: VName -> TypeM lore (NameType (Aliases lore))
+lookupVar :: VName -> TypeM lore (NameInfo (Aliases lore))
 lookupVar name = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
@@ -333,8 +334,8 @@ lookupAliases name = do
   als <- aliases <$> lookupVar name
   return $ HS.insert name als
 
-aliases :: NameType (Aliases lore) -> Names
-aliases (LetType (als, _)) = unNames als
+aliases :: NameInfo (Aliases lore) -> Names
+aliases (LetInfo (als, _)) = unNames als
 aliases _ = mempty
 
 subExpAliasesM :: SubExp -> TypeM lore Names
@@ -462,7 +463,7 @@ checkFun (FunDec fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
                retTypeValues rettype,
-               funParamsToNameTypes params,
+               funParamsToNameInfos params,
                body) consumable $ do
       checkFunParams params
       checkRetType rettype
@@ -472,12 +473,12 @@ checkFun (FunDec fname rettype params body) =
                            , unique $ paramDeclType param
                            ]
 
-funParamsToNameTypes :: Checkable lore =>
+funParamsToNameInfos :: Checkable lore =>
                         [FParam lore]
-                     -> [(VName, NameType (Aliases lore))]
-funParamsToNameTypes = map nameTypeAndLore
+                     -> [(VName, NameInfo (Aliases lore))]
+funParamsToNameInfos = map nameTypeAndLore
   where nameTypeAndLore fparam = (paramName fparam,
-                                  FParamType $ paramAttr fparam)
+                                  FParamInfo $ paramAttr fparam)
 
 checkFunParams :: Checkable lore =>
                   [FParam lore] -> TypeM lore ()
@@ -494,7 +495,7 @@ checkLambdaParams = mapM_ $ \param ->
 checkFun' :: Checkable lore =>
              (Name,
               [DeclExtType],
-              [(VName, NameType (Aliases lore))],
+              [(VName, NameInfo (Aliases lore))],
               BodyT (Aliases lore))
           -> [(VName, Names)]
           -> TypeM lore ()
@@ -764,7 +765,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
   context "Inside the loop body" $
     checkFun' (nameFromString "<loop body>",
                staticShapes rettype,
-               funParamsToNameTypes funparams,
+               funParamsToNameInfos funparams,
                loopbody) consumable $ do
         checkFunParams funparams
         checkBody loopbody
@@ -922,13 +923,13 @@ checkBinding :: Checkable lore =>
              -> TypeM lore a
 checkBinding pat e m = do
   context ("When matching\n" ++ message "  " pat ++ "\nwith\n" ++ message "  " e) $
-    matchPattern (removePatternAliases pat) (removeExpAliases e)
-  binding (typeEnvFromPattern pat) $ do
+    matchPattern pat e
+  binding (scopeOf pat) $ do
     mapM_ checkPatElem (patternElements $ removePatternAliases pat)
     m
 
 matchExtPattern :: Checkable lore =>
-                   [PatElem (LetAttr lore)]
+                   [PatElem (LetAttr (Aliases lore))]
                 -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
@@ -1031,7 +1032,7 @@ checkLambda (Lambda i params body rettype) args = do
     checkFun' (fname,
            staticShapes $ map (`toDecl` Nonunique) rettype,
            [ (paramName param,
-              LParamType $ paramAttr param)
+              LParamInfo $ paramAttr param)
            | param <- iparam:params ],
            body) consumable $ do
       checkLambdaParams params
@@ -1055,7 +1056,7 @@ checkConcatMapLambda (Lambda i params body rettype) args = do
     checkFun' (fname,
                rettype',
                [ (paramName param,
-                  LParamType $ paramAttr param)
+                  LParamInfo $ paramAttr param)
                | param <- iparam:params ],
                body) consumable $
       checkBindings (bodyBindings body) $ do
@@ -1074,7 +1075,7 @@ checkExtLambda (ExtLambda i params body rettype) args =
     checkFun' (fname,
                map (`toDecl` Nonunique) rettype,
                [ (paramName param,
-                  LParamType $ paramAttr param)
+                  LParamInfo $ paramAttr param)
                | param <- iparam:params ],
                body) consumable $
       checkBindings (bodyBindings body) $ do
@@ -1093,7 +1094,7 @@ class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   checkLetBoundLore :: VName -> LetAttr lore -> TypeM lore ()
   checkRetType :: AST.RetType lore -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
-  matchPattern :: AST.Pattern lore -> AST.Exp lore -> TypeM lore ()
+  matchPattern :: Pattern lore -> Exp lore -> TypeM lore ()
   basicFParam :: lore -> VName -> BasicType -> AST.FParam (Aliases lore)
   basicLParam :: lore -> VName -> BasicType -> AST.LParam (Aliases lore)
   matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()

@@ -107,12 +107,12 @@ instance Substitutable lore => Substitute (NestBody lore) where
               substituteNames m $ lambdaBody l
           }
 
-bodyToLambda :: (Bindable lore, MonadFreshNames m, LocalTypeEnv (NameType lore) m,
+bodyToLambda :: (Bindable lore, MonadFreshNames m, LocalScope lore m,
                  Op lore ~ Futhark.SOAC lore) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
 bodyToLambda pts (NewNest (Nesting i ps inps bndIds retTypes) op) =
-  withLParamTypes lparams $ do
+  localScope (scopeOfLParams lparams) $ do
     (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
     bnd <- mkLetNames' bndIds e
     return
@@ -124,11 +124,11 @@ bodyToLambda pts (NewNest (Nesting i ps inps bndIds retTypes) op) =
              }
   where lparams = [ Param p t | (p, t) <- zip ps pts ]
 
-lambdaToBody :: (LocalTypeEnv (NameType lore) m, Bindable lore,
+lambdaToBody :: (LocalScope lore m, Bindable lore,
                 Op lore ~ Futhark.SOAC lore) =>
                 Lambda lore -> m (NestBody lore)
 lambdaToBody l =
-  withLParamTypes (lambdaParams l) $
+  localScope (scopeOfLParams $ lambdaParams l) $
   maybe (Fun l) (uncurry $ flip NewNest) <$> nested l
 
 data TypedSubExp = TypedSubExp { subExpExp :: SubExp
@@ -257,7 +257,7 @@ typeOf (SOACNest inps (Stream  _ form lam _)) =
   in  staticShapes $ accrtps ++ arrrtps
   where outersize = arraysSize 0 $ map SOAC.inputType inps
 
-fromExp :: (Bindable lore, LocalTypeEnv (NameType lore) f, Monad f,
+fromExp :: (Bindable lore, LocalScope lore f, Monad f,
            Op lore ~ Futhark.SOAC lore) =>
            Exp lore -> f (Either SOAC.NotSOAC (SOACNest lore))
 fromExp e = either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
@@ -266,7 +266,7 @@ toExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore) =>
          SOACNest lore -> Binder lore (Exp lore)
 toExp = SOAC.toExp <=< toSOAC
 
-fromSOAC :: (Bindable lore, LocalTypeEnv (NameType lore) m,
+fromSOAC :: (Bindable lore, LocalScope lore m,
              Op lore ~ Futhark.SOAC lore) =>
             SOAC lore -> m (SOACNest lore)
 fromSOAC (SOAC.Map cs l as) =
@@ -297,7 +297,7 @@ accSubExps :: Annotations lore =>
               Lambda lore -> [SubExp] -> [TypedSubExp]
 accSubExps l args = zipWith TypedSubExp args (map paramType $ lambdaParams l)
 
-nested :: (LocalTypeEnv (NameType lore) m, Monad m, Bindable lore,
+nested :: (LocalScope lore m, Monad m, Bindable lore,
           Op lore ~ Futhark.SOAC lore) =>
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
 nested l
@@ -316,7 +316,7 @@ nested l
       _ -> pure Nothing
   | otherwise = pure Nothing
 
-toSOAC :: (Bindable lore, MonadFreshNames m, LocalTypeEnv (NameType lore) m,
+toSOAC :: (Bindable lore, MonadFreshNames m, LocalScope lore m,
           Op lore ~ Futhark.SOAC lore) =>
           SOACNest lore -> m (SOAC lore)
 toSOAC (SOACNest as (Map cs b)) =

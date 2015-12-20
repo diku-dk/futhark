@@ -34,7 +34,7 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 
 newtype BinderT lore m a = BinderT (StateT
-                                    (TypeEnv (NameType lore))
+                                    (Scope lore)
                                     (WriterT
                                      (DL.DList (Binding lore))
                                      m)
@@ -54,17 +54,17 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   putNameSource = lift . putNameSource
 
 instance (Attributes lore, Applicative m, Monad m) =>
-         HasTypeEnv (NameType lore) (BinderT lore m) where
+         HasScope lore (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
     case t of
       Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
       Just t' -> return $ typeOf t'
-  askTypeEnv = BinderT get
+  askScope = BinderT get
 
 instance (Attributes lore, Applicative m, Monad m) =>
-         LocalTypeEnv (NameType lore) (BinderT lore m) where
-  localTypeEnv types (BinderT m) = BinderT $ do
+         LocalScope lore (BinderT lore m) where
+  localScope types (BinderT m) = BinderT $ do
     modify (`HM.union` types)
     x <- m
     modify (`HM.difference` types)
@@ -87,22 +87,22 @@ instance (Attributes lore, Bindable lore, MonadFreshNames m) =>
 
 runBinderT :: Monad m =>
               BinderT lore m a
-           -> TypeEnv (NameType lore)
+           -> Scope lore
            -> m (a, [Binding lore])
 runBinderT (BinderT m) types = do
   (x, bnds) <- runWriterT $ evalStateT m types
   return (x, DL.toList bnds)
 
-runBinder :: (MonadFreshNames m, HasTypeEnv (NameType lore) m) =>
+runBinder :: (MonadFreshNames m, HasScope lore m) =>
               Binder lore a
            -> m (a, [Binding lore])
 runBinder m = do
-  types <- askTypeEnv
+  types <- askScope
   modifyNameSource $ runState $ runBinderT m types
 
 -- | Like 'runBinder', but throw away the result and just return the
 -- added bindings.
-runBinder_ :: (MonadFreshNames m, HasTypeEnv (NameType lore) m) =>
+runBinder_ :: (MonadFreshNames m, HasScope lore m) =>
               Binder lore a
            -> m [Binding lore]
 runBinder_ = liftM snd . runBinder
@@ -117,7 +117,7 @@ joinBinder m = do (x, bnds) <- runBinder m
                   return x
 
 runBodyBinder :: (Bindable lore, MonadFreshNames m,
-                  HasTypeEnv (NameType lore) m) =>
+                  HasScope lore m) =>
                  Binder lore (Body lore) -> m (Body lore)
 runBodyBinder = liftM (uncurry $ flip insertBindings) . runBinder
 
@@ -130,7 +130,7 @@ addBinderBinding :: (Annotations lore, Monad m) =>
                     Binding lore -> BinderT lore m ()
 addBinderBinding binding = do
   tell $ DL.singleton binding
-  BinderT $ modify (`HM.union` typeEnvFromBindings [binding])
+  BinderT $ modify (`HM.union` scopeOf binding)
 
 collectBinderBindings :: (Annotations lore, Monad m) =>
                          BinderT lore m a
@@ -138,7 +138,7 @@ collectBinderBindings :: (Annotations lore, Monad m) =>
 collectBinderBindings m = pass $ do
   (x, bnds) <- listen m
   let bnds' = DL.toList bnds
-  BinderT $ modify (`HM.difference` typeEnvFromBindings bnds')
+  BinderT $ modify (`HM.difference` scopeOf bnds')
   return ((x, bnds'), const DL.empty)
 
 -- Utility instance defintions for MTL classes.  These require

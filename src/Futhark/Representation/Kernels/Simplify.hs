@@ -104,7 +104,7 @@ instance Engine.Simplifiable KernelSize where
     return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
 
 kernelRules :: (MonadBinder m,
-                LocalTypeEnv (NameType (Lore m)) m,
+                LocalScope (Lore m) m,
                 Op (Lore m) ~ Kernel (Lore m),
                 Aliased (Lore m)) => RuleBook m
 kernelRules = (std_td_rules <> topDownRules,
@@ -112,7 +112,7 @@ kernelRules = (std_td_rules <> topDownRules,
   where (std_td_rules, std_bu_rules) = standardRules
 
 topDownRules :: (MonadBinder m,
-                 LocalTypeEnv (NameType (Lore m)) m,
+                 LocalScope (Lore m) m,
                  Op (Lore m) ~ Kernel (Lore m),
                  Aliased (Lore m)) => TopDownRules m
 topDownRules = [removeUnusedKernelInputs
@@ -121,7 +121,7 @@ topDownRules = [removeUnusedKernelInputs
                ]
 
 bottomUpRules :: (MonadBinder m,
-                  LocalTypeEnv (NameType (Lore m)) m,
+                  LocalScope (Lore m) m,
                   Op (Lore m) ~ Kernel (Lore m)) => BottomUpRules m
 bottomUpRules = [
                 ]
@@ -140,13 +140,13 @@ removeUnusedKernelInputs _ _ = cannotSimplify
 -- | Kernel inputs are indexes into arrays.  Based on how those arrays
 -- are defined, we may be able to simplify the input.
 simplifyKernelInputs :: (MonadBinder m,
-                         LocalTypeEnv (NameType (Lore m)) m,
+                         LocalScope (Lore m) m,
                          Op (Lore m) ~ Kernel (Lore m), Aliased (Lore m)) =>
                         TopDownRule m
 simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
   | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
     inps /= catMaybes inps' = do
-      body' <- localTypeEnv index_env $ insertBindingsM $ do
+      body' <- localScope index_env $ insertBindingsM $ do
          forM_ (catMaybes extra_bnds) $ \(name, se) ->
            letBindNames'_ [name] $ PrimOp $ SubExp se
          return body
@@ -156,7 +156,7 @@ simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps ret
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Basic $ basicValueType v
-        index_env = HM.fromList $ zip (map fst ispace) $ repeat IndexType
+        index_env = HM.fromList $ zip (map fst ispace) $ repeat IndexInfo
         consumed_in_body = consumedInBody body
 
         simplifyInput inp@(KernelInput param arr is) =
