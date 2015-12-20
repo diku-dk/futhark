@@ -17,7 +17,6 @@ module Futhark.Representation.ExplicitMemory
        , expReturns
        , bodyReturns
        , returnsToType
-       , generaliseReturns
        , lookupMemBound
        , basicSize
          -- * Syntax types
@@ -64,7 +63,6 @@ import Data.Maybe
 import Data.List
 import Data.Loc
 import Data.Monoid
-
 import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
@@ -305,9 +303,9 @@ instance PP.Pretty (PatElemT (MemBound NoUniqueness)) where
 data MemReturn = ReturnsInBlock VName IxFun.IxFun
                  -- ^ The array is located in a memory block that is
                  -- already in scope.
-               | ReturnsNewBlock Int
+               | ReturnsNewBlock Int (Maybe SubExp)
                  -- ^ The operation returns a new (existential) block,
-                 -- with an existential size.
+                 -- with an existential or known size.
                deriving (Show)
 
 instance Eq MemReturn where
@@ -319,14 +317,14 @@ instance Ord MemReturn where
 instance Rename MemReturn where
   rename (ReturnsInBlock ident ixfun) =
     ReturnsInBlock <$> rename ident <*> rename ixfun
-  rename (ReturnsNewBlock i) =
-    return $ ReturnsNewBlock i
+  rename (ReturnsNewBlock i size) =
+    ReturnsNewBlock i <$> rename size
 
 instance Substitute MemReturn where
   substituteNames substs (ReturnsInBlock ident ixfun) =
     ReturnsInBlock (substituteNames substs ident) (substituteNames substs ixfun)
-  substituteNames _ (ReturnsNewBlock i) =
-    ReturnsNewBlock i
+  substituteNames substs (ReturnsNewBlock i size) =
+    ReturnsNewBlock i $ substituteNames substs size
 
 -- | A description of a value being returned from a construct,
 -- parametrised across extra information stored for arrays.
@@ -362,8 +360,10 @@ instance PP.Pretty u => PP.Pretty (Returns u (Maybe MemReturn)) where
             PP.text "any"
           pp (Just (ReturnsInBlock v ixfun)) =
             PP.parens $ PP.text (pretty v) <> PP.text "->" <> PP.ppr ixfun
-          pp (Just (ReturnsNewBlock i)) =
-            PP.text $ show i
+          pp (Just (ReturnsNewBlock i (Just size))) =
+            PP.text (show i) <> PP.parens (PP.ppr size)
+          pp (Just (ReturnsNewBlock i Nothing)) =
+            PP.text (show i)
   ppr ret =
     PP.ppr $ returnsToType ret
 
@@ -395,8 +395,8 @@ instance Engine.Simplifiable a => Engine.Simplifiable (Returns u a) where
     ReturnsMemory <$> Engine.simplify size <*> pure space
 
 instance Engine.Simplifiable MemReturn where
-  simplify (ReturnsNewBlock i) =
-    return $ ReturnsNewBlock i
+  simplify (ReturnsNewBlock i size) =
+    ReturnsNewBlock i <$> Engine.simplify size
   simplify (ReturnsInBlock v ixfun) =
     ReturnsInBlock <$> Engine.simplify v <*> pure ixfun
 
@@ -453,9 +453,10 @@ bodyReturnsToExpReturns = noUniquenessReturns . maybeReturns
 
 -- | Similar to 'generaliseExtTypes', but also generalises the
 -- existentiality of memory returns.
-generaliseReturns :: [BodyReturns] -> [BodyReturns] -> [BodyReturns]
+generaliseReturns :: (HasTypeEnv (NameType ExplicitMemory) m, Monad m) =>
+                     [BodyReturns] -> [BodyReturns] -> m [BodyReturns]
 generaliseReturns r1s r2s =
-  evalState (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
+  evalStateT (zipWithM generaliseReturns' r1s r2s) (0, HM.empty, HM.empty)
   where generaliseReturns'
           (ReturnsArray bt shape1 _ summary1)
           (ReturnsArray _  shape2 _ summary2) =
@@ -487,11 +488,24 @@ generaliseReturns r1s r2s =
             return $ ReturnsInBlock mem1 ixfun1 -- Arbitrary
           | otherwise = do (i, sizemap, memmap) <- get
                            put (i + 1, sizemap, memmap)
-                           return $ ReturnsNewBlock i
-        generaliseSummaries (ReturnsNewBlock x) _ =
-          ReturnsNewBlock <$> newMem x
-        generaliseSummaries _ (ReturnsNewBlock x) =
-          ReturnsNewBlock <$> newMem x
+                           mem1_info <- lift $ lookupMemBound mem1
+                           mem2_info <- lift $ lookupMemBound mem2
+                           case (mem1_info, mem2_info) of
+                             (MemMem size1 space1, MemMem size2 space2)
+                               | size1 == size2, space1 == space2 ->
+                                   return $ ReturnsNewBlock i $ Just size1
+                             _ ->
+                               return $ ReturnsNewBlock i Nothing
+        generaliseSummaries
+          (ReturnsNewBlock x (Just size_x))
+          (ReturnsNewBlock _ (Just size_y))
+          | size_x == size_y =
+            ReturnsNewBlock <$> newMem x <*> pure (Just size_x)
+
+        generaliseSummaries (ReturnsNewBlock x _) _ =
+          ReturnsNewBlock <$> newMem x <*> pure Nothing
+        generaliseSummaries _ (ReturnsNewBlock x _) =
+          ReturnsNewBlock <$> newMem x <*> pure Nothing
 
         newSize x = do (i, sizemap, memmap) <- get
                        put (i + 1, HM.insert x i sizemap, memmap)
@@ -595,7 +609,7 @@ matchPatternToReturns wrong pat rt = do
                 pretty bindeeIxFun ++ "\nBut return index function is:\n  " ++
                 pretty retIxFun
 
-            Just (ReturnsNewBlock _) ->
+            Just (ReturnsNewBlock _ _) ->
               popMemFromCtx mem
           zipWithM_ matchArrayDim (arrayDims $ patElemType bindee) $
             extShapeDims shape
@@ -728,19 +742,29 @@ instance Attributes ExplicitMemory where
   expContext pat e = do
     ext_context <- expExtContext pat e
     case e of
-      If _ tbranch fbranch rettype | False -> do
+      If _ tbranch fbranch rettype -> do
         treturns <- bodyReturns rettype tbranch
         freturns <- bodyReturns rettype fbranch
-        let combreturns = generaliseReturns treturns freturns
-            ext_mapping =
-              returnsMapping (map patElemAttr $ patternValueElements pat) combreturns
+        combreturns <- generaliseReturns treturns freturns
+        let ext_mapping =
+              returnsMapping pat (map patElemAttr $ patternValueElements pat) combreturns
         return $ map (`HM.lookup` ext_mapping) $ patternContextNames pat
       _ ->
         return ext_context
 
-returnsMapping :: [MemBound NoUniqueness] -> [BodyReturns]
+returnsMapping :: Pattern -> [MemBound NoUniqueness] -> [BodyReturns]
                -> HM.HashMap VName SubExp
-returnsMapping = undefined
+returnsMapping pat bounds returns =
+  mconcat $ zipWith inspect bounds returns
+  where ctx = patternContextElements pat
+        inspect
+          (ArrayMem _ _ _ pat_mem _)
+          (ReturnsArray _ _ _ (ReturnsNewBlock _ (Just size)))
+            | Just pat_mem_elem <- find ((==pat_mem) . patElemName) ctx,
+              Mem (Var pat_mem_elem_size) _ <- patElemType pat_mem_elem,
+              Just pat_mem_elem_size_elem <- find ((==pat_mem_elem_size) . patElemName) ctx =
+                HM.singleton (patElemName pat_mem_elem_size_elem) size
+        inspect _ _ = mempty
 
 instance PrettyLore ExplicitMemory where
   ppBindingLore binding =
@@ -807,7 +831,7 @@ extReturns ts =
             | existential t = do
               i <- get
               put $ i + 1
-              return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i
+              return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i Nothing
             | otherwise =
               return $ ReturnsArray bt shape u Nothing
 
@@ -906,7 +930,7 @@ expReturns (AST.LoopOp (DoLoop res merge _ _)) =
                 | isMergeVar mem -> do
                   i <- get
                   put $ i + 1
-                  return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i
+                  return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i Nothing
                 | otherwise ->
                   return (ReturnsArray bt shape u $
                           Just $ ReturnsInBlock mem ixfun)
@@ -925,8 +949,7 @@ expReturns (Apply _ _ ret) =
 expReturns (If _ b1 b2 ts) = do
   b1t <- bodyReturns ts b1
   b2t <- bodyReturns ts b2
-  return $
-    map bodyReturnsToExpReturns $
+  map bodyReturnsToExpReturns <$>
     generaliseReturns b1t b2t
 
 expReturns (Op (Alloc size space)) =
@@ -969,7 +992,7 @@ bodyReturns ts (AST.Body _ bnds res) = do
                 case HM.lookup mem memmap of
                   Nothing -> do
                     put (i+1, HM.insert mem (i+1) memmap)
-                    return $ ReturnsNewBlock i
+                    return $ ReturnsNewBlock i Nothing
 
                   Just _ ->
                     fail "bodyReturns: same memory block used multiple times."
@@ -1020,8 +1043,8 @@ applyFunReturns rets params args
         correctDim (Ext i)   = Ext i
         correctDim (Free se) = Free $ substSubExp se
 
-        correctSummary (ReturnsNewBlock i) =
-          ReturnsNewBlock i
+        correctSummary (ReturnsNewBlock i size) =
+          ReturnsNewBlock i size
         correctSummary (ReturnsInBlock mem ixfun) =
           -- FIXME: we should also do a replacement in ixfun here.
           ReturnsInBlock mem' ixfun

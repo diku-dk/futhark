@@ -439,7 +439,7 @@ memoryInRetType (ExtRetType ts) =
         addAttr (Array bt shape u) = do
           i <- get
           put $ i + 1
-          return $ ReturnsArray bt shape u $ ReturnsNewBlock i
+          return $ ReturnsArray bt shape u $ ReturnsNewBlock i Nothing
 
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext

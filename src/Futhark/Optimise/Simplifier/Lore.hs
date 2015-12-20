@@ -103,6 +103,10 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
   loopResultContext (Wise lore) =
     loopResultContext lore
 
+  expContext pat e = do
+    types <- asksTypeEnv removeTypeEnvWisdom
+    runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
+
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
 
 instance AliasesOf (VarWisdom, attr) where
