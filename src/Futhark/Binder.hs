@@ -11,8 +11,6 @@ module Futhark.Binder
   , joinBinder
   , runBodyBinder
   , runBinderEmptyEnv
-  , bindingIdentTypes
-  , bindingParamTypes
   -- * Non-class interface
   , addBinderBinding
   , collectBinderBindings
@@ -23,7 +21,6 @@ where
 
 import qualified Data.DList as DL
 import Control.Applicative
-import Control.Arrow ((&&&))
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.Reader
@@ -37,7 +34,7 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 
 newtype BinderT lore m a = BinderT (StateT
-                                    TypeEnv
+                                    (TypeEnv (NameType lore))
                                     (WriterT
                                      (DL.DList (Binding lore))
                                      m)
@@ -56,15 +53,17 @@ instance MonadFreshNames m => MonadFreshNames (BinderT lore m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (Applicative m, Monad m) => HasTypeEnv (BinderT lore m) where
+instance (Attributes lore, Applicative m, Monad m) =>
+         HasTypeEnv (NameType lore) (BinderT lore m) where
   lookupType name = do
     t <- BinderT $ gets $ HM.lookup name
     case t of
       Nothing -> fail $ "BinderT.lookupType: unknown variable " ++ pretty name
-      Just t' -> return t'
+      Just t' -> return $ typeOf t'
   askTypeEnv = BinderT get
 
-instance (Applicative m, Monad m) => LocalTypeEnv (BinderT lore m) where
+instance (Attributes lore, Applicative m, Monad m) =>
+         LocalTypeEnv (NameType lore) (BinderT lore m) where
   localTypeEnv types (BinderT m) = BinderT $ do
     modify (`HM.union` types)
     x <- m
@@ -88,13 +87,13 @@ instance (Attributes lore, Bindable lore, MonadFreshNames m) =>
 
 runBinderT :: Monad m =>
               BinderT lore m a
-           -> TypeEnv
+           -> TypeEnv (NameType lore)
            -> m (a, [Binding lore])
 runBinderT (BinderT m) types = do
   (x, bnds) <- runWriterT $ evalStateT m types
   return (x, DL.toList bnds)
 
-runBinder :: (MonadFreshNames m, HasTypeEnv m) =>
+runBinder :: (MonadFreshNames m, HasTypeEnv (NameType lore) m) =>
               Binder lore a
            -> m (a, [Binding lore])
 runBinder m = do
@@ -103,7 +102,7 @@ runBinder m = do
 
 -- | Like 'runBinder', but throw away the result and just return the
 -- added bindings.
-runBinder_ :: (MonadFreshNames m, HasTypeEnv m) =>
+runBinder_ :: (MonadFreshNames m, HasTypeEnv (NameType lore) m) =>
               Binder lore a
            -> m [Binding lore]
 runBinder_ = liftM snd . runBinder
@@ -117,7 +116,8 @@ joinBinder m = do (x, bnds) <- runBinder m
                   mapM_ addBinding bnds
                   return x
 
-runBodyBinder :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+runBodyBinder :: (Bindable lore, MonadFreshNames m,
+                  HasTypeEnv (NameType lore) m) =>
                  Binder lore (Body lore) -> m (Body lore)
 runBodyBinder = liftM (uncurry $ flip insertBindings) . runBinder
 
@@ -140,22 +140,6 @@ collectBinderBindings m = pass $ do
   let bnds' = DL.toList bnds
   BinderT $ modify (`HM.difference` typeEnvFromBindings bnds')
   return ((x, bnds'), const DL.empty)
-
--- | Add the names and types from the given list of 'Ident's to the
--- type environment while executing the given action.  This is used to
--- deal with function parameters and loop merge variables.
-bindingIdentTypes :: LocalTypeEnv m =>
-                     [Ident] -> m a
-                  -> m a
-bindingIdentTypes idents = localTypeEnv types
-  where types = HM.fromList $ map (identName &&& identType) idents
-
--- | Add the names and types from the given list of 'Param's to the
--- type environment while executing the given action.
-bindingParamTypes :: (LocalTypeEnv m, Typed attr) =>
-                     [ParamT attr] -> m a
-                  -> m a
-bindingParamTypes = bindingIdentTypes . map paramIdent
 
 -- Utility instance defintions for MTL classes.  These require
 -- UndecidableInstances, but save on typing elsewhere.

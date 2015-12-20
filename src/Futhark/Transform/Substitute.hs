@@ -177,7 +177,8 @@ instance Substitute d => Substitute (DimChange d) where
 
 -- | Lores in which all annotations support name
 -- substitution.
-type Substitutable lore = (Substitute (ExpAttr lore),
+type Substitutable lore = (Annotations lore,
+                           Substitute (ExpAttr lore),
                            Substitute (BodyAttr lore),
                            Substitute (LetAttr lore),
                            Substitute (FParamAttr lore),

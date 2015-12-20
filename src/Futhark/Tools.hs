@@ -6,7 +6,6 @@ module Futhark.Tools
     module Futhark.Construct
 
   , nonuniqueParams
-  , nonuniqueFParams
   , redomapToMapAndReduce
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
@@ -29,7 +28,7 @@ import Futhark.Representation.SOACS.SOAC
 import Futhark.MonadFreshNames
 import Futhark.Construct
 
-nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
+nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
                    [LParam lore] -> m ([LParam lore], [Binding lore])
 nonuniqueParams params =
   modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
@@ -37,27 +36,12 @@ nonuniqueParams params =
     if not $ basicType $ paramType param then do
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
       let param' = Param param_name $ paramType param
-      bindingIdentTypes [paramIdent param'] $
+      withLParamTypes [param'] $
         letBindNames_ [(paramName param,BindVar)] $
         PrimOp $ Copy $ paramName param'
       return param'
     else
       return param
-
-nonuniqueFParams :: (MonadFreshNames m, Bindable lore) =>
-                    [FParam lore] -> m ([FParam lore], [Binding lore])
-nonuniqueFParams params =
-  modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
-  collectBindings $ forM params $ \param ->
-  if unique $ paramDeclType param then do
-    param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
-    let param' = Param param_name $ paramDeclType param `setUniqueness` Nonunique
-    bindingIdentTypes [paramIdent param'] $
-      letBindNames_ [(paramName param,BindVar)] $
-      PrimOp $ Copy $ paramName param'
-    return param'
-  else
-    return param
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).

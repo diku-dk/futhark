@@ -287,7 +287,7 @@ distributionBodyFromBinding :: (Attributes lore, CanBeAliased (Op lore)) =>
 distributionBodyFromBinding targets bnd =
   distributionBodyFromBindings targets [bnd]
 
-createKernelNest :: (MonadFreshNames m, HasTypeEnv m) =>
+createKernelNest :: (MonadFreshNames m, HasTypeEnv t m) =>
                     Nestings
                  -> DistributionBody
                  -> m (Maybe (Targets, KernelNest))
@@ -307,7 +307,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
         distributableType =
           HS.null . HS.intersection bound_in_nest . freeIn . arrayDims
 
-        distributeAtNesting :: (HasTypeEnv m, MonadFreshNames m) =>
+        distributeAtNesting :: (HasTypeEnv t m, MonadFreshNames m) =>
                                Nesting
                             -> Pattern
                             -> (LoopNesting -> KernelNest, Names, Names)
@@ -385,7 +385,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
                   addTarget (free_arrs_pat, map (Var . paramName) free_params_pat))
 
-        recurse :: (HasTypeEnv m, MonadFreshNames m) =>
+        recurse :: (HasTypeEnv t m, MonadFreshNames m) =>
                    [(Nesting,Target)]
                 -> MaybeT m (KernelNest, Names, Names, Targets)
         recurse [] =
@@ -458,7 +458,7 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
         removeIdentityMappingGeneral bound_in_nesting pat res
   in (pat', res', identity_map, expand_target)
 
-tryDistribute :: (MonadFreshNames m, HasTypeEnv m, MonadLogger m) =>
+tryDistribute :: (MonadFreshNames m, HasTypeEnv t m, MonadLogger m) =>
                  Nestings -> Targets -> [Binding]
               -> m (Maybe (Targets, [Binding]))
 tryDistribute _ targets [] =
@@ -481,7 +481,7 @@ tryDistribute nest targets bnds =
   where (dist_body, inner_body_res) = distributionBodyFromBindings targets bnds
         inner_body = mkBody bnds inner_body_res
 
-tryDistributeBinding :: (MonadFreshNames m, HasTypeEnv m,
+tryDistributeBinding :: (MonadFreshNames m, HasTypeEnv t m,
                          Attributes lore, CanBeAliased (Op lore)) =>
                         Nestings -> Targets -> AST.Binding lore
                      -> m (Maybe (Result, Targets, KernelNest))

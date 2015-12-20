@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
@@ -29,8 +29,7 @@ import Data.List
 import qualified Futhark.Representation.External as E
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
-import qualified Futhark.Binder as B
-import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
+import Futhark.Tools
 
 import Prelude hiding (mapM)
 
@@ -77,7 +76,7 @@ instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv InternaliseM where
+instance HasTypeEnv (NameType SOACS) InternaliseM where
   askTypeEnv = InternaliseM askTypeEnv
 
 instance MonadBinder InternaliseM where
@@ -115,7 +114,7 @@ lookupFunction fname = do
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
 bindingIdentTypes idents (InternaliseM m) =
-  InternaliseM $ B.bindingIdentTypes idents m
+  InternaliseM $ localTypeEnv (typeEnvFromIdents idents) m
 
 bindingParamTypes :: [LParam] -> InternaliseM a
                   -> InternaliseM a

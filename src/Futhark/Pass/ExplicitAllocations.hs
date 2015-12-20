@@ -1,26 +1,24 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections, LambdaCase #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, TypeFamilies, FlexibleContexts, TupleSections, LambdaCase, FlexibleInstances, MultiParamTypeClasses #-}
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
        )
 where
 
-import Control.Arrow (first, second)
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
-import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
 import qualified Futhark.Representation.Kernels as In
 import Futhark.Optimise.Simplifier.Lore
-  (Wise,
-   mkWiseBody,
+  (mkWiseBody,
    mkWiseLetBinding,
    removeExpWisdom,
-   removePatternWisdom)
+   removePatternWisdom,
+   removeTypeEnvWisdom)
 import Futhark.MonadFreshNames
 import Futhark.Representation.ExplicitMemory
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
@@ -31,13 +29,16 @@ import Futhark.Optimise.Simplifier.Simple (SimpleOps (..))
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Pass
 
-data Entry = Entry { entryMemBound :: MemBound NoUniqueness
-                   }
+import Prelude
 
-entryType :: Entry -> Type
-entryType = typeOf . entryMemBound
+type MemoryMap = HM.HashMap VName (MemBound NoUniqueness)
 
-type MemoryMap = HM.HashMap VName Entry
+memoryMap :: TypeEnv (NameType ExplicitMemory) -> MemoryMap
+memoryMap = HM.map memory
+  where memory IndexType = Scalar Int
+        memory (LetType attr) = attr
+        memory (FParamType attr) = const NoUniqueness <$> attr
+        memory (LParamType attr) = attr
 
 data AllocBinding = SizeComputation VName SE.ScalExp
                   | Allocation VName SubExp Space
@@ -54,13 +55,8 @@ bindAllocBinding (Allocation name size space) =
 bindAllocBinding (ArrayCopy name bindage src) =
   letBindNames_ [(name,bindage)] $ PrimOp $ Copy src
 
-class (MonadFreshNames m, HasTypeEnv m) => Allocator m where
+class (MonadFreshNames m, HasTypeEnv (NameType ExplicitMemory) m) => Allocator m where
   addAllocBinding :: AllocBinding -> m ()
-
-  askMemoryMap :: m MemoryMap
-
-  asksMemoryMap :: (MemoryMap -> a) -> m a
-  asksMemoryMap f = f <$> askMemoryMap
 
 allocateMemory :: Allocator m =>
                   String -> SubExp -> Space -> m VName
@@ -77,15 +73,11 @@ computeSize desc se = do
   return $ Var v
 
 -- | Monad for adding allocations to an entire program.
-newtype AllocM a = AllocM (BinderT ExplicitMemory
-                            (State (MemoryMap, VNameSource))
-                           a)
+newtype AllocM a = AllocM (BinderT ExplicitMemory (State VNameSource) a)
                  deriving (Applicative, Functor, Monad,
-                           MonadState (MemoryMap, VNameSource))
-
-instance MonadFreshNames AllocM where
-  getNameSource = snd <$> get
-  putNameSource src = modify $ \(memmap, _) -> (memmap, src)
+                           MonadFreshNames,
+                           HasTypeEnv (NameType ExplicitMemory),
+                           LocalTypeEnv (NameType ExplicitMemory))
 
 instance MonadBinder AllocM where
   type Lore AllocM = ExplicitMemory
@@ -98,20 +90,12 @@ instance MonadBinder AllocM where
 
   mkBodyM bnds res = return $ Body () bnds res
 
-  addBinding binding = do
+  addBinding binding =
     AllocM $ addBinderBinding binding
-    let summaries = HM.fromList $
-                    map patElemSummary $ patternElements $ bindingPattern binding
-    modify $ first (`HM.union` summaries)
   collectBindings (AllocM m) =
     AllocM $ collectBinderBindings m
 
-instance HasTypeEnv AllocM where
-  askTypeEnv = liftM2 HM.union (AllocM askTypeEnv) (HM.map entryType <$> askMemoryMap)
-
 instance Allocator AllocM where
-  askMemoryMap = gets fst
-
   addAllocBinding (SizeComputation name se) =
     letBindNames'_ [name] =<< SE.fromScalExp' se
   addAllocBinding (Allocation name size space) =
@@ -120,43 +104,30 @@ instance Allocator AllocM where
     letBindNames_ [(name, bindage)] $ PrimOp $ SubExp $ Var src
 
 runAllocM :: MonadFreshNames m => AllocM a -> m a
-runAllocM = runAllocMWithEnv HM.empty
-
-runAllocMWithEnv :: MonadFreshNames m =>
-                    MemoryMap
-                 -> AllocM a
-                 -> m a
-runAllocMWithEnv env (AllocM m) = modifyNameSource $ \src ->
-  first fst $ second snd $ runState (runBinderT m mempty) (env, src)
-
-localMemoryMap :: (MemoryMap -> MemoryMap) -> AllocM a -> AllocM a
-localMemoryMap f m = do old <- gets fst
-                        modify $ first f
-                        m <* modify (first (const old))
+runAllocM (AllocM m) =
+  liftM fst $ modifyNameSource $ runState $ runBinderT m mempty
 
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM a = PatAllocM (WriterT [AllocBinding]
-                                 (ReaderT MemoryMap
+                                 (ReaderT (TypeEnv (NameType ExplicitMemory))
                                   (State VNameSource))
                                  a)
                     deriving (Applicative, Functor, Monad,
-                              MonadReader MemoryMap,
+                              MonadReader (TypeEnv (NameType ExplicitMemory)),
                               MonadWriter [AllocBinding],
                               MonadFreshNames)
 
 instance Allocator PatAllocM where
-  askMemoryMap = ask
-
   addAllocBinding = tell . pure
 
-instance HasTypeEnv PatAllocM where
-  askTypeEnv =
-    HM.map entryType <$> ask
+instance HasTypeEnv (NameType ExplicitMemory) PatAllocM where
+  askTypeEnv = ask
 
 runPatAllocM :: MonadFreshNames m =>
-                PatAllocM a -> MemoryMap -> m (a, [AllocBinding])
-runPatAllocM (PatAllocM m) memoryMap =
-  modifyNameSource $ runState $ runReaderT (runWriterT m) memoryMap
+                PatAllocM a -> TypeEnv (NameType ExplicitMemory)
+             -> m (a, [AllocBinding])
+runPatAllocM (PatAllocM m) mems =
+  modifyNameSource $ runState $ runReaderT (runWriterT m) mems
 
 arraySizeInBytesExp :: Type -> SE.ScalExp
 arraySizeInBytesExp t =
@@ -322,12 +293,12 @@ directIndexFunction bt shape u mem t =
   ArrayMem bt shape u mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
 
 lookupSummary :: VName -> AllocM (Maybe (MemBound NoUniqueness))
-lookupSummary name = asksMemoryMap $ fmap entryMemBound . HM.lookup name
+lookupSummary name = asksTypeEnv $ HM.lookup name . memoryMap
 
 lookupSummary' :: Allocator m =>
                   VName -> m (MemBound NoUniqueness)
 lookupSummary' name = do
-  res <- asksMemoryMap $ fmap entryMemBound . HM.lookup name
+  res <- asksTypeEnv $ HM.lookup name . memoryMap
   case res of
     Just summary -> return summary
     Nothing ->
@@ -342,19 +313,24 @@ lookupArraySummary' name = do
     _ ->
       fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
-patElemSummary :: PatElem -> (VName, Entry)
+patElemSummary :: PatElem -> (VName, NameType ExplicitMemory)
 patElemSummary bindee = (patElemName bindee,
-                         Entry (patElemAttr bindee))
+                         LetType $ patElemAttr bindee)
 
-bindeesSummary :: [PatElem] -> MemoryMap
+bindeesSummary :: [PatElem] -> TypeEnv (NameType ExplicitMemory)
 bindeesSummary = HM.fromList . map patElemSummary
 
-paramsSummary :: Typed (MemBound u) =>
-                 [ParamT (MemBound u)] -> MemoryMap
-paramsSummary = HM.fromList . map paramSummary
-  where paramSummary fparam = (paramName fparam,
-                               Entry
-                               (const NoUniqueness <$> paramAttr fparam))
+fparamsSummary :: [FParam] -> TypeEnv (NameType ExplicitMemory)
+fparamsSummary = HM.fromList . map paramSummary
+  where paramSummary fparam =
+          (paramName fparam,
+           FParamType $ paramAttr fparam)
+
+lparamsSummary :: [LParam] -> TypeEnv (NameType ExplicitMemory)
+lparamsSummary = HM.fromList . map paramSummary
+  where paramSummary fparam =
+          (paramName fparam,
+           LParamType $ paramAttr fparam)
 
 allocInFParams :: [In.FParam] -> ([FParam] -> AllocM a)
                -> AllocM a
@@ -362,8 +338,8 @@ allocInFParams params m = do
   (valparams, (memsizeparams, memparams)) <-
     runWriterT $ mapM allocInFParam params
   let params' = memsizeparams <> memparams <> valparams
-      summary = paramsSummary params'
-  localMemoryMap (summary `HM.union`) $ m params'
+      summary = fparamsSummary params'
+  localTypeEnv summary $ m params'
 
 allocInFParam :: MonadFreshNames m =>
                  In.FParam -> WriterT ([FParam], [FParam]) m FParam
@@ -389,7 +365,7 @@ allocInMergeParams merge m = do
   ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
     runWriterT $ unzip <$> mapM allocInMergeParam merge
   let mergeparams' = memsizeparams <> memparams <> valparams
-      summary = paramsSummary mergeparams'
+      summary = fparamsSummary mergeparams'
 
       mk_loop_res :: [SubExp] -> AllocM [SubExp]
       mk_loop_res ses = do
@@ -397,7 +373,7 @@ allocInMergeParams merge m = do
           runWriterT $ zipWithM ($) handle_loop_subexps ses
         return $ memsizeargs <> memargs <> valargs
 
-  localMemoryMap (summary `HM.union`) $ m mergeparams' mk_loop_res
+  localTypeEnv summary $ m mergeparams' mk_loop_res
   where param_names = map (paramName . fst) merge
         loopInvariantShape =
           not . any (`elem` param_names) . subExpVars . arrayDims . paramType
@@ -518,7 +494,7 @@ allocInBindings origbnds m = allocInBindings' origbnds []
           let summaries =
                 bindeesSummary $
                 concatMap (patternElements . bindingPattern) allocbnds
-          localMemoryMap (`HM.union` summaries) $
+          localTypeEnv summaries $
             allocInBindings' xs (bnds'++allocbnds)
         allocInBinding' bnd = do
           ((),bnds') <- collectBindings $ allocInBinding bnd
@@ -546,18 +522,18 @@ allocInExp (LoopOp (DoLoop res merge form
       DoLoop res (zip mergeparams' mergeinit') form body'
   where (_mergeparams, mergeinit) = unzip merge
         formBinds (ForLoop i _) =
-          localMemoryMap $ HM.insert i $ Entry $ Scalar Int
+          localTypeEnv $ HM.singleton i IndexType
         formBinds (WhileLoop _) =
           id
 
 allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
   inps' <- mapM allocInKernelInput inps
-  let mem_map = paramsSummary (map kernelInputParam inps') <> ispace_map
-  localMemoryMap (mem_map <>) $ do
+  let mem_map = lparamsSummary (map kernelInputParam inps') <> ispace_map
+  localTypeEnv mem_map $ do
     body' <- allocInBindings (bodyBindings body) $ \bnds' ->
       return $ Body () bnds' $ bodyResult body
     return $ Op $ Inner $ MapKernel cs w index ispace inps' returns body'
-  where ispace_map = HM.fromList [ (i, Entry $ Scalar Int)
+  where ispace_map = HM.fromList [ (i, IndexType)
                                  | i <- index : map fst ispace ]
         allocInKernelInput inp =
           case kernelInputType inp of
@@ -672,20 +648,11 @@ allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
 allocInLambda :: VName -> [LParam] -> In.Body -> [Type]
               -> AllocM Lambda
 allocInLambda i params body rettype = do
-  let param_summaries = paramsSummary params
-      all_summaries = HM.insert i (Entry $ Scalar Int) param_summaries
-  body' <- localMemoryMap (HM.union all_summaries) $
+  let param_summaries = lparamsSummary params
+      all_summaries = HM.insert i IndexType param_summaries
+  body' <- localTypeEnv all_summaries $
            allocInBody body
   return $ Lambda i params body' rettype
-
-vtableToAllocEnv :: ST.SymbolTable (Wise ExplicitMemory)
-                 -> MemoryMap
-vtableToAllocEnv = HM.fromList . mapMaybe entryToMemBound .
-                   HM.toList . ST.bindings
-  where entryToMemBound (k,entry) = do
-          summary <- (snd <$> ST.entryLetBoundLore entry) <|>
-                     (fmap (const NoUniqueness) <$> ST.entryFParamLore entry)
-          return (k, Entry summary)
 
 simplifiable :: (Engine.MonadEngine m,
                  Engine.InnerLore m ~ ExplicitMemory) =>
@@ -701,12 +668,12 @@ simplifiable =
           pat' <- bindPatternWithAllocations env names $
                   removeExpWisdom e
           return $ mkWiseLetBinding pat' () e
-          where env = vtableToAllocEnv vtable
+          where env = removeTypeEnvWisdom $ ST.typeEnv vtable
 
 bindPatternWithAllocations :: (MonadBinder m, Op (Lore m) ~ MemOp (Lore m)) =>
-                              MemoryMap -> [(VName, Bindage)] -> Exp
+                              TypeEnv (NameType ExplicitMemory) -> [(VName, Bindage)] -> Exp
                            -> m Pattern
-bindPatternWithAllocations memoryMap names e = do
-  (pat,prebnds) <- runPatAllocM (patternWithAllocations names e) memoryMap
+bindPatternWithAllocations types names e = do
+  (pat,prebnds) <- runPatAllocM (patternWithAllocations names e) types
   mapM_ bindAllocBinding prebnds
   return pat

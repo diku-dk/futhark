@@ -14,6 +14,8 @@ module Futhark.Optimise.Simplifier.Lore
        , removeExpWisdom
        , removePatternWisdom
        , removeBodyWisdom
+       , removeTypeEnvWisdom
+       , addTypeEnvWisdom
        , addWisdomToPattern
        , mkWiseBody
        , mkWiseLetBinding
@@ -23,7 +25,9 @@ module Futhark.Optimise.Simplifier.Lore
        where
 
 import Control.Applicative
+import Control.Monad.Reader
 import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Ranges
@@ -124,6 +128,20 @@ removeWisdom = Rephraser { rephraseExpLore = snd
                          , rephraseOp = removeOpWisdom
                          }
 
+removeTypeEnvWisdom :: TypeEnv (NameType (Wise lore)) -> TypeEnv (NameType lore)
+removeTypeEnvWisdom = HM.map unAlias
+  where unAlias (LetType (_, attr)) = LetType attr
+        unAlias (FParamType attr) = FParamType attr
+        unAlias (LParamType attr) = LParamType attr
+        unAlias IndexType = IndexType
+
+addTypeEnvWisdom :: TypeEnv (NameType lore) -> TypeEnv (NameType (Wise lore))
+addTypeEnvWisdom = HM.map alias
+  where alias (LetType attr) = LetType (VarWisdom mempty unknownRange, attr)
+        alias (FParamType attr) = FParamType attr
+        alias (LParamType attr) = LParamType attr
+        alias IndexType = IndexType
+
 removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
 removeProgWisdom = rephraseProg removeWisdom
 
@@ -185,8 +203,10 @@ instance (Bindable lore,
     in mkWiseLetBinding pat' explore e
 
   mkLetNames names e = do
-    Let pat explore _ <- mkLetNames names $ removeExpWisdom e
-    return $ mkWiseLetBinding pat explore e
+    env <- asksTypeEnv removeTypeEnvWisdom
+    flip runReaderT env $ do
+      Let pat explore _ <- mkLetNames names $ removeExpWisdom e
+      return $ mkWiseLetBinding pat explore e
 
   mkBody bnds res =
     let Body bodylore _ _ = mkBody (map removeBindingWisdom bnds) res

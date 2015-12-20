@@ -19,7 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 
-blockedReduction :: (MonadFreshNames m, HasTypeEnv m) =>
+blockedReduction :: (MonadFreshNames m, HasTypeEnv (NameType Kernels) m) =>
                     Pattern
                  -> Certificates -> SubExp
                  -> Lambda -> Lambda
@@ -67,7 +67,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
           | (param, arr) <- zip fold_arr_params $ map paramName arr_chunk_params ]
 
   seq_loop_body <-
-    runBodyBinder $ bindingParamTypes (lambdaParams fold_lam) $ do
+    runBodyBinder $ withLParamTypes (lambdaParams fold_lam) $ do
       mapM_ addBinding $ compute_start_index : compute_index : read_array_elements
       resultBodyM =<< bodyBind (lambdaBody fold_lam)
 
@@ -235,7 +235,7 @@ blockedScan pat cs w lam input = do
       result_inputs = zipWith (mkKernelInput [Var j]) arr_params sequentially_scanned
 
   result_map_body <- runBodyBinder $
-                     localTypeEnv (inputTypes result_inputs)  $ do
+                     withLParamTypes (map kernelInputParam result_inputs) $ do
     thread_id <-
       letSubExp "thread_id" $
       PrimOp $ BinOp Quot (Var j) elems_per_thread Int
@@ -269,10 +269,6 @@ blockedScan pat cs w lam input = do
                                                   , kernelInputIndices = indices
                                                   }
 
-        inputTypes inps = HM.fromList [ (kernelInputName inp,
-                                         kernelInputType inp)
-                                      | inp <- inps ]
-
 blockedSegmentedScan :: (MonadBinder m, Futhark.Tools.Lore m ~ Kernels) =>
                         SubExp
                      -> Pattern
@@ -289,7 +285,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       (x_params, y_params) = splitAt (length input) $ lambdaParams lam
       params = [x_flag_param] ++ x_params ++ [y_flag_param] ++ y_params
 
-  body <- runBodyBinder $ localTypeEnv (typeEnvFromParams params) $ do
+  body <- runBodyBinder $ withLParamTypes params $ do
     new_flag <- letSubExp "new_flag" $
                 PrimOp $ BinOp LogOr (Var x_flag) (Var y_flag) Bool
     seg_res <- letTupExp "seg_res" $ If (Var y_flag)
@@ -301,7 +297,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
   flags_global_index <- newVName "flags_global_index"
   flags_i <- newVName "flags_i"
   flags_body <-
-    runBodyBinder $ localTypeEnv (HM.singleton flags_i $ Basic Int) $ do
+    runBodyBinder $ localTypeEnv (HM.singleton flags_i IndexType) $ do
       segment_index <- letSubExp "segment_index" $
                        PrimOp $ BinOp Rem (Var flags_i) segment_size Int
       start_of_segment <- letSubExp "start_of_segment" $

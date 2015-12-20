@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, FlexibleContexts, UndecidableInstances #-}
 -- | This module exports 'RuleM', the monad used for writing
 -- simplification rules.
 module Futhark.Optimise.Simplifier.RuleM
@@ -25,11 +25,11 @@ instance MonadFreshNames m => MonadFreshNames (RuleM m) where
   getNameSource = RuleM . lift $ getNameSource
   putNameSource = RuleM . lift . putNameSource
 
-instance (Monad m, HasTypeEnv m) => HasTypeEnv (RuleM m) where
+instance (Monad m, HasTypeEnv t m) => HasTypeEnv t (RuleM m) where
   lookupType = RuleM . lift . lookupType
   askTypeEnv  = RuleM . lift $ askTypeEnv
 
-instance (Monad m, LocalTypeEnv m) => LocalTypeEnv (RuleM m) where
+instance (Monad m, LocalTypeEnv t m) => LocalTypeEnv t (RuleM m) where
   localTypeEnv types (RuleM m) = RuleM $ do
     x <- lift $ localTypeEnv types $ runMaybeT m
     MaybeT $ return x

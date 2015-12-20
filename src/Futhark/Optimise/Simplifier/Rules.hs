@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | This module defines a collection of simplification rules, as per
@@ -39,7 +40,7 @@ import Futhark.Transform.Substitute
 
 import Prelude hiding (any, all)
 
-topDownRules :: (MonadBinder m, LocalTypeEnv m) => TopDownRules m
+topDownRules :: (MonadBinder m, LocalTypeEnv (NameType (Lore m)) m) => TopDownRules m
 topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
@@ -77,11 +78,11 @@ bottomUpRules = [ removeUnusedLoopResult
                 , simplifyEqualBranchResult
                 ]
 
-standardRules :: (MonadBinder m, LocalTypeEnv m) => RuleBook m
+standardRules :: (MonadBinder m, LocalTypeEnv (NameType (Lore m)) m) => RuleBook m
 standardRules = (topDownRules, bottomUpRules)
 
 -- | Rules that only work on 'Basic' lores or similar.  Includes 'standardRules'.
-basicRules :: (MonadBinder m, LocalTypeEnv m) => RuleBook m
+basicRules :: (MonadBinder m, LocalTypeEnv (NameType (Lore m)) m) => RuleBook m
 basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 -- After removing a result, we may also have to remove some existential bindings.

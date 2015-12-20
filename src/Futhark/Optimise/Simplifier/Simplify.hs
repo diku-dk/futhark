@@ -16,9 +16,9 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Lore (Wise)
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simple
+import Futhark.Optimise.Simplifier.Lore (addTypeEnvWisdom)
 import Futhark.Tools (intraproceduralTransformation)
 
 -- | Simplify the given program.  Even if the output differs from the
@@ -48,7 +48,9 @@ simplifyFun simpl rules blockers fundec =
   Engine.emptyEnv rules blockers
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
+simplifyLambda :: (MonadFreshNames m,
+                   HasTypeEnv (NameType lore) m,
+                   Engine.MonadEngine (SimpleM lore)) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Engine.HoistBlockers (SimpleM lore)
@@ -56,13 +58,16 @@ simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM 
                -> m (Lambda (Wise lore))
 simplifyLambda simpl rules blockers lam w args = do
   types <- askTypeEnv
-  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+  let m = Engine.localVtable
+          (<> ST.fromTypeEnv (addTypeEnvWisdom types)) $
           Engine.simplifyLambdaNoHoisting lam w args
   modifyNameSource $ runSimpleM m simpl $
     Engine.emptyEnv rules blockers
 
 -- | Simplify a list of 'Binding's.
-simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
+simplifyBindings :: (MonadFreshNames m,
+                     HasTypeEnv (NameType lore) m,
+                     Engine.MonadEngine (SimpleM lore)) =>
                     SimpleOps (SimpleM lore)
                  -> RuleBook (SimpleM lore)
                  -> Engine.HoistBlockers (SimpleM lore)
@@ -70,7 +75,8 @@ simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (Simple
                  -> m [Binding (Wise lore)]
 simplifyBindings simpl rules blockers bnds = do
   types <- askTypeEnv
-  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+  let m = Engine.localVtable
+          (<> ST.fromTypeEnv (addTypeEnvWisdom types)) $
           fmap snd $ Engine.collectBindingsEngine $
           mapM_ Engine.simplifyBinding bnds
   modifyNameSource $ runSimpleM m simpl $
