@@ -32,6 +32,7 @@ script:
  - cabal test  # Run the Cabal test suite.
  - cabal install
  - data/runtests.sh # Run integration test suite.
+ - data/runtests.sh -t --exclude=no_opencl --compiler=futhark-opencl # Also test OpenCL code generation
  - tools/style-check.sh src # Check for style issues.
  - cabal haddock # Can we build the documentation?
  - cabal check # Sanity-checks the .cabal file.
