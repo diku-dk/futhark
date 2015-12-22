@@ -12,6 +12,7 @@
 --     scan
 --
 -- ==
+-- tags { no_opencl }
 -- structure distributed { MapKernel 4 }
 
 fun [real] combineVs([real] n_row, [real] vol_row, [real] dr_row) =

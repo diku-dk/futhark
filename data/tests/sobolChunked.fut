@@ -3,6 +3,7 @@
 -- At one point failed in the OpenCL code generator.
 --
 -- ==
+-- tags { no_opencl }
 -- input {
 -- 10
 --
