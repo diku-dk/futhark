@@ -85,10 +85,24 @@ transformExp (Op (Inner (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs
           Op $ Inner $ ReduceKernel cs w kernel_size red_lam' fold_lam' nes arrs)
   where num_threads = kernelNumThreads kernel_size
 
-        bound_in_red_lam = HS.fromList $
-                           lambdaIndex red_lam : map paramName (lambdaParams red_lam)
-        bound_in_fold_lam = HS.fromList $
-                            lambdaIndex fold_lam : map paramName (lambdaParams fold_lam)
+        bound_in_red_lam = HS.fromList $ HM.keys $ scopeOf red_lam
+        bound_in_fold_lam = HS.fromList $ HM.keys $ scopeOf fold_lam
+
+transformExp (Op (Inner (ScanKernel cs w kernel_size order lam input)))
+  -- Extract allocations from the lambda.
+  | Right (lam_body', lam_thread_allocs) <-
+      extractKernelAllocations bound_in_lam $ lambdaBody lam = do
+
+  (alloc_bnds, alloc_offsets) <-
+    expandedAllocations num_threads (lambdaIndex lam) lam_thread_allocs
+
+  let lam_body'' = offsetMemoryInBody alloc_offsets lam_body'
+      lam' = lam { lambdaBody = lam_body'' }
+  return (alloc_bnds,
+          Op $ Inner $ ScanKernel cs w kernel_size order lam' input)
+  where num_threads = kernelNumThreads kernel_size
+
+        bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
 
 transformExp e =
   return ([], e)
