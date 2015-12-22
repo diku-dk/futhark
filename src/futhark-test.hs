@@ -65,6 +65,8 @@ concurrency = 8
 data ProgramTest =
   ProgramTest { testDescription ::
                    T.Text
+              , testTags ::
+                   [T.Text]
               , testAction ::
                    TestAction
               , testExpectedStructure ::
@@ -137,6 +139,11 @@ parseDescriptionSeparator = try (string descriptionSeparator >> void newline) <|
 
 descriptionSeparator :: String
 descriptionSeparator = "=="
+
+parseTags :: Parser [T.Text]
+parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
+  where parseTag = T.pack <$> many1 (lexeme $ satisfy constituent)
+        constituent c = not (isSpace c) && c /= '}'
 
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
@@ -217,7 +224,7 @@ parseMetrics = braces $ liftM HM.fromList $ many $
 
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseAction <*> optional parseExpectedStructure
+  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> optional parseExpectedStructure
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
@@ -526,6 +533,10 @@ runTest testmvar resmvar = forever $ do
   res <- doTest test
   putMVar resmvar (test, res)
 
+excludedTest :: TestConfig -> TestCase -> Bool
+excludedTest config =
+  any (`elem` configExclude config) . testTags . testCaseTest
+
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
 
@@ -552,8 +563,9 @@ runTests config files = do
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
-  tests <- mapM (makeTestCase (configPrograms config) mode) files
-  _ <- forkIO $ mapM_ (putMVar testmvar) tests
+  all_tests <- mapM (makeTestCase (configPrograms config) mode) files
+  let (excluded, included) = partition (excludedTest config) all_tests
+  _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
@@ -571,8 +583,11 @@ runTests config files = do
                               putStrLn (testCaseProgram test ++ ":\n" ++ s)
                               next (failed+1) passed
 
-  (failed, passed) <- getResults (S.fromList tests) 0 0
-  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed."
+  (failed, passed) <- getResults (S.fromList included) 0 0
+  let excluded_str = if null excluded
+                     then ""
+                     else " (" ++ show (length excluded) ++ " excluded)"
+  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed" ++ excluded_str ++ "."
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
 
@@ -583,10 +598,12 @@ runTests config files = do
 data TestConfig = TestConfig
                   { configTestMode :: TestMode
                   , configPrograms :: ProgConfig
+                  , configExclude :: [T.Text]
                   }
 
 defaultConfig :: TestConfig
 defaultConfig = TestConfig { configTestMode = Everything
+                           , configExclude = []
                            , configPrograms =
                              ProgConfig
                              { configCompiler = Left "futhark-c"
@@ -658,6 +675,12 @@ commandLineOptions = [
     (ReqArg (Right . changeProgConfig . addInterpreter)
      "PROGRAM")
     "What to run for interpretation (defaults to 'futharki')."
+  , Option [] ["exclude"]
+    (ReqArg (\tag ->
+               Right $ \config ->
+               config { configExclude = T.pack tag : configExclude config })
+     "TAG")
+    "Exclude test programs that define this tag."
   ]
 
 main :: IO ()

@@ -6,6 +6,7 @@
 testdir=$(dirname "$0")
 
 compiler=futhark-c
+exclude=""
 
 while true; do
     case $1 in
@@ -26,7 +27,16 @@ while true; do
             shift
             ;;
         --compiler)
-            compiler=$(echo $2|cut -d= -f2-)
+            compiler=$2
+            shift
+            shift
+            ;;
+        --exclude=*)
+            exclude="$exclude --exclude $(echo $1|cut -d= -f2-)"
+            shift
+            ;;
+        --exclude)
+            exclude="$exclude --exclude $2"
             shift
             shift
             ;;
@@ -69,4 +79,4 @@ else
     }
 fi
 
-futhark_test_command $tests
+futhark_test_command $exclude $tests
