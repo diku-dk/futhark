@@ -53,10 +53,12 @@ module Futhark.Representation.Aliases
        , removeLambdaAliases
        , removeExtLambdaAliases
        , removePatternAliases
+       , removeScopeAliases
        )
 where
 
 import Control.Applicative
+import Control.Monad.Reader
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
@@ -151,8 +153,9 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) 
   loopResultContext (Aliases lore) =
     loopResultContext lore
 
-  expContext pat e =
-    expContext (removePatternAliases pat) (removeExpAliases e)
+  expContext pat e = do
+    env <- asksScope removeScopeAliases
+    return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
@@ -222,6 +225,13 @@ removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseRetType = id
                           , rephraseOp = removeOpAliases
                           }
+
+removeScopeAliases :: Scope (Aliases lore) -> Scope lore
+removeScopeAliases = HM.map unAlias
+  where unAlias (LetInfo (_, attr)) = LetInfo attr
+        unAlias (FParamInfo attr) = FParamInfo attr
+        unAlias (LParamInfo attr) = LParamInfo attr
+        unAlias IndexInfo = IndexInfo
 
 removeProgAliases :: CanBeAliased (Op lore) =>
                      AST.Prog (Aliases lore) -> AST.Prog lore
@@ -350,8 +360,10 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
     in mkAliasedLetBinding pat' explore e
 
   mkLetNames names e = do
-    Let pat explore _ <- mkLetNames names $ removeExpAliases e
-    return $ mkAliasedLetBinding pat explore e
+    env <- asksScope removeScopeAliases
+    flip runReaderT env $ do
+      Let pat explore _ <- mkLetNames names $ removeExpAliases e
+      return $ mkAliasedLetBinding pat explore e
 
   mkBody bnds res =
     let AST.Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res

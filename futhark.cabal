@@ -137,7 +137,7 @@ Library
                    Futhark.Representation.AST.Attributes.Rearrange
                    Futhark.Representation.AST.Attributes.Reshape
                    Futhark.Representation.AST.Attributes.Stripe
-                   Futhark.Representation.AST.Attributes.TypeEnv
+                   Futhark.Representation.AST.Attributes.Scope
                    Futhark.Representation.AST.Attributes.TypeOf
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values

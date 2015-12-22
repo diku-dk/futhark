@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -86,6 +86,7 @@ import Futhark.CodeGen.ImpCode
    bytes, elements,
    withElemType)
 import Futhark.Representation.ExplicitMemory
+import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util
@@ -201,8 +202,8 @@ instance MonadFreshNames (ImpM op) where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv (ImpM op) where
-  askTypeEnv = HM.map entryType <$> asks envVtable
+instance HasScope SOACS (ImpM op) where
+  askScope = HM.map (LetInfo . entryType) <$> asks envVtable
     where entryType (MemVar memEntry) =
             Mem (dimSizeToSubExp $ entryMemSize memEntry) (entryMemSpace memEntry)
           entryType (ArrayVar arrayEntry) =
@@ -327,7 +328,7 @@ compileOutParams rts = do
         mkParam (ReturnsArray t shape _ lore) = do
           space <- asks envDefaultSpace
           (memout, memdestf) <- case lore of
-            ReturnsNewBlock x -> do
+            ReturnsNewBlock x _ -> do
               memout <- imp $ newVName "out_mem"
               (sizeout, destmemsize) <- ensureMemSizeOut x
               tell [Imp.MemParam memout (Imp.VarSize sizeout) space]

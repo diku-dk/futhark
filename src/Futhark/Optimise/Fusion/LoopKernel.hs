@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer(..)
@@ -169,11 +170,11 @@ applyFusionRules    unfus_nms outVars soac ker =
   tryExposeInputs   unfus_nms outVars soac ker <|>
   fuseSOACwithKer   unfus_nms outVars soac ker
 
-attemptFusion :: (MonadFreshNames m, HasTypeEnv m) =>
+attemptFusion :: (MonadFreshNames m, HasScope SOACS m) =>
                  Names -> [VName] -> SOAC -> FusedKer
               -> m (Maybe FusedKer)
 attemptFusion unfus_nms outVars soac ker = do
-  types <- askTypeEnv
+  types <- askScope
   liftM removeUnusedParamsFromKer <$>
     tryFusion (applyFusionRules unfus_nms outVars soac ker) types
 

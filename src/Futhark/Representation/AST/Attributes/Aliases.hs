@@ -78,8 +78,9 @@ primOpAliases (Partition _ n _ arr) =
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
 loopOpAliases (DoLoop res merge _ loopbody) =
-  map snd $ filter fst $
-  zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
+  map ((`HS.difference` merge_names) . snd) $ filter fst $
+  zip (map ((`elem` res) . paramName . fst) merge) (bodyAliases loopbody)
+  where merge_names = HS.fromList $ map (paramName . fst) merge
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =

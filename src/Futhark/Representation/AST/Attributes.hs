@@ -15,6 +15,7 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.Attributes.Patterns
   , module Futhark.Representation.AST.Attributes.Names
   , module Futhark.Representation.AST.RetType
+  , module Futhark.Representation.AST.Attributes.Context
 
   -- * Extra tools
   , funDecByName
@@ -183,13 +184,13 @@ class (Annotations lore,
                     -> [FParam lore]
                     -> [VName]
 
-  -- | As far as possible, determine the subexpression to which ecah
+  -- | As far as possible, determine the subexpression to which each
   -- context pattern element will be bound due to evaluation of the
   -- given expression.  The resulting list must have the same number
   -- of elements as there are context elements in the pattern.
   --
   -- The default method invokes 'expExtContext'.
-  expContext :: (HasTypeEnv m, Monad m) =>
+  expContext :: (HasScope lore m, Monad m) =>
                 Pattern lore ->
                 Exp lore ->
                 m [Maybe SubExp]

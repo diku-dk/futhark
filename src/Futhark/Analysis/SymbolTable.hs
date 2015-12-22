@@ -1,10 +1,11 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings)
   , empty
-  , fromTypeEnv
+  , fromScope
     -- * Entries
   , Entry
   , deepen
@@ -12,7 +13,7 @@ module Futhark.Analysis.SymbolTable
   , valueRange
   , loopVariable
   , entryBinding
-  , entryLetBoundLore
+  , entryLetBoundAttr
   , entryFParamLore
   , entryType
   , asScalExp
@@ -80,9 +81,9 @@ instance Monoid (SymbolTable lore) where
 empty :: SymbolTable lore
 empty = SymbolTable 0 HM.empty
 
-fromTypeEnv :: TypeEnv -> SymbolTable lore
-fromTypeEnv = HM.foldlWithKey' insertFreeVar' empty
-  where insertFreeVar' m k v = insertFreeVar k v m
+fromScope :: Annotations lore => Scope lore -> SymbolTable lore
+fromScope = HM.foldlWithKey' insertFreeVar' empty
+  where insertFreeVar' m k attr = insertFreeVar k attr m
 
 deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
@@ -91,7 +92,7 @@ data Entry lore = LoopVar (LoopVarEntry lore)
                 | LetBound (LetBoundEntry lore)
                 | FParam (FParamEntry lore)
                 | LParam (LParamEntry lore)
-                | FreeVar FreeVarEntry
+                | FreeVar (FreeVarEntry lore)
 
 data LoopVarEntry lore =
   LoopVarEntry { loopVarRange        :: ScalExpRange
@@ -100,29 +101,27 @@ data LoopVarEntry lore =
 
 data LetBoundEntry lore =
   LetBoundEntry { letBoundRange        :: ScalExpRange
-                , letBoundLore         :: LetAttr lore
+                , letBoundAttr         :: LetAttr lore
                 , letBoundBinding      :: Binding lore
                 , letBoundBindingDepth :: Int
                 , letBoundScalExp      :: Maybe ScalExp
                 , letBoundBindage      :: Bindage
-                , letBoundType         :: Type
                 }
 
 data FParamEntry lore =
   FParamEntry { fparamRange        :: ScalExpRange
-              , paramLore          :: FParamAttr lore
+              , fparamAttr         :: FParamAttr lore
               , fparamBindingDepth :: Int
-              , paramType          :: DeclType
               }
 
 data LParamEntry lore =
   LParamEntry { lparamRange        :: ScalExpRange
+              , lparamAttr         :: LParamAttr lore
               , lparamBindingDepth :: Int
-              , lparamType         :: Type
               }
 
-data FreeVarEntry =
-  FreeVarEntry { freeVarType         :: Type
+data FreeVarEntry lore =
+  FreeVarEntry { freeVarAttr         :: NameInfo lore
                , freeVarBindingDepth :: Int
                , freeVarRange        :: ScalExpRange
                }
@@ -179,12 +178,12 @@ entryBinding :: Entry lore -> Maybe (Binding lore)
 entryBinding (LetBound entry) = Just $ letBoundBinding entry
 entryBinding _                = Nothing
 
-entryLetBoundLore :: Entry lore -> Maybe (LetAttr lore)
-entryLetBoundLore (LetBound entry) = Just $ letBoundLore entry
-entryLetBoundLore _                = Nothing
+entryLetBoundAttr :: Entry lore -> Maybe (LetAttr lore)
+entryLetBoundAttr (LetBound entry) = Just $ letBoundAttr entry
+entryLetBoundAttr _                = Nothing
 
 entryFParamLore :: Entry lore -> Maybe (FParamAttr lore)
-entryFParamLore (FParam entry) = Just $ paramLore entry
+entryFParamLore (FParam entry) = Just $ fparamAttr entry
 entryFParamLore _              = Nothing
 
 loopVariable :: Entry lore -> Bool
@@ -194,32 +193,30 @@ loopVariable _           = False
 asExp :: Entry lore -> Maybe (Exp lore)
 asExp = liftM (bindingExp . letBoundBinding) . isVarBound
 
-entryType :: Entry lore -> Type
-entryType (LetBound entry) = letBoundType entry
-entryType (LParam entry)   = lparamType entry
-entryType (FParam entry)   = fromDecl $ paramType entry
+entryType :: Annotations lore => Entry lore -> Type
+entryType (LetBound entry) = typeOf $ letBoundAttr entry
+entryType (LParam entry)   = typeOf $ lparamAttr entry
+entryType (FParam entry)   = typeOf $ fparamAttr entry
 entryType (LoopVar _)      = Basic Int
-entryType (FreeVar entry)  = freeVarType entry
+entryType (FreeVar entry)  = typeOf $ freeVarAttr entry
 
 instance Substitutable lore => Substitute (LetBoundEntry lore) where
   substituteNames substs entry =
     LetBoundEntry {
         letBoundRange = substituteNames substs $ letBoundRange entry
-      , letBoundLore = substituteNames substs $ letBoundLore entry
+      , letBoundAttr = substituteNames substs $ letBoundAttr entry
       , letBoundBinding = substituteNames substs $ letBoundBinding entry
       , letBoundScalExp = substituteNames substs $ letBoundScalExp entry
       , letBoundBindingDepth = letBoundBindingDepth entry
       , letBoundBindage = substituteNames substs $ letBoundBindage entry
-      , letBoundType = substituteNames substs $ letBoundType entry
       }
 
 instance Substitutable lore => Substitute (FParamEntry lore) where
   substituteNames substs entry =
     FParamEntry {
           fparamRange = substituteNames substs $ fparamRange entry
-        , paramLore = substituteNames substs $ paramLore entry
+        , fparamAttr = substituteNames substs $ fparamAttr entry
         , fparamBindingDepth = fparamBindingDepth entry
-        , paramType = substituteNames substs $ paramType entry
       }
 
 instance Substitutable lore => Substitute (LParamEntry lore) where
@@ -227,7 +224,7 @@ instance Substitutable lore => Substitute (LParamEntry lore) where
     LParamEntry {
           lparamRange = substituteNames substs $ lparamRange entry
         , lparamBindingDepth = lparamBindingDepth entry
-        , lparamType = substituteNames substs $ lparamType entry
+        , lparamAttr = substituteNames substs $ lparamAttr entry
       }
 
 instance Substitutable lore => Substitute (LoopVarEntry lore) where
@@ -237,11 +234,11 @@ instance Substitutable lore => Substitute (LoopVarEntry lore) where
         , loopVarBindingDepth = loopVarBindingDepth entry
       }
 
-instance Substitute FreeVarEntry where
+instance Substitute (NameInfo lore) => Substitute (FreeVarEntry lore) where
   substituteNames substs entry =
     FreeVarEntry {
         freeVarRange = substituteNames substs $ freeVarRange entry
-      , freeVarType = substituteNames substs $ freeVarType entry
+      , freeVarAttr = substituteNames substs $ freeVarAttr entry
       , freeVarBindingDepth = freeVarBindingDepth entry
       }
 
@@ -267,7 +264,7 @@ lookup name = HM.lookup name . bindings
 lookupExp :: VName -> SymbolTable lore -> Maybe (Exp lore)
 lookupExp name vtable = asExp =<< lookup name vtable
 
-lookupType :: VName -> SymbolTable lore -> Maybe Type
+lookupType :: Annotations lore => VName -> SymbolTable lore -> Maybe Type
 lookupType name vtable = entryType <$> lookup name vtable
 
 lookupSubExp :: VName -> SymbolTable lore -> Maybe SubExp
@@ -308,8 +305,13 @@ rangesRep = HM.filter knownRange . HM.map toRep . bindings
           where (lower, upper) = valueRange entry
         knownRange (_, lower, upper) = isJust lower || isJust upper
 
-typeEnv :: SymbolTable lore -> TypeEnv
-typeEnv = HM.map entryType . bindings
+typeEnv :: SymbolTable lore -> Scope lore
+typeEnv = HM.map nameType . bindings
+  where nameType (LetBound entry) = LetInfo $ letBoundAttr entry
+        nameType (LoopVar _) = IndexInfo
+        nameType (FParam entry) = FParamInfo $ fparamAttr entry
+        nameType (LParam entry) = LParamInfo $ lparamAttr entry
+        nameType (FreeVar entry) = freeVarAttr entry
 
 defBndEntry :: Annotations lore =>
                SymbolTable lore
@@ -320,13 +322,12 @@ defBndEntry :: Annotations lore =>
 defBndEntry vtable patElem range bnd =
   LetBoundEntry {
       letBoundRange = simplifyRange $ scalExpRange range
-    , letBoundLore = patElemAttr patElem
+    , letBoundAttr = patElemAttr patElem
     , letBoundBinding = bnd
     , letBoundScalExp =
       runReader (toScalExp (`lookupScalExp` vtable) (bindingExp bnd)) types
     , letBoundBindingDepth = 0
     , letBoundBindage = patElemBindage patElem
-    , letBoundType = patElemType patElem
     }
   where ranges :: AS.RangesRep
         ranges = rangesRep vtable
@@ -401,9 +402,8 @@ insertFParam :: Annotations lore =>
 insertFParam fparam = insertEntry name entry
   where name = AST.paramName fparam
         entry = FParam FParamEntry { fparamRange = (Nothing, Nothing)
-                                   , paramLore = AST.paramAttr fparam
+                                   , fparamAttr = AST.paramAttr fparam
                                    , fparamBindingDepth = 0
-                                   , paramType = AST.paramDeclType fparam
                                    }
 
 insertFParams :: Annotations lore =>
@@ -420,8 +420,8 @@ insertLParamWithRange param range vtable =
   let vtable' = insertEntry name bind vtable
   in foldr (`isAtLeast` 0) vtable' sizevars
   where bind = LParam LParamEntry { lparamRange = range
+                                  , lparamAttr = AST.paramAttr param
                                   , lparamBindingDepth = 0
-                                  , lparamType = AST.paramType param
                                   }
         name = AST.paramName param
         sizevars = mapMaybe isVar $ arrayDims $ AST.paramType param
@@ -458,15 +458,15 @@ insertLoopVar name bound = insertEntry name bind
           , loopVarBindingDepth = 0
           }
 
-insertFreeVar :: VName -> Type -> SymbolTable lore -> SymbolTable lore
-insertFreeVar name t = insertEntry name entry
+insertFreeVar :: VName -> NameInfo lore -> SymbolTable lore -> SymbolTable lore
+insertFreeVar name attr = insertEntry name entry
   where entry = FreeVar FreeVarEntry {
-            freeVarType = t
+            freeVarAttr = attr
           , freeVarRange = (Nothing, Nothing)
           , freeVarBindingDepth = 0
           }
 
-updateBounds :: Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
+updateBounds :: Annotations lore => Bool -> SubExp -> SymbolTable lore -> SymbolTable lore
 updateBounds isTrue cond vtable =
   case runReader (toScalExp (`lookupScalExp` vtable) $ PrimOp $ SubExp cond) types of
     Nothing    -> vtable

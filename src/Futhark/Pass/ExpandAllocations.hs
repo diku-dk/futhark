@@ -175,7 +175,7 @@ offsetMemoryInBody offsets (Body attr bnds res) =
   Body attr (snd $ mapAccumL offsetMemoryInBinding offsets bnds) res
 
 offsetMemoryInBinding :: RebaseMap -> Binding
-                               -> (RebaseMap, Binding)
+                      -> (RebaseMap, Binding)
 offsetMemoryInBinding offsets (Let pat attr e) =
   (offsets', Let pat' attr $ offsetMemoryInExp offsets e)
   where (offsets', pat') = offsetMemoryInPattern offsets pat
@@ -191,7 +191,7 @@ offsetMemoryInPattern offsets (Pattern ctx vals) =
                   }
         inspectCtx ctx_offsets patElem
           | Mem _ _ <- patElemType patElem =
-              error $ unwords ["Cannot deal with existential memory block ",
+              error $ unwords ["Cannot deal with existential memory block",
                                pretty (patElemName patElem),
                                "when expanding inside kernels."]
           | otherwise =

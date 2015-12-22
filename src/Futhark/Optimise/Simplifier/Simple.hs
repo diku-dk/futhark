@@ -1,12 +1,15 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Futhark.Optimise.Simplifier.Simple
        ( SimpleOps (..)
        , SimpleM
        , bindableSimpleOps
        , runSimpleM
+       , Wise
        )
   where
 
@@ -66,8 +69,9 @@ instance MonadFreshNames (SimpleM lore) where
   getNameSource   = snd <$> get
   putNameSource y = modify $ \(x, _) -> (x,y)
 
-instance Engine.MonadEngine (SimpleM lore) => HasTypeEnv (SimpleM lore) where
-  askTypeEnv = ST.typeEnv <$> Engine.getVtable
+instance Engine.MonadEngine (SimpleM lore) =>
+         HasScope (Wise lore) (SimpleM lore) where
+  askScope = ST.typeEnv <$> Engine.getVtable
   lookupType name = do
     vtable <- Engine.getVtable
     case ST.lookupType name vtable of
@@ -76,8 +80,9 @@ instance Engine.MonadEngine (SimpleM lore) => HasTypeEnv (SimpleM lore) where
                  "SimpleM.lookupType: cannot find variable " ++
                  pretty name ++ " in symbol table."
 
-instance Engine.MonadEngine (SimpleM lore) => LocalTypeEnv (SimpleM lore) where
-  localTypeEnv types = Engine.localVtable (<>ST.fromTypeEnv types)
+instance Engine.MonadEngine (SimpleM lore) =>
+         LocalScope (Wise lore) (SimpleM lore) where
+  localScope types = Engine.localVtable (<>ST.fromScope types)
 
 instance Engine.MonadEngine (SimpleM lore) => MonadBinder (SimpleM lore) where
   type Lore (SimpleM lore) = Wise lore

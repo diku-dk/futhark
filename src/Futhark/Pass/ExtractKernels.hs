@@ -2,6 +2,9 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | Extract kernels.
 -- In the following, I will use the term "width" to denote the amount
 -- of immediate parallelism in a map - that is, the row size of the
@@ -153,6 +156,7 @@ module Futhark.Pass.ExtractKernels
 import Control.Arrow (second)
 import Control.Applicative
 import Control.Monad.RWS.Strict
+import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -185,10 +189,10 @@ extractKernels =
        , passFunction = runDistribM . liftM Prog . mapM transformFunDec . progFunctions
        }
 
-newtype DistribM a = DistribM (RWS TypeEnv Log VNameSource a)
+newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log VNameSource a)
                    deriving (Functor, Applicative, Monad,
-                             HasTypeEnv,
-                             LocalTypeEnv,
+                             HasScope Out.Kernels,
+                             LocalScope Out.Kernels,
                              MonadFreshNames,
                              MonadLogger)
 
@@ -202,7 +206,7 @@ runDistribM (DistribM m) = do
 
 transformFunDec :: FunDec -> DistribM Out.FunDec
 transformFunDec (FunDec name rettype params body) = do
-  body' <- localTypeEnv (typeEnvFromParams params) $
+  body' <- localScope (scopeOfFParams params) $
            transformBody body
   return $ FunDec name rettype params body'
 
@@ -217,20 +221,38 @@ transformBindings (bnd:bnds) =
   sequentialisedUnbalancedBinding bnd >>= \case
     Nothing -> do
       bnd' <- transformBinding bnd
-      localTypeEnv (typeEnvFromBindings bnd') $
+      inScopeOf bnd' $
         (bnd'++) <$> transformBindings bnds
     Just bnds' ->
       transformBindings $ bnds' <> bnds
 
 sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Map _ _ lam _)))
-  | unbalancedLambda lam =
-    Just <$> runBinder_ (FOT.transformSOAC pat soac)
+  | unbalancedLambda lam = do
+      types <- asksScope scopeForSOACs
+      Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ lam1 lam2 _ _)))
-  | unbalancedLambda lam1 || unbalancedLambda lam2 =
-    Just <$> runBinder_ (FOT.transformSOAC pat soac)
+  | unbalancedLambda lam1 || unbalancedLambda lam2 = do
+      types <- asksScope scopeForSOACs
+      Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding _ =
   return Nothing
+
+castScope :: (LetAttr fromlore ~ LetAttr tolore,
+              FParamAttr fromlore ~ FParamAttr tolore,
+              LParamAttr fromlore ~ LParamAttr tolore) =>
+             Scope fromlore -> Scope tolore
+castScope = HM.map soacs
+  where soacs (LetInfo attr) = LetInfo attr
+        soacs (FParamInfo attr) = FParamInfo attr
+        soacs (LParamInfo attr) = LParamInfo attr
+        soacs IndexInfo = IndexInfo
+
+scopeForSOACs ::Scope Out.Kernels -> Scope SOACS
+scopeForSOACs = castScope
+
+scopeForKernels :: Scope SOACS -> Scope Out.Kernels
+scopeForKernels = castScope
 
 transformBinding :: Binding -> DistribM [Out.Binding]
 
@@ -240,12 +262,10 @@ transformBinding (Let pat () (If c tb fb rt)) = do
   return [Let pat () $ If c tb' fb' rt]
 
 transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
-  localTypeEnv (boundInForm form $ typeEnvFromParams mergeparams) $ do
+  localScope (scopeOfLoopForm form <> scopeOfFParams mergeparams) $ do
     body' <- transformBody body
     return [Let pat () $ LoopOp $ DoLoop res mergepat form body']
-  where boundInForm (ForLoop i _) = HM.insert i (Basic Int)
-        boundInForm (WhileLoop _) = id
-        mergeparams = map fst mergepat
+  where mergeparams = map fst mergepat
 
 transformBinding (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
@@ -281,22 +301,25 @@ transformBinding (Let pat () (Op (Stream cs w (RedLike _ red_fun nes) fold_fun a
   fold_fun_unchunked_sequential <- FOT.transformLambda fold_fun_unchunked
   blockedReduction pat cs w red_fun_sequential fold_fun_unchunked_sequential nes arrs
 
-transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs _))) =
+transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs _))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
-  transformBindings <=< runBinder_ $
-  sequentialStreamWholeArray pat cs w nes fold_fun arrs
+  types <- asksScope scopeForSOACs
+  transformBindings =<<
+    (snd <$> runBinderT (sequentialStreamWholeArray pat cs w nes fold_fun arrs) types)
 
-transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs _))) =
+transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs _))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
-  transformBindings <=< runBinder_ $
-  sequentialStreamWholeArray pat cs w [] map_fun arrs
+  types <- asksScope scopeForSOACs
+  transformBindings =<<
+    (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
 transformBinding (Let res_pat () (Op op))
   | Scan cs w scan_fun scan_input <- op,
-    Just do_iswim <- iswim res_pat cs w scan_fun scan_input =
-      transformBindings =<< runBinder_ do_iswim
+    Just do_iswim <- iswim res_pat cs w scan_fun scan_input = do
+      types <- asksScope scopeForSOACs
+      transformBindings =<< (snd <$> runBinderT do_iswim types)
 
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd
@@ -306,16 +329,17 @@ data MapLoop = MapLoop Certificates SubExp Lambda [VName]
 mapLoopExp :: MapLoop -> Exp
 mapLoopExp (MapLoop cs w lam arrs) = Op $ Map cs w lam arrs
 
-distributeMap :: (HasTypeEnv m, MonadFreshNames m, MonadLogger m) =>
+distributeMap :: (HasScope Out.Kernels m,
+                  MonadFreshNames m, MonadLogger m) =>
                  Pattern -> MapLoop -> m [Out.Binding]
 distributeMap pat (MapLoop cs w lam arrs) = do
-  types <- askTypeEnv
+  types <- askScope
   let env = KernelEnv { kernelNest =
                         singleNesting (Nesting mempty $
                                        MapNesting pat cs w (lambdaIndex lam) $
                                        zip (lambdaParams lam) arrs)
-                      , kernelTypeEnv =
-                        types <> typeEnvFromParams (lambdaParams lam)
+                      , kernelScope =
+                        types <> scopeForKernels (scopeOf lam)
                       }
   liftM (postKernelBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
@@ -324,7 +348,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
                           }
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
-                           , kernelTypeEnv :: TypeEnv
+                           , kernelScope :: Scope Out.Kernels
                            }
 
 data KernelAcc = KernelAcc { kernelTargets :: Targets
@@ -351,16 +375,16 @@ instance Monoid PostKernels where
 postKernelBindings :: PostKernels -> [Out.Binding]
 postKernelBindings (PostKernels kernels) = concatMap unPostKernel kernels
 
-typeEnvFromKernelAcc :: KernelAcc -> TypeEnv
-typeEnvFromKernelAcc = typeEnvFromPattern . fst . outerTarget . kernelTargets
+typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
+typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
 
-addSOACtoKernel :: (HasTypeEnv m, MonadFreshNames m) =>
+addSOACtoKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                    Out.Pattern -> SOAC Out.Kernels -> KernelAcc -> m KernelAcc
 addSOACtoKernel pat soac acc = do
   bnds <- runBinder_ $ FOT.transformSOAC pat soac
   return acc { kernelBindings = bnds <> kernelBindings acc }
 
-addBindingToKernel :: (HasTypeEnv m, MonadFreshNames m) =>
+addBindingToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
 addBindingToKernel bnd acc = do
   bnds <- runBinder_ $ FOT.transformBindingRecursively bnd
@@ -372,17 +396,18 @@ newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
             MonadWriter KernelRes,
             MonadFreshNames)
 
-instance HasTypeEnv KernelM where
-  askTypeEnv = asks kernelTypeEnv
+instance HasScope Out.Kernels KernelM where
+  askScope = asks kernelScope
 
-instance LocalTypeEnv KernelM where
-  localTypeEnv types = local $ \env ->
-    env { kernelTypeEnv = kernelTypeEnv env <> types }
+instance LocalScope Out.Kernels KernelM where
+  localScope types = local $ \env ->
+    env { kernelScope = kernelScope env <> types }
 
 instance MonadLogger KernelM where
   addLog msgs = tell mempty { accLog = msgs }
 
-runKernelM :: (HasTypeEnv m, MonadFreshNames m, MonadLogger m) =>
+runKernelM :: (HasScope Out.Kernels m,
+               MonadFreshNames m, MonadLogger m) =>
               KernelEnv -> KernelM a -> m (a, PostKernels)
 runKernelM env (KernelM m) = do
   (x, res) <- modifyNameSource $ getKernels . runRWS m env
@@ -398,11 +423,11 @@ addKernel bnds = addKernels $ PostKernels [PostKernel bnds]
 
 withBinding :: Binding -> KernelM a -> KernelM a
 withBinding bnd = local $ \env ->
-  env { kernelTypeEnv =
-          kernelTypeEnv env <> typeEnvFromBindings [bnd]
+  env { kernelScope =
+          kernelScope env <> scopeForKernels (scopeOf [bnd])
       , kernelNest =
-        letBindInInnerNesting provided $
-        kernelNest env
+          letBindInInnerNesting provided $
+          kernelNest env
       }
   where provided = HS.fromList $ patternNames $ bindingPattern bnd
 
@@ -411,8 +436,7 @@ mapNesting :: Pattern -> Certificates -> SubExp -> Lambda -> [VName]
            -> KernelM a
 mapNesting pat cs w lam arrs = local $ \env ->
   env { kernelNest = pushInnerNesting nest $ kernelNest env
-      , kernelTypeEnv = kernelTypeEnv env <>
-                        typeEnvFromParams (lambdaParams lam)
+      , kernelScope = kernelScope env <> scopeForKernels (scopeOf lam)
       }
   where nest = Nesting mempty $
                MapNesting pat cs w (lambdaIndex lam) $
@@ -507,9 +531,12 @@ distributeMapBodyBindings acc [] =
 
 distributeMapBodyBindings acc
   (Let pat () (Op (Stream cs w (Sequential accs) lam arrs _)):bnds) = do
-  stream_bnds <- runBinder_ $ sequentialStreamWholeArray pat cs w accs lam arrs
-  stream_bnds' <- copyPropagateInBindings bindableSimpleOps stream_bnds
-  distributeMapBodyBindings acc $ stream_bnds' ++ bnds
+    types <- asksScope scopeForSOACs
+    stream_bnds <-
+      snd <$> runBinderT (sequentialStreamWholeArray pat cs w accs lam arrs) types
+    stream_bnds' <-
+      runReaderT (copyPropagateInBindings bindableSimpleOps stream_bnds) types
+    distributeMapBodyBindings acc $ stream_bnds' ++ bnds
 
 distributeMapBodyBindings acc (bnd:bnds) =
   -- It is important that bnd is in scope if 'maybeDistributeBinding'
@@ -534,8 +561,10 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
     Just (kernels, res, nest, acc')
       | length res == patternSize pat -> do
       addKernels kernels
-      localTypeEnv (typeEnvFromKernelAcc acc') $ do
-        bnds <- interchangeLoops nest (SeqLoop pat ret merge form body)
+      localScope (typeEnvFromKernelAcc acc') $ do
+        types <- asksScope scopeForSOACs
+        bnds <- runReaderT
+                (interchangeLoops nest (SeqLoop pat ret merge form body)) types
         bnds' <- runDistribM $ transformBindings bnds
         addKernel bnds'
       return acc'
@@ -553,7 +582,7 @@ maybeDistributeBinding bnd@(Let _ _ (Op (Scan cs w lam input))) acc =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, _, nest, acc') -> do
       lam' <- FOT.transformLambda lam
-      localTypeEnv (typeEnvFromKernelAcc acc') $
+      localScope (typeEnvFromKernelAcc acc') $
         segmentedScanKernel nest cs w lam' input >>= \case
           Nothing ->
             addBindingToKernel bnd acc
@@ -612,7 +641,7 @@ distributeSingleBinding acc bnd = do
                                    })
 
 segmentedScanKernel :: KernelNest
-                    -> Certificates -> SubExp -> Lambda -> [(SubExp, VName)]
+                    -> Certificates -> SubExp -> Out.Lambda -> [(SubExp, VName)]
                     -> KernelM (Maybe [Out.Binding])
 segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
   -- We must verify that array inputs to the scan are inputs to the
@@ -679,8 +708,7 @@ segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
                 zipWithM flatPatElem
                 (patternValueElements pat)
                 (lambdaReturnType lam)
-    lam' <- FOT.transformLambda lam
-    blockedSegmentedScan segment_size flat_pat cs total_num_elements lam' scan_inps'
+    blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
 
     forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
       \(dst_pat_elem, flat) -> do

@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Pass.ExtractKernels.Interchange
        (
          SeqLoop (..)
@@ -24,14 +25,14 @@ seqLoopBinding :: SeqLoop -> Binding
 seqLoopBinding (SeqLoop pat ret merge form body) =
   Let pat () $ LoopOp $ DoLoop ret merge form body
 
-interchangeLoop :: (MonadBinder m, LocalTypeEnv m) =>
+interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
                    SeqLoop -> LoopNesting
                 -> m SeqLoop
 interchangeLoop
   (SeqLoop loop_pat ret merge form body)
   (MapNesting pat cs w i params_and_arrs) = do
     merge_expanded <-
-      localTypeEnv (typeEnvFromParams $ map fst params_and_arrs) $
+      localScope (scopeOfLParams $ map fst params_and_arrs) $
       mapM expand merge
 
     let ret_params_mask = map ((`elem` ret) . paramName . fst) merge
@@ -51,7 +52,7 @@ interchangeLoop
     -- it is not used anymore.  This might happen if the parameter was
     -- used just as the inital value of a merge parameter.
     ((params', arrs'), pre_copy_bnds) <-
-      runBinder $ bindingParamTypes new_params $
+      runBinder $ localScope (scopeOfLParams new_params) $
       unzip <$> catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
     let lam = Lambda i (params'<>new_params) body rettype
@@ -90,7 +91,7 @@ interchangeLoop
         expandPatElem (PatElem name bindage t) =
           PatElem name bindage $ arrayOfRow t w
 
-interchangeLoops :: (MonadFreshNames m, HasTypeEnv m) =>
+interchangeLoops :: (MonadFreshNames m, HasScope SOACS m) =>
                     KernelNest -> SeqLoop
                  -> m [Binding]
 interchangeLoops nest loop = do
