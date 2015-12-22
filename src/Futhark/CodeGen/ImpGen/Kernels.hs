@@ -309,6 +309,7 @@ kernelCompiler
       ImpGen.declaringBasicVar wave_size Int $
       ImpGen.declaringBasicVar thread_chunk_size Int $
       ImpGen.declaringBasicVar (lambdaIndex lam) Int $
+      ImpGen.declaringBasicVar (lambdaIndex renamed_lam) Int $
       ImpGen.declaringBasicVar global_id Int $
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (lambdaParams lam) $
