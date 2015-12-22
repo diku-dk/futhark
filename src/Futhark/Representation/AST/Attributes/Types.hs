@@ -25,6 +25,7 @@ module Futhark.Representation.AST.Attributes.Types
        , peelArray
        , stripArray
        , arrayDims
+       , shapeSize
        , arraySize
        , arraysSize
        , rowType
@@ -226,6 +227,13 @@ stripArray n (Array et shape u)
   | otherwise           = Basic et
 stripArray _ t = t
 
+-- | Return the size of the given dimension.  If the dimension does
+-- not exist, the zero constant is returned.
+shapeSize :: Int -> Shape -> SubExp
+shapeSize i shape = case drop i $ shapeDims shape of
+  e : _ -> e
+  []    -> intconst 0
+
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
 arrayDims :: TypeBase Shape u -> [SubExp]
@@ -234,9 +242,7 @@ arrayDims = shapeDims . arrayShape
 -- | Return the size of the given dimension.  If the dimension does
 -- not exist, the zero constant is returned.
 arraySize :: Int -> TypeBase Shape u -> SubExp
-arraySize i t = case drop i $ arrayDims t of
-                  e : _ -> e
-                  _     -> intconst 0
+arraySize i = shapeSize i . arrayShape
 
 -- | Return the size of the given dimension in the first element of
 -- the given type list.  If the dimension does not exist, or no types
