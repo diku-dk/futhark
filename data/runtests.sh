@@ -63,7 +63,7 @@ fi
 
 if [ "$onlytypecheck" = true ]; then
     futhark_test_command() {
-        futhark-test -t "$@"
+        futhark-test -t --compiler="$compiler" "$@"
     }
 elif [ "$onlycompile" = true ]; then
     futhark_test_command() {
