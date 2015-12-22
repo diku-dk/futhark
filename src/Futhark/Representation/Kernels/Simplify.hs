@@ -7,7 +7,6 @@
 module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
        , simplifyFun
-       , simplifyLambda
        )
 where
 
@@ -42,11 +41,6 @@ simplifyKernels =
 simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
 simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps kernelRules Engine.noExtraHoistBlockers
-
-simplifyLambda :: (HasTypeEnv m, MonadFreshNames m) =>
-                  Lambda -> SubExp -> [Maybe VName] -> m Lambda
-simplifyLambda =
-  Simplifier.simplifyLambdaWithRules bindableSimpleOps kernelRules Engine.noExtraHoistBlockers
 
 instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
          Engine.SimplifiableOp lore (Kernel lore) where
@@ -110,15 +104,15 @@ instance Engine.Simplifiable KernelSize where
     return $ KernelSize num_groups' group_size' thread_chunk' num_elements' offset_multiple' num_threads'
 
 kernelRules :: (MonadBinder m,
-                LocalTypeEnv m,
+                LocalScope (Lore m) m,
                 Op (Lore m) ~ Kernel (Lore m),
                 Aliased (Lore m)) => RuleBook m
 kernelRules = (std_td_rules <> topDownRules,
-             std_bu_rules <> bottomUpRules)
+               std_bu_rules <> bottomUpRules)
   where (std_td_rules, std_bu_rules) = standardRules
 
 topDownRules :: (MonadBinder m,
-                 LocalTypeEnv m,
+                 LocalScope (Lore m) m,
                  Op (Lore m) ~ Kernel (Lore m),
                  Aliased (Lore m)) => TopDownRules m
 topDownRules = [removeUnusedKernelInputs
@@ -127,7 +121,7 @@ topDownRules = [removeUnusedKernelInputs
                ]
 
 bottomUpRules :: (MonadBinder m,
-                  LocalTypeEnv m,
+                  LocalScope (Lore m) m,
                   Op (Lore m) ~ Kernel (Lore m)) => BottomUpRules m
 bottomUpRules = [
                 ]
@@ -145,13 +139,14 @@ removeUnusedKernelInputs _ _ = cannotSimplify
 
 -- | Kernel inputs are indexes into arrays.  Based on how those arrays
 -- are defined, we may be able to simplify the input.
-simplifyKernelInputs :: (MonadBinder m, LocalTypeEnv m,
+simplifyKernelInputs :: (MonadBinder m,
+                         LocalScope (Lore m) m,
                          Op (Lore m) ~ Kernel (Lore m), Aliased (Lore m)) =>
                         TopDownRule m
 simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
   | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
     inps /= catMaybes inps' = do
-      body' <- localTypeEnv index_env $ insertBindingsM $ do
+      body' <- localScope index_env $ insertBindingsM $ do
          forM_ (catMaybes extra_bnds) $ \(name, se) ->
            letBindNames'_ [name] $ PrimOp $ SubExp se
          return body
@@ -161,7 +156,7 @@ simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps ret
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Basic $ basicValueType v
-        index_env = HM.fromList $ zip (map fst ispace) $ repeat $ Basic Int
+        index_env = HM.fromList $ zip (map fst ispace) $ repeat IndexInfo
         consumed_in_body = consumedInBody body
 
         simplifyInput inp@(KernelInput param arr is) =

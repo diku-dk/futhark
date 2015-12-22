@@ -150,7 +150,7 @@ instance VarName vn => Monoid (Dataflow vn) where
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data TypeEnv vn = TypeEnv { envVtable :: HM.HashMap (ID vn) (Binding vn)
+data Scope vn = Scope { envVtable :: HM.HashMap (ID vn) (Binding vn)
                           , envFtable :: HM.HashMap Name (FunBinding vn)
                           , envCheckOccurences :: Bool
                           }
@@ -158,17 +158,17 @@ data TypeEnv vn = TypeEnv { envVtable :: HM.HashMap (ID vn) (Binding vn)
 -- | The type checker runs in this monad.  The 'Either' monad is used
 -- for error handling.
 newtype TypeM vn a = TypeM (RWST
-                            (TypeEnv vn)            -- Reader
+                            (Scope vn)            -- Reader
                             (Dataflow vn)           -- Writer
                             (NameSource (ID vn))    -- State
                             (Either (TypeError vn)) -- Inner monad
                             a)
   deriving (Monad, Functor, Applicative,
-            MonadReader (TypeEnv vn),
+            MonadReader (Scope vn),
             MonadWriter (Dataflow vn),
             MonadState (NameSource (ID vn)))
 
-runTypeM :: TypeEnv vn -> NameSource (ID vn) -> TypeM vn a
+runTypeM :: Scope vn -> NameSource (ID vn) -> TypeM vn a
          -> Either (TypeError vn) a
 runTypeM env src (TypeM m) = fst <$> evalRWST m env src
 
@@ -260,10 +260,10 @@ noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
 
 binding :: VarName vn => [TaggedIdent CompTypeBase vn] -> TypeM vn a -> TypeM vn a
 binding bnds = check . local (`bindVars` bnds)
-  where bindVars :: TypeEnv vn -> [TaggedIdent CompTypeBase vn] -> TypeEnv vn
+  where bindVars :: Scope vn -> [TaggedIdent CompTypeBase vn] -> Scope vn
         bindVars = foldl bindVar
 
-        bindVar :: TypeEnv vn -> TaggedIdent CompTypeBase vn -> TypeEnv vn
+        bindVar :: Scope vn -> TaggedIdent CompTypeBase vn -> Scope vn
         bindVar env (Ident name tp _) =
           let inedges = HS.toList $ aliases tp
               update (Bound tp')
@@ -436,7 +436,7 @@ checkProg' :: (VarName vn, TypeBox ty) =>
               Bool -> ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
 checkProg' checkoccurs prog = do
   ftable <- buildFtable
-  let typeenv = TypeEnv { envVtable = HM.empty
+  let typeenv = Scope { envVtable = HM.empty
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
@@ -538,7 +538,7 @@ checkOpenExp :: (TypeBox ty, VarName vn) =>
                 HM.HashMap vn (CompTypeBase vn) -> ExpBase ty vn ->
                 Either (TypeError vn) (ExpBase CompTypeBase vn)
 checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
-  where env = TypeEnv { envFtable = initialFtable
+  where env = Scope { envFtable = initialFtable
                       , envCheckOccurences = True
                       , envVtable = vtable
                       }
@@ -557,7 +557,7 @@ checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
 checkClosedExp :: (TypeBox ty, VarName vn) => ExpBase ty vn ->
                   Either (TypeError vn) (ExpBase CompTypeBase vn)
 checkClosedExp e = untagExp <$> runTypeM env src (checkExp e')
-  where env = TypeEnv { envFtable = initialFtable
+  where env = Scope { envFtable = initialFtable
                       , envCheckOccurences = True
                       , envVtable = HM.empty
                       }

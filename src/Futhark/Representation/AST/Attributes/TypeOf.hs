@@ -1,9 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | This module provides facilities for obtaining the types of
 -- various Futhark constructs.  Typically, you will need to execute
 -- these in a context where type information is available as a
--- 'TypeEnv'; usually by using a monad that is an instance of
--- 'HasTypeEnv'.  The information is returned as a list of 'ExtType'
+-- 'Scope'; usually by using a monad that is an instance of
+-- 'HasScope'.  The information is returned as a list of 'ExtType'
 -- values - one for each of the values the Futhark construct returns.
 -- Some constructs (such as subexpressions) can produce only a single
 -- value, and their typing functions hence do not return a list.
@@ -29,12 +32,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        -- * Return type
        , module Futhark.Representation.AST.RetType
        -- * Type environment
-       , module Futhark.Representation.AST.Attributes.TypeEnv
-       , typeEnvFromBindings
-       , typeEnvFromParams
-       , typeEnvFromPattern
-       , typeEnvFromIdents
-       , withParamTypes
+       , module Futhark.Representation.AST.Attributes.Scope
 
          -- * Extensibility
        , TypedOp(..)
@@ -47,7 +45,6 @@ import Data.List
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
-import qualified Data.HashMap.Lazy as HM
 import Data.Traversable hiding (mapM)
 
 import Prelude hiding (mapM)
@@ -58,10 +55,10 @@ import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
-import Futhark.Representation.AST.Attributes.TypeEnv
+import Futhark.Representation.AST.Attributes.Scope
 
 -- | The type of a subexpression.
-subExpType :: HasTypeEnv m => SubExp -> m Type
+subExpType :: HasScope t m => SubExp -> m Type
 subExpType (Constant val) = pure $ Basic $ basicValueType val
 subExpType (Var name)     = lookupType name
 
@@ -73,7 +70,7 @@ mapType outersize f = [ arrayOf t (Shape [outersize]) NoUniqueness
                       | t <- lambdaReturnType f ]
 
 -- | The type of a primitive operation.
-primOpType :: HasTypeEnv m =>
+primOpType :: HasScope t m =>
               PrimOp lore -> m [Type]
 primOpType (SubExp se) =
   pure <$> subExpType se
@@ -137,7 +134,7 @@ loopOpExtType (DoLoop res merge _ _) =
   loopExtType res $ map (paramIdent . fst) merge
 
 -- | The type of an expression.
-expExtType :: (HasTypeEnv m,
+expExtType :: (HasScope lore m,
                IsRetType (RetType lore),
                Typed (FParamAttr lore),
                TypedOp (Op lore)) =>
@@ -149,33 +146,31 @@ expExtType (PrimOp op)    = staticShapes <$> primOpType op
 expExtType (Op op)        = opType op
 
 -- | The number of values returned by an expression.
-expExtTypeSize :: (IsRetType (RetType lore),
-                   Typed (FParamAttr lore),
-                   TypedOp (Op lore)) =>
+expExtTypeSize :: (Annotations lore, TypedOp (Op lore)) =>
                   Exp lore -> Int
 expExtTypeSize = length . feelBad . expExtType
 
 -- FIXME, this is a horrible quick hack.
-newtype FeelBad a = FeelBad { feelBad :: a }
+newtype FeelBad lore a = FeelBad { feelBad :: a }
 
-instance Functor FeelBad where
+instance Functor (FeelBad lore) where
   fmap f = FeelBad . f . feelBad
 
-instance Applicative FeelBad where
+instance Applicative (FeelBad lore) where
   pure = FeelBad
   f <*> x = FeelBad $ feelBad f $ feelBad x
 
-instance HasTypeEnv FeelBad where
+instance Annotations lore => HasScope lore (FeelBad lore) where
   lookupType = const $ pure $ Basic Int
-  askTypeEnv = pure mempty
+  askScope = pure mempty
 
 -- | The type of a body.
-bodyExtType :: (Annotations lore, HasTypeEnv m, Monad m) =>
+bodyExtType :: (Annotations lore, HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
   existentialiseExtTypes bound <$> staticShapes <$>
-  extendedTypeEnv (traverse subExpType res) bndtypes
-  where bndtypes = typeEnvFromBindings bnds
+  extendedScope (traverse subExpType res) bndscope
+  where bndscope = scopeOf bnds
         boundInLet (Let pat _ _) = patternNames pat
         bound = HS.fromList $ concatMap boundInLet bnds
 
@@ -187,7 +182,7 @@ valueShapeContext rettype values =
 
 -- | Given the return type of a function and the subexpressions
 -- returned by that function, return the size context.
-subExpShapeContext :: HasTypeEnv m =>
+subExpShapeContext :: HasScope t m =>
                       [TypeBase ExtShape u] -> [SubExp] -> m [SubExp]
 subExpShapeContext rettype ses =
   extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
@@ -215,31 +210,8 @@ loopExtType res merge =
   where inaccessible = HS.fromList $ map identName merge
         res' = mapMaybe (\name -> find ((==name) . identName) merge) res
 
--- | Create a type environment consisting of the names bound in the
--- list of bindings.
-typeEnvFromBindings :: Annotations lore => [Binding lore] -> TypeEnv
-typeEnvFromBindings = mconcat . map (typeEnvFromPattern . bindingPattern)
-
--- | Create a type environment from function parameters.
-typeEnvFromParams :: Typed attr => [Param attr] -> TypeEnv
-typeEnvFromParams = typeEnvFromIdents . map paramIdent
-
--- | Create a type environment from 'Ident's.
-typeEnvFromIdents :: [Ident] -> TypeEnv
-typeEnvFromIdents = HM.fromList . map assoc
-  where assoc param = (identName param, identType param)
-
--- | Create a type environment a pattern.
-typeEnvFromPattern :: Typed attr => PatternT attr -> TypeEnv
-typeEnvFromPattern = typeEnvFromIdents . patternIdents
-
--- | Execute an action with a locally extended type environment.
-withParamTypes :: (LocalTypeEnv m, Typed attr) =>
-                  [Param attr] -> m a -> m a
-withParamTypes = localTypeEnv . typeEnvFromParams
-
 class TypedOp op where
-  opType :: HasTypeEnv m => op -> m [ExtType]
+  opType :: HasScope t m => op -> m [ExtType]
 
 instance TypedOp () where
   opType () = pure []

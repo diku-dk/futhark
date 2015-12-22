@@ -14,6 +14,8 @@ module Futhark.Optimise.Simplifier.Lore
        , removeExpWisdom
        , removePatternWisdom
        , removeBodyWisdom
+       , removeScopeWisdom
+       , addScopeWisdom
        , addWisdomToPattern
        , mkWiseBody
        , mkWiseLetBinding
@@ -23,7 +25,9 @@ module Futhark.Optimise.Simplifier.Lore
        where
 
 import Control.Applicative
+import Control.Monad.Reader
 import Data.Monoid
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Ranges
@@ -99,6 +103,10 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
   loopResultContext (Wise lore) =
     loopResultContext lore
 
+  expContext pat e = do
+    types <- asksScope removeScopeWisdom
+    runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
+
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
 
 instance AliasesOf (VarWisdom, attr) where
@@ -123,6 +131,20 @@ removeWisdom = Rephraser { rephraseExpLore = snd
                          , rephraseRetType = id
                          , rephraseOp = removeOpWisdom
                          }
+
+removeScopeWisdom :: Scope (Wise lore) -> Scope lore
+removeScopeWisdom = HM.map unAlias
+  where unAlias (LetInfo (_, attr)) = LetInfo attr
+        unAlias (FParamInfo attr) = FParamInfo attr
+        unAlias (LParamInfo attr) = LParamInfo attr
+        unAlias IndexInfo = IndexInfo
+
+addScopeWisdom :: Scope lore -> Scope (Wise lore)
+addScopeWisdom = HM.map alias
+  where alias (LetInfo attr) = LetInfo (VarWisdom mempty unknownRange, attr)
+        alias (FParamInfo attr) = FParamInfo attr
+        alias (LParamInfo attr) = LParamInfo attr
+        alias IndexInfo = IndexInfo
 
 removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
 removeProgWisdom = rephraseProg removeWisdom
@@ -185,8 +207,10 @@ instance (Bindable lore,
     in mkWiseLetBinding pat' explore e
 
   mkLetNames names e = do
-    Let pat explore _ <- mkLetNames names $ removeExpWisdom e
-    return $ mkWiseLetBinding pat explore e
+    env <- asksScope removeScopeWisdom
+    flip runReaderT env $ do
+      Let pat explore _ <- mkLetNames names $ removeExpWisdom e
+      return $ mkWiseLetBinding pat explore e
 
   mkBody bnds res =
     let Body bodylore _ _ = mkBody (map removeBindingWisdom bnds) res

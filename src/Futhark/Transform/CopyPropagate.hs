@@ -14,7 +14,7 @@ import Futhark.Optimise.Simplifier
   (simplifyBindingsWithRules, noExtraHoistBlockers)
 
 copyPropagateInBindings :: (MonadFreshNames m,
-                            HasTypeEnv m,
+                            HasScope lore m,
                             MonadEngine (SimpleM lore)) =>
                            SimpleOps (SimpleM lore)
                         -> [Binding lore]

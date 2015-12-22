@@ -47,7 +47,7 @@ simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
 simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
-simplifyLambda :: (HasTypeEnv m, MonadFreshNames m) =>
+simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> SubExp -> [Maybe VName] -> m Lambda
 simplifyLambda =
   Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
@@ -132,14 +132,14 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
             | otherwise = return (lam, arrinps)
 
 soacRules :: (MonadBinder m,
-              LocalTypeEnv m,
+              LocalScope (Lore m) m,
               Op (Lore m) ~ SOAC (Lore m)) => RuleBook m
 soacRules = (std_td_rules <> topDownRules,
              std_bu_rules <> bottomUpRules)
   where (std_td_rules, std_bu_rules) = standardRules
 
 topDownRules :: (MonadBinder m,
-                 LocalTypeEnv m,
+                 LocalScope (Lore m) m,
                  Op (Lore m) ~ SOAC (Lore m)) => TopDownRules m
 topDownRules = [liftIdentityMapping,
                 removeReplicateMapping,
@@ -151,7 +151,7 @@ topDownRules = [liftIdentityMapping,
                ]
 
 bottomUpRules :: (MonadBinder m,
-                  LocalTypeEnv m,
+                  LocalScope (Lore m) m,
                   Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping
                 ]
@@ -276,7 +276,8 @@ simplifyClosedFormReduce _ _ = cannotSimplify
 -- and turned it into a rule, but I don't really understand what's
 -- going on.
 
-simplifyStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+simplifyStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
+                   LocalScope (Lore m) m) => TopDownRule m
 simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr ii))) = do
   lss' <- frobStream vtable cs outerdim form lam arr ii
   rtp <- expExtType lss
@@ -318,7 +319,8 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr ii))) 
             gatherShape acc _ = return acc
 simplifyStream _ _ = cannotSimplify
 
-frobStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
+frobStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
+               LocalScope (Lore m) m) =>
               ST.SymbolTable (Lore m)
            -> Certificates -> SubExp -> StreamForm (Lore m)
            -> AST.ExtLambda (Lore m) -> [VName] -> ChunkIntent
@@ -327,23 +329,24 @@ frobStream vtab cs outerdim form lam arr ii = do
   lam' <- frobExtLambda vtab lam
   return $ Op $ Stream cs outerdim form lam' arr ii
 
-frobExtLambda :: MonadBinder m =>
+frobExtLambda :: (MonadBinder m, LocalScope (Lore m) m) =>
                  ST.SymbolTable (Lore m)
               -> AST.ExtLambda (Lore m)
               -> m (AST.ExtLambda (Lore m))
 frobExtLambda vtable (ExtLambda index params body rettype) = do
   let bodyres = bodyResult body
-      bodyenv = typeEnvFromBindings $ bodyBindings body
+      bodyenv = scopeOf $ bodyBindings body
       vtable' = foldr ST.insertLParam vtable params
   rettype' <- zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
   return $ ExtLambda index params body rettype'
-    where refineArrType :: MonadBinder m =>
+    where refineArrType :: (MonadBinder m, LocalScope (Lore m) m) =>
                            ST.SymbolTable (Lore m)
-                        -> TypeEnv -> [AST.LParam (Lore m)] -> SubExp -> ExtType
+                        -> Scope (Lore m)
+                        -> [AST.LParam (Lore m)] -> SubExp -> ExtType
                         -> m ExtType
           refineArrType vtable' bodyenv pars x (Array btp shp u) = do
             let vtab = ST.bindings vtable'
-            dsx <- flip extendedTypeEnv bodyenv $
+            dsx <- localScope bodyenv $
                    shapeDims <$> arrayShape <$> subExpType x
             let parnms = map paramName pars
                 dsrtpx = extShapeDims shp

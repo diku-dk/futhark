@@ -43,7 +43,7 @@ class (Attributes lore,
       Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
-  mkLetNames :: (MonadFreshNames m, HasTypeEnv m) =>
+  mkLetNames :: (MonadFreshNames m, HasScope lore m) =>
                 [(VName, Bindage)] -> Exp lore -> m (Binding lore)
 
 -- | A monad that supports the creation of bindings from expressions
@@ -57,7 +57,7 @@ class (Attributes lore,
 -- bindings, however.
 class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
-       HasTypeEnv m) =>
+       HasScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: *
   mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
@@ -87,7 +87,7 @@ mkLetNamesM' :: MonadBinder m =>
 mkLetNamesM' = mkLetNamesM . map addBindVar
   where addBindVar name = (name, BindVar)
 
-mkLetNames' :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+mkLetNames' :: (Bindable lore, MonadFreshNames m, HasScope lore m) =>
                [VName] -> Exp lore -> m (Binding lore)
 mkLetNames' = mkLetNames . map addBindVar
   where addBindVar name = (name, BindVar)

@@ -215,7 +215,7 @@ subExpToScalExp (Constant val) _ = Val val
 intSubExpToScalExp :: SubExp -> ScalExp
 intSubExpToScalExp se = subExpToScalExp se Int
 
-toScalExp :: (HasTypeEnv f, Monad f) =>
+toScalExp :: (HasScope t f, Monad f) =>
              LookupVar -> Exp lore -> f (Maybe ScalExp)
 toScalExp look (PrimOp (SubExp (Var v)))
   | Just se <- look v =
@@ -246,7 +246,8 @@ toScalExp look (PrimOp (BinOp bop x y t))
 
 toScalExp _ _ = return Nothing
 
-subExpToScalExp' :: HasTypeEnv f => LookupVar -> SubExp -> f ScalExp
+subExpToScalExp' :: HasScope t f =>
+                    LookupVar -> SubExp -> f ScalExp
 subExpToScalExp' look (Var v)
   | Just se <- look v =
     pure se

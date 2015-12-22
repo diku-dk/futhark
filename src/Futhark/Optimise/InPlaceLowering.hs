@@ -1,5 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | This module implements an optimisation that moves in-place
 -- updates into/before loops where possible, with the end goal of
 -- minimising memory copies.  As an example, consider this program:
@@ -89,7 +92,7 @@ inPlaceLowering = simplePass
 optimiseFunDec :: MonadFreshNames m => FunDec Kernels -> m (FunDec Kernels)
 optimiseFunDec fundec =
   modifyNameSource $ runForwardingM $
-  bindingParams (funDecParams fundec) $ do
+  bindingFParams (funDecParams fundec) $ do
     body <- optimiseBody $ funDecBody fundec
     return $ fundec { funDecBody = body }
 
@@ -116,8 +119,8 @@ optimiseBindings (bnd:bnds) m = do
       let updateBindings = map updateBinding updates
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
-      case lowerUpdate bnd' updates of
-        Just lowering -> do new_bnds <- lowering
+      case lowerUpdate (removeBindingAliases bnd') $ map (fmap snd) updates of
+        Just lowering -> do new_bnds <- map analyseBinding <$> lowering
                             new_bnds' <- optimiseBindings new_bnds $
                                          tell bup { forwardThese = [] }
                             return $ new_bnds' ++ bnds'
@@ -129,7 +132,7 @@ optimiseBindings (bnd:bnds) m = do
         checkIfForwardableUpdate bnd'@(Let pat _ e) bnds'
             | [PatElem v (BindInPlace cs src [i]) attr] <- patternElements pat,
               PrimOp (SubExp (Var ve)) <- e = do
-                forwarded <- maybeForward ve v (typeOf attr) cs src i
+                forwarded <- maybeForward ve v attr cs src i
                 return $ if forwarded
                          then bnds'
                          else bnd' : bnds'
@@ -144,16 +147,15 @@ optimiseInBinding (Let pat attr e) = do
 
 optimiseExp :: Exp Kernels -> ForwardingM (Exp Kernels)
 optimiseExp (LoopOp (DoLoop res merge form body)) =
-  bindingIdents (boundInForm form) $
-  bindingParams (map fst merge) $ do
+  bindingIndices (boundInForm form) $
+  bindingFParams (map fst merge) $ do
     body' <- optimiseBody body
     return $ LoopOp $ DoLoop res merge form body'
-  where boundInForm (ForLoop i _) = [Ident i $ Basic Int]
+  where boundInForm (ForLoop i _) = [i]
         boundInForm (WhileLoop _) = []
 optimiseExp (Op (MapKernel cs w index ispace inps returns body)) =
-  bindingIdents [Ident index $ Basic Int] $
-  bindingIdents (map ((`Ident` Basic Int) . fst) ispace) $
-  bindingParams (map kernelInputParam inps) $ do
+  bindingIndices (index : map fst ispace) $
+  bindingLParams (map kernelInputParam inps) $ do
     body' <- optimiseBody body
     return $ Op $ MapKernel cs w index ispace inps returns body'
 optimiseExp e = mapExpM optimise e
@@ -164,7 +166,7 @@ optimiseExp e = mapExpM optimise e
 optimiseLambda :: Lambda Kernels
                -> ForwardingM (Lambda Kernels)
 optimiseLambda lam =
-  bindingIdents (map paramIdent $ lambdaParams lam) $ do
+  bindingLParams (lambdaParams lam) $ do
     optbody <- optimiseBody $ lambdaBody lam
     return $ lam { lambdaBody = optbody }
 
@@ -172,7 +174,7 @@ data Entry = Entry { entryNumber :: Int
                    , entryAliases :: Names
                    , entryDepth :: Int
                    , entryOptimisable :: Bool
-                   , entryType :: Type
+                   , entryType :: NameInfo (Aliases Kernels)
                    }
 
 type VTable = HM.HashMap VName Entry
@@ -183,7 +185,7 @@ data TopDown = TopDown { topDownCounter :: Int
                        }
 
 data BottomUp = BottomUp { bottomUpSeen :: Names
-                         , forwardThese :: [DesiredUpdate]
+                         , forwardThese :: [DesiredUpdate (LetAttr (Aliases Kernels))]
                          }
 
 instance Monoid BottomUp where
@@ -191,9 +193,9 @@ instance Monoid BottomUp where
     BottomUp (seen1 `mappend` seen2) (forward1 `mappend` forward2)
   mempty = BottomUp mempty mempty
 
-updateBinding :: DesiredUpdate -> Binding Kernels
+updateBinding :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Binding Kernels
 updateBinding fwd =
-  mkLet [] [(Ident (updateName fwd) (updateType fwd),
+  mkLet [] [(Ident (updateName fwd) $ typeOf $ updateType fwd,
              BindInPlace
              (updateCertificates fwd)
              (updateSource fwd)
@@ -210,8 +212,8 @@ instance MonadFreshNames ForwardingM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv ForwardingM where
-  askTypeEnv = HM.map entryType <$> asks topDownTable
+instance HasScope (Aliases Kernels) ForwardingM where
+  askScope = HM.map entryType <$> asks topDownTable
 
 runForwardingM :: ForwardingM a -> VNameSource -> (a, VNameSource)
 runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown src
@@ -221,16 +223,26 @@ runForwardingM (ForwardingM m) src = let (x, src', _) = runRWS m emptyTopDown sr
                                , topDownDepth = 0
                                }
 
-bindingParams :: Typed attr =>
-                 [Param attr]
-              -> ForwardingM a
-              -> ForwardingM a
-bindingParams params = local $ \(TopDown n vtable d) ->
+bindingParams :: (attr -> NameInfo (Aliases Kernels))
+              -> [Param attr]
+               -> ForwardingM a
+               -> ForwardingM a
+bindingParams f params = local $ \(TopDown n vtable d) ->
   let entry fparam =
         (paramName fparam,
-         Entry n mempty d False $ paramType fparam)
+         Entry n mempty d False $ f $ paramAttr fparam)
       entries = HM.fromList $ map entry params
   in TopDown (n+1) (HM.union entries vtable) d
+
+bindingFParams :: [FParam (Aliases Kernels)]
+               -> ForwardingM a
+               -> ForwardingM a
+bindingFParams = bindingParams FParamInfo
+
+bindingLParams :: [LParam (Aliases Kernels)]
+               -> ForwardingM a
+               -> ForwardingM a
+bindingLParams = bindingParams LParamInfo
 
 bindingBinding :: Binding Kernels
                -> ForwardingM a
@@ -240,17 +252,17 @@ bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
       entry patElem =
         let (aliases, _) = patElemAttr patElem
         in (patElemName patElem,
-            Entry n (unNames aliases) d True $ patElemType patElem)
+            Entry n (unNames aliases) d True $ LetInfo $ patElemAttr patElem)
   in TopDown (n+1) (HM.union entries vtable) d
 
-bindingIdents :: [Ident]
-             -> ForwardingM a
-             -> ForwardingM a
-bindingIdents vs = local $ \(TopDown n vtable d) ->
-  let entries = HM.fromList $ map entry vs
+bindingIndices :: [VName]
+               -> ForwardingM a
+               -> ForwardingM a
+bindingIndices is = local $ \(TopDown n vtable d) ->
+  let entries = HM.fromList $ map entry is
       entry v =
-        (identName v,
-         Entry n mempty d False $ identType v)
+        (v,
+         Entry n mempty d False IndexInfo)
   in TopDown (n+1) (HM.union entries vtable) d
 
 bindingNumber :: VName -> ForwardingM Int
@@ -299,9 +311,9 @@ tapBottomUp m = do (x,bup) <- listen m
                    return (x, bup)
 
 maybeForward :: VName
-             -> VName -> Type -> Certificates -> VName -> SubExp
+             -> VName -> LetAttr (Aliases Kernels) -> Certificates -> VName -> SubExp
              -> ForwardingM Bool
-maybeForward v dest_nm dest_tp cs src i = do
+maybeForward v dest_nm dest_attr cs src i = do
   -- Checks condition (2)
   available <- [i,Var src] `areAvailableBefore` v
   -- ...subcondition, the certificates must also.
@@ -312,7 +324,7 @@ maybeForward v dest_nm dest_tp cs src i = do
   optimisable <- isOptimisable v
   not_basic <- not <$> basicType <$> lookupType v
   if available && certs_available && samebody && optimisable && not_basic then do
-    let fwd = DesiredUpdate dest_nm dest_tp cs src [i] v
+    let fwd = DesiredUpdate dest_nm dest_attr cs src [i] v
     tell mempty { forwardThese = [fwd] }
     return True
     else return False

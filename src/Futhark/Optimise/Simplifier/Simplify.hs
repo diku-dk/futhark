@@ -16,9 +16,9 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Lore (Wise)
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simple
+import Futhark.Optimise.Simplifier.Lore (addScopeWisdom)
 import Futhark.Tools (intraproceduralTransformation)
 
 -- | Simplify the given program.  Even if the output differs from the
@@ -48,29 +48,35 @@ simplifyFun simpl rules blockers fundec =
   Engine.emptyEnv rules blockers
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
+simplifyLambda :: (MonadFreshNames m,
+                   HasScope lore m,
+                   Engine.MonadEngine (SimpleM lore)) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Engine.HoistBlockers (SimpleM lore)
                -> Lambda lore -> SubExp -> [Maybe VName]
                -> m (Lambda (Wise lore))
 simplifyLambda simpl rules blockers lam w args = do
-  types <- askTypeEnv
-  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+  types <- askScope
+  let m = Engine.localVtable
+          (<> ST.fromScope (addScopeWisdom types)) $
           Engine.simplifyLambdaNoHoisting lam w args
   modifyNameSource $ runSimpleM m simpl $
     Engine.emptyEnv rules blockers
 
 -- | Simplify a list of 'Binding's.
-simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Engine.MonadEngine (SimpleM lore)) =>
+simplifyBindings :: (MonadFreshNames m,
+                     HasScope lore m,
+                     Engine.MonadEngine (SimpleM lore)) =>
                     SimpleOps (SimpleM lore)
                  -> RuleBook (SimpleM lore)
                  -> Engine.HoistBlockers (SimpleM lore)
                  -> [Binding lore]
                  -> m [Binding (Wise lore)]
 simplifyBindings simpl rules blockers bnds = do
-  types <- askTypeEnv
-  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+  types <- askScope
+  let m = Engine.localVtable
+          (<> ST.fromScope (addScopeWisdom types)) $
           fmap snd $ Engine.collectBindingsEngine $
           mapM_ Engine.simplifyBinding bnds
   modifyNameSource $ runSimpleM m simpl $

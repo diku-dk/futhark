@@ -14,7 +14,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.SOACS
 import Futhark.Tools
 
-iswim :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
+iswim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
@@ -65,7 +65,7 @@ iswim res_pat cs w scan_fun scan_input
                      PrimOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
-irwim :: (MonadBinder m, Futhark.Tools.Lore m ~ SOACS) =>
+irwim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
