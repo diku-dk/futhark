@@ -2,7 +2,7 @@
 -- blackScholes computation from GenericPricing.
 --
 -- ==
---
+-- tags { no_opencl }
 -- structure distributed {
 --   MapKernel 4
 --   Map 0

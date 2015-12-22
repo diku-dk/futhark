@@ -1,5 +1,6 @@
 -- Test a simple map, that might be irregular based on input data.
 -- ==
+-- tags { no_opencl }
 -- input {
 --   [8,8,8,8]
 -- }

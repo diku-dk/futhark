@@ -2,6 +2,7 @@
 -- that were at one point problematic.
 --
 -- ==
+-- tags { no_float }
 -- input {
 --   [1.0, 4.0, 7.0, 10.0, 13.0]
 -- }
