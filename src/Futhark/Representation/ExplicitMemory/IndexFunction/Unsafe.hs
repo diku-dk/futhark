@@ -187,7 +187,7 @@ applyInd ixfun@(IxFun (scnat::SNat ('S c)) (snnat::SNat ('S n))
           error $
           unlines ["IndexFunction.Unsafe.applyInd: Too many indices given.",
                    "  Index function: " ++ pretty ixfun,
-                   "  Indices" ++ pretty is]
+                   "  Indices: " ++ pretty is]
   where nnat :: SNat n
         nnat = snnat %- sOne
 
