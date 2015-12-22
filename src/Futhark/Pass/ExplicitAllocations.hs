@@ -2,6 +2,8 @@
 module Futhark.Pass.ExplicitAllocations
        ( explicitAllocations
        , simplifiable
+
+       , arraySizeInBytesExp
        )
 where
 
