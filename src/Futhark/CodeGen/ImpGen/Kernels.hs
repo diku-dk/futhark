@@ -332,15 +332,9 @@ kernelCompiler
         x_dest <- ImpGen.destinationFromParams x_params
         y_dest <- ImpGen.destinationFromParams y_params
 
-        let readScanElement param inp_arr
-              | Basic _ <- paramType param = do
-                  let global_i = ImpGen.varIndex $ lambdaIndex lam
-                  read_input <-
-                    ImpGen.readFromArray inp_arr [global_i]
-                  ImpGen.emit $
-                    Imp.SetScalar (paramName param) read_input
-              | otherwise =
-                  fail "readScanElement: cannot handle array accumulator yet."
+        let readScanElement param inp_arr =
+              ImpGen.copyDWIM (paramName param) []
+              inp_arr [ImpGen.varIndex $ lambdaIndex lam]
 
         computeThreadChunkSize
           (Imp.ScalarVar global_id)
@@ -443,10 +437,9 @@ kernelCompiler
         return $ \body -> do
 
           let local_mem = map (ensureAlignment $ alignmentMap body) acc_local_mem
-              bound_in_kernel = map paramName (lambdaParams lam) ++
-                                map paramName (lambdaParams renamed_lam) ++
-                                [lambdaIndex lam,
-                                 local_id,
+              bound_in_kernel = HM.keys (scopeOf lam) ++
+                                HM.keys (scopeOf renamed_lam) ++
+                                [local_id,
                                  group_id,
                                  global_id] ++
                                 map Imp.paramName acc_mem_params
@@ -665,7 +658,7 @@ writeThreadResult thread_idxs perm
         ImpGen.fullyIndexArray' destloc' is bt
       ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space elemOffset) se
     _ -> do
-      memloc <- ImpGen.indexArray destloc' is
+      let memloc = ImpGen.sliceArray destloc' is
       let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
                  replicate (arrayRank set) Nothing
       ImpGen.compileResultSubExp dest se

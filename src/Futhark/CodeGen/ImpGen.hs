@@ -47,7 +47,7 @@ module Futhark.CodeGen.ImpGen
   , compileBody
   , compileBindings
   , writeExp
-  , indexArray
+  , sliceArray
   , fullyIndexArray
   , fullyIndexArray'
   , readFromArray
@@ -58,6 +58,8 @@ module Futhark.CodeGen.ImpGen
   , Imp.dimSizeToExp
   , destinationFromParam
   , destinationFromParams
+  , copy
+  , copyDWIM
   , copyElementWise
   )
   where
@@ -131,7 +133,10 @@ defaultOperations opc = Operations { opsExpCompiler = const $ return . CompileEx
                                    }
 
 -- | When an array is declared, this is where it is stored.
-data MemLocation = MemLocation VName [Imp.DimSize] IxFun.IxFun
+data MemLocation = MemLocation { memLocationName :: VName
+                               , memLocationShape :: [Imp.DimSize]
+                               , memLocationIxFun :: IxFun.IxFun
+                               }
                    deriving (Show)
 
 data ArrayEntry = ArrayEntry {
@@ -501,10 +506,9 @@ defCompilePrimOp
         Constant{} ->
           throwError "Array value in replicate cannot be constant."
         Var v -> do
-          targetloc <-
-            indexArray destlocation [varIndex i]
           src_array <- lookupArray v
-          let src_elements = arrayOuterSize src_array
+          let targetloc = sliceArray destlocation [varIndex i]
+              src_elements = arrayOuterSize src_array
               src_loc = entryArrayLocation src_array
           emit =<< (Imp.For i (compileSubExp n) <$>
             collect (copy elemt targetloc src_loc src_elements))
@@ -562,7 +566,8 @@ defCompilePrimOp
         Constant {} ->
           throwError "defCompilePrimOp ArrayLit: Cannot have array constants."
         Var v -> do
-          targetloc <- indexArray memlocation [SE.Val $ IntVal $ fromIntegral i]
+          let targetloc =
+                sliceArray memlocation [SE.Val $ IntVal $ fromIntegral i]
           srcloc <- arrayLocation v
           copy et targetloc srcloc elements_per_row
   where et = elemType rt
@@ -639,7 +644,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
     ets <- mapM (fmap elemType . lookupType) value_arrs
     srclocs <- mapM arrayLocation value_arrs
     copy_elements <- forM (zip3 destlocs ets srclocs) $ \(destloc,et,srcloc) ->
-      copyElem et
+      copyArrayDWIM et
       destloc [varIndex partition_cur_offset]
       srcloc [varIndex i]
     let mkWriteLoopBody code c offsetvar =
@@ -888,22 +893,29 @@ varIndex name = SE.Id name Int
 constIndex :: Int -> SE.ScalExp
 constIndex = SE.Val . IntVal . fromIntegral
 
-lookupArray :: VName -> ImpM op ArrayEntry
-lookupArray name = do
+lookupVar :: VName -> ImpM op VarEntry
+lookupVar name = do
   res <- asks $ HM.lookup name . envVtable
   case res of
-    Just (ArrayVar entry) -> return entry
-    _                     -> throwError $ "Unknown array: " ++ textual name
+    Just entry -> return entry
+    _ -> throwError $ "Unknown variable: " ++ textual name
+
+lookupArray :: VName -> ImpM op ArrayEntry
+lookupArray name = do
+  res <- lookupVar name
+  case res of
+    ArrayVar entry -> return entry
+    _              -> throwError $ "Not an array: " ++ textual name
 
 arrayLocation :: VName -> ImpM op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
 
 lookupMemory :: VName -> ImpM op MemEntry
 lookupMemory name = do
-  res <- asks $ HM.lookup name . envVtable
+  res <- lookupVar name
   case res of
-    Just (MemVar entry) -> return entry
-    _                   -> throwError $ "Unknown memory block: " ++ textual name
+    MemVar entry -> return entry
+    _            -> throwError $ "Unknown memory block: " ++ textual name
 
 destinationFromParam :: Param (MemBound u) -> ImpM op ValueDestination
 destinationFromParam param
@@ -926,9 +938,9 @@ destinationFromPattern (Pattern ctxElems valElems) =
         isctx = (`elem` ctxNames)
         inspect patElem = do
           let name = patElemName patElem
-          entry <- asks $ HM.lookup name . envVtable
+          entry <- lookupVar name
           case entry of
-            Just (ArrayVar (ArrayEntry (MemLocation mem _ ixfun) bt shape)) ->
+            ArrayVar (ArrayEntry (MemLocation mem _ ixfun) bt shape) ->
               case patElemBindage patElem of
                 BindVar -> do
                   let nullifyFreeDim (Imp.ConstSize _) = Nothing
@@ -959,17 +971,14 @@ destinationFromPattern (Pattern ctxElems valElems) =
                     Mem {} ->
                       throwError "destinationFromPattern: cannot do an in-place bind of a memory block."
 
-            Just (MemVar (MemEntry memsize _))
+            MemVar (MemEntry memsize _)
               | Imp.VarSize memsize' <- memsize, isctx memsize' ->
                 return $ MemoryDestination name $ Just memsize'
               | otherwise ->
                 return $ MemoryDestination name Nothing
 
-            Just (ScalarVar (ScalarEntry _)) ->
+            ScalarVar (ScalarEntry _) ->
               return $ ScalarDestination name
-
-            Nothing ->
-              throwError $ "destinationFromPattern: unknown target " ++ pretty name
 
 fullyIndexArray :: VName -> [ScalExp]
                 -> ImpM op (VName, Imp.Space, Count Bytes)
@@ -1000,12 +1009,6 @@ writeToArray name indices v = do
   (mem, space, i) <-
     fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
   emit $ Imp.Write mem i (entryArrayElemType arr) space v
-
-indexArray :: MemLocation -> [ScalExp]
-           -> ImpM op MemLocation
-indexArray (MemLocation arrmem dims ixfun) indices =
-  return (MemLocation arrmem (drop (length indices) dims) $
-          IxFun.applyInd ixfun indices)
 
 sliceArray :: MemLocation
            -> [SE.ScalExp]
@@ -1067,11 +1070,13 @@ copyElementWise bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem
         Imp.Index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
   where bt_size = basicScalarSize bt
 
-copyElem :: BasicType
-         -> MemLocation -> [SE.ScalExp]
-         -> MemLocation -> [SE.ScalExp]
-         -> ImpM op (Imp.Code op)
-copyElem bt
+-- | Copy from here to there; both destination and source be
+-- indexeded.
+copyArrayDWIM :: BasicType
+              -> MemLocation -> [SE.ScalExp]
+              -> MemLocation -> [SE.ScalExp]
+              -> ImpM op (Imp.Code op)
+copyArrayDWIM bt
   destlocation@(MemLocation _ destshape _) destis
   srclocation@(MemLocation _ srcshape _) srcis
 
@@ -1084,10 +1089,57 @@ copyElem bt
     Imp.Index srcmem srcoffset bt srcspace
 
   | otherwise = do
-  destlocation' <- indexArray destlocation destis
-  srclocation'  <- indexArray srclocation  srcis
-  collect $ copy bt destlocation' srclocation' $
-    product $ map Imp.dimSizeToExp $ drop (length srcis) srcshape
+      let destlocation' = sliceArray destlocation destis
+          srclocation'  = sliceArray srclocation  srcis
+      collect $ copy bt destlocation' srclocation' $
+        product $ map Imp.dimSizeToExp $ drop (length srcis) srcshape
+
+-- | Copy from here to there; both destination and source be
+-- indexeded.  If so, they better be arrays of enough dimensions.
+-- This function will generally just Do What I Mean, and Do The Right
+-- Thing.  Both destination and source must be in scope.
+copyDWIM :: VName -> [SE.ScalExp] -> VName -> [SE.ScalExp]
+         -> ImpM op ()
+copyDWIM dest dest_is src src_is = do
+  dest_entry <- lookupVar dest
+  src_entry <- lookupVar src
+  case (dest_entry, src_entry) of
+    (MemVar{}, _) ->
+      throwError $
+      unwords ["copyDWIM: destination ", pretty dest, " is a memory block."]
+
+    (_, MemVar{}) ->
+      throwError $
+      unwords ["copyDWIM: source ", pretty src, " is a memory block."]
+
+    (_, ScalarVar (ScalarEntry _)) | not $ null src_is ->
+      throwError $
+      unwords ["copyDWIM: basic-typed target ", pretty dest, " with nonzero indices."]
+
+
+    (ScalarVar (ScalarEntry _), _) | not $ null dest_is ->
+      throwError $
+      unwords ["copyDWIM: basic-typed target ", pretty dest, " with nonzero indices."]
+
+    (ScalarVar (ScalarEntry _), ScalarVar{}) ->
+      emit $ Imp.SetScalar dest $ Imp.ScalarVar src
+
+    (ScalarVar (ScalarEntry bt), ArrayVar arr) -> do
+      (mem, space, i) <-
+        fullyIndexArray' (entryArrayLocation arr) src_is bt
+      emit $ Imp.SetScalar dest $
+        Imp.Index mem i (entryArrayElemType arr) space
+
+    (ArrayVar arr, ScalarVar (ScalarEntry bt)) -> do
+      (dest_mem, dest_space, dest_i) <-
+        fullyIndexArray' (entryArrayLocation arr) dest_is bt
+      emit $ Imp.Write dest_mem dest_i bt dest_space $ Imp.ScalarVar src
+
+    (ArrayVar dest_arr, ArrayVar src_arr) -> do
+      let dest_loc = entryArrayLocation dest_arr
+          src_loc = entryArrayLocation src_arr
+          bt = entryArrayElemType dest_arr
+      emit =<< copyArrayDWIM bt dest_loc dest_is src_loc src_is
 
 -- | @compileAlloc dest size space@ allocates @n@ bytes of memory in @space@,
 -- writing the result to @dest@, which must be a single
