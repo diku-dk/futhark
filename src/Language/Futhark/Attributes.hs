@@ -612,7 +612,8 @@ typeOf (Index ident idx _) =
   `addAliases` HS.insert (identName ident)
 typeOf (Iota _ _) = Array $ BasicArray Int (Rank 1) Nonunique mempty
 typeOf Size{} = Basic Int
-typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique
+typeOf (Replicate _ e _) = arrayType 1 (typeOf e) u
+  where u = uniqueness $ typeOf e
 typeOf (Reshape shape  e _) =
   Rank (length shape) `setArrayShape` typeOf e
 typeOf (Rearrange _ e _) = typeOf e
