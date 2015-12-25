@@ -26,6 +26,7 @@ module Futhark.CodeGen.ImpGen
   , collect
   , comment
   , VarEntry (..)
+  , ArrayEntry (..)
 
     -- * Lookups
   , lookupArray
@@ -44,6 +45,7 @@ module Futhark.CodeGen.ImpGen
   , withParams
   , declaringBasicVar
   , withBasicVar
+  , modifyingArrays
   , compileBody
   , compileBindings
   , writeExp
@@ -56,6 +58,7 @@ module Futhark.CodeGen.ImpGen
   , basicScalarSize
   , scalExpToImpExp
   , Imp.dimSizeToExp
+  , dimSizeToSubExp
   , destinationFromParam
   , destinationFromParams
   , copy
@@ -220,11 +223,6 @@ instance HasScope SOACS (ImpM op) where
             NoUniqueness
           entryType (ScalarVar scalarEntry) =
             Basic $ entryScalarType scalarEntry
-
-          dimSizeToSubExp (Imp.ConstSize n) =
-            Constant $ IntVal $ fromIntegral n
-          dimSizeToSubExp (Imp.VarSize v) =
-            Var v
 
 runImpM :: ImpM op a
         -> Operations op -> Imp.Space -> VNameSource
@@ -799,6 +797,16 @@ declaringLoopVar :: VName -> ImpM op a -> ImpM op a
 declaringLoopVar name =
   withBasicVar name Int
 
+modifyingArrays :: [VName] -> (ArrayEntry -> ArrayEntry)
+                -> ImpM op a -> ImpM op a
+modifyingArrays arrs f m = do
+  vtable <- asks envVtable
+  let inspect name (ArrayVar entry)
+        | name `elem` arrs = ArrayVar $ f entry
+      inspect _ entry = entry
+      vtable' =  HM.mapWithKey inspect vtable
+  local (\env -> env { envVtable = vtable' }) m
+
 -- | Remove the array targets.
 funcallTargets :: Destination -> ImpM op [VName]
 funcallTargets (Destination dests) =
@@ -1194,6 +1202,12 @@ scalExpToImpExp (SE.SIfLessThan a b t f) =
   scalExpToImpExp f
 scalExpToImpExp _ =
   Nothing
+
+dimSizeToSubExp :: Imp.Size -> SubExp
+dimSizeToSubExp (Imp.ConstSize n) =
+  Constant $ IntVal $ fromIntegral n
+dimSizeToSubExp (Imp.VarSize v) =
+  Var v
 
 simplifyScalExp :: ScalExp -> ScalExp
 simplifyScalExp se = AlgSimplify.simplify se mempty
