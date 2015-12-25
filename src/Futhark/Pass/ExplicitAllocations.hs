@@ -573,7 +573,7 @@ allocInChunkedLambda elems_per_thread num_threads lam arr_summaries = do
         return p { paramAttr =
                       ArrayMem bt shape u mem $ IxFun.applyInd
                       (IxFun.reshape ixfun $
-                       newshape ++ map DimNew (drop 2 $ shapeDims shape))
+                       newshape ++ map DimNew (drop 1 $ shapeDims shape))
                       [SE.Id i Int]
                  }
       _ ->
