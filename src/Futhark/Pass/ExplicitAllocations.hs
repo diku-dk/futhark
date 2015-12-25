@@ -530,7 +530,9 @@ allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
 
 allocInExp (Op (ReduceKernel cs w size red_lam fold_lam nes arrs)) = do
   arr_summaries <- mapM lookupMemBound arrs
-  fold_lam' <- allocInChunkedLambda (kernelThreadOffsetMultiple size)
+  fold_lam' <- allocInChunkedLambda
+               (kernelElementsPerThread size)
+               (kernelNumThreads size)
                fold_lam arr_summaries
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
   return $ Op $ Inner $ ReduceKernel cs w size red_lam' fold_lam' nes arrs
@@ -554,8 +556,10 @@ allocInExp e = mapExpM alloc e
                              fail $ "Unhandled Op in ExplicitAllocations: " ++ pretty op
                          }
 
-allocInChunkedLambda :: SubExp -> In.Lambda -> [MemBound NoUniqueness] -> AllocM Lambda
-allocInChunkedLambda thread_chunk lam arr_summaries = do
+allocInChunkedLambda :: SubExp -> SubExp
+                     -> In.Lambda -> [MemBound NoUniqueness]
+                     -> AllocM Lambda
+allocInChunkedLambda elems_per_thread num_threads lam arr_summaries = do
   let i = lambdaIndex lam
       (chunk_size_param, chunked_params) =
         partitionChunkedLambdaParameters $ lambdaParams lam
@@ -564,10 +568,13 @@ allocInChunkedLambda thread_chunk lam arr_summaries = do
     case summary of
       Scalar _ ->
         fail $ "Passed a scalar for lambda parameter " ++ pretty p
-      ArrayMem bt shape u mem ixfun ->
+      ArrayMem bt shape u mem ixfun -> do
+        let newshape = [DimNew num_threads, DimNew elems_per_thread]
         return p { paramAttr =
-                      ArrayMem bt shape u mem $ IxFun.offsetIndex ixfun $
-                      SE.Id i Int * SE.intSubExpToScalExp thread_chunk
+                      ArrayMem bt shape u mem $ IxFun.applyInd
+                      (IxFun.reshape ixfun $
+                       newshape ++ map DimNew (drop 2 $ shapeDims shape))
+                      [SE.Id i Int]
                  }
       _ ->
         fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
