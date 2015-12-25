@@ -55,7 +55,7 @@ shapeCoerce cs newdims arr =
   PrimOp $ Reshape cs (map DimCoercion newdims) arr
 
 -- | @reshapeOuter newshape n oldshape@ returns a 'Reshape' expression
--- that replaces the outer @n@ dimensions of @oldshape@ with @shape@.
+-- that replaces the outer @n@ dimensions of @oldshape@ with @newshape@.
 reshapeOuter :: ShapeChange SubExp -> Int -> Shape -> ShapeChange SubExp
 reshapeOuter newshape n oldshape =
   newshape ++ map coercion_or_new (drop n (shapeDims oldshape))
