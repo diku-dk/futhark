@@ -66,7 +66,8 @@ transformBinding expmap (Let pat ()
   -- We want to pad and transpose the input arrays.
 
   (kernel_size', w', padding) <- paddedScanReduceInput w kernel_size
-  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w') arrs
+  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w' $
+                 kernelElementsPerThread kernel_size) arrs
 
   parlam' <- transformLambda parlam
   seqlam' <- transformLambda seqlam
@@ -83,7 +84,8 @@ transformBinding expmap (Let pat ()
   -- We want to pad and transpose the input arrays.
 
   (kernel_size', w', padding) <- paddedScanReduceInput w kernel_size
-  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w') arrs
+  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w' $
+                 kernelElementsPerThread kernel_size) arrs
 
   lam' <- transformLambda lam
 
@@ -248,15 +250,12 @@ paddedScanReduceInput w kernel_size = do
   where num_threads = kernelNumThreads kernel_size
 
 rearrangeScanReduceInput :: Certificates
-                         -> SubExp -> SubExp -> SubExp -> VName
+                         -> SubExp -> SubExp -> SubExp -> SubExp -> VName
                          -> BabysitM VName
-rearrangeScanReduceInput cs num_threads padding w' arr = do
-  elements_per_thread <- letSubExp "elements_per_thread" $
-                         PrimOp $ BinOp Quot w' num_threads Int
-
+rearrangeScanReduceInput cs num_threads padding w' elements_per_thread arr = do
   arr_t <- lookupType arr
   arr_padded <- padArray arr_t
-  rearrange elements_per_thread (baseString arr) arr_padded (rowType arr_t)
+  rearrange (baseString arr) arr_padded (rowType arr_t)
 
   where padArray arr_t = do
           let arr_shape = arrayShape arr_t
@@ -267,7 +266,7 @@ rearrangeScanReduceInput cs num_threads padding w' arr = do
           letExp (baseString arr <> "_padded") $
             PrimOp $ Concat [] arr [arr_padding] w'
 
-        rearrange elements_per_thread arr_name arr_padded row_type = do
+        rearrange arr_name arr_padded row_type = do
           let row_dims = arrayDims row_type
               extradim_shape = Shape $ [num_threads, elements_per_thread] ++ row_dims
               tr_perm = [1] ++ [2..shapeRank extradim_shape-1] ++ [0]
