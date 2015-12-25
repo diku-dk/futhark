@@ -291,7 +291,8 @@ kernelCompiler
 
     renamed_lam <- renameLambda lam
 
-    (num_groups, local_size, elements_per_thread, num_elements, _, _) <-
+    (num_groups, local_size, elements_per_thread,
+     num_elements, _offset_multiple, num_threads) <-
       compileKernelSize kernel_size
 
     let (other_index_param, actual_params) =
@@ -301,6 +302,14 @@ kernelCompiler
 
     (acc_mem_params, acc_local_mem) <-
       unzip <$> mapM (createAccMem local_size) x_params
+
+    let twoDimInput (ImpGen.ArrayEntry (ImpGen.MemLocation mem shape ixfun) bt) =
+          let shape' = [num_threads, elements_per_thread] ++ drop 1 shape
+              ixfun' = IxFun.reshape ixfun $
+                       [DimNew $ kernelNumThreads kernel_size,
+                        DimNew $ kernelElementsPerThread kernel_size] ++
+                       map (DimNew . ImpGen.dimSizeToSubExp) (drop 1 shape)
+          in ImpGen.ArrayEntry (ImpGen.MemLocation mem shape' ixfun') bt
 
     (call_with_body, body) <-
       makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
@@ -313,7 +322,8 @@ kernelCompiler
       ImpGen.declaringBasicVar global_id Int $
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (lambdaParams lam) $
-      ImpGen.declaringLParams (lambdaParams renamed_lam) $ do
+      ImpGen.declaringLParams (lambdaParams renamed_lam) $
+      ImpGen.modifyingArrays arrs twoDimInput $ do
 
         ImpGen.emit $
           Imp.Op (Imp.GetLocalId local_id 0) <>
@@ -333,16 +343,19 @@ kernelCompiler
         x_dest <- ImpGen.destinationFromParams x_params
         y_dest <- ImpGen.destinationFromParams y_params
 
+        -- The number of elements processed by the thread so far.
+        elements_scanned <- newVName "elements_scanned"
+
         let readScanElement param inp_arr =
               ImpGen.copyDWIM (paramName param) []
-              inp_arr [ImpGen.varIndex $ lambdaIndex lam]
+              inp_arr [ImpGen.varIndex global_id,
+                       ImpGen.varIndex elements_scanned]
 
         computeThreadChunkSize
           (Imp.ScalarVar global_id)
           (ImpGen.dimSizeToExp elements_per_thread)
           (ImpGen.dimSizeToExp num_elements)
           thread_chunk_size
-        elements_scanned <- newVName "elements_scanned"
 
         zipWithM_ ImpGen.compileResultSubExp
           (ImpGen.valueDestinations x_dest) nes
