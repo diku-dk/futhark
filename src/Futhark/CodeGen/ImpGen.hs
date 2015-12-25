@@ -53,7 +53,6 @@ module Futhark.CodeGen.ImpGen
   , fullyIndexArray
   , fullyIndexArray'
   , readFromArray
-  , writeToArray
   , varIndex
   , basicScalarSize
   , scalExpToImpExp
