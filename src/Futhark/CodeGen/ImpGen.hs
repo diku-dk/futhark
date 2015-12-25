@@ -52,7 +52,6 @@ module Futhark.CodeGen.ImpGen
   , sliceArray
   , fullyIndexArray
   , fullyIndexArray'
-  , readFromArray
   , varIndex
   , basicScalarSize
   , scalExpToImpExp
@@ -1008,14 +1007,6 @@ readFromArray name indices = do
   (mem, space, i) <-
     fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
   return $ Imp.Index mem i (entryArrayElemType arr) space
-
-writeToArray :: VName -> [ScalExp] -> Imp.Exp
-             -> ImpM op ()
-writeToArray name indices v = do
-  arr <- lookupArray name
-  (mem, space, i) <-
-    fullyIndexArray' (entryArrayLocation arr) indices $ entryArrayElemType arr
-  emit $ Imp.Write mem i (entryArrayElemType arr) space v
 
 sliceArray :: MemLocation
            -> [SE.ScalExp]
