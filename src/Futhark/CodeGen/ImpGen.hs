@@ -142,8 +142,10 @@ data MemLocation = MemLocation { memLocationName :: VName
 data ArrayEntry = ArrayEntry {
     entryArrayLocation :: MemLocation
   , entryArrayElemType :: BasicType
-  , entryArrayShape    :: [Imp.DimSize]
   }
+
+entryArrayShape :: ArrayEntry -> [Imp.DimSize]
+entryArrayShape = memLocationShape . entryArrayLocation
 
 data MemEntry = MemEntry {
       entryMemSize  :: Imp.MemSize
@@ -282,11 +284,11 @@ compileInParam fparam = case paramAttr fparam of
     Left <$> (Imp.MemParam name <$> subExpToDimSize size <*> pure space)
   ArrayMem bt shape _ mem ixfun -> do
     shape' <- mapM subExpToDimSize $ shapeDims shape
-    return $ Right $ ArrayDecl name bt shape' $
+    return $ Right $ ArrayDecl name bt $
       MemLocation mem shape' ixfun
   where name = paramName fparam
 
-data ArrayDecl = ArrayDecl VName BasicType [Imp.DimSize] MemLocation
+data ArrayDecl = ArrayDecl VName BasicType MemLocation
 
 fparamSizes :: FParam -> HS.HashSet VName
 fparamSizes fparam
@@ -303,7 +305,7 @@ compileInParams params = do
       sizes = mconcat $ map fparamSizes params
       mkArg fparam =
         case (findArray $ paramName fparam, paramType fparam) of
-          (Just (ArrayDecl _ bt shape (MemLocation mem _ _)), _) ->
+          (Just (ArrayDecl _ bt (MemLocation mem shape _)), _) ->
             Just $ Imp.ArrayValue mem bt shape
           (_, Basic bt)
             | paramName fparam `HS.member` sizes ->
@@ -314,7 +316,7 @@ compileInParams params = do
             Nothing
       args = mapMaybe mkArg params
   return (inparams, arraydecls, args)
-  where isArrayDecl x (ArrayDecl y _ _ _) = x == y
+  where isArrayDecl x (ArrayDecl y _ _) = x == y
 
 compileOutParams :: RetType
                  -> ImpM op ([Imp.ValueDecl], [Imp.Param], Destination)
@@ -710,11 +712,10 @@ insertInVtable name entry env =
   env { envVtable = HM.insert name entry $ envVtable env }
 
 withArray :: ArrayDecl -> ImpM op a -> ImpM op a
-withArray (ArrayDecl name bt shape location) m = do
+withArray (ArrayDecl name bt location) m = do
   let entry = ArrayVar ArrayEntry {
           entryArrayLocation = location
         , entryArrayElemType = bt
-        , entryArrayShape    = shape
         }
   local (insertInVtable name entry) m
 
@@ -779,7 +780,6 @@ declaringVar patElem m =
           entry = ArrayVar ArrayEntry {
               entryArrayLocation = location
             , entryArrayElemType = bt
-            , entryArrayShape    = shape'
             }
       declaringVarEntry name entry m
   where name = patElemName patElem
@@ -940,7 +940,7 @@ destinationFromPattern (Pattern ctxElems valElems) =
           let name = patElemName patElem
           entry <- lookupVar name
           case entry of
-            ArrayVar (ArrayEntry (MemLocation mem _ ixfun) bt shape) ->
+            ArrayVar (ArrayEntry (MemLocation mem shape ixfun) bt) ->
               case patElemBindage patElem of
                 BindVar -> do
                   let nullifyFreeDim (Imp.ConstSize _) = Nothing
