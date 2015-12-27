@@ -136,7 +136,7 @@ data MemLocation = MemLocation { memLocationName :: VName
                                , memLocationShape :: [Imp.DimSize]
                                , memLocationIxFun :: IxFun.IxFun
                                }
-                   deriving (Show)
+                   deriving (Eq, Show)
 
 data ArrayEntry = ArrayEntry {
     entryArrayLocation :: MemLocation
@@ -997,8 +997,11 @@ copyArrayDWIM bt
   | otherwise = do
       let destlocation' = sliceArray destlocation destis
           srclocation'  = sliceArray srclocation  srcis
-      collect $ copy bt destlocation' srclocation' $
-        product $ map Imp.dimSizeToExp $ take 1 $ drop (length srcis) srcshape
+      if destlocation' == srclocation'
+        then return mempty -- Copy would be no-op.
+        else collect $ copy bt destlocation' srclocation' $
+             product $ map Imp.dimSizeToExp $
+             take 1 $ drop (length srcis) srcshape
 
 -- | Like 'copyDWIMDest', but the target is a 'ValueDestination'
 -- instead of a variable name.
