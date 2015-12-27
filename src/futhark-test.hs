@@ -52,6 +52,10 @@ import Futhark.Util.Log
 
 import Futhark.Util.Options
 
+-- | Number of tests to run concurrently.
+concurrency :: Int
+concurrency = 8
+
 ---
 --- Test specification parser
 ---
@@ -558,7 +562,6 @@ runTests config files = do
   let mode = configTestMode config
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
-  concurrency <- getNumCapabilities
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
   all_tests <- mapM (makeTestCase (configPrograms config) mode) files
   let (excluded, included) = partition (excludedTest config) all_tests
