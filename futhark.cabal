@@ -272,7 +272,7 @@ Executable futhark-test
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-opencl
   Main-is: src/futhark-opencl.hs
