@@ -638,7 +638,8 @@ allocInLambda i params body rettype = do
   let param_summaries = lparamsSummary params
       all_summaries = HM.insert i IndexInfo param_summaries
   body' <- localScope all_summaries $
-           allocInBody body
+           allocInBindings (bodyBindings body) $ \bnds' ->
+           return $ Body () bnds' $ bodyResult body
   return $ Lambda i params body' rettype
 
 simplifiable :: (Engine.MonadEngine m,

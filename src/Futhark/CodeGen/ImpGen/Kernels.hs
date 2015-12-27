@@ -121,6 +121,7 @@ kernelCompiler
       compileKernelSize kernel_size
 
     let fold_lparams = lambdaParams fold_lam
+        (reduce_targets, arr_targets) = splitAt (length nes) dest
         (fold_chunk_param, _) =
           partitionChunkedLambdaParameters $ lambdaParams fold_lam
 
@@ -154,7 +155,22 @@ kernelCompiler
           Imp.Op (Imp.GetGlobalId (lambdaIndex fold_lam) 0) <>
           Imp.Op (Imp.GetWaveSize wave_size)
 
-        reduce_acc_dest <- ImpGen.destinationFromParams reduce_acc_params
+        ImpGen.Destination reduce_acc_targets <-
+          ImpGen.destinationFromParams reduce_acc_params
+
+        let indexArrayTarget (ImpGen.ArrayDestination
+                              (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.offsetArray dest_loc $
+                              ImpGen.sizeToScalExp per_thread_chunk *
+                              ImpGen.varIndex (lambdaIndex fold_lam)
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                Nothing : dest_dims
+            indexArrayTarget _ =
+              throwError "indexArrayTarget: invalid target for map-out."
+        arr_chunk_targets <- mapM indexArrayTarget arr_targets
+
+        let fold_dest =
+              ImpGen.Destination $ reduce_acc_targets <> arr_chunk_targets
 
         fold_op <-
           ImpGen.subImpM_ inKernelOperations $ do
@@ -163,7 +179,7 @@ kernelCompiler
               (ImpGen.dimSizeToExp per_thread_chunk)
               (ImpGen.dimSizeToExp num_elements) $
               paramName fold_chunk_param
-            ImpGen.compileBody reduce_acc_dest $ lambdaBody fold_lam
+            ImpGen.compileBody fold_dest $ lambdaBody fold_lam
 
         write_fold_result <-
           ImpGen.subImpM_ inKernelOperations $
@@ -172,6 +188,7 @@ kernelCompiler
 
         let read_reduce_args = zipWithM_ (readReduceArgument local_id offset)
                                reduce_arr_params acc_local_mem
+            reduce_acc_dest = ImpGen.Destination reduce_acc_targets
 
         reduce_op <-
           ImpGen.subImpM_ inKernelOperations $ do
@@ -180,7 +197,7 @@ kernelCompiler
 
         write_result <-
           ImpGen.subImpM_ inKernelOperations $
-          zipWithM_ (writeFinalResult [group_id]) dest reduce_acc_params
+          zipWithM_ (writeFinalResult [group_id]) reduce_targets reduce_acc_params
 
         let bound_in_kernel = map paramName (lambdaParams fold_lam ++
                                              lambdaParams reduce_lam) ++

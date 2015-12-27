@@ -49,6 +49,7 @@ module Futhark.CodeGen.ImpGen
   , compileBody
   , compileBindings
   , sliceArray
+  , offsetArray
   , fullyIndexArray
   , fullyIndexArray'
   , varIndex
@@ -922,6 +923,13 @@ sliceArray :: MemLocation
 sliceArray (MemLocation mem shape ixfun) indices =
   MemLocation mem (drop (length indices) shape) $
   IxFun.applyInd ixfun indices
+
+offsetArray :: MemLocation
+            -> SE.ScalExp
+            -> MemLocation
+offsetArray (MemLocation mem shape ixfun) offset =
+  MemLocation mem shape $
+  IxFun.offsetIndex ixfun offset
 
 subExpNotArray :: SubExp -> ImpM op Bool
 subExpNotArray se = subExpType se >>= \case

@@ -252,8 +252,11 @@ kernelType (MapKernel _ _ _ is _ returns _) =
   [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
-kernelType (ReduceKernel _ _ size parlam _ _ _) =
-  map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType parlam
+kernelType (ReduceKernel _ _ size redlam foldlam _ _) =
+  let acc_tp = map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType redlam
+      arr_row_tp = drop (length acc_tp) $ lambdaReturnType foldlam
+  in acc_tp ++
+     map (`setOuterSize` kernelTotalElements size) arr_row_tp
 kernelType (ScanKernel _ w size _ lam _) =
   map (`arrayOfRow` w) (lambdaReturnType lam) ++
   map ((`arrayOfRow` kernelWorkgroups size) .
@@ -266,8 +269,8 @@ instance Attributes lore => TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases (MapKernel _ _ _ _ _ returns _) =
     map (const mempty) returns
-  opAliases (ReduceKernel _ _ _ _ _ nes _) =
-    map (const mempty) nes
+  opAliases (ReduceKernel _ _ _ _ fold_lam _ _) =
+    map (const mempty) $ lambdaReturnType fold_lam
   opAliases (ScanKernel _ _ _ _ lam _) =
     replicate (length (lambdaReturnType lam) * 2) mempty
 
@@ -374,6 +377,9 @@ typeCheckKernel (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = 
   arrargs <- TC.checkSOACArrayArgs w arrexps
   accargs <- mapM TC.checkArg accexps
 
+  let (fold_acc_ret, _) =
+        splitAt (length accexps) $ lambdaReturnType seqfun
+
   case lambdaParams seqfun of
     [] -> TC.bad $ TC.TypeError noLoc "Fold function takes no parameters."
     chunk_param : _
@@ -385,14 +391,13 @@ typeCheckKernel (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = 
       | otherwise ->
           TC.bad $ TC.TypeError noLoc "First parameter of fold function is not integer-typed."
 
-  let seqRetType = lambdaReturnType seqfun
-      asArg t = (t, mempty)
-  TC.checkLambda parfun $ map asArg $ Basic Int : seqRetType ++ seqRetType
+  let asArg t = (t, mempty)
+  TC.checkLambda parfun $ map asArg $ Basic Int : fold_acc_ret ++ fold_acc_ret
   let acct = map TC.argType accargs
       parRetType = lambdaReturnType parfun
-  unless (acct == seqRetType) $
+  unless (acct == fold_acc_ret) $
     TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap fold function returns type " ++ prettyTuple seqRetType ++ "."
+          ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
   unless (acct == parRetType) $
     TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."

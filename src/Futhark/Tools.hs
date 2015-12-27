@@ -10,8 +10,8 @@ module Futhark.Tools
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
   , partitionChunkedLambdaParameters
+
   , intraproceduralTransformation
-  , boundInBody
   )
 where
 

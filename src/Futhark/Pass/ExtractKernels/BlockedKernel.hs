@@ -18,6 +18,7 @@ import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
+import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
 
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern
@@ -35,49 +36,44 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
       num_chunks = kernelWorkgroups step_one_size
       step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
 
-  loop_iterator <- newVName "i"
   seq_lam_index <- newVName "lam_index"
+  let (acc_idents, arr_idents) = splitAt (length nes) $ patternIdents pat
   step_one_pat <- basicPattern' [] <$>
-                  mapM (mkIntermediateIdent num_chunks) (patternIdents pat)
+                  ((++) <$>
+                   mapM (mkIntermediateIdent num_chunks) acc_idents <*>
+                   pure arr_idents)
   step_two_pat <- basicPattern' [] <$>
-                  mapM (mkIntermediateIdent $ Constant $ IntVal 1) (patternIdents pat)
+                  mapM (mkIntermediateIdent $ Constant $ IntVal 1) acc_idents
   let (fold_acc_params, fold_arr_params) =
         splitAt (length nes) $ lambdaParams fold_lam
       chunk_size_param = Param chunk_size (Basic Int)
       other_index_param = Param other_index (Basic Int)
   arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_arr_params
-  res_idents <- mapM (newIdent' (<>"_res") . paramIdent) fold_acc_params
 
-  start_index <- newVName "start_index"
+  map_arr_params <- forM arr_idents $ \arr ->
+    newParam (baseString (identName arr) <> "_in") $
+    setOuterSize (identType arr) (Var chunk_size)
 
-  ((merge_params, unique_nes), seq_copy_merge) <-
+
+  (seq_loop, seq_loop_prologue) <-
     collectBindings $
-    unzip <$> zipWithM mkMergeParam fold_acc_params nes
+    localScope (scopeOfLParams $ arr_chunk_params ++ map_arr_params) $
+    doLoopMapAccumL cs (Var chunk_size) fold_lam
+    nes (map paramName arr_chunk_params) (map paramName map_arr_params)
 
-  let res = map paramName merge_params
-      form = ForLoop loop_iterator $ Var chunk_size
+  let seq_rt =
+        let (acc_ts, arr_ts) =
+              splitAt (length nes) $ lambdaReturnType fold_lam
+        in acc_ts ++ map (`arrayOfRow` Var chunk_size) arr_ts
 
-      compute_start_index =
-        mkLet' [] [Ident start_index $ Basic Int] $
-        PrimOp $ BinOp Times (Var seq_lam_index) (kernelElementsPerThread step_one_size) Int
-      compute_index = mkLet' [] [Ident (lambdaIndex fold_lam) $ Basic Int] $
-                      PrimOp $ BinOp Plus (Var start_index) (Var loop_iterator) Int
-      read_array_elements =
-        [ mkLet' [] [paramIdent param] $ PrimOp $ Index [] arr [Var loop_iterator]
-          | (param, arr) <- zip fold_arr_params $ map paramName arr_chunk_params ]
+      res_idents = zipWith Ident (patternValueNames pat) seq_rt
 
-  seq_loop_body <-
-    runBodyBinder $ inScopeOf fold_lam $ do
-      mapM_ addBinding $ compute_start_index : compute_index : read_array_elements
-      resultBodyM =<< bodyBind (lambdaBody fold_lam)
+      seq_loop_bnd = mkLet' [] res_idents seq_loop
+      seq_body = mkBody (seq_loop_prologue++[seq_loop_bnd]) $ map (Var . identName) res_idents
 
-  let seq_loop =
-        mkLet' [] res_idents $
-        LoopOp $ DoLoop res (zip merge_params unique_nes) form seq_loop_body
-      seq_body = mkBody (seq_copy_merge++[seq_loop]) $ map (Var . identName) res_idents
-
-      seqlam = Lambda { lambdaParams = chunk_size_param : arr_chunk_params
-                      , lambdaReturnType = lambdaReturnType fold_lam
+      seqlam = Lambda { lambdaParams = chunk_size_param :
+                                       arr_chunk_params ++ map_arr_params
+                      , lambdaReturnType = seq_rt
                       , lambdaBody = seq_body
                       , lambdaIndex = seq_lam_index
                       }
@@ -86,9 +82,13 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
                                                 lambdaParams reduce_lam
                                }
 
+  map_out_arrs <- forM arr_idents $ \(Ident name t) ->
+    letExp (baseString name <> "_out_in") $
+    PrimOp $ Scratch (elemType t) (arrayDims t)
+
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     Op $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes arrs)
+     Op $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes $ arrs ++ map_out_arrs)
 
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
 
@@ -101,7 +101,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
         | (element, arr) <- zip elements $ map paramName identity_lam_params ]
       identity_body = mkBody read_elements $ map (Var . identName) elements
       identity_lam = Lambda { lambdaParams = chunk_size_param : identity_lam_params
-                            , lambdaReturnType = lambdaReturnType fold_lam
+                            , lambdaReturnType = lambdaReturnType reduce_lam
                             , lambdaBody = identity_body
                             , lambdaIndex = seq_lam_index
                             }
@@ -109,7 +109,8 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   addBinding $
     Let step_two_pat () $
     Op $ ReduceKernel [] num_chunks step_two_size
-    reduce_lam' identity_lam nes $ patternNames step_one_pat
+    reduce_lam' identity_lam nes $
+    take (length nes) $ patternNames step_one_pat
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
     addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [Constant $ IntVal 0]
@@ -120,13 +121,6 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
         mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
           arrayOfRow (identType ident) chunk_size
-
-        mkMergeParam (Param pname ptype) (Var v) = do
-          v' <- letExp (baseString v ++ "_copy") $ PrimOp $ Copy v
-          return (Param pname $ toDecl ptype Unique,
-                  Var v')
-        mkMergeParam acc_param se =
-          return (acc_param { paramAttr = toDecl (paramAttr acc_param) Unique }, se)
 
 blockedKernelSize :: MonadBinder m =>
                      SubExp -> m KernelSize
