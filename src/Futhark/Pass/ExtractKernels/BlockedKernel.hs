@@ -86,9 +86,13 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
     letExp (baseString name <> "_out_in") $
     PrimOp $ Scratch (elemType t) (arrayDims t)
 
+  arrs_copies <- forM arrs $ \arr ->
+    letExp (baseString arr <> "_copy") $ PrimOp $ Copy arr
+
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     Op $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes $ arrs ++ map_out_arrs)
+     Op $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes $
+     arrs_copies ++ map_out_arrs)
 
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
 
