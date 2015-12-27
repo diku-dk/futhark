@@ -203,7 +203,8 @@ transformSOAC pat (Redomap cs width _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
                          | t <- map_arr_tps ]
-  letBind_ pat =<< doLoopMapAccumL cs width innerfun accexps arrexps maparrs
+  arrexps' <- mapM copyIfArrayName arrexps
+  letBind_ pat =<< doLoopMapAccumL cs width innerfun accexps arrexps' maparrs
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
@@ -651,11 +652,15 @@ newFold accexps_and_types = do
 copyIfArray :: Transformer m =>
                SubExp -> m SubExp
 copyIfArray (Constant v) = return $ Constant v
-copyIfArray (Var v) = do
+copyIfArray (Var v) = Var <$> copyIfArrayName v
+
+copyIfArrayName :: Transformer m =>
+                   VName -> m VName
+copyIfArrayName v = do
   t <- lookupType v
   case t of
-   Array {} -> letSubExp (baseString v ++ "_first_order_copy") $ PrimOp $ Copy v
-   _        -> return $ Var v
+   Array {} -> letExp (baseString v ++ "_first_order_copy") $ PrimOp $ Copy v
+   _        -> return v
 
 index :: Certificates -> [VName] -> SubExp
       -> [AST.Exp lore]
@@ -721,12 +726,11 @@ doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
   let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                | t <- map_arr_tps ]
   let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
-  arrexps' <- mapM (copyIfArray . Var) arrexps
   outarrs <- mapM (newIdent "redomap_outarr") res_ts
   -- for the REDUCE part
   (acc, initacc) <- newFold $ zip accexps accts
   inarrs <- mapM (newIdent "redomap_inarr") arrts
-  let merge = loopMerge (inarrs++acc++outarrs) (arrexps'++initacc++map Var maparrs)
+  let merge = loopMerge (inarrs++acc++outarrs) (map Var arrexps++initacc++map Var maparrs)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
     accxis<- bindLambda innerfun
              (map (PrimOp . SubExp . Var . identName) acc ++
