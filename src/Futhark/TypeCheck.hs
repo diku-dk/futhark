@@ -1021,7 +1021,6 @@ checkFuncall fname paramts args = do
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore ()
 checkLambda (Lambda i params body rettype) args = do
-  mapM_ checkType rettype
   iparam <- basicLParamM i Int
   let fname = nameFromString "<anonymous>"
   if length params == length args then do
@@ -1058,7 +1057,8 @@ checkConcatMapLambda (Lambda i params body rettype) args = do
                [ (paramName param,
                   LParamInfo $ paramAttr param)
                | param <- iparam:params ],
-               body) consumable $
+               body) consumable $ do
+      mapM_ checkType rettype
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
         matchExtReturnType fname (map fromDecl rettype') $ bodyResult body

@@ -13,6 +13,9 @@ module Futhark.Transform.FirstOrderTransform
   , transformBindingRecursively
   , transformLambda
   , transformSOAC
+
+  -- * Utility
+  , doLoopMapAccumL
   )
   where
 
@@ -197,32 +200,10 @@ transformSOAC pat (Scan cs width fun args) = do
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformSOAC pat (Redomap cs width _ innerfun accexps arrexps) = do
-  arrts <- mapM lookupType arrexps
-  -- for the MAP    part
-  let i = lambdaIndex innerfun
-  let acc_num     = length accexps
-  let res_tps     = lambdaReturnType innerfun
-  let map_arr_tps = drop acc_num res_tps
-  let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
-               | t <- map_arr_tps ]
-  let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
-  arrexps' <- mapM (copyIfArray . Var) arrexps
-  maparrs <- resultArray res_ts
-  outarrs <- mapM (newIdent "redomap_outarr") res_ts
-  -- for the REDUCE part
-  (acc, initacc) <- newFold $ zip accexps accts
-  inarrs <- mapM (newIdent "redomap_inarr") arrts
-  let merge = loopMerge (inarrs++acc++outarrs) (arrexps'++initacc++map Var maparrs)
-  loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    accxis<- bindLambda innerfun
-             (map (PrimOp . SubExp . Var . identName) acc ++
-              index cs (map identName inarrs) (Var i))
-    let (acc', xis) = splitAt acc_num accxis
-    dests <- letwith cs (map identName outarrs) (pexp (Var i)) $
-             map (PrimOp . SubExp) xis
-    return $ resultBody (map (Var . identName) inarrs ++ acc' ++ map Var dests)
-  letBind_ pat $ LoopOp $
-    DoLoop (map identName $ acc++outarrs) merge (ForLoop i width) loopbody
+  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
+  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
+                         | t <- map_arr_tps ]
+  letBind_ pat =<< doLoopMapAccumL cs width innerfun accexps arrexps maparrs
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
@@ -718,3 +699,41 @@ withUpperBound = False
 data MEQType = ExactBd SubExp
              | UpperBd SubExp
              | UnknownBd
+
+-- | Turn a Haskell-style mapAccumL into a sequential do-loop.  This
+-- is the guts of transforming a 'Redomap'.
+doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
+                    LetAttr (Lore m) ~ Type) =>
+                   Certificates
+                -> SubExp
+                -> AST.Lambda (Lore m)
+                -> [SubExp]
+                -> [VName]
+                -> [VName]
+                -> m (AST.Exp (Lore m))
+doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
+  arrts <- mapM lookupType arrexps
+  -- for the MAP    part
+  let i = lambdaIndex innerfun
+  let acc_num     = length accexps
+  let res_tps     = lambdaReturnType innerfun
+  let map_arr_tps = drop acc_num res_tps
+  let res_ts = [ arrayOf t (Shape [width]) NoUniqueness
+               | t <- map_arr_tps ]
+  let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
+  arrexps' <- mapM (copyIfArray . Var) arrexps
+  outarrs <- mapM (newIdent "redomap_outarr") res_ts
+  -- for the REDUCE part
+  (acc, initacc) <- newFold $ zip accexps accts
+  inarrs <- mapM (newIdent "redomap_inarr") arrts
+  let merge = loopMerge (inarrs++acc++outarrs) (arrexps'++initacc++map Var maparrs)
+  loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
+    accxis<- bindLambda innerfun
+             (map (PrimOp . SubExp . Var . identName) acc ++
+              index cs (map identName inarrs) (Var i))
+    let (acc', xis) = splitAt acc_num accxis
+    dests <- letwith cs (map identName outarrs) (pexp (Var i)) $
+             map (PrimOp . SubExp) xis
+    return $ resultBody (map (Var . identName) inarrs ++ acc' ++ map Var dests)
+  return $ LoopOp $
+    DoLoop (map identName $ acc++outarrs) merge (ForLoop i width) loopbody

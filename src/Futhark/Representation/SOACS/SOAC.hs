@@ -160,8 +160,7 @@ soacType (Redomap _ outersize outerfun innerfun _ _) =
       res_el_tp = drop (length acc_tp) acc_el_tp
   in  case res_el_tp of
         [] -> acc_tp
-        _  -> acc_tp ++ [ arrayOf eltp (Shape [outersize]) NoUniqueness |
-                          eltp <- res_el_tp ]
+        _  -> acc_tp ++ map (`arrayOfRow` outersize) res_el_tp
 soacType (Stream _ outersize form lam _ _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
