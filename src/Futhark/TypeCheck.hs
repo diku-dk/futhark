@@ -274,8 +274,9 @@ consumeOnlyParams consumable m = do
           | otherwise =
             bad $ TypeError noLoc $
             unlines [pretty v ++ " was invalidly consumed.",
-                     "Only " ++ intercalate ", " (map (pretty . fst) consumable) ++
-                     " can be consumed here."]
+                     what ++ " can be consumed here."]
+        what | null consumable = "Nothing"
+             | otherwise = "Only " ++ intercalate ", " (map (pretty . fst) consumable)
 
 -- | Given the immediate aliases, compute the full transitive alias
 -- set (including the immediate aliases).
