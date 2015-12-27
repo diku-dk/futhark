@@ -348,8 +348,8 @@ kernelCompiler
 
         let readScanElement param inp_arr =
               ImpGen.copyDWIM (paramName param) []
-              inp_arr [ImpGen.varIndex global_id,
-                       ImpGen.varIndex elements_scanned]
+              (Var inp_arr) [ImpGen.varIndex global_id,
+                             ImpGen.varIndex elements_scanned]
 
         computeThreadChunkSize
           (Imp.ScalarVar global_id)
@@ -357,7 +357,7 @@ kernelCompiler
           (ImpGen.dimSizeToExp num_elements)
           thread_chunk_size
 
-        zipWithM_ ImpGen.compileResultSubExp
+        zipWithM_ ImpGen.compileSubExpTo
           (ImpGen.valueDestinations x_dest) nes
 
         read_params <-
@@ -670,12 +670,12 @@ writeThreadResult thread_idxs perm
     Basic bt -> do
       (_, _, elemOffset) <-
         ImpGen.fullyIndexArray' destloc' is bt
-      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space elemOffset) se
+      ImpGen.compileSubExpTo (ImpGen.ArrayElemDestination mem bt space elemOffset) se
     _ -> do
       let memloc = ImpGen.sliceArray destloc' is
       let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
                  replicate (arrayRank set) Nothing
-      ImpGen.compileResultSubExp dest se
+      ImpGen.compileSubExpTo dest se
 writeThreadResult _ _ _ _ =
   fail "Cannot handle kernel that does not return an array."
 
@@ -794,7 +794,7 @@ writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
           return $
             ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) $
             map (const Nothing) ds
-      ImpGen.compileResultSubExp target $ Var $ paramName acc_param
+      ImpGen.compileSubExpTo target $ Var $ paramName acc_param
   where bt = elemType $ paramType acc_param
 writeFinalResult _ _ _ =
   fail "writeFinalResult: invalid destination"
