@@ -43,7 +43,6 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.Aliases
   (Aliases, removeLambdaAliases, removeExtLambdaAliases)
 import Futhark.Analysis.Usage
-import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
 import qualified Futhark.Analysis.Range as Range
@@ -298,17 +297,6 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (SOAC lore) where
   usageInOp (Map _ _ f arrs) = usageInLambda f arrs
   usageInOp (Redomap _ _ _ f _ arrs) = usageInLambda f arrs
   usageInOp _ = mempty
-
-usageInLambda :: (Aliased lore, UsageInOp (Op lore)) =>
-                 Lambda lore -> [VName] -> UT.UsageTable
-usageInLambda lam arrs =
-  mconcat $
-  map (UT.consumedUsage . snd) $
-  filter ((`HS.member` consumed_in_body) . fst) $
-  zip (map paramName arr_params) arrs
-  where arr_params = snd $ splitAt n $ lambdaParams lam
-        consumed_in_body = consumedInBody $ lambdaBody lam
-        n = length arrs
 
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
 typeCheckSOAC (Map cs size fun arrexps) = do

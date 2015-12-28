@@ -37,6 +37,7 @@ import Prelude
 
 import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
+import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
   ((</>), (<+>), ppr, comma, commasep, Pretty, parens, text)
@@ -320,7 +321,16 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    return return return
 
 instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
-  usageInOp _ = mempty -- FIXME
+  usageInOp (ReduceKernel _ _ _ _ foldfun _ arrs) =
+    usageInLambda foldfun arrs
+  usageInOp (ScanKernel _ _ _ _ fun input) =
+    usageInLambda fun arrs
+    where arrs = map snd input
+  usageInOp (MapKernel _ _ _ _ inps _ body) =
+    mconcat $
+    map (UT.consumedUsage . kernelInputArray) $
+    filter ((`HS.member` consumed_in_body) . kernelInputName) inps
+    where consumed_in_body = consumedInBody body
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
