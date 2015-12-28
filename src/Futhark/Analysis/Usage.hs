@@ -2,6 +2,7 @@
 module Futhark.Analysis.Usage
        ( usageInBinding
        , usageInExp
+       , usageInLambda
 
        , UsageInOp(..)
        )
@@ -51,3 +52,14 @@ class UsageInOp op where
 
 instance UsageInOp () where
   usageInOp () = mempty
+
+usageInLambda :: (Aliased lore, UsageInOp (Op lore)) =>
+                 Lambda lore -> [VName] -> UT.UsageTable
+usageInLambda lam arrs =
+  mconcat $
+  map (UT.consumedUsage . snd) $
+  filter ((`HS.member` consumed_in_body) . fst) $
+  zip (map paramName arr_params) arrs
+  where arr_params = snd $ splitAt n $ lambdaParams lam
+        consumed_in_body = consumedInBody $ lambdaBody lam
+        n = length arrs
