@@ -495,6 +495,9 @@ binOpRes = Just . SubExp . Constant
 simplifyNot :: LetTopDownRule lore u
 simplifyNot _ _ (Not (Constant (LogVal v))) =
   Just $ SubExp $ constant (not v)
+simplifyNot defOf _ (Not (Var v))
+  | Just (PrimOp (Not v2)) <- defOf v =
+  Just $ SubExp v2
 simplifyNot _ _ _ = Nothing
 
 simplifyComplement :: LetTopDownRule lore u
