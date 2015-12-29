@@ -143,7 +143,9 @@ topDownRules :: (MonadBinder m,
                  Op (Lore m) ~ SOAC (Lore m)) => TopDownRules m
 topDownRules = [liftIdentityMapping,
                 removeReplicateMapping,
+                removeReplicateRedomap,
                 removeIotaMapping,
+                removeIotaRedomap,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
@@ -195,20 +197,9 @@ liftIdentityMapping _ _ = cannotSimplify
 -- These can be turned into free variables instead.
 removeReplicateMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 removeReplicateMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
-  | not $ null parameterBnds = do
-  let (params, arrs') = unzip paramsAndArrs
-      fun' = fun { lambdaParams = params }
-  mapM_ (uncurry letBindNames') parameterBnds
-  letBind_ pat $ Op $ Map cs outersize fun' arrs'
-  where (paramsAndArrs, parameterBnds) =
-          partitionEithers $ zipWith isReplicate (lambdaParams fun) arrs
-
-        isReplicate p v
-          | Just (Replicate _ e) <-
-            asPrimOp =<< ST.lookupExp v vtable =
-              Right ([paramName p], PrimOp $ SubExp e)
-          | otherwise =
-              Left (p, v)
+  | Just (bnds, fun', arrs') <- removeReplicateInput vtable fun arrs = do
+      mapM_ (uncurry letBindNames') bnds
+      letBind_ pat $ Op $ Map cs outersize fun' arrs'
 
 removeReplicateMapping _ _ = cannotSimplify
 
@@ -216,14 +207,40 @@ removeReplicateMapping _ _ = cannotSimplify
 -- These can be turned into references to the index variable instead.
 removeIotaMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 removeIotaMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
-  | not $ null iotaParams = do
-  let substs = HM.fromList $ zip iotaParams $ repeat $ lambdaIndex fun
-      (params, arrs') = unzip paramsAndArrs
-      fun' = substituteNames substs fun { lambdaParams = params
-                                        }
-  letBind_ pat $ Op $ Map cs outersize fun' arrs'
-  where (paramsAndArrs, iotaParams) =
-          partitionEithers $ zipWith isIota (lambdaParams fun) arrs
+  | Just (fun', arrs') <- removeIotaInput vtable fun arrs =
+      letBind_ pat $ Op $ Map cs outersize fun' arrs'
+removeIotaMapping _ _ = cannotSimplify
+
+-- | Like 'removeIotaMapping', but for 'Redomap'.
+removeIotaRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeIotaRedomap vtable (Let pat _ (Op (Redomap cs w redfun foldfun nes arrs)))
+  | Just (foldfun', arrs') <- removeIotaInput vtable foldfun arrs =
+      letBind_ pat $ Op $ Redomap cs w redfun foldfun' nes arrs'
+removeIotaRedomap _ _ = cannotSimplify
+
+-- | Like 'removeReplicateMapping', but for 'Redomap'.
+removeReplicateRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w redfun foldfun nes arrs)))
+  | Just (bnds, foldfun', arrs') <- removeReplicateInput vtable foldfun arrs = do
+      mapM_ (uncurry letBindNames') bnds
+      letBind_ pat $ Op $ Redomap cs w redfun foldfun' nes arrs'
+removeReplicateRedomap _ _ = cannotSimplify
+
+removeIotaInput :: Attributes lore =>
+                   ST.SymbolTable lore
+                -> AST.Lambda lore -> [VName] -> Maybe (AST.Lambda lore, [VName])
+removeIotaInput vtable fun arrs
+  | not $ null iotaParams =
+    let substs = HM.fromList $ zip iotaParams $ repeat $ lambdaIndex fun
+        (arr_params', arrs') = unzip params_and_arrs
+        fun' = substituteNames substs fun { lambdaParams = acc_params <> arr_params' }
+    in Just (fun', arrs')
+  | otherwise = Nothing
+  where params = lambdaParams fun
+        (acc_params, arr_params) =
+          splitAt (length params - length arrs) params
+        (params_and_arrs, iotaParams) =
+          partitionEithers $ zipWith isIota arr_params arrs
 
         isIota p v
           | Just (Iota _) <- asPrimOp =<< ST.lookupExp v vtable =
@@ -231,7 +248,30 @@ removeIotaMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
           | otherwise =
               Left (p, v)
 
-removeIotaMapping _ _ = cannotSimplify
+removeReplicateInput :: Attributes lore =>
+                        ST.SymbolTable lore
+                        -> AST.Lambda lore -> [VName]
+                     -> Maybe ([([VName], AST.Exp lore)],
+                               AST.Lambda lore, [VName])
+removeReplicateInput vtable fun arrs
+  | not $ null parameterBnds = do
+  let (arr_params', arrs') = unzip params_and_arrs
+      fun' = fun { lambdaParams = acc_params <> arr_params' }
+  return (parameterBnds, fun', arrs')
+  | otherwise = Nothing
+
+  where params = lambdaParams fun
+        (acc_params, arr_params) =
+          splitAt (length params - length arrs) params
+        (params_and_arrs, parameterBnds) =
+          partitionEithers $ zipWith isReplicate arr_params arrs
+
+        isReplicate p v
+          | Just (Replicate _ e) <-
+            asPrimOp =<< ST.lookupExp v vtable =
+              Right ([paramName p], PrimOp $ SubExp e)
+          | otherwise =
+              Left (p, v)
 
 -- | Remove inputs that are not used inside the @map@.
 removeUnusedMapInput :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
