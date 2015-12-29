@@ -68,6 +68,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , hackilySimplifyBranch
                , removeIdentityInPlace
                , simplifyBranchContext
+               , simplifyBranchResultComparison
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
@@ -925,6 +926,48 @@ simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
               Right (bindee, se1, se2, t)
           where name = patElemName bindee
 simplifyEqualBranchResult _ _ = cannotSimplify
+
+-- | If we are comparing X against the result of a branch of the form
+-- @if P then Y else Z@ then replace comparison with '(P && X == Y) ||
+-- (!P && X == Z').  This may allow us to get rid of a branch, and the
+-- extra comparisons may be constant-folded out.  Question: maybe we
+-- should have some more checks to ensure that we only do this if that
+-- is actually the case, such as if we will obtain at least one
+-- constant-to-constant comparison?
+simplifyBranchResultComparison :: MonadBinder m => TopDownRule m
+simplifyBranchResultComparison vtable (Let pat _ (PrimOp (BinOp Equal se1 se2 _)))
+  | Just m <- simplifyWith se1 se2 = m
+  | Just m <- simplifyWith se2 se1 = m
+  where simplifyWith (Var v) x
+          | Just bnd <- ST.entryBinding =<< ST.lookup v vtable,
+            If p tbranch fbranch _ <- bindingExp bnd,
+            Just (y, z) <-
+              returns v (bindingPattern bnd) tbranch fbranch,
+            HS.null $ freeIn y `HS.intersection` boundInBody tbranch,
+            HS.null $ freeIn z `HS.intersection` boundInBody fbranch = Just $ do
+                eq_x_y <-
+                  letSubExp "eq_x_y" $ PrimOp $ BinOp Equal x y Bool
+                eq_x_z <-
+                  letSubExp "eq_x_z" $ PrimOp $ BinOp Equal x z Bool
+                p_and_eq_x_y <-
+                  letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd p eq_x_y Bool
+                not_p <-
+                  letSubExp "not_p" $ PrimOp $ Not p
+                not_p_and_eq_x_z <-
+                  letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd not_p eq_x_z Bool
+                letBind_ pat $
+                  PrimOp $ BinOp LogOr p_and_eq_x_y not_p_and_eq_x_z Bool
+        simplifyWith _ _ =
+          Nothing
+
+        returns v ifpat tbranch fbranch =
+          liftM snd $
+          find ((==v) . patElemName . fst) $
+          zip (patternElements ifpat) $
+          zip (bodyResult tbranch) (bodyResult fbranch)
+
+simplifyBranchResultComparison _ _ =
+  cannotSimplify
 
 -- Some helper functions
 
