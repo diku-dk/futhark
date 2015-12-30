@@ -60,11 +60,8 @@ analyseExp = Out.mapExp analyse
                      , Out.mapOnCertificates = return
                      , Out.mapOnVName = return
                      , Out.mapOnBody = return . analyseBody
-                     , Out.mapOnLambda = return . analyseLambda
-                     , Out.mapOnExtLambda = return . analyseExtLambda
                      , Out.mapOnRetType = return
                      , Out.mapOnFParam = return
-                     , Out.mapOnLParam = return
                      , Out.mapOnOp = return . Out.addOpAliases
                      }
 

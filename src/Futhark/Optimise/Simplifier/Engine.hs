@@ -506,15 +506,11 @@ simplifyExpBase = mapExpM hoist
                 , mapOnSubExp = simplify
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
-                , mapOnLambda = fail "Unhandled lambda in simplification engine."
-                , mapOnExtLambda = fail "Unhandled existential lambda in simplification engine."
                 , mapOnVName = simplify
                 , mapOnCertificates = simplify
                 , mapOnRetType = simplify
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
-                , mapOnLParam =
-                  fail "Unhandled LParam in simplification engine."
                 , mapOnOp =
                   simplifyOp
                 }

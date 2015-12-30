@@ -547,11 +547,8 @@ allocInExp (Apply fname args rettype) = do
 allocInExp e = mapExpM alloc e
   where alloc =
           identityMapper { mapOnBody = allocInBody
-                         , mapOnLambda = fail "Unhandled lambda in ExplicitAllocations"
-                         , mapOnExtLambda = fail "Unhandled ext lambda in ExplicitAllocations"
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
-                         , mapOnLParam = fail "Unhandled LParam in ExplicitAllocations"
                          , mapOnOp = \op ->
                              fail $ "Unhandled Op in ExplicitAllocations: " ++ pretty op
                          }

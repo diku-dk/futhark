@@ -66,13 +66,10 @@ import Futhark.Representation.AST.Syntax
 data Mapper flore tlore m = Mapper {
     mapOnSubExp :: SubExp -> m SubExp
   , mapOnBody :: Body flore -> m (Body tlore)
-  , mapOnLambda :: Lambda flore -> m (Lambda tlore)
-  , mapOnExtLambda :: ExtLambda flore -> m (ExtLambda tlore)
   , mapOnVName :: VName -> m VName
   , mapOnCertificates :: Certificates -> m Certificates
   , mapOnRetType :: RetType flore -> m (RetType tlore)
   , mapOnFParam :: FParam flore -> m (FParam tlore)
-  , mapOnLParam :: LParam flore -> m (LParam tlore)
   , mapOnOp :: Op flore -> m (Op tlore)
   }
 
@@ -81,13 +78,10 @@ identityMapper :: Monad m => Mapper lore lore m
 identityMapper = Mapper {
                    mapOnSubExp = return
                  , mapOnBody = return
-                 , mapOnLambda = return
-                 , mapOnExtLambda = return
                  , mapOnVName = return
                  , mapOnCertificates = return
                  , mapOnRetType = return
                  , mapOnFParam = return
-                 , mapOnLParam = return
                  , mapOnOp = return
                  }
 
@@ -209,8 +203,6 @@ data Folder a lore m = Folder {
     foldOnSubExp :: a -> SubExp -> m a
   , foldOnBody :: a -> Body lore -> m a
   , foldOnBinding :: a -> Binding lore -> m a
-  , foldOnLambda :: a -> Lambda lore -> m a
-  , foldOnExtLambda :: a -> ExtLambda lore -> m a
   , foldOnVName :: a -> VName -> m a
   , foldOnCertificates :: a -> Certificates -> m a
   , foldOnRetType :: a -> RetType lore -> m a
@@ -225,8 +217,6 @@ identityFolder = Folder {
                    foldOnSubExp = const . return
                  , foldOnBody = const . return
                  , foldOnBinding = const . return
-                 , foldOnLambda = const . return
-                 , foldOnExtLambda = const . return
                  , foldOnVName = const . return
                  , foldOnCertificates = const . return
                  , foldOnRetType = const . return
@@ -239,13 +229,10 @@ foldMapper :: Monad m => Folder a lore m -> Mapper lore lore (StateT a m)
 foldMapper f = Mapper {
                  mapOnSubExp = wrap foldOnSubExp
                , mapOnBody = wrap foldOnBody
-               , mapOnLambda = wrap foldOnLambda
-               , mapOnExtLambda = wrap foldOnExtLambda
                , mapOnVName = wrap foldOnVName
                , mapOnCertificates = wrap foldOnCertificates
                , mapOnRetType = wrap foldOnRetType
                , mapOnFParam = wrap foldOnFParam
-               , mapOnLParam = wrap foldOnLParam
                , mapOnOp = wrap foldOnOp
                }
   where wrap op k = do
@@ -270,8 +257,6 @@ data Walker lore m = Walker {
     walkOnSubExp :: SubExp -> m ()
   , walkOnBody :: Body lore -> m ()
   , walkOnBinding :: Binding lore -> m ()
-  , walkOnLambda :: Lambda lore -> m ()
-  , walkOnExtLambda :: ExtLambda lore -> m ()
   , walkOnVName :: VName -> m ()
   , walkOnCertificates :: Certificates -> m ()
   , walkOnRetType :: RetType lore -> m ()
@@ -286,8 +271,6 @@ identityWalker = Walker {
                    walkOnSubExp = const $ return ()
                  , walkOnBody = const $ return ()
                  , walkOnBinding = const $ return ()
-                 , walkOnLambda = const $ return ()
-                 , walkOnExtLambda = const $ return ()
                  , walkOnVName = const $ return ()
                  , walkOnCertificates = const $ return ()
                  , walkOnRetType = const $ return ()
@@ -300,13 +283,10 @@ walkMapper :: Monad m => Walker lore m -> Mapper lore lore m
 walkMapper f = Mapper {
                  mapOnSubExp = wrap walkOnSubExp
                , mapOnBody = wrap walkOnBody
-               , mapOnLambda = wrap walkOnLambda
-               , mapOnExtLambda = wrap walkOnExtLambda
                , mapOnVName = wrap walkOnVName
                , mapOnCertificates = wrap walkOnCertificates
                , mapOnRetType = wrap walkOnRetType
                , mapOnFParam = wrap walkOnFParam
-               , mapOnLParam = wrap walkOnLParam
                , mapOnOp = wrap walkOnOp
                }
   where wrap op k = op f k >> return k

@@ -146,12 +146,9 @@ inlineInBody _ (Body () [] res) =
   Body () [] res
 
 inliner :: Monad m => [FunDec] -> Mapper SOACS SOACS m
-inliner funs = identityMapper {
-                 mapOnLambda = return . inlineInLambda funs
-               , mapOnBody = return . inlineInBody funs
-               , mapOnExtLambda = return . inlineInExtLambda funs
-               , mapOnOp = return . inlineInSOAC funs
-               }
+inliner funs = identityMapper { mapOnBody = return . inlineInBody funs
+                              , mapOnOp = return . inlineInSOAC funs
+                              }
 
 inlineInSOAC :: [FunDec] -> SOAC SOACS -> SOAC SOACS
 inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper

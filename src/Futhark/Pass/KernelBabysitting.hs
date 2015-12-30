@@ -162,8 +162,6 @@ transformBinding expmap (Let pat () e) = do
 
 transform :: Mapper Kernels Kernels BabysitM
 transform = identityMapper { mapOnBody = transformBody
-                           , mapOnLambda = transformLambda
-                           , mapOnExtLambda = transformExtLambda
                            }
 
 transformLambda :: Lambda -> BabysitM Lambda
@@ -171,12 +169,6 @@ transformLambda lam = do
   body' <- inScopeOf lam $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }
-
-transformExtLambda :: ExtLambda -> BabysitM ExtLambda
-transformExtLambda lam = do
-  body' <- inScopeOf lam $
-           transformBody $ extLambdaBody lam
-  return lam { extLambdaBody = body' }
 
 rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Kernels]
                 -> BabysitM [KernelInput Kernels]

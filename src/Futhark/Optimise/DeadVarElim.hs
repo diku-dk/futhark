@@ -113,8 +113,6 @@ deadCodeElimExp e = mapExpM mapper e
   where mapper = Mapper {
                    mapOnBody = deadCodeElimBodyM
                  , mapOnSubExp = deadCodeElimSubExp
-                 , mapOnLambda = deadCodeElimLambda
-                 , mapOnExtLambda = deadCodeElimExtLambda
                  , mapOnVName = deadCodeElimVName
                  , mapOnCertificates = mapM deadCodeElimVName
                  , mapOnRetType = \rt -> do
@@ -123,9 +121,6 @@ deadCodeElimExp e = mapExpM mapper e
                  , mapOnFParam = \fparam -> do
                    seen $ freeIn fparam
                    return fparam
-                 , mapOnLParam = \lparam -> do
-                   seen $ freeIn lparam
-                   return lparam
                  , mapOnOp = \op -> seen (freeIn op) >> return op
                  }
 

@@ -108,12 +108,9 @@ replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = return . substituteNames substs
-                 , mapOnLambda = return . substituteNames substs
-                 , mapOnExtLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
-                 , mapOnLParam = return . substituteNames substs
                  , mapOnOp = return . substituteNames substs
                  }
 
