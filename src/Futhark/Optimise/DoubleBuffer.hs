@@ -55,12 +55,6 @@ optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   }
 
-optimiseLambda :: MonadFreshNames m =>
-                  Lambda -> m Lambda
-optimiseLambda lambda = do
-  body' <- optimiseBody $ lambdaBody lambda
-  return lambda { lambdaBody = body' }
-
 optimiseLoop :: MonadFreshNames m =>
                 [(FParam, SubExp)] -> Body
              -> m ([Binding], [(FParam, SubExp)], Body)

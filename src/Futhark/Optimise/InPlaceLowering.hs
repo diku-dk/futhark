@@ -162,13 +162,6 @@ optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   }
 
-optimiseLambda :: Lambda Kernels
-               -> ForwardingM (Lambda Kernels)
-optimiseLambda lam =
-  bindingLParams (lambdaParams lam) $ do
-    optbody <- optimiseBody $ lambdaBody lam
-    return $ lam { lambdaBody = optbody }
-
 data Entry = Entry { entryNumber :: Int
                    , entryAliases :: Names
                    , entryDepth :: Int
