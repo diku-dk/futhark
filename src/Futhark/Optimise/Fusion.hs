@@ -741,7 +741,6 @@ fuseInExp e = mapExpM fuseIn e
 fuseIn :: Mapper SOACS SOACS FusionGM
 fuseIn = identityMapper {
            mapOnBody    = fuseInBody
-         , mapOnLambda  = fuseInLambda
          , mapOnOp      = mapSOACM identitySOACMapper
                           { mapOnSOACLambda = fuseInLambda
                           }

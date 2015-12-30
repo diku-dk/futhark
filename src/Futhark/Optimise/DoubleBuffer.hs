@@ -53,7 +53,6 @@ optimiseBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
   return $ bnds ++ [Let pat () $ LoopOp $ DoLoop res merge' form body'']
 optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
-                                  , mapOnLambda = optimiseLambda
                                   }
 
 optimiseLambda :: MonadFreshNames m =>

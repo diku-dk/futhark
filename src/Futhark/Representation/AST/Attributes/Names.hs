@@ -43,17 +43,11 @@ freeWalker = identityWalker {
                walkOnSubExp = subExpFree
              , walkOnBody = bodyFree
              , walkOnBinding = bindingFree
-             , walkOnLambda = lambdaFree
-             , walkOnExtLambda = extLambdaFree
              , walkOnVName = tell . HS.singleton
              , walkOnCertificates = tell . HS.fromList
              , walkOnOp = tell . freeIn
              }
   where subExpFree = tell . freeIn
-
-        lambdaFree = tell . freeInLambda
-
-        extLambdaFree = tell . freeInExtLambda
 
         binding bound = censor (`HS.difference` bound)
 

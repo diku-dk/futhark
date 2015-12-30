@@ -72,7 +72,6 @@ cseInBindings (bnd:bnds) m =
           e <- mapExpM cse $ bindingExp bnd'
           return bnd' { bindingExp = e }
         cse = identityMapper { mapOnBody = cseInBody
-                             , mapOnLambda = cseInLambda
                              , mapOnOp = cseInOp
                              }
 

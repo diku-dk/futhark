@@ -48,8 +48,6 @@ transformBinding (Let pat () e) = do
   (bnds, e') <- transformExp =<< mapExpM transform e
   return $ bnds ++ [Let pat () e']
   where transform = identityMapper { mapOnBody = transformBody
-                                   , mapOnLambda = transformLambda
-                                   , mapOnExtLambda = transformExtLambda
                                    }
 
 transformExp :: Exp -> ExpandM ([Binding], Exp)
@@ -230,13 +228,4 @@ offsetMemoryInExp offsets (LoopOp (DoLoop res merge form body)) =
         mergeparams' = map (offsetMemoryInParam offsets) mergeparams
 offsetMemoryInExp offsets e = mapExp recurse e
   where recurse = identityMapper { mapOnBody = return . offsetMemoryInBody offsets
-                                 , mapOnLambda = return . offsetMemoryInLambda offsets
                                  }
-
-offsetMemoryInLambda :: RebaseMap -> Lambda -> Lambda
-offsetMemoryInLambda offsets lam =
-  lam { lambdaParams = params,
-        lambdaBody = body
-      }
-  where params = map (offsetMemoryInParam offsets) $ lambdaParams lam
-        body = offsetMemoryInBody offsets $ lambdaBody lam

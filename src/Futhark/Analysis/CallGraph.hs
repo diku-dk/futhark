@@ -88,6 +88,4 @@ buildCGexp callees e =
   foldExp folder callees e
   where folder =
           identityFolder { foldOnBody = \x body -> return $ buildCGbody x body
-                         , foldOnLambda = \x lam -> return $ buildCGbody x $ lambdaBody lam
-                         , foldOnExtLambda = \x lam -> return $ buildCGbody x $ extLambdaBody lam
                          }

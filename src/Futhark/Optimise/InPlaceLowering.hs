@@ -160,7 +160,6 @@ optimiseExp (Op (MapKernel cs w index ispace inps returns body)) =
     return $ Op $ MapKernel cs w index ispace inps returns body'
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
-                                  , mapOnLambda = optimiseLambda
                                   }
 
 optimiseLambda :: Lambda Kernels

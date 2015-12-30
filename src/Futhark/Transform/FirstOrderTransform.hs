@@ -84,11 +84,8 @@ transformBindingRecursively (Let pat () (Op soac)) =
 transformBindingRecursively (Let pat () e) =
   letBind_ pat =<< mapExpM transform e
   where transform = identityMapper { mapOnBody = transformBody
-                                   , mapOnLambda = transformLambda
-                                   , mapOnExtLambda = transformExtLambda
                                    , mapOnRetType = return
                                    , mapOnFParam = return
-                                   , mapOnLParam = return
                                    , mapOnOp = fail "Unhandled Op in first order transform"
                                    }
 
