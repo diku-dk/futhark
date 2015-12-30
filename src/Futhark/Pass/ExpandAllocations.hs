@@ -105,16 +105,6 @@ transformExp (Op (Inner (ScanKernel cs w kernel_size order lam input)))
 transformExp e =
   return ([], e)
 
-transformLambda :: Lambda -> ExpandM Lambda
-transformLambda lam = do
-  body' <- transformBody $ lambdaBody lam
-  return lam { lambdaBody = body' }
-
-transformExtLambda :: ExtLambda -> ExpandM ExtLambda
-transformExtLambda lam = do
-  body' <- transformBody $ extLambdaBody lam
-  return lam { extLambdaBody = body' }
-
 -- | Returns a map from memory block names to their size in bytes,
 -- as well as the lambda body where all the allocations have been removed.
 -- Only looks at allocations in the immediate body - if there are any
