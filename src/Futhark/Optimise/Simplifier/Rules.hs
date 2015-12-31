@@ -76,7 +76,6 @@ bottomUpRules = [ removeUnusedLoopResult
                 , removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , removeUnnecessaryCopy
-                , simplifyEqualBranchResult
                 ]
 
 standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
@@ -897,38 +896,6 @@ removeDeadBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
   in letBind_ (Pattern [] pat') =<<
      eIf (eSubExp e1) (pure tb') (pure fb')
 removeDeadBranchResult _ _ = cannotSimplify
-
--- | Simplify return values of a branch if it is later asserted that
--- they have some specific value.  FIXME: this is not entiiiiirely
--- sound, as in practice we just end up removing the eventual
--- assertion.  This is really just about eliminating shape computation
--- branches.  Maybe there is a better way.
-simplifyEqualBranchResult :: MonadBinder m => BottomUpRule m
-simplifyEqualBranchResult (_, used) (Let pat _ (If e1 tb fb rettype))
-  | -- Only if there is no existential context...
-    patternSize pat == length rettype,
-    let (simplified,orig) = partitionEithers $ map isActually $
-                            zip4 (patternElements pat) tses fses rettype,
-    not (null simplified) = do
-      let mkSimplified (bindee, se) =
-            letBind_ (Pattern [] [bindee]) $ PrimOp $ SubExp se
-      mapM_ mkSimplified simplified
-      let (bindees,tses',fses',rettype') = unzip4 orig
-          pat' = Pattern [] bindees
-          tb' = tb { bodyResult = tses' }
-          fb' = fb { bodyResult = fses' }
-      letBind_ pat' $ If e1 tb' fb' rettype'
-  where tses = bodyResult tb
-        fses = bodyResult fb
-        isActually (bindee, se1, se2, t)
-          | UT.isEqualTo se1 name used =
-              Left (bindee, se1)
-          | UT.isEqualTo se2 name used =
-              Left (bindee, se2)
-          | otherwise =
-              Right (bindee, se1, se2, t)
-          where name = patElemName bindee
-simplifyEqualBranchResult _ _ = cannotSimplify
 
 -- | If we are comparing X against the result of a branch of the form
 -- @if P then Y else Z@ then replace comparison with '(P && X == Y) ||
