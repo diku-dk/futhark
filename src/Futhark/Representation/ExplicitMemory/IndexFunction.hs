@@ -281,6 +281,7 @@ unstripe = Unstripe
 applyInd :: forall num c n m.
             IntegralCond num =>
             SNat n -> IxFun num c (m:+:n) -> Indices num m -> IxFun num c n
+applyInd _ ixfun Nil = ixfun
 applyInd n (Index m_plus_n (ixfun :: IxFun num c (k:+:(m:+:n))) (mis :: Indices num k)) is =
   Index n ixfun' is'
   where k :: SNat k
