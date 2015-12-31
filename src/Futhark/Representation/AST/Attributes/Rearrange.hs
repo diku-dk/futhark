@@ -5,6 +5,7 @@ module Futhark.Representation.AST.Attributes.Rearrange
        , rearrangeCompose
        , isPermutationOf
        , transposeIndex
+       , isMapTranspose
        ) where
 
 import Data.List
@@ -73,3 +74,33 @@ transposeIndex k n l
     (mid,end) <- splitAt n post =
     beg ++ mid ++ [needle] ++ end
   | otherwise = l
+
+-- | If @perm@ is conceptually a map of a transposition,
+-- @isMapTranspose perm@ returns the number of dimensions being mapped
+-- and the number dimension being transposed.  For example, we can
+-- consider the permutation @[0,1,4,5,2,3]@ as a map of a transpose,
+-- by considering dimensions @[0,1]@, @[4,5]@, and @[2,3]@ as single
+-- dimensions each.
+--
+-- If the input is not a valid permutation, then the result is
+-- undefined.
+isMapTranspose :: [Int] -> Maybe (Int, Int, Int)
+isMapTranspose perm
+  | sort posttrans == posttrans =
+      Just (length mapped, length pretrans, length posttrans)
+  | otherwise =
+      Nothing
+  where (mapped, notmapped) = findIncreasingFrom 0 perm
+        (pretrans, posttrans) = findTransposed notmapped
+
+        findIncreasingFrom x (i:is)
+          | i == x =
+            let (js, ps) = findIncreasingFrom (x+1) is
+            in (i : js, ps)
+        findIncreasingFrom _ is =
+          ([], is)
+
+        findTransposed [] =
+          ([], [])
+        findTransposed (i:is) =
+          findIncreasingFrom i (i:is)

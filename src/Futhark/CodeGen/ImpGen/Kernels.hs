@@ -547,7 +547,7 @@ callKernelCopy bt
   srcloc@(ImpGen.MemLocation srcmem srcshape srcIxFun)
   n
   | Just (destoffset, srcoffset,
-          num_arrays, size_x, size_y) <- isMapTranspose bt destloc srcloc =
+          num_arrays, size_x, size_y) <- isMapTransposeKernel bt destloc srcloc =
   ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
   num_arrays size_x size_y
 
@@ -709,36 +709,37 @@ readKernelInput inp =
         t = kernelInputType inp
         is = kernelInputIndices inp
 
-isMapTranspose :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
-               -> Maybe (Imp.Exp, Imp.Exp,
-                         Imp.Exp, Imp.Exp, Imp.Exp)
-isMapTranspose bt
+isMapTransposeKernel :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
+                     -> Maybe (Imp.Exp, Imp.Exp,
+                               Imp.Exp, Imp.Exp, Imp.Exp)
+isMapTransposeKernel bt
   (ImpGen.MemLocation _ destshape destIxFun)
   (ImpGen.MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
-    permIsTranspose perm =
-    isOk dest_offset src_offset
+    Just (r1, r2, _) <- isMapTranspose perm =
+    isOk r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
-    permIsTranspose perm  =
-    isOk dest_offset src_offset
+    Just (r1, r2, _) <- isMapTranspose perm =
+    isOk r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
   where bt_size = ImpGen.basicScalarSize bt
-        permIsTranspose = (`elem` [ [0,2,1], [1,0] ])
 
-        isOk dest_offset src_offset = do
+        isOk r1 r2 dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
           src_offset' <- ImpGen.scalExpToImpExp src_offset
-          (num_arrays, size_x, size_y) <- getSizes
+          let (num_arrays, size_x, size_y) = getSizes r1 r2
           return (dest_offset', src_offset',
                   num_arrays, size_x, size_y)
-        getSizes =
-          case map Imp.sizeToExp destshape of
-            [num_arrays, size_x, size_y] -> Just (num_arrays, size_x, size_y)
-            [size_x, size_y]             -> Just (1, size_x, size_y)
-            _                            -> Nothing
+
+        getSizes r1 r2 =
+          let (mapped, notmapped) =
+                splitAt r1 $ map Imp.sizeToExp destshape
+              (pretrans, posttrans) =
+                splitAt r2 notmapped
+          in (product mapped, product pretrans, product posttrans)
 
 createAccMem :: Imp.DimSize
              -> LParam
