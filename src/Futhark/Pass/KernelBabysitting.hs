@@ -174,10 +174,6 @@ rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Kernels]
                 -> BabysitM [KernelInput Kernels]
 rearrangeInputs expmap is = mapM maybeRearrangeInput
   where
-    iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
-                            reverse .
-                            kernelInputIndices
-
     maybeRearrangeInput inp =
       case paramType $ kernelInputParam inp of
         Array {} -> do
