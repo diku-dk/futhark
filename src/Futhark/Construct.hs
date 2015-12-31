@@ -23,6 +23,7 @@ module Futhark.Construct
   , eLambda
   , eDivRoundingUp
   , eRoundToMultipleOf
+  , eProduct
 
   , resultBody
   , resultBodyM
@@ -226,6 +227,12 @@ eRoundToMultipleOf x d =
   where eMod a b = eBinOp Mod a b Int
         eMinus a b = eBinOp Minus a b Int
         ePlus a b = eBinOp Plus a b Int
+
+eProduct :: MonadBinder m =>
+            [m (Exp (Lore m))] -> m (Exp (Lore m))
+eProduct [] = return $ PrimOp $ SubExp $ Constant $ IntVal 1
+eProduct [e] = e
+eProduct (e:es) = eBinOp Times e (eProduct es) Int
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
