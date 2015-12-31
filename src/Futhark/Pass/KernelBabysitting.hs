@@ -180,11 +180,10 @@ rearrangeInputs expmap is = mapM maybeRearrangeInput
 
     maybeRearrangeInput inp =
       case paramType $ kernelInputParam inp of
-        Array {}
-          | not $ iteratesLastDimension inp -> do
-              arr_t <- lookupType arr
-              let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
-              rearrangeInput perm inp
+        Array {} -> do
+          arr_t <- lookupType arr
+          let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
+          rearrangeInput perm inp
         Basic {}
           | Just perm <- map Var is `isPermutationOf` inp_is,
             perm /= [0..length perm-1] ->
@@ -211,7 +210,7 @@ rearrangeInputs expmap is = mapM maybeRearrangeInput
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
-  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..rank-1]
+  [num_is..rank-1] ++ [0..num_is-1]
 
 rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
                     BabysitM ([PatElem], [(Type, [Int])])
