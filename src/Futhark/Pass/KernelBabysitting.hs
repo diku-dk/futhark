@@ -174,9 +174,13 @@ rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Kernels]
                 -> BabysitM [KernelInput Kernels]
 rearrangeInputs expmap is = mapM maybeRearrangeInput
   where
+    iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
+                            reverse .
+                            kernelInputIndices
+
     maybeRearrangeInput inp =
       case paramType $ kernelInputParam inp of
-        Array {} -> do
+        Array {} | not $ iteratesLastDimension inp -> do
           arr_t <- lookupType arr
           let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
           rearrangeInput perm inp
@@ -208,13 +212,18 @@ coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
   [num_is..rank-1] ++ [0..num_is-1]
 
+
+returnsPermutation :: Int -> Int -> [Int]
+returnsPermutation num_is rank =
+  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..rank-1]
+
 rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
                     BabysitM ([PatElem], [(Type, [Int])])
 rearrangeReturns num_is pat_elems returns =
   unzip <$> zipWithM rearrangeReturn pat_elems returns
   where rearrangeReturn (PatElem name BindVar namet) (t@Array{}, perm) = do
           name_tr <- newVName $ baseString name <> "_tr_res"
-          let perm' = rearrangeShape (coalescingPermutation num_is $ num_is + arrayRank t) perm
+          let perm' = rearrangeShape (returnsPermutation num_is $ num_is + arrayRank t) perm
               new_pat_elem = PatElem name_tr BindVar $ rearrangeType perm' namet
           return (new_pat_elem, (t, perm'))
         rearrangeReturn pat_elem (t, perm) =
