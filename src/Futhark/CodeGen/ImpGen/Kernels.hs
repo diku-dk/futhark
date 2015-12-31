@@ -717,11 +717,11 @@ isMapTransposeKernel bt
   (ImpGen.MemLocation _ _ srcIxFun)
   | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
-    Just (r1, r2, r3) <- isMapTranspose perm, r1 > 0, r2 > 0, r3 > 0 =
+    Just (r1, r2, r3) <- isMapTranspose perm, r2 > 0, r3 > 0 =
     isOk r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
-    Just (r1, r2, r3) <- isMapTranspose perm, r1 > 0, r2 > 0, r3 > 0 =
+    Just (r1, r2, r3) <- isMapTranspose perm, r2 > 0, r3 > 0 =
     isOk r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
