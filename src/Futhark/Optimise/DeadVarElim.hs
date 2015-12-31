@@ -140,26 +140,5 @@ deadCodeElimParam :: FreeIn attr => ParamT attr -> DCElimM ()
 deadCodeElimParam fparam =
   seen $ paramName fparam `HS.delete` freeIn fparam
 
-deadCodeElimType :: Type -> DCElimM Type
-deadCodeElimType t = do
-  dims <- mapM deadCodeElimSubExp $ arrayDims t
-  return $ t `setArrayDims` dims
-
-deadCodeElimLambda :: Attributes lore =>
-                      Lambda lore -> DCElimM (Lambda lore)
-deadCodeElimLambda (Lambda i params body rettype) = do
-  body' <- deadCodeElimBodyM body
-  mapM_ deadCodeElimParam params
-  mapM_ deadCodeElimType rettype
-  return $ Lambda i params body' rettype
-
-deadCodeElimExtLambda :: Attributes lore =>
-                         ExtLambda lore -> DCElimM (ExtLambda lore)
-deadCodeElimExtLambda (ExtLambda i params body rettype) = do
-  body' <- deadCodeElimBodyM body
-  mapM_ deadCodeElimParam params
-  seen $ freeIn rettype
-  return $ ExtLambda i params body' rettype
-
 seen :: Names -> DCElimM ()
 seen = tell . DCElimRes False
