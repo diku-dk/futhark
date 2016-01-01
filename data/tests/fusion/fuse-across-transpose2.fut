@@ -6,8 +6,7 @@ fun [[int]] main([[{int,int},m],n] a) =
                       {x+y,x-y},
                     row),
                 a) in
-  let d = size(0,b) in -- FIXME
-  let c = map(fn [int,d] ([{int,int}] row) =>
+  let c = map(fn [int,n] ([{int,int}] row) =>
                 map(+ , row),
               transpose(b)) in
   c
