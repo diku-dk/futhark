@@ -26,8 +26,8 @@ mapTranspose kernel_name elem_type =
     uint our_array_offset;
 
     // Adjust the input and output arrays with the basic offset.
-    odata += odata_offset;
-    idata += idata_offset;
+    odata += odata_offset/sizeof($ty:elem_type);
+    idata += idata_offset/sizeof($ty:elem_type);
 
     // Adjust the input and output arrays for the third dimension.
     our_array_offset = get_global_id(2) * width * height;
