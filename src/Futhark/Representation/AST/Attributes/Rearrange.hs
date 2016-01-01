@@ -86,7 +86,8 @@ transposeIndex k n l
 -- undefined.
 isMapTranspose :: [Int] -> Maybe (Int, Int, Int)
 isMapTranspose perm
-  | sort posttrans == posttrans =
+  | posttrans == [length mapped..length mapped+length posttrans-1],
+    not $ null pretrans, not $ null posttrans =
       Just (length mapped, length pretrans, length posttrans)
   | otherwise =
       Nothing
