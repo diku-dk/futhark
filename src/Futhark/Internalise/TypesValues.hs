@@ -63,10 +63,9 @@ internaliseDeclType' ddi (E.Array at) =
                   internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
-          outerdim <- Ext <$> newId
-          innerdims <- map Ext <$> replicateM (E.shapeRank shape - 1) newId
+          innerdims <- ExtShape <$> internaliseShape shape
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
-          return [ I.arrayOf ct (ExtShape $ outerdim : innerdims) $
+          return [ I.arrayOf ct innerdims $
                    if I.unique ct then Unique
                    else if I.basicType ct then u
                         else I.uniqueness ct
