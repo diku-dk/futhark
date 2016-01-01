@@ -21,5 +21,7 @@ isMapTransposeTests =
                     , ([1,0,4,5,2,3], Nothing)
                     , ([1,0], Just (0, 1, 1))
                     , ([0,2,1], Just (1, 1, 1))
+                    , ([0,1,2], Nothing)
+                    , ([1,0,2], Nothing)
                     ]
   ]
