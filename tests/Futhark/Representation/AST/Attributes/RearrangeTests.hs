@@ -2,6 +2,8 @@ module Futhark.Representation.AST.Attributes.RearrangeTests
        ( tests )
        where
 
+import Control.Applicative
+
 import Test.HUnit hiding (Test)
 import Test.Framework
 import Test.Framework.Providers.HUnit
