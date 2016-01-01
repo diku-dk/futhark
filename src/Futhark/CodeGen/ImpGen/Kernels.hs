@@ -713,8 +713,8 @@ isMapTransposeKernel :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
                      -> Maybe (Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
-  (ImpGen.MemLocation _ destshape destIxFun)
-  (ImpGen.MemLocation _ _ srcIxFun)
+  (ImpGen.MemLocation _ _ destIxFun)
+  (ImpGen.MemLocation _ srcshape srcIxFun)
   | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, r3) <- isMapTranspose perm, r2 > 0, r3 > 0 =
@@ -736,7 +736,7 @@ isMapTransposeKernel bt
 
         getSizes r1 r2 =
           let (mapped, notmapped) =
-                splitAt r1 $ map Imp.sizeToExp destshape
+                splitAt r1 $ map Imp.sizeToExp srcshape
               (pretrans, posttrans) =
                 splitAt r2 notmapped
           in (product mapped, product pretrans, product posttrans)
