@@ -224,8 +224,11 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                                ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
-  pprPrec _ (Reduce lam e a _) = ppSOAC "reduce" [lam] [e, a]
-  pprPrec _ (Redomap redlam maplam e a _) =
+  pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
+  pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
+  pprPrec _ (Redomap Commutative redlam maplam e a _) =
+    ppSOAC "redomapComm" [redlam, maplam] [e, a]
+  pprPrec _ (Redomap Noncommutative redlam maplam e a _) =
     ppSOAC "redomap" [redlam, maplam] [e, a]
   pprPrec _ (Stream form lam arr ii _) =
     let intent_str = if ii==MaxChunk then "Max" else ""
@@ -234,9 +237,11 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
             let ord_str = if o == Disorder then "Per" else ""
             in  text ("streamMap"++ord_str++intent_str) <>
                 parens ( ppList [lam] </> commasep [ppr arr] )
-          RedLike o lam0 acc ->
+          RedLike o comm lam0 acc ->
             let ord_str = if o == Disorder then "Per" else ""
-            in  text ("streamRed"++ord_str++intent_str) <>
+                comm_str = case comm of Commutative -> "Comm"
+                                        Noncommutative -> ""
+            in  text ("streamRed"++ord_str++intent_str++comm_str) <>
                 parens ( ppList [lam0, lam] </> commasep [ppr acc, ppr arr] )
           Sequential acc ->
                 text "streamSeq" <>

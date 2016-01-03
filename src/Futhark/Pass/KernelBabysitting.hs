@@ -61,7 +61,7 @@ transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
   return expmap
 
 transformBinding expmap (Let pat ()
-                         (Op (ReduceKernel cs w kernel_size parlam seqlam nes arrs)))
+                         (Op (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs)))
   | num_groups /= Constant (IntVal 1) = do
   -- We want to pad and transpose the input arrays.
 
@@ -73,7 +73,7 @@ transformBinding expmap (Let pat ()
   seqlam' <- transformLambda seqlam
 
   addBinding $ Let pat () $ Op $
-    ReduceKernel cs w' kernel_size' parlam' seqlam' nes arrs'
+    ReduceKernel cs w' kernel_size' comm parlam' seqlam' nes arrs'
   return expmap
   where num_groups = kernelWorkgroups kernel_size
         num_threads = kernelNumThreads kernel_size

@@ -231,7 +231,7 @@ sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Map _ _ lam _)))
   | unbalancedLambda lam = do
       types <- asksScope scopeForSOACs
       Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
-sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ lam1 lam2 _ _)))
+sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ _ lam1 lam2 _ _)))
   | unbalancedLambda lam1 || unbalancedLambda lam2 = do
       types <- asksScope scopeForSOACs
       Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
@@ -270,20 +270,20 @@ transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
 transformBinding (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
-transformBinding (Let pat () (Op (Redomap cs w lam1 lam2 nes arrs))) =
+transformBinding (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
     lam1_sequential <- FOT.transformLambda lam1
     lam2_sequential <- FOT.transformLambda lam2
-    blockedReduction pat cs w lam1_sequential lam2_sequential nes arrs
+    blockedReduction pat cs w comm lam1_sequential lam2_sequential nes arrs
   else do
-    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, lam1, lam2, nes, arrs)
+    (mapbnd, redbnd) <- redomapToMapAndReduce pat () (cs, w, comm, lam1, lam2, nes, arrs)
     transformBindings [mapbnd, redbnd]
       where sequentialiseRedomapBody = True
 
-transformBinding (Let pat () (Op (Reduce cs w red_fun red_input))) = do
+transformBinding (Let pat () (Op (Reduce cs w comm red_fun red_input))) = do
   red_fun_sequential <- FOT.transformLambda red_fun
   red_fun_sequential' <- renameLambda red_fun_sequential
-  blockedReduction pat cs w red_fun_sequential' red_fun_sequential nes arrs
+  blockedReduction pat cs w comm red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
 
 transformBinding (Let pat () (Op (Scan cs w fun input))) = do
@@ -292,14 +292,14 @@ transformBinding (Let pat () (Op (Scan cs w fun input))) = do
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformBinding (Let pat () (Op (Stream cs w (RedLike _ red_fun nes) fold_fun arrs _))) = do
+transformBinding (Let pat () (Op (Stream cs w (RedLike _ comm red_fun nes) fold_fun arrs _))) = do
   -- We will sequentialise the body.  We do this by turning the stream
   -- into a redomap with the chunk size set to one.
   acc_ts <- mapM subExpType nes
   red_fun_sequential <- FOT.transformLambda red_fun
   fold_fun_unchunked <- singletonChunkRedLikeStreamLambda acc_ts fold_fun
   fold_fun_unchunked_sequential <- FOT.transformLambda fold_fun_unchunked
-  blockedReduction pat cs w red_fun_sequential fold_fun_unchunked_sequential nes arrs
+  blockedReduction pat cs w comm red_fun_sequential fold_fun_unchunked_sequential nes arrs
 
 transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs _))) = do
   -- Remove the stream and leave the body parallel.  It will be
@@ -458,11 +458,11 @@ unbalancedLambda lam =
         -- XXX - our notion of balancing is probably still too naive.
         unbalancedBinding bound (Op (Map _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (Op (Reduce _ w _ _)) =
+        unbalancedBinding bound (Op (Reduce _ w _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Scan _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (Op (Redomap _ w _ _ _ _)) =
+        unbalancedBinding bound (Op (Redomap _ w _ _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (Op (ConcatMap _ w _ _)) =
           w `subExpBound` bound

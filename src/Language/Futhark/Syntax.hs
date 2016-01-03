@@ -382,7 +382,7 @@ data ExpBase ty vn =
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @map(op +(1), [1,2,..,n]) = [2,3,..,n+1]@.
 
-            | Reduce (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | Reduce Commutativity (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @reduce(op +, 0, [1,2,...,n]) = (0+1+2+...+n)@.
 
             | Scan (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
@@ -399,7 +399,7 @@ data ExpBase ty vn =
             -- has returned 'True'.  The @n+1@th array contains those
             -- elements for which no function returns 'True'.
 
-            | Redomap (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | Redomap Commutativity (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
@@ -443,7 +443,7 @@ data ExpBase ty vn =
               deriving (Eq, Ord, Show)
 
 data StreamForm ty vn = MapLike    StreamOrd
-                      | RedLike    StreamOrd (LambdaBase ty vn) (ExpBase ty vn)
+                      | RedLike    StreamOrd Commutativity (LambdaBase ty vn) (ExpBase ty vn)
                       | Sequential (ExpBase ty vn)
                         deriving (Eq, Ord, Show)
 
@@ -469,13 +469,13 @@ instance Located (ExpBase ty vn) where
   locOf (Unstripe _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (ConcatMap _ _ _ pos) = locOf pos
-  locOf (Reduce _ _ _ pos) = locOf pos
+  locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
   locOf (Partition _ _ pos) = locOf pos
-  locOf (Redomap _ _ _ _ pos) = locOf pos
+  locOf (Redomap _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos

@@ -759,7 +759,7 @@ evalSOAC (ConcatMap _ _ fun inputs) = do
         asArray (ArrayVal a _ (n:_)) = return (a, n)
         asArray _                    = bad $ TypeError "evalSOAC asArray"
 
-evalSOAC (Reduce _ w fun inputs) = do
+evalSOAC (Reduce _ w _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
   let foldfun acc (i, x) = applyLambda fun i $ acc ++ x
@@ -775,7 +775,7 @@ evalSOAC (Scan _ w fun inputs) = do
             acc' <- applyLambda fun i $ acc ++ x
             return (acc', acc' : l)
 
-evalSOAC (Redomap _ w _ innerfun accexp arrexps) = do
+evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   if res_len == acc_len
   then foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)

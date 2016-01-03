@@ -439,7 +439,7 @@ internaliseExp desc (E.Map lam arr _) = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Map [] w lam' arrs
 
-internaliseExp desc (E.Reduce lam ne arr loc) = do
+internaliseExp desc (E.Reduce comm lam ne arr loc) = do
   arrs <- internaliseExpToVars "reduce_arr" arr
   nes <- internaliseExp "reduce_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
@@ -450,7 +450,7 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Reduce [] w lam' input
+  letTupExp' desc $ I.Op $ I.Reduce [] w comm lam' input
 
 internaliseExp desc (E.Scan lam ne arr loc) = do
   arrs <- internaliseExpToVars "scan_arr" arr
@@ -494,7 +494,7 @@ internaliseExp desc (E.Partition lams arr _) = do
       I.identName partition_perm
   where n = length lams + 1
 
-internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
+internaliseExp desc (E.Redomap comm lam1 lam2 ne arrs _) = do
   arrs' <- internaliseExpToVars "redomap_arr" arrs
   nes <- internaliseExp "redomap_ne" ne
   acc_tps <- mapM I.subExpType nes
@@ -507,14 +507,14 @@ internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
            nes (map I.Var arrs')
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $ I.Op $
-    I.Redomap [] w lam1' lam2' nes arrs'
+    I.Redomap [] w comm lam1' lam2' nes arrs'
 
 internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr ii _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
   accs' <- case form of
-             E.MapLike _       -> return []
-             E.RedLike _ _ acc -> internaliseExp "stream_acc" acc
-             E.Sequential  acc -> internaliseExp "stream_acc" acc
+             E.MapLike _         -> return []
+             E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
+             E.Sequential  acc   -> internaliseExp "stream_acc" acc
   lam'  <- bindingParams [E.toParam chunk] $ \_ [chunk'] -> do
              rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
              let lam_arrs' = [ I.arrayOf t
@@ -527,12 +527,12 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
              return $ lam'' { extLambdaParams = fmap I.fromDecl chunk' : extLambdaParams lam'' }
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
-             E.RedLike o lam0 _ -> do
+             E.RedLike o comm lam0 _ -> do
                  acctps <- mapM I.subExpType accs'
                  outsz  <- arraysSize 0 <$> mapM lookupType arrs'
                  let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) NoUniqueness | t <- acctps ]
                  lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
-                 return $ I.RedLike o lam0' accs'
+                 return $ I.RedLike o comm lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $

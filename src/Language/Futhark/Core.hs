@@ -9,6 +9,7 @@ module Language.Futhark.Core
   , blankBasicValue
   , ChunkIntent(..)
   , StreamOrd(..)
+  , Commutativity(..)
 
   -- * Location utilities
   , locStr
@@ -70,6 +71,16 @@ data ChunkIntent = MaxChunk
 data StreamOrd  = InOrder
                 | Disorder
                     deriving (Eq, Ord, Show)
+
+-- | Whether some operator is commutative or not.  The 'Monoid'
+-- instance returns the least commutative of its arguments.
+data Commutativity = Noncommutative
+                   | Commutative
+                     deriving (Eq, Ord, Show)
+
+instance Monoid Commutativity where
+  mempty = Commutative
+  mappend = min
 
 -- | Low-level primitive types.  TODO: please add float, double, long
 -- int, etc.

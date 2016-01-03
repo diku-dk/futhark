@@ -257,7 +257,7 @@ deriving instance Annotations lore => Show (LoopOp lore)
 deriving instance Annotations lore => Ord (LoopOp lore)
 
 data StreamForm lore  = MapLike    StreamOrd
-                      | RedLike    StreamOrd (LambdaT lore) [SubExp]
+                      | RedLike    StreamOrd Commutativity (LambdaT lore) [SubExp]
                       | Sequential [SubExp]
                         deriving (Eq, Ord, Show)
 

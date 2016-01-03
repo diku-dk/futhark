@@ -398,71 +398,71 @@ transposeInput k n inp =
 
 -- | A definite representation of a SOAC expression.
 data SOAC lore = Map Certificates (Lambda lore) [Input]
-               | Reduce  Certificates (Lambda lore) [(SubExp,Input)]
+               | Reduce  Certificates Commutativity (Lambda lore) [(SubExp,Input)]
                | Scan Certificates (Lambda lore) [(SubExp,Input)]
-               | Redomap Certificates (Lambda lore) (Lambda lore) [SubExp] [Input]
+               | Redomap Certificates Commutativity (Lambda lore) (Lambda lore) [SubExp] [Input]
                | Stream  Certificates (StreamForm lore) (Lambda lore) ChunkIntent [Input]
             deriving (Show)
 
 -- | Returns the inputs used in a SOAC.
 inputs :: SOAC lore -> [Input]
-inputs (Map _     _     arrs) = arrs
-inputs (Reduce  _ _     args) = map snd args
-inputs (Scan    _ _     args) = map snd args
-inputs (Redomap _ _ _ _ arrs) = arrs
-inputs (Stream  _ _ _ _ arrs) = arrs
+inputs (Map _     _       arrs) = arrs
+inputs (Reduce  _ _ _     args) = map snd args
+inputs (Scan    _ _       args) = map snd args
+inputs (Redomap _ _ _ _ _ arrs) = arrs
+inputs (Stream  _ _ _   _ arrs) = arrs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
 setInputs arrs (Map cs lam _) =
   Map cs lam arrs
-setInputs arrs (Reduce cs lam args) =
-  Reduce cs lam (zip (map fst args) arrs)
+setInputs arrs (Reduce cs comm lam args) =
+  Reduce cs comm lam (zip (map fst args) arrs)
 setInputs arrs (Scan cs lam args) =
   Scan cs lam (zip (map fst args) arrs)
-setInputs arrs (Redomap cs lam1 lam ne _) =
-  Redomap cs lam1 lam ne arrs
+setInputs arrs (Redomap cs comm lam1 lam ne _) =
+  Redomap cs comm lam1 lam ne arrs
 setInputs arrs (Stream  cs form lam ii _) =
   Stream cs form lam ii arrs
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC lore -> Lambda lore
 lambda (Map     _ lam _       ) = lam
-lambda (Reduce  _ lam _       ) = lam
+lambda (Reduce  _ _ lam _     ) = lam
 lambda (Scan    _ lam _       ) = lam
-lambda (Redomap _ _   lam2 _ _) = lam2
+lambda (Redomap _ _ _ lam2 _ _) = lam2
 lambda (Stream  _ _ lam    _ _) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
 setLambda lam (Map cs _ arrs) =
   Map cs lam    arrs
-setLambda lam (Reduce cs _ args) =
-  Reduce cs lam args
+setLambda lam (Reduce cs comm _ args) =
+  Reduce cs comm lam args
 setLambda lam (Scan cs _ args) =
   Scan cs lam args
-setLambda lam (Redomap cs lam1 _ ne arrs) =
-  Redomap cs lam1 lam ne arrs
+setLambda lam (Redomap cs comm lam1 _ ne arrs) =
+  Redomap cs comm lam1 lam ne arrs
 setLambda lam (Stream  cs form _ ii arrs) =
   Stream cs form lam ii arrs
 
 -- | Returns the certificates used in a SOAC.
 certificates :: SOAC lore -> Certificates
-certificates (Map     cs _     _) = cs
-certificates (Reduce  cs _ _    ) = cs
-certificates (Scan    cs _ _    ) = cs
-certificates (Redomap cs _ _ _ _) = cs
-certificates (Stream  cs _ _ _ _) = cs
+certificates (Map cs _ _) = cs
+certificates (Reduce cs _ _ _) = cs
+certificates (Scan cs _ _    ) = cs
+certificates (Redomap cs _ _ _ _ _) = cs
+certificates (Stream cs _ _ _ _) = cs
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
 typeOf (Map _ lam inps) =
   mapType (arraysSize 0 $ map inputType inps) lam
-typeOf (Reduce _ lam _) =
+typeOf (Reduce _ _ lam _) =
   lambdaReturnType lam
 typeOf (Scan _ _ input) =
   map (inputType . snd) input
-typeOf soac@(Redomap _ outlam inlam nes _) =
+typeOf soac@(Redomap _ _ outlam inlam nes _) =
   let accrtps = lambdaReturnType outlam
       arrrtps = drop (length nes) $ mapType (width soac) inlam
   in  accrtps ++ arrrtps
@@ -476,11 +476,11 @@ typeOf soac@(Stream _ form lam _ _) =
 width :: SOAC lore -> SubExp
 width (Map _ _ inps) =
   arraysSize 0 $ map inputType inps
-width (Reduce _ _ input) =
+width (Reduce _ _ _ input) =
   arraysSize 0 $ map (inputType . snd) input
 width (Scan _ _ input) =
   arraysSize 0 $ map (inputType . snd) input
-width (Redomap _ _ _ _ inps) =
+width (Redomap _ _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
 width (Stream  _ _ _ _ inps) =
   arraysSize 0 $ map inputType inps
@@ -495,25 +495,25 @@ toExp (Map cs l as)
       new_index <- newVName $ baseString $ lambdaIndex l
       Op <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
-toExp (Redomap cs redlam l acc as)
+toExp (Redomap cs comm redlam l acc as)
   | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
       new_index <- newVName $ baseString $ lambdaIndex l
-      Op <$> (Futhark.Redomap cs w redlam l { lambdaIndex = new_index } acc <$> inputsToSubExps as)
+      Op <$> (Futhark.Redomap cs w comm redlam l { lambdaIndex = new_index } acc <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
 
 toExp (Map cs l as) =
   Op <$> (Futhark.Map cs w l <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
-toExp (Reduce cs l args) =
-  Op <$> (Futhark.Reduce cs w l <$> (zip es <$> inputsToSubExps as))
+toExp (Reduce cs comm l args) =
+  Op <$> (Futhark.Reduce cs w comm l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
         w = arraysSize 0 $ map inputType as
 toExp (Scan cs l args) =
   Op <$> (Futhark.Scan cs w l <$> (zip es <$> inputsToSubExps as))
   where (es, as) = unzip args
         w = arraysSize 0 $ map inputType as
-toExp (Redomap cs l1 l2 es as) =
-  Op <$> (Futhark.Redomap cs w l1 l2 es <$> inputsToSubExps as)
+toExp (Redomap cs comm l1 l2 es as) =
+  Op <$> (Futhark.Redomap cs w comm l1 l2 es <$> inputsToSubExps as)
   where w = arraysSize 0 $ map inputType as
 toExp (Stream  cs form lam ii inps) = Op <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
@@ -545,23 +545,23 @@ fromExp (Op (Futhark.Map cs w lam [])) =
       lam' = lam
              { lambdaParams = [Param (lambdaIndex lam) (Basic Int)] }
   in pure $ Right $ Map cs lam' [iota_input]
-fromExp (Op (Futhark.Redomap cs w redlam lam acc [])) =
+fromExp (Op (Futhark.Redomap cs w comm redlam lam acc [])) =
   let iota_input = Input mempty $ Iota w
       lam' = lam
              { lambdaParams = lambdaParams lam ++
                               [Param (lambdaIndex lam) (Basic Int)] }
-  in pure $ Right $ Redomap cs redlam lam' acc [iota_input]
+  in pure $ Right $ Redomap cs comm redlam lam' acc [iota_input]
 
 fromExp (Op (Futhark.Map cs _ l as)) =
   Right <$> Map cs l <$> traverse varInput as
-fromExp (Op (Futhark.Reduce cs _ l args)) = do
+fromExp (Op (Futhark.Reduce cs _ comm l args)) = do
   let (es,as) = unzip args
-  Right <$> Reduce cs l <$> zip es <$> traverse varInput as
+  Right <$> Reduce cs comm l <$> zip es <$> traverse varInput as
 fromExp (Op (Futhark.Scan cs _ l args)) = do
   let (es,as) = unzip args
   Right <$> Scan cs l <$> zip es <$> traverse varInput as
-fromExp (Op (Futhark.Redomap cs _ l1 l2 es as)) =
-  Right <$> Redomap cs l1 l2 es <$> traverse varInput as
+fromExp (Op (Futhark.Redomap cs _ comm l1 l2 es as)) =
+  Right <$> Redomap cs comm l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Stream cs _ form extlam as ii)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
@@ -659,7 +659,7 @@ soacToStream soac = do
     -- 1. let acc0_ids = reduce(+,nes,a_ch) in
     -- 2. let acc'     = acc + acc0_ids    in
     --    {acc'}
-    Reduce _ _ nesinps -> do
+    Reduce _ comm _ nesinps -> do
       -- the array and accumulator result types
       let nes = fst $ unzip nesinps
           accrtps= lambdaReturnType lam
@@ -671,7 +671,7 @@ soacToStream soac = do
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let acc0_ids = reduce(+,nes,a_ch) in
-      let insoac = Futhark.Reduce cs w lam' $ zip nes (map paramName strm_inpids)
+      let insoac = Futhark.Reduce cs w comm lam' $ zip nes (map paramName strm_inpids)
           insbnd = mkLet' [] acc0_ids $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lam $ map Futhark.Var $
@@ -682,12 +682,12 @@ soacToStream soac = do
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda i strmpar strmbdy accrtps
       lam0 <- renameLambda lam
-      return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
+      return (Stream cs (RedLike InOrder comm lam0 nes) strmlam MaxChunk inps, [])
     -- Redomap(+,lam,nes,a) => is translated in strem's body to:
     -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
     -- 2. let acc'                   = acc + acc0_ids          in
     --    {acc', strm_resids}
-    Redomap _ lamin _ nes _ -> do
+    Redomap _ comm lamin _ nes _ -> do
       -- the array and accumulator result types
       let accrtps= take (length nes) $ lambdaReturnType lam
           arrrtps= drop (length nes) $ mapType w lam
@@ -700,7 +700,7 @@ soacToStream soac = do
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-      let insoac = Futhark.Redomap cs w lamin lam' nes (map paramName strm_inpids)
+      let insoac = Futhark.Redomap cs w comm lamin lam' nes (map paramName strm_inpids)
           insbnd = mkLet' [] (acc0_ids++strm_resids) $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lamin $ map Futhark.Var $
@@ -712,7 +712,7 @@ soacToStream soac = do
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda i strmpar strmbdy (accrtps++loutps)
       lam0 <- renameLambda lamin
-      return (Stream cs (RedLike InOrder lam0 nes) strmlam MaxChunk inps, [])
+      return (Stream cs (RedLike InOrder comm lam0 nes) strmlam MaxChunk inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])
     -- HELPER FUNCTIONS

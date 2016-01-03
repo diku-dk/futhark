@@ -69,6 +69,7 @@ data Token = IF
            | MAP
            | CONCATMAP
            | REDUCE
+           | REDUCECOMM
            | RESHAPE
            | REARRANGE
            | STRIPE

@@ -51,6 +51,10 @@ instance Pretty Uniqueness where
 instance Pretty NoUniqueness where
   ppr _ = mempty
 
+instance Pretty Commutativity where
+  ppr Commutative = text "commutative"
+  ppr Noncommutative = text "noncommutative"
+
 instance Pretty Value where
   ppr (BasicVal bv) = ppr bv
   ppr v

@@ -779,7 +779,7 @@ checkExp (ConcatMap fun arrexp arrexps pos) = do
   fun' <- checkLambda fun [arg]
   return $ ConcatMap fun' arrexp' arrexps' pos
 
-checkExp (Reduce fun startexp arrexp pos) = do
+checkExp (Reduce comm fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [startarg, arrarg]
@@ -788,7 +788,7 @@ checkExp (Reduce fun startexp arrexp pos) = do
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
   unless (inrowt `subtypeOf` redtype) $
     bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  return $ Reduce fun' startexp' arrexp' pos
+  return $ Reduce comm fun' startexp' arrexp' pos
 
 checkExp (Scan fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
@@ -823,18 +823,18 @@ checkExp (Partition funs arrexp pos) = do
 
   return $ Partition funs' arrexp' pos
 
-checkExp (Redomap outerfun innerfun accexp arrexp pos) = do
+checkExp (Redomap comm outerfun innerfun accexp arrexp pos) = do
   (accexp', accarg) <- checkArg accexp
   (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp
   (outerfun', _) <- checkLambdaArg outerfun [accarg, accarg]
   innerfun' <- checkLambda innerfun [accarg, arrarg]
   let redtype = lambdaType innerfun' [typeOf accexp', rt]
   if argType accarg == redtype
-  then return $ Redomap outerfun' innerfun' accexp' arrexp' pos
+  then return $ Redomap comm outerfun' innerfun' accexp' arrexp' pos
   else case redtype of
          Tuple (acctp:_) -> do
              _ <- require [acctp] accexp'
-             return $ Redomap outerfun' innerfun' accexp' arrexp' pos
+             return $ Redomap comm outerfun' innerfun' accexp' arrexp' pos
          _ -> bad $ TypeError pos "Redomap with illegal reduce type."
 
 checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
@@ -851,14 +851,14 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
   (form', macctup) <-
     case form of
       MapLike o -> return (MapLike o, Nothing)
-      RedLike o lam0 acc -> do
+      RedLike o comm lam0 acc -> do
         (acc',accarg) <- checkArg acc
         lam0' <- checkLambda lam0 [accarg, accarg]
         let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
         unless (redtype `subtypeOf` typeOf acc') $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
                   ppType (typeOf acc') ++ ", but reduce fun returns type "++ppType redtype++"."
-        return (RedLike o lam0' acc', Just(acc',accarg))
+        return (RedLike o comm lam0' acc', Just(acc',accarg))
       Sequential acc -> do
         (acc',accarg) <- checkArg acc
         return (Sequential acc', Just(acc',accarg))
