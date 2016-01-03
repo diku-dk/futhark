@@ -568,7 +568,7 @@ allocInChunkedLambda elems_per_thread num_threads lam arr_summaries = do
       ArrayMem bt shape u mem ixfun -> do
         let newshape = [DimNew num_threads, DimNew elems_per_thread]
         return p { paramAttr =
-                      ArrayMem bt shape u mem $ IxFun.applyInd
+                      ArrayMem bt (arrayShape $ paramType p) u mem $ IxFun.applyInd
                       (IxFun.reshape ixfun $
                        newshape ++ map DimNew (drop 1 $ shapeDims shape))
                       [SE.Id i Int]
