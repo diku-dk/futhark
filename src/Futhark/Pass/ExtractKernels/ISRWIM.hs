@@ -69,10 +69,10 @@ irwim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
-      -> Lambda
+      -> Commutativity -> Lambda
       -> [(SubExp, VName)]
       -> Maybe (m ())
-irwim res_pat cs w red_fun red_input
+irwim res_pat cs w comm red_fun red_input
   | Body () [bnd] res <- lambdaBody red_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
     Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
@@ -100,7 +100,7 @@ irwim res_pat cs w red_fun red_input
                        uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
           map_body = mkBody [Let (stripPatternOuterDim $ bindingPattern bnd) () $
-                             Op $ Reduce cs w red_fun' red_input']
+                             Op $ Reduce cs w comm red_fun' red_input']
                             res
 
       addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' map_arrs'

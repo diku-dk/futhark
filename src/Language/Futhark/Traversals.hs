@@ -146,8 +146,8 @@ mapExpM tv (Map fun e loc) =
 mapExpM tv (ConcatMap fun e es loc) =
   pure ConcatMap <*> mapOnLambda tv fun <*>
   mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
-mapExpM tv (Reduce fun startexp arrexp loc) =
-  pure Reduce <*> mapOnLambda tv fun <*>
+mapExpM tv (Reduce comm fun startexp arrexp loc) =
+  Reduce comm <$> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Zip args loc) = do
   args' <- forM args $ \(argexp, argt) -> do
@@ -165,16 +165,17 @@ mapExpM tv (Filter fun arrexp loc) =
   pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Partition funs arrexp loc) =
   pure Partition <*> mapM (mapOnLambda tv) funs <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
-  pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
+mapExpM tv (Redomap comm redfun mapfun accexp arrexp loc) =
+  Redomap comm <$> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Stream form fun arr mm loc) =
   pure Stream <*> mapOnStreamForm form <*> mapOnLambda tv fun <*>
        mapOnExp tv arr <*> pure mm <*> pure loc
   where mapOnStreamForm (MapLike o) = pure $ MapLike o
-        mapOnStreamForm (RedLike o lam acc) =
-            pure RedLike <*> pure o <*>
-                 mapOnLambda tv lam <*> mapOnExp tv acc
+        mapOnStreamForm (RedLike o comm lam acc) =
+            RedLike o comm <$>
+            mapOnLambda tv lam <*>
+            mapOnExp tv acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapOnExp tv acc
 mapExpM tv (Split splitexps arrexp loc) =

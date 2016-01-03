@@ -64,7 +64,7 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       return $ MapKernel cs' w' index ispace' inps' returns' body'
     where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
 
-  simplifyOp (ReduceKernel cs w kernel_size parlam seqlam nes arrs) = do
+  simplifyOp (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs) = do
     cs' <- Engine.simplify cs
     w' <- Engine.simplify w
     kernel_size' <- Engine.simplify kernel_size
@@ -72,7 +72,7 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     arrs' <- mapM Engine.simplify arrs
     parlam' <- Engine.simplifyLambda parlam w' $ map (const Nothing) nes
     seqlam' <- Engine.simplifyLambda seqlam w' $ map (const Nothing) nes
-    return $ ReduceKernel cs' w' kernel_size' parlam' seqlam' nes' arrs'
+    return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' nes' arrs'
 
   simplifyOp (ScanKernel cs w kernel_size order lam input) = do
     let (nes, arrs) = unzip input

@@ -257,10 +257,10 @@ renameExp (DoLoop mergepat mergeexp form loopbody letbody pos) = do
 renameExp (Stream form lam arr ii pos) = do
   form' <- case form of
                MapLike o -> return $ MapLike o
-               RedLike o lam0 acc -> do
+               RedLike o comm lam0 acc -> do
                  lam0' <- renameLambda lam0
                  acc'  <- renameExp    acc
-                 return $ RedLike o lam0' acc'
+                 return $ RedLike o comm lam0' acc'
                Sequential acc ->
                  return Sequential <*> renameExp acc
   lam' <- renameLambda lam

@@ -63,7 +63,7 @@ transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
   where bound_before_body =
           HS.fromList $ map fst ispace ++ map kernelInputName inps
 
-transformExp (Op (Inner (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs)))
+transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam nes arrs)))
   -- Extract allocations from the lambdas.
   | Right (red_lam_body', red_lam_thread_allocs) <-
       extractKernelAllocations bound_in_red_lam $ lambdaBody red_lam,
@@ -80,7 +80,7 @@ transformExp (Op (Inner (ReduceKernel cs w kernel_size red_lam fold_lam nes arrs
       red_lam' = red_lam { lambdaBody = red_lam_body'' }
       fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
   return (red_alloc_bnds <> fold_alloc_bnds,
-          Op $ Inner $ ReduceKernel cs w kernel_size red_lam' fold_lam' nes arrs)
+          Op $ Inner $ ReduceKernel cs w kernel_size comm red_lam' fold_lam' nes arrs)
   where num_threads = kernelNumThreads kernel_size
 
         bound_in_red_lam = HS.fromList $ HM.keys $ scopeOf red_lam

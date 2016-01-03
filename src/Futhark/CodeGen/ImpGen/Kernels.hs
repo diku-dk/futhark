@@ -110,7 +110,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ReduceKernel _ _ kernel_size reduce_lam fold_lam nes _) = do
+  (ReduceKernel _ _ kernel_size _ reduce_lam fold_lam nes _) = do
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"

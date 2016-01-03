@@ -54,11 +54,12 @@ nonuniqueParams params =
 redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>
                          Pattern lore -> ExpAttr lore
                       -> ( Certificates, SubExp
+                         , Commutativity
                          , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
                       -> m (Binding lore, Binding lore)
 redomapToMapAndReduce (Pattern [] patelems) lore
-                      (certs, outersz, redlam, redmap_lam, accs, arrs) = do
+                      (certs, outersz, comm, redlam, redmap_lam, accs, arrs) = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
   map_accpat <- mapM accMapPatElem acc_patelems
   map_arrpat <- mapM arrMapPatElem arr_patelems
@@ -67,7 +68,7 @@ redomapToMapAndReduce (Pattern [] patelems) lore
                 Op $ Map certs outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
       red_bnd = Let (Pattern [] patelems) lore $
-                Op $ Reduce certs outersz redlam red_args
+                Op $ Reduce certs outersz comm redlam red_args
   return (map_bnd, red_bnd)
   where
     accMapPatElem pe = do

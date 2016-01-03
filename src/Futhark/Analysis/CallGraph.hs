@@ -72,15 +72,15 @@ buildCGexp callees (Apply fname _ _)
 buildCGexp callees (Op op) =
   case op of Map _ _ lam _ ->
                buildCGbody callees $ lambdaBody lam
-             Reduce _ _ lam _ ->
+             Reduce _ _ _ lam _ ->
                buildCGbody callees $ lambdaBody lam
              Scan _ _ lam _ ->
                buildCGbody callees $ lambdaBody lam
-             Redomap _ _ lam0 lam1 _ _ ->
+             Redomap _ _ _ lam0 lam1 _ _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
              ConcatMap _ _ lam _ ->
                buildCGbody callees (lambdaBody lam)
-             Stream _ _ (RedLike _ lam0 _) lam _ _ ->
+             Stream _ _ (RedLike _ _ lam0 _) lam _ _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (extLambdaBody lam)
              Stream _ _ _ lam _ _ ->
                buildCGbody callees (extLambdaBody lam)

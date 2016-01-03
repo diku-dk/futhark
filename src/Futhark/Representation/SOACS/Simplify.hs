@@ -71,11 +71,11 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     return $ Stream cs' outerdim' form' lam' arr' ii
     where simplifyStreamForm _ (MapLike o) =
             return $ MapLike o
-          simplifyStreamForm outerdim' (RedLike o lam0 acc) = do
+          simplifyStreamForm outerdim' (RedLike o comm lam0 acc) = do
               acc'  <- mapM Engine.simplify acc
               lam0' <- Engine.simplifyLambda lam0 outerdim' $
                        replicate (length $ lambdaParams lam0) Nothing
-              return $ RedLike o lam0' acc'
+              return $ RedLike o comm lam0' acc'
           simplifyStreamForm _ (Sequential acc) = do
               acc'  <- mapM Engine.simplify acc
               return $ Sequential acc'
@@ -94,14 +94,14 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     fun' <- Engine.simplifyLambda fun w $ map (const Nothing) $ lambdaParams fun
     return $ ConcatMap cs' w' fun' arrs'
 
-  simplifyOp (Reduce cs w fun input) = do
+  simplifyOp (Reduce cs w comm fun input) = do
     let (acc, arrs) = unzip input
     cs' <- Engine.simplify cs
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
     fun' <- Engine.simplifyLambda fun w $ map Just arrs'
-    return $ Reduce cs' w' fun' (zip acc' arrs')
+    return $ Reduce cs' w' comm fun' (zip acc' arrs')
 
   simplifyOp (Scan cs w fun input) = do
     let (acc, arrs) = unzip input
@@ -112,7 +112,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     fun' <- Engine.simplifyLambda fun w $ map Just arrs'
     return $ Scan cs' w' fun' (zip acc' arrs')
 
-  simplifyOp (Redomap cs w outerfun innerfun acc arrs) = do
+  simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) = do
     cs' <- Engine.simplify cs
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
@@ -121,7 +121,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                  replicate (length $ lambdaParams outerfun) Nothing
     (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w $ map Just arrs
     (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-    return $ Redomap cs' w' outerfun' innerfun'' acc' arrs''
+    return $ Redomap cs' w' comm outerfun' innerfun'' acc' arrs''
     where removeUnusedParams used lam arrinps
             | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
                 let (arrparams', arrinps') =
@@ -213,17 +213,17 @@ removeIotaMapping _ _ = cannotSimplify
 
 -- | Like 'removeIotaMapping', but for 'Redomap'.
 removeIotaRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeIotaRedomap vtable (Let pat _ (Op (Redomap cs w redfun foldfun nes arrs)))
+removeIotaRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
   | Just (foldfun', arrs') <- removeIotaInput vtable foldfun arrs =
-      letBind_ pat $ Op $ Redomap cs w redfun foldfun' nes arrs'
+      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeIotaRedomap _ _ = cannotSimplify
 
 -- | Like 'removeReplicateMapping', but for 'Redomap'.
 removeReplicateRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w redfun foldfun nes arrs)))
+removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
   | Just (bnds, foldfun', arrs') <- removeReplicateInput vtable foldfun arrs = do
       mapM_ (uncurry letBindNames') bnds
-      letBind_ pat $ Op $ Redomap cs w redfun foldfun' nes arrs'
+      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
 
 removeIotaInput :: Attributes lore =>
@@ -301,12 +301,12 @@ removeDeadMapping (_, used) (Let pat _ (Op (Map cs width fun arrs))) =
 removeDeadMapping _ _ = cannotSimplify
 
 simplifyClosedFormRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-simplifyClosedFormRedomap vtable (Let pat _ (Op (Redomap _ _ _ innerfun acc arr))) =
+simplifyClosedFormRedomap vtable (Let pat _ (Op (Redomap _ _ _ _ innerfun acc arr))) =
   foldClosedForm (`ST.lookupExp` vtable) pat innerfun acc arr
 simplifyClosedFormRedomap _ _ = cannotSimplify
 
 simplifyClosedFormReduce :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-simplifyClosedFormReduce vtable (Let pat _ (Op (Reduce _ _ fun args))) =
+simplifyClosedFormReduce vtable (Let pat _ (Op (Reduce _ _ _ fun args))) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify

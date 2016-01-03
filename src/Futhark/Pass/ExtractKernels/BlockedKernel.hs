@@ -23,11 +23,12 @@ import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern
                  -> Certificates -> SubExp
+                 -> Commutativity
                  -> Lambda -> Lambda
                  -> [SubExp]
                  -> [VName]
                  -> m [Binding]
-blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
+blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   chunk_size <- newVName "chunk_size"
   other_index <- newVName "other_index"
   step_one_size <- blockedKernelSize w
@@ -105,7 +106,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     Op $ ReduceKernel cs w step_one_size reduce_lam' seqlam nes $
+     Op $ ReduceKernel cs w step_one_size comm reduce_lam' seqlam nes $
      arrs_copies ++ map_out_arrs)
 
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
@@ -127,7 +128,7 @@ blockedReduction pat cs w reduce_lam fold_lam nes arrs = runBinder_ $ do
   addBinding $
     Let step_two_pat () $
     Op $ ReduceKernel [] num_chunks step_two_size
-    reduce_lam' identity_lam nes $
+    comm reduce_lam' identity_lam nes $
     take (length nes) $ patternNames step_one_pat
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->

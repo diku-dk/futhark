@@ -19,6 +19,7 @@ module Language.Futhark.Attributes
   , typeOf
   , freeInExp
   , freeNamesInExp
+  , commutative
 
   -- * Queries on patterns
   , patNames
@@ -627,7 +628,7 @@ typeOf (Map f arr _) = arrayType 1 et Unique
 typeOf (ConcatMap f _ _ _) =
   fromDecl $ removeShapeAnnotations t `setUniqueness` Unique
   where t = lambdaReturnType f
-typeOf (Reduce fun start arr _) =
+typeOf (Reduce _ fun start arr _) =
   removeShapeAnnotations $
   lambdaType fun [typeOf start, rowType (typeOf arr)]
 typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . snd) es) Nonunique
@@ -640,7 +641,7 @@ typeOf (Filter _ arr _) =
   typeOf arr
 typeOf (Partition funs arr _) =
   Tuple $ replicate (length funs + 1) $ typeOf arr
-typeOf (Redomap _ innerfun start arr _) =
+typeOf (Redomap _ _ innerfun start arr _) =
   let acc_tp = typeOf start
       res_el_tp = removeShapeAnnotations $
                   lambdaType innerfun [typeOf start, rowType $ typeOf arr] `setUniqueness`
@@ -655,8 +656,8 @@ typeOf (Stream form lam arr _ _) =
   case form of
     MapLike{}       -> lambdaType lam [Basic Int, typeOf arr]
                        `setUniqueness` Unique
-    RedLike _ _ acc -> lambdaType lam [Basic Int, typeOf acc, typeOf arr]
-                       `setUniqueness` Unique
+    RedLike _ _ _ acc -> lambdaType lam [Basic Int, typeOf acc, typeOf arr]
+                         `setUniqueness` Unique
     Sequential  acc -> lambdaType lam [Basic Int, typeOf acc, typeOf arr]
                        `setUniqueness` Unique
 typeOf (Concat x _ _) =
@@ -887,6 +888,10 @@ freeInDimDecl :: (TypeBox ty, Eq vn, Hashable vn) =>
 freeInDimDecl (NamedDim name) = HS.singleton $
                                 Ident name (boxType $ Basic Int) noLoc
 freeInDimDecl _               = mempty
+
+-- | Is the given binary operator commutative?
+commutative :: BinOp -> Bool
+commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
 -- | Remove alias information from the type of an ident.
 toParam :: ArrayShape (shape vn) =>

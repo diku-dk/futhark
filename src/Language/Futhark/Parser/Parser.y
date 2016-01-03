@@ -125,6 +125,7 @@ import Language.Futhark.Parser.Lexer
       map             { L $$ MAP }
       concatMap       { L $$ CONCATMAP }
       reduce          { L $$ REDUCE }
+      reduceComm      { L $$ REDUCECOMM }
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
       stripe          { L $$ STRIPE }
@@ -366,7 +367,11 @@ Exp  :: { UncheckedExp }
                       { Concat $3 $5 $1 }
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
-                      { Reduce $3 $5 $7 $1 }
+                      { Reduce (commutativity $3) $3 $5 $7 $1 }
+
+     | reduceComm '(' FunAbstr ',' Exp ',' Exp ')'
+                      { Reduce Commutative $3 $5 $7 $1 }
+
 
      | map '(' FunAbstr ',' Exp ')'
                       { Map $3 $5 $1 }
@@ -387,7 +392,7 @@ Exp  :: { UncheckedExp }
                       { Partition (fst $3) (snd $3) $1 }
 
      | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                      { Redomap $3 $5 $7 $9 $1 }
+                      { Redomap (commutativity $3) $3 $5 $7 $9 $1 }
 
      | zipWith '(' FunAbstr ',' Exps2 ')'
                       { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }
@@ -439,13 +444,13 @@ Exp  :: { UncheckedExp }
                          { Stream (MapLike Disorder) $3 $5 MaxChunk $1 }
 
      | streamRed       '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike InOrder  $3 $7) $5 $9 MinChunk $1 }
+                         { Stream (RedLike InOrder (commutativity $3) $3 $7) $5 $9 MinChunk $1 }
      | streamRedMax    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike InOrder  $3 $7) $5 $9 MaxChunk $1 }
+                         { Stream (RedLike InOrder (commutativity $3)$3 $7) $5 $9 MaxChunk $1 }
      | streamRedPer    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike Disorder $3 $7) $5 $9 MinChunk $1 }
+                         { Stream (RedLike Disorder (commutativity $3) $3 $7) $5 $9 MinChunk $1 }
      | streamRedPerMax '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike Disorder $3 $7) $5 $9 MaxChunk $1 }
+                         { Stream (RedLike Disorder (commutativity $3) $3 $7) $5 $9 MaxChunk $1 }
 
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 MinChunk $1 }
@@ -629,6 +634,11 @@ tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr lo
 
 zeroExpression :: SrcLoc -> UncheckedExp
 zeroExpression = Literal (BasicVal $ IntVal 0)
+
+commutativity :: LambdaBase ty vn -> Commutativity
+commutativity (BinOpFun binop _ _)
+  | commutative binop = Commutative
+commutativity _ = Noncommutative
 
 eof :: L Token
 eof = L (SrcLoc $ Loc (Pos "" 0 0 0) (Pos "" 0 0 0)) EOF

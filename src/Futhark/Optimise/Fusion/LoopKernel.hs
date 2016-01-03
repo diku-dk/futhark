@@ -22,6 +22,7 @@ import Control.Monad
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
+import Data.Monoid
 import Data.List
 
 import Prelude
@@ -251,16 +252,16 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       success (outNames ker ++ unfus_nms) $
               SOAC.Map (cs1++cs2) res_lam' new_inp
 
-    (SOAC.Map {}, SOAC.Redomap _ lam11 _ nes _)
+    (SOAC.Map {}, SOAC.Redomap _ comm1 lam11 _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
       let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes lam1 inp1_arr
                                             outPairs lam2 inp2_arr
           unfus_accs  = take (length nes) outVars
           unfus_arrs  = unfus_nms \\ unfus_accs
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-              SOAC.Redomap (cs1++cs2) lam11 res_lam' nes new_inp
+              SOAC.Redomap (cs1++cs2) comm1 lam11 res_lam' nes new_inp
 
-    (SOAC.Redomap _ lam2r _ nes2 _, SOAC.Redomap _ lam1r _ nes1 _)
+    (SOAC.Redomap _ comm2 lam2r _ nes2 _, SOAC.Redomap _ comm1 lam1r _ nes1 _)
       | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
       let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1 inp1_arr
                                             outPairs lam2 inp2_arr
@@ -268,16 +269,16 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
           unfus_arrs  = unfus_nms \\ unfus_accs
           lamr        = mergeReduceOps lam1r lam2r
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-              SOAC.Redomap (cs1++cs2) lamr res_lam' (nes1++nes2) new_inp
+              SOAC.Redomap (cs1++cs2) (comm1<>comm2) lamr res_lam' (nes1++nes2) new_inp
 
-    (SOAC.Redomap _ lam21 _ nes _, SOAC.Map {})
+    (SOAC.Redomap _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ unfus_nms) $
-              SOAC.Redomap (cs1++cs2) lam21 res_lam' nes new_inp
+              SOAC.Redomap (cs1++cs2) comm2 lam21 res_lam' nes new_inp
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
@@ -379,12 +380,12 @@ fuseStreamHelper out_kernms unfus_nms outVars outPairs
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
                     SOAC.Stream (cs1++cs2) res_form res_lam'' res_ii new_inp )
-  where mergeForms (MapLike _) (MapLike o )           = return $ MapLike o
-        mergeForms (MapLike _) (RedLike o lam0 acc0)  = return $ RedLike o lam0 acc0
-        mergeForms (RedLike o lam0 acc0) (MapLike _)  = return $ RedLike o lam0 acc0
-        mergeForms (Sequential acc2) (Sequential acc1)= return $ Sequential (acc1++acc2)
-        mergeForms (RedLike _ lam2r acc2) (RedLike o1 lam1r acc1) =
-            return $ RedLike o1 (mergeReduceOps lam1r lam2r) (acc1++acc2)
+  where mergeForms (MapLike _) (MapLike o ) = return $ MapLike o
+        mergeForms (MapLike _) (RedLike o comm lam0 acc0) = return $ RedLike o comm lam0 acc0
+        mergeForms (RedLike o comm lam0 acc0) (MapLike _) = return $ RedLike o comm lam0 acc0
+        mergeForms (Sequential acc2) (Sequential acc1) = return $ Sequential (acc1++acc2)
+        mergeForms (RedLike _ comm2 lam2r acc2) (RedLike o1 comm1 lam1r acc1) =
+            return $ RedLike o1 (comm1<>comm2) (mergeReduceOps lam1r lam2r) (acc1++acc2)
         mergeForms _ _ = fail "Fusing sequential to parallel stream disallowed!"
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
@@ -394,7 +395,7 @@ toSeqStream :: SOAC -> TryFusion SOAC
 toSeqStream s@(SOAC.Stream _ (Sequential _) _ _ _) = return s
 toSeqStream (SOAC.Stream cs (MapLike _) l ii inps) =
     return $ SOAC.Stream cs (Sequential  []) l ii inps
-toSeqStream (SOAC.Stream cs (RedLike _ _ acc) l ii inps) =
+toSeqStream (SOAC.Stream cs (RedLike _ _ _ acc) l ii inps) =
     return $ SOAC.Stream cs (Sequential acc) l ii inps
 toSeqStream _ = fail "toSeqStream expects a string, but given a SOAC."
 

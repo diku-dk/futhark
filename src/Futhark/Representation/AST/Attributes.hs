@@ -57,12 +57,12 @@ import Futhark.Util.Pretty (Pretty)
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
 getStreamAccums (MapLike _       ) = []
-getStreamAccums (RedLike _ _ accs) = accs
+getStreamAccums (RedLike _ _ _ accs) = accs
 getStreamAccums (Sequential  accs) = accs
 
 getStreamOrder :: StreamForm lore -> StreamOrd
 getStreamOrder (MapLike o    ) = o
-getStreamOrder (RedLike o _ _) = o
+getStreamOrder (RedLike o _ _ _) = o
 getStreamOrder (Sequential  _) = InOrder
 
 

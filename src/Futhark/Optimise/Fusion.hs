@@ -422,7 +422,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       unfusable_nms  = HS.fromList $ filter (`HS.member` unfusable res) out_nms
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
-                        SOAC.Redomap _ _ _ nes _ -> drop (length nes) out_nms
+                        SOAC.Redomap _ _ _ _ nes _ -> drop (length nes) out_nms
                         SOAC.Stream  _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
@@ -524,9 +524,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
 -- A reduce is translated to a redomap and treated from there.
-fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w lam args)):bnds) res) = do
+fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm lam args)):bnds) res) = do
   let (ne, arrs) = unzip args
-      equivsoac = Futhark.Redomap cs w lam lam ne arrs
+      equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
 fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
@@ -538,7 +538,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
       greedyFuse False (bodyBindings body) used_lam blres (pat, soac)
 
-    Right soac@(SOAC.Redomap _ outer_red inner_red nes _) -> do
+    Right soac@(SOAC.Redomap _ _ outer_red inner_red nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
@@ -567,8 +567,8 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       -- a redomap always starts a new kernel
       let nes     = getStreamAccums form
           lambdas = case form of
-                        RedLike _ lout _ -> [lout, lam]
-                        _                -> [lam]
+                        RedLike _ _ lout _ -> [lout, lam]
+                        _                  -> [lam]
       (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
       bres  <- bindingFamily pat $ fusionGatherBody lres body
       bres' <- foldM fusionGatherSubExp bres nes

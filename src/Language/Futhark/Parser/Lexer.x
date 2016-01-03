@@ -107,6 +107,7 @@ keyword s =
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE
+    "reduceComm"   -> REDUCECOMM
     "zip"          -> ZIP
     "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP

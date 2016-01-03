@@ -60,6 +60,7 @@ data Kernel lore =
     [(Type, [Int])] (Body lore)
   | ReduceKernel Certificates SubExp
     KernelSize
+    Commutativity
     (LambdaT lore)
     (LambdaT lore)
     [SubExp]
@@ -140,11 +141,12 @@ mapKernelM tv (MapKernel cs w index ispace inps rettype body) =
   mapOnKernelBody tv body
   where (iparams, bounds) = unzip ispace
         (ts, perms) = unzip rettype
-mapKernelM tv (ReduceKernel cs w kernel_size red_fun fold_fun accs arrs) =
+mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun accs arrs) =
   ReduceKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv w <*>
   mapOnKernelSize tv kernel_size <*>
+  pure comm <*>
   mapOnKernelLambda tv red_fun <*>
   mapOnKernelLambda tv fold_fun <*>
   mapM (mapOnKernelSubExp tv) accs <*>
@@ -253,7 +255,7 @@ kernelType (MapKernel _ _ _ is _ returns _) =
   [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
-kernelType (ReduceKernel _ _ size redlam foldlam _ _) =
+kernelType (ReduceKernel _ _ size _ redlam foldlam _ _) =
   let acc_tp = map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType redlam
       arr_row_tp = drop (length acc_tp) $ lambdaReturnType foldlam
   in acc_tp ++
@@ -270,7 +272,7 @@ instance Attributes lore => TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases (MapKernel _ _ _ _ _ returns _) =
     map (const mempty) returns
-  opAliases (ReduceKernel _ _ _ _ fold_lam _ _) =
+  opAliases (ReduceKernel _ _ _ _ _ fold_lam _ _) =
     map (const mempty) $ lambdaReturnType fold_lam
   opAliases (ScanKernel _ _ _ _ lam _) =
     replicate (length (lambdaReturnType lam) * 2) mempty
@@ -321,7 +323,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    return return return
 
 instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
-  usageInOp (ReduceKernel _ _ _ _ foldfun _ arrs) =
+  usageInOp (ReduceKernel _ _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
   usageInOp (ScanKernel _ _ _ _ fun input) =
     usageInLambda fun arrs
@@ -380,7 +382,7 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
             TC.bad $ TC.TypeError noLoc $
             "Kernel input " ++ pretty inp ++ " has inconsistent type."
 
-typeCheckKernel (ReduceKernel cs w kernel_size parfun seqfun accexps arrexps) = do
+typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) = do
   mapM_ (TC.requireI [Basic Cert]) cs
   TC.require [Basic Int] w
   typeCheckKernelSize kernel_size
@@ -467,7 +469,7 @@ consumableInputs is = map (first kernelInputName) .
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (MapKernel _ _ _ _ _ _ body) =
     inside "MapKernel" $ bodyMetrics body
-  opMetrics (ReduceKernel _ _ _ lam1 lam2 _ _) =
+  opMetrics (ReduceKernel _ _ _ _ lam1 lam2 _ _) =
     inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
   opMetrics (ScanKernel _ _ _ _ lam _) =
     inside "ScanKernel" $ lambdaMetrics lam
@@ -486,12 +488,13 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr name <+> text "<" <+> ppr bound
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> PP.apply (map ppr perm)
-  ppr (ReduceKernel cs w kernel_size parfun seqfun es as) =
+  ppr (ReduceKernel cs w kernel_size comm parfun seqfun es as) =
     ppCertificates' cs <> text "reduceKernel" <>
     parens (ppr w <> comma </>
             ppr kernel_size </>
             PP.braces (commasep $ map ppr es) <> comma </>
             commasep (map ppr as) </>
+            ppr comm </>
             ppr parfun <> comma </> ppr seqfun)
   ppr (ScanKernel cs w kernel_size order fun input) =
     ppCertificates' cs <> text "scanKernel" <>

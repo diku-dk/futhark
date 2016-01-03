@@ -157,7 +157,7 @@ transformSOAC pat (ConcatMap cs _ fun inputs) = do
   forM_ (zip (patternNames pat) ses) $ \(name, se) ->
     letBindNames' [name] $ PrimOp $ SubExp se
 
-transformSOAC pat (Reduce cs width fun args) = do
+transformSOAC pat (Reduce cs width _ fun args) = do
   (acc, initacc) <- newFold $ zip accexps accts
   arrts <- mapM lookupType arrexps
   inarrs <- mapM (newIdent "reduce_inarr") arrts
@@ -196,7 +196,7 @@ transformSOAC pat (Scan cs width fun args) = do
         (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
-transformSOAC pat (Redomap cs width _ innerfun accexps arrexps) = do
+transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
                          | t <- map_arr_tps ]

@@ -38,7 +38,8 @@
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with"
     "fun" "fn" "for" "while" "do" "do" "op" "not" "pow"
-    "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "zip" "unzip" "zipWith"
+    "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "reduceComm"
+    "zip" "unzip" "zipWith"
     "scan" "split" "concat" "filter" "partition" "redomap"
     "empty" "copy" "size")
   "A list of Futhark keywords.")
