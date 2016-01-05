@@ -138,7 +138,7 @@ descriptionSeparator = "=="
 
 parseTags :: Parser [T.Text]
 parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
-  where parseTag = T.pack <$> many1 (lexeme $ satisfy constituent)
+  where parseTag = T.pack <$> lexeme (many1 $ satisfy constituent)
         constituent c = not (isSpace c) && c /= '}'
 
 parseAction :: Parser TestAction
