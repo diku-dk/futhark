@@ -103,8 +103,8 @@ instance Pretty PyStmt where
     text "while" <+> ppr cond <+> text ":" </>
     indent 2 (stack $ map ppr body)
 
-  ppr (For i limit body) =
-    text  "for" <+> ppr i <+> text "in range" <+> parens (ppr limit) <+> text ":" </>
+  ppr (For i what body) =
+    text  "for" <+> ppr i <+> text "in" <+> ppr what <+> text ":" </>
     indent 2 (stack $ map ppr body)
 
   ppr (Assign e1 e2) = ppr e1 <+> text "=" <+> ppr e2

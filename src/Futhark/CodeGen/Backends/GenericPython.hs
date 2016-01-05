@@ -572,7 +572,7 @@ compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = pretty i
   body' <- collect $ compileCode body
-  stm $ For i' bound' (Assign (Var i') (Call "int32" [Var i']) : body')
+  stm $ For i' (Call "range" [bound']) (Assign (Var i') (Call "int32" [Var i']) : body')
 
 compileCode (Imp.SetScalar vname exp1) = do
   let name' = Var $ pretty vname
