@@ -57,4 +57,9 @@ script:
  - SRC_TGZ=$(cabal info . | awk '{print $2;exit}').tar.gz &&
    (cd dist && cabal install --force-reinstalls "$SRC_TGZ")
 
+ - data/runtests.sh # Run integration test suite.
+
+ - tools/style-check.sh src # Check for style issues.
+ - cabal haddock # Can we build the documentation?
+
 # EOF
