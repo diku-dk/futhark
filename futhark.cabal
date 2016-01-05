@@ -202,8 +202,6 @@ Library
 
   Ghc-Options:        -Wall
 
-  Ghc-prof-options:   -fprof-auto
-
 Executable futhark
   Main-is: src/futhark.hs
 
