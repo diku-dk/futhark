@@ -24,6 +24,11 @@ before_install:
  - travis_retry cabal update
  - travis_retry cabal install happy alex hlint
 
+cache:
+  directories:
+    - $HOME/.cabal
+    - $HOME/.ghc
+
 install:
  - cabal --version
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
