@@ -217,8 +217,6 @@ Executable futhark
 
   Ghc-Options:        -Wall
 
-  Ghc-prof-options:   -fprof-auto
-
 Executable futhark-c
   Main-is: src/futhark-c.hs
 
