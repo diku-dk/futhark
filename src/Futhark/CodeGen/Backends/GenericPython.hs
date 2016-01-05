@@ -200,10 +200,9 @@ instrumentation statements s = do
 
 --we replace the entry points with appended _
 replaceFuncName :: String -> PyFunc -> PyFunc
-replaceFuncName key funs@(PyFunc str args body)  = if str == key
-  then PyFunc ('_':str) args body
-  else funs
-replaceFuncName _ _ = error "This should only replace PyFuncs"
+replaceFuncName key fun@(PyFunc str args body)
+  | str == key = PyFunc ('_':str) args body
+  | otherwise = fun
 
 paramsTypes :: [Imp.Param] -> [Imp.Type]
 paramsTypes = map paramType
@@ -232,18 +231,18 @@ compileProg :: MonadFreshNames m =>
             -> m String
 compileProg timeit imports defines ops userstate prog@(Imp.Functions funs)  = do
   src <- getNameSource
-  let prog' = runCompilerM prog ops src userstate compileProg' timeit
-  return $ pretty (PyProg prog' imports defines)
+  let (prog', maincall) = runCompilerM prog ops src userstate compileProg' timeit
+  return $ pretty (PyProg prog' imports defines) ++ "\n" ++ pretty maincall
   where compileProg' = do
           definitions <- mapM compileFunc funs
           let mainname = nameFromString "main"
-          main <- case lookup mainname funs of
-                    Nothing   -> fail "No main function"
-                    Just func -> compileEntryFun (mainname, func)
+          (main, maincall) <- case lookup mainname funs of
+            Nothing   -> fail "No main function"
+            Just func -> compileEntryFun (mainname, func)
 
           let renamed = map (replaceFuncName "futhark_main") definitions
 
-          return (renamed ++ main) --not sure if better method, but the point is that there will be more entry points, not just the main in the future.
+          return (renamed ++ [main], maincall)
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunc
 compileFunc (fname, Imp.Function outputs inputs body _ _) = do
@@ -403,7 +402,7 @@ writeOutput (Imp.ArrayValue vname bt _) =
     Char -> Exp $ Call "write_chars" [stdout, name]
     _ -> Exp $ Call "write_array" [stdout, name, bt']
 
-compileEntryFun :: (Name, Imp.Function op) -> CompilerM op s [PyFunc]
+compileEntryFun :: (Name, Imp.Function op) -> CompilerM op s (PyFunc, PyStmt)
 compileEntryFun (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
   let funName = pretty fname
@@ -434,8 +433,8 @@ compileEntryFun (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = 
             (str_input ++ [trys] ++ str_output)
             [Pass]
 
-  return [PyFunc funName (map valueDeclName decl_args) (body'++[ret]),
-          PyMainTest (pretty iff)]
+  return (PyFunc funName (map valueDeclName decl_args) (body'++[ret]),
+          iff)
 
 compileUnOp :: Imp.UnOp -> String
 compileUnOp op =
