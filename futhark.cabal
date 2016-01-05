@@ -11,7 +11,7 @@ Homepage:            https://github.com/HIPERFIT/futhark
 Category:            Language
 License:             BSD3
 License-file:        LICENSE
-Build-type:          Custom
+Build-type:          Simple
 Maintainer:          athas@sigkill.dk
 
 -- Constraint on the version of Cabal needed to build this package.
@@ -202,8 +202,6 @@ Library
 
   Ghc-Options:        -Wall
 
-  Ghc-prof-options:   -fprof-auto
-
 Executable futhark
   Main-is: src/futhark.hs
 
@@ -218,8 +216,6 @@ Executable futhark
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
-  Ghc-prof-options:   -fprof-auto
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
