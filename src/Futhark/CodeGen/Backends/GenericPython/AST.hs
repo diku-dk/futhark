@@ -55,7 +55,6 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
 data PyExcept = Catch PyExp [PyStmt] deriving (Eq, Show)
 
 data PyFunc = PyFunc String [String] [PyStmt]
-            | PyMainTest String
 
 type PyDefinition = String
 
@@ -129,7 +128,6 @@ instance Pretty PyFunc where
   ppr (PyFunc fname params body) =
     text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
     indent 2 (stack (map ppr body))
-  ppr (PyMainTest str) = text str
 
 instance Pretty PyProg where
   ppr (PyProg funcs imports defines) =
