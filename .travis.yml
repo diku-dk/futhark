@@ -8,7 +8,6 @@ language: c
 # release of a major GHC version. Setting HPVER implictly sets
 # GHCVER. Omit lines with versions you don't need/want testing for.
 env:
- - CABALVER=1.18 GHCVER=7.8.1
  - CABALVER=1.18 GHCVER=7.8.2
  - CABALVER=1.18 GHCVER=7.8.3
  - CABALVER=1.18 GHCVER=7.8.4
@@ -22,6 +21,8 @@ before_install:
  - travis_retry sudo apt-get update
  - travis_retry sudo apt-get install cabal-install-$CABALVER ghc-$GHCVER
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
+ - travis_retry cabal update
+ - travis_retry cabal install happy alex hlint
 
 install:
  - cabal --version
