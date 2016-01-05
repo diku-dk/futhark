@@ -229,7 +229,7 @@ compileProg :: MonadFreshNames m =>
             -> Operations op s
             -> s
             -> Imp.Functions op
-                        -> m String
+            -> m String
 compileProg timeit imports defines ops userstate prog@(Imp.Functions funs)  = do
   src <- getNameSource
   let prog' = runCompilerM prog ops src userstate compileProg' timeit
