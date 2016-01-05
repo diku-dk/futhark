@@ -430,17 +430,9 @@ compileEntryFun (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = 
   let except' = Catch (Var "AssertionError") exitcall
   instrumentations <- collect $ instrumentation [Assign decl_output_names callmain] "main took so long: "
   let trys = Try instrumentations [except']
-  let iff = If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__")) (str_input ++ [trys] ++ str_output) [Pass]
-
---  let testMainStr = [string|
---                    if __name__ == "__main__":
---                      $str_input
---                      try:
---                        $decl_output_names=main$decl_input_names
---                      except AssertionError as e:
---                        sys.exit("Assertion.{} failed".format(e))
---                      $str_output
---                    |]
+  let iff = If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
+            (str_input ++ [trys] ++ str_output)
+            [Pass]
 
   return [PyFunc funName (map valueDeclName decl_args) (body'++[ret]),
           PyMainTest (pretty iff)]
@@ -514,7 +506,8 @@ compileBasicToNp bt =
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp
 
--- Had to explicitly declare each constant value because memmove typeclashses with python types and numpy types
+-- Had to explicitly declare each constant value because memmove
+-- typeclashes with python types and numpy types
 compileExp (Imp.Constant (IntVal v)) = return $ Call "int32" [Constant $ IntVal v]
 compileExp (Imp.Constant (Float32Val v)) = return $ Call "float32" [Constant $ Float32Val v]
 compileExp (Imp.Constant (Float64Val v)) = return $ Call "float64" [Constant $ Float64Val v]
@@ -587,23 +580,9 @@ compileCode (Imp.SetScalar vname exp1) = do
   exp1' <- compileExp exp1
   stm $ Assign name' exp1'
 
-compileCode (Imp.DeclareMem _ DefaultSpace) = return ()
+compileCode Imp.DeclareMem{} = return ()
+compileCode Imp.DeclareScalar{} = return ()
 
-compileCode (Imp.DeclareMem _ (Imp.Space _)) = return () --stm $ Assign (Var $ pretty vname) (Constant $ IntVal 0)
-
-compileCode (Imp.DeclareScalar _ _) = return ()
--- We don't need to do this as the values are already numpy scalars
---  let vname' = Var $ pretty vname
---  let bt' = case bt of
---              Int -> "int32"
---              Char -> "uint8"
---              Float32 -> "float32"
---              Float64 -> "float64"
---              Bool -> "bool_"
---              Cert -> "int32" -- dummy value
---  let npobject = Call bt' []
---  stm $ Assign vname' npobject
---
 compileCode (Imp.Comment s code) = do
   code' <- collect $ compileCode code
   stm $ Comment s code'
@@ -612,7 +591,6 @@ compileCode (Imp.Assert e loc) = do
   e' <- compileExp e
   stm $ Assert e' $ locStr loc
 
---we can just wrap it in a tuple regardless of the number of outputs because all functions return single variables or tuples.
 compileCode (Imp.Call dests fname args) = do
   args' <- mapM compileExp args
   let dests' = tupleOrSingle $ fmap Var (map pretty dests)
