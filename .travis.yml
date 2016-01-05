@@ -23,6 +23,7 @@ before_install:
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$HOME/.cabal/bin:$PATH
  - travis_retry cabal update
  - travis_retry cabal install happy alex hlint
+ - sudo apt-get install python-numpy # For testing futhark-py
 
 cache:
   directories:
@@ -58,6 +59,8 @@ script:
    (cd dist && cabal install --force-reinstalls "$SRC_TGZ")
 
  - data/runtests.sh # Run integration test suite.
+ - data/runtests.sh --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
+# - data/runtests.sh -t --exclude=no_opencl --compiler=futhark-opencl # Also test OpenCL code generation
 
  - tools/style-check.sh src # Check for style issues.
  - cabal haddock # Can we build the documentation?

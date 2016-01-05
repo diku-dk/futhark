@@ -40,7 +40,9 @@ Library
                  sized-vector >= 1.4,
                  singletons >= 0.9,
                  monomorphic >= 0.0.3,
-                 equational-reasoning >= 0.0.2
+                 equational-reasoning >= 0.0.2,
+                 raw-strings-qq,
+                 neat-interpolation < 0.3
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -61,11 +63,17 @@ Library
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
+                   Futhark.CodeGen.Backends.GenericPython
+                   Futhark.CodeGen.Backends.GenericPython.AST
+                   Futhark.CodeGen.Backends.GenericPython.Definitions
                    Futhark.CodeGen.Backends.GenericC.Options
                    Futhark.CodeGen.Backends.GenericC.Reading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.COpenCL.Boilerplate
+                   Futhark.CodeGen.Backends.PyOpenCL
+                   Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
                    Futhark.CodeGen.Backends.SequentialC
+                   Futhark.CodeGen.Backends.SequentialPython
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpCode.Kernels
@@ -228,6 +236,40 @@ Executable futhark-c
                  filepath,
                  process,
                  transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+Executable futhark-py
+  Main-is: src/futhark-py.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 text,
+                 filepath,
+                 process,
+                 transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+Executable futhark-pyopencl
+  Main-is: src/futhark-pyopencl.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 filepath,
+                 process,
+                 transformers,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010

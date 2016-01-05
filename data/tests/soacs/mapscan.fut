@@ -1,6 +1,7 @@
 --
 --
 -- ==
+-- tags { no_python }
 -- compiled input { 100000 100} output { 15799424 }
 --
 fun int main(int n, int m) =
