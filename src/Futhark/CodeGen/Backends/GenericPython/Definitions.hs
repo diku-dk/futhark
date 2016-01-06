@@ -59,6 +59,9 @@ def futhark_log32(x):
 def futhark_sqrt32(x):
   return float32(sqrt(x))
 
+def futhark_exp32(x):
+  return exp(x)
+
 def futhark_trunc32(x):
   return float32(trunc(x))
 |]
