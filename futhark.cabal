@@ -66,6 +66,7 @@ Library
                    Futhark.CodeGen.Backends.GenericPython
                    Futhark.CodeGen.Backends.GenericPython.AST
                    Futhark.CodeGen.Backends.GenericPython.Definitions
+                   Futhark.CodeGen.Backends.GenericPython.Options
                    Futhark.CodeGen.Backends.GenericC.Options
                    Futhark.CodeGen.Backends.GenericC.Reading
                    Futhark.CodeGen.Backends.COpenCL
