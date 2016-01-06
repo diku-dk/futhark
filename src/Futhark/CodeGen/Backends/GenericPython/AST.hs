@@ -31,6 +31,7 @@ data PyExp = Constant BasicValue
            | Call String [PyExp]
            | Cast PyExp String
            | Tuple [PyExp]
+           | List [PyExp]
            | Field PyExp String
            | None
            | ParamAssign PyExp PyExp
@@ -80,11 +81,12 @@ instance Pretty PyExp where
     ppr (Call fname exps) = text fname <> parens(commasep $ map ppr exps)
     ppr (Tuple [dim]) = parens(ppr dim <> text ",")
     ppr (Tuple dims) = parens(commasep $ map ppr dims)
+    ppr (List es) = brackets $ commasep $ map ppr es
     ppr None = text "None"
     ppr (ParamAssign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
 
 instance Pretty PyStmt where
-  ppr (If cond tbranch [Pass]) =
+  ppr (If cond tbranch []) =
     text "if" <+> ppr cond <+> text ":" </>
     indent 2 (stack $ map ppr tbranch)
 
