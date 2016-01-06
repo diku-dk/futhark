@@ -48,6 +48,7 @@ import qualified Futhark.CodeGen.ImpCode as Imp hiding (dimSizeToExp)
 --import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
 
 import Futhark.CodeGen.Backends.GenericPython.AST
+import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.Util.Pretty(pretty)
 
 
@@ -179,25 +180,6 @@ stms = mapM_ stm
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ s
 
-instrumentation :: [PyStmt] -> String -> CompilerM op s ()
-instrumentation statements s = do
-  check <- asks envTimeit
-  if check
-  then do
-    time_start <- newVName "time_start"
-    time_end <- newVName "time_end"
-    time_diff <- newVName "time_diff"
-    let time_start' = Var $ pretty time_start
-    let time_end'   = Var $ pretty time_end
-    let time_diff'  = Var $ pretty time_diff
-    stm $ Assign time_start' (Call "time.time" [])
-    stms statements
-    stm $ Assign time_end' (Call "time.time" [])
-    stm $ Assign time_diff' (BinaryOp "-" time_end' time_start')
-    stm $ Exp $ Call "print" [StringLiteral s, time_diff']
-  else
-    stms statements
-
 --we replace the entry points with appended _
 replaceFuncName :: String -> PyFunc -> PyFunc
 replaceFuncName key fun@(PyFunc str args body)
@@ -221,24 +203,39 @@ runCompilerM :: Imp.Functions op -> Operations op s
 runCompilerM prog ops src userstate (CompilerM m) timeit =
   fst $ evalRWS m (newCompilerEnv prog ops timeit) (newCompilerState src userstate)
 
+timingOption :: Option
+timingOption =
+  Option { optionLongName = "write-runtime-to"
+         , optionShortName = Just 't'
+         , optionArgument = RequiredArgument
+         , optionAction =
+           [
+             If (Var "runtime_file")
+             [Exp $ Call "runtime_file.close" []] []
+           , Assign (Var "runtime_file") $
+             Call "open" [Var "optarg", StringLiteral "w"]
+           ]
+  }
+
 compileProg :: MonadFreshNames m =>
                Bool
             -> [PyImport]
             -> [PyDefinition]
             -> Operations op s
             -> s
+            -> [Option]
             -> Imp.Functions op
             -> m String
-compileProg timeit imports defines ops userstate prog@(Imp.Functions funs)  = do
+compileProg timeit imports defines ops userstate options prog@(Imp.Functions funs)  = do
   src <- getNameSource
   let (prog', maincall) = runCompilerM prog ops src userstate compileProg' timeit
-  return $ pretty (PyProg prog' imports defines) ++ "\n" ++ pretty maincall
+  return $ pretty (PyProg prog' (imports++["import argparse"]) defines) ++ "\n" ++ pretty maincall
   where compileProg' = do
           definitions <- mapM compileFunc funs
           let mainname = nameFromString "main"
           (main, maincall) <- case lookup mainname funs of
             Nothing   -> fail "No main function"
-            Just func -> compileEntryFun (mainname, func)
+            Just func -> compileEntryFun options (mainname, func)
 
           let renamed = map (replaceFuncName "futhark_main") definitions
 
@@ -402,8 +399,8 @@ writeOutput (Imp.ArrayValue vname bt _) =
     Char -> Exp $ Call "write_chars" [stdout, name]
     _ -> Exp $ Call "write_array" [stdout, name, bt']
 
-compileEntryFun :: (Name, Imp.Function op) -> CompilerM op s (PyFunc, PyStmt)
-compileEntryFun (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = do
+compileEntryFun :: [Option] -> (Name, Imp.Function op) -> CompilerM op s (PyFunc, PyStmt)
+compileEntryFun options (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
   let funName = pretty fname
   let funTuple = tupleOrSingle $ fmap Var output_paramNames
@@ -427,14 +424,34 @@ compileEntryFun (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = 
   let callmain = Call "main" decl_input_names
   let exitcall = [Exp $ Call "sys.exit" [Field (StringLiteral "Assertion.{} failed") "format(e)"]]
   let except' = Catch (Var "AssertionError") exitcall
-  instrumentations <- collect $ instrumentation [Assign decl_output_names callmain] "main took so long: "
-  let trys = Try instrumentations [except']
+  let main_with_timing =
+        addTiming [Assign decl_output_names callmain]
+  let trys = Try main_with_timing [except']
   let iff = If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
-            (str_input ++ [trys] ++ str_output)
+            (parse_options ++ str_input ++ [trys] ++ str_output)
             [Pass]
 
   return (PyFunc funName (map valueDeclName decl_args) (body'++[ret]),
           iff)
+  where parse_options =
+          Assign (Var "runtime_file") None :
+          generateOptionParser (timingOption : options)
+
+addTiming :: [PyStmt] -> [PyStmt]
+addTiming statements =
+    [ Assign (Var "time_start") $ Call "time.time" [] ] ++
+    statements ++
+    [ Assign (Var "time_end") $ Call "time.time" []
+    , If (Var "runtime_file") print_runtime [] ]
+  where print_runtime =
+          [Exp $ Call "runtime_file.write"
+           [Call "str"
+            [BinaryOp "-"
+             (toMicroseconds (Var "time_end"))
+             (toMicroseconds (Var "time_start"))]],
+           Exp $ Call "runtime_file.close" []]
+        toMicroseconds x =
+          Call "int" [BinaryOp "*" x $ Constant $ IntVal 1000000]
 
 compileUnOp :: Imp.UnOp -> String
 compileUnOp op =
