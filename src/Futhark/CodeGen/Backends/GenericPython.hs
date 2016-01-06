@@ -449,6 +449,7 @@ addTiming statements =
             [BinaryOp "-"
              (toMicroseconds (Var "time_end"))
              (toMicroseconds (Var "time_start"))]],
+           Exp $ Call "runtime_file.write" [StringLiteral "\n"],
            Exp $ Call "runtime_file.close" []]
         toMicroseconds x =
           Call "int" [BinaryOp "*" x $ Constant $ IntVal 1000000]
