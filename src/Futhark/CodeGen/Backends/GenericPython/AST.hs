@@ -70,7 +70,7 @@ instance Pretty PyIdx where
 instance Pretty PyExp where
     ppr (Constant chr@(CharVal _)) = text "b" <> ppr chr
     ppr (Constant v) = ppr v
-    ppr (StringLiteral s) = text "\"" <> ppr s <> text "\""
+    ppr (StringLiteral s) = text $ show s
     ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
     ppr (Field e s) = ppr e <> text "." <> text s
     ppr (BinaryOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
