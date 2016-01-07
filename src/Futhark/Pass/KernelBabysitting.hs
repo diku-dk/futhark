@@ -65,9 +65,8 @@ transformBinding expmap (Let pat ()
   | num_groups /= Constant (IntVal 1) = do
   -- We want to pad and transpose the input arrays.
 
-  (kernel_size', w', padding) <- paddedScanReduceInput w kernel_size
-  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w' $
-                 kernelElementsPerThread kernel_size) arrs
+  (w', kernel_size', arrs') <-
+    rearrangeScanReduceInputs comm cs w kernel_size arrs
 
   parlam' <- transformLambda parlam
   seqlam' <- transformLambda seqlam
@@ -76,16 +75,14 @@ transformBinding expmap (Let pat ()
     ReduceKernel cs w' kernel_size' comm parlam' seqlam' nes arrs'
   return expmap
   where num_groups = kernelWorkgroups kernel_size
-        num_threads = kernelNumThreads kernel_size
 
 transformBinding expmap (Let pat ()
                          (Op (ScanKernel cs w kernel_size ScanFlat lam input)))
   | num_groups /= Constant (IntVal 1) = do
   -- We want to pad and transpose the input arrays.
 
-  (kernel_size', w', padding) <- paddedScanReduceInput w kernel_size
-  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w' $
-                 kernelElementsPerThread kernel_size) arrs
+  (w', kernel_size', arrs') <-
+    rearrangeScanReduceInputs Noncommutative cs w kernel_size arrs
 
   lam' <- transformLambda lam
 
@@ -125,7 +122,6 @@ transformBinding expmap (Let pat ()
 
   return expmap
   where num_groups = kernelWorkgroups kernel_size
-        num_threads = kernelNumThreads kernel_size
         (nes, arrs) = unzip input
 
 transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
@@ -229,6 +225,22 @@ rearrangeReturns num_is pat_elems returns =
         rearrangeReturn pat_elem (t, perm) =
           return (pat_elem, (t, perm))
 
+rearrangeScanReduceInputs :: Commutativity
+                          -> Certificates
+                          -> SubExp
+                          -> KernelSize
+                          -> [VName]
+                          -> BabysitM (SubExp, KernelSize, [VName])
+rearrangeScanReduceInputs Commutative _ w kernel_size arrs =
+  return (w, kernel_size, arrs)
+
+rearrangeScanReduceInputs Noncommutative cs w kernel_size arrs = do
+  (kernel_size', w', padding) <- paddedScanReduceInput w kernel_size
+  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w' $
+                 kernelElementsPerThread kernel_size) arrs
+  return (w', kernel_size', arrs')
+  where num_threads = kernelNumThreads kernel_size
+
 paddedScanReduceInput :: SubExp -> KernelSize
                       -> BabysitM (KernelSize, SubExp, SubExp)
 paddedScanReduceInput w kernel_size = do
@@ -245,9 +257,10 @@ paddedScanReduceInput w kernel_size = do
   return (kernel_size', w', padding)
   where num_threads = kernelNumThreads kernel_size
 
-rearrangeScanReduceInput :: Certificates
+rearrangeScanReduceInput :: MonadBinder m =>
+                            Certificates
                          -> SubExp -> SubExp -> SubExp -> SubExp -> VName
-                         -> BabysitM VName
+                         -> m VName
 rearrangeScanReduceInput cs num_threads padding w' elements_per_thread arr = do
   arr_t <- lookupType arr
   arr_padded <- padArray arr_t

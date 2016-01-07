@@ -530,7 +530,8 @@ allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
 
 allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam nes arrs)) = do
   arr_summaries <- mapM lookupMemBound arrs
-  fold_lam' <- allocInChunkedLambda
+  fold_lam' <- allocInFoldLambda
+               comm
                (kernelElementsPerThread size)
                (kernelNumThreads size)
                fold_lam arr_summaries
@@ -553,10 +554,11 @@ allocInExp e = mapExpM alloc e
                              fail $ "Unhandled Op in ExplicitAllocations: " ++ pretty op
                          }
 
-allocInChunkedLambda :: SubExp -> SubExp
-                     -> In.Lambda -> [MemBound NoUniqueness]
-                     -> AllocM Lambda
-allocInChunkedLambda elems_per_thread num_threads lam arr_summaries = do
+allocInFoldLambda :: Commutativity
+                  -> SubExp -> SubExp
+                  -> In.Lambda -> [MemBound NoUniqueness]
+                  -> AllocM Lambda
+allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
   let i = lambdaIndex lam
       (chunk_size_param, chunked_params) =
         partitionChunkedLambdaParameters $ lambdaParams lam
@@ -565,14 +567,28 @@ allocInChunkedLambda elems_per_thread num_threads lam arr_summaries = do
     case summary of
       Scalar _ ->
         fail $ "Passed a scalar for lambda parameter " ++ pretty p
-      ArrayMem bt shape u mem ixfun -> do
-        let newshape = [DimNew num_threads, DimNew elems_per_thread]
-        return p { paramAttr =
-                      ArrayMem bt (arrayShape $ paramType p) u mem $ IxFun.applyInd
-                      (IxFun.reshape ixfun $
-                       newshape ++ map DimNew (drop 1 $ shapeDims shape))
-                      [SE.Id i Int]
-                 }
+      ArrayMem bt shape u mem ixfun ->
+        case comm of
+          Noncommutative -> do
+            let newshape = [DimNew num_threads, DimNew elems_per_thread]
+            return p { paramAttr =
+                       ArrayMem bt (arrayShape $ paramType p) u mem $
+                       IxFun.applyInd
+                       (IxFun.reshape ixfun $
+                        newshape ++ map DimNew (drop 1 $ shapeDims shape))
+                       [SE.Id i Int]
+                     }
+          Commutative -> do
+            let newshape = [DimNew elems_per_thread, DimNew num_threads]
+                perm = [1,0] ++ [2..IxFun.rank ixfun]
+            return p { paramAttr =
+                       ArrayMem bt (arrayShape $ paramType p) u mem $
+                       IxFun.applyInd
+                       (IxFun.permute (IxFun.reshape ixfun $
+                        newshape ++ map DimNew (drop 1 $ shapeDims shape))
+                        perm)
+                       [SE.Id i Int]
+                     }
       _ ->
         fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
   allocInLambda i (Param (paramName chunk_size_param) (Scalar Int) : chunked_params')

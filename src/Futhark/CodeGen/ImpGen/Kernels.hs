@@ -26,6 +26,7 @@ import Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedLambdaParameters)
+import Futhark.Util.IntegralExp (quotRoundingUp)
 
 type CallKernelGen = ImpGen.ImpM Imp.CallKernel
 type InKernelGen = ImpGen.ImpM Imp.InKernel
@@ -110,14 +111,14 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ReduceKernel _ _ kernel_size _ reduce_lam fold_lam nes _) = do
+  (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam nes _) = do
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
     wave_size <- newVName "wave_size"
     skip_waves <- newVName "skip_waves"
 
-    (num_groups, group_size, per_thread_chunk, num_elements, _, _) <-
+    (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
 
     let fold_lparams = lambdaParams fold_lam
@@ -175,7 +176,9 @@ kernelCompiler
         fold_op <-
           ImpGen.subImpM_ inKernelOperations $ do
             computeThreadChunkSize
+              comm
               (Imp.ScalarVar $ lambdaIndex fold_lam)
+              (Imp.innerExp $ Imp.dimSizeToExp num_threads)
               (ImpGen.dimSizeToExp per_thread_chunk)
               (ImpGen.dimSizeToExp num_elements) $
               paramName fold_chunk_param
@@ -369,7 +372,9 @@ kernelCompiler
                              ImpGen.varIndex elements_scanned]
 
         computeThreadChunkSize
+          Noncommutative
           (Imp.ScalarVar global_id)
+          (Imp.innerExp $ Imp.dimSizeToExp num_threads)
           (ImpGen.dimSizeToExp elements_per_thread)
           (ImpGen.dimSizeToExp num_elements)
           thread_chunk_size
@@ -817,12 +822,28 @@ writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
 writeFinalResult _ _ _ =
   fail "writeFinalResult: invalid destination"
 
-computeThreadChunkSize :: Imp.Exp
+computeThreadChunkSize :: Commutativity
+                       -> Imp.Exp
+                       -> Imp.Exp
                        -> Imp.Count Imp.Elements
                        -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM op ()
-computeThreadChunkSize thread_index elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
+  remaining_elements <- newVName "remaining_elements"
+  ImpGen.emit $
+    Imp.DeclareScalar remaining_elements Int
+  ImpGen.emit $
+    Imp.SetScalar remaining_elements $
+    (Imp.innerExp num_elements - thread_index)
+    `quotRoundingUp`
+    num_threads
+  ImpGen.emit $
+    Imp.If (Imp.BinOp Less (Imp.innerExp elements_per_thread) (Imp.ScalarVar remaining_elements))
+    (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
+    (Imp.SetScalar chunk_var (Imp.ScalarVar remaining_elements))
+
+computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_elements chunk_var = do
   starting_point <- newVName "starting_point"
   remaining_elements <- newVName "remaining_elements"
 
