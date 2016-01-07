@@ -18,6 +18,7 @@ module Futhark.Util.IntegralExp
        ( IntegralExp (..)
        , IntegralCond (..)
        , Wrapped (..)
+       , quotRoundingUp
        )
        where
 
@@ -68,3 +69,8 @@ instance (Eq a, Ord a, Integral a) => IntegralCond (Wrapped a) where
     | otherwise = y
   oneIfZero 0 = 1
   oneIfZero x = x
+
+-- | Like 'quot', but rounds up.
+quotRoundingUp :: IntegralCond num => num -> num -> num
+quotRoundingUp x y =
+  (x + y - 1) `Futhark.Util.IntegralExp.quot` y
