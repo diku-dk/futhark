@@ -33,7 +33,7 @@ stripeIndexInverse :: IntegralCond num => StripeParams num -> num -> num
 stripeIndexInverse params i =
   let j'''_inv = flat i
       j''_inv = j'''_inv - start_of_last
-      j'_inv = (j''_inv * oneIfZero elems_per_short_block) `divRoundingUp`
+      j'_inv = (j''_inv * oneIfZero elems_per_short_block) `quotRoundingUp`
                (oneIfZero elems_per_short_block + 1)
       j_inv = j'_inv - size_of_last + n
       i_inv = flat j_inv
@@ -83,12 +83,8 @@ stripeToNumBlocks n num_blocks =
                , stripeSizeOfLastBlock =
                    n - start_of_last
                }
-  where elems_per_block = n `divRoundingUp` num_blocks
+  where elems_per_block = n `quotRoundingUp` num_blocks
         start_of_last = (n `quot` elems_per_block) * elems_per_block
-
-divRoundingUp :: IntegralCond num => num -> num -> num
-divRoundingUp x y =
-  (x + y - 1) `quot` y
 
 stripeIndicesInverse :: Int -> Int -> [Int]
 stripeIndicesInverse n num_blocks =
