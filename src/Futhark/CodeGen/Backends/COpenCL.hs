@@ -56,6 +56,11 @@ compileProg prog = do
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_preferred_device = optarg;|]
                            }
+                  , Option { optionLongName = "synchronous"
+                           , optionShortName = Just 's'
+                           , optionArgument = NoArgument
+                           , optionAction = [C.cstm|cl_synchronous = 1;|]
+                           }
                   ]
 
 writeOpenCLScalar :: GenericC.WriteScalar OpenCL ()
@@ -68,7 +73,6 @@ writeOpenCLScalar mem i t "device" val = do
                                                &$id:val',
                                                0, NULL, NULL)
                           == CL_SUCCESS);
-                   assert(clFinish(fut_cl_queue) == CL_SUCCESS);
                 }|]
 writeOpenCLScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
@@ -77,14 +81,13 @@ readOpenCLScalar :: GenericC.ReadScalar OpenCL ()
 readOpenCLScalar mem i t "device" = do
   val <- newVName "read_res"
   GenericC.decl [C.cdecl|$ty:t $id:val;|]
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
                  assert(clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
                                             $exp:i, sizeof($ty:t),
                                             &$id:val,
                                             0, NULL, NULL)
                         == CL_SUCCESS);
-                 assert(clFinish(fut_cl_queue) == CL_SUCCESS);
-              }|]
+              |]
   return [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
@@ -114,27 +117,25 @@ copyOpenCLMemory :: GenericC.Copy OpenCL ()
 -- out of bounds, even if asked to read zero bytes.  We protect with a
 -- branch to avoid this.
 copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       assert(clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
                                  $exp:srcidx, $exp:nbytes,
                                  $id:destmem + $exp:destidx,
                                  0, NULL, NULL)
              == CL_SUCCESS);
-      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
    }
-  }|]
+  |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       assert(clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
                                   $exp:destidx, $exp:nbytes,
                                   $id:srcmem + $exp:srcidx,
                                   0, NULL, NULL)
              == CL_SUCCESS);
-      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
     }
-  }|]
+  |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
   -- Be aware that OpenCL swaps the usual order of operands for
   -- memcpy()-like functions.  The order below is not a typo.
@@ -146,7 +147,9 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
                                  $exp:nbytes,
                                  0, NULL, NULL)
              == CL_SUCCESS);
-      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+      if (cl_synchronous) {
+        assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+      }
     }
   }|]
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
@@ -216,7 +219,9 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $exp:local_work_size_arg,
                                0, NULL, NULL));
-      OPENCL_SUCCEED(clFinish(fut_cl_queue));
+      if (cl_synchronous) {
+        OPENCL_SUCCEED(clFinish(fut_cl_queue));
+      }
       gettimeofday(&$id:time_end, NULL);
       timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
       $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
