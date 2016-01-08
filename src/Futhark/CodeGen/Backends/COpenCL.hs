@@ -34,7 +34,10 @@ compileProg prog = do
                            ]
       cprog <- GenericC.compileProg operations ()
                (openClDecls kernel_names opencl_code)
-               openClInit (openClReport kernel_names) options prog'
+               openClInit
+               [[C.cstm|OPENCL_SUCCEED(clFinish(fut_cl_queue));|]]
+               (openClReport kernel_names)
+               options prog'
       return $ Right $ header ++ cprog
   where operations :: GenericC.Operations OpenCL ()
         operations = GenericC.Operations

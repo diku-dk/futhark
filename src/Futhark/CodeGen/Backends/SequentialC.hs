@@ -18,7 +18,7 @@ import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.MonadFreshNames
 
 compileProg :: MonadFreshNames m => Prog -> m (Either String String)
-compileProg = traverse (GenericC.compileProg operations () [] [] [] []) <=<
+compileProg = traverse (GenericC.compileProg operations () [] [] [] [] []) <=<
               ImpGen.compileProg
   where operations :: GenericC.Operations Imp.Sequential ()
         operations = GenericC.defaultOperations {

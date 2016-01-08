@@ -384,8 +384,8 @@ readBasicStm _ t =
 --
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
-mainCall :: Name -> Function op -> CompilerM op s C.Stm
-mainCall fname (Function outputs inputs _ results args) = do
+mainCall :: [C.Stm] -> Name -> Function op -> CompilerM op s C.Stm
+mainCall pre_timing fname (Function outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
   let readstms = readInputs inputs args
@@ -402,6 +402,7 @@ mainCall fname (Function outputs inputs _ results args) = do
                $items:prepare
                gettimeofday(&t_start, NULL);
                $id:ret = $id:(funName fname)($args:argexps);
+               $stms:pre_timing
                gettimeofday(&t_end, NULL);
                $items:unpackstms
                $stms:printstms
@@ -527,11 +528,11 @@ timingOption =
 compileProg :: MonadFreshNames m =>
                Operations op s
             -> s
-            -> [C.Definition] -> [C.Stm] -> [C.Stm]
+            -> [C.Definition] -> [C.Stm] -> [C.Stm] -> [C.Stm]
             -> [Option]
             -> Functions op
             -> m String
-compileProg ops userstate decls pre_main_stms post_main_stms options prog@(Functions funs) = do
+compileProg ops userstate decls pre_main_stms pre_timing post_main_stms options prog@(Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops src userstate compileProg'
@@ -600,7 +601,7 @@ int main(int argc, char** argv) {
           let mainname = nameFromString "main"
           main <- case lookup mainname funs of
                     Nothing   -> fail "GenericC.compileProg: No main function"
-                    Just func -> mainCall mainname func
+                    Just func -> mainCall pre_timing mainname func
           return (prototypes, definitions, main)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
