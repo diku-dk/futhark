@@ -28,6 +28,7 @@ typename cl_command_queue fut_cl_queue;
 const char *cl_preferred_platform = "";
 const char *cl_preferred_device = "";
 int cl_verbosity = 1;
+int cl_synchronous = 0;
 static size_t cl_group_size = 512;
 
 static char *strclone(const char *str) {
