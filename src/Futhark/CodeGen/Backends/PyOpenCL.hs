@@ -69,23 +69,27 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
   let kernel_dims' = Tuple $ map Py.asscalar kernel_dims
   let kernel_name' = kernel_name ++ "_var"
   args' <- mapM processKernelArg args
-  Py.stm $ Exp $ Call (kernel_name' ++ ".set_args") args'
-  Py.stm $ Exp $ Call "cl.enqueue_nd_range_kernel" [Var "queue", Var kernel_name', kernel_dims', workgroup_dims]
+  Py.stm $ Exp $ Call (kernel_name' ++ ".set_args") $ map Arg args'
+  Py.stm $ Exp $ Call "cl.enqueue_nd_range_kernel"
+    [Arg $ Var "queue", Arg $ Var kernel_name',
+     Arg kernel_dims', Arg workgroup_dims]
   Py.stm $ Exp $ Call "queue.finish" []
   where processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
         processKernelArg (Imp.ValueArg e bt) = do
           e' <- Py.compileExp e
-          return $ Call (Py.compileBasicToNp bt) [e']
+          return $ Call (Py.compileBasicToNp bt) [Arg e']
         processKernelArg (Imp.MemArg v) = return $ Var $ pretty v
         processKernelArg (Imp.SharedMemoryArg (Imp.Count num_bytes)) = do
           num_bytes' <- Py.compileExp num_bytes
-          return $ Call "cl.LocalMemory" [num_bytes']
+          return $ Call "cl.LocalMemory" [Arg num_bytes']
 
 writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do
   let mem' = Var $ pretty mem
-  let nparr = Call "array" [val, ParamAssign (Var "dtype") (Var $ Py.compileBasicType bt)]
-  Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Var "queue", mem', nparr, ParamAssign (Var "device_offset") i]
+  let nparr = Call "array"
+              [Arg val, ArgKeyword "dtype" $ Var $ Py.compileBasicType bt]
+  Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Arg $ Var "queue", Arg mem', Arg nparr,
+                                                 ArgKeyword "device_offset" i]
   Py.stm $ Exp $ Call "queue.finish" []
 
 writeOpenCLScalar _ _ _ space _ =
@@ -96,10 +100,12 @@ readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ pretty val
   let mem' = Var $ pretty mem
-  let nparr = Call "empty" [Constant $ IntVal 1, ParamAssign (Var "dtype") (Var $ Py.compileBasicType bt)]
+  let nparr = Call "empty" [Arg $ Constant $ IntVal 1,
+                            ArgKeyword "dtype" (Var $ Py.compileBasicType bt)]
   let toNp = Py.asscalar i
   Py.stm $ Assign val' nparr
-  Py.stm $ Exp $ Call "cl.enqueue_read_buffer" [Var "queue", mem', val', ParamAssign (Var "device_offset") toNp]
+  Py.stm $ Exp $ Call "cl.enqueue_read_buffer" [Arg $ Var "queue", Arg mem', Arg val',
+                                                ArgKeyword "device_offset" toNp]
   Py.stm $ Exp $ Call "queue.finish" []
   return $ Index val' $ IdxExp $ Constant $ IntVal 0
 
@@ -110,7 +116,9 @@ allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
   let toNp = Py.asscalar size
   let cond' = Cond (BinaryOp ">" size (Constant $ IntVal 0)) toNp (Constant $ IntVal 1)
-  let call' = Call "cl.Buffer" [Var "ctx", Var "cl.mem_flags.READ_WRITE", cond']
+  let call' = Call "cl.Buffer" [Arg $ Var "ctx",
+                                Arg $ Var "cl.mem_flags.READ_WRITE",
+                                Arg cond']
   Py.stm $ Assign (Var $ pretty mem) call'
 
 allocateOpenCLBuffer _ _ space =
@@ -124,7 +132,8 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
   let end = BinaryOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
   Py.stm $ Exp $ Call "queue.finish" []
-  Py.stm $ Exp $ Call "cl.enqueue_read_buffer" [Var "queue", srcmem', dest, ParamAssign (Var "device_offset") srcidx]
+  Py.stm $ Exp $ Call "cl.enqueue_read_buffer" [Arg $ Var "queue", Arg srcmem', Arg dest,
+                                                ArgKeyword "device_offset" srcidx]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
   let destmem' = Var $ pretty destmem
@@ -133,16 +142,19 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
   let end = BinaryOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
   Py.stm $ Exp $ Call "queue.finish" []
-  Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Var "queue", destmem', src, ParamAssign (Var "device_offset") destidx]
+  Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Arg $ Var "queue", Arg destmem', Arg src,
+                                                 ArgKeyword "device_offset" destidx]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
   let destmem' = Var $ pretty destmem
   let srcmem'  = Var $ pretty srcmem
-  let dest_offset = ParamAssign (Var "dst_offset") (Py.asscalar destidx)
-  let src_offset = ParamAssign (Var "src_offset") (Py.asscalar srcidx)
-  let bytecount = ParamAssign (Var "byte_count") (Py.asscalar nbytes)
+  let dest_offset = ArgKeyword "dst_offset" (Py.asscalar destidx)
+  let src_offset = ArgKeyword "src_offset" (Py.asscalar srcidx)
+  let bytecount = ArgKeyword "byte_count" (Py.asscalar nbytes)
   let cond = BinaryOp ">" nbytes (Constant $ IntVal 0)
-  let tb = Exp $ Call "cl.enqueue_copy_buffer" [Var "queue", srcmem', destmem', dest_offset, src_offset, bytecount]
+  let tb = Exp $ Call "cl.enqueue_copy_buffer"
+           [Arg $ Var "queue", Arg srcmem', Arg destmem',
+            dest_offset, src_offset, bytecount]
   Py.stm $ Exp $ Call "queue.finish" []
   Py.stm $ If cond [tb] [Pass]
 
