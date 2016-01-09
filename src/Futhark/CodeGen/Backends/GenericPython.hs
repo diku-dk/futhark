@@ -112,7 +112,6 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
   , envFtable     :: HM.HashMap Name [Imp.Type]
-  , envTimeit     :: Bool
 }
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
@@ -130,11 +129,11 @@ envAllocate = opsAllocate . envOperations
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
 
-newCompilerEnv :: Imp.Functions op -> Operations op s -> Bool -> CompilerEnv op s
-newCompilerEnv (Imp.Functions funs) ops timeit =
+newCompilerEnv :: Imp.Functions op -> Operations op s -> CompilerEnv op s
+newCompilerEnv (Imp.Functions funs) ops =
   CompilerEnv { envOperations = ops
               , envFtable = ftable <> builtinFtable
-              , envTimeit = timeit }
+              }
   where ftable = HM.fromList $ map funReturn funs
         funReturn (name, Imp.Function outparams _ _ _ _) = (name, paramsTypes outparams)
         builtinFtable = HM.map (map Imp.Scalar . snd) builtInFunctions
@@ -198,10 +197,9 @@ runCompilerM :: Imp.Functions op -> Operations op s
              -> VNameSource
              -> s
              -> CompilerM op s a
-             -> Bool
              -> a
-runCompilerM prog ops src userstate (CompilerM m) timeit =
-  fst $ evalRWS m (newCompilerEnv prog ops timeit) (newCompilerState src userstate)
+runCompilerM prog ops src userstate (CompilerM m) =
+  fst $ evalRWS m (newCompilerEnv prog ops) (newCompilerState src userstate)
 
 timingOption :: Option
 timingOption =
@@ -218,8 +216,7 @@ timingOption =
   }
 
 compileProg :: MonadFreshNames m =>
-               Bool
-            -> [PyImport]
+               [PyImport]
             -> [PyDefinition]
             -> Operations op s
             -> s
@@ -227,9 +224,9 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Imp.Functions op
             -> m String
-compileProg timeit imports defines ops userstate pre_timing options prog@(Imp.Functions funs)  = do
+compileProg imports defines ops userstate pre_timing options prog@(Imp.Functions funs)  = do
   src <- getNameSource
-  let (prog', maincall) = runCompilerM prog ops src userstate compileProg' timeit
+  let (prog', maincall) = runCompilerM prog ops src userstate compileProg'
   return $ pretty (PyProg prog' (imports++["import argparse"]) defines) ++ "\n" ++ pretty maincall
   where compileProg' = do
           definitions <- mapM compileFunc funs

@@ -40,7 +40,7 @@ pyCodeAction filepath config =
          , actionProcedure = procedure
          }
   where procedure prog = do
-          pyprog <- either compileFail return =<< PyOpenCL.compileProg (compilerInstrumentation config) (compilerModule config) prog
+          pyprog <- either compileFail return =<< PyOpenCL.compileProg (compilerModule config) prog
           let binpath = outputFilePath filepath config
           let pypath = if compilerModule config
                        then binpath `replaceExtension` "py"
@@ -69,9 +69,6 @@ commandLineOptions =
   , Option [] ["unsafe"]
     (NoArg $ Right $ \config -> config { compilerUnsafe = True })
     "Do not perform bound- and size-checks in generated code."
-  , Option [] ["instrumentation"]
-    (NoArg $ Right $ \config -> config { compilerInstrumentation = True })
-    "Generate profiling code."
   , Option [] ["module"]
     (NoArg $ Right $ \config -> config { compilerModule = True })
     "Generate the file as a module."
@@ -82,7 +79,6 @@ data CompilerConfig =
                  , compilerVerbose :: Maybe (Maybe FilePath)
                  , compilerRealConfiguration :: RealConfiguration
                  , compilerUnsafe :: Bool
-                 , compilerInstrumentation :: Bool
                  , compilerModule :: Bool
                  }
 
@@ -92,7 +88,6 @@ newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerRealConfiguration = RealAsFloat64
                                    , compilerUnsafe = False
                                    , compilerModule = False
-                                   , compilerInstrumentation = False
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath
