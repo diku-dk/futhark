@@ -94,11 +94,11 @@ instance Pretty PyExp where
 
 instance Pretty PyStmt where
   ppr (If cond tbranch []) =
-    text "if" <+> ppr cond <+> text ":" </>
+    text "if" <+> ppr cond <> text ":" </>
     indent 2 (stack $ map ppr tbranch)
 
   ppr (If cond tbranch fbranch) =
-    text "if" <+> ppr cond <+> text ":" </>
+    text "if" <+> ppr cond <> text ":" </>
     indent 2 (stack $ map ppr tbranch) </>
     text "else:" </>
     indent 2 (stack $ map ppr fbranch)
@@ -109,11 +109,11 @@ instance Pretty PyStmt where
     stack (map ppr pyexcepts)
 
   ppr (While cond body) =
-    text "while" <+> ppr cond <+> text ":" </>
+    text "while" <+> ppr cond <> text ":" </>
     indent 2 (stack $ map ppr body)
 
   ppr (For i what body) =
-    text  "for" <+> ppr i <+> text "in" <+> ppr what <+> text ":" </>
+    text  "for" <+> ppr i <+> text "in" <+> ppr what <> text ":" </>
     indent 2 (stack $ map ppr body)
 
   ppr (Assign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
