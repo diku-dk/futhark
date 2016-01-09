@@ -133,9 +133,9 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
   let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
   let end = BinaryOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
-  Py.stm $ Exp $ Call "queue.finish" []
-  Py.stm $ Exp $ Call "cl.enqueue_read_buffer" [Arg $ Var "queue", Arg srcmem', Arg dest,
-                                                ArgKeyword "device_offset" srcidx]
+  Py.stm $ Exp $ Call "cl.enqueue_copy" [Arg $ Var "queue", Arg dest, Arg srcmem',
+                                         ArgKeyword "device_offset" srcidx,
+                                         ArgKeyword "is_blocking" $ Var "synchronous"]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
   let destmem' = Var $ pretty destmem
@@ -143,21 +143,23 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
   let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
   let end = BinaryOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
-  finishIfSynchronous
-  Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Arg $ Var "queue", Arg destmem', Arg src,
-                                                 ArgKeyword "device_offset" destidx]
+  Py.stm $ Exp $ Call "cl.enqueue_copy" [Arg $ Var "queue", Arg destmem', Arg src,
+                                         ArgKeyword "device_offset" destidx,
+                                         ArgKeyword "is_blocking" $ Var "synchronous"]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
   let destmem' = Var $ pretty destmem
   let srcmem'  = Var $ pretty srcmem
-  let dest_offset = ArgKeyword "dst_offset" (Py.asscalar destidx)
-  let src_offset = ArgKeyword "src_offset" (Py.asscalar srcidx)
-  let bytecount = ArgKeyword "byte_count" (Py.asscalar nbytes)
+  let dest_offset = Py.asscalar destidx
+  let src_offset = Py.asscalar srcidx
+  let bytecount = Py.asscalar nbytes
   let cond = BinaryOp ">" nbytes (Constant $ IntVal 0)
-  let tb = Exp $ Call "cl.enqueue_copy_buffer"
-           [Arg $ Var "queue", Arg srcmem', Arg destmem',
-            dest_offset, src_offset, bytecount]
-  finishIfSynchronous
+  let tb = Exp $ Call "cl.enqueue_copy"
+           [Arg $ Var "queue", Arg destmem', Arg srcmem',
+            ArgKeyword "dest_offset" dest_offset,
+            ArgKeyword "src_offset" src_offset,
+            ArgKeyword "byte_count" bytecount,
+            ArgKeyword "is_blocking" $ Var "synchronous"]
   Py.stm $ If cond [tb] [Pass]
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
