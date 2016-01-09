@@ -38,7 +38,7 @@ compileProg moduleConfig prog = do
       let kernel_declare = map (\x -> "global " ++ x ++ "_var") kernel_names
       let kernel_concat = intercalate "\n" kernel_declare
 
-      let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", pyUtility, pyTestMain, openClDecls opencl_code assign_concat kernel_concat] ++ initCL
+      let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", "synchronous=False", pyUtility, pyTestMain, openClDecls opencl_code assign_concat kernel_concat] ++ initCL
       let imports = shebang ++ ["import sys", "from numpy import *", "from ctypes import *", "import pyopencl as cl", "import time"]
 
       Right <$> Py.compileProg imports defines operations ()
@@ -74,7 +74,7 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
   Py.stm $ Exp $ Call "cl.enqueue_nd_range_kernel"
     [Arg $ Var "queue", Arg $ Var kernel_name',
      Arg kernel_dims', Arg workgroup_dims]
-  Py.stm $ Exp $ Call "queue.finish" []
+  finishIfSynchronous
   where processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
         processKernelArg (Imp.ValueArg e bt) = do
           e' <- Py.compileExp e
@@ -91,7 +91,6 @@ writeOpenCLScalar mem i bt "device" val = do
               [Arg val, ArgKeyword "dtype" $ Var $ Py.compileBasicType bt]
   Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Arg $ Var "queue", Arg mem', Arg nparr,
                                                  ArgKeyword "device_offset" i]
-  Py.stm $ Exp $ Call "queue.finish" []
 
 writeOpenCLScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
@@ -142,7 +141,7 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
   let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
   let end = BinaryOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
-  Py.stm $ Exp $ Call "queue.finish" []
+  finishIfSynchronous
   Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Arg $ Var "queue", Arg destmem', Arg src,
                                                  ArgKeyword "device_offset" destidx]
 
@@ -156,7 +155,7 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
   let tb = Exp $ Call "cl.enqueue_copy_buffer"
            [Arg $ Var "queue", Arg srcmem', Arg destmem',
             dest_offset, src_offset, bytecount]
-  Py.stm $ Exp $ Call "queue.finish" []
+  finishIfSynchronous
   Py.stm $ If cond [tb] [Pass]
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
@@ -164,3 +163,7 @@ copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
 
 blockDimPragma :: String
 blockDimPragma = "FUT_BLOCK_DIM = " ++ show (Imp.transposeBlockDim :: Int)
+
+finishIfSynchronous :: Py.CompilerM op s ()
+finishIfSynchronous =
+  Py.stm $ If (Var "synchronous") [Exp $ Call "queue.finish" []] []
