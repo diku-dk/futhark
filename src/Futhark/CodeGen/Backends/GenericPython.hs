@@ -434,7 +434,7 @@ compileEntryFun pre_timing options (fname, Imp.Function outputs inputs _ decl_ou
   let trys = Try main_with_timing [except']
   let iff = If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
             (parse_options ++ str_input ++ [trys] ++ str_output)
-            [Pass]
+            []
 
   return (PyFunc funName (map valueDeclName decl_args) (body'++[ret]),
           iff)
@@ -669,4 +669,4 @@ compileCode (Imp.Write dest (Imp.Count idx) elemtype (Imp.Space space) elemexp) 
     <*> pure space
     <*> compileExp elemexp
 
-compileCode Imp.Skip = stm Pass
+compileCode Imp.Skip = return ()
