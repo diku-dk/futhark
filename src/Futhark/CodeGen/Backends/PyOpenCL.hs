@@ -89,8 +89,9 @@ writeOpenCLScalar mem i bt "device" val = do
   let mem' = Var $ pretty mem
   let nparr = Call "array"
               [Arg val, ArgKeyword "dtype" $ Var $ Py.compileBasicType bt]
-  Py.stm $ Exp $ Call "cl.enqueue_write_buffer" [Arg $ Var "queue", Arg mem', Arg nparr,
-                                                 ArgKeyword "device_offset" i]
+  Py.stm $ Exp $ Call "cl.enqueue_copy" [Arg $ Var "queue", Arg mem', Arg nparr,
+                                         ArgKeyword "device_offset" i,
+                                         ArgKeyword "is_blocking" $ Var "synchronous"]
 
 writeOpenCLScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
@@ -104,9 +105,10 @@ readOpenCLScalar mem i bt "device" = do
                             ArgKeyword "dtype" (Var $ Py.compileBasicType bt)]
   let toNp = Py.asscalar i
   Py.stm $ Assign val' nparr
-  Py.stm $ Exp $ Call "cl.enqueue_read_buffer" [Arg $ Var "queue", Arg mem', Arg val',
-                                                ArgKeyword "device_offset" toNp]
-  Py.stm $ Exp $ Call "queue.finish" []
+  Py.stm $ Exp $ Call "cl.enqueue_copy"
+    [Arg $ Var "queue", Arg val', Arg mem',
+     ArgKeyword "device_offset" toNp,
+     ArgKeyword "is_blocking" $ Constant $ LogVal True]
   return $ Index val' $ IdxExp $ Constant $ IntVal 0
 
 readOpenCLScalar _ _ _ space =
