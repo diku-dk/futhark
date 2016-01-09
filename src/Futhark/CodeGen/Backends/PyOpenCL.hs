@@ -61,7 +61,7 @@ callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
     Nothing -> return None
     Just es -> Tuple <$> mapM Py.compileExp es
   body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
-  Py.stm $ If cond body [Pass]
+  Py.stm $ If cond body []
   return Py.Done
   where mult_exp = BinaryOp "*"
 
@@ -159,7 +159,7 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
             ArgKeyword "dest_offset" dest_offset,
             ArgKeyword "src_offset" src_offset,
             ArgKeyword "byte_count" bytecount]
-  Py.stm $ If cond [tb] [Pass]
+  Py.stm $ If cond [tb] []
   finishIfSynchronous
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
