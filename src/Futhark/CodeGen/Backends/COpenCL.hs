@@ -64,6 +64,16 @@ compileProg prog = do
                            , optionArgument = NoArgument
                            , optionAction = [C.cstm|cl_synchronous = 1;|]
                            }
+                  , Option { optionLongName = "group-size"
+                           , optionShortName = Nothing
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_group_size = atoi(optarg);|]
+                           }
+                  , Option { optionLongName = "num-groups"
+                           , optionShortName = Nothing
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_num_groups = atoi(optarg);|]
+                           }
                   ]
 
 writeOpenCLScalar :: GenericC.WriteScalar OpenCL ()
