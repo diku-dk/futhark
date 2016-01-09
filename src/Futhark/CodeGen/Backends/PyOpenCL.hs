@@ -23,8 +23,8 @@ import Futhark.CodeGen.Backends.GenericPython.Definitions
 
 
 --maybe pass the config file rather than multiple arguments
-compileProg :: MonadFreshNames m => Bool -> Bool -> Prog ->  m (Either String String)
-compileProg timeit moduleConfig prog = do
+compileProg :: MonadFreshNames m => Bool -> Prog ->  m (Either String String)
+compileProg moduleConfig prog = do
   res <- ImpGen.compileProg prog
   --could probably be a better why do to this..
   let initCL = if moduleConfig then [] else [openClInit]
@@ -41,7 +41,7 @@ compileProg timeit moduleConfig prog = do
       let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", pyUtility, pyTestMain, openClDecls opencl_code assign_concat kernel_concat] ++ initCL
       let imports = shebang ++ ["import sys", "from numpy import *", "from ctypes import *", "import pyopencl as cl", "import time"]
 
-      Right <$> Py.compileProg timeit imports defines operations ()
+      Right <$> Py.compileProg imports defines operations ()
         [Exp $ Call "queue.finish" []] [] prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations

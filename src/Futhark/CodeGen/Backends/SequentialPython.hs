@@ -15,7 +15,7 @@ import Futhark.MonadFreshNames
 import Prelude
 
 compileProg :: MonadFreshNames m => Prog -> m (Either String String)
-compileProg = traverse (GenericPython.compileProg False imports defines operations () [] []) <=< ImpGen.compileProg
+compileProg = traverse (GenericPython.compileProg imports defines operations () [] []) <=< ImpGen.compileProg
   where imports = ["#!/usr/bin/env python", "from numpy import *", "from ctypes import *", "import sys", "import re", "import time", "import math"]
         defines = [pyTestMain, pyFunctions, pyUtility] --we could create a seperatate py file that contains all the depenendies and just import it
         operations :: GenericPython.Operations Imp.Sequential ()
