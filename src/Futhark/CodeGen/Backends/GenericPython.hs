@@ -223,10 +223,11 @@ compileProg :: MonadFreshNames m =>
             -> [PyDefinition]
             -> Operations op s
             -> s
+            -> [PyStmt]
             -> [Option]
             -> Imp.Functions op
             -> m String
-compileProg timeit imports defines ops userstate options prog@(Imp.Functions funs)  = do
+compileProg timeit imports defines ops userstate pre_timing options prog@(Imp.Functions funs)  = do
   src <- getNameSource
   let (prog', maincall) = runCompilerM prog ops src userstate compileProg' timeit
   return $ pretty (PyProg prog' (imports++["import argparse"]) defines) ++ "\n" ++ pretty maincall
@@ -235,7 +236,7 @@ compileProg timeit imports defines ops userstate options prog@(Imp.Functions fun
           let mainname = nameFromString "main"
           (main, maincall) <- case lookup mainname funs of
             Nothing   -> fail "No main function"
-            Just func -> compileEntryFun options (mainname, func)
+            Just func -> compileEntryFun pre_timing options (mainname, func)
 
           let renamed = map (replaceFuncName "futhark_main") definitions
 
@@ -405,8 +406,9 @@ writeOutput (Imp.ArrayValue vname bt _) =
     Char -> Exp $ simpleCall "write_chars" [stdout, name]
     _ -> Exp $ simpleCall "write_array" [stdout, name, bt']
 
-compileEntryFun :: [Option] -> (Name, Imp.Function op) -> CompilerM op s (PyFunc, PyStmt)
-compileEntryFun options (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = do
+compileEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
+                -> CompilerM op s (PyFunc, PyStmt)
+compileEntryFun pre_timing options (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
   let funName = pretty fname
   let funTuple = tupleOrSingle $ fmap Var output_paramNames
@@ -431,7 +433,7 @@ compileEntryFun options (fname, Imp.Function outputs inputs _ decl_outputs decl_
   let exitcall = [Exp $ simpleCall "sys.exit" [Field (StringLiteral "Assertion.{} failed") "format(e)"]]
   let except' = Catch (Var "AssertionError") exitcall
   let main_with_timing =
-        addTiming [Assign decl_output_names callmain]
+        addTiming $ Assign decl_output_names callmain : pre_timing
   let trys = Try main_with_timing [except']
   let iff = If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
             (parse_options ++ str_input ++ [trys] ++ str_output)
