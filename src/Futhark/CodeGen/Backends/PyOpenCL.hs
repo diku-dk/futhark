@@ -41,7 +41,8 @@ compileProg timeit moduleConfig prog = do
       let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", pyUtility, pyTestMain, openClDecls opencl_code assign_concat kernel_concat] ++ initCL
       let imports = shebang ++ ["import sys", "from numpy import *", "from ctypes import *", "import pyopencl as cl", "import time"]
 
-      Right <$> Py.compileProg timeit imports defines operations () [] prog'
+      Right <$> Py.compileProg timeit imports defines operations ()
+        [Exp $ Call "queue.finish" []] [] prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations
                      { Py.opsCompiler = callKernel
