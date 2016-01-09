@@ -158,9 +158,9 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
            [Arg $ Var "queue", Arg destmem', Arg srcmem',
             ArgKeyword "dest_offset" dest_offset,
             ArgKeyword "src_offset" src_offset,
-            ArgKeyword "byte_count" bytecount,
-            ArgKeyword "is_blocking" $ Var "synchronous"]
+            ArgKeyword "byte_count" bytecount]
   Py.stm $ If cond [tb] [Pass]
+  finishIfSynchronous
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
