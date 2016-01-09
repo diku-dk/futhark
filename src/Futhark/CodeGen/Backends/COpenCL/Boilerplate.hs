@@ -29,7 +29,7 @@ const char *cl_preferred_platform = "";
 const char *cl_preferred_device = "";
 int cl_verbosity = 1;
 int cl_synchronous = 0;
-static size_t cl_group_size = 512;
+static size_t cl_group_size = 512, cl_num_groups = 128;
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
@@ -301,6 +301,8 @@ void setup_opencl() {
                                  sizeof(size_t), &max_group_size, NULL));
 
   if (max_group_size < cl_group_size) {
+    fprintf(stderr, "Warning: Device limits group size to %d (setting was %d)\n",
+            max_group_size, cl_group_size);
     cl_group_size = max_group_size;
   }
 
@@ -336,7 +338,7 @@ void setup_opencl() {
 }
 
 size_t futhark_num_groups() {
-  return 128; /* Must be a power of two */
+  return cl_num_groups; /* Must be a power of two */
 }
 
 size_t futhark_group_size() {
