@@ -36,30 +36,30 @@ generateOptionParser :: [Option] -> [PyStmt]
 generateOptionParser options =
   [Assign (Var "parser")
    (Call "argparse.ArgumentParser"
-    [ParamAssign (Var "description") $
+    [ArgKeyword "description" $
      StringLiteral "A compiled Futhark program."])] ++
   map parseOption options ++
   [Assign (Var "parser_result") $
-   Call "vars" [Call "parser.parse_args" [Var "sys.argv[1:]"]]] ++
+   Call "vars" [Arg $ Call "parser.parse_args" [Arg $ Var "sys.argv[1:]"]]] ++
   map executeOption options
   where parseOption option =
           Exp $ Call "parser.add_argument" $
-          map StringLiteral name_args ++ argument_args
+          map (Arg . StringLiteral) name_args ++ argument_args
           where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option) $
                             ["--" ++ optionLongName option]
                 argument_args = case optionArgument option of
                   RequiredArgument ->
-                    [ParamAssign (Var "action") (StringLiteral "append"),
-                     ParamAssign (Var "default") $ List []]
+                    [ArgKeyword "action" (StringLiteral "append"),
+                     ArgKeyword "default" $ List []]
 
                   NoArgument ->
-                    [ParamAssign (Var "action") (StringLiteral "append_const"),
-                     ParamAssign (Var "const") None]
+                    [ArgKeyword "action" (StringLiteral "append_const"),
+                     ArgKeyword "const" None]
 
                   OptionalArgument ->
-                    [ParamAssign (Var "action") (StringLiteral "append"),
-                     ParamAssign (Var "default") $ List [],
-                     ParamAssign (Var "nargs") $ StringLiteral "?"]
+                    [ArgKeyword "action" (StringLiteral "append"),
+                     ArgKeyword "default" $ List [],
+                     ArgKeyword "nargs" $ StringLiteral "?"]
 
         executeOption option =
           For "optarg" (Index (Var "parser_result") $

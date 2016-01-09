@@ -1,6 +1,7 @@
 module Futhark.CodeGen.Backends.GenericPython.AST
   ( PyExp(..)
   , PyIdx (..)
+  , PyArg (..)
   , PyStmt(..)
   , module Language.Futhark.Core
   , PyFunc(..)
@@ -28,17 +29,20 @@ data PyExp = Constant BasicValue
            | UnOp String PyExp
            | Cond PyExp PyExp PyExp
            | Index PyExp PyIdx
-           | Call String [PyExp]
+           | Call String [PyArg]
            | Cast PyExp String
            | Tuple [PyExp]
            | List [PyExp]
            | Field PyExp String
            | None
-           | ParamAssign PyExp PyExp
              deriving (Eq, Show)
 
 data PyIdx = IdxRange PyExp PyExp
            | IdxExp PyExp
+             deriving (Eq, Show)
+
+data PyArg = ArgKeyword String PyExp
+           | Arg PyExp
              deriving (Eq, Show)
 
 data PyStmt = If PyExp [PyStmt] [PyStmt]
@@ -67,6 +71,10 @@ instance Pretty PyIdx where
   ppr (IdxExp e) = ppr e
   ppr (IdxRange from to) = ppr from <> text ":" <> ppr to
 
+instance Pretty PyArg where
+  ppr (ArgKeyword k e) = text k <> equals <> ppr e
+  ppr (Arg e) = ppr e
+
 instance Pretty PyExp where
     ppr (Constant chr@(CharVal _)) = text "b" <> ppr chr
     ppr (Constant v) = ppr v
@@ -83,7 +91,6 @@ instance Pretty PyExp where
     ppr (Tuple dims) = parens(commasep $ map ppr dims)
     ppr (List es) = brackets $ commasep $ map ppr es
     ppr None = text "None"
-    ppr (ParamAssign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
 
 instance Pretty PyStmt where
   ppr (If cond tbranch []) =
