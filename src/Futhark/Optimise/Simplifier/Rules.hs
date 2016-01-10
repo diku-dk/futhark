@@ -133,7 +133,7 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
   | not $ all (explicitlyReturned . fst) merge =
   let es = bodyResult body
       necessaryForReturned =
-        findNecessaryForReturned explicitlyReturned (zip mergepat es) (dataDependencies body)
+        findNecessaryForReturned explicitlyReturnedOrInForm (zip mergepat es) (dataDependencies body)
       resIsNecessary ((v,_), _) =
         explicitlyReturned v ||
         paramName v `HS.member` necessaryForReturned ||
@@ -156,6 +156,8 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
        letBind_ pat $ LoopOp $ DoLoop respat merge' form body''
   where (mergepat, _) = unzip merge
         explicitlyReturned = (`elem` respat) . paramName
+        explicitlyReturnedOrInForm p =
+          explicitlyReturned p || paramName p `HS.member` freeIn form
         patAnnotNames = mconcat $ map freeIn mergepat
         referencedInPat = (`HS.member` patAnnotNames) . paramName
         referencedInForm = (`HS.member` freeIn form) . paramName
