@@ -825,7 +825,13 @@ compileCode (If cond tbranch fbranch) = do
   cond' <- compileExp cond
   tbranch' <- collect $ compileCode tbranch
   fbranch' <- collect $ compileCode fbranch
-  stm [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
+  stm $ case (tbranch', fbranch') of
+    (_, []) ->
+      [C.cstm|if ($exp:cond') { $items:tbranch' }|]
+    ([], _) ->
+      [C.cstm|if (!($exp:cond')) { $items:fbranch' }|]
+    _ ->
+      [C.cstm|if ($exp:cond') { $items:tbranch' } else { $items:fbranch' }|]
 
 compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) DefaultSpace (Count size)) = do
   destoffset' <- compileExp destoffset
