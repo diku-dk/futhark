@@ -41,10 +41,13 @@ pyCodeAction filepath config =
          , actionProcedure = procedure
          }
   where procedure prog = do
-          pyprog <- either compileFail return =<< SequentialPy.compileProg prog
+          pyprog <- either compileFail return =<< SequentialPy.compileProg (compilerModule config) prog
           let binpath = outputFilePath filepath config
-          liftIO $ writeFile binpath pyprog
-          _ <- liftIO $ createProcess (proc "chmod" ["+x", binpath])
+          let pypath = if compilerModule config
+                       then binpath `replaceExtension` "py"
+                       else binpath
+          liftIO $ writeFile pypath pyprog
+          _ <- liftIO $ createProcess (proc "chmod" ["+x", pypath])
           return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
@@ -67,6 +70,9 @@ commandLineOptions =
   , Option [] ["unsafe"]
     (NoArg $ Right $ \config -> config { compilerUnsafe = True })
     "Do not perform bound- and size-checks in generated code."
+  , Option [] ["module"]
+    (NoArg $ Right $ \config -> config { compilerModule = True })
+    "Generate the file as a module."
   ]
 
 data CompilerConfig =
@@ -74,6 +80,7 @@ data CompilerConfig =
                  , compilerVerbose :: Maybe (Maybe FilePath)
                  , compilerRealConfiguration :: RealConfiguration
                  , compilerUnsafe :: Bool
+                 , compilerModule :: Bool
                  }
 
 newCompilerConfig :: CompilerConfig
@@ -81,6 +88,7 @@ newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
                                    , compilerRealConfiguration = RealAsFloat64
                                    , compilerUnsafe = False
+                                   , compilerModule = False
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath
