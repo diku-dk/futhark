@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE StandaloneDeriving #-}
 -- | This module defines the concept of a type environment as a
 -- mapping from variable names to 'Type's.  Convenience facilities are
 -- also provided to communicate that some monad or applicative functor
@@ -47,6 +48,8 @@ data NameInfo lore = LetInfo (LetAttr lore)
                    | FParamInfo (FParamAttr lore)
                    | LParamInfo (LParamAttr lore)
                    | IndexInfo
+
+deriving instance Annotations lore => Show (NameInfo lore)
 
 instance Annotations lore => Typed (NameInfo lore) where
   typeOf (LetInfo attr) = typeOf attr
