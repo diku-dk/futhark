@@ -282,8 +282,9 @@ soacInputs soac = do
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
+  scope <- askScope
   let out_nms = map identName idd
-      new_ker = newKernel soac out_nms
+      new_ker = newKernel soac out_nms scope
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
             `HM.union` outArr res
@@ -446,8 +447,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                     case L.findIndex (elem out_nm) bnd_nms of
                       Nothing -> return Nothing
                       Just i  -> return $ Just (ker,ker_nm,i)
+  scope <- askScope
   let kernminds' = L.sortBy (\(_,_,i1) (_,_,i2)->compare i1 i2) $ catMaybes kernminds
-      soac_kernel = newKernel soac out_nms
+      soac_kernel = newKernel soac out_nms scope
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
   -- kernel until which fusion succeded, and @fused_ker@ is the resulted kernel.
   (_,ok_ind,_,fused_ker,_) <-

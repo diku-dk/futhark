@@ -98,18 +98,22 @@ data FusedKer = FusedKer {
   , fusedVars :: [VName]
   -- ^ whether at least a fusion has been performed.
 
+  , kernelScope :: Scope SOACS
+  -- ^ The names in scope at the kernel.  FIXME: get rid of this.
+
   , outputTransform :: SOAC.ArrayTransforms
   , outNames :: [VName]
   }
                 deriving (Show)
 
-newKernel :: SOAC -> [VName] -> FusedKer
-newKernel soac out_nms =
+newKernel :: SOAC -> [VName] -> Scope SOACS -> FusedKer
+newKernel soac out_nms scope =
   FusedKer { fsoac = soac
            , inplace = HS.empty
            , fusedVars = []
            , outputTransform = SOAC.noTransforms
            , outNames = out_nms
+           , kernelScope = scope
            }
 
 arrInputs :: FusedKer -> HS.HashSet VName
@@ -174,10 +178,10 @@ applyFusionRules    unfus_nms outVars soac ker =
 attemptFusion :: (MonadFreshNames m, HasScope SOACS m) =>
                  Names -> [VName] -> SOAC -> FusedKer
               -> m (Maybe FusedKer)
-attemptFusion unfus_nms outVars soac ker = do
-  types <- askScope
+attemptFusion unfus_nms outVars soac ker =
   liftM removeUnusedParamsFromKer <$>
-    tryFusion (applyFusionRules unfus_nms outVars soac ker) types
+    tryFusion (applyFusionRules unfus_nms outVars soac ker)
+    (kernelScope ker)
 
 removeUnusedParamsFromKer :: FusedKer -> FusedKer
 removeUnusedParamsFromKer ker =
