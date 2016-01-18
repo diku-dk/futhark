@@ -63,15 +63,15 @@ integers, and ``[[[{int, real}]]]`` is a three-dimensional array of
 tuples of integers and floats.  An immediate array is written as a
 sequence of elements enclosed by brackets::
 
-  [1, 2, 3]       // Array of type [int].
-  [[1], [2], [3]] // Array of type [[int]].
+  [1, 2, 3]       -- Array of type [int].
+  [[1], [2], [3]] -- Array of type [[int]].
 
 All arrays must be *regular* (often termed *full*).  This means that,
 for example, all rows of a two-dimensional array must have the same
 number of elements::
 
-  [[1, 2], [3]]      // Compile-time error.
-  [iota(1), iota(2)] // A run-time error if reached.
+  [[1, 2], [3]]      -- Compile-time error.
+  [iota(1), iota(2)] -- A run-time error if reached.
 
 The restriction to regular arrays simplifies size analysis and
 optimisation.
@@ -95,7 +95,7 @@ tuples, but this can only be done in ``let``-bindings, and not
 directly in a function argument list.  Specifically, the following
 function definition is not valid::
 
-  fun int sumpair({int, int} {x, y}) = x + y // WRONG!
+  fun int sumpair({int, int} {x, y}) = x + y -- WRONG!
 
 Instead, we must use a ``let``-binding explicitly, as follows::
 
