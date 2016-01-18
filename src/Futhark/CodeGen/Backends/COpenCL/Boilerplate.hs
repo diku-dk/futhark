@@ -8,11 +8,12 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-openClDecls :: [String] -> String -> [C.Definition]
-openClDecls kernel_names opencl_program =
+openClDecls :: [String] -> String -> String -> [C.Definition]
+openClDecls kernel_names opencl_program opencl_prelude =
   kernelDeclarations ++ openclBoilerplate
   where kernelDeclarations =
-          [C.cedecl|$esc:("static const char fut_opencl_src[] = FUT_KERNEL(\n" ++
+          [C.cedecl|static const char fut_opencl_prelude[] = $string:opencl_prelude;|] :
+          [C.cedecl|$esc:("static const char fut_opencl_program[] = FUT_KERNEL(\n" ++
                          opencl_program ++
                          ");")|] :
           concat
@@ -319,19 +320,26 @@ void setup_opencl() {
   assert(error == 0);
 
   // Some drivers complain if we compile empty programs, so bail out early if so.
-  if (strlen(fut_opencl_src) == 0) return;
+  if (strlen(fut_opencl_program) == 0) return;
 
-  // Build the OpenCL program.
-  size_t src_size;
+  // Build the OpenCL program.  First we have to prepend the prelude to the program source.
+  size_t prelude_size = strlen(fut_opencl_prelude);
+  size_t program_size = strlen(fut_opencl_program);
+  size_t src_size = prelude_size + program_size;
+  char *fut_opencl_src = malloc(src_size + 1);
+  strncpy(fut_opencl_src, fut_opencl_prelude, src_size);
+  strncpy(fut_opencl_src+prelude_size, fut_opencl_program, src_size-prelude_size);
+  fut_opencl_src[src_size] = '0';
+
   typename cl_program prog;
   error = 0;
-  src_size = sizeof(fut_opencl_src);
   const char* src_ptr[] = {fut_opencl_src};
   prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
   assert(error == 0);
   char compile_opts[1024];
   snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DWAVE_SIZE=32", FUT_BLOCK_DIM);
   OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
+  free(fut_opencl_src);
 
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)

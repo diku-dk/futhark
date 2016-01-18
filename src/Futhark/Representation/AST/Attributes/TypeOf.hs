@@ -28,6 +28,9 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , subExpShapeContext
        , loopShapeContext
        , loopExtType
+       , convTypes
+       , binOpType
+       , unOpType
 
        -- * Return type
        , module Futhark.Representation.AST.RetType
@@ -57,9 +60,55 @@ import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Scope
 
+-- | Return respectively the source and destination types of a conversion operator.
+convTypes :: ConvOp -> (PrimType, PrimType)
+convTypes (Trunc t1 t2) = (IntType t1, IntType t2)
+convTypes (ZExt t1 t2) = (IntType t1, IntType t2)
+convTypes (SExt t1 t2) = (IntType t1, IntType t2)
+convTypes (FPTrunc t1 t2) = (FloatType t1, FloatType t2)
+convTypes (FPExt t1 t2) = (FloatType t1, FloatType t2)
+convTypes (FPToUI t1 t2) = (FloatType t1, IntType t2)
+convTypes (FPToSI t1 t2) = (FloatType t1, IntType t2)
+convTypes (UIToFP t1 t2) = (IntType t1, FloatType t2)
+convTypes (SIToFP t1 t2) = (IntType t1, FloatType t2)
+
+-- | The result type of a binary operator.
+binOpType :: BinOp -> PrimType
+binOpType (Add t) = IntType t
+binOpType (Sub t) = IntType t
+binOpType (Mul t) = IntType t
+binOpType (SDiv t) = IntType t
+binOpType (SMod t) = IntType t
+binOpType (SQuot t) = IntType t
+binOpType (SRem t) = IntType t
+binOpType (UDiv t) = IntType t
+binOpType (UMod t) = IntType t
+binOpType (Shl t) = IntType t
+binOpType (LShr t) = IntType t
+binOpType (AShr t) = IntType t
+binOpType (And t) = IntType t
+binOpType (Or t) = IntType t
+binOpType (Xor t) = IntType t
+binOpType (SPow t) = IntType t
+binOpType (FPow t) = FloatType t
+binOpType LogAnd = Bool
+binOpType LogOr = Bool
+binOpType (FAdd t) = FloatType t
+binOpType (FSub t) = FloatType t
+binOpType (FMul t) = FloatType t
+binOpType (FDiv t) = FloatType t
+
+-- | The operand and result type of a unary operator.
+unOpType :: UnOp -> PrimType
+unOpType (Signum t) = IntType t
+unOpType Not = Bool
+unOpType (Complement t) = IntType t
+unOpType (Abs t) = IntType t
+unOpType (FAbs t) = FloatType t
+
 -- | The type of a subexpression.
 subExpType :: HasScope t m => SubExp -> m Type
-subExpType (Constant val) = pure $ Basic $ basicValueType val
+subExpType (Constant val) = pure $ Prim $ primValueType val
 subExpType (Var name)     = lookupType name
 
 -- | @mapType f arrts@ wraps each element in the return type of @f@ in
@@ -77,31 +126,27 @@ primOpType (SubExp se) =
 primOpType (ArrayLit es rt) =
   pure [arrayOf rt (Shape [n]) NoUniqueness]
   where n = Constant (value (length es))
-primOpType (BinOp _ _ _ t) =
-  pure [Basic t]
-primOpType (Not _) =
-  pure [Basic Bool]
-primOpType (Complement _) =
-  pure [Basic Int]
-primOpType (Negate e) =
-  pure <$> subExpType e
-primOpType (Abs _) =
-  pure [Basic Int]
-primOpType (Signum _) =
-  pure [Basic Int]
+primOpType (BinOp bop _ _) =
+  pure [Prim $ binOpType bop]
+primOpType (UnOp _ x) =
+  pure <$> subExpType x
+primOpType CmpOp{} =
+  pure [Prim Bool]
+primOpType (ConvOp conv _) =
+  pure [Prim $ snd $ convTypes conv]
 primOpType (Index _ ident idx) =
   result <$> lookupType ident
   where result t = [stripArray (length idx) t]
 primOpType (Iota ne) =
-  pure [arrayOf (Basic Int) (Shape [ne]) NoUniqueness]
+  pure [arrayOf (Prim $ IntType Int32) (Shape [ne]) NoUniqueness]
 primOpType (Replicate ne e) =
   result <$> subExpType e
   where result t = [arrayOf t (Shape [ne]) NoUniqueness]
 primOpType (Scratch t shape) =
-  pure [arrayOf (Basic t) (Shape shape) NoUniqueness]
+  pure [arrayOf (Prim t) (Shape shape) NoUniqueness]
 primOpType (Reshape _ [] e) =
   result <$> lookupType e
-  where result t = [Basic $ elemType t]
+  where result t = [Prim $ elemType t]
 primOpType (Reshape _ shape e) =
   result <$> lookupType e
   where result t = [t `setArrayShape` newShape shape]
@@ -122,10 +167,10 @@ primOpType (Concat _ x _ ressize) =
 primOpType (Copy v) =
   pure <$> lookupType v
 primOpType (Assert _ _) =
-  pure [Basic Cert]
+  pure [Prim Cert]
 primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
-  where result ts = replicate n (Basic Int) ++ ts
+  where result ts = replicate n (Prim $ IntType Int32) ++ ts
 
 -- | The type of a loop operation.
 loopOpExtType :: Typed (FParamAttr lore) =>
@@ -161,7 +206,7 @@ instance Applicative (FeelBad lore) where
   f <*> x = FeelBad $ feelBad f $ feelBad x
 
 instance Annotations lore => HasScope lore (FeelBad lore) where
-  lookupType = const $ pure $ Basic Int
+  lookupType = const $ pure $ Prim $ IntType Int32
   askScope = pure mempty
 
 -- | The type of a body.
@@ -178,7 +223,7 @@ bodyExtType (Body _ bnds res) =
 -- that function, return the size context.
 valueShapeContext :: [TypeBase ExtShape u] -> [Value] -> [Value]
 valueShapeContext rettype values =
-  map (BasicVal . value) $ extractShapeContext rettype $ map valueShape values
+  map (PrimVal . value) $ extractShapeContext rettype $ map valueShape values
 
 -- | Given the return type of a function and the subexpressions
 -- returned by that function, return the size context.

@@ -57,9 +57,9 @@ initialFtable :: FunTable
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, paramts) =
           FunBinding
-          ([], map Basic paramts,
-           const $ Just $ ExtRetType [Basic t])
-          (E.Basic t, map E.Basic paramts)
+          ([], map Prim paramts,
+           const $ Just $ ExtRetType [Prim t])
+          (E.Prim t, map E.Prim paramts)
 
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (ReaderT InternaliseEnv

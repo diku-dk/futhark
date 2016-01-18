@@ -51,15 +51,15 @@ internaliseDeclType' :: DimDeclInterpretation
                      -> E.TypeBase E.ShapeDecl als VName
                      -> StateT (Int, HM.HashMap VName Int)
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
-internaliseDeclType' _ (E.Basic bt) =
-  return [I.Basic bt]
+internaliseDeclType' _ (E.Prim bt) =
+  return [I.Prim bt]
 internaliseDeclType' ddi (E.Tuple ets) =
   concat <$> mapM (internaliseDeclType' ddi) ets
 internaliseDeclType' ddi (E.Array at) =
   internaliseArrayType at
-  where internaliseArrayType (E.BasicArray bt shape u _) = do
+  where internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- internaliseShape shape
-          return [I.arrayOf (I.Basic bt) (ExtShape dims) $
+          return [I.arrayOf (I.Prim bt) (ExtShape dims) $
                   internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
@@ -67,12 +67,12 @@ internaliseDeclType' ddi (E.Array at) =
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
           return [ I.arrayOf ct innerdims $
                    if I.unique ct then Unique
-                   else if I.basicType ct then u
+                   else if I.primType ct then u
                         else I.uniqueness ct
                  | ct <- ts ]
 
-        internaliseTupleArrayElem (BasicArrayElem bt _) =
-          return [I.Basic bt]
+        internaliseTupleArrayElem (PrimArrayElem bt _) =
+          return [I.Prim bt]
         internaliseTupleArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet
         internaliseTupleArrayElem (TupleArrayElem ts) =
@@ -94,7 +94,7 @@ internaliseDeclType' ddi (E.Array at) =
         internaliseDim _ AnyDim =
           Ext <$> newId
         internaliseDim _ (ConstDim n) =
-          return $ Free $ Constant $ IntVal $ fromIntegral n
+          return $ Free $ Constant $ intvalue Int32 $ toInteger n
         internaliseDim BindDims (NamedDim name) =
           Ext <$> knownOrNewId name
         internaliseDim AssertDims (NamedDim name) = do
@@ -112,16 +112,16 @@ internaliseTypeWithUniqueness :: Ord vn =>
                                  E.TypeBase E.Rank als vn
                               -> [I.TypeBase ExtShape Uniqueness]
 internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
-  where internaliseType' (E.Basic bt) =
-          return [I.Basic bt]
+  where internaliseType' (E.Prim bt) =
+          return [I.Prim bt]
         internaliseType' (E.Tuple ets) =
           concat <$> mapM internaliseType' ets
         internaliseType' (E.Array at) =
           internaliseArrayType at
 
-        internaliseArrayType (E.BasicArray bt shape u _) = do
+        internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId
-          return [I.arrayOf (I.Basic bt) (ExtShape dims) $
+          return [I.arrayOf (I.Prim bt) (ExtShape dims) $
                   internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
@@ -130,12 +130,12 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
           ts <- concat <$> mapM internaliseTupleArrayElem elemts
           return [ I.arrayOf t (ExtShape $ outerdim : innerdims) $
                     if I.unique t then Unique
-                    else if I.basicType t then u
+                    else if I.primType t then u
                          else I.uniqueness t
                  | t <- ts ]
 
-        internaliseTupleArrayElem (BasicArrayElem bt _) =
-          return [I.Basic bt]
+        internaliseTupleArrayElem (PrimArrayElem bt _) =
+          return [I.Prim bt]
         internaliseTupleArrayElem (ArrayArrayElem at) =
           internaliseArrayType at
         internaliseTupleArrayElem (TupleArrayElem ts) =
@@ -164,7 +164,7 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
 -- If the input value is or contains a non-regular array, 'Nothing'
 -- will be returned.
 internaliseValue :: E.Value -> Maybe [I.Value]
-internaliseValue (E.ArrayVal arr rt) = do
+internaliseValue (E.ArrayValue arr rt) = do
   arrayvalues <- mapM internaliseValue $ A.elems arr
   let ts          = internaliseType rt
       arrayvalues' =
@@ -180,13 +180,13 @@ internaliseValue (E.ArrayVal arr rt) = do
                Just $ I.ArrayVal (A.listArray (0,size - 1) values')
                (I.elemType rt') shape
              else Nothing
-        flatten (I.BasicVal bv)      = [bv]
+        flatten (I.PrimVal bv)      = [bv]
         flatten (I.ArrayVal bvs _ _) = A.elems bvs
 
-internaliseValue (E.TupVal vs) =
+internaliseValue (E.TupValue vs) =
   concat <$> mapM internaliseValue vs
-internaliseValue (E.BasicVal bv) =
-  return [I.BasicVal bv]
+internaliseValue (E.PrimValue bv) =
+  return [I.PrimVal bv]
 
 determineShape :: Int -> [I.Value] -> [Int]
 determineShape _ vs@(I.ArrayVal _ _ shape : _) =

@@ -183,7 +183,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
   ppExpLore e@(AST.LoopOp (DoLoop _ merge _ body)) =
     maybeComment $ catMaybes [expAttr, mergeAttr]
     where mergeAttr = let mergeParamAliases fparam als
-                            | basicType (paramType fparam) =
+                            | primType (paramType fparam) =
                               Nothing
                             | otherwise =
                               resultAliasComment (paramName fparam) als

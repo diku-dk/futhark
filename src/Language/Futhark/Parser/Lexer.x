@@ -81,9 +81,10 @@ keyword s =
     "in"           -> IN
     "with"         -> WITH
     "int"          -> INT
+    "i32"          -> I32
     "real"         -> REAL
-    "float32"      -> FLOAT32
-    "float64"      -> FLOAT64
+    "f32"          -> F32
+    "f64"          -> F64
     "bool"         -> BOOL
     "cert"         -> CERT
     "char"         -> CHAR

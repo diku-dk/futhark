@@ -155,7 +155,7 @@ simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps ret
         (catMaybes inps') returns body'
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
-        seType (Constant v) = Just $ Basic $ basicValueType v
+        seType (Constant v) = Just $ Prim $ primValueType v
         index_env = HM.fromList $ zip (map fst ispace) $ repeat IndexInfo
         consumed_in_body = consumedInBody body
 

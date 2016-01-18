@@ -33,7 +33,8 @@ import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.Representation.AST
+import Futhark.Representation.AST hiding (numBinOp, intBinOp, ordBinOp, floatBinOp)
+import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
 import Futhark.Transform.Substitute
@@ -48,7 +49,6 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyBinOp
                , letRule simplifyNot
                , letRule simplifyComplement
-               , letRule simplifyNegate
                , letRule simplifyAssert
                , letRule simplifyIndex
                , letRule copyScratchToScratch
@@ -278,7 +278,7 @@ letRule rule vtable (Let pat _ (PrimOp op)) =
   letBind_ pat =<< liftMaybe (PrimOp <$> rule defOf seType op)
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
-        seType (Constant v) = Just $ Basic $ basicValueType v
+        seType (Constant v) = Just $ Prim $ primValueType v
 letRule _ _ _ =
   cannotSimplify
 
@@ -290,10 +290,11 @@ simplifyClosedFormLoop _ _ = cannotSimplify
 simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
                                (LoopOp
-                                (DoLoop respat merge (ForLoop i (Constant (IntVal 1))) body))) = do
+                                (DoLoop respat merge
+                                 (ForLoop i (Constant (IntValue (Int32Value 1)))) body))) = do
   forM_ merge $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ PrimOp $ SubExp mergeinit
-  letBindNames'_ [i] $ PrimOp $ SubExp $ Constant $ IntVal 0
+  letBindNames'_ [i] $ PrimOp $ SubExp $ intconst Int32 0
   loop_body_res <- mapM asVar =<< bodyBind body
   let res_params = zipWith setParamName (map fst merge) loop_body_res
       subst = HM.fromList $ zip (map (paramName . fst) merge) loop_body_res
@@ -329,18 +330,29 @@ simplifyRearrange _ _ _ = Nothing
 
 simplifyBinOp :: LetTopDownRule lore u
 
-simplifyBinOp _ _ (BinOp Plus e1 e2 _)
+simplifyBinOp _ _ (BinOp Add{} e1 e2)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
   | otherwise = SubExp <$> numBinOp op e1 e2
     where op x y = Just $ x + y
 
-simplifyBinOp _ _ (BinOp Minus e1 e2 _)
+simplifyBinOp _ _ (BinOp FAdd{} e1 e2)
+  | isCt0 e1 = Just $ SubExp e2
+  | isCt0 e2 = Just $ SubExp e1
+  | otherwise = SubExp <$> numBinOp op e1 e2
+    where op x y = Just $ x + y
+
+simplifyBinOp _ _ (BinOp Sub{} e1 e2)
   | isCt0 e2 = Just $ SubExp e1
   | otherwise = SubExp <$> numBinOp op e1 e2
     where op x y = Just $ x - y
 
-simplifyBinOp _ _ (BinOp Times e1 e2 _)
+simplifyBinOp _ _ (BinOp FSub{} e1 e2)
+  | isCt0 e2 = Just $ SubExp e1
+  | otherwise = SubExp <$> numBinOp op e1 e2
+    where op x y = Just $ x - y
+
+simplifyBinOp _ _ (BinOp Mul{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
   | isCt0 e2 = Just $ SubExp e2
   | isCt1 e1 = Just $ SubExp e2
@@ -348,177 +360,155 @@ simplifyBinOp _ _ (BinOp Times e1 e2 _)
   | otherwise = SubExp <$> numBinOp op e1 e2
     where op x y = Just $ x * y
 
-simplifyBinOp _ _ (BinOp FloatDiv e1 e2 _)
+simplifyBinOp _ _ (BinOp FMul{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
+  | isCt0 e2 = Just $ SubExp e2
+  | isCt1 e1 = Just $ SubExp e2
   | isCt1 e2 = Just $ SubExp e1
-  | isCt0 e2 = Nothing
-  | otherwise = SubExp <$> intFloatBinOp intop floatop e1 e2
-  where intop x y = return $ x `div` y
-        floatop x y = return $ x / y
+  | otherwise = SubExp <$> numBinOp op e1 e2
+    where op x y = Just $ x * y
 
-simplifyBinOp _ _ (BinOp Mod e1 e2 _)
+simplifyBinOp _ _ (BinOp SMod{} e1 e2)
   | isCt0 e2 = Nothing
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = Just $ x `mod` y
 
-simplifyBinOp _ _ (BinOp Div e1 e2 _)
+simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = return $ x `div` y
 
-simplifyBinOp _ _ (BinOp Rem e1 e2 _)
+simplifyBinOp _ _ (BinOp SRem{} e1 e2)
   | isCt0 e2 = Nothing
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = Just $ x `rem` y
 
-simplifyBinOp _ _ (BinOp Quot e1 e2 _)
+simplifyBinOp _ _ (BinOp SQuot{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
   | isCt1 e2 = Just $ SubExp e1
   | isCt0 e2 = Nothing
   | otherwise = SubExp <$> intBinOp op e1 e2
   where op x y = return $ x `quot` y
 
-simplifyBinOp _ seType (BinOp Pow e1 e2 _)
-  | isCt0 e2 =
-    case seType e1 of
-      Just (Basic Int)     -> binOpRes $ IntVal 1
-      Just (Basic Float32) -> binOpRes $ Float32Val 1.0
-      Just (Basic Float64) -> binOpRes $ Float64Val 1.0
-      _                    -> Nothing
+simplifyBinOp _ _ (BinOp (FPow t) e1 e2)
+  | isCt0 e2 = binOpRes $ FloatValue $ floatvalue t 1
   | isCt0 e1 || isCt1 e1 || isCt1 e2 = Just $ SubExp e1
-  | otherwise = SubExp <$> intFloatBinOp intop floatop e1 e2
-  where intop x y = return $ x ^ y
-        floatop x y = return $ x ** y
+  | otherwise = SubExp <$> floatBinOp op e1 e2
+  where op x y = return $ x ** y
 
-simplifyBinOp _ _ (BinOp ShiftL e1 e2 _)
+simplifyBinOp _ _ (BinOp (Shl t) e1 e2)
   | isCt0 e2 = Just $ SubExp e1
-  | isCt0 e1 = Just $ SubExp $ Constant $ IntVal 0
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 `shiftL` fromIntegral v2
-      _ -> Nothing
+  | isCt0 e1 = Just $ SubExp $ intconst t 0
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x `shiftL` fromIntegral y
 
-simplifyBinOp _ _ (BinOp ShiftR e1 e2 _)
+simplifyBinOp _ _ (BinOp AShr{} e1 e2)
   | isCt0 e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 `shiftR` fromIntegral v2
-      _ -> Nothing
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x `shiftR` fromIntegral y
 
-simplifyBinOp _ _ (BinOp Band e1 e2 _)
-  | isCt0 e1 = Just $ SubExp $ Constant $ IntVal 0
-  | isCt0 e2 = Just $ SubExp $ Constant $ IntVal 0
+simplifyBinOp _ _ (BinOp (And t) e1 e2)
+  | isCt0 e1 = Just $ SubExp $ intconst t 0
+  | isCt0 e2 = Just $ SubExp $ intconst t 0
   | e1 == e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 .&. v2
-      _ -> Nothing
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x .&. y
 
-simplifyBinOp _ _ (BinOp Bor e1 e2 _)
+simplifyBinOp _ _ (BinOp Or{} e1 e2)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
   | e1 == e2 = Just $ SubExp e1
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 .|. v2
-      _ -> Nothing
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x .|. y
 
-simplifyBinOp _ _ (BinOp Xor e1 e2 _)
+simplifyBinOp _ _ (BinOp (Xor t) e1 e2)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
-  | e1 == e2 = binOpRes $ IntVal 0
-  | otherwise =
-    case (e1, e2) of
-      (Constant (IntVal v1), Constant (IntVal v2)) ->
-        binOpRes $ IntVal $ v1 `xor` v2
-      _ -> Nothing
+  | e1 == e2 = binOpRes $ intvalue t 0
+  | otherwise = SubExp <$> intBinOp op e1 e2
+  where op x y = return $ x `xor` y
 
-simplifyBinOp defOf _ (BinOp LogAnd e1 e2 _)
-  | isCt0 e1 = Just $ SubExp $ Constant $ LogVal False
-  | isCt0 e2 = Just $ SubExp $ Constant $ LogVal False
+simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
+  | isCt0 e1 = Just $ SubExp $ Constant $ BoolValue False
+  | isCt0 e2 = Just $ SubExp $ Constant $ BoolValue False
   | isCt1 e1 = Just $ SubExp e2
   | isCt1 e2 = Just $ SubExp e1
   | Var v <- e1,
-    Just (Not e1') <- asPrimOp =<< defOf v,
-    e1' == e2 = binOpRes $ LogVal False
+    Just (UnOp Not e1') <- asPrimOp =<< defOf v,
+    e1' == e2 = binOpRes $ BoolValue False
   | Var v <- e2,
-    Just (Not e2') <- asPrimOp =<< defOf v,
-    e2' == e1 = binOpRes $ LogVal False
+    Just (UnOp Not e2') <- asPrimOp =<< defOf v,
+    e2' == e1 = binOpRes $ BoolValue False
   | otherwise =
     case (e1, e2) of
-      (Constant (LogVal  v1), Constant (LogVal v2)) ->
-        binOpRes $ LogVal $ v1 && v2
+      (Constant (BoolValue  v1), Constant (BoolValue v2)) ->
+        binOpRes $ BoolValue $ v1 && v2
       _ -> Nothing
 
-simplifyBinOp defOf _ (BinOp LogOr e1 e2 _)
+simplifyBinOp defOf _ (BinOp LogOr e1 e2)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
-  | isCt1 e1 = Just $ SubExp $ Constant $ LogVal True
-  | isCt1 e2 = Just $ SubExp $ Constant $ LogVal True
+  | isCt1 e1 = Just $ SubExp $ Constant $ BoolValue True
+  | isCt1 e2 = Just $ SubExp $ Constant $ BoolValue True
   | Var v <- e1,
-    Just (Not e1') <- asPrimOp =<< defOf v,
-    e1' == e2 = binOpRes $ LogVal True
+    Just (UnOp Not e1') <- asPrimOp =<< defOf v,
+    e1' == e2 = binOpRes $ BoolValue True
   | Var v <- e2,
-    Just (Not e2') <- asPrimOp =<< defOf v,
-    e2' == e1 = binOpRes $ LogVal True
+    Just (UnOp Not e2') <- asPrimOp =<< defOf v,
+    e2' == e1 = binOpRes $ BoolValue True
   | otherwise =
     case (e1, e2) of
-      (Constant (LogVal v1), Constant (LogVal v2)) ->
-        binOpRes $ LogVal $ v1 || v2
+      (Constant (BoolValue v1), Constant (BoolValue v2)) ->
+        binOpRes $ BoolValue $ v1 || v2
       _ -> Nothing
 
-simplifyBinOp _ _ (BinOp Equal e1 e2 _)
-  | e1 == e2 = binOpRes $ LogVal True
+simplifyBinOp _ _ (CmpOp CmpEq e1 e2)
+  | e1 == e2 = binOpRes $ BoolValue True
   | otherwise = SubExp <$> ordBinOp op e1 e2
   where op x y = return $ x == y
 
-simplifyBinOp _ _ (BinOp Less e1 e2 _)
-  | e1 == e2 = binOpRes $ LogVal False
+simplifyBinOp _ _ (CmpOp CmpSlt{} e1 e2)
+  | e1 == e2 = binOpRes $ BoolValue False
   | otherwise = SubExp <$> ordBinOp op e1 e2
   where op x y = return $ x < y
 
-simplifyBinOp _ _ (BinOp Leq e1 e2 _)
-  | e1 == e2 = binOpRes $ LogVal True
+simplifyBinOp _ _ (CmpOp FCmpLt{} e1 e2)
+  | e1 == e2 = binOpRes $ BoolValue False
+  | otherwise = SubExp <$> ordBinOp op e1 e2
+  where op x y = return $ x < y
+
+simplifyBinOp _ _ (CmpOp CmpSle{} e1 e2)
+  | e1 == e2 = binOpRes $ BoolValue True
   | otherwise = SubExp <$> ordBinOp op e1 e2
   where op x y = return $ x <= y
 
+simplifyBinOp _ _ (CmpOp FCmpLe{} e1 e2)
+  | e1 == e2 = binOpRes $ BoolValue True
+  | otherwise = SubExp <$> ordBinOp op e1 e2
+  where op x y = return $ x <= y
 simplifyBinOp _ _ _ = Nothing
 
-binOpRes :: BasicValue -> Maybe (PrimOp lore)
+binOpRes :: PrimValue -> Maybe (PrimOp lore)
 binOpRes = Just . SubExp . Constant
 
 simplifyNot :: LetTopDownRule lore u
-simplifyNot _ _ (Not (Constant (LogVal v))) =
+simplifyNot _ _ (UnOp Not (Constant (BoolValue v))) =
   Just $ SubExp $ constant (not v)
-simplifyNot defOf _ (Not (Var v))
-  | Just (PrimOp (Not v2)) <- defOf v =
+simplifyNot defOf _ (UnOp Not (Var v))
+  | Just (PrimOp (UnOp Not v2)) <- defOf v =
   Just $ SubExp v2
 simplifyNot _ _ _ = Nothing
 
 simplifyComplement :: LetTopDownRule lore u
-simplifyComplement _ _ (Complement (Constant (IntVal v))) =
+simplifyComplement _ _ (UnOp Complement{} (Constant (IntValue (Int32Value v)))) =
   Just $ SubExp $ constant $ complement v
 simplifyComplement _ _ _ = Nothing
 
-simplifyNegate :: LetTopDownRule lore u
-simplifyNegate _ _ (Negate (Constant (IntVal v))) =
-  Just $ SubExp $ constant $ negate v
-simplifyNegate _ _ (Negate (Constant (Float32Val v))) =
-  Just $ SubExp $ constant $ negate v
-simplifyNegate _ _ (Negate (Constant (Float64Val v))) =
-  Just $ SubExp $ constant $ negate v
-simplifyNegate _ _ _ =
-  Nothing
-
 -- If expression is true then just replace assertion.
 simplifyAssert :: LetTopDownRule lore u
-simplifyAssert _ _ (Assert (Constant (LogVal True)) _) =
+simplifyAssert _ _ (Assert (Constant (BoolValue True)) _) =
   Just $ SubExp $ Constant Checked
 simplifyAssert _ _ _ =
   Nothing
@@ -620,8 +610,8 @@ simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
       ST.entryBinding =<< ST.lookup idd vtable,
     first_index : rest_indices <- inds = do
       -- Figure out the extra offset that we should add to the first index.
-      let plus x y = eBinOp Plus x y Int
-          esum [] = return $ PrimOp $ SubExp $ Constant $ IntVal 0
+      let plus = eBinOp (Add Int32)
+          esum [] = return $ PrimOp $ SubExp $ intconst Int32 0
           esum (x:xs) = foldl plus x xs
 
       patElem_and_offset <-
@@ -633,7 +623,7 @@ simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
         Just (_, offset_e) -> do
           offset <- letSubExp "offset" offset_e
           offset_index <- letSubExp "offset_index" $
-                          PrimOp $ BinOp Plus first_index offset Int
+                          PrimOp $ BinOp (Add Int32) first_index offset
           letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 (offset_index:rest_indices)
 simplifyIndexIntoSplit _ _ =
   cannotSimplify
@@ -684,8 +674,8 @@ simplifyBoolBranch :: MonadBinder m => TopDownRule m
 simplifyBoolBranch _
   (Let pat _
    (If cond
-    (Body _ [] [Constant (LogVal True)])
-    (Body _ [] [Constant (LogVal False)])
+    (Body _ [] [Constant (BoolValue True)])
+    (Body _ [] [Constant (BoolValue False)])
     _)) =
   letBind_ pat $ PrimOp $ SubExp cond
 -- When seType(x)==bool, if c then x else y == (c && x) || (!c && y)
@@ -693,12 +683,11 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
   | Body _ [] [tres] <- tb,
     Body _ [] [fres] <- fb,
     patternSize pat == length ts,
-    all (==Basic Bool) ts,
+    all (==Prim Bool) ts,
     False = do -- FIXME: disable because algebraic optimiser cannot handle it.
-  e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres Bool)
-                    (eBinOp LogAnd (pure $ PrimOp $ Not cond)
-                     (pure $ PrimOp $ SubExp fres) Bool)
-       Bool
+  e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres)
+                    (eBinOp LogAnd (pure $ PrimOp $ UnOp Not cond)
+                     (pure $ PrimOp $ SubExp fres))
   letBind_ pat e
 simplifyBoolBranch _ _ = cannotSimplify
 
@@ -783,17 +772,17 @@ simplifyScalExp vtable (Let pat _ e) = do
   case res of
     -- If the sufficient condition is 'True', then it statically succeeds.
     Just se@(SE.RelExp SE.LTH0 _)
-      | Right (SE.Val (LogVal True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
-        letBind_ pat $ PrimOp $ SubExp $ Constant $ LogVal True
+      | Right (SE.Val (BoolValue True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
+        letBind_ pat $ PrimOp $ SubExp $ Constant $ BoolValue True
     Just se
       | new@(SE.Val val) <- AS.simplify se ranges,
         se /= new ->
            letBind_ pat $ PrimOp $ SubExp $ Constant val
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
-        mkDisj []     = SE.Val $ LogVal False
+        mkDisj []     = SE.Val $ BoolValue False
         mkDisj (x:xs) = foldl SE.SLogOr (mkConj x) $ map mkConj xs
-        mkConj []     = SE.Val $ LogVal True
+        mkConj []     = SE.Val $ BoolValue True
         mkConj (x:xs) = foldl SE.SLogAnd x xs
 
 simplifyIdentityReshape :: LetTopDownRule lore u
@@ -845,7 +834,7 @@ removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
   t <- lookupType v
   let originalNotUsedAnymore =
         not (any (`UT.used` used) $ vnameAliases v)
-  if basicType t || originalNotUsedAnymore
+  if primType t || originalNotUsedAnymore
     then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
     else cannotSimplify
 removeUnnecessaryCopy _ _ = cannotSimplify
@@ -907,7 +896,7 @@ removeDeadBranchResult _ _ = cannotSimplify
 -- is actually the case, such as if we will obtain at least one
 -- constant-to-constant comparison?
 simplifyBranchResultComparison :: MonadBinder m => TopDownRule m
-simplifyBranchResultComparison vtable (Let pat _ (PrimOp (BinOp Equal se1 se2 _)))
+simplifyBranchResultComparison vtable (Let pat _ (PrimOp (CmpOp CmpEq se1 se2)))
   | Just m <- simplifyWith se1 se2 = m
   | Just m <- simplifyWith se2 se1 = m
   where simplifyWith (Var v) x
@@ -918,17 +907,17 @@ simplifyBranchResultComparison vtable (Let pat _ (PrimOp (BinOp Equal se1 se2 _)
             HS.null $ freeIn y `HS.intersection` boundInBody tbranch,
             HS.null $ freeIn z `HS.intersection` boundInBody fbranch = Just $ do
                 eq_x_y <-
-                  letSubExp "eq_x_y" $ PrimOp $ BinOp Equal x y Bool
+                  letSubExp "eq_x_y" $ PrimOp $ CmpOp CmpEq x y
                 eq_x_z <-
-                  letSubExp "eq_x_z" $ PrimOp $ BinOp Equal x z Bool
+                  letSubExp "eq_x_z" $ PrimOp $ CmpOp CmpEq x z
                 p_and_eq_x_y <-
-                  letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd p eq_x_y Bool
+                  letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd p eq_x_y
                 not_p <-
-                  letSubExp "not_p" $ PrimOp $ Not p
+                  letSubExp "not_p" $ PrimOp $ UnOp Not p
                 not_p_and_eq_x_z <-
-                  letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd not_p eq_x_z Bool
+                  letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd not_p eq_x_z
                 letBind_ pat $
-                  PrimOp $ BinOp LogOr p_and_eq_x_y not_p_and_eq_x_z Bool
+                  PrimOp $ BinOp LogOr p_and_eq_x_y not_p_and_eq_x_z
         simplifyWith _ _ =
           Nothing
 
@@ -944,64 +933,36 @@ simplifyBranchResultComparison _ _ =
 -- Some helper functions
 
 isCt1 :: SubExp -> Bool
-isCt1 (Constant (IntVal x))     = x == 1
-isCt1 (Constant (Float32Val x)) = x == 1
-isCt1 (Constant (Float64Val x)) = x == 1
-isCt1 (Constant (LogVal x))     = x
-isCt1 _                         = False
+isCt1 (Constant v) = oneIsh v
+isCt1 _ = False
 
 isCt0 :: SubExp -> Bool
-isCt0 (Constant (IntVal x))     = x == 0
-isCt0 (Constant (Float32Val x)) = x == 0
-isCt0 (Constant (Float64Val x)) = x == 0
-isCt0 (Constant (LogVal x))     = not x
-isCt0 _                         = False
+isCt0 (Constant v) = zeroIsh v
+isCt0 _ = False
 
 ordBinOp :: (Functor m, Monad m) =>
             (forall a. Ord a => a -> a -> m Bool)
          -> SubExp -> SubExp -> m SubExp
-ordBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
-  Constant <$> LogVal <$> x `op` y
-ordBinOp op (Constant (CharVal x)) (Constant (CharVal y)) =
-  Constant <$> LogVal <$> x `op` y
-ordBinOp op (Constant (Float32Val x)) (Constant (Float32Val y)) =
-  Constant <$> LogVal <$> x `op` y
-ordBinOp op (Constant (Float64Val x)) (Constant (Float64Val y)) =
-  Constant <$> LogVal <$> x `op` y
-ordBinOp op (Constant (LogVal x)) (Constant (LogVal y)) =
-  Constant <$> LogVal <$> x `op` y
-ordBinOp _ _ _ =
-  fail "ordBinOp: operands not of appropriate type."
+ordBinOp op (Constant v1) (Constant v2) = Constant <$> AST.ordBinOp op v1 v2
+ordBinOp _ _ _ =   fail "ordBinOp: operands not constants."
 
 numBinOp :: (Functor m, Monad m) =>
             (forall num. Num num => num -> num -> m num)
          -> SubExp -> SubExp -> m SubExp
-numBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
-  Constant <$> IntVal <$> x `op` y
-numBinOp op (Constant (Float32Val x)) (Constant (Float32Val y)) =
-  Constant <$> Float32Val <$> x `op` y
-numBinOp op (Constant (Float64Val x)) (Constant (Float64Val y)) =
-  Constant <$> Float64Val <$> x `op` y
+numBinOp op (Constant v1) (Constant v2) = Constant <$> AST.numBinOp op v1 v2
 numBinOp _ _ _ =
-  fail "numBinOp: operands not of appropriate type."
+  fail "numBinOp: operands not constants."
 
 intBinOp :: (Functor m, Monad m) =>
-            (forall int. Integral int => int -> int -> m int)
+            (forall int. (Integral int, Bits int) => int -> int -> m int)
          -> SubExp -> SubExp -> m SubExp
-intBinOp op (Constant (IntVal x)) (Constant (IntVal y)) =
-  Constant <$> IntVal <$> x `op` y
+intBinOp op (Constant v1) (Constant v2) = Constant <$> AST.intBinOp op v1 v2
 intBinOp _ _ _ =
-  fail "intBinOp: operands not of appropriate type."
+  fail "intBinOp: operands not constants."
 
-intFloatBinOp :: (Functor m, Monad m) =>
-                 (forall int. Integral int => int -> int -> m int)
-              -> (forall float. Floating float => float -> float -> m float)
-              -> SubExp -> SubExp -> m SubExp
-intFloatBinOp intop _ (Constant (IntVal x)) (Constant (IntVal y)) =
-  Constant <$> IntVal <$> x `intop` y
-intFloatBinOp _ floatop (Constant (Float32Val x)) (Constant (Float32Val y)) =
-  Constant <$> Float32Val <$> x `floatop` y
-intFloatBinOp _ floatop (Constant (Float64Val x)) (Constant (Float64Val y)) =
-  Constant <$> Float64Val <$> x `floatop` y
-intFloatBinOp _ _ _ _ =
-  fail "intFloatBinOp: operands not of appropriate type."
+floatBinOp :: (Functor m, Monad m) =>
+              (forall float. (Floating float, Eq float) => float -> float -> m float)
+           -> SubExp -> SubExp -> m SubExp
+floatBinOp op (Constant v1) (Constant v2) = Constant <$> AST.floatBinOp op v1 v2
+floatBinOp _ _ _ =
+  fail "floatBinOp: operands not constants."

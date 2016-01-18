@@ -233,7 +233,7 @@ instance Attributes lore => IsOp (SOAC lore) where
   safeOp _ = False
 
 substNamesInExtType :: HM.HashMap VName SubExp -> ExtType -> ExtType
-substNamesInExtType _ tp@(Basic _) = tp
+substNamesInExtType _ tp@(Prim _) = tp
 substNamesInExtType subs (Mem se space) =
   Mem (substNamesInSubExp subs se) space
 substNamesInExtType subs (Array btp shp u) =
@@ -301,22 +301,22 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (SOAC lore) where
 
 typeCheckSOAC :: TC.Checkable lore => SOAC (Aliases lore) -> TC.TypeM lore ()
 typeCheckSOAC (Map cs size fun arrexps) = do
-  mapM_ (TC.requireI [Basic Cert]) cs
-  TC.require [Basic Int] size
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun arrargs
 
 typeCheckSOAC (ConcatMap cd size fun inarrs) = do
-  mapM_ (TC.requireI [Basic Cert]) cd
-  TC.require [Basic Int] size
+  mapM_ (TC.requireI [Prim Cert]) cd
+  TC.require [Prim int32] size
   forM_ inarrs $ \inarr -> do
     args <- mapM (TC.checkArg . Var) inarr
     void $ TC.checkConcatMapLambda fun args
 
 typeCheckSOAC (Reduce ass size _ fun inputs) = do
   let (startexps, arrexps) = unzip inputs
-  mapM_ (TC.requireI [Basic Cert]) ass
-  TC.require [Basic Int] size
+  mapM_ (TC.requireI [Prim Cert]) ass
+  TC.require [Prim int32] size
   startargs <- mapM TC.checkArg startexps
   arrargs   <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun $ startargs ++ arrargs
@@ -335,8 +335,8 @@ typeCheckSOAC (Reduce ass size _ fun inputs) = do
 -- Scan is exactly identical to Reduce.  Duplicate for clarity anyway.
 typeCheckSOAC (Scan ass size fun inputs) = do
   let (startexps, arrexps) = unzip inputs
-  mapM_ (TC.requireI [Basic Cert]) ass
-  TC.require [Basic Int] size
+  mapM_ (TC.requireI [Prim Cert]) ass
+  TC.require [Prim int32] size
   startargs <- mapM TC.checkArg startexps
   arrargs   <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun $ startargs ++ arrargs
@@ -353,8 +353,8 @@ typeCheckSOAC (Scan ass size fun inputs) = do
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
 typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
-  mapM_ (TC.requireI [Basic Cert]) ass
-  TC.require [Basic Int] size
+  mapM_ (TC.requireI [Prim Cert]) ass
+  TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   accargs <- mapM TC.checkArg accexps
   TC.checkLambda innerfun $ accargs ++ arrargs
@@ -373,14 +373,14 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
 
 typeCheckSOAC (Stream ass size form lam arrexps _) = do
   let accexps = getStreamAccums form
-  mapM_ (TC.requireI [Basic Cert]) ass
-  TC.require [Basic Int] size
+  mapM_ (TC.requireI [Prim Cert]) ass
+  TC.require [Prim int32] size
   accargs <- mapM TC.checkArg accexps
   arrargs <- mapM lookupType arrexps
   _ <- TC.checkSOACArrayArgs size arrexps
   let chunk = head $ extLambdaParams lam
   let asArg t = (t, mempty)
-      inttp   = Basic Int
+      inttp   = Prim int32
       lamarrs'= map (`setOuterSize` Var (paramName chunk)) arrargs
   TC.checkExtLambda lam $ asArg inttp : accargs ++ map asArg lamarrs'
   let acc_len= length accexps

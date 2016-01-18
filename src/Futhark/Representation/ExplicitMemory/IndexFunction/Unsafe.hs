@@ -51,7 +51,6 @@ import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
 import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
-import Language.Futhark.Core
 import Futhark.Util.Pretty as PP
 
 data IxFun = forall c n .
@@ -217,9 +216,7 @@ shape (IxFun _ _ f) =
 
 isDirect :: IxFun -> Bool
 isDirect =
-  maybe False (==zeroscal) . flip linearWithOffset onescal
-  where zeroscal = Val (IntVal 0)
-        onescal = Val (IntVal 1)
+  maybe False (==0) . flip linearWithOffset 1
 
 linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ _ ixfun) =

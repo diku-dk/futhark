@@ -26,14 +26,14 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code kernel_names prog') -> do
+    Right (Program opencl_code opencl_prelude kernel_names prog') -> do
       let header = unlines [ "#include <CL/cl.h>\n"
                            , "#define FUT_KERNEL(s) #s"
                            , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
                            , blockDimPragma
                            ]
       cprog <- GenericC.compileProg operations ()
-               (openClDecls kernel_names opencl_code)
+               (openClDecls kernel_names opencl_code opencl_prelude)
                openClInit
                [[C.cstm|OPENCL_SUCCEED(clFinish(fut_cl_queue));|]]
                (openClReport kernel_names)

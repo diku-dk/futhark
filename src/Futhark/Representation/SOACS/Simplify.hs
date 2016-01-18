@@ -61,12 +61,11 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     vtable <- Engine.getVtable
     let (chunk:_) = extLambdaParams lam
         se_outer = case outerdim of
-                      Var idd    -> fromMaybe (SE.Id idd Int) (ST.lookupScalExp idd vtable)
+                      Var idd    -> fromMaybe (SE.Id idd int32) (ST.lookupScalExp idd vtable)
                       Constant c -> SE.Val c
-        se_1 = SE.Val $ IntVal 1
         -- extension: one may similarly treat iota stream-array case,
         -- by setting the bounds to [0, se_outer-1]
-        parbnds  = [ (chunk, se_1, se_outer) ]
+        parbnds  = [ (chunk, 1, se_outer) ]
     lam' <- Engine.simplifyExtLambda lam outerdim' parbnds
     return $ Stream cs' outerdim' form' lam' arr' ii
     where simplifyStreamForm _ (MapLike o) =
@@ -100,7 +99,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w $ map Just arrs'
+    fun' <- Engine.simplifyLambda fun w $ map (const Nothing) arrs'
     return $ Reduce cs' w' comm fun' (zip acc' arrs')
 
   simplifyOp (Scan cs w fun input) = do
@@ -109,7 +108,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w $ map Just arrs'
+    fun' <- Engine.simplifyLambda fun w $ map (const Nothing) arrs'
     return $ Scan cs' w' fun' (zip acc' arrs')
 
   simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) = do
@@ -118,7 +117,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
     outerfun' <- Engine.simplifyLambda outerfun w $
-                 replicate (length $ lambdaParams outerfun) Nothing
+                 map (const Nothing) arrs'
     (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w $ map Just arrs
     (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
     return $ Redomap cs' w' comm outerfun' innerfun'' acc' arrs''
@@ -338,7 +337,7 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr ii))) 
         (_,newexps'') = unzip newpatexps'
         newpatexps''= zip newpats' newexps''
     forM_ newpatexps'' $ \(p,e) -> addBinding =<< mkLetM p e
-      where gatherPat acc (_, Basic _, _) = return acc
+      where gatherPat acc (_, Prim _, _) = return acc
             gatherPat acc (_, Mem {}, _) = return acc
             gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
               foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))

@@ -18,7 +18,7 @@ import Text.Parsec.Language
 import qualified Text.Parsec.Token as Token
 
 import Futhark.Analysis.ScalExp
-import Futhark.Representation.AST hiding (constant)
+import Futhark.Representation.AST hiding (constant, SDiv, SPow)
 
 tests :: [Test]
 tests = []
@@ -78,16 +78,16 @@ identifier = do s <- (:) <$> letter <*> many alphaNum
                 varDecl s <|> knownVar s
   where varDecl s = do
           t <- parens $
-               (reserved "int" >> pure (Basic Int)) <|>
-               (reserved "float32" >> pure (Basic Float32)) <|>
-               (reserved "float64" >> pure (Basic Float64)) <|>
-               (reserved "bool" >> pure (Basic Bool))
+               (reserved "int" >> pure (Prim $ IntType Int32)) <|>
+               (reserved "float32" >> pure (Prim $ FloatType Float32)) <|>
+               (reserved "float64" >> pure (Prim $ FloatType Float64)) <|>
+               (reserved "bool" >> pure (Prim Bool))
           newVar s t
 
 constant :: Parser ScalExp
-constant = (reserved "True" >> pure (Val $ LogVal True)) <|>
-           (reserved "False" >> pure (Val $ LogVal True)) <|>
-           (Val . IntVal <$> integer)
+constant = (reserved "True" >> pure (Val $ BoolValue True)) <|>
+           (reserved "False" >> pure (Val $ BoolValue True)) <|>
+           (Val . IntValue . Int32Value <$> integer)
   where integer = fromIntegral <$> Token.integer lexer
 
 expr :: Parser ScalExp
@@ -102,7 +102,7 @@ prim = parens expr <|>
   where maxapp = reserved "max" >> MaxMin False <$> parens (expr `sepBy` comma)
         minapp = reserved "min" >> MaxMin True <$> parens (expr `sepBy` comma)
         comma = Token.comma lexer
-        scalExpId (Ident name (Basic t)) = Id name t
+        scalExpId (Ident name (Prim t)) = Id name t
         scalExpId (Ident name t) = error $
                                    pretty name ++ " is of type " ++ pretty t ++
                                    " but supposed to be a ScalExp."

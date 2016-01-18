@@ -100,10 +100,10 @@ instance TypeCheck.Checkable SOACS where
   matchPattern pat e = do
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
-  basicFParam _ name t =
-    AST.Param name (AST.Basic t)
-  basicLParam _ name t =
-    AST.Param name (AST.Basic t)
+  primFParam _ name t =
+    AST.Param name (AST.Prim t)
+  primLParam _ name t =
+    AST.Param name (AST.Prim t)
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 

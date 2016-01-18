@@ -26,7 +26,7 @@ module Futhark.Representation.AST.Syntax
   , Diet(..)
 
   -- * Values
-  , BasicValue(..)
+  , PrimValue(..)
   , Value(..)
 
   -- * Abstract syntax tree
@@ -44,7 +44,10 @@ module Futhark.Representation.AST.Syntax
   , Body
   , PrimOp (..)
   , LoopOp (..)
+  , UnOp (..)
   , BinOp (..)
+  , CmpOp (..)
+  , ConvOp (..)
   , DimChange (..)
   , ShapeChange
   , ExpT(..)
@@ -123,28 +126,103 @@ deriving instance Annotations lore => Eq (BodyT lore)
 
 type Body = BodyT
 
--- | Binary operators.
-data BinOp = Plus -- Binary Ops for Numbers
-           | Minus
-           | Pow
-           | Times
-           | FloatDiv
-           | Div -- ^ Rounds towards negative infinity.
-           | Mod
-           | Quot -- ^ Rounds towards zero.
-           | Rem
-           | ShiftR
-           | ShiftL
-           | Band
-           | Xor
-           | Bor
-           | LogAnd
-           | LogOr
-           -- Relational Ops for all basic types at least
-           | Equal
-           | Less
-           | Leq
-             deriving (Eq, Ord, Enum, Bounded, Show)
+-- | Various unary operators.  It is a bit ad-hoc what is a unary
+-- operator and what is a built-in function.  Perhaps these should all
+-- go away eventually.
+data UnOp = Not -- ^ E.g., @! True == False@.
+          | Complement IntType -- ^ E.g., @~(~1) = 1@.
+          | Abs IntType -- ^ @abs(-2) = 2@.
+          | FAbs FloatType -- ^ @abs(-2.0) = 2.0@.
+          | Signum IntType -- ^ @signum(2)@ = 1.
+             deriving (Eq, Ord, Show)
+
+-- | Binary operators.  These correspond closely to the binary operators in
+-- LLVM.  Most are parametrised by their expected input and output
+-- types.
+data BinOp = Add IntType -- ^ Integer addition.
+           | FAdd FloatType -- ^ Floating-point addition.
+
+           | Sub IntType -- ^ Integer subtraction.
+           | FSub FloatType -- ^ Floating-point subtraction.
+
+           | Mul IntType -- ^ Integer multiplication.
+           | FMul FloatType -- ^ Floating-point multiplication.
+
+           | UDiv IntType
+             -- ^ Unsigned integer division.  Rounds towards
+             -- negativity infinity.  Note: this is different
+             -- from LLVM.
+           | SDiv IntType
+             -- ^ Signed integer division.  Rounds towards
+             -- negativity infinity.  Note: this is different
+             -- from LLVM.
+           | FDiv FloatType -- ^ Floating-point division.
+
+           | UMod IntType
+             -- ^ Unsigned integer modulus; the countepart to 'UDiv'.
+           | SMod IntType
+             -- ^ Signed integer modulus; the countepart to 'SDiv'.
+
+           | SQuot IntType
+             -- ^ Signed integer division.  Rounds towards zero.
+             -- This corresponds to the @sdiv@ instruction in LLVM.
+           | SRem IntType
+             -- ^ Signed integer division.  Rounds towards zero.
+             -- This corresponds to the @srem@ instruction in LLVM.
+
+           | Shl IntType -- ^ Left-shift.
+           | LShr IntType -- ^ Logical right-shift, zero-extended.
+           | AShr IntType -- ^ Arithmetic right-shift, sign-extended.
+
+           | And IntType -- ^ Bitwise and.
+           | Or IntType -- ^ Bitwise or.
+           | Xor IntType -- ^ Bitwise exclusive-or.
+
+           | SPow IntType -- ^ Signed integer exponentatation.
+           | FPow FloatType -- ^ Floating-point exponentatation.
+
+           | LogAnd -- ^ Boolean and - not short-circuiting.
+           | LogOr -- ^ Boolean or - not short-circuiting.
+             deriving (Eq, Ord, Show)
+
+-- | Comparison operators are like 'BinOp's, but they return 'Bool's.
+-- The somewhat ugly constructor names are straight out of LLVM.
+data CmpOp = CmpEq -- ^ All types equality.
+           | CmpUlt IntType -- ^ Unsigned less than.
+           | CmpUle IntType -- ^ Unsigned less than or equal.
+           | CmpSlt IntType -- ^ Signed less than.
+           | CmpSle IntType -- ^ Signed less than or equal.
+
+             -- Comparison operators for floating-point values.  TODO: extend
+             -- this to handle NaNs and such, like the LLVM fcmp instruction.
+           | FCmpLt FloatType -- ^ Floating-point less than.
+           | FCmpLe FloatType -- ^ Floating-point less than or equal.
+
+             deriving (Eq, Ord, Show)
+
+-- | Conversion operators try to generalise the @from t0 x to t1@
+-- instructions from LLVM.
+data ConvOp = Trunc IntType IntType
+              -- ^ Truncate the former integer type to the latter.
+            | ZExt IntType IntType
+              -- ^ Zero-extend the former integer type to the latter.
+            | SExt IntType IntType
+              -- ^ Sign-extend the former integer type to the latter.
+            | FPTrunc FloatType FloatType
+              -- ^ Truncate the former floating-point type to the latter.
+            | FPExt FloatType FloatType
+              -- ^ Extend the former floating-point type to the latter.
+            | FPToUI FloatType IntType
+              -- ^ Convert a floating-point value to the nearest
+              -- unsigned integer (rounding towards zero).
+            | FPToSI FloatType IntType
+              -- ^ Convert a floating-point value to the nearest
+              -- signed integer (rounding towards zero).
+            | UIToFP IntType FloatType
+              -- ^ Convert an unsigned integer to a floating-point value.
+            | SIToFP IntType FloatType
+              -- ^ Convert a signed integer to a floating-point value.
+             deriving (Eq, Ord, Show)
 
 -- | The new dimension in a 'Reshape'-like operation.  This allows us to
 -- disambiguate "real" reshapes, that change the actual shape of the
@@ -183,14 +261,18 @@ data PrimOp lore
     -- Second arg is the element type of of the rows of the array.
     -- Scalar operations
 
-  | BinOp BinOp SubExp SubExp BasicType
-    -- ^ The type is the result type.
+  | UnOp UnOp SubExp
+    -- ^ Unary operation - result type is the same as the input type.
 
-  | Not SubExp -- ^ E.g., @! True == False@.
-  | Negate SubExp -- ^ E.g., @-(-1) = 1@.
-  | Complement SubExp -- ^ E.g., @~(~1) = 1@.
-  | Abs SubExp -- ^ @abs(-2) = 2@.
-  | Signum SubExp -- ^ @signum(2)@ = 1.
+  | BinOp BinOp SubExp SubExp
+    -- ^ Binary operation - result type is the same as the input
+    -- types.
+
+  | CmpOp CmpOp SubExp SubExp
+    -- ^ Comparison - result type is always boolean.
+
+  | ConvOp ConvOp SubExp
+    -- ^ Conversion "casting".
 
   -- Assertion management.
   | Assert SubExp SrcLoc
@@ -225,7 +307,7 @@ data PrimOp lore
   -- ^ @iota(n) = [0,1,..,n-1]@
   | Replicate SubExp SubExp
   -- ^ @replicate(3,1) = [1, 1, 1]@
-  | Scratch BasicType [SubExp]
+  | Scratch PrimType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.

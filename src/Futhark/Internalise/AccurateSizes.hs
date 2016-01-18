@@ -33,7 +33,8 @@ shapeBody shapenames ts body =
 annotateArrayShape :: ArrayShape shape =>
                       TypeBase shape u -> [Int] -> TypeBase Shape u
 annotateArrayShape t newshape =
-  t `setArrayShape` Shape (take (arrayRank t) (map intconst $ newshape ++ repeat 0))
+  t `setArrayShape` Shape (take (arrayRank t) $
+                           map (intconst Int32 . toInteger) $ newshape ++ repeat 0)
 
 argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
 argShapes shapes valts valargts =
@@ -41,7 +42,7 @@ argShapes shapes valts valargts =
   where mapping = shapeMapping valts valargts
         addShape name
           | Just se <- HM.lookup name mapping = se
-          | otherwise                         = Constant (IntVal 0)
+          | otherwise                         = intconst Int32 0
 
 ensureResultShape :: MonadBinder m =>
                      (m Certificates -> m Certificates)
@@ -88,7 +89,7 @@ ensureShapeVar asserting loc t name v
     oldshape <- arrayDims <$> lookupType v
     let checkDim desired has =
           letExp "shape_cert" =<<
-          eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
+          eAssert (pure $ PrimOp $ CmpOp CmpEq desired has) loc
     certs <- asserting $ zipWithM checkDim newshape oldshape
     letExp name $ shapeCoerce certs newshape v
   | otherwise = return v

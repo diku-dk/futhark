@@ -37,7 +37,7 @@ import Data.Loc hiding (L) -- Lexer has replacements.
 import qualified Data.HashMap.Lazy as HM
 
 import Language.Futhark.Syntax hiding (ID)
-import Language.Futhark.Attributes
+import Language.Futhark.Attributes hiding (arrayValue)
 import Language.Futhark.Parser.Lexer
 
 }
@@ -48,7 +48,7 @@ import Language.Futhark.Parser.Lexer
 %name lambda FunAbstr
 %name futharktype Type
 %name intValue IntValue
-%name boolValue LogValue
+%name boolValue BoolValue
 %name charValue CharValue
 %name certValue CertValue
 %name stringValue StringValue
@@ -70,12 +70,13 @@ import Language.Futhark.Parser.Lexer
       loop            { L $$ LOOP }
       in              { L $$ IN }
       int             { L $$ INT }
+      i32             { L $$ I32 }
       bool            { L $$ BOOL }
       cert            { L $$ CERT }
       char            { L $$ CHAR }
       real            { L $$ REAL }
-      float32         { L $$ FLOAT32 }
-      float64         { L $$ FLOAT64 }
+      f32             { L $$ F32 }
+      f64             { L $$ F64 }
 
       id              { L _ (ID _) }
 
@@ -173,7 +174,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs
+%nonassoc '~' '!' signum abs real f32 f64
 
 %%
 
@@ -208,6 +209,9 @@ UnOp :: { (UnOp, SrcLoc) }
      | '!' { (Not, $1) }
      | abs { (Abs, $1) }
      | signum { (Signum, $1) }
+     | f32 { (ToFloat Float32, $1) }
+     | f64 { (ToFloat Float64, $1) }
+     | real {% do t <- getRealType; return (ToFloat t, $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
@@ -223,7 +227,7 @@ Uniqueness : '*' { Unique }
            |     { Nonunique }
 
 Type :: { UncheckedType }
-        : BasicType     { Basic $1 }
+        : PrimType     { Prim $1 }
         | ArrayType     { Array $1 }
         | '{' Types '}' { Tuple $2 }
 ;
@@ -238,16 +242,16 @@ DimDecl :: { DimDecl Name }
         | { AnyDim }
 
 ArrayType :: { UncheckedArrayType }
-          : Uniqueness '[' BasicArrayRowType DimDecl ']'
+          : Uniqueness '[' PrimArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in BasicArray et (ShapeDecl ($4:ds)) $1 NoInfo }
+              in PrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
           | Uniqueness '[' TupleArrayRowType DimDecl ']'
             { let (ds, et) = $3
               in TupleArray et (ShapeDecl ($4:ds)) $1 }
 
-BasicArrayRowType : BasicType
+PrimArrayRowType : PrimType
                     { ([], $1) }
-                  | '[' BasicArrayRowType DimDecl ']'
+                  | '[' PrimArrayRowType DimDecl ']'
                     { let (ds, et) = $2
                       in ($3:ds, et) }
 
@@ -263,17 +267,22 @@ TupleArrayElemTypes : { [] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
-TupleArrayElemType : BasicType                   { BasicArrayElem $1 NoInfo }
+TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
-BasicType : int           { Int }
-          | real          {% getRealType }
-          | bool          { Bool }
-          | cert          { Cert }
-          | char          { Char }
-          | float32       { Float32 }
-          | float64       { Float64 }
+PrimType : IntType       { IntType $1 }
+         | FloatType     { FloatType $1 }
+         | bool          { Bool }
+         | cert          { Cert }
+         | char          { Char }
+
+IntType : int { Int32 }
+        | i32 { Int32 }
+
+FloatType : real      {% getRealType }
+          | f32       { Float32 }
+          | f64       { Float64 }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
@@ -286,14 +295,14 @@ TypeIds : Type id ',' TypeIds
 ;
 
 Exp  :: { UncheckedExp }
-     : intlit         { let L pos (INTLIT num) = $1 in Literal (BasicVal $ IntVal num) pos }
-     | reallit        {% let L pos (REALLIT num) = $1 in (liftM2 (Literal . BasicVal) (getRealValue num) (pure pos)) }
-     | charlit        { let L pos (CHARLIT char) = $1 in Literal (BasicVal $ CharVal char) pos }
+     : intlit         { let L pos (INTLIT num) = $1 in Literal (PrimValue $ IntValue $ Int32Value num) pos }
+     | reallit        {% let L pos (REALLIT num) = $1 in (liftM2 (Literal . PrimValue) (getRealValue num) (pure pos)) }
+     | charlit        { let L pos (CHARLIT char) = $1 in Literal (PrimValue $ CharValue char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Basic Char) pos }
-     | true           { Literal (BasicVal $ LogVal True) $1 }
-     | false          { Literal (BasicVal $ LogVal False) $1 }
-     | checked        { Literal (BasicVal Checked) $1 }
+                        in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
+     | true           { Literal (PrimValue $ BoolValue True) $1 }
+     | false          { Literal (PrimValue $ BoolValue False) $1 }
+     | checked        { Literal (PrimValue Checked) $1 }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -311,6 +320,9 @@ Exp  :: { UncheckedExp }
      | '~' Exp        { UnOp Complement $2 $1 }
      | abs Exp        { UnOp Abs $2 $1 }
      | signum Exp     { UnOp Signum $2 $1 }
+     | f32 Exp        { UnOp (ToFloat Float32) $2 $1 }
+     | f64 Exp        { UnOp (ToFloat Float64) $2 $1 }
+     | real Exp       {% do t <- getRealType; return (UnOp (ToFloat t) $2 $1) }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
@@ -505,19 +517,19 @@ FunAbstr :: { UncheckedLambda }
            -- Minus is handed explicitly here because I could figure
            -- out how to resolve the ambiguity with negation.
          | '-' Exp
-           { CurryBinOpRight Minus $2 NoInfo $1 }
+           { CurryBinOpRight Minus $2 NoInfo NoInfo $1 }
          | '-'
-           { BinOpFun Minus NoInfo $1 }
+           { BinOpFun Minus NoInfo NoInfo NoInfo $1 }
          | Exp '-'
-           { CurryBinOpLeft Minus $1 NoInfo (srclocOf $1) }
+           { CurryBinOpLeft Minus $1 NoInfo NoInfo (srclocOf $1) }
          | BinOp Exp
-           { CurryBinOpRight (fst $1) $2 NoInfo (snd $1) }
+           { CurryBinOpRight (fst $1) $2 NoInfo NoInfo (snd $1) }
          | Exp BinOp
-           { CurryBinOpLeft (fst $2) $1 NoInfo (snd $2) }
+           { CurryBinOpLeft (fst $2) $1 NoInfo NoInfo (snd $2) }
          | BinOp
-           { BinOpFun (fst $1) NoInfo (snd $1) }
+           { BinOpFun (fst $1) NoInfo NoInfo NoInfo (snd $1) }
          | UnOp
-           { UnOpFun (fst $1) NoInfo (snd $1) }
+           { UnOpFun (fst $1) NoInfo NoInfo (snd $1) }
 
 FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
                  | FunAbstr ',' FunAbstrsThenExp { ($1 : fst $3, snd $3) }
@@ -526,7 +538,7 @@ Value : IntValue { $1 }
       | RealValue { $1 }
       | CharValue { $1 }
       | StringValue { $1 }
-      | LogValue { $1 }
+      | BoolValue { $1 }
       | ArrayValue { $1 }
       | TupleValue { $1 }
 
@@ -544,26 +556,26 @@ NaturalInts :: { [Int] }
            : intlit                 { let L _ (INTLIT num) = $1 in [fromIntegral num] }
            | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in fromIntegral num : $3  }
 
-IntValue : intlit        { let L pos (INTLIT num) = $1 in BasicVal $ IntVal num }
-         | '-' intlit    { let L pos (INTLIT num) = $2 in BasicVal $ IntVal (-num) }
-RealValue : reallit      {% let L pos (REALLIT num) = $1 in liftM BasicVal (getRealValue num) }
-          | '-' reallit  {% let L pos (REALLIT num) = $2 in liftM BasicVal (getRealValue (-num)) }
-CharValue : charlit      { let L pos (CHARLIT char) = $1 in BasicVal $ CharVal char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayVal (arrayFromList $ map (BasicVal . CharVal) s) $ Basic Char }
-LogValue : true          { BasicVal $ LogVal True }
-         | false          { BasicVal $ LogVal False }
-CertValue : checked      { BasicVal Checked }
+IntValue : intlit        { let L pos (INTLIT num) = $1 in PrimValue $ IntValue $ Int32Value num }
+         | '-' intlit    { let L pos (INTLIT num) = $2 in PrimValue $ IntValue $ Int32Value (-num) }
+RealValue : reallit      {% let L pos (REALLIT num) = $1 in liftM PrimValue (getRealValue num) }
+          | '-' reallit  {% let L pos (REALLIT num) = $2 in liftM PrimValue (getRealValue (-num)) }
+CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValue char }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
+BoolValue : true          { PrimValue $ BoolValue True }
+         | false          { PrimValue $ BoolValue False }
+CertValue : checked      { PrimValue Checked }
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayVal (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
              }
            |  '[' Value ',' Values ']'
              {% case combArrayTypes (valueType $2) $ map valueType $4 of
                   Nothing -> throwError "Invalid array value"
-                  Just ts -> return $ ArrayVal (arrayFromList $ $2:$4) $ removeNames ts
+                  Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) $ removeNames ts
              }
            | empty '(' Type ')'
              { emptyArray $3 }
-TupleValue : '{' Values '}' { TupVal $2 }
+TupleValue : '{' Values '}' { TupValue $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
@@ -573,8 +585,8 @@ Values : Value ',' Values { $1 : $3 }
 
 data ParserEnv = ParserEnv {
                  parserFile :: FilePath
-               , parserRealType :: BasicType
-               , parserRealFun :: Double -> BasicValue
+               , parserRealType :: FloatType
+               , parserRealFun :: Double -> PrimValue
                , parserFunMap :: HM.HashMap Name Name
                }
 
@@ -633,10 +645,10 @@ tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
 tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
-zeroExpression = Literal (BasicVal $ IntVal 0)
+zeroExpression = Literal $ PrimValue $ IntValue $ Int32Value 0
 
 commutativity :: LambdaBase ty vn -> Commutativity
-commutativity (BinOpFun binop _ _)
+commutativity (BinOpFun binop _ _ _ _)
   | commutative binop = Commutative
 commutativity _ = Noncommutative
 
@@ -652,10 +664,10 @@ putTokens ts = lift $ lift $ put ts
 getFilename :: ParserMonad FilePath
 getFilename = lift $ asks parserFile
 
-getRealType :: ParserMonad BasicType
+getRealType :: ParserMonad FloatType
 getRealType = lift $ asks parserRealType
 
-getRealValue :: Double -> ParserMonad BasicValue
+getRealValue :: Double -> ParserMonad PrimValue
 getRealValue x = do f <- lift $ asks parserRealFun
                     return $ f x
 

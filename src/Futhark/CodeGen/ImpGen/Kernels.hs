@@ -22,7 +22,7 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedLambdaParameters)
@@ -70,11 +70,11 @@ kernelCompiler
 
   let kernel_size = product $ map (ImpGen.compileSubExp . snd) ispace
 
-      global_thread_index_param = Imp.ScalarParam global_thread_index Int
+      global_thread_index_param = Imp.ScalarParam global_thread_index int32
       shape = map (ImpGen.compileSubExp . snd) ispace
       indices = map fst ispace
 
-      indices_lparams = [ Param index (Scalar Int) | index <- indices ]
+      indices_lparams = [ Param index (Scalar int32) | index <- indices ]
       bound_in_kernel = global_thread_index : indices ++ map kernelInputName inps
       kernel_bnds = bodyBindings body
 
@@ -139,13 +139,13 @@ kernelCompiler
 
     (call_with_prologue, prologue) <-
       makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
-      ImpGen.withBasicVar local_id Int $
-      ImpGen.declaringBasicVar local_id Int $
-      ImpGen.declaringBasicVar group_id Int $
-      ImpGen.declaringBasicVar wave_size Int $
-      ImpGen.declaringBasicVar skip_waves Int $
-      ImpGen.declaringBasicVar (lambdaIndex reduce_lam) Int $
-      ImpGen.declaringBasicVar (lambdaIndex fold_lam) Int $
+      ImpGen.withPrimVar local_id int32 $
+      ImpGen.declaringPrimVar local_id int32 $
+      ImpGen.declaringPrimVar group_id int32 $
+      ImpGen.declaringPrimVar wave_size int32 $
+      ImpGen.declaringPrimVar skip_waves int32 $
+      ImpGen.declaringPrimVar (lambdaIndex reduce_lam) int32 $
+      ImpGen.declaringPrimVar (lambdaIndex fold_lam) int32 $
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (fold_lparams++reduce_lparams) $ do
 
@@ -222,21 +222,21 @@ kernelCompiler
           -- the loops where they are used, without losing
           -- performance.  This can be done when we become tired of
           -- looking at ugly kernel code.
-          let wave_id = Imp.BinOp Quot
+          let wave_id = Imp.BinOp (SQuot Int32)
                         (Imp.ScalarVar local_id)
                         (Imp.ScalarVar wave_size)
               in_wave_id = Imp.ScalarVar local_id -
                            (wave_id * Imp.ScalarVar wave_size)
-              num_waves = Imp.BinOp Quot
+              num_waves = Imp.BinOp (SQuot Int32)
                           (Imp.innerExp (Imp.dimSizeToExp group_size) +
                            Imp.ScalarVar wave_size - 1)
                           (Imp.ScalarVar wave_size)
 
               doing_in_wave_reductions =
-                Imp.BinOp Less (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
+                Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
               apply_in_in_wave_iteration =
-                Imp.BinOp Equal
-                (Imp.BinOp Band in_wave_id (2 * Imp.ScalarVar offset - 1)) 0
+                Imp.CmpOp CmpEq
+                (Imp.BinOp (And Int32) in_wave_id (2 * Imp.ScalarVar offset - 1)) 0
               in_wave_reductions =
                 Imp.SetScalar offset 1 <>
                 Imp.While doing_in_wave_reductions
@@ -245,12 +245,12 @@ kernelCompiler
                    Imp.SetScalar offset (Imp.ScalarVar offset * 2))
 
               doing_cross_wave_reductions =
-                Imp.BinOp Less (Imp.ScalarVar skip_waves) num_waves
+                Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar skip_waves) num_waves
               is_first_thread_in_wave =
-                Imp.BinOp Equal in_wave_id 0
+                Imp.CmpOp CmpEq in_wave_id 0
               wave_not_skipped =
-                Imp.BinOp Equal (Imp.BinOp Band wave_id
-                                 (2 * Imp.ScalarVar skip_waves - 1))
+                Imp.CmpOp CmpEq
+                (Imp.BinOp (And Int32) wave_id (2 * Imp.ScalarVar skip_waves - 1))
                 0
               apply_in_cross_wave_iteration =
                 Imp.BinOp LogAnd is_first_thread_in_wave wave_not_skipped
@@ -265,7 +265,7 @@ kernelCompiler
                    Imp.SetScalar skip_waves (Imp.ScalarVar skip_waves * 2))
 
               write_group_result =
-                Imp.If (Imp.BinOp Equal (Imp.ScalarVar local_id) 0)
+                Imp.If (Imp.CmpOp CmpEq (Imp.ScalarVar local_id) 0)
                 write_result mempty
 
               body = mconcat [prologue,
@@ -289,7 +289,7 @@ kernelCompiler
             }
     call_with_prologue prologue
   where readReduceArgument local_id offset param (mem, _)
-          | Basic _ <- paramType param =
+          | Prim _ <- paramType param =
               ImpGen.emit $
                 Imp.SetScalar (paramName param) $
                 Imp.Index mem (bytes i) bt (Space "local")
@@ -333,13 +333,13 @@ kernelCompiler
 
     (call_with_body, body) <-
       makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
-      ImpGen.declaringBasicVar local_id Int $
-      ImpGen.declaringBasicVar group_id Int $
-      ImpGen.declaringBasicVar wave_size Int $
-      ImpGen.declaringBasicVar thread_chunk_size Int $
-      ImpGen.declaringBasicVar (lambdaIndex lam) Int $
-      ImpGen.declaringBasicVar (lambdaIndex renamed_lam) Int $
-      ImpGen.declaringBasicVar global_id Int $
+      ImpGen.declaringPrimVar local_id int32 $
+      ImpGen.declaringPrimVar group_id int32 $
+      ImpGen.declaringPrimVar wave_size int32 $
+      ImpGen.declaringPrimVar thread_chunk_size int32 $
+      ImpGen.declaringPrimVar (lambdaIndex lam) int32 $
+      ImpGen.declaringPrimVar (lambdaIndex renamed_lam) int32 $
+      ImpGen.declaringPrimVar global_id int32 $
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (lambdaParams lam) $
       ImpGen.declaringLParams (lambdaParams renamed_lam) $
@@ -406,7 +406,7 @@ kernelCompiler
             writeScanElement _ =
               const $ fail "writeScanElement: invalid destination"
 
-            sizeToSubExp (Imp.ConstSize k) = Constant $ IntVal k
+            sizeToSubExp (Imp.ConstSize k) = constant k
             sizeToSubExp (Imp.VarSize v)   = Var v
 
         write_arrs <-
@@ -420,12 +420,12 @@ kernelCompiler
             op_to_x <>
             write_arrs <>
             Imp.SetScalar (lambdaIndex lam)
-            (Imp.BinOp Plus (Imp.ScalarVar $ lambdaIndex lam) 1)
+            (Imp.BinOp (Add Int32) (Imp.ScalarVar $ lambdaIndex lam) 1)
 
         zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
           acc_local_mem x_params
 
-        let wave_id = Imp.BinOp Quot
+        let wave_id = Imp.BinOp (SQuot Int32)
                       (Imp.ScalarVar local_id)
                       (Imp.ScalarVar wave_size)
             in_wave_id = Imp.ScalarVar local_id -
@@ -440,14 +440,14 @@ kernelCompiler
           zipWithM_ (writeParamToLocalMemory wave_id) acc_local_mem y_params
 
         let last_in_wave =
-              Imp.BinOp Equal in_wave_id $ Imp.ScalarVar wave_size - 1
+              Imp.CmpOp CmpEq in_wave_id $ Imp.ScalarVar wave_size - 1
         ImpGen.emit $
           Imp.Comment "last thread of wave 'i' writes its result to offset 'i'" $
           Imp.If last_in_wave pack_wave_results mempty
 
         ImpGen.emit $ Imp.Op Imp.Barrier
 
-        let is_first_wave = Imp.BinOp Equal wave_id 0
+        let is_first_wave = Imp.CmpOp CmpEq wave_id 0
         scan_first_wave <- ImpGen.collect $ inWaveScan' renamed_lam
         ImpGen.emit $
           Imp.Comment "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $
@@ -499,7 +499,7 @@ expCompiler target (PrimOp (Iota n)) = do
   i <- newVName "i"
   global_thread_index <- newVName "global_thread_index"
   kernelCompiler target $
-    MapKernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
+    MapKernel [] n global_thread_index [(i,n)] [] [(Prim int32,[0])] (Body () [] [Var i])
   return ImpGen.Done
 
 expCompiler target (PrimOp (Replicate n se)) = do
@@ -556,7 +556,7 @@ callKernelCopy bt
   ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
   num_arrays size_x size_y
 
-  | bt_size <- ImpGen.basicScalarSize bt,
+  | bt_size <- primSize bt,
     Just destoffset <-
       ImpGen.scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun bt_size,
@@ -596,7 +596,7 @@ callKernelCopy bt
                   freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
 
     kernel_size <- newVName "copy_kernel_size"
-    ImpGen.emit $ Imp.DeclareScalar kernel_size Int
+    ImpGen.emit $ Imp.DeclareScalar kernel_size int32
     ImpGen.emit $ Imp.SetScalar kernel_size $
       Imp.innerExp n * product (drop 1 shape)
 
@@ -653,7 +653,7 @@ readsFromSet free =
       Mem _ (Space "local") -> return Nothing
       Mem memsize _ -> Just <$> (Imp.MemoryUse var <$>
                                  ImpGen.subExpToDimSize memsize)
-      Basic bt ->
+      Prim bt ->
         if bt == Cert
         then return Nothing
         else return $ Just $ Imp.ScalarUse var bt
@@ -689,7 +689,7 @@ writeThreadResult thread_idxs perm
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let is = map ImpGen.varIndex thread_idxs
   case set of
-    Basic bt -> do
+    Prim bt -> do
       (_, _, elemOffset) <-
         ImpGen.fullyIndexArray' destloc' is bt
       ImpGen.compileSubExpTo (ImpGen.ArrayElemDestination mem bt space elemOffset) se
@@ -704,7 +704,7 @@ writeThreadResult _ _ _ _ =
 readKernelInput :: KernelInput ExplicitMemory
                 -> InKernelGen ()
 readKernelInput inp =
-  when (basicType t) $ do
+  when (primType t) $ do
     (srcmem, space, srcoffset) <-
       ImpGen.fullyIndexArray arr $ map SE.intSubExpToScalExp is
     ImpGen.emit $ Imp.SetScalar name $
@@ -714,7 +714,7 @@ readKernelInput inp =
         t = kernelInputType inp
         is = kernelInputIndices inp
 
-isMapTransposeKernel :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
+isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
                      -> Maybe (Imp.Exp, Imp.Exp,
                                Imp.Exp, Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
@@ -730,7 +730,7 @@ isMapTransposeKernel bt
     isOk r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
-  where bt_size = ImpGen.basicScalarSize bt
+  where bt_size = primSize bt
 
         isOk r1 r2 dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
@@ -750,11 +750,11 @@ createAccMem :: Imp.DimSize
              -> LParam
              -> ImpGen.ImpM op (Imp.Param, (VName, Imp.Size))
 createAccMem local_size param
-  | Basic bt <- paramType param = do
+  | Prim bt <- paramType param = do
       mem_shared <- newVName (baseString (paramName param) <> "_mem_local")
       total_size <- newVName "total_size"
       ImpGen.emit $
-        Imp.DeclareScalar total_size Int
+        Imp.DeclareScalar total_size int32
       ImpGen.emit $
         Imp.SetScalar total_size $
         Imp.SizeOf bt * Imp.innerExp (ImpGen.dimSizeToExp local_size)
@@ -773,7 +773,7 @@ writeParamToLocalMemory :: Typed (MemBound u) =>
                            Imp.Exp -> (VName, t) -> Param (MemBound u)
                         -> ImpGen.ImpM op ()
 writeParamToLocalMemory i (mem, _) param
-  | Basic _ <- paramType param =
+  | Prim _ <- paramType param =
       ImpGen.emit $
       Imp.Write mem (bytes i') bt (Space "local") $
       Imp.ScalarVar (paramName param)
@@ -786,7 +786,7 @@ readParamFromLocalMemory :: Typed (MemBound u) =>
                             VName -> Imp.Exp -> Param (MemBound u) -> (VName, t)
                          -> ImpGen.ImpM op ()
 readParamFromLocalMemory index i param (l_mem, _)
-  | Basic _ <- paramType param =
+  | Prim _ <- paramType param =
       ImpGen.emit $
       Imp.SetScalar (paramName param) $
       Imp.Index l_mem (bytes i') bt (Space "local")
@@ -832,14 +832,16 @@ computeThreadChunkSize :: Commutativity
 computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
   remaining_elements <- newVName "remaining_elements"
   ImpGen.emit $
-    Imp.DeclareScalar remaining_elements Int
+    Imp.DeclareScalar remaining_elements int32
   ImpGen.emit $
     Imp.SetScalar remaining_elements $
     (Imp.innerExp num_elements - thread_index)
     `quotRoundingUp`
     num_threads
   ImpGen.emit $
-    Imp.If (Imp.BinOp Less (Imp.innerExp elements_per_thread) (Imp.ScalarVar remaining_elements))
+    Imp.If (Imp.CmpOp (CmpSlt Int32)
+            (Imp.innerExp elements_per_thread)
+            (Imp.ScalarVar remaining_elements))
     (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
     (Imp.SetScalar chunk_var (Imp.ScalarVar remaining_elements))
 
@@ -848,19 +850,22 @@ computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_ele
   remaining_elements <- newVName "remaining_elements"
 
   ImpGen.emit $
-    Imp.DeclareScalar starting_point Int
+    Imp.DeclareScalar starting_point int32
   ImpGen.emit $
     Imp.SetScalar starting_point $
     thread_index * Imp.innerExp elements_per_thread
 
   ImpGen.emit $
-    Imp.DeclareScalar remaining_elements Int
+    Imp.DeclareScalar remaining_elements int32
   ImpGen.emit $
     Imp.SetScalar remaining_elements $
     Imp.innerExp num_elements - Imp.ScalarVar starting_point
 
-  let no_remaining_elements = Imp.BinOp Leq (Imp.ScalarVar remaining_elements) 0
-      beyond_bounds = Imp.BinOp Leq (Imp.innerExp num_elements) (Imp.ScalarVar starting_point)
+  let no_remaining_elements = Imp.CmpOp (CmpSle Int32)
+                              (Imp.ScalarVar remaining_elements) 0
+      beyond_bounds = Imp.CmpOp (CmpSle Int32)
+                      (Imp.innerExp num_elements)
+                      (Imp.ScalarVar starting_point)
 
   ImpGen.emit $
     Imp.If (Imp.BinOp LogOr no_remaining_elements beyond_bounds)
@@ -871,7 +876,9 @@ computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_ele
   where last_thread_elements =
           num_elements - Imp.elements thread_index * elements_per_thread
         is_last_thread =
-          Imp.BinOp Less (Imp.innerExp num_elements) ((thread_index + 1) * Imp.innerExp elements_per_thread)
+          Imp.CmpOp (CmpSlt Int32)
+          (Imp.innerExp num_elements)
+          ((thread_index + 1) * Imp.innerExp elements_per_thread)
 
 inWaveScan :: Imp.Exp
            -> VName
@@ -881,7 +888,7 @@ inWaveScan :: Imp.Exp
 inWaveScan wave_size local_id acc_local_mem scan_lam = do
   skip_threads <- newVName "skip_threads"
   let in_wave_thread_active =
-        Imp.BinOp Leq (Imp.ScalarVar skip_threads) in_wave_id
+        Imp.CmpOp (CmpSle Int32) (Imp.ScalarVar skip_threads) in_wave_id
       (other_index_param, actual_params) =
         partitionChunkedLambdaParameters $ lambdaParams scan_lam
       (x_params, y_params) =
@@ -905,36 +912,36 @@ inWaveScan wave_size local_id acc_local_mem scan_lam = do
     acc_local_mem y_params
   ImpGen.emit $
     Imp.Comment "in-wave scan (no barriers needed)" $
-    Imp.DeclareScalar skip_threads Int <>
+    Imp.DeclareScalar skip_threads int32 <>
     Imp.SetScalar skip_threads 1 <>
-    Imp.While (Imp.BinOp Less (Imp.ScalarVar skip_threads) wave_size)
+    Imp.While (Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar skip_threads) wave_size)
     (Imp.If in_wave_thread_active
      (Imp.Comment "read operands" read_operands <>
       Imp.Comment "perform operation" op_to_y <>
       Imp.Comment "write result" write_operation_result)
      mempty <>
      Imp.SetScalar skip_threads (Imp.ScalarVar skip_threads * 2))
-  where wave_id = Imp.BinOp Quot (Imp.ScalarVar local_id) wave_size
+  where wave_id = Imp.BinOp (SQuot Int32) (Imp.ScalarVar local_id) wave_size
         in_wave_id = Imp.ScalarVar local_id - wave_id * wave_size
 
-type AlignmentMap = HM.HashMap VName BasicType
+type AlignmentMap = HM.HashMap VName PrimType
 
-lookupAlignment :: VName -> AlignmentMap -> BasicType
+lookupAlignment :: VName -> AlignmentMap -> PrimType
 lookupAlignment = HM.lookupDefault smallestType
 
-smallestType :: BasicType
+smallestType :: PrimType
 smallestType = Bool
 
 alignmentMap :: Imp.KernelCode  -> AlignmentMap
 alignmentMap = HM.map alignment . Imp.memoryUsage (const mempty)
   where alignment = HS.foldr mostRestrictive smallestType
         mostRestrictive bt1 bt2 =
-          if (basicSize bt1 :: Int) > basicSize bt2
+          if (primSize bt1 :: Int) > primSize bt2
           then bt1 else bt2
 
 ensureAlignment :: AlignmentMap
                 -> (VName, Imp.Size)
-                -> (VName, Imp.Size, BasicType)
+                -> (VName, Imp.Size, PrimType)
 ensureAlignment alignments (name, size) =
   (name, size, lookupAlignment name alignments)
 

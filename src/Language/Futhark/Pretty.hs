@@ -50,13 +50,13 @@ aliasComment pat d = case aliasComment' pat of
                 oneline s = text $ displayS (renderCompact s) ""
 
 instance Pretty Value where
-  ppr (BasicVal bv) = ppr bv
-  ppr (TupVal vs)
-    | any (not . basicType . valueType) vs =
+  ppr (PrimValue bv) = ppr bv
+  ppr (TupValue vs)
+    | any (not . primType . valueType) vs =
       braces $ commastack $ map ppr vs
     | otherwise =
       braces $ commasep $ map ppr vs
-  ppr v@(ArrayVal a t)
+  ppr v@(ArrayValue a t)
     | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
@@ -68,19 +68,19 @@ instance Pretty Uniqueness where
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
-  ppr (BasicArrayElem bt _) = ppr bt
+  ppr (PrimArrayElem bt _) = ppr bt
   ppr (ArrayArrayElem at)   = ppr at
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase Rank as vn) where
-  ppr (BasicArrayElem bt _) = ppr bt
+  ppr (PrimArrayElem bt _) = ppr bt
   ppr (ArrayArrayElem at)   = ppr at
   ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (ArrayTypeBase ShapeDecl as vn) where
-  ppr (BasicArray et (ShapeDecl ds) u _) =
+  ppr (PrimArray et (ShapeDecl ds) u _) =
     ppr u <> foldl f (ppr et) ds
     where f s AnyDim       = brackets s
           f s (NamedDim v) = brackets $ s <> comma <> ppr v
@@ -93,19 +93,19 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) where
-  ppr (BasicArray et (Rank n) u _) =
+  ppr (PrimArray et (Rank n) u _) =
     ppr u <> foldl (.) id (replicate n brackets) (ppr et)
   ppr (TupleArray ts (Rank n) u) =
     ppr u <> foldl (.) id (replicate n brackets)
     (braces $ commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
-  ppr (Basic et) = ppr et
+  ppr (Prim et) = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
-  ppr (Basic et) = ppr et
+  ppr (Prim et) = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
@@ -118,6 +118,7 @@ instance Pretty UnOp where
   ppr Complement = text "~"
   ppr Abs = text "abs "
   ppr Signum = text "signum "
+  ppr (ToFloat t) = ppr t
 
 instance Pretty BinOp where
   ppr Plus = text "+"
@@ -138,8 +139,8 @@ instance Pretty BinOp where
   ppr Equal = text "=="
   ppr Less = text "<"
   ppr Leq = text "<="
-  ppr Greater = text "<="
-  ppr Geq = text "<="
+  ppr Greater = text ">="
+  ppr Geq = text ">="
 
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit ArrayLit{} = True
@@ -148,8 +149,8 @@ hasArrayLit (Literal val _) = hasArrayVal val
 hasArrayLit _ = False
 
 hasArrayVal :: Value -> Bool
-hasArrayVal ArrayVal{} = True
-hasArrayVal (TupVal vs) = any hasArrayVal vs
+hasArrayVal ArrayValue{} = True
+hasArrayVal (TupValue vs) = any hasArrayVal vs
 hasArrayVal _ = False
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
@@ -187,7 +188,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         DoLoop{} -> True
                         LetPat{} -> True
                         LetWith{} -> True
-                        Literal ArrayVal{} _ -> False
+                        Literal ArrayValue{} _ -> False
                         If{} -> True
                         ArrayLit{} -> False
                         _ -> hasArrayLit e
@@ -285,13 +286,13 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
     text "=>" </> indent 2 (ppr body)
-  ppr (UnOpFun unop _ _) =
+  ppr (UnOpFun unop _ _ _) =
     ppr unop
-  ppr (BinOpFun binop _ _) =
+  ppr (BinOpFun binop _ _ _ _) =
     ppr binop
-  ppr (CurryBinOpLeft binop x _ _) =
+  ppr (CurryBinOpLeft binop x _ _ _) =
     ppr x <+> ppr binop
-  ppr (CurryBinOpRight binop x _ _) =
+  ppr (CurryBinOpRight binop x _ _ _) =
     ppr binop <+> ppr x
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where

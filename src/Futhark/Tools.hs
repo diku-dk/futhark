@@ -33,7 +33,7 @@ nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
 nonuniqueParams params =
   modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
   collectBindings $ forM params $ \param ->
-    if not $ basicType $ paramType param then do
+    if not $ primType $ paramType param then do
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
       let param' = Param param_name $ paramType param
       localScope (scopeOfLParams [param']) $
@@ -148,7 +148,7 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
     pure (rowType $ paramType arr_param)
   let chunk_name = paramName chunk_param
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $
-                  PrimOp $ SubExp $ Constant $ IntVal 1
+                  PrimOp $ SubExp $ intconst Int32 1
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
                    PrimOp $ Replicate (Var chunk_name) $
                    Var $ paramName unchunked_arr_param |

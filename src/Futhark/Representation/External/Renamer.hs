@@ -290,18 +290,18 @@ renameTypeGeneric :: (VarName f, VarName t) =>
                   -> RenameM f t (TypeBase shape als t)
 renameTypeGeneric renameShape renameAliases = renameType'
   where renameType' (Array at) = Array <$> renameArrayType at
-        renameType' (Basic bt) = return $ Basic bt
+        renameType' (Prim bt) = return $ Prim bt
         renameType' (Tuple ts) = Tuple <$> mapM renameType' ts
-        renameArrayType (BasicArray bt shape u als) = do
+        renameArrayType (PrimArray bt shape u als) = do
           shape' <- renameShape shape
           als' <- renameAliases als
-          return $ BasicArray bt shape' u als'
+          return $ PrimArray bt shape' u als'
         renameArrayType (TupleArray et shape u) = do
           et' <- mapM renameTupleArrayElem et
           shape' <- renameShape shape
           return $ TupleArray et' shape' u
-        renameTupleArrayElem (BasicArrayElem bt als) =
-          BasicArrayElem bt <$> renameAliases als
+        renameTupleArrayElem (PrimArrayElem bt als) =
+          PrimArrayElem bt <$> renameAliases als
         renameTupleArrayElem (ArrayArrayElem at) =
           ArrayArrayElem <$> renameArrayType at
         renameTupleArrayElem (TupleArrayElem ts) =
@@ -329,14 +329,17 @@ renameLambda (CurryFun fname curryargexps rettype pos) = do
   curryargexps' <- mapM renameExp curryargexps
   rettype' <- renameType rettype
   return (CurryFun fname curryargexps' rettype' pos)
-renameLambda (UnOpFun bop t loc) =
-  UnOpFun bop <$> renameType t <*> pure loc
-renameLambda (BinOpFun bop t loc) =
-  BinOpFun bop <$> renameType t <*> pure loc
-renameLambda (CurryBinOpLeft bop x t loc) =
-  CurryBinOpLeft bop <$> renameExp x <*> renameType t <*> pure loc
-renameLambda (CurryBinOpRight bop x t loc) =
-  CurryBinOpRight bop <$> renameExp x <*> renameType t <*> pure loc
+renameLambda (UnOpFun bop paramt rest loc) =
+  UnOpFun bop <$> renameType paramt <*> renameType rest <*> pure loc
+renameLambda (BinOpFun bop xtype ytype rettype loc) =
+  BinOpFun bop <$> renameType xtype <*> renameType ytype <*>
+  renameType rettype <*> pure loc
+renameLambda (CurryBinOpLeft bop x xtype rettype loc) =
+  CurryBinOpLeft bop <$> renameExp x <*>
+  renameType xtype <*> renameType rettype <*> pure loc
+renameLambda (CurryBinOpRight bop x xtype rettype loc) =
+  CurryBinOpRight bop <$> renameExp x <*>
+  renameType xtype <*> renameType rettype <*> pure loc
 
 renamePattern :: (TypeBox ty, VarName f, VarName t) =>
                  TupIdentBase ty f -> RenameM f t (TupIdentBase ty t)

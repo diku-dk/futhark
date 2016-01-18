@@ -146,7 +146,7 @@ refineDimensionRanges ranges = flip $ foldl refineShape
           env
         -- A dimension is never negative.
         dimBound :: Out.Range
-        dimBound = (Just $ Out.ScalarBound $ SE.Val $ In.IntVal 0,
+        dimBound = (Just $ Out.ScalarBound 0,
                     Nothing)
 
 refineRange :: AS.RangesRep -> Out.VName -> Out.Range -> RangeEnv

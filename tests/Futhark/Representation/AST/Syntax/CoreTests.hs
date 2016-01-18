@@ -33,7 +33,7 @@ subShapeTests =
         shape = ExtShape
 
         free :: Int -> ExtDimSize
-        free = Free . Constant . IntVal . fromIntegral
+        free = Free . Constant . IntValue . Int32Value . fromIntegral
 
         isSubShapeOf shape1 shape2 =
           subShapeTest shape1 shape2 True
@@ -52,12 +52,12 @@ instance Arbitrary NoUniqueness where
 
 instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
   arbitrary =
-    oneof [ Basic <$> arbitrary
+    oneof [ Prim <$> arbitrary
           , Array <$> arbitrary <*> arbitrary <*> arbitrary
           ]
 
 instance Arbitrary Value where
-  arbitrary = BasicVal <$> arbitrary
+  arbitrary = PrimVal <$> arbitrary
 
 instance Arbitrary Ident where
   arbitrary = Ident <$> arbitrary <*> arbitrary
@@ -67,4 +67,4 @@ instance Arbitrary Rank where
 
 instance Arbitrary Shape where
   arbitrary = Shape <$> map intconst <$> listOf1 (elements [1..9])
-    where intconst x = Constant $ IntVal x
+    where intconst = Constant . IntValue . Int32Value

@@ -20,8 +20,8 @@ module Futhark.TypeCheck
   , UsageMap
   , usageMap
   , collectOccurences
-  , basicLParamM
-  , basicFParamM
+  , primLParamM
+  , primFParamM
 
     -- * Checkers
   , require
@@ -222,7 +222,7 @@ observe :: Checkable lore =>
            VName -> TypeM lore ()
 observe name = do
   attr <- lookupVar name
-  unless (basicType $ typeOf attr) $
+  unless (primType $ typeOf attr) $
     occur [observation $ aliases attr]
 
 -- | Proclaim that we have written to the given variable.
@@ -366,15 +366,13 @@ lookupFun fname args = do
 -- Causes a 'TypeError vn' if they fail to match, and otherwise
 -- returns their common type.
 matchSubExpTypes :: Checkable lore =>
-                    SubExp -> SubExp -> TypeM lore Type
+                    SubExp -> SubExp -> TypeM lore ()
 matchSubExpTypes e1 e2 = do
   t1 <- subExpType e1
   t2 <- subExpType e2
-  if t1 `subtypeOf` t2
-    then return t1 -- arbitrary
-    else bad $
-         UnifyError (PrimOp $ SubExp e1) (justOne $ staticShapes1 t1)
-         (PrimOp $ SubExp e2) (justOne $ staticShapes1 t2)
+  unless (t1 == t2) $
+    bad $ UnifyError (PrimOp $ SubExp e1) (justOne $ staticShapes1 t1)
+    (PrimOp $ SubExp e2) (justOne $ staticShapes1 t2)
 
 -- | @checkAnnotation loc s t1 t2@ checks if @t2@ is equal to
 -- @t1@.  If not, a 'BadAnnotation' is raised.
@@ -384,6 +382,15 @@ checkAnnotation desc t1 t2
   | t2 == t1 = return ()
   | otherwise = bad $ BadAnnotation noLoc desc
                 (justOne $ staticShapes1 t1) (justOne $ staticShapes1 t2)
+
+anyIntType :: [Type]
+anyIntType = map (Prim . IntType) [minBound .. maxBound]
+
+anyFloatType :: [Type]
+anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
+
+anyPrimType :: [Type]
+anyPrimType = anyIntType ++ anyFloatType ++ map Prim [Bool, Cert, Char]
 
 -- | @require ts se@ causes a '(TypeError vn)' if the type of @se@ is
 -- not a subtype of one of the types in @ts@.
@@ -454,8 +461,8 @@ initialFtable :: forall lore.Checkable lore =>
                  Prog lore -> HM.HashMap Name (FunBinding lore)
 initialFtable _ = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) =
-          (basicRetType t,
-           map (basicFParam (representative :: lore) name) ts)
+          (primRetType t,
+           map (primFParam (representative :: lore) name) ts)
         name = ID (nameFromString "x", 0)
 
 checkFun :: Checkable lore =>
@@ -541,7 +548,7 @@ checkFun' (fname, rettype, params, body) consumable check = do
 
 checkSubExp :: Checkable lore => SubExp -> TypeM lore Type
 checkSubExp (Constant val) =
-  return $ Basic $ basicValueType val
+  return $ Prim $ primValueType val
 checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
   observe ident
   lookupType ident
@@ -623,37 +630,28 @@ checkPrimOp (ArrayLit (e:es') t) = do
 
   mapM_ (check et) es'
 
-checkPrimOp (BinOp op e1 e2 t) = checkBinOp op e1 e2 t
+checkPrimOp (UnOp op e) = require [Prim $ unOpType op] e
 
-checkPrimOp (Not e) =
-  require [Basic Bool] e
+checkPrimOp (BinOp op e1 e2) = checkBinOpArgs (binOpType op) e1 e2
 
-checkPrimOp (Complement e) =
-  require [Basic Int] e
+checkPrimOp (CmpOp op e1 e2) = checkCmpOp op e1 e2
 
-checkPrimOp (Negate e) =
-  require [Basic Int, Basic Float32, Basic Float64] e
-
-checkPrimOp (Abs e) =
-  require [Basic Int] e
-
-checkPrimOp (Signum e) =
-  require [Basic Int] e
+checkPrimOp (ConvOp op e) = require [Prim $ fst $ convTypes op] e
 
 checkPrimOp (Index cs ident idxes) = do
-  mapM_ (requireI [Basic Cert]) cs
+  mapM_ (requireI [Prim Cert]) cs
   vt <- lookupType ident
   observe ident
   when (arrayRank vt < length idxes) $
     bad $ IndexingError ident
           (arrayRank vt) (length idxes) noLoc
-  mapM_ (require [Basic Int]) idxes
+  mapM_ (require [Prim int32]) idxes
 
 checkPrimOp (Iota e) =
-  require [Basic Int] e
+  require [Prim int32] e
 
 checkPrimOp (Replicate countexp valexp) = do
-  require [Basic Int] countexp
+  require [Prim int32] countexp
   void $ checkSubExp valexp
 
 checkPrimOp (Scratch _ shape) =
@@ -661,8 +659,8 @@ checkPrimOp (Scratch _ shape) =
 
 checkPrimOp (Reshape cs newshape arrexp) = do
   rank <- arrayRank <$> checkArrIdent arrexp
-  mapM_ (requireI [Basic Cert]) cs
-  mapM_ (require [Basic Int] . newDim) newshape
+  mapM_ (requireI [Prim Cert]) cs
+  mapM_ (require [Prim int32] . newDim) newshape
   zipWithM_ (checkDimChange rank) newshape [0..]
   where checkDimChange _ (DimNew _) _ =
           return ()
@@ -675,29 +673,29 @@ checkPrimOp (Reshape cs newshape arrexp) = do
             return ()
 
 checkPrimOp (Rearrange cs perm arr) = do
-  mapM_ (requireI [Basic Cert]) cs
+  mapM_ (requireI [Prim Cert]) cs
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError noLoc perm rank $ Just arr
 
 checkPrimOp (Stripe cs stride arr) = do
-  mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] stride
+  mapM_ (requireI [Prim Cert]) cs
+  require [Prim int32] stride
   void $ checkArrIdent arr
 
 checkPrimOp (Unstripe cs stride arr) = do
-  mapM_ (requireI [Basic Cert]) cs
-  require [Basic Int] stride
+  mapM_ (requireI [Prim Cert]) cs
+  require [Prim int32] stride
   void $ checkArrIdent arr
 
 checkPrimOp (Split cs sizeexps arrexp) = do
-  mapM_ (requireI [Basic Cert]) cs
-  mapM_ (require [Basic Int]) sizeexps
+  mapM_ (requireI [Prim Cert]) cs
+  mapM_ (require [Prim int32]) sizeexps
   void $ checkArrIdent arrexp
 
 checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
-  mapM_ (requireI [Basic Cert]) cs
+  mapM_ (requireI [Prim Cert]) cs
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
   let success = all (== stripArray 1 arr1t) $
@@ -706,18 +704,18 @@ checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
     bad $ TypeError noLoc $
     "Types of arguments to concat do not match.  Got " ++
     pretty arr1t ++ " and " ++ intercalate ", " (map pretty arr2ts)
-  require [Basic Int] ressize
+  require [Prim int32] ressize
 
 checkPrimOp (Copy e) =
   void $ checkArrIdent e
 
 checkPrimOp (Assert e _) =
-  require [Basic Bool] e
+  require [Prim Bool] e
 
 checkPrimOp (Partition cs _ flags arrs) = do
-  mapM_ (requireI [Basic Cert]) cs
+  mapM_ (requireI [Prim Cert]) cs
   flagst <- lookupType flags
-  unless (rowType flagst == Basic Int) $
+  unless (rowType flagst == Prim int32) $
     bad $ TypeError noLoc $ "Flag array has type " ++ pretty flagst ++ "."
   forM_ arrs $ \arr -> do
     arrt <- lookupType arr
@@ -735,7 +733,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
 
   funparams <- case form of
     ForLoop loopvar boundexp -> do
-      iparam <- basicFParamM loopvar Int
+      iparam <- primFParamM loopvar int32
       let funparams = iparam : mergepat
           paramts   = map paramDeclType funparams
 
@@ -745,7 +743,7 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
     WhileLoop cond -> do
       case find ((==cond) . paramName . fst) merge of
         Just (condparam,_) ->
-          unless (paramType condparam == Basic Bool) $
+          unless (paramType condparam == Prim Bool) $
           bad $ TypeError noLoc $
           "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but " ++
           pretty (paramType condparam) ++ "."
@@ -792,7 +790,7 @@ checkExp (PrimOp op) = checkPrimOp op
 checkExp (LoopOp op) = checkLoopOp op
 
 checkExp (If e1 e2 e3 ts) = do
-  require [Basic Bool] e1
+  require [Prim Bool] e1
   _ <- checkBody e2 `alternative` checkBody e3
   ts2 <- bodyExtType e2
   ts3 <- bodyExtType e3
@@ -851,49 +849,25 @@ checkExtType = mapM_ checkExtDim . extShapeDims . arrayShape
   where checkExtDim (Free se) = void $ checkSubExp se
         checkExtDim (Ext _)   = return ()
 
-checkBinOp :: Checkable lore =>
-              BinOp -> SubExp -> SubExp -> BasicType
+checkCmpOp :: Checkable lore =>
+              CmpOp -> SubExp -> SubExp
            -> TypeM lore ()
-checkBinOp Plus e1 e2 t = checkPolyBinOp Plus [Float32, Float64, Int] e1 e2 t
-checkBinOp Minus e1 e2 t = checkPolyBinOp Minus [Float32, Float64, Int] e1 e2 t
-checkBinOp Pow e1 e2 t = checkPolyBinOp Pow [Float32, Float64, Int] e1 e2 t
-checkBinOp Times e1 e2 t = checkPolyBinOp Times [Float32, Float64, Int] e1 e2 t
-checkBinOp FloatDiv e1 e2 t = checkPolyBinOp FloatDiv [Float32, Float64] e1 e2 t
-checkBinOp Div e1 e2 t = checkPolyBinOp Div [Int] e1 e2 t
-checkBinOp Mod e1 e2 t = checkPolyBinOp Mod [Int] e1 e2 t
-checkBinOp Quot e1 e2 t = checkPolyBinOp Quot [Int] e1 e2 t
-checkBinOp Rem e1 e2 t = checkPolyBinOp Rem [Int] e1 e2 t
-checkBinOp ShiftR e1 e2 t = checkPolyBinOp ShiftR [Int] e1 e2 t
-checkBinOp ShiftL e1 e2 t = checkPolyBinOp ShiftL [Int] e1 e2 t
-checkBinOp Band e1 e2 t = checkPolyBinOp Band [Int] e1 e2 t
-checkBinOp Xor e1 e2 t = checkPolyBinOp Xor [Int] e1 e2 t
-checkBinOp Bor e1 e2 t = checkPolyBinOp Bor [Int] e1 e2 t
-checkBinOp LogAnd e1 e2 t = checkPolyBinOp LogAnd [Bool] e1 e2 t
-checkBinOp LogOr e1 e2 t = checkPolyBinOp LogOr [Bool] e1 e2 t
-checkBinOp Equal e1 e2 t = checkRelOp Equal [Int, Float32, Float64] e1 e2 t
-checkBinOp Less e1 e2 t = checkRelOp Less [Int, Float32, Float64] e1 e2 t
-checkBinOp Leq e1 e2 t = checkRelOp Leq [Int, Float32, Float64] e1 e2 t
+checkCmpOp CmpEq x y = do
+  require anyPrimType x
+  require anyPrimType y
+  matchSubExpTypes x y
+checkCmpOp (CmpUlt t) x y = checkBinOpArgs (IntType t) x y
+checkCmpOp (CmpUle t) x y = checkBinOpArgs (IntType t) x y
+checkCmpOp (CmpSlt t) x y = checkBinOpArgs (IntType t) x y
+checkCmpOp (CmpSle t) x y = checkBinOpArgs (IntType t) x y
+checkCmpOp (FCmpLt t) x y = checkBinOpArgs (FloatType t) x y
+checkCmpOp (FCmpLe t) x y = checkBinOpArgs (FloatType t) x y
 
-checkRelOp :: Checkable lore =>
-              BinOp -> [BasicType]
-           -> SubExp -> SubExp
-           -> BasicType
-           -> TypeM lore ()
-checkRelOp op tl e1 e2 t = do
-  require (map Basic tl) e1
-  require (map Basic tl) e2
-  _ <- matchSubExpTypes e1 e2
-  checkAnnotation (pretty op ++ " result") (Basic t) $ Basic Bool
-
-checkPolyBinOp :: Checkable lore =>
-                  BinOp -> [BasicType]
-               -> SubExp -> SubExp -> BasicType
-               -> TypeM lore ()
-checkPolyBinOp op tl e1 e2 t = do
-  require (map Basic tl) e1
-  require (map Basic tl) e2
-  t' <- matchSubExpTypes e1 e2
-  checkAnnotation (pretty op ++ " result") (Basic t) t'
+checkBinOpArgs :: Checkable lore =>
+                  PrimType -> SubExp -> SubExp -> TypeM lore ()
+checkBinOpArgs t e1 e2 = do
+  require [Prim t] e1
+  require [Prim t] e2
 
 checkPatElem :: Checkable lore =>
                 PatElem (LetAttr lore) -> TypeM lore ()
@@ -905,9 +879,9 @@ checkBindage :: Checkable lore =>
                 Bindage -> TypeM lore ()
 checkBindage BindVar = return ()
 checkBindage (BindInPlace cs src is) = do
-  mapM_ (requireI [Basic Cert]) cs
+  mapM_ (requireI [Prim Cert]) cs
   srct <- lookupType src
-  mapM_ (require [Basic Int]) is
+  mapM_ (require [Prim int32]) is
 
   consume =<< lookupAliases src
 
@@ -973,7 +947,7 @@ patternContext pat rt = do
           case (remnames, HM.lookup x m) of
             (_, Just v) -> return $ Var $ patElemName v
             (v:vs, Nothing)
-              | Basic Int <- patElemType v -> do
+              | Prim (IntType Int32) <- patElemType v -> do
                 tell [v]
                 put (vs, HM.insert x v m)
                 return $ Var $ patElemName v
@@ -1022,12 +996,12 @@ checkFuncall fname paramts args = do
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore ()
 checkLambda (Lambda i params body rettype) args = do
-  iparam <- basicLParamM i Int
+  iparam <- primLParamM i int32
   let fname = nameFromString "<anonymous>"
   if length params == length args then do
     checkFuncall Nothing
       (map ((`toDecl` Nonunique) . paramType) $ iparam:params) $
-      (Basic Int, mempty) : args
+      (Prim int32, mempty) : args
     let consumable = zip (map paramName params) (map argAliases args)
     checkFun' (fname,
            staticShapes $ map (`toDecl` Nonunique) rettype,
@@ -1044,7 +1018,7 @@ checkConcatMapLambda :: Checkable lore =>
                         Lambda lore -> [Arg] -> TypeM lore ()
 checkConcatMapLambda (Lambda i params body rettype) args = do
   mapM_ checkType rettype
-  iparam <- basicLParamM i Int
+  iparam <- primLParamM i int32
   let (_,elemparams) =
         splitAt (length params - length args) params
       fname = nameFromString "<anonymous>"
@@ -1069,7 +1043,7 @@ checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
 checkExtLambda (ExtLambda i params body rettype) args =
   if length params == length args then do
-    iparam <- basicLParamM i Int
+    iparam <- primLParamM i int32
     checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
     let fname = nameFromString "<anonymous>"
         consumable = zip (map paramName params) (map argAliases args)
@@ -1096,16 +1070,16 @@ class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   checkRetType :: AST.RetType lore -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   matchPattern :: Pattern lore -> Exp lore -> TypeM lore ()
-  basicFParam :: lore -> VName -> BasicType -> AST.FParam (Aliases lore)
-  basicLParam :: lore -> VName -> BasicType -> AST.LParam (Aliases lore)
+  primFParam :: lore -> VName -> PrimType -> AST.FParam (Aliases lore)
+  primLParam :: lore -> VName -> PrimType -> AST.LParam (Aliases lore)
   matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()
 
-basicFParamM :: forall lore.Checkable lore =>
-                VName -> BasicType -> TypeM lore (AST.FParam lore)
-basicFParamM name t =
-  return $ basicFParam (representative :: lore) name t
+primFParamM :: forall lore.Checkable lore =>
+                VName -> PrimType -> TypeM lore (AST.FParam lore)
+primFParamM name t =
+  return $ primFParam (representative :: lore) name t
 
-basicLParamM :: forall lore.Checkable lore =>
-                VName -> BasicType -> TypeM lore (AST.LParam lore)
-basicLParamM name t =
-  return $ basicLParam (representative :: lore) name t
+primLParamM :: forall lore.Checkable lore =>
+                VName -> PrimType -> TypeM lore (AST.LParam lore)
+primLParamM name t =
+  return $ primLParam (representative :: lore) name t

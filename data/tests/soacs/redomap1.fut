@@ -9,6 +9,6 @@ fun real main([int] a) =
     redomap(fn real (real x, real y) =>
               x*y,
             fn real (real x, int y) =>
-              x*toFloat(y),
+              x*real(y),
             1.0,
             a)

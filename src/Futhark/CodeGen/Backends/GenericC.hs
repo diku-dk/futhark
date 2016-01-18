@@ -35,7 +35,7 @@ module Futhark.CodeGen.Backends.GenericC
   , stms
   , decl
   -- * Building Blocks
-  , scalarTypeToCType
+  , primTypeToCType
   ) where
 
 import Control.Applicative
@@ -254,26 +254,13 @@ decl :: C.InitGroup -> CompilerM op s ()
 decl x = item [C.citem|$decl:x;|]
 
 valueTypeName :: Type -> String
-valueTypeName (Scalar Int)  = "int"
-valueTypeName (Scalar Bool) = "bool"
-valueTypeName (Scalar Char) = "char"
-valueTypeName (Scalar Float32) = "float"
-valueTypeName (Scalar Float64) = "double"
-valueTypeName (Scalar Cert) = "cert"
+valueTypeName (Scalar t) = pretty $ primTypeToCType t
 valueTypeName (Mem _ (Space space)) = space ++ "_mem"
 valueTypeName (Mem _ DefaultSpace) = "mem"
 
 typeName :: [Type] -> String
 typeName [t] = valueTypeName t
 typeName ts  = "tuple_" ++ intercalate "_" (map (typeName . pure) ts)
-
-scalarTypeToCType :: BasicType -> C.Type
-scalarTypeToCType Int  = [C.cty|int|]
-scalarTypeToCType Bool = [C.cty|char|]
-scalarTypeToCType Char = [C.cty|char|]
-scalarTypeToCType Float64 = [C.cty|double|]
-scalarTypeToCType Float32 = [C.cty|float|]
-scalarTypeToCType Cert = [C.cty|char|]
 
 memToCType :: Space -> CompilerM op s C.Type
 memToCType DefaultSpace =
@@ -282,7 +269,7 @@ memToCType (Space space) =
   join $ asks envMemoryType <*> pure space
 
 typeToCType :: [Type] -> CompilerM op s C.Type
-typeToCType [Scalar bt] = return $ scalarTypeToCType bt
+typeToCType [Scalar bt] = return $ primTypeToCType bt
 typeToCType [Mem _ space] = memToCType space
 typeToCType t = do
   ty <- gets $ find (sameRepresentation t . fst) . compTypeStructs
@@ -299,20 +286,23 @@ typeToCType t = do
                 ct <- typeToCType [et]
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
-printBasicStm :: C.Exp -> BasicType -> C.Stm
-printBasicStm val Int = [C.cstm|printf("%d", $exp:val);|]
-printBasicStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
-printBasicStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
-printBasicStm val Float32 = [C.cstm|printf("%.6f", $exp:val);|]
-printBasicStm val Float64 = [C.cstm|printf("%.6f", $exp:val);|]
-printBasicStm _ Cert = [C.cstm|printf("Checked");|]
+printPrimStm :: C.Exp -> PrimType -> C.Stm
+printPrimStm val (IntType Int8) = [C.cstm|printf("%d", $exp:val);|]
+printPrimStm val (IntType Int16) = [C.cstm|printf("%d", $exp:val);|]
+printPrimStm val (IntType Int32) = [C.cstm|printf("%d", $exp:val);|]
+printPrimStm val (IntType Int64) = [C.cstm|printf("%lld", $exp:val);|]
+printPrimStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
+printPrimStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
+printPrimStm val (FloatType Float32) = [C.cstm|printf("%.6f", $exp:val);|]
+printPrimStm val (FloatType Float64) = [C.cstm|printf("%.6f", $exp:val);|]
+printPrimStm _ Cert = [C.cstm|printf("Checked");|]
 
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
 printStm (ScalarValue bt name) =
-  return $ printBasicStm (C.var name) bt
+  return $ printPrimStm (C.var name) bt
 printStm (ArrayValue mem bt []) =
-  return $ printBasicStm val bt
+  return $ printPrimStm val bt
   where val = [C.cexp|*$id:mem|]
 printStm (ArrayValue mem Char [size]) = do
   i <- newVName "print_i"
@@ -330,7 +320,7 @@ printStm (ArrayValue mem bt (dim:shape)) = do
   v <- newVName "print_elem"
   let dim' = dimSizeToExp dim
       shape' = C.product $ map dimSizeToExp shape
-      bt'  = scalarTypeToCType bt
+      bt'  = primTypeToCType bt
   printelem <- printStm $ ArrayValue v bt shape
   return [C.cstm|{
                if ($exp:dim' == 0) {
@@ -349,12 +339,12 @@ printStm (ArrayValue mem bt (dim:shape)) = do
                }
              }|]
 
-readFun :: BasicType -> Maybe String
-readFun Int  = Just "read_int"
+readFun :: PrimType -> Maybe String
+readFun (IntType Int32)  = Just "read_int"
 readFun Char = Just "read_char"
 readFun Bool = Just "read_bool"
-readFun Float32 = Just "read_float"
-readFun Float64 = Just "read_double"
+readFun (FloatType Float32) = Just "read_float"
+readFun (FloatType Float64) = Just "read_double"
 readFun _    = Nothing
 
 paramsTypes :: [Param] -> [Type]
@@ -362,15 +352,15 @@ paramsTypes = map paramType
   where paramType (MemParam _ size space) = Mem size space
         paramType (ScalarParam _ t) = Scalar t
 
-readBasicStm :: C.Exp -> BasicType -> C.Stm
-readBasicStm place t
+readPrimStm :: C.Exp -> PrimType -> C.Stm
+readPrimStm place t
   | Just f <- readFun t =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
           errx(1, "Syntax error when reading %s.\n", $string:(pretty t));
         }|]
-readBasicStm _ Cert =
+readPrimStm _ Cert =
   [C.cstm|;|]
-readBasicStm _ t =
+readPrimStm _ t =
   [C.cstm|{
         errx(1, "Cannot read %s.\n", $string:(pretty t));
       }|]
@@ -411,7 +401,7 @@ mainCall pre_timing fname (Function outputs inputs _ results args) = do
           ty <- memToCType DefaultSpace
           return [C.cdecl|$ty:ty $id:name;|]
         paramDecl (ScalarParam name ty) = do
-          let ty' = scalarTypeToCType ty
+          let ty' = primTypeToCType ty
           return [C.cdecl|$ty:ty' $id:name;|]
 
 prepareArg :: Param -> CompilerM op s C.Exp
@@ -436,12 +426,12 @@ readInputs inputparams = map $ readInput memsizes
 
 readInput :: HM.HashMap VName VName -> ValueDecl -> C.Stm
 readInput _ (ScalarValue t name) =
-  readBasicStm (C.var name) t
+  readPrimStm (C.var name) t
 readInput memsizes (ArrayValue name t shape)
   | Just f <- readFun t =
   -- We need to create an array for the array parser to put
   -- the shapes.
-  let t' = scalarTypeToCType t
+  let t' = primTypeToCType t
       rank = length shape
       maybeCopyDim (ConstSize _) _ =
         Nothing
@@ -491,7 +481,7 @@ unpackResults ret outparams =
           ret_field_tmp <- newVName "ret_field_tmp"
           field_t <- case param of
                        ScalarParam _ bt ->
-                         return $ scalarTypeToCType bt
+                         return $ primTypeToCType bt
                        MemParam _ _ space ->
                          memToCType space
           let field_e = tupleFieldExp (C.var ret) i
@@ -608,7 +598,8 @@ int main(int argc, char** argv) {
                         C.OldFunc _ _ _ _ _ _ l -> l
                         C.Func _ _ _ _ _ l      -> l
 
-        builtin = map asDecl builtInFunctionDefs
+        builtin = map asDecl builtInFunctionDefs ++
+                  cIntOps ++ cFloat32Ops ++ cFloat64Ops
           where asDecl fun = [C.cedecl|$func:fun|]
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
@@ -621,39 +612,40 @@ compileFun (fname, Function outputs inputs body _ _) = do
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $items:body' }|])
   where compileInput (ScalarParam name bt) = do
-          let ctp = scalarTypeToCType bt
+          let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
         compileInput (MemParam name _ space) = do
           ty <- memToCType space
           return [C.cparam|$ty:ty $id:name|]
 
         compileOutput (ScalarParam name bt) = do
-          let ctp = scalarTypeToCType bt
+          let ctp = primTypeToCType bt
           decl [C.cdecl|$ty:ctp $id:name;|]
         compileOutput (MemParam name _ space) = do
           ty <- memToCType space
           decl [C.cdecl|$ty:ty $id:name;|]
 
-compileBasicValue :: BasicValue -> C.Exp
+compilePrimValue :: PrimValue -> C.Exp
 
-compileBasicValue (IntVal k) =
-  [C.cexp|$int:k|]
+compilePrimValue (IntValue (Int8Value k)) = [C.cexp|$int:k|]
+compilePrimValue (IntValue (Int16Value k)) = [C.cexp|$int:k|]
+compilePrimValue (IntValue (Int32Value k)) = [C.cexp|$int:k|]
+compilePrimValue (IntValue (Int64Value k)) = [C.cexp|$int:k|]
 
-compileBasicValue (Float64Val x) =
+compilePrimValue (FloatValue (Float64Value x)) =
   [C.cexp|$double:(toRational x)|]
-
-compileBasicValue (Float32Val x) =
+compilePrimValue (FloatValue (Float32Value x)) =
   [C.cexp|$float:(toRational x)|]
 
-compileBasicValue (LogVal b) =
+compilePrimValue (BoolValue b) =
   [C.cexp|$int:b'|]
   where b' :: Int
         b' = if b then 1 else 0
 
-compileBasicValue (CharVal c) =
+compilePrimValue (CharValue c) =
   [C.cexp|$char:c|]
 
-compileBasicValue Checked =
+compilePrimValue Checked =
   [C.cexp|0|]
 
 dimSizeToExp :: DimSize -> C.Exp
@@ -676,18 +668,18 @@ readScalarPointerWithQuals quals_f dest i elemtype space = do
   quals <- quals_f space
   return $ derefPointer dest i [C.cty|$tyquals:quals $ty:elemtype*|]
 
-compileExpToName :: String -> BasicType -> Exp -> CompilerM op s VName
+compileExpToName :: String -> PrimType -> Exp -> CompilerM op s VName
 compileExpToName _ _ (ScalarVar v) =
   return v
 compileExpToName desc t e = do
   desc' <- newVName desc
   e' <- compileExp e
-  decl [C.cdecl|$ty:(scalarTypeToCType t) $id:desc' = $e';|]
+  decl [C.cdecl|$ty:(primTypeToCType t) $id:desc' = $e';|]
   return desc'
 
 compileExp :: Exp -> CompilerM op s C.Exp
 
-compileExp (Constant val) = return $ compileBasicValue val
+compileExp (Constant val) = return $ compilePrimValue val
 
 compileExp (ScalarVar src) =
   return [C.cexp|$id:src|]
@@ -695,75 +687,76 @@ compileExp (ScalarVar src) =
 compileExp (Index src (Count iexp) restype DefaultSpace) =
   derefPointer src
   <$> compileExp iexp
-  <*> pure [C.cty|$ty:(scalarTypeToCType restype)*|]
+  <*> pure [C.cty|$ty:(primTypeToCType restype)*|]
 
 compileExp (Index src (Count iexp) restype (Space space)) =
   join $ asks envReadScalar
     <*> pure src <*> compileExp iexp
-    <*> pure (scalarTypeToCType restype) <*> pure space
+    <*> pure (primTypeToCType restype) <*> pure space
 
-compileExp (UnOp Negate x) = do
-  x' <- compileExp x
-  return [C.cexp|-$exp:x'|]
-
-compileExp (UnOp Complement x) = do
+compileExp (UnOp Complement{} x) = do
   x' <- compileExp x
   return [C.cexp|~$exp:x'|]
 
-compileExp (UnOp Not x) = do
+compileExp (UnOp Not{} x) = do
   x' <- compileExp x
   return [C.cexp|!$exp:x'|]
 
-compileExp (UnOp Abs x) = do
+compileExp (UnOp Abs{} x) = do
   x' <- compileExp x
   return [C.cexp|abs($exp:x')|]
 
-compileExp (UnOp Signum x) = do
+compileExp (UnOp (FAbs Float32) x) = do
+  x' <- compileExp x
+  return [C.cexp|fabsf($exp:x')|]
+
+compileExp (UnOp (FAbs Float64) x) = do
+  x' <- compileExp x
+  return [C.cexp|fabs($exp:x')|]
+
+compileExp (UnOp Signum{} x) = do
   x' <- compileExp x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+
+compileExp (CmpOp cmp x y) = do
+  x' <- compileExp x
+  y' <- compileExp y
+  return $ case cmp of
+    CmpEq -> [C.cexp|$exp:x' == $exp:y'|]
+
+    FCmpLt{} -> [C.cexp|$exp:x' < $exp:y'|]
+    FCmpLe{} -> [C.cexp|$exp:x' <= $exp:y'|]
+
+    _ -> [C.cexp|$id:(pretty cmp)($exp:x', $exp:y')|]
+
+compileExp (ConvOp conv x) = do
+  x' <- compileExp x
+  return $ case conv of
+    Trunc _ to -> [C.cexp|($ty:(intTypeToCType to)) $exp:x'|]
+    _ -> [C.cexp|$id:(pretty conv)($exp:x')|]
 
 compileExp (BinOp bop x y) = do
   x' <- compileExp x
   y' <- compileExp y
   return $ case bop of
-             Plus -> [C.cexp|$exp:x' + $exp:y'|]
-             Minus -> [C.cexp|$exp:x' - $exp:y'|]
-             Times -> [C.cexp|$exp:x' * $exp:y'|]
-             FloatDiv -> [C.cexp|$exp:x' / $exp:y'|]
-             Pow -> [C.cexp|pow($exp:x',$exp:y')|]
-             ShiftR -> [C.cexp|$exp:x' >> $exp:y'|]
-             ShiftL -> [C.cexp|$exp:x' << $exp:y'|]
-             Band -> [C.cexp|$exp:x' & $exp:y'|]
-             Xor -> [C.cexp|$exp:x' ^ $exp:y'|]
-             Bor -> [C.cexp|$exp:x' | $exp:y'|]
-             LogAnd -> [C.cexp|$exp:x' && $exp:y'|]
-             LogOr -> [C.cexp|$exp:x' || $exp:y'|]
-             Equal -> [C.cexp|$exp:x' == $exp:y'|]
-             Less -> [C.cexp|$exp:x' < $exp:y'|]
-             Leq -> [C.cexp|$exp:x' <= $exp:y'|]
-             Div ->
-               let q = [C.cexp|$exp:x' / $exp:y'|]
-                   r = [C.cexp|$exp:x' % $exp:y'|]
-               in [C.cexp|$exp:q -
-                   ((($exp:r != 0) &&
-                     (($exp:r < 0) != ($exp:y' < 0))) ?
-                    1 : 0)|]
-             Mod ->
-               let r = [C.cexp|$exp:x' % $exp:y'|]
-               in [C.cexp|
-                   $exp:r +
-                   (($exp:r == 0 ||
-                    ($exp:x' > 0 && $exp:y' > 0) ||
-                    ($exp:x' < 0 && $exp:y' < 0)) ?
-                    0 : $exp:y')|]
-             Quot ->
-               [C.cexp|$exp:x' / $exp:y'|]
-             Rem ->
-               [C.cexp|$exp:x' % $exp:y'|]
+             Add{} -> [C.cexp|$exp:x' + $exp:y'|]
+             FAdd{} -> [C.cexp|$exp:x' + $exp:y'|]
+             Sub{} -> [C.cexp|$exp:x' - $exp:y'|]
+             FSub{} -> [C.cexp|$exp:x' - $exp:y'|]
+             Mul{} -> [C.cexp|$exp:x' * $exp:y'|]
+             FMul{} -> [C.cexp|$exp:x' * $exp:y'|]
+             FDiv{} -> [C.cexp|$exp:x' / $exp:y'|]
+             Xor{} -> [C.cexp|$exp:x' ^ $exp:y'|]
+             And{} -> [C.cexp|$exp:x' & $exp:y'|]
+             Or{} -> [C.cexp|$exp:x' | $exp:y'|]
+             Shl{} -> [C.cexp|$exp:x' << $exp:y'|]
+             LogAnd{} -> [C.cexp|$exp:x' && $exp:y'|]
+             LogOr{} -> [C.cexp|$exp:x' || $exp:y'|]
+             _ -> [C.cexp|$id:(pretty bop)($exp:x', $exp:y')|]
 
 compileExp (SizeOf t) =
   return [C.cexp|(sizeof($ty:t'))|]
-  where t' = scalarTypeToCType t
+  where t' = primTypeToCType t
 
 compileExp (Cond c t f) = do
   c' <- compileExp c
@@ -851,7 +844,7 @@ compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspa
 compileCode (Write dest (Count idx) elemtype DefaultSpace elemexp) = do
   deref <- derefPointer dest
            <$> compileExp idx
-           <*> pure [C.cty|$ty:(scalarTypeToCType elemtype)*|]
+           <*> pure [C.cty|$ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
   stm [C.cstm|$exp:deref = $exp:elemexp';|]
 
@@ -859,7 +852,7 @@ compileCode (Write dest (Count idx) elemtype (Space space) elemexp) =
   join $ asks envWriteScalar
     <*> pure dest
     <*> compileExp idx
-    <*> pure (scalarTypeToCType elemtype)
+    <*> pure (primTypeToCType elemtype)
     <*> pure space
     <*> compileExp elemexp
 
@@ -868,7 +861,7 @@ compileCode (DeclareMem name space) = do
   decl [C.cdecl|$ty:ty $id:name;|]
 
 compileCode (DeclareScalar name t) = do
-  let ct = scalarTypeToCType t
+  let ct = primTypeToCType t
   decl [C.cdecl|$ty:ct $id:name;|]
 
 -- For assignments of the form 'x = x OP e', we generate C assignment
@@ -913,12 +906,12 @@ compileFunBody outputs code = do
     _        -> zipWithM_ setRetVal' [0..] outputs
   stm [C.cstm|return $id:retval;|]
 
-ppArrayType :: BasicType -> Int -> String
+ppArrayType :: PrimType -> Int -> String
 ppArrayType t 0 = pretty t
 ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
-assignmentOperator Plus  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
-assignmentOperator Minus = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
-assignmentOperator Times = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
+assignmentOperator Add{}  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
+assignmentOperator Sub{} = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
+assignmentOperator Mul{} = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
 assignmentOperator _     = Nothing

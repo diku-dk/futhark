@@ -133,7 +133,7 @@ transformSOAC pat (ConcatMap cs _ fun inputs) = do
   emptyarrs <- mapM (letExp "empty")
                [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
   let concatArrays (arr, arrs') = do
-        let plus x y = eBinOp Plus x y Int
+        let plus = eBinOp (Add Int32)
         n <- arraySize 0 <$> lookupType arr
         ms <- mapM (liftM (arraySize 0) . lookupType) arrs'
         ressize <- letSubExp "concatMap_result_size" =<<
@@ -149,7 +149,7 @@ transformSOAC pat (ConcatMap cs _ fun inputs) = do
 
   ses <-case mapM nonempty $ transpose arrs of
           Nothing ->
-            return $ Constant (IntVal 0) : map Var emptyarrs
+            return $ intconst Int32 0 : map Var emptyarrs
           Just arrs' -> do
             concatted_arrs <- mapM (letSubExp "concatMap_result" <=< concatArrays) arrs'
             arrts <- mapM subExpType concatted_arrs
@@ -267,13 +267,13 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
   -- b) chunkloc is the chunk used inside the loop body
   -- c) chunkglb is the global chunk (set to 1 or a convenient number)
   -- d) inarrVsz is the variant size of the streamed input array in the loop.
-  ilam <- newIdent "stream_ii" $ Basic Int
+  ilam <- newIdent "stream_ii" $ Prim int32
   chunkloc <- case lampars of
                 chnk:_ -> return chnk
                 _ -> fail "FirstOrderTransform Stream: chunk error!"
   outersz  <- arraysSize 0 <$> mapM lookupType arrexps
   let chunkglb_val = case form of
-                       Sequential{} -> intconst 1
+                       Sequential{} -> intconst Int32 1
                        _            -> outersz
   chunkglb <- letExp (baseString $ paramName chunkloc) $ PrimOp $ SubExp chunkglb_val
   let acc_num = length accexps
@@ -321,7 +321,7 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
       merge = loopMerge
               (accall++outarrloop)
               (initacc++map (Var . identName) outarrinit)
-  loopcnt  <- newIdent "stream_N" $ Basic Int
+  loopcnt  <- newIdent "stream_N" $ Prim int32
   -- 3.) Transform the stream's lambda to a loop body
   loopbody <- runBodyBinder $
               localScope (HM.singleton loopind IndexInfo) $
@@ -334,46 +334,41 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
           forM_ (zip accpars argsacc) $ \(param, arg) ->
               letBindNames' [paramName param] arg
           -- ilam := i*chunk_glb, the local chunk inside the loop
-          ilamexp <- eBinOp Times
+          ilamexp <- eBinOp (Mul Int32)
                             (pure $ PrimOp $ SubExp $ Var loopind)
                             (pure $ PrimOp $ SubExp $ Var chunkglb)
-                            Int
           myLetBind ilamexp ilam
           ---------------- changed from here --------------
           -- ilampch := (i+1)*chunk_glb
-          ip1chgid <- newIdent "stream_ip1chg" $ Basic Int
-          ip1chgexp<- eBinOp Plus
+          ip1chgid <- newIdent "stream_ip1chg" $ Prim int32
+          ip1chgexp<- eBinOp (Add Int32)
                              (pure $ PrimOp $ SubExp $ Var $ identName ilam)
                              (pure $ PrimOp $ SubExp $ Var chunkglb)
-                             Int
           myLetBind ip1chgexp ip1chgid
           -- diff0   := (i+1)*ghunk_glb - total_stream_size
-          diff0id  <- newIdent "stream_diff0" $ Basic Int
-          diff0exp <-eBinOp Minus
+          diff0id  <- newIdent "stream_diff0" $ Prim int32
+          diff0exp <-eBinOp (Sub Int32)
                             (pure $ PrimOp $ SubExp $ Var $ identName ip1chgid)
                             (pure $ PrimOp $ SubExp outersz)
-                            Int
           myLetBind diff0exp diff0id
           -- diff    := 0 < diff0 ? diff0 : 0
-          diffid   <- newIdent "stream_diff" $ Basic Int
-          ifdiffexp<- eIf (eBinOp Less (pure $ PrimOp $ SubExp $ Constant $ IntVal 0)
-                                       (pure $ PrimOp $ SubExp $ Var $ identName diff0id)
-                                  Bool)
+          diffid   <- newIdent "stream_diff" $ Prim int32
+          ifdiffexp<- eIf (eCmpOp (CmpSlt Int32)
+                           (pure $ PrimOp $ SubExp $ intconst Int32 0)
+                           (pure $ PrimOp $ SubExp $ Var $ identName diff0id))
                           (pure $ resultBody [Var $ identName diff0id])
-                          (pure $ resultBody [Constant $ IntVal 0])
+                          (pure $ resultBody [intconst Int32 0])
           myLetBind ifdiffexp diffid
           -- chunk_loc := chunk_glb - diff
-          chlexp   <- eBinOp Minus
+          chlexp   <- eBinOp (Sub Int32)
                              (pure $ PrimOp $ SubExp $ Var chunkglb)
                              (pure $ PrimOp $ SubExp $ Var $ identName diffid)
-                             Int
           myLetBind chlexp $ paramIdent chunkloc
           -- diff1   := chunk_glb*i - diff
-          diff1id  <- newIdent "stream_diff1" $ Basic Int
-          diff1exp <- eBinOp Minus
+          diff1id  <- newIdent "stream_diff1" $ Prim int32
+          diff1exp <- eBinOp (Sub Int32)
                              (pure $ PrimOp $ SubExp $ Var $ identName ilam)
                              (pure $ PrimOp $ SubExp $ Var $ identName diffid)
-                             Int
           myLetBind diff1exp diff1id
           -- split input streams into current chunk and rest of stream
           forM_ (zip arrpars arrexps) $
@@ -434,13 +429,12 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   thenbody <- runBodyBinder $ do
-      lUBexp <- eBinOp Div
-                       (eBinOp Plus (pure $ PrimOp $ SubExp outersz)
-                                    (eBinOp Minus (pure $ PrimOp $ SubExp $ Var chunkglb)
-                                                  (pure $ PrimOp $ SubExp $ intconst 1) Int)
-                                    Int)
+      lUBexp <- eBinOp (SDiv Int32)
+                       (eBinOp (Add Int32)
+                        (pure $ PrimOp $ SubExp outersz)
+                        (eBinOp (Sub Int32) (pure $ PrimOp $ SubExp $ Var chunkglb)
+                                            (pure $ PrimOp $ SubExp $ intconst Int32 1)))
                        (pure $ PrimOp $ SubExp $ Var chunkglb)
-                       Int
       myLetBind lUBexp loopcnt
       let outinibds= zipWith (\ idd tp ->
                                 mkLet' [] [idd] $ PrimOp $
@@ -453,7 +447,7 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
       fakeoutarrs <- resultArray  initrtps
       return $ resultBody (accexps ++ map Var fakeoutarrs)
   letBind_ respat =<<
-    eIf (pure $ PrimOp $ SubExp $ Constant $ LogVal True)
+    eIf (pure $ PrimOp $ SubExp $ Constant $ BoolValue True)
     (pure thenbody)
     (pure elsebody)
   where myLetBind :: Transformer m =>
@@ -500,23 +494,23 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
         mkAllExistIdAndTypes _ ((_, ExactBd _), initrtp) =
             return ( Nothing, Nothing, (initrtp,initrtp,initrtp) )
         mkAllExistIdAndTypes _ ((p,UpperBd _), Array bt (Shape (d:dims)) u) = do
-            idd1<- newIdent (textual (identName p)++"_outiv1") $ Basic Int
-            idd2<- newIdent (textual (identName p)++"_outiv2") $ Basic Int
+            idd1<- newIdent (textual (identName p)++"_outiv1") $ Prim int32
+            idd2<- newIdent (textual (identName p)++"_outiv2") $ Prim int32
             let initrtp   = Array bt (Shape $ d:dims) u
                 exacttype = Array bt (Shape $ Var (identName idd2):dims) u
             return ( Nothing
-                   , Just (idd1,idd2,intconst 0)
+                   , Just (idd1,idd2,intconst Int32 0)
                    , (initrtp,initrtp,exacttype) )
         mkAllExistIdAndTypes strmsz ((p,UnknownBd), Array bt (Shape (_:dims)) u) = do
-            idd1 <- newIdent (textual (identName p)++"_outiv1") $ Basic Int
-            idd2 <- newIdent (textual (identName p)++"_outiv2") $ Basic Int
-            idal1<- newIdent (textual (identName p)++"_outsz1") $ Basic Int
-            idal2<- newIdent (textual (identName p)++"_outsz2") $ Basic Int
+            idd1 <- newIdent (textual (identName p)++"_outiv1") $ Prim int32
+            idd2 <- newIdent (textual (identName p)++"_outiv2") $ Prim int32
+            idal1<- newIdent (textual (identName p)++"_outsz1") $ Prim int32
+            idal2<- newIdent (textual (identName p)++"_outsz2") $ Prim int32
             let lftedtype1= Array bt (Shape $ Var (identName idal1): dims) u
                 lftedtype2= Array bt (Shape $ Var (identName idal2): dims) u
                 exacttype = Array bt (Shape $ Var (identName idd2) : dims) u
             return ( Just (idal1,idal2,    strmsz)
-                   , Just (idd1, idd2, intconst 0)
+                   , Just (idd1, idd2, intconst Int32 0)
                    , (lftedtype1,lftedtype2,exacttype) )
         mkAllExistIdAndTypes _ _ =
             fail "FirstOrderTransform(Stream): failed in mkAllExistIdAndTypes"
@@ -539,13 +533,13 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
                   Nothing ->               -- exact-size case
                     return (iv, glboutid, Nothing, Nothing)
                   Just (k,_,_) -> do
-                    newszid <- newIdent (textual (identName k)++"_new") $ Basic Int
-                    plexp <- eBinOp Plus (pure $ PrimOp $ SubExp $ Var $ identName k)
-                                         (pure $ PrimOp $ SubExp locoutid_size) Int
+                    newszid <- newIdent (textual (identName k)++"_new") $ Prim int32
+                    plexp <- eBinOp (Add Int32) (pure $ PrimOp $ SubExp $ Var $ identName k)
+                                                (pure $ PrimOp $ SubExp locoutid_size)
                     myLetBind plexp newszid
                     let oldbtp = identType glboutid
-                    newallocid <- newIdent "newallocsz" $ Basic Int
-                    resallocid <- newIdent "resallocsz" $ Basic Int
+                    newallocid <- newIdent "newallocsz" $ Prim int32
+                    resallocid <- newIdent "resallocsz" $ Prim int32
                     olddims <- case arrayDims oldbtp of
                                  (_:dims) -> return dims
                                  _ -> fail ("FirstOrderTransform(Stream), mkOutArrEpilogue:"++
@@ -555,12 +549,14 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
                         return (Var $ identName k, glboutid, Just newszid, Nothing)
                       Just (alsz,_,_)-> do -- fully existential case, reallocate
                         alloclid <- newVName "allcloopiv"
-                        let isempty = eBinOp Leq (pure $ PrimOp $ SubExp $ Var $ identName newszid)
-                                             (pure $ PrimOp $ SubExp $ Var $ identName alsz) Bool
+                        let isempty = eCmpOp (CmpSlt Int32)
+                                      (pure $ PrimOp $ SubExp $ Var $ identName newszid)
+                                      (pure $ PrimOp $ SubExp $ Var $ identName alsz)
                             emptybranch = pure $ resultBody [Var $ identName glboutid]
                             otherbranch = runBodyBinder $ do
-                                alszt2exp<- eBinOp Times (pure $ PrimOp $ SubExp $ Var $ identName newszid)
-                                                         (pure $ PrimOp $ SubExp $ intconst 2 ) Int
+                                alszt2exp<- eBinOp (Mul Int32)
+                                            (pure $ PrimOp $ SubExp $ Var $ identName newszid)
+                                            (pure $ PrimOp $ SubExp $ intconst Int32 2)
                                 myLetBind alszt2exp newallocid
                                 bnew0<- letExp (textual (identName glboutid)++"_loop0") $
                                                PrimOp $ Scratch (elemType oldbtp) (Var (identName newallocid):olddims)
@@ -596,9 +592,10 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
             loopbody <- runBodyBinder $
                         localScope (HM.singleton loopid IndexInfo) $
                         localScope (scopeOfFParams $ map fst outmerge) $ do
-                ivvplid <- newIdent "jj" $ Basic Int
-                ivvplidexp <- eBinOp Plus (pure $ PrimOp $ SubExp ivv)
-                                          (pure $ PrimOp $ SubExp $ Var loopid) Int
+                ivvplid <- newIdent "jj" $ Prim int32
+                ivvplidexp <- eBinOp (Add Int32)
+                              (pure $ PrimOp $ SubExp ivv)
+                              (pure $ PrimOp $ SubExp $ Var loopid)
                 myLetBind ivvplidexp ivvplid
                 (dest:_) <- letwith css [identName glboutLid] (pexp (Var $ identName ivvplid))--[indexp]
                                         [PrimOp $ Index css locoutid [Var loopid]]
@@ -686,7 +683,7 @@ bindLambda :: Transformer m =>
            -> m [SubExp]
 bindLambda (Lambda _ params body _) args = do
   forM_ (zip params args) $ \(param, arg) ->
-    if basicType $ paramType param
+    if primType $ paramType param
     then letBindNames' [paramName param] arg
     else letBindNames' [paramName param] =<< eCopy (pure arg)
   bodyBind body

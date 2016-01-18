@@ -22,7 +22,7 @@ data UnOp = Not -- ^ Boolean negation.
           | Abs -- ^ Absolute/numerical value.
             deriving (Eq, Show)
 
-data PyExp = Constant BasicValue
+data PyExp = Constant PrimValue
            | StringLiteral String
            | Var String
            | BinaryOp String PyExp PyExp
@@ -76,7 +76,7 @@ instance Pretty PyArg where
   ppr (Arg e) = ppr e
 
 instance Pretty PyExp where
-    ppr (Constant chr@(CharVal _)) = text "b" <> ppr chr
+    ppr (Constant chr@(CharValue _)) = text "b" <> ppr chr
     ppr (Constant v) = ppr v
     ppr (StringLiteral s) = text $ show s
     ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n

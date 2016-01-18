@@ -197,7 +197,7 @@ entryType :: Annotations lore => Entry lore -> Type
 entryType (LetBound entry) = typeOf $ letBoundAttr entry
 entryType (LParam entry)   = typeOf $ lparamAttr entry
 entryType (FParam entry)   = typeOf $ fparamAttr entry
-entryType (LoopVar _)      = Basic Int
+entryType (LoopVar _)      = Prim int32
 entryType (FreeVar entry)  = typeOf $ freeVarAttr entry
 
 instance Substitutable lore => Substitute (LetBoundEntry lore) where
@@ -279,7 +279,7 @@ lookupScalExp name vtable = asScalExp =<< lookup name vtable
 
 lookupValue :: VName -> SymbolTable lore -> Maybe Value
 lookupValue name vtable = case lookupSubExp name vtable of
-                            Just (Constant val) -> Just $ BasicVal val
+                            Just (Constant val) -> Just $ PrimVal val
                             _                   -> Nothing
 
 lookupVar :: VName -> SymbolTable lore -> Maybe VName
@@ -451,10 +451,8 @@ insertArrayLParam param Nothing vtable =
 insertLoopVar :: VName -> SubExp -> SymbolTable lore -> SymbolTable lore
 insertLoopVar name bound = insertEntry name bind
   where bind = LoopVar LoopVarEntry {
-            loopVarRange = (Just (Val (IntVal 0)),
-                            Just $
-                              subExpToScalExp bound Int `SMinus`
-                              Val (IntVal 1))
+            loopVarRange = (Just 0,
+                            Just $ subExpToScalExp bound int32 - 1)
           , loopVarBindingDepth = 0
           }
 
@@ -500,10 +498,10 @@ updateBounds' cond sym_tab =
       --   of `not cond' in CNF form: not cond = (not c1) && ... && (not cn)
       getNotFactorsLEQ0 :: ScalExp -> [ScalExp]
       getNotFactorsLEQ0 (RelExp rel e_scal) =
-          if scalExpType e_scal /= Int then []
+          if scalExpType e_scal /= int32 then []
           else let leq0_escal = if rel == LTH0
-                                then SMinus (Val (IntVal 0)) e_scal
-                                else SMinus (Val (IntVal 1)) e_scal
+                                then SMinus 0 e_scal
+                                else SMinus 1 e_scal
 
                in  [AS.simplify leq0_escal ranges]
       getNotFactorsLEQ0 (SLogOr  e1 e2) = getNotFactorsLEQ0 e1 ++ getNotFactorsLEQ0 e2
@@ -523,9 +521,10 @@ updateBounds' cond sym_tab =
         sym <- pickRefinedSym S.empty e_scal
         (a,b) <- either (const Nothing) id $ AS.linFormScalE sym e_scal ranges
         case a of
-          Val (IntVal (-1)) -> Just (sym, False, b)
-          Val (IntVal 1)    ->
-            let mb = AS.simplify (SMinus (Val (IntVal 0)) b) ranges
+          -1 ->
+            Just (sym, False, b)
+          1  ->
+            let mb = AS.simplify (negate b) ranges
             in Just (sym, True, mb)
           _ -> Nothing
 
@@ -580,4 +579,4 @@ setLowerBound name bound vtable =
 
 isAtLeast :: VName -> Int -> SymbolTable lore -> SymbolTable lore
 isAtLeast name x =
-  setLowerBound name $ Val $ IntVal $ fromIntegral x
+  setLowerBound name $ fromIntegral x

@@ -44,11 +44,10 @@ primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
 primOpAliases BinOp{} = [mempty]
-primOpAliases Not{} = [mempty]
-primOpAliases Complement{} = [mempty]
-primOpAliases Negate{} = [mempty]
-primOpAliases Abs{} = [mempty]
-primOpAliases Signum{} = [mempty]
+primOpAliases ConvOp{} = [mempty]
+primOpAliases CmpOp{} = [mempty]
+primOpAliases UnOp{} = [mempty]
+
 primOpAliases (Index _ ident _) =
   [vnameAliases ident]
 primOpAliases Iota{} =
@@ -109,7 +108,7 @@ returnAliases rts args = map returnType' rts
           mconcat $ map (uncurry maskAliases) args
         returnType' (Array _ _ Unique) =
           mempty
-        returnType' (Basic _) =
+        returnType' (Prim _) =
           mempty
         returnType' Mem{} =
           error "returnAliases Mem"

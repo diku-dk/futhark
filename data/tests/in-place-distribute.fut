@@ -2,7 +2,6 @@
 -- that were at one point problematic.
 --
 -- ==
--- tags { no_float }
 -- input {
 --   [1.0, 4.0, 7.0, 10.0, 13.0]
 -- }
@@ -15,10 +14,10 @@
 --   815730721.000000, 665416609183179904.000000]]
 -- }
 
-fun [[real]] main([real,num_dates] gausses) =
+fun [[f64]] main([f64,num_dates] gausses) =
   map(seqloop(num_dates), gausses)
 
-fun [real,num_dates] seqloop (int num_dates, real gauss) =
+fun [f64,num_dates] seqloop (int num_dates, f64 gauss) =
   let bbrow = copy(replicate(num_dates, 0.0))   in
   let bbrow[ 0 ] = gauss in
 

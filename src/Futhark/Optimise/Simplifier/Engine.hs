@@ -193,7 +193,7 @@ asserted Constant{} =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp name <$> getVtable
-  case se of Just (PrimOp (BinOp Equal x y _)) -> do
+  case se of Just (PrimOp (CmpOp CmpEq x y)) -> do
                case x of Var xvar ->
                            tellNeed $ Need [] $
                            UT.equalToUsage xvar y
@@ -396,8 +396,9 @@ isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
         cheap (PrimOp BinOp{})   = True
         cheap (PrimOp SubExp{})  = True
-        cheap (PrimOp Not{})     = True
-        cheap (PrimOp Negate{})  = True
+        cheap (PrimOp UnOp{})    = True
+        cheap (PrimOp CmpOp{})   = True
+        cheap (PrimOp ConvOp{})  = True
         cheap LoopOp{}           = False
         cheap _                  = True -- Used to be False, but
                                         -- let's try it out.
@@ -634,8 +635,8 @@ instance Simplifiable (TypeBase Shape u) where
     return $ Array et (Shape dims) u
   simplify (Mem size space) =
     Mem <$> simplify size <*> pure space
-  simplify (Basic bt) =
-    return $ Basic bt
+  simplify (Prim bt) =
+    return $ Prim bt
 
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)

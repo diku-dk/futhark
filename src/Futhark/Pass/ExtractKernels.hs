@@ -685,7 +685,7 @@ segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
     -- We must make sure all inputs are of size
     -- segment_size*nesting_size.
     total_num_elements <-
-      letSubExp "total_num_elements" $ PrimOp $ BinOp Times segment_size nesting_size Int
+      letSubExp "total_num_elements" $ PrimOp $ BinOp (Mul Int32) segment_size nesting_size
 
     let flatten (ne, arr) = do
           ne_shape <- arrayShape <$> subExpType ne
