@@ -1,8 +1,5 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
--- | This Is an ever-changing abstract syntax for Futhark.  Some types,
--- such as @Exp@, are parametrised by type and name representation.
--- See the @doc/@ subdirectory in the Futhark repository for a language
--- reference, or this module may be a little hard to understand.
+-- | Internal abstract syntax for Futhark.
 module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core
