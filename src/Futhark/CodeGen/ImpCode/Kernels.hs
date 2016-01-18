@@ -40,7 +40,7 @@ type KernelCode = Imp.Code InKernel
 
 data CallKernel = Map MapKernel
                 | CallKernel Kernel
-                | MapTranspose BasicType VName Exp VName Exp Exp Exp Exp
+                | MapTranspose PrimType VName Exp VName Exp Exp Exp Exp
             deriving (Show)
 
 -- | A generic kernel containing arbitrary kernel code.
@@ -56,7 +56,7 @@ data MapKernel = MapKernel { mapKernelThreadNum :: VName
 
 data Kernel = Kernel
               { kernelBody :: Imp.Code InKernel
-              , kernelLocalMemory :: [(VName, MemSize, BasicType)]
+              , kernelLocalMemory :: [(VName, MemSize, PrimType)]
                 -- ^ In-kernel name, per-workgroup size in bytes, and
                 -- alignment restriction.
 
@@ -70,7 +70,7 @@ data Kernel = Kernel
               }
             deriving (Show)
 
-data KernelUse = ScalarUse VName BasicType
+data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName Imp.DimSize
                  deriving (Eq, Show)
 

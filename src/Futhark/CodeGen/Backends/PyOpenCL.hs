@@ -10,6 +10,7 @@ import Data.List
 import Prelude
 import NeatInterpolation()
 
+import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.ExplicitMemory (Prog)
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
@@ -31,14 +32,14 @@ compileProg moduleConfig prog = do
   let shebang = if moduleConfig then [] else ["#!/usr/bin/env python"]
   case res of
     Left err -> return $ Left err
-    Right (Imp.Program opencl_code kernel_names prog')  -> do
+    Right (Imp.Program opencl_code opencl_prelude kernel_names prog')  -> do
       --prepare the strings for assigning the kernels and set them as global
       let assigned = map (\x -> Assign (Var (x++"_var")) (Var $ "program."++x)) kernel_names
       let assign_concat = intercalate "\n" $ map pretty assigned
       let kernel_declare = map (\x -> "global " ++ x ++ "_var") kernel_names
       let kernel_concat = intercalate "\n" kernel_declare
 
-      let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", "synchronous=False", pyUtility, pyTestMain, openClDecls opencl_code assign_concat kernel_concat] ++ initCL
+      let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", "synchronous=False", pyUtility, pyTestMain, openClDecls (opencl_prelude ++ "\n" ++ opencl_code) assign_concat kernel_concat] ++ initCL
       let imports = shebang ++ ["import sys", "from numpy import *", "from ctypes import *", "import pyopencl as cl", "import time"]
 
       Right <$> Py.compileProg imports defines operations ()
@@ -55,8 +56,8 @@ compileProg moduleConfig prog = do
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
-  let total_elements = foldl mult_exp (Constant $ IntVal 1) kernel_size'
-  let cond = BinaryOp "!=" total_elements (Constant $ IntVal 0)
+  let total_elements = foldl mult_exp (Constant $ intvalue Int32 1) kernel_size'
+  let cond = BinaryOp "!=" total_elements (Constant $ intvalue Int32 0)
   workgroup_size' <- case workgroup_size of
     Nothing -> return None
     Just es -> Tuple <$> mapM Py.compileExp es
@@ -78,7 +79,7 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
   where processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
         processKernelArg (Imp.ValueArg e bt) = do
           e' <- Py.compileExp e
-          return $ Call (Py.compileBasicToNp bt) [Arg e']
+          return $ Call (Py.compilePrimToNp bt) [Arg e']
         processKernelArg (Imp.MemArg v) = return $ Var $ pretty v
         processKernelArg (Imp.SharedMemoryArg (Imp.Count num_bytes)) = do
           num_bytes' <- Py.compileExp num_bytes
@@ -88,7 +89,7 @@ writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do
   let mem' = Var $ pretty mem
   let nparr = Call "array"
-              [Arg val, ArgKeyword "dtype" $ Var $ Py.compileBasicType bt]
+              [Arg val, ArgKeyword "dtype" $ Var $ Py.compilePrimType bt]
   Py.stm $ Exp $ Call "cl.enqueue_copy" [Arg $ Var "queue", Arg mem', Arg nparr,
                                          ArgKeyword "device_offset" i,
                                          ArgKeyword "is_blocking" $ Var "synchronous"]
@@ -101,15 +102,15 @@ readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ pretty val
   let mem' = Var $ pretty mem
-  let nparr = Call "empty" [Arg $ Constant $ IntVal 1,
-                            ArgKeyword "dtype" (Var $ Py.compileBasicType bt)]
+  let nparr = Call "empty" [Arg $ Constant $ intvalue Int32 1,
+                            ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
   let toNp = Py.asscalar i
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call "cl.enqueue_copy"
     [Arg $ Var "queue", Arg val', Arg mem',
      ArgKeyword "device_offset" toNp,
-     ArgKeyword "is_blocking" $ Constant $ LogVal True]
-  return $ Index val' $ IdxExp $ Constant $ IntVal 0
+     ArgKeyword "is_blocking" $ Constant $ BoolValue True]
+  return $ Index val' $ IdxExp $ Constant $ intvalue Int32 0
 
 readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
@@ -117,7 +118,7 @@ readOpenCLScalar _ _ _ space =
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
   let toNp = Py.asscalar size
-  let cond' = Cond (BinaryOp ">" size (Constant $ IntVal 0)) toNp (Constant $ IntVal 1)
+  let cond' = Cond (BinaryOp ">" size (Constant $ intvalue Int32 0)) toNp (Constant $ intvalue Int32 1)
   let call' = Call "cl.Buffer" [Arg $ Var "ctx",
                                 Arg $ Var "cl.mem_flags.READ_WRITE",
                                 Arg cond']
@@ -153,7 +154,7 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
   let dest_offset = Py.asscalar destidx
   let src_offset = Py.asscalar srcidx
   let bytecount = Py.asscalar nbytes
-  let cond = BinaryOp ">" nbytes (Constant $ IntVal 0)
+  let cond = BinaryOp ">" nbytes (Constant $ intvalue Int32 0)
   let tb = Exp $ Call "cl.enqueue_copy"
            [Arg $ Var "queue", Arg destmem', Arg srcmem',
             ArgKeyword "dest_offset" dest_offset,

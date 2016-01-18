@@ -23,6 +23,7 @@ import Futhark.Util.Pretty
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
+import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Util
 
 -- | The class of lores whose annotations can be prettyprinted.
@@ -56,7 +57,7 @@ instance Pretty Commutativity where
   ppr Noncommutative = text "noncommutative"
 
 instance Pretty Value where
-  ppr (BasicVal bv) = ppr bv
+  ppr (PrimVal bv) = ppr bv
   ppr v
     | Just s <- arrayString v = text $ show s
   ppr (ArrayVal a t _)
@@ -84,21 +85,21 @@ instance Pretty Space where
   ppr (Space s)    = text "@" <> text s
 
 instance Pretty u => Pretty (TypeBase Shape u) where
-  ppr (Basic et) = ppr et
+  ppr (Prim et) = ppr et
   ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
     where f e s = brackets $ s <> comma <> ppr e
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
-  ppr (Basic et) = ppr et
+  ppr (Prim et) = ppr et
   ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
     where f dim s = brackets $ s <> comma <> ppr dim
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase Rank u) where
-  ppr (Basic et) = ppr et
+  ppr (Prim et) = ppr et
   ppr (Array et (Rank n) u) = ppr u <> foldl f (ppr et) [1..n]
     where f s _ = brackets s
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
@@ -182,12 +183,16 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     case rt of
       Array {} -> brackets $ commastack $ map ppr es
       _        -> brackets $ commasep   $ map ppr es
-  ppr (BinOp bop x y _) = ppr x <+/> text (pretty bop) <+> ppr y
-  ppr (Not e) = text "!" <+> pprPrec 9 e
-  ppr (Negate e) = text "-" <> pprPrec 9 e
-  ppr (Abs e) = text "abs" <+> pprPrec 9 e
-  ppr (Signum e) = text "signum" <+> pprPrec 9 e
-  ppr (Complement e) = text "~" <> pprPrec 9 e
+  ppr (BinOp bop x y) = ppr bop <> parens (ppr x <> comma <+> ppr y)
+  ppr (CmpOp op x y) = ppr op <> parens (ppr x <> comma <+> ppr y)
+  ppr (ConvOp conv x) =
+    text "convert" <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
+    where (fromtype, totype) = convTypes conv
+  ppr (UnOp Not e) = text "!" <+> pprPrec 9 e
+  ppr (UnOp (Abs t) e) = taggedI "abs" t <+> pprPrec 9 e
+  ppr (UnOp (FAbs t) e) = taggedF "fabs" t <+> pprPrec 9 e
+  ppr (UnOp (Signum t) e) = taggedI "signum" t <+> pprPrec 9 e
+  ppr (UnOp (Complement t) e) = taggedI "~" t <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
@@ -268,25 +273,62 @@ instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions
 
 instance Pretty BinOp where
-  ppr Plus = text "+"
-  ppr Minus = text "-"
-  ppr Pow = text "**"
-  ppr Times = text "*"
-  ppr FloatDiv = text "/"
-  ppr Div = text "div"
-  ppr Mod = text "%"
-  ppr Quot = text "//"
-  ppr Rem = text "%%"
-  ppr ShiftR = text ">>"
-  ppr ShiftL = text "<<"
-  ppr Band = text "&"
-  ppr Xor = text "^"
-  ppr Bor = text "|"
-  ppr LogAnd = text "&&"
-  ppr LogOr = text "||"
-  ppr Equal = text "=="
-  ppr Less = text "<"
-  ppr Leq = text "<="
+  ppr (Add t) = taggedI "add" t
+  ppr (FAdd t) = taggedF "fadd" t
+  ppr (Sub t) = taggedI "sub" t
+  ppr (FSub t) = taggedF "fsub" t
+  ppr (Mul t) = taggedI "mul" t
+  ppr (FMul t) = taggedF "fmul" t
+  ppr (UDiv t) = taggedI "udiv" t
+  ppr (UMod t) = taggedI "umod" t
+  ppr (SDiv t) = taggedI "sdiv" t
+  ppr (SMod t) = taggedI "smod" t
+  ppr (SQuot t) = taggedI "squot" t
+  ppr (SRem t) = taggedI "srem" t
+  ppr (FDiv t) = taggedF "fdiv" t
+  ppr (Shl t) = taggedI "shl" t
+  ppr (LShr t) = taggedI "lshr" t
+  ppr (AShr t) = taggedI "ashr" t
+  ppr (And t) = taggedI "and" t
+  ppr (Or t) = taggedI "or" t
+  ppr (Xor t) = taggedI "xor" t
+  ppr (SPow t) = taggedI "spow" t
+  ppr (FPow t) = taggedF "fpow" t
+  ppr LogAnd = text "logand"
+  ppr LogOr = text "logor"
+
+instance Pretty CmpOp where
+  ppr CmpEq = text "eq"
+  ppr (CmpUlt t) = taggedI "ult" t
+  ppr (CmpUle t) = taggedI "ule" t
+  ppr (CmpSlt t) = taggedI "slt" t
+  ppr (CmpSle t) = taggedI "sle" t
+  ppr (FCmpLt t) = taggedF "lt" t
+  ppr (FCmpLe t) = taggedF "le" t
+
+instance Pretty ConvOp where
+  ppr (Trunc from to) = convOp "trunc" from to
+  ppr (ZExt from to) = convOp "zext" from to
+  ppr (SExt from to) = convOp "sext" from to
+  ppr (FPTrunc from to) = convOp "fptrunc" from to
+  ppr (FPExt from to) = convOp "fpext" from to
+  ppr (FPToUI from to) = convOp "fptoui" from to
+  ppr (FPToSI from to) = convOp "fptosi" from to
+  ppr (UIToFP from to) = convOp "uitofp" from to
+  ppr (SIToFP from to) = convOp "sitofp" from to
+
+taggedI :: String -> IntType -> Doc
+taggedI s Int8 = text $ s ++ "8"
+taggedI s Int16 = text $ s ++ "8"
+taggedI s Int32 = text $ s ++ "32"
+taggedI s Int64 = text $ s ++ "64"
+
+taggedF :: String -> FloatType -> Doc
+taggedF s Float32 = text $ s ++ "32"
+taggedF s Float64 = text $ s ++ "64"
+
+convOp :: (Pretty from, Pretty to) => String -> from -> to -> Doc
+convOp s from to = text s <> text "_" <> ppr from <> text "_" <> ppr to
 
 instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se

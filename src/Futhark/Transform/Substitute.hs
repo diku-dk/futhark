@@ -136,7 +136,7 @@ instance Substitute Names where
   substituteNames = HS.map . substituteNames
 
 instance Substitute shape => Substitute (TypeBase shape u) where
-  substituteNames _ (Basic et) = Basic et
+  substituteNames _ (Prim et) = Prim et
   substituteNames substs (Array et sz u) =
     Array et (substituteNames substs sz) u
   substituteNames substs (Mem sz space) =

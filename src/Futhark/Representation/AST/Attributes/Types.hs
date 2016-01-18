@@ -14,7 +14,7 @@ module Futhark.Representation.AST.Attributes.Types
        , unique
        , staticShapes
        , staticShapes1
-       , basicType
+       , primType
 
        , arrayOf
        , arrayOfRow
@@ -53,6 +53,11 @@ module Futhark.Representation.AST.Attributes.Types
        , shapeMapping
        , shapeMapping'
 
+         -- * Abbreviations
+       , int8, int16, int32, int64
+       , float32, float64
+
+         -- * The Typed typeclass
        , Typed (..)
        , DeclTyped (..)
        , SetType (..)
@@ -75,7 +80,7 @@ import Futhark.Representation.AST.Attributes.Rearrange
 -- | Remove shape information from a type.
 rankShaped :: ArrayShape shape => TypeBase shape u -> TypeBase Rank u
 rankShaped (Array et sz u) = Array et (Rank $ shapeRank sz) u
-rankShaped (Basic et) = Basic et
+rankShaped (Prim et) = Prim et
 rankShaped (Mem size space) = Mem size space
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
@@ -96,10 +101,10 @@ modifyArrayShape :: ArrayShape newshape =>
                  -> TypeBase oldshape u
                  -> TypeBase newshape u
 modifyArrayShape f (Array t ds u)
-  | shapeRank ds' == 0 = Basic t
+  | shapeRank ds' == 0 = Prim t
   | otherwise          = Array t (f ds) u
   where ds' = f ds
-modifyArrayShape _ (Basic t)        = Basic t
+modifyArrayShape _ (Prim t)        = Prim t
 modifyArrayShape _ (Mem size space) = Mem size space
 
 -- | Set the shape of an array.  If the given type is not an
@@ -154,8 +159,8 @@ staticShapes = map staticShapes1
 
 -- | As 'staticShapes', but on a single type.
 staticShapes1 :: TypeBase Shape u -> TypeBase ExtShape u
-staticShapes1 (Basic bt) =
-  Basic bt
+staticShapes1 (Prim bt) =
+  Prim bt
 staticShapes1 (Array bt (Shape shape) u) =
   Array bt (ExtShape $ map Free shape) u
 staticShapes1 (Mem size space) =
@@ -173,9 +178,9 @@ arrayOf :: ArrayShape shape =>
            TypeBase shape u_unused -> shape -> u -> TypeBase shape u
 arrayOf (Array et size1 _) size2 u =
   Array et (size2 <> size1) u
-arrayOf (Basic et) s _
-  | 0 <- shapeRank s = Basic et
-arrayOf (Basic et) size u =
+arrayOf (Prim et) s _
+  | 0 <- shapeRank s = Prim et
+arrayOf (Prim et) size u =
   Array et size u
 arrayOf Mem{} _ _ =
   error "arrayOf Mem"
@@ -214,7 +219,7 @@ peelArray :: ArrayShape shape =>
              Int -> TypeBase shape u -> Maybe (TypeBase shape u)
 peelArray 0 t = Just t
 peelArray n (Array et shape u)
-  | shapeRank shape == n = Just $ Basic et
+  | shapeRank shape == n = Just $ Prim et
   | shapeRank shape >  n = Just $ Array et (stripDims n shape) u
 peelArray _ _ = Nothing
 
@@ -224,7 +229,7 @@ peelArray _ _ = Nothing
 stripArray :: ArrayShape shape => Int -> TypeBase shape u -> TypeBase shape u
 stripArray n (Array et shape u)
   | n < shapeRank shape = Array et (stripDims n shape) u
-  | otherwise           = Basic et
+  | otherwise           = Prim et
 stripArray _ t = t
 
 -- | Return the size of the given dimension.  If the dimension does
@@ -232,7 +237,7 @@ stripArray _ t = t
 shapeSize :: Int -> Shape -> SubExp
 shapeSize i shape = case drop i $ shapeDims shape of
   e : _ -> e
-  []    -> intconst 0
+  []    -> intconst Int32 0
 
 -- | Return the dimensions of a type - for non-arrays, this is the
 -- empty list.
@@ -248,7 +253,7 @@ arraySize i = shapeSize i . arrayShape
 -- the given type list.  If the dimension does not exist, or no types
 -- are given, the zero constant is returned.
 arraysSize :: Int -> [TypeBase Shape u] -> SubExp
-arraysSize _ []    = intconst 0
+arraysSize _ []    = intconst Int32 0
 arraysSize i (t:_) = arraySize i t
 
 -- | Return the immediate row-type of an array.  For @[[int]]@, this
@@ -256,18 +261,17 @@ arraysSize i (t:_) = arraySize i t
 rowType :: ArrayShape shape => TypeBase shape u -> TypeBase shape u
 rowType = stripArray 1
 
--- | A type is a basic type if it is not an array or memory block and
--- any component types are basic types.
-basicType :: TypeBase shape u -> Bool
-basicType Array{} = False
-basicType Mem{} = False
-basicType _ = True
+-- | A type is a primitive type if it is not an array or memory block.
+primType :: TypeBase shape u -> Bool
+primType Array{} = False
+primType Mem{} = False
+primType _ = True
 
 -- | Returns the bottommost type of an array.  For @[[int]]@, this
 -- would be @int@.  If the given type is not an array, it is returned.
-elemType :: TypeBase shape u -> BasicType
+elemType :: TypeBase shape u -> PrimType
 elemType (Array t _ _) = t
-elemType (Basic t)     = t
+elemType (Prim t)     = t
 elemType Mem{}      = error "elemType Mem"
 
 -- | Swap the two outer dimensions of the type.
@@ -285,7 +289,7 @@ rearrangeType perm t =
 -- | @diet t@ returns a description of how a function parameter of
 -- type @t@ might consume its argument.
 diet :: TypeBase shape Uniqueness -> Diet
-diet (Basic _) = Observe
+diet (Prim _) = Observe
 diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem{} = Observe
@@ -309,7 +313,7 @@ subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
   u1 <= u2 &&
   t1 == t2 &&
   shape1 `subShapeOf` shape2
-subtypeOf (Basic t1) (Basic t2) = t1 == t2
+subtypeOf (Prim t1) (Prim t2) = t1 == t2
 subtypeOf (Mem _ space1) (Mem _ space2) = space1 == space2
 subtypeOf _ _ = False
 
@@ -326,13 +330,13 @@ subtypesOf xs ys = length xs == length ys &&
 toDecl :: TypeBase shape NoUniqueness
        -> Uniqueness
        -> TypeBase shape Uniqueness
-toDecl (Basic bt) _ = Basic bt
+toDecl (Prim bt) _ = Prim bt
 toDecl (Array et shape _) u = Array et shape u
 toDecl (Mem size space) _ = Mem size space
 
 fromDecl :: TypeBase shape Uniqueness
          -> TypeBase shape NoUniqueness
-fromDecl (Basic bt) = Basic bt
+fromDecl (Prim bt) = Prim bt
 fromDecl (Array et shape _) = Array et shape NoUniqueness
 fromDecl (Mem size space) = Mem size space
 
@@ -367,8 +371,8 @@ shapeContextSize = HS.size . shapeContext
 -- | If all dimensions of the given 'RetType' are statically known,
 -- return the corresponding list of 'Type'.
 hasStaticShape :: ExtType -> Maybe Type
-hasStaticShape (Basic bt) =
-  Just $ Basic bt
+hasStaticShape (Prim bt) =
+  Just $ Prim bt
 hasStaticShape (Mem size space) =
   Just $ Mem size space
 hasStaticShape (Array bt (ExtShape shape) u) =
@@ -455,6 +459,24 @@ shapeMapping' ts shapes = HM.fromList $ concat $ zipWith inspect ts shapes
           mapMaybe match $ zip (arrayDims t) shape
         match (Constant {}, _) = Nothing
         match (Var v, dim)     = Just (v, dim)
+
+int8 :: PrimType
+int8 = IntType Int8
+
+int16 :: PrimType
+int16 = IntType Int16
+
+int32 :: PrimType
+int32 = IntType Int32
+
+int64 :: PrimType
+int64 = IntType Int64
+
+float32 :: PrimType
+float32 = FloatType Float32
+
+float64 :: PrimType
+float64 = FloatType Float64
 
 -- | Typeclass for things that contain 'Type's.
 class Typed t where

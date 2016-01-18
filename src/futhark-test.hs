@@ -37,7 +37,7 @@ import Text.Regex.TDFA
 import Prelude
 
 import Futhark.Util.Pretty (pretty)
-import Futhark.Representation.AST.Syntax.Core hiding (Basic)
+import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
 import Futhark.Representation.SOACS (SOACS)
@@ -463,20 +463,25 @@ compareValues vs1 vs2
   | otherwise = and $ zipWith compareValue vs1 vs2
 
 compareValue :: Value -> Value -> Bool
-compareValue (BasicVal bv1) (BasicVal bv2) =
-  compareBasicValue bv1 bv2
+compareValue (PrimVal bv1) (PrimVal bv2) =
+  comparePrimValue bv1 bv2
 compareValue (ArrayVal vs1 _ _) (ArrayVal vs2 _ _) =
   A.bounds vs1 == A.bounds vs2 &&
-  and (zipWith compareBasicValue (A.elems vs1) (A.elems vs2))
+  and (zipWith comparePrimValue (A.elems vs1) (A.elems vs2))
 compareValue _ _ =
   False
 
-compareBasicValue :: BasicValue -> BasicValue -> Bool
-compareBasicValue (Float32Val x) (Float32Val y) = floatToDouble (abs (x - y)) < epsilon
-compareBasicValue (Float64Val x) (Float64Val y) = abs (x - y) < epsilon
-compareBasicValue (Float64Val x) (Float32Val y) = abs (x - floatToDouble y) < epsilon
-compareBasicValue (Float32Val x) (Float64Val y) = abs (floatToDouble x - y) < epsilon
-compareBasicValue x y = x == y
+comparePrimValue :: PrimValue -> PrimValue -> Bool
+comparePrimValue (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
+  floatToDouble (abs (x - y)) < epsilon
+comparePrimValue (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
+  abs (x - y) < epsilon
+comparePrimValue (FloatValue (Float64Value x)) (FloatValue (Float32Value y)) =
+  abs (x - floatToDouble y) < epsilon
+comparePrimValue (FloatValue (Float32Value x)) (FloatValue (Float64Value y)) =
+  abs (floatToDouble x - y) < epsilon
+comparePrimValue x y =
+  x == y
 
 epsilon :: Double
 epsilon = 0.001

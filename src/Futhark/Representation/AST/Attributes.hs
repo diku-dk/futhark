@@ -110,20 +110,21 @@ asLoopOp _           = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: IsOp (Op lore) => Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp FloatDiv _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp FloatDiv _ (Constant (Float32Val k)) _) = k /= 0
-        safePrimOp (BinOp FloatDiv _ (Constant (Float64Val k)) _) = k /= 0
-        safePrimOp (BinOp FloatDiv _ _ _) = False
-        safePrimOp (BinOp Mod _ (Constant (IntVal k)) _) = k /= 0
-        safePrimOp (BinOp Mod _ (Constant (Float32Val k)) _) = k /= 0
-        safePrimOp (BinOp Mod _ (Constant (Float64Val k)) _) = k /= 0
-        safePrimOp (BinOp Mod _ _ _) = False
-        safePrimOp (BinOp Pow _ _ _) = False
+  where safePrimOp (BinOp SDiv{} _ y) = not $ zeroIsh' y
+        safePrimOp (BinOp UDiv{} _ y) = not $ zeroIsh' y
+        safePrimOp (BinOp FDiv{} _ y) = not $ zeroIsh' y
+        safePrimOp (BinOp SMod{} _ y) = not $ zeroIsh' y
+        safePrimOp (BinOp UMod{} _ y) = not $ zeroIsh' y
         safePrimOp BinOp{} = True
         safePrimOp SubExp{} = True
-        safePrimOp Not{} = True
-        safePrimOp Negate{} = True
+        safePrimOp UnOp{} = True
+        safePrimOp CmpOp{} = True
+        safePrimOp ConvOp{} = True
         safePrimOp _ = False
+
+        zeroIsh' (Constant v) = zeroIsh v
+        zeroIsh' _ = False
+
 safeExp (LoopOp _) = False
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =

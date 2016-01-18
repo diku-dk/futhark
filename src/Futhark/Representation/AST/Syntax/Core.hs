@@ -26,7 +26,7 @@ module Futhark.Representation.AST.Syntax.Core
          , Diet(..)
 
          -- * Values
-         , BasicValue(..)
+         , PrimValue(..)
          , Value(..)
 
          -- * Abstract syntax tree
@@ -145,8 +145,8 @@ data NoUniqueness = NoUniqueness
 
 -- | An Futhark type is either an array or an element type.  When
 -- comparing types for equality with '==', shapes must match.
-data TypeBase shape u = Basic BasicType
-                      | Array BasicType shape u
+data TypeBase shape u = Prim PrimType
+                      | Array PrimType shape u
                       | Mem SubExp Space
                     deriving (Show, Eq, Ord)
 
@@ -178,8 +178,8 @@ data Diet = Consume -- ^ Consumes this value.
 
 -- | Every possible value in Futhark.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = BasicVal BasicValue
-           | ArrayVal !(Array Int BasicValue) BasicType [Int]
+data Value = PrimVal PrimValue
+           | ArrayVal !(Array Int PrimValue) PrimType [Int]
              -- ^ It is assumed that the array is 0-indexed.
              deriving (Eq, Ord, Show)
 
@@ -205,7 +205,7 @@ type Certificates = [VName]
 -- | A subexpression is either a scalar constant or a variable.  One
 -- important property is that evaluation of a subexpression is
 -- guaranteed to complete in constant time.
-data SubExp = Constant BasicValue
+data SubExp = Constant PrimValue
             | Var      VName
             deriving (Show, Eq, Ord)
 

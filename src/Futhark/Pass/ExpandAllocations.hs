@@ -141,10 +141,10 @@ expandedAllocations num_threads thread_index thread_allocs = do
   alloc_bnds <-
     liftM concat $ forM (HM.toList thread_allocs) $ \(mem,(per_thread_size, space)) -> do
       total_size <- newVName "total_size"
-      let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar Int]
+      let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int32]
           allocpat = Pattern [] [PatElem mem BindVar $
                                  MemMem (Var total_size) space]
-      return [Let sizepat () $ PrimOp $ BinOp Times num_threads per_thread_size Int,
+      return [Let sizepat () $ PrimOp $ BinOp (Mul Int32) num_threads per_thread_size,
               Let allocpat () $ Op $ Alloc (Var total_size) space]
   -- Fix every reference to the memory blocks to be offset by the
   -- thread number.
@@ -159,7 +159,7 @@ expandedAllocations num_threads thread_index thread_allocs = do
           let perm = [length old_shape, 0] ++ [1..length old_shape-1]
               root_ixfun = IxFun.iota (old_shape ++ [SE.intSubExpToScalExp num_threads])
               permuted_ixfun = IxFun.permute root_ixfun perm
-              offset_ixfun = IxFun.applyInd permuted_ixfun [SE.Id thread_index Int]
+              offset_ixfun = IxFun.applyInd permuted_ixfun [SE.Id thread_index int32]
           in offset_ixfun
 
 data RebaseMap = RebaseMap {

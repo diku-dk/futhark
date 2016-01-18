@@ -31,7 +31,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes
+import Language.Futhark.Attributes hiding (arrayValue)
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Parser.Lexer
 import Language.Futhark.Parser.RealConfiguration
@@ -51,10 +51,10 @@ parseInMonad p rconf file program =
   where env = case rconf of RealAsFloat32 ->
                               ParserEnv file Float32 toFloat32 float32funs
                             RealAsFloat64 ->
-                              ParserEnv file Float64 Float64Val float64funs
+                              ParserEnv file Float64 (FloatValue . Float64Value) float64funs
         toFloat32 x =
           let (m,n) = decodeFloat x
-          in Float32Val $ encodeFloat m n
+          in FloatValue $ Float32Value $ encodeFloat m n
         float32funs = HM.map (<>nameFromString "32") funs
         float64funs = HM.map (<>nameFromString "64") funs
         funs = HM.fromList $ zip funnames funnames

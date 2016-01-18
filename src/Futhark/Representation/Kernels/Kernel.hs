@@ -337,11 +337,11 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
 typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
-  mapM_ (TC.requireI [Basic Cert]) cs
-  TC.require [Basic Int] w
-  mapM_ (TC.require [Basic Int]) bounds
-  index_param <- TC.basicLParamM index Int
-  iparams' <- forM iparams $ \iparam -> TC.basicLParamM iparam Int
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
+  mapM_ (TC.require [Prim int32]) bounds
+  index_param <- TC.primLParamM index int32
+  iparams' <- forM iparams $ \iparam -> TC.primLParamM iparam int32
   forM_ returns $ \(t, perm) ->
     let return_rank = arrayRank t + rank
     in unless (sort perm == [0..return_rank - 1]) $
@@ -383,8 +383,8 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
             "Kernel input " ++ pretty inp ++ " has inconsistent type."
 
 typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) = do
-  mapM_ (TC.requireI [Basic Cert]) cs
-  TC.require [Basic Int] w
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
   typeCheckKernelSize kernel_size
   arrargs <- TC.checkSOACArrayArgs w arrexps
   accargs <- mapM TC.checkArg accexps
@@ -395,16 +395,16 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) 
   case lambdaParams seqfun of
     [] -> TC.bad $ TC.TypeError noLoc "Fold function takes no parameters."
     chunk_param : _
-      | Basic Int <- paramType chunk_param -> do
-          let seq_args = (Basic Int, mempty) :
+      | Prim (IntType Int32) <- paramType chunk_param -> do
+          let seq_args = (Prim int32, mempty) :
                          [ (t `arrayOfRow` Var (paramName chunk_param), als)
                          | (t, als) <- arrargs ]
           TC.checkLambda seqfun seq_args
       | otherwise ->
-          TC.bad $ TC.TypeError noLoc "First parameter of fold function is not integer-typed."
+          TC.bad $ TC.TypeError noLoc "First parameter of fold function is not int32-typed."
 
   let asArg t = (t, mempty)
-  TC.checkLambda parfun $ map asArg $ Basic Int : fold_acc_ret ++ fold_acc_ret
+  TC.checkLambda parfun $ map asArg $ Prim int32 : fold_acc_ret ++ fold_acc_ret
   let acct = map TC.argType accargs
       parRetType = lambdaReturnType parfun
   unless (acct == fold_acc_ret) $
@@ -415,11 +415,11 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) 
           ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
 
 typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
-  mapM_ (TC.requireI [Basic Cert]) cs
-  TC.require [Basic Int] w
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
   typeCheckKernelSize kernel_size
   let (nes, arrs) = unzip input
-      other_index_arg = (Basic Int, mempty)
+      other_index_arg = (Prim int32, mempty)
   arrargs <- TC.checkSOACArrayArgs w arrs
   accargs <- mapM TC.checkArg nes
   TC.checkLambda fun $ other_index_arg : accargs ++ arrargs
@@ -439,12 +439,12 @@ typeCheckKernelSize :: TC.Checkable lore =>
                        KernelSize -> TC.TypeM lore ()
 typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
                      num_elements offset_multiple num_threads) = do
-  TC.require [Basic Int] num_groups
-  TC.require [Basic Int] workgroup_size
-  TC.require [Basic Int] per_thread_elements
-  TC.require [Basic Int] num_elements
-  TC.require [Basic Int] offset_multiple
-  TC.require [Basic Int] num_threads
+  TC.require [Prim int32] num_groups
+  TC.require [Prim int32] workgroup_size
+  TC.require [Prim int32] per_thread_elements
+  TC.require [Prim int32] num_elements
+  TC.require [Prim int32] offset_multiple
+  TC.require [Prim int32] num_threads
 
 lamParamsToNameInfos :: [LParam lore]
                      -> [(VName, NameInfo lore)]

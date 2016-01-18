@@ -592,7 +592,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
         getUnfusableSet bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
       repl_idnm <- newVName "repl_x"
       i <- newVName "i"
-      let repl_id = Param repl_idnm (Basic Int)
+      let repl_id = Param repl_idnm (Prim int32)
           repl_lam = Lambda i [repl_id] (mkBody [] [el])
                      [rowType $ identType v]
           soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
@@ -752,7 +752,7 @@ fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda i params body rtp) = do
   body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
   return $ Lambda i params body' rtp
-  where i_ident = Ident i $ Basic Int
+  where i_ident = Ident i $ Prim int32
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern _ []) _ body = return body

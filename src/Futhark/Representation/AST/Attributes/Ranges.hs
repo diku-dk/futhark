@@ -31,7 +31,7 @@ import Prelude
 
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Syntax
-import Futhark.Analysis.ScalExp
+import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -46,7 +46,7 @@ data KnownBound = VarBound VName
                   -- ^ Bounded by the minimum of these two bounds.
                 | MaximumBound KnownBound KnownBound
                   -- ^ Bounded by the maximum of these two bounds.
-                | ScalarBound ScalExp
+                | ScalarBound SE.ScalExp
                   -- ^ Bounded by this scalar expression.
                 deriving (Eq, Ord, Show)
 
@@ -84,17 +84,17 @@ instance PP.Pretty KnownBound where
 
 -- | Convert the bound to a scalar expression if possible.  This is
 -- possible for all bounds that do not contain 'VarBound's.
-boundToScalExp :: KnownBound -> Maybe ScalExp
+boundToScalExp :: KnownBound -> Maybe SE.ScalExp
 boundToScalExp (VarBound _) = Nothing
 boundToScalExp (ScalarBound se) = Just se
 boundToScalExp (MinimumBound b1 b2) = do
   b1' <- boundToScalExp b1
   b2' <- boundToScalExp b2
-  return $ MaxMin True [b1', b2']
+  return $ SE.MaxMin True [b1', b2']
 boundToScalExp (MaximumBound b1 b2) = do
   b1' <- boundToScalExp b1
   b2' <- boundToScalExp b2
-  return $ MaxMin False [b1', b2']
+  return $ SE.MaxMin False [b1', b2']
 
 -- | A possibly undefined bound on a value.
 type Bound = Maybe KnownBound
@@ -124,7 +124,7 @@ unknownRange :: Range
 unknownRange = (Nothing, Nothing)
 
 -- | The range as a pair of scalar expressions.
-type ScalExpRange = (Maybe ScalExp, Maybe ScalExp)
+type ScalExpRange = (Maybe SE.ScalExp, Maybe SE.ScalExp)
 
 -- | The lore has embedded range information.  Note that it may not be
 -- up to date, unless whatever maintains the syntax tree is careful.
@@ -168,11 +168,11 @@ subExpKnownRange (Var v) =
   (VarBound v,
    VarBound v)
 subExpKnownRange (Constant val) =
-  (ScalarBound $ Val val,
-   ScalarBound $ Val val)
+  (ScalarBound $ SE.Val val,
+   ScalarBound $ SE.Val val)
 
 -- | The range of a scalar expression.
-scalExpRange :: ScalExp -> Range
+scalExpRange :: SE.ScalExp -> Range
 scalExpRange se =
   (Just $ ScalarBound se, Just $ ScalarBound se)
 
@@ -180,27 +180,21 @@ primOpRanges :: PrimOp lore -> [Range]
 primOpRanges (SubExp se) =
   [rangeOf se]
 
-primOpRanges (BinOp Plus x y t) =
-  [scalExpRange $ SPlus (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp Minus x y t) =
-  [scalExpRange $ SMinus (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp Times x y t) =
-  [scalExpRange $ STimes (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp Div x y t) =
-  [scalExpRange $ SDiv (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp FloatDiv x y t) =
-  [scalExpRange $ SDiv (subExpToScalExp x t) (subExpToScalExp y t)]
-primOpRanges (BinOp Pow x y t) =
-  [scalExpRange $ SPow (subExpToScalExp x t) (subExpToScalExp y t)]
+primOpRanges (BinOp (Add t) x y) =
+  [scalExpRange $ SE.SPlus (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
+primOpRanges (BinOp (Sub t) x y) =
+  [scalExpRange $ SE.SMinus (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
+primOpRanges (BinOp (Mul t) x y) =
+  [scalExpRange $ SE.STimes (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
+primOpRanges (BinOp (SDiv t) x y) =
+  [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 
 primOpRanges (Iota n) =
-  [(Just $ ScalarBound zero,
-    Just $ ScalarBound $ n' `SMinus` one)]
-  where zero = Val $ IntVal 0
-        one = Val $ IntVal 1
-        n' = case n of
-          Var v        -> Id v Int
-          Constant val -> Val val
+  [(Just $ ScalarBound 0,
+    Just $ ScalarBound $ n' `SE.SMinus` 1)]
+  where n' = case n of
+          Var v        -> SE.Id v $ IntType Int32
+          Constant val -> SE.Val val
 primOpRanges (Replicate _ v) =
   [rangeOf v]
 primOpRanges (Rearrange _ _ v) =
@@ -246,14 +240,14 @@ expRanges (LoopOp (DoLoop res merge (ForLoop i iterations) body)) =
            returnedBound mergeparam upper)
 
         returnedBound (param, mergeinit) (Just bound)
-          | paramType param == Basic Int,
+          | paramType param == Prim (IntType Int32),
             Just bound' <- boundToScalExp bound,
             let se_diff =
-                  AS.simplify (SMinus (Id (paramName param) Int) bound') HM.empty,
+                  AS.simplify (SE.SMinus (SE.Id (paramName param) $ IntType Int32) bound') HM.empty,
             HS.null $ HS.intersection bound_in_loop $ freeIn se_diff =
-              Just $ ScalarBound $ SPlus (subExpToScalExp mergeinit Int) $
-              STimes se_diff $ MaxMin False
-              [subExpToScalExp iterations Int, Val $ IntVal 0]
+              Just $ ScalarBound $ SE.SPlus (SE.subExpToScalExp mergeinit $ IntType Int32) $
+              SE.STimes se_diff $ SE.MaxMin False
+              [SE.subExpToScalExp iterations $ IntType Int32, 0]
         returnedBound _ _ = Nothing
 expRanges e =
   replicate (expExtTypeSize e) unknownRange

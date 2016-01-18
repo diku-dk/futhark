@@ -35,11 +35,44 @@ def writeScalarArray(x, offset, v):
 
 pyUtility :: PyDefinition
 pyUtility = [r|
-def futhark_toFloat32(x):
+def shl32(x,y):
+  return x << y
+
+def ashr32(x,y):
+  return x >> y
+
+def sdiv32(x,y):
+  return x / y
+
+def smod32(x,y):
+  return x % y
+
+def squot32(x,y):
+  return int32(float(x) / float(y))
+
+def srem32(x,y):
+  return fmod(x,y)
+
+def spow32(x,y):
+  return x ** y
+
+def sle32(x,y):
+  return x <= y
+
+def slt32(x,y):
+  return x < y
+
+def sitofp_i32_f32(x):
   return float32(x)
 
-def futhark_toFloat64(x):
-  return float64(x)
+def sitofp_i32_f64(x):
+  return float32(x)
+
+def fptosi_f32_i32(x):
+  return int32(trunc(x))
+
+def fptosi_f64_i32(x):
+  return int32(trunc(x))
 
 def futhark_sqrt64(x):
   return sqrt(x)
@@ -199,7 +232,7 @@ def read_double(f):
         aft = '0'
     if (optional(parse_specific_char, f, 'E') or
         optional(parse_specific_char, f, 'e')):
-        expt = parse_int(f)
+        expt = parse_int_signed(f)
     else:
         expt = '0'
     return float(sign + bef + '.' + aft + 'E' + expt)
@@ -280,7 +313,7 @@ def write_chars(f, arr):
 
 def write_array(f, arr, bt):
     if arr.size == 0:
-        print("empty({})".format(bt[2:]))
+        print("empty({})".format(bt))
     else:
         print(arr.tolist())
 |]

@@ -615,7 +615,7 @@ pullReshape :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.Arr
 pullReshape nest ots
   | SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
     op@Nest.Map {} <- Nest.operation nest,
-    all basicType $ Nest.returnType op = do
+    all primType $ Nest.returnType op = do
   let inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
                 Nest.inputs nest
       inputTypes = map SOAC.inputType inputs'

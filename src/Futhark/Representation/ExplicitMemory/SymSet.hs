@@ -55,10 +55,10 @@ intersection :: SymSet n -> SymSet m -> SymSet (n :+: m)
 intersection s1 s2 = SetOp Intersect (sParameters s1) s1 (sParameters s2) s2
 
 null :: SymSet n -> ScalExp
-null Empty = Val $ LogVal True
+null Empty = Val $ BoolValue True
 null (SetOp Intersect _ x _ y) = null x `SLogOr` null y
-null (SetOp Union _ _ _ _) = Val $ LogVal False
-null Bound{} = Val $ LogVal False
+null (SetOp Union _ _ _ _) = Val $ BoolValue False
+null Bound{} = Val $ BoolValue False
 
 empty :: SymSet 'Z
 empty = Empty

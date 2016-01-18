@@ -2,7 +2,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Language.Futhark.CoreTests
   ( tests
-  , arbitraryBasicValOfType
+  , arbitraryPrimValOfType
   )
 where
 
@@ -20,13 +20,13 @@ import Language.Futhark.Core
 
 tests :: [Test]
 tests = testBuiltins ++
-        propBasicValuesHaveRightType
+        propPrimValuesHaveRightType
 
-propBasicValuesHaveRightType :: [Test]
-propBasicValuesHaveRightType = [ testCase (show t ++ " has blank of right type") $
-                                 basicValueType (blankBasicValue t) @?= t
-                                 | t <- [minBound..maxBound]
-                               ]
+propPrimValuesHaveRightType :: [Test]
+propPrimValuesHaveRightType = [ testCase (show t ++ " has blank of right type") $
+                                primValueType (blankPrimValue t) @?= t
+                              | t <- [minBound..maxBound]
+                              ]
 
 testBuiltins :: [Test]
 testBuiltins = [ testCase (nameToString f ++ " is builtin") $
@@ -36,15 +36,24 @@ testBuiltins = [ testCase (nameToString f ++ " is builtin") $
 instance Arbitrary Uniqueness where
   arbitrary = elements [Unique, Nonunique]
 
-instance Arbitrary BasicType where
+instance Arbitrary PrimType where
   arbitrary = elements [minBound..maxBound]
 
-instance Arbitrary BasicValue where
-  arbitrary = oneof [ IntVal <$> arbitrary
-                    , Float32Val <$> arbitrary
-                    , Float64Val <$> arbitrary
-                    , LogVal <$> arbitrary
-                    , CharVal <$> arbitrary
+instance Arbitrary IntValue where
+  arbitrary = oneof [ Int8Value <$> arbitrary
+                    , Int16Value <$> arbitrary
+                    , Int32Value <$> arbitrary
+                    , Int64Value <$> arbitrary ]
+
+instance Arbitrary FloatValue where
+  arbitrary = oneof [ Float32Value <$> arbitrary
+                    , Float64Value <$> arbitrary ]
+
+instance Arbitrary PrimValue where
+  arbitrary = oneof [ IntValue <$> arbitrary
+                    , FloatValue <$> arbitrary
+                    , BoolValue <$> arbitrary
+                    , CharValue <$> arbitrary
                     , pure Checked]
 
 instance Arbitrary Name where
@@ -53,10 +62,13 @@ instance Arbitrary Name where
 instance Arbitrary VName where
   arbitrary = curry ID <$> arbitrary <*> arbitrary
 
-arbitraryBasicValOfType :: BasicType -> Gen BasicValue
-arbitraryBasicValOfType Int  = IntVal <$> arbitrary
-arbitraryBasicValOfType Float32 = Float32Val <$> arbitrary
-arbitraryBasicValOfType Float64 = Float64Val <$> arbitrary
-arbitraryBasicValOfType Bool = LogVal <$> arbitrary
-arbitraryBasicValOfType Char = CharVal <$> arbitrary
-arbitraryBasicValOfType Cert = return Checked
+arbitraryPrimValOfType :: PrimType -> Gen PrimValue
+arbitraryPrimValOfType (IntType Int8) = IntValue <$> Int8Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int16) = IntValue <$> Int16Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int32) = IntValue <$> Int32Value <$> arbitrary
+arbitraryPrimValOfType (IntType Int64) = IntValue <$> Int64Value <$> arbitrary
+arbitraryPrimValOfType (FloatType Float32) = FloatValue <$> Float32Value <$> arbitrary
+arbitraryPrimValOfType (FloatType Float64) = FloatValue <$> Float32Value <$> arbitrary
+arbitraryPrimValOfType Bool = BoolValue <$> arbitrary
+arbitraryPrimValOfType Char = CharValue <$> arbitrary
+arbitraryPrimValOfType Cert = return Checked

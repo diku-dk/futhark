@@ -252,7 +252,7 @@ instance Rename shape =>
   rename (Array et size u) = do
     size' <- rename size
     return $ Array et size' u
-  rename (Basic et) = return $ Basic et
+  rename (Prim et) = return $ Prim et
   rename (Mem e space) = Mem <$> rename e <*> pure space
 
 instance Renameable lore => Rename (Lambda lore) where

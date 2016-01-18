@@ -17,8 +17,8 @@ import Futhark.Representation.AST.Attributes.Types
 -- contain at least the information contained in a list of 'ExtType's,
 -- but may have more, notably an existential context.
 class (Show rt, Eq rt, Ord rt) => IsRetType rt where
-  -- | Contruct a return type from a basic (scalar) type.
-  basicRetType :: BasicType -> rt
+  -- | Contruct a return type from a primitive type.
+  primRetType :: PrimType -> rt
 
   -- | Extract the simple type from the return type - although this
   -- may still involve an existential shape context.
@@ -40,7 +40,7 @@ newtype ExtRetType = ExtRetType [DeclExtType]
                    deriving (Eq, Ord, Show)
 
 instance IsRetType ExtRetType where
-  basicRetType = ExtRetType . staticShapes . return . Basic
+  primRetType = ExtRetType . staticShapes . return . Prim
 
   retTypeValues (ExtRetType ts) = ts
 

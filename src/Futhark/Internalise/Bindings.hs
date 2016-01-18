@@ -148,7 +148,7 @@ makeShapeIdentsFromContext :: MonadFreshNames m =>
                                  VarSubstitutions)
 makeShapeIdentsFromContext ctx = do
   (ctx', substs) <- liftM unzip $ forM (HM.toList ctx) $ \(name, i) -> do
-    v <- newIdent (baseString name) $ I.Basic Int
+    v <- newIdent (baseString name) $ I.Prim int32
     return ((i, v), (name, [I.identName v]))
   return (HM.fromList ctx', HM.fromList substs)
 
@@ -163,7 +163,7 @@ instantiateShapesWithDecls ctx ts =
             return $ I.Var $ I.identName v
 
           | otherwise = do
-            v <- lift $ nonuniqueParamFromIdent <$> newIdent "size" (I.Basic Int)
+            v <- lift $ nonuniqueParamFromIdent <$> newIdent "size" (I.Prim int32)
             tell [v]
             return $ I.Var $ I.paramName v
 

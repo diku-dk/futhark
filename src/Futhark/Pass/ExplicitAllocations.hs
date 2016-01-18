@@ -124,8 +124,8 @@ runPatAllocM (PatAllocM m) mems =
 arraySizeInBytesExp :: Type -> SE.ScalExp
 arraySizeInBytesExp t =
   SE.sproduct $
-  (SE.Val $ IntVal $ basicSize $ elemType t) :
-  map (`SE.subExpToScalExp` Int) (arrayDims t)
+  primSize (elemType t) :
+  map (`SE.subExpToScalExp` int32) (arrayDims t)
 
 arraySizeInBytes :: Allocator m => Type -> m SubExp
 arraySizeInBytes = computeSize "bytes" . arraySizeInBytesExp
@@ -178,7 +178,7 @@ allocsForPattern :: Allocator m =>
                     [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
                  -> m ([PatElem], [PatElem], [AllocBinding])
 allocsForPattern sizeidents validents rts = do
-  let sizes' = [ PatElem size BindVar $ Scalar Int | size <- map identName sizeidents ]
+  let sizes' = [ PatElem size BindVar $ Scalar int32 | size <- map identName sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
     runWriterT $ forM (zip validents rts) $ \((ident,bindage), rt) -> do
       let shape = arrayShape $ identType ident
@@ -232,7 +232,7 @@ allocsForPattern sizeidents validents rts = do
                             newIdent (baseString (identName ident)<>"_ext_buffer")
                             (stripArray (length is) $ identType ident)
               (memsize,mem,(_,ixfun)) <- lift $ memForBindee tmp_buffer
-              tell ([PatElem (identName memsize) BindVar $ Scalar Int],
+              tell ([PatElem (identName memsize) BindVar $ Scalar int32],
                     [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                     [ArrayCopy (identName ident) bindage $
                      identName tmp_buffer])
@@ -241,7 +241,7 @@ allocsForPattern sizeidents validents rts = do
 
         ReturnsArray bt _ u _ -> do
           (memsize,mem,(ident',ixfun)) <- lift $ memForBindee ident
-          tell ([PatElem (identName memsize) BindVar $ Scalar Int],
+          tell ([PatElem (identName memsize) BindVar $ Scalar int32],
                 [PatElem (identName mem)     BindVar $ MemMem (Var $ identName memsize) DefaultSpace],
                 [])
           return $ PatElem (identName ident') bindage $ ArrayMem bt shape u (identName mem) ixfun
@@ -256,7 +256,7 @@ allocsForPattern sizeidents validents rts = do
 summaryForBindage :: Allocator m =>
                      Type -> Bindage
                   -> m (MemBound NoUniqueness)
-summaryForBindage (Basic bt) BindVar =
+summaryForBindage (Prim bt) BindVar =
   return $ Scalar bt
 summaryForBindage (Mem size space) BindVar =
   return $ MemMem size space
@@ -272,7 +272,7 @@ memForBindee :: (MonadFreshNames m) =>
                    Ident,
                    (Ident, IxFun.IxFun))
 memForBindee ident = do
-  size <- newIdent (memname <> "_size") (Basic Int)
+  size <- newIdent (memname <> "_size") (Prim int32)
   mem <- newIdent memname $ Mem (Var $ identName size) DefaultSpace
   return (size,
           mem,
@@ -280,7 +280,7 @@ memForBindee ident = do
   where  memname = baseString (identName ident) <> "_mem"
          t       = identType ident
 
-directIndexFunction :: BasicType -> Shape -> u -> VName -> Type -> MemBound u
+directIndexFunction :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
   ArrayMem bt shape u mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
 
@@ -330,10 +330,10 @@ allocInFParam param =
           ixfun = IxFun.iota $ IxFun.shapeFromSubExps $ shapeDims shape
       memsize <- lift $ newVName (memname <> "_size")
       mem <- lift $ newVName memname
-      tell ([Param memsize $ Scalar Int],
+      tell ([Param memsize $ Scalar int32],
             [Param mem $ MemMem (Var memsize) DefaultSpace])
       return param { paramAttr =  ArrayMem bt shape u mem ixfun }
-    Basic bt ->
+    Prim bt ->
       return param { paramAttr = Scalar bt }
     Mem size space ->
       return param { paramAttr = MemMem size space }
@@ -435,7 +435,7 @@ explicitAllocations = simplePass
 memoryInRetType :: In.RetType -> RetType
 memoryInRetType (ExtRetType ts) =
   evalState (mapM addAttr ts) $ startOfFreeIDRange ts
-  where addAttr (Basic t) = return $ ReturnsScalar t
+  where addAttr (Prim t) = return $ ReturnsScalar t
         addAttr Mem{} = fail "memoryInRetType: too much memory"
         addAttr (Array bt shape u) = do
           i <- get
@@ -458,7 +458,7 @@ allocInBody (Body _ bnds res) =
     return $ Body () (bnds'<>allocs) ses
   where ensureDirect se@Constant{} = return se
         ensureDirect (Var v) = do
-          bt <- basicType <$> lookupType v
+          bt <- primType <$> lookupType v
           if bt
             then return $ Var v
             else do (_, _, v') <- ensureDirectArray v
@@ -517,7 +517,7 @@ allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
                                  | i <- index : map fst ispace ]
         allocInKernelInput inp =
           case kernelInputType inp of
-            Basic bt ->
+            Prim bt ->
               return inp { kernelInputParam = Param (kernelInputName inp) $ Scalar bt }
             Array bt shape u -> do
               (mem, ixfun) <- lookupArraySummary' $ kernelInputArray inp
@@ -576,7 +576,7 @@ allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
                        IxFun.applyInd
                        (IxFun.reshape ixfun $
                         newshape ++ map DimNew (drop 1 $ shapeDims shape))
-                       [SE.Id i Int]
+                       [SE.Id i int32]
                      }
           Commutative -> do
             let newshape = [DimNew elems_per_thread, DimNew num_threads]
@@ -587,11 +587,11 @@ allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
                        (IxFun.permute (IxFun.reshape ixfun $
                         newshape ++ map DimNew (drop 1 $ shapeDims shape))
                         perm)
-                       [SE.Id i Int]
+                       [SE.Id i int32]
                      }
       _ ->
         fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
-  allocInLambda i (Param (paramName chunk_size_param) (Scalar Int) : chunked_params')
+  allocInLambda i (Param (paramName chunk_size_param) (Scalar int32) : chunked_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceLambda :: In.Lambda
@@ -603,9 +603,9 @@ allocInReduceLambda lam workgroup_size = do
         partitionChunkedLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
         splitAt (length actual_params `div` 2) actual_params
-      this_index = SE.Id i Int `SE.SRem`
+      this_index = SE.Id i int32 `SE.SRem`
                    SE.intSubExpToScalExp workgroup_size
-      other_index = SE.Id (paramName other_index_param) Int
+      other_index = SE.Id (paramName other_index_param) int32
   acc_params' <-
     allocInReduceParameters workgroup_size this_index acc_params
   arr_params' <-
@@ -621,7 +621,7 @@ allocInReduceLambda lam workgroup_size = do
       _ ->
         return param { paramAttr = attr }
 
-  allocInLambda i (other_index_param { paramAttr = Scalar Int } :
+  allocInLambda i (other_index_param { paramAttr = Scalar int32 } :
                    acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
@@ -640,7 +640,7 @@ allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
                           [local_id]
               return p { paramAttr = ArrayMem bt shape u shared_mem ixfun
                        }
-            Basic bt ->
+            Prim bt ->
               return p { paramAttr = Scalar bt }
             Mem size space ->
               return p { paramAttr = MemMem size space }

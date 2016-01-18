@@ -314,8 +314,8 @@ maybeForward v dest_nm dest_attr cs src i = do
   samebody <- isInCurrentBody v
   -- Check condition (6)
   optimisable <- isOptimisable v
-  not_basic <- not <$> basicType <$> lookupType v
-  if available && certs_available && samebody && optimisable && not_basic then do
+  not_prim <- not <$> primType <$> lookupType v
+  if available && certs_available && samebody && optimisable && not_prim then do
     let fwd = DesiredUpdate dest_nm dest_attr cs src [i] v
     tell mempty { forwardThese = [fwd] }
     return True

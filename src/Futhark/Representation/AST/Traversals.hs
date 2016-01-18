@@ -100,20 +100,14 @@ mapExpM tv (PrimOp (SubExp se)) =
 mapExpM tv (PrimOp (ArrayLit els rowt)) =
   PrimOp <$> (pure ArrayLit <*> mapM (mapOnSubExp tv) els <*>
               mapOnType (mapOnSubExp tv) rowt)
-mapExpM tv (PrimOp (BinOp bop x y t)) =
-  PrimOp <$> (pure (BinOp bop) <*>
-                 mapOnSubExp tv x <*> mapOnSubExp tv y <*>
-                 pure t)
-mapExpM tv (PrimOp (Not x)) =
-  PrimOp <$> (Not <$> mapOnSubExp tv x)
-mapExpM tv (PrimOp (Complement x)) =
-  PrimOp <$> (Complement <$> mapOnSubExp tv x)
-mapExpM tv (PrimOp (Negate x)) =
-  PrimOp <$> (Negate <$> mapOnSubExp tv x)
-mapExpM tv (PrimOp (Abs x)) =
-  PrimOp <$> (Abs <$> mapOnSubExp tv x)
-mapExpM tv (PrimOp (Signum x)) =
-  PrimOp <$> (Signum <$> mapOnSubExp tv x)
+mapExpM tv (PrimOp (BinOp bop x y)) =
+  PrimOp <$> (BinOp bop <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
+mapExpM tv (PrimOp (CmpOp op x y)) =
+  PrimOp <$> (CmpOp op <$> mapOnSubExp tv x <*> mapOnSubExp tv y)
+mapExpM tv (PrimOp (ConvOp conv x)) =
+  PrimOp <$> (ConvOp conv <$> mapOnSubExp tv x)
+mapExpM tv (PrimOp (UnOp op x)) =
+  PrimOp <$> (UnOp op <$> mapOnSubExp tv x)
 mapExpM tv (If c texp fexp ts) =
   pure If <*> mapOnSubExp tv c <*> mapOnBody tv texp <*> mapOnBody tv fexp <*>
        mapM (mapOnExtType tv) ts
@@ -177,7 +171,7 @@ mapOnExtType tv (Array bt (ExtShape shape) u) =
   return u
   where mapOnExtSize (Ext x)   = return $ Ext x
         mapOnExtSize (Free se) = Free <$> mapOnSubExp tv se
-mapOnExtType _ (Basic bt) = return $ Basic bt
+mapOnExtType _ (Prim bt) = return $ Prim bt
 mapOnExtType tv (Mem size space) = Mem <$> mapOnSubExp tv size <*> pure space
 
 mapOnLoopForm :: (Monad m, Applicative m) =>
@@ -193,7 +187,7 @@ mapExp m = runIdentity . mapExpM m
 
 mapOnType :: (Applicative m, Monad m) =>
              (SubExp -> m SubExp) -> Type -> m Type
-mapOnType _ (Basic bt) = return $ Basic bt
+mapOnType _ (Prim bt) = return $ Prim bt
 mapOnType f (Mem size space) = Mem <$> f size <*> pure space
 mapOnType f (Array bt shape u) =
   Array bt <$> (Shape <$> mapM f (shapeDims shape)) <*> pure u

@@ -196,7 +196,7 @@ instance FreeIn ExtShape where
 instance (ArrayShape shape, FreeIn shape) => FreeIn (TypeBase shape u) where
   freeIn (Array _ shape _) = freeIn shape
   freeIn (Mem size _)      = freeIn size
-  freeIn (Basic _)         = mempty
+  freeIn (Prim _)          = mempty
 
 instance FreeIn attr => FreeIn (ParamT attr) where
   freeIn (Param _ attr) =

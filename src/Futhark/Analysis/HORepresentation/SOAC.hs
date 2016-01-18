@@ -325,7 +325,7 @@ inputArray (Input _ (Iota _))  = Nothing
 
 inputArrayType :: InputArray -> Type
 inputArrayType (Var _ t) = t
-inputArrayType (Iota e)  = arrayOf (Basic Int) (Shape [e]) NoUniqueness
+inputArrayType (Iota e)  = arrayOf (Prim int32) (Shape [e]) NoUniqueness
 
 -- | Return the type of an input.
 inputType :: Input -> Type
@@ -543,13 +543,13 @@ fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f) =>
 fromExp (Op (Futhark.Map cs w lam [])) =
   let iota_input = Input mempty $ Iota w
       lam' = lam
-             { lambdaParams = [Param (lambdaIndex lam) (Basic Int)] }
+             { lambdaParams = [Param (lambdaIndex lam) (Prim int32)] }
   in pure $ Right $ Map cs lam' [iota_input]
 fromExp (Op (Futhark.Redomap cs w comm redlam lam acc [])) =
   let iota_input = Input mempty $ Iota w
       lam' = lam
              { lambdaParams = lambdaParams lam ++
-                              [Param (lambdaIndex lam) (Basic Int)] }
+                              [Param (lambdaIndex lam) (Prim int32)] }
   in pure $ Right $ Redomap cs comm redlam lam' acc [iota_input]
 
 fromExp (Op (Futhark.Map cs _ l as)) =
@@ -580,7 +580,7 @@ fromExp _ = pure $ Left NotSOAC
 soacToStream :: (MonadFreshNames m, Bindable lore, Op lore ~ Futhark.SOAC lore) =>
                 SOAC lore -> m (SOAC lore,[Ident])
 soacToStream soac = do
-  chunk_param <- newParam "chunk" $ Basic Int
+  chunk_param <- newParam "chunk" $ Prim int32
   let chvar= Futhark.Var $ paramName chunk_param
       (cs, lam, inps) = (certificates soac, lambda soac, inputs soac)
       w = arraysSize 0 $ map inputType inps
@@ -628,7 +628,7 @@ soacToStream soac = do
       scan0_ids  <- mapM (newIdent "resarr0") loutps
       lastel_ids <- mapM (newIdent "lstel")   accrtps
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
-      outszm1id  <- newIdent "szm1" $ Basic Int
+      outszm1id  <- newIdent "szm1" $ Prim int32
       -- 1. let scan0_ids   = scan(+,nes,a_ch)             in
       let insoac = Futhark.Scan cs w lam' $ zip nes (map paramName strm_inpids)
           insbnd = mkLet' [] scan0_ids $ Op insoac
@@ -638,7 +638,9 @@ soacToStream soac = do
                    Futhark.Map cs w maplam $ map identName scan0_ids
       -- 3. let outerszm1id = sizeof(0,strm_resids) - 1    in
           outszm1bnd = mkLet' [] [outszm1id] $ PrimOp $
-                       BinOp Minus (Futhark.Var $ paramName chunk_param) (Constant $ IntVal 1) Int
+                       BinOp (Sub Int32)
+                       (Futhark.Var $ paramName chunk_param)
+                       (intconst Int32 1)
       -- 4. let lasteel_ids = strm_resids[outerszm1id]     in
           lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ PrimOp $
                                            Index cs (identName arrid)

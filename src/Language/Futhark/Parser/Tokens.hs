@@ -18,12 +18,13 @@ data Token = IF
            | LOOP
            | IN
            | INT
+           | I32
            | BOOL
            | CERT
            | CHAR
            | REAL
-           | FLOAT32
-           | FLOAT64
+           | F32
+           | F64
            | ID Name
            | STRINGLIT String
            | INTLIT Int32

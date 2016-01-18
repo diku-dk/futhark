@@ -62,7 +62,7 @@ transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
 
 transformBinding expmap (Let pat ()
                          (Op (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs)))
-  | num_groups /= Constant (IntVal 1) = do
+  | num_groups /= intconst Int32 1 = do
   -- We want to pad and transpose the input arrays.
 
   (w', kernel_size', arrs') <-
@@ -78,7 +78,7 @@ transformBinding expmap (Let pat ()
 
 transformBinding expmap (Let pat ()
                          (Op (ScanKernel cs w kernel_size ScanFlat lam input)))
-  | num_groups /= Constant (IntVal 1) = do
+  | num_groups /= intconst Int32 1 = do
   -- We want to pad and transpose the input arrays.
 
   (w', kernel_size', arrs') <-
@@ -180,7 +180,7 @@ rearrangeInputs expmap is = mapM maybeRearrangeInput
           arr_t <- lookupType arr
           let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
           rearrangeInput perm inp
-        Basic {}
+        Prim {}
           | Just perm <- map Var is `isPermutationOf` inp_is,
             perm /= [0..length perm-1] ->
               rearrangeInput perm inp
@@ -245,12 +245,12 @@ paddedScanReduceInput :: SubExp -> KernelSize
                       -> BabysitM (KernelSize, SubExp, SubExp)
 paddedScanReduceInput w kernel_size = do
   w' <- letSubExp "padded_size" =<<
-        eRoundToMultipleOf (eSubExp w) (eSubExp num_threads)
-  padding <- letSubExp "padding" $ PrimOp $ BinOp Minus w' w Int
+        eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
+  padding <- letSubExp "padding" $ PrimOp $ BinOp (Sub Int32) w' w
 
   offset_multiple <-
     letSubExp "offset_multiple" =<<
-    eDivRoundingUp (eSubExp w') (eSubExp num_threads)
+    eDivRoundingUp Int32 (eSubExp w') (eSubExp num_threads)
 
   let kernel_size' =
         kernel_size { kernelThreadOffsetMultiple = offset_multiple }

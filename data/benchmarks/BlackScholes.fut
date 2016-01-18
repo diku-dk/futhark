@@ -293,6 +293,6 @@ fun [real] blackscholes ([{bool,real,real,real}] xs) =
 fun [real] main (int years) =
   let days = years*365 in
   let a = map(+1, iota(days)) in
-  let a = map(toFloat, a) in
-  let a = map(fn {bool,real,real,real} (real x) => {True, 58.0 + 4.0 * x / toFloat(days), 65.0, x / 365.0}, a) in
+  let a = map(real, a) in
+  let a = map(fn {bool,real,real,real} (real x) => {True, 58.0 + 4.0 * x / real(days), 65.0, x / 365.0}, a) in
   blackscholes(a)

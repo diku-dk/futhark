@@ -119,41 +119,41 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
 
 -- | Types that can be elements of tuple-arrays.
 data TupleArrayElemTypeBase shape as vn =
-    BasicArrayElem BasicType (as vn)
+    PrimArrayElem PrimType (as vn)
   | ArrayArrayElem (ArrayTypeBase shape as vn)
   | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
   deriving (Show)
 
 instance Eq (shape vn) =>
          Eq (TupleArrayElemTypeBase shape as vn) where
-  BasicArrayElem bt1 _ == BasicArrayElem bt2 _ = bt1 == bt2
+  PrimArrayElem bt1 _ == PrimArrayElem bt2 _ = bt1 == bt2
   ArrayArrayElem at1   == ArrayArrayElem at2   = at1 == at2
   TupleArrayElem ts1   == TupleArrayElem ts2   = ts1 == ts2
   _                    == _                    = False
 
 instance Ord (shape vn) =>
          Ord (TupleArrayElemTypeBase shape as vn) where
-  BasicArrayElem bt1 _ `compare` BasicArrayElem bt2 _ = bt1 `compare` bt2
+  PrimArrayElem bt1 _ `compare` PrimArrayElem bt2 _ = bt1 `compare` bt2
   ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
   TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
-  BasicArrayElem {}    `compare` ArrayArrayElem {}    = LT
-  BasicArrayElem {}    `compare` TupleArrayElem {}    = LT
+  PrimArrayElem {}    `compare` ArrayArrayElem {}    = LT
+  PrimArrayElem {}    `compare` TupleArrayElem {}    = LT
   ArrayArrayElem {}    `compare` TupleArrayElem {}    = LT
-  ArrayArrayElem {}    `compare` BasicArrayElem {}    = GT
-  TupleArrayElem {}    `compare` BasicArrayElem {}    = GT
+  ArrayArrayElem {}    `compare` PrimArrayElem {}    = GT
+  TupleArrayElem {}    `compare` PrimArrayElem {}    = GT
   TupleArrayElem {}    `compare` ArrayArrayElem {}    = GT
 
 -- | An array type.
 data ArrayTypeBase shape as vn =
-    BasicArray BasicType (shape vn) Uniqueness (as vn)
-    -- ^ An array whose elements are basic elements.
+    PrimArray PrimType (shape vn) Uniqueness (as vn)
+    -- ^ An array whose elements are prim elements.
   | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
 
 instance Eq (shape vn) =>
          Eq (ArrayTypeBase shape as vn) where
-  BasicArray et1 dims1 u1 _ == BasicArray et2 dims2 u2 _ =
+  PrimArray et1 dims1 u1 _ == PrimArray et2 dims2 u2 _ =
     et1 == et2 && dims1 == dims2 && u1 == u2
   TupleArray ts1 dims1 u1 == TupleArray ts2 dims2 u2 =
     ts1 == ts2 && dims1 == dims2 && u1 == u2
@@ -162,7 +162,7 @@ instance Eq (shape vn) =>
 
 instance Ord (shape vn) =>
          Ord (ArrayTypeBase shape as vn) where
-  BasicArray et1 dims1 u1 _ <= BasicArray et2 dims2 u2 _
+  PrimArray et1 dims1 u1 _ <= PrimArray et2 dims2 u2 _
     | et1 < et2     = True
     | et1 > et2     = False
     | dims1 < dims2 = True
@@ -178,15 +178,15 @@ instance Ord (shape vn) =>
     | u1 < u2       = True
     | u1 > u2       = False
     | otherwise     = True
-  BasicArray {} <= TupleArray {} =
+  PrimArray {} <= TupleArray {} =
     True
-  TupleArray {} <= BasicArray {} =
+  TupleArray {} <= PrimArray {} =
     False
 
--- | An Futhark type is either an array, a basic type, or a tuple.
+-- | An Futhark type is either an array, a prim type, or a tuple.
 -- When comparing types for equality with '==', aliases are ignored,
 -- but dimensions much match.
-data TypeBase shape as vn = Basic BasicType
+data TypeBase shape as vn = Prim PrimType
                           | Array (ArrayTypeBase shape as vn)
                           | Tuple [TypeBase shape as vn]
                           deriving (Eq, Ord, Show)
@@ -219,9 +219,9 @@ data Diet = TupleDiet [Diet] -- ^ Consumes these parts of the tuple.
 
 -- | Every possible value in Futhark.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = BasicVal !BasicValue
-           | TupVal ![Value]
-           | ArrayVal !(Array Int Value) (TypeBase Rank NoInfo ())
+data Value = PrimValue !PrimValue
+           | TupValue ![Value]
+           | ArrayValue !(Array Int Value) (TypeBase Rank NoInfo ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
              deriving (Eq, Ord, Show)
@@ -256,6 +256,7 @@ data UnOp = Not
           | Complement
           | Abs
           | Signum
+          | ToFloat FloatType
           deriving (Eq, Ord, Show)
 
 -- | Binary operators.
@@ -274,7 +275,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Bor
            | LogAnd
            | LogOr
-           -- Relational Ops for all basic types at least
+           -- Relational Ops for all primitive types at least
            | Equal
            | Less
            | Leq
@@ -499,22 +500,23 @@ data LambdaBase ty vn = AnonymFun [ParamBase vn] (ExpBase ty vn) (DeclTypeBase v
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
                       | CurryFun Name [ExpBase ty vn] (ty vn) SrcLoc
                         -- ^ @f(4)@
-                      | UnOpFun UnOp (ty vn) SrcLoc
-                        -- ^ @-@.
-                      | BinOpFun BinOp (ty vn) SrcLoc
-                      | CurryBinOpLeft BinOp (ExpBase ty vn) (ty vn) SrcLoc
-                        -- ^ @2+@.
-                      | CurryBinOpRight BinOp (ExpBase ty vn) (ty vn) SrcLoc
-                        -- ^ @+2@.
+                      | UnOpFun UnOp (ty vn) (ty vn) SrcLoc
+                        -- ^ @-@; first type is operand, second is result.
+                      | BinOpFun BinOp (ty vn) (ty vn) (ty vn) SrcLoc
+                        -- ^ @+@; first two types are operands, third is result.
+                      | CurryBinOpLeft BinOp (ExpBase ty vn) (ty vn) (ty vn) SrcLoc
+                        -- ^ @2+@; first type is operand, second is result.
+                      | CurryBinOpRight BinOp (ExpBase ty vn) (ty vn) (ty vn) SrcLoc
+                        -- ^ @+2@; first type is operand, second is result.
                         deriving (Eq, Ord, Show)
 
 instance Located (LambdaBase ty vn) where
-  locOf (AnonymFun _ _ _ loc)       = locOf loc
-  locOf (CurryFun  _ _ _ loc)       = locOf loc
-  locOf (UnOpFun _ _ loc)           = locOf loc
-  locOf (BinOpFun _ _ loc)          = locOf loc
-  locOf (CurryBinOpLeft _ _ _ loc)  = locOf loc
-  locOf (CurryBinOpRight _ _ _ loc) = locOf loc
+  locOf (AnonymFun _ _ _ loc)         = locOf loc
+  locOf (CurryFun  _ _ _ loc)         = locOf loc
+  locOf (UnOpFun _ _ _ loc)           = locOf loc
+  locOf (BinOpFun _ _ _ _ loc)        = locOf loc
+  locOf (CurryBinOpLeft _ _ _ _ loc)  = locOf loc
+  locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
 data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc

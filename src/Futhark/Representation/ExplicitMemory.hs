@@ -18,7 +18,7 @@ module Futhark.Representation.ExplicitMemory
        , bodyReturns
        , returnsToType
        , lookupMemBound
-       , basicSize
+       , primSize
          -- * Syntax types
        , Prog
        , Body
@@ -112,7 +112,7 @@ type PatElem = AST.PatElem (MemBound NoUniqueness)
 instance IsRetType [FunReturns] where
   retTypeValues = map returnsToType
 
-  basicRetType t = [ReturnsScalar t]
+  primRetType t = [ReturnsScalar t]
 
   applyRetType = applyFunReturns
 
@@ -199,11 +199,11 @@ instance Annotations ExplicitMemory where
 
 -- | A summary of the memory information for every let-bound identifier
 -- and function parameter.
-data MemBound u = Scalar BasicType
+data MemBound u = Scalar PrimType
                  -- ^ The corresponding identifier is a
                  -- scalar.  It must not be of array type.
                | MemMem SubExp Space
-               | ArrayMem BasicType Shape u VName IxFun.IxFun
+               | ArrayMem PrimType Shape u VName IxFun.IxFun
                  -- ^ The array is stored in the named memory block,
                  -- and with the given index function.  The index
                  -- function maps indices in the array to /element/
@@ -222,7 +222,7 @@ instance Typed (MemBound Uniqueness) where
 
 instance Typed (MemBound NoUniqueness) where
   typeOf (Scalar bt) =
-    Basic bt
+    Prim bt
   typeOf (MemMem size space) =
     Mem size space
   typeOf (ArrayMem bt shape u _ _) =
@@ -230,7 +230,7 @@ instance Typed (MemBound NoUniqueness) where
 
 instance DeclTyped (MemBound Uniqueness) where
   declTypeOf (Scalar bt) =
-    Basic bt
+    Prim bt
   declTypeOf (MemMem size space) =
     Mem size space
   declTypeOf (ArrayMem bt shape u _ _) =
@@ -329,10 +329,10 @@ instance Substitute MemReturn where
 
 -- | A description of a value being returned from a construct,
 -- parametrised across extra information stored for arrays.
-data Returns u a = ReturnsArray BasicType ExtShape u a
+data Returns u a = ReturnsArray PrimType ExtShape u a
                    -- ^ Returns an array of the given element type,
                    -- (existential) shape, and uniqueness.
-                 | ReturnsScalar BasicType
+                 | ReturnsScalar PrimType
                    -- ^ Returns a scalar of the given type.
                  | ReturnsMemory SubExp Space
                    -- ^ Returns a memory block of the given size.
@@ -472,7 +472,7 @@ generaliseReturns r1s r2s =
             <*>
             generaliseSummaries summary1 summary2
         generaliseReturns' t1 _ =
-          return t1 -- Must be basic then.
+          return t1 -- Must be prim then.
 
         unifyExtDims (Free se1) (Free se2)
           | se1 == se2 = return $ Free se1 -- Arbitrary
@@ -522,12 +522,12 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkLParamLore = checkMemBound
   checkLetBoundLore = checkMemBound
   checkRetType = mapM_ TypeCheck.checkExtType . retTypeValues
-  checkOp (Alloc size _) = TypeCheck.require [Basic Int] size
+  checkOp (Alloc size _) = TypeCheck.require [Prim int32] size
   checkOp (Inner k) = typeCheckKernel k
 
-  basicFParam _ name t =
+  primFParam _ name t =
     AST.Param name (Scalar t)
-  basicLParam _ name t =
+  primLParam _ name t =
     AST.Param name (Scalar t)
 
   matchPattern pat e = do
@@ -586,7 +586,7 @@ matchPatternToReturns wrong pat rt = do
 
 
     matchBindee bindee (ReturnsScalar bt) =
-      matchType bindee $ Basic bt
+      matchType bindee $ Prim bt
     matchBindee bindee (ReturnsMemory size@Constant{} space) =
       matchType bindee $ Mem size space
     matchBindee bindee (ReturnsMemory (Var size) space) = do
@@ -640,7 +640,7 @@ matchPatternToReturns wrong pat rt = do
       case partition ((==name) . patElemName) ctxbindees' of
         ([nameBindee], ctxbindees'') -> do
           put ctxbindees''
-          unless (patElemType nameBindee == Basic Int) $
+          unless (patElemType nameBindee == Prim int32) $
             lift $ wrong $ "Size " ++ pretty name ++
             " is not an integer."
         _ ->
@@ -678,7 +678,7 @@ varMemBound name = do
     LetInfo (_, summary) -> return summary
     FParamInfo summary -> return $ fmap (const NoUniqueness) summary
     LParamInfo summary -> return summary
-    IndexInfo -> return $ Scalar Int
+    IndexInfo -> return $ Scalar int32
 
 lookupMemBound :: (HasScope ExplicitMemory m, Monad m) =>
                   VName -> m (MemBound NoUniqueness)
@@ -688,13 +688,13 @@ lookupMemBound name = do
     FParamInfo summary -> return $ fmap (const NoUniqueness) summary
     LParamInfo summary -> return summary
     LetInfo summary -> return summary
-    IndexInfo -> return $ Scalar Int
+    IndexInfo -> return $ Scalar int32
 
 checkMemBound :: VName -> MemBound u
              -> TypeCheck.TypeM ExplicitMemory ()
 checkMemBound _ (Scalar _) = return ()
 checkMemBound _ (MemMem size _) =
-  TypeCheck.require [Basic Int] size
+  TypeCheck.require [Prim int32] size
 checkMemBound name (ArrayMem _ shape _ v ixfun) = do
   t <- lookupType v
   case t of
@@ -707,7 +707,7 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
       pretty t ++ "."
 
   TypeCheck.context ("in index function " ++ pretty ixfun) $ do
-    traverse_ (TypeCheck.requireI [Basic Int]) $ freeIn ixfun
+    traverse_ (TypeCheck.requireI [Prim int32]) $ freeIn ixfun
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
@@ -815,7 +815,7 @@ patElemAnnot = bindeeAnnot patElemName patElemAttr
 -- information.
 returnsToType :: Returns u a -> TypeBase ExtShape u
 returnsToType (ReturnsScalar bt) =
-  Basic bt
+  Prim bt
 returnsToType (ReturnsMemory size space) =
   Mem size space
 returnsToType (ReturnsArray bt shape u _) =
@@ -824,7 +824,7 @@ returnsToType (ReturnsArray bt shape u _) =
 extReturns :: [ExtType] -> [ExpReturns]
 extReturns ts =
     evalState (mapM addAttr ts) 0
-    where addAttr (Basic bt) =
+    where addAttr (Prim bt) =
             return $ ReturnsScalar bt
           addAttr (Mem size space) =
             return $ ReturnsMemory size space
@@ -838,7 +838,7 @@ extReturns ts =
 
 arrayVarReturns :: (HasScope ExplicitMemory m, Monad m) =>
                    VName
-                -> m (BasicType, Shape, VName, IxFun.IxFun)
+                -> m (PrimType, Shape, VName, IxFun.IxFun)
 arrayVarReturns v = do
   summary <- lookupMemBound v
   case summary of
@@ -897,8 +897,8 @@ expReturns (AST.PrimOp (Unstripe _ stride v)) = do
 expReturns (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
-      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n Int))
-                (SE.Val $ IntVal 0) sizeexps
+      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n int32))
+                0 sizeexps
   return $ zipWith (\new_shape offset
                     -> ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
                        NoUniqueness $
@@ -914,7 +914,7 @@ expReturns (AST.PrimOp (Index _ v is)) = do
       return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
              Just $ ReturnsInBlock mem $
              IxFun.applyInd ixfun
-             (map (`SE.subExpToScalExp` Int) is)]
+             (map (`SE.subExpToScalExp` int32) is)]
 
 expReturns (AST.PrimOp op) =
   extReturns <$> staticShapes <$> primOpType op
@@ -937,7 +937,7 @@ expReturns (AST.LoopOp (DoLoop res merge _ _)) =
                           Just $ ReturnsInBlock mem ixfun)
               (Array{}, _) ->
                 fail "expReturns: result is not a merge variable."
-              (Basic bt, _) ->
+              (Prim bt, _) ->
                 return $ ReturnsScalar bt
               (Mem{}, _) ->
                 fail "expReturns: loop returns memory block explicitly."
@@ -967,8 +967,8 @@ bodyReturns :: (Monad m, HasScope ExplicitMemory m) =>
 bodyReturns ts (AST.Body _ bnds res) = do
   let boundHere = boundInBindings bnds
       inspect _ (Constant val) =
-        return $ ReturnsScalar $ basicValueType val
-      inspect (Basic bt) (Var _) =
+        return $ ReturnsScalar $ primValueType val
+      inspect (Prim bt) (Var _) =
         return $ ReturnsScalar bt
       inspect Mem{} (Var _) =
         -- FIXME
@@ -1053,11 +1053,20 @@ applyFunReturns rets params args
                   Just (Var v, _) -> v
                   _               -> mem
 
--- | The size of a basic type in bytes.
-basicSize :: Num a => BasicType -> a
-basicSize Int = 4
-basicSize Bool = 1
-basicSize Char = 1
-basicSize Float64 = 8
-basicSize Float32 = 4
-basicSize Cert = 1
+-- | The size of a primitive type in bytes.
+primSize :: Num a => PrimType -> a
+primSize (IntType t) = intSize t
+primSize (FloatType t) = floatSize t
+primSize Bool = 1
+primSize Char = 1
+primSize Cert = 1
+
+intSize :: Num a => IntType -> a
+intSize Int8 = 1
+intSize Int16 = 2
+intSize Int32 = 4
+intSize Int64 = 8
+
+floatSize :: Num a => FloatType -> a
+floatSize Float32 = 4
+floatSize Float64 = 8

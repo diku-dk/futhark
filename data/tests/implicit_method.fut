@@ -84,4 +84,4 @@ fun *[[[real,m],n],num_samples]
         *[[real,m],n] u,    real     dtInv,
         int num_samples) =
   map(implicitMethod(myD, myDD, myMu, myVar, u),
-      map (*dtInv, map (/toFloat(num_samples), map(toFloat, map(+1, iota(num_samples))))))
+      map (*dtInv, map (/real(num_samples), map(real, map(+1, iota(num_samples))))))

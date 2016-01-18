@@ -15,6 +15,6 @@ tests = blankValueHasRightType
 
 blankValueHasRightType :: [Test]
 blankValueHasRightType = [ testCase (show t ++ " has blank of right type") $
-                           valueType (BasicVal (blankBasicValue t)) @?= Basic t
+                           valueType (PrimVal (blankPrimValue t)) @?= Prim t
                          | t <- [minBound..maxBound]
                          ]

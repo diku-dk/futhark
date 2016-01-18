@@ -55,7 +55,7 @@ instance Annotations lore => Typed (NameInfo lore) where
   typeOf (LetInfo attr) = typeOf attr
   typeOf (FParamInfo attr) = typeOf attr
   typeOf (LParamInfo attr) = typeOf attr
-  typeOf IndexInfo = Basic Int
+  typeOf IndexInfo = Prim $ IntType Int32
 
 instance Substitutable lore => Substitute (NameInfo lore) where
   substituteNames subst (LetInfo attr) =
