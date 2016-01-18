@@ -56,6 +56,9 @@ def srem32(x,y):
 def spow32(x,y):
   return x ** y
 
+def fpow32(x,y):
+  return x ** y
+
 def sle32(x,y):
   return x <= y
 
