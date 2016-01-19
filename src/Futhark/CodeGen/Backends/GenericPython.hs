@@ -43,8 +43,7 @@ import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Attributes.Constants
-import Futhark.Representation.AST.Syntax
-  (BinOp (..), UnOp (..), CmpOp(..), Space(..))
+import Futhark.Representation.AST.Syntax (Space(..))
 import qualified Futhark.CodeGen.ImpCode as Imp hiding (dimSizeToExp)
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
@@ -313,8 +312,8 @@ packArg memsizes spacemap (Imp.ArrayValue vname bt dims) = do
                                  name <- newVName $ baseString vname <> "_" <> space
                                  alloc name (Var $ pretty sizevar) space
                                  copy
-                                   name (Constant $ intvalue Int32 0) (Imp.Space $ pretty space)
-                                   vname (Constant $ intvalue Int32 0) Imp.DefaultSpace src_size bt
+                                   name (Constant $ value (0 :: Int32)) (Imp.Space $ pretty space)
+                                   vname (Constant $ value (0 :: Int32)) Imp.DefaultSpace src_size bt
                                  stm $ Assign src_data (Var $ pretty name)
 
     Just Imp.DefaultSpace -> stm $ Assign src_data unwrap_call
@@ -346,8 +345,8 @@ unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
                                                    ArgKeyword "dtype" (Var bt'')]
                                  stm $ Assign name' emptyArray
                                  copy
-                                   name (Constant $ intvalue Int32 0) Imp.DefaultSpace
-                                   vname (Constant $ intvalue Int32 0) (Space $ pretty space) (Var size)
+                                   name (Constant $ value (0::Int32)) Imp.DefaultSpace
+                                   vname (Constant $ value (0::Int32)) (Space $ pretty space) (Var size)
                                    bt
                                  stm $ Assign (Var $ pretty vname) name'
     Just Imp.DefaultSpace -> stm $ Assign dest funCall
@@ -460,7 +459,7 @@ addTiming statements =
            Exp $ simpleCall "runtime_file.write" [StringLiteral "\n"],
            Exp $ simpleCall "runtime_file.close" []]
         toMicroseconds x =
-          simpleCall "int" [BinaryOp "*" x $ Constant $ intvalue Int32 1000000]
+          simpleCall "int" [BinaryOp "*" x $ Constant $ value (1000000::Int32)]
 
 compileUnOp :: Imp.UnOp -> String
 compileUnOp op =

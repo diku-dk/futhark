@@ -585,7 +585,7 @@ simplifyScal (MaxMin ismin es) = do -- helperMinMax ismin  es pos
         getValue :: ScalExp -> PrimValue
         getValue se = case se of
                         Val v -> v
-                        _     -> intvalue Int32 0
+                        _     -> value (0::Int32)
         flatop :: [ScalExp] -> ScalExp -> [ScalExp]
         flatop a e@(MaxMin ismin' ses) =
             a ++ if ismin == ismin' then ses else [e]
@@ -1253,15 +1253,15 @@ discriminate e@((k,v):t) (k', v') =
 ------------------------------------------------------
 
 getZero :: PrimType -> AlgSimplifyM PrimValue
-getZero (IntType t)     = return $ intvalue t 0
+getZero (IntType t)     = return $ value $ intValue t (0::Int)
 getZero tp      = badAlgSimplifyM ("getZero for type: "++pretty tp)
 
 getPos1 :: PrimType -> AlgSimplifyM PrimValue
-getPos1 (IntType t)     = return $ intvalue t 1
+getPos1 (IntType t)     = return $ value $ intValue t (1::Int)
 getPos1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 getNeg1 :: PrimType -> AlgSimplifyM PrimValue
-getNeg1 (IntType t)     = return $ intvalue t (-1)
+getNeg1 (IntType t)     = return $ value $ intValue t (-1::Int)
 getNeg1 tp      = badAlgSimplifyM ("getOne for type: "++pretty tp)
 
 valLTHEQ0 :: RelOp0 -> PrimValue -> AlgSimplifyM Bool

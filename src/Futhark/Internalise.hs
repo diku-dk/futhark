@@ -215,7 +215,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
         E.FromDownTo -> do
           upper_bound_less_one <-
             letSubExp "upper_bound_less_one" $
-            PrimOp $ I.BinOp (I.Sub I.Int32) ubound' (intconst I.Int32 1)
+            PrimOp $ I.BinOp (I.Sub I.Int32) ubound' (constant (1 :: I.Int32))
           return [mkLet' [] [i_ident] $
                   I.PrimOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
       return ( bindingIdentTypes [I.Ident j $ I.Prim I.int32, i_ident] .
@@ -322,7 +322,7 @@ internaliseExp desc (E.Size i e _) = do
   case ks of
     (k:_) -> do kt <- I.subExpType k
                 return [I.arraySize i kt]
-    _     -> return [I.intconst I.Int32 0] -- Will this ever happen?
+    _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
 internaliseExp desc (E.Unzip e _ _) =
   internaliseExp desc e
@@ -387,7 +387,7 @@ internaliseExp _ (E.Reshape shape e loc) = do
                eAssert (eCmpOp I.CmpEq (prod dims) (prod shape'))
                loc
     return $ I.Reshape shapeOk (DimNew <$> shape') v
-  where prod = foldBinOp (I.Mul I.Int32) (intconst I.Int32 1)
+  where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
 
 internaliseExp _ (E.Split splitexps arrexp loc) = do
   splits' <- mapM (internaliseExp1 "n") splitexps
@@ -398,14 +398,14 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
   -- Assertions
   indexAsserts <- asserting $ do
     let indexConds = zipWith (\beg end -> PrimOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
-                     (I.intconst I.Int32 0:splits') (splits'++[arrayOuterdim])
+                     (I.constant (0 :: I.Int32):splits') (splits'++[arrayOuterdim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
     forM indexChecks$ \cnd ->
       letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
   let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp (I.Sub I.Int32) end beg)
-                 (I.intconst I.Int32 0:splits') (splits'++[arrayOuterdim])
+                 (I.constant (0 :: I.Int32):splits') (splits'++[arrayOuterdim])
   sizeVars <- mapM (letSubExp "split_size") sizeExps
   splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
                                    PrimOp $ I.Split indexAsserts sizeVars arr
@@ -598,9 +598,9 @@ internaliseExp desc (E.UnOp E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
   et <- subExpType e'
   case et of I.Prim (I.IntType t) ->
-               letTupExp' desc $ I.PrimOp $ I.BinOp (I.Sub t) (I.intconst t 0) e'
+               letTupExp' desc $ I.PrimOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
              I.Prim (I.FloatType t) ->
-               letTupExp' desc $ I.PrimOp $ I.BinOp (I.FSub t) (I.floatconst t 0) e'
+               letTupExp' desc $ I.PrimOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
              _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
 internaliseExp desc (E.UnOp E.Abs e _) = do
@@ -895,7 +895,7 @@ boundsCheck loc v i e = do
   size <- arraySize i <$> lookupType v
   let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
       lowerBound = I.PrimOp $
-                   I.CmpOp (I.CmpSle I.Int32) (I.intconst I.Int32 0) e
+                   I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) e
       upperBound = I.PrimOp $
                    I.CmpOp (I.CmpSlt I.Int32) e size
   letExp "bounds_check" =<< eAssert check loc

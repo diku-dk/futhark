@@ -293,7 +293,7 @@ simplifKnownIterationLoop _ (Let pat _
                                  (ForLoop i (Constant (IntValue (Int32Value 1)))) body))) = do
   forM_ merge $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ PrimOp $ SubExp mergeinit
-  letBindNames'_ [i] $ PrimOp $ SubExp $ intconst Int32 0
+  letBindNames'_ [i] $ PrimOp $ SubExp $ constant (0 :: Int32)
   loop_body_res <- mapM asVar =<< bodyBind body
   let res_params = zipWith setParamName (map fst merge) loop_body_res
       subst = HM.fromList $ zip (map (paramName . fst) merge) loop_body_res
@@ -378,19 +378,19 @@ simplifyBinOp _ _ (BinOp SQuot{} e1 e2)
   | isCt0 e2 = Nothing
 
 simplifyBinOp _ _ (BinOp (FPow t) e1 e2)
-  | isCt0 e2 = binOpRes $ FloatValue $ floatvalue t 1
+  | isCt0 e2 = Just $ SubExp $ floatConst t 1
   | isCt0 e1 || isCt1 e1 || isCt1 e2 = Just $ SubExp e1
 
 simplifyBinOp _ _ (BinOp (Shl t) e1 e2)
   | isCt0 e2 = Just $ SubExp e1
-  | isCt0 e1 = Just $ SubExp $ intconst t 0
+  | isCt0 e1 = Just $ SubExp $ intConst t 0
 
 simplifyBinOp _ _ (BinOp AShr{} e1 e2)
   | isCt0 e2 = Just $ SubExp e1
 
 simplifyBinOp _ _ (BinOp (And t) e1 e2)
-  | isCt0 e1 = Just $ SubExp $ intconst t 0
-  | isCt0 e2 = Just $ SubExp $ intconst t 0
+  | isCt0 e1 = Just $ SubExp $ intConst t 0
+  | isCt0 e2 = Just $ SubExp $ intConst t 0
   | e1 == e2 = Just $ SubExp e1
 
 simplifyBinOp _ _ (BinOp Or{} e1 e2)
@@ -401,7 +401,7 @@ simplifyBinOp _ _ (BinOp Or{} e1 e2)
 simplifyBinOp _ _ (BinOp (Xor t) e1 e2)
   | isCt0 e1 = Just $ SubExp e2
   | isCt0 e2 = Just $ SubExp e1
-  | e1 == e2 = binOpRes $ intvalue t 0
+  | e1 == e2 = Just $ SubExp $ intConst t 0
 
 simplifyBinOp defOf _ (BinOp LogAnd e1 e2)
   | isCt0 e1 = Just $ SubExp $ Constant $ BoolValue False
@@ -565,7 +565,7 @@ simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
     first_index : rest_indices <- inds = do
       -- Figure out the extra offset that we should add to the first index.
       let plus = eBinOp (Add Int32)
-          esum [] = return $ PrimOp $ SubExp $ intconst Int32 0
+          esum [] = return $ PrimOp $ SubExp $ constant (0 :: Int32)
           esum (x:xs) = foldl plus x xs
 
       patElem_and_offset <-

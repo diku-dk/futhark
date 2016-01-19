@@ -60,7 +60,7 @@ foldClosedForm look pat lam accs arrs = do
                 (map paramIdent $ lambdaParams lam) (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames'_ [isEmpty] $
-    PrimOp $ CmpOp CmpEq inputsize (intconst Int32 0)
+    PrimOp $ CmpOp CmpEq inputsize (intConst Int32 0)
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
     (resultBodyM accs)
@@ -80,7 +80,7 @@ loopClosedForm pat respat merge i bound body
                   mergeidents body mergeexp
     isEmpty <- newVName "bound_is_zero"
     letBindNames'_ [isEmpty] $
-      PrimOp $ CmpOp (CmpSlt Int32) bound (intconst Int32 0)
+      PrimOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
     letBindNames'_ (patternNames pat) =<<
       eIf (eSubExp $ Var isEmpty)
       (resultBodyM mergeexp)

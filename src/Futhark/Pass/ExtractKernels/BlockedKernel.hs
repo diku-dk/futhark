@@ -33,7 +33,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   other_index <- newVName "other_index"
   step_one_size <- blockedKernelSize w
 
-  let one = intconst Int32 1
+  let one = constant (1 :: Int32)
       num_chunks = kernelWorkgroups step_one_size
       step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
 
@@ -44,7 +44,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
                    mapM (mkIntermediateIdent num_chunks) acc_idents <*>
                    pure arr_idents)
   step_two_pat <- basicPattern' [] <$>
-                  mapM (mkIntermediateIdent $ intconst Int32 1) acc_idents
+                  mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
   let (fold_acc_params, fold_arr_params) =
         splitAt (length nes) $ lambdaParams fold_lam
       chunk_size_param = Param chunk_size (Prim int32)
@@ -116,7 +116,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
               lambdaReturnType seqlam
   let read_elements =
         [ mkLet' [] [element] $
-          PrimOp $ Index [] arr [intconst Int32 0]
+          PrimOp $ Index [] arr [constant (0 :: Int32)]
         | (element, arr) <- zip elements $ map paramName identity_lam_params ]
       identity_body = mkBody read_elements $ map (Var . identName) elements
       identity_lam = Lambda { lambdaParams = chunk_size_param : identity_lam_params
@@ -132,7 +132,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
     take (length nes) $ patternNames step_one_pat
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
-    addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [intconst Int32 0]
+    addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [constant (0 :: Int32)]
   where mkArrChunkParam chunk_size arr_param =
           newParam (baseString (paramName arr_param) <> "_chunk") $
             arrayOfRow (paramType arr_param) chunk_size
@@ -271,8 +271,8 @@ blockedScan pat cs w lam input = do
                            | rt <- lambdaReturnType lam ]
   letBind_ pat $ Op $ MapKernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
-  where one = intconst Int32 1
-        zero = intconst Int32 0
+  where one = constant (1 :: Int32)
+        zero = constant (0 :: Int32)
         (nes, _) = unzip input
 
         mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Kernels
@@ -335,6 +335,6 @@ blockedSegmentedScan segment_size pat cs w lam input = do
                  }
       input' = (false, flags) : input
   blockedScan pat' cs w lam' input'
-  where zero = intconst Int32 0
+  where zero = constant (0 :: Int32)
         true = constant True
         false = constant False

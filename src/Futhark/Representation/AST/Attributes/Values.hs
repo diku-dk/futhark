@@ -6,8 +6,6 @@ module Futhark.Representation.AST.Attributes.Values
          valueType
        , valueShape
        , valueSize
-       , IsValue (..)
-       , intconst
 
          -- * Extracting
        , valueInt

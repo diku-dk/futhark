@@ -73,10 +73,10 @@ reshapeInnerTests =
   ]
 
 intShape :: [Int] -> Shape
-intShape = Shape . map (intconst Int32 . fromIntegral)
+intShape = Shape . map (intConst Int32 . toInteger)
 
 intShapeChange :: ShapeChange Int -> ShapeChange SubExp
-intShapeChange = map (fmap $ intconst Int32 . fromIntegral)
+intShapeChange = map (fmap $ intConst Int32 . toInteger)
 
 fuseReshapeProp :: Test
 fuseReshapeProp = testProperty "fuseReshape result matches second argument" prop

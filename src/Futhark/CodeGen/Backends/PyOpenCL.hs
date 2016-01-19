@@ -56,8 +56,8 @@ compileProg moduleConfig prog = do
 callKernel :: Py.OpCompiler Imp.OpenCL ()
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
-  let total_elements = foldl mult_exp (Constant $ intvalue Int32 1) kernel_size'
-  let cond = BinaryOp "!=" total_elements (Constant $ intvalue Int32 0)
+  let total_elements = foldl mult_exp (Constant $ value (1::Int32)) kernel_size'
+  let cond = BinaryOp "!=" total_elements (Constant $ value (0::Int32))
   workgroup_size' <- case workgroup_size of
     Nothing -> return None
     Just es -> Tuple <$> mapM Py.compileExp es
@@ -102,7 +102,7 @@ readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ pretty val
   let mem' = Var $ pretty mem
-  let nparr = Call "empty" [Arg $ Constant $ intvalue Int32 1,
+  let nparr = Call "empty" [Arg $ Constant $ value (1::Int32),
                             ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
   let toNp = Py.asscalar i
   Py.stm $ Assign val' nparr
@@ -110,7 +110,7 @@ readOpenCLScalar mem i bt "device" = do
     [Arg $ Var "queue", Arg val', Arg mem',
      ArgKeyword "device_offset" toNp,
      ArgKeyword "is_blocking" $ Constant $ BoolValue True]
-  return $ Index val' $ IdxExp $ Constant $ intvalue Int32 0
+  return $ Index val' $ IdxExp $ Constant $ value (0::Int32)
 
 readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
@@ -118,7 +118,7 @@ readOpenCLScalar _ _ _ space =
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
   let toNp = Py.asscalar size
-  let cond' = Cond (BinaryOp ">" size (Constant $ intvalue Int32 0)) toNp (Constant $ intvalue Int32 1)
+  let cond' = Cond (BinaryOp ">" size (Constant $ value (0::Int32))) toNp (Constant $ value (1::Int32))
   let call' = Call "cl.Buffer" [Arg $ Var "ctx",
                                 Arg $ Var "cl.mem_flags.READ_WRITE",
                                 Arg cond']
@@ -154,7 +154,7 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
   let dest_offset = Py.asscalar destidx
   let src_offset = Py.asscalar srcidx
   let bytecount = Py.asscalar nbytes
-  let cond = BinaryOp ">" nbytes (Constant $ intvalue Int32 0)
+  let cond = BinaryOp ">" nbytes (Constant $ value (0::Int32))
   let tb = Exp $ Call "cl.enqueue_copy"
            [Arg $ Var "queue", Arg destmem', Arg srcmem',
             ArgKeyword "dest_offset" dest_offset,
