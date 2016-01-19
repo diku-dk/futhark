@@ -878,7 +878,7 @@ simplifyBranchResultComparison vtable (Let pat _ (PrimOp (CmpOp CmpEq se1 se2)))
         returns v ifpat tbranch fbranch =
           liftM snd $
           find ((==v) . patElemName . fst) $
-          zip (patternElements ifpat) $
+          zip (patternValueElements ifpat) $
           zip (bodyResult tbranch) (bodyResult fbranch)
 
 simplifyBranchResultComparison _ _ =
