@@ -263,7 +263,7 @@ blockedScan pat cs w lam input = do
           return $ lambdaBody lam'''
     group_lasts <-
       letTupExp "final_result" =<<
-        eIf (eCmpOp CmpEq (eSubExp zero) (eSubExp thread_id))
+        eIf (eCmpOp (CmpEq int32) (eSubExp zero) (eSubExp thread_id))
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
@@ -313,7 +313,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       segment_index <- letSubExp "segment_index" $
                        PrimOp $ BinOp (SRem Int32) (Var flags_i) segment_size
       start_of_segment <- letSubExp "start_of_segment" $
-                          PrimOp $ CmpOp CmpEq segment_index zero
+                          PrimOp $ CmpOp (CmpEq int32) segment_index zero
       flag <- letSubExp "flag" $
               If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
       return $ resultBody [flag]

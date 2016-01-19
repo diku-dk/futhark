@@ -567,7 +567,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
     eqclass <- newVName "eqclass"
     emit $ Imp.DeclareScalar eqclass int32
     let mkSizeLoopBody code c sizevar =
-          Imp.If (Imp.CmpOp CmpEq (Imp.ScalarVar eqclass) (fromIntegral c))
+          Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar eqclass) (fromIntegral c))
           (Imp.SetScalar sizevar $ Imp.ScalarVar sizevar + 1)
           code
         sizeLoopBody = HM.foldlWithKey' mkSizeLoopBody Imp.Skip sizes
@@ -603,7 +603,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
       destloc [varIndex partition_cur_offset]
       srcloc [varIndex i]
     let mkWriteLoopBody code c offsetvar =
-          Imp.If (Imp.CmpOp CmpEq (Imp.ScalarVar eqclass) (fromIntegral c))
+          Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar eqclass) (fromIntegral c))
           (Imp.SetScalar partition_cur_offset
              (Imp.ScalarVar offsetvar)
            <>

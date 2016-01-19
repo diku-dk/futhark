@@ -60,7 +60,7 @@ foldClosedForm look pat lam accs arrs = do
                 (map paramIdent $ lambdaParams lam) (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames'_ [isEmpty] $
-    PrimOp $ CmpOp CmpEq inputsize (intConst Int32 0)
+    PrimOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
   letBind_ pat =<<
     eIf (eSubExp $ Var isEmpty)
     (resultBodyM accs)

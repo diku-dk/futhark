@@ -427,7 +427,7 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2)
     Just (UnOp Not e2') <- asPrimOp =<< defOf v,
     e2' == e1 = binOpRes $ BoolValue True
 
-simplifyBinOp _ _ (CmpOp CmpEq e1 e2)
+simplifyBinOp _ _ (CmpOp CmpEq{} e1 e2)
   | e1 == e2 = binOpRes $ BoolValue True
 
 simplifyBinOp _ _ (CmpOp CmpSlt{} e1 e2)
@@ -850,7 +850,7 @@ removeDeadBranchResult _ _ = cannotSimplify
 -- is actually the case, such as if we will obtain at least one
 -- constant-to-constant comparison?
 simplifyBranchResultComparison :: MonadBinder m => TopDownRule m
-simplifyBranchResultComparison vtable (Let pat _ (PrimOp (CmpOp CmpEq se1 se2)))
+simplifyBranchResultComparison vtable (Let pat _ (PrimOp (CmpOp (CmpEq t) se1 se2)))
   | Just m <- simplifyWith se1 se2 = m
   | Just m <- simplifyWith se2 se1 = m
   where simplifyWith (Var v) x
@@ -861,9 +861,9 @@ simplifyBranchResultComparison vtable (Let pat _ (PrimOp (CmpOp CmpEq se1 se2)))
             HS.null $ freeIn y `HS.intersection` boundInBody tbranch,
             HS.null $ freeIn z `HS.intersection` boundInBody fbranch = Just $ do
                 eq_x_y <-
-                  letSubExp "eq_x_y" $ PrimOp $ CmpOp CmpEq x y
+                  letSubExp "eq_x_y" $ PrimOp $ CmpOp (CmpEq t) x y
                 eq_x_z <-
-                  letSubExp "eq_x_z" $ PrimOp $ CmpOp CmpEq x z
+                  letSubExp "eq_x_z" $ PrimOp $ CmpOp (CmpEq t) x z
                 p_and_eq_x_y <-
                   letSubExp "p_and_eq_x_y" $ PrimOp $ BinOp LogAnd p eq_x_y
                 not_p <-

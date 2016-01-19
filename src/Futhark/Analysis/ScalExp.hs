@@ -238,7 +238,7 @@ toScalExp look (PrimOp (CmpOp CmpSlt{} x y)) =
   Just <$> RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (CmpOp CmpSle{} x y)) =
   Just <$> RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-toScalExp look (PrimOp (CmpOp CmpEq x y)) = do
+toScalExp look (PrimOp (CmpOp (CmpEq t) x y)) | t `elem` [Bool, int32] = do
   x' <- subExpToScalExp' look x
   y' <- subExpToScalExp' look y
   return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
@@ -365,12 +365,12 @@ fromScalExp' = convert
         convert (SOneIfZero e) = do
           e' <- letSubExp "one_if_zero_arg" =<< convert e
           eIf
-            (eCmpOp CmpEq (eSubExp e') (pure zero))
+            (eCmpOp (CmpEq int32) (eSubExp e') (pure zero))
             (eBody [eSubExp $ intConst Int32 1])
             (eBody [eSubExp e'])
         convert (SIfZero x t f) =
           eIf
-          (eCmpOp CmpEq (convert x) (pure zero))
+          (eCmpOp (CmpEq int32) (convert x) (pure zero))
           (eBody [convert t])
           (eBody [convert f])
         convert (SIfLessThan a b t f) =

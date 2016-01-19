@@ -80,7 +80,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
     letBind_ (basicPattern' [] inner_shapes) =<<
     eIf isempty emptybranch nonemptybranch
   where zero = constant (0::I.Int32)
-        isempty = eCmpOp I.CmpEq
+        isempty = eCmpOp (I.CmpEq I.int32)
                   (pure $ I.PrimOp $ I.SubExp outer_shape)
                   (pure $ I.PrimOp $ SubExp zero)
         emptybranch =
