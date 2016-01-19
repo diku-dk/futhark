@@ -227,10 +227,13 @@ toScalExp look (PrimOp (SubExp (Var v)))
   | otherwise = do
     t <- lookupType v
     case t of
-      Prim bt -> return $ Just $ Id v bt
-      _        -> return Nothing
-toScalExp _ (PrimOp (SubExp (Constant val))) =
-  return $ Just $ Val val
+      Prim bt | bt `elem` [Bool, int32] ->
+        return $ Just $ Id v bt
+      _ ->
+        return Nothing
+toScalExp _ (PrimOp (SubExp (Constant val)))
+  | primValueType val `elem` [Bool, int32] =
+    return $ Just $ Val val
 toScalExp look (PrimOp (CmpOp CmpSlt{} x y)) =
   Just <$> RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (CmpOp CmpSle{} x y)) =
