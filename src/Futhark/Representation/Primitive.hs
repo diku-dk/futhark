@@ -339,7 +339,7 @@ doUnOp _ _ = Nothing
 doComplement :: IntValue -> IntValue
 doComplement v = intValue (intValueType v) $ complement $ intToInt64 v
 
- -- | @abs(-2) = 2@.
+-- | @abs(-2) = 2@.
 doAbs :: IntValue -> IntValue
 doAbs v = intValue (intValueType v) $ abs $ intToInt64 v
 
