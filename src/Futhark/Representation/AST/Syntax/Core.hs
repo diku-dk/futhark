@@ -6,7 +6,8 @@
 -- there should be no reason to include it explicitly.
 module Futhark.Representation.AST.Syntax.Core
        (
-         module Language.Futhark.Core
+           module Language.Futhark.Core
+         , module Futhark.Representation.Primitive
 
          -- * Types
          , Uniqueness(..)
@@ -54,6 +55,7 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Language.Futhark.Core
+import Futhark.Representation.Primitive
 
 -- | The size of an array type as a list of its dimension sizes.  If a
 -- variable, that variable must be in scope where this array is used.

@@ -31,7 +31,6 @@ import Data.List
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
 import Data.Maybe
-import Data.Word
 
 import Prelude
 
@@ -122,14 +121,9 @@ runFutharkM (FutharkM m) env = runWriter $ runExceptT $ runReaderT m env
 bad :: InterpreterError -> FutharkM a
 bad = FutharkM . throwError
 
-asRational :: String -> Value -> FutharkM Rational
-asRational _ (PrimVal (FloatValue (Float32Value v))) = return $ toRational v
-asRational _ (PrimVal (FloatValue (Float64Value v))) = return $ toRational v
-asRational w _ = bad $ TypeError $ w ++ " asInteger"
-
-asIntValue :: String -> Value -> FutharkM IntValue
-asIntValue _ (PrimVal (IntValue v)) = return v
-asIntValue w _ = bad $ TypeError $ w ++ " asIntValue"
+asPrimitive :: String -> Value -> FutharkM PrimValue
+asPrimitive _ (PrimVal v) = return v
+asPrimitive w _ = bad $ TypeError $ w ++ " asPrimitive"
 
 asInt32 :: String -> Value -> FutharkM Int32
 asInt32 _ (PrimVal (IntValue (Int32Value v))) = return v
@@ -437,9 +431,6 @@ evalPrimOp (ArrayLit es rt) = do
               pure (elemType rt) <*>
               pure (length es : rowshape))
 
-evalPrimOp (BinOp Add{} e1 e2) = evalIntBinOp (+) e1 e2
-evalPrimOp (BinOp FAdd{} e1 e2) = evalFloatBinOp (+) e1 e2
-evalPrimOp (BinOp Sub{} e1 e2) = evalIntBinOp (-) e1 e2
 evalPrimOp (BinOp FSub{} e1 e2) = evalFloatBinOp (-) e1 e2
 evalPrimOp (BinOp SPow{} e1 e2) = evalIntBinOpM pow e1 e2
   -- Haskell (^) cannot handle negative exponents, so check for that
@@ -447,8 +438,6 @@ evalPrimOp (BinOp SPow{} e1 e2) = evalIntBinOpM pow e1 e2
   where pow x y | y < 0, x == 0 = bad DivisionByZero
                 | y < 0         = return $ 1 `div` (x ^ (-y))
                 | otherwise     = return $ x ^ y
-evalPrimOp (BinOp FPow{} e1 e2) = evalFloatBinOp (**) e1 e2
-evalPrimOp (BinOp Mul{} e1 e2) = evalIntBinOp (*) e1 e2
 evalPrimOp (BinOp FMul{} e1 e2) = evalFloatBinOp (*) e1 e2
 evalPrimOp (BinOp SDiv{} e1 e2) = evalIntBinOpM div' e1 e2
   where div' _ 0 = bad DivisionByZero
@@ -462,114 +451,35 @@ evalPrimOp (BinOp SQuot{} e1 e2) = evalIntBinOpM quot' e1 e2
 evalPrimOp (BinOp SRem{} e1 e2) = evalIntBinOpM rem' e1 e2
   where rem' _ 0 = bad DivisionByZero
         rem' x y = return $ x `rem` y
-evalPrimOp (BinOp UDiv{} _ _ ) = bad $ TypeError "UDiv not implemented in interpreter yet."
-evalPrimOp (BinOp UMod{} _ _ ) = bad $ TypeError "UDiv not implemented in interpreter yet."
 evalPrimOp (BinOp FDiv{} e1 e2) = evalFloatBinOpM div' e1 e2
   where div' _ 0 = bad  DivisionByZero
         div' x y = return $ x / y
-evalPrimOp (BinOp Shl{} e1 e2) = evalIntBinOp shiftL' e1 e2
-  where shiftL' x = shiftL x . fromIntegral
-evalPrimOp (BinOp AShr{} e1 e2) = evalIntBinOp shiftR' e1 e2
-  where shiftR' x = shiftR x . fromIntegral
-evalPrimOp (BinOp LShr{} _ _ ) = bad $ TypeError "LShr not implemented in interpreter yet."
-evalPrimOp (BinOp And{} e1 e2) = evalIntBinOp (.&.) e1 e2
-evalPrimOp (BinOp Xor{} e1 e2) = evalIntBinOp xor e1 e2
-evalPrimOp (BinOp Or{} e1 e2) = evalIntBinOp (.|.) e1 e2
-evalPrimOp (BinOp LogAnd e1 e2) = evalBoolBinOp (&&) e1 e2
-evalPrimOp (BinOp LogOr e1 e2) = evalBoolBinOp (||) e1 e2
+evalPrimOp binop@(BinOp op e1 e2) = do
+  v1 <- asPrimitive "BinOp" =<< evalSubExp e1
+  v2 <- asPrimitive "BinOp" =<< evalSubExp e2
+  case doBinOp op v1 v2 of
+    Just v -> return [PrimVal v]
+    Nothing -> bad $ TypeError $ "Cannot BinOp: " ++ pretty binop
 
-evalPrimOp (CmpOp CmpEq e1 e2) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [PrimVal $ BoolValue (v1==v2)]
 
-evalPrimOp (CmpOp CmpSlt{} e1 e2) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [PrimVal $ BoolValue (v1<v2)]
+evalPrimOp e@(CmpOp cmp e1 e2) = do
+  v1 <- asPrimitive "CmpOp" =<< evalSubExp e1
+  v2 <- asPrimitive "CmpOp" =<< evalSubExp e2
+  case doCmpOp cmp v1 v2 of
+    Just b -> return [PrimVal $ BoolValue b]
+    Nothing -> bad $ TypeError $ "Cannot compare: " ++ pretty e
 
-evalPrimOp (CmpOp CmpSle{} e1 e2) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [PrimVal $ BoolValue (v1<=v2)]
+evalPrimOp e@(ConvOp op x) = do
+  v <- asPrimitive "ConvOp" =<< evalSubExp x
+  case doConvOp op v of
+    Just v' -> return [PrimVal v']
+    Nothing -> bad $ TypeError $ "Cannot convert: " ++ pretty e
 
-evalPrimOp (CmpOp FCmpLt{} e1 e2) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [PrimVal $ BoolValue (v1<v2)]
-
-evalPrimOp (CmpOp FCmpLe{} e1 e2) = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  return [PrimVal $ BoolValue (v1<=v2)]
-
-evalPrimOp (CmpOp CmpUlt{} _ _) =
-  bad $ TypeError "CmpUlt not implemented in interpreter yet."
-
-evalPrimOp (CmpOp CmpUle{} _ _) =
-  bad $ TypeError "CmpUlt not implemented in interpreter yet."
-
-evalPrimOp (ConvOp (Trunc _ to) x) =
-  -- Zero-extension with a smaller type is the same as truncation.
-  single <$> PrimVal <$> intvalue to <$>
-  valueInt <$> (asIntValue "Trunc" =<< evalSubExp x)
-
-evalPrimOp (ConvOp (ZExt _ to) x) =
-  single <$> PrimVal <$> IntValue <$>
-  (zeroExtend <$> (asIntValue "ZExt" =<< evalSubExp x) <*> pure to)
-
-evalPrimOp (ConvOp (SExt _ to) x) =
-  single <$> PrimVal <$> IntValue <$>
-  (signExtend <$> (asIntValue "SExt" =<< evalSubExp x) <*> pure to)
-
-evalPrimOp (ConvOp (FPTrunc _ to) x) =
-  single <$> PrimVal <$> FloatValue <$>
-  floatvalue to <$> (asRational "FPTrunc" =<< evalSubExp x)
-
-evalPrimOp (ConvOp (FPExt _ to) x) =
-  single <$> PrimVal <$> FloatValue <$>
-  floatvalue to <$> (asRational "FPExt" =<< evalSubExp x)
-
-evalPrimOp (ConvOp (FPToSI _ t) x) =
-  single <$> PrimVal <$>
-  intvalue t <$> truncate <$> (asRational "FPToSI" =<< evalSubExp x)
-
-evalPrimOp (ConvOp (FPToUI _ t) x) =
-  single <$> PrimVal <$> intvalue t <$> toInteger <$>
-  (truncate <$> (asRational "FPToSI" =<< evalSubExp x) :: FutharkM Word64)
-
-evalPrimOp (ConvOp (UIToFP _ t) x) =
-  single <$> PrimVal <$> FloatValue <$>
-  (uintToFloat <$> (asIntValue "UIToFP" =<< evalSubExp x) <*> pure t)
-
-evalPrimOp (ConvOp (SIToFP _ t) x) =
-  single <$> PrimVal <$> FloatValue <$>
-  (intToFloat <$> (asIntValue "SIToFP" =<< evalSubExp x) <*> pure t)
-
-evalPrimOp (UnOp Not e) = do
-  v <- evalSubExp e
-  case v of PrimVal (BoolValue b) -> return [PrimVal $ BoolValue (not b)]
-            _                     -> bad $ TypeError "evalPrimOp Not"
-
-evalPrimOp (UnOp Complement{} e) = do
-  v <- evalSubExp e
-  case v of PrimVal x -> single <$> PrimVal <$> intUnOp (return . complement) x
-            _         -> bad $ TypeError "evalPrimOp Not"
-
-evalPrimOp (UnOp Abs{} e) = do
-  v <- evalSubExp e
-  case v of PrimVal x -> single <$> PrimVal <$> numUnOp (return . abs) x
-            _         -> bad $ TypeError "evalPrimOp Abs"
-
-evalPrimOp (UnOp FAbs{} e) = do
-  v <- evalSubExp e
-  case v of PrimVal x -> single <$> PrimVal <$> numUnOp (return . abs) x
-            _         -> bad $ TypeError "evalPrimOp FAbs"
-
-evalPrimOp (UnOp Signum{} e) = do
-  v <- evalSubExp e
-  case v of PrimVal x -> single <$> PrimVal <$> intUnOp (return . signum) x
-            _         -> bad $ TypeError "evalPrimOp Signum"
+evalPrimOp unop@(UnOp op e) = do
+  v <- asPrimitive "UnOp" =<< evalSubExp e
+  case doUnOp op v of
+    Just v' -> return [PrimVal v']
+    Nothing -> bad $ TypeError $ "Cannot UnOp: " ++ pretty unop
 
 evalPrimOp (Index _ ident idxs) = do
   v <- lookupVar ident
@@ -839,11 +749,6 @@ evalFuncall fname args = do
   fun <- lookupFun fname
   fun args
 
-evalIntBinOp :: (forall int. (Integral int, Bits int) => int -> int -> int)
-             -> SubExp -> SubExp
-             -> FutharkM [Value]
-evalIntBinOp op = evalIntBinOpM $ \x y -> return $ op x y
-
 evalIntBinOpM :: (forall int. (Integral int, Bits int) => int -> int -> FutharkM int)
               -> SubExp
               -> SubExp
@@ -878,16 +783,6 @@ evalFloatBinOpM op e1 e2 = do
       return [PrimVal result]
     _ ->
       bad $ TypeError "evalFloatBinOpM"
-
-evalBoolBinOp :: (Bool -> Bool -> Bool) -> SubExp -> SubExp -> FutharkM [Value]
-evalBoolBinOp op e1 e2 = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  case (v1, v2) of
-    (PrimVal (BoolValue x), PrimVal (BoolValue y)) ->
-      return [PrimVal $ BoolValue (op x y)]
-    _ ->
-      bad $ TypeError $ "evalBoolBinOp " ++ pretty v1 ++ " " ++ pretty v2
 
 applyLambda :: Lambda -> Int32 -> [Value] -> FutharkM [Value]
 applyLambda (Lambda i params body rettype) j args = do

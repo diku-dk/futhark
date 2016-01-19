@@ -4,6 +4,7 @@ module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core
   , module Futhark.Representation.AST.Annotations
+  , module Futhark.Representation.AST.Syntax.Core
 
   -- * Types
   , Uniqueness(..)
@@ -14,12 +15,7 @@ module Futhark.Representation.AST.Syntax
   , Rank(..)
   , ArrayShape(..)
   , Space (..)
-  , SpaceId
   , TypeBase(..)
-  , Type
-  , ExtType
-  , DeclType
-  , DeclExtType
   , Diet(..)
 
   -- * Values
@@ -28,11 +24,9 @@ module Futhark.Representation.AST.Syntax
 
   -- * Abstract syntax tree
   , Ident (..)
-  , Certificates
   , SubExp(..)
   , Bindage (..)
   , PatElemT (..)
-  , PatElem
   , PatternT (..)
   , Pattern
   , Binding(..)
@@ -58,16 +52,12 @@ module Futhark.Representation.AST.Syntax
 
   -- * Definitions
   , ParamT (..)
-  , Param
   , FParam
   , LParam
   , FunDecT (..)
   , FunDec
   , ProgT(..)
   , Prog
-
-  -- * Miscellaneous
-  , Names
   )
   where
 
@@ -122,104 +112,6 @@ deriving instance Annotations lore => Show (BodyT lore)
 deriving instance Annotations lore => Eq (BodyT lore)
 
 type Body = BodyT
-
--- | Various unary operators.  It is a bit ad-hoc what is a unary
--- operator and what is a built-in function.  Perhaps these should all
--- go away eventually.
-data UnOp = Not -- ^ E.g., @! True == False@.
-          | Complement IntType -- ^ E.g., @~(~1) = 1@.
-          | Abs IntType -- ^ @abs(-2) = 2@.
-          | FAbs FloatType -- ^ @abs(-2.0) = 2.0@.
-          | Signum IntType -- ^ @signum(2)@ = 1.
-             deriving (Eq, Ord, Show)
-
--- | Binary operators.  These correspond closely to the binary operators in
--- LLVM.  Most are parametrised by their expected input and output
--- types.
-data BinOp = Add IntType -- ^ Integer addition.
-           | FAdd FloatType -- ^ Floating-point addition.
-
-           | Sub IntType -- ^ Integer subtraction.
-           | FSub FloatType -- ^ Floating-point subtraction.
-
-           | Mul IntType -- ^ Integer multiplication.
-           | FMul FloatType -- ^ Floating-point multiplication.
-
-           | UDiv IntType
-             -- ^ Unsigned integer division.  Rounds towards
-             -- negativity infinity.  Note: this is different
-             -- from LLVM.
-           | SDiv IntType
-             -- ^ Signed integer division.  Rounds towards
-             -- negativity infinity.  Note: this is different
-             -- from LLVM.
-           | FDiv FloatType -- ^ Floating-point division.
-
-           | UMod IntType
-             -- ^ Unsigned integer modulus; the countepart to 'UDiv'.
-           | SMod IntType
-             -- ^ Signed integer modulus; the countepart to 'SDiv'.
-
-           | SQuot IntType
-             -- ^ Signed integer division.  Rounds towards zero.
-             -- This corresponds to the @sdiv@ instruction in LLVM.
-           | SRem IntType
-             -- ^ Signed integer division.  Rounds towards zero.
-             -- This corresponds to the @srem@ instruction in LLVM.
-
-           | Shl IntType -- ^ Left-shift.
-           | LShr IntType -- ^ Logical right-shift, zero-extended.
-           | AShr IntType -- ^ Arithmetic right-shift, sign-extended.
-
-           | And IntType -- ^ Bitwise and.
-           | Or IntType -- ^ Bitwise or.
-           | Xor IntType -- ^ Bitwise exclusive-or.
-
-           | SPow IntType -- ^ Signed integer exponentatation.
-           | FPow FloatType -- ^ Floating-point exponentatation.
-
-           | LogAnd -- ^ Boolean and - not short-circuiting.
-           | LogOr -- ^ Boolean or - not short-circuiting.
-             deriving (Eq, Ord, Show)
-
--- | Comparison operators are like 'BinOp's, but they return 'Bool's.
--- The somewhat ugly constructor names are straight out of LLVM.
-data CmpOp = CmpEq -- ^ All types equality.
-           | CmpUlt IntType -- ^ Unsigned less than.
-           | CmpUle IntType -- ^ Unsigned less than or equal.
-           | CmpSlt IntType -- ^ Signed less than.
-           | CmpSle IntType -- ^ Signed less than or equal.
-
-             -- Comparison operators for floating-point values.  TODO: extend
-             -- this to handle NaNs and such, like the LLVM fcmp instruction.
-           | FCmpLt FloatType -- ^ Floating-point less than.
-           | FCmpLe FloatType -- ^ Floating-point less than or equal.
-
-             deriving (Eq, Ord, Show)
-
--- | Conversion operators try to generalise the @from t0 x to t1@
--- instructions from LLVM.
-data ConvOp = Trunc IntType IntType
-              -- ^ Truncate the former integer type to the latter.
-            | ZExt IntType IntType
-              -- ^ Zero-extend the former integer type to the latter.
-            | SExt IntType IntType
-              -- ^ Sign-extend the former integer type to the latter.
-            | FPTrunc FloatType FloatType
-              -- ^ Truncate the former floating-point type to the latter.
-            | FPExt FloatType FloatType
-              -- ^ Extend the former floating-point type to the latter.
-            | FPToUI FloatType IntType
-              -- ^ Convert a floating-point value to the nearest
-              -- unsigned integer (rounding towards zero).
-            | FPToSI FloatType IntType
-              -- ^ Convert a floating-point value to the nearest
-              -- signed integer (rounding towards zero).
-            | UIToFP IntType FloatType
-              -- ^ Convert an unsigned integer to a floating-point value.
-            | SIToFP IntType FloatType
-              -- ^ Convert a signed integer to a floating-point value.
-             deriving (Eq, Ord, Show)
 
 -- | The new dimension in a 'Reshape'-like operation.  This allows us to
 -- disambiguate "real" reshapes, that change the actual shape of the

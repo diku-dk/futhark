@@ -52,7 +52,8 @@ internaliseProg doBoundsCheck prog = do
 
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
-buildFtable = runInternaliseM True HM.empty .
+buildFtable = liftM (fmap $ HM.union builtinFtable) .
+              runInternaliseM True mempty .
               liftM HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) =
           bindingParams params $ \shapes values -> do
@@ -67,6 +68,13 @@ buildFtable = runInternaliseM True HM.empty .
                                                )
                                , externalFun = (rettype, map E.identType params)
                                })
+
+        builtinFtable = HM.map addBuiltin E.builtInFunctions
+        addBuiltin (t, paramts) =
+          FunBinding
+          ([], map (I.Prim . internalisePrimType) paramts,
+           const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
+          (E.Prim t, map E.Prim paramts)
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
@@ -159,7 +167,7 @@ internaliseExp desc (E.Apply fname args _ _)
   where tag ses = [ (se, I.Observe) | se <- ses ]
 
 internaliseExp desc (E.Apply fname args _ _)
-  | Just (rettype, _) <- HM.lookup fname builtInFunctions = do
+  | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
   letTupExp' desc $ I.Apply fname args'' (ExtRetType [I.Prim rettype])
@@ -196,20 +204,20 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       lbound' <- internaliseExp1 "lower_bound" lbound
       ubound' <- internaliseExp1 "upper_bound" ubound
       num_iterations <- letSubExp "num_iterations" $
-                        PrimOp $ I.BinOp (I.Sub Int32) ubound' lbound'
+                        PrimOp $ I.BinOp (I.Sub I.Int32) ubound' lbound'
       i' <- internaliseIdent i
       j <- newVName $ baseString i'
       let i_ident = I.Ident i' $ I.Prim I.int32
       i_bnds <- case dir of
         E.FromUpTo ->
           return [mkLet' [] [i_ident] $
-                  I.PrimOp $ I.BinOp (I.Add Int32) lbound' (I.Var j)]
+                  I.PrimOp $ I.BinOp (I.Add I.Int32) lbound' (I.Var j)]
         E.FromDownTo -> do
           upper_bound_less_one <-
             letSubExp "upper_bound_less_one" $
-            PrimOp $ I.BinOp (I.Sub Int32) ubound' (intconst Int32 1)
+            PrimOp $ I.BinOp (I.Sub I.Int32) ubound' (intconst I.Int32 1)
           return [mkLet' [] [i_ident] $
-                  I.PrimOp $ I.BinOp (I.Sub Int32) upper_bound_less_one (I.Var j)]
+                  I.PrimOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
       return ( bindingIdentTypes [I.Ident j $ I.Prim I.int32, i_ident] .
                extraBodyBindings i_bnds
              , Left (j, num_iterations))
@@ -245,7 +253,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           -- next iteration?).  This is safe, as the type rules for
           -- the external language guarantees that 'cond' does not
           -- consume anything.
-          loop_while <- newParam "loop_while" $ I.Prim Bool
+          loop_while <- newParam "loop_while" $ I.Prim I.Bool
           (loop_cond, loop_cond_bnds) <-
             collectBindings $ internaliseExp1 "loop_cond" cond
           let initsubst = [ (I.paramName mergeparam, initval)
@@ -314,7 +322,7 @@ internaliseExp desc (E.Size i e _) = do
   case ks of
     (k:_) -> do kt <- I.subExpType k
                 return [I.arraySize i kt]
-    _     -> return [I.intconst Int32 0] -- Will this ever happen?
+    _     -> return [I.intconst I.Int32 0] -- Will this ever happen?
 
 internaliseExp desc (E.Unzip e _ _) =
   internaliseExp desc e
@@ -379,7 +387,7 @@ internaliseExp _ (E.Reshape shape e loc) = do
                eAssert (eCmpOp I.CmpEq (prod dims) (prod shape'))
                loc
     return $ I.Reshape shapeOk (DimNew <$> shape') v
-  where prod = foldBinOp (I.Mul Int32) (intconst Int32 1)
+  where prod = foldBinOp (I.Mul I.Int32) (intconst I.Int32 1)
 
 internaliseExp _ (E.Split splitexps arrexp loc) = do
   splits' <- mapM (internaliseExp1 "n") splitexps
@@ -389,15 +397,15 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
 
   -- Assertions
   indexAsserts <- asserting $ do
-    let indexConds = zipWith (\beg end -> PrimOp $ I.CmpOp (I.CmpSle Int32) beg end)
-                     (I.intconst Int32 0:splits') (splits'++[arrayOuterdim])
+    let indexConds = zipWith (\beg end -> PrimOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
+                     (I.intconst I.Int32 0:splits') (splits'++[arrayOuterdim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
     forM indexChecks$ \cnd ->
       letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
   let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp (I.Sub I.Int32) end beg)
-                 (I.intconst Int32 0:splits') (splits'++[arrayOuterdim])
+                 (I.intconst I.Int32 0:splits') (splits'++[arrayOuterdim])
   sizeVars <- mapM (letSubExp "split_size") sizeExps
   splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
                                    PrimOp $ I.Split indexAsserts sizeVars arr
@@ -568,8 +576,8 @@ internaliseExp desc (E.If ce te fe t _) = do
 internaliseExp desc (E.BinOp bop xe ye _ _) = do
   xe' <- internaliseExp1 "x" xe
   ye' <- internaliseExp1 "y" ye
-  case (internaliseType $ E.typeOf xe, internaliseType $ E.typeOf ye) of
-    ([I.Prim t1], [I.Prim t2]) ->
+  case (E.typeOf xe, E.typeOf ye) of
+    (E.Prim t1, E.Prim t2) ->
       internaliseBinOp desc bop xe' ye' t1 t2
     _            ->
       fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
@@ -887,7 +895,7 @@ boundsCheck loc v i e = do
   size <- arraySize i <$> lookupType v
   let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
       lowerBound = I.PrimOp $
-                   I.CmpOp (I.CmpSle I.Int32) (I.intconst Int32 0) e
+                   I.CmpOp (I.CmpSle I.Int32) (I.intconst I.Int32 0) e
       upperBound = I.PrimOp $
                    I.CmpOp (I.CmpSlt I.Int32) e size
   letExp "bounds_check" =<< eAssert check loc

@@ -9,6 +9,9 @@ module Language.Futhark.Syntax
 
   -- * Types
   , Uniqueness(..)
+  , IntType(..)
+  , FloatType(..)
+  , PrimType(..)
   , ArrayShape (..)
   , DimDecl (..)
   , ShapeDecl (..)
@@ -22,7 +25,10 @@ module Language.Futhark.Syntax
   , DeclTupleArrayElemTypeBase
   , Diet(..)
 
-  -- * Values
+    -- * Values
+  , IntValue(..)
+  , FloatValue(..)
+  , PrimValue(..)
   , Value(..)
 
   -- * Abstract syntax tree
@@ -55,6 +61,8 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
+import Futhark.Representation.Primitive
+  (IntType(..), FloatType(..), IntValue(..), FloatValue(..))
 import Language.Futhark.Core
 
 -- | No information.  Usually used for placeholder type- or aliasing
@@ -65,6 +73,20 @@ data NoInfo vn = NoInfo
 instance Monoid (NoInfo vn) where
   mempty = NoInfo
   _ `mappend` _ = NoInfo
+
+-- | Low-level primitive types.
+data PrimType = IntType IntType
+              | FloatType FloatType
+              | Bool
+              | Char
+              deriving (Eq, Ord, Show)
+
+-- | Non-array values.
+data PrimValue = IntValue !IntValue
+               | FloatValue !FloatValue
+               | BoolValue !Bool
+               | CharValue !Char
+               deriving (Eq, Ord, Show)
 
 -- | The class of types that can represent an array size.  The
 -- 'Monoid' instance must define 'mappend' such that @dims1 `mappend`
@@ -281,7 +303,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Leq
            | Greater
            | Geq
-             deriving (Eq, Ord, Show)
+             deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +

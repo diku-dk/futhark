@@ -46,6 +46,7 @@ module Futhark.CodeGen.ImpCode
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
+  , module Futhark.Representation.Primitive
   )
   where
 
@@ -61,8 +62,8 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude hiding (foldr)
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Syntax (BinOp (..), UnOp(..), ConvOp(..),
-                                          CmpOp(..), Space(..), SpaceId)
+import Futhark.Representation.Primitive
+import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.TypeOf (convTypes)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()

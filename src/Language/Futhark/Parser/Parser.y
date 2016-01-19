@@ -10,7 +10,6 @@ module Language.Futhark.Parser.Parser
   , boolValue
   , charValue
   , stringValue
-  , certValue
   , arrayValue
   , tupleValue
   , anyValue
@@ -50,7 +49,6 @@ import Language.Futhark.Parser.Lexer
 %name intValue IntValue
 %name boolValue BoolValue
 %name charValue CharValue
-%name certValue CertValue
 %name stringValue StringValue
 %name arrayValue ArrayValue
 %name tupleValue TupleValue
@@ -72,7 +70,6 @@ import Language.Futhark.Parser.Lexer
       int             { L $$ INT }
       i32             { L $$ I32 }
       bool            { L $$ BOOL }
-      cert            { L $$ CERT }
       char            { L $$ CHAR }
       real            { L $$ REAL }
       f32             { L $$ F32 }
@@ -143,7 +140,6 @@ import Language.Futhark.Parser.Lexer
       redomap         { L $$ REDOMAP }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
-      checked         { L $$ CHECKED }
       '~'             { L $$ TILDE }
       abs             { L $$ ABS }
       signum          { L $$ SIGNUM }
@@ -274,7 +270,6 @@ TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
 PrimType : IntType       { IntType $1 }
          | FloatType     { FloatType $1 }
          | bool          { Bool }
-         | cert          { Cert }
          | char          { Char }
 
 IntType : int { Int32 }
@@ -302,7 +297,6 @@ Exp  :: { UncheckedExp }
                         in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
      | true           { Literal (PrimValue $ BoolValue True) $1 }
      | false          { Literal (PrimValue $ BoolValue False) $1 }
-     | checked        { Literal (PrimValue Checked) $1 }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -564,7 +558,6 @@ CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValu
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
 BoolValue : true          { PrimValue $ BoolValue True }
          | false          { PrimValue $ BoolValue False }
-CertValue : checked      { PrimValue Checked }
 ArrayValue :  '[' Value ']'
              {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
              }

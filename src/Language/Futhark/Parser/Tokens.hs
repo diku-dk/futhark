@@ -20,7 +20,6 @@ data Token = IF
            | INT
            | I32
            | BOOL
-           | CERT
            | CHAR
            | REAL
            | F32
@@ -87,7 +86,6 @@ data Token = IF
            | REDOMAP
            | TRUE
            | FALSE
-           | CHECKED
            | TILDE
            | AND
            | OR

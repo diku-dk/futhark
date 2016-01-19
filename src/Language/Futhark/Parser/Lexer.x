@@ -86,7 +86,6 @@ keyword s =
     "f32"          -> F32
     "f64"          -> F64
     "bool"         -> BOOL
-    "cert"         -> CERT
     "char"         -> CHAR
     "fun"          -> FUN
     "fn"           -> FN
@@ -94,7 +93,6 @@ keyword s =
     "do"           -> DO
     "True"         -> TRUE
     "False"        -> FALSE
-    "Checked"      -> CHECKED
     "abs"          -> ABS
     "signum"       -> SIGNUM
 

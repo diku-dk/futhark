@@ -14,6 +14,7 @@ import Test.QuickCheck
 import Prelude
 
 import Language.Futhark.CoreTests ()
+import Futhark.Representation.PrimitiveTests()
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Pretty
 

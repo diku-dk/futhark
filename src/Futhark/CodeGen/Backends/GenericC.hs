@@ -60,6 +60,7 @@ import Futhark.CodeGen.Backends.GenericC.Reading
 import qualified Futhark.CodeGen.Backends.CUtils as C
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space)
+import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 data CompilerState s = CompilerState {
     compTypeStructs :: [([Type], (C.Type, C.Definition))]
