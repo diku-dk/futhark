@@ -57,6 +57,7 @@ import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
+import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Scope
 

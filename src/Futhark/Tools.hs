@@ -148,7 +148,7 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
     pure (rowType $ paramType arr_param)
   let chunk_name = paramName chunk_param
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $
-                  PrimOp $ SubExp $ intconst Int32 1
+                  PrimOp $ SubExp $ intConst Int32 1
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
                    PrimOp $ Replicate (Var chunk_name) $
                    Var $ paramName unchunked_arr_param |

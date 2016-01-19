@@ -95,7 +95,7 @@ internaliseDeclType' ddi (E.Array at) =
         internaliseDim _ AnyDim =
           Ext <$> newId
         internaliseDim _ (ConstDim n) =
-          return $ Free $ Constant $ intvalue I.Int32 $ toInteger n
+          return $ Free $ intConst I.Int32 $ toInteger n
         internaliseDim BindDims (NamedDim name) =
           Ext <$> knownOrNewId name
         internaliseDim AssertDims (NamedDim name) = do

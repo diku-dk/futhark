@@ -363,7 +363,7 @@ fromScalExp' = convert
           e' <- letSubExp "one_if_zero_arg" =<< convert e
           eIf
             (eCmpOp CmpEq (eSubExp e') (pure zero))
-            (eBody [eSubExp $ intconst Int32 1])
+            (eBody [eSubExp $ intConst Int32 1])
             (eBody [eSubExp e'])
         convert (SIfZero x t f) =
           eIf
@@ -386,7 +386,7 @@ fromScalExp' = convert
                 | otherwise = (next, cur)
           in eIf cmp (eBody [pure pick]) (eBody [pure discard])
 
-        zero = PrimOp $ SubExp $ intconst Int32 0
+        zero = PrimOp $ SubExp $ intConst Int32 0
 
 instance FreeIn ScalExp where
   freeIn (Val   _) = mempty

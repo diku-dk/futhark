@@ -3,11 +3,8 @@ module Futhark.Representation.AST.Attributes.Constants
        (
          IsValue (..)
        , constant
-       , intvalue
-       , intvalue'
-       , floatvalue
-       , intconst
-       , floatconst
+       , intConst
+       , floatConst
        )
        where
 
@@ -48,31 +45,23 @@ instance IsValue Bool where
 instance IsValue Char where
   value = CharValue
 
+instance IsValue PrimValue where
+  value = id
+
+instance IsValue IntValue where
+  value = IntValue
+
+instance IsValue FloatValue where
+  value = FloatValue
+
 -- | Create a 'Constant' 'SubExp' containing the given value.
 constant :: IsValue v => v -> SubExp
 constant = Constant . value
 
--- | For reasons of type ambiguity, a specialised 'value' for integers is defined.
-intvalue :: IntType -> Integer -> PrimValue
-intvalue = ((.).(.)) IntValue intvalue'
+-- | Utility definition for reasons of type ambiguity.
+intConst :: IntType -> Integer -> SubExp
+intConst t v = constant $ intValue t v
 
--- | Like 'intvalue', but doesn't tack on the 'IntValue' constructor.
-intvalue' :: IntType -> Integer -> IntValue
-intvalue' Int8 = Int8Value . fromIntegral
-intvalue' Int16 = Int16Value . fromIntegral
-intvalue' Int32 = Int32Value . fromIntegral
-intvalue' Int64 = Int64Value . fromIntegral
-
--- | Construct a 'FloatValue' corresponding to a 'FloatType', from a 'Rational'.
-floatvalue :: FloatType -> Rational -> FloatValue
-floatvalue Float32 = Float32Value . fromRational
-floatvalue Float64 = Float64Value . fromRational
-
--- | For reasons of type ambiguity, a specialised 'constant' for integers is defined.
-intconst :: IntType -> Integer -> SubExp
-intconst t = Constant . intvalue t
-
--- | Same as for 'intconst'.
-floatconst :: FloatType -> Double -> SubExp
-floatconst Float32 = Constant . FloatValue . Float32Value . fromRational . toRational
-floatconst Float64 = Constant . FloatValue . Float64Value
+-- | Utility definition for reasons of type ambiguity.
+floatConst :: FloatType -> Double -> SubExp
+floatConst t v = constant $ floatValue t v

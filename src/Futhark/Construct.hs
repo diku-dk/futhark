@@ -157,9 +157,11 @@ eNegate em = do
   t <- subExpType e'
   case t of
     Prim (IntType int_t) ->
-      return $ PrimOp $ BinOp  (Sub int_t) (intconst int_t 0) e'
+      return $ PrimOp $
+      BinOp (Sub int_t) (intConst int_t 0) e'
     Prim (FloatType float_t) ->
-      return $ PrimOp $ BinOp (FSub float_t) (floatconst float_t 0) e'
+      return $ PrimOp $
+      BinOp (FSub float_t) (floatConst float_t 0) e'
     _ ->
       fail $ "eNegate: operand " ++ pretty e ++ " has invalid type."
 
@@ -223,7 +225,7 @@ eValue (ArrayVal a bt shape) = do
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (intconst Int32 . toInteger) rowshape)
+      rowtype = Array bt (Shape $ map (intConst Int32 . toInteger) rowshape)
                 NoUniqueness
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ PrimOp $ ArrayLit ses rowtype
@@ -249,7 +251,7 @@ eDivRoundingUp :: MonadBinder m =>
                   IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
 eDivRoundingUp t x y =
   eBinOp (SQuot t) (eBinOp (Add t) x (eBinOp (Sub t) y (eSubExp one))) y
-  where one = intconst t 1
+  where one = intConst t 1
 
 eRoundToMultipleOf :: MonadBinder m =>
                       IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))

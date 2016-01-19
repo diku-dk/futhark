@@ -302,7 +302,7 @@ runFunWithShapes fname valargs prog = do
               shapemap = shapeMapping'
                          (map paramType valparams)
                          (map valueShape valargs)
-          in map (PrimVal . intvalue Int32 . fromIntegral . fromMaybe 0 .
+          in map (PrimVal . IntValue . Int32Value . fromIntegral . fromMaybe 0 .
                   flip HM.lookup shapemap .
                   paramName)
              shapeparams
@@ -581,9 +581,9 @@ evalPrimOp (Partition _ n flags arrs) = do
   return $
     case partitions of
       [] ->
-        replicate n $ PrimVal $ intvalue Int32 0
+        replicate n $ PrimVal $ IntValue $ Int32Value 0
       first_part:_ ->
-        map (PrimVal . intvalue Int32 . genericLength) first_part ++
+        map (PrimVal . IntValue . Int32Value . genericLength) first_part ++
         [arrayVal (concat part) et (valueShape arrv) |
          (part,et,arrv) <- zip3 partitions ets arrvs]
   where partitionArray flagsv arrv =
@@ -646,7 +646,7 @@ evalSOAC (Stream _ _ form elam arrs _) = do
   let ExtLambda i elam_params elam_body elam_rtp = elam
       bind_i = (Ident i (Prim int32),
                 BindVar,
-                PrimVal $ intvalue Int32 0)
+                PrimVal $ IntValue $ Int32Value 0)
   let fun funargs = binding (bind_i :
                              zip3 (map paramIdent elam_params)
                                   (repeat BindVar)
@@ -654,7 +654,7 @@ evalSOAC (Stream _ _ form elam arrs _) = do
                     evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
   let (ArrayVal _ _ (outersize:_)) = head arrvals
-  let chunkval = PrimVal $ intvalue Int32 $ fromIntegral outersize
+  let chunkval = PrimVal $ IntValue $ Int32Value $ fromIntegral outersize
   vs <- fun (chunkval:accvals++arrvals)
   return $ valueShapeContext elam_rtp vs ++ vs
 
@@ -674,7 +674,7 @@ evalSOAC (ConcatMap _ _ fun inputs) = do
         (listArray (0,n1+n2-1) (elems arr1 ++ elems arr2), n1+n2)
       arrs = foldl (zipWith concatArrays) (replicate numTs emptyArray) vss
       (ctx,vs) = unzip
-                 [ (PrimVal $ intvalue Int32 $ fromIntegral n,
+                 [ (PrimVal $ IntValue $ Int32Value $ fromIntegral n,
                     ArrayVal arr (elemType t) (n:innershape))
                  | (innershape,(arr,n),t) <-
                       zip3 innershapes arrs $ lambdaReturnType fun ]
@@ -745,7 +745,7 @@ applyConcatMapLambda (Lambda i params body rettype) valargs = do
   return v
   where bind_i = (Ident i $ Prim int32,
                   BindVar,
-                  PrimVal $ intvalue Int32 0)
+                  PrimVal $ IntValue $ Int32Value 0)
 
         shapes =
           let (shapeparams, valparams) =
@@ -753,7 +753,7 @@ applyConcatMapLambda (Lambda i params body rettype) valargs = do
               shapemap = shapeMapping'
                          (map paramType valparams)
                          (map valueShape valargs)
-          in map (PrimVal . intvalue Int32 . fromIntegral . fromMaybe 0 .
+          in map (PrimVal . IntValue . Int32Value . fromIntegral . fromMaybe 0 .
                   flip HM.lookup shapemap .
                   paramName)
              shapeparams
@@ -761,7 +761,7 @@ applyConcatMapLambda (Lambda i params body rettype) valargs = do
 checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM ()
 checkReturnShapes = zipWithM_ checkShape
   where checkShape t val = do
-          let valshape = map (PrimVal . intvalue Int32 . fromIntegral) $ valueShape val
+          let valshape = map (PrimVal . IntValue . Int32Value . fromIntegral) $ valueShape val
               retdims = extShapeDims $ arrayShape t
               evalExtDim (Free se) = do v <- evalSubExp se
                                         return $ Just (se, v)

@@ -640,7 +640,7 @@ soacToStream soac = do
           outszm1bnd = mkLet' [] [outszm1id] $ PrimOp $
                        BinOp (Sub Int32)
                        (Futhark.Var $ paramName chunk_param)
-                       (intconst Int32 1)
+                       (constant (1::Int32))
       -- 4. let lasteel_ids = strm_resids[outerszm1id]     in
           lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ PrimOp $
                                            Index cs (identName arrid)

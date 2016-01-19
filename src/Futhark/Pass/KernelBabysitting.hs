@@ -62,7 +62,7 @@ transformBinding expmap (Let pat () (LoopOp (DoLoop res merge form body))) = do
 
 transformBinding expmap (Let pat ()
                          (Op (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs)))
-  | num_groups /= intconst Int32 1 = do
+  | num_groups /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
 
   (w', kernel_size', arrs') <-
@@ -78,7 +78,7 @@ transformBinding expmap (Let pat ()
 
 transformBinding expmap (Let pat ()
                          (Op (ScanKernel cs w kernel_size ScanFlat lam input)))
-  | num_groups /= intconst Int32 1 = do
+  | num_groups /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
 
   (w', kernel_size', arrs') <-
