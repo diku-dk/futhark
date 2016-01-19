@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   , PyArg (..)
   , PyStmt(..)
   , module Language.Futhark.Core
+  , module Futhark.Representation.Primitive
   , PyFunc(..)
   , PyProg(..)
   , PyExcept(..)
@@ -13,6 +14,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   where
 
 import Language.Futhark.Core
+import Futhark.Representation.Primitive
 import Text.PrettyPrint.Mainland hiding (space)
 
 

@@ -12,6 +12,8 @@ module Futhark.Analysis.ScalExp
   , fromScalExp'
   , sproduct
   , ssum
+
+  , module Futhark.Representation.Primitive
   )
 where
 
@@ -24,6 +26,7 @@ import Data.Monoid
 
 import Prelude
 
+import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SPow)
 import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SPow)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Transform.Substitute

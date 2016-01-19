@@ -62,6 +62,18 @@ instance Pretty Value where
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
+instance Pretty PrimType where
+  ppr (IntType t) = ppr t
+  ppr (FloatType t) = ppr t
+  ppr Char = text"char"
+  ppr Bool = text "bool"
+
+instance Pretty PrimValue where
+  ppr (IntValue v) = ppr v
+  ppr (CharValue c) = text $ show c
+  ppr (BoolValue b) = text $ show b
+  ppr (FloatValue v) = ppr v
+
 instance Pretty Uniqueness where
   ppr Unique    = star
   ppr Nonunique = empty

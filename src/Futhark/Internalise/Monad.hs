@@ -53,14 +53,6 @@ data InternaliseEnv = InternaliseEnv {
   , envDoBoundsChecks :: Bool
   }
 
-initialFtable :: FunTable
-initialFtable = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, paramts) =
-          FunBinding
-          ([], map Prim paramts,
-           const $ Just $ ExtRetType [Prim t])
-          (E.Prim t, map E.Prim paramts)
-
 newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (ReaderT InternaliseEnv
                                          (StateT VNameSource
@@ -101,7 +93,7 @@ runInternaliseM boundsCheck ftable (InternaliseM m) =
      runStateT (runReaderT (runBinderT m mempty) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
-                 , envFtable = initialFtable `HM.union` ftable
+                 , envFtable = ftable
                  , envDoBoundsChecks = boundsCheck
                  }
 

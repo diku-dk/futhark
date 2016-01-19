@@ -45,13 +45,11 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Syntax
   (BinOp (..), UnOp (..), CmpOp(..), Space(..))
-
 import qualified Futhark.CodeGen.ImpCode as Imp hiding (dimSizeToExp)
-
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.Util.Pretty(pretty)
-
+import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.

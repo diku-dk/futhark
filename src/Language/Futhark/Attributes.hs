@@ -8,6 +8,8 @@ module Language.Futhark.Attributes
     TypeBox(..)
   , funDecByName
   , progNames
+  , isBuiltInFunction
+  , builtInFunctions
 
   -- * Parameter handling
   , toParam
@@ -70,6 +72,7 @@ module Language.Futhark.Attributes
 
   -- * Queries on values
   , arrayString
+  , primValueType
   , valueType
 
   -- * Operations on values
@@ -101,6 +104,7 @@ import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
 import Data.Loc
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
@@ -554,6 +558,23 @@ unifyUniqueness (Tuple ets1) (Tuple ets2) =
   Tuple $ zipWith unifyUniqueness ets1 ets2
 unifyUniqueness t1 _ = t1
 
+intValueType :: IntValue -> IntType
+intValueType Int8Value{} = Int8
+intValueType Int16Value{} = Int16
+intValueType Int32Value{} = Int32
+intValueType Int64Value{} = Int64
+
+floatValueType :: FloatValue -> FloatType
+floatValueType Float32Value{} = Float32
+floatValueType Float64Value{} = Float64
+
+-- | The type of a basic value.
+primValueType :: PrimValue -> PrimType
+primValueType (IntValue v) = IntType $ intValueType v
+primValueType (FloatValue v) = FloatType $ floatValueType v
+primValueType BoolValue{} = Bool
+primValueType CharValue{} = Char
+
 -- | The type of an Futhark value.
 valueType :: Value -> TypeBase Rank NoInfo vn
 valueType (PrimValue bv) = Prim $ primValueType bv
@@ -930,6 +951,28 @@ patIdents (Wildcard _ _) = []
 -- you want).
 patIdentSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBase ty vn)
 patIdentSet = HS.fromList . patIdents
+
+-- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
+isBuiltInFunction :: Name -> Bool
+isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
+
+-- | A map of all built-in functions and their types.
+builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])
+builtInFunctions = HM.fromList $ map namify
+                   [("sqrt32", (FloatType Float32, [FloatType Float32]))
+                   ,("log32", (FloatType Float32, [FloatType Float32]))
+                   ,("exp32", (FloatType Float32, [FloatType Float32]))
+                   ,("trunc32", (IntType Int32, [FloatType Float32]))
+
+                   ,("sqrt64", (FloatType Float64, [FloatType Float64]))
+                   ,("log64", (FloatType Float64, [FloatType Float64]))
+                   ,("exp64", (FloatType Float64, [FloatType Float64]))
+                   ,("trunc64", (IntType Int32, [FloatType Float64]))
+
+                   ,("num_groups", (IntType Int32, []))
+                   ,("group_size", (IntType Int32, []))
+                   ]
+  where namify (k,v) = (nameFromString k, v)
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase ShapeDecl NoInfo Name

@@ -17,6 +17,10 @@ module Futhark.Representation.AST.Attributes
   , module Futhark.Representation.AST.RetType
   , module Futhark.Representation.AST.Attributes.Context
 
+  -- * Built-in functions
+  , isBuiltInFunction
+  , builtInFunctions
+
   -- * Extra tools
   , funDecByName
   , asPrimOp
@@ -36,6 +40,7 @@ module Futhark.Representation.AST.Attributes
 
 import Data.List
 import Data.Maybe (mapMaybe)
+import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Attributes.Rearrange
@@ -53,6 +58,28 @@ import Futhark.Representation.AST.Pretty
 import Futhark.Transform.Rename (Rename, Renameable)
 import Futhark.Transform.Substitute (Substitute, Substitutable)
 import Futhark.Util.Pretty (Pretty)
+
+-- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
+isBuiltInFunction :: Name -> Bool
+isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
+
+-- | A map of all built-in functions and their types.
+builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])
+builtInFunctions = HM.fromList $ map namify
+                   [("sqrt32", (FloatType Float32, [FloatType Float32]))
+                   ,("log32", (FloatType Float32, [FloatType Float32]))
+                   ,("exp32", (FloatType Float32, [FloatType Float32]))
+                   ,("trunc32", (IntType Int32, [FloatType Float32]))
+
+                   ,("sqrt64", (FloatType Float64, [FloatType Float64]))
+                   ,("log64", (FloatType Float64, [FloatType Float64]))
+                   ,("exp64", (FloatType Float64, [FloatType Float64]))
+                   ,("trunc64", (IntType Int32, [FloatType Float64]))
+
+                   ,("num_groups", (IntType Int32, []))
+                   ,("group_size", (IntType Int32, []))
+                   ]
+  where namify (k,v) = (nameFromString k, v)
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]

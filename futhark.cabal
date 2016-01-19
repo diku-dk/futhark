@@ -165,6 +165,7 @@ Library
                    Futhark.Representation.External
                    Futhark.Representation.External.Renamer
                    Futhark.Representation.External.TypeChecker
+                   Futhark.Representation.Primitive
                    Futhark.Representation.SOACS
                    Futhark.Representation.SOACS.Simplify
                    Futhark.Representation.SOACS.SOAC
@@ -359,5 +360,6 @@ Test-suite unit
                  Futhark.Representation.AST.Attributes.RearrangeTests
                  Futhark.Representation.AST.Syntax.CoreTests
                  Futhark.Representation.AST.SyntaxTests
-                 Language.Futhark.CoreTests
+                 Futhark.Representation.PrimitiveTests
                  Language.Futhark.SyntaxTests
+                 Language.Futhark.CoreTests

@@ -7,6 +7,7 @@ module Futhark.Internalise.TypesValues
   , internaliseType
   , internaliseTypeWithUniqueness
   , internaliseUniqueness
+  , internalisePrimType
 
   -- * Internalising values
   , internaliseValue
@@ -52,14 +53,14 @@ internaliseDeclType' :: DimDeclInterpretation
                      -> StateT (Int, HM.HashMap VName Int)
                         InternaliseM [I.TypeBase ExtShape Uniqueness]
 internaliseDeclType' _ (E.Prim bt) =
-  return [I.Prim bt]
+  return [I.Prim $ internalisePrimType bt]
 internaliseDeclType' ddi (E.Tuple ets) =
   concat <$> mapM (internaliseDeclType' ddi) ets
 internaliseDeclType' ddi (E.Array at) =
   internaliseArrayType at
   where internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- internaliseShape shape
-          return [I.arrayOf (I.Prim bt) (ExtShape dims) $
+          return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
@@ -72,7 +73,7 @@ internaliseDeclType' ddi (E.Array at) =
                  | ct <- ts ]
 
         internaliseTupleArrayElem (PrimArrayElem bt _) =
-          return [I.Prim bt]
+          return [I.Prim $ internalisePrimType bt]
         internaliseTupleArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet
         internaliseTupleArrayElem (TupleArrayElem ts) =
@@ -94,7 +95,7 @@ internaliseDeclType' ddi (E.Array at) =
         internaliseDim _ AnyDim =
           Ext <$> newId
         internaliseDim _ (ConstDim n) =
-          return $ Free $ Constant $ intvalue Int32 $ toInteger n
+          return $ Free $ Constant $ intvalue I.Int32 $ toInteger n
         internaliseDim BindDims (NamedDim name) =
           Ext <$> knownOrNewId name
         internaliseDim AssertDims (NamedDim name) = do
@@ -113,7 +114,7 @@ internaliseTypeWithUniqueness :: Ord vn =>
                               -> [I.TypeBase ExtShape Uniqueness]
 internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
   where internaliseType' (E.Prim bt) =
-          return [I.Prim bt]
+          return [I.Prim $ internalisePrimType bt]
         internaliseType' (E.Tuple ets) =
           concat <$> mapM internaliseType' ets
         internaliseType' (E.Array at) =
@@ -121,7 +122,7 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
 
         internaliseArrayType (E.PrimArray bt shape u _) = do
           dims <- map Ext <$> replicateM (E.shapeRank shape) newId
-          return [I.arrayOf (I.Prim bt) (ExtShape dims) $
+          return [I.arrayOf (I.Prim $ internalisePrimType bt) (ExtShape dims) $
                   internaliseUniqueness u]
 
         internaliseArrayType (E.TupleArray elemts shape u) = do
@@ -135,7 +136,7 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
                  | t <- ts ]
 
         internaliseTupleArrayElem (PrimArrayElem bt _) =
-          return [I.Prim bt]
+          return [I.Prim $ internalisePrimType bt]
         internaliseTupleArrayElem (ArrayArrayElem at) =
           internaliseArrayType at
         internaliseTupleArrayElem (TupleArrayElem ts) =
@@ -186,10 +187,24 @@ internaliseValue (E.ArrayValue arr rt) = do
 internaliseValue (E.TupValue vs) =
   concat <$> mapM internaliseValue vs
 internaliseValue (E.PrimValue bv) =
-  return [I.PrimVal bv]
+  return [I.PrimVal $ internalisePrimValue bv]
 
 determineShape :: Int -> [I.Value] -> [Int]
 determineShape _ vs@(I.ArrayVal _ _ shape : _) =
   length vs : shape
 determineShape r vs =
   length vs : replicate r 0
+
+-- | Convert an external primitive to an internal primitive.
+internalisePrimType :: E.PrimType -> I.PrimType
+internalisePrimType (E.IntType t) = I.IntType t
+internalisePrimType (E.FloatType t) = I.FloatType t
+internalisePrimType E.Bool = I.Bool
+internalisePrimType E.Char = I.Char
+
+-- | Convert an external primitive value to an internal primitive value.
+internalisePrimValue :: E.PrimValue -> I.PrimValue
+internalisePrimValue (E.IntValue v) = I.IntValue v
+internalisePrimValue (E.FloatValue v) = I.FloatValue v
+internalisePrimValue (E.BoolValue b) = I.BoolValue b
+internalisePrimValue (E.CharValue c) = I.CharValue c

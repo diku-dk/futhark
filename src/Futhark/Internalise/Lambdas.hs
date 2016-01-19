@@ -79,7 +79,7 @@ bindMapShapes inner_shapes sizefun args outer_shape
   | otherwise =
     letBind_ (basicPattern' [] inner_shapes) =<<
     eIf isempty emptybranch nonemptybranch
-  where zero = intconst Int32 0
+  where zero = intconst I.Int32 0
         isempty = eCmpOp I.CmpEq
                   (pure $ I.PrimOp $ I.SubExp outer_shape)
                   (pure $ I.PrimOp $ SubExp zero)
