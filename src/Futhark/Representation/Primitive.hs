@@ -58,14 +58,6 @@ module Futhark.Representation.Primitive
        , doCmpSlt, doCmpSle
        , doFCmpLt, doFCmpLe
 
-         -- * Functions on Values
-       , numBinOp
-       , intBinOp
-       , floatBinOp
-       , ordBinOp
-       , numUnOp
-       , intUnOp
-
          -- * Utility
        , zeroIsh
        , oneIsh
@@ -237,113 +229,6 @@ blankPrimValue Bool = BoolValue False
 blankPrimValue Char = CharValue '\0'
 blankPrimValue Cert = Checked
 
--- | If both values are of the same type, apply the operator, otherwise 'Fail'.
-ordBinOp :: (Functor m, Monad m) =>
-            (forall a. Ord a => a -> a -> m Bool)
-         -> PrimValue -> PrimValue -> m PrimValue
-ordBinOp op (IntValue (Int8Value x)) (IntValue (Int8Value y)) =
-  BoolValue <$> x `op` y
-ordBinOp op (IntValue (Int16Value x)) (IntValue (Int16Value y)) =
-  BoolValue <$> x `op` y
-ordBinOp op (IntValue (Int32Value x)) (IntValue (Int32Value y)) =
-  BoolValue <$> x `op` y
-ordBinOp op (IntValue (Int64Value x)) (IntValue (Int64Value y)) =
-  BoolValue <$> x `op` y
-ordBinOp op (CharValue x) (CharValue y) =
-  BoolValue <$> x `op` y
-ordBinOp op (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
-  BoolValue <$> x `op` y
-ordBinOp op (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
-  BoolValue <$> x `op` y
-ordBinOp op (BoolValue x) (BoolValue y) =
-  BoolValue <$> x `op` y
-ordBinOp _ _ _ =
-  fail "ordBinOp: operands not of appropriate type."
-
--- | If both values are of the same numeric type, apply the operator,
--- otherwise 'Fail'.
-numBinOp :: (Functor m, Monad m) =>
-            (forall num. (Eq num, Num num) => num -> num -> m num)
-         -> PrimValue -> PrimValue -> m PrimValue
-numBinOp op (IntValue (Int8Value x)) (IntValue (Int8Value y)) =
-  IntValue <$> Int8Value <$> x `op` y
-numBinOp op (IntValue (Int16Value x)) (IntValue (Int16Value y)) =
-  IntValue <$> Int16Value <$> x `op` y
-numBinOp op (IntValue (Int32Value x)) (IntValue (Int32Value y)) =
-  IntValue <$> Int32Value <$> x `op` y
-numBinOp op (IntValue (Int64Value x)) (IntValue (Int64Value y)) =
-  IntValue <$> Int64Value <$> x `op` y
-numBinOp op (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
-  FloatValue <$> Float32Value <$> x `op` y
-numBinOp op (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
-  FloatValue <$> Float64Value <$> x `op` y
-numBinOp _ _ _ =
-  fail "numBinOp: operands not of appropriate type."
-
--- | If both values are of the same integer type, apply the operator,
--- otherwise 'Fail'.
-intBinOp :: (Functor m, Monad m) =>
-            (forall int. (Eq int, Integral int, Bits int) => int -> int -> m int)
-         -> PrimValue -> PrimValue -> m PrimValue
-intBinOp op (IntValue (Int8Value x)) (IntValue (Int8Value y)) =
-  IntValue <$> Int8Value <$> x `op` y
-intBinOp op (IntValue (Int16Value x)) (IntValue (Int16Value y)) =
-  IntValue <$> Int16Value <$> x `op` y
-intBinOp op (IntValue (Int32Value x)) (IntValue (Int32Value y)) =
-  IntValue <$> Int32Value <$> x `op` y
-intBinOp op (IntValue (Int64Value x)) (IntValue (Int64Value y)) =
-  IntValue <$> Int64Value <$> x `op` y
-intBinOp _ _ _ =
-  fail "intBinOp: operands not of appropriate type."
-
--- | If both values are of the same floating-point type, apply the operator,
--- otherwise 'Fail'.
-floatBinOp :: (Functor m, Monad m) =>
-            (forall float. (Eq float, Floating float) => float -> float -> m float)
-         -> PrimValue -> PrimValue -> m PrimValue
-floatBinOp op (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
-  FloatValue <$> Float32Value <$> x `op` y
-floatBinOp op (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
-  FloatValue <$> Float64Value <$> x `op` y
-floatBinOp _ _ _ =
-  fail "floatBinOp: operands not of appropriate type."
-
--- | If the value is of a numeric type, apply the operator,
--- otherwise 'Fail'.
-numUnOp :: (Functor m, Monad m) =>
-            (forall num. Num num => num -> m num)
-         -> PrimValue -> m PrimValue
-numUnOp op (IntValue (Int8Value x)) =
-  IntValue <$> Int8Value <$> op x
-numUnOp op (IntValue (Int16Value x)) =
-  IntValue <$> Int16Value <$> op x
-numUnOp op (IntValue (Int32Value x)) =
-  IntValue <$> Int32Value <$> op x
-numUnOp op (IntValue (Int64Value x)) =
-  IntValue <$> Int64Value <$> op x
-numUnOp op (FloatValue (Float32Value x)) =
-  FloatValue <$> Float32Value <$> op x
-numUnOp op (FloatValue (Float64Value x)) =
-  FloatValue <$> Float64Value <$> op x
-numUnOp _ _ =
-  fail "numUnOp: operands not of appropriate type."
-
--- | If the value is of an integer type, apply the operator,
--- otherwise 'Fail'.
-intUnOp :: (Functor m, Monad m) =>
-           (forall int. (Integral int, Bits int) => int -> m int)
-           -> PrimValue -> m PrimValue
-intUnOp op (IntValue (Int8Value x)) =
-  IntValue <$> Int8Value <$> op x
-intUnOp op (IntValue (Int16Value x)) =
-  IntValue <$> Int16Value <$> op x
-intUnOp op (IntValue (Int32Value x)) =
-  IntValue <$> Int32Value <$> op x
-intUnOp op (IntValue (Int64Value x)) =
-  IntValue <$> Int64Value <$> op x
-intUnOp _ _ =
-  fail "intUnOp: operands not of appropriate type."
-
 -- | Various unary operators.  It is a bit ad-hoc what is a unary
 -- operator and what is a built-in function.  Perhaps these should all
 -- go away eventually.
@@ -473,13 +358,13 @@ doBinOp Sub{} = doIntBinOp doSub
 doBinOp FSub{} = doFloatBinOp doFSub
 doBinOp Mul{} = doIntBinOp doMul
 doBinOp FMul{} = doFloatBinOp doFMul
-doBinOp UDiv{} = doIntBinOp doUDiv
-doBinOp SDiv{} = doIntBinOp doSDiv
+doBinOp UDiv{} = doRiskyIntBinOp doUDiv
+doBinOp SDiv{} = doRiskyIntBinOp doSDiv
 doBinOp FDiv{} = doFloatBinOp doFDiv
-doBinOp UMod{} = doIntBinOp doUMod
-doBinOp SMod{} = doIntBinOp doSMod
-doBinOp SQuot{} = doIntBinOp doSQuot
-doBinOp SRem{} = doIntBinOp doSRem
+doBinOp UMod{} = doRiskyIntBinOp doUMod
+doBinOp SMod{} = doRiskyIntBinOp doSMod
+doBinOp SQuot{} = doRiskyIntBinOp doSQuot
+doBinOp SRem{} = doRiskyIntBinOp doSRem
 doBinOp Shl{} = doIntBinOp doShl
 doBinOp LShr{} = doIntBinOp doLShr
 doBinOp AShr{} = doIntBinOp doAShr
@@ -496,6 +381,12 @@ doIntBinOp :: (IntValue -> IntValue -> IntValue) -> PrimValue -> PrimValue
 doIntBinOp f (IntValue v1) (IntValue v2) =
   Just $ IntValue $ f v1 v2
 doIntBinOp _ _ _ = Nothing
+
+doRiskyIntBinOp :: (IntValue -> IntValue -> Maybe IntValue) -> PrimValue -> PrimValue
+           -> Maybe PrimValue
+doRiskyIntBinOp f (IntValue v1) (IntValue v2) =
+  IntValue <$> f v1 v2
+doRiskyIntBinOp _ _ _ = Nothing
 
 doFloatBinOp :: (FloatValue -> FloatValue -> FloatValue) -> PrimValue -> PrimValue
              -> Maybe PrimValue
@@ -536,36 +427,48 @@ doFMul v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 * floatToDouble
 -- | Unsigned integer division.  Rounds towards
 -- negativity infinity.  Note: this is different
 -- from LLVM.
-doUDiv :: IntValue -> IntValue -> IntValue
-doUDiv v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `div` intToWord64 v2
+doUDiv :: IntValue -> IntValue -> Maybe IntValue
+doUDiv v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $ intToWord64 v1 `div` intToWord64 v2
 
 -- | Signed integer division.  Rounds towards
 -- negativity infinity.  Note: this is different
 -- from LLVM.
-doSDiv :: IntValue -> IntValue -> IntValue
-doSDiv v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `div` intToInt64 v2
+doSDiv :: IntValue -> IntValue -> Maybe IntValue
+doSDiv v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `div` intToInt64 v2
 
 -- | Floating-point division.
 doFDiv :: FloatValue -> FloatValue -> FloatValue
 doFDiv v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 / floatToDouble v2
 
 -- | Unsigned integer modulus; the countepart to 'UDiv'.
-doUMod :: IntValue -> IntValue -> IntValue
-doUMod v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `mod` intToWord64 v2
+doUMod :: IntValue -> IntValue -> Maybe IntValue
+doUMod v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $ intToWord64 v1 `mod` intToWord64 v2
 
 -- | Signed integer modulus; the countepart to 'SDiv'.
-doSMod :: IntValue -> IntValue -> IntValue
-doSMod v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `mod` intToInt64 v2
+doSMod :: IntValue -> IntValue -> Maybe IntValue
+doSMod v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `mod` intToInt64 v2
 
 -- | Signed integer division.  Rounds towards zero.
 -- This corresponds to the @sdiv@ instruction in LLVM.
-doSQuot :: IntValue -> IntValue -> IntValue
-doSQuot v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `quot` intToInt64 v2
+doSQuot :: IntValue -> IntValue -> Maybe IntValue
+doSQuot v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `quot` intToInt64 v2
 
 -- | Signed integer division.  Rounds towards zero.
 -- This corresponds to the @srem@ instruction in LLVM.
-doSRem :: IntValue -> IntValue -> IntValue
-doSRem v1 v2 = intValue (intValueType v1) $ intToInt64 v1 `rem` intToInt64 v2
+doSRem :: IntValue -> IntValue -> Maybe IntValue
+doSRem v1 v2
+  | zeroIshInt v2 = Nothing
+  | otherwise = Just $ intValue (intValueType v1) $ intToInt64 v1 `rem` intToInt64 v2
 
 -- | Left-shift.
 doShl :: IntValue -> IntValue -> IntValue
@@ -720,6 +623,7 @@ floatToDouble :: FloatValue -> Double
 floatToDouble (Float32Value v) = fromRational $ toRational v
 floatToDouble (Float64Value v) = v
 
+
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool
 zeroIsh (IntValue (Int8Value k)) = k == 0
@@ -741,3 +645,10 @@ oneIsh (FloatValue (Float32Value k)) = k == 1
 oneIsh (FloatValue (Float64Value k)) = k == 1
 oneIsh (BoolValue True) = True
 oneIsh _ = False
+
+-- | Is the given integer value kind of zero?
+zeroIshInt :: IntValue -> Bool
+zeroIshInt (Int8Value k) = k == 0
+zeroIshInt (Int16Value k) = k == 0
+zeroIshInt (Int32Value k) = k == 0
+zeroIshInt (Int64Value k) = k == 0
