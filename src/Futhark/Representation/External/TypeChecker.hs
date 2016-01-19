@@ -1289,10 +1289,12 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
                   fromDecl $ removeShapeAnnotations rt
       let paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
       case () of
-        _ | [(tupt@(Tuple ets), _, _)] <- args,
+        _ | [(Tuple ets, _, _)] <- args,
             validApply paramtypes ets -> do
               -- Same shimming as in the case for anonymous functions.
               let mkparam i t = newIdent ("param_" ++ show i) t pos
+                  tupt = Tuple $ zipWith setUniqueness ets $
+                         map uniqueness paramtypes
               params <- zipWithM mkparam [(0::Int)..] paramtypes'
               tupparam <- newIdent "x" (removeShapeAnnotations tupt) pos
               let tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
