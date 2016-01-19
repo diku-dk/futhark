@@ -26,7 +26,6 @@ import Control.Monad.Writer
 import Control.Monad.Except
 
 import Data.Array
-import Data.Bits
 import Data.List
 import Data.Loc
 import qualified Data.HashMap.Strict as HM
@@ -431,35 +430,12 @@ evalPrimOp (ArrayLit es rt) = do
               pure (elemType rt) <*>
               pure (length es : rowshape))
 
-evalPrimOp (BinOp FSub{} e1 e2) = evalFloatBinOp (-) e1 e2
-evalPrimOp (BinOp SPow{} e1 e2) = evalIntBinOpM pow e1 e2
-  -- Haskell (^) cannot handle negative exponents, so check for that
-  -- explicitly.
-  where pow x y | y < 0, x == 0 = bad DivisionByZero
-                | y < 0         = return $ 1 `div` (x ^ (-y))
-                | otherwise     = return $ x ^ y
-evalPrimOp (BinOp FMul{} e1 e2) = evalFloatBinOp (*) e1 e2
-evalPrimOp (BinOp SDiv{} e1 e2) = evalIntBinOpM div' e1 e2
-  where div' _ 0 = bad DivisionByZero
-        div' x y = return $ x `div` y
-evalPrimOp (BinOp SMod{} e1 e2) = evalIntBinOpM mod' e1 e2
-  where mod' _ 0 = bad DivisionByZero
-        mod' x y = return $ x `mod` y
-evalPrimOp (BinOp SQuot{} e1 e2) = evalIntBinOpM quot' e1 e2
-  where quot' _ 0 = bad DivisionByZero
-        quot' x y = return $ x `quot` y
-evalPrimOp (BinOp SRem{} e1 e2) = evalIntBinOpM rem' e1 e2
-  where rem' _ 0 = bad DivisionByZero
-        rem' x y = return $ x `rem` y
-evalPrimOp (BinOp FDiv{} e1 e2) = evalFloatBinOpM div' e1 e2
-  where div' _ 0 = bad  DivisionByZero
-        div' x y = return $ x / y
 evalPrimOp binop@(BinOp op e1 e2) = do
   v1 <- asPrimitive "BinOp" =<< evalSubExp e1
   v2 <- asPrimitive "BinOp" =<< evalSubExp e2
   case doBinOp op v1 v2 of
     Just v -> return [PrimVal v]
-    Nothing -> bad $ TypeError $ "Cannot BinOp: " ++ pretty binop
+    Nothing -> bad $ TypeError $ "Cannot BinOp: " ++ unwords [pretty binop, pretty v1, pretty v2]
 
 
 evalPrimOp e@(CmpOp cmp e1 e2) = do
@@ -467,19 +443,19 @@ evalPrimOp e@(CmpOp cmp e1 e2) = do
   v2 <- asPrimitive "CmpOp" =<< evalSubExp e2
   case doCmpOp cmp v1 v2 of
     Just b -> return [PrimVal $ BoolValue b]
-    Nothing -> bad $ TypeError $ "Cannot compare: " ++ pretty e
+    Nothing -> bad $ TypeError $ "Cannot compare: " ++ unwords [pretty e, pretty v1, pretty v2]
 
 evalPrimOp e@(ConvOp op x) = do
   v <- asPrimitive "ConvOp" =<< evalSubExp x
   case doConvOp op v of
     Just v' -> return [PrimVal v']
-    Nothing -> bad $ TypeError $ "Cannot convert: " ++ pretty e
+    Nothing -> bad $ TypeError $ "Cannot convert: " ++ unwords [pretty e, pretty v]
 
 evalPrimOp unop@(UnOp op e) = do
   v <- asPrimitive "UnOp" =<< evalSubExp e
   case doUnOp op v of
     Just v' -> return [PrimVal v']
-    Nothing -> bad $ TypeError $ "Cannot UnOp: " ++ pretty unop
+    Nothing -> bad $ TypeError $ "Cannot UnOp: " ++ unwords [pretty unop, pretty v]
 
 evalPrimOp (Index _ ident idxs) = do
   v <- lookupVar ident
@@ -748,41 +724,6 @@ evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do
   fun <- lookupFun fname
   fun args
-
-evalIntBinOpM :: (forall int. (Integral int, Bits int) => int -> int -> FutharkM int)
-              -> SubExp
-              -> SubExp
-              -> FutharkM [Value]
-evalIntBinOpM op e1 e2 = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  case (v1, v2) of
-    (PrimVal x, PrimVal y) -> do
-      result <- intBinOp op x y
-      return [PrimVal result]
-    _ ->
-      bad $ TypeError "evalIntBinOpM"
-
-evalFloatBinOp :: (forall float. (Eq float, Floating float) =>
-                   float -> float -> float)
-               -> SubExp -> SubExp
-               -> FutharkM [Value]
-evalFloatBinOp op = evalFloatBinOpM $ \x y -> return $ op x y
-
-evalFloatBinOpM :: (forall float. (Eq float, Floating float) =>
-                    float -> float -> FutharkM float)
-                -> SubExp
-                -> SubExp
-                -> FutharkM [Value]
-evalFloatBinOpM op e1 e2 = do
-  v1 <- evalSubExp e1
-  v2 <- evalSubExp e2
-  case (v1, v2) of
-    (PrimVal x, PrimVal y) -> do
-      result <- floatBinOp op x y
-      return [PrimVal result]
-    _ ->
-      bad $ TypeError "evalFloatBinOpM"
 
 applyLambda :: Lambda -> Int32 -> [Value] -> FutharkM [Value]
 applyLambda (Lambda i params body rettype) j args = do
