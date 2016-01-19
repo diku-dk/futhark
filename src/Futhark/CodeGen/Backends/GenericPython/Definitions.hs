@@ -77,6 +77,9 @@ def fptosi_f32_i32(x):
 def fptosi_f64_i32(x):
   return int32(trunc(x))
 
+def futhark_log64(x):
+  return float64(log(x))
+
 def futhark_sqrt64(x):
   return sqrt(x)
 
