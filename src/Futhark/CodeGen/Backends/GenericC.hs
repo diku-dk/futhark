@@ -723,7 +723,7 @@ compileExp (CmpOp cmp x y) = do
   x' <- compileExp x
   y' <- compileExp y
   return $ case cmp of
-    CmpEq -> [C.cexp|$exp:x' == $exp:y'|]
+    CmpEq{} -> [C.cexp|$exp:x' == $exp:y'|]
 
     FCmpLt{} -> [C.cexp|$exp:x' < $exp:y'|]
     FCmpLe{} -> [C.cexp|$exp:x' <= $exp:y'|]

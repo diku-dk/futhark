@@ -235,7 +235,7 @@ kernelCompiler
               doing_in_wave_reductions =
                 Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
               apply_in_in_wave_iteration =
-                Imp.CmpOp CmpEq
+                Imp.CmpOp (CmpEq int32)
                 (Imp.BinOp (And Int32) in_wave_id (2 * Imp.ScalarVar offset - 1)) 0
               in_wave_reductions =
                 Imp.SetScalar offset 1 <>
@@ -247,9 +247,9 @@ kernelCompiler
               doing_cross_wave_reductions =
                 Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar skip_waves) num_waves
               is_first_thread_in_wave =
-                Imp.CmpOp CmpEq in_wave_id 0
+                Imp.CmpOp (CmpEq int32) in_wave_id 0
               wave_not_skipped =
-                Imp.CmpOp CmpEq
+                Imp.CmpOp (CmpEq int32)
                 (Imp.BinOp (And Int32) wave_id (2 * Imp.ScalarVar skip_waves - 1))
                 0
               apply_in_cross_wave_iteration =
@@ -265,7 +265,7 @@ kernelCompiler
                    Imp.SetScalar skip_waves (Imp.ScalarVar skip_waves * 2))
 
               write_group_result =
-                Imp.If (Imp.CmpOp CmpEq (Imp.ScalarVar local_id) 0)
+                Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar local_id) 0)
                 write_result mempty
 
               body = mconcat [prologue,
@@ -440,14 +440,14 @@ kernelCompiler
           zipWithM_ (writeParamToLocalMemory wave_id) acc_local_mem y_params
 
         let last_in_wave =
-              Imp.CmpOp CmpEq in_wave_id $ Imp.ScalarVar wave_size - 1
+              Imp.CmpOp (CmpEq int32) in_wave_id $ Imp.ScalarVar wave_size - 1
         ImpGen.emit $
           Imp.Comment "last thread of wave 'i' writes its result to offset 'i'" $
           Imp.If last_in_wave pack_wave_results mempty
 
         ImpGen.emit $ Imp.Op Imp.Barrier
 
-        let is_first_wave = Imp.CmpOp CmpEq wave_id 0
+        let is_first_wave = Imp.CmpOp (CmpEq int32) wave_id 0
         scan_first_wave <- ImpGen.collect $ inWaveScan' renamed_lam
         ImpGen.emit $
           Imp.Comment "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $

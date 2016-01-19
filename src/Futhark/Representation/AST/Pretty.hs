@@ -298,7 +298,7 @@ instance Pretty BinOp where
   ppr LogOr = text "logor"
 
 instance Pretty CmpOp where
-  ppr CmpEq = text "eq"
+  ppr (CmpEq t) = text "eq_" <> ppr t
   ppr (CmpUlt t) = taggedI "ult" t
   ppr (CmpUle t) = taggedI "ule" t
   ppr (CmpSlt t) = taggedI "slt" t

@@ -561,7 +561,7 @@ compileExp (Imp.CmpOp cmp x y) = do
   y' <- compileExp y
   let simple s = return $ BinaryOp s x' y'
   case cmp of
-    CmpEq -> simple "=="
+    CmpEq{} -> simple "=="
     FCmpLt{} -> simple "<"
     FCmpLe{} -> simple "<="
     _ -> return $ simpleCall (pretty cmp) [x', y']

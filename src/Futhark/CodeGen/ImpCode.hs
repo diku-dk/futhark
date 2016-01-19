@@ -185,9 +185,9 @@ instance IntegralExp Exp where
 
 instance IntegralCond Exp where
   oneIfZero x =
-    Cond (CmpOp CmpEq x 0) 1 x
+    Cond (CmpOp (CmpEq $ IntType Int32) x 0) 1 x
   ifZero c =
-    Cond (CmpOp CmpEq c 0)
+    Cond (CmpOp (CmpEq $ IntType Int32) c 0)
   ifLessThan a b =
     Cond (CmpOp (CmpSlt Int32) a b)
 

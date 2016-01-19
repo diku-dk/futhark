@@ -193,7 +193,7 @@ asserted Constant{} =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp name <$> getVtable
-  case se of Just (PrimOp (CmpOp CmpEq x y)) -> do
+  case se of Just (PrimOp (CmpOp CmpEq{} x y)) -> do
                case x of Var xvar ->
                            tellNeed $ Need [] $
                            UT.equalToUsage xvar y

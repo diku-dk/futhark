@@ -383,15 +383,6 @@ checkAnnotation desc t1 t2
   | otherwise = bad $ BadAnnotation noLoc desc
                 (justOne $ staticShapes1 t1) (justOne $ staticShapes1 t2)
 
-anyIntType :: [Type]
-anyIntType = map (Prim . IntType) [minBound .. maxBound]
-
-anyFloatType :: [Type]
-anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
-
-anyPrimType :: [Type]
-anyPrimType = anyIntType ++ anyFloatType ++ map Prim [Bool, Cert, Char]
-
 -- | @require ts se@ causes a '(TypeError vn)' if the type of @se@ is
 -- not a subtype of one of the types in @ts@.
 require :: Checkable lore => [Type] -> SubExp -> TypeM lore ()
@@ -852,9 +843,9 @@ checkExtType = mapM_ checkExtDim . extShapeDims . arrayShape
 checkCmpOp :: Checkable lore =>
               CmpOp -> SubExp -> SubExp
            -> TypeM lore ()
-checkCmpOp CmpEq x y = do
-  require anyPrimType x
-  require anyPrimType y
+checkCmpOp (CmpEq t) x y = do
+  require [Prim t] x
+  require [Prim t] y
   matchSubExpTypes x y
 checkCmpOp (CmpUlt t) x y = checkBinOpArgs (IntType t) x y
 checkCmpOp (CmpUle t) x y = checkBinOpArgs (IntType t) x y

@@ -344,7 +344,7 @@ internaliseExp _ (E.Zip (e:es) loc) = do
           []      -> return e_unchecked' -- Probably type error
           outer:inner -> do
             cmp <- letSubExp "zip_cmp" $ I.PrimOp $
-                   I.CmpOp I.CmpEq e_outer outer
+                   I.CmpOp (I.CmpEq I.int32) e_outer outer
             c   <- assertingOne $
                    letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
@@ -384,7 +384,7 @@ internaliseExp _ (E.Reshape shape e loc) = do
     dims <- I.arrayDims <$> lookupType v
     shapeOk <- assertingOne $
                letExp "shape_ok" =<<
-               eAssert (eCmpOp I.CmpEq (prod dims) (prod shape'))
+               eAssert (eCmpOp (I.CmpEq I.int32) (prod dims) (prod shape'))
                loc
     return $ I.Reshape shapeOk (DimNew <$> shape') v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
@@ -425,7 +425,7 @@ internaliseExp desc (E.Concat x ys loc) = do
         yts <- mapM lookupType yarrs
         let matches n m =
               letExp "match" =<<
-              eAssert (pure $ I.PrimOp $ I.CmpOp I.CmpEq n m) loc
+              eAssert (pure $ I.PrimOp $ I.CmpOp (I.CmpEq I.int32) n m) loc
             x_inner_dims  = drop 1 $ I.arrayDims xt
             ys_inner_dims = map (drop 1 . I.arrayDims) yts
         matchcs <- asserting $
@@ -699,8 +699,8 @@ internaliseBinOp desc E.LogAnd x y _ _ =
   simpleBinOp desc I.LogAnd x y
 internaliseBinOp desc E.LogOr x y _ _ =
   simpleBinOp desc I.LogOr x y
-internaliseBinOp desc E.Equal x y _ _ =
-  simpleCmpOp desc I.CmpEq x y
+internaliseBinOp desc E.Equal x y t _ =
+  simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
 internaliseBinOp desc E.Less x y (E.IntType t) _ =
   simpleCmpOp desc (I.CmpSlt t) x y
 internaliseBinOp desc E.Leq x y (E.IntType t) _ =
