@@ -498,7 +498,7 @@ doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 doSPow :: IntValue -> IntValue -> IntValue
 doSPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
 
- -- | Floating-point exponentatation.
+-- | Floating-point exponentatation.
 doFPow :: FloatValue -> FloatValue -> FloatValue
 doFPow v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 ** floatToDouble v2
 
@@ -587,11 +587,11 @@ doCmpUlt v1 v2 = intToWord64 v1 < intToWord64 v2
 doCmpUle :: IntValue -> IntValue -> Bool
 doCmpUle v1 v2 = intToWord64 v1 <= intToWord64 v2
 
- -- | Signed less than.
+-- | Signed less than.
 doCmpSlt :: IntValue -> IntValue -> Bool
 doCmpSlt = (<)
 
- -- | Signed less than or equal.
+-- | Signed less than or equal.
 doCmpSle :: IntValue -> IntValue -> Bool
 doCmpSle = (<=)
 
