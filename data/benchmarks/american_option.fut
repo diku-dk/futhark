@@ -18,9 +18,9 @@
 fun int strike() = 100
 fun int bankDays() = 252
 fun int s0() = 100
-fun f64 r() = 0.03
-fun f64 alpha() = 0.07
-fun f64 sigma() = 0.20
+fun f64 r() = f64(0.03)
+fun f64 alpha() = f64(0.07)
+fun f64 sigma() = f64(0.20)
 
 fun f64 maxF64(f64 x, f64 y) =
   if x < y then y else x
@@ -28,17 +28,17 @@ fun f64 maxF64(f64 x, f64 y) =
 fun f64 binom(int expiry) =
   let n = expiry * bankDays() in
   let dt = f64(expiry) / f64(n) in
-  let u = exp(alpha()*dt+sigma()*sqrt(dt)) in
-  let d = exp(alpha()*dt-sigma()*sqrt(dt)) in
-  let stepR = exp(r()*dt) in
+  let u = exp64(alpha()*dt+sigma()*sqrt64(dt)) in
+  let d = exp64(alpha()*dt-sigma()*sqrt64(dt)) in
+  let stepR = exp64(r()*dt) in
   let q = (stepR-d)/(u-d) in
   let qUR = q/stepR in
-  let qDR = (1.0-q)/stepR in
+  let qDR = (f64(1.0)-q)/stepR in
 
   let uPow = map(u **, map(f64, iota(n+1))) in
   let dPow = map(d **, map(f64, map(n-, iota(n+1)))) in
   let st = map(f64(s0())*, map(*, zip(uPow, dPow))) in
-  let finalPut = map(maxF64(0.0), map(f64(strike())-, st)) in
+  let finalPut = map(maxF64(f64(0.0)), map(f64(strike())-, st)) in
   loop (put = finalPut) = for n+1 > i >= 1 do
     let {uPow_start, _} = split((i), uPow) in
     let {_, dPow_end} = split((n+1-i), dPow) in
