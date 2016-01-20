@@ -46,6 +46,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifKnownIterationLoop
                , letRule simplifyRearrange
                , letRule simplifyBinOp
+               , letRule simplifyCmpOp
                , letRule simplifyNot
                , letRule simplifyComplement
                , letRule simplifyAssert
@@ -327,6 +328,20 @@ simplifyRearrange defOf _ (Rearrange cs perm v) =
 
 simplifyRearrange _ _ _ = Nothing
 
+simplifyCmpOp :: LetTopDownRule lore u
+simplifyCmpOp _ _ (CmpOp cmp e1 e2)
+  | e1 == e2 = binOpRes $ BoolValue $
+               case cmp of CmpEq{}  -> True
+                           CmpSlt{} -> False
+                           CmpUlt{} -> False
+                           CmpSle{} -> True
+                           CmpUle{} -> True
+                           FCmpLt{} -> False
+                           FCmpLe{} -> True
+simplifyCmpOp _ _ (CmpOp cmp (Constant v1) (Constant v2)) =
+  binOpRes =<< BoolValue <$> doCmpOp cmp v1 v2
+simplifyCmpOp _ _ _ = Nothing
+
 simplifyBinOp :: LetTopDownRule lore u
 
 simplifyBinOp _ _ (BinOp op (Constant v1) (Constant v2))
@@ -426,21 +441,6 @@ simplifyBinOp defOf _ (BinOp LogOr e1 e2)
   | Var v <- e2,
     Just (UnOp Not e2') <- asPrimOp =<< defOf v,
     e2' == e1 = binOpRes $ BoolValue True
-
-simplifyBinOp _ _ (CmpOp CmpEq{} e1 e2)
-  | e1 == e2 = binOpRes $ BoolValue True
-
-simplifyBinOp _ _ (CmpOp CmpSlt{} e1 e2)
-  | e1 == e2 = binOpRes $ BoolValue False
-
-simplifyBinOp _ _ (CmpOp FCmpLt{} e1 e2)
-  | e1 == e2 = binOpRes $ BoolValue False
-
-simplifyBinOp _ _ (CmpOp CmpSle{} e1 e2)
-  | e1 == e2 = binOpRes $ BoolValue True
-
-simplifyBinOp _ _ (CmpOp FCmpLe{} e1 e2)
-  | e1 == e2 = binOpRes $ BoolValue True
 
 simplifyBinOp _ _ _ = Nothing
 
