@@ -47,6 +47,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyBinOp
                , letRule simplifyCmpOp
                , letRule simplifyUnOp
+               , letRule simplifyConvOp
                , letRule simplifyAssert
                , letRule simplifyIndex
                , letRule copyScratchToScratch
@@ -452,6 +453,15 @@ simplifyUnOp defOf _ (UnOp Not (Var v))
   | Just (PrimOp (UnOp Not v2)) <- defOf v =
   Just $ SubExp v2
 simplifyUnOp _ _ _ =
+  Nothing
+
+simplifyConvOp :: LetTopDownRule lore u
+simplifyConvOp _ _ (ConvOp op (Constant v)) =
+  binOpRes =<< doConvOp op v
+simplifyConvOp _ _ (ConvOp op se)
+  | (from, to) <- convTypes op, from == to =
+  Just $ SubExp se
+simplifyConvOp _ _ _ =
   Nothing
 
 -- If expression is true then just replace assertion.
