@@ -15,7 +15,6 @@ where
 
 import Control.Applicative
 import Control.Monad
-import Data.Bits
 import Data.Either
 import Data.Foldable (any, all)
 import Data.List hiding (any, all)
@@ -47,8 +46,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyRearrange
                , letRule simplifyBinOp
                , letRule simplifyCmpOp
-               , letRule simplifyNot
-               , letRule simplifyComplement
+               , letRule simplifyUnOp
                , letRule simplifyAssert
                , letRule simplifyIndex
                , letRule copyScratchToScratch
@@ -447,18 +445,14 @@ simplifyBinOp _ _ _ = Nothing
 binOpRes :: PrimValue -> Maybe (PrimOp lore)
 binOpRes = Just . SubExp . Constant
 
-simplifyNot :: LetTopDownRule lore u
-simplifyNot _ _ (UnOp Not (Constant (BoolValue v))) =
-  Just $ SubExp $ constant (not v)
-simplifyNot defOf _ (UnOp Not (Var v))
+simplifyUnOp :: LetTopDownRule lore u
+simplifyUnOp _ _ (UnOp op (Constant v)) =
+  binOpRes =<< doUnOp op v
+simplifyUnOp defOf _ (UnOp Not (Var v))
   | Just (PrimOp (UnOp Not v2)) <- defOf v =
   Just $ SubExp v2
-simplifyNot _ _ _ = Nothing
-
-simplifyComplement :: LetTopDownRule lore u
-simplifyComplement _ _ (UnOp Complement{} (Constant (IntValue (Int32Value v)))) =
-  Just $ SubExp $ constant $ complement v
-simplifyComplement _ _ _ = Nothing
+simplifyUnOp _ _ _ =
+  Nothing
 
 -- If expression is true then just replace assertion.
 simplifyAssert :: LetTopDownRule lore u
