@@ -53,7 +53,17 @@ optimiseBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
   return $ bnds ++ [Let pat () $ LoopOp $ DoLoop res merge' form body'']
 optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
+                                  , mapOnOp = optimiseOp
                                   }
+          where optimiseOp (Inner k) = Inner <$> optimiseKernel k
+                optimiseOp op = return op
+                optimiseKernel = mapKernelM identityKernelMapper
+                                 { mapOnKernelBody = optimiseBody
+                                 , mapOnKernelLambda = optimiseLambda
+                                 }
+                optimiseLambda lam = do
+                  body <- optimiseBody $ lambdaBody lam
+                  return lam { lambdaBody = body }
 
 optimiseLoop :: MonadFreshNames m =>
                 [(FParam, SubExp)] -> Body
