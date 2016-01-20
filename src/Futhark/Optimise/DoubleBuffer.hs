@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | The simplification engine is only willing to hoist allocations
 -- out of loops if the memory block resulting from the allocation is
@@ -16,6 +17,7 @@ module Futhark.Optimise.DoubleBuffer
 
 import           Control.Applicative
 import           Control.Monad.State
+import           Control.Monad.Writer
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import           Data.Maybe
@@ -74,17 +76,20 @@ optimiseLoop mergeparams body = do
   buffered <- doubleBufferMergeParams
               (zip (map fst mergeparams) (bodyResult body))
               (boundInBody body)
-  -- Then create the allocations of the buffers.
-  let allocs = allocBindings buffered
+  -- Then create the allocations of the buffers and copies of the
+  -- initial values.
+  (mergeparams', allocs) <- allocBindings mergeparams buffered
   -- Modify the loop body to copy buffered result arrays.
   let body' = doubleBufferResult (map fst mergeparams) buffered body
-  return (allocs, mergeparams, body')
+  -- Modify the initial merge p
+  return (allocs, mergeparams', body')
 
 data DoubleBuffer = BufferAlloc VName SubExp Space
                   | BufferCopy VName IxFun.IxFun VName
                     -- ^ First name is the memory block to copy to,
                     -- second is the name of the array copy.
                   | NoBuffer
+                    deriving (Show)
 
 doubleBufferMergeParams :: MonadFreshNames m =>
                            [(FParam,SubExp)] -> Names -> m [DoubleBuffer]
@@ -122,14 +127,24 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
                     return NoBuffer
           _ -> return NoBuffer
 
-allocBindings :: [DoubleBuffer] -> [Binding]
-allocBindings = mapMaybe allocation
-  where allocation (BufferAlloc name size space) =
-          Just $
-          Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
-          Op $ Alloc size space
-        allocation _ =
-          Nothing
+allocBindings :: MonadFreshNames m =>
+                 [(FParam,SubExp)] -> [DoubleBuffer] -> m ([(FParam,SubExp)], [Binding])
+allocBindings merge = runWriterT . zipWithM allocation merge
+  where allocation (f, _) (BufferAlloc name size space) = do
+          tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
+                Op $ Alloc size space]
+          return (f, Var name)
+        allocation (f, Var v) (BufferCopy mem ixfun _) = do
+          v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
+          let bt = elemType $ paramType f
+              shape = arrayShape $ paramType f
+              bound = ArrayMem bt shape NoUniqueness mem ixfun
+          tell [Let (Pattern []
+                     [PatElem v_copy BindVar bound]) () $
+                PrimOp $ Copy v]
+          return (f, Var v_copy)
+        allocation (f, se) _ =
+          return (f, se)
 
 doubleBufferResult :: [FParam] -> [DoubleBuffer] -> Body -> Body
 doubleBufferResult mergeparams buffered (Body () bnds res) =
