@@ -18,6 +18,7 @@ module Futhark.Representation.ExplicitMemory
        , bodyReturns
        , returnsToType
        , lookupMemBound
+       , lookupArraySummary
        , primSize
          -- * Syntax types
        , Prog
@@ -564,14 +565,12 @@ matchPatternToReturns :: Monad m =>
                       -> Pattern
                       -> [ExpReturns]
                       -> m ()
-matchPatternToReturns wrong pat rt = do
+matchPatternToReturns wrong (AST.Pattern ctxbindees valbindees) rt = do
   remaining <- execStateT (zipWithM matchBindee valbindees rt) ctxbindees
   unless (null remaining) $
     wrong $ "Unused parts of pattern: " ++
     intercalate ", " (map pretty remaining)
   where
-    (ctxbindees, valbindees) =
-        splitAt (patternSize pat - length rt) $ patternElements pat
     inCtx = (`elem` map patElemName ctxbindees)
 
     matchType bindee t
@@ -689,6 +688,16 @@ lookupMemBound name = do
     LParamInfo summary -> return summary
     LetInfo summary -> return summary
     IndexInfo -> return $ Scalar int32
+
+lookupArraySummary :: (HasScope ExplicitMemory m, Monad m) =>
+                      VName -> m (VName, IxFun.IxFun)
+lookupArraySummary name = do
+  summary <- lookupMemBound name
+  case summary of
+    ArrayMem _ _ _ mem ixfun ->
+      return (mem, ixfun)
+    _ ->
+      fail $ "Variable " ++ pretty name ++ " does not look like an array."
 
 checkMemBound :: VName -> MemBound u
              -> TypeCheck.TypeM ExplicitMemory ()
