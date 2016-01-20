@@ -23,7 +23,6 @@ import Futhark.Util.Pretty
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
-import Futhark.Representation.AST.Attributes.TypeOf
 import Futhark.Util
 
 -- | The class of lores whose annotations can be prettyprinted.

@@ -58,6 +58,11 @@ module Futhark.Representation.Primitive
        , doCmpSlt, doCmpSle
        , doFCmpLt, doFCmpLe
 
+        -- * Type Of
+       , convTypes
+       , binOpType
+       , unOpType
+
          -- * Utility
        , zeroIsh
        , oneIsh
@@ -623,6 +628,51 @@ floatToDouble :: FloatValue -> Double
 floatToDouble (Float32Value v) = fromRational $ toRational v
 floatToDouble (Float64Value v) = v
 
+-- | Return respectively the source and destination types of a conversion operator.
+convTypes :: ConvOp -> (PrimType, PrimType)
+convTypes (Trunc t1 t2) = (IntType t1, IntType t2)
+convTypes (ZExt t1 t2) = (IntType t1, IntType t2)
+convTypes (SExt t1 t2) = (IntType t1, IntType t2)
+convTypes (FPTrunc t1 t2) = (FloatType t1, FloatType t2)
+convTypes (FPExt t1 t2) = (FloatType t1, FloatType t2)
+convTypes (FPToUI t1 t2) = (FloatType t1, IntType t2)
+convTypes (FPToSI t1 t2) = (FloatType t1, IntType t2)
+convTypes (UIToFP t1 t2) = (IntType t1, FloatType t2)
+convTypes (SIToFP t1 t2) = (IntType t1, FloatType t2)
+
+-- | The result type of a binary operator.
+binOpType :: BinOp -> PrimType
+binOpType (Add t) = IntType t
+binOpType (Sub t) = IntType t
+binOpType (Mul t) = IntType t
+binOpType (SDiv t) = IntType t
+binOpType (SMod t) = IntType t
+binOpType (SQuot t) = IntType t
+binOpType (SRem t) = IntType t
+binOpType (UDiv t) = IntType t
+binOpType (UMod t) = IntType t
+binOpType (Shl t) = IntType t
+binOpType (LShr t) = IntType t
+binOpType (AShr t) = IntType t
+binOpType (And t) = IntType t
+binOpType (Or t) = IntType t
+binOpType (Xor t) = IntType t
+binOpType (SPow t) = IntType t
+binOpType (FPow t) = FloatType t
+binOpType LogAnd = Bool
+binOpType LogOr = Bool
+binOpType (FAdd t) = FloatType t
+binOpType (FSub t) = FloatType t
+binOpType (FMul t) = FloatType t
+binOpType (FDiv t) = FloatType t
+
+-- | The operand and result type of a unary operator.
+unOpType :: UnOp -> PrimType
+unOpType (Signum t) = IntType t
+unOpType Not = Bool
+unOpType (Complement t) = IntType t
+unOpType (Abs t) = IntType t
+unOpType (FAbs t) = FloatType t
 
 -- | Is the given value kind of zero?
 zeroIsh :: PrimValue -> Bool

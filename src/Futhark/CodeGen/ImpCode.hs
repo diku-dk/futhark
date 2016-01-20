@@ -64,7 +64,6 @@ import Prelude hiding (foldr)
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
 import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
-import Futhark.Representation.AST.Attributes.TypeOf (convTypes)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
