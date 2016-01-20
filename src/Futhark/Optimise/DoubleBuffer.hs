@@ -1,6 +1,8 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 -- | The simplification engine is only willing to hoist allocations
 -- out of loops if the memory block resulting from the allocation is
 -- dead at the end of the loop.  If it is not, we may cause data
@@ -12,6 +14,11 @@
 -- the loop.  This is only possible for allocations whose size is
 -- loop-invariant, although the initial size may differ from the size
 -- produced by the loop result.
+--
+-- Additionally, inside parallel kernels we also copy the initial
+-- value.  This has the effect of making the memory block returned by
+-- the array non-existential, which is important for later memory
+-- expansion to work.
 module Futhark.Optimise.DoubleBuffer
        ( doubleBuffer )
        where
@@ -42,27 +49,45 @@ doubleBuffer =
 
 optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec
 optimiseFunDec fundec = do
-  body' <- runReaderT (inScopeOf fundec $
-                       optimiseBody $ funDecBody fundec) emptyScope
+  body' <- runReaderT (runDoubleBufferM $ inScopeOf fundec $
+                       optimiseBody $ funDecBody fundec) $
+           Env emptyScope False
   return fundec { funDecBody = body' }
   where emptyScope :: Scope ExplicitMemory
         emptyScope = mempty
 
-type DoubleBufferer m = (MonadFreshNames m, LocalScope ExplicitMemory m)
+data Env = Env { envScope :: Scope ExplicitMemory
+               , envCopyInit :: Bool
+                 -- ^ If true, copy initial values of merge
+                 -- parameters.  This is necessary to remove
+                 -- existential memory inside kernels, but seems to
+                 -- break C compiler vectorisation in sequential code.
+                 -- We set this to true once we enter kernels.
+               }
 
-optimiseBody :: DoubleBufferer m => Body -> m Body
+newtype DoubleBufferM m a = DoubleBufferM { runDoubleBufferM :: ReaderT Env m a }
+                          deriving (Functor, Applicative, Monad,
+                                    MonadReader Env, MonadFreshNames)
+
+instance Monad m => HasScope ExplicitMemory (DoubleBufferM m) where
+  askScope = asks envScope
+
+instance Monad m => LocalScope ExplicitMemory (DoubleBufferM m) where
+  localScope scope = local $ \env -> env { envScope = envScope env <> scope }
+
+optimiseBody :: MonadFreshNames m => Body -> DoubleBufferM m Body
 optimiseBody body = do
   bnds' <- optimiseBindings $ bodyBindings body
   return $ body { bodyBindings = bnds' }
 
-optimiseBindings :: DoubleBufferer m => [Binding] -> m [Binding]
+optimiseBindings :: MonadFreshNames m => [Binding] -> DoubleBufferM m [Binding]
 optimiseBindings [] = return []
 optimiseBindings (e:es) = do
   e_es <- optimiseBinding e
   es' <- inScopeOf e_es $ optimiseBindings es
   return $ e_es ++ es'
 
-optimiseBinding :: DoubleBufferer m => Binding -> m [Binding]
+optimiseBinding :: MonadFreshNames m => Binding -> DoubleBufferM m [Binding]
 optimiseBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
   body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst merge)) $
            optimiseBody body
@@ -74,7 +99,8 @@ optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
                                   }
           where optimiseOp (Inner k) = Inner <$> optimiseKernel k
                 optimiseOp op = return op
-                optimiseKernel = mapKernelM identityKernelMapper
+                optimiseKernel = local (\env -> env { envCopyInit = True }) .
+                                 mapKernelM identityKernelMapper
                                  { mapOnKernelBody = optimiseBody
                                  , mapOnKernelLambda = optimiseLambda
                                  }
@@ -82,9 +108,9 @@ optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
                   body <- inScopeOf lam $ optimiseBody $ lambdaBody lam
                   return lam { lambdaBody = body }
 
-optimiseLoop :: DoubleBufferer m =>
+optimiseLoop :: MonadFreshNames m =>
                 [(FParam, SubExp)] -> Body
-             -> m ([Binding], [(FParam, SubExp)], Body)
+             -> DoubleBufferM m ([Binding], [(FParam, SubExp)], Body)
 optimiseLoop mergeparams body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
@@ -108,14 +134,16 @@ data DoubleBuffer = BufferAlloc VName SubExp Space Bool
                   | NoBuffer
                     deriving (Show)
 
-doubleBufferMergeParams :: DoubleBufferer m =>
-                           [(FParam,SubExp)] -> Names -> m [DoubleBuffer]
-doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer params) HM.empty
+doubleBufferMergeParams :: MonadFreshNames m =>
+                           [(FParam,SubExp)] -> Names -> DoubleBufferM m [DoubleBuffer]
+doubleBufferMergeParams params_and_res bound_in_loop = do
+  copy_init <- asks envCopyInit
+  evalStateT (mapM (buffer copy_init) params) HM.empty
   where (params,_) = unzip params_and_res
 
-        loopInvariantSize (Constant v) =
-          Just (Constant v, True)
-        loopInvariantSize (Var v) =
+        loopInvariantSize copy_init (Constant v) =
+          Just (Constant v, copy_init)
+        loopInvariantSize copy_init (Var v) =
           case find ((==v) . paramName . fst) params_and_res of
             Just (_, Constant val) ->
               Just (Constant val, False)
@@ -124,11 +152,11 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
             Just _ ->
               Nothing
             Nothing ->
-              Just (Var v, True)
+              Just (Var v, copy_init)
 
-        buffer fparam = case paramType fparam of
+        buffer copy_init fparam = case paramType fparam of
           Mem size space
-            | Just (size', b) <- loopInvariantSize size -> do
+            | Just (size', b) <- loopInvariantSize copy_init size -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
                 modify $ HM.insert (paramName fparam) (bufname, b)
@@ -144,8 +172,9 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
                     return NoBuffer
           _ -> return NoBuffer
 
-allocBindings :: DoubleBufferer m =>
-                 [(FParam,SubExp)] -> [DoubleBuffer] -> m ([(FParam,SubExp)], [Binding])
+allocBindings :: MonadFreshNames m =>
+                 [(FParam,SubExp)] -> [DoubleBuffer]
+              -> DoubleBufferM m ([(FParam,SubExp)], [Binding])
 allocBindings merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
