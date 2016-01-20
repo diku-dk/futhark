@@ -99,8 +99,10 @@ optimiseLoop mergeparams body = do
   -- Modify the initial merge p
   return (allocs, mergeparams', body')
 
-data DoubleBuffer = BufferAlloc VName SubExp Space
-                  | BufferCopy VName IxFun.IxFun VName
+-- | The booleans indicate whether we should also play with the
+-- initial merge values.
+data DoubleBuffer = BufferAlloc VName SubExp Space Bool
+                  | BufferCopy VName IxFun.IxFun VName Bool
                     -- ^ First name is the memory block to copy to,
                     -- second is the name of the array copy.
                   | NoBuffer
@@ -112,34 +114,32 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
   where (params,_) = unzip params_and_res
 
         loopInvariantSize (Constant v) =
-          Just $ Constant v
+          Just (Constant v, True)
         loopInvariantSize (Var v) =
           case find ((==v) . paramName . fst) params_and_res of
-          -- FIXME: these cases are disabled because the resulting
-          -- code is too gnarly for the simplifier to not break.
-            Just (_, Constant val) | False ->
-              Just $ Constant val
-            Just (_, Var v') | not $ v' `HS.member` bound_in_loop, False ->
-              Just $ Var v'
+            Just (_, Constant val) ->
+              Just (Constant val, False)
+            Just (_, Var v') | not $ v' `HS.member` bound_in_loop ->
+              Just (Var v', False)
             Just _ ->
               Nothing
             Nothing ->
-              Just $ Var v
+              Just (Var v, True)
 
         buffer fparam = case paramType fparam of
           Mem size space
-            | Just size' <- loopInvariantSize size -> do
+            | Just (size', b) <- loopInvariantSize size -> do
                 -- Let us double buffer this!
                 bufname <- lift $ newVName "double_buffer_mem"
-                modify $ HM.insert (paramName fparam) bufname
-                return $ BufferAlloc bufname size' space
+                modify $ HM.insert (paramName fparam) (bufname, b)
+                return $ BufferAlloc bufname size' space b
           Array {}
             | ArrayMem _ _ _ mem ixfun <- paramAttr fparam -> do
                 buffered <- gets $ HM.lookup mem
                 case buffered of
-                  Just bufname -> do
+                  Just (bufname, b) -> do
                     copyname <- lift $ newVName "double_buffer_array"
-                    return $ BufferCopy bufname ixfun copyname
+                    return $ BufferCopy bufname ixfun copyname b
                   Nothing ->
                     return NoBuffer
           _ -> return NoBuffer
@@ -147,11 +147,13 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
 allocBindings :: DoubleBufferer m =>
                  [(FParam,SubExp)] -> [DoubleBuffer] -> m ([(FParam,SubExp)], [Binding])
 allocBindings merge = runWriterT . zipWithM allocation merge
-  where allocation (Param pname _, _) (BufferAlloc name size space) = do
+  where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
                 Op $ Alloc size space]
-          return (Param pname $ MemMem size space, Var name)
-        allocation (f, Var v) (BufferCopy mem _ _) = do
+          if b
+            then return (Param pname $ MemMem size space, Var name)
+            else return m
+        allocation (f, Var v) (BufferCopy mem _ _ b) | b = do
           v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
           (_v_mem, v_ixfun) <- lift $ lookupArraySummary v
           let bt = elemType $ paramType f
@@ -169,10 +171,10 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
   let (copybnds,ses) =
         unzip $ zipWith3 buffer mergeparams buffered res
   in Body () (bnds++catMaybes copybnds) ses
-  where buffer _ (BufferAlloc bufname _ _) _ =
+  where buffer _ (BufferAlloc bufname _ _ _) _ =
           (Nothing, Var bufname)
 
-        buffer fparam (BufferCopy bufname ixfun copyname) (Var v) =
+        buffer fparam (BufferCopy bufname ixfun copyname _) (Var v) =
           -- To construct the copy we will need to figure out its type
           -- based on the type of the function parameter.
           let t = resultType $ paramType fparam
