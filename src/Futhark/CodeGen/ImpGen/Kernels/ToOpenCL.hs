@@ -221,7 +221,7 @@ typedef uint uint32_t;
 typedef ulong uint64_t;
 |] ++
   cIntOps ++ cFloat32Ops ++
-  (if uses_float64 then cFloat64Ops else []) ++
+  (if uses_float64 then cFloat64Ops ++ cFloatConvOps else []) ++
   [ [C.cedecl|$func:used_fun|] | (_, used_fun) <- used_funs ]
   where uses_float64 = FloatType Float64 `HS.member` ts
 

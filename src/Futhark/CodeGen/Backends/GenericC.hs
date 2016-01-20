@@ -600,7 +600,7 @@ int main(int argc, char** argv) {
                         C.Func _ _ _ _ _ l      -> l
 
         builtin = map asDecl builtInFunctionDefs ++
-                  cIntOps ++ cFloat32Ops ++ cFloat64Ops
+                  cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps
           where asDecl fun = [C.cedecl|$func:fun|]
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)

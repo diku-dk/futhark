@@ -15,6 +15,7 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , cIntOps
   , cFloat32Ops
   , cFloat64Ops
+  , cFloatConvOps
 
     -- * Specific builtin functions
   , c_trunc32, c_log32, c_sqrt32, c_exp32
@@ -172,16 +173,25 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
 
 cFloat32Ops :: [C.Definition]
 cFloat64Ops :: [C.Definition]
-(cFloat32Ops, cFloat64Ops) = (map ($Float32) mkOps, map ($Float64) mkOps)
+cFloatConvOps :: [C.Definition]
+(cFloat32Ops, cFloat64Ops, cFloatConvOps) =
+  ( map ($Float32) mkOps
+  , map ($Float64) mkOps
+  , [ mkFPConvFF "fpext" from to |
+      from <- [minBound..maxBound],
+      to <- [minBound..maxBound] ] ++
+    [ mkFPConvFF "fptrunc" from to |
+      from <- [minBound..maxBound],
+      to <- [minBound..maxBound] ])
   where taggedF s Float32 = s ++ "32"
         taggedF s Float64 = s ++ "64"
         convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
 
         mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkPow, mkCmpLt, mkCmpLe] ++
-                map mkSIToFP [minBound..maxBound] ++
-                map mkUIToFP [minBound..maxBound] ++
-                map (flip mkFPToSI) [minBound..maxBound] ++
-                map (flip mkFPToUI) [minBound..maxBound]
+                map (mkFPConvIF "sitofp") [minBound..maxBound] ++
+                map (mkFPConvUF "uitofp") [minBound..maxBound] ++
+                map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
+                map (flip $ mkFPConvFU "tptoui") [minBound..maxBound]
 
         mkFDiv = simpleFloatOp "fdiv" [C.cexp|x / y|]
         mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
@@ -195,27 +205,17 @@ cFloat64Ops :: [C.Definition]
         mkPow Float64 =
           [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
 
-        mkSIToFP int_t float_t =
-          [C.cedecl|static inline $ty:float_ct
-                    $id:(convOp "sitofp" int_t float_t)($ty:int_ct x) { return x; }|]
-          where int_ct = intTypeToCType int_t
-                float_ct = floatTypeToCType float_t
-        mkUIToFP int_t float_t =
-          [C.cedecl|static inline $ty:float_ct
-                    $id:(convOp "uitofp" int_t float_t)($ty:int_ct x) { return x; }|]
-          where int_ct = uintTypeToCType int_t
-                float_ct = floatTypeToCType float_t
+        mkFPConv from_f to_f s from_t to_t =
+          [C.cedecl|static inline $ty:to_ct
+                    $id:(convOp s from_t to_t)($ty:from_ct x) { return x;} |]
+          where from_ct = from_f from_t
+                to_ct = to_f to_t
 
-        mkFPToSI float_t int_t =
-          [C.cedecl|static inline $ty:int_ct
-                    $id:(convOp "tptosi"  float_t int_t)($ty:float_ct x) { return x; }|]
-          where int_ct = intTypeToCType int_t
-                float_ct = floatTypeToCType float_t
-        mkFPToUI float_t int_t =
-          [C.cedecl|static inline $ty:int_ct
-                    $id:(convOp "fptoui" float_t int_t)($ty:float_ct x) { return x; }|]
-          where int_ct = uintTypeToCType int_t
-                float_ct = floatTypeToCType float_t
+        mkFPConvFF = mkFPConv floatTypeToCType floatTypeToCType
+        mkFPConvFI = mkFPConv floatTypeToCType intTypeToCType
+        mkFPConvIF = mkFPConv intTypeToCType floatTypeToCType
+        mkFPConvFU = mkFPConv floatTypeToCType uintTypeToCType
+        mkFPConvUF = mkFPConv uintTypeToCType floatTypeToCType
 
         simpleFloatOp s e t =
           [C.cedecl|static inline $ty:ct $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
