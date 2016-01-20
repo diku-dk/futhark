@@ -302,14 +302,17 @@ mkContextAliases :: forall lore attr.
                     (Attributes lore, Aliased lore) =>
                     AST.PatternT attr -> AST.Exp lore
                  -> [Names]
-mkContextAliases _ (AST.LoopOp (DoLoop res merge _ body)) =
+mkContextAliases pat (AST.LoopOp (DoLoop res merge _ body)) =
   let ctx = loopResultContext (representative :: lore) res $ map fst merge
       init_als = zip mergenames $ map (subExpAliases . snd) merge
       expand als = als <> HS.unions (mapMaybe (`lookup` init_als) (HS.toList als))
       merge_als = zip mergenames $
                   map ((`HS.difference` mergenames_set) . expand) $
                   bodyAliases body
-  in map (fromMaybe mempty . flip lookup merge_als) ctx
+  -- FIXME: sometimes loopResultContext will not return the correct number of elements.
+  in if length ctx == length (patternContextElements pat)
+     then map (fromMaybe mempty . flip lookup merge_als) ctx
+     else map (const mempty) $ patternContextElements pat
   where mergenames = map (paramName . fst) merge
         mergenames_set = HS.fromList mergenames
 mkContextAliases pat _ =
