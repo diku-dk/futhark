@@ -23,6 +23,7 @@ import Control.Applicative
 import Control.Monad.State
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import Data.List
 import Prelude
 
@@ -31,15 +32,20 @@ import Futhark.Representation.SOACS
 import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import qualified Futhark.Analysis.Alias as Alias
+import Futhark.Representation.Aliases (Aliases, removeLambdaAliases)
+import Futhark.Representation.AST.Attributes.Aliases
 
 -- | Perform the first-order transformation on an Futhark program.
 transformProg :: (MonadFreshNames m, Bindable tolore,
-                  LetAttr SOACS ~ LetAttr tolore) =>
+                  LetAttr SOACS ~ LetAttr tolore,
+                  CanBeAliased (Op tolore)) =>
                  Prog -> m (AST.Prog tolore)
 transformProg = intraproceduralTransformation transformFunDec
 
 transformFunDec :: (MonadFreshNames m, Bindable tolore,
-                    LetAttr SOACS ~ LetAttr tolore) =>
+                    LetAttr SOACS ~ LetAttr tolore,
+                    CanBeAliased (Op tolore)) =>
                    FunDec -> m (AST.FunDec tolore)
 transformFunDec (FunDec fname rettype params body) = do
   (body',_) <-
@@ -55,7 +61,8 @@ type Transformer m = (MonadBinder m,
                       Bindable (Lore m),
                       LocalScope (Lore m) m,
                       LetAttr SOACS ~ LetAttr (Lore m),
-                      LParamAttr SOACS ~ LParamAttr (Lore m))
+                      LParamAttr SOACS ~ LParamAttr (Lore m),
+                      CanBeAliased (Op (Lore m)))
 
 transformBody :: Transformer m =>
                  Body -> m (AST.Body (Lore m))
@@ -200,8 +207,15 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
                          | t <- map_arr_tps ]
-  arrexps' <- mapM copyIfArrayName arrexps
-  letBind_ pat =<< doLoopMapAccumL cs width innerfun accexps arrexps' maparrs
+  let innerfun' = Alias.analyseLambda innerfun
+      consumed = consumedInBody $ lambdaBody innerfun'
+  arrexps' <- forM (zip
+                    (drop (length accexps) (lambdaParams innerfun))
+                    arrexps) $ \(p,a) ->
+    if paramName p `HS.member` consumed then
+      letExp (baseString a ++ "_fot_redomap_copy") $ PrimOp $ Copy a
+    else return a
+  letBind_ pat =<< doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
@@ -611,7 +625,8 @@ transformLambda :: (MonadFreshNames m,
                     Bindable lore,
                     LocalScope lore m,
                     LetAttr SOACS ~ LetAttr lore,
-                    LParamAttr SOACS ~ LParamAttr lore) =>
+                    LParamAttr SOACS ~ LParamAttr lore,
+                    CanBeAliased (Op lore)) =>
                    Lambda -> m (AST.Lambda lore)
 transformLambda (Lambda i params body rettype) = do
   body' <- runBodyBinder $
@@ -625,7 +640,8 @@ transformExtLambda :: (MonadFreshNames m,
                        Bindable lore,
                        LocalScope lore m,
                        LetAttr SOACS ~ LetAttr lore,
-                       LParamAttr SOACS ~ LParamAttr lore) =>
+                       LParamAttr SOACS ~ LParamAttr lore,
+                       CanBeAliased (Op lore)) =>
                       ExtLambda -> m (AST.ExtLambda lore)
 transformExtLambda (ExtLambda i params body rettype) = do
   body' <- runBodyBinder $
@@ -689,8 +705,11 @@ bindLambda (Lambda _ params body _) args = do
   bodyBind body
 
 loopMerge :: [Ident] -> [SubExp] -> [(Param DeclType, SubExp)]
-loopMerge vars vals = [ (Param pname $ toDecl ptype Unique, val)
-                      | (Ident pname ptype,val) <- zip vars vals ]
+loopMerge vars = loopMerge' $ zip vars $ repeat Unique
+
+loopMerge' :: [(Ident,Uniqueness)] -> [SubExp] -> [(Param DeclType, SubExp)]
+loopMerge' vars vals = [ (Param pname $ toDecl ptype u, val)
+                       | ((Ident pname ptype, u),val) <- zip vars vals ]
 
 
 withUpperBound :: Bool
@@ -702,10 +721,11 @@ data MEQType = ExactBd SubExp
 -- | Turn a Haskell-style mapAccumL into a sequential do-loop.  This
 -- is the guts of transforming a 'Redomap'.
 doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
-                    LetAttr (Lore m) ~ Type) =>
+                    LetAttr (Lore m) ~ Type,
+                    CanBeAliased (Op (Lore m))) =>
                    Certificates
                 -> SubExp
-                -> AST.Lambda (Lore m)
+                -> AST.Lambda (Aliases (Lore m))
                 -> [SubExp]
                 -> [VName]
                 -> [VName]
@@ -724,9 +744,14 @@ doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
   -- for the REDUCE part
   (acc, initacc) <- newFold $ zip accexps accts
   inarrs <- mapM (newIdent "redomap_inarr") arrts
-  let merge = loopMerge (inarrs++acc++outarrs) (map Var arrexps++initacc++map Var maparrs)
+  let consumed = consumedInBody $ lambdaBody innerfun
+      withUniqueness p | identName p `HS.member` consumed = (p, Unique)
+                       | p `elem` outarrs = (p, Unique)
+                       | otherwise = (p, Nonunique)
+      merge = loopMerge' (map withUniqueness (inarrs++acc++outarrs))
+              (map Var arrexps++initacc++map Var maparrs)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
-    accxis<- bindLambda innerfun
+    accxis<- bindLambda (removeLambdaAliases innerfun)
              (map (PrimOp . SubExp . Var . identName) acc ++
               index cs (map identName inarrs) (Var i))
     let (acc', xis) = splitAt acc_num accxis
