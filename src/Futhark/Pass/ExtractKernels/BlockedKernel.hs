@@ -19,6 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
+import qualified Futhark.Analysis.Alias as Alias
 
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern
@@ -73,7 +74,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   (seq_loop, seq_loop_prologue) <-
     collectBindings $
     localScope (scopeOfLParams $ arr_chunk_params ++ map_arr_params) $
-    doLoopMapAccumL cs (Var chunk_size) fold_lam'
+    doLoopMapAccumL cs (Var chunk_size) (Alias.analyseLambda fold_lam')
     nes (map paramName arr_chunk_params) (map paramName map_arr_params)
 
   let seq_rt =
