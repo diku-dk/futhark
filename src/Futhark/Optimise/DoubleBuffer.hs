@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 -- | The simplification engine is only willing to hoist allocations
@@ -18,6 +19,7 @@ module Futhark.Optimise.DoubleBuffer
 import           Control.Applicative
 import           Control.Monad.State
 import           Control.Monad.Writer
+import           Control.Monad.Reader
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import           Data.Maybe
@@ -40,17 +42,30 @@ doubleBuffer =
 
 optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec
 optimiseFunDec fundec = do
-  body' <- optimiseBody $ funDecBody fundec
+  body' <- runReaderT (inScopeOf fundec $
+                       optimiseBody $ funDecBody fundec) emptyScope
   return fundec { funDecBody = body' }
+  where emptyScope :: Scope ExplicitMemory
+        emptyScope = mempty
 
-optimiseBody :: MonadFreshNames m => Body -> m Body
+type DoubleBufferer m = (MonadFreshNames m, LocalScope ExplicitMemory m)
+
+optimiseBody :: DoubleBufferer m => Body -> m Body
 optimiseBody body = do
-  bnds' <- concat <$> mapM optimiseBinding (bodyBindings body)
+  bnds' <- optimiseBindings $ bodyBindings body
   return $ body { bodyBindings = bnds' }
 
-optimiseBinding :: MonadFreshNames m => Binding -> m [Binding]
+optimiseBindings :: DoubleBufferer m => [Binding] -> m [Binding]
+optimiseBindings [] = return []
+optimiseBindings (e:es) = do
+  e_es <- optimiseBinding e
+  es' <- inScopeOf e_es $ optimiseBindings es
+  return $ e_es ++ es'
+
+optimiseBinding :: DoubleBufferer m => Binding -> m [Binding]
 optimiseBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
-  body' <- optimiseBody body
+  body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst merge)) $
+           optimiseBody body
   (bnds, merge', body'') <- optimiseLoop merge body'
   return $ bnds ++ [Let pat () $ LoopOp $ DoLoop res merge' form body'']
 optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
@@ -64,10 +79,10 @@ optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
                                  , mapOnKernelLambda = optimiseLambda
                                  }
                 optimiseLambda lam = do
-                  body <- optimiseBody $ lambdaBody lam
+                  body <- inScopeOf lam $ optimiseBody $ lambdaBody lam
                   return lam { lambdaBody = body }
 
-optimiseLoop :: MonadFreshNames m =>
+optimiseLoop :: DoubleBufferer m =>
                 [(FParam, SubExp)] -> Body
              -> m ([Binding], [(FParam, SubExp)], Body)
 optimiseLoop mergeparams body = do
@@ -91,7 +106,7 @@ data DoubleBuffer = BufferAlloc VName SubExp Space
                   | NoBuffer
                     deriving (Show)
 
-doubleBufferMergeParams :: MonadFreshNames m =>
+doubleBufferMergeParams :: DoubleBufferer m =>
                            [(FParam,SubExp)] -> Names -> m [DoubleBuffer]
 doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer params) HM.empty
   where (params,_) = unzip params_and_res
@@ -100,9 +115,11 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
           Just $ Constant v
         loopInvariantSize (Var v) =
           case find ((==v) . paramName . fst) params_and_res of
-            Just (_, Constant val) ->
+          -- FIXME: these cases are disabled because the resulting
+          -- code is too gnarly for the simplifier to not break.
+            Just (_, Constant val) | False ->
               Just $ Constant val
-            Just (_, Var v') | not $ v' `HS.member` bound_in_loop ->
+            Just (_, Var v') | not $ v' `HS.member` bound_in_loop, False ->
               Just $ Var v'
             Just _ ->
               Nothing
@@ -127,18 +144,19 @@ doubleBufferMergeParams params_and_res bound_in_loop = evalStateT (mapM buffer p
                     return NoBuffer
           _ -> return NoBuffer
 
-allocBindings :: MonadFreshNames m =>
+allocBindings :: DoubleBufferer m =>
                  [(FParam,SubExp)] -> [DoubleBuffer] -> m ([(FParam,SubExp)], [Binding])
 allocBindings merge = runWriterT . zipWithM allocation merge
-  where allocation (f, _) (BufferAlloc name size space) = do
+  where allocation (Param pname _, _) (BufferAlloc name size space) = do
           tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
                 Op $ Alloc size space]
-          return (f, Var name)
-        allocation (f, Var v) (BufferCopy mem ixfun _) = do
+          return (Param pname $ MemMem size space, Var name)
+        allocation (f, Var v) (BufferCopy mem _ _) = do
           v_copy <- lift $ newVName $ baseString v ++ "_double_buffer_copy"
+          (_v_mem, v_ixfun) <- lift $ lookupArraySummary v
           let bt = elemType $ paramType f
               shape = arrayShape $ paramType f
-              bound = ArrayMem bt shape NoUniqueness mem ixfun
+              bound = ArrayMem bt shape NoUniqueness mem v_ixfun
           tell [Let (Pattern []
                      [PatElem v_copy BindVar bound]) () $
                 PrimOp $ Copy v]
