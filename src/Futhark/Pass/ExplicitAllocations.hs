@@ -196,7 +196,7 @@ allocsForPattern sizeidents validents rts = do
               return $ PatElem (identName ident) bindage $
               ArrayMem bt shape u mem ixfun
             BindInPlace _ src is -> do
-              (destmem,destixfun) <- lift $ lookupArraySummary' src
+              (destmem,destixfun) <- lift $ lookupArraySummary src
               if destmem == mem && destixfun == ixfun
                 then return $ PatElem (identName ident) bindage $
                      ArrayMem bt shape u mem ixfun
@@ -284,15 +284,6 @@ directIndexFunction :: PrimType -> Shape -> u -> VName -> Type -> MemBound u
 directIndexFunction bt shape u mem t =
   ArrayMem bt shape u mem $ IxFun.iota $ IxFun.shapeFromSubExps $ arrayDims t
 
-lookupArraySummary' :: Allocator m => VName -> m (VName, IxFun.IxFun)
-lookupArraySummary' name = do
-  summary <- lookupMemBound name
-  case summary of
-    ArrayMem _ _ _ mem ixfun ->
-      return (mem, ixfun)
-    _ ->
-      fail $ "Variable " ++ pretty name ++ " does not look like an array."
-
 patElemSummary :: PatElem -> (VName, NameInfo ExplicitMemory)
 patElemSummary bindee = (patElemName bindee,
                          LetInfo $ patElemAttr bindee)
@@ -360,7 +351,7 @@ allocInMergeParams merge m = do
         allocInMergeParam (mergeparam, Var v)
           | Array bt shape Unique <- paramDeclType mergeparam,
             loopInvariantShape mergeparam = do
-              (mem, ixfun) <- lift $ lookupArraySummary' v
+              (mem, ixfun) <- lift $ lookupArraySummary v
               return (mergeparam { paramAttr = ArrayMem bt shape Unique mem ixfun },
                       lift . ensureArrayIn (paramType mergeparam) mem ixfun)
         allocInMergeParam (mergeparam, _) = do
@@ -389,7 +380,7 @@ ensureArrayIn :: Type -> VName -> IxFun.IxFun -> SubExp -> AllocM SubExp
 ensureArrayIn _ _ _ (Constant v) =
   fail $ "ensureArrayIn: " ++ pretty v ++ " cannot be an array."
 ensureArrayIn t mem ixfun (Var v) = do
-  (src_mem, src_ixfun) <- lookupArraySummary' v
+  (src_mem, src_ixfun) <- lookupArraySummary v
   if src_mem == mem && src_ixfun == ixfun
     then return $ Var v
     else do copy <- newIdent (baseString v ++ "_copy") t
@@ -520,7 +511,7 @@ allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
             Prim bt ->
               return inp { kernelInputParam = Param (kernelInputName inp) $ Scalar bt }
             Array bt shape u -> do
-              (mem, ixfun) <- lookupArraySummary' $ kernelInputArray inp
+              (mem, ixfun) <- lookupArraySummary $ kernelInputArray inp
               let ixfun' = IxFun.applyInd ixfun $ map SE.intSubExpToScalExp $
                            kernelInputIndices inp
                   summary = ArrayMem bt shape u mem ixfun'
