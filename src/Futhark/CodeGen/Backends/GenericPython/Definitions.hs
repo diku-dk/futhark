@@ -71,6 +71,12 @@ def sitofp_i32_f32(x):
 def sitofp_i32_f64(x):
   return float32(x)
 
+def fpext_f32_f64(x):
+  return float64(x)
+
+def fptrunc_f64_f32(x):
+  return float32(x)
+
 def fptosi_f32_i32(x):
   return int32(trunc(x))
 
