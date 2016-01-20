@@ -201,7 +201,7 @@ cFloatConvOps :: [C.Definition]
         mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
 
         mkPow Float32 =
-          [C.cedecl|static inline float fpow32(float x, float y) { return powf(x, y); }|]
+          [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
         mkPow Float64 =
           [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
 
