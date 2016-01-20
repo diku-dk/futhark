@@ -17,7 +17,6 @@ import Prelude
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Representation.AST.Attributes.TypeOf (convTypes)
 import Futhark.Representation.AST.Attributes.Types (int32)
 import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
