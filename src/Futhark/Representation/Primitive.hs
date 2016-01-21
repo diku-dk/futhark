@@ -185,7 +185,7 @@ data FloatValue = Float32Value !Float
 
 
 instance Pretty FloatValue where
-  ppr (Float32Value v) = text $ show v
+  ppr (Float32Value v) = text $ show v ++ "f"
   ppr (Float64Value v) = text $ show v
 
 -- | Create a 'FloatValue' from a type and a 'Rational'.

@@ -222,7 +222,7 @@ readerFunctions =
 
     int read_float(void* dest) {
       skipspaces();
-      if (scanf("%f", (float*)dest) == 1) {
+      if (scanf("%ff", (float*)dest) == 1) {
         return 0;
       } else {
         return 1;

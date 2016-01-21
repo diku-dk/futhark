@@ -250,7 +250,10 @@ def read_double(f):
     return float(sign + bef + '.' + aft + 'E' + expt)
 
 def read_float(f):
-    return read_double(f)
+    x = read_double(f)
+    if not optional(parse_specific_char, f, 'f'):
+      parse_specific_char, f, 'F'
+    return x
 
 def read_bool(f):
     skip_spaces(f)

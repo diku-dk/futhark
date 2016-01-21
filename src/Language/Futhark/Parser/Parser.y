@@ -79,6 +79,8 @@ import Language.Futhark.Parser.Lexer
 
       intlit          { L _ (INTLIT _) }
       reallit         { L _ (REALLIT _) }
+      f32lit          { L _ (F32LIT _) }
+      f64lit          { L _ (F64LIT _) }
       stringlit       { L _ (STRINGLIT _) }
       charlit         { L _ (CHARLIT _) }
 
@@ -292,6 +294,8 @@ TypeIds : Type id ',' TypeIds
 Exp  :: { UncheckedExp }
      : intlit         { let L pos (INTLIT num) = $1 in Literal (PrimValue $ IntValue $ Int32Value num) pos }
      | reallit        {% let L pos (REALLIT num) = $1 in (liftM2 (Literal . PrimValue) (getRealValue num) (pure pos)) }
+     | f32lit         { let L pos (F32LIT num) = $1 in Literal (PrimValue $ FloatValue $ Float32Value num) pos }
+     | f64lit         { let L pos (F64LIT num) = $1 in Literal (PrimValue $ FloatValue $ Float64Value num) pos }
      | charlit        { let L pos (CHARLIT char) = $1 in Literal (PrimValue $ CharValue char) pos }
      | stringlit      { let L pos (STRINGLIT s) = $1
                         in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
@@ -530,6 +534,8 @@ FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
 
 Value : IntValue { $1 }
       | RealValue { $1 }
+      | F32Value { $1 }
+      | F64Value { $1 }
       | CharValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
@@ -554,6 +560,10 @@ IntValue : intlit        { let L pos (INTLIT num) = $1 in PrimValue $ IntValue $
          | '-' intlit    { let L pos (INTLIT num) = $2 in PrimValue $ IntValue $ Int32Value (-num) }
 RealValue : reallit      {% let L pos (REALLIT num) = $1 in liftM PrimValue (getRealValue num) }
           | '-' reallit  {% let L pos (REALLIT num) = $2 in liftM PrimValue (getRealValue (-num)) }
+F32Value : f32lit        { let L pos (F32LIT num) = $1 in PrimValue $ FloatValue $ Float32Value num }
+          | '-' f32lit   { let L pos (F32LIT num) = $2 in PrimValue $ FloatValue $ Float32Value (-num) }
+F64Value : f64lit        { let L pos (F64LIT num) = $1 in PrimValue $ FloatValue $ Float64Value num }
+          | '-' f64lit   { let L pos (F64LIT num) = $2 in PrimValue $ FloatValue $ Float64Value (-num) }
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValue char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
 BoolValue : true          { PrimValue $ BoolValue True }
