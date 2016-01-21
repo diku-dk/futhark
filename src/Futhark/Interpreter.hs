@@ -15,7 +15,6 @@
 module Futhark.Interpreter
   ( runFun
   , runFunWithShapes
-  , runFunNoTrace
   , Trace
   , InterpreterError(..) )
 where
@@ -306,11 +305,6 @@ runFunWithShapes fname valargs prog = do
                   flip HM.lookup shapemap .
                   paramName)
              shapeparams
-
--- | As 'runFun', but throws away the trace.
-runFunNoTrace :: Name -> [Value] -> Prog
-              -> Either InterpreterError [Value]
-runFunNoTrace = ((.) . (.) . (.)) fst runFun -- I admit this is just for fun.
 
 runThisFun :: FunDec -> [Value] -> FunTable
            -> (Either InterpreterError [Value], Trace)
