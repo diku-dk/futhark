@@ -63,6 +63,8 @@ tokens :-
   0[xX][0-9a-fA-F]*        { INTLIT . readInt32 }
   [0-9]+                   { INTLIT . readInt32 }
   (([0-9]+("."[0-9]+)?))
+    ([eE][\+\-]?[0-9]+)?[fF] { F32LIT . read . init }
+  (([0-9]+("."[0-9]+)?))
     ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
   [a-zA-Z] [a-zA-Z0-9_']* { keyword }
   "'" @charlit "'" { CHARLIT . read }

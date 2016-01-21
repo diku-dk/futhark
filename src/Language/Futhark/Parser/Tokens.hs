@@ -28,6 +28,8 @@ data Token = IF
            | STRINGLIT String
            | INTLIT Int32
            | REALLIT Double
+           | F32LIT Float
+           | F64LIT Double
            | CHARLIT Char
            | PLUS
            | MINUS
