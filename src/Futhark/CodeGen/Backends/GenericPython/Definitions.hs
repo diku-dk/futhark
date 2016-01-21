@@ -95,9 +95,6 @@ def futhark_sqrt64(x):
 def futhark_exp64(x):
   return exp(x)
 
-def futhark_fact(x):
-  return int32(math.factorial(x))
-
 def futhark_trunc64(x):
   return int64(trunc(x))
 
