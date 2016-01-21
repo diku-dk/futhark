@@ -70,8 +70,13 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     kernel_size' <- Engine.simplify kernel_size
     nes' <- mapM Engine.simplify nes
     arrs' <- mapM Engine.simplify arrs
-    parlam' <- Engine.simplifyLambda parlam w' $ map (const Nothing) nes
-    seqlam' <- Engine.simplifyLambda seqlam w' $ map (const Nothing) nes
+    parlam' <- Engine.simplifyLambda parlam w' $ map (const Nothing) arrs
+    seqlam' <- Engine.simplifyLambda seqlam w' $ map Just arrs
+    let consumed_in_seq = consumedInBody $ lambdaBody seqlam'
+        arr_params = drop 1 $ lambdaParams seqlam'
+    forM_ (zip arr_params arrs) $ \(p,arr) ->
+      when (paramName p `HS.member` consumed_in_seq) $
+      Engine.consumedName arr
     return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' nes' arrs'
 
   simplifyOp (ScanKernel cs w kernel_size order lam input) = do
