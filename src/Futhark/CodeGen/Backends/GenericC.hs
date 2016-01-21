@@ -294,7 +294,7 @@ printPrimStm val (IntType Int32) = [C.cstm|printf("%d", $exp:val);|]
 printPrimStm val (IntType Int64) = [C.cstm|printf("%lld", $exp:val);|]
 printPrimStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
 printPrimStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
-printPrimStm val (FloatType Float32) = [C.cstm|printf("%.6f", $exp:val);|]
+printPrimStm val (FloatType Float32) = [C.cstm|printf("%.6ff", $exp:val);|]
 printPrimStm val (FloatType Float64) = [C.cstm|printf("%.6f", $exp:val);|]
 printPrimStm _ Cert = [C.cstm|printf("Checked");|]
 

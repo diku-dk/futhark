@@ -394,6 +394,8 @@ writeOutput :: Imp.ValueDecl -> PyStmt
 writeOutput (Imp.ScalarValue bt vname) =
   let name = Var $ pretty vname
   in case bt of
+    FloatType Float32 -> Exp $ simpleCall "print"
+                         [BinaryOp "%" (StringLiteral "%ef") name]
     Char -> Exp $ simpleCall "print" [Field name ".decode()"]
     _ -> Exp $ simpleCall "print" [name]
 
