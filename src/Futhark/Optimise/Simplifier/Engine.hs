@@ -52,6 +52,7 @@ module Futhark.Optimise.Simplifier.Engine
        , bindLParams
        , bindLoopVars
        , enterLoop
+       , consumedName
 
        , blockIf
 
