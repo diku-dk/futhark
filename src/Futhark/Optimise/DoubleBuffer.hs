@@ -69,10 +69,12 @@ newtype DoubleBufferM m a = DoubleBufferM { runDoubleBufferM :: ReaderT Env m a 
                           deriving (Functor, Applicative, Monad,
                                     MonadReader Env, MonadFreshNames)
 
-instance Monad m => HasScope ExplicitMemory (DoubleBufferM m) where
+instance (Applicative m, Monad m) =>
+         HasScope ExplicitMemory (DoubleBufferM m) where
   askScope = asks envScope
 
-instance Monad m => LocalScope ExplicitMemory (DoubleBufferM m) where
+instance (Applicative m, Monad m) =>
+         LocalScope ExplicitMemory (DoubleBufferM m) where
   localScope scope = local $ \env -> env { envScope = envScope env <> scope }
 
 optimiseBody :: MonadFreshNames m => Body -> DoubleBufferM m Body
