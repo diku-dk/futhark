@@ -1,4 +1,7 @@
 -- ==
+-- input { [1.0, 2.0] [[1.0, 2.0], [-4.0, 1.5]] }
+-- output { 8.0 -1.0 0.0 -1.0 5.5 }
+-- structure { Redomap 1 Reduce 0 Map 0 }
 
 fun {real,real,real} f1( {real,real} p ) =
     let {a1, a2} = p in {a1 * a2, a1 + a2, a1 - a2}

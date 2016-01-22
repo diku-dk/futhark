@@ -1,7 +1,19 @@
 -- Once failed in fusion.  Derived from tail2futhark output.
-
+-- ==
+-- input { [1, 2, -4, 1] [[1, 2], [-4, 1]] }
+-- output {
+--          [[True, False, False, False, False, False, False, False, False, False, False,
+--            False, False, False, False, False, False, False, False, False, False, False,
+--            False, False, False, False, False, False, False, False],
+--           [False, False, False, False, False, False, False, False, False, False, False,
+--            False, False, False, False, False, False, False, False, False, False, False,
+--            False, False, False, False, False, False, False, False],
+--           [True, False, False, False, False, False, False, False, False, False, False,
+--            False, False, False, False, False, False, False, False, False, False, False,
+--            False, False, False, False, False, False, False, False]]
+-- }
 fun [[bool]] main([int] t_v1, [[int]] t_v3) =
-  let n = 10000000 in
+  let n = 3 in
   let t_v6 = map(fn int (int x) => (x + 1),iota(n)) in
   let t_v12 = map(fn int (int x) => (x + 1),iota(30)) in
   let t_v18 = rearrange((1,0),replicate(30, t_v6)) in
