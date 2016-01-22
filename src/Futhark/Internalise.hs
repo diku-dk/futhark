@@ -629,6 +629,16 @@ internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
       in letTupExp' desc $ I.PrimOp $ I.ConvOp (op float_from float_to) e'
     _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
 
+internaliseExp desc (E.UnOp (E.ToInt int_to) e _) = do
+  e' <- internaliseExp1 "trunc_arg" e
+  case E.typeOf e of
+    E.Prim (E.IntType int_from) ->
+      let op = if int_to < int_from then I.SExt else I.Trunc
+      in letTupExp' desc $ I.PrimOp $ I.ConvOp (op int_from int_to) e'
+    E.Prim (E.FloatType float_from) ->
+      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.FPToSI float_from int_to) e'
+    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Trunc"
+
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]

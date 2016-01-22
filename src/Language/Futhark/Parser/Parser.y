@@ -172,7 +172,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs real f32 f64
+%nonassoc '~' '!' signum abs real f32 f64 int i32
 
 %%
 
@@ -318,6 +318,8 @@ Exp  :: { UncheckedExp }
      | '~' Exp        { UnOp Complement $2 $1 }
      | abs Exp        { UnOp Abs $2 $1 }
      | signum Exp     { UnOp Signum $2 $1 }
+     | int Exp        { UnOp (ToInt Int32) $2 $1 }
+     | i32 Exp        { UnOp (ToInt Int32) $2 $1 }
      | f32 Exp        { UnOp (ToFloat Float32) $2 $1 }
      | f64 Exp        { UnOp (ToFloat Float64) $2 $1 }
      | real Exp       {% do t <- getRealType; return (UnOp (ToFloat t) $2 $1) }

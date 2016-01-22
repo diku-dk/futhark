@@ -629,6 +629,10 @@ checkExp (UnOp (ToFloat t) e loc) = do
   e' <- require anyNumberType =<< checkExp e
   return $ UnOp (ToFloat t) e' loc
 
+checkExp (UnOp (ToInt t) e loc) = do
+  e' <- require anyNumberType =<< checkExp e
+  return $ UnOp (ToInt t) e' loc
+
 checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3

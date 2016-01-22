@@ -7,4 +7,4 @@
 -- input { 3.14 } output { 3.0 }
 
 fun f32 main(f64 x) =
-  f32(trunc64(x))
+  f32(int(x))

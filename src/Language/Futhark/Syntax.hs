@@ -279,6 +279,7 @@ data UnOp = Not
           | Abs
           | Signum
           | ToFloat FloatType
+          | ToInt IntType
           deriving (Eq, Ord, Show)
 
 -- | Binary operators.
