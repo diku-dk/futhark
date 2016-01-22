@@ -339,14 +339,12 @@ buildFunTable = foldl expand builtins . progFunctions
 
 builtins :: HM.HashMap Name ([Value] -> FutharkM [Value])
 builtins = HM.fromList $ map namify
-           [("trunc32", builtin "trunc32")
-           ,("sqrt32", builtin "sqrt32")
+           [("sqrt32", builtin "sqrt32")
            ,("log32", builtin "log32")
            ,("exp32", builtin "exp32")
            ,("cos32", builtin "cos32")
            ,("sin32", builtin "sin32")
 
-           ,("trunc64", builtin "trunc64")
            ,("sqrt64", builtin "sqrt64")
            ,("log64", builtin "log64")
            ,("exp64", builtin "exp64")
@@ -356,8 +354,6 @@ builtins = HM.fromList $ map namify
   where namify (k,v) = (nameFromString k, v)
 
 builtin :: String -> [Value] -> FutharkM [Value]
-builtin "trunc32" [PrimVal (FloatValue (Float32Value x))] =
-  return [PrimVal $ IntValue $ Int32Value $ truncate x]
 builtin "sqrt32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ sqrt x]
 builtin "log32" [PrimVal (FloatValue (Float32Value x))] =
@@ -368,8 +364,6 @@ builtin "cos32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ cos x]
 builtin "sin32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ sin x]
-builtin "trunc64" [PrimVal (FloatValue (Float64Value x))] =
-  return [PrimVal $ IntValue $ Int32Value $ truncate x]
 builtin "sqrt64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ sqrt x]
 builtin "log64" [PrimVal (FloatValue (Float64Value x))] =

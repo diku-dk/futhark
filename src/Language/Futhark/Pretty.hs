@@ -131,6 +131,7 @@ instance Pretty UnOp where
   ppr Abs = text "abs "
   ppr Signum = text "signum "
   ppr (ToFloat t) = ppr t
+  ppr (ToInt t) = ppr t
 
 instance Pretty BinOp where
   ppr Plus = text "+"

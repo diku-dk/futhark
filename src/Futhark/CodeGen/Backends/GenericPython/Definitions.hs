@@ -101,9 +101,6 @@ def futhark_cos64(x):
 def futhark_sin64(x):
   return sin(x)
 
-def futhark_trunc64(x):
-  return int64(trunc(x))
-
 def futhark_log32(x):
   return float32(log(x))
 
@@ -118,9 +115,6 @@ def futhark_cos32(x):
 
 def futhark_sin32(x):
   return sin(x)
-
-def futhark_trunc32(x):
-  return float32(trunc(x))
 |]
 
 pyTestMain :: PyDefinition

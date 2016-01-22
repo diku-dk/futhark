@@ -186,15 +186,13 @@ requiredFunctions kernel_funs =
       funs32_used = filter used_in_kernel funs32
       funs64_used = filter used_in_kernel funs64
 
-      funs32 = [("trunc32", c_trunc32),
-                ("log32", c_log32),
+      funs32 = [("log32", c_log32),
                 ("sqrt32", c_sqrt32),
                 ("exp32", c_exp32),
                 ("sin32", c_sin32),
                 ("cos32", c_cos32)]
 
-      funs64 = [("trunc64", c_trunc64),
-                ("log64", c_log64),
+      funs64 = [("log64", c_log64),
                 ("sqrt64", c_sqrt64),
                 ("exp64", c_exp64),
                 ("sin64", c_sin64),
