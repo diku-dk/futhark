@@ -58,7 +58,7 @@ parseInMonad p rconf file program =
         float32funs = HM.map (<>nameFromString "32") funs
         float64funs = HM.map (<>nameFromString "64") funs
         funs = HM.fromList $ zip funnames funnames
-        funnames = map nameFromString ["toFloat", "trunc", "sqrt", "log", "exp", "sin", "cos"]
+        funnames = map nameFromString ["trunc", "sqrt", "log", "exp", "sin", "cos"]
 
 parseIncrementalIO :: ParserMonad a -> RealConfiguration -> FilePath -> String
                    -> IO (Either ParseError a)
