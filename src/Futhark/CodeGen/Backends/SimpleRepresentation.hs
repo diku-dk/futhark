@@ -18,8 +18,8 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , cFloatConvOps
 
     -- * Specific builtin functions
-  , c_trunc32, c_log32, c_sqrt32, c_exp32
-  , c_trunc64, c_log64, c_sqrt64, c_exp64
+  , c_trunc32, c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32
+  , c_trunc64, c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64
   )
   where
 
@@ -252,6 +252,19 @@ c_exp32 = [C.cfun|
     }
   |]
 
+c_cos32 ::C.Func
+c_cos32 = [C.cfun|
+    float $id:(funName' "cos32")(float x) {
+      return cos(x);
+    }
+  |]
+
+c_sin32 ::C.Func
+c_sin32 = [C.cfun|
+    float $id:(funName' "sin32")(float x) {
+      return sin(x);
+    }
+  |]
 
 c_trunc64 :: C.Func
 c_trunc64 = [C.cfun|
@@ -281,8 +294,22 @@ c_exp64 = [C.cfun|
     }
   |]
 
+c_cos64 ::C.Func
+c_cos64 = [C.cfun|
+    double $id:(funName' "cos64")(double x) {
+      return cos(x);
+    }
+  |]
+
+c_sin64 ::C.Func
+c_sin64 = [C.cfun|
+    double $id:(funName' "sin64")(double x) {
+      return sin(x);
+    }
+  |]
+
 -- | C definitions of the Futhark "standard library".
 builtInFunctionDefs :: [C.Func]
 builtInFunctionDefs =
-  [c_trunc32, c_log32, c_sqrt32, c_exp32,
-   c_trunc64, c_log64, c_sqrt64, c_exp64]
+  [c_trunc32, c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32,
+   c_trunc64, c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64]

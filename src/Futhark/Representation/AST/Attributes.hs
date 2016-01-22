@@ -70,11 +70,15 @@ builtInFunctions = HM.fromList $ map namify
                    ,("log32", (FloatType Float32, [FloatType Float32]))
                    ,("exp32", (FloatType Float32, [FloatType Float32]))
                    ,("trunc32", (IntType Int32, [FloatType Float32]))
+                   ,("cos32", (FloatType Float32, [FloatType Float32]))
+                   ,("sin32", (FloatType Float32, [FloatType Float32]))
 
                    ,("sqrt64", (FloatType Float64, [FloatType Float64]))
                    ,("log64", (FloatType Float64, [FloatType Float64]))
                    ,("exp64", (FloatType Float64, [FloatType Float64]))
                    ,("trunc64", (IntType Int32, [FloatType Float64]))
+                   ,("cos64", (FloatType Float64, [FloatType Float64]))
+                   ,("sin64", (FloatType Float64, [FloatType Float64]))
 
                    ,("num_groups", (IntType Int32, []))
                    ,("group_size", (IntType Int32, []))

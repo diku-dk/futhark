@@ -95,6 +95,12 @@ def futhark_sqrt64(x):
 def futhark_exp64(x):
   return exp(x)
 
+def futhark_cos64(x):
+  return cos(x)
+
+def futhark_sin64(x):
+  return sin(x)
+
 def futhark_trunc64(x):
   return int64(trunc(x))
 
@@ -106,6 +112,12 @@ def futhark_sqrt32(x):
 
 def futhark_exp32(x):
   return exp(x)
+
+def futhark_cos32(x):
+  return cos(x)
+
+def futhark_sin32(x):
+  return sin(x)
 
 def futhark_trunc32(x):
   return float32(trunc(x))

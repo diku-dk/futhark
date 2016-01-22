@@ -343,11 +343,16 @@ builtins = HM.fromList $ map namify
            ,("sqrt32", builtin "sqrt32")
            ,("log32", builtin "log32")
            ,("exp32", builtin "exp32")
+           ,("cos32", builtin "cos32")
+           ,("sin32", builtin "sin32")
 
            ,("trunc64", builtin "trunc64")
            ,("sqrt64", builtin "sqrt64")
            ,("log64", builtin "log64")
-           ,("exp64", builtin "exp64")]
+           ,("exp64", builtin "exp64")
+           ,("cos64", builtin "cos64")
+           ,("sin64", builtin "sin64")
+           ]
   where namify (k,v) = (nameFromString k, v)
 
 builtin :: String -> [Value] -> FutharkM [Value]
@@ -359,6 +364,10 @@ builtin "log32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ log x]
 builtin "exp32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ exp x]
+builtin "cos32" [PrimVal (FloatValue (Float32Value x))] =
+  return [PrimVal $ FloatValue $ Float32Value $ cos x]
+builtin "sin32" [PrimVal (FloatValue (Float32Value x))] =
+  return [PrimVal $ FloatValue $ Float32Value $ sin x]
 builtin "trunc64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ IntValue $ Int32Value $ truncate x]
 builtin "sqrt64" [PrimVal (FloatValue (Float64Value x))] =
@@ -367,6 +376,10 @@ builtin "log64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ log x]
 builtin "exp64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ exp x]
+builtin "cos64" [PrimVal (FloatValue (Float64Value x))] =
+  return [PrimVal $ FloatValue $ Float64Value $ cos x]
+builtin "sin64" [PrimVal (FloatValue (Float64Value x))] =
+  return [PrimVal $ FloatValue $ Float64Value $ sin x]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (rankShaped . valueType) args
