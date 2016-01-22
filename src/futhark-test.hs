@@ -13,10 +13,10 @@ import Control.Monad hiding (forM_)
 import Control.Exception hiding (try)
 import Control.Monad.Except hiding (forM_)
 import Data.Char
-import Data.List
+import Data.List hiding (foldl')
 import Data.Monoid
 import Data.Ord
-import Data.Foldable (forM_)
+import Data.Foldable (forM_, foldl')
 import qualified Data.Array as A
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -36,12 +36,13 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (Pretty,pretty)
 import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.Kernels (Kernels)
+import Futhark.Representation.AST.Attributes.Values (valueType)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
@@ -123,7 +124,7 @@ braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
 
 parseNatural :: Parser Int
-parseNatural = lexeme $ foldl (\acc x -> acc * 10 + x) 0 <$>
+parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 <$>
                map num <$> some digit
   where num c = ord c - ord '0'
 
@@ -430,14 +431,17 @@ justCompileTestProgram futharkc program =
 
 compareResult :: FilePath -> ExpectedResult [Value] -> RunResult -> TestM ()
 compareResult program (Succeeds expectedResult) (SuccessResult actualResult) =
-  unless (compareValues actualResult expectedResult) $ do
-    actualf <-
-      io $ writeOutFile program "actual" $
-      unlines $ map pretty actualResult
-    expectedf <-
-      io $ writeOutFile program "expected" $
-      unlines $ map pretty expectedResult
-    throwError $ actualf ++ " and " ++ expectedf ++ " do not match."
+  case compareValues actualResult expectedResult of
+    Just mismatch -> do
+      actualf <-
+        io $ writeOutFile program "actual" $
+        unlines $ map pretty actualResult
+      expectedf <-
+        io $ writeOutFile program "expected" $
+        unlines $ map pretty expectedResult
+      throwError $ actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
+    Nothing ->
+      return ()
 compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
 compareResult _ (Succeeds _) (ErrorResult _ err) =
@@ -457,34 +461,74 @@ writeOutFile base ext content =
             else do writeFile filename content
                     return filename
 
-compareValues :: [Value] -> [Value] -> Bool
+data Mismatch = PrimValueMismatch Int PrimValue PrimValue
+              | ArrayLengthMismatch Int Int Int
+              | TypeMismatch Int Type Type
+              | ValueCountMismatch Int Int
+
+instance Show Mismatch where
+  show (PrimValueMismatch i got expected) =
+    explainMismatch i "" got expected
+  show (ArrayLengthMismatch i got expected) =
+    explainMismatch i "array of length" got expected
+  show (TypeMismatch i got expected) =
+    explainMismatch i "value of type" got expected
+  show (ValueCountMismatch got expected) =
+    "Expected " ++ show expected ++ " values, got " ++ show got
+
+explainMismatch :: Pretty a => Int -> String -> a -> a -> String
+explainMismatch i what expected got =
+  "Value " ++ show i ++ " expected " ++ what ++ pretty expected ++ ", got " ++ pretty got
+
+compareValues :: [Value] -> [Value] -> Maybe Mismatch
 compareValues vs1 vs2
-  | length vs1 /= length vs2 = False
-  | otherwise = and $ zipWith compareValue vs1 vs2
+  | n /= m = Just $ ValueCountMismatch n m
+  | otherwise = case sequence $ zipWith3 compareValue [0..] vs1 vs2 of
+    Just (e:_) -> Just e
+    _          -> Nothing
+  where n = length vs1
+        m = length vs2
 
-compareValue :: Value -> Value -> Bool
-compareValue (PrimVal bv1) (PrimVal bv2) =
-  comparePrimValue bv1 bv2
-compareValue (ArrayVal vs1 _ _) (ArrayVal vs2 _ _) =
-  A.bounds vs1 == A.bounds vs2 &&
-  and (zipWith comparePrimValue (A.elems vs1) (A.elems vs2))
-compareValue _ _ =
-  False
+compareValue :: Int -> Value -> Value -> Maybe Mismatch
+compareValue i (PrimVal bv1) (PrimVal bv2)
+  | comparePrimValue minTolerance bv1 bv2 = Nothing
+  | otherwise = Just $ PrimValueMismatch i bv1 bv2
+compareValue i (ArrayVal vs1 _ _) (ArrayVal vs2 _ _)
+  | A.bounds vs1 == A.bounds vs2 =
+      uncurry (PrimValueMismatch i) <$>
+        find (not . uncurry (comparePrimValue tol)) (zip (A.elems vs1) (A.elems vs2))
+  | otherwise =
+      Just $ ArrayLengthMismatch i (snd $ A.bounds vs1) (snd $ A.bounds vs2)
+  where tol = tolerance vs2
+compareValue i v1 v2 =
+  Just $ TypeMismatch i (valueType v1) (valueType v2)
 
-comparePrimValue :: PrimValue -> PrimValue -> Bool
-comparePrimValue (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
-  floatToDouble (abs (x - y)) < epsilon
-comparePrimValue (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
-  abs (x - y) < epsilon
-comparePrimValue (FloatValue (Float64Value x)) (FloatValue (Float32Value y)) =
-  abs (x - floatToDouble y) < epsilon
-comparePrimValue (FloatValue (Float32Value x)) (FloatValue (Float64Value y)) =
-  abs (floatToDouble x - y) < epsilon
-comparePrimValue x y =
+comparePrimValue :: Double -> PrimValue -> PrimValue -> Bool
+comparePrimValue tol (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
+  compareFractional tol x y
+comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
+  compareFractional tol x y
+comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float32Value y)) =
+  compareFractional tol x (floatToDouble y)
+comparePrimValue tol  (FloatValue (Float32Value x)) (FloatValue (Float64Value y)) =
+  compareFractional tol (floatToDouble x) y
+comparePrimValue _ x y =
   x == y
 
-epsilon :: Double
-epsilon = 0.001
+compareFractional :: (Ord num, Fractional num, Real tol) =>
+                     tol -> num -> num -> Bool
+compareFractional tol x y =
+  diff < fromRational (toRational tol) || diff < minTolerance * abs y
+  where diff = abs $ x - y
+
+minTolerance :: Fractional a => a
+minTolerance = 0.002 -- 0.2%
+
+tolerance :: A.Array Int PrimValue -> Double
+tolerance = foldl' tolerance' minTolerance
+  where tolerance' t (FloatValue (Float32Value v)) = max t $ floatToDouble v
+        tolerance' t (FloatValue (Float64Value v)) = max t v
+        tolerance' t _                             = t
 
 floatToDouble :: Float -> Double
 floatToDouble x =
