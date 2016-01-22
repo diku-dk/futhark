@@ -226,84 +226,84 @@ cFloatConvOps :: [C.Definition]
 
 c_trunc32 :: C.Func
 c_trunc32 = [C.cfun|
-    int $id:(funName' "trunc32")(float x) {
+    static inline int $id:(funName' "trunc32")(float x) {
       return x;
     }
    |]
 
 c_log32 :: C.Func
 c_log32 = [C.cfun|
-    float $id:(funName' "log32")(float x) {
+    static inline float $id:(funName' "log32")(float x) {
       return log(x);
     }
     |]
 
 c_sqrt32 :: C.Func
 c_sqrt32 = [C.cfun|
-    float $id:(funName' "sqrt32")(float x) {
+    static inline float $id:(funName' "sqrt32")(float x) {
       return sqrt(x);
     }
     |]
 
 c_exp32 ::C.Func
 c_exp32 = [C.cfun|
-    float $id:(funName' "exp32")(float x) {
+    static inline float $id:(funName' "exp32")(float x) {
       return exp(x);
     }
   |]
 
 c_cos32 ::C.Func
 c_cos32 = [C.cfun|
-    float $id:(funName' "cos32")(float x) {
+    static inline float $id:(funName' "cos32")(float x) {
       return cos(x);
     }
   |]
 
 c_sin32 ::C.Func
 c_sin32 = [C.cfun|
-    float $id:(funName' "sin32")(float x) {
+    static inline float $id:(funName' "sin32")(float x) {
       return sin(x);
     }
   |]
 
 c_trunc64 :: C.Func
 c_trunc64 = [C.cfun|
-    int $id:(funName' "trunc64")(double x) {
+    static inline int $id:(funName' "trunc64")(double x) {
       return x;
     }
    |]
 
 c_log64 :: C.Func
 c_log64 = [C.cfun|
-    double $id:(funName' "log64")(double x) {
+    static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }
     |]
 
 c_sqrt64 :: C.Func
 c_sqrt64 = [C.cfun|
-    double $id:(funName' "sqrt64")(double x) {
+    static inline double $id:(funName' "sqrt64")(double x) {
       return sqrt(x);
     }
     |]
 
 c_exp64 ::C.Func
 c_exp64 = [C.cfun|
-    double $id:(funName' "exp64")(double x) {
+    static inline double $id:(funName' "exp64")(double x) {
       return exp(x);
     }
   |]
 
 c_cos64 ::C.Func
 c_cos64 = [C.cfun|
-    double $id:(funName' "cos64")(double x) {
+    static inline double $id:(funName' "cos64")(double x) {
       return cos(x);
     }
   |]
 
 c_sin64 ::C.Func
 c_sin64 = [C.cfun|
-    double $id:(funName' "sin64")(double x) {
+    static inline double $id:(funName' "sin64")(double x) {
       return sin(x);
     }
   |]
