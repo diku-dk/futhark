@@ -14,6 +14,7 @@ import Control.Exception hiding (try)
 import Control.Monad.Except hiding (forM_)
 import Data.Char
 import Data.List hiding (foldl')
+import Data.Maybe
 import Data.Monoid
 import Data.Ord
 import Data.Foldable (forM_, foldl')
@@ -93,9 +94,10 @@ instance Show StructureTest where
     "StructureTest <config> " ++ show metrics
 
 data RunMode
-  = CompiledOnly
-  | InterpretedOnly
-  | InterpretedAndCompiled
+  = CompiledOnly -- ^ Cannot run with interpreter.
+  | InterpretedOnly -- ^ Only run with interpreter.
+  | NoTravis -- ^ Requires a lot of memory, do not run in Travis.
+  | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
   deriving (Eq, Show)
 
 data TestRun = TestRun
@@ -148,6 +150,7 @@ parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
 
 parseRunMode :: Parser RunMode
 parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
+               (lexstr "notravis" *> pure NoTravis) <|>
                pure InterpretedAndCompiled
 
 parseRunCases :: Parser [TestRun]
@@ -562,15 +565,17 @@ applyModeToAction _ a@CompileTimeFailure{} =
 applyModeToAction OnlyTypeCheck (RunCases _) =
   RunCases []
 applyModeToAction mode (RunCases cases) =
-  RunCases $ map (applyModeToCase mode) cases
+  RunCases $ mapMaybe (applyModeToCase mode) cases
 
-applyModeToCase :: TestMode -> TestRun -> TestRun
+applyModeToCase :: TestMode -> TestRun -> Maybe TestRun
 applyModeToCase OnlyInterpret run =
-  run { runMode = InterpretedOnly }
+  Just run { runMode = InterpretedOnly }
 applyModeToCase OnlyCompile run =
-  run { runMode = CompiledOnly }
+  Just run { runMode = CompiledOnly }
+applyModeToCase OnTravis run | runMode run == NoTravis =
+  Nothing
 applyModeToCase _ run =
-  run
+  Just run
 
 runTest :: MVar TestCase -> MVar (TestCase, TestResult) -> IO ()
 runTest testmvar resmvar = forever $ do
@@ -695,6 +700,7 @@ addTypeChecker typeChecker config = case configTypeChecker config of
 data TestMode = OnlyTypeCheck
               | OnlyCompile
               | OnlyInterpret
+              | OnTravis
               | Everything
 
 commandLineOptions :: [FunOptDescr TestConfig]
@@ -708,6 +714,11 @@ commandLineOptions = [
   , Option "c" ["only-compile"]
     (NoArg $ Right $ \config -> config { configTestMode = OnlyCompile })
     "Only run compiled code"
+  , Option [] ["travis"]
+    (NoArg $ Right $ \config -> config { configTestMode = OnTravis
+                                       , configExclude = T.pack "notravis" :
+                                                         configExclude config })
+    "Only run compiled code not marked notravis"
 
   , Option [] ["typechecker"]
     (ReqArg (Right . changeProgConfig . addTypeChecker)
