@@ -518,7 +518,7 @@ comparePrimValue _ x y =
 compareFractional :: (Ord num, Fractional num, Real tol) =>
                      tol -> num -> num -> Bool
 compareFractional tol x y =
-  diff < fromRational (toRational tol) || diff < minTolerance * abs y
+  diff < fromRational (toRational tol)
   where diff = abs $ x - y
 
 minTolerance :: Fractional a => a
@@ -526,8 +526,8 @@ minTolerance = 0.002 -- 0.2%
 
 tolerance :: A.Array Int PrimValue -> Double
 tolerance = foldl' tolerance' minTolerance
-  where tolerance' t (FloatValue (Float32Value v)) = max t $ floatToDouble v
-        tolerance' t (FloatValue (Float64Value v)) = max t v
+  where tolerance' t (FloatValue (Float32Value v)) = max t $ 0.001 * floatToDouble v
+        tolerance' t (FloatValue (Float64Value v)) = max t $ 0.001 * v
         tolerance' t _                             = t
 
 floatToDouble :: Float -> Double
