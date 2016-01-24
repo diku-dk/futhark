@@ -447,8 +447,8 @@ compareResult program (Succeeds expectedResult) (SuccessResult actualResult) =
       return ()
 compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
-compareResult _ (Succeeds _) (ErrorResult _ err) =
-  throwError $ "Program failed with error:\n  " ++ err
+compareResult _ (Succeeds _) (ErrorResult code err) =
+  throwError $ "Program failed with error code " ++ show code ++ " and stderr:\n  " ++ err
 compareResult _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " ++ show f
 
@@ -480,7 +480,7 @@ instance Show Mismatch where
     "Expected " ++ show expected ++ " values, got " ++ show got
 
 explainMismatch :: Pretty a => Int -> String -> a -> a -> String
-explainMismatch i what expected got =
+explainMismatch i what got expected =
   "Value " ++ show i ++ " expected " ++ what ++ pretty expected ++ ", got " ++ pretty got
 
 compareValues :: [Value] -> [Value] -> Maybe Mismatch
