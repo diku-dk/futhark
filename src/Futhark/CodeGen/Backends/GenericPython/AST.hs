@@ -79,7 +79,14 @@ instance Pretty PyArg where
 
 instance Pretty PyExp where
     ppr (Constant chr@(CharValue _)) = text "b" <> ppr chr
-    ppr (Constant v) = ppr v
+    ppr (Constant (IntValue (Int8Value v))) = text "int8" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int16Value v))) = text "int16" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int32Value v))) = text "int32" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int64Value v))) = text "int64" <> parens (text $ show v)
+    ppr (Constant (FloatValue (Float32Value v))) = text "float32" <> parens (text $ show v)
+    ppr (Constant (FloatValue (Float64Value v))) = text "float64" <> parens (text $ show v)
+    ppr (Constant Checked) = text "Checked"
+    ppr (Constant (BoolValue b)) = ppr b
     ppr (StringLiteral s) = text $ show s
     ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
     ppr (Field e s) = ppr e <> text "." <> text s

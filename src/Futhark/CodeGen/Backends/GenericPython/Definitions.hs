@@ -200,8 +200,8 @@ def parse_int(f):
         else:
             unget_char(f, c)
             break
+    optional(read_int_trailer, f)
     return s
-
 
 def parse_int_signed(f):
     s = ''
@@ -214,6 +214,11 @@ def parse_int_signed(f):
       s = parse_int(f)
 
     return s
+
+def read_int_trailer(f):
+  parse_specific_char(f, 'i')
+  while peek_char(f).isdigit():
+    get_char(f)
 
 def read_comma(f):
     skip_spaces(f)
@@ -253,13 +258,16 @@ def read_double(f):
         expt = parse_int_signed(f)
     else:
         expt = '0'
+    optional(read_float_trailer, f)
     return float(sign + bef + '.' + aft + 'E' + expt)
 
 def read_float(f):
-    x = read_double(f)
-    if not optional(parse_specific_char, f, 'f'):
-      parse_specific_char, f, 'F'
-    return x
+    return read_double(f)
+
+def read_float_trailer(f):
+  parse_specific_char(f, 'f')
+  while peek_char(f).isdigit():
+    get_char(f)
 
 def read_bool(f):
     skip_spaces(f)
