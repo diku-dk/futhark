@@ -139,20 +139,22 @@ asLoopOp _           = Nothing
 -- bounds.  On the other hand, adding two numbers cannot fail.
 safeExp :: IsOp (Op lore) => Exp lore -> Bool
 safeExp (PrimOp op) = safePrimOp op
-  where safePrimOp (BinOp SDiv{} _ y) = not $ zeroIsh' y
-        safePrimOp (BinOp UDiv{} _ y) = not $ zeroIsh' y
-        safePrimOp (BinOp FDiv{} _ y) = not $ zeroIsh' y
-        safePrimOp (BinOp SMod{} _ y) = not $ zeroIsh' y
-        safePrimOp (BinOp UMod{} _ y) = not $ zeroIsh' y
+  where safePrimOp (BinOp SDiv{} _ (Constant y)) = not $ zeroIsh y
+        safePrimOp (BinOp SDiv{} _ _) = False
+        safePrimOp (BinOp UDiv{} _ (Constant y)) = not $ zeroIsh y
+        safePrimOp (BinOp UDiv{} _ _) = False
+        safePrimOp (BinOp SMod{} _ (Constant y)) = not $ zeroIsh y
+        safePrimOp (BinOp SMod{} _ _) = False
+        safePrimOp (BinOp UMod{} _ (Constant y)) = not $ zeroIsh y
+        safePrimOp (BinOp UMod{} _ _) = False
+        safePrimOp (BinOp SPow{} (Constant x) _) = not $ zeroIsh x
+        safePrimOp (BinOp SPow{} _ _) = False
         safePrimOp BinOp{} = True
         safePrimOp SubExp{} = True
         safePrimOp UnOp{} = True
         safePrimOp CmpOp{} = True
         safePrimOp ConvOp{} = True
         safePrimOp _ = False
-
-        zeroIsh' (Constant v) = zeroIsh v
-        zeroIsh' _ = False
 
 safeExp (LoopOp _) = False
 safeExp Apply{} = False
