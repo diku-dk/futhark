@@ -13,9 +13,9 @@ module Futhark.Representation.Primitive
 
          -- * Values
        , IntValue(..)
-       , intValue
+       , intValue, intValueType
        , FloatValue(..)
-       , floatValue
+       , floatValue, floatValueType
        , PrimValue(..)
        , primValueType
        , blankPrimValue
@@ -160,10 +160,10 @@ data IntValue = Int8Value !Int8
                deriving (Eq, Ord, Show)
 
 instance Pretty IntValue where
-  ppr (Int8Value v) = text $ show v
-  ppr (Int16Value v) = text $ show v
-  ppr (Int32Value v) = text $ show v
-  ppr (Int64Value v) = text $ show v
+  ppr (Int8Value v) = text $ show v ++ "i8"
+  ppr (Int16Value v) = text $ show v ++ "i16"
+  ppr (Int32Value v) = text $ show v ++ "i32"
+  ppr (Int64Value v) = text $ show v ++ "i64"
 
 -- | Create an 'IntValue' from a type and an 'Integer'.
 intValue :: Integral int => IntType -> int -> IntValue
@@ -185,8 +185,8 @@ data FloatValue = Float32Value !Float
 
 
 instance Pretty FloatValue where
-  ppr (Float32Value v) = text $ show v ++ "f"
-  ppr (Float64Value v) = text $ show v
+  ppr (Float32Value v) = text $ show v ++ "f32"
+  ppr (Float64Value v) = text $ show v ++ "f64"
 
 -- | Create a 'FloatValue' from a type and a 'Rational'.
 floatValue :: Real num => FloatType -> num -> FloatValue

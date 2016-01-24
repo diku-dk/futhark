@@ -9,7 +9,7 @@ module Language.Futhark.Parser.Lexer
 
 import Data.Char (ord)
 import Data.Loc hiding (L)
-import Data.Int (Int32)
+import Data.Int (Int8, Int16, Int32, Int64)
 
 import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser.Tokens
@@ -22,6 +22,10 @@ import Data.Bits
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
 @stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
+@hexlit = 0[xX][0-9a-fA-F]+
+@declit = [0-9]+
+@intlit = @hexlit|@declit
+@reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
 
 tokens :-
 
@@ -60,15 +64,17 @@ tokens :-
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
   "!"                      { const BANG }
-  0[xX][0-9a-fA-F]*        { INTLIT . readInt32 }
-  [0-9]+                   { INTLIT . readInt32 }
-  (([0-9]+("."[0-9]+)?))
-    ([eE][\+\-]?[0-9]+)?[fF] { F32LIT . read . init }
-  (([0-9]+("."[0-9]+)?))
-    ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
-  [a-zA-Z] [a-zA-Z0-9_']* { keyword }
-  "'" @charlit "'" { CHARLIT . read }
-  \" @stringcharlit* \" { STRINGLIT . read }
+  @intlit i8               { I8LIT . readInt8 . takeWhile (/='i') }
+  @intlit i16              { I16LIT . readInt16 . takeWhile (/='i') }
+  @intlit i32              { I32LIT . readInt32 . takeWhile (/='i') }
+  @intlit i64              { I64LIT . readInt64 . takeWhile (/='i') }
+  @intlit                  { INTLIT . readInt32 }
+  @reallit f32             { F32LIT . read . takeWhile (/='f') }
+  @reallit f64             { F64LIT . read . takeWhile (/='f') }
+  @reallit                 { REALLIT . readReal }
+  [a-zA-Z] [a-zA-Z0-9_']*  { keyword }
+  "'" @charlit "'"         { CHARLIT . read }
+  \" @stringcharlit* \"    { STRINGLIT . read }
 
 {
 
@@ -83,7 +89,10 @@ keyword s =
     "in"           -> IN
     "with"         -> WITH
     "int"          -> INT
+    "i8"           -> I8
+    "i16"          -> I16
     "i32"          -> I32
+    "i64"          -> I64
     "real"         -> REAL
     "f32"          -> F32
     "f64"          -> F64
@@ -209,8 +218,17 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
 readReal :: String -> Double
 readReal = read
 
+readInt8 :: String -> Int8
+readInt8 = read
+
+readInt16 :: String -> Int16
+readInt16 = read
+
 readInt32 :: String -> Int32
 readInt32 = read
+
+readInt64 :: String -> Int64
+readInt64 = read
 
 -- | A value tagged with a source location.
 data L a = L SrcLoc a

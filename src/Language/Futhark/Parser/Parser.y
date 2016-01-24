@@ -68,7 +68,10 @@ import Language.Futhark.Parser.Lexer
       loop            { L $$ LOOP }
       in              { L $$ IN }
       int             { L $$ INT }
+      i8              { L $$ I8 }
+      i16             { L $$ I16 }
       i32             { L $$ I32 }
+      i64             { L $$ I64 }
       bool            { L $$ BOOL }
       char            { L $$ CHAR }
       real            { L $$ REAL }
@@ -77,6 +80,10 @@ import Language.Futhark.Parser.Lexer
 
       id              { L _ (ID _) }
 
+      i8lit           { L _ (I8LIT _) }
+      i16lit          { L _ (I16LIT _) }
+      i32lit          { L _ (I32LIT _) }
+      i64lit          { L _ (I64LIT _) }
       intlit          { L _ (INTLIT _) }
       reallit         { L _ (REALLIT _) }
       f32lit          { L _ (F32LIT _) }
@@ -172,7 +179,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs real f32 f64 int i32
+%nonassoc '~' '!' signum abs real f32 f64 int i8 i16 i32 i64
 
 %%
 
@@ -275,7 +282,10 @@ PrimType : IntType       { IntType $1 }
          | char          { Char }
 
 IntType : int { Int32 }
+        | i8  { Int8 }
+        | i16 { Int16 }
         | i32 { Int32 }
+        | i64 { Int64 }
 
 FloatType : real      {% getRealType }
           | f32       { Float32 }
@@ -292,15 +302,9 @@ TypeIds : Type id ',' TypeIds
 ;
 
 Exp  :: { UncheckedExp }
-     : intlit         { let L pos (INTLIT num) = $1 in Literal (PrimValue $ IntValue $ Int32Value num) pos }
-     | reallit        {% let L pos (REALLIT num) = $1 in (liftM2 (Literal . PrimValue) (getRealValue num) (pure pos)) }
-     | f32lit         { let L pos (F32LIT num) = $1 in Literal (PrimValue $ FloatValue $ Float32Value num) pos }
-     | f64lit         { let L pos (F64LIT num) = $1 in Literal (PrimValue $ FloatValue $ Float64Value num) pos }
-     | charlit        { let L pos (CHARLIT char) = $1 in Literal (PrimValue $ CharValue char) pos }
+     : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
      | stringlit      { let L pos (STRINGLIT s) = $1
                         in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
-     | true           { Literal (PrimValue $ BoolValue True) $1 }
-     | false          { Literal (PrimValue $ BoolValue False) $1 }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -532,9 +536,7 @@ FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
                  | FunAbstr ',' FunAbstrsThenExp { ($1 : fst $3, snd $3) }
 
 Value : IntValue { $1 }
-      | RealValue { $1 }
-      | F32Value { $1 }
-      | F64Value { $1 }
+      | FloatValue { $1 }
       | CharValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
@@ -555,18 +557,40 @@ NaturalInts :: { [Int] }
            : intlit                 { let L _ (INTLIT num) = $1 in [fromIntegral num] }
            | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in fromIntegral num : $3  }
 
-IntValue : intlit        { let L pos (INTLIT num) = $1 in PrimValue $ IntValue $ Int32Value num }
-         | '-' intlit    { let L pos (INTLIT num) = $2 in PrimValue $ IntValue $ Int32Value (-num) }
-RealValue : reallit      {% let L pos (REALLIT num) = $1 in liftM PrimValue (getRealValue num) }
-          | '-' reallit  {% let L pos (REALLIT num) = $2 in liftM PrimValue (getRealValue (-num)) }
-F32Value : f32lit        { let L pos (F32LIT num) = $1 in PrimValue $ FloatValue $ Float32Value num }
-          | '-' f32lit   { let L pos (F32LIT num) = $2 in PrimValue $ FloatValue $ Float32Value (-num) }
-F64Value : f64lit        { let L pos (F64LIT num) = $1 in PrimValue $ FloatValue $ Float64Value num }
-          | '-' f64lit   { let L pos (F64LIT num) = $2 in PrimValue $ FloatValue $ Float64Value (-num) }
+IntValue :: { Value }
+         : IntLit { PrimValue (IntValue (fst $1)) }
+         | '-' IntLit { PrimValue (IntValue (intNegate (fst $2))) }
+
+FloatValue :: { Value }
+         : FloatLit { PrimValue (FloatValue (fst $1)) }
+         | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
+
 CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValue char }
 StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
 BoolValue : true          { PrimValue $ BoolValue True }
          | false          { PrimValue $ BoolValue False }
+
+IntLit :: { (IntValue, SrcLoc) }
+       : i8lit  { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
+       | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
+       | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
+       | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
+       | intlit { let L pos (INTLIT num) = $1 in (Int32Value num, pos) }
+
+FloatLit :: { (FloatValue, SrcLoc) }
+         : f32lit { let L pos (F32LIT num) = $1 in (Float32Value num, pos) }
+         | f64lit { let L pos (F64LIT num) = $1 in (Float64Value num, pos) }
+         | reallit {% let L pos (REALLIT num) = $1 in do num' <- getRealValue num; return (num', pos) }
+
+PrimLit :: { (PrimValue, SrcLoc) }
+        : IntLit { let (x,loc) = $1 in (IntValue x, loc) }
+        | FloatLit { let (x,loc) = $1 in (FloatValue x, loc) }
+
+        | true   { (BoolValue True, $1) }
+        | false  { (BoolValue False, $1) }
+
+        | charlit { let L pos (CHARLIT char) = $1 in (CharValue char, pos) }
+
 ArrayValue :  '[' Value ']'
              {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
              }
@@ -588,7 +612,7 @@ Values : Value ',' Values { $1 : $3 }
 data ParserEnv = ParserEnv {
                  parserFile :: FilePath
                , parserRealType :: FloatType
-               , parserRealFun :: Double -> PrimValue
+               , parserRealFun :: Double -> FloatValue
                , parserFunMap :: HM.HashMap Name Name
                }
 
@@ -669,13 +693,23 @@ getFilename = lift $ asks parserFile
 getRealType :: ParserMonad FloatType
 getRealType = lift $ asks parserRealType
 
-getRealValue :: Double -> ParserMonad PrimValue
+getRealValue :: Double -> ParserMonad FloatValue
 getRealValue x = do f <- lift $ asks parserRealFun
                     return $ f x
 
 getFunName :: Name -> ParserMonad Name
 getFunName name = do substs <- lift $ asks parserFunMap
                      return $ HM.lookupDefault name name substs
+
+intNegate :: IntValue -> IntValue
+intNegate (Int8Value v) = Int8Value (-v)
+intNegate (Int16Value v) = Int16Value (-v)
+intNegate (Int32Value v) = Int32Value (-v)
+intNegate (Int64Value v) = Int64Value (-v)
+
+floatNegate :: FloatValue -> FloatValue
+floatNegate (Float32Value v) = Float32Value (-v)
+floatNegate (Float64Value v) = Float64Value (-v)
 
 readLine :: ParserMonad String
 readLine = lift $ lift $ lift readLineFromMonad
