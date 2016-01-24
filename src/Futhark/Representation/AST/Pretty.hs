@@ -318,7 +318,7 @@ instance Pretty ConvOp where
 
 taggedI :: String -> IntType -> Doc
 taggedI s Int8 = text $ s ++ "8"
-taggedI s Int16 = text $ s ++ "8"
+taggedI s Int16 = text $ s ++ "16"
 taggedI s Int32 = text $ s ++ "32"
 taggedI s Int64 = text $ s ++ "64"
 
