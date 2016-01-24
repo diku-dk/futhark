@@ -341,7 +341,10 @@ printStm (ArrayValue mem bt (dim:shape)) = do
              }|]
 
 readFun :: PrimType -> Maybe String
-readFun (IntType Int32)  = Just "read_int"
+readFun (IntType Int8) = Just "read_int8"
+readFun (IntType Int16) = Just "read_int16"
+readFun (IntType Int32) = Just "read_int32"
+readFun (IntType Int64) = Just "read_int64"
 readFun Char = Just "read_char"
 readFun Bool = Just "read_bool"
 readFun (FloatType Float32) = Just "read_float"
