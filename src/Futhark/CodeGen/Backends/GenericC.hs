@@ -781,6 +781,13 @@ compileCode (Comment s code) = do
               { $items:items }
              |]
 
+compileCode c
+  | Just (name, t, e, c') <- declareAndSet c = do
+    let ct = primTypeToCType t
+    e' <- compileExp e
+    item [C.citem|$ty:ct $id:name = $exp:e';|]
+    compileCode c'
+
 compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e loc) = do
@@ -910,6 +917,13 @@ compileFunBody outputs code = do
 ppArrayType :: PrimType -> Int -> String
 ppArrayType t 0 = pretty t
 ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"
+
+declareAndSet :: Code op -> Maybe (VName, PrimType, Exp, Code op)
+declareAndSet (DeclareScalar name t :>>: (SetScalar dest e :>>: c))
+  | name == dest = Just (name, t, e, c)
+declareAndSet ((DeclareScalar name t :>>: SetScalar dest e) :>>: c)
+  | name == dest = Just (name, t, e, c)
+declareAndSet _ = Nothing
 
 assignmentOperator :: BinOp -> Maybe (VName -> C.Exp -> C.Exp)
 assignmentOperator Add{}  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
