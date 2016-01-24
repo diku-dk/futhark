@@ -45,7 +45,7 @@
   "A list of Futhark keywords.")
 
 (defconst futhark-types
-  '("int" "real" "bool" "char" "f32" "f64")
+  '("i8" "i16" "i32" "i64" "int" "real" "bool" "char" "f32" "f64")
   "A list of Futhark types.")
 
 (defconst futhark-vars

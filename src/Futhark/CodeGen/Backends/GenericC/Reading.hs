@@ -196,6 +196,7 @@ readerFunctions =
     int read_int(void* dest) {
       skipspaces();
       if (scanf("%d", (int*)dest) == 1) {
+        scanf("i32");
         return 0;
       } else {
         return 1;
@@ -214,6 +215,7 @@ readerFunctions =
     int read_double(void* dest) {
       skipspaces();
       if (scanf("%lf", (double*)dest) == 1) {
+        scanf("f64");
         return 0;
       } else {
         return 1;
@@ -222,7 +224,8 @@ readerFunctions =
 
     int read_float(void* dest) {
       skipspaces();
-      if (scanf("%ff", (float*)dest) == 1) {
+      if (scanf("%f", (float*)dest) == 1) {
+        scanf("f32");
         return 0;
       } else {
         return 1;
