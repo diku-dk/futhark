@@ -288,8 +288,8 @@ typeToCType t = do
                 return [C.csdecl|$ty:ct $id:(tupleField i);|]
 
 printPrimStm :: C.Exp -> PrimType -> C.Stm
-printPrimStm val (IntType Int8) = [C.cstm|printf("%di8", $exp:val);|]
-printPrimStm val (IntType Int16) = [C.cstm|printf("%di16", $exp:val);|]
+printPrimStm val (IntType Int8) = [C.cstm|printf("%hhdi8", $exp:val);|]
+printPrimStm val (IntType Int16) = [C.cstm|printf("%hdi16", $exp:val);|]
 printPrimStm val (IntType Int32) = [C.cstm|printf("%di32", $exp:val);|]
 printPrimStm val (IntType Int64) = [C.cstm|printf("%lldi64", $exp:val);|]
 printPrimStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
