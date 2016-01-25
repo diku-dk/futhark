@@ -54,6 +54,7 @@ data Token = IF
            | POW
            | SHIFTL
            | SHIFTR
+           | ZSHIFTR
            | BOR
            | BAND
            | XOR

@@ -292,6 +292,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Quot
            | Rem
            | ShiftR
+           | ZShiftR -- ^ Zero-extend right shift.
            | ShiftL
            | Band
            | Xor

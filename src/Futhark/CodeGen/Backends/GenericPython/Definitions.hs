@@ -35,38 +35,122 @@ def writeScalarArray(x, offset, v):
 
 pyUtility :: PyDefinition
 pyUtility = [r|
-def shl32(x,y):
+def shlN(x,y):
   return x << y
 
-def ashr32(x,y):
+def ashrN(x,y):
   return x >> y
 
-def sdiv32(x,y):
+def sdivN(x,y):
   return x / y
 
-def smod32(x,y):
+def smodN(x,y):
   return x % y
 
-def squot32(x,y):
+def squotN(x,y):
   return int32(float(x) / float(y))
 
-def srem32(x,y):
+def sremN(x,y):
   return fmod(x,y)
 
-def spow32(x,y):
+def spowN(x,y):
   return x ** y
 
-def fpow32(x,y):
+def fpowN(x,y):
   return x ** y
 
-def fpow64(x,y):
-  return x ** y
-
-def sle32(x,y):
+def sleN(x,y):
   return x <= y
 
-def slt32(x,y):
+def sltN(x,y):
   return x < y
+
+def lshr8(x,y):
+  return int8(uint8(x) >> uint8(y))
+
+def lshr16(x,y):
+  return int16(uint16(x) >> uint16(y))
+
+def lshr32(x,y):
+  return int32(uint32(x) >> uint32(y))
+
+def lshr64(x,y):
+  return int64(uint64(x) >> uint64(y))
+
+def sext_T_i8(x):
+  return int8(x)
+
+def sext_T_i16(x):
+  return int16(x)
+
+def sext_T_i32(x):
+  return int32(x)
+
+def sext_T_i64(x):
+  return int32(x)
+
+def zext_i8_i8(x):
+  return int8(uint8(x))
+
+def zext_i8_i16(x):
+  return int16(uint8(x))
+
+def zext_i8_i32(x):
+  return int32(uint8(x))
+
+def zext_i8_i64(x):
+  return int64(uint8(x))
+
+def zext_i16_i8(x):
+  return int8(uint16(x))
+
+def zext_i16_i16(x):
+  return int16(uint16(x))
+
+def zext_i16_i32(x):
+  return int32(uint16(x))
+
+def zext_i16_i64(x):
+  return int64(uint16(x))
+
+def zext_i32_i8(x):
+  return int8(uint32(x))
+
+def zext_i32_i16(x):
+  return int16(uint32(x))
+
+def zext_i32_i32(x):
+  return int32(uint32(x))
+
+def zext_i32_i64(x):
+  return int64(uint32(x))
+
+def zext_i64_i8(x):
+  return int8(uint64(x))
+
+def zext_i64_i16(x):
+  return int16(uint64(x))
+
+def zext_i64_i32(x):
+  return int32(uint64(x))
+
+def zext_i64_i64(x):
+  return int64(uint64(x))
+
+shl8 = shl16 = shl32 = shl64 = shlN
+ashr8 = ashr16 = ashr32 = ashr64 = ashrN
+sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
+smod8 = smod16 = smod32 = smod64 = smodN
+squot8 = squot16 = squot32 = squot64 = squotN
+srem8 = srem16 = srem32 = srem64 = sremN
+spow8 = spow16 = spow32 = spow64 = spowN
+fpow32 = fpow64 = fpowN
+sle8 = sle16 = sle32 = sle64 = sleN
+slt8 = slt16 = slt32 = slt64 = sltN
+sext_i8_i8 = sext_i16_i8 = sext_i32_i8 = sext_i64_i8 = sext_T_i8
+sext_i8_i16 = sext_i16_i16 = sext_i32_i16 = sext_i64_i16 = sext_T_i16
+sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
+sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
 
 def sitofp_i32_f32(x):
   return float32(x)
@@ -74,10 +158,10 @@ def sitofp_i32_f32(x):
 def sitofp_i32_f64(x):
   return float32(x)
 
-def fpext_f32_f64(x):
+def fpconv_f32_f64(x):
   return float64(x)
 
-def fptrunc_f64_f32(x):
+def fpconv_f64_f32(x):
   return float32(x)
 
 def fptosi_f32_i32(x):

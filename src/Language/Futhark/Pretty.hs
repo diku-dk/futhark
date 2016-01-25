@@ -143,6 +143,7 @@ instance Pretty BinOp where
   ppr Quot = text "//"
   ppr Rem = text "%%"
   ppr ShiftR = text ">>"
+  ppr ZShiftR = text ">>>"
   ppr ShiftL = text "<<"
   ppr Band = text "&"
   ppr Xor = text "^"
@@ -337,6 +338,7 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Geq = 2
         precedence ShiftL = 3
         precedence ShiftR = 3
+        precedence ZShiftR = 3
         precedence Plus = 4
         precedence Minus = 4
         precedence Times = 5
