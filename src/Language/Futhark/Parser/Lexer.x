@@ -34,6 +34,7 @@ tokens :-
   "&&"                     { const AND }
   "||"                     { const OR }
   ">>"                     { const SHIFTR }
+  ">>>"                    { const ZSHIFTR }
   "<<"                     { const SHIFTL }
   "=>"                     { const ARROW }
   "<-"                     { const SETTO }

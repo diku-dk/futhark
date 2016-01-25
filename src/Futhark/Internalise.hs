@@ -695,6 +695,8 @@ internaliseBinOp desc E.Rem x y (E.IntType t) _ =
   simpleBinOp desc (I.SRem t) x y
 internaliseBinOp desc E.ShiftR x y (E.IntType t) _ =
   simpleBinOp desc (I.AShr t) x y
+internaliseBinOp desc E.ZShiftR x y (E.IntType t) _ =
+  simpleBinOp desc (I.LShr t) x y
 internaliseBinOp desc E.ShiftL x y (E.IntType t) _ =
   simpleBinOp desc (I.Shl t) x y
 internaliseBinOp desc E.Band x y (E.IntType t) _ =

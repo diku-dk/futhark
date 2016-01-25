@@ -3,13 +3,23 @@
 Language Reference
 ==================
 
-The builtin types in Futhark are ``int``, ``real``, ``f32``, ``f64``,
-``bool`` and ``char``, as well as their combination in tuples and
-arrays.  An ``int`` is currently 32 bits and ``real`` is by default a
-double-precision float (64 bits).  Some compiler frontends permit
-configuration of whether ``real`` maps to a 32-bit or 64-bit float.
-An ``f32`` is always a single-precision float and a ``f64`` is a
-double-precision float.
+The primitive types in Futhark are the signed integer types ``i8``,
+``i6``, ``i32``, ``i64``, the floating-point types``f32``, ``f64``, as
+well as ``bool`` and ``char``.  Furthermore, ``int`` is an alias for
+``i32`` and ``real`` is an alias for ``f64``.  Some compiler frontends
+permit configuration of whether ``real`` maps to a 32-bit or 64-bit
+float.  An ``f32`` is always a single-precision float and a ``f64`` is
+a double-precision float.  All primitive types can be combined in
+tuples and arrays.
+
+Numeric literals can be suffixed with their intended type.  For
+example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
+``f64``.  If no suffix is given, integer literals are of type ``i32``,
+and decimal literals are of type ``f64``.
+
+Numeric values can be converted between different types by using the
+desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
+the floating-point number ``1.0`` to a 32-bit signed integer.
 
 The following list describes every syntactical language construct in
 the language.  For convenience, we will sometimes talk of expressions
@@ -38,7 +48,8 @@ The above declaration specifies a function that takes an array
 containing ``n`` elements and returns an array likewise containing
 ``n`z elements.  In general, shape declarations in parameters are
 fresh names, whilst shape declarations in return types must refer to a
-name in scope.  A shape declaration can also be an integer constant.
+name of type ``i32`` in scope.  A shape declaration can also be an
+integer constant (with no suffix).
 
 The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
@@ -96,8 +107,9 @@ are supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``,
 
 Evaluate the binary bitwise operator on its operands, which must both
 be of type ``int``.  The following operators are supported: ``^``,
-``&``, ``|``, ``>>``, ``<<``, i.e., bitwise xor, and, or, and
-arithmetic shift right and left.
+``&``, ``|``, ``>>``, ``<<``, ``>>>``, i.e., bitwise xor, and, or,
+arithmetic shift right and left, and logical shift right.  Shift
+amounts must be non-negative.
 
 ``x && y``
 ~~~~~~~~~~

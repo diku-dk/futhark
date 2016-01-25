@@ -107,6 +107,7 @@ import Language.Futhark.Parser.Lexer
       pow             { L $$ POW }
       '<<'            { L $$ SHIFTL }
       '>>'            { L $$ SHIFTR }
+      '>>>'           { L $$ ZSHIFTR }
       '|'             { L $$ BOR }
       '&'             { L $$ BAND }
       '^'             { L $$ XOR }
@@ -174,7 +175,7 @@ import Language.Futhark.Parser.Lexer
 %left '&' '^' '|'
 %left '<=' '>=' '>' '<' '=='
 
-%left '<<' '>>'
+%left '<<' '>>' '>>>'
 %left '+' '-'
 
 %left '*' '/' '%' '//' '%%'
@@ -207,6 +208,7 @@ BinOp :: { (BinOp, SrcLoc) }
       | '&'     { (Band, $1) }
       | '|'     { (Bor, $1) }
       | '>>'    { (ShiftR, $1) }
+      | '>>>'   { (ZShiftR, $1) }
       | '<<'    { (ShiftL, $1) }
 
 UnOp :: { (UnOp, SrcLoc) }
@@ -326,6 +328,7 @@ Exp  :: { UncheckedExp }
      | FloatType '(' Exp ')' { UnOp (ToFloat $1) $3 $2 }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
+     | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
      | Exp '<<' Exp   { BinOp ShiftL $1 $3 NoInfo $2 }
      | Exp '&&' Exp   { BinOp LogAnd $1 $3 NoInfo $2 }
      | Exp '||' Exp   { BinOp LogOr $1 $3 NoInfo $2 }
