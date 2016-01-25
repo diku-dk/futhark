@@ -609,10 +609,10 @@ doFCmpLe :: FloatValue -> FloatValue -> Bool
 doFCmpLe = (<=)
 
 intToWord64 :: IntValue -> Word64
-intToWord64 (Int8Value v) = fromIntegral v
-intToWord64 (Int16Value v) = fromIntegral v
-intToWord64 (Int32Value v) = fromIntegral v
-intToWord64 (Int64Value v) = fromIntegral v
+intToWord64 (Int8Value v) = fromIntegral (fromIntegral v :: Word8)
+intToWord64 (Int16Value v) = fromIntegral (fromIntegral v :: Word16)
+intToWord64 (Int32Value v) = fromIntegral (fromIntegral v :: Word32)
+intToWord64 (Int64Value v) = fromIntegral (fromIntegral v :: Word64)
 
 intToInt64 :: IntValue -> Int64
 intToInt64 (Int8Value v) = fromIntegral v
