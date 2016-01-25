@@ -98,7 +98,9 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
                mkAnd, mkOr, mkXor,
                mkUlt, mkUle,  mkSlt, mkSle,
                mkSPow
-              ]
+              ] ++
+              map mkSExt [minBound..maxBound] ++
+              map mkZExt [minBound..maxBound]
 
         taggedI s Int8 = s ++ "8"
         taggedI s Int16 = s ++ "16"
@@ -157,6 +159,20 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
                            return res;
                          }
               }|]
+
+        mkSExt from_t to_t =
+          [C.cedecl|static inline $ty:to_ct
+                    $id:name($ty:from_ct x) { return x;} |]
+          where name = "sext_"++pretty from_t++"_"++pretty to_t
+                from_ct = intTypeToCType from_t
+                to_ct = intTypeToCType to_t
+
+        mkZExt from_t to_t =
+          [C.cedecl|static inline $ty:to_ct
+                    $id:name($ty:from_ct x) { return x;} |]
+          where name = "zext_"++pretty from_t++"_"++pretty to_t
+                from_ct = uintTypeToCType from_t
+                to_ct = uintTypeToCType to_t
 
         simpleUintOp s e t =
           [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
