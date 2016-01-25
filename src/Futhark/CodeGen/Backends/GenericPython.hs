@@ -395,9 +395,17 @@ writeOutput (Imp.ScalarValue bt vname) =
   let name = Var $ pretty vname
   in case bt of
     FloatType Float32 -> Exp $ simpleCall "print"
-                         [BinaryOp "%" (StringLiteral "%ef32") name]
+                         [BinaryOp "%" (StringLiteral "%ff32") name]
     FloatType Float64 -> Exp $ simpleCall "print"
-                         [BinaryOp "%" (StringLiteral "%ef64") name]
+                         [BinaryOp "%" (StringLiteral "%ff64") name]
+    IntType Int8 -> Exp $ simpleCall "print"
+                    [BinaryOp "%" (StringLiteral "%di8") name]
+    IntType Int16 -> Exp $ simpleCall "print"
+                     [BinaryOp "%" (StringLiteral "%di16") name]
+    IntType Int32 -> Exp $ simpleCall "print"
+                     [BinaryOp "%" (StringLiteral "%di32") name]
+    IntType Int64 -> Exp $ simpleCall "print"
+                     [BinaryOp "%" (StringLiteral "%di64") name]
     Char -> Exp $ simpleCall "print" [Field name ".decode()"]
     _ -> Exp $ simpleCall "print" [name]
 
