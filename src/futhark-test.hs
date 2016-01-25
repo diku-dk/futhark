@@ -484,27 +484,27 @@ explainMismatch i what got expected =
   "Value " ++ show i ++ " expected " ++ what ++ pretty expected ++ ", got " ++ pretty got
 
 compareValues :: [Value] -> [Value] -> Maybe Mismatch
-compareValues vs1 vs2
+compareValues got expected
   | n /= m = Just $ ValueCountMismatch n m
-  | otherwise = case sequence $ zipWith3 compareValue [0..] vs1 vs2 of
+  | otherwise = case sequence $ zipWith3 compareValue [0..] got expected of
     Just (e:_) -> Just e
     _          -> Nothing
-  where n = length vs1
-        m = length vs2
+  where n = length got
+        m = length expected
 
 compareValue :: Int -> Value -> Value -> Maybe Mismatch
-compareValue i (PrimVal bv1) (PrimVal bv2)
-  | comparePrimValue minTolerance bv1 bv2 = Nothing
-  | otherwise = Just $ PrimValueMismatch i bv1 bv2
-compareValue i (ArrayVal vs1 _ _) (ArrayVal vs2 _ _)
-  | A.bounds vs1 == A.bounds vs2 =
+compareValue i (PrimVal got) (PrimVal expected)
+  | comparePrimValue minTolerance got expected = Nothing
+  | otherwise = Just $ PrimValueMismatch i got expected
+compareValue i (ArrayVal got _ _) (ArrayVal expected _ _)
+  | A.bounds got == A.bounds expected =
       uncurry (PrimValueMismatch i) <$>
-        find (not . uncurry (comparePrimValue tol)) (zip (A.elems vs1) (A.elems vs2))
+        find (not . uncurry (comparePrimValue tol)) (zip (A.elems got) (A.elems expected))
   | otherwise =
-      Just $ ArrayLengthMismatch i (snd $ A.bounds vs1) (snd $ A.bounds vs2)
-  where tol = tolerance vs2
-compareValue i v1 v2 =
-  Just $ TypeMismatch i (valueType v1) (valueType v2)
+      Just $ ArrayLengthMismatch i (snd $ A.bounds got) (snd $ A.bounds expected)
+  where tol = tolerance expected
+compareValue i got expected =
+  Just $ TypeMismatch i (valueType got) (valueType expected)
 
 comparePrimValue :: Double -> PrimValue -> PrimValue -> Bool
 comparePrimValue tol (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
