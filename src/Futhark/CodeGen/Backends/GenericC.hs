@@ -735,9 +735,7 @@ compileExp (CmpOp cmp x y) = do
 
 compileExp (ConvOp conv x) = do
   x' <- compileExp x
-  return $ case conv of
-    Trunc _ to -> [C.cexp|($ty:(intTypeToCType to)) $exp:x'|]
-    _ -> [C.cexp|$id:(pretty conv)($exp:x')|]
+  return [C.cexp|$id:(pretty conv)($exp:x')|]
 
 compileExp (BinOp bop x y) = do
   x' <- compileExp x

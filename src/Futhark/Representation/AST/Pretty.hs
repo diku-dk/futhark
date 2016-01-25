@@ -306,11 +306,9 @@ instance Pretty CmpOp where
   ppr (FCmpLe t) = taggedF "le" t
 
 instance Pretty ConvOp where
-  ppr (Trunc from to) = convOp "trunc" from to
   ppr (ZExt from to) = convOp "zext" from to
   ppr (SExt from to) = convOp "sext" from to
-  ppr (FPTrunc from to) = convOp "fptrunc" from to
-  ppr (FPExt from to) = convOp "fpext" from to
+  ppr (FPConv from to) = convOp "fpconv" from to
   ppr (FPToUI from to) = convOp "fptoui" from to
   ppr (FPToSI from to) = convOp "fptosi" from to
   ppr (UIToFP from to) = convOp "uitofp" from to
