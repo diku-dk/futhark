@@ -46,8 +46,8 @@ module Futhark.Representation.Primitive
 
          -- ** Conversion Operations
        , doConvOp
-       , doTrunc, doZExt, doSExt
-       , doFPTrunc, doFPExt
+       , doZExt, doSExt
+       , doFPConv
        , doFPToUI, doFPToSI
        , doUIToFP, doSIToFP
 
@@ -310,16 +310,18 @@ data CmpOp = CmpEq PrimType -- ^ All types equality.
 
 -- | Conversion operators try to generalise the @from t0 x to t1@
 -- instructions from LLVM.
-data ConvOp = Trunc IntType IntType
-              -- ^ Truncate the former integer type to the latter.
-            | ZExt IntType IntType
+data ConvOp = ZExt IntType IntType
               -- ^ Zero-extend the former integer type to the latter.
+              -- If the new type is smaller, the result is a
+              -- truncation.
             | SExt IntType IntType
               -- ^ Sign-extend the former integer type to the latter.
-            | FPTrunc FloatType FloatType
-              -- ^ Truncate the former floating-point type to the latter.
-            | FPExt FloatType FloatType
-              -- ^ Extend the former floating-point type to the latter.
+              -- If the new type is smaller, the result is a
+              -- truncation.
+            | FPConv FloatType FloatType
+              -- ^ Convert value of the former floating-point type to
+              -- the latter.  If the new type is smaller, the result
+              -- is a truncation.
             | FPToUI FloatType IntType
               -- ^ Convert a floating-point value to the nearest
               -- unsigned integer (rounding towards zero).
@@ -508,20 +510,14 @@ doFPow :: FloatValue -> FloatValue -> FloatValue
 doFPow v1 v2 = floatValue (floatValueType v1) $ floatToDouble v1 ** floatToDouble v2
 
 doConvOp :: ConvOp -> PrimValue -> Maybe PrimValue
-doConvOp (Trunc _ to) (IntValue v) = Just $ IntValue $ doTrunc v to
 doConvOp (ZExt _ to) (IntValue v) = Just $ IntValue $ doZExt v to
 doConvOp (SExt _ to) (IntValue v) = Just $ IntValue $ doSExt v to
-doConvOp (FPTrunc _ to) (FloatValue v) = Just $ FloatValue $ doFPTrunc v to
-doConvOp (FPExt _ to) (FloatValue v) = Just $ FloatValue $ doFPExt v to
+doConvOp (FPConv _ to) (FloatValue v) = Just $ FloatValue $ doFPConv v to
 doConvOp (FPToUI _ to) (FloatValue v) = Just $ IntValue $ doFPToUI v to
 doConvOp (FPToSI _ to) (FloatValue v) = Just $ IntValue $ doFPToSI v to
 doConvOp (UIToFP _ to) (IntValue v) = Just $ FloatValue $ doUIToFP v to
 doConvOp (SIToFP _ to) (IntValue v) = Just $ FloatValue $ doSIToFP v to
 doConvOp _ _ = Nothing
-
--- | Truncate the given integer value to the given type.
-doTrunc :: IntValue -> IntType -> IntValue
-doTrunc = doZExt -- If the type is smaller, this is a truncation.
 
 -- | Zero-extend the given integer value to the size of the given
 -- type.  If the type is smaller than the given value, the result is a
@@ -541,16 +537,12 @@ doSExt (Int16Value x) t = intValue t $ toInteger x
 doSExt (Int32Value x) t = intValue t $ toInteger x
 doSExt (Int64Value x) t = intValue t $ toInteger x
 
--- | Truncate the former floating-point type to the latter.
-doFPTrunc :: FloatValue -> FloatType -> FloatValue
-doFPTrunc = doFPExt -- Same as truncation.
-
--- | Extend the former floating-point type to the latter.
-doFPExt :: FloatValue -> FloatType -> FloatValue
-doFPExt (Float32Value v) Float32 = Float32Value v
-doFPExt (Float64Value v) Float32 = Float32Value $ fromRational $ toRational v
-doFPExt (Float64Value v) Float64 = Float64Value v
-doFPExt (Float32Value v) Float64 = Float64Value $ fromRational $ toRational v
+-- | Convert the former floating-point type to the latter.
+doFPConv :: FloatValue -> FloatType -> FloatValue
+doFPConv (Float32Value v) Float32 = Float32Value v
+doFPConv (Float64Value v) Float32 = Float32Value $ fromRational $ toRational v
+doFPConv (Float64Value v) Float64 = Float64Value v
+doFPConv (Float32Value v) Float64 = Float64Value $ fromRational $ toRational v
 
 -- | Convert a floating-point value to the nearest
 -- unsigned integer (rounding towards zero).
@@ -630,11 +622,9 @@ floatToDouble (Float64Value v) = v
 
 -- | Return respectively the source and destination types of a conversion operator.
 convTypes :: ConvOp -> (PrimType, PrimType)
-convTypes (Trunc t1 t2) = (IntType t1, IntType t2)
 convTypes (ZExt t1 t2) = (IntType t1, IntType t2)
 convTypes (SExt t1 t2) = (IntType t1, IntType t2)
-convTypes (FPTrunc t1 t2) = (FloatType t1, FloatType t2)
-convTypes (FPExt t1 t2) = (FloatType t1, FloatType t2)
+convTypes (FPConv t1 t2) = (FloatType t1, FloatType t2)
 convTypes (FPToUI t1 t2) = (FloatType t1, IntType t2)
 convTypes (FPToSI t1 t2) = (FloatType t1, IntType t2)
 convTypes (UIToFP t1 t2) = (IntType t1, FloatType t2)

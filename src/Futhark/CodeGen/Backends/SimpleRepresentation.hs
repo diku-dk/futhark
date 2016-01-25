@@ -193,10 +193,7 @@ cFloatConvOps :: [C.Definition]
 (cFloat32Ops, cFloat64Ops, cFloatConvOps) =
   ( map ($Float32) mkOps
   , map ($Float64) mkOps
-  , [ mkFPConvFF "fpext" from to |
-      from <- [minBound..maxBound],
-      to <- [minBound..maxBound] ] ++
-    [ mkFPConvFF "fptrunc" from to |
+  , [ mkFPConvFF "fpconv" from to |
       from <- [minBound..maxBound],
       to <- [minBound..maxBound] ])
   where taggedF s Float32 = s ++ "32"
