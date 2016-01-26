@@ -4,17 +4,19 @@
 --
 -- ==
 -- input { 2i16 } output { 32769i32 }
+-- input { 33799i16 } output { 28110i32 }
 
 fun i32 main(i16 a) =
+  let a = i32(a)&0xFFFF in
   let b = 0x10001 in
   let u = 0 in
   let v = 1 in
-  loop ({a,b,u,v}) = while a > 0i16 do
+  loop ({a,b,u,v}) = while a > 0i32 do
     let q = i32((i64(b)&0xFFFFFFFFi64) // (i64(a)&0xFFFFi64)) in
     let r = i32((i64(b)&0xFFFFFFFFi64) %% (i64(a)&0xFFFFi64)) in
 
-    let b = i32(a)&0xFFFFFFFF in
-    let a = i16(r) in
+    let b = i32(a) in
+    let a = r in
 
     let t = v in
     let v = u - q * v in
