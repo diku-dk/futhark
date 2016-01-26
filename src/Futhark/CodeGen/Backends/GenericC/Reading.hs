@@ -195,7 +195,7 @@ readerFunctions =
 
     int read_int8(void* dest) {
       skipspaces();
-      if (scanf("%hhd", (typename int8_t*)dest) == 1) {
+      if (scanf("%hhi", (typename int8_t*)dest) == 1) {
         scanf("i8");
         return 0;
       } else {
@@ -205,7 +205,7 @@ readerFunctions =
 
     int read_int16(void* dest) {
       skipspaces();
-      if (scanf("%hd", (typename int16_t*)dest) == 1) {
+      if (scanf("%hi", (typename int16_t*)dest) == 1) {
         scanf("i16");
         return 0;
       } else {
@@ -215,7 +215,7 @@ readerFunctions =
 
     int read_int32(void* dest) {
       skipspaces();
-      if (scanf("%d", (typename int32_t*)dest) == 1) {
+      if (scanf("%i", (typename int32_t*)dest) == 1) {
         scanf("i32");
         return 0;
       } else {
@@ -225,7 +225,7 @@ readerFunctions =
 
     int read_int64(void* dest) {
       skipspaces();
-      if (scanf("%Ld", (typename int64_t*)dest) == 1) {
+      if (scanf("%Li", (typename int64_t*)dest) == 1) {
         scanf("i64");
         return 0;
       } else {
