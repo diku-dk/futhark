@@ -185,7 +185,7 @@ findNecessaryForReturned explicitlyReturned merge_and_res allDependencies =
                 dependencies (Constant _) =
                   HS.empty
                 dependencies (Var v)      =
-                  HM.lookupDefault HS.empty v allDependencies
+                  HM.lookupDefault (HS.singleton v) v allDependencies
 
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
