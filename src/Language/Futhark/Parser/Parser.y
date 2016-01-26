@@ -216,9 +216,8 @@ UnOp :: { (UnOp, SrcLoc) }
      | '!' { (Not, $1) }
      | abs { (Abs, $1) }
      | signum { (Signum, $1) }
-     | f32 { (ToFloat Float32, $1) }
-     | f64 { (ToFloat Float64, $1) }
-     | real {% do t <- getRealType; return (ToFloat t, $1) }
+     | IntType { (ToInt (fst $1), snd $1) }
+     | FloatType { (ToFloat (fst $1), snd $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
@@ -278,20 +277,22 @@ TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
-PrimType : IntType       { IntType $1 }
-         | FloatType     { FloatType $1 }
+PrimType : IntType       { IntType (fst $1) }
+         | FloatType     { FloatType (fst $1) }
          | bool          { Bool }
          | char          { Char }
 
-IntType : int { Int32 }
-        | i8  { Int8 }
-        | i16 { Int16 }
-        | i32 { Int32 }
-        | i64 { Int64 }
+IntType :: { (IntType, SrcLoc) }
+        : int { (Int32, $1) }
+        | i8  { (Int8, $1) }
+        | i16 { (Int16, $1) }
+        | i32 { (Int32, $1) }
+        | i64 { (Int64, $1) }
 
-FloatType : real      {% getRealType }
-          | f32       { Float32 }
-          | f64       { Float64 }
+FloatType :: { (FloatType, SrcLoc) }
+          : real {% do t <- getRealType; return (t, $1) }
+          | f32  { (Float32, $1) }
+          | f64  { (Float64, $1) }
 
 Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
@@ -324,8 +325,8 @@ Exp  :: { UncheckedExp }
      | '~' Exp        { UnOp Complement $2 $1 }
      | abs Exp        { UnOp Abs $2 $1 }
      | signum Exp     { UnOp Signum $2 $1 }
-     | IntType '(' Exp ')' { UnOp (ToInt $1) $3 $2 }
-     | FloatType '(' Exp ')' { UnOp (ToFloat $1) $3 $2 }
+     | IntType '(' Exp ')' { UnOp (ToInt (fst $1)) $3 (snd $1) }
+     | FloatType '(' Exp ')' { UnOp (ToFloat (fst $1)) $3 (snd $1) }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
      | Exp '>>>' Exp  { BinOp ZShiftR $1 $3 NoInfo $2 }
