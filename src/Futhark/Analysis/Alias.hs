@@ -7,6 +7,7 @@
 module Futhark.Analysis.Alias
        ( aliasAnalysis
          -- * Ad-hoc utilities
+       , analyseFun
        , analyseBinding
        )
        where

@@ -23,10 +23,15 @@ import Futhark.Representation.Basic
 import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Transform.GlobalizeArrays
+import qualified Futhark.Transform.FirstOrderTransfOpt as FOTopt
+--import Futhark.Analysis.LastUse
 
 -- | Perform the first-order transformation on an Futhark program.
 transformProg :: MonadFreshNames m => Prog -> m Prog
-transformProg = intraproceduralTransformation transformFunDec
+transformProg prg = do
+  let glob_arr_env = gatherGlobArrsProg prg
+  intraproceduralTransformation transformFunDec prg
 
 transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
 transformFunDec (FunDec fname rettype params body) = do

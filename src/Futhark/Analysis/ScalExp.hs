@@ -12,6 +12,7 @@ module Futhark.Analysis.ScalExp
   , fromScalExp'
   , sproduct
   , ssum
+  , freeIn
   )
 where
 
