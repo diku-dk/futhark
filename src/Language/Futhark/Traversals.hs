@@ -137,13 +137,17 @@ mapExpM tv (Transpose k n e3 loc) =
        mapOnExp tv e3 <*> pure loc
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Stripe stride e loc) =
+  Stripe <$> mapOnExp tv stride <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Unstripe stride e loc) =
+  Unstripe <$> mapOnExp tv stride <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
 mapExpM tv (ConcatMap fun e es loc) =
   pure ConcatMap <*> mapOnLambda tv fun <*>
   mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
-mapExpM tv (Reduce fun startexp arrexp loc) =
-  pure Reduce <*> mapOnLambda tv fun <*>
+mapExpM tv (Reduce comm fun startexp arrexp loc) =
+  Reduce comm <$> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Zip args loc) = do
   args' <- forM args $ \(argexp, argt) -> do
@@ -161,16 +165,17 @@ mapExpM tv (Filter fun arrexp loc) =
   pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Partition funs arrexp loc) =
   pure Partition <*> mapM (mapOnLambda tv) funs <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
-  pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
+mapExpM tv (Redomap comm redfun mapfun accexp arrexp loc) =
+  Redomap comm <$> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Stream form fun arr mm loc) =
   pure Stream <*> mapOnStreamForm form <*> mapOnLambda tv fun <*>
        mapOnExp tv arr <*> pure mm <*> pure loc
   where mapOnStreamForm (MapLike o) = pure $ MapLike o
-        mapOnStreamForm (RedLike o lam acc) =
-            pure RedLike <*> pure o <*>
-                 mapOnLambda tv lam <*> mapOnExp tv acc
+        mapOnStreamForm (RedLike o comm lam acc) =
+            RedLike o comm <$>
+            mapOnLambda tv lam <*>
+            mapOnExp tv acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapOnExp tv acc
 mapExpM tv (Split splitexps arrexp loc) =
@@ -182,18 +187,25 @@ mapExpM tv (Concat x ys loc) =
        mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
-mapExpM tv (DoLoop mergepat mergeexp (ForLoop loopvar boundexp) loopbody letbody loc) =
+mapExpM tv (DoLoop mergepat mergeexp form loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
-       (ForLoop <$> mapOnIdent tv loopvar <*> mapOnExp tv boundexp) <*>
-       mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (DoLoop mergepat mergeexp (WhileLoop cond) loopbody letbody loc) =
-  pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
-       (WhileLoop <$> mapOnExp tv cond) <*>
+       mapLoopFormM tv form <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
 
 -- | Like 'mapExp', but in the 'Identity' monad.
 mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn
 mapExp m = runIdentity . mapExpM m
+
+mapLoopFormM :: (Applicative m, Monad m) =>
+                MapperBase tyf tyt vnf vnt m
+             -> LoopFormBase tyf vnf
+             -> m (LoopFormBase tyt vnt)
+mapLoopFormM tv (For FromUpTo lbound i ubound) =
+  For FromUpTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
+mapLoopFormM tv (For FromDownTo lbound i ubound) =
+  For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
+mapLoopFormM tv (While e) =
+  While <$> mapOnExp tv e
 
 -- | Reification of a left-reduction across a syntax tree.
 data Folder ty vn a m = Folder {

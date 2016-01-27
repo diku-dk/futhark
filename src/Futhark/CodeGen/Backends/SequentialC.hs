@@ -6,15 +6,21 @@ module Futhark.CodeGen.Backends.SequentialC
   ( compileProg
   ) where
 
+import Control.Monad
+import Data.Traversable
+
+import Prelude
+
 import Futhark.Representation.ExplicitMemory
-
-import qualified Futhark.CodeGen.ImpGen as ImpGen
+import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
+import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
+import Futhark.MonadFreshNames
 
-compileProg :: Prog -> Either String String
-compileProg = fmap (GenericC.compileProg operations () [] [] []) .
-              ImpGen.compileProgSimply
-  where operations :: GenericC.Operations () ()
+compileProg :: MonadFreshNames m => Prog -> m (Either String String)
+compileProg = traverse (GenericC.compileProg operations () [] [] [] [] []) <=<
+              ImpGen.compileProg
+  where operations :: GenericC.Operations Imp.Sequential ()
         operations = GenericC.defaultOperations {
           GenericC.opsCompiler = const $ return GenericC.Done
           }

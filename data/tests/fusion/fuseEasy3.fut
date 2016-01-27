@@ -1,4 +1,7 @@
 -- ==
+-- input { [1.0, 2.0, -4.0, 1.5] }
+-- output { [13.0, 22.0, -2.0, 17.25] }
+
 fun real f(real a        ) = a + 3.0
 fun real g(real a        ) = a * 3.0
 fun real h1(real a1, real a2, real a3) = a1 * a2 + a3

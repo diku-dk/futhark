@@ -8,6 +8,7 @@ module Futhark.Optimise.InliningDeadFun
 
 import Control.Applicative
 import Control.Monad.Reader
+import Control.Monad.Identity
 
 import Data.List
 import Data.Maybe
@@ -15,7 +16,7 @@ import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Transform.Rename
 import Futhark.Analysis.CallGraph
 import Futhark.Binder
@@ -36,7 +37,7 @@ runCGM = runReader
 -- | This pass performs aggressive inlining for all
 -- functions in @prog@ by repeatedly inlining the functions with
 -- empty-apply-callee set into other callers.
-inlineAggressively :: Pass Basic Basic
+inlineAggressively :: Pass SOACS SOACS
 inlineAggressively =
   Pass { passName = "inline functions"
        , passDescription = "Inline all non-recursive functions."
@@ -45,7 +46,7 @@ inlineAggressively =
   where inline prog = do
           let cg = buildCallGraph prog
               env = CGEnv $ buildFunctionTable prog
-          return $ renameProg $ runCGM (aggInlining cg) env
+          renameProg $ runCGM (aggInlining cg) env
 
 -- | Bind a name as a common (non-merge) variable.
 bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
@@ -113,8 +114,7 @@ inlineInBody
       continue' (Body _ callbnds res') =
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
-        (runReader (withShapes res') $
-         typeEnvFromBindings callbnds)
+        (runReader (withShapes res') $ scopeOf callbnds)
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
        FunDec _ _ fargs body:_ ->
@@ -133,7 +133,7 @@ inlineInBody
           ses
 
       reshapeIfNecessary ident se
-        | t@(Array {}) <- identType ident,
+        | t@Array{} <- identType ident,
           Var v <- se =
             mkLet' [] [ident] $ shapeCoerce [] (arrayDims t) v
         | otherwise =
@@ -145,12 +145,16 @@ inlineInBody inlcallees (Body () (bnd:bnds) res) =
 inlineInBody _ (Body () [] res) =
   Body () [] res
 
-inliner :: Monad m => [FunDec] -> Mapper Basic Basic m
-inliner funs = identityMapper {
-                 mapOnLambda = return . inlineInLambda funs
-               , mapOnBody = return . inlineInBody funs
-               , mapOnExtLambda = return . inlineInExtLambda funs
-               }
+inliner :: Monad m => [FunDec] -> Mapper SOACS SOACS m
+inliner funs = identityMapper { mapOnBody = return . inlineInBody funs
+                              , mapOnOp = return . inlineInSOAC funs
+                              }
+
+inlineInSOAC :: [FunDec] -> SOAC SOACS -> SOAC SOACS
+inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
+                          { mapOnSOACLambda = return . inlineInLambda inlcallees
+                          , mapOnSOACExtLambda = return . inlineInExtLambda inlcallees
+                          }
 
 inlineInBinding :: [FunDec] -> Binding -> Binding
 inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
@@ -165,7 +169,7 @@ inlineInExtLambda inlcallees (ExtLambda i params body ret) =
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
-removeDeadFunctions :: Pass Basic Basic
+removeDeadFunctions :: Pass SOACS SOACS
 removeDeadFunctions =
   Pass { passName = "Remove dead functions"
        , passDescription = "Remove the functions that are unreachable from the main function"

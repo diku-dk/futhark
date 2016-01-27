@@ -13,10 +13,12 @@ module Futhark.MonadFreshNames
   , newID
   , newIDFromString
   , newVName
+  , newVName'
   , newIdent
   , newIdent'
   , newIdents
-  , newNameSourceForProg
+  , newParam
+  , newParam'
   , module Futhark.FreshNames
   ) where
 
@@ -34,7 +36,6 @@ import Data.Monoid
 import Prelude
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Names (progNames)
 import qualified Futhark.FreshNames as FreshNames
 import Futhark.FreshNames hiding (newName, newID, newVName)
 
@@ -97,6 +98,11 @@ newIDFromString s = newID $ varName s Nothing
 newVName :: MonadFreshNames m => String -> m VName
 newVName = newID . nameFromString
 
+-- | Produce a fresh 'VName', using the given name as a template, but
+-- possibly appending something more..
+newVName' :: MonadFreshNames m => (String -> String) -> String -> m VName
+newVName' f = newID . nameFromString . f
+
 -- | Produce a fresh 'Ident', using the given name as a template.
 newIdent :: MonadFreshNames m =>
             String -> Type -> m Ident
@@ -119,10 +125,21 @@ newIdents :: MonadFreshNames m =>
              String -> [Type] -> m [Ident]
 newIdents = mapM . newIdent
 
--- | Create a new 'NameSource' that will never produce any of the
--- names used as variables in the given program.
-newNameSourceForProg :: Prog lore -> VNameSource
-newNameSourceForProg = newNameSource . progNames
+-- | Produce a fresh 'Param', using the given name as a template.
+newParam :: MonadFreshNames m =>
+            String -> attr -> m (Param attr)
+newParam s t = do
+  s' <- newID $ varName s Nothing
+  return $ Param s' t
+
+-- | Produce a fresh 'Param', using the given 'Param' as a template,
+-- but possibly modifying the name.
+newParam' :: MonadFreshNames m =>
+             (String -> String)
+          -> Param attr -> m (Param attr)
+newParam' f param =
+  newParam (f $ nameToString $ baseName $ paramName param)
+           (paramAttr param)
 
 -- Utility instance defintions for MTL classes.  This requires
 -- UndecidableInstances, but saves on typing elsewhere.

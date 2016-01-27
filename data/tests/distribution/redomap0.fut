@@ -1,14 +1,19 @@
 -- Distribute a redomap inside of a map.
 --
--- Expected structure:
+-- One possible structure:
 --
 -- map
 --   map
 -- map
 --   reduce
+--
+-- Currently expected structure:
+--
+-- map
+--   loop
 -- ==
 --
--- structure distributed { Kernel 2 Reduce 0 Map 0 }
+-- structure distributed { MapKernel 1 Reduce 0 Map 0 DoLoop 1 }
 
 fun [int] main([[int]] a) =
   map(fn int ([int] a_r) =>

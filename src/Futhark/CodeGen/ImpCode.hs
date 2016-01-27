@@ -1,8 +1,13 @@
-{-# LANGUAGE TupleSections #-}
--- | Inspired by the paper "Defunctionalizing Push Arrays".
+{-# LANGUAGE TupleSections, GeneralizedNewtypeDeriving #-}
+-- | Imperative intermediate language used as a stepping stone in code generation.
+--
+-- This is a generic representation parametrised on an extensible
+-- arbitrary operation.
+--
+-- Originally inspired by the paper "Defunctionalizing Push Arrays"
+-- (FHPC '14).
 module Futhark.CodeGen.ImpCode
-  ( Program
-  , ProgramT (..)
+  ( Functions (..)
   , Function
   , FunctionT (..)
   , ValueDecl (..)
@@ -15,12 +20,33 @@ module Futhark.CodeGen.ImpCode
   , Space (..)
   , SpaceId
   , Code (..)
+  , PrimValue (..)
   , Exp (..)
+  , BinOp (..)
+  , CmpOp (..)
+  , ConvOp (..)
   , UnOp (..)
+
+    -- * Typed enumerations
+  , Count (..)
+  , Bytes
+  , Elements
+  , elements
+  , bytes
+  , withElemType
+
+    -- * Converting from sizes
+  , sizeToExp
+  , dimSizeToExp
+  , memSizeToExp
+
     -- * Analysis
   , functionsCalled
+  , memoryUsage
+
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
+  , module Futhark.Representation.Primitive
   )
   where
 
@@ -31,15 +57,18 @@ import Data.Loc
 import Data.Traversable
 import Data.Foldable
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude hiding (foldr)
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Syntax (BinOp (..))
+import Futhark.Representation.Primitive
+import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
+import Futhark.Util.IntegralExp
 
-import Text.PrettyPrint.Mainland hiding (space)
+import Futhark.Util.Pretty hiding (space)
 
 data Size = ConstSize Int32
           | VarSize VName
@@ -48,35 +77,21 @@ data Size = ConstSize Int32
 type MemSize = Size
 type DimSize = Size
 
--- | The memory space of a block.  If 'DefaultSpace', this is the "default"
--- space, whatever that is.  The exact meaning of the 'SpaceID'
--- depends on the backend used.  In GPU kernels, for example, this is
--- used to distinguish between constant, global and shared memory
--- spaces.  In GPU-enabled host code, it is used to distinguish
--- between host memory ('DefaultSpace') and GPU space.
-data Space = DefaultSpace
-           | Space SpaceId
-             deriving (Show, Eq, Ord)
-
--- | A string representing a specific non-default memory space.
-type SpaceId = String
-
-data Type = Scalar BasicType | Mem DimSize Space
+data Type = Scalar PrimType | Mem MemSize Space
 
 data Param = MemParam VName DimSize Space
-           | ScalarParam VName BasicType
+           | ScalarParam VName PrimType
              deriving (Show)
 
 paramName :: Param -> VName
 paramName (MemParam name _ _) = name
 paramName (ScalarParam name _) = name
 
-newtype ProgramT a = Program [(Name, Function a)]
+-- | A collection of imperative functions.
+newtype Functions a = Functions [(Name, Function a)]
 
-type Program = ProgramT
-
-data ValueDecl = ArrayValue VName BasicType [DimSize]
-               | ScalarValue BasicType VName
+data ValueDecl = ArrayValue VName PrimType [DimSize]
+               | ScalarValue PrimType VName
                deriving (Show)
 
 data FunctionT a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
@@ -89,15 +104,15 @@ data Code a = Skip
             | For VName Exp (Code a)
             | While Exp (Code a)
             | DeclareMem VName Space
-            | DeclareScalar VName BasicType
-            | Allocate VName Exp Space
+            | DeclareScalar VName PrimType
+            | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
-            | Copy VName Exp Space VName Exp Space Exp
+            | Copy VName (Count Bytes) Space VName (Count Bytes) Space (Count Bytes)
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName Exp BasicType Space Exp
+            | Write VName (Count Bytes) PrimType Space Exp
             | SetScalar VName Exp
             | SetMem VName VName
               -- ^ Must be in same space.
@@ -111,62 +126,106 @@ data Code a = Skip
             | Op a
             deriving (Show)
 
-data Exp = Constant BasicValue
-         | BinOp BinOp Exp Exp
-         | UnOp UnOp Exp
-         | Index VName Exp BasicType Space
-         | ScalarVar VName
-         | SizeOf BasicType
-         | UnsignedDivide Exp Exp -- Hack for doing address
-                                  -- calculations.  We should remove
-                                  -- this when we get around to
-                                  -- improving our binary operators
-                                  -- and scalar types.
-         | UnsignedMod Exp Exp -- Likewise.
-           deriving (Eq, Show)
-
-data UnOp = Not -- ^ Boolean negation.
-          | Complement -- ^ Bitwise complement.
-          | Negate -- ^ Numerical negation.
-          | Abs -- ^ Absolute/numerical value.
-          | Signum -- ^ Sign function.
-            deriving (Eq, Show)
-
-instance Num Exp where
-  0 + y = y
-  x + 0 = x
-  x + y = BinOp Plus x y
-
-  x - 0 = x
-  x - y = BinOp Minus x y
-
-  0 * _ = 0
-  _ * 0 = 0
-  1 * y = y
-  y * 1 = y
-  x * y = BinOp Times x y
-
-  abs = UnOp Abs
-  signum = UnOp Signum
-  fromInteger = Constant . IntVal . fromInteger
-  negate = UnOp Negate
-
-instance Fractional Exp where
-  0 / _ = 0
-  x / 1 = x
-  x / y = BinOp Divide x y
-  fromRational = Constant . Float64Val . fromRational
-
 instance Monoid (Code a) where
   mempty = Skip
   Skip `mappend` y    = y
   x    `mappend` Skip = x
   x    `mappend` y    = x :>>: y
 
+data Exp = Constant PrimValue
+         | BinOp BinOp Exp Exp
+         | CmpOp CmpOp Exp Exp
+         | ConvOp ConvOp Exp
+         | UnOp UnOp Exp
+         | Index VName (Count Bytes) PrimType Space
+         | ScalarVar VName
+         | SizeOf PrimType
+         | Cond Exp Exp Exp
+           deriving (Eq, Show)
+
+-- FIXME: At the moment, the Num instances (and family) assume that we
+-- only operate on Int32 values.
+
+instance Num Exp where
+  0 + y = y
+  x + 0 = x
+  x + y = BinOp (Add Int32) x y
+
+  x - 0 = x
+  x - y = BinOp (Sub Int32) x y
+
+  0 * _ = 0
+  _ * 0 = 0
+  1 * y = y
+  y * 1 = y
+  x * y = BinOp (Mul Int32) x y
+
+  abs = UnOp (Abs Int32)
+  signum = UnOp (Signum Int32)
+  fromInteger = Constant . IntValue . Int32Value . fromInteger
+  negate x = 0 - x
+
+instance IntegralExp Exp where
+  0 `div` _ = 0
+  x `div` 1 = x
+  x `div` y = BinOp (SDiv Int32) x y
+
+  0 `mod` _ = 0
+  _ `mod` 1 = 0
+  x `mod` y = BinOp (SMod Int32) x y
+
+  0 `quot` _ = 0
+  x `quot` 1 = x
+  x `quot` y = BinOp (SQuot Int32) x y
+
+  0 `rem` _ = 0
+  _ `rem` 1 = 0
+  x `rem` y = BinOp (SRem Int32) x y
+
+instance IntegralCond Exp where
+  oneIfZero x =
+    Cond (CmpOp (CmpEq $ IntType Int32) x 0) 1 x
+  ifZero c =
+    Cond (CmpOp (CmpEq $ IntType Int32) c 0)
+  ifLessThan a b =
+    Cond (CmpOp (CmpSlt Int32) a b)
+
+-- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
+-- type.
+newtype Count u = Count { innerExp :: Exp }
+                deriving (Eq, Show, Num, IntegralExp, FreeIn, Pretty)
+
+-- | Phantom type for a count of elements.
+data Elements
+
+-- | Phanton type for a count of bytes.
+data Bytes
+
+elements :: Exp -> Count Elements
+elements = Count
+
+bytes :: Exp -> Count Bytes
+bytes = Count
+
+-- | Convert a count of elements into a count of bytes, given the
+-- per-element size.
+withElemType :: Count Elements -> PrimType -> Count Bytes
+withElemType (Count e) t = bytes $ e * SizeOf t
+
+dimSizeToExp :: DimSize -> Count Elements
+dimSizeToExp = elements . sizeToExp
+
+memSizeToExp :: MemSize -> Count Bytes
+memSizeToExp = bytes . sizeToExp
+
+sizeToExp :: Size -> Exp
+sizeToExp (VarSize v)   = ScalarVar v
+sizeToExp (ConstSize x) = Constant $ IntValue $ Int32Value $ fromIntegral x
+
 -- Prettyprinting definitions.
 
-instance Pretty op => Pretty (ProgramT op) where
-  ppr (Program funs) = stack $ intersperse mempty $ map ppFun funs
+instance Pretty op => Pretty (Functions op) where
+  ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
     where ppFun (name, fun) =
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
@@ -245,80 +304,45 @@ instance Pretty op => Pretty (Code op) where
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
 
-instance Pretty Space where
-  ppr DefaultSpace = mempty
-  ppr (Space s)    = text "@" <> text s
-
 instance Pretty Exp where
-  ppr = pprPrec (-1)
-  pprPrec _ (Constant v) = ppr v
-  pprPrec p (BinOp op x y) =
-    parensIf (p >= precedence op) $
-    pprPrec (precedence op) x <+/>
-    ppr op <+>
-    pprPrec (rprecedence op) y
-  pprPrec p (UnsignedDivide x y) =
-    parensIf (p >= precedence IntDivide) $
-    pprPrec (precedence IntDivide) x <+/>
-    text "///" <+>
-    pprPrec (rprecedence IntDivide) y
-  pprPrec p (UnsignedMod x y) =
-    parensIf (p >= precedence Mod) $
-    pprPrec (precedence Mod) x <+/>
-    text "%%" <+>
-    pprPrec (rprecedence Mod) y
-  pprPrec _ (UnOp Not x) =
+  ppr (Constant v) = ppr v
+  ppr (BinOp op x y) =
+    ppr op <> parens (ppr x <> comma <+> ppr y)
+  ppr (CmpOp op x y) =
+    ppr op <> parens (ppr x <> comma <+> ppr y)
+  ppr (ConvOp conv x) =
+    text "convert" <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
+    where (fromtype, totype) = convTypes conv
+  ppr (UnOp Not{} x) =
     text "not" <+> ppr x
-  pprPrec _ (UnOp Complement x) =
+  ppr (UnOp Complement{} x) =
     text "~" <+> ppr x
-  pprPrec _ (UnOp Negate x) =
-    text "-" <+> ppr x
-  pprPrec _ (UnOp Abs x) =
+  ppr (UnOp Abs{} x) =
     text "abs" <> parens (ppr x)
-  pprPrec _ (UnOp Signum x) =
+  ppr (UnOp FAbs{} x) =
+    text "fabs" <> parens (ppr x)
+  ppr (UnOp Signum{} x) =
     text "signum" <> parens (ppr x)
-  pprPrec _ (ScalarVar v) =
+  ppr (ScalarVar v) =
     ppr v
-  pprPrec _ (Index v is bt space) =
+  ppr (Index v is bt space) =
     ppr v <> langle <> ppr bt <> space' <> rangle <> brackets (ppr is)
     where space' = case space of DefaultSpace -> mempty
                                  Space s      -> text "@" <> text s
-  pprPrec _ (SizeOf t) =
+  ppr (SizeOf t) =
     text "sizeof" <> parens (ppr t)
+  ppr (Cond c t f) =
+    ppr c <+> text "?" <+> ppr t <+> text ":" <+> ppr f
 
-precedence :: BinOp -> Int
-precedence LogAnd = 0
-precedence LogOr = 0
-precedence Band = 1
-precedence Bor = 1
-precedence Xor = 1
-precedence Equal = 2
-precedence Less = 2
-precedence Leq = 2
-precedence ShiftL = 3
-precedence ShiftR = 3
-precedence Plus = 4
-precedence Minus = 4
-precedence Times = 5
-precedence Divide = 5
-precedence IntDivide = 5
-precedence Mod = 5
-precedence Pow = 6
-
-rprecedence :: BinOp -> Int
-rprecedence Minus = 10
-rprecedence Divide = 10
-rprecedence op = precedence op
-
-instance Functor ProgramT where
+instance Functor Functions where
   fmap = fmapDefault
 
-instance Foldable ProgramT where
+instance Foldable Functions where
   foldMap = foldMapDefault
 
-instance Traversable ProgramT where
-  traverse f (Program funs) =
-    Program <$> traverse f' funs
+instance Traversable Functions where
+  traverse f (Functions funs) =
+    Functions <$> traverse f' funs
     where f' (name, fun) = (name,) <$> traverse f fun
 
 instance Functor FunctionT where
@@ -389,9 +413,9 @@ instance FreeIn a => FreeIn (Code a) where
     i `HS.delete` (freeIn bound <> freeIn body)
   freeIn (While cond body) =
     freeIn cond <> freeIn body
-  freeIn (DeclareMem {}) =
+  freeIn DeclareMem{} =
     mempty
-  freeIn (DeclareScalar {}) =
+  freeIn DeclareScalar{} =
     mempty
   freeIn (Allocate name size _) =
     freeIn name <> freeIn size
@@ -417,12 +441,13 @@ instance FreeIn a => FreeIn (Code a) where
 instance FreeIn Exp where
   freeIn (Constant _) = mempty
   freeIn (BinOp _ x y) = freeIn x <> freeIn y
-  freeIn (UnsignedDivide x y) = freeIn x <> freeIn y
-  freeIn (UnsignedMod x y) = freeIn x <> freeIn y
   freeIn (UnOp _ x) = freeIn x
+  freeIn (CmpOp _ x y) = freeIn x <> freeIn y
+  freeIn (ConvOp _ x) = freeIn x
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
+  freeIn (Cond c t f) = freeIn c <> freeIn t <> freeIn f
 
 instance FreeIn Size where
   freeIn (VarSize name) = HS.singleton name
@@ -435,3 +460,70 @@ functionsCalled (For _ _ body) = functionsCalled body
 functionsCalled (While _ body) = functionsCalled body
 functionsCalled (Call _ fname _) = HS.singleton fname
 functionsCalled _ = mempty
+
+-- | Return a mapping from every memory block read or written, to the
+-- set of types that are read or written from that block.  If a memory
+-- block is never used in an 'Index' expression or 'Write' statement,
+-- it will not appear in the map.  Note that this in particular means
+-- that a memory block will not appear if it is only used in a 'Copy'
+-- statement.
+--
+-- This function is intended to help figure out alignment restrictions
+-- for memory blocks.
+memoryUsage :: (op -> HM.HashMap VName (HS.HashSet PrimType))
+            -> Code op
+            -> HM.HashMap VName (HS.HashSet PrimType)
+memoryUsage _ (Write mem _ bt _ e) =
+  HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
+memoryUsage f (c1 :>>: c2) =
+  HM.unionWith (<>) (memoryUsage f c1) (memoryUsage f c2)
+memoryUsage f (For _ e c)  =
+  HM.unionWith (<>) (expMemoryUsage e) (memoryUsage f c)
+memoryUsage f (While e c)  =
+  HM.unionWith (<>) (expMemoryUsage e) (memoryUsage f c)
+memoryUsage _ (Allocate _ (Count e) _) =
+  expMemoryUsage e
+memoryUsage _ (Copy _ (Count e1) _ _ (Count e2) _ (Count e3)) =
+  foldr (HM.unionWith (<>) . expMemoryUsage) mempty [e1, e2, e3]
+memoryUsage _ (SetScalar _ e) =
+  expMemoryUsage e
+memoryUsage _ (Call _ _ es) =
+  foldr (HM.unionWith (<>) . expMemoryUsage) mempty es
+memoryUsage f (If e c1 c2) =
+  foldr (HM.unionWith (<>)) mempty
+  [expMemoryUsage e, memoryUsage f c1, memoryUsage f c2]
+memoryUsage _ (Assert e _) =
+  expMemoryUsage e
+memoryUsage f (Comment _ c) =
+  memoryUsage f c
+memoryUsage f (Op op) =
+  f op
+memoryUsage _ SetMem{} =
+  HM.empty
+memoryUsage _ Skip =
+  HM.empty
+memoryUsage _ DeclareMem{}  =
+  HM.empty
+memoryUsage _ DeclareScalar{}  =
+  HM.empty
+
+expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet PrimType)
+expMemoryUsage (Index mem (Count e) bt _) =
+  HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
+expMemoryUsage (BinOp _ e1 e2) =
+  HM.unionWith (<>) (expMemoryUsage e1) (expMemoryUsage e2)
+expMemoryUsage (CmpOp _ e1 e2) =
+  HM.unionWith (<>) (expMemoryUsage e1) (expMemoryUsage e2)
+expMemoryUsage (UnOp _ e) =
+  expMemoryUsage e
+expMemoryUsage (ConvOp _ e) =
+  expMemoryUsage e
+expMemoryUsage (Cond e1 e2 e3) =
+  foldr (HM.unionWith (<>)) mempty
+  [expMemoryUsage e1, expMemoryUsage e2, expMemoryUsage e3]
+expMemoryUsage (ScalarVar _) =
+  HM.empty
+expMemoryUsage (SizeOf _) =
+  HM.empty
+expMemoryUsage Constant{} =
+  HM.empty

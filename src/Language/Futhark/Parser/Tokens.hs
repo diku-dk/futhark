@@ -6,7 +6,7 @@ module Language.Futhark.Parser.Tokens
   )
   where
 
-import Language.Futhark.Core
+import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name)
 
 -- | A lexical token.  It does not itself contain position
 -- information, so in practice the parser will consume tokens tagged
@@ -18,20 +18,33 @@ data Token = IF
            | LOOP
            | IN
            | INT
+           | I8
+           | I16
+           | I32
+           | I64
            | BOOL
-           | CERT
            | CHAR
            | REAL
-           | ID { idName :: Name }
-           | STRINGLIT { stringLit :: String }
-           | INTLIT { intLit :: Int32 }
-           | REALLIT { realLit :: Double }
-           | CHARLIT { charLit :: Char }
+           | F32
+           | F64
+           | ID Name
+           | STRINGLIT String
+           | INTLIT Int32
+           | I8LIT Int8
+           | I16LIT Int16
+           | I32LIT Int32
+           | I64LIT Int64
+           | REALLIT Double
+           | F32LIT Float
+           | F64LIT Double
+           | CHARLIT Char
            | PLUS
            | MINUS
            | TIMES
            | DIVIDE
            | MOD
+           | QUOT
+           | REM
            | EQU
            | EQU2
            | LTH
@@ -41,6 +54,7 @@ data Token = IF
            | POW
            | SHIFTL
            | SHIFTR
+           | ZSHIFTR
            | BOR
            | BAND
            | XOR
@@ -65,8 +79,11 @@ data Token = IF
            | MAP
            | CONCATMAP
            | REDUCE
+           | REDUCECOMM
            | RESHAPE
            | REARRANGE
+           | STRIPE
+           | UNSTRIPE
            | TRANSPOSE
            | ZIPWITH
            | ZIP
@@ -79,11 +96,9 @@ data Token = IF
            | REDOMAP
            | TRUE
            | FALSE
-           | CHECKED
            | TILDE
            | AND
            | OR
-           | OP
            | EMPTY
            | COPY
            | ASSERT

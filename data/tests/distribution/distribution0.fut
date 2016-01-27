@@ -6,7 +6,7 @@
 --
 -- ==
 --
--- structure distributed { Kernel 1 DoLoop 2 }
+-- structure distributed { MapKernel 1 DoLoop 2 }
 
 fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
 

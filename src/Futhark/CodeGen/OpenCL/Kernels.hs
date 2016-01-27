@@ -15,19 +15,19 @@ mapTranspose kernel_name elem_type =
   // to (BLOCK_DIM+1)*BLOCK_DIM.  This pads each row of the 2D block in shared memory
   // so that bank conflicts do not occur when threads address the array column-wise.
   __kernel void $id:kernel_name(__global $ty:elem_type *odata,
-                                unsigned int odata_offset,
+                                uint odata_offset,
                                 __global $ty:elem_type *idata,
-                                unsigned int idata_offset,
-                                unsigned int width,
-                                unsigned int height,
+                                uint idata_offset,
+                                uint width,
+                                uint height,
                                 __local $ty:elem_type* block) {
-    unsigned int x_index;
-    unsigned int y_index;
-    unsigned int our_array_offset;
+    uint x_index;
+    uint y_index;
+    uint our_array_offset;
 
     // Adjust the input and output arrays with the basic offset.
-    odata += odata_offset;
-    idata += idata_offset;
+    odata += odata_offset/sizeof($ty:elem_type);
+    idata += idata_offset/sizeof($ty:elem_type);
 
     // Adjust the input and output arrays for the third dimension.
     our_array_offset = get_global_id(2) * width * height;
@@ -40,7 +40,7 @@ mapTranspose kernel_name elem_type =
 
     if((x_index < width) && (y_index < height))
     {
-        unsigned int index_in = y_index * width + x_index;
+        uint index_in = y_index * width + x_index;
         block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
     }
 
@@ -51,7 +51,7 @@ mapTranspose kernel_name elem_type =
     y_index = get_group_id(0) * FUT_BLOCK_DIM + get_local_id(1);
     if((x_index < height) && (y_index < width))
     {
-        unsigned int index_out = y_index * height + x_index;
+        uint index_out = y_index * height + x_index;
         odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
     }
   }|]

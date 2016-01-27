@@ -32,8 +32,10 @@ fun {int,int,int,int,int,int} redOp({int,int,int,int,int,int} x,
                           else max(lssx, lssy) in
   let newlis = if lisx == tlx && connect then lisx + lisy else lisx in
   let newlcs = if lcsy == tly && connect then lcsy + lcsx else lcsy in
+  let first = if tlx == 0 then firsty else firstx in
+  let last  = if tly == 0 then lastx else lasty in
 
-  {newlss, newlis, newlcs, tlx+tly, firstx, lasty}
+  {newlss, newlis, newlcs, tlx+tly, first, last}
 
 fun {int,int,int,int,int,int} mapOp (int x) =
   let xmatch = if pred1(x) then 1 else 0 in

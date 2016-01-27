@@ -75,10 +75,11 @@ fuseMaps :: (Input input, Bindable lore) =>
                                    -- the resulting SOAC.
 fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
   where lam2' =
-          lam2 { lambdaParams = map (`Param` ()) $ lam2redparams ++ HM.keys inputmap
+          lam2 { lambdaParams = [ Param name t
+                                | Ident name t <- lam2redparams ++ HM.keys inputmap ]
                , lambdaBody   = new_body2'
                }
-        let_i_j = mkLet' [] [Ident (lambdaIndex lam1) $ Basic Int] $
+        let_i_j = mkLet' [] [Ident (lambdaIndex lam1) $ Prim int32] $
                   PrimOp $ SubExp $ Var $ lambdaIndex lam2
         new_body2 = let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
                                    | (p,e) <- zip pat res]
@@ -205,7 +206,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
 
 mergeReduceOps :: Bindable lore => Lambda lore -> Lambda lore -> Lambda lore
 mergeReduceOps (Lambda i par1 bdy1 rtp1) (Lambda j par2 bdy2 rtp2) =
-  let let_i_j = mkLet' [] [Ident i $ Basic Int] $ PrimOp $ SubExp $ Var j
+  let let_i_j = mkLet' [] [Ident i $ Prim int32] $ PrimOp $ SubExp $ Var j
       body' = Body (bodyLore bdy1)
                    (let_i_j : bodyBindings bdy1 ++ bodyBindings bdy2)
                    (bodyResult   bdy1 ++ bodyResult   bdy2)

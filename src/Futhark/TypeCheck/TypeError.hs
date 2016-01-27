@@ -10,7 +10,7 @@ where
 import Data.Loc
 import Data.List
 
-import Text.PrettyPrint.Mainland
+import Futhark.Util.Pretty
 import Language.Futhark.Core
 
 -- | Information about an error during type checking.  The 'Show'
@@ -83,23 +83,23 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
   show (UnifyError e1 t1 e2 t2) =
-    "Cannot unify type " ++ ppr' t1 ++
-    " of expression\n" ++ pretty 160 (indent 2 $ ppr e1) ++
-    "\nwith type " ++ ppr' t2 ++
-    " of expression\n" ++ pretty 160 (indent 2 $ ppr e2)
+    "Cannot unify type " ++ pretty t1 ++
+    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e1) ++
+    "\nwith type " ++ pretty t2 ++
+    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e2)
   show (UnexpectedType loc e _ []) =
     "Type of expression at " ++ locStr loc ++ "\n" ++
-    pretty 160 (indent 2 $ ppr e) ++
+    prettyDoc 160 (indent 2 $ ppr e) ++
     "\ncannot have any type - possibly a bug in the type checker."
   show (UnexpectedType loc e t ts) =
     "Type of expression at " ++ locStr loc ++ "\n" ++
-    pretty 160 (indent 2 $ ppr e) ++
-    "\nmust be one of " ++ intercalate ", " (map ppr' ts) ++ ", but is " ++
-    ppr' t ++ "."
+    prettyDoc 160 (indent 2 $ ppr e) ++
+    "\nmust be one of " ++ intercalate ", " (map pretty ts) ++ ", but is " ++
+    pretty t ++ "."
   show (ReturnTypeError pos fname rettype bodytype) =
     "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
-    " declares return type " ++ ppr' rettype ++ ", but body has type " ++
-    ppr' bodytype
+    " declares return type " ++ pretty rettype ++ ", but body has type " ++
+    pretty bodytype
   show (DupDefinitionError name pos1 pos2) =
     "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
@@ -111,8 +111,8 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     "Variable " ++ textual name ++ " bound twice in tuple pattern; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (InvalidPatternError pat t desc loc) =
-    "Pattern " ++ ppr' pat ++
-    " cannot match value of type " ++ ppr' t ++ " at " ++ locStr loc ++ end
+    "Pattern " ++ pretty pat ++
+    " cannot match value of type " ++ pretty t ++ " at " ++ locStr loc ++ end
     where end = case desc of Nothing -> "."
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name pos) =
@@ -123,11 +123,11 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
     "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
      expected' ++ ", but got " ++ show ngot ++
-    " arguments of types " ++ intercalate ", " (map ppr' got) ++ "."
+    " arguments of types " ++ intercalate ", " (map pretty got) ++ "."
     where (nexpected, expected') =
             case expected of
               Left i -> (i, "(polymorphic)")
-              Right ts -> (length ts, intercalate ", " $ map ppr' ts)
+              Right ts -> (length ts, intercalate ", " $ map pretty ts)
           ngot = length got
           fname' = maybe "anonymous function" (("function "++) . nameToString) fname
   show (UseAfterConsume name rloc wloc) =
@@ -139,12 +139,12 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     " has " ++ show dims ++ " dimension(s)."
   show (BadAnnotation loc desc expected got) =
     "Annotation of \"" ++ desc ++ "\" type of expression at " ++
-    locStr loc ++ " is " ++ ppr' expected ++
-    ", but derived to be " ++ ppr' got ++ "."
+    locStr loc ++ " is " ++ pretty expected ++
+    ", but derived to be " ++ pretty got ++ "."
   show (BadTupleAnnotation loc desc expected got) =
     "Annotation of \"" ++ desc ++ "\" type of expression at " ++
     locStr loc ++ " is a tuple {" ++
-    intercalate ", " (map (maybe "(unspecified)" ppr') expected) ++
+    intercalate ", " (map (maybe "(unspecified)" pretty) expected) ++
     "}, but derived to be " ++ ppTuple got ++ "."
   show (CurriedConsumption fname loc) =
     "Function " ++ nameToString fname ++
@@ -161,7 +161,7 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     " is aliased to some other tuple component."
   show (NotAnArray loc _ t) =
     "The expression at " ++ locStr loc ++
-    " is expected to be an array, but is " ++ ppr' t ++ "."
+    " is expected to be an array, but is " ++ pretty t ++ "."
   show (PermutationError loc perm rank name) =
     "The permutation (" ++ intercalate ", " (map show perm) ++
     ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ " at " ++
@@ -172,10 +172,7 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
     " should be an integer."
 
 ppTuple :: Pretty a => [a] -> String
-ppTuple ts = intercalate ", " $ map ppr' ts
-
-ppr' :: Pretty a => a -> String
-ppr' = pretty 80 . ppr
+ppTuple ts = intercalate ", " $ map pretty ts
 
 -- | A list.  Its 'Pretty' instance produces a comma-separated
 -- sequence enclosed in braces if the list has anything but a single

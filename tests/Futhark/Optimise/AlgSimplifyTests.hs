@@ -33,7 +33,7 @@ constantFoldTests =
   , cfoldTest "x/1" "x"
   , cfoldTest "x/x" "1"
   ]
-  where vars = declareVars [("x", Int)]
+  where vars = declareVars [("x", int32)]
         simplify'' e = simplify' vars e []
         scalExp = parseScalExp' vars
 
@@ -56,9 +56,9 @@ suffCondTests =
           suffsort (mkSuffConds' vars input ranges) @?=
           suffsort (map (map simplify'') expected)
 
-        vars = declareVars [ ("n", Int)
-                           , ("m", Int)
-                           , ("i", Int)
+        vars = declareVars [ ("n", int32)
+                           , ("m", int32)
+                           , ("i", int32)
                            ]
         ranges = [ ("n", "10", "10")
                  , ("i", "0", "9")
@@ -66,7 +66,7 @@ suffCondTests =
 
 type RangesRep' = [(String, String, String)]
 
-type VarDecls = [(String, BasicType)]
+type VarDecls = [(String, PrimType)]
 
 type VarInfo = M.Map String (Int, Type)
 
@@ -77,7 +77,7 @@ lookupVarName s varinfo = case M.lookup s varinfo of
 
 declareVars :: VarDecls -> VarInfo
 declareVars = M.fromList . snd . mapAccumL declare 0
-  where declare i (name, t) = (i+1, (name, (i, Basic t)))
+  where declare i (name, t) = (i+1, (name, (i, Prim t)))
 
 instantiateRanges :: VarInfo -> RangesRep' -> RangesRep
 instantiateRanges varinfo r =

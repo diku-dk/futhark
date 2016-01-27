@@ -6,7 +6,7 @@
 --   [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 -- }
 fun int intsqrt(int x) =
-    trunc(sqrt(toFloat(x)))
+    int(sqrt(real(x)))
 
 fun [[int]] main ([int] a) =
     let n = size(0, a) in
