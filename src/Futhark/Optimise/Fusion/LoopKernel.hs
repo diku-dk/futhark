@@ -250,10 +250,10 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
-          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
-                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          (extra_nms,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+                                   zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ unfus_nms) $
+      success (outNames ker ++ extra_nms) $
               SOAC.Map (cs1++cs2) res_lam' new_inp
 
     (SOAC.Map {}, SOAC.Redomap _ comm1 lam11 _ nes _)
