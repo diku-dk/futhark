@@ -39,7 +39,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 -----------------------------------------------------
 -- for Cosmin's sequentializer: work in progress
 -----------------------------------------------------
--- import Futhark.Transform.GlobalizeArrays 
+-- import Futhark.Transform.GlobalizeArrays
 -- import qualified Futhark.Transform.FirstOrderTransfOpt as FOTopt
 -- import Futhark.Analysis.LastUse
 -- transformProg prg = do
