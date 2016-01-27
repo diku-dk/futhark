@@ -1,4 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Futhark.Optimise.Fusion ( fuseSOACs )
   where
 
@@ -17,36 +19,38 @@ import qualified Data.List         as L
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS hiding (SOAC(..))
+import qualified Futhark.Representation.SOACS as Futhark
 import Futhark.MonadFreshNames
-import Futhark.Optimise.SimplifyLambda
+import Futhark.Representation.SOACS.Simplify
 import Futhark.Optimise.Fusion.LoopKernel
 import Futhark.Binder
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Transform.Rename
 import Futhark.Pass
 
-data VarEntry = IsArray Ident SOAC.ArrayTransforms
-              | IsNotArray Ident
+data VarEntry = IsArray VName SOAC.ArrayTransforms (NameInfo SOACS)
+              | IsNotArray VName (NameInfo SOACS)
 
-varEntryType :: VarEntry -> Type
-varEntryType (IsArray ident trns) =
-  SOAC.inputType $ SOAC.addTransforms trns $ SOAC.identInput ident
-varEntryType (IsNotArray ident) =
-  identType ident
+varEntryType :: VarEntry -> NameInfo SOACS
+varEntryType (IsArray _ _ attr) =
+  attr
+varEntryType (IsNotArray _ attr) =
+  attr
 
 data FusionGEnv = FusionGEnv {
     soacs      :: HM.HashMap VName [VName]
   -- ^ Mapping from variable name to its entire family.
   , varsInScope:: HM.HashMap VName VarEntry
   , fusedRes   :: FusedRes
-  , program    :: Prog
   }
 
-arrsInScope :: FusionGEnv -> HM.HashMap VName (Ident, SOAC.ArrayTransforms)
+arrsInScope :: FusionGEnv -> HM.HashMap VName (VName, Type, SOAC.ArrayTransforms)
 arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
-  where asArray (name, IsArray ident ts) = Just (name, (ident, ts))
-        asArray (_, IsNotArray _)        = Nothing
+  where asArray (name, IsArray srcname ts attr) =
+          Just (name, (srcname, typeOf attr, ts))
+        asArray (_, IsNotArray _ _) =
+          Nothing
 
 data Error = Error String
 
@@ -64,29 +68,27 @@ instance MonadFreshNames FusionGM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv FusionGM where
-  askTypeEnv = toTypeEnv <$> asks varsInScope
-    where toTypeEnv = HM.map varEntryType
+instance HasScope SOACS FusionGM where
+  askScope = toScope <$> asks varsInScope
+    where toScope = HM.map varEntryType
 
 ------------------------------------------------------------------------
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
 ------------------------------------------------------------------------
 
-arrayTransforms :: VName -> Type -> FusionGM (Ident, SOAC.ArrayTransforms)
+arrayTransforms :: VName -> Type -> FusionGM (VName, Type, SOAC.ArrayTransforms)
 arrayTransforms name t = do
   v' <- asks $ HM.lookup name . arrsInScope
   case v' of Just res -> return res
-             Nothing  -> return (Ident name t, SOAC.noTransforms)
+             Nothing  -> return (name, t, SOAC.noTransforms)
 
 -- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> Ident -> FusionGEnv
-bindVar env name =
-  env { varsInScope = HM.insert (identName name) entry $
-                      varsInScope env }
-  where entry = case identType name of
-          Array {} -> IsArray name mempty
-          _        -> IsNotArray name
-
+bindVar env (Ident name t) =
+  env { varsInScope = HM.insert name entry $ varsInScope env }
+  where entry = case t of
+          Array {} -> IsArray name mempty $ LetInfo t
+          _        -> IsNotArray name $ LetInfo t
 
 bindVars :: FusionGEnv -> [Ident] -> FusionGEnv
 bindVars = foldl bindVar
@@ -107,9 +109,10 @@ bindingFParams = binding  . map paramIdent
 
 -- | Binds an array name to the set of soac-produced vars
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
-bindingFamilyVar faml env nm =
-  env { soacs       = HM.insert (identName nm) faml $ soacs env
-      , varsInScope = HM.insert (identName nm) (IsArray nm mempty) $ varsInScope env
+bindingFamilyVar faml env (Ident nm t) =
+  env { soacs       = HM.insert nm faml $ soacs env
+      , varsInScope = HM.insert nm (IsArray nm mempty $ LetInfo t) $
+                      varsInScope env
       }
 
 checkForUpdates :: Pattern -> FusedRes -> FusionGM FusedRes
@@ -140,9 +143,9 @@ bindingFamily pat m = do
 bindingTransform :: Ident -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform v srcname trns = local $ \env ->
   case HM.lookup srcname $ varsInScope env of
-    Just (IsArray src' ts) ->
+    Just (IsArray src' ts attr) ->
       env { varsInScope =
-              HM.insert vname (IsArray src' $ ts SOAC.|> trns) $
+              HM.insert vname (IsArray src' (ts SOAC.|> trns) attr) $
               varsInScope env
           }
     _ -> bindVar env v
@@ -169,7 +172,7 @@ badFusionGM = throwError
 ---    and fuse them in a second pass!                               ---
 ------------------------------------------------------------------------
 
-fuseSOACs :: Pass Basic Basic
+fuseSOACs :: Pass SOACS SOACS
 fuseSOACs =
   Pass { passName = "Fuse SOACs"
        , passDescription = "Perform higher-order optimisation, i.e., fusion."
@@ -181,7 +184,6 @@ fuseProg prog = do
   let env  = FusionGEnv { soacs = HM.empty
                         , varsInScope = HM.empty
                         , fusedRes = mkFreshFusionRes
-                        , program = prog
                         }
       funs = progFunctions prog
   ks <- liftEitherM $ runFusionGatherM (mapM fusionGatherFun funs) env
@@ -190,7 +192,7 @@ fuseProg prog = do
   if not succc
   then return prog
   else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
-          return $ renameProg $ Prog funs'
+          renameProg $ Prog funs'
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
 fusionGatherFun fundec =
@@ -280,8 +282,9 @@ soacInputs soac = do
 addNewKerWithUnfusable :: FusedRes -> ([Ident], SOAC) -> Names -> FusionGM FusedRes
 addNewKerWithUnfusable res (idd, soac) ufs = do
   nm_ker <- KernName <$> newVName "ker"
+  scope <- askScope
   let out_nms = map identName idd
-      new_ker = newKernel soac out_nms
+      new_ker = newKernel soac out_nms scope
       comb    = HM.unionWith HS.union
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
             `HM.union` outArr res
@@ -293,8 +296,8 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
 
 inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
 inlineSOACInput (SOAC.Input ts (SOAC.Var v t)) = do
-  (v2, ts2) <- arrayTransforms v t
-  return $ SOAC.Input (ts2<>ts) (SOAC.Var (identName v2) (identType v2))
+  (v2, t2, ts2) <- arrayTransforms v t
+  return $ SOAC.Input (ts2<>ts) (SOAC.Var v2 t2)
 inlineSOACInput input = return input
 
 inlineSOACInputs :: SOAC -> FusionGM SOAC
@@ -420,7 +423,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       unfusable_nms  = HS.fromList $ filter (`HS.member` unfusable res) out_nms
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
-                        SOAC.Redomap _ _ _ nes _ -> drop (length nes) out_nms
+                        SOAC.Redomap _ _ _ _ nes _ -> drop (length nes) out_nms
                         SOAC.Stream  _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
@@ -444,8 +447,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                     case L.findIndex (elem out_nm) bnd_nms of
                       Nothing -> return Nothing
                       Just i  -> return $ Just (ker,ker_nm,i)
+  scope <- askScope
   let kernminds' = L.sortBy (\(_,_,i1) (_,_,i2)->compare i1 i2) $ catMaybes kernminds
-      soac_kernel = newKernel soac out_nms
+      soac_kernel = newKernel soac out_nms scope
   -- now try to fuse kernels one by one (in a fold); @ok_ind@ is the index of the
   -- kernel until which fusion succeded, and @fused_ker@ is the resulted kernel.
   (_,ok_ind,_,fused_ker,_) <-
@@ -522,10 +526,10 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
 fusionGatherBody :: FusedRes -> Body -> FusionGM FusedRes
 
 -- A reduce is translated to a redomap and treated from there.
-fusionGatherBody fres (Body blore (Let pat bndtp (LoopOp (Reduce cs w lam args)):bnds) res) = do
+fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm lam args)):bnds) res) = do
   let (ne, arrs) = unzip args
-      equivsoac = Redomap cs w lam lam ne arrs
-  fusionGatherBody fres $ Body blore (Let pat bndtp (LoopOp equivsoac):bnds) res
+      equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
+  fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
 fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
   maybesoac <- SOAC.fromExp e
@@ -536,7 +540,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
       greedyFuse False (bodyBindings body) used_lam blres (pat, soac)
 
-    Right soac@(SOAC.Redomap _ outer_red inner_red nes _) -> do
+    Right soac@(SOAC.Redomap _ _ outer_red inner_red nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
@@ -565,8 +569,8 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       -- a redomap always starts a new kernel
       let nes     = getStreamAccums form
           lambdas = case form of
-                        RedLike _ lout _ -> [lout, lam]
-                        _                -> [lam]
+                        RedLike _ _ lout _ -> [lout, lam]
+                        _                  -> [lam]
       (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
       bres  <- bindingFamily pat $ fusionGatherBody lres body
       bres' <- foldM fusionGatherSubExp bres nes
@@ -588,7 +592,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
         getUnfusableSet bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
       repl_idnm <- newVName "repl_x"
       i <- newVName "i"
-      let repl_id = Param (Ident repl_idnm (Basic Int)) ()
+      let repl_id = Param repl_idnm (Prim int32)
           repl_lam = Lambda i [repl_id] (mkBody [] [el])
                      [rowType $ identType v]
           soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
@@ -643,10 +647,10 @@ fusionGatherExp fres (If cond e_then e_else _) = do
 --- directly in let exp, i.e., let x = e)
 -----------------------------------------------------------------------------------
 
-fusionGatherExp _ (LoopOp (Map     {})) = errorIllegal "map"
-fusionGatherExp _ (LoopOp (Reduce  {})) = errorIllegal "reduce"
-fusionGatherExp _ (LoopOp (Scan    {})) = errorIllegal "scan"
-fusionGatherExp _ (LoopOp (Redomap {})) = errorIllegal "redomap"
+fusionGatherExp _ (Op Futhark.Map{}) = errorIllegal "map"
+fusionGatherExp _ (Op Futhark.Reduce{}) = errorIllegal "reduce"
+fusionGatherExp _ (Op Futhark.Scan{}) = errorIllegal "scan"
+fusionGatherExp _ (Op Futhark.Redomap{}) = errorIllegal "redomap"
 
 -----------------------------------
 ---- Generic Traversal         ----
@@ -666,8 +670,8 @@ addVarToUnfusable :: FusedRes -> VName -> FusionGM FusedRes
 addVarToUnfusable fres name = do
   trns <- asks $ HM.lookup name . arrsInScope
   let name' = case trns of
-        Nothing       -> name
-        Just (orig,_) -> identName orig
+        Nothing         -> name
+        Just (orig,_,_) -> orig
   return fres { unfusable = HS.insert name' $ unfusable fres }
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
@@ -736,17 +740,19 @@ fuseInExp (LoopOp (DoLoop res mergepat form loopbody)) =
 
 fuseInExp e = mapExpM fuseIn e
 
-fuseIn :: Mapper Basic Basic FusionGM
+fuseIn :: Mapper SOACS SOACS FusionGM
 fuseIn = identityMapper {
            mapOnBody    = fuseInBody
-         , mapOnLambda  = fuseInLambda
+         , mapOnOp      = mapSOACM identitySOACMapper
+                          { mapOnSOACLambda = fuseInLambda
+                          }
          }
 
 fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda i params body rtp) = do
   body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
   return $ Lambda i params body' rtp
-  where i_ident = Ident i $ Basic Int
+  where i_ident = Ident i $ Prim int32
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern _ []) _ body = return body
@@ -773,11 +779,10 @@ replaceSOAC pat@(Pattern _ (patElem : _)) soac body = do
 
 insertKerSOAC :: [VName] -> FusedKer -> Body -> FusionGM Body
 insertKerSOAC names ker body = do
-  prog <- asks program
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simplifyLambda prog lam (SOAC.width new_soac) args
+  lam' <- simplifyLambda lam (SOAC.width new_soac) args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

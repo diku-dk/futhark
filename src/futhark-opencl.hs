@@ -1,20 +1,17 @@
 module Main (main) where
 
 import Control.Category ((>>>))
-import Control.Monad
+import Control.Monad.IO.Class
 import Data.Maybe
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import System.FilePath
 import System.Process
-import System.IO
 import System.Exit
 import System.Console.GetOpt
 
 import Futhark.Pipeline
 import Futhark.Passes
 import Futhark.Compiler
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Pass.ExplicitAllocations
 import qualified Futhark.CodeGen.Backends.COpenCL as COpenCL
@@ -22,44 +19,37 @@ import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.CSE
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
-import Futhark.Pass.ExpandArrays
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExpandAllocations
 import Futhark.Util.Options
-import Futhark.Util.Log
 import Futhark.Optimise.DoubleBuffer
-import Futhark.Representation.AST.Pretty
 
 main :: IO ()
 main = mainWithOptions newCompilerConfig commandLineOptions inspectNonOptions
   where inspectNonOptions [file] config = Just $ compile config file
         inspectNonOptions _      _      = Nothing
 
-
 compile :: CompilerConfig -> FilePath -> IO ()
-compile config filepath = do
-  (res, msgs) <- runPipelineOnProgram (futharkConfig config) compilerPipeline filepath
-  when (isJust $ compilerVerbose config) $
-    T.hPutStr stderr $ toText msgs
-  case res of
-    Left err -> do
-      dumpError (futharkConfig config) err
-      exitWith $ ExitFailure 2
-    Right prog ->
-      case COpenCL.compileProg prog of
-        Left err -> do
-          dumpError (futharkConfig config) $
-            CompileError (T.pack err) $ T.pack $ pretty prog
-          exitWith $ ExitFailure 2
-        Right cprog -> do
+compile config filepath =
+  runCompilerOnProgram (futharkConfig config)
+  compilerPipeline (openclCodeAction filepath config) filepath
+
+openclCodeAction :: FilePath -> CompilerConfig -> Action ExplicitMemory
+openclCodeAction filepath config =
+  Action { actionName = "Compile OpenCL"
+         , actionDescription = "Generate OpenCL/C code from optimised Futhark program."
+         , actionProcedure = procedure
+         }
+  where procedure prog = do
+          cprog <- either compileFail return =<< COpenCL.compileProg prog
           let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
-          writeFile cpath cprog
+          liftIO $ writeFile cpath cprog
           (gccCode, _, gccerr) <-
-            readProcessWithExitCode "gcc"
+            liftIO $ readProcessWithExitCode "gcc"
             [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"] ""
           case gccCode of
-            ExitFailure code -> error $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
+            ExitFailure code -> compileFail $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
             ExitSuccess      -> return ()
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
@@ -109,18 +99,14 @@ futharkConfig config =
                    , futharkBoundsCheck = not $ compilerUnsafe config
                    }
 
--- XXX: this pipeline is a total hack - note that we run distribution
--- multiple times.
-compilerPipeline :: Pipeline Basic ExplicitMemory
+compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =
   standardPipeline >>>
-  passes [ extractKernels
-         , extractKernels
-         , simplifyBasic
-         , expandArrays
-         , simplifyBasic
+  onePass extractKernels >>>
+  passes [ simplifyKernels
+         , simplifyKernels
          , babysitKernels
-         , simplifyBasic
+         , simplifyKernels
          , inPlaceLowering
          ] >>>
   onePass explicitAllocations >>>

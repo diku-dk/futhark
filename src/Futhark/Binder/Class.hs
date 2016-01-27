@@ -2,8 +2,7 @@
 -- | This module defines a convenience typeclass for creating
 -- normalised programs.
 module Futhark.Binder.Class
-  ( Proper
-  , Bindable (..)
+  ( Bindable (..)
   , mkLet'
   , mkLetNames'
   , MonadBinder (..)
@@ -27,24 +26,8 @@ import Control.Monad.Writer
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.MonadFreshNames
-import Futhark.Transform.Substitute
-import Futhark.Transform.Rename (Renameable)
-
--- | A lore that supports some basic facilities.
-class (Lore.Lore lore,
-       PrettyLore lore,
-       Renameable lore, Substitutable lore,
-       FreeIn (Annotations.Exp lore),
-       FreeIn (Annotations.LetBound lore),
-       FreeIn (Annotations.Body lore),
-       FreeIn (Annotations.FParam lore),
-       FreeIn (Annotations.LParam lore),
-       FreeIn (Annotations.RetType lore),
-       IsRetType (RetType lore)) => Proper lore where
 
 -- | The class of lores that can be constructed solely from an
 -- expression, within some monad.  Very important: the methods should
@@ -52,11 +35,15 @@ class (Lore.Lore lore,
 -- often than you think, and the results thrown away.  If used
 -- exclusively within a 'MonadBinder' instance, it is acceptable for
 -- them to create new bindings, however.
-class (Proper lore, Annotations.FParam lore ~ (), Annotations.LParam lore ~ ()) =>
+class (Attributes lore,
+       FParamAttr lore ~ DeclType,
+       LParamAttr lore ~ Type,
+       RetType lore ~ ExtRetType,
+       SetType (LetAttr lore)) =>
       Bindable lore where
   mkLet :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> Exp lore -> Binding lore
   mkBody :: [Binding lore] -> Result -> Body lore
-  mkLetNames :: (MonadFreshNames m, HasTypeEnv m) =>
+  mkLetNames :: (MonadFreshNames m, HasScope lore m) =>
                 [(VName, Bindage)] -> Exp lore -> m (Binding lore)
 
 -- | A monad that supports the creation of bindings from expressions
@@ -68,9 +55,9 @@ class (Proper lore, Annotations.FParam lore ~ (), Annotations.LParam lore ~ ()) 
 -- effects!  They may be called more often than you think, and the
 -- results thrown away.  It is acceptable for them to create new
 -- bindings, however.
-class (Proper (Lore m),
+class (Attributes (Lore m),
        MonadFreshNames m, Applicative m, Monad m,
-       HasTypeEnv m) =>
+       HasScope (Lore m) m) =>
       MonadBinder m where
   type Lore m :: *
   mkLetM :: Pattern (Lore m) -> Exp (Lore m) -> m (Binding (Lore m))
@@ -100,7 +87,7 @@ mkLetNamesM' :: MonadBinder m =>
 mkLetNamesM' = mkLetNamesM . map addBindVar
   where addBindVar name = (name, BindVar)
 
-mkLetNames' :: (Bindable lore, MonadFreshNames m, HasTypeEnv m) =>
+mkLetNames' :: (Bindable lore, MonadFreshNames m, HasScope lore m) =>
                [VName] -> Exp lore -> m (Binding lore)
 mkLetNames' = mkLetNames . map addBindVar
   where addBindVar name = (name, BindVar)

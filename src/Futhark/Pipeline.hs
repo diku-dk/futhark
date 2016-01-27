@@ -9,6 +9,7 @@ module Futhark.Pipeline
        , runFutharkM
        , compileError
        , compileErrorS
+       , compileFail
 
        , onePass
        , passes
@@ -22,34 +23,40 @@ import Control.Category
 import Control.Monad
 import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
+import Control.Monad.State
 import qualified Data.Text as T
 
 import Prelude hiding (id, (.))
-
-import qualified Text.PrettyPrint.Mainland as PP
 
 import Futhark.Representation.AST (Prog, pretty, PrettyLore)
 import Futhark.TypeCheck
 import Futhark.Pass
 import Futhark.Util.Log
 import Futhark.MonadFreshNames
+import qualified Futhark.Util.Pretty as PP
 
 data CompileError = CompileError {
     errorDesc :: T.Text
   , errorData :: T.Text
   }
 
-newtype FutharkM a = FutharkM (ExceptT CompileError (WriterT Log IO) a)
+newtype FutharkM a = FutharkM (ExceptT CompileError (StateT VNameSource (WriterT Log IO)) a)
                      deriving (Applicative, Functor, Monad,
                                MonadWriter Log,
                                MonadError CompileError,
+                               MonadState VNameSource,
                                MonadIO)
+
+instance MonadFreshNames FutharkM where
+  getNameSource = get
+  putNameSource = put
 
 instance MonadLogger FutharkM where
   addLog = tell
 
 runFutharkM :: FutharkM a -> IO (Either CompileError a, Log)
-runFutharkM (FutharkM m) = runWriterT $ runExceptT m
+runFutharkM (FutharkM m) =
+  runWriterT (evalStateT (runExceptT m) blankNameSource)
 
 compileError :: (MonadError CompileError m, PP.Pretty err) =>
                 T.Text -> err -> m a
@@ -58,6 +65,9 @@ compileError s e = throwError $ CompileError s $ T.pack $ pretty e
 compileErrorS :: (MonadError CompileError m) =>
                  T.Text -> String -> m a
 compileErrorS s e = throwError $ CompileError s $ T.pack e
+
+compileFail :: String -> FutharkM a
+compileFail s = compileErrorS (T.pack s) "<nothing>"
 
 data Action lore =
   Action { actionName :: String
@@ -123,8 +133,7 @@ runPass :: Pass fromlore tolore
         -> Prog fromlore
         -> FutharkM (Prog tolore)
 runPass pass prog = do
-  let (res, logged) = runPassM (passFunction pass prog) $
-                      newNameSourceForProg prog
+  (res, logged) <- runPassM (passFunction pass prog)
   tell logged
   case res of Left err -> compileError err ()
               Right x  -> return x

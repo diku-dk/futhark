@@ -63,15 +63,15 @@ integers, and ``[[[{int, real}]]]`` is a three-dimensional array of
 tuples of integers and floats.  An immediate array is written as a
 sequence of elements enclosed by brackets::
 
-  [1, 2, 3]       // Array of type [int].
-  [[1], [2], [3]] // Array of type [[int]].
+  [1, 2, 3]       -- Array of type [int].
+  [[1], [2], [3]] -- Array of type [[int]].
 
 All arrays must be *regular* (often termed *full*).  This means that,
 for example, all rows of a two-dimensional array must have the same
 number of elements::
 
-  [[1, 2], [3]]      // Compile-time error.
-  [iota(1), iota(2)] // A run-time error if reached.
+  [[1, 2], [3]]      -- Compile-time error.
+  [iota(1), iota(2)] -- A run-time error if reached.
 
 The restriction to regular arrays simplifies size analysis and
 optimisation.
@@ -95,7 +95,7 @@ tuples, but this can only be done in ``let``-bindings, and not
 directly in a function argument list.  Specifically, the following
 function definition is not valid::
 
-  fun int sumpair({int, int} {x, y}) = x + y // WRONG!
+  fun int sumpair({int, int} {x, y}) = x + y -- WRONG!
 
 Instead, we must use a ``let``-binding explicitly, as follows::
 
@@ -113,7 +113,7 @@ Grammar of First-Order Fragment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   t : "int" | "real" | "bool" | "char"
+   t : "int" | "real" | "bool" | "char" | "f32" | "f64"
    t : "{" `t` "," ... "," `t` "}"
    t : "[" t "]"
    t : "*" "[" t "]"
@@ -130,7 +130,7 @@ Grammar of First-Order Fragment
    p : "{" `p` "," ...  "," `p` "}"
 
 .. productionlist::
-   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "pow"
+   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "**"
       : "==" | "<" | ">" | ">=" | "&&" | "||" "&" | "|"
 
 .. productionlist::
@@ -162,6 +162,15 @@ Grammar of First-Order Fragment
      : "in" `e`
    e : "loop" (`p` "=" `e`) =
      :   "for" variable "<" `e` "do" `e`
+     : "in" `e`
+   e : "loop" (`p` "=" `e`) =
+     :   "for" `e` "<=" variable "<" `e` "do" `e`
+     : "in" `e`
+   e : "loop" (`p` "=" `e`) =
+     :   "for" `e` ">" variable "do" `e`
+     : "in" `e`
+   e : "loop" (`p` "=" `e`) =
+     :   "for" `e` ">" variable ">=" `e` "do" `e`
      : "in" `e`
    e : "loop" (`p` "=" `e`) =
      :   "while" `e` "do" `e`
@@ -226,6 +235,11 @@ computations slightly more convenient, but primarily to express
 certain very specific forms of recursive functions, specifically those
 with a fixed iteration count.  This property is used for analysis and
 optimisation by the Futhark compiler.
+
+Apart from the ``i < n`` form, which loops from zero, Futhark also
+supports the ``v <= i < n`` form which starts at ``v``.  We can also
+invert the order of iteration by writitin ``n > i`` or ``n > i >= v``,
+which loops down from the upper bound to the lower.
 
 Apart from ``for``-loops, Futhark also supports ``while`` loops.
 These do not provide as much information to the compiler, but can be

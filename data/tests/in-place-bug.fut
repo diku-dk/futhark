@@ -36,8 +36,8 @@ fun [[real]] implicitMethod( [[real]] myD,  [[real]] myDD,
      )
 
 fun real main(int numX, int numY, int numT, real s0, real strike, real t, real alpha, real nu, real beta) =
-    let myX = map(toFloat, iota(numX)) in
-    let myY = map(toFloat, iota(numY)) in
+    let myX = map(real, iota(numX)) in
+    let myY = map(real, iota(numY)) in
     let {myDx, myDxx} = {empty([real]), empty([real])} in
     let {myDy, myDyy} = {empty([real]), empty([real])} in
     let myResult = copy(empty([real])) in

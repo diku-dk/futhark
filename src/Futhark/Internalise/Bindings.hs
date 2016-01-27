@@ -21,7 +21,7 @@ import Data.List
 import Data.Traversable (mapM)
 
 import Futhark.Representation.External as E
-import Futhark.Representation.Basic as I
+import Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
@@ -31,7 +31,7 @@ import Prelude hiding (mapM)
 
 internaliseParams :: [E.Parameter]
                   -> InternaliseM (HM.HashMap VName Int,
-                                   [[(VName, I.ExtType)]])
+                                   [[(VName, I.DeclExtType)]])
 internaliseParams params = do
   (param_ts, ctx) <- internaliseParamTypes $ map E.identType params
   vss <- forM (zip params param_ts) $ \(param, ts) -> do
@@ -43,48 +43,51 @@ internaliseParams params = do
 
 internaliseBindee :: MonadFreshNames m =>
                      E.Ident
-                  -> m [(VName, I.ExtType)]
+                  -> m [(VName, I.DeclExtType)]
 internaliseBindee bindee =
-  forM (internaliseType $ E.identType bindee) $ \t -> do
+  forM (internaliseTypeWithUniqueness $ E.identType bindee) $ \t -> do
     name <- newVName base
     return (name, t)
   where base = nameToString $ baseName $ E.identName bindee
 
 internaliseFunParams :: [E.Parameter]
-                     -> InternaliseM ([I.Ident],
-                                      [I.Ident],
+                     -> InternaliseM ([I.FParam],
+                                      [I.FParam],
                                       VarSubstitutions)
 internaliseFunParams params = do
   (shapectx, param_params) <- internaliseParams params
 
   (shapectx', shapesubst) <- makeShapeIdentsFromContext shapectx
-  let declared_shape_params = HM.elems shapectx'
+  let declared_shape_params =
+        map nonuniqueParamFromIdent $ HM.elems shapectx'
 
   (implicit_shape_params, value_params) <-
     liftM unzip $ forM param_params $ \params' -> do
     (instantiated_param_types, param_implicit_shapes) <-
       instantiateShapesWithDecls shapectx' $ map snd params'
     let instantiated_params =
-          [ I.Ident new_param_name t |
+          [ I.Param new_param_name t |
             ((new_param_name, _), t) <- zip params' instantiated_param_types ]
     return (param_implicit_shapes, instantiated_params)
-  let subst = HM.fromList $ zip (map E.identName params) (map (map I.identName) value_params)
+  let subst = HM.fromList $ zip
+              (map E.identName params)
+              (map (map I.paramName) value_params)
   return (declared_shape_params ++ concat implicit_shape_params,
           concat value_params,
           subst <> shapesubst)
 
 bindingParams :: [E.Parameter]
-              -> ([I.Ident] -> [I.Ident] -> InternaliseM a)
+              -> ([I.FParam] -> [I.FParam] -> InternaliseM a)
               -> InternaliseM a
 bindingParams params m = do
   (shapeparams, valueparams, substs) <- internaliseFunParams params
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $
-    bindingIdentTypes (shapeparams++valueparams) $
+    bindingIdentTypes (map paramIdent $ shapeparams++valueparams) $
     m shapeparams valueparams
 
 bindingFlatPattern :: [E.Ident] -> [I.Type]
-                   -> ([I.Ident] -> InternaliseM a)
+                   -> ([I.Param I.Type] -> InternaliseM a)
                    -> InternaliseM a
 bindingFlatPattern = bindingFlatPattern' []
   where
@@ -97,7 +100,7 @@ bindingFlatPattern = bindingFlatPattern' []
 
     bindingFlatPattern' pat (p:rest) ts m = do
       (ps, subst, rest_ts) <- handleMapping ts <$> internaliseBindee p
-      bindingFlatPattern' ((ps, (E.identName p, map I.identName subst)) : pat) rest rest_ts m
+      bindingFlatPattern' ((ps, (E.identName p, map I.paramName subst)) : pat) rest rest_ts m
 
     handleMapping ts [] =
       ([], [], ts)
@@ -106,9 +109,8 @@ bindingFlatPattern = bindingFlatPattern' []
             (pss, repss, ts'') = handleMapping ts' rs
         in (ps++pss, reps:repss, ts'')
 
-    handleMapping' (t:ts) (vname,vt) =
-      let u = I.uniqueness vt
-          v' = I.Ident vname $ t `I.setUniqueness` u
+    handleMapping' (t:ts) (vname,_) =
+      let v' = I.Param vname t
       in ([v'], v', ts)
     handleMapping' [] _ =
       error "bindingFlatPattern: insufficient identifiers in pattern."
@@ -127,15 +129,16 @@ bindingTupIdent :: E.TupIdent -> [ExtType] -> (I.Pattern -> InternaliseM a)
 bindingTupIdent pat ts m = do
   pat' <- flattenPattern pat
   (ts',shapes) <- instantiateShapes' ts
-  let addShapeBindings pat'' = m $ I.basicPattern' shapes pat''
+  let addShapeBindings =
+        m . I.basicPattern' shapes . map paramIdent
   bindingFlatPattern pat' ts' addShapeBindings
 
 bindingLambdaParams :: [E.Parameter] -> [I.Type]
                     -> InternaliseM I.Body
-                    -> InternaliseM (I.Body, [I.Ident])
+                    -> InternaliseM (I.Body, [I.LParam])
 bindingLambdaParams params ts m =
   bindingFlatPattern (map E.fromParam params) ts $ \params' ->
-  bindingIdentTypes params' $ do
+  bindingIdentTypes (map paramIdent params') $ do
     body <- m
     return (body, params')
 
@@ -145,14 +148,14 @@ makeShapeIdentsFromContext :: MonadFreshNames m =>
                                  VarSubstitutions)
 makeShapeIdentsFromContext ctx = do
   (ctx', substs) <- liftM unzip $ forM (HM.toList ctx) $ \(name, i) -> do
-    v <- newIdent (baseString name) $ I.Basic Int
+    v <- newIdent (baseString name) $ I.Prim int32
     return ((i, v), (name, [I.identName v]))
   return (HM.fromList ctx', HM.fromList substs)
 
 instantiateShapesWithDecls :: MonadFreshNames m =>
                               HM.HashMap Int I.Ident
-                           -> [I.ExtType]
-                           -> m ([I.Type], [I.Ident])
+                           -> [I.DeclExtType]
+                           -> m ([I.DeclType], [I.FParam])
 instantiateShapesWithDecls ctx ts =
   runWriterT $ instantiateShapes instantiate ts
   where instantiate x
@@ -160,6 +163,10 @@ instantiateShapesWithDecls ctx ts =
             return $ I.Var $ I.identName v
 
           | otherwise = do
-            v <- lift $ newIdent "size" (I.Basic Int)
+            v <- lift $ nonuniqueParamFromIdent <$> newIdent "size" (I.Prim int32)
             tell [v]
-            return $ I.Var $ I.identName v
+            return $ I.Var $ I.paramName v
+
+nonuniqueParamFromIdent :: I.Ident -> I.FParam
+nonuniqueParamFromIdent (I.Ident name t) =
+  I.Param name $ I.toDecl t Nonunique

@@ -3,6 +3,7 @@
 -- At one point failed in the OpenCL code generator.
 --
 -- ==
+-- tags { no_opencl }
 -- input {
 -- 10
 --
@@ -67,7 +68,7 @@ fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
 
 -- computes sobol numbers: n,..,n+chunk-1
 fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
-  let sob_fact= 1.0 / toFloat(1 << num_bits)       in
+  let sob_fact= 1.0 / real(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
   let contrbs = map( fn [int] (int k) =>
                         let sob = k + n in
@@ -79,7 +80,7 @@ fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
                     , replicate(len, 0), contrbs ) in
   map( fn [real] ([int] xs) =>
              map ( fn real (int x) =>
-                     toFloat(x) * sob_fact
+                     real(x) * sob_fact
                  , xs)
          , vct_ints)
 

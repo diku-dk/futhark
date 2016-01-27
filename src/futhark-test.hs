@@ -13,10 +13,11 @@ import Control.Monad hiding (forM_)
 import Control.Exception hiding (try)
 import Control.Monad.Except hiding (forM_)
 import Data.Char
-import Data.List
+import Data.List hiding (foldl')
+import Data.Maybe
 import Data.Monoid
 import Data.Ord
-import Data.Foldable (forM_)
+import Data.Foldable (forM_, foldl')
 import qualified Data.Array as A
 import qualified Data.Set as S
 import qualified Data.Text as T
@@ -36,11 +37,13 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.AST.Pretty (pretty)
-import Futhark.Representation.AST.Syntax.Core hiding (Basic)
+import Futhark.Util.Pretty (Pretty,pretty)
+import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Internalise.TypesValues (internaliseValue)
 import qualified Language.Futhark.Parser as F
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
+import Futhark.Representation.Kernels (Kernels)
+import Futhark.Representation.AST.Attributes.Values (valueType)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
@@ -51,10 +54,6 @@ import Futhark.Util.Log
 
 import Futhark.Util.Options
 
--- | Number of tests to run concurrently.
-concurrency :: Int
-concurrency = 8
-
 ---
 --- Test specification parser
 ---
@@ -64,6 +63,8 @@ concurrency = 8
 data ProgramTest =
   ProgramTest { testDescription ::
                    T.Text
+              , testTags ::
+                   [T.Text]
               , testAction ::
                    TestAction
               , testExpectedStructure ::
@@ -83,16 +84,20 @@ instance Show ExpectedError where
   show AnyError = "AnyError"
   show (ThisError r _) = "ThisError " ++ show r
 
-data StructureTest = StructureTest (Pipeline Basic Basic) AstMetrics
+data StructurePipeline = KernelsPipeline (Pipeline SOACS Kernels)
+                       | SOACSPipeline (Pipeline SOACS SOACS)
+
+data StructureTest = StructureTest StructurePipeline AstMetrics
 
 instance Show StructureTest where
   show (StructureTest _ metrics) =
     "StructureTest <config> " ++ show metrics
 
 data RunMode
-  = CompiledOnly
-  | InterpretedOnly
-  | InterpretedAndCompiled
+  = CompiledOnly -- ^ Cannot run with interpreter.
+  | InterpretedOnly -- ^ Only run with interpreter.
+  | NoTravis -- ^ Requires a lot of memory, do not run in Travis.
+  | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
   deriving (Eq, Show)
 
 data TestRun = TestRun
@@ -121,7 +126,7 @@ braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
 
 parseNatural :: Parser Int
-parseNatural = lexeme $ foldl (\acc x -> acc * 10 + x) 0 <$>
+parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 <$>
                map num <$> some digit
   where num c = ord c - ord '0'
 
@@ -134,12 +139,18 @@ parseDescriptionSeparator = try (string descriptionSeparator >> void newline) <|
 descriptionSeparator :: String
 descriptionSeparator = "=="
 
+parseTags :: Parser [T.Text]
+parseTags = lexstr "tags" *> braces (many parseTag) <|> pure []
+  where parseTag = T.pack <$> lexeme (many1 $ satisfy constituent)
+        constituent c = not (isSpace c) && c /= '}'
+
 parseAction :: Parser TestAction
 parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
               RunCases <$> parseRunCases
 
 parseRunMode :: Parser RunMode
 parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
+               (lexstr "notravis" *> pure NoTravis) <|>
                pure InterpretedAndCompiled
 
 parseRunCases :: Parser [TestRun]
@@ -193,16 +204,18 @@ restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
 parseExpectedStructure :: Parser StructureTest
 parseExpectedStructure =
   lexstr "structure" *>
-  (StructureTest <$> parsePipeline <*> parseMetrics)
+  (StructureTest <$> optimisePipeline <*> parseMetrics)
 
-parsePipeline :: Parser (Pipeline Basic Basic)
-parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
-                pure defaultPipelineConfig
+optimisePipeline :: Parser StructurePipeline
+optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
+                   pure defaultPipelineConfig
   where defaultPipelineConfig =
-          standardPipeline
+          SOACSPipeline standardPipeline
         distributePipelineConfig =
+          KernelsPipeline $
           standardPipeline >>>
-          passes [extractKernels, simplifyBasic]
+          onePass extractKernels >>>
+          onePass simplifyKernels
 
 parseMetrics :: Parser AstMetrics
 parseMetrics = braces $ liftM HM.fromList $ many $
@@ -211,7 +224,7 @@ parseMetrics = braces $ liftM HM.fromList $ many $
 
 testSpec :: Parser ProgramTest
 testSpec =
-  ProgramTest <$> parseDescription <*> parseAction <*> optional parseExpectedStructure
+  ProgramTest <$> parseDescription <*> parseTags <*> parseAction <*> optional parseExpectedStructure
 
 readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
 readTestSpec = parse $ testSpec <* eof
@@ -272,9 +285,16 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-optimisedProgramMetrics :: Pipeline Basic Basic -> FilePath -> TestM AstMetrics
-optimisedProgramMetrics pipeline program = do
-  res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
+optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics (SOACSPipeline pipeline) program = do
+  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
+  case res of
+    (Left err, msgs) ->
+      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
+    (Right prog, _) ->
+      return $ progMetrics prog
+optimisedProgramMetrics (KernelsPipeline pipeline) program = do
+  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
       throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
@@ -414,18 +434,21 @@ justCompileTestProgram futharkc program =
 
 compareResult :: FilePath -> ExpectedResult [Value] -> RunResult -> TestM ()
 compareResult program (Succeeds expectedResult) (SuccessResult actualResult) =
-  unless (compareValues actualResult expectedResult) $ do
-    actualf <-
-      io $ writeOutFile program "actual" $
-      unlines $ map pretty actualResult
-    expectedf <-
-      io $ writeOutFile program "expected" $
-      unlines $ map pretty expectedResult
-    throwError $ actualf ++ " and " ++ expectedf ++ " do not match."
+  case compareValues actualResult expectedResult of
+    Just mismatch -> do
+      actualf <-
+        io $ writeOutFile program "actual" $
+        unlines $ map pretty actualResult
+      expectedf <-
+        io $ writeOutFile program "expected" $
+        unlines $ map pretty expectedResult
+      throwError $ actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
+    Nothing ->
+      return ()
 compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
-compareResult _ (Succeeds _) (ErrorResult _ err) =
-  throwError $ "Program failed with error:\n  " ++ err
+compareResult _ (Succeeds _) (ErrorResult code err) =
+  throwError $ "Program failed with error code " ++ show code ++ " and stderr:\n  " ++ err
 compareResult _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " ++ show f
 
@@ -441,29 +464,74 @@ writeOutFile base ext content =
             else do writeFile filename content
                     return filename
 
-compareValues :: [Value] -> [Value] -> Bool
-compareValues vs1 vs2
-  | length vs1 /= length vs2 = False
-  | otherwise = and $ zipWith compareValue vs1 vs2
+data Mismatch = PrimValueMismatch Int PrimValue PrimValue
+              | ArrayLengthMismatch Int Int Int
+              | TypeMismatch Int Type Type
+              | ValueCountMismatch Int Int
 
-compareValue :: Value -> Value -> Bool
-compareValue (BasicVal bv1) (BasicVal bv2) =
-  compareBasicValue bv1 bv2
-compareValue (ArrayVal vs1 _ _) (ArrayVal vs2 _ _) =
-  A.bounds vs1 == A.bounds vs2 &&
-  and (zipWith compareBasicValue (A.elems vs1) (A.elems vs2))
-compareValue _ _ =
-  False
+instance Show Mismatch where
+  show (PrimValueMismatch i got expected) =
+    explainMismatch i "" got expected
+  show (ArrayLengthMismatch i got expected) =
+    explainMismatch i "array of length" got expected
+  show (TypeMismatch i got expected) =
+    explainMismatch i "value of type" got expected
+  show (ValueCountMismatch got expected) =
+    "Expected " ++ show expected ++ " values, got " ++ show got
 
-compareBasicValue :: BasicValue -> BasicValue -> Bool
-compareBasicValue (Float32Val x) (Float32Val y) = floatToDouble (abs (x - y)) < epsilon
-compareBasicValue (Float64Val x) (Float64Val y) = abs (x - y) < epsilon
-compareBasicValue (Float64Val x) (Float32Val y) = abs (x - floatToDouble y) < epsilon
-compareBasicValue (Float32Val x) (Float64Val y) = abs (floatToDouble x - y) < epsilon
-compareBasicValue x y = x == y
+explainMismatch :: Pretty a => Int -> String -> a -> a -> String
+explainMismatch i what got expected =
+  "Value " ++ show i ++ " expected " ++ what ++ pretty expected ++ ", got " ++ pretty got
 
-epsilon :: Double
-epsilon = 0.001
+compareValues :: [Value] -> [Value] -> Maybe Mismatch
+compareValues got expected
+  | n /= m = Just $ ValueCountMismatch n m
+  | otherwise = case sequence $ zipWith3 compareValue [0..] got expected of
+    Just (e:_) -> Just e
+    _          -> Nothing
+  where n = length got
+        m = length expected
+
+compareValue :: Int -> Value -> Value -> Maybe Mismatch
+compareValue i (PrimVal got) (PrimVal expected)
+  | comparePrimValue minTolerance got expected = Nothing
+  | otherwise = Just $ PrimValueMismatch i got expected
+compareValue i (ArrayVal got _ _) (ArrayVal expected _ _)
+  | A.bounds got == A.bounds expected =
+      uncurry (PrimValueMismatch i) <$>
+        find (not . uncurry (comparePrimValue tol)) (zip (A.elems got) (A.elems expected))
+  | otherwise =
+      Just $ ArrayLengthMismatch i (snd $ A.bounds got) (snd $ A.bounds expected)
+  where tol = tolerance expected
+compareValue i got expected =
+  Just $ TypeMismatch i (valueType got) (valueType expected)
+
+comparePrimValue :: Double -> PrimValue -> PrimValue -> Bool
+comparePrimValue tol (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
+  compareFractional tol x y
+comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
+  compareFractional tol x y
+comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float32Value y)) =
+  compareFractional tol x (floatToDouble y)
+comparePrimValue tol  (FloatValue (Float32Value x)) (FloatValue (Float64Value y)) =
+  compareFractional tol (floatToDouble x) y
+comparePrimValue _ x y =
+  x == y
+
+compareFractional :: (Ord num, Fractional num, Real tol) =>
+                     tol -> num -> num -> Bool
+compareFractional tol x y =
+  diff < fromRational (toRational tol)
+  where diff = abs $ x - y
+
+minTolerance :: Fractional a => a
+minTolerance = 0.002 -- 0.2%
+
+tolerance :: A.Array Int PrimValue -> Double
+tolerance = foldl' tolerance' minTolerance
+  where tolerance' t (FloatValue (Float32Value v)) = max t $ 0.001 * floatToDouble v
+        tolerance' t (FloatValue (Float64Value v)) = max t $ 0.001 * v
+        tolerance' t _                             = t
 
 floatToDouble :: Float -> Double
 floatToDouble x =
@@ -492,26 +560,32 @@ applyMode mode test =
   test { testAction = applyModeToAction mode $ testAction test }
 
 applyModeToAction :: TestMode -> TestAction -> TestAction
-applyModeToAction _ a@(CompileTimeFailure {}) =
+applyModeToAction _ a@CompileTimeFailure{} =
   a
 applyModeToAction OnlyTypeCheck (RunCases _) =
   RunCases []
 applyModeToAction mode (RunCases cases) =
-  RunCases $ map (applyModeToCase mode) cases
+  RunCases $ mapMaybe (applyModeToCase mode) cases
 
-applyModeToCase :: TestMode -> TestRun -> TestRun
+applyModeToCase :: TestMode -> TestRun -> Maybe TestRun
 applyModeToCase OnlyInterpret run =
-  run { runMode = InterpretedOnly }
+  Just run { runMode = InterpretedOnly }
 applyModeToCase OnlyCompile run =
-  run { runMode = CompiledOnly }
+  Just run { runMode = CompiledOnly }
+applyModeToCase OnTravis run | runMode run == NoTravis =
+  Nothing
 applyModeToCase _ run =
-  run
+  Just run
 
 runTest :: MVar TestCase -> MVar (TestCase, TestResult) -> IO ()
 runTest testmvar resmvar = forever $ do
   test <- takeMVar testmvar
   res <- doTest test
   putMVar resmvar (test, res)
+
+excludedTest :: TestConfig -> TestCase -> Bool
+excludedTest config =
+  any (`elem` configExclude config) . testTags . testCaseTest
 
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
@@ -538,9 +612,11 @@ runTests config files = do
   let mode = configTestMode config
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
+  concurrency <- getNumCapabilities
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
-  tests <- mapM (makeTestCase (configPrograms config) mode) files
-  _ <- forkIO $ mapM_ (putMVar testmvar) tests
+  all_tests <- mapM (makeTestCase (configPrograms config) mode) files
+  let (excluded, included) = partition (excludedTest config) all_tests
+  _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
@@ -558,8 +634,11 @@ runTests config files = do
                               putStrLn (testCaseProgram test ++ ":\n" ++ s)
                               next (failed+1) passed
 
-  (failed, passed) <- getResults (S.fromList tests) 0 0
-  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed."
+  (failed, passed) <- getResults (S.fromList included) 0 0
+  let excluded_str = if null excluded
+                     then ""
+                     else " (" ++ show (length excluded) ++ " excluded)"
+  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed" ++ excluded_str ++ "."
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
 
@@ -570,10 +649,12 @@ runTests config files = do
 data TestConfig = TestConfig
                   { configTestMode :: TestMode
                   , configPrograms :: ProgConfig
+                  , configExclude :: [T.Text]
                   }
 
 defaultConfig :: TestConfig
 defaultConfig = TestConfig { configTestMode = Everything
+                           , configExclude = []
                            , configPrograms =
                              ProgConfig
                              { configCompiler = Left "futhark-c"
@@ -619,6 +700,7 @@ addTypeChecker typeChecker config = case configTypeChecker config of
 data TestMode = OnlyTypeCheck
               | OnlyCompile
               | OnlyInterpret
+              | OnTravis
               | Everything
 
 commandLineOptions :: [FunOptDescr TestConfig]
@@ -632,6 +714,11 @@ commandLineOptions = [
   , Option "c" ["only-compile"]
     (NoArg $ Right $ \config -> config { configTestMode = OnlyCompile })
     "Only run compiled code"
+  , Option [] ["travis"]
+    (NoArg $ Right $ \config -> config { configTestMode = OnTravis
+                                       , configExclude = T.pack "notravis" :
+                                                         configExclude config })
+    "Only run compiled code not marked notravis"
 
   , Option [] ["typechecker"]
     (ReqArg (Right . changeProgConfig . addTypeChecker)
@@ -645,6 +732,12 @@ commandLineOptions = [
     (ReqArg (Right . changeProgConfig . addInterpreter)
      "PROGRAM")
     "What to run for interpretation (defaults to 'futharki')."
+  , Option [] ["exclude"]
+    (ReqArg (\tag ->
+               Right $ \config ->
+               config { configExclude = T.pack tag : configExclude config })
+     "TAG")
+    "Exclude test programs that define this tag."
   ]
 
 main :: IO ()

@@ -7,12 +7,14 @@ module Futhark.Pass.Untrace
   ( untraceProg )
   where
 
-import Futhark.Representation.Basic
+import Control.Monad.Identity
+
+import Futhark.Representation.SOACS
 import Futhark.Pass
 import Futhark.Tools
 
 -- | Remove all special debugging function calls from the program.
-untraceProg :: Pass Basic Basic
+untraceProg :: Pass SOACS SOACS
 untraceProg = simplePass
               "untrace"
               "Remove debugging annotations from program." $
@@ -25,8 +27,8 @@ untraceFun (FunDec fname ret params body) =
 untraceBody :: Body -> Body
 untraceBody = mapBody untraceBinding
   where untrace = identityMapper {
-                    mapOnBody = return .untraceBody
-                  , mapOnLambda = return . untraceLambda
+                    mapOnBody = return . untraceBody
+                  , mapOnOp = return . untraceSOAC
                   }
         untraceBinding bnd@(Let _ _ (PrimOp _)) = bnd
         untraceBinding (Let pat attr e) =
@@ -35,6 +37,9 @@ untraceBody = mapBody untraceBinding
           | "trace" <- nameToString fname = PrimOp $ SubExp e
         untraceExp e = mapExp untrace e
 
+untraceSOAC :: SOAC SOACS -> SOAC SOACS
+untraceSOAC =
+  runIdentity . mapSOACM identitySOACMapper { mapOnSOACLambda = return . untraceLambda }
 
 untraceLambda :: Lambda -> Lambda
 untraceLambda lam =

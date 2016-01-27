@@ -11,16 +11,19 @@ module Futhark.Internalise
   where
 
 import Control.Applicative
-import Control.Monad.State  hiding (mapM)
-import Control.Monad.Reader hiding (mapM)
+import Control.Monad.State  hiding (mapM, sequence)
+import Control.Monad.Reader hiding (mapM, sequence)
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
 import Data.Monoid
 import Data.List
-import Data.Traversable (mapM)
+import Data.Traversable (mapM, sequence)
 import Data.Loc
+
+import Prelude hiding (mapM, sequence)
+
 import Futhark.Representation.External as E
-import Futhark.Representation.Basic as I
+import Futhark.Representation.SOACS as I
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
@@ -30,58 +33,66 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-import Prelude hiding (mapM)
 
 -- | Convert a program in external Futhark to a program in internal
 -- Futhark.  If the boolean parameter is false, do not add bounds
 -- checks to array indexing.
-internaliseProg :: Bool -> E.Prog -> Either String I.Prog
-internaliseProg doBoundsCheck prog =
-  liftM I.renameProg $ flip evalStateT src $ do
+internaliseProg :: MonadFreshNames m =>
+                   Bool -> E.Prog -> m (Either String I.Prog)
+internaliseProg doBoundsCheck prog = do
+  res <- do
     ftable_attempt <- buildFtable prog
     case ftable_attempt of
-      Left err -> lift $ Left err
+      Left err -> return $ Left err
       Right ftable -> do
         funs <- runInternaliseM doBoundsCheck ftable $
                 mapM internaliseFun $ E.progFunctions prog
-        lift $ fmap I.Prog funs
-  where src = E.newNameSourceForProg prog
+        return $ fmap I.Prog funs
+  sequence $ fmap I.renameProg res
 
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
-buildFtable = runInternaliseM True HM.empty .
+buildFtable = liftM (fmap $ HM.union builtinFtable) .
+              runInternaliseM True mempty .
               liftM HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) =
           bindingParams params $ \shapes values -> do
             (rettype', _) <- internaliseReturnType rettype
-            let shapenames = map I.identName shapes
+            let shapenames = map I.paramName shapes
             return (fname,
                     FunBinding { internalFun = (shapenames,
-                                                map I.identType values,
-                                                applyExtType
+                                                map I.paramDeclType values,
+                                                applyRetType
                                                 (ExtRetType rettype')
                                                 (shapes++values)
                                                )
                                , externalFun = (rettype, map E.identType params)
                                })
 
+        builtinFtable = HM.map addBuiltin E.builtInFunctions
+        addBuiltin (t, paramts) =
+          FunBinding
+          ([], map (I.Prim . internalisePrimType) paramts,
+           const $ Just $ ExtRetType [I.Prim $ internalisePrimType t])
+          (E.Prim t, map E.Prim paramts)
+
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
 internaliseFun (fname,rettype,params,body,loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
-    body' <- ensureResultExtShape asserting loc rettype' firstbody
-    let mkFParam = flip Param ()
+    body' <- ensureResultExtShape asserting loc
+             (map I.fromDecl rettype') firstbody
     return $ FunDec
       fname (ExtRetType rettype')
-      (map mkFParam $ shapeparams ++ params')
+      (shapeparams ++ params')
       body'
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
 internaliseIdent (E.Ident name tp _) =
   case internaliseType tp of
-    [I.Basic _] -> return name
-    _           -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-basic-typed ident '"
+    [I.Prim _] -> return name
+    _           -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
                    ++ pretty name ++ "'."
 
 internaliseBody :: E.Exp -> InternaliseM Body
@@ -95,6 +106,13 @@ internaliseBodyBindings e m = do
   ((Body _ bnds res,x), otherbnds) <-
     collectBindings $ m =<< internaliseExp "res" e
   (,x) <$> mkBodyM (otherbnds <> bnds) res
+
+extraBodyBindings :: [Binding]
+                  -> InternaliseM (Body, a)
+                  -> InternaliseM (Body, a)
+extraBodyBindings bnds m = do
+  (body, x) <- m
+  return (insertBindings bnds body, x)
 
 internaliseExp :: String -> E.Exp -> InternaliseM [I.SubExp]
 
@@ -141,15 +159,18 @@ internaliseExp desc (E.Apply fname args _ _)
   | "trace" <- nameToString fname = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
-  rettype <- ExtRetType <$> staticShapes <$> mapM (subExpType . fst) args''
+  rettype <- ExtRetType <$>
+             map (`I.toDecl` Nonunique) <$>
+             staticShapes <$>
+             mapM (subExpType . fst) args''
   letTupExp' desc $ I.Apply fname args'' rettype
   where tag ses = [ (se, I.Observe) | se <- ses ]
 
 internaliseExp desc (E.Apply fname args _ _)
-  | Just (rettype, _) <- HM.lookup fname builtInFunctions = do
+  | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname args'' (ExtRetType [I.Basic rettype])
+  letTupExp' desc $ I.Apply fname args'' (ExtRetType [I.Prim rettype])
   where tag ses = [ (se, I.Observe) | se <- ses ]
 
 internaliseExp desc (E.Apply fname args _ _) = do
@@ -160,7 +181,7 @@ internaliseExp desc (E.Apply fname args _ _) = do
       shapeargs = argShapes shapes paramts argts
       args'' = zip shapeargs (repeat I.Observe) ++
                zip args' diets
-  case rettype_fun $ map (,I.Basic Int) shapeargs ++ zip args' argts of
+  case rettype_fun $ map (,I.Prim int32) shapeargs ++ zip args' argts of
     Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
                pretty (shapeargs ++ args')
     Just rettype ->
@@ -179,11 +200,28 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit_ts <- mapM subExpType mergeinit
 
   (wrap, form_contents) <- case form of
-    E.ForLoop i bound -> do
-      bound' <- internaliseExp1 "bound" bound
+    E.For dir lbound i ubound -> do
+      lbound' <- internaliseExp1 "lower_bound" lbound
+      ubound' <- internaliseExp1 "upper_bound" ubound
+      num_iterations <- letSubExp "num_iterations" $
+                        PrimOp $ I.BinOp (I.Sub I.Int32) ubound' lbound'
       i' <- internaliseIdent i
-      return (bindingIdentTypes [I.Ident i' $ I.Basic I.Int], Left (i', bound'))
-    E.WhileLoop cond ->
+      j <- newVName $ baseString i'
+      let i_ident = I.Ident i' $ I.Prim I.int32
+      i_bnds <- case dir of
+        E.FromUpTo ->
+          return [mkLet' [] [i_ident] $
+                  I.PrimOp $ I.BinOp (I.Add I.Int32) lbound' (I.Var j)]
+        E.FromDownTo -> do
+          upper_bound_less_one <-
+            letSubExp "upper_bound_less_one" $
+            PrimOp $ I.BinOp (I.Sub I.Int32) ubound' (constant (1 :: I.Int32))
+          return [mkLet' [] [i_ident] $
+                  I.PrimOp $ I.BinOp (I.Sub I.Int32) upper_bound_less_one (I.Var j)]
+      return ( bindingIdentTypes [I.Ident j $ I.Prim I.int32, i_ident] .
+               extraBodyBindings i_bnds
+             , Left (j, num_iterations))
+    E.While cond ->
       return (id, Right cond)
 
   mergeparams <- map E.toParam <$> flattenPattern mergepat
@@ -192,20 +230,20 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
     internaliseBodyBindings loopbody $ \ses -> do
       sets <- mapM subExpType ses
       let shapeinit = argShapes
-                      (map I.identName shapepat)
-                      (map I.identType mergepat')
+                      (map I.paramName shapepat)
+                      (map I.paramType mergepat')
                       mergeinit_ts
           shapeargs = argShapes
-                      (map I.identName shapepat)
-                      (map I.identType mergepat')
+                      (map I.paramName shapepat)
+                      (map I.paramType mergepat')
                       sets
       case form_contents of
-        Left (i', bound') ->
-          return (resultBody $ shapeargs ++ ses,
-                  (I.ForLoop i' bound',
+        Left (i', bound) ->
+             return (resultBody $ shapeargs ++ ses,
+                  (I.ForLoop i' bound,
                    shapepat,
                    mergepat',
-                   map I.identName mergepat',
+                   map I.paramName mergepat',
                    mergeinit,
                    []))
         Right cond -> do
@@ -215,14 +253,14 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
           -- next iteration?).  This is safe, as the type rules for
           -- the external language guarantees that 'cond' does not
           -- consume anything.
-          loop_while <- newIdent "loop_while" $ I.Basic Bool
+          loop_while <- newParam "loop_while" $ I.Prim I.Bool
           (loop_cond, loop_cond_bnds) <-
             collectBindings $ internaliseExp1 "loop_cond" cond
-          let initsubst = [ (I.identName mergeparam, initval)
+          let initsubst = [ (I.paramName mergeparam, initval)
                             | (mergeparam, initval) <-
                                zip (shapepat++mergepat') (shapeinit++mergeinit)
                             ]
-              endsubst = [ (I.identName mergeparam, endval)
+              endsubst = [ (I.paramName mergeparam, endval)
                          | (mergeparam, endval) <-
                               zip (shapepat++mergepat') (shapeargs++ses)
                          ]
@@ -234,10 +272,10 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
             shadowIdentsInExp endsubst loop_cond_bnds loop_cond
           return (mkBody loop_end_cond_bnds $
                   shapeargs++[loop_end_cond]++ses,
-                  (I.WhileLoop $ I.identName loop_while,
+                  (I.WhileLoop $ I.paramName loop_while,
                    shapepat,
                    loop_while : mergepat',
-                   map I.identName mergepat',
+                   map I.paramName mergepat',
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
 
@@ -246,12 +284,11 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
   mergeinit_ts' <- mapM subExpType mergeinit'
 
   let mergeexp' = argShapes
-                  (map I.identName shapepat)
-                  (map I.identType mergepat')
+                  (map I.paramName shapepat)
+                  (map I.paramType mergepat')
                   mergeinit_ts' ++
                   mergeinit'
-      merge = [ (Param ident (), e) |
-                (ident, e) <- zip (shapepat ++ mergepat') mergeexp' ]
+      merge = zip (shapepat ++ mergepat') mergeexp'
       loop = I.LoopOp $ I.DoLoop res merge form' loopbody'
   loopt <- I.expExtType loop
   bindingTupIdent mergepat loopt $ \mergepat'' -> do
@@ -285,7 +322,7 @@ internaliseExp desc (E.Size i e _) = do
   case ks of
     (k:_) -> do kt <- I.subExpType k
                 return [I.arraySize i kt]
-    _     -> return [I.intconst 0] -- Will this ever happen?
+    _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
 internaliseExp desc (E.Unzip e _ _) =
   internaliseExp desc e
@@ -307,7 +344,7 @@ internaliseExp _ (E.Zip (e:es) loc) = do
           []      -> return e_unchecked' -- Probably type error
           outer:inner -> do
             cmp <- letSubExp "zip_cmp" $ I.PrimOp $
-                   I.BinOp I.Equal e_outer outer I.Bool
+                   I.CmpOp (I.CmpEq I.int32) e_outer outer
             c   <- assertingOne $
                    letExp "zip_assert" $ I.PrimOp $
                    I.Assert cmp loc
@@ -329,6 +366,16 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange [] perm v
 
+internaliseExp _ (E.Stripe stride e _) = do
+  e' <- internaliseExp1 "stride" stride
+  internaliseOperation "stripe" e $ \v ->
+    return $ I.Stripe [] e' v
+
+internaliseExp _ (E.Unstripe stride e _) = do
+  e' <- internaliseExp1 "stride" stride
+  internaliseOperation "unstripe" e $ \v ->
+    return $ I.Unstripe [] e' v
+
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" e $ \v -> do
@@ -337,10 +384,10 @@ internaliseExp _ (E.Reshape shape e loc) = do
     dims <- I.arrayDims <$> lookupType v
     shapeOk <- assertingOne $
                letExp "shape_ok" =<<
-               eAssert (eBinOp I.Equal (prod dims) (prod shape') I.Bool)
+               eAssert (eCmpOp (I.CmpEq I.int32) (prod dims) (prod shape'))
                loc
     return $ I.Reshape shapeOk (DimNew <$> shape') v
-  where prod l = foldBinOp I.Times (intconst 1) l I.Int
+  where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
 
 internaliseExp _ (E.Split splitexps arrexp loc) = do
   splits' <- mapM (internaliseExp1 "n") splitexps
@@ -350,15 +397,15 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
 
   -- Assertions
   indexAsserts <- asserting $ do
-    let indexConds = zipWith (\beg end -> PrimOp $ I.BinOp I.Leq beg end I.Bool)
-                     (I.intconst 0:splits') (splits'++[arrayOuterdim])
+    let indexConds = zipWith (\beg end -> PrimOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
+                     (I.constant (0 :: I.Int32):splits') (splits'++[arrayOuterdim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
     forM indexChecks$ \cnd ->
       letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
-  let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp I.Minus end beg I.Int)
-                 (I.intconst 0:splits') (splits'++[arrayOuterdim])
+  let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp (I.Sub I.Int32) end beg)
+                 (I.constant (0 :: I.Int32):splits') (splits'++[arrayOuterdim])
   sizeVars <- mapM (letSubExp "split_size") sizeExps
   splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
                                    PrimOp $ I.Split indexAsserts sizeVars arr
@@ -378,7 +425,7 @@ internaliseExp desc (E.Concat x ys loc) = do
         yts <- mapM lookupType yarrs
         let matches n m =
               letExp "match" =<<
-              eAssert (pure $ I.PrimOp $ I.BinOp I.Equal n m I.Bool) loc
+              eAssert (pure $ I.PrimOp $ I.CmpOp (I.CmpEq I.int32) n m) loc
             x_inner_dims  = drop 1 $ I.arrayDims xt
             ys_inner_dims = map (drop 1 . I.arrayDims) yts
         matchcs <- asserting $
@@ -392,15 +439,15 @@ internaliseExp desc (E.Concat x ys loc) = do
 
     where
         sumdims xsize ysize = letSubExp "conc_tmp" $ I.PrimOp $
-                                        I.BinOp I.Plus xsize ysize I.Int
+                                        I.BinOp (I.Add I.Int32) xsize ysize
 
 internaliseExp desc (E.Map lam arr _) = do
   arrs <- internaliseExpToVars "map_arr" arr
   lam' <- internaliseMapLambda internaliseLambda asserting lam $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.LoopOp $ I.Map [] w lam' arrs
+  letTupExp' desc $ I.Op $ I.Map [] w lam' arrs
 
-internaliseExp desc (E.Reduce lam ne arr loc) = do
+internaliseExp desc (E.Reduce comm lam ne arr loc) = do
   arrs <- internaliseExpToVars "reduce_arr" arr
   nes <- internaliseExp "reduce_ne" ne
   nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
@@ -411,7 +458,7 @@ internaliseExp desc (E.Reduce lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.LoopOp $ I.Reduce [] w lam' input
+  letTupExp' desc $ I.Op $ I.Reduce [] w comm lam' input
 
 internaliseExp desc (E.Scan lam ne arr loc) = do
   arrs <- internaliseExpToVars "scan_arr" arr
@@ -424,14 +471,14 @@ internaliseExp desc (E.Scan lam ne arr loc) = do
   lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.LoopOp $ I.Scan [] w lam' input
+  letTupExp' desc $ I.Op $ I.Scan [] w lam' input
 
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda [lam] $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "filter_partition_flags" $ I.LoopOp $ I.Map [] w lam' arrs
-  filter_size <- newIdent "filter_size" $ I.Basic Int
+  flags <- letExp "filter_partition_flags" $ I.Op $ I.Map [] w lam' arrs
+  filter_size <- newIdent "filter_size" $ I.Prim int32
   filter_perms <- mapM (newIdent "filter_perm" <=< lookupType) arrs
   addBinding $ mkLet' [] (filter_size : filter_perms) $
     I.PrimOp $ I.Partition [] 1 flags arrs
@@ -444,9 +491,9 @@ internaliseExp desc (E.Partition lams arr _) = do
   arrs <- internaliseExpToVars "partition_input" arr
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
-  flags <- letExp "partition_partition_flags" $ I.LoopOp $ I.Map [] w lam' arrs
+  flags <- letExp "partition_partition_flags" $ I.Op $ I.Map [] w lam' arrs
   liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
-    partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Basic Int
+    partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Prim int32
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
     addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
       I.PrimOp $ I.Partition [] n flags [arr']
@@ -455,50 +502,50 @@ internaliseExp desc (E.Partition lams arr _) = do
       I.identName partition_perm
   where n = length lams + 1
 
-internaliseExp desc (E.Redomap lam1 lam2 ne arrs _) = do
+internaliseExp desc (E.Redomap comm lam1 lam2 ne arrs _) = do
   arrs' <- internaliseExpToVars "redomap_arr" arrs
   nes <- internaliseExp "redomap_ne" ne
   acc_tps <- mapM I.subExpType nes
   outersize <- arraysSize 0 <$> mapM lookupType arrs'
-  let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) (I.uniqueness t)
-                        | t <- acc_tps ]
+  let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) NoUniqueness
+                    | t <- acc_tps ]
   nests <- mapM I.subExpType nes
   lam1' <- internaliseFoldLambda internaliseLambda asserting lam1 nests acc_arr_tps
   lam2' <- internaliseRedomapInnerLambda internaliseLambda asserting lam2
            nes (map I.Var arrs')
   w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $ I.LoopOp $
-    I.Redomap [] w lam1' lam2' nes arrs'
+  letTupExp' desc $ I.Op $
+    I.Redomap [] w comm lam1' lam2' nes arrs'
 
 internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr ii _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
   accs' <- case form of
-             E.MapLike _       -> return []
-             E.RedLike _ _ acc -> internaliseExp "stream_acc" acc
-             E.Sequential  acc -> internaliseExp "stream_acc" acc
+             E.MapLike _         -> return []
+             E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
+             E.Sequential  acc   -> internaliseExp "stream_acc" acc
   lam'  <- bindingParams [E.toParam chunk] $ \_ [chunk'] -> do
              rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
              let lam_arrs' = [ I.arrayOf t
-                              (Shape [I.Var $ I.identName chunk'])
-                              (I.uniqueness t)
+                              (Shape [I.Var $ I.paramName chunk'])
+                              NoUniqueness
                               | t <- rowts
                              ]
                  lamf = AnonymFun remparams body lamrtp pos
              lam'' <- internaliseStreamLambda internaliseLambda asserting lamf accs' lam_arrs'
-             return $ lam'' { extLambdaParams = I.Param chunk' () : extLambdaParams lam'' }
+             return $ lam'' { extLambdaParams = fmap I.fromDecl chunk' : extLambdaParams lam'' }
   form' <- case form of
              E.MapLike o -> return $ I.MapLike o
-             E.RedLike o lam0 _ -> do
+             E.RedLike o comm lam0 _ -> do
                  acctps <- mapM I.subExpType accs'
                  outsz  <- arraysSize 0 <$> mapM lookupType arrs'
-                 let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) (I.uniqueness t) | t <- acctps ]
+                 let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) NoUniqueness | t <- acctps ]
                  lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
-                 return $ I.RedLike o lam0' accs'
+                 return $ I.RedLike o comm lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $
-    I.LoopOp $ I.Stream [] w form' lam' arrs' ii
-internaliseExp _ (E.Stream{}) =
+    I.Op $ I.Stream [] w form' lam' arrs' ii
+internaliseExp _ E.Stream{} =
   fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 
 internaliseExp desc (E.ConcatMap lam arr arrs _) = do
@@ -506,7 +553,7 @@ internaliseExp desc (E.ConcatMap lam arr arrs _) = do
   arrs' <- mapM (internaliseExpToVars "concatMap_arr") arrs
   lam' <- internaliseConcatMapLambda internaliseLambda lam
   w <- arraysSize 0 <$> mapM lookupType arr'
-  letTupExp' desc $ I.LoopOp $ I.ConcatMap [] w lam' $ arr':arrs'
+  letTupExp' desc $ I.Op $ I.ConcatMap [] w lam' $ arr':arrs'
 
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
@@ -526,32 +573,69 @@ internaliseExp desc (E.If ce te fe t _) = do
   let t' = internaliseType t
   letTupExp' desc $ I.If ce' te' fe' t'
 
-internaliseExp desc (E.BinOp bop xe ye t _) = do
+internaliseExp desc (E.BinOp bop xe ye _ _) = do
   xe' <- internaliseExp1 "x" xe
   ye' <- internaliseExp1 "y" ye
-  case internaliseType t of
-    [I.Basic t'] -> internaliseBinOp desc bop xe' ye' t'
-    _            -> fail "Futhark.Internalise.internaliseExp: non-basic type in BinOp."
+  case (E.typeOf xe, E.typeOf ye) of
+    (E.Prim t1, E.Prim t2) ->
+      internaliseBinOp desc bop xe' ye' t1 t2
+    _            ->
+      fail "Futhark.Internalise.internaliseExp: non-primitive type in BinOp."
 
 internaliseExp desc (E.UnOp E.Not e _) = do
   e' <- internaliseExp1 "not_arg" e
-  letTupExp' desc $ I.PrimOp $ I.Not e'
+  letTupExp' desc $ I.PrimOp $ I.UnOp I.Not e'
 
 internaliseExp desc (E.UnOp E.Complement e _) = do
   e' <- internaliseExp1 "complement_arg" e
-  letTupExp' desc $ I.PrimOp $ I.Complement e'
+  et <- subExpType e'
+  case et of I.Prim (I.IntType t) ->
+               letTupExp' desc $ I.PrimOp $ I.UnOp (I.Complement t) e'
+             _ ->
+               fail "Futhark.Internalise.internaliseExp: non-integer type in Complement"
 
 internaliseExp desc (E.UnOp E.Negate e _) = do
   e' <- internaliseExp1 "negate_arg" e
-  letTupExp' desc $ I.PrimOp $ I.Negate e'
+  et <- subExpType e'
+  case et of I.Prim (I.IntType t) ->
+               letTupExp' desc $ I.PrimOp $ I.BinOp (I.Sub t) (I.intConst t 0) e'
+             I.Prim (I.FloatType t) ->
+               letTupExp' desc $ I.PrimOp $ I.BinOp (I.FSub t) (I.floatConst t 0) e'
+             _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Negate"
 
 internaliseExp desc (E.UnOp E.Abs e _) = do
   e' <- internaliseExp1 "abs_arg" e
-  letTupExp' desc $ I.PrimOp $ I.Abs e'
+  et <- subExpType e'
+  case et of I.Prim (I.IntType t) ->
+               letTupExp' desc $ I.PrimOp $ I.UnOp (I.Abs t) e'
+             I.Prim (I.FloatType t) ->
+               letTupExp' desc $ I.PrimOp $ I.UnOp (I.FAbs t) e'
+             _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Abs"
 
 internaliseExp desc (E.UnOp E.Signum e _) = do
   e' <- internaliseExp1 "signum_arg" e
-  letTupExp' desc $ I.PrimOp $ I.Signum e'
+  et <- subExpType e'
+  case et of I.Prim (I.IntType t) ->
+               letTupExp' desc $ I.PrimOp $ I.UnOp (I.Signum t) e'
+             _ -> fail "Futhark.Internalise.internaliseExp: non-integer type in Signum"
+
+internaliseExp desc (E.UnOp (E.ToFloat float_to) e _) = do
+  e' <- internaliseExp1 "tofloat_arg" e
+  case E.typeOf e of
+    E.Prim (E.IntType int_from) ->
+      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.SIToFP int_from float_to) e'
+    E.Prim (E.FloatType float_from) ->
+      letTupExp' desc $ I.PrimOp $ I.ConvOp (FPConv float_from float_to) e'
+    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in ToFloat"
+
+internaliseExp desc (E.UnOp (E.ToInt int_to) e _) = do
+  e' <- internaliseExp1 "trunc_arg" e
+  case E.typeOf e of
+    E.Prim (E.IntType int_from) ->
+      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.SExt int_from int_to) e'
+    E.Prim (E.FloatType float_from) ->
+      letTupExp' desc $ I.PrimOp $ I.ConvOp (I.FPToSI float_from int_to) e'
+    _ -> fail "Futhark.Internalise.internaliseExp: non-numeric type in Trunc"
 
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
@@ -580,54 +664,87 @@ internaliseOperation s e op = do
 internaliseBinOp :: String
                  -> E.BinOp
                  -> I.SubExp -> I.SubExp
-                 -> I.BasicType
+                 -> E.PrimType
+                 -> E.PrimType
                  -> InternaliseM [I.SubExp]
-internaliseBinOp desc E.Plus x y t =
-  simpleBinOp desc I.Plus x y t
-internaliseBinOp desc E.Minus x y t =
-  simpleBinOp desc I.Minus x y t
-internaliseBinOp desc E.Times x y t =
-  simpleBinOp desc I.Times x y t
-internaliseBinOp desc E.Divide x y Int =
-  simpleBinOp desc I.IntDivide x y Int
-internaliseBinOp desc E.Divide x y t =
-  simpleBinOp desc I.Divide x y t
-internaliseBinOp desc E.Pow x y t =
-  simpleBinOp desc I.Pow x y t
-internaliseBinOp desc E.Mod x y t =
-  simpleBinOp desc I.Mod x y t
-internaliseBinOp desc E.ShiftR x y t =
-  simpleBinOp desc I.ShiftR x y t
-internaliseBinOp desc E.ShiftL x y t =
-  simpleBinOp desc I.ShiftL x y t
-internaliseBinOp desc E.Band x y t =
-  simpleBinOp desc I.Band x y t
-internaliseBinOp desc E.Xor x y t =
-  simpleBinOp desc I.Xor x y t
-internaliseBinOp desc E.Bor x y t =
-  simpleBinOp desc I.Bor x y t
-internaliseBinOp desc E.LogAnd x y t =
-  simpleBinOp desc I.LogAnd x y t
-internaliseBinOp desc E.LogOr x y t =
-  simpleBinOp desc I.LogOr x y t
-internaliseBinOp desc E.Equal x y t =
-  simpleBinOp desc I.Equal x y t
-internaliseBinOp desc E.Less x y t =
-  simpleBinOp desc I.Less x y t
-internaliseBinOp desc E.Leq x y t =
-  simpleBinOp desc I.Leq x y t
-internaliseBinOp desc E.Greater x y t =
-  simpleBinOp desc I.Less y x t -- Note the swapped x and y
-internaliseBinOp desc E.Geq x y t =
-  simpleBinOp desc I.Leq y x t -- Note the swapped x and y
+internaliseBinOp desc E.Plus x y (E.IntType t) _ =
+  simpleBinOp desc (I.Add t) x y
+internaliseBinOp desc E.Plus x y (E.FloatType t) _ =
+  simpleBinOp desc (I.FAdd t) x y
+internaliseBinOp desc E.Minus x y (E.IntType t) _ =
+  simpleBinOp desc (I.Sub t) x y
+internaliseBinOp desc E.Minus x y (E.FloatType t) _ =
+  simpleBinOp desc (I.FSub t) x y
+internaliseBinOp desc E.Times x y (E.IntType t) _ =
+  simpleBinOp desc (I.Mul t) x y
+internaliseBinOp desc E.Times x y (E.FloatType t) _ =
+  simpleBinOp desc (I.FMul t) x y
+internaliseBinOp desc E.Divide x y (E.IntType t) _ =
+  simpleBinOp desc (I.SDiv t) x y
+internaliseBinOp desc E.Divide x y (E.FloatType t) _ =
+  simpleBinOp desc (I.FDiv t) x y
+internaliseBinOp desc E.Pow x y (E.FloatType t) _ =
+  simpleBinOp desc (I.FPow t) x y
+internaliseBinOp desc E.Pow x y (E.IntType t) _ =
+  simpleBinOp desc (I.SPow t) x y
+internaliseBinOp desc E.Mod x y (E.IntType t) _ =
+  simpleBinOp desc (I.SMod t) x y
+internaliseBinOp desc E.Quot x y (E.IntType t) _ =
+  simpleBinOp desc (I.SQuot t) x y
+internaliseBinOp desc E.Rem x y (E.IntType t) _ =
+  simpleBinOp desc (I.SRem t) x y
+internaliseBinOp desc E.ShiftR x y (E.IntType t) _ =
+  simpleBinOp desc (I.AShr t) x y
+internaliseBinOp desc E.ZShiftR x y (E.IntType t) _ =
+  simpleBinOp desc (I.LShr t) x y
+internaliseBinOp desc E.ShiftL x y (E.IntType t) _ =
+  simpleBinOp desc (I.Shl t) x y
+internaliseBinOp desc E.Band x y (E.IntType t) _ =
+  simpleBinOp desc (I.And t) x y
+internaliseBinOp desc E.Xor x y (E.IntType t) _ =
+  simpleBinOp desc (I.Xor t) x y
+internaliseBinOp desc E.Bor x y (E.IntType t) _ =
+  simpleBinOp desc (I.Or t) x y
+internaliseBinOp desc E.LogAnd x y _ _ =
+  simpleBinOp desc I.LogAnd x y
+internaliseBinOp desc E.LogOr x y _ _ =
+  simpleBinOp desc I.LogOr x y
+internaliseBinOp desc E.Equal x y t _ =
+  simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
+internaliseBinOp desc E.Less x y (E.IntType t) _ =
+  simpleCmpOp desc (I.CmpSlt t) x y
+internaliseBinOp desc E.Leq x y (E.IntType t) _ =
+  simpleCmpOp desc (I.CmpSle t) x y
+internaliseBinOp desc E.Greater x y (E.IntType t) _ =
+  simpleCmpOp desc (I.CmpSlt t) y x -- Note the swapped x and y
+internaliseBinOp desc E.Geq x y (E.IntType t) _ =
+  simpleCmpOp desc (I.CmpSle t) y x -- Note the swapped x and y
+internaliseBinOp desc E.Less x y (E.FloatType t) _ =
+  simpleCmpOp desc (I.FCmpLt t) x y
+internaliseBinOp desc E.Leq x y (E.FloatType t) _ =
+  simpleCmpOp desc (I.FCmpLe t) x y
+internaliseBinOp desc E.Greater x y (E.FloatType t) _ =
+  simpleCmpOp desc (I.FCmpLt t) y x -- Note the swapped x and y
+internaliseBinOp desc E.Geq x y (E.FloatType t) _ =
+  simpleCmpOp desc (I.FCmpLe t) y x -- Note the swapped x and y
+internaliseBinOp _ op _ _ t1 t2 =
+  fail $ "Invalid binary operator " ++ pretty op ++
+  " with operand types " ++ pretty t1 ++ ", " ++ pretty t2
 
 simpleBinOp :: String
             -> I.BinOp
             -> I.SubExp -> I.SubExp
-            -> I.BasicType
             -> InternaliseM [I.SubExp]
-simpleBinOp desc bop x y t =
-  letTupExp' desc $ I.PrimOp $ I.BinOp bop x y t
+simpleBinOp desc bop x y =
+  letTupExp' desc $ I.PrimOp $ I.BinOp bop x y
+
+simpleCmpOp :: String
+            -> I.CmpOp
+            -> I.SubExp -> I.SubExp
+            -> InternaliseM [I.SubExp]
+simpleCmpOp desc op x y =
+  letTupExp' desc $ I.PrimOp $ I.CmpOp op x y
+
 
 internaliseLambda :: InternaliseLambda
 
@@ -635,29 +752,29 @@ internaliseLambda (E.AnonymFun params body rettype _) (Just rowtypes) = do
   (body', params') <- bindingLambdaParams params rowtypes $
                       internaliseBody body
   (rettype', _) <- internaliseReturnType rettype
-  return (map (`Param` ()) params', body', rettype')
+  return (params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.AnonymFun params body rettype _) Nothing = do
   (body', params', rettype') <- bindingParams params $ \shapeparams valparams -> do
     body' <- internaliseBody body
     (rettype', _) <- internaliseReturnType rettype
     return (body', shapeparams ++ valparams, rettype')
-  return (map (`Param` ()) params', body', rettype')
+  return (map (fmap I.fromDecl) params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
   fun_entry <- lookupFunction fname
   let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
-  params <- mapM (newIdent "not_curried") rowtypes
-  let valargs = curargs' ++ map (I.Var . I.identName) params
+  params <- mapM (newParam "not_curried") rowtypes
+  let valargs = curargs' ++ map (I.Var . I.paramName) params
       valargs_types = curarg_types ++ rowtypes
       diets = map I.diet paramts
       shapeargs = argShapes shapes paramts valargs_types
       allargs = zip shapeargs (repeat I.Observe) ++
                 zip valargs diets
   case int_rettype_fun $
-       map (,I.Basic Int) shapeargs ++ zip valargs valargs_types of
+       map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
     Nothing ->
       fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
       pretty (shapeargs ++ valargs)
@@ -666,7 +783,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
         res <- letTupExp "curried_fun_result" $
                I.Apply fname allargs $ ExtRetType ts
         resultBodyM $ map I.Var res
-      return (map (`Param` ()) params, funbody, ts)
+      return (params, funbody, map I.fromDecl ts)
 
 internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
   fun_entry <- lookupFunction fname
@@ -681,15 +798,15 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
                    , E.identSrcLoc = noLoc
                    }
   bindingParams ext_params $ \shape_params value_params -> do
-    let params = shape_params ++ value_params
-        valargs = curargs' ++ map (I.Var . I.identName) value_params
-        valargs_types = curarg_types ++ map I.identType value_params
+    let params = map (fmap I.fromDecl) $ shape_params ++ value_params
+        valargs = curargs' ++ map (I.Var . I.paramName) value_params
+        valargs_types = curarg_types ++ map I.paramType value_params
         diets = map I.diet paramts
         shapeargs = argShapes shapes paramts valargs_types
         allargs = zip shapeargs (repeat I.Observe) ++
                   zip valargs diets
     case int_rettype_fun $
-         map (,I.Basic Int) shapeargs ++ zip valargs valargs_types of
+         map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
       Nothing ->
         fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
         pretty (shapeargs ++ valargs)
@@ -698,67 +815,69 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
           res <- letTupExp "curried_fun_result" $
                  I.Apply fname allargs $ ExtRetType ts
           resultBodyM $ map I.Var res
-        return (map (`Param` ()) params, funbody, ts)
+        return (params, funbody, map I.fromDecl ts)
 
-internaliseLambda (E.UnOpFun unop t loc) rowts = do
-  (params, body, rettype) <- unOpFunToLambda unop t
-  internaliseLambda (E.AnonymFun params body rettype loc) rowts
+internaliseLambda (E.UnOpFun unop paramtype rettype loc) rowts = do
+  (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
+  internaliseLambda (E.AnonymFun params body rettype' loc) rowts
 
-internaliseLambda (E.BinOpFun unop t loc) rowts = do
-  (params, body, rettype) <- binOpFunToLambda unop t
-  internaliseLambda (AnonymFun params body rettype loc) rowts
+internaliseLambda (E.BinOpFun unop xtype ytype rettype loc) rowts = do
+  (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
+  internaliseLambda (AnonymFun params body rettype' loc) rowts
 
-internaliseLambda (E.CurryBinOpLeft binop e t loc) rowts = do
-  (params, body, rettype) <- binOpCurriedToLambda binop t e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body rettype loc) rowts
+internaliseLambda (E.CurryBinOpLeft binop e paramtype rettype loc) rowts = do
+  (params, body, rettype') <-
+    binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
+  internaliseLambda (AnonymFun params body rettype' loc) rowts
 
-internaliseLambda (E.CurryBinOpRight binop e t loc) rowts = do
-  (params, body, rettype) <- binOpCurriedToLambda binop t e id
-  internaliseLambda (AnonymFun params body rettype loc) rowts
+internaliseLambda (E.CurryBinOpRight binop e paramtype rettype loc) rowts = do
+  (params, body, rettype') <-
+    binOpCurriedToLambda binop paramtype rettype e id
+  internaliseLambda (AnonymFun params body rettype' loc) rowts
 
-unOpFunToLambda :: E.UnOp -> E.Type
+unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
-unOpFunToLambda op t = do
+unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
-  let param = E.Ident { E.identType = t
+  let param = E.Ident { E.identType = paramtype
                       , E.identSrcLoc = noLoc
                       , E.identName = paramname
                       }
   return ([toParam param],
           E.UnOp op (E.Var param) noLoc,
-          E.vacuousShapeAnnotations $ E.toDecl t)
+          E.vacuousShapeAnnotations $ E.toDecl rettype)
 
-binOpFunToLambda :: E.BinOp -> E.Type
+binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
                  -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
-binOpFunToLambda op t = do
+binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
-  let param_x = E.Ident { E.identType = t
+  let param_x = E.Ident { E.identType = xtype
                         , E.identSrcLoc = noLoc
                         , E.identName = x_name
                         }
-      param_y = E.Ident { E.identType = t
+      param_y = E.Ident { E.identType = ytype
                         , E.identSrcLoc = noLoc
                         , E.identName = y_name
                         }
   return ([toParam param_x, toParam param_y],
-          E.BinOp op (E.Var param_x) (E.Var param_y) t noLoc,
-          E.vacuousShapeAnnotations $ E.toDecl t)
+          E.BinOp op (E.Var param_x) (E.Var param_y) rettype noLoc,
+          E.vacuousShapeAnnotations $ E.toDecl rettype)
 
-binOpCurriedToLambda :: E.BinOp -> E.Type
+binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
                      -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
-binOpCurriedToLambda op t e swap = do
+binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
-  let param = E.Ident { E.identType = t
+  let param = E.Ident { E.identType = paramtype
                       , E.identSrcLoc = noLoc
                       , E.identName = paramname
                         }
       (x', y') = swap (E.Var param, e)
   return ([toParam param],
-          E.BinOp op x' y' t noLoc,
-          E.vacuousShapeAnnotations $ E.toDecl t)
+          E.BinOp op x' y' rettype noLoc,
+          E.vacuousShapeAnnotations $ E.toDecl rettype)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
@@ -784,11 +903,11 @@ boundsChecks loc (v:_) es =
 boundsCheck :: SrcLoc -> VName -> Int -> I.SubExp -> InternaliseM I.VName
 boundsCheck loc v i e = do
   size <- arraySize i <$> lookupType v
-  let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound) I.Bool
+  let check = eBinOp I.LogAnd (pure lowerBound) (pure upperBound)
       lowerBound = I.PrimOp $
-                   I.BinOp I.Leq (I.intconst 0) e I.Bool
+                   I.CmpOp (I.CmpSle I.Int32) (I.constant (0 :: I.Int32)) e
       upperBound = I.PrimOp $
-                   I.BinOp I.Less e size I.Bool
+                   I.CmpOp (I.CmpSlt I.Int32) e size
   letExp "bounds_check" =<< eAssert check loc
 
 shadowIdentsInExp :: [(VName, I.SubExp)] -> [Binding] -> I.SubExp

@@ -4,7 +4,7 @@
 -- be revised.
 --
 -- ==
--- structure distributed { If/Kernel 0 }
+-- structure distributed { If/MapKernel 0 }
 
 fun [[int]] main([[int]] a) =
   map(fn [int] ([int] a_r) =>

@@ -13,17 +13,21 @@
 --    "Futhark.Optimise.Simplification.Rules").
 --
 -- If you just want to run the simplifier as simply as possible, you
--- may prefer to use the "Futhark.Optimise.Simplifier" or
--- "Futhark.Optimise.Simplifier.Simplify" modules.
+-- may prefer to use the "Futhark.Optimise.Simplifier" module.
 --
 module Futhark.Optimise.Simplifier.Engine
        ( -- * Monadic interface
-         Simplifiable
-       , MonadEngine(..)
+         MonadEngine(..)
        , addBindingEngine
        , collectBindingsEngine
-       , Env
+       , Env (envHoistBlockers)
        , emptyEnv
+       , HoistBlockers(..)
+       , noExtraHoistBlockers
+       , BlockPred
+       , orIf
+       , hasFree
+       , isConsumed
        , State
        , emptyState
        , Need
@@ -34,17 +38,25 @@ module Futhark.Optimise.Simplifier.Engine
        , defaultSimplifyBody
        , defaultInspectBinding
          -- * Building blocks
+       , SimplifiableOp (..)
+       , Simplifiable (..)
        , simplifyBinding
        , simplifyResult
        , simplifyExp
+       , simplifyPattern
        , simplifyFun
        , simplifyLambda
        , simplifyLambdaNoHoisting
        , simplifyExtLambda
-       , simplifySubExp
-       , simplifyVName
-       , simplifyExtType
-       , simplifyExtShape
+       , simplifyParam
+       , bindLParams
+       , bindLoopVars
+       , enterLoop
+       , consumedName
+
+       , blockIf
+
+       , tapUsage
        ) where
 
 import Control.Applicative
@@ -53,7 +65,6 @@ import Control.Monad.Writer
 import Data.Either
 import Data.Hashable
 import Data.List
-import qualified Data.Traversable
 import Data.Maybe
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -61,18 +72,15 @@ import Data.Foldable (traverse_)
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
-import Futhark.Optimise.Simplifier.Apply
 import Futhark.Construct
-import qualified Futhark.Analysis.ScalExp as SExp
-import Futhark.Optimise.Simplifier.Simplifiable
 import Futhark.Optimise.Simplifier.Lore
+import qualified Futhark.Analysis.ScalExp as SE
 
 type NeedSet lore = [Binding lore]
 
@@ -86,18 +94,29 @@ instance Monoid (Need lore) where
 
 type AliasMap = HM.HashMap VName Names
 
-data Env m = Env { envProgram   :: Maybe (Prog (InnerLore m))
-                 , envRules     :: RuleBook m
-                 , envAliases   :: AliasMap
+data HoistBlockers m = HoistBlockers
+                       { blockHoistPar :: BlockPred (Lore m)
+                         -- ^ Blocker for hoisting out of parallel loops.
+                       , blockHoistSeq :: BlockPred (Lore m)
+                         -- ^ Blocker for hoisting out of sequential loops.
+                       }
+
+noExtraHoistBlockers :: HoistBlockers m
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks
+
+data Env m = Env { envRules         :: RuleBook m
+                 , envAliases       :: AliasMap
+                 , envHoistBlockers :: HoistBlockers m
                  }
 
 emptyEnv :: MonadEngine m =>
             RuleBook m
-         -> Maybe (Prog (InnerLore m)) -> Env m
-emptyEnv rules prog =
-  Env { envProgram = prog
-      , envRules = rules
+         -> HoistBlockers m
+         -> Env m
+emptyEnv rules blockers =
+  Env { envRules = rules
       , envAliases = mempty
+      , envHoistBlockers = blockers
       }
 data State m = State { stateVtable :: ST.SymbolTable (Lore m)
                      }
@@ -106,10 +125,15 @@ emptyState :: State m
 emptyState = State { stateVtable = ST.empty }
 
 class (MonadBinder m,
-       Proper (Lore m),
+       Attributes (Lore m),
+       Attributes (InnerLore m),
        Lore m ~ Wise (InnerLore m),
-       Simplifiable (InnerLore m)) => MonadEngine m where
-  type InnerLore m
+       Simplifiable (LetAttr (InnerLore m)),
+       Simplifiable (FParamAttr (InnerLore m)),
+       Simplifiable (LParamAttr (InnerLore m)),
+       Simplifiable (RetType (InnerLore m)),
+       SimplifiableOp (InnerLore m) (Op (InnerLore m))) => MonadEngine m where
+  type InnerLore m :: *
   askEngineEnv :: m (Env m)
   localEngineEnv :: (Env m -> Env m) -> m a -> m a
   tellNeed :: Need (Lore m) -> m ()
@@ -122,14 +146,6 @@ class (MonadBinder m,
   simplifyBody = defaultSimplifyBody
   inspectBinding :: Binding (Lore m) -> m ()
   inspectBinding = defaultInspectBinding
-  simplifyLetBoundLore :: Annotations.LetBound (InnerLore m)
-                       -> m (Annotations.LetBound (InnerLore m))
-  simplifyFParamLore :: Annotations.FParam (InnerLore m)
-                     -> m (Annotations.FParam (InnerLore m))
-  simplifyLParamLore :: Annotations.LParam (InnerLore m)
-                     -> m (Annotations.LParam (InnerLore m))
-  simplifyRetType :: Annotations.RetType (InnerLore m)
-                  -> m (Annotations.RetType (InnerLore m))
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
@@ -166,6 +182,7 @@ boundFree fs = tellNeed $ Need [] $ UT.usages fs
 usedName :: MonadEngine m => VName -> m ()
 usedName = boundFree . HS.singleton
 
+-- | Register the fact that the given name is consumed.
 consumedName :: MonadEngine m => VName -> m ()
 consumedName = tellNeed . Need [] . UT.consumedUsage
 
@@ -173,11 +190,11 @@ inResultName :: MonadEngine m => VName -> m ()
 inResultName = tellNeed . Need [] . UT.inResultUsage
 
 asserted :: MonadEngine m => SubExp -> m ()
-asserted (Constant {}) =
+asserted Constant{} =
   return ()
 asserted (Var name) = do
   se <- ST.lookupExp name <$> getVtable
-  case se of Just (PrimOp (BinOp Equal x y _)) -> do
+  case se of Just (PrimOp (CmpOp CmpEq{} x y)) -> do
                case x of Var xvar ->
                            tellNeed $ Need [] $
                            UT.equalToUsage xvar y
@@ -191,11 +208,6 @@ asserted (Var name) = do
 tapUsage :: MonadEngine m => m a -> m (a, UT.UsageTable)
 tapUsage m = do (x,needs) <- listenNeed m
                 return (x, usageTable needs)
-
-blockUsage :: MonadEngine m => m a -> m a
-blockUsage m = passNeed $ do
-  (x, _) <- listenNeed m
-  return (x, const mempty)
 
 censorUsage :: MonadEngine m =>
                (UT.UsageTable -> UT.UsageTable)
@@ -227,7 +239,7 @@ localVtable f m = do
   return x
 
 enterLoop :: MonadEngine m => m a -> m a
-enterLoop = localVtable ST.deepen
+enterLoop = enterBody . localVtable ST.deepen
 
 enterBody :: MonadEngine m => m a -> m a
 enterBody = censorUsage UT.leftScope
@@ -303,7 +315,7 @@ hoistBindings rules block vtable uses needs result = do
                 (uses'',bnds') <- simplifyBindings' vtable' uses' optimbnds
                 return (uses'', bnds'++bnds)
 
-blockUnhoistedDeps :: Proper lore =>
+blockUnhoistedDeps :: Attributes lore =>
                       [Either (Binding lore) (Binding lore)]
                    -> [Either (Binding lore) (Binding lore)]
 blockUnhoistedDeps = snd . mapAccumL block HS.empty
@@ -315,16 +327,16 @@ blockUnhoistedDeps = snd . mapAccumL block HS.empty
           | otherwise =
             (blocked, Right need)
 
-provides :: Proper lore => Binding lore -> [VName]
+provides :: Attributes lore => Binding lore -> [VName]
 provides = patternNames . bindingPattern
 
-requires :: Proper lore => Binding lore -> Names
+requires :: Attributes lore => Binding lore -> Names
 requires bnd =
   (mconcat (map freeIn $ patternElements $ bindingPattern bnd)
   `HS.difference` HS.fromList (provides bnd)) <>
   freeInExp (bindingExp bnd)
 
-expandUsage :: (Proper lore, Aliased lore) =>
+expandUsage :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
                UT.UsageTable -> Binding lore -> UT.UsageTable
 expandUsage utable bnd = utable <> usageInBinding bnd <> usageThroughAliases
   where pat = bindingPattern bnd
@@ -340,11 +352,17 @@ intersects a b = not $ HS.null $ a `HS.intersection` b
 
 type BlockPred lore = UT.UsageTable -> Binding lore -> Bool
 
+neverBlocks :: BlockPred lore
+neverBlocks _ _ = False
+
 isFalse :: Bool -> BlockPred lore
 isFalse b _ _ = not b
 
 orIf :: BlockPred lore -> BlockPred lore -> BlockPred lore
 orIf p1 p2 body need = p1 body need || p2 body need
+
+isConsumed :: BlockPred lore
+isConsumed utable = any (`UT.isConsumed` utable) . patternNames . bindingPattern
 
 blockIf :: MonadEngine m =>
            BlockPred (Lore m)
@@ -364,10 +382,10 @@ blockIf block m = passNeed $ do
 insertAllBindings :: MonadEngine m => m Result -> m (Body (Lore m))
 insertAllBindings = blockIf $ \_ _ -> True
 
-hasFree :: Proper lore => Names -> BlockPred lore
+hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
 
-isNotSafe :: BlockPred m
+isNotSafe :: Attributes lore => BlockPred lore
 isNotSafe _ = not . safeExp . bindingExp
 
 isInPlaceBound :: BlockPred m
@@ -377,27 +395,14 @@ isInPlaceBound _ = not . all ((==BindVar) . patElemBindage) .
 isNotCheap :: BlockPred m
 isNotCheap _ = not . cheapBnd
   where cheapBnd = cheap . bindingExp
-        cheap (PrimOp (BinOp {}))   = True
-        cheap (PrimOp (SubExp {}))  = True
-        cheap (PrimOp (Not {}))     = True
-        cheap (PrimOp (Negate {}))  = True
-        cheap (LoopOp {})           = False
-        cheap _                     = True -- Used to be False, but
-                                           -- let's try it out.
-
-isUnique :: BlockPred lore
-isUnique _ = any unique . patternTypes . bindingPattern
-
-isAlloc :: BlockPred lore
-isAlloc _ (Let _ _ (PrimOp (Alloc {}))) = True
-isAlloc _ _                             = False
-
-isResultAlloc :: BlockPred lore
-isResultAlloc usage (Let (Pattern [] [bindee]) _
-                     (PrimOp (Alloc {}))) =
-  UT.isInResult (patElemName bindee) usage
-isResultAlloc _ _ = False
-
+        cheap (PrimOp BinOp{})   = True
+        cheap (PrimOp SubExp{})  = True
+        cheap (PrimOp UnOp{})    = True
+        cheap (PrimOp CmpOp{})   = True
+        cheap (PrimOp ConvOp{})  = True
+        cheap LoopOp{}           = False
+        cheap _                  = True -- Used to be False, but
+                                        -- let's try it out.
 hoistCommon :: MonadEngine m =>
                m Result
             -> (ST.SymbolTable (Lore m)
@@ -442,7 +447,7 @@ simplifyResult :: MonadEngine m =>
                   [Diet] -> Result -> m Result
 
 simplifyResult ds es = do
-  es' <- mapM simplifySubExp es
+  es' <- mapM simplify es
   consumeResult $ zip ds es'
   return es'
 
@@ -458,72 +463,10 @@ isDoLoopResult = mapM_ checkForVar
 simplifyBinding :: MonadEngine m =>
                    Binding (InnerLore m)
                 -> m ()
--- The simplification rules cannot handle Apply, because it requires
--- access to the full program.  This is a bit of a hack.
-simplifyBinding (Let pat _ (Apply fname args rettype)) = do
-  args' <- mapM (simplifySubExp . fst) args
-  rettype' <- simplifyRetType rettype
-  prog <- asksEngineEnv envProgram
-  vtable <- getVtable
-  case join $ pure simplifyApply <*> prog <*> pure vtable <*> pure fname <*> pure args of
-    -- Array values are non-unique, so we may need to copy them.
-    Just vs -> do let vs' = valueShapeContext (retTypeValues rettype) vs ++ vs
-                  bnds <- forM (zip (patternIdents pat) vs') $ \(p,v) ->
-                    case uniqueness $ identType p of
-                      Unique    -> mkLetNamesM' [identName p] =<< eCopy (eValue v)
-                      Nonunique -> mkLetNamesM' [identName p] =<< eValue v
-                  mapM_ (simplifyBinding . removeBindingWisdom) bnds
-    Nothing -> do let e' = Apply fname (zip args' $ map snd args) rettype'
-                  t <- expExtType e'
-                  pat' <- blockUsage $ simplifyPattern pat t
-                  inspectBinding =<<
-                    mkLetM (addWisdomToPattern pat' e') e'
-
-simplifyBinding (Let pat _ lss@(LoopOp Stream{})) = do
-  lss' <- simplifyExp lss
-  rtp <- expExtType lss
-  rtp' <- expExtType lss'
-  let patels      = patternElements pat
-      argpattps   = map patElemType $ drop (length patels - length rtp) patels
-  (newpats,newsubexps) <- unzip <$> reverse <$>
-                          foldM gatherPat [] (zip3 rtp rtp' argpattps)
-  newexps' <- forM newsubexps $ simplifyExp . PrimOp . SubExp
-  newpats' <- forM (zip newpats newexps') $ \(p,e) ->
-                    simplifyPattern p =<< expExtType e
-  let rmvdpatels = concatMap patternElements newpats
-      patels' = concatMap (\p->if p `elem` rmvdpatels then [] else [p]) patels
-  pat' <- let (ctx,vals) = splitAt (length patels' - length rtp') patels'
-          in simplifyPattern (Pattern ctx vals) rtp'
-  let newpatexps' = zip newpats' newexps' ++ [(pat',lss')]
-  newpats'' <- forM newpatexps' $ \(p,e)->simplifyPattern p =<< expExtType e
-  let (_,newexps'') = unzip newpatexps'
-  let newpatexps''= zip newpats'' newexps''
-  _ <- forM newpatexps'' $ \(p,e) -> inspectBinding =<<
-                            mkLetM (addWisdomToPattern p e) e
-  return ()
-    where gatherPat acc (_, Basic _, _) = return acc
-          gatherPat acc (_, Mem   _, _) = return acc
-          gatherPat acc (Array _ shp _, Array _ shp' _, Array _ pshp _) =
-            foldM gatherShape acc (zip3 (extShapeDims shp) (extShapeDims shp') (shapeDims pshp))
-          gatherPat _ _ =
-            fail $ "In simplifyBinding \"let pat = stream()\": "++
-                   " reached unreachable case!"
-          gatherShape acc (Ext i, Free se', Var pid) = do
-            let patind  = elemIndex pid $
-                          map patElemName $ patternElements pat
-            case patind of
-              Just k -> return $ (Pattern [] [patternElements pat !! k], se') : acc
-              Nothing-> fail $ "In simplifyBinding \"let pat = stream()\": pat "++
-                               "element of known dim not found: "++pretty pid++" "++show i++" "++pretty se'++"."
-          gatherShape _ (Free se, Ext i', _) =
-            fail $ "In simplifyBinding \"let pat = stream()\": "++
-                   " previous known dimension: " ++ pretty se ++
-                   " becomes existential: ?" ++ show i' ++ "!"
-          gatherShape acc _ = return acc
 
 simplifyBinding (Let pat _ e) = do
   e' <- simplifyExp e
-  pat' <- simplifyPattern pat =<< expExtType e'
+  pat' <- simplifyPattern pat
   inspectBinding =<<
     mkLetM (addWisdomToPattern pat' e') e'
 
@@ -544,17 +487,15 @@ simplifyExp (If cond tbranch fbranch ts) = do
   -- Here, we have to check whether 'cond' puts a bound on some free
   -- variable, and if so, chomp it.  We should also try to do CSE
   -- across branches.
-  cond' <- simplifySubExp cond
-  ts' <- mapM simplifyExtType ts
-  let ds = map diet ts'
+  cond' <- simplify cond
+  ts' <- mapM simplify ts
+  let ds = map (const Observe) ts'
   (tbranch',fbranch') <-
     hoistCommon (simplifyBody ds tbranch) (ST.updateBounds True cond)
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
   return $ If cond' tbranch' fbranch' ts'
 
 simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
-
-simplifyExp (SegOp op) = SegOp <$> simplifySegOp op
 
 simplifyExp e = simplifyExpBase e
 
@@ -564,43 +505,41 @@ simplifyExpBase = mapExpM hoist
                 -- Bodies are handled explicitly because we need to
                 -- provide their result diet.
                   mapOnBody = fail "Unhandled body in simplification engine."
-                , mapOnSubExp = simplifySubExp
+                , mapOnSubExp = simplify
                 -- Lambdas are handled explicitly because we need to
                 -- bind their parameters.
-                , mapOnLambda = fail "Unhandled lambda in simplification engine."
-                , mapOnExtLambda = fail "Unhandled existential lambda in simplification engine."
-                , mapOnVName = simplifyVName
-                , mapOnCertificates = simplifyCerts
-                , mapOnRetType = simplifyRetType
+                , mapOnVName = simplify
+                , mapOnCertificates = simplify
+                , mapOnRetType = simplify
                 , mapOnFParam =
                   fail "Unhandled FParam in simplification engine."
+                , mapOnOp =
+                  simplifyOp
                 }
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
 simplifyLoopOp (DoLoop respat merge form loopbody) = do
   let (mergepat, mergeexp) = unzip merge
-  mergepat' <- mapM (simplifyParam simplifyFParamLore) mergepat
-  mergeexp' <- mapM simplifySubExp mergeexp
-  let diets = map (diet . paramType) mergepat'
+  mergepat' <- mapM (simplifyParam simplify) mergepat
+  mergeexp' <- mapM simplify mergeexp
+  let diets = map (diet . paramDeclType) mergepat'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar boundexp -> do
-      boundexp' <- simplifySubExp boundexp
+      boundexp' <- simplify boundexp
       return (ForLoop loopvar boundexp',
               loopvar `HS.insert` fparamnames,
               bindLoopVar loopvar boundexp')
     WhileLoop cond -> do
-      cond' <- simplifyVName cond
+      cond' <- simplify cond
       return (WhileLoop cond',
               fparamnames,
               id)
-  -- Blocking hoisting of all unique bindings is probably too
-  -- conservative, but there is currently no nice way to mark
-  -- consumption of the loop body result.
-  loopbody' <- enterLoop $ enterBody $
+  seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
+  loopbody' <- enterLoop $
                bindFParams mergepat' $
                blockIf
-               (hasFree boundnames `orIf` isUnique `orIf` isResultAlloc) $
+               (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
@@ -610,208 +549,95 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
   return $ DoLoop respat merge' form' loopbody'
   where fparamnames = HS.fromList (map (paramName . fst) merge)
 
-simplifyLoopOp (Stream cs outerdim form lam arr ii) = do
-  cs' <- simplifyCerts      cs
-  outerdim' <- simplifySubExp outerdim
-  form' <- simplifyStreamForm outerdim' form
-  arr' <- mapM simplifyVName  arr
-  vtab <- getVtable
-  let (chunk:_) = extLambdaParams lam
-      se_outer = case outerdim' of
-                    Var idd    -> fromMaybe (SExp.Id idd Int) (ST.lookupScalExp idd vtab)
-                    Constant c -> SExp.Val c
-      se_1 = SExp.Val $ IntVal 1
-      -- extension: one may similarly treat iota stream-array case,
-      -- by setting the bounds to [0, se_outer-1]
-      parbnds  = [ (chunk, se_1, se_outer) ]
-  lam' <- simplifyExtLambda parbnds lam outerdim'
-  return $ Stream cs' outerdim' form' lam' arr' ii
-  where simplifyStreamForm _ (MapLike o) = return $ MapLike o
-        simplifyStreamForm outerdim' (RedLike o lam0 acc) = do
-            acc'  <- mapM simplifySubExp acc
-            lam0' <- simplifyLambda lam0 outerdim' $
-                     replicate (length $ lambdaParams lam0) Nothing
-            return $ RedLike o lam0' acc'
-        simplifyStreamForm _ (Sequential acc) = do
-            acc'  <- mapM simplifySubExp acc
-            return $ Sequential acc'
+class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op where
+  simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)
 
-simplifyLoopOp (Kernel cs w index ispace inps returns body) = do
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  ispace' <- forM ispace $ \(i, bound) -> do
-    bound' <- simplifySubExp bound
-    return (i, bound')
-  returns' <- forM returns $ \(t, perm) -> do
-    t' <- simplifyType t
-    return (t', perm)
-  enterLoop $ enterBody $ bindLoopVars ((index,w) : ispace) $ do
-    inps' <- mapM simplifyKernelInput inps
-    body' <- bindFParams (map kernelInputParam inps') $
-             blockIf (hasFree bound_here `orIf` isUnique `orIf` isAlloc) $
-             simplifyBody (map (diet . fst) returns) body
-    return $ Kernel cs' w' index ispace' inps' returns' body'
-  where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
+instance SimplifiableOp lore () where
+  simplifyOp () = return ()
 
-simplifyLoopOp (Map cs w fun arrs) = do
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  return $ Map cs' w' fun' arrs'
+class Simplifiable e where
+  simplify :: MonadEngine m => e -> m e
 
-simplifyLoopOp (ConcatMap cs w fun arrs) = do
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  arrs' <- mapM (mapM simplifyVName) arrs
-  fun' <- simplifyLambda fun w $ map (const Nothing) $ lambdaParams fun
-  return $ ConcatMap cs' w' fun' arrs'
+instance (Simplifiable a, Simplifiable b) => Simplifiable (a, b) where
+  simplify (x,y) = do
+    x' <- simplify x
+    y' <- simplify y
+    return (x', y')
 
-simplifyLoopOp (Reduce cs w fun input) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  return $ Reduce cs' w' fun' (zip acc' arrs')
+instance Simplifiable a => Simplifiable (Maybe a) where
+  simplify Nothing = return Nothing
+  simplify (Just x) = Just <$> simplify x
 
-simplifyLoopOp (Scan cs w fun input) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  return $ Scan cs' w' fun' (zip acc' arrs')
+instance Simplifiable SubExp where
+  simplify (Var name) = do
+    bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
+    case bnd of
+      Just (Constant v) -> return $ Constant v
+      Just (Var id') -> do usedName id'
+                           return $ Var id'
+      _              -> do usedName name
+                           return $ Var name
+  simplify (Constant v) =
+    return $ Constant v
 
-simplifyLoopOp (Redomap cs w outerfun innerfun acc arrs) = do
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyVName arrs
-  outerfun' <- simplifyLambda outerfun w $
-               replicate (length $ lambdaParams outerfun) Nothing
-  (innerfun', used) <- tapUsage $ simplifyLambda innerfun w $ map Just arrs
-  (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-  return $ Redomap cs' w' outerfun' innerfun'' acc' arrs''
-  where removeUnusedParams used lam arrinps
-          | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
-              let (arrparams', arrinps') =
-                    unzip $ filter ((`UT.used` used) . paramName . fst) $
-                    zip arrparams arrinps
-              in return (lam { lambdaParams = accparams ++ arrparams' },
-                         arrinps')
-          | otherwise = return (lam, arrinps)
+instance Simplifiable ExtRetType where
+  simplify = liftM ExtRetType . mapM simplify . retTypeValues
 
-simplifySegOp :: MonadEngine m => SegOp (InnerLore m) -> m (SegOp (Lore m))
-simplifySegOp (SegReduce cs w fun input descp) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  descp' <- simplifyVName descp
-  return $ SegReduce cs' w' fun' (zip acc' arrs') descp'
-
-simplifySegOp (SegScan cs w st fun input descp) = do
-  let (acc, arrs) = unzip input
-  cs' <- simplifyCerts cs
-  w' <- simplifySubExp w
-  acc' <- mapM simplifySubExp acc
-  arrs' <- mapM simplifyVName arrs
-  fun' <- simplifyLambda fun w $ map Just arrs'
-  descp' <- simplifyVName descp
-  return $ SegScan cs' w' st fun' (zip acc' arrs') descp'
-
-simplifySegOp (SegReplicate cs counts dataarr seg) = do
-  cs' <- simplifyCerts cs
-  counts' <- simplifyVName counts
-  dataarr' <- simplifyVName dataarr
-  seg' <- Data.Traversable.mapM simplifyVName seg
-  return $ SegReplicate cs' counts' dataarr' seg'
-
-simplifySubExp :: MonadEngine m => SubExp -> m SubExp
-simplifySubExp (Var name) = do
-  bnd <- getsEngineState $ ST.lookupSubExp name . stateVtable
-  case bnd of
-    Just (Constant v) -> return $ Constant v
-    Just (Var id') -> do usedName id'
-                         return $ Var id'
-    _              -> do usedName name
-                         return $ Var name
-simplifySubExp (Constant v) = return $ Constant v
-
-simplifyPattern :: MonadEngine m =>
-                   Pattern (InnerLore m)
-                -> [ExtType]
-                -> m (Pattern (InnerLore m))
-simplifyPattern pat ets =
+simplifyPattern :: (MonadEngine m, Simplifiable attr) =>
+                   PatternT attr
+                -> m (PatternT attr)
+simplifyPattern pat =
   Pattern <$>
-  zipWithM inspect (patternContextElements pat) (repeat Nonunique) <*>
-  zipWithM inspect (patternValueElements pat) (map uniqueness ets)
-  where inspect (PatElem ident bindage lore) u = do
-          t <- simplifyType $ identType ident
-          let ident' =
-                case bindage of
-                  BindVar -> ident { identType = t `setUniqueness` u }
-                  _       -> ident { identType = t }
-          bindage' <- simplifyBindage bindage
-          lore'  <- simplifyLetBoundLore lore
-          return $ PatElem ident' bindage' lore'
+  mapM inspect (patternContextElements pat) <*>
+  mapM inspect (patternValueElements pat)
+  where inspect (PatElem name bindage lore) = do
+          bindage' <- simplify bindage
+          lore'  <- simplify lore
+          return $ PatElem name bindage' lore'
 
-simplifyBindage :: MonadEngine m =>
-                   Bindage
-                -> m Bindage
-simplifyBindage BindVar =
-  return BindVar
-simplifyBindage (BindInPlace cs src is) =
-  BindInPlace <$>
-  simplifyCerts cs <*>
-  simplifyVName src <*>
-  mapM simplifySubExp is
-
-simplifyIdentBinding :: MonadEngine m => Ident -> m Ident
-simplifyIdentBinding v = do
-  t' <- simplifyType $ identType v
-  return v { identType = t' }
+instance Simplifiable Bindage where
+  simplify BindVar =
+    return BindVar
+  simplify (BindInPlace cs src is) =
+    BindInPlace <$>
+    simplify cs <*>
+    simplify src <*>
+    mapM simplify is
 
 simplifyParam :: MonadEngine m =>
                  (attr -> m attr) -> ParamT attr -> m (ParamT attr)
-simplifyParam simplifyAttribute (Param ident attr) = do
-  ident' <- simplifyIdentBinding ident
+simplifyParam simplifyAttribute (Param name attr) = do
   attr' <- simplifyAttribute attr
-  return $ Param ident' attr'
+  return $ Param name attr'
 
-simplifyVName :: MonadEngine m => VName -> m VName
-simplifyVName v = do
-  se <- ST.lookupSubExp v <$> getVtable
-  case se of
-    Just (Var v') -> do usedName v'
-                        return v'
-    _             -> do usedName v
-                        return v
+instance Simplifiable VName where
+  simplify v = do
+    se <- ST.lookupSubExp v <$> getVtable
+    case se of
+      Just (Var v') -> do usedName v'
+                          return v'
+      _             -> do usedName v
+                          return v
 
-simplifyExtType :: MonadEngine m =>
-                   TypeBase ExtShape -> m (TypeBase ExtShape)
-simplifyExtType t = do shape <- simplifyExtShape $ arrayShape t
-                       return $ t `setArrayShape` shape
+instance Simplifiable (TypeBase ExtShape u) where
+  simplify t = do shape <- simplify $ arrayShape t
+                  return $ t `setArrayShape` shape
 
-simplifyExtShape :: MonadEngine m =>
-                    ExtShape -> m ExtShape
-simplifyExtShape = liftM ExtShape . mapM simplifyDim . extShapeDims
-  where simplifyDim (Free se) = Free <$> simplifySubExp se
-        simplifyDim (Ext x)   = return $ Ext x
+instance Simplifiable ExtShape where
+  simplify = liftM ExtShape . mapM simplify . extShapeDims
 
-simplifyType :: MonadEngine m => Type -> m Type
-simplifyType (Array et shape u) = do
-  dims <- mapM simplifySubExp $ shapeDims shape
-  return $ Array et (Shape dims) u
-simplifyType (Mem size) =
-  Mem <$> simplifySubExp size
-simplifyType (Basic bt) =
-  return $ Basic bt
+instance Simplifiable ExtDimSize where
+  simplify (Free se) = Free <$> simplify se
+  simplify (Ext x)   = return $ Ext x
+
+instance Simplifiable (TypeBase Shape u) where
+  simplify (Array et shape u) = do
+    dims <- mapM simplify $ shapeDims shape
+    return $ Array et (Shape dims) u
+  simplify (Mem size space) =
+    Mem <$> simplify size <*> pure space
+  simplify (Prim bt) =
+    return $ Prim bt
 
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)
@@ -830,73 +656,50 @@ simplifyLambdaMaybeHoist :: MonadEngine m =>
                          -> SubExp -> [Maybe VName]
                          -> m (Lambda (Lore m))
 simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
-  params' <- mapM (simplifyParam simplifyLParamLore) params
+  params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ boundByLambda lam
+  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   body' <-
-    enterLoop $ enterBody $
+    enterLoop $
     bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isUnique `orIf` isAlloc) $
-      simplifyBody (map diet rettype) body
-  rettype' <- mapM simplifyType rettype
+    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
+      simplifyBody (map (const Observe) rettype) body
+  rettype' <- mapM simplify rettype
+  let consumed_in_body = consumedInBody body'
+      paramWasConsumed p (Just arr)
+        | p `HS.member` consumed_in_body = consumedName arr
+      paramWasConsumed _ _ =
+        return ()
+  zipWithM_ paramWasConsumed (map paramName arrayparams) arrs
   return $ Lambda i params' body' rettype'
 
-
 simplifyExtLambda :: MonadEngine m =>
-                    [(LParam (Lore m), SExp.ScalExp, SExp.ScalExp)]
-                  ->    ExtLambda (InnerLore m)
+                     ExtLambda (InnerLore m)
                   -> SubExp
+                  -> [(LParam (Lore m), SE.ScalExp, SE.ScalExp)]
                   -> m (ExtLambda (Lore m))
-simplifyExtLambda parbnds lam@(ExtLambda index params body rettype) w = do
-  params' <- mapM (simplifyParam simplifyLParamLore) params
+simplifyExtLambda lam@(ExtLambda index params body rettype) w parbnds = do
+  params' <- mapM (simplifyParam simplify) params
   let paramnames = HS.fromList $ boundByExtLambda lam
-  rettype' <- mapM simplifyExtType rettype
-  body' <- enterLoop $ enterBody $
+  rettype' <- mapM simplify rettype
+  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
+  body' <- enterLoop $
            bindLoopVar index w $
            bindLParams params' $
-           blockIf (hasFree paramnames `orIf` isUnique) $
            localVtable extendSymTab $
-           simplifyBody (map diet rettype) body
-  let bodyres = bodyResult body'
-      bodyenv = typeEnvFromBindings $ bodyBindings body'
-  rettype'' <- bindLParams params' $
-               zipWithM (refineArrType bodyenv params') bodyres rettype'
-  return $ ExtLambda index params' body' rettype''
-    where extendSymTab vtb =
-            foldl (\ vt (i,l,u) ->
-                        let i_name = paramName i
-                        in  ST.setUpperBound i_name u $
-                            ST.setLowerBound i_name l vt
-                  ) vtb parbnds
-          refineArrType :: MonadEngine m =>
-                           TypeEnv -> [LParam (Lore m)] -> SubExp -> ExtType -> m ExtType
-          refineArrType bodyenv pars x (Array btp shp u) = do
-            vtab <- ST.bindings <$> getVtable
-            dsx <- flip extendedTypeEnv bodyenv $
-                   shapeDims <$> arrayShape <$> subExpType x
-            let parnms = map paramName pars
-                dsrtpx =  extShapeDims shp
-                (resdims,_) =
-                    foldl (\ (lst,i) el ->
-                            case el of
-                              (Free (Constant c), _) -> (lst++[Free (Constant c)], i)
-                              ( _,      Constant c ) -> (lst++[Free (Constant c)], i)
-                              (Free (Var tid), Var pid) ->
-                                if not (HM.member tid vtab) &&
-                                        HM.member pid vtab
-                                then (lst++[Free (Var pid)], i)
-                                else (lst++[Free (Var tid)], i)
-                              (Ext _, Var pid) ->
-                                if HM.member pid vtab ||
-                                   pid `elem` parnms
-                                then (lst ++ [Free (Var pid)], i)
-                                else (lst ++ [Ext i],        i+1)
-                          ) ([],0) (zip dsrtpx dsx)
-            return $ Array btp (ExtShape resdims) u
-          refineArrType _ _ _ tp = return tp
+           blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
+           simplifyBody (map (const Observe) rettype) body
+  return $ ExtLambda index params' body' rettype'
+  where extendSymTab vtb =
+          foldl (\ vt (i,l,u) ->
+                   let i_name = paramName i
+                   in  ST.setUpperBound i_name u $
+                       ST.setLowerBound i_name l vt
+                ) vtb parbnds
 
 consumeResult :: MonadEngine m =>
                  [(Diet, SubExp)] -> m ()
@@ -905,30 +708,21 @@ consumeResult = mapM_ inspect
           traverse_ consumedName $ subExpAliases se
         inspect (Observe, _) = return ()
 
-simplifyCerts :: MonadEngine m =>
-                 Certificates -> m Certificates
-simplifyCerts = liftM (nub . concat) . mapM check
-  where check idd = do
-          vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
-          case vv of
-            Just (Constant Checked) -> return []
-            Just (Var idd') -> do usedName idd'
-                                  return [idd']
-            _ -> do usedName idd
-                    return [idd]
-
-simplifyKernelInput :: MonadEngine m =>
-                       KernelInput (InnerLore m) -> m (KernelInput (Lore m))
-simplifyKernelInput (KernelInput param arr is) = do
-  param' <- simplifyParam simplifyFParamLore param
-  arr' <- simplifyVName arr
-  is' <- mapM simplifySubExp is
-  return $ KernelInput param' arr' is'
+instance Simplifiable Certificates where
+  simplify = liftM (nub . concat) . mapM check
+    where check idd = do
+            vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
+            case vv of
+              Just (Constant Checked) -> return []
+              Just (Var idd') -> do usedName idd'
+                                    return [idd']
+              _ -> do usedName idd
+                      return [idd]
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
 simplifyFun (FunDec fname rettype params body) = do
-  rettype' <- simplifyRetType rettype
+  rettype' <- simplify rettype
   body' <- bindFParams params $ insertAllBindings $
            simplifyBody (map diet $ retTypeValues rettype') body
   return $ FunDec fname rettype' params body'

@@ -1,6 +1,10 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Analysis.Usage
        ( usageInBinding
        , usageInExp
+       , usageInLambda
+
+       , UsageInOp(..)
        )
        where
 
@@ -10,9 +14,9 @@ import qualified Data.HashSet as HS
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.UsageTable as UT
-import Futhark.Binder (Proper)
 
-usageInBinding :: (Proper lore, Aliased lore) => Binding lore -> UT.UsageTable
+usageInBinding :: (Attributes lore, Aliased lore, UsageInOp (Op lore)) =>
+                  Binding lore -> UT.UsageTable
 usageInBinding (Let pat lore e) =
   mconcat [usageInPat,
            usageInExpLore,
@@ -30,7 +34,7 @@ usageInBinding (Let pat lore e) =
         consumptionInPatElem _ =
           mempty
 
-usageInExp :: Aliased lore => Exp lore -> UT.UsageTable
+usageInExp :: (Aliased lore, UsageInOp (Op lore)) => Exp lore -> UT.UsageTable
 usageInExp (Apply _ args _) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases arg
@@ -38,30 +42,24 @@ usageInExp (Apply _ args _) =
 usageInExp (LoopOp (DoLoop _ merge _ _)) =
   mconcat [ mconcat $ map UT.consumedUsage $
             HS.toList $ subExpAliases se
-          | (v,se) <- merge, unique $ paramType v ]
-usageInExp (LoopOp (Map _ _ f args)) =
-  mconcat [ mconcat $ map UT.consumedUsage $
-            HS.toList $ vnameAliases se
-          | (v,se) <- zip (lambdaParams f) args,
-            unique $ paramType v ]
-usageInExp (LoopOp (Reduce _ _ f args)) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map subExpAliases acc ++
-                       map vnameAliases arr,
-            unique $ paramType v ]
-  where (acc, arr) = unzip args
-usageInExp (LoopOp (Scan _ _ f args)) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map subExpAliases acc ++
-                       map vnameAliases arr,
-            unique $ paramType v ]
-  where (acc, arr) = unzip args
-usageInExp (LoopOp (Redomap _ _ _ f acc arr)) =
-  mconcat [ mconcat $ map UT.consumedUsage $ HS.toList als
-          | (v,als) <- zip (lambdaParams f) $
-                       map subExpAliases acc ++
-                       map vnameAliases arr,
-            unique $ paramType v ]
+          | (v,se) <- merge, unique $ paramDeclType v ]
+usageInExp (Op op) =
+  usageInOp op
 usageInExp _ = UT.empty
+
+class UsageInOp op where
+  usageInOp :: op -> UT.UsageTable
+
+instance UsageInOp () where
+  usageInOp () = mempty
+
+usageInLambda :: (Aliased lore, UsageInOp (Op lore)) =>
+                 Lambda lore -> [VName] -> UT.UsageTable
+usageInLambda lam arrs =
+  mconcat $
+  map (UT.consumedUsage . snd) $
+  filter ((`HS.member` consumed_in_body) . fst) $
+  zip (map paramName arr_params) arrs
+  where arr_params = snd $ splitAt n $ lambdaParams lam
+        consumed_in_body = consumedInBody $ lambdaBody lam
+        n = length arrs
