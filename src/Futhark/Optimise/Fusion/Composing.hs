@@ -121,11 +121,11 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
                             Just nm -> Just (nm, fst x)
                             Nothing -> Nothing --should not be reached!
         outinsrev = HM.fromList $ mapMaybe getVarParPair $ HM.toList outins
-        unfusible (outname, se)
+        unfusible outname
           | outname `elem` unfus_nms =
             outname `HM.lookup` HM.union outinsrev (HM.fromList out1)
         unfusible _ = Nothing
-        unfus_vars= mapMaybe unfusible $ zip (map fst out1) $ bodyResult $ lambdaBody lam1
+        unfus_vars= mapMaybe (unfusible . fst) out1
 
 outParams :: Input input =>
              [VName] -> [Ident] -> [input]
