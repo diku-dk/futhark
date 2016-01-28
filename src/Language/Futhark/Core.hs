@@ -42,8 +42,8 @@ import Text.PrettyPrint.Mainland
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.
-data Uniqueness = Unique    -- ^ At most one outer reference.
-                | Nonunique -- ^ Any number of references.
+data Uniqueness = Unique    -- ^ No references outside current function.
+                | Nonunique -- ^ May have references outside current function.
                   deriving (Eq, Ord, Show)
 
 instance Monoid Uniqueness where
