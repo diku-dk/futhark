@@ -215,16 +215,18 @@ uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
 
 def fptosi_T_i8(x):
   return int8(trunc(x))
+fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
 
 def fptosi_T_i16(x):
   return int16(trunc(x))
+fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
 
 def fptosi_T_i32(x):
   return int32(trunc(x))
+fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
 
 def fptosi_T_i64(x):
   return int64(trunc(x))
-
 fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 def fptoui_T_i8(x):
