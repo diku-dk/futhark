@@ -197,14 +197,16 @@ determineShape r vs =
 
 -- | Convert an external primitive to an internal primitive.
 internalisePrimType :: E.PrimType -> I.PrimType
-internalisePrimType (E.IntType t) = I.IntType t
+internalisePrimType (E.Signed t) = I.IntType t
+internalisePrimType (E.Unsigned t) = I.IntType t
 internalisePrimType (E.FloatType t) = I.FloatType t
 internalisePrimType E.Bool = I.Bool
 internalisePrimType E.Char = I.Char
 
 -- | Convert an external primitive value to an internal primitive value.
 internalisePrimValue :: E.PrimValue -> I.PrimValue
-internalisePrimValue (E.IntValue v) = I.IntValue v
+internalisePrimValue (E.SignedValue v) = I.IntValue v
+internalisePrimValue (E.UnsignedValue v) = I.IntValue v
 internalisePrimValue (E.FloatValue v) = I.FloatValue v
 internalisePrimValue (E.BoolValue b) = I.BoolValue b
 internalisePrimValue (E.CharValue c) = I.CharValue c

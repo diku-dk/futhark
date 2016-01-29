@@ -6,7 +6,6 @@ module Language.Futhark.Parser
   , parseType
   , parseLambda
 
-  , parseInt
   , parseBool
   , parseChar
   , parseString
@@ -120,12 +119,6 @@ parseType = parse futharktype
 parseLambda :: RealConfiguration -> FilePath -> String
             -> Either ParseError UncheckedLambda
 parseLambda = parse lambda
-
--- | Parse an integer in Futhark syntax from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseInt :: RealConfiguration -> FilePath -> String
-         -> Either ParseError Value
-parseInt = parse intValue
 
 -- | Parse a boolean Futhark syntax from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

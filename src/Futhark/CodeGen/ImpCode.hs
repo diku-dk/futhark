@@ -161,7 +161,7 @@ instance Num Exp where
   x * y = BinOp (Mul Int32) x y
 
   abs = UnOp (Abs Int32)
-  signum = UnOp (Signum Int32)
+  signum = UnOp (SSignum Int32)
   fromInteger = Constant . IntValue . Int32Value . fromInteger
   negate x = 0 - x
 
@@ -321,8 +321,10 @@ instance Pretty Exp where
     text "abs" <> parens (ppr x)
   ppr (UnOp FAbs{} x) =
     text "fabs" <> parens (ppr x)
-  ppr (UnOp Signum{} x) =
-    text "signum" <> parens (ppr x)
+  ppr (UnOp SSignum{} x) =
+    text "ssignum" <> parens (ppr x)
+  ppr (UnOp USignum{} x) =
+    text "usignum" <> parens (ppr x)
   ppr (ScalarVar v) =
     ppr v
   ppr (Index v is bt space) =

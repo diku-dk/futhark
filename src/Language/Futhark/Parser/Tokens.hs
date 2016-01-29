@@ -22,6 +22,10 @@ data Token = IF
            | I16
            | I32
            | I64
+           | U8
+           | U16
+           | U32
+           | U64
            | BOOL
            | CHAR
            | REAL
@@ -34,6 +38,10 @@ data Token = IF
            | I16LIT Int16
            | I32LIT Int32
            | I64LIT Int64
+           | U8LIT Int8
+           | U16LIT Int16
+           | U32LIT Int32
+           | U64LIT Int64
            | REALLIT Double
            | F32LIT Float
            | F64LIT Double

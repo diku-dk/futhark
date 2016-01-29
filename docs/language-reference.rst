@@ -4,8 +4,9 @@ Language Reference
 ==================
 
 The primitive types in Futhark are the signed integer types ``i8``,
-``i6``, ``i32``, ``i64``, the floating-point types``f32``, ``f64``, as
-well as ``bool`` and ``char``.  Furthermore, ``int`` is an alias for
+``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
+``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
+as ``bool`` and ``char``.  Furthermore, ``int`` is an alias for
 ``i32`` and ``real`` is an alias for ``f64``.  Some compiler frontends
 permit configuration of whether ``real`` maps to a 32-bit or 64-bit
 float.  An ``f32`` is always a single-precision float and a ``f64`` is
@@ -98,15 +99,15 @@ Evaluates to its value in the environment.
 ~~~~~~~~~~~~~~~~~~~~~
 
 Evaluate the binary arithmetic operator on its operands, which must
-both be of either type ``int`` or ``real``.  The following operators
-are supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``,
-``==``, ``<``, ``<=``, ``**``.
+both be of the same numeric type.  The following operators are
+supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``, ``==``,
+``<``, ``<=``, ``**``.
 
 ``x`` *bitop* ``y``
 ~~~~~~~~~~~~~~~~~~~
 
 Evaluate the binary bitwise operator on its operands, which must both
-be of type ``int``.  The following operators are supported: ``^``,
+be of integer type.  The following operators are supported: ``^``,
 ``&``, ``|``, ``>>``, ``<<``, ``>>>``, i.e., bitwise xor, and, or,
 arithmetic shift right and left, and logical shift right.  Shift
 amounts must be non-negative.
@@ -133,23 +134,23 @@ Logical negation of ``x``, which must be of type ``bool``.
 ``- x``
 ~~~~~~~
 
-Numerical negation of ``x``, which must be of type ``real`` or
-``int``.
+Numerical negation of ``x``, which must be of numeric type.
 
 ``~ x``
 ~~~~~~~
 
-Bitwise negation of ``x``, which must be of type ``int``.
+Bitwise negation of ``x``, which must be of integral type.
 
 ``abs x``
 ~~~~~~~~~
 
-Absolute value of ``x``, which must be of type ``int``.
+Absolute value of ``x``, which must be of integral type.
 
 ``signum x``
 ~~~~~~~~~~~~
 
-Sign of ``x``, which must be of type ``int``.  Returns 1, 0, or -1.
+Sign of ``x``, which must be of an integral type.  Returns 1, 0, or
+-1.
 
 ``a[i]``
 ~~~~~~~~

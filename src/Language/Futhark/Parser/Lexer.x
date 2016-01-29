@@ -69,6 +69,10 @@ tokens :-
   @intlit i16              { I16LIT . readInt16 . takeWhile (/='i') }
   @intlit i32              { I32LIT . readInt32 . takeWhile (/='i') }
   @intlit i64              { I64LIT . readInt64 . takeWhile (/='i') }
+  @intlit u8               { U8LIT . readInt8 . takeWhile (/='u') }
+  @intlit u16              { U16LIT . readInt16 . takeWhile (/='u') }
+  @intlit u32              { U32LIT . readInt32 . takeWhile (/='u') }
+  @intlit u64              { U64LIT . readInt64 . takeWhile (/='u') }
   @intlit                  { INTLIT . readInt32 }
   @reallit f32             { F32LIT . read . takeWhile (/='f') }
   @reallit f64             { F64LIT . read . takeWhile (/='f') }
@@ -94,6 +98,10 @@ keyword s =
     "i16"          -> I16
     "i32"          -> I32
     "i64"          -> I64
+    "u8"           -> U8
+    "u16"          -> U16
+    "u32"          -> U32
+    "u64"          -> U64
     "real"         -> REAL
     "f32"          -> F32
     "f64"          -> F64

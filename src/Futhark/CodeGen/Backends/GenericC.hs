@@ -718,9 +718,13 @@ compileExp (UnOp (FAbs Float64) x) = do
   x' <- compileExp x
   return [C.cexp|fabs($exp:x')|]
 
-compileExp (UnOp Signum{} x) = do
+compileExp (UnOp SSignum{} x) = do
   x' <- compileExp x
   return [C.cexp|($exp:x' > 0) - ($exp:x' < 0)|]
+
+compileExp (UnOp USignum{} x) = do
+  x' <- compileExp x
+  return [C.cexp|($exp:x' > 0) - ($exp:x' < 0) != 0|]
 
 compileExp (CmpOp cmp x y) = do
   x' <- compileExp x

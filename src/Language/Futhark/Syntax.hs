@@ -75,14 +75,16 @@ instance Monoid (NoInfo vn) where
   _ `mappend` _ = NoInfo
 
 -- | Low-level primitive types.
-data PrimType = IntType IntType
+data PrimType = Signed IntType
+              | Unsigned IntType
               | FloatType FloatType
               | Bool
               | Char
               deriving (Eq, Ord, Show)
 
 -- | Non-array values.
-data PrimValue = IntValue !IntValue
+data PrimValue = SignedValue !IntValue
+               | UnsignedValue !IntValue
                | FloatValue !FloatValue
                | BoolValue !Bool
                | CharValue !Char
@@ -279,7 +281,8 @@ data UnOp = Not
           | Abs
           | Signum
           | ToFloat FloatType
-          | ToInt IntType
+          | ToSigned IntType
+          | ToUnsigned IntType
           deriving (Eq, Ord, Show)
 
 -- | Binary operators.

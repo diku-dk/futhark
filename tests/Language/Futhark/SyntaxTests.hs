@@ -34,14 +34,16 @@ instance Arbitrary Uniqueness where
   arbitrary = elements [Unique, Nonunique]
 
 instance Arbitrary PrimType where
-  arbitrary = oneof [ IntType <$> arbitrary
+  arbitrary = oneof [ Signed <$> arbitrary
+                    , Unsigned <$> arbitrary
                     , FloatType <$> arbitrary
                     , pure Bool
                     , pure Char
                     ]
 
 instance Arbitrary PrimValue where
-  arbitrary = oneof [ IntValue <$> arbitrary
+  arbitrary = oneof [ SignedValue <$> arbitrary
+                    , UnsignedValue <$> arbitrary
                     , FloatValue <$> arbitrary
                     , BoolValue <$> arbitrary
                     , CharValue <$> arbitrary

@@ -35,6 +35,26 @@ def writeScalarArray(x, offset, v):
 
 pyUtility :: PyDefinition
 pyUtility = [r|
+def signed(x):
+  if type(x) == uint8:
+    return int8(x)
+  elif type(x) == uint16:
+    return int16(x)
+  elif type(x) == uint32:
+    return int32(x)
+  else:
+    return int64(x)
+
+def unsigned(x):
+  if type(x) == int8:
+    return uint8(x)
+  elif type(x) == int16:
+    return uint16(x)
+  elif type(x) == int32:
+    return uint32(x)
+  else:
+    return uint64(x)
+
 def shlN(x,y):
   return x << y
 
@@ -47,13 +67,19 @@ def sdivN(x,y):
 def smodN(x,y):
   return x % y
 
+def udivN(x,y):
+  return signed(unsigned(x) / unsigned(y))
+
+def umodN(x,y):
+  return signed(unsigned(x) % unsigned(y))
+
 def squotN(x,y):
   return int32(float(x) / float(y))
 
 def sremN(x,y):
   return fmod(x,y)
 
-def spowN(x,y):
+def powN(x,y):
   return x ** y
 
 def fpowN(x,y):
@@ -64,6 +90,12 @@ def sleN(x,y):
 
 def sltN(x,y):
   return x < y
+
+def uleN(x,y):
+  return unsigned(x) <= unsigned(y)
+
+def ultN(x,y):
+  return unsigned(x) < unsigned(y)
 
 def lshr8(x,y):
   return int8(uint8(x) >> uint8(y))
@@ -141,34 +173,79 @@ shl8 = shl16 = shl32 = shl64 = shlN
 ashr8 = ashr16 = ashr32 = ashr64 = ashrN
 sdiv8 = sdiv16 = sdiv32 = sdiv64 = sdivN
 smod8 = smod16 = smod32 = smod64 = smodN
+udiv8 = udiv16 = udiv32 = udiv64 = udivN
+umod8 = umod16 = umod32 = umod64 = umodN
 squot8 = squot16 = squot32 = squot64 = squotN
 srem8 = srem16 = srem32 = srem64 = sremN
-spow8 = spow16 = spow32 = spow64 = spowN
+pow8 = pow16 = pow32 = pow64 = powN
 fpow32 = fpow64 = fpowN
 sle8 = sle16 = sle32 = sle64 = sleN
 slt8 = slt16 = slt32 = slt64 = sltN
+ule8 = ule16 = ule32 = ule64 = uleN
+ult8 = ult16 = ult32 = ult64 = ultN
 sext_i8_i8 = sext_i16_i8 = sext_i32_i8 = sext_i64_i8 = sext_T_i8
 sext_i8_i16 = sext_i16_i16 = sext_i32_i16 = sext_i64_i16 = sext_T_i16
 sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
 sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
 
-def sitofp_i32_f32(x):
-  return float32(x)
+def ssignum(x):
+  return sign(x)
 
-def sitofp_i32_f64(x):
+def usignum(x):
+  if x < 0:
+    return ssignum(-x)
+  else:
+    return ssignum(x)
+
+def sitofp_T_f32(x):
   return float32(x)
+sitofp_i8_f32 = sitofp_i16_f32 = sitofp_i32_f32 = sitofp_i64_f32 = sitofp_T_f32
+
+def sitofp_T_f64(x):
+  return float64(x)
+sitofp_i8_f64 = sitofp_i16_f64 = sitofp_i32_f64 = sitofp_i64_f64 = sitofp_T_f64
+
+def uitofp_T_f32(x):
+  return float32(unsigned(x))
+uitofp_i8_f32 = uitofp_i16_f32 = uitofp_i32_f32 = uitofp_i64_f32 = uitofp_T_f32
+
+def uitofp_T_f64(x):
+  return float64(unsigned(x))
+uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
+
+def fptosi_T_i8(x):
+  return int8(trunc(x))
+
+def fptosi_T_i16(x):
+  return int16(trunc(x))
+
+def fptosi_T_i32(x):
+  return int32(trunc(x))
+
+def fptosi_T_i64(x):
+  return int64(trunc(x))
+
+fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
+
+def fptoui_T_i8(x):
+  return uint8(trunc(x))
+
+def fptoui_T_i16(x):
+  return uint16(trunc(x))
+
+def fptoui_T_i32(x):
+  return uint32(trunc(x))
+
+def fptoui_T_i64(x):
+  return uint64(trunc(x))
+
+fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
 
 def fpconv_f32_f64(x):
   return float64(x)
 
 def fpconv_f64_f32(x):
   return float32(x)
-
-def fptosi_f32_i32(x):
-  return int32(trunc(x))
-
-def fptosi_f64_i32(x):
-  return int32(trunc(x))
 
 def futhark_log64(x):
   return float64(log(x))

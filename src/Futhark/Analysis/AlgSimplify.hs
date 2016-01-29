@@ -23,7 +23,7 @@ import Data.Monoid
 
 import Prelude
 
-import Futhark.Representation.AST hiding (SDiv, SMod, SQuot, SRem, SPow)
+import Futhark.Representation.AST hiding (SDiv, SMod, SQuot, SRem, SSignum)
 import Futhark.Analysis.ScalExp
 
 -- | Ranges are inclusive.

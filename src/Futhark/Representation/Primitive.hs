@@ -30,7 +30,7 @@ module Futhark.Representation.Primitive
        , doUnOp
        , doComplement
        , doAbs, doFAbs
-       , doSignum
+       , doSSignum, doUSignum
 
          -- ** Binary Operations
        , doBinOp
@@ -42,7 +42,7 @@ module Futhark.Representation.Primitive
        , doSQuot, doSRem
        , doShl, doLShr, doAShr
        , doAnd, doOr, doXor
-       , doSPow, doFPow
+       , doPow, doFPow
 
          -- ** Conversion Operations
        , doConvOp
@@ -240,8 +240,9 @@ blankPrimValue Cert = Checked
 data UnOp = Not -- ^ E.g., @! True == False@.
           | Complement IntType -- ^ E.g., @~(~1) = 1@.
           | Abs IntType -- ^ @abs(-2) = 2@.
-          | FAbs FloatType -- ^ @abs(-2.0) = 2.0@.
-          | Signum IntType -- ^ @signum(2)@ = 1.
+          | FAbs FloatType -- ^ @fabs(-2.0) = 2.0@.
+          | SSignum IntType -- ^ Signed sign function: @ssignum(-2)@ = -1.
+          | USignum IntType -- ^ Unsigned sign function: @usignum(2)@ = 1.
              deriving (Eq, Ord, Show)
 
 -- | Binary operators.  These correspond closely to the binary operators in
@@ -286,7 +287,7 @@ data BinOp = Add IntType -- ^ Integer addition.
            | Or IntType -- ^ Bitwise or.
            | Xor IntType -- ^ Bitwise exclusive-or.
 
-           | SPow IntType -- ^ Signed integer exponentatation.
+           | Pow IntType -- ^ Integer exponentatation.
            | FPow FloatType -- ^ Floating-point exponentatation.
 
            | LogAnd -- ^ Boolean and - not short-circuiting.
@@ -339,7 +340,8 @@ doUnOp Not (BoolValue b) = Just $ BoolValue $ not b
 doUnOp Complement{} (IntValue v) = Just $ IntValue $ doComplement v
 doUnOp Abs{} (IntValue v) = Just $ IntValue $ doAbs v
 doUnOp FAbs{} (FloatValue v) = Just $ FloatValue $ doFAbs v
-doUnOp Signum{} (IntValue v) = Just $ IntValue $ doSignum v
+doUnOp SSignum{} (IntValue v) = Just $ IntValue $ doSSignum v
+doUnOp USignum{} (IntValue v) = Just $ IntValue $ doUSignum v
 doUnOp _ _ = Nothing
 
 -- | E.g., @~(~1) = 1@.
@@ -354,9 +356,13 @@ doAbs v = intValue (intValueType v) $ abs $ intToInt64 v
 doFAbs :: FloatValue -> FloatValue
 doFAbs v = floatValue (floatValueType v) $ abs $ floatToDouble v
 
--- | @signum(2)@ = 1.
-doSignum :: IntValue -> IntValue
-doSignum v = intValue (intValueType v) $ signum $ intToInt64 v
+-- | @ssignum(-2)@ = -1.
+doSSignum :: IntValue -> IntValue
+doSSignum v = intValue (intValueType v) $ signum $ intToInt64 v
+
+-- | @usignum(-2)@ = -1.
+doUSignum :: IntValue -> IntValue
+doUSignum v = intValue (intValueType v) $ signum $ intToWord64 v
 
 doBinOp :: BinOp -> PrimValue -> PrimValue -> Maybe PrimValue
 doBinOp Add{} = doIntBinOp doAdd
@@ -378,7 +384,7 @@ doBinOp AShr{} = doIntBinOp doAShr
 doBinOp And{} = doIntBinOp doAnd
 doBinOp Or{} = doIntBinOp doOr
 doBinOp Xor{} = doIntBinOp doXor
-doBinOp SPow{} = doIntBinOp doSPow
+doBinOp Pow{} = doIntBinOp doPow
 doBinOp FPow{} = doFloatBinOp doFPow
 doBinOp LogAnd{} = doBoolBinOp (&&)
 doBinOp LogOr{} = doBoolBinOp (||)
@@ -502,8 +508,8 @@ doXor :: IntValue -> IntValue -> IntValue
 doXor v1 v2 = intValue (intValueType v1) $ intToWord64 v1 `xor` intToWord64 v2
 
 -- | Signed integer exponentatation.
-doSPow :: IntValue -> IntValue -> IntValue
-doSPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
+doPow :: IntValue -> IntValue -> IntValue
+doPow v1 v2 = intValue (intValueType v1) $ intToInt64 v1 ^ intToInt64 v2
 
 -- | Floating-point exponentatation.
 doFPow :: FloatValue -> FloatValue -> FloatValue
@@ -647,7 +653,7 @@ binOpType (AShr t) = IntType t
 binOpType (And t) = IntType t
 binOpType (Or t) = IntType t
 binOpType (Xor t) = IntType t
-binOpType (SPow t) = IntType t
+binOpType (Pow t) = IntType t
 binOpType (FPow t) = FloatType t
 binOpType LogAnd = Bool
 binOpType LogOr = Bool
@@ -658,7 +664,8 @@ binOpType (FDiv t) = FloatType t
 
 -- | The operand and result type of a unary operator.
 unOpType :: UnOp -> PrimType
-unOpType (Signum t) = IntType t
+unOpType (SSignum t) = IntType t
+unOpType (USignum t) = IntType t
 unOpType Not = Bool
 unOpType (Complement t) = IntType t
 unOpType (Abs t) = IntType t
