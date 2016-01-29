@@ -63,13 +63,21 @@ instance Pretty Value where
     | otherwise     = brackets $ commasep $ map ppr $ elems a
 
 instance Pretty PrimType where
-  ppr (IntType t) = ppr t
+  ppr (Unsigned Int8) = text "u8"
+  ppr (Unsigned Int16) = text "u16"
+  ppr (Unsigned Int32) = text "u32"
+  ppr (Unsigned Int64) = text "u64"
+  ppr (Signed t) = ppr t
   ppr (FloatType t) = ppr t
   ppr Char = text"char"
   ppr Bool = text "bool"
 
 instance Pretty PrimValue where
-  ppr (IntValue v) = ppr v
+  ppr (UnsignedValue (Int8Value v)) = text (show v) <> text "u8"
+  ppr (UnsignedValue (Int16Value v)) = text (show v) <> text "u16"
+  ppr (UnsignedValue (Int32Value v)) = text (show v) <> text "u32"
+  ppr (UnsignedValue (Int64Value v)) = text (show v) <> text "u64"
+  ppr (SignedValue v) = ppr v
   ppr (CharValue c) = text $ show c
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
@@ -131,7 +139,8 @@ instance Pretty UnOp where
   ppr Abs = text "abs "
   ppr Signum = text "signum "
   ppr (ToFloat t) = ppr t
-  ppr (ToInt t) = ppr t
+  ppr (ToSigned t) = ppr (Unsigned t)
+  ppr (ToUnsigned t) = ppr (Signed t)
 
 instance Pretty BinOp where
   ppr Plus = text "+"

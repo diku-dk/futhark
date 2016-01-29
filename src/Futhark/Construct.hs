@@ -193,7 +193,7 @@ eSignum em = do
   t <- subExpType e'
   case t of
     Prim (IntType int_t) ->
-      return $ PrimOp $ UnOp (Signum int_t) e'
+      return $ PrimOp $ UnOp (SSignum int_t) e'
     _ ->
       fail $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 

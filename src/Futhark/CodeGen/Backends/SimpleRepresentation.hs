@@ -97,7 +97,7 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
                mkShl, mkLShr, mkAShr,
                mkAnd, mkOr, mkXor,
                mkUlt, mkUle,  mkSlt, mkSle,
-               mkSPow
+               mkPow
               ] ++
               map mkSExt [minBound..maxBound] ++
               map mkZExt [minBound..maxBound]
@@ -142,10 +142,10 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
         mkSlt = intCmpOp "slt" [C.cexp|x < y|]
         mkSle = intCmpOp "sle" [C.cexp|x <= y|]
 
-        mkSPow t =
+        mkPow t =
           let ct = intTypeToCType t
-          in [C.cedecl|static inline $ty:ct $id:(taggedI "spow" t)($ty:ct x, $ty:ct y) {
-                         $ty:ct res = 1, rem = y < 0 ? -y : y;
+          in [C.cedecl|static inline $ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+                         $ty:ct res = 1, rem = y;
                          while (rem != 0) {
                            if (rem & 1) {
                              res *= x;
@@ -153,11 +153,7 @@ cIntOps = concatMap (flip map [minBound..maxBound]) ops
                            rem >>= 1;
                            x *= x;
                          }
-                         if (y < 0) {
-                           return 1 / res;
-                         } else {
-                           return res;
-                         }
+                         return res;
               }|]
 
         mkSExt from_t to_t =

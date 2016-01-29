@@ -190,7 +190,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (UnOp Not e) = text "!" <+> pprPrec 9 e
   ppr (UnOp (Abs t) e) = taggedI "abs" t <+> pprPrec 9 e
   ppr (UnOp (FAbs t) e) = taggedF "fabs" t <+> pprPrec 9 e
-  ppr (UnOp (Signum t) e) = taggedI "signum" t <+> pprPrec 9 e
+  ppr (UnOp (SSignum t) e) = taggedI "ssignum" t <+> pprPrec 9 e
+  ppr (UnOp (USignum t) e) = taggedI "usignum" t <+> pprPrec 9 e
   ppr (UnOp (Complement t) e) = taggedI "~" t <> pprPrec 9 e
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
@@ -291,7 +292,7 @@ instance Pretty BinOp where
   ppr (And t) = taggedI "and" t
   ppr (Or t) = taggedI "or" t
   ppr (Xor t) = taggedI "xor" t
-  ppr (SPow t) = taggedI "spow" t
+  ppr (Pow t) = taggedI "pow" t
   ppr (FPow t) = taggedF "fpow" t
   ppr LogAnd = text "logand"
   ppr LogOr = text "logor"

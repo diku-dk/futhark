@@ -6,7 +6,6 @@ module Language.Futhark.Parser.Parser
   , tupId
   , lambda
   , futharktype
-  , intValue
   , boolValue
   , charValue
   , stringValue
@@ -46,7 +45,6 @@ import Language.Futhark.Parser.Lexer
 %name tupId TupId
 %name lambda FunAbstr
 %name futharktype Type
-%name intValue IntValue
 %name boolValue BoolValue
 %name charValue CharValue
 %name stringValue StringValue
@@ -72,6 +70,10 @@ import Language.Futhark.Parser.Lexer
       i16             { L $$ I16 }
       i32             { L $$ I32 }
       i64             { L $$ I64 }
+      u8              { L $$ U8 }
+      u16             { L $$ U16 }
+      u32             { L $$ U32 }
+      u64             { L $$ U64 }
       bool            { L $$ BOOL }
       char            { L $$ CHAR }
       real            { L $$ REAL }
@@ -80,11 +82,15 @@ import Language.Futhark.Parser.Lexer
 
       id              { L _ (ID _) }
 
+      intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
       i16lit          { L _ (I16LIT _) }
       i32lit          { L _ (I32LIT _) }
       i64lit          { L _ (I64LIT _) }
-      intlit          { L _ (INTLIT _) }
+      u8lit           { L _ (U8LIT _) }
+      u16lit          { L _ (U16LIT _) }
+      u32lit          { L _ (U32LIT _) }
+      u64lit          { L _ (U64LIT _) }
       reallit         { L _ (REALLIT _) }
       f32lit          { L _ (F32LIT _) }
       f64lit          { L _ (F64LIT _) }
@@ -216,7 +222,8 @@ UnOp :: { (UnOp, SrcLoc) }
      | '!' { (Not, $1) }
      | abs { (Abs, $1) }
      | signum { (Signum, $1) }
-     | IntType { (ToInt (fst $1), snd $1) }
+     | SignedType { (ToSigned (fst $1), snd $1) }
+     | UnsignedType { (ToUnsigned (fst $1), snd $1) }
      | FloatType { (ToFloat (fst $1), snd $1) }
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
@@ -277,17 +284,24 @@ TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
-PrimType : IntType       { IntType (fst $1) }
-         | FloatType     { FloatType (fst $1) }
-         | bool          { Bool }
-         | char          { Char }
+PrimType : UnsignedType { Unsigned (fst $1) }
+         | SignedType   { Signed (fst $1) }
+         | FloatType    { FloatType (fst $1) }
+         | bool         { Bool }
+         | char         { Char }
 
-IntType :: { (IntType, SrcLoc) }
-        : int { (Int32, $1) }
-        | i8  { (Int8, $1) }
-        | i16 { (Int16, $1) }
-        | i32 { (Int32, $1) }
-        | i64 { (Int64, $1) }
+SignedType :: { (IntType, SrcLoc) }
+           : int { (Int32, $1) }
+           | i8  { (Int8, $1) }
+           | i16 { (Int16, $1) }
+           | i32 { (Int32, $1) }
+           | i64 { (Int64, $1) }
+
+UnsignedType :: { (IntType, SrcLoc) }
+             : u8  { (Int8, $1) }
+             | u16 { (Int16, $1) }
+             | u32 { (Int32, $1) }
+             | u64 { (Int64, $1) }
 
 FloatType :: { (FloatType, SrcLoc) }
           : real {% do t <- getRealType; return (t, $1) }
@@ -325,7 +339,8 @@ Exp  :: { UncheckedExp }
      | '~' Exp        { UnOp Complement $2 $1 }
      | abs Exp        { UnOp Abs $2 $1 }
      | signum Exp     { UnOp Signum $2 $1 }
-     | IntType '(' Exp ')' { UnOp (ToInt (fst $1)) $3 (snd $1) }
+     | SignedType '(' Exp ')' { UnOp (ToSigned (fst $1)) $3 (snd $1) }
+     | UnsignedType '(' Exp ')' { UnOp (ToUnsigned (fst $1)) $3 (snd $1) }
      | FloatType '(' Exp ')' { UnOp (ToFloat (fst $1)) $3 (snd $1) }
      | Exp pow Exp    { BinOp Pow $1 $3 NoInfo $2 }
      | Exp '>>' Exp   { BinOp ShiftR $1 $3 NoInfo $2 }
@@ -562,8 +577,9 @@ NaturalInts :: { [Int] }
            | intlit ',' NaturalInts { let L _ (INTLIT num) = $1 in fromIntegral num : $3  }
 
 IntValue :: { Value }
-         : IntLit { PrimValue (IntValue (fst $1)) }
-         | '-' IntLit { PrimValue (IntValue (intNegate (fst $2))) }
+         : SignedLit { PrimValue (SignedValue (fst $1)) }
+         | '-' SignedLit { PrimValue (SignedValue (intNegate (fst $2))) }
+         | UnsignedLit { PrimValue (UnsignedValue (fst $1)) }
 
 FloatValue :: { Value }
          : FloatLit { PrimValue (FloatValue (fst $1)) }
@@ -574,12 +590,18 @@ StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFrom
 BoolValue : true          { PrimValue $ BoolValue True }
          | false          { PrimValue $ BoolValue False }
 
-IntLit :: { (IntValue, SrcLoc) }
-       : i8lit  { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
-       | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
-       | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
-       | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-       | intlit { let L pos (INTLIT num) = $1 in (Int32Value num, pos) }
+SignedLit :: { (IntValue, SrcLoc) }
+          : i8lit  { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
+          | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
+          | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
+          | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
+          | intlit { let L pos (INTLIT num) = $1 in (Int32Value num, pos) }
+
+UnsignedLit :: { (IntValue, SrcLoc) }
+            : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
+            | u16lit { let L pos (U16LIT num) = $1 in (Int16Value num, pos) }
+            | u32lit { let L pos (U32LIT num) = $1 in (Int32Value num, pos) }
+            | u64lit { let L pos (U64LIT num) = $1 in (Int64Value num, pos) }
 
 FloatLit :: { (FloatValue, SrcLoc) }
          : f32lit { let L pos (F32LIT num) = $1 in (Float32Value num, pos) }
@@ -587,7 +609,8 @@ FloatLit :: { (FloatValue, SrcLoc) }
          | reallit {% let L pos (REALLIT num) = $1 in do num' <- getRealValue num; return (num', pos) }
 
 PrimLit :: { (PrimValue, SrcLoc) }
-        : IntLit { let (x,loc) = $1 in (IntValue x, loc) }
+        : SignedLit { let (x,loc) = $1 in (SignedValue x, loc) }
+        | UnsignedLit { let (x,loc) = $1 in (UnsignedValue x, loc) }
         | FloatLit { let (x,loc) = $1 in (FloatValue x, loc) }
 
         | true   { (BoolValue True, $1) }
@@ -675,7 +698,7 @@ tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
 tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
-zeroExpression = Literal $ PrimValue $ IntValue $ Int32Value 0
+zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0
 
 commutativity :: LambdaBase ty vn -> Commutativity
 commutativity (BinOpFun binop _ _ _ _)

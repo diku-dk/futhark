@@ -480,7 +480,8 @@ compileUnOp op =
     Complement{} -> "~"
     Abs{} -> "abs"
     FAbs{} -> "abs"
-    Signum{} -> "sign" -- python does not implement sign, so we use numpy for this, and we have to use numpy for pyopencl anyway.
+    SSignum{} -> "ssignum"
+    USignum{} -> "usignum"
 
 compileBinOp :: BinOp -> Imp.Exp -> Imp.Exp -> CompilerM op s PyExp
 compileBinOp op x y = do

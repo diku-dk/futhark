@@ -18,7 +18,7 @@ import Text.Parsec.Language
 import qualified Text.Parsec.Token as Token
 
 import Futhark.Analysis.ScalExp
-import Futhark.Representation.AST hiding (constant, SDiv, SPow)
+import Futhark.Representation.AST hiding (constant, SDiv)
 
 tests :: [Test]
 tests = []

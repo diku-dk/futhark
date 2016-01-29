@@ -570,7 +570,8 @@ floatValueType Float64Value{} = Float64
 
 -- | The type of a basic value.
 primValueType :: PrimValue -> PrimType
-primValueType (IntValue v) = IntType $ intValueType v
+primValueType (SignedValue v) = Signed $ intValueType v
+primValueType (UnsignedValue v) = Unsigned $ intValueType v
 primValueType (FloatValue v) = FloatType $ floatValueType v
 primValueType BoolValue{} = Bool
 primValueType CharValue{} = Char
@@ -622,7 +623,8 @@ typeOf (UnOp Complement e _) = typeOf e
 typeOf (UnOp Abs e _) = typeOf e
 typeOf (UnOp Signum e _) = typeOf e
 typeOf (UnOp (ToFloat t) _ _) = Prim $ FloatType t
-typeOf (UnOp (ToInt t) _ _) = Prim $ IntType t
+typeOf (UnOp (ToSigned t) _ _) = Prim $ Signed t
+typeOf (UnOp (ToUnsigned t) _ _) = Prim $ Unsigned t
 typeOf (If _ _ _ t _) = t
 typeOf (Var ident) =
   case identType ident of
@@ -634,8 +636,8 @@ typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
   stripArray (length idx) (identType ident)
   `addAliases` HS.insert (identName ident)
-typeOf (Iota _ _) = Array $ PrimArray (IntType Int32) (Rank 1) Nonunique mempty
-typeOf Size{} = Prim $ IntType Int32
+typeOf (Iota _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Nonunique mempty
+typeOf Size{} = Prim $ Signed Int32
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique
 typeOf (Reshape shape  e _) =
   Rank (length shape) `setArrayShape` typeOf e
@@ -676,11 +678,11 @@ typeOf (Redomap _ _ innerfun start arr _) =
              _ -> acc_tp -- NOT reachable
 typeOf (Stream form lam arr _ _) =
   case form of
-    MapLike{}       -> lambdaType lam [Prim $ IntType Int32, typeOf arr]
+    MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf arr]
                        `setUniqueness` Unique
-    RedLike _ _ _ acc -> lambdaType lam [Prim $ IntType Int32, typeOf acc, typeOf arr]
+    RedLike _ _ _ acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
                          `setUniqueness` Unique
-    Sequential  acc -> lambdaType lam [Prim $ IntType Int32, typeOf acc, typeOf arr]
+    Sequential  acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
                        `setUniqueness` Unique
 typeOf (Concat x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` HS.empty
@@ -908,7 +910,7 @@ freeInDeclTupleArrayElemType (TupleArrayElem ts) =
 freeInDimDecl :: (TypeBox ty, Eq vn, Hashable vn) =>
                  DimDecl vn -> HS.HashSet (IdentBase ty vn)
 freeInDimDecl (NamedDim name) = HS.singleton $
-                                Ident name (boxType $ Prim $ IntType Int32) noLoc
+                                Ident name (boxType $ Prim $ Signed Int32) noLoc
 freeInDimDecl _               = mempty
 
 -- | Is the given binary operator commutative?

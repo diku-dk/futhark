@@ -317,7 +317,7 @@ bindingParams params m =
         inspectDim _ (ConstDim _) =
           return Nothing
         inspectDim loc (NamedDim name) =
-          return $ Just $ Ident name (Prim $ IntType Int32) loc
+          return $ Just $ Ident name (Prim $ Signed Int32) loc
 
 lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
 lookupVar name pos = do
@@ -404,8 +404,14 @@ checkAnnotation loc desc t1 t2 =
                                    (toStructural t2)
                   Just t  -> return t
 
+anySignedType :: [TaggedType vn]
+anySignedType = map (Prim . Signed) [minBound .. maxBound]
+
+anyUnsignedType :: [TaggedType vn]
+anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
+
 anyIntType :: [TaggedType vn]
-anyIntType = map (Prim . IntType) [minBound .. maxBound]
+anyIntType = anySignedType ++ anyUnsignedType
 
 anyFloatType :: [TaggedType vn]
 anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
@@ -629,9 +635,13 @@ checkExp (UnOp (ToFloat t) e loc) = do
   e' <- require anyNumberType =<< checkExp e
   return $ UnOp (ToFloat t) e' loc
 
-checkExp (UnOp (ToInt t) e loc) = do
+checkExp (UnOp (ToSigned t) e loc) = do
   e' <- require anyNumberType =<< checkExp e
-  return $ UnOp (ToInt t) e' loc
+  return $ UnOp (ToSigned t) e' loc
+
+checkExp (UnOp (ToUnsigned t) e loc) = do
+  e' <- require anyNumberType =<< checkExp e
+  return $ UnOp (ToUnsigned t) e' loc
 
 checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
@@ -680,7 +690,7 @@ checkExp (LetPat pat e body pos) = do
 
 checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
   src' <- checkIdent src
-  idxes' <- mapM (require [Prim $ IntType Int32] <=< checkExp) idxes
+  idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
   destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
   let dest' = Ident dest destt' destpos
 
@@ -706,11 +716,11 @@ checkExp (Index ident idxes pos) = do
   when (arrayRank vt < length idxes) $
     bad $ IndexingError (baseName $ identName ident)
           (arrayRank vt) (length idxes) pos
-  idxes' <- mapM (require [Prim $ IntType Int32] <=< checkExp) idxes
+  idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
   return $ Index ident' idxes' pos
 
 checkExp (Iota e pos) = do
-  e' <- require [Prim $ IntType Int32] =<< checkExp e
+  e' <- require [Prim $ Signed Int32] =<< checkExp e
   return $ Iota e' pos
 
 checkExp (Size i e pos) = do
@@ -724,12 +734,12 @@ checkExp (Size i e pos) = do
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) = do
-  countexp' <- require [Prim $ IntType Int32] =<< checkExp countexp
+  countexp' <- require [Prim $ Signed Int32] =<< checkExp countexp
   valexp' <- checkExp valexp
   return $ Replicate countexp' valexp' pos
 
 checkExp (Reshape shapeexps arrexp pos) = do
-  shapeexps' <- mapM (require [Prim $ IntType Int32] <=< checkExp) shapeexps
+  shapeexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) shapeexps
   arrexp' <- checkExp arrexp
   return (Reshape shapeexps' arrexp' pos)
 
@@ -743,13 +753,13 @@ checkExp (Rearrange perm arrexp pos) = do
                               _     -> Nothing
 
 checkExp (Stripe strideexp arrexp loc) = do
-  strideexp' <- require [Prim $ IntType Int32] =<< checkExp strideexp
+  strideexp' <- require [Prim $ Signed Int32] =<< checkExp strideexp
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Stripe strideexp' arrexp' loc
 
 checkExp (Unstripe strideexp arrexp loc) = do
-  strideexp' <- require [Prim $ IntType Int32] =<< checkExp strideexp
+  strideexp' <- require [Prim $ Signed Int32] =<< checkExp strideexp
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Unstripe strideexp' arrexp' loc
@@ -859,7 +869,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
         case arrtp of
           Array _ -> True
           _       -> False
-  let lit_int0 = Literal (PrimValue $ IntValue $ Int32Value 0) pos
+  let lit_int0 = Literal (PrimValue $ SignedValue $ Int32Value 0) pos
   [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
   -- arr must have an array type
   unless (isArrayType $ typeOf arr') $
@@ -895,7 +905,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
   -- check that the result type of lambda matches the accumulator part
   _ <- case macctup of
         Just (acc',_) -> do
-            let rtp' = lambdaType lam' [Prim $ IntType Int32, typeOf acc', typeOf acc']
+            let rtp' = lambdaType lam' [Prim $ Signed Int32, typeOf acc', typeOf acc']
             case rtp' of
                 Tuple (acctp:_) ->
                      unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
@@ -946,7 +956,7 @@ checkExp (Stream _ _ _ _ pos) =
   bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
 checkExp (Split splitexps arrexp pos) = do
-  splitexps' <- mapM (require [Prim $ IntType Int32] <=< checkExp) splitexps
+  splitexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) splitexps
   arrexp' <- checkExp arrexp
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Split splitexps' arrexp' pos
@@ -978,7 +988,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
       return $
         case form of
           For _ _ (Ident loopvar _ _) _ ->
-            let iparam = Ident loopvar (Prim $ IntType Int32) loc
+            let iparam = Ident loopvar (Prim $ Signed Int32) loc
             in (mergeexp', [iparam])
           While _ ->
             (mergeexp', [])
@@ -989,14 +999,14 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
     binding bindExtra $ noDataflow $
     case form of
       For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
-        lboundexp' <- require [Prim $ IntType Int32] =<< checkExp lboundexp
-        uboundexp' <- require [Prim $ IntType Int32] =<< checkExp uboundexp
+        lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
+        uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp
         firstscope $ do
           loopbody' <- checkExp loopbody
-          let iparam = Ident loopvar (Prim $ IntType Int32) loc
+          let iparam = Ident loopvar (Prim $ Signed Int32) loc
           return (loopbody',
-                  For dir lboundexp' (Ident loopvar (Prim $ IntType Int32) loopvarloc) uboundexp',
-                  [(Literal (PrimValue $ IntValue $ Int32Value 0) loc, Observe)],
+                  For dir lboundexp' (Ident loopvar (Prim $ Signed Int32) loopvarloc) uboundexp',
+                  [(Literal (PrimValue $ SignedValue $ Int32Value 0) loc, Observe)],
                   id,
                   HS.singleton iparam,
                   [iparam],
@@ -1435,5 +1445,5 @@ checkDim _ (ConstDim _) =
 checkDim loc (NamedDim name) = do
   t <- lookupVar name loc
   case t of
-    Prim (IntType Int32) -> return ()
-    _                    -> bad $ DimensionNotInteger loc $ baseName name
+    Prim (Signed Int32) -> return ()
+    _                   -> bad $ DimensionNotInteger loc $ baseName name

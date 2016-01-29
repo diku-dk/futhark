@@ -26,8 +26,8 @@ import Data.Monoid
 
 import Prelude
 
-import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SPow)
-import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SPow)
+import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SSignum)
+import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)
 import qualified Futhark.Representation.AST as AST
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -332,7 +332,7 @@ binOpScalExp bop = liftM snd $ find ((==bop) . fst)
                    , (Sub Int32, SMinus)
                    , (Mul Int32, STimes)
                    , (AST.SDiv Int32, SDiv)
-                   , (AST.SPow Int32, SPow)
+                   , (AST.Pow Int32, SPow)
                    , (LogAnd, SLogAnd)
                    , (LogOr, SLogOr)
                    ]
@@ -358,7 +358,7 @@ fromScalExp' = convert
         convert (SMod x y) = arithBinOp (AST.SMod Int32) x y
         convert (SQuot x y) = arithBinOp (AST.SQuot Int32) x y
         convert (SRem x y) = arithBinOp (AST.SRem Int32) x y
-        convert (SPow x y) = arithBinOp (AST.SPow Int32) x y
+        convert (SPow x y) = arithBinOp (AST.Pow Int32) x y
         convert (SLogAnd x y) = eBinOp LogAnd (convert x) (convert y)
         convert (SLogOr x y) = eBinOp LogOr (convert x) (convert y)
         convert (RelExp LTH0 x) = eCmpOp (CmpSlt Int32) (convert x) (pure zero)
