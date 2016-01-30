@@ -80,9 +80,9 @@ applyTransform (SOAC.Replicate n) v =
   Replicate n $ Var $ identName v
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
-inputToOutput (SOAC.Input ts ia) =
+inputToOutput (SOAC.Input ts ia iat) =
   case SOAC.viewf ts of
-    t SOAC.:< ts' -> Just (t, SOAC.Input ts' ia)
+    t SOAC.:< ts' -> Just (t, SOAC.Input ts' ia iat)
     SOAC.EmptyF   -> Nothing
 
 data FusedKer = FusedKer {
@@ -117,7 +117,7 @@ newKernel soac out_nms scope =
            }
 
 arrInputs :: FusedKer -> HS.HashSet VName
-arrInputs = HS.fromList . mapMaybe SOAC.inputArray . inputs
+arrInputs = HS.fromList . map SOAC.inputArray . inputs
 
 inputs :: FusedKer -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac
@@ -162,9 +162,9 @@ fixInputTypes outIdents ker =
   ker { fsoac = fixInputTypes' $ fsoac ker }
   where fixInputTypes' soac =
           map fixInputType (SOAC.inputs soac) `SOAC.setInputs` soac
-        fixInputType (SOAC.Input ts (SOAC.Var v _))
+        fixInputType (SOAC.Input ts v _)
           | Just v' <- find ((==v) . identName) outIdents =
-            SOAC.Input ts $ SOAC.Var v $ identType v'
+            SOAC.Input ts v $ identType v'
         fixInputType inp = inp
 
 applyFusionRules :: Names -> [VName] -> SOAC -> FusedKer
@@ -506,8 +506,8 @@ iswim _ _ _ = fail "ISWIM does not apply"
 commonTransforms :: [VName] -> [SOAC.Input]
                  -> (SOAC.ArrayTransforms, [SOAC.Input])
 commonTransforms interesting inps = commonTransforms' inps'
-  where inps' = [ (maybe False (`elem` interesting) $ SOAC.inputArray inp, inp)
-                    | inp <- inps ]
+  where inps' = [ (SOAC.inputArray inp `elem` interesting, inp)
+                | inp <- inps ]
 
 commonTransforms' :: [(Bool, SOAC.Input)] -> (SOAC.ArrayTransforms, [SOAC.Input])
 commonTransforms' inps =
@@ -600,9 +600,9 @@ fixupInputs inpIds inps =
     perm:_ -> do inps' <- mapM (fixupInput (rearrangeReach perm) perm) inps
                  return (perm, inps')
     _    -> Nothing
-  where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
+  where exposable = (`elem` inpIds) . SOAC.inputArray
 
-        inputRearrange (SOAC.Input ts _)
+        inputRearrange (SOAC.Input ts _ _)
           | _ SOAC.:> SOAC.Rearrange _ perm <- SOAC.viewl ts = Just perm
         inputRearrange _                                     = Nothing
 
@@ -689,9 +689,9 @@ exposeInputs inpIds ker = do
               return (ker' { fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
             _ -> fail "Cannot expose"
 
-        exposed (SOAC.Input ts SOAC.Var{})
+        exposed (SOAC.Input ts _ _)
           | SOAC.nullTransforms ts = True
-        exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
+        exposed inp = SOAC.inputArray inp `notElem` inpIds
 
 outputTransformPullers :: [SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)]
 outputTransformPullers = [pullRearrange, pullReshape]
