@@ -42,7 +42,6 @@ module Futhark.Analysis.HORepresentation.SOAC
   , isVarishInput
   , addTransform
   , addTransforms
-  , InputArray (..)
   , inputArray
   , inputRank
   , inputType
@@ -222,69 +221,52 @@ transformFromExp (PrimOp (Futhark.Reshape cs shape v)) =
   Just (v, Reshape cs shape)
 transformFromExp _ = Nothing
 
--- | The basic source of data for an array input - either an array
--- variable (possibly indexed) or an @iota@.
-data InputArray = Var VName Type
-                -- ^ Some array-typed variable in scope.
-                | Iota SubExp
-                -- ^ @iota(e)@.
-                  deriving (Show, Eq, Ord)
-
-instance Substitute InputArray where
-  substituteNames substs (Var name t) =
-    Var (substituteNames substs name) (substituteNames substs t)
-  substituteNames substs (Iota e) =
-    Iota $ substituteNames substs e
-
-inputArrayToExp :: InputArray -> Exp lore
-inputArrayToExp (Var k _) = PrimOp $ SubExp $ Futhark.Var k
-inputArrayToExp (Iota e)  = PrimOp $ Futhark.Iota e
-
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
 -- all are of this form.  Only the array inputs are expressed with
 -- this type; other arguments, such as initial accumulator values, are
 -- plain expressions.  The transforms are done left-to-right, that is,
 -- the first element of the 'ArrayTransform' list is applied first.
-data Input = Input ArrayTransforms InputArray
+data Input = Input ArrayTransforms VName Type
              deriving (Show, Eq, Ord)
 
 instance Substitute Input where
-  substituteNames substs (Input ts a) =
-    Input (substituteNames substs ts) (substituteNames substs a)
+  substituteNames substs (Input ts v t) =
+    Input (substituteNames substs ts)
+    (substituteNames substs v) (substituteNames substs t)
 
 -- | Create a plain array variable input with no transformations.
 varInput :: HasScope t f => VName -> f Input
 varInput v = withType <$> lookupType v
-  where withType t = Input (ArrayTransforms Seq.empty) $ Var v t
+  where withType = Input (ArrayTransforms Seq.empty) v
 
 -- | Create a plain array variable input with no transformations, from an 'Ident'.
 identInput :: Ident -> Input
-identInput v = Input (ArrayTransforms Seq.empty) $ Var (identName v) (identType v)
+identInput v = Input (ArrayTransforms Seq.empty) (identName v) (identType v)
 
 -- | If the given input is a plain variable input, with no transforms,
 -- return the variable.
 isVarInput :: Input -> Maybe VName
-isVarInput (Input ts (Var v _)) | nullTransforms ts = Just v
-isVarInput _                                        = Nothing
+isVarInput (Input ts v _) | nullTransforms ts = Just v
+isVarInput _                                  = Nothing
 
 -- | If the given input is a plain variable input, with no non-vacuous transforms,
 -- return the variable.
 isVarishInput :: Input -> Maybe VName
-isVarishInput (Input ts ia@(Var v _))
+isVarishInput (Input ts v t)
   | nullTransforms ts = Just v
   | Reshape [] [DimCoercion _] :< ts' <- viewf ts =
-      isVarishInput $ Input ts' ia
+      isVarishInput $ Input ts' v t
 isVarishInput _ = Nothing
 
 -- | Add a transformation to the end of the transformation list.
 addTransform :: ArrayTransform -> Input -> Input
-addTransform t (Input ts ia) =
-  Input (ts |> t) ia
+addTransform tr (Input trs a t) =
+  Input (trs |> tr) a t
 
 -- | Add several transformations to the end of the transformation
 -- list.
 addTransforms :: ArrayTransforms -> Input -> Input
-addTransforms ts (Input ots ia) = Input (ots <> ts) ia
+addTransforms ts (Input ots a t) = Input (ots <> ts) a t
 
 -- | If the given expression represents a normalised SOAC input,
 -- return that input.
@@ -296,9 +278,8 @@ inputFromSubExp _               = pure Nothing
 inputsToSubExps :: (MonadBinder m) =>
                    [Input] -> m [VName]
 inputsToSubExps = mapM inputToExp'
-  where inputToExp' (Input (ArrayTransforms ts) ia) = do
-          ia' <- letExp "soac_input" $ inputArrayToExp ia
-          foldlM transform ia' ts
+  where inputToExp' (Input (ArrayTransforms ts) a _) =
+          foldlM transform a ts
 
         transform ia (Replicate n) =
           letExp "repeat" $ PrimOp $ Futhark.Replicate n (Futhark.Var ia)
@@ -317,20 +298,14 @@ inputsToSubExps = mapM inputToExp'
           shape' <- reshapeInner shape 1 <$> arrayShape <$> lookupType ia
           letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia
 
--- | If the input is a (possibly rearranged, reshaped or otherwise
--- transformed) array variable, return that variable.
-inputArray :: Input -> Maybe VName
-inputArray (Input _ (Var v _)) = Just v
-inputArray (Input _ (Iota _))  = Nothing
-
-inputArrayType :: InputArray -> Type
-inputArrayType (Var _ t) = t
-inputArrayType (Iota e)  = arrayOf (Prim int32) (Shape [e]) NoUniqueness
+-- | Return the array name of the input.
+inputArray :: Input -> VName
+inputArray (Input _ v _) = v
 
 -- | Return the type of an input.
 inputType :: Input -> Type
-inputType (Input (ArrayTransforms ts) ia) =
-  Foldable.foldl transformType (inputArrayType ia) ts
+inputType (Input (ArrayTransforms ts) _ at) =
+  Foldable.foldl transformType at ts
   where transformType t (Replicate n) =
           arrayOf t (Shape [n]) NoUniqueness
         transformType t (Rearrange _ perm) =

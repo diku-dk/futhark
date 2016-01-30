@@ -289,16 +289,15 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
       os' = HM.fromList [(arr,nm_ker) | arr <- out_nms]
             `HM.union` outArr res
       is' = HM.fromList [(arr,HS.singleton nm_ker)
-                         | arr <- mapMaybe SOAC.inputArray $ SOAC.inputs soac]
+                         | arr <- map SOAC.inputArray $ SOAC.inputs soac]
             `comb` inpArr res
   return $ FusedRes (rsucc res) os' is' ufs
            (HM.insert nm_ker new_ker (kernels res))
 
 inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
-inlineSOACInput (SOAC.Input ts (SOAC.Var v t)) = do
+inlineSOACInput (SOAC.Input ts v t) = do
   (v2, t2, ts2) <- arrayTransforms v t
-  return $ SOAC.Input (ts2<>ts) (SOAC.Var v2 t2)
-inlineSOACInput input = return input
+  return $ SOAC.Input (ts2<>ts) v2 t2
 
 inlineSOACInputs :: SOAC -> FusionGM SOAC
 inlineSOACInputs soac = do
@@ -355,7 +354,7 @@ greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   let used_inps = filter (isInpArrInResModKers res mod_kerS) inp_nms
   let ufs       = HS.unions [unfusable res, HS.fromList used_inps,
                              HS.fromList other_nms `HS.difference`
-                             HS.fromList (mapMaybe SOAC.inputArray $ SOAC.inputs soac)]
+                             HS.fromList (map SOAC.inputArray $ SOAC.inputs soac)]
   let comb      = HM.unionWith HS.union
 
   if not fusable_ker then
@@ -462,7 +461,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                     -- disable horizontal fusion in the case when an output array of
                     -- producer SOAC is a non-trivially transformed input of the consumer
                     out_transf_ok  = let ker_inp = SOAC.inputs $ fsoac ker
-                                         unfuse1 = HS.fromList (mapMaybe SOAC.inputArray ker_inp) `HS.difference`
+                                         unfuse1 = HS.fromList (map SOAC.inputArray ker_inp) `HS.difference`
                                                    HS.fromList (mapMaybe SOAC.isVarInput ker_inp)
                                          unfuse2 = HS.intersection curker_outset ufus_nms
                                      in  HS.null $ HS.intersection unfuse1 unfuse2
@@ -584,20 +583,6 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
         Just (src,trns) <- SOAC.transformFromExp e ->
       bindingTransform v src trns $ fusionGatherBody fres $ mkBody bnds res
 
-    _ | [v] <- patternIdents pat,
-        PrimOp (Replicate n el) <- e -> do
-      bres <- bindingFamily pat $ fusionGatherBody fres $ mkBody bnds res
-      -- Implemented inplace: gets the variables in `n` and `el`
-      (used_set, bres') <-
-        getUnfusableSet bres [PrimOp $ SubExp n, PrimOp $ SubExp el]
-      repl_idnm <- newVName "repl_x"
-      i <- newVName "i"
-      let repl_id = Param repl_idnm (Prim int32)
-          repl_lam = Lambda i [repl_id] (mkBody [] [el])
-                     [rowType $ identType v]
-          soac_repl= SOAC.Map [] n repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
-      greedyFuse True [] used_set bres' (pat, soac_repl)
-
     _ -> do
       let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
       bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
@@ -691,21 +676,6 @@ fusionGatherLam (u_set,fres) (Lambda _ idds body _) = do
     let new_res' = new_res { unfusable = unfus' }
     -- merge new_res with fres'
     return (u_set `HS.union` unfus', unionFusionRes new_res' fres)
-
-getUnfusableSet :: FusedRes -> [Exp] -> FusionGM (Names, FusedRes)
-getUnfusableSet fres args = do
-    -- assuming program is normalized then args
-    -- can only contribute to the unfusable set
-    let null_res = mkFreshFusionRes
-    new_res <- foldM fusionGatherExp null_res args
-    if not (HM.null (outArr  new_res)) || not (HM.null (inpArr new_res)) ||
-       not (HM.null (kernels new_res)) || rsucc new_res
-    then badFusionGM $ Error $
-                        "In Fusion.hs, getUnfusableSet, broken invariant!"
-                        ++ " Unnormalized program: " ++ concatMap pretty args
-    else return ( unfusable new_res,
-                  fres { unfusable = unfusable fres `HS.union` unfusable new_res }
-                )
 
 -------------------------------------------------------------
 -------------------------------------------------------------
@@ -834,10 +804,10 @@ mergeFusionRes res1 res2 = do
 --   `([a],[b])'
 getIdentArr :: [SOAC.Input] -> ([VName], [VName])
 getIdentArr = foldl comb ([],[])
-  where comb (vs,os) (SOAC.Input ts (SOAC.Var idd _))
+  where comb (vs,os) (SOAC.Input ts idd _)
           | SOAC.nullTransforms ts = (idd:vs, os)
         comb (vs, os) inp =
-          (vs, maybeToList (SOAC.inputArray inp)++os)
+          (vs, SOAC.inputArray inp : os)
 
 cleanFusionResult :: FusedRes -> FusedRes
 cleanFusionResult fres =

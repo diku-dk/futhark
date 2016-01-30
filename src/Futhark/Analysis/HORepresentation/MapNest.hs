@@ -182,7 +182,7 @@ fixInputs ourInps childInps =
                ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
             -> (VName, SOAC.Input)
             -> m ([(VName, SOAC.Input)], [(VName, SOAC.Input)])
-    inspect (remPs, newInps) (_, SOAC.Input ts (SOAC.Var v _))
+    inspect (remPs, newInps) (_, SOAC.Input ts v _)
       | Just ((p,pInp), remPs') <- findParam remPs v =
           let pInp' = SOAC.transformRows ts pInp
           in return (remPs',
@@ -194,7 +194,7 @@ fixInputs ourInps childInps =
           p' <- newNameFromString $ baseString p
           return (remPs, (p', pInp) : newInps)
 
-    inspect (remPs, newInps) (param, SOAC.Input ts ia) = do
+    inspect (remPs, newInps) (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
       return (remPs, (param',
-                      SOAC.Input (ts SOAC.|> SOAC.Replicate ourWidth) ia) : newInps)
+                      SOAC.Input (ts SOAC.|> SOAC.Replicate ourWidth) a t) : newInps)
