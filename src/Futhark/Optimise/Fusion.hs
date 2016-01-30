@@ -423,8 +423,8 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       unfusable_nms  = HS.fromList $ filter (`HS.member` unfusable res) out_nms
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
-                        SOAC.Redomap _ _ _ _ nes _ -> drop (length nes) out_nms
-                        SOAC.Stream  _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
+                        SOAC.Redomap _ _ _ _ _ nes _ -> drop (length nes) out_nms
+                        SOAC.Stream  _ _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
       to_fuse_knms2  = getKersWithSameInpSize (SOAC.width soac) res
@@ -440,7 +440,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   kernminds <- forM (zip to_fuse_knms to_fuse_kers) $ \(ker_nm, ker) -> do
                     let bnd_nms = map (patternNames . bindingPattern) rem_bnds
                         out_nm  = case fsoac ker of
-                                    SOAC.Stream _ frm _ _ _ ->
+                                    SOAC.Stream _ _ frm _ _ _ ->
                                         let acc_len = length $ getStreamAccums frm
                                         in  head $ drop acc_len $ outNames ker
                                     _ -> head $ outNames ker
@@ -535,12 +535,12 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
   maybesoac <- SOAC.fromExp e
   let body = mkBody bnds res
   case maybesoac of
-    Right soac@(SOAC.Map _ lam _) -> do
+    Right soac@(SOAC.Map _ _ lam _) -> do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
       greedyFuse False (bodyBindings body) used_lam blres (pat, soac)
 
-    Right soac@(SOAC.Redomap _ _ outer_red inner_red nes _) -> do
+    Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
@@ -552,7 +552,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       -- addNewKer bres' (patternIdents pat, soac)
       greedyFuse False (bodyBindings body) used_lam bres' (pat, soac)
 
-    Right soac@(SOAC.Scan _ lam args) -> do
+    Right soac@(SOAC.Scan _ _ lam args) -> do
       -- NOT FUSABLE (probably), but still add as kernel, as
       -- optimisations like ISWIM may make it fusable.
       let nes = map fst args
@@ -561,7 +561,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       blres' <- foldM fusionGatherSubExp blres nes
       greedyFuse False (bodyBindings body) used_lam blres' (pat, soac)
 
-    Right soac@(SOAC.Stream _ form lam _ _) -> do
+    Right soac@(SOAC.Stream _ _ form lam _ _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
@@ -595,7 +595,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       let repl_id = Param repl_idnm (Prim int32)
           repl_lam = Lambda i [repl_id] (mkBody [] [el])
                      [rowType $ identType v]
-          soac_repl= SOAC.Map [] repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
+          soac_repl= SOAC.Map [] n repl_lam [SOAC.Input SOAC.noTransforms $ SOAC.Iota n]
       greedyFuse True [] used_set bres' (pat, soac_repl)
 
     _ -> do
