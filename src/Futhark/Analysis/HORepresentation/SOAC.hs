@@ -484,16 +484,6 @@ width (Stream _ w _ _ _ _) = w
 toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
          SOAC (Lore m) -> m (Exp (Lore m))
 
--- XXX: the other part of the zero-input hack (see fromExp).
-toExp (Map cs w l as)
-  | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
-      new_index <- newVName $ baseString $ lambdaIndex l
-      Op <$> (Futhark.Map cs w l { lambdaIndex = new_index } <$> inputsToSubExps as)
-toExp (Redomap cs w comm redlam l acc as)
-  | lambdaIndex l `Prelude.elem` map paramName (lambdaParams l) = do
-      new_index <- newVName $ baseString $ lambdaIndex l
-      Op <$> (Futhark.Redomap cs w comm redlam l { lambdaIndex = new_index } acc <$> inputsToSubExps as)
-
 toExp (Map cs w l as) =
   Op <$> (Futhark.Map cs w l <$> inputsToSubExps as)
 toExp (Reduce cs w comm l args) =
@@ -523,22 +513,6 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- valid form.
 fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
-
--- | XXX: ugly hack to deal with the lack of support for zero-input
--- SOACs.  If we encounter one of these (and it is a map or redomap),
--- we add a dummy iota input.  This really should go away, because it
--- is not robust.
-fromExp (Op (Futhark.Map cs w lam [])) =
-  let iota_input = Input mempty $ Iota w
-      lam' = lam
-             { lambdaParams = [Param (lambdaIndex lam) (Prim int32)] }
-  in pure $ Right $ Map cs w lam' [iota_input]
-fromExp (Op (Futhark.Redomap cs w comm redlam lam acc [])) =
-  let iota_input = Input mempty $ Iota w
-      lam' = lam
-             { lambdaParams = lambdaParams lam ++
-                              [Param (lambdaIndex lam) (Prim int32)] }
-  in pure $ Right $ Redomap cs w comm redlam lam' acc [iota_input]
 
 fromExp (Op (Futhark.Map cs w l as)) =
   Right <$> Map cs w l <$> traverse varInput as

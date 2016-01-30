@@ -5,7 +5,7 @@
 --   [[2, 4, 6], [8, 10, 12], [14, 16, 18]]
 -- }
 -- structure {
---   Map 2
+--   Map 1
 -- }
 fun [[int]] main() =
   let n = 9 in
