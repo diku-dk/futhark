@@ -1,26 +1,25 @@
 -- Multiplicative inverse on 16-bit numbers.  Returned as a 32-bit
--- number to print better (because we do not have unsigned types).  At
--- one point the compiler missimplified the convergence loop.
+-- number to print better (because we do not print unsigned types).
+-- At one point the compiler missimplified the convergence loop.
 --
 -- ==
 -- input { 2i16 } output { 32769i32 }
 -- input { 33799i16 } output { 28110i32 }
 
-fun i32 main(i16 a) =
-  let a = i32(a)&0xFFFF in
-  let b = 0x10001 in
-  let u = 0 in
-  let v = 1 in
-  loop ({a,b,u,v}) = while a > 0i32 do
-    let q = i32((i64(b)&0xFFFFFFFFi64) // (i64(a)&0xFFFFi64)) in
-    let r = i32((i64(b)&0xFFFFFFFFi64) %% (i64(a)&0xFFFFi64)) in
+fun u32 main(u16 a) =
+  let b = 0x10001u32 in
+  let u = 0i32 in
+  let v = 1i32 in
+  loop ({a,b,u,v}) = while a > 0u16 do
+    let q = b / u32(a) in
+    let r = b % u32(a) in
 
-    let b = i32(a) in
-    let a = r in
+    let b = u32(a) in
+    let a = u16(r) in
 
     let t = v in
-    let v = u - q * v in
+    let v = u - i32(q) * v in
     let u = t in
     {a,b,u,v} in
 
-  (if u < 0 then u + 0x10001 else u) & 0xFFFF
+  u32(if u < 0 then u + 0x10001 else u)
