@@ -6,8 +6,6 @@ module Futhark.Optimise.Fusion.TryFusion
   ( TryFusion
   , tryFusion
   , liftMaybe
-  , liftNeedNames
-  , liftMaybeNeedNames
   )
   where
 
@@ -18,7 +16,6 @@ import Control.Monad.Reader
 import Prelude
 
 import Futhark.Representation.SOACS
-import Futhark.NeedNames
 import Futhark.MonadFreshNames
 
 newtype TryFusion a = TryFusion (ReaderT (Scope SOACS)
@@ -39,10 +36,3 @@ tryFusion (TryFusion m) types = modifyNameSource $ \src ->
 liftMaybe :: Maybe a -> TryFusion a
 liftMaybe Nothing = fail "Nothing"
 liftMaybe (Just x) = return x
-
-liftNeedNames :: NeedNames a -> TryFusion a
-liftNeedNames = provideNames
-
-liftMaybeNeedNames :: NeedNames (Maybe a) -> TryFusion a
-liftMaybeNeedNames m = do x <- liftNeedNames m
-                          liftMaybe x
