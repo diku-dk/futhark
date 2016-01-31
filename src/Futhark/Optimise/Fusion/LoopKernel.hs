@@ -38,6 +38,7 @@ import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
+import qualified Futhark.Analysis.ScalExp as SE
 
 type SOAC = SOAC.SOAC SOACS
 type SOACNest = Nest.SOACNest SOACS
@@ -567,6 +568,7 @@ pushRearrange inpIds nest ots = do
             ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
 
+-- | Actually also rearranges indices.
 rearrangeReturnTypes :: MapNest -> [Int] -> MapNest
 rearrangeReturnTypes nest@(MapNest.MapNest cs w body nestings inps) perm =
   MapNest.MapNest cs w
@@ -616,13 +618,31 @@ pullReshape nest ots
   | SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
     op@(Nest.Map _ _ mapbody) <- Nest.operation nest,
     all primType $ Nest.returnType op = do
-  let inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
-                Nest.inputs nest
-      inputTypes = map SOAC.inputType inputs'
-      mapw' = case reverse $ newDims shape of
+  let mapw' = case reverse $ newDims shape of
         []  -> intConst Int32 0
         d:_ -> d
-      outernest inner (w, outershape) = do
+      inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
+                Nest.inputs nest
+      inputTypes = map SOAC.inputType inputs'
+      innermost_input_ts = map (stripArray (length shape - 1)) inputTypes
+  new_index <- newVName "pull_reshape_inner_index"
+  new_indices <- replicateM (length (newDims shape) - 1) $
+                 newVName "pull_reshape_index"
+  maplam <- Nest.bodyToLambda innermost_input_ts mapbody
+  let old_index = lambdaIndex maplam
+      indices_scope = HM.fromList $ zip (new_index:new_indices) $ repeat IndexInfo
+      flat_idx = flattenIndex
+                 (map SE.intSubExpToScalExp $ newDims shape)
+                 (map (SE.intSubExpToScalExp . Var) $ new_indices++[new_index])
+  compute_old_index_bnds <- runBinder_ $ localScope indices_scope $
+    letBindNames'_ [old_index] =<< SE.fromScalExp' flat_idx
+
+  let mapbody' = Nest.Fun maplam { lambdaIndex = new_index
+                                 , lambdaBody =
+                                     insertBindings compute_old_index_bnds $
+                                     lambdaBody maplam
+                                 }
+      outernest inner (i, w, outershape) = do
         let addDims t = arrayOf t (Shape outershape) NoUniqueness
             retTypes = map addDims $ Nest.returnType op
 
@@ -632,7 +652,6 @@ pullReshape nest ots
 
         bnds <- forM retTypes $ \_ ->
                   newNameFromString "pullReshape_bnd"
-        i <- newVName "pull_reshape_index"
 
         let nesting = Nest.Nesting {
                         Nest.nestingIndex = i
@@ -645,8 +664,8 @@ pullReshape nest ots
   -- Only have the certificates on the outermost loop nest.  This
   -- only has the significance of making the generated code look
   -- very slightly neater.
-  op' <- foldM outernest (Nest.Map [] mapw' mapbody) $
-         zip (newDims shape) $
+  op' <- foldM outernest (Nest.Map [] mapw' mapbody') $
+         zip3 new_indices (newDims shape) $
          drop 1 $ reverse $ drop 1 $ tails $ newDims shape
   let nest'   = Nest.SOACNest {
                   Nest.inputs    = inputs'
