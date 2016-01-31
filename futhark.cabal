@@ -98,7 +98,6 @@ Library
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
                    Futhark.MonadFreshNames
-                   Futhark.NeedNames
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
                    Futhark.Optimise.DoubleBuffer
