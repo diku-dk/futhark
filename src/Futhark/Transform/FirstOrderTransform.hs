@@ -281,7 +281,7 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-transformSOAC respat (Stream cs _ form lam arrexps _) = do
+transformSOAC respat (Stream cs outersz form lam arrexps _) = do
   -- 1.) trivial step: find and build some of the basic things you need
   let accexps = getStreamAccums    form
       lampars = extLambdaParams     lam
@@ -295,7 +295,6 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
   chunkloc <- case lampars of
                 chnk:_ -> return chnk
                 _ -> fail "FirstOrderTransform Stream: chunk error!"
-  outersz  <- arraysSize 0 <$> mapM lookupType arrexps
   let chunkglb_val = case form of
                        Sequential{} -> constant (1 :: Int32)
                        _            -> outersz
@@ -337,9 +336,9 @@ transformSOAC respat (Stream cs _ form lam arrexps _) = do
   strmresacc <- mapM (newIdent "stream_accres" <=< subExpType) accexps
   -- various stream array identifiers and outer sizes
   acc0     <- mapM (newIdent "acc" <=< subExpType) accexps
-  loopind  <- newVName "stream_i"
   initacc0 <- mapM copyIfArray accexps --WHY COPY???
-  let accres  = exindvars ++ acc0
+  let loopind  = extLambdaIndex lam
+      accres  = exindvars ++ acc0
       accall  = exszvar ++ accres
       initacc = exszses ++ exindses  ++ initacc0
       merge = loopMerge
