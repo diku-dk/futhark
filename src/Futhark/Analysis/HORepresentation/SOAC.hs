@@ -523,6 +523,10 @@ soacToStream soac = do
       w = width soac
   lam'     <- renameLambda lam
   i <- newVName "stream_i"
+  j <- newVName "stream_j"
+  let compute_index =
+        mkLet' [] [Ident (lambdaIndex lam') $ Prim int32] $
+        PrimOp $ BinOp (Add Int32) (Futhark.Var i) (Futhark.Var j)
   -- Treat each SOAC case individually:
   case soac of
     -- Map(f,a) => is translated in strem's body to:
@@ -533,10 +537,14 @@ soacToStream soac = do
       -- the chunked-outersize of the array result and input types
           loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
           lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
+          maplam = lam' { lambdaIndex = j
+                        , lambdaBody =
+                            insertBinding compute_index $ lambdaBody lam'
+                        }
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
-      let insoac = Futhark.Map cs chvar lam' $ map paramName strm_inpids
+      let insoac = Futhark.Map cs chvar maplam $ map paramName strm_inpids
           insbnd = mkLet' [] strm_resids $ Op insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
