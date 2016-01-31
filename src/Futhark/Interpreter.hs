@@ -640,7 +640,7 @@ evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
 
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
-evalSOAC (Stream _ _ form elam arrs _) = do
+evalSOAC (Stream _ w form elam arrs _) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
@@ -654,8 +654,7 @@ evalSOAC (Stream _ _ form elam arrs _) = do
                                   funargs) $
                     evalBody elam_body
   -- get the outersize of the input array(s), and use it as chunk!
-  let (ArrayVal _ _ (outersize:_)) = head arrvals
-  let chunkval = PrimVal $ IntValue $ Int32Value $ fromIntegral outersize
+  chunkval <- evalSubExp w
   vs <- fun (chunkval:accvals++arrvals)
   return $ valueShapeContext elam_rtp vs ++ vs
 
