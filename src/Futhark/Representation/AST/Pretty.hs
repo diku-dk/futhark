@@ -185,7 +185,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (BinOp bop x y) = ppr bop <> parens (ppr x <> comma <+> ppr y)
   ppr (CmpOp op x y) = ppr op <> parens (ppr x <> comma <+> ppr y)
   ppr (ConvOp conv x) =
-    text "convert" <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
+    text (convOpFun conv) <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
     where (fromtype, totype) = convTypes conv
   ppr (UnOp Not e) = text "!" <+> pprPrec 9 e
   ppr (UnOp (Abs t) e) = taggedI "abs" t <+> pprPrec 9 e
@@ -307,13 +307,17 @@ instance Pretty CmpOp where
   ppr (FCmpLe t) = taggedF "le" t
 
 instance Pretty ConvOp where
-  ppr (ZExt from to) = convOp "zext" from to
-  ppr (SExt from to) = convOp "sext" from to
-  ppr (FPConv from to) = convOp "fpconv" from to
-  ppr (FPToUI from to) = convOp "fptoui" from to
-  ppr (FPToSI from to) = convOp "fptosi" from to
-  ppr (UIToFP from to) = convOp "uitofp" from to
-  ppr (SIToFP from to) = convOp "sitofp" from to
+  ppr op = convOp (convOpFun op) from to
+    where (from, to) = convTypes op
+
+convOpFun :: ConvOp -> String
+convOpFun ZExt{} = "zext"
+convOpFun SExt{} = "sext"
+convOpFun FPConv{} = "fpconv"
+convOpFun FPToUI{} = "fptoui"
+convOpFun FPToSI{} = "fptosi"
+convOpFun UIToFP{} = "uitofp"
+convOpFun SIToFP{} = "sitofp"
 
 taggedI :: String -> IntType -> Doc
 taggedI s Int8 = text $ s ++ "8"
