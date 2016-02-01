@@ -66,6 +66,8 @@ module Futhark.Representation.Primitive
          -- * Utility
        , zeroIsh
        , oneIsh
+       , primBitSize
+       , primByteSize
        )
        where
 
@@ -699,3 +701,27 @@ zeroIshInt (Int8Value k) = k == 0
 zeroIshInt (Int16Value k) = k == 0
 zeroIshInt (Int32Value k) = k == 0
 zeroIshInt (Int64Value k) = k == 0
+
+-- | The size of a value of a given primitive type in bites.
+primBitSize :: PrimType -> Int
+primBitSize = (*8) . primByteSize
+
+-- | The size of a value of a given primitive type in eight-bit bytes.
+primByteSize :: Num a => PrimType -> a
+primByteSize (IntType t) = intByteSize t
+primByteSize (FloatType t) = floatByteSize t
+primByteSize Bool = 1
+primByteSize Char = 1
+primByteSize Cert = 1
+
+-- | The size of a value of a given integer type in eight-bit bytes.
+intByteSize :: Num a => IntType -> a
+intByteSize Int8 = 1
+intByteSize Int16 = 2
+intByteSize Int32 = 4
+intByteSize Int64 = 8
+
+-- | The size of a value of a given floating-point type in eight-bit bytes.
+floatByteSize :: Num a => FloatType -> a
+floatByteSize Float32 = 4
+floatByteSize Float64 = 8

@@ -124,7 +124,7 @@ runPatAllocM (PatAllocM m) mems =
 arraySizeInBytesExp :: Type -> SE.ScalExp
 arraySizeInBytesExp t =
   SE.sproduct $
-  primSize (elemType t) :
+  primByteSize (elemType t) :
   map (`SE.subExpToScalExp` int32) (arrayDims t)
 
 arraySizeInBytes :: Allocator m => Type -> m SubExp
