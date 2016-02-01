@@ -19,7 +19,6 @@ module Futhark.Representation.ExplicitMemory
        , returnsToType
        , lookupMemBound
        , lookupArraySummary
-       , primSize
          -- * Syntax types
        , Prog
        , Body
@@ -1061,21 +1060,3 @@ applyFunReturns rets params args
           where mem' = case HM.lookup mem parammap of
                   Just (Var v, _) -> v
                   _               -> mem
-
--- | The size of a primitive type in bytes.
-primSize :: Num a => PrimType -> a
-primSize (IntType t) = intSize t
-primSize (FloatType t) = floatSize t
-primSize Bool = 1
-primSize Char = 1
-primSize Cert = 1
-
-intSize :: Num a => IntType -> a
-intSize Int8 = 1
-intSize Int16 = 2
-intSize Int32 = 4
-intSize Int64 = 8
-
-floatSize :: Num a => FloatType -> a
-floatSize Float32 = 4
-floatSize Float64 = 8

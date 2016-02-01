@@ -901,7 +901,7 @@ fullyIndexArray' :: MemLocation -> [ScalExp] -> PrimType
                  -> ImpM op (VName, Imp.Space, Count Bytes)
 fullyIndexArray' (MemLocation mem _ ixfun) indices bt = do
   space <- entryMemSpace <$> lookupMemory mem
-  case scalExpToImpExp $ IxFun.index ixfun indices $ primSize bt of
+  case scalExpToImpExp $ IxFun.index ixfun indices $ primByteSize bt of
     Nothing -> throwError "fullyIndexArray': Cannot turn scalexp into impexp"
     Just e -> return (mem, space, bytes e)
 
@@ -960,7 +960,7 @@ defaultCopy bt dest src n
           (n * row_size) `withElemType` bt
   | otherwise =
       copyElementWise bt dest src n
-  where bt_size = primSize bt
+  where bt_size = primByteSize bt
         row_size = product $ map Imp.dimSizeToExp $ drop 1 srcshape
         MemLocation destmem _ destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
@@ -978,7 +978,7 @@ copyElementWise bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem
       emit $ foldl (.) id (zipWith Imp.For is bounds) $
         Imp.Write destmem (bytes $ fromJust $ scalExpToImpExp destidx) bt destspace $
         Imp.Index srcmem (bytes $ fromJust $ scalExpToImpExp srcidx) bt srcspace
-  where bt_size = primSize bt
+  where bt_size = primByteSize bt
 
 -- | Copy from here to there; both destination and source may be
 -- indexeded.

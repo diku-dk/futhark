@@ -556,7 +556,7 @@ callKernelCopy bt
   ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
   num_arrays size_x size_y
 
-  | bt_size <- primSize bt,
+  | bt_size <- primByteSize bt,
     Just destoffset <-
       ImpGen.scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun bt_size,
@@ -730,7 +730,7 @@ isMapTransposeKernel bt
     isOk r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
-  where bt_size = primSize bt
+  where bt_size = primByteSize bt
 
         isOk r1 r2 dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
@@ -936,7 +936,7 @@ alignmentMap :: Imp.KernelCode  -> AlignmentMap
 alignmentMap = HM.map alignment . Imp.memoryUsage (const mempty)
   where alignment = HS.foldr mostRestrictive smallestType
         mostRestrictive bt1 bt2 =
-          if (primSize bt1 :: Int) > primSize bt2
+          if (primByteSize bt1 :: Int) > primByteSize bt2
           then bt1 else bt2
 
 ensureAlignment :: AlignmentMap
