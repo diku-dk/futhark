@@ -105,7 +105,7 @@ runBinder m = do
 runBinder_ :: (MonadFreshNames m, HasScope lore m) =>
               Binder lore a
            -> m [Binding lore]
-runBinder_ = liftM snd . runBinder
+runBinder_ = fmap snd . runBinder
 
 -- | As 'runBinder', but uses 'addBinding' to add the returned
 -- bindings to the surrounding monad.
@@ -119,7 +119,7 @@ joinBinder m = do (x, bnds) <- runBinder m
 runBodyBinder :: (Bindable lore, MonadFreshNames m,
                   HasScope lore m) =>
                  Binder lore (Body lore) -> m (Body lore)
-runBodyBinder = liftM (uncurry $ flip insertBindings) . runBinder
+runBodyBinder = fmap (uncurry $ flip insertBindings) . runBinder
 
 runBinderEmptyEnv :: MonadFreshNames m =>
                      Binder lore a -> m (a, [Binding lore])

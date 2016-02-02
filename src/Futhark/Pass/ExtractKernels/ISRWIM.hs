@@ -52,7 +52,7 @@ iswim res_pat cs w scan_fun scan_input
                              Op $ Scan cs w scan_fun' scan_input']
                             res
 
-      res_pat' <- liftM (basicPattern' []) $
+      res_pat' <- fmap (basicPattern' []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 

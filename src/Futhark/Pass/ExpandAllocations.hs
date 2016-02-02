@@ -139,7 +139,7 @@ expandedAllocations num_threads thread_index thread_allocs = do
   -- We expand the allocations by multiplying their size with the
   -- number of kernel threads.
   alloc_bnds <-
-    liftM concat $ forM (HM.toList thread_allocs) $ \(mem,(per_thread_size, space)) -> do
+    fmap concat $ forM (HM.toList thread_allocs) $ \(mem,(per_thread_size, space)) -> do
       total_size <- newVName "total_size"
       let sizepat = Pattern [] [PatElem total_size BindVar $ Scalar int32]
           allocpat = Pattern [] [PatElem mem BindVar $

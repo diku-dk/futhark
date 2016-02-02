@@ -29,6 +29,8 @@ import Control.Monad.Except
 import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
 
+import Prelude
+
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes hiding (arrayValue)
 import Language.Futhark.Parser.Parser
@@ -44,7 +46,7 @@ instance Show ParseError where
 parseInMonad :: ParserMonad a -> RealConfiguration -> FilePath -> String
              -> ReadLineMonad (Either ParseError a)
 parseInMonad p rconf file program =
-  liftM (either (Left . ParseError) Right) $ either (return . Left)
+  either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (runReaderT (runExceptT p) env))
   (alexScanTokens file program)
   where env = case rconf of RealAsFloat32 ->

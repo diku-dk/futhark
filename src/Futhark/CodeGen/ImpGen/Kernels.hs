@@ -89,7 +89,7 @@ kernelCompiler
         sequence_ $ zipWith3 (writeThreadResult indices) perms dest $ bodyResult body
 
   makeAllMemoryGlobal $ do
-    kernel_body <- liftM (setBodySpace $ Imp.Space "global") $
+    kernel_body <- fmap (setBodySpace $ Imp.Space "global") $
                    ImpGen.subImpM_ inKernelOperations $
                    ImpGen.withParams [global_thread_index_param] $
                    ImpGen.declaringLParams (indices_lparams ++ map kernelInputParam inps) $ do
@@ -633,7 +633,7 @@ computeKernelUses dest kernel_body bound_in_kernel = do
 
     -- Compute what memory to copy out.  Must be allocated on device
     -- before kernel execution anyway.
-    writes_to <- liftM catMaybes $ forM dest $ \case
+    writes_to <- fmap catMaybes $ forM dest $ \case
       (ImpGen.ArrayDestination
        (ImpGen.CopyIntoMemory
         (ImpGen.MemLocation mem _ _)) _) -> do
@@ -645,7 +645,7 @@ computeKernelUses dest kernel_body bound_in_kernel = do
 
 readsFromSet :: Names -> ImpGen.ImpM op [Imp.KernelUse]
 readsFromSet free =
-  liftM catMaybes $
+  fmap catMaybes $
   forM (HS.toList free) $ \var -> do
     t <- lookupType var
     case t of

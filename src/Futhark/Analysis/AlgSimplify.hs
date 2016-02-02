@@ -616,7 +616,7 @@ simplifyScal (SPlus e1o e2o) = do
         let sortedTerms = sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
         -- foldM discriminate: adds together identical terms, and
         -- we reverse the list, to keep it in a ascending order.
-        merged <- liftM reverse $ foldM discriminate [] sortedTerms
+        merged <- reverse <$> foldM discriminate [] sortedTerms
         let filtered = filter (\(_,v) -> not $ zeroIsh v ) merged
         if null filtered
         then do

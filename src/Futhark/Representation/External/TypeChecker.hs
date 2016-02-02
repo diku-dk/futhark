@@ -307,8 +307,8 @@ bindingParams params m =
   -- presently non-bound shape annotations.
   binding (map fromParam params) $ do
     -- Figure out the not already bound shape annotations.
-    dims <- liftM concat $ forM params $ \param ->
-      liftM catMaybes $
+    dims <- fmap concat $ forM params $ \param ->
+      fmap catMaybes $
       mapM (inspectDim $ srclocOf param) $
       arrayDims $ identType param
     binding dims m
@@ -455,7 +455,7 @@ checkProg' checkoccurs prog = do
                         , envFtable = ftable
                         , envCheckOccurences = checkoccurs
                         }
-  liftM (untagProg . Prog) $
+  fmap (untagProg . Prog) $
           runTypeM typeenv src $ mapM (noDataflow . checkFun) $ progFunctions prog'
   where
     (prog', src) = tagProg' blankNameSource prog

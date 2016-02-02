@@ -85,7 +85,7 @@ inPlaceLowering :: Pass Kernels Kernels
 inPlaceLowering = simplePass
                   "In-place lowering"
                   "Lower in-place updates into loops" $
-                  liftM removeProgAliases .
+                  fmap removeProgAliases .
                   intraproceduralTransformation optimiseFunDec .
                   aliasAnalysis
 
@@ -259,7 +259,7 @@ bindingIndices is = local $ \(TopDown n vtable d) ->
 
 bindingNumber :: VName -> ForwardingM Int
 bindingNumber name = do
-  res <- asks $ liftM entryNumber . HM.lookup name . topDownTable
+  res <- asks $ fmap entryNumber . HM.lookup name . topDownTable
   case res of Just n  -> return n
               Nothing -> fail $ "bindingNumber: variable " ++
                          pretty name ++ " not found."
@@ -279,14 +279,14 @@ areAvailableBefore ses point = do
 isInCurrentBody :: VName -> ForwardingM Bool
 isInCurrentBody name = do
   current <- asks topDownDepth
-  res <- asks $ liftM entryDepth . HM.lookup name . topDownTable
+  res <- asks $ fmap entryDepth . HM.lookup name . topDownTable
   case res of Just d  -> return $ d == current
               Nothing -> fail $ "isInCurrentBody: variable " ++
                          pretty name ++ " not found."
 
 isOptimisable :: VName -> ForwardingM Bool
 isOptimisable name = do
-  res <- asks $ liftM entryOptimisable . HM.lookup name . topDownTable
+  res <- asks $ fmap entryOptimisable . HM.lookup name . topDownTable
   case res of Just b  -> return b
               Nothing -> fail $ "isOptimisable: variable " ++
                          pretty name ++ " not found."

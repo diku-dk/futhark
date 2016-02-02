@@ -581,7 +581,7 @@ instance Simplifiable SubExp where
     return $ Constant v
 
 instance Simplifiable ExtRetType where
-  simplify = liftM ExtRetType . mapM simplify . retTypeValues
+  simplify = fmap ExtRetType . mapM simplify . retTypeValues
 
 simplifyPattern :: (MonadEngine m, Simplifiable attr) =>
                    PatternT attr
@@ -624,7 +624,7 @@ instance Simplifiable (TypeBase ExtShape u) where
                   return $ t `setArrayShape` shape
 
 instance Simplifiable ExtShape where
-  simplify = liftM ExtShape . mapM simplify . extShapeDims
+  simplify = fmap ExtShape . mapM simplify . extShapeDims
 
 instance Simplifiable ExtDimSize where
   simplify (Free se) = Free <$> simplify se
@@ -709,7 +709,7 @@ consumeResult = mapM_ inspect
         inspect (Observe, _) = return ()
 
 instance Simplifiable Certificates where
-  simplify = liftM (nub . concat) . mapM check
+  simplify = fmap (nub . concat) . mapM check
     where check idd = do
             vv <- getsEngineState $ ST.lookupSubExp idd . stateVtable
             case vv of

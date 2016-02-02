@@ -152,7 +152,7 @@ transformSOAC pat (ConcatMap cs _ fun inputs) = do
   let concatArrays (arr, arrs') = do
         let plus = eBinOp (Add Int32)
         n <- arraySize 0 <$> lookupType arr
-        ms <- mapM (liftM (arraySize 0) . lookupType) arrs'
+        ms <- mapM (fmap (arraySize 0) . lookupType) arrs'
         ressize <- letSubExp "concatMap_result_size" =<<
                    foldl plus
                    (pure $ PrimOp $ SubExp n)

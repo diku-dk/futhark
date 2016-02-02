@@ -21,7 +21,6 @@ module Futhark.Optimise.Simplifier
   where
 
 import Data.Functor
-import Control.Monad
 
 import Prelude
 
@@ -45,7 +44,7 @@ simplifyProgWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
                       -> HoistBlockers (SimpleM lore)
                       -> Prog lore -> m (Prog lore)
 simplifyProgWithRules simpl rules blockers =
-  liftM removeProgWisdom .
+  fmap removeProgWisdom .
   simplifyProg simpl rules blockers
 
 -- | Simplify just a single function declaration.
@@ -56,7 +55,7 @@ simplifyFunWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
                      -> FunDec lore
                      -> m (FunDec lore)
 simplifyFunWithRules simpl rules blockers =
-  liftM removeFunDecWisdom .
+  fmap removeFunDecWisdom .
   simplifyFun simpl rules blockers
 
 -- | Simplify just a single 'Lambda'.
@@ -70,9 +69,9 @@ simplifyLambdaWithRules :: (MonadFreshNames m,
                         -> SubExp
                         -> [Maybe VName]
                         -> m (Lambda lore)
-simplifyLambdaWithRules simpl rules blockers lam w args =
-  liftM removeLambdaWisdom $
-  simplifyLambda simpl rules blockers lam w args
+simplifyLambdaWithRules simpl rules blockers lam w =
+  fmap removeLambdaWisdom .
+  simplifyLambda simpl rules blockers lam w
 
 -- | Simplify a list of 'Binding's.
 simplifyBindingsWithRules :: (MonadFreshNames m,

@@ -186,7 +186,7 @@ extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = runDistribM . liftM Prog . mapM transformFunDec . progFunctions
+       , passFunction = runDistribM . fmap Prog . mapM transformFunDec . progFunctions
        }
 
 newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log VNameSource a)
@@ -341,7 +341,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
                       , kernelScope =
                         types <> scopeForKernels (scopeOf lam)
                       }
-  liftM (postKernelBindings . snd) $ runKernelM env $
+  fmap (postKernelBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelBindings = mempty
