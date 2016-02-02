@@ -379,7 +379,7 @@ getValues dir (InFile file) = do
     Right vs -> return vs
   where file' = dir </> file
 
-getExpectedResult :: MonadIO m =>
+getExpectedResult :: (Functor m, MonadIO m) =>
                      FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
 getExpectedResult dir (Succeeds vals)      = Succeeds <$> getValues dir vals
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
