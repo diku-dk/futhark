@@ -191,7 +191,7 @@ loopVariable (LoopVar _) = True
 loopVariable _           = False
 
 asExp :: Entry lore -> Maybe (Exp lore)
-asExp = liftM (bindingExp . letBoundBinding) . isVarBound
+asExp = fmap (bindingExp . letBoundBinding) . isVarBound
 
 entryType :: Annotations lore => Entry lore -> Type
 entryType (LetBound entry) = typeOf $ letBoundAttr entry

@@ -188,7 +188,7 @@ simplifyRange (lower, upper) = do
   return (lower', upper')
 
 simplifyBound :: AS.RangesRep -> Out.Bound -> Out.Bound
-simplifyBound ranges = liftM $ simplifyKnownBound ranges
+simplifyBound ranges = fmap $ simplifyKnownBound ranges
 
 simplifyKnownBound :: AS.RangesRep -> Out.KnownBound -> Out.KnownBound
 simplifyKnownBound ranges bound

@@ -113,7 +113,7 @@ letBindNames'_ :: MonadBinder m =>
 letBindNames'_ names e = void $ letBindNames' names e
 
 collectBindings_ :: MonadBinder m => m a -> m [Binding (Lore m)]
-collectBindings_ = liftM snd . collectBindings
+collectBindings_ = fmap snd . collectBindings
 
 
 bodyBind :: MonadBinder m => Body (Lore m) -> m [SubExp]

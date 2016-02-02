@@ -135,7 +135,7 @@ interpretAction' rconf =
   interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
-          liftM concat $ mapM internalise =<< parseValues rconf path s
+          fmap concat $ mapM internalise =<< parseValues rconf path s
         internalise v =
           maybe (Left $ ParseError $ "Invalid input value: " ++ I.pretty v) Right $
           internaliseValue v

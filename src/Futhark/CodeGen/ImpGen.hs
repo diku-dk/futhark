@@ -294,7 +294,7 @@ fparamSizes fparam
 compileInParams :: [FParam]
                 -> ImpM op ([Imp.Param], [ArrayDecl], [Imp.ValueDecl])
 compileInParams params = do
-  (inparams, arraydecls) <- liftM partitionEithers $ mapM compileInParam params
+  (inparams, arraydecls) <- partitionEithers <$> mapM compileInParam params
   let findArray x = find (isArrayDecl x) arraydecls
       sizes = mconcat $ map fparamSizes params
       mkArg fparam =
@@ -765,7 +765,7 @@ modifyingArrays arrs f m = do
 -- | Remove the array targets.
 funcallTargets :: Destination -> ImpM op [VName]
 funcallTargets (Destination dests) =
-  liftM concat $ mapM funcallTarget dests
+  concat <$> mapM funcallTarget dests
   where funcallTarget (ScalarDestination name) =
           return [name]
         funcallTarget ArrayElemDestination{} =
@@ -840,7 +840,7 @@ destinationFromParam param
       return $ ScalarDestination $ paramName param
 
 destinationFromParams :: [Param (MemBound u)] -> ImpM op Destination
-destinationFromParams = liftM Destination . mapM destinationFromParam
+destinationFromParams = fmap Destination . mapM destinationFromParam
 
 destinationFromPattern :: Pattern -> ImpM op Destination
 destinationFromPattern (Pattern ctxElems valElems) =

@@ -147,7 +147,7 @@ instance (Rename a, Rename b, Rename c) => Rename (a,b,c) where
     return (a',b',c')
 
 instance Rename a => Rename (Maybe a) where
-  rename = maybe (return Nothing) (liftM Just . rename)
+  rename = maybe (return Nothing) (fmap Just . rename)
 
 instance Rename Bool where
   rename = return
@@ -274,7 +274,7 @@ instance Renameable lore => Rename (ExtLambda lore) where
       return $ ExtLambda index' params' body' rettype'
 
 instance Rename Names where
-  rename = liftM HS.fromList . mapM rename . HS.toList
+  rename = fmap HS.fromList . mapM rename . HS.toList
 
 instance Rename Rank where
   rename = return
@@ -293,7 +293,7 @@ instance Rename () where
   rename = return
 
 instance Rename ExtRetType where
-  rename = liftM ExtRetType . mapM rename . retTypeValues
+  rename = fmap ExtRetType . mapM rename . retTypeValues
 
 -- | Lores in which all annotations are renameable.
 type Renameable lore = (Rename (LetAttr lore),

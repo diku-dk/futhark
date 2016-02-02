@@ -98,7 +98,7 @@ instance Allocator AllocM where
 
 runAllocM :: MonadFreshNames m => AllocM a -> m a
 runAllocM (AllocM m) =
-  liftM fst $ modifyNameSource $ runState $ runBinderT m mempty
+  fmap fst $ modifyNameSource $ runState $ runBinderT m mempty
 
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM a = PatAllocM (RWS

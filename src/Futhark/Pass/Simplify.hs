@@ -35,7 +35,7 @@ simplify f =
   -- number of times and hope that it is enough.  Will be fixed later;
   -- promise.
   foldl (<=<) return (replicate num_passes pass)
-  where pass = liftM deadCodeElim . f
+  where pass = fmap deadCodeElim . f
         num_passes = 5
 
 simplifySOACS :: Pass R.SOACS R.SOACS

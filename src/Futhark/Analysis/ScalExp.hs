@@ -327,7 +327,7 @@ ssum (se:ses) = foldl SPlus se ses
 
  -- XXX: Only integers and booleans, OK?
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
-binOpScalExp bop = liftM snd $ find ((==bop) . fst)
+binOpScalExp bop = snd <$> find ((==bop) . fst)
                    [ (Add Int32, SPlus)
                    , (Sub Int32, SMinus)
                    , (Mul Int32, STimes)

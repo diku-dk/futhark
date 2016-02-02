@@ -62,7 +62,7 @@ internaliseFunParams params = do
         map nonuniqueParamFromIdent $ HM.elems shapectx'
 
   (implicit_shape_params, value_params) <-
-    liftM unzip $ forM param_params $ \params' -> do
+    fmap unzip $ forM param_params $ \params' -> do
     (instantiated_param_types, param_implicit_shapes) <-
       instantiateShapesWithDecls shapectx' $ map snd params'
     let instantiated_params =
@@ -147,7 +147,7 @@ makeShapeIdentsFromContext :: MonadFreshNames m =>
                            -> m (HM.HashMap Int I.Ident,
                                  VarSubstitutions)
 makeShapeIdentsFromContext ctx = do
-  (ctx', substs) <- liftM unzip $ forM (HM.toList ctx) $ \(name, i) -> do
+  (ctx', substs) <- fmap unzip $ forM (HM.toList ctx) $ \(name, i) -> do
     v <- newIdent (baseString name) $ I.Prim int32
     return ((i, v), (name, [I.identName v]))
   return (HM.fromList ctx', HM.fromList substs)

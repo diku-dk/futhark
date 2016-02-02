@@ -31,7 +31,7 @@ import Futhark.Construct
 nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
                    [LParam lore] -> m ([LParam lore], [Binding lore])
 nonuniqueParams params =
-  modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
+  modifyNameSource $ runState $ fmap fst $ runBinderEmptyEnv $
   collectBindings $ forM params $ \param ->
     if not $ primType $ paramType param then do
       param_name <- newVName $ baseString (paramName param) ++ "_nonunique"

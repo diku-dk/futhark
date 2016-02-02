@@ -115,7 +115,7 @@ tagLambda = fst . tagLambda' blankNameSource
 -- semantics-changing if the underlying names are not each unique.
 untagProg :: (TypeBox ty, VarName vn) =>
              ProgBase ty (ID vn) -> ProgBase ty vn
-untagProg = untagger $ liftM Prog . mapM renameFun . progFunctions
+untagProg = untagger $ fmap Prog . mapM renameFun . progFunctions
 
 -- | Remove tags from an expression.  The same caveats as with
 -- 'untagProg' apply.
@@ -271,13 +271,13 @@ renameExp e = mapExpM rename e
 renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)
 renameType = mapType $ renameTypeGeneric
              (\(Rank n) -> return $ Rank n)
-             (liftM HS.fromList . mapM replName . HS.toList)
+             (fmap HS.fromList . mapM replName . HS.toList)
 
 renameDeclType :: (VarName f, VarName t) =>
                   TypeBase ShapeDecl NoInfo f
                -> RenameM f t (TypeBase ShapeDecl NoInfo t)
 renameDeclType = renameTypeGeneric
-                 (liftM ShapeDecl . mapM renameDim . shapeDims)
+                 (fmap ShapeDecl . mapM renameDim . shapeDims)
                  (const $ return NoInfo)
   where renameDim AnyDim       = return AnyDim
         renameDim (NamedDim v) = NamedDim <$> replName v

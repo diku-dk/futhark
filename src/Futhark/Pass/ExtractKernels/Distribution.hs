@@ -297,7 +297,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
     fail $ "Nests and targets do not match!\n" ++
     "nests: " ++ ppNestings (inner_nest, nests) ++
     "\ntargets:" ++ ppTargets (target, targets)
-  runMaybeT $ liftM prepare $ recurse $ zip nests targets
+  runMaybeT $ fmap prepare $ recurse $ zip nests targets
 
   where prepare (x, _, _, z) = (z, x)
         bound_in_nest =
@@ -337,7 +337,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
               return $ Ident name t
 
           (free_params, free_arrs, bind_in_target) <-
-            liftM unzip3 $
+            fmap unzip3 $
             forM (inner_returned_arrs++required_from_nest_idents) $
             \(Ident pname ptype) ->
               case HM.lookup pname identity_map of
@@ -486,7 +486,7 @@ tryDistributeBinding :: (MonadFreshNames m, HasScope t m,
                         Nestings -> Targets -> AST.Binding lore
                      -> m (Maybe (Result, Targets, KernelNest))
 tryDistributeBinding nest targets bnd =
-  liftM addRes <$> createKernelNest nest dist_body
+  fmap addRes <$> createKernelNest nest dist_body
   where (dist_body, res) = distributionBodyFromBinding targets bnd
         addRes (targets', kernel_nest) = (res, targets', kernel_nest)
 
@@ -506,7 +506,7 @@ singleBindingBody (Body _ [bnd] [res])
 singleBindingBody _ = Nothing
 
 singleExpBody :: Body -> Maybe Exp
-singleExpBody = liftM bindingExp . singleBindingBody
+singleExpBody = fmap bindingExp . singleBindingBody
 
 fullIndexInput :: [(VName, SubExp)] -> [KernelInput lore]
                -> Maybe (KernelInput lore)

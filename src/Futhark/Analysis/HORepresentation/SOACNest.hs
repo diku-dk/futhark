@@ -260,7 +260,7 @@ typeOf (SOACNest _ (Stream  _ w form lam _)) =
 fromExp :: (Bindable lore, LocalScope lore f, Monad f,
            Op lore ~ Futhark.SOAC lore) =>
            Exp lore -> f (Either SOAC.NotSOAC (SOACNest lore))
-fromExp e = either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
+fromExp e = either (return . Left) (fmap Right . fromSOAC) =<< SOAC.fromExp e
 
 toExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore) =>
          SOACNest lore -> Binder lore (Exp lore)
@@ -302,7 +302,7 @@ nested :: (LocalScope lore m, Monad m, Bindable lore,
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
 nested l
   | Body _ [Let pat _ e] res <- lambdaBody l = do -- Is a let-binding...
-    maybesoac <- either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
+    maybesoac <- either (return . Left) (fmap Right . fromSOAC) =<< SOAC.fromExp e
     case maybesoac of
       Right soac -- ...the bindee is a SOAC...
         | res == map Var (patternNames pat) ->

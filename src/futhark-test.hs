@@ -181,7 +181,7 @@ parseValues = do s <- parseBlock
 
 parseValuesFromString :: SourceName -> String -> Either F.ParseError [Value]
 parseValuesFromString srcname s =
-  liftM concat $ mapM internalise =<< F.parseValues F.RealAsFloat64 srcname s
+  fmap concat $ mapM internalise =<< F.parseValues F.RealAsFloat64 srcname s
   where internalise v =
           maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
           internaliseValue v
@@ -218,7 +218,7 @@ optimisePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
           onePass simplifyKernels
 
 parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ liftM HM.fromList $ many $
+parseMetrics = braces $ fmap HM.fromList $ many $
                (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
   where constituent c = isAlpha c || c == '/'
 
@@ -255,7 +255,7 @@ testSpecFromFile path = do
 type TestM = ExceptT String IO
 
 runTestM :: TestM () -> IO TestResult
-runTestM = liftM (either Failure $ const Success) . runExceptT
+runTestM = fmap (either Failure $ const Success) . runExceptT
 
 io :: IO a -> TestM a
 io = liftIO
@@ -381,7 +381,7 @@ getValues dir (InFile file) = do
 
 getExpectedResult :: MonadIO m =>
                      FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
-getExpectedResult dir (Succeeds vals)      = liftM Succeeds $ getValues dir vals
+getExpectedResult dir (Succeeds vals)      = Succeeds <$> getValues dir vals
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()

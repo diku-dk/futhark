@@ -52,9 +52,9 @@ internaliseProg doBoundsCheck prog = do
 
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
-buildFtable = liftM (fmap $ HM.union builtinFtable) .
+buildFtable = fmap (HM.union builtinFtable<$>) .
               runInternaliseM True mempty .
-              liftM HM.fromList . mapM inspect . E.progFunctions
+              fmap HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) =
           bindingParams params $ \shapes values -> do
             (rettype', _) <- internaliseReturnType rettype
@@ -174,7 +174,7 @@ internaliseExp desc (E.Apply fname args _ _)
   where tag ses = [ (se, I.Observe) | se <- ses ]
 
 internaliseExp desc (E.Apply fname args _ _) = do
-  args' <- liftM concat $ mapM (internaliseExp "arg" . fst) args
+  args' <- concat <$> mapM (internaliseExp "arg" . fst) args
   (shapes, paramts, rettype_fun) <- internalFun <$> lookupFunction fname
   argts <- mapM subExpType args'
   let diets = map I.diet paramts
@@ -417,7 +417,7 @@ internaliseExp desc (E.Concat x ys loc) = do
   yss <- mapM (internaliseExpToVars "concat_y") ys
   outer_size <- arraysSize 0 <$> mapM lookupType xs
   ressize <- foldM sumdims outer_size =<<
-             mapM (liftM (arraysSize 0) . mapM lookupType) yss
+             mapM (fmap (arraysSize 0) . mapM lookupType) yss
 
   let conc xarr yarrs = do
         -- The inner sizes must match.
@@ -492,7 +492,7 @@ internaliseExp desc (E.Partition lams arr _) = do
   lam' <- internalisePartitionLambdas internaliseLambda lams $ map I.Var arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   flags <- letExp "partition_partition_flags" $ I.Op $ I.Map [] w lam' arrs
-  liftM (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
+  fmap (map I.Var . concat . transpose) $ forM arrs $ \arr' -> do
     partition_sizes <- replicateM n $ newIdent "partition_size" $ I.Prim int32
     partition_perm <- newIdent "partition_perm" =<< lookupType arr'
     addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
@@ -524,7 +524,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
              E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
              E.Sequential  acc   -> internaliseExp "stream_acc" acc
   lam'  <- bindingParams [E.toParam chunk] $ \_ [chunk'] -> do
-             rowts <- mapM (liftM (I.stripArray 1) . lookupType) arrs'
+             rowts <- mapM (fmap (I.stripArray 1) . lookupType) arrs'
              let lam_arrs' = [ I.arrayOf t
                               (Shape [I.Var $ I.paramName chunk'])
                               NoUniqueness
@@ -678,7 +678,7 @@ internaliseOperation :: String
                      -> InternaliseM [I.SubExp]
 internaliseOperation s e op = do
   vs <- internaliseExpToVars s e
-  letSubExps s =<< mapM (liftM I.PrimOp . op) vs
+  letSubExps s =<< mapM (fmap I.PrimOp . op) vs
 
 internaliseBinOp :: String
                  -> E.BinOp
@@ -950,7 +950,7 @@ asserting m = do
 -- just return an empty list.
 assertingOne :: InternaliseM VName
              -> InternaliseM I.Certificates
-assertingOne m = asserting $ liftM pure m
+assertingOne m = asserting $ fmap pure m
 
 boundsChecks :: SrcLoc -> [VName] -> [I.SubExp] -> InternaliseM I.Certificates
 boundsChecks _ []    _  = return []

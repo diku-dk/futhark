@@ -472,7 +472,7 @@ sizeVars = mconcat . map sizeVars'
           HM.empty
 
 printResult :: [ValueDecl] -> CompilerM op s [C.Stm]
-printResult vs = liftM concat $ forM vs $ \v -> do
+printResult vs = fmap concat $ forM vs $ \v -> do
   p <- printStm v
   return [p, [C.cstm|printf("\n");|]]
 

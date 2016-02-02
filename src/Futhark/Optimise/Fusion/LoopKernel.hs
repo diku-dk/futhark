@@ -180,7 +180,7 @@ attemptFusion :: (MonadFreshNames m, HasScope SOACS m) =>
                  Names -> [VName] -> SOAC -> FusedKer
               -> m (Maybe FusedKer)
 attemptFusion unfus_nms outVars soac ker =
-  liftM removeUnusedParamsFromKer <$>
+  fmap removeUnusedParamsFromKer <$>
     tryFusion (applyFusionRules unfus_nms outVars soac ker)
     (kernelScope ker)
 
@@ -541,7 +541,7 @@ mapDepth (MapNest.MapNest _ _ body levels _) =
 pullRearrange :: SOACNest -> SOAC.ArrayTransforms
               -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pullRearrange nest ots = do
-  nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
+  nest' <- join $ fmapaybe <$> MapNest.fromSOACNest nest
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
   if rearrangeReach perm <= mapDepth nest' then
     let -- Expand perm to cover the full extent of the input dimensionality
@@ -557,8 +557,8 @@ pullRearrange nest ots = do
 pushRearrange :: [VName] -> SOACNest -> SOAC.ArrayTransforms
               -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pushRearrange inpIds nest ots = do
-  nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
-  (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
+  nest' <- join $ fmapaybe <$> MapNest.fromSOACNest nest
+  (perm, inputs') <- fmapaybe $ fixupInputs inpIds $ MapNest.inputs nest'
   if rearrangeReach perm <= mapDepth nest' then do
     let invertRearrange = SOAC.Rearrange [] $ rearrangeInverse perm
         nest'' = MapNest.toSOACNest $

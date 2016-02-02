@@ -85,7 +85,7 @@ interpret parseValues prog =
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just _ -> do
-      parseres <- liftM (parseValues "<stdin>") getContents
+      parseres <- fmap (parseValues "<stdin>") getContents
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
