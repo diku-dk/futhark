@@ -27,6 +27,7 @@ Contents:
    language-overview.rst
    uniqueness-types.rst
    language-reference.rst
+   c-porting-guide.rst
    publications.rst
 
 Manual pages:
