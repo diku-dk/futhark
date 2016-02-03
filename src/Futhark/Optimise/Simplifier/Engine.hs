@@ -641,21 +641,21 @@ instance Simplifiable (TypeBase Shape u) where
 
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)
-               -> SubExp -> [Maybe VName]
+               -> SubExp -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Lore m))
 simplifyLambda = simplifyLambdaMaybeHoist True
 
 simplifyLambdaNoHoisting :: MonadEngine m =>
                             Lambda (InnerLore m)
-                         -> SubExp -> [Maybe VName]
+                         -> SubExp -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
 simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist False
 
 simplifyLambdaMaybeHoist :: MonadEngine m =>
                             Bool -> Lambda (InnerLore m)
-                         -> SubExp -> [Maybe VName]
+                         -> SubExp -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
-simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
+simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w nes arrs = do
   params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
@@ -670,19 +670,26 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w arrs = do
       simplifyBody (map (const Observe) rettype) body
   rettype' <- mapM simplify rettype
   let consumed_in_body = consumedInBody body'
-      paramWasConsumed p (Just arr)
+      paramWasConsumed p (Just (Var arr))
         | p `HS.member` consumed_in_body = consumedName arr
       paramWasConsumed _ _ =
         return ()
-  zipWithM_ paramWasConsumed (map paramName arrayparams) arrs
+  zipWithM_ paramWasConsumed (map paramName arrayparams) $ map (fmap Var) arrs
+  case nes of
+    Just nes' -> do
+      let accparams = drop (length nonarrayparams - length nes') nonarrayparams
+      zipWithM_ paramWasConsumed (map paramName accparams) $ map Just nes'
+    Nothing -> return ()
+
   return $ Lambda i params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
                      ExtLambda (InnerLore m)
                   -> SubExp
+                  -> [SubExp]
                   -> [(LParam (Lore m), SE.ScalExp, SE.ScalExp)]
                   -> m (ExtLambda (Lore m))
-simplifyExtLambda lam@(ExtLambda index params body rettype) w parbnds = do
+simplifyExtLambda lam@(ExtLambda index params body rettype) w nes parbnds = do
   params' <- mapM (simplifyParam simplify) params
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
@@ -693,6 +700,13 @@ simplifyExtLambda lam@(ExtLambda index params body rettype) w parbnds = do
            localVtable extendSymTab $
            blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
            simplifyBody (map (const Observe) rettype) body
+  let consumed_in_body = consumedInBody body'
+      paramWasConsumed p (Var arr)
+        | p `HS.member` consumed_in_body = consumedName arr
+      paramWasConsumed _ _ =
+        return ()
+      accparams = take (length nes) $ drop 1 params
+  zipWithM_ paramWasConsumed (map paramName accparams) nes
   return $ ExtLambda index params' body' rettype'
   where extendSymTab vtb =
           foldl (\ vt (i,l,u) ->

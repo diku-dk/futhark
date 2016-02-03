@@ -206,6 +206,21 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     HS.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
+  consumedInOp (Stream _ _ form lam arrs _) =
+    HS.fromList $ mapMaybe onlyVar $
+    case form of MapLike{} ->
+                   map (consumedArray []) $ HS.toList $ consumedByExtLambda lam
+                 Sequential accs ->
+                   map (consumedArray accs) $ HS.toList $ consumedByExtLambda lam
+                 RedLike _ _ _ accs ->
+                   map (consumedArray accs) $ HS.toList $ consumedByExtLambda lam
+    where consumedArray accs v = fromMaybe (Var v) $ lookup v $ paramsToInput accs
+          -- Drop the chunk parameter, which cannot alias anything.
+          paramsToInput accs = zip
+                               (map paramName $ drop 1 $ extLambdaParams lam)
+                               (accs++map Var arrs)
+          onlyVar (Var v) = Just v
+          onlyVar _       = Nothing
   consumedInOp _ =
     mempty
 
@@ -259,6 +274,9 @@ substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
 consumedByLambda :: Aliased lore => Lambda lore -> Names
 consumedByLambda = consumedInBody . lambdaBody
+
+consumedByExtLambda :: Aliased lore => ExtLambda lore -> Names
+consumedByExtLambda = consumedInBody . extLambdaBody
 
 instance (Attributes inner, Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange

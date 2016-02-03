@@ -67,11 +67,12 @@ simplifyLambdaWithRules :: (MonadFreshNames m,
                         -> HoistBlockers (SimpleM lore)
                         -> Lambda lore
                         -> SubExp
+                        -> Maybe [SubExp]
                         -> [Maybe VName]
                         -> m (Lambda lore)
-simplifyLambdaWithRules simpl rules blockers lam w =
+simplifyLambdaWithRules simpl rules blockers lam w nes =
   fmap removeLambdaWisdom .
-  simplifyLambda simpl rules blockers lam w
+  simplifyLambda simpl rules blockers lam w nes
 
 -- | Simplify a list of 'Binding's.
 simplifyBindingsWithRules :: (MonadFreshNames m,
