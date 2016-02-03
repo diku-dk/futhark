@@ -270,12 +270,7 @@ instance Attributes lore => TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType
 
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
-  opAliases (MapKernel _ _ _ _ _ returns _) =
-    map (const mempty) returns
-  opAliases (ReduceKernel _ _ _ _ _ fold_lam _ _) =
-    map (const mempty) $ lambdaReturnType fold_lam
-  opAliases (ScanKernel _ _ _ _ lam _) =
-    replicate (length (lambdaReturnType lam) * 2) mempty
+  opAliases = map (const mempty) . kernelType
 
   consumedInOp (MapKernel _ _ _ _ inps _ body) =
     HS.fromList $
