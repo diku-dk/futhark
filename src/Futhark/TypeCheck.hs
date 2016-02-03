@@ -995,11 +995,11 @@ checkLambda (Lambda i params body rettype) args = do
       (Prim int32, mempty) : args
     let consumable = zip (map paramName params) (map argAliases args)
     checkFun' (fname,
-           staticShapes $ map (`toDecl` Nonunique) rettype,
-           [ (paramName param,
-              LParamInfo $ paramAttr param)
-           | param <- iparam:params ],
-           body) consumable $ do
+               staticShapes $ map (`toDecl` Nonunique) rettype,
+               [ (paramName param,
+                  LParamInfo $ paramAttr param)
+               | param <- iparam:params ],
+               body) consumable $ do
       checkLambdaParams params
       mapM_ checkType rettype
       checkLambdaBody rettype body
