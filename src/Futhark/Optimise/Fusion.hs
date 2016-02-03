@@ -439,9 +439,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   kernminds <- forM (zip to_fuse_knms to_fuse_kers) $ \(ker_nm, ker) -> do
                     let bnd_nms = map (patternNames . bindingPattern) rem_bnds
                         out_nm  = case fsoac ker of
-                                    SOAC.Stream _ _ frm _ _ _ ->
-                                        let acc_len = length $ getStreamAccums frm
-                                        in  head $ drop acc_len $ outNames ker
+                                    SOAC.Stream _ _ frm _ _ _
+                                      | x:_ <- drop (length $ getStreamAccums frm) $ outNames ker ->
+                                        x
                                     _ -> head $ outNames ker
                     case L.findIndex (elem out_nm) bnd_nms of
                       Nothing -> return Nothing
