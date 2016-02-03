@@ -38,6 +38,7 @@ import Data.Maybe
 import Prelude
 
 import Futhark.Representation.AST hiding (subExpType, typeOf)
+import Futhark.Representation.SOACS.SOAC (StreamForm(..), getStreamAccums)
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.MonadFreshNames
 import Futhark.Binder

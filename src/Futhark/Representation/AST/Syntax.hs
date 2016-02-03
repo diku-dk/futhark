@@ -48,7 +48,6 @@ module Futhark.Representation.AST.Syntax
   , Lambda
   , ExtLambdaT (..)
   , ExtLambda
-  , StreamForm(..)
 
   -- * Definitions
   , ParamT (..)
@@ -226,11 +225,6 @@ data LoopOp lore
 deriving instance Annotations lore => Eq (LoopOp lore)
 deriving instance Annotations lore => Show (LoopOp lore)
 deriving instance Annotations lore => Ord (LoopOp lore)
-
-data StreamForm lore  = MapLike    StreamOrd
-                      | RedLike    StreamOrd Commutativity (LambdaT lore) [SubExp]
-                      | Sequential [SubExp]
-                        deriving (Eq, Ord, Show)
 
 data LoopForm = ForLoop VName SubExp
               | WhileLoop VName

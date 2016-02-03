@@ -27,8 +27,6 @@ module Futhark.Representation.AST.Attributes
   , asLoopOp
   , safeExp
   , loopResultValues
-  , getStreamAccums
-  , getStreamOrder
   , subExpVars
   , shapeVars
 
@@ -82,18 +80,6 @@ builtInFunctions = HM.fromList $ map namify
                    ,("group_size", (IntType Int32, []))
                    ]
   where namify (k,v) = (nameFromString k, v)
-
--- | Get Stream's accumulators as a sub-expression list
-getStreamAccums :: StreamForm lore -> [SubExp]
-getStreamAccums (MapLike _       ) = []
-getStreamAccums (RedLike _ _ _ accs) = accs
-getStreamAccums (Sequential  accs) = accs
-
-getStreamOrder :: StreamForm lore -> StreamOrd
-getStreamOrder (MapLike o    ) = o
-getStreamOrder (RedLike o _ _ _) = o
-getStreamOrder (Sequential  _) = InOrder
-
 
 -- | Figure out which parts of a loop body result correspond to which
 -- value identifiers in the pattern.

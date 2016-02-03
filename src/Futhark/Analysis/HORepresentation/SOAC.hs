@@ -80,6 +80,7 @@ import Data.Traversable
 import Prelude hiding (mapM)
 
 import qualified Futhark.Representation.AST as Futhark
+import Futhark.Representation.SOACS.SOAC (StreamForm(..), getStreamAccums)
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Representation.AST
   hiding (Var, Iota, Rearrange, Reshape, Replicate,

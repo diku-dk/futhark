@@ -6,8 +6,13 @@
 {-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.SOACS.SOAC
        ( SOAC(..)
+       , StreamForm(..)
 
        , typeCheckSOAC
+
+         -- * Utility
+       , getStreamOrder
+       , getStreamAccums
 
          -- * Generic traversal
        , SOACMapper(..)
@@ -55,6 +60,11 @@ data SOAC lore =
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
     deriving (Eq, Ord, Show)
+
+data StreamForm lore  = MapLike    StreamOrd
+  | RedLike    StreamOrd Commutativity (LambdaT lore) [SubExp]
+  | Sequential [SubExp]
+  deriving (Eq, Ord, Show)
 
 -- | Like 'Mapper', but just for 'SOAC's.
 data SOACMapper flore tlore m = SOACMapper {
@@ -444,6 +454,16 @@ typeCheckSOAC (Stream ass size form lam arrexps _) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
+-- | Get Stream's accumulators as a sub-expression list
+getStreamAccums :: StreamForm lore -> [SubExp]
+getStreamAccums (MapLike _       ) = []
+getStreamAccums (RedLike _ _ _ accs) = accs
+getStreamAccums (Sequential  accs) = accs
+
+getStreamOrder :: StreamForm lore -> StreamOrd
+getStreamOrder (MapLike o    ) = o
+getStreamOrder (RedLike o _ _ _) = o
+getStreamOrder (Sequential  _) = InOrder
 
 instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Map _ _ fun _) =
