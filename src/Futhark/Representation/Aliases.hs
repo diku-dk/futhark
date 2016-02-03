@@ -285,7 +285,9 @@ mkPatternAliases pat e =
   -- Some part of the pattern may  be the context.  This does not have
   -- aliases from expAliases, so we  use a hack to compute some aliases
   -- from do-loops.  FIXME.  This should be more general.
-  let als = expAliases e
+  let als = expAliases e ++ repeat mempty -- In case the pattern has
+                                          -- more elements (this
+                                          -- implies a type error).
       context_als = mkContextAliases pat e
   in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
