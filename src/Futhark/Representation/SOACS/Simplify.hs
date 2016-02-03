@@ -48,7 +48,7 @@ simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
-                  Lambda -> SubExp -> [Maybe VName] -> m Lambda
+                  Lambda -> SubExp -> Maybe [SubExp] -> [Maybe VName] -> m Lambda
 simplifyLambda =
   Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
@@ -66,13 +66,13 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
         -- extension: one may similarly treat iota stream-array case,
         -- by setting the bounds to [0, se_outer-1]
         parbnds  = [ (chunk, 1, se_outer) ]
-    lam' <- Engine.simplifyExtLambda lam outerdim' parbnds
+    lam' <- Engine.simplifyExtLambda lam outerdim' (getStreamAccums form) parbnds
     return $ Stream cs' outerdim' form' lam' arr' ii
     where simplifyStreamForm _ (MapLike o) =
             return $ MapLike o
           simplifyStreamForm outerdim' (RedLike o comm lam0 acc) = do
               acc'  <- mapM Engine.simplify acc
-              lam0' <- Engine.simplifyLambda lam0 outerdim' $
+              lam0' <- Engine.simplifyLambda lam0 outerdim' (Just acc) $
                        replicate (length $ lambdaParams lam0) Nothing
               return $ RedLike o comm lam0' acc'
           simplifyStreamForm _ (Sequential acc) = do
@@ -83,14 +83,14 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     cs' <- Engine.simplify cs
     w' <- Engine.simplify w
     arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w $ map Just arrs'
+    fun' <- Engine.simplifyLambda fun w Nothing $ map Just arrs'
     return $ Map cs' w' fun' arrs'
 
   simplifyOp (ConcatMap cs w fun arrs) = do
     cs' <- Engine.simplify cs
     w' <- Engine.simplify w
     arrs' <- mapM (mapM Engine.simplify) arrs
-    fun' <- Engine.simplifyLambda fun w $ map (const Nothing) $ lambdaParams fun
+    fun' <- Engine.simplifyLambda fun w Nothing $ map (const Nothing) $ lambdaParams fun
     return $ ConcatMap cs' w' fun' arrs'
 
   simplifyOp (Reduce cs w comm fun input) = do
@@ -99,7 +99,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w $ map (const Nothing) arrs'
+    fun' <- Engine.simplifyLambda fun w (Just acc) $ map (const Nothing) arrs'
     return $ Reduce cs' w' comm fun' (zip acc' arrs')
 
   simplifyOp (Scan cs w fun input) = do
@@ -108,7 +108,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w $ map (const Nothing) arrs'
+    fun' <- Engine.simplifyLambda fun w (Just acc) $ map (const Nothing) arrs'
     return $ Scan cs' w' fun' (zip acc' arrs')
 
   simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) = do
@@ -116,9 +116,9 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
-    outerfun' <- Engine.simplifyLambda outerfun w $
+    outerfun' <- Engine.simplifyLambda outerfun w (Just acc) $
                  map (const Nothing) arrs'
-    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w $ map Just arrs
+    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w (Just acc) $ map Just arrs
     (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
     return $ Redomap cs' w' comm outerfun' innerfun'' acc' arrs''
     where removeUnusedParams used lam arrinps
