@@ -679,10 +679,13 @@ typeOf (Redomap _ _ innerfun start arr _) =
 typeOf (Stream form lam arr _ _) =
   case form of
     MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf arr]
+                       `setAliases` HS.empty
                        `setUniqueness` Unique
     RedLike _ _ _ acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
+                         `setAliases` HS.empty
                          `setUniqueness` Unique
     Sequential  acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
+                       `setAliases` HS.empty
                        `setUniqueness` Unique
 typeOf (Concat x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` HS.empty
