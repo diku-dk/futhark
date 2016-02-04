@@ -51,4 +51,4 @@ fun {{int,[int]},[[int]],[real],[real],[int]} main(int m, *[int,n] A) =
                     in
                     { {C[chunk-1],Y[chunk-1]}, Y, Z, W, C }
 
-           , {0,replicate(m,0)}, copy(B) )
+           , {0,replicate(m,0)}, B )
