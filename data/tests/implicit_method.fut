@@ -74,7 +74,7 @@ fun *[[real,m],n] implicitMethod( [[real,3],m] myD,  [[real,3],m] myDD,
                       , zip(mu_row, var_row, myD, myDD)
                       ) in
          let {a,b,c} = unzip(abc) in
-         tridagSeq( a, copy(b), c, u_row )
+         tridagSeq( a, b, c, u_row )
      , zip(myMu,myVar,copy(u))
      )
 

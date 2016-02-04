@@ -13,8 +13,8 @@
 fun [real,num_dates] doInPlaceUpdate([[int, num_dates],3] bb_inds,
                                      [[real,num_dates],3] bb_data,
                                      [real,num_dates]     gauss) =
-    let bbrow = copy(replicate(num_dates, 0.0))   in
-    let bbrow[ 0 ] = gauss[0]                     in
+    let bbrow = replicate(num_dates, 0.0)   in
+    let bbrow[ 0 ] = gauss[0]               in
     bbrow
 
 fun [[real]] mapInPlaceUpdate([[int, num_dates],3] bb_inds,

@@ -15,5 +15,5 @@ fun *[real,n_histo] main(int n_histo, int n_image) =
                             let acc[ind] = acc[ind] + 1.0 in
                             acc
                         in  acc
-                 , copy(replicate(n_histo,0.0)), A
+                 , replicate(n_histo,0.0), A
                  )
