@@ -274,7 +274,7 @@ type LetTopDownRule lore u = VarLookup lore -> TypeLookup
 
 letRule :: MonadBinder m => LetTopDownRule (Lore m) u -> TopDownRule m
 letRule rule vtable (Let pat _ (PrimOp op)) =
-  letBind_ pat =<< fmapaybe (PrimOp <$> rule defOf seType op)
+  letBind_ pat =<< liftMaybe (PrimOp <$> rule defOf seType op)
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
