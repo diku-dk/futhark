@@ -76,10 +76,10 @@ primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr
 
 loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
-loopOpAliases (DoLoop res merge _ loopbody) =
-  map ((`HS.difference` merge_names) . snd) $ filter fst $
-  zip (map ((`elem` res) . paramName . fst) merge) (bodyAliases loopbody)
-  where merge_names = HS.fromList $ map (paramName . fst) merge
+loopOpAliases (DoLoop ctxmerge valmerge _ loopbody) =
+  map (`HS.difference` merge_names) $ bodyAliases loopbody
+  where merge_names = HS.fromList $
+                      map (paramName . fst) $ ctxmerge ++ valmerge
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =

@@ -519,11 +519,16 @@ simplifyExpBase = mapExpM hoist
 
 simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
 
-simplifyLoopOp (DoLoop respat merge form loopbody) = do
-  let (mergepat, mergeexp) = unzip merge
-  mergepat' <- mapM (simplifyParam simplify) mergepat
-  mergeexp' <- mapM simplify mergeexp
-  let diets = map (diet . paramDeclType) mergepat'
+simplifyLoopOp (DoLoop ctx val form loopbody) = do
+  let (ctxparams, ctxinit) = unzip ctx
+      (valparams, valinit) = unzip val
+  ctxparams' <- mapM (simplifyParam simplify) ctxparams
+  ctxinit' <- mapM simplify ctxinit
+  valparams' <- mapM (simplifyParam simplify) valparams
+  valinit' <- mapM simplify valinit
+  let ctx' = zip ctxparams' ctxinit'
+      val' = zip valparams' valinit'
+      diets = map (diet . paramDeclType) $ ctxparams' ++ valparams'
   (form', boundnames, wrapbody) <- case form of
     ForLoop loopvar boundexp -> do
       boundexp' <- simplify boundexp
@@ -537,17 +542,16 @@ simplifyLoopOp (DoLoop respat merge form loopbody) = do
               id)
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   loopbody' <- enterLoop $
-               bindFParams mergepat' $
+               bindFParams (ctxparams'++valparams') $
                blockIf
                (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
                wrapbody $ do
                  res <- simplifyBody diets loopbody
                  isDoLoopResult res
                  return res
-  let merge' = zip mergepat' mergeexp'
-  consumeResult $ zip diets mergeexp'
-  return $ DoLoop respat merge' form' loopbody'
-  where fparamnames = HS.fromList (map (paramName . fst) merge)
+  consumeResult $ zip diets $ ctxinit' ++ valinit'
+  return $ DoLoop ctx' val' form' loopbody'
+  where fparamnames = HS.fromList (map (paramName . fst) $ ctx++val)
 
 class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op where
   simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)

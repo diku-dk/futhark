@@ -100,9 +100,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
   representative =
     Wise representative
 
-  loopResultContext (Wise lore) =
-    loopResultContext lore
-
   expContext pat e = do
     types <- asksScope removeScopeWisdom
     runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types

@@ -5,7 +5,7 @@
 module Futhark.Optimise.Fusion.TryFusion
   ( TryFusion
   , tryFusion
-  , fmapaybe
+  , liftMaybe
   )
   where
 
@@ -33,6 +33,6 @@ tryFusion (TryFusion m) types = modifyNameSource $ \src ->
     Just (x, src') -> (Just x, src')
     Nothing        -> (Nothing, src)
 
-fmapaybe :: Maybe a -> TryFusion a
-fmapaybe Nothing = fail "Nothing"
-fmapaybe (Just x) = return x
+liftMaybe :: Maybe a -> TryFusion a
+liftMaybe Nothing = fail "Nothing"
+liftMaybe (Just x) = return x

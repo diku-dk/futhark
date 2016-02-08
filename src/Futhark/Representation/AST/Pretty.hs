@@ -21,7 +21,6 @@ import Data.Monoid
 import Futhark.Util.Pretty
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Util
 
@@ -124,7 +123,7 @@ bindingAnnotation bnd doc =
     Just annot -> annot </> doc
 
 instance Pretty (PatElemT attr) => Pretty (PatternT attr) where
-  ppr = braces . commasep . map ppr . patternElements
+  ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
 
 instance Pretty (PatElemT b) => Pretty (PatElemT (a,b)) where
   ppr = ppr . fmap snd
@@ -221,9 +220,9 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
 instance PrettyLore lore => Pretty (LoopOp lore) where
-  ppr (DoLoop res mergepat form loopbody) =
-    text "loop" <+> braces (commasep $ map ppr res) <+>
-    text "<-" <+> ppPattern pat <+> equals <+> ppTuple' initexp </>
+  ppr (DoLoop ctx val form loopbody) =
+    text "loop" <+> ppPattern ctxparams valparams <+>
+    equals <+> ppTuple' (ctxinit++valinit) </>
     (case form of
       ForLoop i bound ->
         text "for" <+> ppr i <+> text "<" <+> align (ppr bound)
@@ -231,7 +230,8 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
         text "while" <+> ppr cond
     ) <+> text "do" </>
     indent 2 (ppr loopbody)
-    where (pat, initexp) = unzip mergepat
+    where (ctxparams, ctxinit) = unzip ctx
+          (valparams, valinit) = unzip val
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
@@ -336,8 +336,9 @@ instance Pretty d => Pretty (DimChange d) where
   ppr (DimCoercion se) = text "~" <> ppr se
   ppr (DimNew      se) = ppr se
 
-ppPattern :: Pretty a => [a] -> Doc
-ppPattern = braces . commasep . map ppr
+ppPattern :: (Pretty a, Pretty b) => [a] -> [b] -> Doc
+ppPattern [] bs = braces $ commasep $ map ppr bs
+ppPattern as bs = braces $ commasep (map ppr as) <> semi <+> commasep (map ppr bs)
 
 ppTuple' :: Pretty a => [a] -> Doc
 ppTuple' ets = braces $ commasep $ map ppr ets

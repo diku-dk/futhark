@@ -77,6 +77,8 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
     doLoopMapAccumL cs (Var chunk_size) (Alias.analyseLambda fold_lam')
     nes (map paramName arr_chunk_params) (map paramName map_arr_params)
 
+  dummys <- mapM (newIdent "dummy" . paramType) arr_chunk_params
+
   let seq_rt =
         let (acc_ts, arr_ts) =
               splitAt (length nes) $ lambdaReturnType fold_lam
@@ -84,7 +86,7 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
 
       res_idents = zipWith Ident (patternValueNames pat) seq_rt
 
-      seq_loop_bnd = mkLet' [] res_idents seq_loop
+      seq_loop_bnd = mkLet' [] (dummys++res_idents) seq_loop
       seq_body = mkBody (seq_loop_prologue++[seq_loop_bnd]) $ map (Var . identName) res_idents
 
       seqlam = Lambda { lambdaParams = chunk_size_param :

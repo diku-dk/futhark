@@ -718,8 +718,9 @@ checkPrimOp (Partition cs _ flags arrs) = do
 checkLoopOp :: Checkable lore =>
                LoopOp lore -> TypeM lore ()
 
-checkLoopOp (DoLoop respat merge form loopbody) = do
-  let (mergepat, mergeexps) = unzip merge
+checkLoopOp (DoLoop ctxmerge valmerge form loopbody) = do
+  let merge = ctxmerge ++ valmerge
+      (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
 
   funparams <- case form of
@@ -765,13 +766,6 @@ checkLoopOp (DoLoop respat merge form loopbody) = do
           bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
           (Several $ map fromDecl $ staticShapes rettype)
           (Several $ map fromDecl bodyt)
-  forM_ respat $ \res ->
-    case find ((==res) . paramName) mergepat of
-      Nothing -> bad $ TypeError noLoc $
-                 "Loop result variable " ++
-                 textual res ++
-                 " is not a merge variable."
-      Just _  -> return ()
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()

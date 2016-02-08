@@ -727,27 +727,6 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
 instance Attributes ExplicitMemory where
   representative = ExplicitMemory
 
-  loopResultContext _ res mergevars =
-    let shapeContextIdents = loopShapeContext res $ map paramIdent mergevars
-        memContextIdents = nub $ mapMaybe memIfNecessary res
-        memSizeContextIdents = nub $ mapMaybe memSizeIfNecessary memContextIdents
-    in memSizeContextIdents <> map identName memContextIdents <> shapeContextIdents
-    where memIfNecessary var =
-            case find ((==var) . paramName) mergevars of
-              Just fparam | ArrayMem _ _ _ mem _ <- paramAttr fparam,
-                            Just memparam <- isMergeParam mem ->
-                Just $ paramIdent memparam
-              _ ->
-                Nothing
-          memSizeIfNecessary ident
-            | Mem (Var sizevar) _ <- identType ident,
-              isJust $ isMergeParam sizevar =
-              Just sizevar
-            | otherwise =
-              Nothing
-          isMergeParam var =
-            find ((==var) . paramName) mergevars
-
   expContext pat e = do
     ext_context <- expExtContext pat e
     case e of
@@ -927,15 +906,14 @@ expReturns (AST.PrimOp (Index _ v is)) = do
 expReturns (AST.PrimOp op) =
   extReturns <$> staticShapes <$> primOpType op
 
-expReturns (AST.LoopOp (DoLoop res merge _ _)) =
+expReturns (AST.LoopOp (DoLoop ctx val _ _)) =
     return $
-    evalState (mapM typeWithAttr $
-               zip res $
-               loopExtType res $ map paramIdent mergevars) 0
-    where typeWithAttr (resname, t) =
-            case (t,
-                  paramAttr <$> find ((==resname) . paramName) mergevars) of
-              (Array bt shape u, Just (ArrayMem _ _ _ mem ixfun))
+    evalState (zipWithM typeWithAttr
+               (loopExtType (map (paramIdent . fst) ctx) (map (paramIdent . fst) val)) $
+               map fst val) 0
+    where typeWithAttr t p =
+            case (t, paramAttr p) of
+              (Array bt shape u, ArrayMem _ _ _ mem ixfun)
                 | isMergeVar mem -> do
                   i <- get
                   put $ i + 1
@@ -944,13 +922,13 @@ expReturns (AST.LoopOp (DoLoop res merge _ _)) =
                   return (ReturnsArray bt shape u $
                           Just $ ReturnsInBlock mem ixfun)
               (Array{}, _) ->
-                fail "expReturns: result is not a merge variable."
+                fail "expReturns: Array return type but not array merge variable."
               (Prim bt, _) ->
                 return $ ReturnsScalar bt
               (Mem{}, _) ->
                 fail "expReturns: loop returns memory block explicitly."
           isMergeVar = flip elem $ map paramName mergevars
-          mergevars = map fst merge
+          mergevars = map fst $ ctx ++ val
 
 expReturns (Apply _ _ ret) =
   return $ map funReturnsToExpReturns ret

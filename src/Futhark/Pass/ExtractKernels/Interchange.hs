@@ -19,27 +19,23 @@ import Futhark.Tools
 
 import Prelude
 
-data SeqLoop = SeqLoop Pattern [VName] [(FParam, SubExp)] LoopForm Body
+data SeqLoop = SeqLoop Pattern [(FParam, SubExp)] LoopForm Body
 
 seqLoopBinding :: SeqLoop -> Binding
-seqLoopBinding (SeqLoop pat ret merge form body) =
-  Let pat () $ LoopOp $ DoLoop ret merge form body
+seqLoopBinding (SeqLoop pat merge form body) =
+  Let pat () $ LoopOp $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
                    SeqLoop -> LoopNesting
                 -> m SeqLoop
 interchangeLoop
-  (SeqLoop loop_pat ret merge form body)
+  (SeqLoop loop_pat merge form body)
   (MapNesting pat cs w i params_and_arrs) = do
     merge_expanded <-
       localScope (scopeOfLParams $ map fst params_and_arrs) $
       mapM expand merge
 
-    let ret_params_mask = map ((`elem` ret) . paramName . fst) merge
-        ret_expanded = [ paramName param
-                       | ((param,_), used) <- zip merge_expanded ret_params_mask,
-                         used]
-        loop_pat_expanded =
+    let loop_pat_expanded =
           Pattern [] $ map expandPatElem $ patternElements loop_pat
         new_params = [ Param pname $ fromDecl ptype
                      | (Param pname ptype, _) <- merge ]
@@ -61,7 +57,7 @@ interchangeLoop
         res = map Var $ patternNames loop_pat_expanded
 
     return $
-      SeqLoop pat ret_expanded merge_expanded form $
+      SeqLoop pat merge_expanded form $
       mkBody (pre_copy_bnds++[map_bnd]) res
   where free_in_body = freeInBody body
 

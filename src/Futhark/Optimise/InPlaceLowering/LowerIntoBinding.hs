@@ -39,13 +39,13 @@ updateHasValue name = (name==) . updateValue
 
 lowerUpdate :: (Bindable lore, MonadFreshNames m, LetAttr lore ~ Type) =>
                Binding lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Binding lore])
-lowerUpdate (Let pat _ (LoopOp (DoLoop res merge form body))) updates = do
-  canDo <- lowerUpdateIntoLoop updates pat res merge body
+lowerUpdate (Let pat _ (LoopOp (DoLoop ctx val form body))) updates = do
+  canDo <- lowerUpdateIntoLoop updates pat ctx val body
   Just $ do
-    (prebnds, postbnds, ctxpat, valpat, res', merge', body') <- canDo
+    (prebnds, postbnds, ctxpat, valpat, ctx', val', body') <- canDo
     return $
       prebnds ++
-      [mkLet' ctxpat valpat $ LoopOp $ DoLoop res' merge' form body'] ++
+      [mkLet' ctxpat valpat $ LoopOp $ DoLoop ctx' val' form body'] ++
       postbnds
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
@@ -67,17 +67,17 @@ lowerUpdate _ _ =
 lowerUpdateIntoLoop :: (Bindable lore, MonadFreshNames m, LetAttr lore ~ Type) =>
                        [DesiredUpdate (LetAttr lore)]
                     -> Pattern lore
-                    -> [VName]
+                    -> [(FParam lore, SubExp)]
                     -> [(FParam lore, SubExp)]
                     -> Body lore
                     -> Maybe (m ([Binding lore],
                                  [Binding lore],
                                  [Ident],
                                  [Ident],
-                                 [VName],
+                                 [(FParam lore, SubExp)],
                                  [(FParam lore, SubExp)],
                                  Body lore))
-lowerUpdateIntoLoop updates pat res merge body = do
+lowerUpdateIntoLoop updates pat ctx val body = do
   -- Algorithm:
   --
   --   0) Map each result of the loop body to a corresponding in-place
@@ -103,22 +103,18 @@ lowerUpdateIntoLoop updates pat res merge body = do
   --
   -- We also check that the merge parameters we work with have
   -- loop-invariant shapes.
-  mk_in_place_map <- summariseLoop updates usedInBody resmap merge
+  mk_in_place_map <- summariseLoop updates usedInBody resmap val
   Just $ do
     in_place_map <- mk_in_place_map
-    (merge',prebnds,postbnds) <- mkMerges in_place_map
-    let (ctxpat,valpat,res') = mkResAndPat in_place_map
+    (val',prebnds,postbnds) <- mkMerges in_place_map
+    let (ctxpat,valpat) = mkResAndPat in_place_map
         idxsubsts = indexSubstitutions in_place_map
     (idxsubsts', newbnds) <- substituteIndices idxsubsts $ bodyBindings body
     (body_res, res_bnds) <- manipulateResult in_place_map idxsubsts'
     let body' = mkBody (newbnds++res_bnds) body_res
-    return (prebnds, postbnds, ctxpat, valpat, res', merge', body')
-  where mergeparams = map fst merge
-        usedInBody = freeInBody body
-        resmap = loopResultValues
-                 (patternValueIdents pat) res
-                 (map paramName mergeparams) $
-                 bodyResult body
+    return (prebnds, postbnds, ctxpat, valpat, ctx, val', body')
+  where usedInBody = freeInBody body
+        resmap = zip (bodyResult body) $ patternValueIdents pat
 
         mkMerges :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
                     [LoopResultSummary (LetAttr lore)]
@@ -148,38 +144,32 @@ lowerUpdateIntoLoop updates pat res merge body = do
           | otherwise = return $ Left $ mergeParam summary
 
         mkResAndPat summaries =
-          let (orig,extra) = partitionEithers $ mapMaybe mkResAndPat' summaries
-              (origpat, origres) = unzip orig
-              (extrapat, extrares) = unzip extra
+          let (origpat,extrapat) = partitionEithers $ map mkResAndPat' summaries
           in (patternContextIdents pat,
-              origpat ++ extrapat,
-              origres ++ extrares)
+              origpat ++ extrapat)
 
         mkResAndPat' summary
-          | Just (update, mergename, _) <- relatedUpdate summary =
-              Just $ Right (Ident (updateName update) (updateType update),
-                            mergename)
-          | Just v <- inPatternAs summary =
-              Just $ Left (v, paramName $ fst $ mergeParam summary)
+          | Just (update, _, _) <- relatedUpdate summary =
+              Right (Ident (updateName update) (updateType update))
           | otherwise =
-              Nothing
+              Left (inPatternAs summary)
 
 summariseLoop :: MonadFreshNames m =>
                  [DesiredUpdate attr]
               -> Names
-              -> [(SubExp, Maybe Ident)]
+              -> [(SubExp, Ident)]
               -> [(Param DeclType, SubExp)]
               -> Maybe (m [LoopResultSummary attr])
 summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
-  where summariseLoopResult (se, Just v) (fparam, mergeinit)
+  where summariseLoopResult (se, v) (fparam, mergeinit)
           | Just update <- find (updateHasValue $ identName v) updates =
             if updateSource update `HS.member` usedInBody
             then Nothing
             else if hasLoopInvariantShape fparam then Just $ do
               lowered_array <- newVName "lowered_array"
               return LoopResultSummary { resultSubExp = se
-                                       , inPatternAs = Just v
+                                       , inPatternAs = v
                                        , mergeParam = (fparam, mergeinit)
                                        , relatedUpdate = Just (update,
                                                                lowered_array,
@@ -202,7 +192,7 @@ summariseLoop updates usedInBody resmap merge =
 
 data LoopResultSummary attr =
   LoopResultSummary { resultSubExp :: SubExp
-                    , inPatternAs :: Maybe Ident
+                    , inPatternAs :: Ident
                     , mergeParam :: (Param DeclType, SubExp)
                     , relatedUpdate :: Maybe (DesiredUpdate attr, VName, attr)
                     }

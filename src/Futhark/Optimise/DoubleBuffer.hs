@@ -90,11 +90,11 @@ optimiseBindings (e:es) = do
   return $ e_es ++ es'
 
 optimiseBinding :: MonadFreshNames m => Binding -> DoubleBufferM m [Binding]
-optimiseBinding (Let pat () (LoopOp (DoLoop res merge form body))) = do
-  body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst merge)) $
+optimiseBinding (Let pat () (LoopOp (DoLoop ctx val form body))) = do
+  body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
-  (bnds, merge', body'') <- optimiseLoop merge body'
-  return $ bnds ++ [Let pat () $ LoopOp $ DoLoop res merge' form body'']
+  (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
+  return $ bnds ++ [Let pat () $ LoopOp $ DoLoop ctx' val' form body'']
 optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   , mapOnOp = optimiseOp
@@ -111,21 +111,24 @@ optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
                   return lam { lambdaBody = body }
 
 optimiseLoop :: MonadFreshNames m =>
-                [(FParam, SubExp)] -> Body
-             -> DoubleBufferM m ([Binding], [(FParam, SubExp)], Body)
-optimiseLoop mergeparams body = do
+                [(FParam, SubExp)] -> [(FParam, SubExp)] -> Body
+             -> DoubleBufferM m ([Binding], [(FParam, SubExp)], [(FParam, SubExp)], Body)
+optimiseLoop ctx val body = do
   -- We start out by figuring out which of the merge variables should
   -- be double-buffered.
   buffered <- doubleBufferMergeParams
-              (zip (map fst mergeparams) (bodyResult body))
+              (zip (map fst ctx) (bodyResult body))
+              (map fst merge)
               (boundInBody body)
   -- Then create the allocations of the buffers and copies of the
   -- initial values.
-  (mergeparams', allocs) <- allocBindings mergeparams buffered
+  (merge', allocs) <- allocBindings merge buffered
   -- Modify the loop body to copy buffered result arrays.
-  let body' = doubleBufferResult (map fst mergeparams) buffered body
+  let body' = doubleBufferResult (map fst merge) buffered body
+      (ctx', val') = splitAt (length ctx) merge'
   -- Modify the initial merge p
-  return (allocs, mergeparams', body')
+  return (allocs, ctx', val', body')
+  where merge = ctx ++ val
 
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
@@ -137,16 +140,15 @@ data DoubleBuffer = BufferAlloc VName SubExp Space Bool
                     deriving (Show)
 
 doubleBufferMergeParams :: MonadFreshNames m =>
-                           [(FParam,SubExp)] -> Names -> DoubleBufferM m [DoubleBuffer]
-doubleBufferMergeParams params_and_res bound_in_loop = do
+                           [(FParam,SubExp)] -> [FParam] -> Names
+                        -> DoubleBufferM m [DoubleBuffer]
+doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
   copy_init <- asks envCopyInit
-  evalStateT (mapM (buffer copy_init) params) HM.empty
-  where (params,_) = unzip params_and_res
-
-        loopInvariantSize copy_init (Constant v) =
+  evalStateT (mapM (buffer copy_init) val_params) HM.empty
+  where loopInvariantSize copy_init (Constant v) =
           Just (Constant v, copy_init)
         loopInvariantSize copy_init (Var v) =
-          case find ((==v) . paramName . fst) params_and_res of
+          case find ((==v) . paramName . fst) ctx_and_res of
             Just (_, Constant val) ->
               Just (Constant val, False)
             Just (_, Var v') | not $ v' `HS.member` bound_in_loop ->
@@ -198,10 +200,11 @@ allocBindings merge = runWriterT . zipWithM allocation merge
           return (f, se)
 
 doubleBufferResult :: [FParam] -> [DoubleBuffer] -> Body -> Body
-doubleBufferResult mergeparams buffered (Body () bnds res) =
-  let (copybnds,ses) =
-        unzip $ zipWith3 buffer mergeparams buffered res
-  in Body () (bnds++catMaybes copybnds) ses
+doubleBufferResult valparams buffered (Body () bnds res) =
+  let (ctx_res, val_res) = splitAt (length res - length valparams) res
+      (copybnds,val_res') =
+        unzip $ zipWith3 buffer valparams buffered val_res
+  in Body () (bnds++catMaybes copybnds) $ ctx_res ++ val_res'
   where buffer _ (BufferAlloc bufname _ _ _) _ =
           (Nothing, Var bufname)
 
@@ -217,7 +220,7 @@ doubleBufferResult mergeparams buffered (Body () bnds res) =
         buffer _ _ se =
           (Nothing, se)
 
-        parammap = HM.fromList $ zip (map paramName mergeparams) res
+        parammap = HM.fromList $ zip (map paramName valparams) res
 
         resultType t = t `setArrayDims` map substitute (arrayDims t)
 

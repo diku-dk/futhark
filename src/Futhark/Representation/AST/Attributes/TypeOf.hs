@@ -26,7 +26,7 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , mapType
        , valueShapeContext
        , subExpShapeContext
-       , loopShapeContext
+       , loopResultContext
        , loopExtType
 
        -- * Return type
@@ -42,7 +42,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
 import Control.Applicative
 import Control.Monad.Reader
 import Data.List
-import Data.Maybe
 import Data.Monoid
 import qualified Data.HashSet as HS
 import Data.Traversable hiding (mapM)
@@ -55,6 +54,7 @@ import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Representation.AST.Attributes.Values
 import Futhark.Representation.AST.Attributes.Constants
+import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.RetType
 import Futhark.Representation.AST.Attributes.Scope
 
@@ -127,8 +127,8 @@ primOpType (Partition _ n _ arrays) =
 -- | The type of a loop operation.
 loopOpExtType :: Typed (FParamAttr lore) =>
                  LoopOp lore -> [ExtType]
-loopOpExtType (DoLoop res merge _ _) =
-  loopExtType res $ map (paramIdent . fst) merge
+loopOpExtType (DoLoop ctxmerge valmerge _ _) =
+  loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 
 -- | The type of an expression.
 expExtType :: (HasScope lore m,
@@ -184,28 +184,21 @@ subExpShapeContext :: HasScope t m =>
 subExpShapeContext rettype ses =
   extractShapeContext rettype <$> traverse (liftA arrayDims . subExpType) ses
 
--- | A loop pures not only the values indicated in the result
--- pattern, but also any shapes of arrays that are merge variables.
--- Thus, @loopResult res merge@ pures those variables in @merge@
--- that constitute the shape context.
-loopShapeContext :: [VName] -> [Ident] -> [VName]
-loopShapeContext res merge = resShapes
-  where isMergeVar (Constant _) = Nothing
-        isMergeVar (Var v)
-          | v `elem` mergenames = Just v
-          | otherwise           = Nothing
-        resShapes =
-          nub $ concatMap (mapMaybe isMergeVar . arrayDims . identType) res'
-        mergenames = map identName merge
-        res' = mapMaybe (\name -> find ((==name) . identName) merge) res
+-- | A loop returns not only its value merge parameters, but may also
+-- have an existential context.  Thus, @loopResult ctxmergeparams
+-- valmergeparams@ returns those paramters in @ctxmergeparams@ that
+-- constitute the returned context.
+loopResultContext :: FreeIn attr => [Param attr] -> [Param attr] -> [Param attr]
+loopResultContext ctx val = filter usedInValue ctx
+  where usedInValue = (`HS.member` used) . paramName
+        used = freeIn val <> freeIn ctx
 
--- | Given the result list and the merge parameters of a Futhark
--- @loop@, produce the return type.
-loopExtType :: [VName] -> [Ident] -> [ExtType]
-loopExtType res merge =
-  existentialiseExtTypes inaccessible $ staticShapes $ map identType res'
-  where inaccessible = HS.fromList $ map identName merge
-        res' = mapMaybe (\name -> find ((==name) . identName) merge) res
+-- | Given the context and value merge parameters of a Futhark @loop@,
+-- produce the return type.
+loopExtType :: [Ident] -> [Ident] -> [ExtType]
+loopExtType ctx val =
+  existentialiseExtTypes inaccessible $ staticShapes $ map identType val
+  where inaccessible = HS.fromList $ map identName ctx
 
 class TypedOp op where
   opType :: HasScope t m => op -> m [ExtType]

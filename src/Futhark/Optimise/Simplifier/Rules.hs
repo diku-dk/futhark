@@ -71,8 +71,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                ]
 
 bottomUpRules :: MonadBinder m => BottomUpRules m
-bottomUpRules = [ removeUnusedLoopResult
-                , removeRedundantMergeVariables
+bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , removeUnnecessaryCopy
                 ]
@@ -84,64 +83,41 @@ standardRules = (topDownRules, bottomUpRules)
 basicRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
 basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
--- After removing a result, we may also have to remove some existential bindings.
-removeUnusedLoopResult :: forall m.MonadBinder m => BottomUpRule m
-removeUnusedLoopResult (_, used) (Let pat _ (LoopOp (DoLoop respat merge form body)))
-  | explpat' <- filter (keep . fst) explpat,
-    explpat' /= explpat =
-  let ctxrefs = concatMap (references . snd) explpat'
-      patctxrefs = mconcat $ map (freeIn . fst) explpat'
-      bindeeUsed = (`HS.member` patctxrefs) . patElemName
-      mergeParamUsed = (`elem` ctxrefs)
-      keepImpl (bindee,ident) = bindeeUsed bindee || mergeParamUsed ident
-      implpat' = filter keepImpl implpat
-      implpat'' = map fst implpat'
-      explpat'' = map fst explpat'
-      respat' = map snd explpat'
-  in letBind_ (Pattern implpat'' explpat'') $ LoopOp $ DoLoop respat' merge form body
-  where -- | Check whether the variable binding is used afterwards OR
-        -- is responsible for some used existential part.
-        keep bindee =
-          patElemName bindee `elem` nonremovablePatternNames
-        patNames = patternNames pat
-        nonremovablePatternNames =
-          filter (`UT.used` used) patNames <>
-          map patElemName (filter interestingBindee $ patternElements pat)
-        interestingBindee bindee =
-          any (`elem` patNames) $
-          freeIn (patElemAttr bindee) <> freeIn (patElemType bindee)
-        taggedpat = zip (patternElements pat) $
-                    loopResultContext (representative :: Lore m) respat (map fst merge) ++
-                    respat
-        (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
-        references name = maybe [] (HS.toList . freeIn) $
-                          find ((name==) . paramName) $
-                          map fst merge
-removeUnusedLoopResult _ _ = cannotSimplify
-
 -- This next one is tricky - it's easy enough to determine that some
--- loop result is not used after the loop (as in
--- 'removeUnusedLoopResult'), but here, we must also make sure that it
--- does not affect any other values.
+-- loop result is not used after the loop, but here, we must also make
+-- sure that it does not affect any other values.
 --
 -- I do not claim that the current implementation of this rule is
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
-removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form body)))
-  | not $ all (explicitlyReturned . fst) merge =
-  let es = bodyResult body
+removeRedundantMergeVariables (_, used) (Let pat _ (LoopOp (DoLoop ctx val form body)))
+  | not $ all (explicitlyReturned . fst) val =
+  let (ctx_es, val_es) = splitAt (length ctx) $ bodyResult body
       necessaryForReturned =
-        findNecessaryForReturned explicitlyReturnedOrInForm (zip mergepat es) (dataDependencies body)
+        findNecessaryForReturned explicitlyReturnedOrInForm
+        (zip (map fst $ ctx++val) $ ctx_es++val_es) (dataDependencies body)
       resIsNecessary ((v,_), _) =
         explicitlyReturned v ||
         paramName v `HS.member` necessaryForReturned ||
         referencedInPat v ||
         referencedInForm v
-      (keep, discard) = partition resIsNecessary $ zip merge es
-      (merge', es') = unzip keep
-      body' = body { bodyResult = es' }
-  in if merge == merge'
+      (keep_ctx, discard_ctx) =
+        partition resIsNecessary $ zip ctx ctx_es
+      (keep_valpart, discard_valpart) =
+        partition (resIsNecessary . snd) $
+        zip (patternValueElements pat) $ zip val val_es
+      (keep_valpatelems, keep_val) = unzip keep_valpart
+      (_discard_valpatelems, discard_val) = unzip discard_valpart
+      (ctx', ctx_es') = unzip keep_ctx
+      (val', val_es') = unzip keep_val
+      body' = body { bodyResult = ctx_es' ++ val_es' }
+      stillUsedContext pat_elem =
+        patElemName pat_elem `HS.member` freeIn keep_valpatelems
+      pat' = pat { patternValueElements = keep_valpatelems
+                 , patternContextElements =
+                     filter stillUsedContext $ patternContextElements pat }
+  in if ctx' ++ val' == ctx ++ val
      then cannotSimplify
      else do
        -- We can't just remove the bindings in 'discard', since the loop
@@ -150,14 +126,16 @@ removeRedundantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form bod
        -- removal will eventually get rid of them.  Some care is
        -- necessary to handle unique bindings.
        body'' <- insertBindingsM $ do
-         mapM_ (uncurry letBindNames') $ dummyBindings discard
+         mapM_ (uncurry letBindNames') $ dummyBindings discard_ctx
+         mapM_ (uncurry letBindNames') $ dummyBindings discard_val
          return body'
-       letBind_ pat $ LoopOp $ DoLoop respat merge' form body''
-  where (mergepat, _) = unzip merge
-        explicitlyReturned = (`elem` respat) . paramName
+       letBind_ pat' $ LoopOp $ DoLoop ctx' val' form body''
+  where pat_used = map (`UT.used` used) $ patternValueNames pat
+        used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
+        explicitlyReturned = flip elem used_vals . paramName
         explicitlyReturnedOrInForm p =
           explicitlyReturned p || paramName p `HS.member` freeIn form
-        patAnnotNames = mconcat $ map freeIn mergepat
+        patAnnotNames = freeIn $ map fst $ ctx++val
         referencedInPat = (`HS.member` patAnnotNames) . paramName
         referencedInForm = (`HS.member` freeIn form) . paramName
 
@@ -190,17 +168,17 @@ findNecessaryForReturned explicitlyReturned merge_and_res allDependencies =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: forall m.MonadBinder m => TopDownRule m
-hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form loopbody))) =
+hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop ctx val form loopbody))) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
-       zip merge ses of
+       zip merge res of
     ([], _, _, _) ->
       -- Nothing is invariant.
       cannotSimplify
-    (invariant, explpat', merge', ses') -> do
+    (invariant, explpat', merge', res') -> do
       -- We have moved something invariant out of the loop.
-      let loopbody' = loopbody { bodyResult = ses' }
+      let loopbody' = loopbody { bodyResult = res' }
           invariantShape :: (a, VName) -> Bool
           invariantShape (_, shapemerge) = shapemerge `elem`
                                            map (paramName . fst) merge'
@@ -208,18 +186,20 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
           implinvariant' = [ (patElemIdent p, Var v) | (p,v) <- implinvariant ]
           implpat'' = map fst implpat'
           explpat'' = map fst explpat'
-          respat' = map snd explpat'
+          (ctx', val') = splitAt (length implpat') merge'
       forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
         letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
       letBind_ (Pattern implpat'' explpat'') $
-        LoopOp $ DoLoop respat' merge' form loopbody'
-  where ses = bodyResult loopbody
-        taggedpat = zip (patternElements pat) $
-                    loopResultContext (representative :: Lore m)
-                    respat (map fst merge) ++ respat
-        (implpat, explpat) = splitAt (length taggedpat - length respat) taggedpat
+        LoopOp $ DoLoop ctx' val' form loopbody'
+  where merge = ctx ++ val
+        res = bodyResult loopbody
 
-        namesOfMergeParams = HS.fromList $ map (paramName . fst) merge
+        implpat = zip (patternContextElements pat) $
+                  map paramName $ loopResultContext (map fst ctx) (map fst val)
+        explpat = zip (patternValueElements pat) $
+                  map (paramName . fst) val
+
+        namesOfMergeParams = HS.fromList $ map (paramName . fst) $ ctx++val
 
         removeFromResult (mergeParam,mergeInit) explpat' =
           case partition ((==paramName mergeParam) . snd) explpat' of
@@ -260,7 +240,6 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop respat merge form 
         invariantOrNotMergeParam namesOfInvariant name =
           not (name `HS.member` namesOfMergeParams) ||
           name `HS.member` namesOfInvariant
-
 hoistLoopInvariantMergeVariables _ _ = cannotSimplify
 
 -- | A function that, given a variable name, returns its definition.
@@ -282,32 +261,29 @@ letRule _ _ _ =
   cannotSimplify
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop respat merge (ForLoop i bound) body))) =
-  loopClosedForm pat respat merge (HS.singleton i) bound body
+simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop [] val (ForLoop i bound) body))) =
+  loopClosedForm pat val (HS.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
                                (LoopOp
-                                (DoLoop respat merge
+                                (DoLoop ctx val
                                  (ForLoop i (Constant (IntValue (Int32Value 1)))) body))) = do
-  forM_ merge $ \(mergevar, mergeinit) ->
+  forM_ (ctx++val) $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ PrimOp $ SubExp mergeinit
   letBindNames'_ [i] $ PrimOp $ SubExp $ constant (0 :: Int32)
-  loop_body_res <- mapM asVar =<< bodyBind body
-  let res_params = zipWith setParamName (map fst merge) loop_body_res
-      subst = HM.fromList $ zip (map (paramName . fst) merge) loop_body_res
-      respat' = substituteNames subst respat
-      res_context = loopResultContext (representative :: Lore m) respat res_params
-  forM_ (zip (patternContextElements pat) res_context) $ \(pat_elem, v) ->
-    letBind_ (Pattern [] [pat_elem]) $ PrimOp $ SubExp $ Var v
-  forM_ (zip (patternValueElements pat) respat') $ \(pat_elem, v) ->
+  (loop_body_ctx, loop_body_val) <- splitAt (length ctx) <$> (mapM asVar =<< bodyBind body)
+  let subst = HM.fromList $ zip (map (paramName . fst) ctx) loop_body_ctx
+      ctx_params = substituteNames subst $ map fst ctx
+      val_params = substituteNames subst $ map fst val
+      res_context = loopResultContext ctx_params val_params
+  forM_ (zip (patternContextElements pat) res_context) $ \(pat_elem, p) ->
+    letBind_ (Pattern [] [pat_elem]) $ PrimOp $ SubExp $ Var $ paramName p
+  forM_ (zip (patternValueElements pat) loop_body_val) $ \(pat_elem, v) ->
     letBind_ (Pattern [] [pat_elem]) $ PrimOp $ SubExp $ Var v
   where asVar (Var v)      = return v
         asVar (Constant v) = letExp "named" $ PrimOp $ SubExp $ Constant v
-
-        setParamName param name =
-          param { paramName = name }
 simplifKnownIterationLoop _ _ =
   cannotSimplify
 

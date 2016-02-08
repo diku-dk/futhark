@@ -150,9 +150,6 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) 
   representative =
     Aliases representative
 
-  loopResultContext (Aliases lore) =
-    loopResultContext lore
-
   expContext pat e = do
     env <- asksScope removeScopeAliases
     return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
@@ -304,18 +301,18 @@ mkContextAliases :: forall lore attr.
                     (Attributes lore, Aliased lore) =>
                     AST.PatternT attr -> AST.Exp lore
                  -> [Names]
-mkContextAliases pat (AST.LoopOp (DoLoop res merge _ body)) =
-  let ctx = loopResultContext (representative :: lore) res $ map fst merge
-      init_als = zip mergenames $ map (subExpAliases . snd) merge
+mkContextAliases pat (AST.LoopOp (DoLoop ctxmerge valmerge _ body)) =
+  let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
+      init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
       expand als = als <> HS.unions (mapMaybe (`lookup` init_als) (HS.toList als))
       merge_als = zip mergenames $
                   map ((`HS.difference` mergenames_set) . expand) $
                   bodyAliases body
   -- FIXME: sometimes loopResultContext will not return the correct number of elements.
   in if length ctx == length (patternContextElements pat)
-     then map (fromMaybe mempty . flip lookup merge_als) ctx
+     then map (fromMaybe mempty . flip lookup merge_als . paramName) ctx
      else map (const mempty) $ patternContextElements pat
-  where mergenames = map (paramName . fst) merge
+  where mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
         mergenames_set = HS.fromList mergenames
 mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty

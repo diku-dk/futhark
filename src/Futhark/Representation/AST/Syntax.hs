@@ -219,8 +219,9 @@ data PrimOp lore
   deriving (Eq, Ord, Show)
 
 data LoopOp lore
-   = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
-    -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
+   = DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+    -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
+    -- parameters are divided into context and value part.
 
 deriving instance Annotations lore => Eq (LoopOp lore)
 deriving instance Annotations lore => Show (LoopOp lore)
