@@ -5,7 +5,7 @@ module Futhark.Optimise.Simplifier.RuleM
   ( RuleM
   , simplify
   , cannotSimplify
-  , fmapaybe
+  , liftMaybe
   )
 
 where
@@ -65,6 +65,6 @@ simplify (RuleM m) = do
 cannotSimplify :: Monad m => RuleM m a
 cannotSimplify = fail "Cannot simplify"
 
-fmapaybe :: Monad m => Maybe a -> RuleM m a
-fmapaybe Nothing = fail "Nothing"
-fmapaybe (Just x) = return x
+liftMaybe :: Monad m => Maybe a -> RuleM m a
+liftMaybe Nothing = fail "Nothing"
+liftMaybe (Just x) = return x

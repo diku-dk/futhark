@@ -116,11 +116,11 @@ checkResults pat size untouchable knownBindings params body accs = do
         checkResult (p, e) _
           | Just e' <- asFreeSubExp e = letBindNames'_ [p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
-          e@(PrimOp (BinOp bop x y)) <- fmapaybe $ HM.lookup v bndMap
+          e@(PrimOp (BinOp bop x y)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
           let isThisAccum = (==Var (identName accparam))
-          (this, el) <- fmapaybe $
+          (this, el) <- liftMaybe $
                         case ((asFreeSubExp x, isThisAccum y),
                               (asFreeSubExp y, isThisAccum x)) of
                           ((Just free, True), _) -> Just (acc, free)
