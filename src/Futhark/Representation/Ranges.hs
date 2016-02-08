@@ -88,9 +88,6 @@ instance (Attributes lore, CanBeRanged (Op lore)) =>
   representative =
     Ranges representative
 
-  loopResultContext (Ranges lore) =
-    loopResultContext lore
-
 instance RangeOf (Range, attr) where
   rangeOf = fst
 

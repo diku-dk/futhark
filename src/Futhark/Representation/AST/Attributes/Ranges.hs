@@ -227,15 +227,13 @@ expRanges (If _ tbranch fbranch _) =
   (zipWith maximumBound t_upper f_upper)
   where (t_lower, t_upper) = unzip $ rangesOf tbranch
         (f_lower, f_upper) = unzip $ rangesOf fbranch
-expRanges (LoopOp (DoLoop res merge (ForLoop i iterations) body)) =
-  map returnedRange $
-  filter ((`elem` res) . paramName . fst . fst) $
-  zip merge $ rangesOf body
+expRanges (LoopOp (DoLoop ctxmerge valmerge (ForLoop i iterations) body)) =
+  zipWith returnedRange valmerge $ rangesOf body
   where bound_in_loop =
-          HS.fromList $ i : map (paramName . fst) merge ++
+          HS.fromList $ i : map (paramName . fst) (ctxmerge++valmerge) ++
           concatMap (patternNames . bindingPattern) (bodyBindings body)
 
-        returnedRange (mergeparam, (lower, upper)) =
+        returnedRange mergeparam (lower, upper) =
           (returnedBound mergeparam lower,
            returnedBound mergeparam upper)
 

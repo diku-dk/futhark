@@ -225,7 +225,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       return (id, Right cond)
 
   mergeparams <- map E.toParam <$> flattenPattern mergepat
-  (loopbody', (form', shapepat, mergepat', res, mergeinit', pre_bnds)) <-
+  (loopbody', (form', shapepat, mergepat', frob, mergeinit', pre_bnds)) <-
     wrap $ bindingParams mergeparams $ \shapepat mergepat' ->
     internaliseBodyBindings loopbody $ \ses -> do
       sets <- mapM subExpType ses
@@ -240,12 +240,12 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       case form_contents of
         Left (i', bound) ->
              return (resultBody $ shapeargs ++ ses,
-                  (I.ForLoop i' bound,
-                   shapepat,
-                   mergepat',
-                   map I.paramName mergepat',
-                   mergeinit,
-                   []))
+                     (I.ForLoop i' bound,
+                      shapepat,
+                      mergepat',
+                      id,
+                      mergeinit,
+                      []))
         Right cond -> do
           -- We need to insert 'cond' twice - once for the initial
           -- condition (do we enter the loop at all?), and once with
@@ -275,7 +275,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                   (I.WhileLoop $ I.paramName loop_while,
                    shapepat,
                    loop_while : mergepat',
-                   map I.paramName mergepat',
+                   addAnother,
                    loop_initial_cond : mergeinit,
                    init_loop_cond_bnds))
 
@@ -283,17 +283,20 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
 
   mergeinit_ts' <- mapM subExpType mergeinit'
 
-  let mergeexp' = argShapes
-                  (map I.paramName shapepat)
-                  (map I.paramType mergepat')
-                  mergeinit_ts' ++
-                  mergeinit'
-      merge = zip (shapepat ++ mergepat') mergeexp'
-      loop = I.LoopOp $ I.DoLoop res merge form' loopbody'
+  let ctxinit = argShapes
+                (map I.paramName shapepat)
+                (map I.paramType mergepat')
+                mergeinit_ts'
+      ctxmerge = zip shapepat ctxinit
+      valmerge = zip mergepat' mergeinit'
+      loop = I.LoopOp $ I.DoLoop ctxmerge valmerge form' loopbody'
   loopt <- I.expExtType loop
-  bindingTupIdent mergepat loopt $ \mergepat'' -> do
+  bindingTupIdent (frob mergepat) loopt $ \mergepat'' -> do
     letBind_ mergepat'' loop
     internaliseExp desc letbody
+
+  where addAnother t =
+          TupId [E.Wildcard (E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   idxs' <- mapM (internaliseExp1 "idx") idxs

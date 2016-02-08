@@ -605,34 +605,35 @@ evalPrimOp (Partition _ n flags arrs) = do
 
 evalLoopOp :: LoopOp -> FutharkM [Value]
 
-evalLoopOp (DoLoop respat merge (ForLoop loopvar boundexp) loopbody) = do
+evalLoopOp (DoLoop ctxmerge valmerge (ForLoop loopvar boundexp) loopbody) = do
   bound <- evalSubExp boundexp
   mergestart <- mapM evalSubExp mergeexp
   case bound of
     PrimVal (IntValue (Int32Value n)) -> do
       vs <- foldM iteration mergestart [0..n-1]
       binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
-        mapM lookupVar $
-        loopResultContext (representative :: SOACS) respat mergepat ++ respat
+        mapM (lookupVar . paramName) $
+        loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
     _ -> bad $ TypeError "evalBody DoLoop for"
-  where (mergepat, mergeexp) = unzip merge
+  where merge = ctxmerge ++ valmerge
+        (mergepat, mergeexp) = unzip merge
         iteration mergeval i =
           binding [(Ident loopvar $ Prim int32, BindVar, PrimVal $ value i)] $
             binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
               evalBody loopbody
 
-evalLoopOp (DoLoop respat merge (WhileLoop cond) loopbody) = do
+evalLoopOp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
   mergestart <- mapM evalSubExp mergeexp
   iteration mergestart
-  where (mergepat, mergeexp) = unzip merge
+  where merge = ctxmerge ++ valmerge
+        (mergepat, mergeexp) = unzip merge
         iteration mergeval =
           binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $ do
             condv <- lookupVar cond
             case condv of
               PrimVal (BoolValue False) ->
-                mapM lookupVar $
-                loopResultContext (representative :: SOACS) respat mergepat ++
-                respat
+                mapM (lookupVar . paramName) $
+                loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
               PrimVal (BoolValue True) ->
                 iteration =<< evalBody loopbody
               _ ->

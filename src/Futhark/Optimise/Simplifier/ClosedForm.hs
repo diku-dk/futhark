@@ -71,10 +71,10 @@ foldClosedForm look pat lam accs arrs = do
 -- the do-loop can be expressed in a closed form.
 loopClosedForm :: MonadBinder m =>
                   PatternT attr
-               -> [VName] -> [(FParam (Lore m),SubExp)]
+               -> [(FParam (Lore m),SubExp)]
                -> Names -> SubExp -> Body (Lore m)
                -> RuleM m ()
-loopClosedForm pat respat merge i bound body
+loopClosedForm pat merge i bound body
   | respat == mergenames = do
     closedBody <- checkResults respat bound i knownBindings
                   mergeidents body mergeexp
@@ -86,7 +86,8 @@ loopClosedForm pat respat merge i bound body
       (resultBodyM mergeexp)
       (renameBody closedBody)
   | otherwise = cannotSimplify
-  where (mergepat, mergeexp) = unzip merge
+  where respat = map paramName mergepat
+        (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
         mergenames = map identName mergeidents
         knownBindings = HM.fromList $ zip mergenames mergeexp

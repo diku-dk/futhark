@@ -330,7 +330,10 @@ allocInFParam param =
       return param { paramAttr = MemMem size space }
 
 allocInMergeParams :: [(In.FParam,SubExp)]
-                   -> ([FParam] -> ([SubExp] -> AllocM [SubExp]) -> AllocM a)
+                   -> ([FParam]
+                       -> [FParam]
+                       -> ([SubExp] -> AllocM ([SubExp], [SubExp]))
+                       -> AllocM a)
                    -> AllocM a
 allocInMergeParams merge m = do
   ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
@@ -338,13 +341,13 @@ allocInMergeParams merge m = do
   let mergeparams' = memsizeparams <> memparams <> valparams
       summary = fparamsSummary mergeparams'
 
-      mk_loop_res :: [SubExp] -> AllocM [SubExp]
+      mk_loop_res :: [SubExp] -> AllocM ([SubExp], [SubExp])
       mk_loop_res ses = do
         (valargs, (memsizeargs, memargs)) <-
           runWriterT $ zipWithM ($) handle_loop_subexps ses
-        return $ memsizeargs <> memargs <> valargs
+        return (memsizeargs <> memargs, valargs)
 
-  localScope summary $ m mergeparams' mk_loop_res
+  localScope summary $ m (memsizeparams<>memparams) valparams mk_loop_res
   where param_names = map (paramName . fst) merge
         loopInvariantShape =
           not . any (`elem` param_names) . subExpVars . arrayDims . paramType
@@ -481,17 +484,24 @@ allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
   mapM_ bindAllocBinding bnds
 
 allocInExp :: In.Exp -> AllocM Exp
-allocInExp (LoopOp (DoLoop res merge form
-                    (Body () bodybnds bodyres))) =
-  allocInMergeParams merge $ \mergeparams' mk_loop_res ->
+allocInExp (LoopOp (DoLoop ctx val form (Body () bodybnds bodyres))) =
+  allocInMergeParams ctx $ \_ ctxparams' _ ->
+  allocInMergeParams val $ \new_ctx_params valparams' mk_loop_val ->
   formBinds form $ do
-    mergeinit' <- mk_loop_res mergeinit
+    (valinit_ctx, valinit') <- mk_loop_val valinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
-      (ses,retbnds) <- collectBindings $ mk_loop_res bodyres
-      return $ Body () (bodybnds'<>retbnds) ses
+      ((val_ses,valres'),val_retbnds) <- collectBindings $ mk_loop_val valres
+      return $ Body ()
+        (bodybnds'<>val_retbnds)
+        (val_ses++ctxres++valres')
     return $ LoopOp $
-      DoLoop res (zip mergeparams' mergeinit') form body'
-  where (_mergeparams, mergeinit) = unzip merge
+      DoLoop
+      (zip (new_ctx_params++ctxparams') (valinit_ctx++ctxinit))
+      (zip valparams' valinit')
+      form body'
+  where (_ctxparams, ctxinit) = unzip ctx
+        (_valparams, valinit) = unzip val
+        (ctxres, valres) = splitAt (length ctx) bodyres
         formBinds (ForLoop i _) =
           localScope $ HM.singleton i IndexInfo
         formBinds (WhileLoop _) =

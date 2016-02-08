@@ -71,9 +71,6 @@ instance Annotations Kernels where
 instance Attributes Kernels where
   representative = Kernels
 
-  loopResultContext _ res merge =
-    loopShapeContext res $ map paramIdent merge
-
 type Prog = AST.Prog Kernels
 type PrimOp = AST.PrimOp Kernels
 type LoopOp = AST.LoopOp Kernels

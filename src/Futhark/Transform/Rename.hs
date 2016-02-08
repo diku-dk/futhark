@@ -214,27 +214,31 @@ instance Renameable lore => Rename (Body lore) where
       return $ Body blore' (Let pat' elore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (LoopOp (DoLoop respat merge form loopbody)) = do
-    let (mergepat, mergeexp) = unzip merge
-    mergeexp' <- mapM rename mergeexp
+  rename (LoopOp (DoLoop ctx val form loopbody)) = do
+    let (ctxparams, ctxinit) = unzip ctx
+        (valparams, valinit) = unzip val
+    ctxinit' <- mapM rename ctxinit
+    valinit' <- mapM rename valinit
     case form of
       ForLoop loopvar boundexp -> do
         boundexp' <- rename boundexp
-        bind (map paramName mergepat) $ do
-          mergepat' <- mapM rename mergepat
-          respat'   <- mapM rename respat
+        bind (map paramName $ ctxparams++valparams) $ do
+          ctxparams' <- mapM rename ctxparams
+          valparams' <- mapM rename valparams
           bind [loopvar] $ do
             loopvar'  <- rename loopvar
             loopbody' <- rename loopbody
-            return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+            return $ LoopOp $ DoLoop
+              (zip ctxparams' ctxinit') (zip valparams' valinit')
               (ForLoop loopvar' boundexp') loopbody'
       WhileLoop cond ->
-        bind (map paramName mergepat) $ do
-          mergepat' <- mapM rename mergepat
-          respat'   <- mapM rename respat
+        bind (map paramName $ ctxparams++valparams) $ do
+          ctxparams' <- mapM rename ctxparams
+          valparams' <- mapM rename valparams
           loopbody' <- rename loopbody
           cond'     <- rename cond
-          return $ LoopOp $ DoLoop respat' (zip mergepat' mergeexp')
+          return $ LoopOp $ DoLoop
+            (zip ctxparams' ctxinit') (zip valparams' valinit')
             (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e
     where mapper = Mapper {

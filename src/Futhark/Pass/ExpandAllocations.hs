@@ -211,11 +211,13 @@ offsetMemoryInMemBound _ summary =
   summary
 
 offsetMemoryInExp :: RebaseMap -> Exp -> Exp
-offsetMemoryInExp offsets (LoopOp (DoLoop res merge form body)) =
-  LoopOp $ DoLoop res (zip mergeparams' mergeinit) form body'
-  where (mergeparams, mergeinit) = unzip merge
+offsetMemoryInExp offsets (LoopOp (DoLoop ctx val form body)) =
+  LoopOp $ DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
+  where (ctxparams, ctxinit) = unzip ctx
+        (valparams, valinit) = unzip val
         body' = offsetMemoryInBody offsets body
-        mergeparams' = map (offsetMemoryInParam offsets) mergeparams
+        ctxparams' = map (offsetMemoryInParam offsets) ctxparams
+        valparams' = map (offsetMemoryInParam offsets) valparams
 offsetMemoryInExp offsets e = mapExp recurse e
   where recurse = identityMapper { mapOnBody = return . offsetMemoryInBody offsets
                                  }

@@ -630,7 +630,7 @@ defCompilePrimOp target e =
 
 defCompileLoopOp :: Destination -> LoopOp -> ImpM op ()
 
-defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
+defCompileLoopOp (Destination dest) (DoLoop ctx val form body) =
   declaringFParams mergepat $ do
     forM_ merge $ \(p, se) -> do
       na <- subExpNotArray se
@@ -648,8 +648,9 @@ defCompileLoopOp (Destination dest) (DoLoop res merge form body) =
     bindForm $ do
       body' <- compileLoopBody mergenames body
       emitForm body'
-    zipWithM_ compileSubExpTo dest $ map Var res
-    where mergepat = map fst merge
+    zipWithM_ compileSubExpTo dest $ map (Var . paramName . fst) val
+    where merge = ctx ++ val
+          mergepat = map fst merge
           mergenames = map paramName mergepat
 
 writeExp :: ValueDestination -> Imp.Exp -> ImpM op ()

@@ -146,11 +146,11 @@ optimiseInBinding (Let pat attr e) = do
   return $ Let pat attr e'
 
 optimiseExp :: Exp Kernels -> ForwardingM (Exp Kernels)
-optimiseExp (LoopOp (DoLoop res merge form body)) =
+optimiseExp (LoopOp (DoLoop ctx val form body)) =
   bindingIndices (boundInForm form) $
-  bindingFParams (map fst merge) $ do
+  bindingFParams (map fst $ ctx ++ val) $ do
     body' <- optimiseBody body
-    return $ LoopOp $ DoLoop res merge form body'
+    return $ LoopOp $ DoLoop ctx val form body'
   where boundInForm (ForLoop i _) = [i]
         boundInForm (WhileLoop _) = []
 optimiseExp (Op (MapKernel cs w index ispace inps returns body)) =

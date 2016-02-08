@@ -261,11 +261,11 @@ transformBinding (Let pat () (If c tb fb rt)) = do
   fb' <- transformBody fb
   return [Let pat () $ If c tb' fb' rt]
 
-transformBinding (Let pat () (LoopOp (DoLoop res mergepat form body))) =
+transformBinding (Let pat () (LoopOp (DoLoop ctx val form body))) =
   localScope (scopeOfLoopForm form <> scopeOfFParams mergeparams) $ do
     body' <- transformBody body
-    return [Let pat () $ LoopOp $ DoLoop res mergepat form body']
-  where mergeparams = map fst mergepat
+    return [Let pat () $ LoopOp $ DoLoop ctx val form body']
+  where mergeparams = map fst $ ctx ++ val
 
 transformBinding (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
@@ -555,7 +555,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Map cs w lam arrs))) acc =
     Nothing -> addBindingToKernel bnd acc
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
-maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
+maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop [] val form body))) acc
   | any (isMap . bindingExp) $ bodyBindings body =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
@@ -564,7 +564,7 @@ maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop ret merge form body))) acc
       localScope (typeEnvFromKernelAcc acc') $ do
         types <- asksScope scopeForSOACs
         bnds <- runReaderT
-                (interchangeLoops nest (SeqLoop pat ret merge form body)) types
+                (interchangeLoops nest (SeqLoop pat val form body)) types
         bnds' <- runDistribM $ transformBindings bnds
         addKernel bnds'
       return acc'

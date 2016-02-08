@@ -71,9 +71,6 @@ instance Annotations SOACS where
 instance Attributes SOACS where
   representative = SOACS
 
-  loopResultContext _ res merge =
-    loopShapeContext res $ map paramIdent merge
-
 type Prog = AST.Prog SOACS
 type PrimOp = AST.PrimOp SOACS
 type LoopOp = AST.LoopOp SOACS
