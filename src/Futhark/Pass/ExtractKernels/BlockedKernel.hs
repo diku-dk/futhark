@@ -48,19 +48,15 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   -- We need to play some tricks to ensure that @lambdaIndex fold_lam@
   -- has the right value inside the chunk loop.
   loop_iterator <- newVName "i"
-  start_index <- newVName "start_index"
-  let compute_start_index =
-        mkLet' [] [Ident start_index $ Prim int32] $
+  let compute_index =
+        mkLet' [] [Ident (lambdaIndex fold_lam) $ Prim int32] $
         PrimOp $ BinOp (Mul Int32) (Var loop_iterator) (kernelElementsPerThread step_one_size)
-      compute_index = mkLet' [] [Ident (lambdaIndex fold_lam) $ Prim int32] $
-                      PrimOp $ BinOp (Add Int32) (Var start_index) (Var loop_iterator)
       mkAccInit p (Var v) = mkLet' [] [paramIdent p] $ PrimOp $ Copy v
       mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
       acc_init_bnds = zipWith mkAccInit fold_acc_params nes
       fold_lam' =
         fold_lam { lambdaIndex = loop_iterator
-                 , lambdaBody = insertBinding compute_start_index $
-                                insertBinding compute_index $
+                 , lambdaBody = insertBinding compute_index $
                                 insertBindings acc_init_bnds $
                                 lambdaBody fold_lam
                  , lambdaParams = fold_chunk_param : fold_inp_params
@@ -144,6 +140,7 @@ chunkLambda pat nes fold_lam = do
     localScope (scopeOfLParams $ arr_chunk_params ++ map_arr_params) $
     doLoopMapAccumL [] (Var chunk_size) (Alias.analyseLambda fold_lam)
     nes (map paramName arr_chunk_params) (map paramName map_arr_params)
+    (Var seq_lam_index)
 
   dummys <- mapM (newIdent "dummy" . paramType) arr_chunk_params
 
