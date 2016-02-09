@@ -224,7 +224,9 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
       letExp (baseString a ++ "_fot_redomap_copy") $ PrimOp $ Copy a
     else return a
   pat' <- discardPattern arr_ts pat
-  letBind_ pat' =<< doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
+  letBind_ pat' =<<
+    doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
+    (constant (0::Int32))
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
@@ -741,11 +743,12 @@ doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
                 -> [SubExp]
                 -> [VName]
                 -> [VName]
+                -> SubExp
                 -> m (AST.Exp (Lore m))
-doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
+doLoopMapAccumL cs width innerfun accexps arrexps maparrs offset = do
   arrts <- mapM lookupType arrexps
+  i <- newVName "i"
   -- for the MAP    part
-  let i = lambdaIndex innerfun
   let acc_num     = length accexps
   let res_tps     = lambdaReturnType innerfun
   let map_arr_tps = drop acc_num res_tps
@@ -763,6 +766,7 @@ doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
       merge = loopMerge' (map withUniqueness $ inarrs++acc++outarrs)
               (map Var arrexps++initacc++map Var maparrs)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
+    letBindNames'_ [lambdaIndex innerfun] $ PrimOp $ BinOp (Add Int32) (Var i) offset
     accxis<- bindLambda (removeLambdaAliases innerfun)
              (map (PrimOp . SubExp . Var . identName) acc ++
               index cs (map identName inarrs) (Var i))
