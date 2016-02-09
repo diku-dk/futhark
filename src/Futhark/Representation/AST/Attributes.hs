@@ -24,7 +24,6 @@ module Futhark.Representation.AST.Attributes
   -- * Extra tools
   , funDecByName
   , asPrimOp
-  , asLoopOp
   , safeExp
   , subExpVars
   , shapeVars
@@ -89,11 +88,6 @@ asPrimOp :: Exp lore -> Maybe (PrimOp lore)
 asPrimOp (PrimOp op) = Just op
 asPrimOp _           = Nothing
 
--- | If the expression is a 'LoopOp', return that 'LoopOp', otherwise 'Nothing'.
-asLoopOp :: Exp lore -> Maybe (LoopOp lore)
-asLoopOp (LoopOp op) = Just op
-asLoopOp _           = Nothing
-
 -- | An expression is safe if it is always well-defined (assuming that
 -- any required certificates have been checked) in any context.  For
 -- example, array indexing is not safe, as the index may be out of
@@ -117,7 +111,7 @@ safeExp (PrimOp op) = safePrimOp op
         safePrimOp ConvOp{} = True
         safePrimOp _ = False
 
-safeExp (LoopOp _) = False
+safeExp DoLoop{} = False
 safeExp Apply{} = False
 safeExp (If _ tbranch fbranch _) =
   all (safeExp . bindingExp) (bodyBindings tbranch) &&

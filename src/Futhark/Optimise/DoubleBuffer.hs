@@ -90,11 +90,11 @@ optimiseBindings (e:es) = do
   return $ e_es ++ es'
 
 optimiseBinding :: MonadFreshNames m => Binding -> DoubleBufferM m [Binding]
-optimiseBinding (Let pat () (LoopOp (DoLoop ctx val form body))) = do
+optimiseBinding (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
   (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
-  return $ bnds ++ [Let pat () $ LoopOp $ DoLoop ctx' val' form body'']
+  return $ bnds ++ [Let pat () $ DoLoop ctx' val' form body'']
 optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   , mapOnOp = optimiseOp

@@ -214,7 +214,7 @@ instance Renameable lore => Rename (Body lore) where
       return $ Body blore' (Let pat' elore' e1':bnds') res'
 
 instance Renameable lore => Rename (Exp lore) where
-  rename (LoopOp (DoLoop ctx val form loopbody)) = do
+  rename (DoLoop ctx val form loopbody) = do
     let (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val
     ctxinit' <- mapM rename ctxinit
@@ -228,7 +228,7 @@ instance Renameable lore => Rename (Exp lore) where
           bind [loopvar] $ do
             loopvar'  <- rename loopvar
             loopbody' <- rename loopbody
-            return $ LoopOp $ DoLoop
+            return $ DoLoop
               (zip ctxparams' ctxinit') (zip valparams' valinit')
               (ForLoop loopvar' boundexp') loopbody'
       WhileLoop cond ->
@@ -237,7 +237,7 @@ instance Renameable lore => Rename (Exp lore) where
           valparams' <- mapM rename valparams
           loopbody' <- rename loopbody
           cond'     <- rename cond
-          return $ LoopOp $ DoLoop
+          return $ DoLoop
             (zip ctxparams' ctxinit') (zip valparams' valinit')
             (WhileLoop cond') loopbody'
   rename e = mapExpM mapper e

@@ -4,7 +4,6 @@ module Futhark.Representation.AST.Attributes.Aliases
        ( vnameAliases
        , subExpAliases
        , primOpAliases
-       , loopOpAliases
        , expAliases
        , patternAliases
        , Aliased (..)
@@ -75,12 +74,6 @@ primOpAliases Assert{} =
 primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr
 
-loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
-loopOpAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`HS.difference` merge_names) $ bodyAliases loopbody
-  where merge_names = HS.fromList $
-                      map (paramName . fst) $ ctxmerge ++ valmerge
-
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
   map (HS.filter notConsumed) $ zipWith mappend als1 als2
@@ -97,7 +90,10 @@ expAliases (If _ tb fb _) =
   (bodyAliases tb, consumedInBody tb)
   (bodyAliases fb, consumedInBody fb)
 expAliases (PrimOp op) = primOpAliases op
-expAliases (LoopOp op) = loopOpAliases op
+expAliases (DoLoop ctxmerge valmerge _ loopbody) =
+  map (`HS.difference` merge_names) $ bodyAliases loopbody
+  where merge_names = HS.fromList $
+                      map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t) =
   funcallAliases args $ retTypeValues t
 expAliases (Op op) = opAliases op
@@ -128,7 +124,7 @@ consumedInExp (Apply _ args _) =
         consumeArg (_,   Observe) = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (LoopOp (DoLoop _ merge _ _)) =
+consumedInExp (DoLoop _ merge _ _) =
   mconcat (map (subExpAliases . snd) $
            filter (unique . paramDeclType . fst) merge)
 consumedInExp (Op op) = consumedInOp op

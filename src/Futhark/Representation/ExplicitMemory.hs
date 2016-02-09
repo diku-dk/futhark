@@ -26,7 +26,6 @@ module Futhark.Representation.ExplicitMemory
        , Pattern
        , PatElem
        , PrimOp
-       , LoopOp
        , Exp
        , Lambda
        , ExtLambda
@@ -47,7 +46,6 @@ module Futhark.Representation.ExplicitMemory
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
        , AST.ParamT(Param)
        )
@@ -68,7 +66,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
           RetType)
 import qualified Futhark.Analysis.ScalExp as SE
@@ -96,7 +94,6 @@ data ExplicitMemory = ExplicitMemory
 
 type Prog = AST.Prog ExplicitMemory
 type PrimOp = AST.PrimOp ExplicitMemory
-type LoopOp = AST.LoopOp ExplicitMemory
 type Exp = AST.Exp ExplicitMemory
 type Body = AST.Body ExplicitMemory
 type Binding = AST.Binding ExplicitMemory
@@ -767,7 +764,7 @@ instance PrettyLore ExplicitMemory where
     case mapMaybe lparamAnnot $ lambdaParams lam of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore (AST.LoopOp (DoLoop _ merge _ _)) =
+  ppExpLore (DoLoop _ merge _ _) =
     case mapMaybe (fparamAnnot . fst) merge of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
@@ -906,7 +903,7 @@ expReturns (AST.PrimOp (Index _ v is)) = do
 expReturns (AST.PrimOp op) =
   extReturns <$> staticShapes <$> primOpType op
 
-expReturns (AST.LoopOp (DoLoop ctx val _ _)) =
+expReturns (DoLoop ctx val _ _) =
     return $
     evalState (zipWithM typeWithAttr
                (loopExtType (map (paramIdent . fst) ctx) (map (paramIdent . fst) val)) $

@@ -10,7 +10,6 @@ module Futhark.Representation.SOACS
        , Binding
        , Pattern
        , PrimOp
-       , LoopOp
        , Exp
        , Lambda
        , ExtLambda
@@ -32,7 +31,6 @@ module Futhark.Representation.SOACS
        , AST.PatElemT(PatElem)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
        , AST.ParamT(Param)
          -- Removing lore
@@ -46,7 +44,7 @@ import Control.Monad
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, FParam, LParam,
           RetType, PatElem)
 import Futhark.Representation.SOACS.SOAC
@@ -73,7 +71,6 @@ instance Attributes SOACS where
 
 type Prog = AST.Prog SOACS
 type PrimOp = AST.PrimOp SOACS
-type LoopOp = AST.LoopOp SOACS
 type Exp = AST.Exp SOACS
 type Body = AST.Body SOACS
 type Binding = AST.Binding SOACS

@@ -34,7 +34,6 @@ module Futhark.Representation.AST.Syntax
   , BodyT(..)
   , Body
   , PrimOp (..)
-  , LoopOp (..)
   , UnOp (..)
   , BinOp (..)
   , CmpOp (..)
@@ -218,19 +217,6 @@ data PrimOp lore
     -- and no arrays are returned.
   deriving (Eq, Ord, Show)
 
-data LoopOp lore
-   = DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] LoopForm (BodyT lore)
-    -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
-    -- parameters are divided into context and value part.
-
-deriving instance Annotations lore => Eq (LoopOp lore)
-deriving instance Annotations lore => Show (LoopOp lore)
-deriving instance Annotations lore => Ord (LoopOp lore)
-
-data LoopForm = ForLoop VName SubExp
-              | WhileLoop VName
-              deriving (Eq, Show, Ord)
-
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
 -- let + tuples (literals & identifiers) TODO: please add float,
@@ -239,17 +225,24 @@ data ExpT lore
   = PrimOp (PrimOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | LoopOp (LoopOp lore)
-
   | Apply  Name [(SubExp, Diet)] (RetType lore)
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
+
+  | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+    -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
+    -- parameters are divided into context and value part.
 
   | Op (Op lore)
 
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
+
+-- | For-loop or while-loop?
+data LoopForm = ForLoop VName SubExp
+              | WhileLoop VName
+              deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.
 type Exp = ExpT

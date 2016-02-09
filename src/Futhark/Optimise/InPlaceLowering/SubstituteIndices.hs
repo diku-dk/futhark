@@ -88,7 +88,7 @@ substituteIndicesInExp substs e = do
         -- 'consumedInExp' to also handle branches and function calls.
         -- Another approach would be to just copy out the rows instead
         -- of all this substitute business.
-        copyAnyConsumed (LoopOp (DoLoop _ merge _ _)) =
+        copyAnyConsumed (DoLoop _ merge _ _) =
           let consumingSubst substs' (fparam, Var v)
                 | unique (paramDeclType fparam),
                   Just (cs2, src2, src2attr, is2) <- lookup v substs = do

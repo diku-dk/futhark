@@ -67,7 +67,7 @@ freeWalker = identityWalker {
           binding (HS.fromList $ patternNames pat) $
             tell $ freeIn pat
 
-        expFree (LoopOp (DoLoop ctxmerge valmerge (ForLoop i boundexp) loopbody)) = do
+        expFree (DoLoop ctxmerge valmerge (ForLoop i boundexp) loopbody) = do
           let (ctxparams, ctxinits) = unzip ctxmerge
               (valparams, valinits) = unzip valmerge
           mapM_ subExpFree $ ctxinits ++ valinits
@@ -76,7 +76,7 @@ freeWalker = identityWalker {
             mapM_ (tell . freeIn) $ ctxparams ++ valparams
             bodyFree loopbody
 
-        expFree (LoopOp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody)) = do
+        expFree (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
           let (ctxparams, ctxinits) = unzip ctxmerge
               (valparams, valinits) = unzip valmerge
           mapM_ subExpFree $ ctxinits ++ valinits

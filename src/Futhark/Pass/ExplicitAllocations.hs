@@ -484,7 +484,7 @@ allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
   mapM_ bindAllocBinding bnds
 
 allocInExp :: In.Exp -> AllocM Exp
-allocInExp (LoopOp (DoLoop ctx val form (Body () bodybnds bodyres))) =
+allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
   allocInMergeParams ctx $ \_ ctxparams' _ ->
   allocInMergeParams val $ \new_ctx_params valparams' mk_loop_val ->
   formBinds form $ do
@@ -494,7 +494,7 @@ allocInExp (LoopOp (DoLoop ctx val form (Body () bodybnds bodyres))) =
       return $ Body ()
         (bodybnds'<>val_retbnds)
         (val_ses++ctxres++valres')
-    return $ LoopOp $
+    return $
       DoLoop
       (zip (new_ctx_params++ctxparams') (valinit_ctx++ctxinit))
       (zip valparams' valinit')

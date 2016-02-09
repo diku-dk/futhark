@@ -400,7 +400,7 @@ isNotCheap _ = not . cheapBnd
         cheap (PrimOp UnOp{})    = True
         cheap (PrimOp CmpOp{})   = True
         cheap (PrimOp ConvOp{})  = True
-        cheap LoopOp{}           = False
+        cheap DoLoop{}           = False
         cheap _                  = True -- Used to be False, but
                                         -- let's try it out.
 hoistCommon :: MonadEngine m =>
@@ -495,31 +495,7 @@ simplifyExp (If cond tbranch fbranch ts) = do
                 (simplifyBody ds fbranch) (ST.updateBounds False cond)
   return $ If cond' tbranch' fbranch' ts'
 
-simplifyExp (LoopOp op) = LoopOp <$> simplifyLoopOp op
-
-simplifyExp e = simplifyExpBase e
-
-simplifyExpBase :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
-simplifyExpBase = mapExpM hoist
-  where hoist = Mapper {
-                -- Bodies are handled explicitly because we need to
-                -- provide their result diet.
-                  mapOnBody = fail "Unhandled body in simplification engine."
-                , mapOnSubExp = simplify
-                -- Lambdas are handled explicitly because we need to
-                -- bind their parameters.
-                , mapOnVName = simplify
-                , mapOnCertificates = simplify
-                , mapOnRetType = simplify
-                , mapOnFParam =
-                  fail "Unhandled FParam in simplification engine."
-                , mapOnOp =
-                  simplifyOp
-                }
-
-simplifyLoopOp :: MonadEngine m => LoopOp (InnerLore m) -> m (LoopOp (Lore m))
-
-simplifyLoopOp (DoLoop ctx val form loopbody) = do
+simplifyExp (DoLoop ctx val form loopbody) = do
   let (ctxparams, ctxinit) = unzip ctx
       (valparams, valinit) = unzip val
   ctxparams' <- mapM (simplifyParam simplify) ctxparams
@@ -552,6 +528,27 @@ simplifyLoopOp (DoLoop ctx val form loopbody) = do
   consumeResult $ zip diets $ ctxinit' ++ valinit'
   return $ DoLoop ctx' val' form' loopbody'
   where fparamnames = HS.fromList (map (paramName . fst) $ ctx++val)
+
+
+simplifyExp e = simplifyExpBase e
+
+simplifyExpBase :: MonadEngine m => Exp (InnerLore m) -> m (Exp (Lore m))
+simplifyExpBase = mapExpM hoist
+  where hoist = Mapper {
+                -- Bodies are handled explicitly because we need to
+                -- provide their result diet.
+                  mapOnBody = fail "Unhandled body in simplification engine."
+                , mapOnSubExp = simplify
+                -- Lambdas are handled explicitly because we need to
+                -- bind their parameters.
+                , mapOnVName = simplify
+                , mapOnCertificates = simplify
+                , mapOnRetType = simplify
+                , mapOnFParam =
+                  fail "Unhandled FParam in simplification engine."
+                , mapOnOp =
+                  simplifyOp
+                }
 
 class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op where
   simplifyOp :: (MonadEngine m, InnerLore m ~ lore) => op -> m (OpWithWisdom op)

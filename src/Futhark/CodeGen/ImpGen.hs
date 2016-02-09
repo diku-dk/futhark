@@ -448,7 +448,28 @@ defCompileExp dest (Apply fname args _) = do
 
 defCompileExp targets (PrimOp op) = defCompilePrimOp targets op
 
-defCompileExp targets (LoopOp op) = defCompileLoopOp targets op
+defCompileExp (Destination dest) (DoLoop ctx val form body) =
+  declaringFParams mergepat $ do
+    forM_ merge $ \(p, se) -> do
+      na <- subExpNotArray se
+      when na $
+        copyDWIM (paramName p) [] se []
+    let (bindForm, emitForm) =
+          case form of
+            ForLoop i bound ->
+              (declaringLoopVar i,
+               emit . Imp.For i (compileSubExp bound))
+            WhileLoop cond ->
+              (id,
+               emit . Imp.While (Imp.ScalarVar cond))
+
+    bindForm $ do
+      body' <- compileLoopBody mergenames body
+      emitForm body'
+    zipWithM_ compileSubExpTo dest $ map (Var . paramName . fst) val
+    where merge = ctx ++ val
+          mergepat = map fst merge
+          mergenames = map paramName mergepat
 
 defCompileExp dest (Op op) = do
   opc <- asks envOpCompiler
@@ -627,31 +648,6 @@ defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 defCompilePrimOp target e =
   throwError $ "ImpGen.defCompilePrimOp: Invalid target\n  " ++
   show target ++ "\nfor expression\n  " ++ pretty e
-
-defCompileLoopOp :: Destination -> LoopOp -> ImpM op ()
-
-defCompileLoopOp (Destination dest) (DoLoop ctx val form body) =
-  declaringFParams mergepat $ do
-    forM_ merge $ \(p, se) -> do
-      na <- subExpNotArray se
-      when na $
-        copyDWIM (paramName p) [] se []
-    let (bindForm, emitForm) =
-          case form of
-            ForLoop i bound ->
-              (declaringLoopVar i,
-               emit . Imp.For i (compileSubExp bound))
-            WhileLoop cond ->
-              (id,
-               emit . Imp.While (Imp.ScalarVar cond))
-
-    bindForm $ do
-      body' <- compileLoopBody mergenames body
-      emitForm body'
-    zipWithM_ compileSubExpTo dest $ map (Var . paramName . fst) val
-    where merge = ctx ++ val
-          mergepat = map fst merge
-          mergenames = map paramName mergepat
 
 writeExp :: ValueDestination -> Imp.Exp -> ImpM op ()
 writeExp (ScalarDestination target) e =

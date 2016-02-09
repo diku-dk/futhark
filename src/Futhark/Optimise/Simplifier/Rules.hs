@@ -91,7 +91,7 @@ basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 -- perfect, but it should suffice for many cases, and should never
 -- generate wrong code.
 removeRedundantMergeVariables :: MonadBinder m => BottomUpRule m
-removeRedundantMergeVariables (_, used) (Let pat _ (LoopOp (DoLoop ctx val form body)))
+removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
   | not $ all (explicitlyReturned . fst) val =
   let (ctx_es, val_es) = splitAt (length ctx) $ bodyResult body
       necessaryForReturned =
@@ -129,7 +129,7 @@ removeRedundantMergeVariables (_, used) (Let pat _ (LoopOp (DoLoop ctx val form 
          mapM_ (uncurry letBindNames') $ dummyBindings discard_ctx
          mapM_ (uncurry letBindNames') $ dummyBindings discard_val
          return body'
-       letBind_ pat' $ LoopOp $ DoLoop ctx' val' form body''
+       letBind_ pat' $ DoLoop ctx' val' form body''
   where pat_used = map (`UT.used` used) $ patternValueNames pat
         used_vals = map fst $ filter snd $ zip (map (paramName . fst) val) pat_used
         explicitlyReturned = flip elem used_vals . paramName
@@ -168,7 +168,7 @@ findNecessaryForReturned explicitlyReturned merge_and_res allDependencies =
 -- We may change the type of the loop if we hoist out a shape
 -- annotation, in which case we also need to tweak the bound pattern.
 hoistLoopInvariantMergeVariables :: forall m.MonadBinder m => TopDownRule m
-hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop ctx val form loopbody))) =
+hoistLoopInvariantMergeVariables _ (Let pat _ (DoLoop ctx val form loopbody)) =
     -- Figure out which of the elements of loopresult are
     -- loop-invariant, and hoist them out.
   case foldr checkInvariance ([], explpat, [], []) $
@@ -190,7 +190,7 @@ hoistLoopInvariantMergeVariables _ (Let pat _ (LoopOp (DoLoop ctx val form loopb
       forM_ (invariant ++ implinvariant') $ \(v1,v2) ->
         letBindNames'_ [identName v1] $ PrimOp $ SubExp v2
       letBind_ (Pattern implpat'' explpat'') $
-        LoopOp $ DoLoop ctx' val' form loopbody'
+        DoLoop ctx' val' form loopbody'
   where merge = ctx ++ val
         res = bodyResult loopbody
 
@@ -261,15 +261,14 @@ letRule _ _ _ =
   cannotSimplify
 
 simplifyClosedFormLoop :: MonadBinder m => TopDownRule m
-simplifyClosedFormLoop _ (Let pat _ (LoopOp (DoLoop [] val (ForLoop i bound) body))) =
+simplifyClosedFormLoop _ (Let pat _ (DoLoop [] val (ForLoop i bound) body)) =
   loopClosedForm pat val (HS.singleton i) bound body
 simplifyClosedFormLoop _ _ = cannotSimplify
 
 simplifKnownIterationLoop :: forall m.MonadBinder m => TopDownRule m
 simplifKnownIterationLoop _ (Let pat _
-                               (LoopOp
                                 (DoLoop ctx val
-                                 (ForLoop i (Constant (IntValue (Int32Value 1)))) body))) = do
+                                 (ForLoop i (Constant (IntValue (Int32Value 1)))) body)) = do
   forM_ (ctx++val) $ \(mergevar, mergeinit) ->
     letBindNames' [paramName mergevar] $ PrimOp $ SubExp mergeinit
   letBindNames'_ [i] $ PrimOp $ SubExp $ constant (0 :: Int32)

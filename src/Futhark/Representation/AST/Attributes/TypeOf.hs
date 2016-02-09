@@ -22,7 +22,6 @@ module Futhark.Representation.AST.Attributes.TypeOf
        , subExpType
        , bodyExtType
        , primOpType
-       , loopOpExtType
        , mapType
        , valueShapeContext
        , subExpShapeContext
@@ -124,12 +123,6 @@ primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Prim $ IntType Int32) ++ ts
 
--- | The type of a loop operation.
-loopOpExtType :: Typed (FParamAttr lore) =>
-                 LoopOp lore -> [ExtType]
-loopOpExtType (DoLoop ctxmerge valmerge _ _) =
-  loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
-
 -- | The type of an expression.
 expExtType :: (HasScope lore m,
                IsRetType (RetType lore),
@@ -138,7 +131,8 @@ expExtType :: (HasScope lore m,
               Exp lore -> m [ExtType]
 expExtType (Apply _ _ rt) = pure $ map fromDecl $ retTypeValues rt
 expExtType (If _ _ _ rt)  = pure rt
-expExtType (LoopOp op)    = pure $ loopOpExtType op
+expExtType (DoLoop ctxmerge valmerge _ _) =
+  pure $ loopExtType (map (paramIdent . fst) ctxmerge) (map (paramIdent . fst) valmerge)
 expExtType (PrimOp op)    = staticShapes <$> primOpType op
 expExtType (Op op)        = opType op
 

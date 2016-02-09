@@ -70,8 +70,10 @@ bindingMetrics = expMetrics . bindingExp
 expMetrics :: OpMetrics (Op lore) => Exp lore -> MetricsM ()
 expMetrics (PrimOp op) =
   seen "PrimOp" >> primOpMetrics op
-expMetrics (LoopOp op) =
-  seen "LoopOp" >> loopOpMetrics op
+expMetrics (DoLoop _ _ ForLoop{} body) =
+  inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
+expMetrics (DoLoop _ _ WhileLoop{} body) =
+  inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 expMetrics (If _ tb fb _) =
   inside "If" $ bodyMetrics tb >> bodyMetrics fb
 expMetrics (Apply fname _ _) =
@@ -99,12 +101,6 @@ primOpMetrics Rearrange{} = seen "Rearrange"
 primOpMetrics Stripe{} = seen "Stripe"
 primOpMetrics Unstripe{} = seen "Unstripe"
 primOpMetrics Partition{} = seen "Partition"
-
-loopOpMetrics :: OpMetrics (Op lore) => LoopOp lore -> MetricsM ()
-loopOpMetrics (DoLoop _ _ ForLoop{} body) =
-  inside "DoLoop" $ seen "ForLoop" >> bodyMetrics body
-loopOpMetrics (DoLoop _ _ WhileLoop{} body) =
-  inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()
 lambdaMetrics = bodyMetrics . lambdaBody
