@@ -261,10 +261,10 @@ transformBinding (Let pat () (If c tb fb rt)) = do
   fb' <- transformBody fb
   return [Let pat () $ If c tb' fb' rt]
 
-transformBinding (Let pat () (LoopOp (DoLoop ctx val form body))) =
+transformBinding (Let pat () (DoLoop ctx val form body)) =
   localScope (scopeOfLoopForm form <> scopeOfFParams mergeparams) $ do
     body' <- transformBody body
-    return [Let pat () $ LoopOp $ DoLoop ctx val form body']
+    return [Let pat () $ DoLoop ctx val form body']
   where mergeparams = map fst $ ctx ++ val
 
 transformBinding (Let pat () (Op (Map cs w lam arrs))) =
@@ -468,12 +468,12 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Stream _ w _ _ _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (LoopOp (DoLoop _ merge (ForLoop i iterations) body)) =
+        unbalancedBinding bound (DoLoop _ merge (ForLoop i iterations) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
           where bound' = foldr HS.insert bound $
                          i : map (paramName . fst) merge
-        unbalancedBinding _ (LoopOp (DoLoop _ _ (WhileLoop _) _)) =
+        unbalancedBinding _ (DoLoop _ _ (WhileLoop _) _) =
           True
 
         unbalancedBinding bound (If _ tbranch fbranch _) =
@@ -555,7 +555,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Map cs w lam arrs))) acc =
     Nothing -> addBindingToKernel bnd acc
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
-maybeDistributeBinding bnd@(Let pat _ (LoopOp (DoLoop [] val form body))) acc
+maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
   | any (isMap . bindingExp) $ bodyBindings body =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')

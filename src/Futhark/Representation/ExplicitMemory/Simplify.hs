@@ -13,7 +13,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
           RetType)
 import Futhark.Representation.AST.Attributes.Aliases

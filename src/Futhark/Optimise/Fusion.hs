@@ -597,7 +597,7 @@ fusionGatherExp :: FusedRes -> Exp -> FusionGM FusedRes
 ---- Index/If    ----
 -----------------------------------------
 
-fusionGatherExp fres (LoopOp (DoLoop ctx val form loop_body)) = do
+fusionGatherExp fres (DoLoop ctx val form loop_body) = do
   let (merge_pat, ini_val) = unzip merge
 
   let pat_vars = map (Var . paramName)  merge_pat
@@ -704,10 +704,10 @@ fuseInExp :: Exp -> FusionGM Exp
 
 -- Handle loop specially because we need to bind the types of the
 -- merge variables.
-fuseInExp (LoopOp (DoLoop ctx val form loopbody)) =
+fuseInExp (DoLoop ctx val form loopbody) =
   bindingFParams (map fst $ ctx ++ val) $ do
     loopbody' <- fuseInBody loopbody
-    return $ LoopOp $ DoLoop ctx val form loopbody'
+    return $ DoLoop ctx val form loopbody'
 
 fuseInExp e = mapExpM fuseIn e
 

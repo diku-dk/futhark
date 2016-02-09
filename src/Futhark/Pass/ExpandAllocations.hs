@@ -211,8 +211,8 @@ offsetMemoryInMemBound _ summary =
   summary
 
 offsetMemoryInExp :: RebaseMap -> Exp -> Exp
-offsetMemoryInExp offsets (LoopOp (DoLoop ctx val form body)) =
-  LoopOp $ DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
+offsetMemoryInExp offsets (DoLoop ctx val form body) =
+  DoLoop (zip ctxparams' ctxinit) (zip valparams' valinit) form body'
   where (ctxparams, ctxinit) = unzip ctx
         (valparams, valinit) = unzip val
         body' = offsetMemoryInBody offsets body

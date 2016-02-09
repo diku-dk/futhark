@@ -416,7 +416,41 @@ evalExp (Apply fname args rettype) = do
   vs <- evalFuncall fname args'
   return $ valueShapeContext (retTypeValues rettype) vs ++ vs
 evalExp (PrimOp op) = evalPrimOp op
-evalExp (LoopOp op) = evalLoopOp op
+
+evalExp (DoLoop ctxmerge valmerge (ForLoop loopvar boundexp) loopbody) = do
+  bound <- evalSubExp boundexp
+  mergestart <- mapM evalSubExp mergeexp
+  case bound of
+    PrimVal (IntValue (Int32Value n)) -> do
+      vs <- foldM iteration mergestart [0..n-1]
+      binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
+        mapM (lookupVar . paramName) $
+        loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
+    _ -> bad $ TypeError "evalBody DoLoop for"
+  where merge = ctxmerge ++ valmerge
+        (mergepat, mergeexp) = unzip merge
+        iteration mergeval i =
+          binding [(Ident loopvar $ Prim int32, BindVar, PrimVal $ value i)] $
+            binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
+              evalBody loopbody
+
+evalExp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
+  mergestart <- mapM evalSubExp mergeexp
+  iteration mergestart
+  where merge = ctxmerge ++ valmerge
+        (mergepat, mergeexp) = unzip merge
+        iteration mergeval =
+          binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $ do
+            condv <- lookupVar cond
+            case condv of
+              PrimVal (BoolValue False) ->
+                mapM (lookupVar . paramName) $
+                loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
+              PrimVal (BoolValue True) ->
+                iteration =<< evalBody loopbody
+              _ ->
+                bad $ TypeError "evalBody DoLoop while"
+
 evalExp (Op op) = evalSOAC op
 
 evalPrimOp :: PrimOp -> FutharkM [Value]
@@ -602,42 +636,6 @@ evalPrimOp (Partition _ n flags arrs) = do
 
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
-
-evalLoopOp :: LoopOp -> FutharkM [Value]
-
-evalLoopOp (DoLoop ctxmerge valmerge (ForLoop loopvar boundexp) loopbody) = do
-  bound <- evalSubExp boundexp
-  mergestart <- mapM evalSubExp mergeexp
-  case bound of
-    PrimVal (IntValue (Int32Value n)) -> do
-      vs <- foldM iteration mergestart [0..n-1]
-      binding (zip3 (map paramIdent mergepat) (repeat BindVar) vs) $
-        mapM (lookupVar . paramName) $
-        loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
-    _ -> bad $ TypeError "evalBody DoLoop for"
-  where merge = ctxmerge ++ valmerge
-        (mergepat, mergeexp) = unzip merge
-        iteration mergeval i =
-          binding [(Ident loopvar $ Prim int32, BindVar, PrimVal $ value i)] $
-            binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $
-              evalBody loopbody
-
-evalLoopOp (DoLoop ctxmerge valmerge (WhileLoop cond) loopbody) = do
-  mergestart <- mapM evalSubExp mergeexp
-  iteration mergestart
-  where merge = ctxmerge ++ valmerge
-        (mergepat, mergeexp) = unzip merge
-        iteration mergeval =
-          binding (zip3 (map paramIdent mergepat) (repeat BindVar) mergeval) $ do
-            condv <- lookupVar cond
-            case condv of
-              PrimVal (BoolValue False) ->
-                mapM (lookupVar . paramName) $
-                loopResultContext (map fst ctxmerge) (map fst valmerge) ++ map fst valmerge
-              PrimVal (BoolValue True) ->
-                iteration =<< evalBody loopbody
-              _ ->
-                bad $ TypeError "evalBody DoLoop while"
 
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 

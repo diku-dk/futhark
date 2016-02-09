@@ -39,13 +39,13 @@ updateHasValue name = (name==) . updateValue
 
 lowerUpdate :: (Bindable lore, MonadFreshNames m, LetAttr lore ~ Type) =>
                Binding lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Binding lore])
-lowerUpdate (Let pat _ (LoopOp (DoLoop ctx val form body))) updates = do
+lowerUpdate (Let pat _ (DoLoop ctx val form body)) updates = do
   canDo <- lowerUpdateIntoLoop updates pat ctx val body
   Just $ do
     (prebnds, postbnds, ctxpat, valpat, ctx', val', body') <- canDo
     return $
       prebnds ++
-      [mkLet' ctxpat valpat $ LoopOp $ DoLoop ctx' val' form body'] ++
+      [mkLet' ctxpat valpat $ DoLoop ctx' val' form body'] ++
       postbnds
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))

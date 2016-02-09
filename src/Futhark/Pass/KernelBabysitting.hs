@@ -53,11 +53,11 @@ nonlinearInMemory name m =
 
 transformBinding :: ExpMap -> Binding -> BabysitM ExpMap
 
-transformBinding expmap (Let pat () (LoopOp (DoLoop ctx val form body))) = do
+transformBinding expmap (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfFParams $ map fst $ ctx ++ val) $
            localScope (scopeOfLoopForm form) $
            transformBody body
-  addBinding $ Let pat () $ LoopOp $ DoLoop ctx val form body'
+  addBinding $ Let pat () $ DoLoop ctx val form body'
   return expmap
 
 transformBinding expmap (Let pat ()

@@ -167,7 +167,7 @@ instance PrettyLore lore => Pretty (Binding lore) where
       (False, Nothing) -> equals <+> align e'
     where e' = ppr e
           linebreak = case e of
-                        LoopOp{} -> True
+                        DoLoop{} -> True
                         Op{} -> True
                         If{} -> True
                         PrimOp ArrayLit{} -> False
@@ -219,7 +219,14 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     text "partition" <>
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
 
-instance PrettyLore lore => Pretty (LoopOp lore) where
+instance PrettyLore lore => Pretty (Exp lore) where
+  ppr (If c t f _) = text "if" <+> ppr c </>
+                     text "then" <+> align (ppr t) </>
+                     text "else" <+> align (ppr f)
+  ppr (PrimOp op) = ppr op
+  ppr (Apply fname args _) = text (nameToString fname) <>
+                             apply (map (align . ppr . fst) args)
+  ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
     text "loop" <+> ppPattern ctxparams valparams <+>
     equals <+> ppTuple' (ctxinit++valinit) </>
@@ -232,16 +239,6 @@ instance PrettyLore lore => Pretty (LoopOp lore) where
     indent 2 (ppr loopbody)
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
-
-instance PrettyLore lore => Pretty (Exp lore) where
-  ppr (If c t f _) = text "if" <+> ppr c </>
-                     text "then" <+> align (ppr t) </>
-                     text "else" <+> align (ppr f)
-  ppr (PrimOp op) = ppr op
-  ppr (LoopOp op) = ppr op
-  ppr (Apply fname args _) = text (nameToString fname) <>
-                             apply (map (align . ppr . fst) args)
-  ppr (Op op) = ppr op
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr lambda@(Lambda index params body rettype) =

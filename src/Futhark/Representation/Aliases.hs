@@ -19,7 +19,6 @@ module Futhark.Representation.Aliases
        , Binding
        , Pattern
        , PrimOp
-       , LoopOp
        , Exp
        , Lambda
        , ExtLambda
@@ -36,7 +35,7 @@ module Futhark.Representation.Aliases
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.ExpT(LoopOp)
+       , AST.ExpT(DoLoop)
        , AST.FunDecT(FunDec)
          -- * Adding aliases
        , addAliasesToPattern
@@ -68,7 +67,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
@@ -136,7 +135,6 @@ instance AliasesOf (VarAliases, attr) where
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
-type LoopOp lore = AST.LoopOp (Aliases lore)
 type Exp lore = AST.Exp (Aliases lore)
 type Body lore = AST.Body (Aliases lore)
 type Binding lore = AST.Binding (Aliases lore)
@@ -177,7 +175,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
   ppFunDecLore = ppFunDecLore . removeFunDecAliases
   ppLambdaLore = ppLambdaLore . removeLambdaAliases
 
-  ppExpLore e@(AST.LoopOp (DoLoop _ merge _ body)) =
+  ppExpLore e@(DoLoop _ merge _ body) =
     maybeComment $ catMaybes [expAttr, mergeAttr]
     where mergeAttr = let mergeParamAliases fparam als
                             | primType (paramType fparam) =
@@ -301,7 +299,7 @@ mkContextAliases :: forall lore attr.
                     (Attributes lore, Aliased lore) =>
                     AST.PatternT attr -> AST.Exp lore
                  -> [Names]
-mkContextAliases pat (AST.LoopOp (DoLoop ctxmerge valmerge _ body)) =
+mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
   let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
       init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
       expand als = als <> HS.unions (mapMaybe (`lookup` init_als) (HS.toList als))

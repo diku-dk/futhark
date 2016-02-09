@@ -155,12 +155,12 @@ mapExpM tv (PrimOp (Partition cs n flags arr)) =
               pure n <*>
               mapOnVName tv flags <*>
               mapM (mapOnVName tv) arr)
-mapExpM tv (LoopOp (DoLoop ctxmerge valmerge form loopbody)) =
-  LoopOp <$> (DoLoop <$>
-              (zip <$> mapM (mapOnFParam tv) ctxparams <*> mapM (mapOnSubExp tv) ctxinits) <*>
-              (zip <$> mapM (mapOnFParam tv) valparams <*> mapM (mapOnSubExp tv) valinits) <*>
-              mapOnLoopForm tv form <*>
-              mapOnBody tv loopbody)
+mapExpM tv (DoLoop ctxmerge valmerge form loopbody) =
+  DoLoop <$>
+  (zip <$> mapM (mapOnFParam tv) ctxparams <*> mapM (mapOnSubExp tv) ctxinits) <*>
+  (zip <$> mapM (mapOnFParam tv) valparams <*> mapM (mapOnSubExp tv) valinits) <*>
+  mapOnLoopForm tv form <*>
+  mapOnBody tv loopbody
   where (ctxparams,ctxinits) = unzip ctxmerge
         (valparams,valinits) = unzip valmerge
 mapExpM tv (Op op) =

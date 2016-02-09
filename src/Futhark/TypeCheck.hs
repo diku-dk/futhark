@@ -715,10 +715,41 @@ checkPrimOp (Partition cs _ flags arrs) = do
       "Array argument " ++ pretty arr ++
       " to partition has type " ++ pretty arrt ++ "."
 
-checkLoopOp :: Checkable lore =>
-               LoopOp lore -> TypeM lore ()
 
-checkLoopOp (DoLoop ctxmerge valmerge form loopbody) = do
+checkExp :: Checkable lore =>
+            Exp lore -> TypeM lore ()
+
+checkExp (PrimOp op) = checkPrimOp op
+
+checkExp (If e1 e2 e3 ts) = do
+  require [Prim Bool] e1
+  _ <- checkBody e2 `alternative` checkBody e3
+  ts2 <- bodyExtType e2
+  ts3 <- bodyExtType e3
+  unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ts) $
+    bad $ TypeError noLoc $
+    unlines ["If-expression branches have types",
+             "  " ++ prettyTuple ts2 ++ ", and",
+             "  " ++ prettyTuple ts3,
+             "But the annotation is",
+             "  " ++ prettyTuple ts]
+
+checkExp (Apply fname args t)
+  | "trace" <- nameToString fname = do
+  argts <- mapM (checkSubExp . fst) args
+  when (staticShapes argts /= map fromDecl (retTypeValues t)) $
+    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty t
+    ++ " but got " ++ pretty argts
+
+checkExp (Apply fname args rettype_annot) = do
+  (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
+  argflows <- mapM (checkArg . fst) args
+  when (rettype_derived /= rettype_annot) $
+    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty rettype_derived
+    ++ " but annotation is " ++ pretty rettype_annot
+  checkFuncall (Just fname) paramtypes argflows
+
+checkExp (DoLoop ctxmerge valmerge form loopbody) = do
   let merge = ctxmerge ++ valmerge
       (mergepat, mergeexps) = unzip merge
   mergeargs <- mapM checkArg mergeexps
@@ -766,41 +797,6 @@ checkLoopOp (DoLoop ctxmerge valmerge form loopbody) = do
           bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
           (Several $ map fromDecl $ staticShapes rettype)
           (Several $ map fromDecl bodyt)
-
-checkExp :: Checkable lore =>
-            Exp lore -> TypeM lore ()
-
-checkExp (PrimOp op) = checkPrimOp op
-
-checkExp (LoopOp op) = checkLoopOp op
-
-checkExp (If e1 e2 e3 ts) = do
-  require [Prim Bool] e1
-  _ <- checkBody e2 `alternative` checkBody e3
-  ts2 <- bodyExtType e2
-  ts3 <- bodyExtType e3
-  unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ts) $
-    bad $ TypeError noLoc $
-    unlines ["If-expression branches have types",
-             "  " ++ prettyTuple ts2 ++ ", and",
-             "  " ++ prettyTuple ts3,
-             "But the annotation is",
-             "  " ++ prettyTuple ts]
-
-checkExp (Apply fname args t)
-  | "trace" <- nameToString fname = do
-  argts <- mapM (checkSubExp . fst) args
-  when (staticShapes argts /= map fromDecl (retTypeValues t)) $
-    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty t
-    ++ " but got " ++ pretty argts
-
-checkExp (Apply fname args rettype_annot) = do
-  (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
-  argflows <- mapM (checkArg . fst) args
-  when (rettype_derived /= rettype_annot) $
-    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty rettype_derived
-    ++ " but annotation is " ++ pretty rettype_annot
-  checkFuncall (Just fname) paramtypes argflows
 
 checkExp (Op op) = checkOp op
 

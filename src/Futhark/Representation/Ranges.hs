@@ -15,7 +15,6 @@ module Futhark.Representation.Ranges
        , Binding
        , Pattern
        , PrimOp
-       , LoopOp
        , Exp
        , Lambda
        , ExtLambda
@@ -32,7 +31,6 @@ module Futhark.Representation.Ranges
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.ExpT(LoopOp)
        , AST.FunDecT(FunDec)
          -- * Adding ranges
        , addRangesToPattern
@@ -61,7 +59,7 @@ import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Ranges
@@ -96,7 +94,6 @@ instance RangesOf ([Range], attr) where
 
 type Prog lore = AST.Prog (Ranges lore)
 type PrimOp lore = AST.PrimOp (Ranges lore)
-type LoopOp lore = AST.LoopOp (Ranges lore)
 type Exp lore = AST.Exp (Ranges lore)
 type Body lore = AST.Body (Ranges lore)
 type Binding lore = AST.Binding (Ranges lore)

@@ -289,7 +289,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
                 mergeinit_ts'
       ctxmerge = zip shapepat ctxinit
       valmerge = zip mergepat' mergeinit'
-      loop = I.LoopOp $ I.DoLoop ctxmerge valmerge form' loopbody'
+      loop = I.DoLoop ctxmerge valmerge form' loopbody'
   loopt <- I.expExtType loop
   bindingTupIdent (frob mergepat) loopt $ \mergepat'' -> do
     letBind_ mergepat'' loop

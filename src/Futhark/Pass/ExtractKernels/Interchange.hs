@@ -23,7 +23,7 @@ data SeqLoop = SeqLoop Pattern [(FParam, SubExp)] LoopForm Body
 
 seqLoopBinding :: SeqLoop -> Binding
 seqLoopBinding (SeqLoop pat merge form body) =
-  Let pat () $ LoopOp $ DoLoop [] merge form body
+  Let pat () $ DoLoop [] merge form body
 
 interchangeLoop :: (MonadBinder m, LocalScope SOACS m) =>
                    SeqLoop -> LoopNesting
