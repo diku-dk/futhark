@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( blockedReduction
+       , blockedReductionStream
        , blockedScan
        , blockedSegmentedScan
        )
@@ -21,22 +22,19 @@ import Futhark.Transform.Rename
 import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
 import qualified Futhark.Analysis.Alias as Alias
 
-blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
-                    Pattern
-                 -> Certificates -> SubExp
-                 -> Commutativity
-                 -> Lambda -> Lambda
-                 -> [SubExp]
-                 -> [VName]
-                 -> m [Binding]
-blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
-  chunk_size <- newVName "chunk_size"
-  other_index <- newVName "other_index"
+blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
+                          Pattern
+                       -> Certificates -> SubExp
+                       -> Commutativity
+                       -> Lambda -> Lambda
+                       -> [SubExp]
+                       -> [VName]
+                       -> m [Binding]
+blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   step_one_size <- blockedKernelSize w
 
   let one = constant (1 :: Int32)
       num_chunks = kernelWorkgroups step_one_size
-      step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
 
   seq_lam_index <- newVName "lam_index"
   let (acc_idents, arr_idents) = splitAt (length nes) $ patternIdents pat
@@ -44,17 +42,8 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
                   ((++) <$>
                    mapM (mkIntermediateIdent num_chunks) acc_idents <*>
                    pure arr_idents)
-  step_two_pat <- basicPattern' [] <$>
-                  mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
-  let (fold_acc_params, fold_arr_params) =
-        splitAt (length nes) $ lambdaParams fold_lam
-      chunk_size_param = Param chunk_size (Prim int32)
-      other_index_param = Param other_index (Prim int32)
-  arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_arr_params
-
-  map_arr_params <- forM arr_idents $ \arr ->
-    newParam (baseString (identName arr) <> "_in") $
-    setOuterSize (identType arr) (Var chunk_size)
+  let (fold_chunk_param, fold_acc_params, fold_inp_params) =
+        partitionChunkedFoldParameters (length nes) $ lambdaParams fold_lam
 
   -- We need to play some tricks to ensure that @lambdaIndex fold_lam@
   -- has the right value inside the chunk loop.
@@ -62,40 +51,23 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   start_index <- newVName "start_index"
   let compute_start_index =
         mkLet' [] [Ident start_index $ Prim int32] $
-        PrimOp $ BinOp (Mul Int32) (Var seq_lam_index) (kernelElementsPerThread step_one_size)
+        PrimOp $ BinOp (Mul Int32) (Var loop_iterator) (kernelElementsPerThread step_one_size)
       compute_index = mkLet' [] [Ident (lambdaIndex fold_lam) $ Prim int32] $
                       PrimOp $ BinOp (Add Int32) (Var start_index) (Var loop_iterator)
+      mkAccInit p (Var v) = mkLet' [] [paramIdent p] $ PrimOp $ Copy v
+      mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
+      acc_init_bnds = zipWith mkAccInit fold_acc_params nes
       fold_lam' =
         fold_lam { lambdaIndex = loop_iterator
                  , lambdaBody = insertBinding compute_start_index $
                                 insertBinding compute_index $
+                                insertBindings acc_init_bnds $
                                 lambdaBody fold_lam
+                 , lambdaParams = fold_chunk_param : fold_inp_params
                  }
-  (seq_loop, seq_loop_prologue) <-
-    collectBindings $
-    localScope (scopeOfLParams $ arr_chunk_params ++ map_arr_params) $
-    doLoopMapAccumL cs (Var chunk_size) (Alias.analyseLambda fold_lam')
-    nes (map paramName arr_chunk_params) (map paramName map_arr_params)
 
-  dummys <- mapM (newIdent "dummy" . paramType) arr_chunk_params
-
-  let seq_rt =
-        let (acc_ts, arr_ts) =
-              splitAt (length nes) $ lambdaReturnType fold_lam
-        in acc_ts ++ map (`arrayOfRow` Var chunk_size) arr_ts
-
-      res_idents = zipWith Ident (patternValueNames pat) seq_rt
-
-      seq_loop_bnd = mkLet' [] (dummys++res_idents) seq_loop
-      seq_body = mkBody (seq_loop_prologue++[seq_loop_bnd]) $ map (Var . identName) res_idents
-
-      seqlam = Lambda { lambdaParams = chunk_size_param :
-                                       arr_chunk_params ++ map_arr_params
-                      , lambdaReturnType = seq_rt
-                      , lambdaBody = seq_body
-                      , lambdaIndex = seq_lam_index
-                      }
-
+  other_index <- newVName "other_index"
+  let other_index_param = Param other_index (Prim int32)
       reduce_lam' = reduce_lam { lambdaParams = other_index_param :
                                                 lambdaParams reduce_lam
                                }
@@ -109,15 +81,17 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
 
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     Op $ ReduceKernel cs w step_one_size comm reduce_lam' seqlam nes $
+     Op $ ReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes $
      arrs_copies ++ map_out_arrs)
 
+  chunk_size <- newVName "chunk_size"
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
 
   elements <- zipWithM newIdent
               (map (baseString . paramName) identity_lam_params) $
-              lambdaReturnType seqlam
-  let read_elements =
+              lambdaReturnType fold_lam'
+  let chunk_size_param = Param chunk_size (Prim int32)
+      read_elements =
         [ mkLet' [] [element] $
           PrimOp $ Index [] arr [constant (0 :: Int32)]
         | (element, arr) <- zip elements $ map paramName identity_lam_params ]
@@ -127,6 +101,11 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
                             , lambdaBody = identity_body
                             , lambdaIndex = seq_lam_index
                             }
+
+  step_two_pat <- basicPattern' [] <$>
+                  mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
+
+  let step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
 
   addBinding $
     Let step_two_pat () $
@@ -143,6 +122,64 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
         mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
           arrayOfRow (identType ident) chunk_size
+
+chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
+               Pattern -> [SubExp] -> Lambda -> m Lambda
+chunkLambda pat nes fold_lam = do
+  chunk_size <- newVName "chunk_size"
+
+  seq_lam_index <- newVName "lam_index"
+  let arr_idents = drop (length nes) $ patternIdents pat
+      (fold_acc_params, fold_arr_params) =
+        splitAt (length nes) $ lambdaParams fold_lam
+      chunk_size_param = Param chunk_size (Prim int32)
+  arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_arr_params
+
+  map_arr_params <- forM arr_idents $ \arr ->
+    newParam (baseString (identName arr) <> "_in") $
+    setOuterSize (identType arr) (Var chunk_size)
+
+  (seq_loop, seq_loop_prologue) <-
+    runBinder $
+    localScope (scopeOfLParams $ arr_chunk_params ++ map_arr_params) $
+    doLoopMapAccumL [] (Var chunk_size) (Alias.analyseLambda fold_lam)
+    nes (map paramName arr_chunk_params) (map paramName map_arr_params)
+
+  dummys <- mapM (newIdent "dummy" . paramType) arr_chunk_params
+
+  let seq_rt =
+        let (acc_ts, arr_ts) =
+              splitAt (length nes) $ lambdaReturnType fold_lam
+        in acc_ts ++ map (`arrayOfRow` Var chunk_size) arr_ts
+
+      res_idents = zipWith Ident (patternValueNames pat) seq_rt
+
+      seq_loop_bnd = mkLet' [] (dummys++res_idents) seq_loop
+      seq_body = mkBody (seq_loop_prologue++[seq_loop_bnd]) $ map (Var . identName) res_idents
+
+  return Lambda { lambdaParams = chunk_size_param :
+                                 fold_acc_params ++
+                                 arr_chunk_params ++
+                                 map_arr_params
+                , lambdaReturnType = seq_rt
+                , lambdaBody = seq_body
+                , lambdaIndex = seq_lam_index
+                }
+  where mkArrChunkParam chunk_size arr_param =
+          newParam (baseString (paramName arr_param) <> "_chunk") $
+            arrayOfRow (paramType arr_param) chunk_size
+
+blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
+                    Pattern
+                 -> Certificates -> SubExp
+                 -> Commutativity
+                 -> Lambda -> Lambda
+                 -> [SubExp]
+                 -> [VName]
+                 -> m [Binding]
+blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = do
+  fold_lam' <- chunkLambda pat nes fold_lam
+  blockedReductionStream pat cs w comm reduce_lam fold_lam' nes arrs
 
 blockedKernelSize :: MonadBinder m =>
                      SubExp -> m KernelSize
