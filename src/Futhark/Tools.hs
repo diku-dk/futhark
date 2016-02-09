@@ -10,6 +10,8 @@ module Futhark.Tools
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
   , partitionChunkedLambdaParameters
+  , extLambdaToLambda
+  , partitionChunkedFoldParameters
 
   , intraproceduralTransformation
   )
@@ -158,6 +160,17 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
   return Lambda { lambdaBody = unchunked_body
                 , lambdaParams = acc_params <> unchunked_arr_params
                 , lambdaReturnType = acc_ts
+                , lambdaIndex = extLambdaIndex lam
+                }
+
+-- | Convert an 'ExtLambda' to a 'Lambda' if the return type is
+-- non-existential anyway.
+extLambdaToLambda :: ExtLambda lore -> Maybe (Lambda lore)
+extLambdaToLambda lam = do
+  ret <- hasStaticShapes $ extLambdaReturnType lam
+  return Lambda { lambdaReturnType = ret
+                , lambdaBody = extLambdaBody lam
+                , lambdaParams = extLambdaParams lam
                 , lambdaIndex = extLambdaIndex lam
                 }
 

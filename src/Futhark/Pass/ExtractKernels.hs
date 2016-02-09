@@ -292,14 +292,13 @@ transformBinding (Let pat () (Op (Scan cs w fun input))) = do
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
-transformBinding (Let pat () (Op (Stream cs w (RedLike _ comm red_fun nes) fold_fun arrs _))) = do
-  -- We will sequentialise the body.  We do this by turning the stream
-  -- into a redomap with the chunk size set to one.
-  acc_ts <- mapM subExpType nes
+transformBinding (Let pat () (Op (Stream cs w
+                                  (RedLike _ comm red_fun nes) fold_fun arrs _)))
+  | Just fold_fun' <- extLambdaToLambda fold_fun = do
+  -- Generate a kernel immediately.
   red_fun_sequential <- FOT.transformLambda red_fun
-  fold_fun_unchunked <- singletonChunkRedLikeStreamLambda acc_ts fold_fun
-  fold_fun_unchunked_sequential <- FOT.transformLambda fold_fun_unchunked
-  blockedReduction pat cs w comm red_fun_sequential fold_fun_unchunked_sequential nes arrs
+  fold_fun_sequential <- FOT.transformLambda fold_fun'
+  blockedReductionStream pat cs w comm red_fun_sequential fold_fun_sequential nes arrs
 
 transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs _))) = do
   -- Remove the stream and leave the body parallel.  It will be
