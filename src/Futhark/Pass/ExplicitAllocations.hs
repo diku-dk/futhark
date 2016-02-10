@@ -41,7 +41,7 @@ data AllocBinding = SizeComputation VName SE.ScalExp
 bindAllocBinding :: (MonadBinder m, Op (Lore m) ~ MemOp (Lore m)) =>
                     AllocBinding -> m ()
 bindAllocBinding (SizeComputation name se) = do
-  e <- SE.fromScalExp' se
+  e <- SE.fromScalExp se
   letBindNames'_ [name] e
 bindAllocBinding (Allocation name size space) =
   letBindNames'_ [name] $ Op $ Alloc size space
@@ -90,7 +90,7 @@ instance MonadBinder AllocM where
 
 instance Allocator AllocM where
   addAllocBinding (SizeComputation name se) =
-    letBindNames'_ [name] =<< SE.fromScalExp' se
+    letBindNames'_ [name] =<< SE.fromScalExp se
   addAllocBinding (Allocation name size space) =
     letBindNames'_ [name] $ Op $ Alloc size space
   addAllocBinding (ArrayCopy name bindage src) =

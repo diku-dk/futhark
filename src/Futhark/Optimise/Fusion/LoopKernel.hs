@@ -627,7 +627,7 @@ pullReshape nest ots
                  (map SE.intSubExpToScalExp $ newDims shape)
                  (map (SE.intSubExpToScalExp . Var) $ new_indices++[new_index])
   compute_old_index_bnds <- runBinder_ $ localScope indices_scope $
-    letBindNames'_ [old_index] =<< SE.fromScalExp' flat_idx
+    letBindNames'_ [old_index] =<< SE.fromScalExp flat_idx
 
   let mapbody' = Nest.Fun maplam { lambdaIndex = new_index
                                  , lambdaBody =
