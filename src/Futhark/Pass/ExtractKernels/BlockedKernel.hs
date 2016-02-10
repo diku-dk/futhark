@@ -169,9 +169,17 @@ blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                  -> [SubExp]
                  -> [VName]
                  -> m [Binding]
-blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = do
+blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   fold_lam' <- chunkLambda pat nes fold_lam
-  blockedReductionStream pat cs w comm reduce_lam fold_lam' nes arrs
+
+  let arr_idents = drop (length nes) $ patternIdents pat
+  map_out_arrs <- forM arr_idents $ \(Ident name t) ->
+    letExp (baseString name <> "_out_in") $
+    PrimOp $ Scratch (elemType t) (arrayDims t)
+
+  mapM_ addBinding =<<
+    blockedReductionStream pat cs w comm reduce_lam fold_lam' nes
+    (arrs ++ map_out_arrs)
 
 blockedKernelSize :: MonadBinder m =>
                      SubExp -> m KernelSize
