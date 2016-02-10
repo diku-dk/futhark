@@ -9,7 +9,6 @@ module Futhark.Analysis.ScalExp
   , expandScalExp
   , LookupVar
   , fromScalExp
-  , fromScalExp'
   , sproduct
   , ssum
   , freeIn
@@ -337,14 +336,9 @@ binOpScalExp bop = snd <$> find ((==bop) . fst)
                    , (LogOr, SLogOr)
                    ]
 
-fromScalExp :: MonadBinder m =>
-               ScalExp
-            -> m (Exp (Lore m), [Binding (Lore m)])
-fromScalExp = collectBindings . fromScalExp'
-
-fromScalExp' :: MonadBinder m => ScalExp
+fromScalExp :: MonadBinder m => ScalExp
              -> m (Exp (Lore m))
-fromScalExp' = convert
+fromScalExp = convert
   where convert (Val val) = return $ PrimOp $ SubExp $ Constant val
         convert (Id v _)  = return $ PrimOp $ SubExp $ Var v
         convert (SNeg se) = eNegate $ convert se

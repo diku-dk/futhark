@@ -92,7 +92,7 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
             return ()
           Var size_v ->
             letBindNames'_ [size_v] =<<
-            SE.fromScalExp' (arraySizeInBytesExp $ patElemType pat_elem)
+            SE.fromScalExp (arraySizeInBytesExp $ patElemType pat_elem)
         letBindNames'_ [mem] $ Op $ Alloc size space
 
       -- Update the branches to contain Copy expressions putting the

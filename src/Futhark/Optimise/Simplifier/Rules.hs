@@ -532,7 +532,7 @@ simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
                              (map SE.intSubExpToScalExp $ newDims newshape)
                              (map SE.intSubExpToScalExp inds)
           new_inds' <-
-            mapM (letSubExp "new_index" <=< SE.fromScalExp') new_inds
+            mapM (letSubExp "new_index" <=< SE.fromScalExp) new_inds
           letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
