@@ -10,9 +10,11 @@ where
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Writer
+import Control.Monad.Reader
 import Control.Monad.RWS.Strict
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
+import Data.Maybe
 
 import qualified Futhark.Representation.Kernels as In
 import Futhark.Optimise.Simplifier.Lore
@@ -50,6 +52,9 @@ bindAllocBinding (ArrayCopy name bindage src) =
 
 class (MonadFreshNames m, HasScope ExplicitMemory m) => Allocator m where
   addAllocBinding :: AllocBinding -> m ()
+  -- | The subexpression giving the number of elements we should
+  -- allocate space for.  See 'ChunkMap' comment.
+  dimAllocationSize :: SubExp -> m SubExp
 
 allocateMemory :: Allocator m =>
                   String -> SubExp -> Space -> m VName
@@ -65,12 +70,19 @@ computeSize desc se = do
   addAllocBinding $ SizeComputation v se
   return $ Var v
 
+-- | A mapping from chunk names to their maximum size.  XXX FIXME
+-- HACK: This is part of a hack to add loop-invariant allocations to
+-- reduce kernels, because memory expansion does not use range
+-- analysis yet (it should).
+type ChunkMap = HM.HashMap VName SubExp
+
 -- | Monad for adding allocations to an entire program.
-newtype AllocM a = AllocM (BinderT ExplicitMemory (State VNameSource) a)
+newtype AllocM a = AllocM (BinderT ExplicitMemory (ReaderT ChunkMap (State VNameSource)) a)
                  deriving (Applicative, Functor, Monad,
                            MonadFreshNames,
                            HasScope ExplicitMemory,
-                           LocalScope ExplicitMemory)
+                           LocalScope ExplicitMemory,
+                           MonadReader ChunkMap)
 
 instance MonadBinder AllocM where
   type Lore AllocM = ExplicitMemory
@@ -96,9 +108,14 @@ instance Allocator AllocM where
   addAllocBinding (ArrayCopy name bindage src) =
     letBindNames_ [(name, bindage)] $ PrimOp $ SubExp $ Var src
 
+  dimAllocationSize (Var v) =
+    fromMaybe (Var v) <$> asks (HM.lookup v)
+  dimAllocationSize size =
+    return size
+
 runAllocM :: MonadFreshNames m => AllocM a -> m a
 runAllocM (AllocM m) =
-  fmap fst $ modifyNameSource $ runState $ runBinderT m mempty
+  fmap fst $ modifyNameSource $ runState $ runReaderT (runBinderT m mempty) mempty
 
 -- | Monad for adding allocations to a single pattern.
 newtype PatAllocM a = PatAllocM (RWS
@@ -113,6 +130,7 @@ newtype PatAllocM a = PatAllocM (RWS
 
 instance Allocator PatAllocM where
   addAllocBinding = tell . pure
+  dimAllocationSize = return
 
 runPatAllocM :: MonadFreshNames m =>
                 PatAllocM a -> Scope ExplicitMemory
@@ -127,8 +145,15 @@ arraySizeInBytesExp t =
   primByteSize (elemType t) :
   map (`SE.subExpToScalExp` int32) (arrayDims t)
 
+arraySizeInBytesExpM :: Allocator m => Type -> m SE.ScalExp
+arraySizeInBytesExpM t =
+  SE.sproduct <$>
+  (primByteSize (elemType t) :) <$>
+  map (`SE.subExpToScalExp` int32) <$>
+  mapM dimAllocationSize (arrayDims t)
+
 arraySizeInBytes :: Allocator m => Type -> m SubExp
-arraySizeInBytes = computeSize "bytes" . arraySizeInBytesExp
+arraySizeInBytes = computeSize "bytes" <=< arraySizeInBytesExpM
 
 allocForArray :: Allocator m =>
                  Type -> Space -> m (SubExp, VName)
@@ -141,9 +166,9 @@ allocForArray t space = do
 allocForLocalArray :: Allocator m =>
                       SubExp -> Type -> m (SubExp, VName)
 allocForLocalArray workgroup_size t = do
-  size <- computeSize "local_bytes" $
-          arraySizeInBytesExp t *
-          SE.intSubExpToScalExp workgroup_size
+  size <- computeSize "local_bytes" =<<
+          (SE.intSubExpToScalExp workgroup_size*) <$>
+          arraySizeInBytesExpM t
   m <- allocateMemory "local_mem" size $ Space "local"
   return (size, m)
 
@@ -592,7 +617,8 @@ allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
                      }
       _ ->
         fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
-  allocInLambda i (Param (paramName chunk_size_param) (Scalar int32) : chunked_params')
+  local (HM.insert (paramName chunk_size_param) elems_per_thread) $
+    allocInLambda i (Param (paramName chunk_size_param) (Scalar int32) : chunked_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceLambda :: In.Lambda
