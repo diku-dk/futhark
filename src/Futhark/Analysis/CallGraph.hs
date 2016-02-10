@@ -80,9 +80,9 @@ buildCGexp callees (Op op) =
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
              ConcatMap _ _ lam _ ->
                buildCGbody callees (lambdaBody lam)
-             Stream _ _ (RedLike _ _ lam0 _) lam _ _ ->
+             Stream _ _ (RedLike _ _ lam0 _) lam _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (extLambdaBody lam)
-             Stream _ _ _ lam _ _ ->
+             Stream _ _ _ lam _ ->
                buildCGbody callees (extLambdaBody lam)
 buildCGexp callees e =
   foldExp folder callees e

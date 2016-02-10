@@ -423,7 +423,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
                         SOAC.Redomap _ _ _ _ _ nes _ -> drop (length nes) out_nms
-                        SOAC.Stream  _ _ frm _ _ _ -> drop (length $ getStreamAccums frm) out_nms
+                        SOAC.Stream  _ _ frm _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
       to_fuse_knms2  = getKersWithSameInpSize (SOAC.width soac) res
@@ -439,7 +439,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
   kernminds <- forM (zip to_fuse_knms to_fuse_kers) $ \(ker_nm, ker) -> do
                     let bnd_nms = map (patternNames . bindingPattern) rem_bnds
                         out_nm  = case fsoac ker of
-                                    SOAC.Stream _ _ frm _ _ _
+                                    SOAC.Stream _ _ frm _ _
                                       | x:_ <- drop (length $ getStreamAccums frm) $ outNames ker ->
                                         x
                                     _ -> head $ outNames ker
@@ -560,7 +560,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       blres' <- foldM fusionGatherSubExp blres nes
       greedyFuse False (bodyBindings body) used_lam blres' (pat, soac)
 
-    Right soac@(SOAC.Stream _ _ form lam _ _) -> do
+    Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@

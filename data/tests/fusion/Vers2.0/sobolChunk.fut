@@ -85,7 +85,7 @@ fun real main( int num_dates, int num_und, int num_mc_it,
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = streamMapMax ( fn [[real,sobvctsz]] (int chunk, [int] ns) =>
-                                    sobolChunk(dir_vs, ns[0], chunk)
-                               , iota(num_mc_it) ) in
+  let sobol_mat = streamMap( fn [[real,sobvctsz]] (int chunk, [int] ns) =>
+                                sobolChunk(dir_vs, ns[0], chunk)
+                           , iota(num_mc_it) ) in
   reduce (+, 0.0, map ( fn real ([real] row) => reduce(+, 0.0, row), sobol_mat ) )

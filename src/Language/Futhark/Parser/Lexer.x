@@ -140,16 +140,11 @@ keyword s =
     "empty"        -> EMPTY
     "copy"         -> COPY
     "while"        -> WHILE
-    "streamMap"       -> STREAM_MAP
-    "streamMapMax"    -> STREAM_MAPMAX
-    "streamMapPer"    -> STREAM_MAPPER
-    "streamMapPerMax" -> STREAM_MAPPERMAX
-    "streamRed"       -> STREAM_RED
-    "streamRedMax"    -> STREAM_REDMAX
-    "streamRedPer"    -> STREAM_REDPER
-    "streamRedPerMax" -> STREAM_REDPERMAX
-    "streamSeq"       -> STREAM_SEQ
-    "streamSeqMax"    -> STREAM_SEQMAX
+    "streamMap"    -> STREAM_MAP
+    "streamMapPer" -> STREAM_MAPPER
+    "streamRed"    -> STREAM_RED
+    "streamRedPer" -> STREAM_REDPER
+    "streamSeq"    -> STREAM_SEQ
     "assert"       -> ASSERT
     _              -> ID $ nameFromString s
 

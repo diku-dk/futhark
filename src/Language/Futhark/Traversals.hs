@@ -168,9 +168,9 @@ mapExpM tv (Partition funs arrexp loc) =
 mapExpM tv (Redomap comm redfun mapfun accexp arrexp loc) =
   Redomap comm <$> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
        mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Stream form fun arr mm loc) =
+mapExpM tv (Stream form fun arr loc) =
   pure Stream <*> mapOnStreamForm form <*> mapOnLambda tv fun <*>
-       mapOnExp tv arr <*> pure mm <*> pure loc
+       mapOnExp tv arr <*> pure loc
   where mapOnStreamForm (MapLike o) = pure $ MapLike o
         mapOnStreamForm (RedLike o comm lam acc) =
             RedLike o comm <$>

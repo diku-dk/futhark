@@ -112,15 +112,10 @@ data Token = IF
            | ASSERT
            | WHILE
            | STREAM_MAP
-           | STREAM_MAPMAX
            | STREAM_MAPPER
-           | STREAM_MAPPERMAX
            | STREAM_RED
-           | STREAM_REDMAX
            | STREAM_REDPER
-           | STREAM_REDPERMAX
            | STREAM_SEQ
-           | STREAM_SEQMAX
            | BANG
            | ABS
            | SIGNUM

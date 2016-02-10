@@ -282,7 +282,7 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
 -- @let {X, Y, Z} = {Xglb, split(y_iv,Yglb), split(z_iv,Zglb)} ...  @
 --
 -- Hope you got the idea at least because the code is terrible :-)
-transformSOAC respat (Stream cs outersz form lam arrexps _) = do
+transformSOAC respat (Stream cs outersz form lam arrexps) = do
   -- 1.) trivial step: find and build some of the basic things you need
   let accexps = getStreamAccums    form
       lampars = extLambdaParams     lam

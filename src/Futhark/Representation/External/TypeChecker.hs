@@ -864,7 +864,7 @@ checkExp (Redomap comm outerfun innerfun accexp arrexp pos) = do
              return $ Redomap comm outerfun' innerfun' accexp' arrexp' pos
          _ -> bad $ TypeError pos "Redomap with illegal reduce type."
 
-checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
+checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr pos) = do
   let isArrayType arrtp =
         case arrtp of
           Array _ -> True
@@ -950,9 +950,9 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr ii pos) = do
             else bad $ TypeError pos "Stream with result arrays of non-array type."
         _ -> return ()-- means that no array is streamed out!
   -- finally return type-checked stream!
-  return $ Stream form' lam' arr' ii pos
+  return $ Stream form' lam' arr' pos
 
-checkExp (Stream _ _ _ _ pos) =
+checkExp (Stream _ _ _ pos) =
   bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
 checkExp (Split splitexps arrexp pos) = do

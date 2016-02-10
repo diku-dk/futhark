@@ -676,7 +676,7 @@ typeOf (Redomap _ _ innerfun start arr _) =
              Tuple [_,el_tp] ->
                  Tuple [acc_tp, arrayType 1 el_tp Unique]
              _ -> acc_tp -- NOT reachable
-typeOf (Stream form lam arr _ _) =
+typeOf (Stream form lam arr _) =
   case form of
     MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf arr]
                        `setAliases` HS.empty
