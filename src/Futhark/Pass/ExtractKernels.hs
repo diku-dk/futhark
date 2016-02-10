@@ -293,21 +293,21 @@ transformBinding (Let pat () (Op (Scan cs w fun input))) = do
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
 transformBinding (Let pat () (Op (Stream cs w
-                                  (RedLike _ comm red_fun nes) fold_fun arrs _)))
+                                  (RedLike _ comm red_fun nes) fold_fun arrs)))
   | Just fold_fun' <- extLambdaToLambda fold_fun = do
   -- Generate a kernel immediately.
   red_fun_sequential <- FOT.transformLambda red_fun
   fold_fun_sequential <- FOT.transformLambda fold_fun'
   blockedReductionStream pat cs w comm red_fun_sequential fold_fun_sequential nes arrs
 
-transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs _))) = do
+transformBinding (Let pat () (Op (Stream cs w (Sequential nes) fold_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
   transformBindings =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w nes fold_fun arrs) types)
 
-transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs _))) = do
+transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   -- Remove the stream and leave the body parallel.  It will be
   -- distributed.
   types <- asksScope scopeForSOACs
@@ -465,7 +465,7 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (Op (ConcatMap _ w _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (Op (Stream _ w _ _ _ _)) =
+        unbalancedBinding bound (Op (Stream _ w _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (DoLoop _ merge (ForLoop i iterations) body) =
           iterations `subExpBound` bound ||
@@ -529,7 +529,7 @@ distributeMapBodyBindings acc [] =
   return acc
 
 distributeMapBodyBindings acc
-  (Let pat () (Op (Stream cs w (Sequential accs) lam arrs _)):bnds) = do
+  (Let pat () (Op (Stream cs w (Sequential accs) lam arrs)):bnds) = do
     types <- asksScope scopeForSOACs
     stream_bnds <-
       snd <$> runBinderT (sequentialStreamWholeArray pat cs w accs lam arrs) types

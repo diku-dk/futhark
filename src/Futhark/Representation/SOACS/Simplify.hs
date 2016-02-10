@@ -53,7 +53,7 @@ simplifyLambda =
   Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
 instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
-  simplifyOp (Stream cs outerdim form lam arr ii) = do
+  simplifyOp (Stream cs outerdim form lam arr) = do
     cs' <- Engine.simplify cs
     outerdim' <- Engine.simplify outerdim
     form' <- simplifyStreamForm outerdim' form
@@ -67,7 +67,7 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
         -- by setting the bounds to [0, se_outer-1]
         parbnds  = [ (chunk, 1, se_outer) ]
     lam' <- Engine.simplifyExtLambda lam outerdim' (getStreamAccums form) parbnds
-    return $ Stream cs' outerdim' form' lam' arr' ii
+    return $ Stream cs' outerdim' form' lam' arr'
     where simplifyStreamForm _ (MapLike o) =
             return $ MapLike o
           simplifyStreamForm outerdim' (RedLike o comm lam0 acc) = do
@@ -317,8 +317,8 @@ simplifyClosedFormReduce _ _ = cannotSimplify
 
 simplifyStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
                    LocalScope (Lore m) m) => TopDownRule m
-simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr ii))) = do
-  lss' <- frobStream vtable cs outerdim form lam arr ii
+simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr))) = do
+  lss' <- frobStream vtable cs outerdim form lam arr
   rtp <- expExtType lss
   rtp' <- expExtType lss'
   if rtp == rtp' then cannotSimplify
@@ -362,11 +362,11 @@ frobStream :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m),
                LocalScope (Lore m) m) =>
               ST.SymbolTable (Lore m)
            -> Certificates -> SubExp -> StreamForm (Lore m)
-           -> AST.ExtLambda (Lore m) -> [VName] -> ChunkIntent
+           -> AST.ExtLambda (Lore m) -> [VName]
            -> m (AST.Exp (Lore m))
-frobStream vtab cs outerdim form lam arr ii = do
+frobStream vtab cs outerdim form lam arr = do
   lam' <- frobExtLambda vtab lam
-  return $ Op $ Stream cs outerdim form lam' arr ii
+  return $ Op $ Stream cs outerdim form lam' arr
 
 frobExtLambda :: (MonadBinder m, LocalScope (Lore m) m) =>
                  ST.SymbolTable (Lore m)

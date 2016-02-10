@@ -58,7 +58,7 @@ data SOAC lore =
   | Reduce Certificates SubExp Commutativity (LambdaT lore) [(SubExp, VName)]
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
-  | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
+  | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -115,11 +115,11 @@ mapSOACM tv (ConcatMap cs size fun arrexps) =
   ConcatMap <$>
   mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv size <*>
   mapOnSOACLambda tv fun <*> mapM (mapM (mapOnSOACVName tv)) arrexps
-mapSOACM tv (Stream cs size form lam arrs ii) =
+mapSOACM tv (Stream cs size form lam arrs) =
   Stream <$>
   mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv size <*>
   mapOnStreamForm form <*> mapOnSOACExtLambda tv lam <*>
-  mapM (mapOnSOACVName tv) arrs <*> pure ii
+  mapM (mapOnSOACVName tv) arrs
   where mapOnStreamForm (MapLike o) = pure $ MapLike o
         mapOnStreamForm (RedLike o comm lam0 acc) =
             RedLike <$> pure o  <*> pure comm <*>
@@ -171,7 +171,7 @@ soacType (Redomap _ outersize _ outerfun innerfun _ _) =
   in  case res_el_tp of
         [] -> acc_tp
         _  -> acc_tp ++ map (`arrayOfRow` outersize) res_el_tp
-soacType (Stream _ outersize form lam _ _) =
+soacType (Stream _ outersize form lam _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
         substs = HM.fromList $ zip nms (outersize:accs)
@@ -193,7 +193,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     map (const mempty) $ lambdaReturnType f
   opAliases (Redomap _ _ _ _ innerfun _ _) =
     map (const mempty) $ lambdaReturnType innerfun
-  opAliases (Stream _ _ form lam _ _) =
+  opAliases (Stream _ _ form lam _) =
     let a1 = case form of
                MapLike _          -> []
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
@@ -206,7 +206,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     HS.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
-  consumedInOp (Stream _ _ form lam arrs _) =
+  consumedInOp (Stream _ _ form lam arrs) =
     HS.fromList $ mapMaybe onlyVar $
     case form of MapLike{} ->
                    map (consumedArray []) $ HS.toList $ consumedByExtLambda lam
@@ -242,9 +242,9 @@ instance (Attributes lore,
      comm (Alias.analyseLambda outerlam)
      (Alias.analyseLambda innerlam)
      acc arr
-  addOpAliases (Stream cs size form lam arr ii) =
+  addOpAliases (Stream cs size form lam arr) =
     Stream cs size (analyseStreamForm form)
-    (Alias.analyseExtLambda lam) arr ii
+    (Alias.analyseExtLambda lam) arr
     where analyseStreamForm (RedLike o comm lam0 acc) =
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
@@ -300,11 +300,11 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
      (Range.runRangeM $ Range.analyseLambda outerlam)
      (Range.runRangeM $ Range.analyseLambda innerlam)
      acc arr
-  addOpRanges (Stream cs w form lam arr ii) =
+  addOpRanges (Stream cs w form lam arr) =
     Stream cs w
     (Range.runRangeM $ analyseStreamForm form)
     (Range.runRangeM $ Range.analyseExtLambda lam)
-    arr ii
+    arr
     where analyseStreamForm (MapLike    o  ) =
             return $ MapLike o
           analyseStreamForm (Sequential acc) =
@@ -399,7 +399,7 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
     TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
-typeCheckSOAC (Stream ass size form lam arrexps _) = do
+typeCheckSOAC (Stream ass size form lam arrexps) = do
   let accexps = getStreamAccums form
   mapM_ (TC.requireI [Prim Cert]) ass
   TC.require [Prim int32] size
@@ -494,7 +494,7 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "ConcatMap" $ lambdaMetrics fun
   opMetrics (Redomap _ _ _ fun1 fun2 _ _) =
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
-  opMetrics (Stream _ _ _ lam _ _) =
+  opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
@@ -526,25 +526,24 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                commasep (PP.braces (commasep $ map ppr es) : map ppr as))
     where s = case comm of Noncommutative -> "redomap"
                            Commutative -> "redomapComm"
-  ppr (Stream cs size form lam arrs ii) =
-    let intent_str = if ii==MaxChunk then "Max" else ""
-    in PP.ppCertificates' cs <> case form of
-          MapLike o ->
-            let ord_str = if o == Disorder then "Per" else ""
-            in  text ("streamMap"++ord_str++intent_str) <>
-                parens (ppr size <> comma </> ppr lam <> comma </>
-                           commasep (map ppr arrs) )
-          RedLike o comm lam0 acc ->
-            let ord_str = if o == Disorder then "Per" else ""
-                comm_str = case comm of Commutative -> "Comm"
-                                        Noncommutative -> ""
-            in  text ("streamRed"++ord_str++intent_str++comm_str) <>
-                parens (ppr size <> comma </> ppr lam0 </> comma </> ppr lam </>
-                           commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
-          Sequential acc ->
-                text "streamSeq" <>
-                parens (ppr size <> comma </> ppr lam <> comma </>
-                           commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
+  ppr (Stream cs size form lam arrs) =
+    PP.ppCertificates' cs <> case form of
+       MapLike o ->
+         let ord_str = if o == Disorder then "Per" else ""
+         in  text ("streamMap"++ord_str) <>
+             parens (ppr size <> comma </> ppr lam <> comma </>
+                        commasep (map ppr arrs) )
+       RedLike o comm lam0 acc ->
+         let ord_str = if o == Disorder then "Per" else ""
+             comm_str = case comm of Commutative -> "Comm"
+                                     Noncommutative -> ""
+         in  text ("streamRed"++ord_str++comm_str) <>
+             parens (ppr size <> comma </> ppr lam0 </> comma </> ppr lam </>
+                        commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
+       Sequential acc ->
+             text "streamSeq" <>
+             parens (ppr size <> comma </> ppr lam <> comma </>
+                        commasep ( PP.braces (commasep $ map ppr acc) : map ppr arrs ))
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs

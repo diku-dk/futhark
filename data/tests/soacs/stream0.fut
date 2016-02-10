@@ -9,8 +9,8 @@ fun [[int]] main(int num_mc_it,
                   int num_dates,
                   int num_und) =
   let sobvctsz  = num_dates*num_und in
-  streamMapMax(fn [[int,1]] (int chunk, [int] ns) =>
-                 map( fn [int,1] (int k) =>
-                        if k==0 then [0] else [1]
-                    , iota(chunk) )
-              , iota(num_mc_it))
+  streamMap(fn [[int,1]] (int chunk, [int] ns) =>
+              map( fn [int,1] (int k) =>
+                     if k==0 then [0] else [1]
+                 , iota(chunk) )
+           , iota(num_mc_it))

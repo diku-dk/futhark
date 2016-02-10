@@ -3,7 +3,6 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness(..)
-  , ChunkIntent(..)
   , StreamOrd(..)
   , Commutativity(..)
 
@@ -55,10 +54,6 @@ instance Monoid Uniqueness where
 instance Hashable Uniqueness where
   hashWithSalt salt Unique    = salt
   hashWithSalt salt Nonunique = salt * 2
-
-data ChunkIntent = MaxChunk
-                 | MinChunk
-                    deriving (Eq, Ord, Show)
 
 data StreamOrd  = InOrder
                 | Disorder

@@ -520,7 +520,7 @@ internaliseExp desc (E.Redomap comm lam1 lam2 ne arrs _) = do
   letTupExp' desc $ I.Op $
     I.Redomap [] w comm lam1' lam2' nes arrs'
 
-internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr ii _) = do
+internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
   accs' <- case form of
              E.MapLike _         -> return []
@@ -547,7 +547,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
              E.Sequential _ -> return $ I.Sequential accs'
   w <- arraysSize 0 <$> mapM lookupType arrs'
   letTupExp' desc $
-    I.Op $ I.Stream [] w form' lam' arrs' ii
+    I.Op $ I.Stream [] w form' lam' arrs'
 internaliseExp _ E.Stream{} =
   fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 

@@ -639,7 +639,7 @@ evalPrimOp (Partition _ n flags arrs) = do
 
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
-evalSOAC (Stream _ w form elam arrs _) = do
+evalSOAC (Stream _ w form elam arrs) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs

@@ -165,15 +165,10 @@ import Language.Futhark.Parser.Lexer
       copy            { L $$ COPY }
       while           { L $$ WHILE }
       streamMap       { L $$ STREAM_MAP }
-      streamMapMax    { L $$ STREAM_MAPMAX }
       streamMapPer    { L $$ STREAM_MAPPER }
-      streamMapPerMax { L $$ STREAM_MAPPERMAX }
       streamRed       { L $$ STREAM_RED }
-      streamRedMax    { L $$ STREAM_REDMAX }
       streamRedPer    { L $$ STREAM_REDPER }
-      streamRedPerMax { L $$ STREAM_REDPERMAX }
       streamSeq       { L $$ STREAM_SEQ }
-      streamSeqMax    { L $$ STREAM_SEQMAX }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -467,27 +462,15 @@ Exp  :: { UncheckedExp }
                       { DoLoop $3 $5 $8 $10 $12 $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
-                         { Stream (MapLike InOrder)  $3 $5 MinChunk $1 }
-     | streamMapMax    '(' FunAbstr ',' Exp ')'
-                         { Stream (MapLike InOrder)  $3 $5 MaxChunk $1 }
+                         { Stream (MapLike InOrder)  $3 $5 $1 }
      | streamMapPer    '(' FunAbstr ',' Exp ')'
-                         { Stream (MapLike Disorder) $3 $5 MinChunk $1 }
-     | streamMapPerMax '(' FunAbstr ',' Exp ')'
-                         { Stream (MapLike Disorder) $3 $5 MaxChunk $1 }
-
+                         { Stream (MapLike Disorder) $3 $5 $1 }
      | streamRed       '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike InOrder (commutativity $3) $3 $7) $5 $9 MinChunk $1 }
-     | streamRedMax    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike InOrder (commutativity $3)$3 $7) $5 $9 MaxChunk $1 }
+                         { Stream (RedLike InOrder (commutativity $3) $3 $7) $5 $9 $1 }
      | streamRedPer    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike Disorder (commutativity $3) $3 $7) $5 $9 MinChunk $1 }
-     | streamRedPerMax '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike Disorder (commutativity $3) $3 $7) $5 $9 MaxChunk $1 }
-
+                         { Stream (RedLike Disorder (commutativity $3) $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (Sequential $5) $3 $7 MinChunk $1 }
-     | streamSeqMax    '(' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (Sequential $5) $3 $7 MaxChunk $1 }
+                         { Stream (Sequential $5) $3 $7 $1 }
 
 LoopForm : for Id '<' Exp
            { For FromUpTo (zeroExpression (srclocOf $1)) $2 $4 }

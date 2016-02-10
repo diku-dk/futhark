@@ -431,7 +431,7 @@ data ExpBase ty vn =
              -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
              -- 5th arg is the row type of the input  array.
 
-            | Stream (StreamForm ty vn) (LambdaBase ty vn) (ExpBase ty vn) ChunkIntent SrcLoc
+            | Stream (StreamForm ty vn) (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ Streaming: intuitively, this gives a size-parameterized
             -- composition for SOACs that cannot be fused, e.g., due to scan.
             -- For example, assuming @A : [int], f : int->int, g : real->real@,
@@ -508,7 +508,7 @@ instance Located (ExpBase ty vn) where
   locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
-  locOf (Stream _ _ _ _   pos) = locOf pos
+  locOf (Stream _ _ _  pos) = locOf pos
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase ty vn = For ForLoopDirection (ExpBase ty vn) (IdentBase ty vn) (ExpBase ty vn)
