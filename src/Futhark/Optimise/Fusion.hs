@@ -306,14 +306,13 @@ inlineSOACInputs soac = do
 
 
 -- | Attempts to fuse between map(s), reduce(s), redomap(s). Input:
---   @is_repl@ is @True@ if the soac is a replicate, @False@ otherwise
 --   @rem_bnds@ are the bindings remaining in the current body after @orig_soac@.
 --   @lam_used_nms@ the unfusable names
 --   @res@ the fusion result (before processing the current soac)
 --   @orig_soac@ and @out_idds@ the current SOAC and its binding pattern
 --   Output: a new Fusion Result (after processing the current SOAC binding)
-greedyFuse :: Bool -> [Binding] -> Names -> FusedRes -> (Pattern, SOAC) -> FusionGM FusedRes
-greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
+greedyFuse :: [Binding] -> Names -> FusedRes -> (Pattern, SOAC) -> FusionGM FusedRes
+greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   soac <- inlineSOACInputs orig_soac
   (inp_nms, other_nms) <- soacInputs soac
   -- Assumption: the free vars in lambda are already in @unfusable res@.
@@ -331,7 +330,7 @@ greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- ELSE try applying horizontal        fusion
   -- (without duplicating computation in both cases)
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-        if   not is_repl && (is_redomap || any isUnfusable out_nms)
+        if   is_redomap || any isUnfusable out_nms
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
         else prodconsGreedyFuse          res (out_idds, soac)
   --
@@ -358,9 +357,7 @@ greedyFuse is_repl rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   let comb      = HM.unionWith HS.union
 
   if not fusable_ker then
-    if is_repl then return res
-    else -- nothing to fuse, add a new soac kernel to the result
-      addNewKerWithUnfusable res (patternIdents out_idds, soac) ufs
+    addNewKerWithUnfusable res (patternIdents out_idds, soac) ufs
   else do
      -- Need to suitably update `inpArr':
      --   (i) first remove the inpArr bindings of the old kernel
@@ -537,7 +534,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
     Right soac@(SOAC.Map _ _ lam _) -> do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-      greedyFuse False (bodyBindings body) used_lam blres (pat, soac)
+      greedyFuse (bodyBindings body) used_lam blres (pat, soac)
 
     Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -549,7 +546,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       bres  <- bindingFamily pat $ fusionGatherBody lres body
       bres' <- foldM fusionGatherSubExp bres nes
       -- addNewKer bres' (patternIdents pat, soac)
-      greedyFuse False (bodyBindings body) used_lam bres' (pat, soac)
+      greedyFuse (bodyBindings body) used_lam bres' (pat, soac)
 
     Right soac@(SOAC.Scan _ _ lam args) -> do
       -- NOT FUSABLE (probably), but still add as kernel, as
@@ -558,7 +555,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
       blres' <- foldM fusionGatherSubExp blres nes
-      greedyFuse False (bodyBindings body) used_lam blres' (pat, soac)
+      greedyFuse (bodyBindings body) used_lam blres' (pat, soac)
 
     Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -573,7 +570,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
       bres  <- bindingFamily pat $ fusionGatherBody lres body
       bres' <- foldM fusionGatherSubExp bres nes
-      greedyFuse False (bodyBindings body) used_lam bres' (pat, soac)
+      greedyFuse (bodyBindings body) used_lam bres' (pat, soac)
 
     Left (SOAC.InvalidArrayInput inpe) ->
       badFusionGM $ Error
