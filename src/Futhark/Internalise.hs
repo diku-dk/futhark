@@ -23,7 +23,7 @@ import Data.Loc
 import Prelude hiding (mapM, sequence)
 
 import Futhark.Representation.External as E
-import Futhark.Representation.SOACS as I
+import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
@@ -190,7 +190,7 @@ internaliseExp desc (E.Apply fname args _ _) = do
 internaliseExp desc (E.LetPat pat e body _) = do
   ses <- internaliseExp desc e
   t <- I.staticShapes <$> mapM I.subExpType ses
-  bindingTupIdent pat t $ \pat' -> do
+  bindingPattern pat t $ \pat' -> do
     forM_ (zip (patternIdents pat') ses) $ \(p,se) ->
       letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp se
     internaliseExp desc body
@@ -291,12 +291,12 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
       valmerge = zip mergepat' mergeinit'
       loop = I.DoLoop ctxmerge valmerge form' loopbody'
   loopt <- I.expExtType loop
-  bindingTupIdent (frob mergepat) loopt $ \mergepat'' -> do
+  bindingPattern (frob mergepat) loopt $ \mergepat'' -> do
     letBind_ mergepat'' loop
     internaliseExp desc letbody
 
   where addAnother t =
-          TupId [E.Wildcard (E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
+          TuplePattern [E.Wildcard (E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   idxs' <- mapM (internaliseExp1 "idx") idxs
@@ -310,7 +310,7 @@ internaliseExp desc (E.LetWith name src idxs ve body loc) = do
           PrimOp $ SubExp ve''
   dsts <- zipWithM comb srcs ves
   dstt <- I.staticShapes <$> mapM lookupType dsts
-  bindingTupIdent (E.Id name) dstt $ \pat' -> do
+  bindingPattern (E.Id name) dstt $ \pat' -> do
     forM_ (zip (patternIdents pat') dsts) $ \(p,dst) ->
       letBind (basicPattern' [] [p]) $ I.PrimOp $ I.SubExp $ I.Var dst
     internaliseExp desc body

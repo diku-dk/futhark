@@ -3,7 +3,6 @@
 module Language.Futhark.Parser.Parser
   ( prog
   , expression
-  , tupId
   , lambda
   , futharktype
   , boolValue
@@ -42,7 +41,6 @@ import Language.Futhark.Parser.Lexer
 
 %name prog Prog
 %name expression Exp
-%name tupId TupId
 %name lambda FunAbstr
 %name futharktype Type
 %name boolValue BoolValue
@@ -440,8 +438,8 @@ Exp  :: { UncheckedExp }
      | let '_' '=' Exp in Exp %prec letprec
                       { LetPat (Wildcard NoInfo $2) $4 $6 $1 }
 
-     | let '{' TupIds '}' '=' Exp in Exp %prec letprec
-                      { LetPat (TupId $3 $1) $6 $8 $1 }
+     | let '{' Patterns '}' '=' Exp in Exp %prec letprec
+                      { LetPat (TuplePattern $3 $1) $6 $8 $1 }
 
      | let Id '=' Id with Index '<-' Exp in Exp %prec letprec
                       { LetWith $2 $4 $6 $8 $10 $1 }
@@ -455,10 +453,10 @@ Exp  :: { UncheckedExp }
      | Id Index
                       { Index $1 $2 (srclocOf $1) }
 
-     | loop '(' TupId ')' '=' LoopForm do Exp in Exp %prec letprec
+     | loop '(' Pattern ')' '=' LoopForm do Exp in Exp %prec letprec
                       {% liftM (\t -> DoLoop $3 t $6 $8 $10 $1)
-                               (tupIdExp $3) }
-     | loop '(' TupId '=' Exp ')' '=' LoopForm do Exp in Exp %prec letprec
+                               (patternExp $3) }
+     | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp in Exp %prec letprec
                       { DoLoop $3 $5 $8 $10 $12 $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
@@ -496,14 +494,14 @@ TupleExp : '{' Exps '}' { ($2, $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
-TupIds : TupId ',' TupIds  { $1 : $3 }
-       | TupId             { [$1] }
-       |                   { [] }
+Patterns : Pattern ',' Patterns  { $1 : $3 }
+         | Pattern               { [$1] }
+         |                       { [] }
 ;
 
-TupId : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
+Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '_' { Wildcard NoInfo $1 }
-      | '{' TupIds '}' { TupId $2 $1 }
+      | '{' Patterns '}' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
          : fn Type '(' TypeIds ')' '=>' Exp
@@ -675,10 +673,10 @@ combArrayTypes t ts = foldM comb t ts
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
 
-tupIdExp :: UncheckedTupIdent -> ParserMonad UncheckedExp
-tupIdExp (Id ident) = return $ Var ident
-tupIdExp (TupId pats loc) = TupLit <$> (mapM tupIdExp pats) <*> return loc
-tupIdExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
+patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
+patternExp (Id ident) = return $ Var ident
+patternExp (TuplePattern pats loc) = TupLit <$> (mapM patternExp pats) <*> return loc
+patternExp (Wildcard _ loc) = throwError $ "Cannot have wildcard at " ++ locStr loc
 
 zeroExpression :: SrcLoc -> UncheckedExp
 zeroExpression = Literal $ PrimValue $ SignedValue $ Int32Value 0

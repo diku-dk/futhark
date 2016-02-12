@@ -2,7 +2,6 @@
 module Language.Futhark.Parser
   ( parseFuthark
   , parseExp
-  , parsePattern
   , parseType
   , parseLambda
 
@@ -104,12 +103,6 @@ parseFuthark = parse prog
 parseExp :: RealConfiguration -> FilePath -> String
          -> Either ParseError UncheckedExp
 parseExp = parse expression
-
--- | Parse an Futhark pattern from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parsePattern :: RealConfiguration -> FilePath -> String
-             -> Either ParseError UncheckedTupIdent
-parsePattern = parse tupId
 
 -- | Parse an Futhark type from the given 'String', using the
 -- 'FilePath' as the source name for error messages.

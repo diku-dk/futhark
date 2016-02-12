@@ -6,7 +6,7 @@ module Futhark.Internalise.Bindings
   , bindingLambdaParams
 
   , flattenPattern
-  , bindingTupIdent
+  , bindingPattern
   , bindingFlatPattern
   )
   where
@@ -21,7 +21,7 @@ import Data.List
 import Data.Traversable (mapM)
 
 import Futhark.Representation.External as E
-import Futhark.Representation.SOACS as I
+import qualified Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
@@ -83,7 +83,7 @@ bindingParams params m = do
   (shapeparams, valueparams, substs) <- internaliseFunParams params
   let bind env = env { envSubsts = substs `HM.union` envSubsts env }
   local bind $
-    bindingIdentTypes (map paramIdent $ shapeparams++valueparams) $
+    bindingIdentTypes (map I.paramIdent $ shapeparams++valueparams) $
     m shapeparams valueparams
 
 bindingFlatPattern :: [E.Ident] -> [I.Type]
@@ -115,22 +115,22 @@ bindingFlatPattern = bindingFlatPattern' []
     handleMapping' [] _ =
       error "bindingFlatPattern: insufficient identifiers in pattern."
 
-flattenPattern :: MonadFreshNames m => E.TupIdent -> m [E.Ident]
+flattenPattern :: MonadFreshNames m => E.Pattern -> m [E.Ident]
 flattenPattern (E.Wildcard t loc) = do
   name <- newVName "nameless"
   return [E.Ident name t loc]
 flattenPattern (E.Id v) =
   return [v]
-flattenPattern (E.TupId pats _) =
+flattenPattern (E.TuplePattern pats _) =
   concat <$> mapM flattenPattern pats
 
-bindingTupIdent :: E.TupIdent -> [ExtType] -> (I.Pattern -> InternaliseM a)
+bindingPattern :: E.Pattern -> [I.ExtType] -> (I.Pattern -> InternaliseM a)
                 -> InternaliseM a
-bindingTupIdent pat ts m = do
+bindingPattern pat ts m = do
   pat' <- flattenPattern pat
   (ts',shapes) <- instantiateShapes' ts
   let addShapeBindings =
-        m . I.basicPattern' shapes . map paramIdent
+        m . I.basicPattern' shapes . map I.paramIdent
   bindingFlatPattern pat' ts' addShapeBindings
 
 bindingLambdaParams :: [E.Parameter] -> [I.Type]
@@ -138,7 +138,7 @@ bindingLambdaParams :: [E.Parameter] -> [I.Type]
                     -> InternaliseM (I.Body, [I.LParam])
 bindingLambdaParams params ts m =
   bindingFlatPattern (map E.fromParam params) ts $ \params' ->
-  bindingIdentTypes (map paramIdent params') $ do
+  bindingIdentTypes (map I.paramIdent params') $ do
     body <- m
     return (body, params')
 
@@ -148,7 +148,7 @@ makeShapeIdentsFromContext :: MonadFreshNames m =>
                                  VarSubstitutions)
 makeShapeIdentsFromContext ctx = do
   (ctx', substs) <- fmap unzip $ forM (HM.toList ctx) $ \(name, i) -> do
-    v <- newIdent (baseString name) $ I.Prim int32
+    v <- newIdent (baseString name) $ I.Prim I.int32
     return ((i, v), (name, [I.identName v]))
   return (HM.fromList ctx', HM.fromList substs)
 
@@ -163,7 +163,7 @@ instantiateShapesWithDecls ctx ts =
             return $ I.Var $ I.identName v
 
           | otherwise = do
-            v <- lift $ nonuniqueParamFromIdent <$> newIdent "size" (I.Prim int32)
+            v <- lift $ nonuniqueParamFromIdent <$> newIdent "size" (I.Prim I.int32)
             tell [v]
             return $ I.Var $ I.paramName v
 

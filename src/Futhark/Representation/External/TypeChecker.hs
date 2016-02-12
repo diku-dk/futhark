@@ -43,7 +43,7 @@ type TypeError vn =
   vn
   (ExpBase CompTypeBase vn)
   (TypeBase Rank NoInfo ())
-  (TupIdentBase NoInfo vn)
+  (PatternBase NoInfo vn)
 
 type TaggedIdent ty vn = IdentBase ty (ID vn)
 
@@ -53,7 +53,7 @@ type TaggedExp ty vn = ExpBase ty (ID vn)
 
 type TaggedLambda ty vn = LambdaBase ty (ID vn)
 
-type TaggedTupIdent ty vn = TupIdentBase ty (ID vn)
+type TaggedPattern ty vn = PatternBase ty (ID vn)
 
 type TaggedFunDec ty vn = FunDecBase ty (ID vn)
 
@@ -1183,8 +1183,8 @@ sequentially m1 m2 = do
   return b
 
 checkBinding :: (VarName vn, TypeBox ty) =>
-                TaggedTupIdent ty vn -> TaggedType vn -> Dataflow vn
-             -> TypeM vn (TypeM vn a -> TypeM vn a, TaggedTupIdent CompTypeBase vn)
+                TaggedPattern ty vn -> TaggedType vn -> Dataflow vn
+             -> TypeM vn (TypeM vn a -> TypeM vn a, TaggedPattern CompTypeBase vn)
 checkBinding pat et dflow = do
   (pat', idds) <-
     runStateT (checkBinding' pat et) []
@@ -1196,10 +1196,10 @@ checkBinding pat et dflow = do
           let t'' = typeOf $ Var $ Ident name t' pos
           add $ Ident name t'' pos
           return $ Id $ Ident name t'' pos
-        checkBinding' (TupId pats pos) (Tuple ts)
+        checkBinding' (TuplePattern pats pos) (Tuple ts)
           | length pats == length ts = do
           pats' <- zipWithM checkBinding' pats ts
-          return $ TupId pats' pos
+          return $ TuplePattern pats' pos
         checkBinding' (Wildcard wt loc) t = do
           t' <- lift $ checkAnnotation (srclocOf pat) "wildcard" wt t
           return $ Wildcard t' loc
@@ -1217,7 +1217,7 @@ checkBinding pat et dflow = do
         -- A pattern with known type box (NoInfo) for error messages.
         errpat = rmTypes pat
         rmTypes (Id (Ident name _ pos)) = Id $ Ident name NoInfo pos
-        rmTypes (TupId pats pos) = TupId (map rmTypes pats) pos
+        rmTypes (TuplePattern pats pos) = TuplePattern (map rmTypes pats) pos
         rmTypes (Wildcard _ loc) = Wildcard NoInfo loc
 
 validApply :: VarName vn =>
@@ -1288,7 +1288,7 @@ checkLambda (AnonymFun params body ret pos) args =
                                     identType) params)
                       pos
           let tupfun = AnonymFun [toParam tupparam] tuplet ret pos
-              tuplet = LetPat (TupId (map (Id . fromParam) params) pos)
+              tuplet = LetPat (TuplePattern (map (Id . fromParam) params) pos)
                               (Var tupparam) body' pos
           _ <- checkLambda tupfun args
           return $ AnonymFun params body' ret' pos
@@ -1312,7 +1312,7 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
                          map uniqueness paramtypes
               params <- zipWithM mkparam [(0::Int)..] paramtypes'
               tupparam <- newIdent "x" (removeShapeAnnotations tupt) pos
-              let tuplet = LetPat (TupId (map Id params) pos) (Var tupparam) body pos
+              let tuplet = LetPat (TuplePattern (map Id params) pos) (Var tupparam) body pos
                   tupfun = AnonymFun [toParam tupparam] tuplet
                            (vacuousShapeAnnotations rt) pos
                   body = Apply fname [(Var param, diet paramt) |
