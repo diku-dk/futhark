@@ -239,12 +239,8 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     text "stripe" <> apply [ppr stride, ppr e]
   pprPrec _ (Unstripe stride e _) =
     text "unstripe" <> apply [ppr stride, ppr e]
-  pprPrec _ (Transpose 0 1 e _) =
+  pprPrec _ (Transpose e _) =
     text "transpose" <> apply [ppr e]
-  pprPrec _ (Transpose k n e _) =
-    text "transpose" <> apply [text $ show k,
-                               text $ show n,
-                               ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]

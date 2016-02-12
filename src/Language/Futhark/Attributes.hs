@@ -644,7 +644,7 @@ typeOf (Reshape shape  e _) =
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Stripe _ e _) = typeOf e
 typeOf (Unstripe _ e _) = typeOf e
-typeOf (Transpose _ _ e _) = typeOf e
+typeOf (Transpose e _) = typeOf e
 typeOf (Map f arr _) = arrayType 1 et Unique
                        `setAliases` HS.empty
                        `setUniqueness` Unique

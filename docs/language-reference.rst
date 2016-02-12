@@ -230,34 +230,10 @@ Permute the dimensions in the array, returning a new array.
 For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
 a[y,z,x]``.
 
-``transpose(k, n, a)``
-~~~~~~~~~~~~~~~~~~~~~~
-
-Return the generalised transpose of \textit{a}.  If
-``b==transpose(k,n,a)``, then
-
-::
-
-    a[i_1, ..., i_k, i_(k+1), ..., i_(k+n), ..., i_q ]
-      =
-    b[i_1 , ..., i_(k+1) , ..., i_(k+n), i_k, ..., i_q ]
-
-We will call this an operation an *(k,n)-transposition*.  Note that
-``transpose(0,1,a)`` is the common two-dimensional transpose.
-
-Be aware that ``k`` and ``n`` must be static integer literals, and
-``k+n`` must be non-negative and smaller than the rank of ``a``, or it
-is considered a type error.
-
-This operation is merely syntactical sugar for the equivalent
-``rearrange`` operation.
-
 ``transpose(a)``
 ~~~~~~~~~~~~~~~~
 
-Return the transpose of ``a``.  Syntactical sugar for
-``transpose(0,1,a)``, which is again syntactical sugar for
-``rearrange``.
+Return the transpose of ``a``, which must be a two-dimensional array.
 
 
 ``let pat = e in body``
