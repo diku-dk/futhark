@@ -562,7 +562,7 @@ internaliseExp desc (E.ConcatMap lam arr arrs _) = do
 
 internaliseExp desc (E.Iota e _) = do
   e' <- internaliseExp1 "n" e
-  letTupExp' desc $ I.PrimOp $ I.Iota e'
+  letTupExp' desc $ I.PrimOp $ I.Iota e' $ constant (0::Int32)
 
 internaliseExp _ (E.Literal v _) =
   case internaliseValue v of
