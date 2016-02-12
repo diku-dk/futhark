@@ -18,7 +18,7 @@ module Futhark.Representation.External
   , Parameter
   , Exp
   , Lambda
-  , TupIdent
+  , Pattern
   , FunDec
   , Prog
   , Type
@@ -53,7 +53,7 @@ type Exp = ExpBase (TypeBase Rank Names) VName
 type Lambda = LambdaBase (TypeBase Rank Names) VName
 
 -- | A pattern with type information.
-type TupIdent = TupIdentBase (TypeBase Rank Names) VName
+type Pattern = PatternBase (TypeBase Rank Names) VName
 
 -- | An function declaration with type information.
 type FunDec = FunDecBase (TypeBase Rank Names) VName

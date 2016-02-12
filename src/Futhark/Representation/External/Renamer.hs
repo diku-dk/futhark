@@ -132,7 +132,7 @@ untagLambda = untagger renameLambda
 -- | Remove tags from a pattern.  The same caveats as with 'untagProg'
 -- apply.
 untagPattern :: (TypeBox ty, VarName vn) =>
-                TupIdentBase ty (ID vn) -> TupIdentBase ty vn
+                PatternBase ty (ID vn) -> PatternBase ty vn
 untagPattern = untagger renamePattern
 
 -- | Remove tags from a type.  The same caveats as with 'untagProg'
@@ -342,18 +342,18 @@ renameLambda (CurryBinOpRight bop x xtype rettype loc) =
   renameType xtype <*> renameType rettype <*> pure loc
 
 renamePattern :: (TypeBox ty, VarName f, VarName t) =>
-                 TupIdentBase ty f -> RenameM f t (TupIdentBase ty t)
+                 PatternBase ty f -> RenameM f t (PatternBase ty t)
 renamePattern (Id ident) = do
   ident' <- repl ident
   return $ Id ident'
-renamePattern (TupId pats pos) = do
+renamePattern (TuplePattern pats pos) = do
   pats' <- mapM renamePattern pats
-  return $ TupId pats' pos
+  return $ TuplePattern pats' pos
 renamePattern (Wildcard t loc) = do
   t' <- renameType t
   return $ Wildcard t' loc
 
-patternNames :: TupIdentBase ty f -> [IdentBase ty f]
-patternNames (Id ident)     = [ident]
-patternNames (TupId pats _) = concatMap patternNames pats
-patternNames (Wildcard _ _)   = []
+patternNames :: PatternBase ty f -> [IdentBase ty f]
+patternNames (Id ident) = [ident]
+patternNames (TuplePattern pats _) = concatMap patternNames pats
+patternNames (Wildcard _ _) = []

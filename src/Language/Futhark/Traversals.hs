@@ -63,7 +63,7 @@ data MapperBase tyf tyt vnf vnt m = Mapper {
     mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
   , mapOnType :: tyf vnf -> m (tyt vnt)
   , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
-  , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
+  , mapOnPattern :: PatternBase tyf vnf -> m (PatternBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
   }
@@ -212,7 +212,7 @@ data Folder ty vn a m = Folder {
     foldOnExp :: a -> ExpBase ty vn -> m a
   , foldOnType :: a -> ty vn -> m a
   , foldOnLambda :: a -> LambdaBase ty vn -> m a
-  , foldOnPattern :: a -> TupIdentBase ty vn -> m a
+  , foldOnPattern :: a -> PatternBase ty vn -> m a
   , foldOnIdent :: a -> IdentBase ty vn -> m a
   , foldOnValue :: a -> Value -> m a
   }
@@ -258,7 +258,7 @@ data Walker ty vn m = Walker {
     walkOnExp :: ExpBase ty vn -> m ()
   , walkOnType :: ty vn -> m ()
   , walkOnLambda :: LambdaBase ty vn -> m ()
-  , walkOnPattern :: TupIdentBase ty vn -> m ()
+  , walkOnPattern :: PatternBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
   }

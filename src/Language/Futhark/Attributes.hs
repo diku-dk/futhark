@@ -90,7 +90,7 @@ module Language.Futhark.Attributes
   , UncheckedIdent
   , UncheckedExp
   , UncheckedLambda
-  , UncheckedTupIdent
+  , UncheckedPattern
   , UncheckedFunDec
   , UncheckedProg
   )
@@ -935,26 +935,26 @@ fromParam (Ident name t loc) =
   Ident name (removeShapeAnnotations $ fromDecl t) loc
 
 -- | The list of names bound in the given pattern.
-patNames :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> [vn]
+patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]
 patNames = map identName . patIdents
 
 -- | As 'patNames', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what
 -- you want).
-patNameSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet vn
+patNameSet :: (Eq vn, Hashable vn) => PatternBase ty vn -> HS.HashSet vn
 patNameSet = HS.map identName . patIdentSet
 
 -- | The list of idents bound in the given pattern.  The order of
 -- idents is given by the pre-order traversal of the pattern.
-patIdents :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> [IdentBase ty vn]
+patIdents :: (Eq vn, Hashable vn) => PatternBase ty vn -> [IdentBase ty vn]
 patIdents (Id ident)     = [ident]
-patIdents (TupId pats _) = mconcat $ map patIdents pats
+patIdents (TuplePattern pats _) = mconcat $ map patIdents pats
 patIdents (Wildcard _ _) = []
 
 -- | As 'patIdents', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what
 -- you want).
-patIdentSet :: (Eq vn, Hashable vn) => TupIdentBase ty vn -> HS.HashSet (IdentBase ty vn)
+patIdentSet :: (Eq vn, Hashable vn) => PatternBase ty vn -> HS.HashSet (IdentBase ty vn)
 patIdentSet = HS.fromList . patIdents
 
 -- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
@@ -994,7 +994,7 @@ type UncheckedExp = ExpBase NoInfo Name
 type UncheckedLambda = LambdaBase NoInfo Name
 
 -- | A pattern with no type annotations.
-type UncheckedTupIdent = TupIdentBase NoInfo Name
+type UncheckedPattern = PatternBase NoInfo Name
 
 -- | A function declaration with no type annotations.
 type UncheckedFunDec = FunDecBase NoInfo Name

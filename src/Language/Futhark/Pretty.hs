@@ -11,7 +11,6 @@ module Language.Futhark.Pretty
   , ppBinOp
   , ppExp
   , ppLambda
-  , ppTupId
   , prettyPrint
   )
   where
@@ -33,12 +32,12 @@ apply = parens . commasep . map align
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
-aliasComment :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> Doc -> Doc
+aliasComment :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => PatternBase ty vn -> Doc -> Doc
 aliasComment pat d = case aliasComment' pat of
                        []   -> d
                        l:ls -> foldl (</>) l ls </> d
   where aliasComment' Wildcard{} = []
-        aliasComment' (TupId pats _) = concatMap aliasComment' pats
+        aliasComment' (TuplePattern pats _) = concatMap aliasComment' pats
         aliasComment' (Id ident) =
           case maybe [] (clean . HS.toList . aliases)
                  $ unboxType $ identType ident of
@@ -295,9 +294,9 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LoopFormBase ty 
   ppr (While cond) =
     text "while" <+> ppr cond
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TupIdentBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (Id ident)     = ppr ident
-  ppr (TupId pats _) = braces $ commasep $ map ppr pats
+  ppr (TuplePattern pats _) = braces $ commasep $ map ppr pats
   ppr (Wildcard _ _) = text "_"
 
 instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn) where
@@ -396,10 +395,6 @@ ppExp = render80
 -- | Prettyprint a lambda, wrapped to 80 characters.
 ppLambda :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => LambdaBase ty vn -> String
 ppLambda = render80
-
--- | Prettyprint a pattern, wrapped to 80 characters.
-ppTupId :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => TupIdentBase ty vn -> String
-ppTupId = render80
 
 -- | Prettyprint an entire Futhark program, wrapped to 80 characters.
 prettyPrint :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => ProgBase ty vn -> String

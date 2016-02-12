@@ -40,7 +40,7 @@ module Language.Futhark.Syntax
   , LoopFormBase (..)
   , ForLoopDirection (..)
   , LambdaBase(..)
-  , TupIdentBase(..)
+  , PatternBase(..)
   , StreamForm(..)
 
   -- * Definitions
@@ -335,14 +335,14 @@ data ExpBase ty vn =
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the type of of the rows of the array (not
             -- the element type).
-            | LetPat (TupIdentBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
+            | LetPat (PatternBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
 
             | If     (ExpBase ty vn) (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
 
             | Apply  Name [(ExpBase ty vn, Diet)] (ty vn) SrcLoc
 
             | DoLoop
-              (TupIdentBase ty vn) -- Merge variable pattern
+              (PatternBase ty vn) -- Merge variable pattern
               (ExpBase ty vn) -- Initial values of merge variables.
               (LoopFormBase ty vn) -- Do or while loop.
               (ExpBase ty vn) -- Loop body.
@@ -546,13 +546,13 @@ instance Located (LambdaBase ty vn) where
   locOf (CurryBinOpRight _ _ _ _ loc) = locOf loc
 
 -- | Tuple IdentBaseifier, i.e., pattern matching
-data TupIdentBase ty vn = TupId [TupIdentBase ty vn] SrcLoc
-                        | Id (IdentBase ty vn)
-                        | Wildcard (ty vn) SrcLoc -- Nothing, i.e. underscore.
-                          deriving (Eq, Ord, Show)
+data PatternBase ty vn = TuplePattern [PatternBase ty vn] SrcLoc
+                       | Id (IdentBase ty vn)
+                       | Wildcard (ty vn) SrcLoc -- Nothing, i.e. underscore.
+                       deriving (Eq, Ord, Show)
 
-instance Located (TupIdentBase ty vn) where
-  locOf (TupId _ loc) = locOf loc
+instance Located (PatternBase ty vn) where
+  locOf (TuplePattern _ loc) = locOf loc
   locOf (Id ident) = locOf ident
   locOf (Wildcard _ loc) = locOf loc
 
