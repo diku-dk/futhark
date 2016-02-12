@@ -388,12 +388,9 @@ data ExpBase ty vn =
             | Reshape [ExpBase ty vn] (ExpBase ty vn) SrcLoc
              -- ^ 1st arg is the new shape, 2nd arg is the input array.
 
-            | Transpose Int Int (ExpBase ty vn) SrcLoc
-            -- ^ If @b=transpose(k,n,a)@, then @a[i_1, ..., i_k
-            -- ,i_{k+1}, ..., i_{k+n}, ..., i_q ] = b[i_1 ,.., i_{k+1}
-            -- , ..., i_{k+n} ,i_k, ..., i_q ]@.  Thus,
-            -- @transpose(0,1,a)@ is the common two-dimensional
-            -- transpose.
+            | Transpose (ExpBase ty vn) SrcLoc
+            -- ^ Transpose two-dimensional array.  @transpose(a) =
+            -- rearrange((1,0), a)@.
 
             | Rearrange [Int] (ExpBase ty vn) SrcLoc
             -- ^ Permute the dimensions of the input array.  The list
@@ -491,7 +488,7 @@ instance Located (ExpBase ty vn) where
   locOf (Size _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
-  locOf (Transpose _ _ _ pos) = locOf pos
+  locOf (Transpose _ pos) = locOf pos
   locOf (Rearrange _ _ pos) = locOf pos
   locOf (Stripe _ _ pos) = locOf pos
   locOf (Unstripe _ _ pos) = locOf pos

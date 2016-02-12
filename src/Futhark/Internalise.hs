@@ -359,11 +359,9 @@ internaliseExp _ (E.Zip (e:es) loc) = do
   where
     postfix i s = baseString i ++ s
 
-internaliseExp _ (E.Transpose k n e _) =
-  internaliseOperation "transpose" e $ \v -> do
-    rank <- I.arrayRank <$> lookupType v
-    let perm = I.transposeIndex k n [0..rank-1]
-    return $ I.Rearrange [] perm v
+internaliseExp _ (E.Transpose e _) =
+  internaliseOperation "transpose" e $ \v ->
+    return $ I.Rearrange [] [1,0] v
 
 internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->

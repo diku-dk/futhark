@@ -370,10 +370,7 @@ Exp  :: { UncheckedExp }
      | unstripe '(' Exp ',' Exp ')'
                       { Unstripe $3 $5 $1 }
 
-     | transpose '(' Exp ')' { Transpose 0 1 $3 $1 }
-
-     | transpose '(' NaturalInt ',' SignedInt ',' Exp ')'
-                      { Transpose $3 $5 $7 $1 }
+     | transpose '(' Exp ')' { Transpose $3 $1 }
 
      | split '(' '(' Exps ')' ',' Exp ')'
                       { Split $4 $7 $1 }
@@ -535,10 +532,6 @@ Value : IntValue { $1 }
 
 CatValues : Value CatValues { $1 : $2 }
           |                 { [] }
-
-SignedInt :: { Int }
-          :     intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }
-          | '-' intlit { let L _ (INTLIT num) = $2 in fromIntegral (-num) }
 
 NaturalInt :: { Int }
            :  intlit { let L _ (INTLIT num) = $1 in fromIntegral num  }

@@ -764,13 +764,11 @@ checkExp (Unstripe strideexp arrexp loc) = do
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Unstripe strideexp' arrexp' loc
 
-checkExp (Transpose k n arrexp pos) = do
+checkExp (Transpose arrexp pos) = do
   arrexp' <- checkExp arrexp
-  when (arrayRank (typeOf arrexp') < reach + 1) $
-    bad $ TypeError pos $ "Argument to transpose does not have " ++
-          show (reach+1) ++ " dimensions."
-  return $ Transpose k n arrexp' pos
-  where reach = max k $ n + k
+  when (arrayRank (typeOf arrexp') /= 2) $
+    bad $ TypeError pos "Argument to transpose is not two-dimensional array."
+  return $ Transpose arrexp' pos
 
 checkExp (Zip arrexps loc) = do
   arrexps' <- mapM (checkExp . fst) arrexps

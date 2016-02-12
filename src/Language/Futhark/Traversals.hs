@@ -131,10 +131,8 @@ mapExpM tv (Replicate nexp vexp loc) =
 mapExpM tv (Reshape shape arrexp loc) =
   pure Reshape <*> mapM (mapOnExp tv) shape <*>
                    mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Transpose k n e3 loc) =
-  pure Transpose <*>
-       pure k <*> pure n <*>
-       mapOnExp tv e3 <*> pure loc
+mapExpM tv (Transpose e loc) =
+  Transpose <$> mapOnExp tv e <*> pure loc
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Stripe stride e loc) =
