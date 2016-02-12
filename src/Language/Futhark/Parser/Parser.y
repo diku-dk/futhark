@@ -5,11 +5,6 @@ module Language.Futhark.Parser.Parser
   , expression
   , lambda
   , futharktype
-  , boolValue
-  , charValue
-  , stringValue
-  , arrayValue
-  , tupleValue
   , anyValue
   , anyValues
   , ParserEnv (..)
@@ -43,11 +38,6 @@ import Language.Futhark.Parser.Lexer
 %name expression Exp
 %name lambda FunAbstr
 %name futharktype Type
-%name boolValue BoolValue
-%name charValue CharValue
-%name stringValue StringValue
-%name arrayValue ArrayValue
-%name tupleValue TupleValue
 %name anyValue Value
 %name anyValues CatValues
 
