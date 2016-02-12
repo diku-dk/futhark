@@ -5,11 +5,6 @@ module Language.Futhark.Parser
   , parseType
   , parseLambda
 
-  , parseBool
-  , parseChar
-  , parseString
-  , parseArray
-  , parseTuple
   , parseValue
   , parseValues
 
@@ -115,36 +110,6 @@ parseType = parse futharktype
 parseLambda :: RealConfiguration -> FilePath -> String
             -> Either ParseError UncheckedLambda
 parseLambda = parse lambda
-
--- | Parse a boolean Futhark syntax from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseBool :: RealConfiguration -> FilePath -> String
-          -> Either ParseError Value
-parseBool = parse boolValue
-
--- | Parse a character in Futhark syntax from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseChar :: RealConfiguration -> FilePath -> String
-          -> Either ParseError Value
-parseChar = parse charValue
-
--- | Parse a string in Futhark syntax from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseString :: RealConfiguration -> FilePath -> String
-            -> Either ParseError Value
-parseString = parse stringValue
-
--- | Parse a tuple in Futhark syntax from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseTuple :: RealConfiguration -> FilePath -> String
-           -> Either ParseError Value
-parseTuple = parse tupleValue
-
--- | Parse an array in Futhark syntax from the given 'String', using the
--- 'FilePath' as the source name for error messages.
-parseArray :: RealConfiguration -> FilePath -> String
-           -> Either ParseError Value
-parseArray = parse arrayValue
 
 -- | Parse any Futhark value from the given 'String', using the 'FilePath'
 -- as the source name for error messages.
