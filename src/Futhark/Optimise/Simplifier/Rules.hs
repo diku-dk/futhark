@@ -49,7 +49,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyUnOp
                , letRule simplifyConvOp
                , letRule simplifyAssert
-               , letRule simplifyIndex
+               , simplifyIndex
                , letRule copyScratchToScratch
                , simplifyIndexIntoReshape
                , simplifyIndexIntoSplit
@@ -446,19 +446,26 @@ simplifyAssert _ _ (Assert (Constant (BoolValue True)) _) =
 simplifyAssert _ _ _ =
   Nothing
 
-simplifyIndex :: LetTopDownRule lore u
-simplifyIndex defOf seType (Index cs idd inds) =
+simplifyIndex :: MonadBinder m => TopDownRule m
+simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds))) =
   case simplifyIndexing defOf seType idd inds False of
     Just (SubExpResult se) ->
-      Just $ SubExp se
+      letBind_ pat $ PrimOp $ SubExp se
     Just (IndexResult extra_cs idd' inds') ->
-      Just $ Index (cs++extra_cs) idd' inds'
+      letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
+    Just (ScalExpResult se) ->
+      letBind_ pat =<< SE.fromScalExp se
     Nothing ->
-      Nothing
-simplifyIndex _ _ _ = Nothing
+      cannotSimplify
+  where defOf = (`ST.lookupExp` vtable)
+        seType (Var v) = ST.lookupType v vtable
+        seType (Constant v) = Just $ Prim $ primValueType v
+
+simplifyIndex _ _ = cannotSimplify
 
 data IndexResult = IndexResult Certificates VName [SubExp]
                  | SubExpResult SubExp
+                 | ScalExpResult SE.ScalExp
 
 simplifyIndexing :: VarLookup lore -> TypeLookup
                  -> VName -> [SubExp] -> Bool
@@ -469,8 +476,14 @@ simplifyIndexing defOf seType idd inds consuming =
 
     Just (SubExp (Var v)) -> Just $ IndexResult [] v inds
 
-    Just (Iota _)
-      | [ii] <- inds -> Just $ SubExpResult ii
+    Just (Iota _ (Constant (IntValue (Int32Value 0))))
+      | [ii] <- inds ->
+          Just $ SubExpResult ii
+
+    Just (Iota _ x)
+      | [ii] <- inds ->
+          Just $ ScalExpResult $
+          SE.intSubExpToScalExp ii + SE.intSubExpToScalExp x
 
     Just (Index cs aa ais) ->
       Just $ IndexResult cs aa (ais ++ inds)

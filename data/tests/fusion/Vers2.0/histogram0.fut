@@ -5,6 +5,9 @@
 -- output {
 --   [100.0,100.0,100.0]
 -- }
+-- structure {
+--   Iota 0
+-- }
 fun *[real,n_histo] main(int n_histo, int n_image) =
   let A = iota(n_image) in
   streamRedPer( fn *[real] ([real] a, [real] b) =>

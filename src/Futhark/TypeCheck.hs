@@ -638,8 +638,9 @@ checkPrimOp (Index cs ident idxes) = do
           (arrayRank vt) (length idxes) noLoc
   mapM_ (require [Prim int32]) idxes
 
-checkPrimOp (Iota e) =
+checkPrimOp (Iota e x) = do
   require [Prim int32] e
+  require [Prim int32] x
 
 checkPrimOp (Replicate countexp valexp) = do
   require [Prim int32] countexp
