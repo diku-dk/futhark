@@ -726,27 +726,28 @@ isMapTransposeKernel bt
   | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk r1 r2 dest_offset src_offset
+    isOk id r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk r1 r2 dest_offset src_offset
+    isOk swap r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
   where bt_size = primByteSize bt
+        swap (x,y) = (y,x)
 
-        isOk r1 r2 dest_offset src_offset = do
+        isOk f r1 r2 dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
           src_offset' <- ImpGen.scalExpToImpExp src_offset
-          let (num_arrays, size_x, size_y) = getSizes r1 r2
+          let (num_arrays, size_x, size_y) = getSizes f r1 r2
           return (dest_offset', src_offset',
                   num_arrays, size_x, size_y)
 
-        getSizes r1 r2 =
+        getSizes f r1 r2 =
           let (mapped, notmapped) =
                 splitAt r1 $ map Imp.sizeToExp srcshape
               (pretrans, posttrans) =
-                splitAt r2 notmapped
+                f $ splitAt r2 notmapped
           in (product mapped, product pretrans, product posttrans)
 
 createAccMem :: Imp.DimSize
