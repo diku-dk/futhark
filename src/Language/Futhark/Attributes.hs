@@ -7,7 +7,6 @@ module Language.Futhark.Attributes
   (
     TypeBox(..)
   , funDecByName
-  , progNames
   , isBuiltInFunction
   , builtInFunctions
 
@@ -777,36 +776,6 @@ lambdaParamDiets CurryBinOpRight{} = [Observe]
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
-
--- | Return the set of all variable names bound in a program.
-progNames :: (Eq vn, Hashable vn) => ProgBase ty vn -> HS.HashSet vn
-progNames = execWriter . mapM funNames . progFunctions
-  where names = identityWalker {
-                  walkOnExp = expNames
-                , walkOnLambda = lambdaNames
-                , walkOnPattern = tell . patNameSet
-                }
-
-        one = tell . HS.singleton . identName
-        funNames (_, _, params, body, _) =
-          mapM_ one params >> expNames body
-
-        expNames e@(LetWith dest _ _ _ _ _) =
-          one dest >> walkExpM names e
-        expNames e@(DoLoop _ _ (For _ _ i _) _ _ _) =
-          one i >> walkExpM names e
-        expNames e@DoLoop{} =
-          walkExpM names e
-        expNames e = walkExpM names e
-
-        lambdaNames (AnonymFun params body _ _) =
-          mapM_ one params >> expNames body
-        lambdaNames (CurryFun _ exps _ _) =
-          mapM_ expNames exps
-        lambdaNames UnOpFun{} = return ()
-        lambdaNames BinOpFun{} = return ()
-        lambdaNames (CurryBinOpLeft _ e _ _ _) = expNames e
-        lambdaNames (CurryBinOpRight _ e _ _ _) = expNames e
 
 -- | Change those subexpressions where evaluation of the expression
 -- would stop.  Also change type annotations at branches.

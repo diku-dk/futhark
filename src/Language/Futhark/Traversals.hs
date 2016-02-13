@@ -1,4 +1,3 @@
------------------------------------------------------------------------------
 -- |
 --
 -- Functions for generic traversals across Futhark syntax trees.  The
@@ -19,11 +18,6 @@
 -- A traversal of the Futhark syntax tree is expressed as a tuple of
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
---
--- The "Futhark.Renamer" and "Futhark.Untrace" modules are simple examples of
--- how to use this facility.
---
------------------------------------------------------------------------------
 module Language.Futhark.Traversals
   (
   -- * Mapping
@@ -32,12 +26,6 @@ module Language.Futhark.Traversals
   , identityMapper
   , mapExpM
   , mapExp
-
-  -- * Folding
-  , Folder(..)
-  , foldExpM
-  , foldExp
-  , identityFolder
 
   -- * Walking
   , Walker(..)
@@ -49,8 +37,6 @@ module Language.Futhark.Traversals
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.Writer
-import Control.Monad.State
 
 import Prelude
 
@@ -204,50 +190,6 @@ mapLoopFormM tv (For FromDownTo lbound i ubound) =
   For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
-
--- | Reification of a left-reduction across a syntax tree.
-data Folder ty vn a m = Folder {
-    foldOnExp :: a -> ExpBase ty vn -> m a
-  , foldOnType :: a -> ty vn -> m a
-  , foldOnLambda :: a -> LambdaBase ty vn -> m a
-  , foldOnPattern :: a -> PatternBase ty vn -> m a
-  , foldOnIdent :: a -> IdentBase ty vn -> m a
-  , foldOnValue :: a -> Value -> m a
-  }
-
--- | A folding operation where the accumulator is returned verbatim.
-identityFolder :: Monad m => Folder ty vn a m
-identityFolder = Folder {
-                   foldOnExp = const . return
-                 , foldOnType = const . return
-                 , foldOnLambda = const . return
-                 , foldOnPattern = const . return
-                 , foldOnIdent = const . return
-                 , foldOnValue = const . return
-                 }
-
--- | Perform a left-reduction across the immediate children of an
--- expression.  Importantly, the 'foldOnExp' action is not invoked for
--- the expression itself, and the reduction does not descend recursively
--- into subexpressions.  The reduction is done left-to-right.
-foldExpM :: (Monad m, Functor m) => Folder ty vn a m -> a -> ExpBase ty vn -> m a
-foldExpM f x e = execStateT (mapExpM m e) x
-  where m = Mapper {
-              mapOnExp = wrap foldOnExp
-            , mapOnType = wrap foldOnType
-            , mapOnLambda = wrap foldOnLambda
-            , mapOnPattern = wrap foldOnPattern
-            , mapOnIdent = wrap foldOnIdent
-            , mapOnValue = wrap foldOnValue
-            }
-        wrap op k = do
-          v <- get
-          put =<< lift (op f v k)
-          return k
-
--- | As 'foldExpM', but in the 'Identity' monad.
-foldExp :: Folder ty vn a Identity -> a -> ExpBase ty vn -> a
-foldExp m x = runIdentity . foldExpM m x
 
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given

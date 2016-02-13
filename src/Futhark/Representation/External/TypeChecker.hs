@@ -8,8 +8,6 @@
 module Futhark.Representation.External.TypeChecker
   ( checkProg
   , checkProgNoUniqueness
-  , checkClosedExp
-  , checkOpenExp
   , TypeError)
   where
 
@@ -30,8 +28,7 @@ import Prelude
 
 import Futhark.Representation.External
 import Futhark.Representation.External.Renamer
-  (tagProg', tagExp, tagExp', tagType',
-   untagProg, untagExp, untagPattern)
+  (tagProg', untagProg, untagExp, untagPattern)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
 import Futhark.TypeCheck.TypeError
@@ -545,39 +542,6 @@ checkFun (fname, rettype, params, body, loc) = do
         returnAliasing (Tuple ets1) (Tuple ets2) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
-
--- | Type-check a single expression without any calls to non-builtin
--- functions.  Free variables are permitted, as long as they are
--- present in the passed-in vtable.
-checkOpenExp :: (TypeBox ty, VarName vn) =>
-                HM.HashMap vn (CompTypeBase vn) -> ExpBase ty vn ->
-                Either (TypeError vn) (ExpBase CompTypeBase vn)
-checkOpenExp bnds e = untagExp <$> runTypeM env namesrc (checkExp e')
-  where env = Scope { envFtable = initialFtable
-                      , envCheckOccurences = True
-                      , envVtable = vtable
-                      }
-        (e', src) = tagExp' blankNameSource e
-
-        (vtable, namesrc) = foldl tagBnd (HM.empty, src) $
-                            HS.toList $ freeNamesInExp e'
-        tagBnd (m, src') k =
-          case HM.lookup (baseName k) bnds of
-            Nothing -> (m, src')
-            Just t  -> let (t', src'') = tagType' src' t
-                       in (HM.insert k (Bound t') m, src'')
-
--- | Type-check a single expression without any free variables or
--- calls to non-builtin functions.
-checkClosedExp :: (TypeBox ty, VarName vn) => ExpBase ty vn ->
-                  Either (TypeError vn) (ExpBase CompTypeBase vn)
-checkClosedExp e = untagExp <$> runTypeM env src (checkExp e')
-  where env = Scope { envFtable = initialFtable
-                      , envCheckOccurences = True
-                      , envVtable = HM.empty
-                      }
-        e' = tagExp e
-        src = newNameSource $ freeNamesInExp e'
 
 checkExp :: (TypeBox ty, VarName vn) =>
              TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn)
