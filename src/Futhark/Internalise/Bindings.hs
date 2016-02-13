@@ -20,7 +20,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Traversable (mapM)
 
-import Futhark.Representation.External as E
+import Language.Futhark as E
 import qualified Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 

@@ -26,7 +26,7 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.DList as DL
 import Data.List
 
-import qualified Futhark.Representation.External as E
+import qualified Language.Futhark as E
 import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
 import Futhark.Tools

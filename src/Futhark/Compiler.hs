@@ -29,7 +29,7 @@ import Futhark.Internalise
 import Futhark.Pipeline
 import Futhark.Actions
 
-import qualified Futhark.Representation.External as E
+import qualified Language.Futhark as E
 import qualified Futhark.Representation.External.TypeChecker as E
 import qualified Futhark.Representation.External.Renamer as E
 
