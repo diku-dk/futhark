@@ -26,7 +26,7 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
-import Futhark.Representation.External
+import Language.Futhark
 import Futhark.Representation.External.Renamer
   (tagProg', untagProg, untagExp, untagPattern)
 import Futhark.FreshNames hiding (newID, newName)

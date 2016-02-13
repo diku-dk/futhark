@@ -21,7 +21,7 @@ import qualified Data.Array as A
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.Representation.External as E
+import Language.Futhark as E
 import Futhark.Representation.SOACS as I
 import Futhark.Internalise.Monad
 

@@ -27,7 +27,7 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
-import Futhark.Representation.External
+import Language.Futhark
 import Futhark.FreshNames
 
 -- | Associate a unique integer with each name in the program, taking

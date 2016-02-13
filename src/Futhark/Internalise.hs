@@ -22,7 +22,7 @@ import Data.Loc
 
 import Prelude hiding (mapM, sequence)
 
-import Futhark.Representation.External as E
+import Language.Futhark as E
 import Futhark.Representation.SOACS as I hiding (bindingPattern)
 import Futhark.Transform.Rename as I
 import Futhark.Transform.Substitute

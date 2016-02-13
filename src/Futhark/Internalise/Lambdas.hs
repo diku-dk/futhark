@@ -14,7 +14,7 @@ import Control.Monad
 import Data.List
 import Data.Loc
 
-import Futhark.Representation.External as E
+import Language.Futhark as E
 import Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 
