@@ -1,26 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
--- | This module provides facilities for transforming Futhark programs such
--- that names are unique, via the 'renameProg' function.
--- Additionally, the module also supports adding integral \"tags\" to
--- names (incarnated as the 'ID' type), in order to support more
--- efficient comparisons and renamings.  This is done by 'tagProg'.
--- The intent is that you call 'tagProg' once at some early stage,
--- then use 'renameProg' from then on.  Functions are also provided
--- for removing the tags again from expressions, patterns and typs.
+-- | This module exports a facility for assigning every name in a
+-- Futhark program a unique integer, thus getting rid of name
+-- shadowing.
 module Futhark.Representation.External.Renamer
   (
-  -- * Renaming programs
-   renameProg
-
   -- * Tagging
-  , tagProg
+    tagProg
   , tagProg'
-  , tagExp
-  , tagExp'
-  , tagType
-  , tagType'
-  , tagLambda
-  , tagLambda'
 
   -- * Untagging
   , untagProg
@@ -44,26 +30,15 @@ import Prelude
 import Futhark.Representation.External
 import Futhark.FreshNames
 
--- | Rename variables such that each is unique.  The semantics of the
--- program are unaffected, under the assumption that the program was
--- correct to begin with.  In particular, the renaming may make an
--- invalid program valid.
-renameProg :: (TypeBox ty, VarName vn) =>
-              ProgBase ty vn -> ProgBase ty vn
-renameProg prog = Prog $ runReader (evalStateT f src) env
-  where env = RenameEnv HM.empty newName
-        src = newNameSourceForProg prog
-        f = mapM renameFun $ progFunctions prog
-
 -- | Associate a unique integer with each name in the program, taking
 -- binding into account, such that the resulting 'VName's are unique.
 -- The semantics of the program are unaffected, under the assumption
 -- that the program was correct to begin with.
 tagProg :: (TypeBox ty, VarName vn) =>
-           ProgBase ty vn -> ProgBase ty (ID vn)
-tagProg prog = Prog $ runReader (evalStateT f blankNameSource) env
+           ProgBase ty vn -> (ProgBase ty (ID vn), NameSource (ID vn))
+tagProg prog = runReader (runStateT f blankNameSource) env
   where env = RenameEnv HM.empty newID
-        f = mapM renameFun $ progFunctions prog
+        f = Prog <$> mapM renameFun (progFunctions prog)
 
 -- | As 'tagProg', but accepts an initial name source and returns the
 -- resulting one.
@@ -73,43 +48,6 @@ tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
                     in (Prog funs, src')
   where env = RenameEnv HM.empty newID
         f = mapM renameFun $ progFunctions prog
-
--- | As 'tagExp', but accepts an initial name source and returns the
--- new one.
-tagExp' :: (TypeBox ty, VarName vn) =>
-           NameSource (ID vn) -> ExpBase ty vn -> (ExpBase ty (ID vn), NameSource (ID vn))
-tagExp' src e = runReader (runStateT (renameExp e) src) env
-  where env = RenameEnv HM.empty newID
-
--- | As 'tagProg', but for expressions.
-tagExp :: (TypeBox ty, VarName vn) =>
-           ExpBase ty vn -> ExpBase ty (ID vn)
-tagExp = fst . tagExp' blankNameSource
-
--- | As 'tagType', but accepts an initial name source and returns the
--- new one.
-tagType' :: (TypeBox ty, VarName vn) =>
-            NameSource (ID vn) -> ty vn -> (ty (ID vn), NameSource (ID vn))
-tagType' src t = runReader (runStateT (renameType t) src) env
-  where env = RenameEnv HM.empty newID
-
--- | As 'tagProg', but for types.
-tagType :: (TypeBox ty, VarName vn) =>
-           ty vn -> ty (ID vn)
-tagType = fst . tagType' blankNameSource
-
--- | As 'tagLambda', but accepts an initial name source and returns
--- the new one.
-tagLambda' :: (TypeBox ty, VarName vn) =>
-            NameSource (ID vn) -> LambdaBase ty vn
-         -> (LambdaBase ty (ID vn), NameSource (ID vn))
-tagLambda' src t = runReader (runStateT (renameLambda t) src) env
-  where env = RenameEnv HM.empty newID
-
--- | As 'tagProg', but for anonymous functions.
-tagLambda :: (TypeBox ty, VarName vn) =>
-             LambdaBase ty vn -> LambdaBase ty (ID vn)
-tagLambda = fst . tagLambda' blankNameSource
 
 -- | Remove tags from a program.  Note that this is potentially
 -- semantics-changing if the underlying names are not each unique.

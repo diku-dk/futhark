@@ -7,9 +7,6 @@ module Futhark.Representation.External
   , module Language.Futhark.Pretty
   , module Language.Futhark.Traversals
 
-  -- * Name generation
-  , newNameSourceForProg
-
   -- * Type aliases
   --
   -- | These types contain full type information and use tagged
@@ -31,13 +28,6 @@ import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Pretty
 import Language.Futhark.Traversals
-
-import Futhark.FreshNames
-
--- | Create a new 'NameSource' that will never produce any of the
--- names used as variables in the given program.
-newNameSourceForProg :: VarName vn => ProgBase ty vn -> NameSource vn
-newNameSourceForProg = newNameSource . progNames
 
 -- | An identifier with type- and aliasing information information.
 type Ident = IdentBase (TypeBase Rank Names) VName
