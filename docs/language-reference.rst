@@ -47,7 +47,7 @@ the function, e.g::
 
 The above declaration specifies a function that takes an array
 containing ``n`` elements and returns an array likewise containing
-``n`z elements.  In general, shape declarations in parameters are
+``n`` elements.  In general, shape declarations in parameters are
 fresh names, whilst shape declarations in return types must refer to a
 name of type ``i32`` in scope.  A shape declaration can also be an
 integer constant (with no suffix).
