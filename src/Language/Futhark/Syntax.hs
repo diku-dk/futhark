@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 -- | This Is an ever-changing abstract syntax for Futhark.  Some types,
 -- such as @Exp@, are parametrised by type and name representation.
--- See the @doc/@ subdirectory in the Futhark repository for a language
+-- See the @docs/@ subdirectory in the Futhark repository for a language
 -- reference, or this module may be a little hard to understand.
 module Language.Futhark.Syntax
   (
@@ -170,7 +170,7 @@ instance Ord (shape vn) =>
 -- | An array type.
 data ArrayTypeBase shape as vn =
     PrimArray PrimType (shape vn) Uniqueness (as vn)
-    -- ^ An array whose elements are prim elements.
+    -- ^ An array whose elements are primitive types.
   | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
@@ -310,12 +310,10 @@ data BinOp = Plus -- Binary Ops for Numbers
            | Geq
              deriving (Eq, Ord, Show, Enum, Bounded)
 
--- | Futhark Expression Language: literals + vars + int binops + array
--- constructors + array combinators (SOAC) + if + function calls +
--- let + tuples (literals & identifiers)
+-- | The Futhark expression language.
 --
--- In a value of type @Exp tt@, all 'Type' values are kept as @tt@
--- values.
+-- In a value of type @Exp tt vn@, all 'Type' values are kept as @tt@
+-- values, and all (variable) names are of type @vn@.
 --
 -- This allows us to encode whether or not the expression has been
 -- type-checked in the Haskell type of the expression.  Specifically,
@@ -349,10 +347,7 @@ data ExpBase ty vn =
               (ExpBase ty vn) -- Let-body.
               SrcLoc
 
-            -- Scalar operations
             | BinOp BinOp (ExpBase ty vn) (ExpBase ty vn) (ty vn) SrcLoc
-
-            -- Unary Ops: Not for bools and Negate for ints
             | UnOp UnOp (ExpBase ty vn) SrcLoc
 
             -- Primitive array operations
