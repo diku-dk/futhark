@@ -554,6 +554,15 @@ allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
             Mem size shape ->
               return inp { kernelInputParam = Param (kernelInputName inp) $ MemMem size shape }
 
+allocInExp (Op (ChunkedMapKernel cs w size lam arrs)) = do
+  arr_summaries <- mapM lookupMemBound arrs
+  lam' <- allocInFoldLambda
+          Noncommutative
+          (kernelElementsPerThread size)
+          (kernelNumThreads size)
+          lam arr_summaries
+  return $ Op $ Inner $ ChunkedMapKernel cs w size lam' arrs
+
 allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam nes arrs)) = do
   arr_summaries <- mapM lookupMemBound arrs
   fold_lam' <- allocInFoldLambda

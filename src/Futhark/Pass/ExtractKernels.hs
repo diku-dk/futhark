@@ -280,11 +280,22 @@ transformBinding (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
     transformBindings [mapbnd, redbnd]
       where sequentialiseRedomapBody = True
 
+transformBinding (Let res_pat () (Op (Reduce cs w comm red_fun red_input)))
+  | Just do_irwim <- irwim res_pat cs w comm red_fun red_input = do
+      types <- asksScope scopeForSOACs
+      bnds <- snd <$> runBinderT do_irwim types
+      transformBindings bnds
+
 transformBinding (Let pat () (Op (Reduce cs w comm red_fun red_input))) = do
   red_fun_sequential <- FOT.transformLambda red_fun
   red_fun_sequential' <- renameLambda red_fun_sequential
   blockedReduction pat cs w comm red_fun_sequential' red_fun_sequential nes arrs
   where (nes, arrs) = unzip red_input
+
+transformBinding (Let res_pat () (Op (Scan cs w scan_fun scan_input)))
+  | Just do_iswim <- iswim res_pat cs w scan_fun scan_input = do
+      types <- asksScope scopeForSOACs
+      transformBindings =<< (snd <$> runBinderT do_iswim types)
 
 transformBinding (Let pat () (Op (Scan cs w fun input))) = do
   fun_sequential <- FOT.transformLambda fun
@@ -292,6 +303,30 @@ transformBinding (Let pat () (Op (Scan cs w fun input))) = do
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
+
+transformBinding (Let pat () (Op (Stream cs w
+                                  (RedLike _ comm red_fun nes) fold_fun arrs)))
+  | any (not . primType) $ lambdaReturnType red_fun,
+    Just fold_fun' <- extLambdaToLambda fold_fun  = do
+  -- Split into a chunked map and a reduction, with the latter
+  -- distributed.
+
+  fold_fun_sequential <- FOT.transformLambda fold_fun'
+
+  let (red_pat_elems, concat_pat_elems) =
+        splitAt (length nes) $ patternValueElements pat
+      red_pat = Pattern [] red_pat_elems
+      concat_pat = Pattern [] concat_pat_elems
+
+  (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w fold_fun_sequential nes arrs
+  let num_threads = arraysSize 0 $ patternTypes $ bindingPattern map_bnd
+      red_input = zip nes $ patternNames $ bindingPattern map_bnd
+
+  ((map_misc_bnds++[map_bnd])++) <$>
+    inScopeOf (map_misc_bnds++[map_bnd])
+    (transformBinding $ Let red_pat () $
+     Op (Reduce cs num_threads comm red_fun red_input))
+
 transformBinding (Let pat () (Op (Stream cs w
                                   (RedLike _ comm red_fun nes) fold_fun arrs)))
   | Just fold_fun' <- extLambdaToLambda fold_fun = do
@@ -313,12 +348,6 @@ transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   types <- asksScope scopeForSOACs
   transformBindings =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
-
-transformBinding (Let res_pat () (Op op))
-  | Scan cs w scan_fun scan_input <- op,
-    Just do_iswim <- iswim res_pat cs w scan_fun scan_input = do
-      types <- asksScope scopeForSOACs
-      transformBindings =<< (snd <$> runBinderT do_iswim types)
 
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd

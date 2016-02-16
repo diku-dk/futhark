@@ -3,8 +3,11 @@
 module Futhark.Pass.ExtractKernels.BlockedKernel
        ( blockedReduction
        , blockedReductionStream
+       , blockedMap
        , blockedScan
        , blockedSegmentedScan
+
+       , kerneliseLambda
        )
        where
 
@@ -42,25 +45,10 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
                   ((++) <$>
                    mapM (mkIntermediateIdent num_chunks) acc_idents <*>
                    pure arr_idents)
-  let (fold_chunk_param, fold_acc_params, fold_inp_params) =
+  let (_fold_chunk_param, fold_acc_params, _fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams fold_lam
 
-  -- We need to play some tricks to ensure that @lambdaIndex fold_lam@
-  -- has the right value inside the chunk loop.
-  loop_iterator <- newVName "i"
-  let compute_index =
-        mkLet' [] [Ident (lambdaIndex fold_lam) $ Prim int32] $
-        PrimOp $ BinOp (Mul Int32) (Var loop_iterator) (kernelElementsPerThread step_one_size)
-      mkAccInit p (Var v) = mkLet' [] [paramIdent p] $ PrimOp $ Copy v
-      mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
-      acc_init_bnds = zipWith mkAccInit fold_acc_params nes
-      fold_lam' =
-        fold_lam { lambdaIndex = loop_iterator
-                 , lambdaBody = insertBinding compute_index $
-                                insertBindings acc_init_bnds $
-                                lambdaBody fold_lam
-                 , lambdaParams = fold_chunk_param : fold_inp_params
-                 }
+  fold_lam' <- kerneliseLambda (kernelElementsPerThread step_one_size) nes fold_lam
 
   other_index <- newVName "other_index"
   let other_index_param = Param other_index (Prim int32)
@@ -161,6 +149,31 @@ chunkLambda pat nes fold_lam = do
           newParam (baseString (paramName arr_param) <> "_chunk") $
             arrayOfRow (paramType arr_param) chunk_size
 
+-- | Given a chunked fold lambda that takes its initial accumulator
+-- value as parameters, bind those parameters to the neutral element
+-- instead.  Also fix the index computation.
+kerneliseLambda :: MonadFreshNames m =>
+                   SubExp -> [SubExp] -> Lambda -> m Lambda
+kerneliseLambda elements_per_thread nes lam = do
+  -- We need to play some tricks to ensure that @lambdaIndex lam@
+  -- has the right value inside the chunk loop.
+  loop_iterator <- newVName "i"
+  let compute_index =
+        mkLet' [] [Ident (lambdaIndex lam) $ Prim int32] $
+        PrimOp $ BinOp (Mul Int32) (Var loop_iterator) elements_per_thread
+      (fold_chunk_param, fold_acc_params, fold_inp_params) =
+        partitionChunkedFoldParameters (length nes) $ lambdaParams lam
+
+      mkAccInit p (Var v) = mkLet' [] [paramIdent p] $ PrimOp $ Copy v
+      mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
+      acc_init_bnds = zipWith mkAccInit fold_acc_params nes
+  return lam { lambdaIndex = loop_iterator
+             , lambdaBody = insertBinding compute_index $
+                            insertBindings acc_init_bnds $
+                            lambdaBody lam
+             , lambdaParams = fold_chunk_param : fold_inp_params
+             }
+
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
                     Pattern
                  -> Certificates -> SubExp
@@ -180,6 +193,25 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   mapM_ addBinding =<<
     blockedReductionStream pat cs w comm reduce_lam fold_lam' nes
     (arrs ++ map_out_arrs)
+
+blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
+              Pattern -> Certificates -> SubExp -> Lambda -> [SubExp] -> [VName]
+           -> m (Binding, [Binding])
+blockedMap concat_pat cs w lam nes arrs = runBinder $ do
+  kernel_size <- blockedKernelSize w
+
+  let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
+
+  nonconcat_pat <-
+    fmap (Pattern []) $ forM (take num_nonconcat $ lambdaReturnType lam) $ \t -> do
+      name <- newVName "nonconcat"
+      return $ PatElem name BindVar $ t `arrayOfRow` kernelNumThreads kernel_size
+
+  let pat = nonconcat_pat <> concat_pat
+
+  lam' <- kerneliseLambda (kernelElementsPerThread kernel_size) nes lam
+
+  return $ Let pat () $ Op $ ChunkedMapKernel cs w kernel_size lam' arrs
 
 blockedKernelSize :: MonadBinder m =>
                      SubExp -> m KernelSize
