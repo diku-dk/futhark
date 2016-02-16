@@ -15,6 +15,7 @@ module Futhark.Representation.Kernels.Kernel
        , kernelInputIdent
        , KernelSize(..)
        , ScanKernelOrder(..)
+       , chunkedKernelNonconcatOutputs
 
        , typeCheckKernel
 
@@ -53,6 +54,7 @@ import Futhark.Representation.Aliases
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
+import Futhark.Tools (partitionChunkedLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
 
 data Kernel lore =
@@ -70,6 +72,10 @@ data Kernel lore =
     ScanKernelOrder
     (LambdaT lore)
     [(SubExp, VName)]
+  | ChunkedMapKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    [VName]
     deriving (Eq, Show, Ord)
 
 data KernelInput lore = KernelInput { kernelInputParam :: LParam lore
@@ -161,6 +167,13 @@ mapKernelM tv (ScanKernel cs w kernel_size order fun input) =
   (zip <$> mapM (mapOnKernelSubExp tv) nes <*>
    mapM (mapOnKernelVName tv) arrs)
   where (nes, arrs) = unzip input
+mapKernelM tv (ChunkedMapKernel cs w kernel_size fun arrs) =
+  ChunkedMapKernel <$>
+  mapOnKernelCertificates tv cs <*>
+  mapOnKernelSubExp tv w <*>
+  mapOnKernelSize tv kernel_size <*>
+  mapOnKernelLambda tv fun <*>
+  mapM (mapOnKernelVName tv) arrs
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -265,6 +278,17 @@ kernelType (ScanKernel _ w size _ lam _) =
   map ((`arrayOfRow` kernelWorkgroups size) .
        (`arrayOfRow` kernelWorkgroupSize size))
   (lambdaReturnType lam)
+kernelType (ChunkedMapKernel _ _ size fun _) =
+  map (`arrayOfRow` kernelNumThreads size) nonconcat_ret <>
+  map (`setOuterSize` kernelTotalElements size) concat_ret
+  where (nonconcat_ret, concat_ret) =
+          splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
+
+chunkedKernelNonconcatOutputs :: Lambda lore -> Int
+chunkedKernelNonconcatOutputs fun =
+  length $ takeWhile (not . outerSizeIsChunk) $ lambdaReturnType fun
+  where outerSizeIsChunk = (==Var (paramName chunk)) . arraySize 0
+        (chunk, _) = partitionChunkedLambdaParameters $ lambdaParams fun
 
 instance Attributes lore => TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType
@@ -323,6 +347,8 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ fun input) =
     usageInLambda fun arrs
     where arrs = map snd input
+  usageInOp (ChunkedMapKernel _ _ _ fun arrs) =
+    usageInLambda fun arrs
   usageInOp (MapKernel _ _ _ _ inps _ body) =
     mconcat $
     map (UT.consumedUsage . kernelInputArray) $
@@ -430,6 +456,24 @@ typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
+typeCheckKernel (ChunkedMapKernel cs w kernel_size fun arrs) = do
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
+  typeCheckKernelSize kernel_size
+
+  arrargs <- TC.checkSOACArrayArgs w arrs
+
+  case lambdaParams fun of
+    [] -> TC.bad $ TC.TypeError noLoc "Chunked map function takes no parameters."
+    chunk_param : _
+      | Prim (IntType Int32) <- paramType chunk_param -> do
+          let args = (Prim int32, mempty) :
+                     [ (t `arrayOfRow` Var (paramName chunk_param), als)
+                     | (t, als) <- arrargs ]
+          TC.checkLambda fun args
+      | otherwise ->
+          TC.bad $ TC.TypeError noLoc "First parameter of chunked map function is not int32-typed."
+
 typeCheckKernelSize :: TC.Checkable lore =>
                        KernelSize -> TC.TypeM lore ()
 typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
@@ -468,6 +512,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
   opMetrics (ScanKernel _ _ _ _ lam _) =
     inside "ScanKernel" $ lambdaMetrics lam
+  opMetrics (ChunkedMapKernel _ _ _ fun _) =
+    inside "ChunkedMapKernel" $ lambdaMetrics fun
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (MapKernel cs w index ispace inps returns body) =
@@ -500,6 +546,12 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr as) </>
             ppr fun)
     where (es, as) = unzip input
+  ppr (ChunkedMapKernel cs w kernel_size fun arrs) =
+    ppCertificates' cs <> text "chunkedMapKernel" <>
+    parens (ppr w <> comma </>
+            ppr kernel_size <> comma </>
+            commasep (map ppr arrs) </>
+            ppr fun)
 
 instance Pretty KernelSize where
   ppr (KernelSize

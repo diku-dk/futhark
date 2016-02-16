@@ -111,6 +111,92 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
+  (ChunkedMapKernel _ _ kernel_size lam _) = do
+    local_id <- newVName "local_id"
+    group_id <- newVName "group_id"
+
+    (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
+      compileKernelSize kernel_size
+
+    let num_nonconcat = chunkedKernelNonconcatOutputs lam
+        (nonconcat_targets, concat_targets) = splitAt num_nonconcat dest
+        (arr_chunk_param, _) =
+          partitionChunkedLambdaParameters $ lambdaParams lam
+
+    (call_with_prologue, prologue) <-
+      makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
+      ImpGen.withPrimVar local_id int32 $
+      ImpGen.declaringPrimVar local_id int32 $
+      ImpGen.declaringPrimVar group_id int32 $
+      ImpGen.declaringPrimVar (lambdaIndex lam) int32 $
+      ImpGen.declaringLParams (lambdaParams lam) $ do
+
+        ImpGen.emit $
+          Imp.Op (Imp.GetLocalId local_id 0) <>
+          Imp.Op (Imp.GetGroupId group_id 0) <>
+          Imp.Op (Imp.GetGlobalId (lambdaIndex lam) 0)
+
+        let indexNonconcatTarget (Prim t) (ImpGen.ArrayDestination
+                                           (ImpGen.CopyIntoMemory dest_loc) [_]) = do
+              (mem, space, offset) <-
+                ImpGen.fullyIndexArray' dest_loc [ImpGen.varIndex (lambdaIndex lam)] t
+              return $ ImpGen.ArrayElemDestination mem t space offset
+            indexNonconcatTarget _ (ImpGen.ArrayDestination
+                                    (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.sliceArray dest_loc
+                              [ImpGen.varIndex (lambdaIndex lam)]
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') dest_dims
+            indexNonconcatTarget _ _ =
+              throwError "indexNonconcatTarget: invalid target."
+            indexConcatTarget (ImpGen.ArrayDestination
+                               (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.offsetArray dest_loc $
+                              ImpGen.sizeToScalExp per_thread_chunk *
+                              ImpGen.varIndex (lambdaIndex lam)
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                Nothing : dest_dims
+            indexConcatTarget _ =
+              throwError "indexConcatTarget: invalid target."
+        nonconcat_elem_targets <-
+          zipWithM indexNonconcatTarget (lambdaReturnType lam) nonconcat_targets
+        concat_elem_targets <- mapM indexConcatTarget concat_targets
+
+        let map_dest =
+              ImpGen.Destination $ nonconcat_elem_targets <> concat_elem_targets
+
+        map_op <-
+          ImpGen.subImpM_ inKernelOperations $ do
+            computeThreadChunkSize
+              Noncommutative
+              (Imp.ScalarVar $ lambdaIndex lam)
+              (Imp.innerExp $ Imp.dimSizeToExp num_threads)
+              (ImpGen.dimSizeToExp per_thread_chunk)
+              (ImpGen.dimSizeToExp num_elements) $
+              paramName arr_chunk_param
+            ImpGen.compileBody map_dest $ lambdaBody lam
+
+        let bound_in_kernel = map paramName (lambdaParams lam) ++
+                              [lambdaIndex lam,
+                               local_id,
+                               group_id]
+
+        return $ \prologue -> do
+          let body = mconcat [prologue, map_op]
+
+          uses <- computeKernelUses dest (freeIn body) bound_in_kernel
+
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+            { Imp.kernelBody = body
+            , Imp.kernelLocalMemory = mempty
+            , Imp.kernelUses = uses
+            , Imp.kernelNumGroups = num_groups
+            , Imp.kernelGroupSize = group_size
+            , Imp.kernelName = lambdaIndex lam
+            }
+    call_with_prologue prologue
+
+kernelCompiler
+  (ImpGen.Destination dest)
   (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam nes _) = do
 
     local_id <- newVName "local_id"

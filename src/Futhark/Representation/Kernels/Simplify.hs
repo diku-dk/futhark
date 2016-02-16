@@ -89,6 +89,14 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     lam' <- Engine.simplifyLambda lam w' (Just nes) $ map Just arrs'
     return $ ScanKernel cs' w' kernel_size' order lam' $ zip nes' arrs'
 
+  simplifyOp (ChunkedMapKernel cs w kernel_size lam arrs) = do
+    cs' <- Engine.simplify cs
+    w' <- Engine.simplify w
+    kernel_size' <- Engine.simplify kernel_size
+    arrs' <- mapM Engine.simplify arrs
+    lam' <- Engine.simplifyLambda lam w' Nothing $ map Just arrs'
+    return $ ChunkedMapKernel cs' w' kernel_size' lam' arrs'
+
 simplifyKernelInput :: Engine.MonadEngine m =>
                        KernelInput (Engine.InnerLore m) -> m (KernelInput (Lore m))
 simplifyKernelInput (KernelInput param arr is) = do

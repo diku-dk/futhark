@@ -63,6 +63,21 @@ transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
   where bound_before_body =
           HS.fromList $ map fst ispace ++ map kernelInputName inps
 
+transformExp (Op (Inner (ChunkedMapKernel cs w kernel_size lam arrs)))
+  -- Extract allocations from the lambda.
+  | Right (lam_body', lam_thread_allocs) <-
+      extractKernelAllocations bound_in_lam $ lambdaBody lam = do
+
+  (alloc_bnds, alloc_offsets) <-
+    expandedAllocations num_threads (lambdaIndex lam) lam_thread_allocs
+
+  let lam_body'' = offsetMemoryInBody alloc_offsets lam_body'
+      lam' = lam { lambdaBody = lam_body'' }
+  return (alloc_bnds,
+          Op $ Inner $ ChunkedMapKernel cs w kernel_size lam' arrs)
+  where num_threads = kernelNumThreads kernel_size
+        bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
+
 transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam nes arrs)))
   -- Extract allocations from the lambdas.
   | Right (red_lam_body', red_lam_thread_allocs) <-
