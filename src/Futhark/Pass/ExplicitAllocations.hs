@@ -577,7 +577,7 @@ allocInExp e = mapExpM alloc e
                          , mapOnRetType = return . memoryInRetType
                          , mapOnFParam = fail "Unhandled FParam in ExplicitAllocations"
                          , mapOnOp = \op ->
-                             fail $ "Unhandled Op in ExplicitAllocations: " ++ pretty op
+                             fail $ "Unhandled Op in ExplicitAllocations:\n" ++ pretty op
                          }
 
 allocInFoldLambda :: Commutativity
