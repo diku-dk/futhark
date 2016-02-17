@@ -100,7 +100,6 @@ data Token = IF
            | CONCAT
            | FILTER
            | PARTITION
-           | REDOMAP
            | TRUE
            | FALSE
            | TILDE

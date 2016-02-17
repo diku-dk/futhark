@@ -419,10 +419,6 @@ data ExpBase ty vn =
             -- has returned 'True'.  The @n+1@th array contains those
             -- elements for which no function returns 'True'.
 
-            | Redomap Commutativity (LambdaBase ty vn) (LambdaBase ty vn) (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-             -- ^ @redomap(g, f, n, a) = reduce(g, n, map(f, a))@.
-             -- 5th arg is the row type of the input  array.
-
             | Stream (StreamForm ty vn) (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
             -- ^ Streaming: intuitively, this gives a size-parameterized
             -- composition for SOACs that cannot be fused, e.g., due to scan.
@@ -492,7 +488,6 @@ instance Located (ExpBase ty vn) where
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
   locOf (Partition _ _ pos) = locOf pos
-  locOf (Redomap _ _ _ _ _ pos) = locOf pos
   locOf (Split _ _ pos) = locOf pos
   locOf (Concat _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos

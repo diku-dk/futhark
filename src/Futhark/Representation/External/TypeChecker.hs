@@ -806,20 +806,6 @@ checkExp (Partition funs arrexp pos) = do
 
   return $ Partition funs' arrexp' pos
 
-checkExp (Redomap comm outerfun innerfun accexp arrexp pos) = do
-  (accexp', accarg) <- checkArg accexp
-  (arrexp', arrarg@(rt, _, _)) <- checkSOACArrayArg arrexp
-  (outerfun', _) <- checkLambdaArg outerfun [accarg, accarg]
-  innerfun' <- checkLambda innerfun [accarg, arrarg]
-  let redtype = lambdaType innerfun' [typeOf accexp', rt]
-  if argType accarg == redtype
-  then return $ Redomap comm outerfun' innerfun' accexp' arrexp' pos
-  else case redtype of
-         Tuple (acctp:_) -> do
-             _ <- require [acctp] accexp'
-             return $ Redomap comm outerfun' innerfun' accexp' arrexp' pos
-         _ -> bad $ TypeError pos "Redomap with illegal reduce type."
-
 checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr pos) = do
   let isArrayType arrtp =
         case arrtp of
@@ -1191,14 +1177,6 @@ checkArg :: (TypeBox ty, VarName vn) =>
             TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
 checkArg arg = do (arg', dflow) <- collectDataflow $ checkExp arg
                   return (arg', (typeOf arg', dflow, srclocOf arg'))
-
-checkLambdaArg :: (TypeBox ty, VarName vn) =>
-                  TaggedLambda ty vn -> [Arg vn]
-               -> TypeM vn (TaggedLambda CompTypeBase vn, Arg vn)
-checkLambdaArg lam args = do
-  (lam', dflow) <- collectDataflow $ checkLambda lam args
-  let lamt = lambdaType lam' $ map argType args
-  return (lam', (lamt, dflow, srclocOf lam'))
 
 checkFuncall :: VarName vn =>
                 Maybe Name -> SrcLoc

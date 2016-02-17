@@ -135,7 +135,6 @@ keyword s =
     "concat"       -> CONCAT
     "filter"       -> FILTER
     "partition"    -> PARTITION
-    "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY
     "while"        -> WHILE
