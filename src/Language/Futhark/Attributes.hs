@@ -661,17 +661,6 @@ typeOf (Filter _ arr _) =
   typeOf arr
 typeOf (Partition funs arr _) =
   Tuple $ replicate (length funs + 1) $ typeOf arr
-typeOf (Redomap _ _ innerfun start arr _) =
-  let acc_tp = typeOf start
-      res_el_tp = removeShapeAnnotations $
-                  lambdaType innerfun [typeOf start, rowType $ typeOf arr] `setUniqueness`
-                  Unique
-  in  if res_el_tp == acc_tp
-      then res_el_tp
-      else case res_el_tp of
-             Tuple [_,el_tp] ->
-                 Tuple [acc_tp, arrayType 1 el_tp Unique]
-             _ -> acc_tp -- NOT reachable
 typeOf (Stream form lam arr _) =
   case form of
     MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf arr]

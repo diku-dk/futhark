@@ -140,7 +140,6 @@ import Language.Futhark.Parser.Lexer
       concat          { L $$ CONCAT }
       filter          { L $$ FILTER }
       partition       { L $$ PARTITION }
-      redomap         { L $$ REDOMAP }
       true            { L $$ TRUE }
       false           { L $$ FALSE }
       '~'             { L $$ TILDE }
@@ -401,9 +400,6 @@ Exp  :: { UncheckedExp }
 
      | partition '(' FunAbstrsThenExp ')'
                       { Partition (fst $3) (snd $3) $1 }
-
-     | redomap '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                      { Redomap (commutativity $3) $3 $5 $7 $9 $1 }
 
      | zipWith '(' FunAbstr ',' Exps2 ')'
                       { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }

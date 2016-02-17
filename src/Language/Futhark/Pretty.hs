@@ -205,7 +205,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
                         Map{} -> True
                         Reduce{} -> True
                         Filter{} -> True
-                        Redomap{} -> True
                         Scan{} -> True
                         DoLoop{} -> True
                         LetPat{} -> True
@@ -244,10 +243,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
-  pprPrec _ (Redomap Commutative redlam maplam e a _) =
-    ppSOAC "redomapComm" [redlam, maplam] [e, a]
-  pprPrec _ (Redomap Noncommutative redlam maplam e a _) =
-    ppSOAC "redomap" [redlam, maplam] [e, a]
   pprPrec _ (Stream form lam arr _) =
     case form of
       MapLike o ->

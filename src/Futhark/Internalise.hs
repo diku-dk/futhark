@@ -503,21 +503,6 @@ internaliseExp desc (E.Partition lams arr _) = do
       I.identName partition_perm
   where n = length lams + 1
 
-internaliseExp desc (E.Redomap comm lam1 lam2 ne arrs _) = do
-  arrs' <- internaliseExpToVars "redomap_arr" arrs
-  nes <- internaliseExp "redomap_ne" ne
-  acc_tps <- mapM I.subExpType nes
-  outersize <- arraysSize 0 <$> mapM lookupType arrs'
-  let acc_arr_tps = [ I.arrayOf t (Shape [outersize]) NoUniqueness
-                    | t <- acc_tps ]
-  nests <- mapM I.subExpType nes
-  lam1' <- internaliseFoldLambda internaliseLambda asserting lam1 nests acc_arr_tps
-  lam2' <- internaliseRedomapInnerLambda internaliseLambda asserting lam2
-           nes (map I.Var arrs')
-  w <- arraysSize 0 <$> mapM lookupType arrs'
-  letTupExp' desc $ I.Op $
-    I.Redomap [] w comm lam1' lam2' nes arrs'
-
 internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos) arr _) = do
   arrs' <- internaliseExpToVars "stream_arr" arr
   accs' <- case form of
