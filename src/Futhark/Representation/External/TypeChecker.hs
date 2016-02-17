@@ -762,12 +762,6 @@ checkExp (Map fun arrexp pos) = do
   fun' <- checkLambda fun [arg]
   return (Map fun' arrexp' pos)
 
-checkExp (ConcatMap fun arrexp arrexps pos) = do
-  (arrexp', arg) <- checkArg arrexp
-  (arrexps', _) <- unzip <$> mapM checkArg arrexps
-  fun' <- checkLambda fun [arg]
-  return $ ConcatMap fun' arrexp' arrexps' pos
-
 checkExp (Reduce comm fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp

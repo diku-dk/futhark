@@ -492,8 +492,6 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Redomap _ w _ _ _ _ _)) =
           w `subExpBound` bound
-        unbalancedBinding bound (Op (ConcatMap _ w _ _)) =
-          w `subExpBound` bound
         unbalancedBinding bound (Op (Stream _ w _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (DoLoop _ merge (ForLoop i iterations) body) =

@@ -449,8 +449,6 @@ data ExpBase ty vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | ConcatMap (LambdaBase ty vn) (ExpBase ty vn) [ExpBase ty vn] SrcLoc
-
             | Zip [(ExpBase ty vn, ty vn)] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the full type of
@@ -488,7 +486,6 @@ instance Located (ExpBase ty vn) where
   locOf (Stripe _ _ pos) = locOf pos
   locOf (Unstripe _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
-  locOf (ConcatMap _ _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos

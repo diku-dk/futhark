@@ -662,26 +662,6 @@ evalSOAC (Map _ w fun arrexps) = do
   vss' <- zipWithM (applyLambda fun) [0..] =<< soacArrays w arrexps
   arrays (lambdaReturnType fun) vss'
 
-evalSOAC (ConcatMap _ _ fun inputs) = do
-  inputs' <- mapM (mapM lookupVar) inputs
-  vss <- mapM (mapM asArray <=< applyConcatMapLambda fun) inputs'
-  innershapes <- mapM (mapM (asInt "evalPrimOp ConcatMap" <=< evalSubExp) . arrayDims) $
-                 lambdaReturnType fun
-  let numTs = length $ lambdaReturnType fun
-      emptyArray :: (Array Int PrimValue, Int)
-      emptyArray = (listArray (0,-1) [], 0)
-      concatArrays (arr1,n1) (arr2,n2) =
-        (listArray (0,n1+n2-1) (elems arr1 ++ elems arr2), n1+n2)
-      arrs = foldl (zipWith concatArrays) (replicate numTs emptyArray) vss
-      (ctx,vs) = unzip
-                 [ (PrimVal $ IntValue $ Int32Value $ fromIntegral n,
-                    ArrayVal arr (elemType t) (n:innershape))
-                 | (innershape,(arr,n),t) <-
-                      zip3 innershapes arrs $ lambdaReturnType fun ]
-  return $ ctx ++ vs
-  where asArray (ArrayVal a _ (n:_)) = return (a, n)
-        asArray _                    = bad $ TypeError "evalSOAC asArray"
-
 evalSOAC (Reduce _ w _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
@@ -734,29 +714,6 @@ applyLambda (Lambda i params body rettype) j args = do
   where bind_i = (Ident i $ Prim int32,
                  BindVar,
                  PrimVal $ value j)
-
-applyConcatMapLambda :: Lambda -> [Value] -> FutharkM [Value]
-applyConcatMapLambda (Lambda i params body rettype) valargs = do
-  v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) (shapes ++ valargs)) $
-       evalBody body
-  let rettype' = [ arrayOf t (ExtShape [Ext 0]) NoUniqueness
-                 | t <- staticShapes rettype ]
-  checkReturnShapes rettype' v
-  return v
-  where bind_i = (Ident i $ Prim int32,
-                  BindVar,
-                  PrimVal $ IntValue $ Int32Value 0)
-
-        shapes =
-          let (shapeparams, valparams) =
-                splitAt (length params - length valargs) params
-              shapemap = shapeMapping'
-                         (map paramType valparams)
-                         (map valueShape valargs)
-          in map (PrimVal . IntValue . Int32Value . fromIntegral . fromMaybe 0 .
-                  flip HM.lookup shapemap .
-                  paramName)
-             shapeparams
 
 checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM ()
 checkReturnShapes = zipWithM_ checkShape

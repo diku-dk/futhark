@@ -37,7 +37,6 @@ module Futhark.TypeCheck
   , checkSOACArrayArgs
   , checkLambda
   , checkExtLambda
-  , checkConcatMapLambda
   , checkFun'
   , checkLambdaParams
   , checkBody
@@ -995,31 +994,6 @@ checkLambda (Lambda i params body rettype) args = do
       mapM_ checkType rettype
       checkLambdaBody rettype body
   else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
-
-checkConcatMapLambda :: Checkable lore =>
-                        Lambda lore -> [Arg] -> TypeM lore ()
-checkConcatMapLambda (Lambda i params body rettype) args = do
-  mapM_ checkType rettype
-  iparam <- primLParamM i int32
-  let (_,elemparams) =
-        splitAt (length params - length args) params
-      fname = nameFromString "<anonymous>"
-      rettype' = [ arrayOf t (ExtShape [Ext 0]) Nonunique
-                 | t <- staticShapes rettype ]
-      consumable = zip (map paramName params) (map argAliases args)
-  if length elemparams == length args then do
-    checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) elemparams) args
-    checkFun' (fname,
-               rettype',
-               [ (paramName param,
-                  LParamInfo $ paramAttr param)
-               | param <- iparam:params ],
-               body) consumable $ do
-      mapM_ checkType rettype
-      checkBindings (bodyBindings body) $ do
-        checkResult $ bodyResult body
-        matchExtReturnType fname (map fromDecl rettype') $ bodyResult body
-  else bad $ TypeError noLoc $ "concatMap function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " array arguments."
 
 checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()

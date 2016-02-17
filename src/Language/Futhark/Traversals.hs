@@ -127,9 +127,6 @@ mapExpM tv (Unstripe stride e loc) =
   Unstripe <$> mapOnExp tv stride <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
-mapExpM tv (ConcatMap fun e es loc) =
-  pure ConcatMap <*> mapOnLambda tv fun <*>
-  mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
 mapExpM tv (Reduce comm fun startexp arrexp loc) =
   Reduce comm <$> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc

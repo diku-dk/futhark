@@ -242,7 +242,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Transpose e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
-  pprPrec _ (ConcatMap lam a as _) = ppSOAC "concatMap" [lam] $ a : as
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
   pprPrec _ (Redomap Commutative redlam maplam e a _) =
