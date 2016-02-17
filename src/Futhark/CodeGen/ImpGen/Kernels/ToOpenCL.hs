@@ -119,8 +119,11 @@ compileKernels kernels = do
 compileKernel :: CallKernel -> Either String ([(String, C.Func)], OpenClRequirements)
 compileKernel called@(Map kernel) =
   let (funbody, s) =
-        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
-        GenericC.collect $ GenericC.compileCode $ mapKernelBody kernel
+        GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
+          size <- GenericC.compileExp $ mapKernelSize kernel
+          let check = [C.citem|if ($id:(mapKernelThreadNum kernel) >= $exp:size) return;|]
+          body <- GenericC.collect $ GenericC.compileCode $ mapKernelBody kernel
+          return $ check : body
 
       used_funs = GenericC.compUserState s
 
@@ -264,19 +267,20 @@ kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elem
   where shared_memory =
           bytes $ (transposeBlockDim + 1) * transposeBlockDim * SizeOf bt
 
-kernelAndWorkgroupSize :: CallKernel -> ([Exp], Maybe [Exp])
+kernelAndWorkgroupSize :: CallKernel -> ([Exp], [Exp])
 kernelAndWorkgroupSize (Map kernel) =
-  ([mapKernelSize kernel],
-   Nothing)
+  ([sizeToExp (mapKernelNumGroups kernel) *
+    sizeToExp (mapKernelGroupSize kernel)],
+   [sizeToExp $ mapKernelGroupSize kernel])
 kernelAndWorkgroupSize (CallKernel kernel) =
   ([sizeToExp (kernelNumGroups kernel) *
     sizeToExp (kernelGroupSize kernel)],
-   Just [sizeToExp $ kernelGroupSize kernel])
+   [sizeToExp $ kernelGroupSize kernel])
 kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems) =
   ([roundedToBlockDim x_elems,
     roundedToBlockDim y_elems,
     num_arrays],
-   Just [transposeBlockDim, transposeBlockDim, 1])
+   [transposeBlockDim, transposeBlockDim, 1])
   where roundedToBlockDim e =
           e + ((transposeBlockDim -
                 (e `impRem` transposeBlockDim)) `impRem`

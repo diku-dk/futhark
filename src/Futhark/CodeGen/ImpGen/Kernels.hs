@@ -98,15 +98,26 @@ kernelCompiler
                      ImpGen.compileBindings kernel_bnds $
                       ImpGen.comment "write kernel result" write_result
 
+    group_size <- newVName "group_size"
+    num_groups <- newVName "num_groups"
+    let group_size_var = Imp.ScalarVar group_size
+    ImpGen.emit $ Imp.DeclareScalar group_size int32
+    ImpGen.emit $ Imp.DeclareScalar num_groups int32
+    ImpGen.emit $ Imp.Call [group_size] (nameFromString "group_size") []
+    ImpGen.emit $ Imp.SetScalar num_groups $
+      kernel_size `quotRoundingUp` group_size_var
+
     -- Compute the variables that we need to pass to and from the
     -- kernel.
-    uses <- computeKernelUses dest kernel_body bound_in_kernel
+    uses <- computeKernelUses dest (kernel_size, kernel_body) bound_in_kernel
 
     ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
       , Imp.mapKernelBody = kernel_body
       , Imp.mapKernelUses = uses
       , Imp.mapKernelSize = kernel_size
+      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
+      , Imp.mapKernelGroupSize = Imp.VarSize group_size
       }
 
 kernelCompiler
@@ -684,15 +695,25 @@ callKernelCopy bt
                   HS.singleton srcmem <>
                   freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
 
-    kernel_size <- newVName "copy_kernel_size"
-    ImpGen.emit $ Imp.DeclareScalar kernel_size int32
-    ImpGen.emit $ Imp.SetScalar kernel_size $
-      Imp.innerExp n * product (drop 1 shape)
+    group_size <- newVName "group_size"
+    num_groups <- newVName "num_groups"
+    let group_size_var = Imp.ScalarVar group_size
+        kernel_size = Imp.innerExp n * product (drop 1 shape)
+    ImpGen.emit $ Imp.DeclareScalar group_size int32
+    ImpGen.emit $ Imp.DeclareScalar num_groups int32
+    ImpGen.emit $ Imp.Call [group_size] (nameFromString "group_size") []
+    ImpGen.emit $ Imp.SetScalar num_groups $
+      kernel_size `quotRoundingUp` group_size_var
+
+    let bound_in_kernel = [global_thread_index]
+    body_uses <- computeKernelUses [] (kernel_size, body) bound_in_kernel
 
     ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
-      , Imp.mapKernelSize = Imp.ScalarVar kernel_size
-      , Imp.mapKernelUses = nub $ reads_from ++ writes_to
+      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
+      , Imp.mapKernelGroupSize = Imp.VarSize group_size
+      , Imp.mapKernelSize = kernel_size
+      , Imp.mapKernelUses = nub $ body_uses ++ writes_to ++ reads_from
       , Imp.mapKernelBody = body
       }
 

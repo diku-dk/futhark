@@ -58,9 +58,7 @@ callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
   let total_elements = foldl mult_exp (Constant $ value (1::Int32)) kernel_size'
   let cond = BinaryOp "!=" total_elements (Constant $ value (0::Int32))
-  workgroup_size' <- case workgroup_size of
-    Nothing -> return None
-    Just es -> Tuple <$> mapM Py.compileExp es
+  workgroup_size' <- Tuple <$> mapM Py.compileExp workgroup_size
   body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
   Py.stm $ If cond body []
   return Py.Done
