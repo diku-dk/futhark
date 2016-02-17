@@ -51,7 +51,7 @@ data KernelArg = ValueArg Exp PrimType
                deriving (Show)
 
 -- | Host-level OpenCL operation.
-data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] (Maybe [Exp])
+data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
             deriving (Show)
 
 -- | The block size when transposing.

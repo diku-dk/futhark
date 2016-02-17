@@ -178,9 +178,7 @@ callKernel :: GenericC.OpCompiler OpenCL ()
 callKernel (LaunchKernel name args kernel_size workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args
   kernel_size' <- mapM GenericC.compileExp kernel_size
-  workgroup_size' <- case workgroup_size of
-    Nothing -> return Nothing
-    Just es -> Just <$> mapM GenericC.compileExp es
+  workgroup_size' <- mapM GenericC.compileExp workgroup_size
   launchKernel name kernel_size' workgroup_size'
   return GenericC.Done
   where setKernelArg i (ValueArg e bt) = do
@@ -204,25 +202,18 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
             |]
 
 launchKernel :: C.ToExp a =>
-                String -> [a] -> Maybe [a] -> GenericC.CompilerM op s ()
+                String -> [a] -> [a] -> GenericC.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims = do
   global_work_size <- newVName "global_work_size"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
   time_diff <- newVName "time_diff"
-
-  local_work_size_arg <- case workgroup_dims of
-    Nothing ->
-      return [C.cexp|NULL|]
-    Just es -> do
-      local_work_size <- newVName "local_work_size"
-      let workgroup_dims' = map toInit es
-      GenericC.decl [C.cdecl|const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};|]
-      return [C.cexp|$id:local_work_size|]
+  local_work_size <- newVName "local_work_size"
 
   GenericC.stm [C.cstm|{
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
+      const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       struct timeval $id:time_start, $id:time_end, $id:time_diff;
       fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
       $stms:(printKernelSize global_work_size)
@@ -230,7 +221,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       gettimeofday(&$id:time_start, NULL);
       OPENCL_SUCCEED(
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
-                               $id:global_work_size, $exp:local_work_size_arg,
+                               $id:global_work_size, $id:local_work_size,
                                0, NULL, NULL));
       if (cl_synchronous) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
@@ -248,6 +239,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         kernel_runs = kernel_name ++ "_runs"
         kernel_rank = length kernel_dims
         kernel_dims' = map toInit kernel_dims
+        workgroup_dims' = map toInit workgroup_dims
         total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
         toInit e = [C.cinit|$exp:e|]

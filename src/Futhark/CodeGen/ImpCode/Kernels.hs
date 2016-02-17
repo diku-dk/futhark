@@ -49,8 +49,10 @@ data MapKernel = MapKernel { mapKernelThreadNum :: VName
                              -- name for the kernel.
                            , mapKernelBody :: Imp.Code InKernel
                            , mapKernelUses :: [KernelUse]
+                           , mapKernelNumGroups :: DimSize
+                           , mapKernelGroupSize :: DimSize
                            , mapKernelSize :: Imp.Exp
-                             -- ^ Number of threads to spawn.
+                           -- ^ Do not actually execute threads past this.
                            }
                      deriving (Show)
 
