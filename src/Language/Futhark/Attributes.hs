@@ -648,9 +648,6 @@ typeOf (Map f arr _) = arrayType 1 et Unique
                        `setAliases` HS.empty
                        `setUniqueness` Unique
   where et = lambdaType f [rowType $ typeOf arr]
-typeOf (ConcatMap f _ _ _) =
-  fromDecl $ removeShapeAnnotations t `setUniqueness` Unique
-  where t = lambdaReturnType f
 typeOf (Reduce _ fun start arr _) =
   removeShapeAnnotations $
   lambdaType fun [typeOf start, rowType (typeOf arr)]

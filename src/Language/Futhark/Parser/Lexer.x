@@ -133,7 +133,6 @@ keyword s =
     "scan"         -> SCAN
     "split"        -> SPLIT
     "concat"       -> CONCAT
-    "concatMap"    -> CONCATMAP
     "filter"       -> FILTER
     "partition"    -> PARTITION
     "redomap"      -> REDOMAP

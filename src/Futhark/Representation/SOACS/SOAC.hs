@@ -36,7 +36,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, comma, commasep, Doc, Pretty, parens, text)
+  ((</>), ppr, comma, commasep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
@@ -54,7 +54,6 @@ import qualified Futhark.Analysis.Range as Range
 
 data SOAC lore =
     Map Certificates SubExp (LambdaT lore) [VName]
-  | ConcatMap Certificates SubExp (LambdaT lore) [[VName]]
   | Reduce Certificates SubExp Commutativity (LambdaT lore) [(SubExp, VName)]
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
@@ -111,10 +110,6 @@ mapSOACM tv (Redomap cs w comm lam0 lam1 nes arrs) =
   pure comm <*>
   mapOnSOACLambda tv lam0 <*> mapOnSOACLambda tv lam1 <*>
   mapM (mapOnSOACSubExp tv) nes <*> mapM (mapOnSOACVName tv) arrs
-mapSOACM tv (ConcatMap cs size fun arrexps) =
-  ConcatMap <$>
-  mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv size <*>
-  mapOnSOACLambda tv fun <*> mapM (mapM (mapOnSOACVName tv)) arrexps
 mapSOACM tv (Stream cs size form lam arrs) =
   Stream <$>
   mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv size <*>
@@ -156,9 +151,6 @@ instance Attributes lore => Rename (SOAC lore) where
 soacType :: SOAC lore -> [ExtType]
 soacType (Map _ size f _) =
   staticShapes $ mapType size f
-soacType (ConcatMap _ _ f _) =
-  [ Array (elemType t) (ExtShape $ Ext 0 : map Free (arrayDims t)) NoUniqueness
-  | t <- lambdaReturnType f ]
 soacType (Reduce _ _ _ fun _) =
   staticShapes $ lambdaReturnType fun
 soacType (Scan _ width lam _) =
@@ -199,8 +191,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
                Sequential _       -> []
     in  a1 ++ bodyAliases (extLambdaBody lam)
-  opAliases ConcatMap{} =
-    [mempty]
 
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
@@ -231,8 +221,6 @@ instance (Attributes lore,
 
   addOpAliases (Map cs size lam args) =
     Map cs size (Alias.analyseLambda lam) args
-  addOpAliases (ConcatMap cs size lam args) =
-    ConcatMap cs size (Alias.analyseLambda lam) args
   addOpAliases (Reduce cs size comm lam input) =
     Reduce cs size comm (Alias.analyseLambda lam) input
   addOpAliases (Scan cs size lam input) =
@@ -289,8 +277,6 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
                    (return . removeExtLambdaRanges) return return
   addOpRanges (Map cs w lam args) =
     Map cs w (Range.runRangeM $ Range.analyseLambda lam) args
-  addOpRanges (ConcatMap cs w lam args) =
-    ConcatMap cs w (Range.runRangeM $ Range.analyseLambda lam) args
   addOpRanges (Reduce cs w comm lam input) =
     Reduce cs w comm (Range.runRangeM $ Range.analyseLambda lam) input
   addOpRanges (Scan cs w lam input) =
@@ -333,13 +319,6 @@ typeCheckSOAC (Map cs size fun arrexps) = do
   TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun arrargs
-
-typeCheckSOAC (ConcatMap cd size fun inarrs) = do
-  mapM_ (TC.requireI [Prim Cert]) cd
-  TC.require [Prim int32] size
-  forM_ inarrs $ \inarr -> do
-    args <- mapM (TC.checkArg . Var) inarr
-    void $ TC.checkConcatMapLambda fun args
 
 typeCheckSOAC (Reduce ass size _ fun inputs) = do
   let (startexps, arrexps) = unzip inputs
@@ -490,8 +469,6 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Reduce" $ lambdaMetrics fun
   opMetrics (Scan _ _ fun _) =
     inside "Scan" $ lambdaMetrics fun
-  opMetrics (ConcatMap _ _ fun _) =
-    inside "ConcatMap" $ lambdaMetrics fun
   opMetrics (Redomap _ _ _ fun1 fun2 _ _) =
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
@@ -503,16 +480,6 @@ extLambdaMetrics = bodyMetrics . extLambdaBody
 instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Map cs size lam as) =
     PP.ppCertificates' cs <> ppSOAC "map" size [lam] Nothing as
-  ppr (ConcatMap cs size lam as) =
-    PP.ppCertificates' cs <> text "concatMap" <>
-    parens (ppr size <> comma </>
-               pprConcatLam lam <> comma </>
-               commasep (map (PP.braces . commasep . map ppr) as))
-    where pprConcatLam (Lambda index params body rettype) =
-            text "fn" <+>
-            PP.braces (commasep $ map (PP.brackets . ppr) rettype) <+>
-            parens (ppr index <> PP.semi <+> commasep (map ppr params)) <+>
-            text "=>" </> PP.indent 2 (ppr body)
   ppr (Reduce cs size comm lam inputs) =
     PP.ppCertificates' cs <> ppSOAC s size [lam] (Just es) as
     where (es, as) = unzip inputs

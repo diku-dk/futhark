@@ -125,7 +125,6 @@ import Language.Futhark.Parser.Lexer
       size            { L $$ SIZE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
-      concatMap       { L $$ CONCATMAP }
       reduce          { L $$ REDUCE }
       reduceComm      { L $$ REDUCECOMM }
       reshape         { L $$ RESHAPE }
@@ -408,12 +407,6 @@ Exp  :: { UncheckedExp }
 
      | zipWith '(' FunAbstr ',' Exps2 ')'
                       { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }
-
-     | concatMap '(' FunAbstr ',' Exp ',' Exps ')'
-                      { ConcatMap $3 $5 $7 $1 }
-
-     | concatMap '(' FunAbstr ',' Exp ')'
-                      { ConcatMap $3 $5 [] $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

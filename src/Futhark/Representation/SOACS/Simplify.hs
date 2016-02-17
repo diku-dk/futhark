@@ -85,13 +85,6 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     fun' <- Engine.simplifyLambda fun w Nothing $ map Just arrs'
     return $ Map cs' w' fun' arrs'
 
-  simplifyOp (ConcatMap cs w fun arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    arrs' <- mapM (mapM Engine.simplify) arrs
-    fun' <- Engine.simplifyLambda fun w Nothing $ map (const Nothing) $ lambdaParams fun
-    return $ ConcatMap cs' w' fun' arrs'
-
   simplifyOp (Reduce cs w comm fun input) = do
     let (acc, arrs) = unzip input
     cs' <- Engine.simplify cs

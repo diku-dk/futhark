@@ -30,7 +30,6 @@ import Prelude
 
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.SOACS
-import Futhark.Transform.Rename
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.Analysis.Alias as Alias
@@ -128,50 +127,6 @@ transformSOAC pat (Map cs width fun arrs) = do
     dests <- letwith cs outarrs_names (pexp $ Var i) $ map (PrimOp . SubExp) x
     return $ resultBody $ map Var dests
   letBind_ pat $ DoLoop [] merge (ForLoop i width) loopbody
-
-transformSOAC pat (ConcatMap cs _ fun inputs) = do
-  arrs <- forM inputs $ \input -> do
-    fun' <- renameLambda fun
-    let funparams = lambdaParams fun'
-        (ctxparams, valparams) =
-          splitAt (length funparams-length input) funparams
-        fun'' = fun' { lambdaParams = valparams }
-    shapemap <- shapeMapping (map paramType valparams) <$>
-                mapM lookupType input
-    forM_ (HM.toList shapemap) $ \(size,se) ->
-      when (size `elem` map paramName ctxparams) $
-        letBindNames'_ [size] $ PrimOp $ SubExp se
-    input' <- forM (zip valparams input) $ \(p,v) ->
-      letExp "concatMap_reshaped_input" $
-      shapeCoerce [] (arrayDims $ paramType p) v
-    vs <- bindLambda fun'' (map (PrimOp . SubExp . Var) input')
-    mapM (letExp "concatMap_fun_res" . PrimOp . SubExp) vs
-  emptyarrs <- mapM (letExp "empty")
-               [ PrimOp $ ArrayLit [] t | t <- lambdaReturnType fun ]
-  let concatArrays (arr, arrs') = do
-        let plus = eBinOp (Add Int32)
-        n <- arraySize 0 <$> lookupType arr
-        ms <- mapM (fmap (arraySize 0) . lookupType) arrs'
-        ressize <- letSubExp "concatMap_result_size" =<<
-                   foldl plus
-                   (pure $ PrimOp $ SubExp n)
-                   (map (pure . PrimOp . SubExp) ms)
-        res <- letExp "concatMap_result" $ PrimOp $ Concat cs arr arrs' ressize
-        return $ PrimOp $ Copy res
-
-      nonempty :: [VName] -> Maybe (VName, [VName])
-      nonempty []     = Nothing
-      nonempty (x:xs) = Just (x, xs)
-
-  ses <-case mapM nonempty $ transpose arrs of
-          Nothing ->
-            return $ constant (0 :: Int32) : map Var emptyarrs
-          Just arrs' -> do
-            concatted_arrs <- mapM (letSubExp "concatMap_result" <=< concatArrays) arrs'
-            arrts <- mapM subExpType concatted_arrs
-            return $ arraysSize 0 arrts : concatted_arrs
-  forM_ (zip (patternNames pat) ses) $ \(name, se) ->
-    letBindNames' [name] $ PrimOp $ SubExp se
 
 transformSOAC pat (Reduce cs width _ fun args) = do
   (acc, initacc) <- newFold $ zip accexps accts

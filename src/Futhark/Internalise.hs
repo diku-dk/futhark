@@ -549,13 +549,6 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
 internaliseExp _ E.Stream{} =
   fail "In internalise: stream's lambda is NOT an anonymous function with at least one param (chunk)!"
 
-internaliseExp desc (E.ConcatMap lam arr arrs _) = do
-  arr' <- internaliseExpToVars "concatMap_arr" arr
-  arrs' <- mapM (internaliseExpToVars "concatMap_arr") arrs
-  lam' <- internaliseConcatMapLambda internaliseLambda lam
-  w <- arraysSize 0 <$> mapM lookupType arr'
-  letTupExp' desc $ I.Op $ I.ConcatMap [] w lam' $ arr':arrs'
-
 -- The "interesting" cases are over, now it's mostly boilerplate.
 
 internaliseExp desc (E.Iota e _) = do
