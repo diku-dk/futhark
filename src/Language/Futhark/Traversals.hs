@@ -138,6 +138,8 @@ mapExpM tv (Zip args loc) = do
   pure $ Zip args' loc
 mapExpM tv (Unzip e ts loc) =
   pure Unzip <*> mapOnExp tv e <*> mapM (mapOnType tv) ts <*> pure loc
+mapExpM tv (Unsafe e loc) =
+  pure Unsafe <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Scan fun startexp arrexp loc) =
   pure Scan <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*>

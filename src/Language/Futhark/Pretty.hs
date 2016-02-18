@@ -263,6 +263,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
   pprPrec _ (Partition lams a _) = ppSOAC "partition" lams [a]
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
+  pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 9 e
   pprPrec _ (Split e a _) =
     text "split" <> apply [ppr e, ppr a]
   pprPrec _ (Concat x y _) =

@@ -330,6 +330,10 @@ internaliseExp desc (E.Size i e _) = do
 internaliseExp desc (E.Unzip e _ _) =
   internaliseExp desc e
 
+internaliseExp desc (E.Unsafe e _) =
+  local (\env -> env { envDoBoundsChecks = False }) $
+  internaliseExp desc e
+
 internaliseExp _ (E.Zip [] _) =
   return []
 

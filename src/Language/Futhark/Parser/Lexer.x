@@ -130,6 +130,7 @@ keyword s =
     "zip"          -> ZIP
     "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP
+    "unsafe"       -> UNSAFE
     "scan"         -> SCAN
     "split"        -> SPLIT
     "concat"       -> CONCAT

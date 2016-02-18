@@ -654,6 +654,8 @@ typeOf (Reduce _ fun start arr _) =
 typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . snd) es) Nonunique
 typeOf (Unzip _ ts _) =
   Tuple ts
+typeOf (Unsafe e _) =
+  typeOf e
 typeOf (Scan fun start arr _) =
   arrayType 1 et Unique
     where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
