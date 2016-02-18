@@ -39,11 +39,11 @@ fun [[real]] main(int num_iterations, [[real,m],n] a) =
   loop (a) = for i < num_iterations do
     map(fn [real] (int i) =>
           map(fn real (int j) =>
-                let center = a[i,j] in
-                let north = if i == 0 then center else a[i-1,j] in
-                let east = if j == m-1 then center else a[i,j+1] in
-                let south = if i == n-1 then center else a[i+1,j] in
-                let west = if j == 0 then center else a[i,j-1] in
+                let center = unsafe a[i,j] in
+                let north = if i == 0 then center else unsafe a[i-1,j] in
+                let east = if j == m-1 then center else unsafe a[i,j+1] in
+                let south = if i == n-1 then center else unsafe a[i+1,j] in
+                let west = if j == 0 then center else unsafe a[i,j-1] in
                 let factor = 1.0/5.0 in
                 factor*center +
                 factor*north +

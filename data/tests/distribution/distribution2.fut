@@ -11,11 +11,11 @@
 --   Redomap 0
 -- }
 
-fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
+fun [real] take(int n, [real] a) = let {first, rest} = unsafe split((n), a) in first
 
 fun [real] fftmp(int num_paths, [[real]] md_c, [real] zi) =
     map( fn real (int j) =>
-            let x = map(*, zip(take(j+1,zi), take(j+1,md_c[j])) )
+            let x = map(*, zip(take(j+1,zi), take(j+1,unsafe md_c[j])) )
                 in  reduce(+, 0.0, x)
          , iota(num_paths)
        )

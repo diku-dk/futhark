@@ -17,9 +17,9 @@
 fun [real] main(int num_iterations, [real,n] a) =
   loop (a) = for i < num_iterations do
     map(fn real (int i) =>
-          let x = if i == 0 then a[i] else a[i-1] in
+          let x = if i == 0 then a[i] else unsafe a[i-1] in
           let y = a[i] in
-          let z = if i == n-1 then a[i] else a[i+1] in
+          let z = if i == n-1 then a[i] else unsafe a[i+1] in
           let factor = 1.0/3.0 in
           factor*x + factor*y + factor*z
        , iota(n)) in

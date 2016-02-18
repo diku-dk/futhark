@@ -18,7 +18,7 @@
 -- }
 
 fun [real] take(int n, [real] a) =
-  let {first, rest} = split( (n), a) in
+  let {first, rest} = unsafe split( (n), a) in
   first
 
 fun [real] fftmp([[real]] md_c) =

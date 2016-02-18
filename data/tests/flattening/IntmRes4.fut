@@ -28,6 +28,7 @@ fun [int] addRows ([int] xs, [int] ys) =
 
 fun [[[[int]]]] main ([[[[int]]]] xssss, [int] cs, int y) =
   map (fn [[[int]]] ([[[int]]] xsss, int c) =>
+         unsafe
          let yss = reshape ( (2,c), xsss ) in
          map (fn [[int]] ([[int]] xss) =>
                 map(fn [int] ([int] xs, [int] ys) =>
