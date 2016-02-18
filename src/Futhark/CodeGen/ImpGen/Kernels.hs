@@ -41,7 +41,9 @@ callKernelOperations =
 
 inKernelOperations :: ImpGen.Operations Imp.InKernel
 inKernelOperations = (ImpGen.defaultOperations cannotAllocInKernel)
-                     { ImpGen.opsCopyCompiler = inKernelCopy }
+                     { ImpGen.opsCopyCompiler = inKernelCopy
+                     , ImpGen.opsExpCompiler = inKernelExpCompiler
+                     }
 
 compileProg :: MonadFreshNames m => Prog -> m (Either String Imp.Program)
 compileProg prog =
@@ -721,6 +723,12 @@ callKernelCopy bt
 -- turn any copy into a loop.
 inKernelCopy :: ImpGen.CopyCompiler Imp.InKernel
 inKernelCopy = ImpGen.copyElementWise
+
+inKernelExpCompiler :: ImpGen.ExpCompiler Imp.InKernel
+inKernelExpCompiler _ (PrimOp (Assert _ loc)) =
+  fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+inKernelExpCompiler _ e =
+  return $ ImpGen.CompileExp e
 
 computeKernelUses :: FreeIn a =>
                      [ImpGen.ValueDestination]
