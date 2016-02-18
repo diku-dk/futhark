@@ -39,6 +39,7 @@ Manual pages:
    man/futhark-opencl.rst
    man/futharki.rst
    man/futhark-test.rst
+   man/futhark-bench.rst
 
 Indices and tables
 ==================
