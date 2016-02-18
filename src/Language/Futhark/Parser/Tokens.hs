@@ -95,6 +95,7 @@ data Token = IF
            | ZIPWITH
            | ZIP
            | UNZIP
+           | UNSAFE
            | SCAN
            | SPLIT
            | CONCAT

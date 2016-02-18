@@ -757,6 +757,9 @@ checkExp (Unzip e _ pos) = do
       "Argument to unzip is not an array of tuples, but " ++
       ppType t ++ "."
 
+checkExp (Unsafe e loc) =
+  Unsafe <$> checkExp e <*> pure loc
+
 checkExp (Map fun arrexp pos) = do
   (arrexp', arg) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [arg]

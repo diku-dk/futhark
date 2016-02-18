@@ -454,6 +454,11 @@ data ExpBase ty vn =
             -- ^ Unzip that can unzip to tuples of arbitrary size.
             -- The types are the elements of the tuple.
 
+            | Unsafe (ExpBase ty vn) SrcLoc
+            -- ^ Explore the Danger Zone and elide safety checks on
+            -- array operations that are (lexically) within this
+            -- expression.  Make really sure the code is correct.
+
               deriving (Eq, Ord, Show)
 
 data StreamForm ty vn = MapLike    StreamOrd
@@ -493,6 +498,7 @@ instance Located (ExpBase ty vn) where
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _  pos) = locOf pos
+  locOf (Unsafe _ loc) = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase ty vn = For ForLoopDirection (ExpBase ty vn) (IdentBase ty vn) (ExpBase ty vn)

@@ -135,6 +135,7 @@ import Language.Futhark.Parser.Lexer
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
+      unsafe          { L $$ UNSAFE }
       scan            { L $$ SCAN }
       split           { L $$ SPLIT }
       concat          { L $$ CONCAT }
@@ -167,7 +168,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs real f32 f64 int i8 i16 i32 i64
+%nonassoc '~' '!' signum abs real f32 f64 int i8 i16 i32 i64 unsafe
 
 %%
 
@@ -394,6 +395,8 @@ Exp  :: { UncheckedExp }
 
      | unzip '(' Exp ')'
                       { Unzip $3 [] $1 }
+
+     | unsafe Exp     { Unsafe $2 $1 }
 
      | filter '(' FunAbstr ',' Exp ')'
                       { Filter $3 $5 $1 }
