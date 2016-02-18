@@ -49,8 +49,9 @@ reportResult True runtimes =
   putStrLn $ unwords $ map (show . runMicroseconds) runtimes
 reportResult False [] =
   print (0::Int)
-reportResult False runtimes =
-  print $ sum (map runMicroseconds runtimes) `div` length runtimes
+reportResult False runtimes = do
+  let avg = sum (map runMicroseconds runtimes) `div` length runtimes
+  putStrLn $ show avg ++ "us (average)"
 
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
