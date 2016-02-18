@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 -- | Simple tool for benchmarking Futhark programs.  Supports raw
 -- output if you want to do your own analysis, but will normally print
 -- the average runtime.
@@ -16,6 +17,7 @@ import System.IO
 import System.IO.Temp
 import System.Process (readProcessWithExitCode)
 import System.Exit
+import Text.Printf
 
 import Futhark.Test
 import Futhark.Representation.AST.Syntax (Value)
@@ -62,9 +64,12 @@ reportResult True runtimes =
   putStrLn $ unwords $ map (show . runMicroseconds) runtimes
 reportResult False [] =
   print (0::Int)
-reportResult False runtimes = do
-  let avg = sum (map runMicroseconds runtimes) `div` length runtimes
-  putStrLn $ show avg ++ "us (average)"
+reportResult False results = do
+  let runtimes = map (fromIntegral . runMicroseconds) results
+      avg = sum runtimes / genericLength runtimes
+      rel_dev = stddevp runtimes / mean runtimes :: Double
+  putStrLn $ printf "%.2f" avg ++ "us (average; relative standard deviation: " ++
+    printf "%.2f" rel_dev ++ ")"
 
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
@@ -171,3 +176,26 @@ main = mainWithOptions initialBenchOptions commandLineOptions $ \progs config ->
   case progs of
     [prog] -> Just $ runBenchmark config prog
     _      -> Nothing
+
+--- The following extracted from hstats package by Marshall Beddoe:
+--- https://hackage.haskell.org/package/hstats-0.3
+
+-- | Numerically stable mean
+mean :: Floating a => [a] -> a
+mean x = fst $ foldl' (\(!m, !n) x' -> (m+(x'-m)/(n+1),n+1)) (0,0) x
+
+-- | Standard deviation of population
+stddevp :: (Floating a) => [a] -> a
+stddevp xs = sqrt $ pvar xs
+
+-- | Population variance
+pvar :: (Floating a) => [a] -> a
+pvar xs = centralMoment xs (2::Int)
+
+-- | Central moments
+centralMoment :: (Floating b, Integral t) => [b] -> t -> b
+centralMoment _  1 = 0
+centralMoment xs r = sum (map (\x -> (x-m)^r) xs) / n
+    where
+      m = mean xs
+      n = fromIntegral $ length xs
