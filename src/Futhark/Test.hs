@@ -5,6 +5,7 @@ module Futhark.Test
        ( testSpecFromFile
        , valuesFromString
        , getValues
+       , getValuesString
        , compareValues
        , Mismatch
 
@@ -261,6 +262,13 @@ getValues dir (InFile file) = do
   case valuesFromString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
+  where file' = dir </> file
+
+getValuesString :: MonadIO m => FilePath -> Values -> m String
+getValuesString _ (Values vs) =
+  return $ unlines $ map pretty vs
+getValuesString dir (InFile file) =
+  liftIO $ readFile file'
   where file' = dir </> file
 
 data Mismatch = PrimValueMismatch Int PrimValue PrimValue

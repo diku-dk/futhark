@@ -179,7 +179,7 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = d
 
 compileTestProgram :: String -> FilePath -> TestRun -> TestM ()
 compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
-  input <- intercalate "\n" <$> map pretty <$> getValues dir inputValues
+  input <- getValuesString dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (futcode, _, futerr) <-
     io $ readProcessWithExitCode futharkc
