@@ -33,14 +33,27 @@ data BenchOptions = BenchOptions
 initialBenchOptions :: BenchOptions
 initialBenchOptions = BenchOptions "futhark-c" 10 False
 
+-- | The name we use for compiled programs.
+binaryName :: FilePath -> FilePath
+binaryName = (`replaceExtension` "bin")
+
 runBenchmark :: BenchOptions -> FilePath -> IO ()
-runBenchmark opts path = do
-  spec <- testSpecFromFile path
+runBenchmark opts program = do
+  spec <- testSpecFromFile program
   case testAction spec of
-    RunCases cases ->
-      zipWithM_ (runBenchmarkCase opts path) [0..] cases
+    RunCases cases -> do
+      (futcode, _, futerr) <-
+        liftIO $ readProcessWithExitCode compiler
+        [program, "-o", binaryName program] ""
+      case futcode of
+        ExitFailure 127 -> fail $ progNotFound compiler
+        ExitFailure _   -> fail futerr
+        ExitSuccess     -> return ()
+
+      zipWithM_ (runBenchmarkCase opts program) [0..] cases
     _ ->
       return ()
+  where compiler = optCompiler opts
 
 data RunResult = RunResult { runMicroseconds :: Int }
 
@@ -65,19 +78,13 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesString dir input_spec
   expected <- getValues dir expected_spec
-  (futcode, _, futerr) <-
-    liftIO $ readProcessWithExitCode compiler [program, "-o", binOutputf] ""
-  case futcode of
-    ExitFailure 127 -> fail $ progNotFound compiler
-    ExitFailure _   -> fail futerr
-    ExitSuccess     -> return ()
 
   runtimes <- forM [0..optRuns opts-1] $ \_ -> do
     -- Explicitly prefixing the current directory is necessary for
     -- readProcessWithExitCode to find the binary when binOutputf has
     -- no program component.
     (progCode, output, progerr) <-
-      liftIO $ readProcessWithExitCode ("." </> binOutputf) ["-t", tmpfile] input
+      liftIO $ readProcessWithExitCode ("." </> binaryName program) ["-t", tmpfile] input
     compareResult program expected =<< runResult program progCode output progerr
     runtime_result <- readFile tmpfile
     case reads runtime_result of
@@ -91,9 +98,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
 
   reportResult (optRawReporting opts) runtimes
 
-  where binOutputf = program `replaceExtension` "bin"
-        dir = takeDirectory program
-        compiler = optCompiler opts
+  where dir = takeDirectory program
 
 runResult :: MonadIO m =>
              FilePath
