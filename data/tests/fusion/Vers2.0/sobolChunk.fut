@@ -61,7 +61,7 @@ fun int index_of_least_significant_0(int num_bits, int n) =
 
 fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map( fn int([int] row) => row[bit], sob_dirs )
+  map( fn int([int] row) => unsafe row[bit], sob_dirs )
 
 fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let sob_fact= 1.0 / real(1 << num_bits)       in

@@ -45,11 +45,12 @@ fun [real] brownianBridgeDates (
 
     loop (bbrow) =
         for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
+            unsafe
             let j  = li[i+1] - 1 in
             let k  = ri[i+1] - 1 in
             let l  = bi[i+1] - 1 in
 
-            let wk = bbrow [k  ] in
+            let wk = unsafe bbrow [k  ] in
             let zi = gauss [i+1] in
             let tmp= rw[i+1] * wk + sd[i+1] * zi in
 

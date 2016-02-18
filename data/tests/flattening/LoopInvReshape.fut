@@ -10,6 +10,7 @@
 
 fun [int] main ([int] xs, [int,n] ys, [int,n] zs, [int,n] is, [int,n] js) =
   map (fn int (int y, int z, int i, int j) =>
+         unsafe
          let tmp = reshape( (y,z) , xs ) in
          tmp[i,j]
       , zip(ys,zs,is,js))
