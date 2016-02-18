@@ -635,7 +635,7 @@ getLinesFromStrings [] (GetLine _) = Left "Ran out of input"
 
 getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
-getNoLines (GetLine _) = Left "No extra lines"
+getNoLines (GetLine _) = Left "Unexpected end of input"
 
 combArrayTypes :: TypeBase Rank NoInfo Name
                -> [TypeBase Rank NoInfo Name]
