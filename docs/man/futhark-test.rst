@@ -93,20 +93,20 @@ EXAMPLES
 
 The following program tests simple indexing and bounds checking::
 
-  // Test simple indexing of an array.
-  // ==
-  // input {
-  //   [4,3,2,1]
-  //   1
-  // }
-  // output {
-  //   3
-  // }
-  // input {
-  //   [4,3,2,1]
-  //   5
-  // }
-  // error: Assertion.*failed
+  -- Test simple indexing of an array.
+  -- ==
+  -- input {
+  --   [4,3,2,1]
+  --   1
+  -- }
+  -- output {
+  --   3
+  -- }
+  -- input {
+  --   [4,3,2,1]
+  --   5
+  -- }
+  -- error: Assertion.*failed
 
   fun int main([int] a, int i) =
     a[i]
