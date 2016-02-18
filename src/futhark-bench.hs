@@ -4,7 +4,6 @@
 
 module Main (main) where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe
@@ -63,7 +62,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
-  input <- intercalate "\n" <$> map pretty <$> getValues dir input_spec
+  input <- getValuesString dir input_spec
   expected <- getValues dir expected_spec
   (futcode, _, futerr) <-
     liftIO $ readProcessWithExitCode compiler [program, "-o", binOutputf] ""
@@ -99,7 +98,7 @@ runResult :: MonadIO m =>
              FilePath
           -> ExitCode
           -> String
-          -> [Char]
+          -> String
           -> m [Value]
 runResult program ExitSuccess stdout_s _ =
   case valuesFromString "stdout" stdout_s of
@@ -108,7 +107,7 @@ runResult program ExitSuccess stdout_s _ =
       fail $ show e <> "\n(See " <> actual <> ")"
     Right vs -> return vs
 runResult program (ExitFailure code) _ stderr_s =
-  fail $ program ++ " failed with error code " ++ show (code) ++
+  fail $ program ++ " failed with error code " ++ show code ++
   " and output:\n" ++ stderr_s
 
 writeOutFile :: FilePath -> String -> String -> IO FilePath
