@@ -1,7 +1,6 @@
 -- Fails if the scan is rewritten to be in-place (consume md_st)
 -- during first-order transform.
 -- ==
--- tags { no_opencl }
 -- input {
 --   [[[1.0]]]
 --   [[1.0],[2.0]]

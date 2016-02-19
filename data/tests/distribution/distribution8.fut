@@ -13,7 +13,6 @@
 --     scan
 --
 -- ==
--- tags { no_opencl }
 -- structure distributed { DoLoop/MapKernel 3 DoLoop 2 Map 0}
 
 fun [real] combineVs([real] n_row, [real] vol_row, [real] dr_row) =
