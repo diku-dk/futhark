@@ -81,11 +81,11 @@ writeOpenCLScalar mem i t "device" val = do
   val' <- newVName "write_tmp"
   GenericC.stm [C.cstm|{
                    $ty:t $id:val' = $exp:val;
-                   assert(clEnqueueWriteBuffer(fut_cl_queue, $id:mem, CL_TRUE,
-                                               $exp:i, sizeof($ty:t),
-                                               &$id:val',
-                                               0, NULL, NULL)
-                          == CL_SUCCESS);
+                   OPENCL_SUCCEED(
+                     clEnqueueWriteBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                                          $exp:i, sizeof($ty:t),
+                                          &$id:val',
+                                          0, NULL, NULL));
                 }|]
 writeOpenCLScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
@@ -95,11 +95,11 @@ readOpenCLScalar mem i t "device" = do
   val <- newVName "read_res"
   GenericC.decl [C.cdecl|$ty:t $id:val;|]
   GenericC.stm [C.cstm|
-                 assert(clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
-                                            $exp:i, sizeof($ty:t),
-                                            &$id:val,
-                                            0, NULL, NULL)
-                        == CL_SUCCESS);
+                 OPENCL_SUCCEED(
+                   clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                                       $exp:i, sizeof($ty:t),
+                                       &$id:val,
+                                       0, NULL, NULL));
               |]
   return [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space =
@@ -120,7 +120,7 @@ allocateOpenCLBuffer mem size "device" = do
     $id:mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
                              $exp:size > 0 ? $exp:size : 1, NULL,
                              &$id:errorname);
-    assert($id:errorname == 0);
+    OPENCL_SUCCEED($id:errorname);
   }|]
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
@@ -132,21 +132,21 @@ copyOpenCLMemory :: GenericC.Copy OpenCL ()
 copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
   GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      assert(clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
-                                 $exp:srcidx, $exp:nbytes,
-                                 $id:destmem + $exp:destidx,
-                                 0, NULL, NULL)
-             == CL_SUCCESS);
+      OPENCL_SUCCEED(
+        clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
+                            $exp:srcidx, $exp:nbytes,
+                            $id:destmem + $exp:destidx,
+                            0, NULL, NULL));
    }
   |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
   GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      assert(clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
-                                  $exp:destidx, $exp:nbytes,
-                                  $id:srcmem + $exp:srcidx,
-                                  0, NULL, NULL)
-             == CL_SUCCESS);
+      OPENCL_SUCCEED(
+        clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
+                             $exp:destidx, $exp:nbytes,
+                             $id:srcmem + $exp:srcidx,
+                             0, NULL, NULL));
     }
   |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
@@ -154,14 +154,14 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
   -- memcpy()-like functions.  The order below is not a typo.
   GenericC.stm [C.cstm|{
     if ($exp:nbytes > 0) {
-      assert(clEnqueueCopyBuffer(fut_cl_queue,
-                                 $id:srcmem, $id:destmem,
-                                 $exp:srcidx, $exp:destidx,
-                                 $exp:nbytes,
-                                 0, NULL, NULL)
-             == CL_SUCCESS);
+      OPENCL_SUCCEED(
+        clEnqueueCopyBuffer(fut_cl_queue,
+                            $id:srcmem, $id:destmem,
+                            $exp:srcidx, $exp:destidx,
+                            $exp:nbytes,
+                            0, NULL, NULL));
       if (cl_synchronous) {
-        assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+        OPENCL_SUCCEED(clFinish(fut_cl_queue));
       }
     }
   }|]
@@ -184,21 +184,18 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
   where setKernelArg i (ValueArg e bt) = do
           v <- GenericC.compileExpToName "kernel_arg" bt e
           GenericC.stm [C.cstm|
-            assert(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v)
-                   == CL_SUCCESS);
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
           |]
 
         setKernelArg i (MemArg v) =
           GenericC.stm [C.cstm|
-            assert(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v)
-                   == CL_SUCCESS);
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
           |]
 
         setKernelArg i (SharedMemoryArg num_bytes) = do
           num_bytes' <- GenericC.compileExp $ innerExp num_bytes
           GenericC.stm [C.cstm|
-            assert(clSetKernelArg($id:name, $int:i, $exp:num_bytes', NULL)
-                   == CL_SUCCESS);
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, $exp:num_bytes', NULL));
             |]
 
 launchKernel :: C.ToExp a =>
