@@ -1,6 +1,11 @@
 -- Fails if the scan is rewritten to be in-place (consume md_st)
 -- during first-order transform.
+--
+-- This compiles to a scan of a two-dimensional array, which is
+-- presently not supported in the OpenCL code generator.
+--
 -- ==
+-- tags { no_opencl }
 -- input {
 --   [[[1.0]]]
 --   [[1.0],[2.0]]
