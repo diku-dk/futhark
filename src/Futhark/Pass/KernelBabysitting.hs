@@ -77,6 +77,23 @@ transformBinding expmap (Let pat ()
   where num_groups = kernelWorkgroups kernel_size
 
 transformBinding expmap (Let pat ()
+                         (Op (ChunkedMapKernel cs w kernel_size o lam arrs)))
+  | num_groups /= constant (1::Int32) = do
+  -- We want to pad and transpose the input arrays.
+
+  (w', kernel_size', arrs') <-
+    rearrangeScanReduceInputs comm cs w kernel_size arrs
+
+  lam' <- transformLambda lam
+
+  addBinding $ Let pat () $ Op $
+    ChunkedMapKernel cs w' kernel_size' o lam' arrs'
+  return expmap
+  where num_groups = kernelWorkgroups kernel_size
+        comm = case o of Disorder -> Commutative
+                         InOrder -> Noncommutative
+
+transformBinding expmap (Let pat ()
                          (Op (ScanKernel cs w kernel_size ScanFlat lam input)))
   | num_groups /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
