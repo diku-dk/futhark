@@ -195,9 +195,10 @@ blockedReduction pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
     (arrs ++ map_out_arrs)
 
 blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
-              Pattern -> Certificates -> SubExp -> Lambda -> [SubExp] -> [VName]
+              Pattern -> Certificates -> SubExp
+           -> StreamOrd -> Lambda -> [SubExp] -> [VName]
            -> m (Binding, [Binding])
-blockedMap concat_pat cs w lam nes arrs = runBinder $ do
+blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
   kernel_size <- blockedKernelSize w
 
   let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
@@ -211,7 +212,7 @@ blockedMap concat_pat cs w lam nes arrs = runBinder $ do
 
   lam' <- kerneliseLambda (kernelElementsPerThread kernel_size) nes lam
 
-  return $ Let pat () $ Op $ ChunkedMapKernel cs w kernel_size lam' arrs
+  return $ Let pat () $ Op $ ChunkedMapKernel cs w kernel_size ordering lam' arrs
 
 blockedKernelSize :: MonadBinder m =>
                      SubExp -> m KernelSize

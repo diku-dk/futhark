@@ -305,7 +305,7 @@ transformBinding (Let pat () (Op (Scan cs w fun input))) = do
 -- sequentialise the body or we keep it parallel and distribute.
 
 transformBinding (Let pat () (Op (Stream cs w
-                                  (RedLike _ comm red_fun nes) fold_fun arrs)))
+                                  (RedLike o comm red_fun nes) fold_fun arrs)))
   | any (not . primType) $ lambdaReturnType red_fun,
     Just fold_fun' <- extLambdaToLambda fold_fun  = do
   -- Split into a chunked map and a reduction, with the latter
@@ -318,7 +318,7 @@ transformBinding (Let pat () (Op (Stream cs w
       red_pat = Pattern [] red_pat_elems
       concat_pat = Pattern [] concat_pat_elems
 
-  (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w fold_fun_sequential nes arrs
+  (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w o fold_fun_sequential nes arrs
   let num_threads = arraysSize 0 $ patternTypes $ bindingPattern map_bnd
       red_input = zip nes $ patternNames $ bindingPattern map_bnd
 
