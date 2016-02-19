@@ -124,7 +124,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ChunkedMapKernel _ _ kernel_size o lam _) = do
+  (ChunkedMapKernel _ _ kernel_size _ lam _) = do
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
 
@@ -180,8 +180,7 @@ kernelCompiler
         map_op <-
           ImpGen.subImpM_ inKernelOperations $ do
             computeThreadChunkSize
-              (case o of InOrder -> Noncommutative
-                         Disorder -> Commutative)
+              Noncommutative
               (Imp.ScalarVar $ lambdaIndex lam)
               (Imp.innerExp $ Imp.dimSizeToExp num_threads)
               (ImpGen.dimSizeToExp per_thread_chunk)
