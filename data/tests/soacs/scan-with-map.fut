@@ -6,7 +6,7 @@
 -- with the inner map during fusion or kernel extraction.
 --
 -- ==
--- tags { no_opencl no_python }
+-- tags { no_python }
 -- compiled input { [1,2,3] 1000001 } output { 901824 }
 
 fun int main([int,n] a, int m) =
