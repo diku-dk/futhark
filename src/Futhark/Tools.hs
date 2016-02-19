@@ -100,6 +100,8 @@ sequentialStreamWholeArrayBindings :: Bindable lore =>
 sequentialStreamWholeArrayBindings width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
+      index_bnd = mkLet' [] [Ident (extLambdaIndex lam) $ Prim int32] $
+                  PrimOp $ SubExp $ intConst Int32 0
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
@@ -107,7 +109,8 @@ sequentialStreamWholeArrayBindings width accs lam arrs =
                    PrimOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
-  in (chunk_bnd :
+  in (index_bnd :
+      chunk_bnd :
       acc_bnds ++
       arr_bnds ++
       bodyBindings (extLambdaBody lam),
