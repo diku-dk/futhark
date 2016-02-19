@@ -27,18 +27,12 @@ compileProg prog = do
   case res of
     Left err -> return $ Left err
     Right (Program opencl_code opencl_prelude kernel_names prog') -> do
-      let header = unlines [ "#include <CL/cl.h>\n"
-                           , "#define FUT_KERNEL(s) #s"
-                           , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
-                           , blockDimPragma
-                           ]
-      cprog <- GenericC.compileProg operations ()
-               (openClDecls kernel_names opencl_code opencl_prelude)
-               openClInit
-               [[C.cstm|OPENCL_SUCCEED(clFinish(fut_cl_queue));|]]
-               (openClReport kernel_names)
-               options prog'
-      return $ Right $ header ++ cprog
+      Right <$> GenericC.compileProg operations ()
+                (openClDecls transposeBlockDim kernel_names opencl_code opencl_prelude)
+                openClInit
+                [[C.cstm|OPENCL_SUCCEED(clFinish(fut_cl_queue));|]]
+                (openClReport kernel_names)
+                options prog'
   where operations :: GenericC.Operations OpenCL ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel
@@ -248,6 +242,3 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
           map (printKernelDim global_work_size) [0..kernel_rank-1]
         printKernelDim global_work_size i =
           [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
-
-blockDimPragma :: String
-blockDimPragma = "#define FUT_BLOCK_DIM " ++ show (transposeBlockDim :: Int)
