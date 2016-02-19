@@ -180,7 +180,7 @@ data Diet = Consume -- ^ Consumes this value.
 
 -- | Every possible value in Futhark.  Values are fully evaluated and their
 -- type is always unambiguous.
-data Value = PrimVal PrimValue
+data Value = PrimVal !PrimValue
            | ArrayVal !(Array Int PrimValue) PrimType [Int]
              -- ^ It is assumed that the array is 0-indexed.
              deriving (Eq, Ord, Show)
