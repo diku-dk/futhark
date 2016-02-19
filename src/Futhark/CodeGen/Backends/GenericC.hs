@@ -543,6 +543,8 @@ $esc:("#include <assert.h>")
 $esc:("#include <err.h>")
 $esc:("#include <getopt.h>")
 
+$edecls:decls
+
 $edecls:(typeDefinitions endstate)
 
 $edecls:(compVarDefinitions endstate)
@@ -550,6 +552,10 @@ $edecls:(compVarDefinitions endstate)
 $edecls:prototypes
 
 $edecls:builtin
+
+$edecls:(map funcToDef definitions)
+
+$edecls:readerFunctions
 
 int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval *t1)
 {
@@ -559,12 +565,6 @@ int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval 
     result->tv_usec = diff % resolution;
     return (diff<0);
 }
-
-$edecls:readerFunctions
-
-$edecls:decls
-
-$edecls:(map funcToDef definitions)
 
 static typename FILE *runtime_file;
 

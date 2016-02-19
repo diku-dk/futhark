@@ -3,14 +3,15 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( openClDecls
   , openClInit
   , openClReport
+
   ) where
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-openClDecls :: [String] -> String -> String -> [C.Definition]
-openClDecls kernel_names opencl_program opencl_prelude =
-  kernelDeclarations ++ openclBoilerplate
+openClDecls :: Int -> [String] -> String -> String -> [C.Definition]
+openClDecls block_dim kernel_names opencl_program opencl_prelude =
+  openclPrelude ++ kernelDeclarations ++ openclBoilerplate
   where kernelDeclarations =
           [C.cedecl|static const char fut_opencl_prelude[] = $string:opencl_prelude;|] :
           [C.cedecl|$esc:("static const char fut_opencl_program[] = FUT_KERNEL(\n" ++
@@ -22,6 +23,12 @@ openClDecls kernel_names opencl_program opencl_prelude =
             , [C.cedecl|static int $id:(name ++ "_runs") = 0;|]
             ]
           | name <- kernel_names ]
+
+        openclPrelude = [ [C.cedecl|$esc:("#include <CL/cl.h>\n")|]
+                        , [C.cedecl|$esc:("#define FUT_KERNEL(s) #s")|]
+                        , [C.cedecl|$esc:("#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)")|]
+                        , [C.cedecl|$esc:("#define FUT_BLOCK_DIM " ++ show block_dim)|]
+                          ]
 
         openclBoilerplate = [C.cunit|
 typename cl_context fut_cl_context;
