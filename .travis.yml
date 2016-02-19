@@ -1,5 +1,8 @@
 # NB: don't set `language: haskell` here
-language: c
+language: generic
+
+sudo: required
+dist: trusty
 
 # See also https://github.com/hvr/multi-ghc-travis for more information
 
