@@ -74,6 +74,7 @@ data Kernel lore =
     [(SubExp, VName)]
   | ChunkedMapKernel Certificates SubExp
     KernelSize
+    StreamOrd
     (LambdaT lore)
     [VName]
     deriving (Eq, Show, Ord)
@@ -167,11 +168,12 @@ mapKernelM tv (ScanKernel cs w kernel_size order fun input) =
   (zip <$> mapM (mapOnKernelSubExp tv) nes <*>
    mapM (mapOnKernelVName tv) arrs)
   where (nes, arrs) = unzip input
-mapKernelM tv (ChunkedMapKernel cs w kernel_size fun arrs) =
+mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   ChunkedMapKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv w <*>
   mapOnKernelSize tv kernel_size <*>
+  pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
 
@@ -278,7 +280,7 @@ kernelType (ScanKernel _ w size _ lam _) =
   map ((`arrayOfRow` kernelWorkgroups size) .
        (`arrayOfRow` kernelWorkgroupSize size))
   (lambdaReturnType lam)
-kernelType (ChunkedMapKernel _ _ size fun _) =
+kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`arrayOfRow` kernelNumThreads size) nonconcat_ret <>
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
@@ -347,7 +349,7 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ fun input) =
     usageInLambda fun arrs
     where arrs = map snd input
-  usageInOp (ChunkedMapKernel _ _ _ fun arrs) =
+  usageInOp (ChunkedMapKernel _ _ _ _ fun arrs) =
     usageInLambda fun arrs
   usageInOp (MapKernel _ _ _ _ inps _ body) =
     mconcat $
@@ -456,7 +458,7 @@ typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
-typeCheckKernel (ChunkedMapKernel cs w kernel_size fun arrs) = do
+typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
   mapM_ (TC.requireI [Prim Cert]) cs
   TC.require [Prim int32] w
   typeCheckKernelSize kernel_size
@@ -512,7 +514,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
   opMetrics (ScanKernel _ _ _ _ lam _) =
     inside "ScanKernel" $ lambdaMetrics lam
-  opMetrics (ChunkedMapKernel _ _ _ fun _) =
+  opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
@@ -546,12 +548,13 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr as) </>
             ppr fun)
     where (es, as) = unzip input
-  ppr (ChunkedMapKernel cs w kernel_size fun arrs) =
-    ppCertificates' cs <> text "chunkedMapKernel" <>
+  ppr (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
+    ppCertificates' cs <> text ("chunkedMapKernel"++ord_str) <>
     parens (ppr w <> comma </>
             ppr kernel_size <> comma </>
             commasep (map ppr arrs) </>
             ppr fun)
+    where ord_str = if ordering == Disorder then "Per" else ""
 
 instance Pretty KernelSize where
   ppr (KernelSize
