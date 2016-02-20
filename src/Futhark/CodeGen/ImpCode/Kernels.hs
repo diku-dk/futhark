@@ -7,11 +7,12 @@ module Futhark.CodeGen.ImpCode.Kernels
   , FunctionT (Function)
   , Code
   , KernelCode
+  , HostOp (..)
+  , KernelOp (..)
   , CallKernel (..)
   , MapKernel (..)
   , Kernel (..)
   , KernelUse (..)
-  , InKernel (..)
   , module Futhark.CodeGen.ImpCode
   -- * Utility functions
   , getKernels
@@ -31,15 +32,20 @@ import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.Pretty
 
-type Program = Functions CallKernel
-type Function = Imp.Function CallKernel
+type Program = Functions HostOp
+type Function = Imp.Function HostOp
 -- | Host-level code that can call kernels.
 type Code = Imp.Code CallKernel
 -- | Code inside a kernel.
-type KernelCode = Imp.Code InKernel
+type KernelCode = Imp.Code KernelOp
+
+data HostOp = CallKernel CallKernel
+            | GetNumGroups VName
+            | GetGroupSize VName
+            deriving (Show)
 
 data CallKernel = Map MapKernel
-                | CallKernel Kernel
+                | AnyKernel Kernel
                 | MapTranspose PrimType VName Exp VName Exp Exp Exp Exp
             deriving (Show)
 
@@ -47,7 +53,7 @@ data CallKernel = Map MapKernel
 data MapKernel = MapKernel { mapKernelThreadNum :: VName
                              -- ^ Binding position - also serves as a unique
                              -- name for the kernel.
-                           , mapKernelBody :: Imp.Code InKernel
+                           , mapKernelBody :: Imp.Code KernelOp
                            , mapKernelUses :: [KernelUse]
                            , mapKernelNumGroups :: DimSize
                            , mapKernelGroupSize :: DimSize
@@ -57,7 +63,7 @@ data MapKernel = MapKernel { mapKernelThreadNum :: VName
                      deriving (Show)
 
 data Kernel = Kernel
-              { kernelBody :: Imp.Code InKernel
+              { kernelBody :: Imp.Code KernelOp
               , kernelLocalMemory :: [(VName, MemSize, PrimType)]
                 -- ^ In-kernel name, per-workgroup size in bytes, and
                 -- alignment restriction.
@@ -78,8 +84,10 @@ data KernelUse = ScalarUse VName PrimType
 
 getKernels :: Program -> [CallKernel]
 getKernels = nubBy sameKernel . execWriter . traverse getFunKernels
-  where getFunKernels kernel =
-          tell [kernel] >> return kernel
+  where getFunKernels (CallKernel kernel) =
+          tell [kernel]
+        getFunKernels _ =
+          return ()
         sameKernel (MapTranspose bt1 _ _ _ _ _ _ _) (MapTranspose bt2 _ _ _ _ _ _ _) =
           bt1 == bt2
         sameKernel _ _ = False
@@ -90,9 +98,19 @@ instance Pretty KernelUse where
   ppr (MemoryUse name size) =
     text "mem_copy" <> parens (commasep [ppr name, ppr size])
 
+instance Pretty HostOp where
+  ppr (GetNumGroups dest) =
+    ppr dest <+> text "<-" <+>
+    text "get_num_groups()"
+  ppr (GetGroupSize dest) =
+    ppr dest <+> text "<-" <+>
+    text "get_group_size()"
+  ppr (CallKernel c) =
+    ppr c
+
 instance Pretty CallKernel where
   ppr (Map k) = ppr k
-  ppr (CallKernel k) = ppr k
+  ppr (AnyKernel k) = ppr k
   ppr (MapTranspose bt dest destoffset src srcoffset num_arrays size_x size_y) =
     text "mapTranspose" <>
     parens (ppr bt <> comma </>
@@ -128,7 +146,7 @@ instance FreeIn MapKernel where
   freeIn kernel =
     mapKernelThreadNum kernel `HS.delete` freeIn (mapKernelBody kernel)
 
-data InKernel = GetGroupId VName Int
+data KernelOp = GetGroupId VName Int
               | GetLocalId VName Int
               | GetLocalSize VName Int
               | GetGlobalSize VName Int
@@ -137,7 +155,7 @@ data InKernel = GetGroupId VName Int
               | Barrier
               deriving (Show)
 
-instance Pretty InKernel where
+instance Pretty KernelOp where
   ppr (GetGroupId dest i) =
     ppr dest <+> text "<-" <+>
     text "get_group_id" <> parens (ppr i)
@@ -159,7 +177,7 @@ instance Pretty InKernel where
   ppr Barrier =
     text "barrier()"
 
-instance FreeIn InKernel where
+instance FreeIn KernelOp where
   freeIn = const mempty
 
 brace :: Doc -> Doc

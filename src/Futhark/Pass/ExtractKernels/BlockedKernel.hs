@@ -214,13 +214,11 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
 
   return $ Let pat () $ Op $ ChunkedMapKernel cs w kernel_size ordering lam' arrs
 
-blockedKernelSize :: MonadBinder m =>
+blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
                      SubExp -> m KernelSize
 blockedKernelSize w = do
-  num_groups <- letSubExp "num_groups" $
-                Apply (nameFromString "num_groups") [] (primRetType int32)
-  group_size <- letSubExp "group_size" $
-                Apply (nameFromString "group_size") [] (primRetType int32)
+  num_groups <- letSubExp "num_groups" $ Op NumGroups
+  group_size <- letSubExp "group_size" $ Op GroupSize
 
   num_threads <-
     letSubExp "num_threads" $ PrimOp $ BinOp (Mul Int32) num_groups group_size

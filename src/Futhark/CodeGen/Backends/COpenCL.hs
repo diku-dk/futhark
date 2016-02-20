@@ -169,6 +169,14 @@ openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
 callKernel :: GenericC.OpCompiler OpenCL ()
+callKernel (GetNumGroups v) = do
+  -- Must be a power of two.
+  GenericC.stm [C.cstm|$id:v = cl_num_groups;|]
+  return GenericC.Done
+callKernel (GetGroupSize v) = do
+  GenericC.stm [C.cstm|$id:v = cl_group_size;|]
+  return GenericC.Done
+
 callKernel (LaunchKernel name args kernel_size workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args
   kernel_size' <- mapM GenericC.compileExp kernel_size

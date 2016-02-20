@@ -52,6 +52,8 @@ data KernelArg = ValueArg Exp PrimType
 
 -- | Host-level OpenCL operation.
 data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
+            | GetNumGroups VName
+            | GetGroupSize VName
             deriving (Show)
 
 -- | The block size when transposing.

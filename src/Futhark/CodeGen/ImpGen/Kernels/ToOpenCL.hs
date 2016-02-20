@@ -21,7 +21,7 @@ import Futhark.Representation.AST.Attributes.Types (int32)
 import qualified Futhark.CodeGen.OpenCL.Kernels as Kernels
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.ImpCode.Kernels hiding (Program)
+import Futhark.CodeGen.ImpCode.Kernels hiding (Program, GetNumGroups, GetGroupSize)
 import qualified Futhark.CodeGen.ImpCode.Kernels as ImpKernels
 import Futhark.CodeGen.ImpCode.OpenCL hiding (Program)
 import qualified Futhark.CodeGen.ImpCode.OpenCL as ImpOpenCL
@@ -67,7 +67,7 @@ instance Monoid OpenClRequirements where
     OpenClRequirements (nubBy cmpFst $ used1 <> used2) (ts1 <> ts2)
     where cmpFst (x, _) (y, _) = x == y
 
-inKernelOperations :: GenericC.Operations InKernel UsedFunctions
+inKernelOperations :: GenericC.Operations KernelOp UsedFunctions
 inKernelOperations = GenericC.Operations
                      { GenericC.opsCompiler = kernelOps
                      , GenericC.opsMemoryType = kernelMemoryType
@@ -76,7 +76,7 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsAllocate = cannotAllocate
                      , GenericC.opsCopy = copyInKernel
                      }
-  where kernelOps :: GenericC.OpCompiler InKernel UsedFunctions
+  where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
         kernelOps (GetGroupId v i) = do
           GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
           return GenericC.Done
@@ -99,11 +99,11 @@ inKernelOperations = GenericC.Operations
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
           return GenericC.Done
 
-        cannotAllocate :: GenericC.Allocate InKernel UsedFunctions
+        cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
 
-        copyInKernel :: GenericC.Copy InKernel UsedFunctions
+        copyInKernel :: GenericC.Copy KernelOp UsedFunctions
         copyInKernel _ _ _ _ _ _ _ =
           fail $ "Cannot bulk copy in kernel."
 
@@ -117,6 +117,7 @@ compileKernels kernels = do
   return (concat funcs, mconcat reqs)
 
 compileKernel :: CallKernel -> Either String ([(String, C.Func)], OpenClRequirements)
+
 compileKernel called@(Map kernel) =
   let (funbody, s) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
@@ -139,7 +140,7 @@ compileKernel called@(Map kernel) =
             OpenClRequirements (used_funs ++ requiredFunctions kernel_funs) $
             typesInKernel called)
 
-compileKernel called@(CallKernel kernel) =
+compileKernel called@(AnyKernel kernel) =
   let (kernel_body, s) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
         GenericC.collect $ GenericC.compileCode $ kernelBody kernel
@@ -236,21 +237,25 @@ mapKernelName = ("map_kernel_"++) . show . baseTag . mapKernelThreadNum
 calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
   mapKernelName k
-calledKernelName (CallKernel k) =
+calledKernelName (AnyKernel k) =
   ("kernel_" ++) $ show $ baseTag $ kernelName k
 calledKernelName (MapTranspose bt _ _ _ _ _ _ _) =
   "fut_kernel_map_transpose_" ++ pretty bt
 
-callKernel :: CallKernel -> OpenCL
-callKernel kernel =
+callKernel :: HostOp -> OpenCL
+callKernel (CallKernel kernel) =
   LaunchKernel
   (calledKernelName kernel) (kernelArgs kernel) kernel_size workgroup_size
   where (kernel_size, workgroup_size) = kernelAndWorkgroupSize kernel
+callKernel (ImpKernels.GetNumGroups v) =
+  GetNumGroups v
+callKernel (ImpKernels.GetGroupSize v) =
+  GetGroupSize v
 
 kernelArgs :: CallKernel -> [KernelArg]
 kernelArgs (Map kernel) =
   map useToArg $ mapKernelUses kernel
-kernelArgs (CallKernel kernel) =
+kernelArgs (AnyKernel kernel) =
   map (SharedMemoryArg . memSizeToExp . localMemorySize)
       (kernelLocalMemory kernel) ++
   map useToArg (kernelUses kernel)
@@ -272,7 +277,7 @@ kernelAndWorkgroupSize (Map kernel) =
   ([sizeToExp (mapKernelNumGroups kernel) *
     sizeToExp (mapKernelGroupSize kernel)],
    [sizeToExp $ mapKernelGroupSize kernel])
-kernelAndWorkgroupSize (CallKernel kernel) =
+kernelAndWorkgroupSize (AnyKernel kernel) =
   ([sizeToExp (kernelNumGroups kernel) *
     sizeToExp (kernelGroupSize kernel)],
    [sizeToExp $ kernelGroupSize kernel])
@@ -293,7 +298,7 @@ useToArg (ScalarUse v bt)  = ValueArg (ScalarVar v) bt
 
 typesInKernel :: CallKernel -> HS.HashSet PrimType
 typesInKernel (Map kernel) = typesInCode $ mapKernelBody kernel
-typesInKernel (CallKernel kernel) = typesInCode $ kernelBody kernel
+typesInKernel (AnyKernel kernel) = typesInCode $ kernelBody kernel
 typesInKernel MapTranspose{} = mempty
 
 typesInCode :: ImpKernels.KernelCode -> HS.HashSet PrimType
