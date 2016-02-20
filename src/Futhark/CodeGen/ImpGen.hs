@@ -58,6 +58,7 @@ module Futhark.CodeGen.ImpGen
   , dimSizeToSubExp
   , destinationFromParam
   , destinationFromParams
+  , funcallTargets
   , copy
   , copyDWIM
   , copyElementWise

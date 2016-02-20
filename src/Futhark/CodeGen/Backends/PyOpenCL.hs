@@ -54,6 +54,14 @@ compileProg moduleConfig prog = do
                      }
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
+callKernel (Imp.GetNumGroups v) = do
+  Py.stm $ Assign (Var (textual v)) $ Constant $ value (128::Int32)
+  return Py.Done
+
+callKernel (Imp.GetGroupSize v) = do
+  Py.stm $ Assign (Var (textual v)) $ Constant $ value (512::Int32)
+  return Py.Done
+
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
   let total_elements = foldl mult_exp (Constant $ value (1::Int32)) kernel_size'

@@ -73,9 +73,6 @@ builtInFunctions = HM.fromList $ map namify
                    ,("exp64", (FloatType Float64, [FloatType Float64]))
                    ,("cos64", (FloatType Float64, [FloatType Float64]))
                    ,("sin64", (FloatType Float64, [FloatType Float64]))
-
-                   ,("num_groups", (IntType Int32, []))
-                   ,("group_size", (IntType Int32, []))
                    ]
   where namify (k,v) = (nameFromString k, v)
 

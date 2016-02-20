@@ -28,10 +28,10 @@ import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedLambdaParameters)
 import Futhark.Util.IntegralExp (quotRoundingUp)
 
-type CallKernelGen = ImpGen.ImpM Imp.CallKernel
-type InKernelGen = ImpGen.ImpM Imp.InKernel
+type CallKernelGen = ImpGen.ImpM Imp.HostOp
+type InKernelGen = ImpGen.ImpM Imp.KernelOp
 
-callKernelOperations :: ImpGen.Operations Imp.CallKernel
+callKernelOperations :: ImpGen.Operations Imp.HostOp
 callKernelOperations =
   ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
                     , ImpGen.opsCopyCompiler = callKernelCopy
@@ -39,7 +39,7 @@ callKernelOperations =
                     }
 
 
-inKernelOperations :: ImpGen.Operations Imp.InKernel
+inKernelOperations :: ImpGen.Operations Imp.KernelOp
 inKernelOperations = (ImpGen.defaultOperations cannotAllocInKernel)
                      { ImpGen.opsCopyCompiler = inKernelCopy
                      , ImpGen.opsExpCompiler = inKernelExpCompiler
@@ -51,20 +51,28 @@ compileProg prog =
   ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
 
 opCompiler :: ImpGen.Destination -> Op ExplicitMemory
-              -> ImpGen.ImpM Imp.CallKernel ()
+              -> ImpGen.ImpM Imp.HostOp ()
 opCompiler dest (Alloc e space) =
   ImpGen.compileAlloc dest e space
 opCompiler dest (Inner kernel) =
   kernelCompiler dest kernel
 
 cannotAllocInKernel :: ImpGen.Destination -> Op ExplicitMemory
-                    -> ImpGen.ImpM Imp.InKernel ()
+                    -> ImpGen.ImpM Imp.KernelOp ()
 cannotAllocInKernel _ _ =
   throwError "Cannot allocate memory in kernel."
 
 -- | Recognise kernels (maps), give everything else back.
 kernelCompiler :: ImpGen.Destination -> Kernel ExplicitMemory
-               -> ImpGen.ImpM Imp.CallKernel ()
+               -> ImpGen.ImpM Imp.HostOp ()
+
+kernelCompiler dest NumGroups = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit $ Imp.Op $ Imp.GetNumGroups v
+
+kernelCompiler dest GroupSize = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit $ Imp.Op $ Imp.GetGroupSize v
 
 kernelCompiler
   (ImpGen.Destination dest)
@@ -105,7 +113,7 @@ kernelCompiler
     let group_size_var = Imp.ScalarVar group_size
     ImpGen.emit $ Imp.DeclareScalar group_size int32
     ImpGen.emit $ Imp.DeclareScalar num_groups int32
-    ImpGen.emit $ Imp.Call [group_size] (nameFromString "group_size") []
+    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
     ImpGen.emit $ Imp.SetScalar num_groups $
       kernel_size `quotRoundingUp` group_size_var
 
@@ -113,7 +121,7 @@ kernelCompiler
     -- kernel.
     uses <- computeKernelUses dest (kernel_size, kernel_body) bound_in_kernel
 
-    ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
       , Imp.mapKernelBody = kernel_body
       , Imp.mapKernelUses = uses
@@ -198,7 +206,7 @@ kernelCompiler
 
           uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
-          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = body
             , Imp.kernelLocalMemory = mempty
             , Imp.kernelUses = uses
@@ -378,7 +386,7 @@ kernelCompiler
 
           uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
-          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = body
             , Imp.kernelLocalMemory = local_mem
             , Imp.kernelUses = uses
@@ -581,7 +589,7 @@ kernelCompiler
 
           uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
-          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = body
             , Imp.kernelLocalMemory = local_mem
             , Imp.kernelUses = uses
@@ -592,7 +600,7 @@ kernelCompiler
 
     call_with_body body
 
-expCompiler :: ImpGen.ExpCompiler Imp.CallKernel
+expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler target (PrimOp (Iota n x)) = do
   i <- newVName "i"
@@ -648,14 +656,17 @@ compileKernelSize (KernelSize num_groups local_size per_thread_elements
   return (num_groups', local_size', per_thread_elements',
           num_elements', offset_multiple', num_threads')
 
-callKernelCopy :: ImpGen.CopyCompiler Imp.CallKernel
+callKernelCopy :: ImpGen.CopyCompiler Imp.HostOp
 callKernelCopy bt
   destloc@(ImpGen.MemLocation destmem destshape destIxFun)
   srcloc@(ImpGen.MemLocation srcmem srcshape srcIxFun)
   n
   | Just (destoffset, srcoffset,
           num_arrays, size_x, size_y) <- isMapTransposeKernel bt destloc srcloc =
-  ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
+  ImpGen.emit $ Imp.Op $ Imp.CallKernel $
+  Imp.MapTranspose bt
+  destmem destoffset
+  srcmem srcoffset
   num_arrays size_x size_y
 
   | bt_size <- primByteSize bt,
@@ -703,14 +714,14 @@ callKernelCopy bt
         kernel_size = Imp.innerExp n * product (drop 1 shape)
     ImpGen.emit $ Imp.DeclareScalar group_size int32
     ImpGen.emit $ Imp.DeclareScalar num_groups int32
-    ImpGen.emit $ Imp.Call [group_size] (nameFromString "group_size") []
+    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
     ImpGen.emit $ Imp.SetScalar num_groups $
       kernel_size `quotRoundingUp` group_size_var
 
     let bound_in_kernel = [global_thread_index]
     body_uses <- computeKernelUses [] (kernel_size, body) bound_in_kernel
 
-    ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
       , Imp.mapKernelGroupSize = Imp.VarSize group_size
@@ -721,10 +732,10 @@ callKernelCopy bt
 
 -- | We have no bulk copy operation (e.g. memmove) inside kernels, so
 -- turn any copy into a loop.
-inKernelCopy :: ImpGen.CopyCompiler Imp.InKernel
+inKernelCopy :: ImpGen.CopyCompiler Imp.KernelOp
 inKernelCopy = ImpGen.copyElementWise
 
-inKernelExpCompiler :: ImpGen.ExpCompiler Imp.InKernel
+inKernelExpCompiler :: ImpGen.ExpCompiler Imp.KernelOp
 inKernelExpCompiler _ (PrimOp (Assert _ loc)) =
   fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
 inKernelExpCompiler _ e =

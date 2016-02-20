@@ -37,6 +37,7 @@ const char *cl_preferred_platform = "";
 const char *cl_preferred_device = "";
 int cl_verbosity = 1;
 int cl_synchronous = 0;
+
 static size_t cl_group_size = 512, cl_num_groups = 128;
 
 static char *strclone(const char *str) {
@@ -350,14 +351,6 @@ void setup_opencl() {
 
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)
-}
-
-size_t futhark_num_groups() {
-  return cl_num_groups; /* Must be a power of two */
-}
-
-size_t futhark_group_size() {
-  return cl_group_size;
 }
 |]
 

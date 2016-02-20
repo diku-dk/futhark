@@ -77,6 +77,9 @@ data Kernel lore =
     StreamOrd
     (LambdaT lore)
     [VName]
+
+  | NumGroups
+  | GroupSize
     deriving (Eq, Show, Ord)
 
 data KernelInput lore = KernelInput { kernelInputParam :: LParam lore
@@ -176,6 +179,8 @@ mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
+mapKernelM _ NumGroups = pure NumGroups
+mapKernelM _ GroupSize = pure GroupSize
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -285,6 +290,10 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
+kernelType NumGroups =
+  [Prim int32]
+kernelType GroupSize =
+  [Prim int32]
 
 chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
@@ -356,6 +365,8 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     map (UT.consumedUsage . kernelInputArray) $
     filter ((`HS.member` consumed_in_body) . kernelInputName) inps
     where consumed_in_body = consumedInBody body
+  usageInOp NumGroups = mempty
+  usageInOp GroupSize = mempty
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
@@ -476,6 +487,9 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError noLoc "First parameter of chunked map function is not int32-typed."
 
+typeCheckKernel NumGroups = return ()
+typeCheckKernel GroupSize = return ()
+
 typeCheckKernelSize :: TC.Checkable lore =>
                        KernelSize -> TC.TypeM lore ()
 typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
@@ -516,6 +530,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
+  opMetrics NumGroups = seen "NumGroups"
+  opMetrics GroupSize = seen "GroupSize"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr (MapKernel cs w index ispace inps returns body) =
@@ -555,6 +571,8 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr arrs) </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
+  ppr NumGroups = text "$num_groups()"
+  ppr GroupSize = text "$group_size()"
 
 instance Pretty KernelSize where
   ppr (KernelSize

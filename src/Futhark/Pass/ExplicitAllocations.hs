@@ -578,6 +578,12 @@ allocInExp (Op (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
   return $ Op $ Inner $ ScanKernel cs w size order lam' input
 
+allocInExp (Op GroupSize) =
+  return $ Op $ Inner GroupSize
+
+allocInExp (Op NumGroups) =
+  return $ Op $ Inner NumGroups
+
 allocInExp (Apply fname args rettype) = do
   args' <- funcallArgs args
   return $ Apply fname args' (memoryInRetType rettype)

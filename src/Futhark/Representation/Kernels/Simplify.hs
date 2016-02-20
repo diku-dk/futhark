@@ -97,6 +97,9 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     lam' <- Engine.simplifyLambda lam w' Nothing $ map Just arrs'
     return $ ChunkedMapKernel cs' w' kernel_size' o lam' arrs'
 
+  simplifyOp NumGroups = return NumGroups
+  simplifyOp GroupSize = return GroupSize
+
 simplifyKernelInput :: Engine.MonadEngine m =>
                        KernelInput (Engine.InnerLore m) -> m (KernelInput (Lore m))
 simplifyKernelInput (KernelInput param arr is) = do
