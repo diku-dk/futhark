@@ -1,5 +1,8 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
--- | Internal abstract syntax for Futhark.
+-- | Futhark core language skeleton.  Concrete representations further
+-- extend this skeleton by defining a "lore", which specifies concrete
+-- annotations ("Futhark.Representation.AST.Annotations") and
+-- semantics.
 module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core
