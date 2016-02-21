@@ -100,7 +100,7 @@ data FusedKer = FusedKer {
   -- ^ whether at least a fusion has been performed.
 
   , kernelScope :: Scope SOACS
-  -- ^ The names in scope at the kernel.  FIXME: get rid of this.
+  -- ^ The names in scope at the kernel.
 
   , outputTransform :: SOAC.ArrayTransforms
   , outNames :: [VName]
