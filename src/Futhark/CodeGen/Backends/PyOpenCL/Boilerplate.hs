@@ -41,11 +41,4 @@ def setup_opencl(context_set, queue_set):
   program = cl.Program(ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM), "-DWAVE_SIZE=32"])
 
   $assignBlock
-
-def futhark_num_groups():
-  return int32(128) # Must be a power of two
-
-def futhark_group_size():
-  return int32(cl_group_size)
-
 |]
