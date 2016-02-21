@@ -321,7 +321,6 @@ data BinOp = Plus -- Binary Ops for Numbers
 -- type checker will convert these to @Exp 'Type'@, in which type
 -- information is always present.
 data ExpBase ty vn =
-            -- Core language
               Literal Value SrcLoc
 
             | TupLit    [ExpBase ty vn] SrcLoc
