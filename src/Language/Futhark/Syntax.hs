@@ -355,7 +355,7 @@ data ExpBase ty vn =
                       [ExpBase ty vn] (ExpBase ty vn)
                       (ExpBase ty vn) SrcLoc
 
-            | Index (IdentBase ty vn)
+            | Index (ExpBase ty vn)
                     [ExpBase ty vn]
                     SrcLoc
 

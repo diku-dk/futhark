@@ -663,7 +663,7 @@ checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
     "' has type " ++ ppType (identType src') ++ ", which is not unique"
 
   case peelArray (length idxes) (identType src') of
-    Nothing -> bad $ IndexingError (baseName $ identName src)
+    Nothing -> bad $ IndexingError
                      (arrayRank $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
       sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
@@ -673,15 +673,13 @@ checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
         body' <- consuming src' $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
 
-checkExp (Index ident idxes pos) = do
-  ident' <- checkIdent ident
-  observe ident'
-  vt <- lookupVar (identName ident') pos
+checkExp (Index e idxes pos) = do
+  e' <- checkExp e
+  let vt = typeOf e'
   when (arrayRank vt < length idxes) $
-    bad $ IndexingError (baseName $ identName ident)
-          (arrayRank vt) (length idxes) pos
+    bad $ IndexingError (arrayRank vt) (length idxes) pos
   idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
-  return $ Index ident' idxes' pos
+  return $ Index e' idxes' pos
 
 checkExp (Iota e pos) = do
   e' <- require [Prim $ Signed Int32] =<< checkExp e

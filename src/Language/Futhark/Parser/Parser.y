@@ -169,7 +169,7 @@ import Language.Futhark.Parser.Lexer
 %left '*' '/' '%' '//' '%%'
 %left pow
 %nonassoc '~' '!' signum abs real f32 f64 int i8 i16 i32 i64 unsafe
-
+%nonassoc '['
 %%
 
 Prog :: { UncheckedProg }
@@ -429,7 +429,7 @@ Exp  :: { UncheckedExp }
      | let Id '[' ']' '=' Exp in Exp %prec letprec
                       { LetWith $2 $2 [] $6 $8 $1 }
 
-     | Id Index
+     | Exp Index
                       { Index $1 $2 (srclocOf $1) }
 
      | loop '(' Pattern ')' '=' LoopForm do Exp in Exp %prec letprec

@@ -633,8 +633,7 @@ checkPrimOp (Index cs ident idxes) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt < length idxes) $
-    bad $ IndexingError ident
-          (arrayRank vt) (length idxes) noLoc
+    bad $ IndexingError (arrayRank vt) (length idxes) noLoc
   mapM_ (require [Prim int32]) idxes
 
 checkPrimOp (Iota e x) = do
@@ -869,8 +868,7 @@ checkBindage (BindInPlace cs src is) = do
   -- Check that the new value has the same type as what is already
   -- there (It does not have to be unique, though.)
   case peelArray (length is) srct of
-    Nothing -> bad $ IndexingError src
-                     (arrayRank srct) (length is) noLoc
+    Nothing -> bad $ IndexingError (arrayRank srct) (length is) noLoc
     Just _  -> return ()
 
 checkBinding :: Checkable lore =>

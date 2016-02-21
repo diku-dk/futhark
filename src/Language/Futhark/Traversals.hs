@@ -105,7 +105,7 @@ mapExpM tv (LetWith dest src idxexps vexp body loc) =
        mapOnExp tv body <*> pure loc
 mapExpM tv (Index arr idxexps loc) =
   pure Index <*>
-       mapOnIdent tv arr <*>
+       mapOnExp tv arr <*>
        mapM (mapOnExp tv) idxexps <*>
        pure loc
 mapExpM tv (Iota nexp loc) =

@@ -50,7 +50,7 @@ data GenTypeError vn e t pat =
   -- ^ A variable was attempted used after being
   -- consumed.  The last location is the point of
   -- consumption.
-  | IndexingError vn Int Int SrcLoc
+  | IndexingError Int Int SrcLoc
   -- ^ Too many indices provided.  The first integer is
   -- the number of dimensions in the array being
   -- indexed.
@@ -133,10 +133,9 @@ instance (VarName vn, Pretty e, Pretty t, Pretty pat) => Show (GenTypeError vn e
   show (UseAfterConsume name rloc wloc) =
     "Variable " ++ textual name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
-  show (IndexingError name dims got pos) =
+  show (IndexingError dims got pos) =
     show got ++ " indices given at " ++ locStr pos ++
-    ", but type of variable " ++ textual name ++
-    " has " ++ show dims ++ " dimension(s)."
+    ", but type of indexee  has " ++ show dims ++ " dimension(s)."
   show (BadAnnotation loc desc expected got) =
     "Annotation of \"" ++ desc ++ "\" type of expression at " ++
     locStr loc ++ " is " ++ pretty expected ++

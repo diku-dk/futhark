@@ -223,8 +223,8 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
       text "with" <+> brackets (commasep (map ppr idxs)) <+>
       text "<-" <+> align (ppr ve) <+>
       text "in" </> ppr body
-  pprPrec _ (Index v idxs _) =
-    ppr v <> brackets (commasep (map ppr idxs))
+  pprPrec _ (Index e idxs _) =
+    pprPrec 9 e <> brackets (commasep (map ppr idxs))
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Size i e _) =
     text "size" <> apply [text $ show i, ppr e]

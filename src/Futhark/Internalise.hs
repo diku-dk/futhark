@@ -122,16 +122,12 @@ internaliseExp _ (E.Var var) = do
     Nothing     -> (:[]) . I.Var <$> internaliseIdent var
     Just substs -> return $ map I.Var substs
 
-internaliseExp desc (E.Index var idxs loc) = do
+internaliseExp desc (E.Index e idxs loc) = do
   idxs' <- mapM (internaliseExp1 "i") idxs
-  subst <- asks $ HM.lookup (E.identName var) . envSubsts
-  case subst of
-    Nothing ->
-      fail $ "Futhark.Internalise.internaliseExp Index: unknown variable " ++ textual (E.identName var) ++ "."
-    Just vs -> do
-      csidx' <- boundsChecks loc vs idxs'
-      let index v = I.PrimOp $ I.Index csidx' v idxs'
-      letSubExps desc (map index vs)
+  vs <- internaliseExpToVars "indexed" e
+  csidx' <- boundsChecks loc vs idxs'
+  let index v = I.PrimOp $ I.Index csidx' v idxs'
+  letSubExps desc (map index vs)
 
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
