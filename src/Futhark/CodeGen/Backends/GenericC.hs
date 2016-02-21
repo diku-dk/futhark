@@ -45,6 +45,7 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
+import Data.Char (isAlphaNum, isAscii, isDigit)
 import Data.List
 import Data.Maybe
 
@@ -237,11 +238,11 @@ item :: C.BlockItem -> CompilerM op s ()
 item x = tell [x]
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . sanitise . textual
-  -- FIXME: this sanitising is incomplete.
-    where sanitise = map sanitise'
-          sanitise' '\'' = '_'
-          sanitise' c    = c
+  toIdent = C.toIdent . prefixIfBad . sanitise . textual
+    where sanitise = map $ \c -> if isAlphaNum c && isAscii c then c else '_'
+          prefixIfBad (c:cs) | isDigit c = 'f' : c : cs
+          prefixIfBad ('_':cs) = 'f' : '_' : cs
+          prefixIfBad s = s
 
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
