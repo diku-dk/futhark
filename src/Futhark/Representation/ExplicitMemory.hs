@@ -3,8 +3,55 @@
 {-# LANGUAGE ConstraintKinds #-}
 -- | This representation requires that every array is given
 -- information about which memory block is it based in, and how array
--- elements map to memory block offsets.  SOACs are not supported, so
--- you will have to convert them to explicit loops first.
+-- elements map to memory block offsets.  The representation is based
+-- on the kernels representation, so nested parallelism does not
+-- occur.
+--
+-- There are two primary concepts you will need to understand:
+--
+--  1. Memory blocks, which are Futhark values of type 'Mem'
+--     (parametrized with their size).  These correspond to arbitrary
+--     blocks of memory, and are created using the 'Alloc' operation.
+--
+--  2. Index functions, which describe a mapping from the index space
+--     of an array (eg. a two-dimensional space for an array of type
+--     @[[int]]@) to a one-dimensional offset into a memory block.
+--     Thus, index functions describe how arbitrary-dimensional arrays
+--     are mapped to the single-dimensional world of memory.
+--
+-- At a conceptual level, imagine that we have a two-dimensional array
+-- @a@ of 32-bit integers, consisting of @n@ rows of @m@ elements
+-- each.  This array could be represented in classic row-major format
+-- with an index function like the following:
+--
+-- @
+--   f(i,j) = i * m + j
+-- @
+--
+-- When we want to know the location of element @a[2,3]@, we simply
+-- call the index function as @f(2,3)@ and obtain @2*m+3@.  We could
+-- also have chosen another index function, one that represents the
+-- array in column-major (or "transposed") format:
+--
+-- @
+--   f(i,j) = j * n + i
+-- @
+--
+-- Index functions are not Futhark-level functions, but a special
+-- construct that the final code generator will eventually use to
+-- generate concrete access code.  By modifying the index functions we
+-- can change how an array is represented in memory, which can permit
+-- memory access pattern optimisations.
+--
+-- Every time we bind an array, whether in a @let@-binding, @loop@
+-- merge parameter, or @lambda@ parameter, we have an annotation
+-- specifying a memory block and an index function.  In some cases,
+-- such as @let@-bindings for many expressions, we are free to specify
+-- an arbitrary index function and memory block - for example, we get
+-- to decide where 'Copy' stores its result - but in other cases the
+-- type rules of the expression chooses for us.  For example, 'Index'
+-- always produces an array in the same memory block as its input, and
+-- with the same index function, except with some indices fixed.
 module Futhark.Representation.ExplicitMemory
        ( -- * The Lore definition
          ExplicitMemory
