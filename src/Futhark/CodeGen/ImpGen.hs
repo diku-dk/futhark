@@ -558,12 +558,6 @@ defCompilePrimOp _ Rearrange{} =
 defCompilePrimOp _ Reshape{} =
   return ()
 
-defCompilePrimOp _ Stripe{} =
-  return ()
-
-defCompilePrimOp _ Unstripe{} =
-  return ()
-
 defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
   | (sizedests, arrdest) <- splitAt n dests,
     Just sizenames <- mapM fromScalarDestination sizedests,

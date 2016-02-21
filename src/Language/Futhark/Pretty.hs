@@ -234,10 +234,6 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     text "reshape" <> apply [apply (map ppr shape), ppr e]
   pprPrec _ (Rearrange perm e _) =
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  pprPrec _ (Stripe stride e _) =
-    text "stripe" <> apply [ppr stride, ppr e]
-  pprPrec _ (Unstripe stride e _) =
-    text "unstripe" <> apply [ppr stride, ppr e]
   pprPrec _ (Transpose e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]

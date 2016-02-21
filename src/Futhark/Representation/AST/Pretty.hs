@@ -204,10 +204,6 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  ppr (Stripe cs stride v) =
-    ppCertificates cs <> text "stripe" <> apply [ppr stride, ppr v]
-  ppr (Unstripe cs stride v) =
-    ppCertificates cs <> text "unstripe" <> apply [ppr stride, ppr v]
   ppr (Split cs sizeexps a) =
     ppCertificates cs <> text "split" <> apply [apply (map ppr sizeexps), ppr a]
   ppr (Concat cs x ys _) =

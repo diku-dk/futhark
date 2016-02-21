@@ -913,18 +913,6 @@ expReturns (AST.PrimOp (Rearrange _ perm v)) = do
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (AST.PrimOp (Stripe _ stride v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let ixfun' = IxFun.stripe ixfun (SE.intSubExpToScalExp stride)
-  return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
-          Just $ ReturnsInBlock mem ixfun']
-
-expReturns (AST.PrimOp (Unstripe _ stride v)) = do
-  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
-  let ixfun' = IxFun.unstripe ixfun (SE.intSubExpToScalExp stride)
-  return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
-          Just $ ReturnsInBlock mem ixfun']
-
 expReturns (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps

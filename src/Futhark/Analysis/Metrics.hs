@@ -98,8 +98,6 @@ primOpMetrics Replicate{} = seen "Replicate"
 primOpMetrics Scratch{} = seen "Scratch"
 primOpMetrics Reshape{} = seen "Reshape"
 primOpMetrics Rearrange{} = seen "Rearrange"
-primOpMetrics Stripe{} = seen "Stripe"
-primOpMetrics Unstripe{} = seen "Unstripe"
 primOpMetrics Partition{} = seen "Partition"
 
 lambdaMetrics :: OpMetrics (Op lore) => Lambda lore -> MetricsM ()

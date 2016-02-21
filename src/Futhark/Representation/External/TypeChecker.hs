@@ -714,18 +714,6 @@ checkExp (Rearrange perm arrexp pos) = do
   where name = case arrexp of Var v -> Just $ baseName $ identName v
                               _     -> Nothing
 
-checkExp (Stripe strideexp arrexp loc) = do
-  strideexp' <- require [Prim $ Signed Int32] =<< checkExp strideexp
-  arrexp' <- checkExp arrexp
-  _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Stripe strideexp' arrexp' loc
-
-checkExp (Unstripe strideexp arrexp loc) = do
-  strideexp' <- require [Prim $ Signed Int32] =<< checkExp strideexp
-  arrexp' <- checkExp arrexp
-  _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Unstripe strideexp' arrexp' loc
-
 checkExp (Transpose arrexp pos) = do
   arrexp' <- checkExp arrexp
   when (arrayRank (typeOf arrexp') /= 2) $
