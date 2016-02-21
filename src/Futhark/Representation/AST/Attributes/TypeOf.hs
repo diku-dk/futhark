@@ -104,10 +104,6 @@ primOpType (Reshape _ shape e) =
 primOpType (Rearrange _ perm e) =
   result <$> lookupType e
   where result t = [rearrangeType perm t]
-primOpType (Stripe _ _ e) =
-  pure <$> lookupType e
-primOpType (Unstripe _ _ e) =
-  pure <$> lookupType e
 primOpType (Split _ sizeexps e) =
   result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps

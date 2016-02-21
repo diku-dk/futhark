@@ -89,8 +89,6 @@ data Token = IF
            | REDUCECOMM
            | RESHAPE
            | REARRANGE
-           | STRIPE
-           | UNSTRIPE
            | TRANSPOSE
            | ZIPWITH
            | ZIP

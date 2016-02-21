@@ -367,16 +367,6 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange [] perm v
 
-internaliseExp _ (E.Stripe stride e _) = do
-  e' <- internaliseExp1 "stride" stride
-  internaliseOperation "stripe" e $ \v ->
-    return $ I.Stripe [] e' v
-
-internaliseExp _ (E.Unstripe stride e _) = do
-  e' <- internaliseExp1 "stride" stride
-  internaliseOperation "unstripe" e $ \v ->
-    return $ I.Unstripe [] e' v
-
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" e $ \v -> do

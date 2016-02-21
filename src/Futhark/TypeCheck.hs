@@ -669,16 +669,6 @@ checkPrimOp (Rearrange cs perm arr) = do
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError noLoc perm rank $ Just arr
 
-checkPrimOp (Stripe cs stride arr) = do
-  mapM_ (requireI [Prim Cert]) cs
-  require [Prim int32] stride
-  void $ checkArrIdent arr
-
-checkPrimOp (Unstripe cs stride arr) = do
-  mapM_ (requireI [Prim Cert]) cs
-  require [Prim int32] stride
-  void $ checkArrIdent arr
-
 checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Prim Cert]) cs
   mapM_ (require [Prim int32]) sizeexps

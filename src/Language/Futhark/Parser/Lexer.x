@@ -121,8 +121,6 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
-    "stripe"       -> STRIPE
-    "unstripe"     -> UNSTRIPE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE

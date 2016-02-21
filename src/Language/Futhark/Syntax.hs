@@ -392,10 +392,6 @@ data ExpBase ty vn =
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
-            | Stripe (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-
-            | Unstripe (ExpBase ty vn) (ExpBase ty vn) SrcLoc
-
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase ty vn) (ExpBase ty vn) SrcLoc
@@ -483,8 +479,6 @@ instance Located (ExpBase ty vn) where
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ pos) = locOf pos
   locOf (Rearrange _ _ pos) = locOf pos
-  locOf (Stripe _ _ pos) = locOf pos
-  locOf (Unstripe _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos

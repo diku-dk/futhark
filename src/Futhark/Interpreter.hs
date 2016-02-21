@@ -559,12 +559,6 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
 evalPrimOp (Rearrange _ perm arrexp) =
   single <$> permuteArray perm <$> lookupVar arrexp
 
-evalPrimOp (Stripe _ stride arrexp) =
-  single <$> (stripeArray <$> (asInt "evalPrimOp Stripe" =<< evalSubExp stride) <*> lookupVar arrexp)
-
-evalPrimOp (Unstripe _ stride arrexp) =
-  single <$> (unstripeArray <$> (asInt "evalPrimOp Unstripe" =<< evalSubExp stride) <*> lookupVar arrexp)
-
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt "evalPrimOp Split" <=< evalSubExp) sizeexps
   arrval <- lookupVar arrexp
