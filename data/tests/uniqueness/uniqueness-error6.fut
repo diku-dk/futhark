@@ -6,7 +6,7 @@ fun int f({int, *[int]} t) =
 
 fun int main() =
     let n = 10 in
-    let a = copy(iota(n)) in
+    let a = iota(n) in
     let t = {5, a} in
     let c = f(t) in
     a[0]

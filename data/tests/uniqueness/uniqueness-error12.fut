@@ -7,6 +7,6 @@ fun [int] f(*[int] a, int i) =
 
 fun [[int]] main() =
     let n = 10 in
-    let a = copy(iota(n)) in
-    let b = copy(iota(n)) in
+    let a = iota(n) in
+    let b = iota(n) in
     map(f (a), b) -- Bad, because a may be consumed many times.
