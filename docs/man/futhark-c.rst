@@ -17,7 +17,7 @@ DESCRIPTION
 ``futhark-c`` translates a Futhark program to sequential C code, and
 then compiles that C code with gcc(1) to an executable binary program.
 The standard Futhark optimisation pipeline is used, and GCC is invoked
-with ``-O3``, ``-lm`` and ``-std=c99``.
+with ``-O3``, ``-lm``, and ``-std=c99``.
 
 The resulting program will read the arguments to the ``main`` function
 from standard input and print its return value on standard output.
