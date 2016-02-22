@@ -354,13 +354,14 @@ allocInFParam param =
     Mem size space ->
       return param { paramAttr = MemMem size space }
 
-allocInMergeParams :: [(In.FParam,SubExp)]
+allocInMergeParams :: [VName]
+                   -> [(In.FParam,SubExp)]
                    -> ([FParam]
                        -> [FParam]
                        -> ([SubExp] -> AllocM ([SubExp], [SubExp]))
                        -> AllocM a)
                    -> AllocM a
-allocInMergeParams merge m = do
+allocInMergeParams variant merge m = do
   ((valparams, handle_loop_subexps), (memsizeparams, memparams)) <-
     runWriterT $ unzip <$> mapM allocInMergeParam merge
   let mergeparams' = memsizeparams <> memparams <> valparams
@@ -373,9 +374,9 @@ allocInMergeParams merge m = do
         return (memsizeargs <> memargs, valargs)
 
   localScope summary $ m (memsizeparams<>memparams) valparams mk_loop_res
-  where param_names = map (paramName . fst) merge
+  where variant_names = variant ++ map (paramName . fst) merge
         loopInvariantShape =
-          not . any (`elem` param_names) . subExpVars . arrayDims . paramType
+          not . any (`elem` variant_names) . subExpVars . arrayDims . paramType
         allocInMergeParam (mergeparam, Var v)
           | Array bt shape Unique <- paramDeclType mergeparam,
             loopInvariantShape mergeparam = do
@@ -510,8 +511,9 @@ allocInBinding (Let (Pattern sizeElems valElems) _ e) = do
 
 allocInExp :: In.Exp -> AllocM Exp
 allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
-  allocInMergeParams ctx $ \_ ctxparams' _ ->
-  allocInMergeParams val $ \new_ctx_params valparams' mk_loop_val ->
+  allocInMergeParams mempty ctx $ \_ ctxparams' _ ->
+  allocInMergeParams (map paramName ctxparams') val $
+  \new_ctx_params valparams' mk_loop_val ->
   formBinds form $ do
     (valinit_ctx, valinit') <- mk_loop_val valinit
     body' <- insertBindingsM $ allocInBindings bodybnds $ \bodybnds' -> do
