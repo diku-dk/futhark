@@ -138,8 +138,8 @@ instance Pretty UnOp where
   ppr Abs = text "abs "
   ppr Signum = text "signum "
   ppr (ToFloat t) = ppr t
-  ppr (ToSigned t) = ppr (Unsigned t)
-  ppr (ToUnsigned t) = ppr (Signed t)
+  ppr (ToSigned t) = ppr (Signed t)
+  ppr (ToUnsigned t) = ppr (Unsigned t)
 
 instance Pretty BinOp where
   ppr Plus = text "+"
