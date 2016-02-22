@@ -634,7 +634,7 @@ typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
   stripArray (length idx) (typeOf ident)
-typeOf (Iota _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Nonunique mempty
+typeOf (Iota _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
 typeOf Size{} = Prim $ Signed Int32
 typeOf (Replicate _ e _) = arrayType 1 (typeOf e) Unique
 typeOf (Reshape shape  e _) =
