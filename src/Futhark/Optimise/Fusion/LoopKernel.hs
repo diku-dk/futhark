@@ -639,7 +639,7 @@ pullReshape nest ots
             retTypes = map addDims $ Nest.returnType op
 
         ps <- forM inputTypes $ \inpt -> do
-          let t = rowType (stripArray (length outershape-1) inpt)
+          let t = rowType (stripArray (length outershape-2) inpt)
           newIdent "pullReshape_param" t
 
         bnds <- forM retTypes $ \_ ->
@@ -657,7 +657,7 @@ pullReshape nest ots
   -- only has the significance of making the generated code look
   -- very slightly neater.
   op' <- foldM outernest (Nest.Map [] mapw' mapbody') $
-         zip3 new_indices (newDims shape) $
+         zip3 new_indices (drop 1 $ reverse $ newDims shape) $
          drop 1 $ reverse $ drop 1 $ tails $ newDims shape
   let nest'   = Nest.SOACNest {
                   Nest.inputs    = inputs'
