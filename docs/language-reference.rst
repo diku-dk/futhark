@@ -101,7 +101,7 @@ Evaluates to its value in the environment.
 Evaluate the binary arithmetic operator on its operands, which must
 both be of the same numeric type.  The following operators are
 supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``, ``==``,
-``<``, ``<=``, ``**``.
+``!=`` ``<``, ``<=``, ``**``.
 
 ``x`` *bitop* ``y``
 ~~~~~~~~~~~~~~~~~~~
