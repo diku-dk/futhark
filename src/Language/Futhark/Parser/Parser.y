@@ -94,6 +94,7 @@ import Language.Futhark.Parser.Lexer
       '%%'            { L $$ REM }
       '='             { L $$ EQU }
       '=='            { L $$ EQU2 }
+      '!='            { L $$ NEQU }
       '<'             { L $$ LTH }
       '>'             { L $$ GTH }
       '<='            { L $$ LEQ }
@@ -159,7 +160,7 @@ import Language.Futhark.Parser.Lexer
 %left '||'
 %left '&&'
 %left '&' '^' '|'
-%left '<=' '>=' '>' '<' '=='
+%left '<=' '>=' '>' '<' '==' '!='
 
 %left '<<' '>>' '>>>'
 %left '+' '-'
@@ -183,6 +184,7 @@ BinOp :: { (BinOp, SrcLoc) }
       | '//'    { (Quot, $1) }
       | '%%'    { (Rem, $1) }
       | '=='    { (Equal, $1) }
+      | '!='    { (NotEqual, $1) }
       | '<'     { (Less, $1) }
       | '<='    { (Leq, $1) }
       | '>'     { (Greater, $1) }
@@ -333,6 +335,7 @@ Exp  :: { UncheckedExp }
      | Exp '^' Exp    { BinOp Xor $1 $3 NoInfo $2 }
 
      | Exp '==' Exp   { BinOp Equal $1 $3 NoInfo $2 }
+     | Exp '!=' Exp   { BinOp NotEqual $1 $3 NoInfo $2 }
      | Exp '<' Exp    { BinOp Less $1 $3 NoInfo $2 }
      | Exp '<=' Exp   { BinOp Leq  $1 $3 NoInfo $2 }
      | Exp '>' Exp    { BinOp Greater $1 $3 NoInfo $2 }

@@ -304,6 +304,7 @@ data BinOp = Plus -- Binary Ops for Numbers
            | LogOr
            -- Relational Ops for all primitive types at least
            | Equal
+           | NotEqual
            | Less
            | Leq
            | Greater

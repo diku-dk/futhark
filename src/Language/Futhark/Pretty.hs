@@ -159,6 +159,7 @@ instance Pretty BinOp where
   ppr LogAnd = text "&&"
   ppr LogOr = text "||"
   ppr Equal = text "=="
+  ppr NotEqual = text "!="
   ppr Less = text "<"
   ppr Leq = text "<="
   ppr Greater = text ">="
@@ -326,6 +327,7 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
         precedence Bor = 1
         precedence Xor = 1
         precedence Equal = 2
+        precedence NotEqual = 2
         precedence Less = 2
         precedence Leq = 2
         precedence Greater = 2

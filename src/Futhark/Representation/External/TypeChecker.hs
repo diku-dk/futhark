@@ -1076,6 +1076,7 @@ checkBinOp Bor e1 e2 t pos = checkPolyBinOp Bor anyIntType e1 e2 t pos
 checkBinOp LogAnd e1 e2 t pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 t pos
 checkBinOp LogOr e1 e2 t pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 t pos
 checkBinOp Equal e1 e2 t pos = checkRelOp Equal anyNumberType e1 e2 t pos
+checkBinOp NotEqual e1 e2 t pos = checkRelOp NotEqual anyNumberType e1 e2 t pos
 checkBinOp Less e1 e2 t pos = checkRelOp Less anyNumberType e1 e2 t pos
 checkBinOp Leq e1 e2 t pos = checkRelOp Leq anyNumberType e1 e2 t pos
 checkBinOp Greater e1 e2 t pos = checkRelOp Greater anyNumberType e1 e2 t pos
