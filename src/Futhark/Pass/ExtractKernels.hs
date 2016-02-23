@@ -599,7 +599,7 @@ maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
   where isMap (Op Map{}) = True
         isMap _          = False
 
-maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc
+maybeDistributeBinding (Let pat _ (Op (Reduce cs w comm lam input))) acc
   | Just m <- irwim pat cs w comm lam input = do
       types <- asksScope scopeForSOACs
       ((), bnds) <- runBinderT m types
