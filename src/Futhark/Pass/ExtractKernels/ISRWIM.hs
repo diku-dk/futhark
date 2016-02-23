@@ -7,6 +7,7 @@ module Futhark.Pass.ExtractKernels.ISRWIM
 import Control.Arrow (first)
 import Control.Monad.State
 import Data.Monoid
+import qualified Data.HashSet as HS
 
 import Prelude
 
@@ -76,19 +77,22 @@ irwim res_pat cs w comm red_fun red_input
   | Body () [bnd] res <- lambdaBody red_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
     Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
-    map paramName (lambdaParams red_fun) == map_arrs = Just $ do
+    map paramName (lambdaParams red_fun) == map_arrs,
+    not (lambdaIndex red_fun `HS.member` freeInLambda red_fun) = Just $ do
       let (accs, arrs) = unzip red_input
       arrs' <- forM arrs $ \arr -> do
                  t <- lookupType arr
                  let perm = [1,0] ++ [2..arrayRank t-1]
                  letExp (baseString arr) $ PrimOp $ Rearrange [] perm arr
-      accs' <- mapM (letExp "acc" . PrimOp . SubExp) accs
+      -- FIXME?  Can we reasonably assume that the accumulator is a
+      -- replicate?  We also assume that it is non-empty.
+      let indexAcc (Var v) = letSubExp "acc" $ PrimOp $ Index [] v [intConst Int32 0]
+          indexAcc Constant{} = fail "irwim: array accumulator is a constant."
+      accs' <- mapM indexAcc accs
 
-      let map_arrs' = accs' ++ arrs'
-          (red_acc_params, red_elem_params) =
+      let (_red_acc_params, red_elem_params) =
             splitAt (length arrs) $ lambdaParams red_fun
-          map_params = map removeParamOuterDim red_acc_params ++
-                       map (setParamOuterDimTo w) red_elem_params
+          map_params = map (setParamOuterDimTo w) red_elem_params
           map_rettype = map rowType $ lambdaReturnType red_fun
           map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
 
@@ -96,14 +100,13 @@ irwim res_pat cs w comm red_fun red_input
           red_body = lambdaBody map_fun
           red_rettype = lambdaReturnType map_fun
           red_fun' = Lambda (lambdaIndex red_fun) red_params red_body red_rettype
-          red_input' = map (first Var) $
-                       uncurry zip $ splitAt (length arrs') $ map paramName map_params
+          red_input' = zip accs' $ map paramName map_params
 
           map_body = mkBody [Let (stripPatternOuterDim $ bindingPattern bnd) () $
                              Op $ Reduce cs w comm red_fun' red_input']
                             res
 
-      addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' map_arrs'
+      addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
   | otherwise = Nothing
 
 removeParamOuterDim :: LParam -> LParam
