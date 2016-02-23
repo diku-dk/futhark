@@ -729,6 +729,9 @@ internaliseBinOp desc E.LogOr x y _ _ =
 
 internaliseBinOp desc E.Equal x y t _ =
   simpleCmpOp desc (I.CmpEq $ internalisePrimType t) x y
+internaliseBinOp desc E.NotEqual x y t _ = do
+  eq <- letSubExp (desc++"true") $ I.PrimOp $ I.CmpOp (I.CmpEq $ internalisePrimType t) x y
+  fmap pure $ letSubExp desc $ I.PrimOp $ I.UnOp I.Not eq
 internaliseBinOp desc E.Less x y (E.Signed t) _ =
   simpleCmpOp desc (I.CmpSlt t) x y
 internaliseBinOp desc E.Less x y (E.Unsigned t) _ =

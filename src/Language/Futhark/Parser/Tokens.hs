@@ -55,6 +55,7 @@ data Token = IF
            | REM
            | EQU
            | EQU2
+           | NEQU
            | LTH
            | GTH
            | LEQ

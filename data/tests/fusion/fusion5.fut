@@ -24,7 +24,7 @@ fun [[bool]] main([int] t_v1, [[int]] t_v3) =
                       map(fn [int] ([int] x) => map(<<1, x), t_v18))) in
   let t_v33 = map(fn [bool] ([int] x) =>
                     map(fn bool (int t_v32) =>
-                          !((0 == t_v32)),x),
+                          ((0 != t_v32)),x),
                     map(fn [int] ([int] x,[int] y) =>
                           map(&,zip(x,y)),
                         zip(t_v27,

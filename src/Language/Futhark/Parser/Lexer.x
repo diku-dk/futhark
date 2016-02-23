@@ -51,6 +51,7 @@ tokens :-
   "%%"                     { const REM }
   "="                      { const EQU }
   "=="                     { const EQU2 }
+  "!="                     { const NEQU }
   "<"                      { const LTH }
   ">"                      { const GTH }
   "&"                      { const BAND }
