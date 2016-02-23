@@ -208,5 +208,6 @@ removeInvariantKernelOutputs vtable (Let pat _ (Op (MapKernel cs w index ispace 
         body { bodyResult = variant_result }
   where isInvariant pat_elem ret (Var v)
           | Just _ <- ST.lookupType v vtable = Left (pat_elem, ret, Var v)
+        isInvariant pat_elem ret (Constant v) = Left (pat_elem, ret, Constant v)
         isInvariant pat_elem ret se = Right (pat_elem, ret, se)
 removeInvariantKernelOutputs _ _ = cannotSimplify
