@@ -112,8 +112,11 @@ removeRedundantMergeVariables (_, used) (Let pat _ (DoLoop ctx val form body))
       (ctx', ctx_es') = unzip keep_ctx
       (val', val_es') = unzip keep_val
       body' = body { bodyResult = ctx_es' ++ val_es' }
+      free_in_keeps = freeIn keep_valpatelems
       stillUsedContext pat_elem =
-        patElemName pat_elem `HS.member` freeIn keep_valpatelems
+        patElemName pat_elem `HS.member`
+        (free_in_keeps <>
+         freeIn (filter (/=pat_elem) $ patternContextElements pat))
       pat' = pat { patternValueElements = keep_valpatelems
                  , patternContextElements =
                      filter stillUsedContext $ patternContextElements pat }
