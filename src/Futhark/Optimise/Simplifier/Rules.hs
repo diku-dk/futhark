@@ -698,13 +698,16 @@ simplifyBranchContext _ (Let pat _ e@(If cond tbranch fbranch _))
             zipWith ctxPatElemIsKnown old_ctx ctx_res
       if null free_ctx then
         cannotSimplify
-        else do let ret' = existentialiseExtTypes
+        else do let subst =
+                      HM.fromList [ (patElemName pe, v) | (pe, Var v) <- free_ctx ]
+                    ret' = existentialiseExtTypes
                            (HS.fromList $ map patElemName new_ctx) $
+                           substituteNames subst $
                            staticShapes $ patternValueTypes pat
+                    pat' = (substituteNames subst pat) { patternContextElements = new_ctx }
                 forM_ free_ctx $ \(name, se) ->
                   letBind_ (Pattern [] [name]) $ PrimOp $ SubExp se
-                letBind_ pat { patternContextElements = new_ctx } $
-                  If cond tbranch fbranch ret'
+                letBind_ pat' $ If cond tbranch fbranch ret'
   where ctxPatElemIsKnown patElem (Just se) =
           Left (patElem, se)
         ctxPatElemIsKnown patElem _ =
