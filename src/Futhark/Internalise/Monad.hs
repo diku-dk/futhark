@@ -83,9 +83,9 @@ instance MonadBinder InternaliseM where
     InternaliseM $ collectBindings m
 
 runInternaliseM :: MonadFreshNames m =>
-                   Bool -> FunTable -> InternaliseM a
+                   FunTable -> InternaliseM a
                 -> m (Either String a)
-runInternaliseM boundsCheck ftable (InternaliseM m) =
+runInternaliseM ftable (InternaliseM m) =
   modifyNameSource $ \src ->
   let onError e                 = (Left e, src)
       onSuccess ((prog,_),src') = (Right prog, src')
@@ -94,7 +94,7 @@ runInternaliseM boundsCheck ftable (InternaliseM m) =
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
                  , envFtable = ftable
-                 , envDoBoundsChecks = boundsCheck
+                 , envDoBoundsChecks = True
                  }
 
 lookupFunction :: Name -> InternaliseM FunBinding

@@ -61,9 +61,6 @@ commandLineOptions =
   , Option "V" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
-  , Option [] ["unsafe"]
-    (NoArg $ Right $ \config -> config { compilerUnsafe = True })
-    "Do not perform bound- and size-checks in generated code."
   , Option [] ["module"]
     (NoArg $ Right $ \config -> config { compilerModule = True })
     "Generate the file as a module."
@@ -72,14 +69,12 @@ commandLineOptions =
 data CompilerConfig =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
-                 , compilerUnsafe :: Bool
                  , compilerModule :: Bool
                  }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
-                                   , compilerUnsafe = False
                                    , compilerModule = False
                                    }
 
@@ -89,9 +84,7 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkVerbose = compilerVerbose config
-                   , futharkBoundsCheck = not $ compilerUnsafe config
-                   }
+  newFutharkConfig { futharkVerbose = compilerVerbose config }
 
 compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =

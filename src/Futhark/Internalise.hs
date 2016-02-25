@@ -38,14 +38,14 @@ import Futhark.Internalise.Lambdas
 -- Futhark.  If the boolean parameter is false, do not add bounds
 -- checks to array indexing.
 internaliseProg :: MonadFreshNames m =>
-                   Bool -> E.Prog -> m (Either String I.Prog)
-internaliseProg doBoundsCheck prog = do
+                   E.Prog -> m (Either String I.Prog)
+internaliseProg prog = do
   res <- do
     ftable_attempt <- buildFtable prog
     case ftable_attempt of
       Left err -> return $ Left err
       Right ftable -> do
-        funs <- runInternaliseM doBoundsCheck ftable $
+        funs <- runInternaliseM ftable $
                 mapM internaliseFun $ E.progFunctions prog
         return $ fmap I.Prog funs
   sequence $ fmap I.renameProg res
@@ -53,7 +53,7 @@ internaliseProg doBoundsCheck prog = do
 buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
 buildFtable = fmap (HM.union builtinFtable<$>) .
-              runInternaliseM True mempty .
+              runInternaliseM mempty .
               fmap HM.fromList . mapM inspect . E.progFunctions
   where inspect (fname, rettype, params, _, _) =
           bindingParams params $ \shapes values -> do
