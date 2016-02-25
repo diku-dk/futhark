@@ -13,6 +13,7 @@ module Language.Futhark.Parser.Parser
   , getLinesFromIO
   , getLinesFromStrings
   , getNoLines
+  , newParserEnv
   )
   where
 
@@ -27,6 +28,7 @@ import Data.Array
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
 import qualified Data.HashMap.Lazy as HM
+import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes hiding (arrayValue)
@@ -53,6 +55,7 @@ import Language.Futhark.Parser.Lexer
       let             { L $$ LET }
       loop            { L $$ LOOP }
       in              { L $$ IN }
+      default         { L $$ DEFAULT }
       int             { L $$ INT }
       i8              { L $$ I8 }
       i16             { L $$ I16 }
@@ -165,12 +168,20 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs f32 f64 int i8 i16 i32 i64 unsafe
+%nonassoc '~' '!' signum abs f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
 %%
 
 Prog :: { UncheckedProg }
      :   FunDecs { Prog $1 }
+     |   DefaultDec FunDecs { Prog $2 }
+;
+
+DefaultDec :: { () }
+           :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
+           |  default '(' FloatType ')' {% defaultRealType (fst $3) }
+           |  default '(' SignedType ',' FloatType ')'
+                {% defaultIntType (fst $3) >> defaultRealType (fst $5) }
 ;
 
 -- Note that this production does not include Minus.
@@ -542,7 +553,7 @@ SignedLit :: { (IntValue, SrcLoc) }
           | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
           | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
           | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | intlit { let L pos (INTLIT num) = $1 in (Int64Value num, pos) }
+          | intlit {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
             : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
@@ -585,14 +596,48 @@ Values : Value ',' Values { $1 : $3 }
 
 data ParserEnv = ParserEnv {
                  parserFile :: FilePath
+               , parserIntType :: IntType
                , parserRealType :: FloatType
                , parserRealFun :: Double -> FloatValue
                , parserFunMap :: HM.HashMap Name Name
                }
 
+newParserEnv :: FilePath -> IntType -> FloatType -> ParserEnv
+newParserEnv path intType realType =
+  let s = ParserEnv path intType realType Float64Value HM.empty
+  in modParserEnv s realType
+
+modParserEnv :: ParserEnv -> FloatType -> ParserEnv
+modParserEnv s realType =
+  case realType of
+    Float32 -> s {
+        parserRealType = Float32,
+        parserRealFun = float32RealFun,
+        parserFunMap = float32FunMap
+      }
+    Float64 -> s {
+        parserRealType = Float64,
+        parserRealFun = float64RealFun,
+        parserFunMap = float64FunMap
+      }
+  where
+
+    float32RealFun x =
+      let (m,n) = decodeFloat x
+      in Float32Value $ encodeFloat m n
+    float64RealFun = Float64Value
+
+    float32FunMap = HM.map (<>nameFromString "32") funs
+    float64FunMap = HM.map (<>nameFromString "64") funs
+
+    funs = HM.fromList $ zip funnames funnames
+    funnames = map nameFromString ["sqrt", "log", "exp", "sin", "cos"]
+
+
+
 type ParserMonad a =
   ExceptT String (
-    ReaderT ParserEnv (
+    StateT ParserEnv (
        StateT [L Token] ReadLineMonad)) a
 
 data ReadLineMonad a = Value a
@@ -661,15 +706,36 @@ getTokens = lift $ lift get
 putTokens :: [L Token] -> ParserMonad ()
 putTokens ts = lift $ lift $ put ts
 
+defaultIntType :: IntType -> ParserMonad ()
+defaultIntType intType = do
+  s <- lift $ get
+  lift $ put $ s { parserIntType = intType }
+
+defaultRealType :: FloatType -> ParserMonad ()
+defaultRealType realType = do
+  s <- lift $ get
+  lift $ put $ modParserEnv s realType
+
 getFilename :: ParserMonad FilePath
-getFilename = lift $ asks parserFile
+getFilename = lift $ gets parserFile
+
+getIntValue :: Int64 -> ParserMonad IntValue
+getIntValue x = do
+  t <- lift $ gets parserIntType
+  return $ (getIntFun t) (toInteger x)
+
+getIntFun :: IntType -> (Integer -> IntValue)
+getIntFun Int8  = Int8Value . fromInteger
+getIntFun Int16 = Int16Value . fromInteger
+getIntFun Int32 = Int32Value . fromInteger
+getIntFun Int64 = Int64Value . fromInteger
 
 getRealValue :: Double -> ParserMonad FloatValue
-getRealValue x = do f <- lift $ asks parserRealFun
+getRealValue x = do f <- lift $ gets parserRealFun
                     return $ f x
 
 getFunName :: Name -> ParserMonad Name
-getFunName name = do substs <- lift $ asks parserFunMap
+getFunName name = do substs <- lift $ gets parserFunMap
                      return $ HM.lookupDefault name name substs
 
 intNegate :: IntValue -> IntValue

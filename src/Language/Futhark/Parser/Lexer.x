@@ -93,6 +93,7 @@ keyword s =
     "loop"         -> LOOP
     "in"           -> IN
     "with"         -> WITH
+    "default"      -> DEFAULT
     "int"          -> INT
     "i8"           -> I8
     "i16"          -> I16
