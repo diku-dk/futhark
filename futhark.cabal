@@ -192,7 +192,6 @@ Library
                    Language.Futhark.Attributes
                    Language.Futhark.Core
                    Language.Futhark.Parser
-                   Language.Futhark.Parser.RealConfiguration
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
                    Language.Futhark.Traversals

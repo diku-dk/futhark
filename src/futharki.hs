@@ -30,11 +30,11 @@ repl = do
   putStrLn "(C) HIPERFIT research centre"
   putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
   putStrLn ""
-  forever $ print =<< parseExpIncrIO RealAsFloat64 "input" ""
+  forever $ print =<< parseExpIncrIO "input" ""
 
 interpret :: FutharkConfig -> FilePath -> IO ()
 interpret config =
-  runCompilerOnProgram config standardPipeline $ interpretAction' $ futharkRealConfiguration config
+  runCompilerOnProgram config standardPipeline interpretAction'
 
 interpreterConfig :: FutharkConfig
 interpreterConfig = newFutharkConfig
