@@ -64,7 +64,6 @@ import Language.Futhark.Parser.Lexer
       u64             { L $$ U64 }
       bool            { L $$ BOOL }
       char            { L $$ CHAR }
-      real            { L $$ REAL }
       f32             { L $$ F32 }
       f64             { L $$ F64 }
 
@@ -166,7 +165,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs real f32 f64 int i8 i16 i32 i64 unsafe
+%nonassoc '~' '!' signum abs f32 f64 int i8 i16 i32 i64 unsafe
 %nonassoc '['
 %%
 
@@ -284,8 +283,7 @@ UnsignedType :: { (IntType, SrcLoc) }
              | u64 { (Int64, $1) }
 
 FloatType :: { (FloatType, SrcLoc) }
-          : real {% do t <- getRealType; return (t, $1) }
-          | f32  { (Float32, $1) }
+          : f32  { (Float32, $1) }
           | f64  { (Float64, $1) }
 
 Types : Type ',' Types { $1 : $3 }
@@ -665,9 +663,6 @@ putTokens ts = lift $ lift $ put ts
 
 getFilename :: ParserMonad FilePath
 getFilename = lift $ asks parserFile
-
-getRealType :: ParserMonad FloatType
-getRealType = lift $ asks parserRealType
 
 getRealValue :: Double -> ParserMonad FloatValue
 getRealValue x = do f <- lift $ asks parserRealFun

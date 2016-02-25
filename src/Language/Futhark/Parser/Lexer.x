@@ -102,7 +102,6 @@ keyword s =
     "u16"          -> U16
     "u32"          -> U32
     "u64"          -> U64
-    "real"         -> REAL
     "f32"          -> F32
     "f64"          -> F64
     "bool"         -> BOOL
