@@ -63,7 +63,7 @@ script:
 
  - data/runtests.sh # Run integration test suite.
  - data/runtests.sh --compiler=futhark-py --exclude=no_python -c # Run integration test suite with Python code generator.
-# - data/runtests.sh -t --exclude=no_opencl --compiler=futhark-opencl # Also test OpenCL code generation
+ - data/runtests.sh -t --exclude=no_opencl --compiler=futhark-pyopencl # Also test OpenCL code generation
 
  # Let us try checking out the benchmark suite for some more tests.
  - git clone https://github.com/HIPERFIT/futhark-benchmarks.git
