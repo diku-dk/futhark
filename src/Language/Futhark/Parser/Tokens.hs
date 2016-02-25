@@ -33,7 +33,7 @@ data Token = IF
            | F64
            | ID Name
            | STRINGLIT String
-           | INTLIT Int32
+           | INTLIT Int64
            | I8LIT Int8
            | I16LIT Int16
            | I32LIT Int32

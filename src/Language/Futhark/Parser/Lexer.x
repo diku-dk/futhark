@@ -73,7 +73,7 @@ tokens :-
   @intlit u16              { U16LIT . readInt16 . takeWhile (/='u') }
   @intlit u32              { U32LIT . readInt32 . takeWhile (/='u') }
   @intlit u64              { U64LIT . readInt64 . takeWhile (/='u') }
-  @intlit                  { INTLIT . readInt32 }
+  @intlit                  { INTLIT . readInt64 }
   @reallit f32             { F32LIT . read . takeWhile (/='f') }
   @reallit f64             { F64LIT . read . takeWhile (/='f') }
   @reallit                 { REALLIT . readReal }

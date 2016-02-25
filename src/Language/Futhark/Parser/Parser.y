@@ -544,7 +544,7 @@ SignedLit :: { (IntValue, SrcLoc) }
           | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
           | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
           | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | intlit { let L pos (INTLIT num) = $1 in (Int32Value num, pos) }
+          | intlit { let L pos (INTLIT num) = $1 in (Int64Value num, pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
             : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
