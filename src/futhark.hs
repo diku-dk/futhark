@@ -204,10 +204,6 @@ commandLineOptions =
     (OptArg (\file -> Right $ changeFutharkConfig $
                       \opts -> opts { futharkVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
-  , Option [] ["no-bounds-checking"]
-    (NoArg $ Right $ changeFutharkConfig $
-     \opts -> opts { futharkBoundsCheck = False })
-    "Do not perform bounds checking in the generated program."
 
   , Option [] ["compile-sequential"]
     (NoArg $ Right $ \opts ->
