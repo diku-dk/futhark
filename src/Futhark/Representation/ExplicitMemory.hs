@@ -826,7 +826,7 @@ bindeeAnnot bindeeName bindeeLore bindee =
       Just $
       PP.text "-- " <>
       PP.oneLine (PP.ppr (bindeeName bindee) <>
-                  PP.text " :: " <>
+                  PP.text " : " <>
                   PP.ppr attr)
     MemMem {} ->
       Nothing
