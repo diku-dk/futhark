@@ -500,7 +500,7 @@ unbalancedLambda lam =
           where bound' = foldr HS.insert bound $
                          i : map (paramName . fst) merge
         unbalancedBinding _ (DoLoop _ _ (WhileLoop _) _) =
-          True
+          False
 
         unbalancedBinding bound (If _ tbranch fbranch _) =
           unbalancedBody bound tbranch || unbalancedBody bound fbranch
