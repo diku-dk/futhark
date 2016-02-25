@@ -41,13 +41,11 @@ import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig {
     futharkVerbose :: Maybe (Maybe FilePath)
-  , futharkBoundsCheck :: Bool
   , futharkRealConfiguration :: RealConfiguration
 }
 
 newFutharkConfig :: FutharkConfig
 newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
-                                 , futharkBoundsCheck = True
                                  , futharkRealConfiguration = RealAsFloat64
                                  }
 
@@ -98,7 +96,7 @@ runPipelineOnSource config pipeline filename srccode = do
   parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
   (tagged_ext_prog, namesrc) <- E.tagProg <$> typeCheckSourceProgram parsed_prog
   putNameSource namesrc
-  res <- internaliseProg (futharkBoundsCheck config) tagged_ext_prog
+  res <- internaliseProg tagged_ext_prog
   case res of
     Left err ->
       compileErrorS "During internalisation:" err
