@@ -4,7 +4,6 @@ module Language.Futhark
   , module Language.Futhark.Attributes
   , module Language.Futhark.Pretty
   , module Language.Futhark.Traversals
-  , module Language.Futhark.Parser
 
   , Ident, Parameter, Exp, Lambda
   , Pattern, FunDec, Prog
@@ -16,7 +15,6 @@ import Language.Futhark.Syntax
 import Language.Futhark.Attributes
 import Language.Futhark.Pretty
 import Language.Futhark.Traversals
-import Language.Futhark.Parser
 
 -- | An identifier with type- and aliasing information information.
 type Ident = IdentBase (TypeBase Rank Names) VName
