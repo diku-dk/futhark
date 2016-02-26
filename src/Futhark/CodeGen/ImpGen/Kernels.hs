@@ -132,7 +132,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ChunkedMapKernel _ _ kernel_size _ lam _) = do
+  (ChunkedMapKernel _ _ kernel_size o lam _) = do
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
 
@@ -188,7 +188,7 @@ kernelCompiler
         map_op <-
           ImpGen.subImpM_ inKernelOperations $ do
             computeThreadChunkSize
-              Noncommutative
+              comm
               (Imp.ScalarVar $ lambdaIndex lam)
               (Imp.innerExp $ Imp.dimSizeToExp num_threads)
               (ImpGen.dimSizeToExp per_thread_chunk)
@@ -215,6 +215,8 @@ kernelCompiler
             , Imp.kernelName = lambdaIndex lam
             }
     call_with_prologue prologue
+    where comm = case o of Disorder -> Commutative
+                           InOrder -> Noncommutative
 
 kernelCompiler
   (ImpGen.Destination dest)
@@ -959,15 +961,13 @@ computeThreadChunkSize :: Commutativity
                        -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM op ()
-computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize Commutative thread_index _ elements_per_thread num_elements chunk_var = do
   remaining_elements <- newVName "remaining_elements"
   ImpGen.emit $
     Imp.DeclareScalar remaining_elements int32
   ImpGen.emit $
-    Imp.SetScalar remaining_elements $
-    (Imp.innerExp num_elements - thread_index)
-    `quotRoundingUp`
-    num_threads
+    Imp.SetScalar remaining_elements $ Imp.innerExp $
+    num_elements - Imp.elements thread_index * elements_per_thread
   ImpGen.emit $
     Imp.If (Imp.CmpOp (CmpSlt Int32)
             (Imp.innerExp elements_per_thread)
