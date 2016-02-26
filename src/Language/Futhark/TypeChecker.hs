@@ -8,7 +8,7 @@
 module Language.Futhark.TypeChecker
   ( checkProg
   , checkProgNoUniqueness
-  , TypeError)
+  , TypeError(..))
   where
 
 import Control.Applicative
@@ -31,16 +31,173 @@ import Language.Futhark.Renamer
   (tagProg', untagProg, untagExp, untagPattern)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
-import Futhark.TypeCheck.TypeError
+import Futhark.Util.Pretty
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-type TypeError vn =
-  GenTypeError
-  vn
-  (ExpBase CompTypeBase vn)
-  (TypeBase Rank NoInfo ())
-  (PatternBase NoInfo vn)
+-- | Information about an error during type checking.  The 'Show'
+-- instance for this type produces a human-readable description.
+data TypeError vn =
+    TypeError SrcLoc String
+  -- ^ A general error happened at the given position and
+  -- for the given reason.
+  | UnifyError
+    (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ())
+    (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ())
+  -- ^ Types of two expressions failed to unify.
+  | UnexpectedType SrcLoc
+    (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
+  -- ^ Expression of type was not one of the expected
+  -- types.
+  | ReturnTypeError SrcLoc Name (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
+  -- ^ The body of a function definition has a different
+  -- type than its declaration.
+  | DupDefinitionError Name SrcLoc SrcLoc
+  -- ^ Two functions have been defined with the same name.
+  | DupParamError Name vn SrcLoc
+  -- ^ Two function parameters share the same name.
+  | DupPatternError vn SrcLoc SrcLoc
+  -- ^ Two pattern variables share the same name.
+  | InvalidPatternError (PatternBase NoInfo vn)
+    (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
+  -- ^ The pattern is not compatible with the type or is otherwise
+  -- inconsistent.
+  | UnknownVariableError vn SrcLoc
+  -- ^ Unknown variable of the given name referenced at the given spot.
+  | UnknownFunctionError Name SrcLoc
+  -- ^ Unknown function of the given name called at the given spot.
+  | ParameterMismatch (Maybe Name) SrcLoc
+    (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
+  -- ^ A function (possibly anonymous) was called with
+  -- invalid arguments.  The third argument is either the
+  -- number of parameters, or the specific types of
+  -- parameters accepted (sometimes, only the former can
+  -- be determined).
+  | UseAfterConsume vn SrcLoc SrcLoc
+  -- ^ A variable was attempted used after being
+  -- consumed.  The last location is the point of
+  -- consumption.
+  | IndexingError Int Int SrcLoc
+  -- ^ Too many indices provided.  The first integer is
+  -- the number of dimensions in the array being
+  -- indexed.
+  | BadAnnotation SrcLoc String
+    (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
+  -- ^ One of the type annotations fails to match with the
+  -- derived type.  The string is a description of the
+  -- role of the type.  The last type is the new derivation.
+  | BadTupleAnnotation SrcLoc String
+    [Maybe (TypeBase Rank NoInfo ())] [TypeBase Rank NoInfo ()]
+  -- ^ One of the tuple type annotations fails to
+  -- match with the derived type.  The string is a
+  -- description of the role of the type.  The last
+  -- type is the elemens of the new derivation.
+  | CurriedConsumption Name SrcLoc
+  -- ^ A function is being curried with an argument to be consumed.
+  | BadLetWithValue SrcLoc
+  -- ^ The new value for an array slice in let-with is aliased to the source.
+  | ReturnAliased Name vn SrcLoc
+  -- ^ The unique return value of the function aliases
+  -- one of the function parameters.
+  | UniqueReturnAliased Name SrcLoc
+  -- ^ A unique element of the tuple returned by the
+  -- function aliases some other element of the tuple.
+  | NotAnArray SrcLoc (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ())
+  | PermutationError SrcLoc [Int] Int (Maybe vn)
+  -- ^ The permutation is not valid.
+  | DimensionNotInteger SrcLoc vn
+  -- ^ A dimension annotation was a non-integer variable.
+
+instance VarName vn => Show (TypeError vn) where
+  show (TypeError pos msg) =
+    "Type error at " ++ locStr pos ++ ":\n" ++ msg
+  show (UnifyError e1 t1 e2 t2) =
+    "Cannot unify type " ++ pretty t1 ++
+    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e1) ++
+    "\nwith type " ++ pretty t2 ++
+    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e2)
+  show (UnexpectedType loc e _ []) =
+    "Type of expression at " ++ locStr loc ++ "\n" ++
+    prettyDoc 160 (indent 2 $ ppr e) ++
+    "\ncannot have any type - possibly a bug in the type checker."
+  show (UnexpectedType loc e t ts) =
+    "Type of expression at " ++ locStr loc ++ "\n" ++
+    prettyDoc 160 (indent 2 $ ppr e) ++
+    "\nmust be one of " ++ intercalate ", " (map pretty ts) ++ ", but is " ++
+    pretty t ++ "."
+  show (ReturnTypeError pos fname rettype bodytype) =
+    "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
+    " declares return type " ++ pretty rettype ++ ", but body has type " ++
+    pretty bodytype
+  show (DupDefinitionError name pos1 pos2) =
+    "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
+    locStr pos1 ++ " and " ++ locStr pos2 ++ "."
+  show (DupParamError funname paramname pos) =
+    "Parameter " ++ textual paramname ++
+    " mentioned multiple times in argument list of function " ++
+    nameToString funname ++ " at " ++ locStr pos ++ "."
+  show (DupPatternError name pos1 pos2) =
+    "Variable " ++ textual name ++ " bound twice in tuple pattern; at " ++
+    locStr pos1 ++ " and " ++ locStr pos2 ++ "."
+  show (InvalidPatternError pat t desc loc) =
+    "Pattern " ++ pretty pat ++
+    " cannot match value of type " ++ pretty t ++ " at " ++ locStr loc ++ end
+    where end = case desc of Nothing -> "."
+                             Just desc' -> ":\n" ++ desc'
+  show (UnknownVariableError name pos) =
+    "Unknown variable " ++ textual name ++ " referenced at " ++ locStr pos ++ "."
+  show (UnknownFunctionError fname pos) =
+    "Unknown function " ++ nameToString fname ++ " called at " ++ locStr pos ++ "."
+  show (ParameterMismatch fname pos expected got) =
+    "In call of " ++ fname' ++ " at position " ++ locStr pos ++ ":\n" ++
+    "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
+     expected' ++ ", but got " ++ show ngot ++
+    " arguments of types " ++ intercalate ", " (map pretty got) ++ "."
+    where (nexpected, expected') =
+            case expected of
+              Left i -> (i, "(polymorphic)")
+              Right ts -> (length ts, intercalate ", " $ map pretty ts)
+          ngot = length got
+          fname' = maybe "anonymous function" (("function "++) . nameToString) fname
+  show (UseAfterConsume name rloc wloc) =
+    "Variable " ++ textual name ++ " used at " ++ locStr rloc ++
+    ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
+  show (IndexingError dims got pos) =
+    show got ++ " indices given at " ++ locStr pos ++
+    ", but type of indexee  has " ++ show dims ++ " dimension(s)."
+  show (BadAnnotation loc desc expected got) =
+    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
+    locStr loc ++ " is " ++ pretty expected ++
+    ", but derived to be " ++ pretty got ++ "."
+  show (BadTupleAnnotation loc desc expected got) =
+    "Annotation of \"" ++ desc ++ "\" type of expression at " ++
+    locStr loc ++ " is a tuple {" ++
+    intercalate ", " (map (maybe "(unspecified)" pretty) expected) ++
+    "}, but derived to be " ++ prettyTuple got ++ "."
+  show (CurriedConsumption fname loc) =
+    "Function " ++ nameToString fname ++
+    " curried over a consuming parameter at " ++ locStr loc ++ "."
+  show (BadLetWithValue loc) =
+    "New value for elements in let-with shares data with source array at " ++
+    locStr loc ++ ".  This is illegal, as it prevents in-place modification."
+  show (ReturnAliased fname name loc) =
+    "Unique return value of function " ++ nameToString fname ++ " at " ++
+    locStr loc ++ " is aliased to " ++ textual name ++ ", which is not consumed."
+  show (UniqueReturnAliased fname loc) =
+    "A unique tuple element of return value of function " ++
+    nameToString fname ++ " at " ++ locStr loc ++
+    " is aliased to some other tuple component."
+  show (NotAnArray loc _ t) =
+    "The expression at " ++ locStr loc ++
+    " is expected to be an array, but is " ++ pretty t ++ "."
+  show (PermutationError loc perm rank name) =
+    "The permutation (" ++ intercalate ", " (map show perm) ++
+    ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ " at " ++
+    locStr loc ++ "."
+    where name' = maybe "" ((++" ") . textual) name
+  show (DimensionNotInteger loc name) =
+    "Dimension declaration " ++ textual name ++ " at " ++ locStr loc ++
+    " should be an integer."
 
 type TaggedIdent ty vn = IdentBase ty (ID vn)
 

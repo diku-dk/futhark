@@ -28,7 +28,6 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import Data.Maybe
 import Data.List
-import Data.Loc (noLoc)
 
 import Prelude
 
@@ -331,11 +330,11 @@ typeCheckSOAC (Reduce ass size _ fun inputs) = do
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
   unless (startt == funret) $
-    TC.bad $ TC.TypeError noLoc $
+    TC.bad $ TC.TypeError $
     "Accumulator is of type " ++ prettyTuple startt ++
     ", but reduce function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype == funret) $
-    TC.bad $ TC.TypeError noLoc $
+    TC.bad $ TC.TypeError $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but reduce function returns type " ++ prettyTuple funret ++ "."
 
@@ -351,11 +350,11 @@ typeCheckSOAC (Scan ass size fun inputs) = do
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
   unless (startt == funret) $
-    TC.bad $ TC.TypeError noLoc $
+    TC.bad $ TC.TypeError $
     "Initial value is of type " ++ prettyTuple startt ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype == funret) $
-    TC.bad $ TC.TypeError noLoc $
+    TC.bad $ TC.TypeError $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
@@ -372,10 +371,10 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   let acct = map TC.argType accargs
       outerRetType = lambdaReturnType outerfun
   unless (acct == innerAccType ) $
-    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap inner reduction returns type " ++ prettyTuple innerRetType ++ "."
   unless (acct == outerRetType) $
-    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 
 typeCheckSOAC (Stream ass size form lam arrexps) = do
@@ -393,7 +392,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   let acc_len= length accexps
   let lamrtp = take acc_len $ extLambdaReturnType lam
   unless (staticShapes (map TC.argType accargs) == lamrtp) $
-    TC.bad $ TC.TypeError noLoc "Stream with inconsistent accumulator type in lambda."
+    TC.bad $ TC.TypeError "Stream with inconsistent accumulator type in lambda."
   -- check reduce's lambda, if any
   _ <- case form of
         RedLike _ _ lam0 _ -> do
@@ -401,7 +400,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                 outerRetType = lambdaReturnType lam0
             TC.checkLambda lam0 (accargs ++ accargs)
             unless (acct == outerRetType) $
-                TC.bad $ TC.TypeError noLoc $
+                TC.bad $ TC.TypeError $
                 "Initial value is of type " ++ prettyTuple acct ++
                 ", but stream's reduce lambda returns type " ++ prettyTuple outerRetType ++ "."
         _ -> return ()
@@ -415,7 +414,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
   arr_aliases <- mapM TC.lookupAliases arrexps
   let aliased_syms = HS.toList $ HS.fromList $ concatMap HS.toList arr_aliases
   when (any (`HM.member` usages) aliased_syms) $
-     TC.bad $ TC.TypeError noLoc "Stream with input array used inside lambda."
+     TC.bad $ TC.TypeError "Stream with input array used inside lambda."
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
   -- and that return type inner dimens are all specified but not as other
   -- lambda parameters!
@@ -429,24 +428,24 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
             let chunk_str = textual chunknm
             case outdim of
                     Constant _ ->
-                      TC.bad $ TC.TypeError noLoc
+                      TC.bad $ TC.TypeError
                       ("Stream: outer dimension of stream should NOT"++
                        " be specified since it is "++chunk_str++"by default.")
                     Var idd    ->
                       unless (idd == chunknm) $
-                      TC.bad $ TC.TypeError noLoc
+                      TC.bad $ TC.TypeError
                       ("Stream: outer dimension of stream should NOT"++
                        " be specified since it is "++chunk_str++"by default.")
           boundDim (Free (Var idd)) = return $ Just idd
           boundDim (Free _        ) = return Nothing
           boundDim (Ext  _        ) =
-            TC.bad $ TC.TypeError noLoc $
+            TC.bad $ TC.TypeError $
             "Stream's lambda: inner dimensions of the"++
             " streamed-out arrays MUST be specified!"
           checkInnerDim lamparnms innerdims = do
             rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
             case find (`HS.member` lamparnms) rtp_iner_syms of
-                Just name -> TC.bad $ TC.TypeError noLoc $
+                Just name -> TC.bad $ TC.TypeError $
                              "Stream's lambda: " ++ textual (baseName name) ++
                              " cannot specify an inner result shape"
                 _ -> return True
