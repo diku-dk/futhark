@@ -115,7 +115,7 @@ data ErrorCase lore =
 
 instance Checkable lore => Show (ErrorCase lore) where
   show (TypeError msg) =
-    "Type error at:\n" ++ msg
+    "Type error:\n" ++ msg
   show (UnifyError e1 t1 e2 t2) =
     "Cannot unify type " ++ pretty t1 ++
     " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e1) ++
