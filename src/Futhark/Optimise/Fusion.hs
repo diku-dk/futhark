@@ -19,6 +19,7 @@ import qualified Data.List         as L
 
 import Prelude
 
+import Futhark.Optimise.DeadVarElim (deadCodeElim)
 import Futhark.Representation.SOACS hiding (SOAC(..))
 import qualified Futhark.Representation.SOACS as Futhark
 import Futhark.MonadFreshNames
@@ -192,7 +193,7 @@ fuseProg prog = do
   if not succc
   then return prog
   else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
-          renameProg $ Prog funs'
+          deadCodeElim <$> renameProg (Prog funs')
 
 fusionGatherFun :: FunDec -> FusionGM FusedRes
 fusionGatherFun fundec =
