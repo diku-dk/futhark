@@ -4,8 +4,8 @@ module Futhark.TypeCheck
   ( -- * Interface
     checkProg
   , checkProgNoUniqueness
-  , TypeError
-  , ErrorCase
+  , TypeError (..)
+  , ErrorCase (..)
 
     -- * Extensionality
   , TypeM
@@ -13,7 +13,6 @@ module Futhark.TypeCheck
   , context
   , message
   , Checkable (..)
-  , module Futhark.TypeCheck.TypeError
   , lookupVar
   , lookupAliases
   , Occurences
@@ -49,7 +48,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
 import Control.Monad.RWS
-import Data.Loc (noLoc)
 import Data.List
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
@@ -59,17 +57,133 @@ import Prelude
 
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases
-import Futhark.TypeCheck.TypeError
 import Futhark.Analysis.Alias
-import qualified Futhark.Util.Pretty as PP
+import Futhark.Util.Pretty (Pretty, prettyDoc, indent, ppr, text, (<+>), align)
 
--- | Information about an error that occured during type checking.
+-- | Information about an error during type checking.  The 'Show'
+-- instance for this type produces a human-readable description.
+data ErrorCase lore =
+    TypeError String
+  -- ^ A general error happened for the given reason.
+  | UnifyError (Exp lore) Type (Exp lore) Type
+  -- ^ Types of two expressions failed to unify.
+  | UnexpectedType (Exp lore) Type [Type]
+  -- ^ Expression of type was not one of the expected
+  -- types.
+  | ReturnTypeError Name [ExtType] [ExtType]
+  -- ^ The body of a function definition has a different
+  -- type than its declaration.
+  | DupDefinitionError Name
+  -- ^ Two functions have been defined with the same name.
+  | DupParamError Name VName
+  -- ^ Two function parameters share the same name.
+  | DupPatternError VName
+  -- ^ Two pattern variables share the same name.
+  | InvalidPatternError (Pattern lore) [ExtType] (Maybe String)
+  -- ^ The pattern is not compatible with the type or is otherwise
+  -- inconsistent.
+  | UnknownVariableError VName
+  -- ^ Unknown variable of the given name referenced.
+  | UnknownFunctionError Name
+  -- ^ Unknown function of the given name called.
+  | ParameterMismatch (Maybe Name) [Type] [Type]
+  -- ^ A function (possibly anonymous) was called with invalid
+  -- arguments.  The second argument is the specific types of
+  -- parameters accepted.
+  | UseAfterConsume VName
+  -- ^ A variable was attempted used after being
+  -- consumed.  The last location is the point of
+  -- consumption.
+  | IndexingError Int Int
+  -- ^ Too many indices provided.  The first integer is
+  -- the number of dimensions in the array being
+  -- indexed.
+  | BadAnnotation String Type Type
+  -- ^ One of the type annotations fails to match with the
+  -- derived type.  The string is a description of the
+  -- role of the type.  The last type is the new derivation.
+  | ReturnAliased Name VName
+  -- ^ The unique return value of the function aliases
+  -- one of the function parameters.
+  | UniqueReturnAliased Name
+  -- ^ A unique element of the tuple returned by the
+  -- function aliases some other element of the tuple.
+  | NotAnArray VName Type
+  -- ^ The given variable is not array-typed.
+  | PermutationError [Int] Int (Maybe VName)
+  -- ^ The permutation is not valid.
+
+instance Checkable lore => Show (ErrorCase lore) where
+  show (TypeError msg) =
+    "Type error at:\n" ++ msg
+  show (UnifyError e1 t1 e2 t2) =
+    "Cannot unify type " ++ pretty t1 ++
+    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e1) ++
+    "\nwith type " ++ pretty t2 ++
+    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e2)
+  show (UnexpectedType e _ []) =
+    "Type of expression\n" ++
+    prettyDoc 160 (indent 2 $ ppr e) ++
+    "\ncannot have any type - possibly a bug in the type checker."
+  show (UnexpectedType e t ts) =
+    "Type of expression\n" ++
+    prettyDoc 160 (indent 2 $ ppr e) ++
+    "\nmust be one of " ++ intercalate ", " (map pretty ts) ++ ", but is " ++
+    pretty t ++ "."
+  show (ReturnTypeError fname rettype bodytype) =
+    "Declaration of function " ++ nameToString fname ++
+    " declares return type " ++ pretty rettype ++ ", but body has type " ++
+    pretty bodytype
+  show (DupDefinitionError name) =
+    "Duplicate definition of function " ++ nameToString name ++ ""
+  show (DupParamError funname paramname) =
+    "Parameter " ++ textual paramname ++
+    " mentioned multiple times in argument list of function " ++
+    nameToString funname ++ "."
+  show (DupPatternError name) =
+    "Variable " ++ textual name ++ " bound twice in pattern."
+  show (InvalidPatternError pat t desc) =
+    "Pattern " ++ pretty pat ++
+    " cannot match value of type " ++ pretty t ++ end
+    where end = case desc of Nothing -> "."
+                             Just desc' -> ":\n" ++ desc'
+  show (UnknownVariableError name) =
+    "Use of unknown variable " ++ textual name ++ "."
+  show (UnknownFunctionError fname) =
+    "Call of unknown function " ++ nameToString fname ++ "."
+  show (ParameterMismatch fname expected got) =
+    "In call of " ++ fname' ++ ":\n" ++
+    "expecting " ++ show nexpected ++ " argument(s) of type(s) " ++
+     expected' ++ ", but got " ++ show ngot ++
+    " arguments of types " ++ intercalate ", " (map pretty got) ++ "."
+    where (nexpected, expected') =
+            (length expected, intercalate ", " $ map pretty expected)
+          ngot = length got
+          fname' = maybe "anonymous function" (("function "++) . nameToString) fname
+  show (UseAfterConsume name) =
+    "Variable " ++ textual name ++ " used" ++
+    ", but it was previously consumed.  (Possibly through aliasing.)"
+  show (IndexingError dims got) =
+    show got ++ " indices given, but type of indexee has " ++ show dims ++ " dimension(s)."
+  show (BadAnnotation desc expected got) =
+    "Annotation of \"" ++ desc ++ "\" type of expression is " ++ pretty expected ++
+    ", but derived to be " ++ pretty got ++ "."
+  show (ReturnAliased fname name) =
+    "Unique return value of function " ++ nameToString fname ++
+    " is aliased to " ++ textual name ++ ", which is not consumed."
+  show (UniqueReturnAliased fname) =
+    "A unique tuple element of return value of function " ++
+    nameToString fname ++ " is aliased to some other tuple component."
+  show (NotAnArray e t) =
+    "The expression " ++ pretty e ++
+    " is expected to be an array, but is " ++ pretty t ++ "."
+  show (PermutationError perm rank name) =
+    "The permutation (" ++ intercalate ", " (map show perm) ++
+    ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ "."
+    where name' = maybe "" ((++" ") . textual) name
+
+-- | A type error.
 data TypeError lore = Error [String] (ErrorCase lore)
-
--- | What went wrong.
-type ErrorCase lore =
-  GenTypeError VName (Exp lore) (Several ExtType)
-  (Several (PatElemT (LetAttr (Aliases lore))))
 
 instance Checkable lore => Show (TypeError lore) where
   show (Error [] err) =
@@ -204,13 +318,13 @@ context :: String
           -> TypeM lore a
 context s = local $ \env -> env { envContext = s : envContext env}
 
-message :: PP.Pretty a =>
+message :: Pretty a =>
            String -> a -> String
-message s x = PP.prettyDoc 80 $
-              PP.text s PP.<+> PP.align (PP.ppr x)
+message s x = prettyDoc 80 $
+              text s <+> align (ppr x)
 
 liftEitherS :: Either String a -> TypeM lore a
-liftEitherS = either (bad . TypeError noLoc) return
+liftEitherS = either (bad . TypeError) return
 
 occur :: Occurences -> TypeM lore ()
 occur = tell . Consumption
@@ -241,7 +355,7 @@ maybeCheckConsumption :: Consumption -> TypeM lore Occurences
 maybeCheckConsumption (ConsumptionError e) = do
   check <- asks envCheckOccurences
   if check
-    then bad $ TypeError noLoc e
+    then bad $ TypeError e
     else return mempty
 maybeCheckConsumption (Consumption os) =
   return os
@@ -271,7 +385,7 @@ consumeOnlyParams consumable m = do
         wasConsumed v
           | Just als <- lookup v consumable = return als
           | otherwise =
-            bad $ TypeError noLoc $
+            bad $ TypeError $
             unlines [pretty v ++ " was invalidly consumed.",
                      what ++ " can be consumed here."]
         what | null consumable = "Nothing"
@@ -315,7 +429,7 @@ binding bnds = check . local (`bindVars` bnds)
           already_bound <- asks envVtable
           case filter (`HM.member` already_bound) $ HM.keys bnds of
             []  -> return ()
-            v:_ -> bad $ TypeError noLoc $
+            v:_ -> bad $ TypeError $
                    "Variable " ++ pretty v ++ " being redefined."
           (a, os) <- collectOccurences m
           tell $ Consumption $ unOccur boundnameset os
@@ -325,9 +439,9 @@ lookupVar :: VName -> TypeM lore (NameInfo (Aliases lore))
 lookupVar name = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
-    Nothing -> bad $ UnknownVariableError name noLoc
+    Nothing -> bad $ UnknownVariableError name
     Just (Bound attr) -> return attr
-    Just WasConsumed  -> bad $ UseAfterConsume name noLoc noLoc
+    Just WasConsumed  -> bad $ UseAfterConsume name
 
 lookupAliases :: VName -> TypeM lore Names
 lookupAliases name = do
@@ -349,15 +463,14 @@ lookupFun :: Checkable lore =>
 lookupFun fname args = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
-    Nothing -> bad $ UnknownFunctionError fname noLoc
+    Nothing -> bad $ UnknownFunctionError fname
     Just (ftype, params) -> do
       argts <- mapM subExpType args
       case applyRetType ftype params $
            zip args argts of
         Nothing ->
-          bad $ ParameterMismatch (Just fname) noLoc
-          (Right $ map (justOne . staticShapes1 . paramType) params) $
-          map (justOne . staticShapes1) argts
+          bad $ ParameterMismatch (Just fname)
+          (map paramType params) argts
         Just rt ->
           return (rt, map paramDeclType params)
 
@@ -370,8 +483,8 @@ matchSubExpTypes e1 e2 = do
   t1 <- subExpType e1
   t2 <- subExpType e2
   unless (t1 == t2) $
-    bad $ UnifyError (PrimOp $ SubExp e1) (justOne $ staticShapes1 t1)
-    (PrimOp $ SubExp e2) (justOne $ staticShapes1 t2)
+    bad $ UnifyError (PrimOp $ SubExp e1) t1
+    (PrimOp $ SubExp e2) t2
 
 -- | @checkAnnotation loc s t1 t2@ checks if @t2@ is equal to
 -- @t1@.  If not, a 'BadAnnotation' is raised.
@@ -379,8 +492,7 @@ checkAnnotation :: String -> Type -> Type
                 -> TypeM lore ()
 checkAnnotation desc t1 t2
   | t2 == t1 = return ()
-  | otherwise = bad $ BadAnnotation noLoc desc
-                (justOne $ staticShapes1 t1) (justOne $ staticShapes1 t2)
+  | otherwise = bad $ BadAnnotation desc t1 t2
 
 -- | @require ts se@ causes a '(TypeError vn)' if the type of @se@ is
 -- not a subtype of one of the types in @ts@.
@@ -388,9 +500,7 @@ require :: Checkable lore => [Type] -> SubExp -> TypeM lore ()
 require ts se = do
   t <- checkSubExp se
   unless (t `elem` ts) $
-    bad $ UnexpectedType noLoc (PrimOp $ SubExp se)
-    (justOne $ staticShapes1 t)
-    (map (justOne . staticShapes1) ts)
+    bad $ UnexpectedType (PrimOp $ SubExp se) t ts
 
 -- | Variant of 'require' working on variable names.
 requireI :: Checkable lore => [Type] -> VName -> TypeM lore ()
@@ -402,8 +512,7 @@ checkArrIdent v = do
   t <- lookupType v
   case t of
     Array{} -> return t
-    _       -> bad $ NotAnArray noLoc (PrimOp $ SubExp $ Var v) $
-               justOne $ staticShapes1 t
+    _       -> bad $ NotAnArray v t
 
 -- | Type check a program containing arbitrary type information,
 -- yielding either a type error or a program with complete type
@@ -442,7 +551,7 @@ checkProg' checkoccurs prog = do
                   (progFunctions prog')
     expand ftable (FunDec name ret params _)
       | HM.member name ftable =
-        Left $ Error [] $ DupDefinitionError name noLoc noLoc
+        Left $ Error [] $ DupDefinitionError name
       | otherwise =
         Right $ HM.insert name (ret,params) ftable
 
@@ -510,7 +619,7 @@ checkFun' (fname, rettype, params, body) consumable check = do
 
         expand seen pname
           | Just _ <- find (==pname) seen =
-            bad $ DupParamError fname pname noLoc
+            bad $ DupParamError fname pname
           | otherwise =
             return $ pname : seen
 
@@ -521,13 +630,13 @@ checkFun' (fname, rettype, params, body) consumable check = do
 
         checkReturnAlias' seen (Unique, names)
           | any (`HS.member` HS.map snd seen) $ HS.toList names =
-            bad $ UniqueReturnAliased fname noLoc
+            bad $ UniqueReturnAliased fname
           | otherwise = do
             consume names
             return $ seen `HS.union` tag Unique names
         checkReturnAlias' seen (Nonunique, names)
           | any (`HS.member` seen) $ HS.toList $ tag Unique names =
-            bad $ UniqueReturnAliased fname noLoc
+            bad $ UniqueReturnAliased fname
           | otherwise = return $ seen `HS.union` tag Nonunique names
 
         tag u = HS.map $ \name -> (u, name)
@@ -581,14 +690,14 @@ checkLambdaResult :: Checkable lore =>
                      [Type] -> Result -> TypeM lore ()
 checkLambdaResult ts es
   | length ts /= length es =
-    bad $ TypeError noLoc $
+    bad $ TypeError $
     "Lambda has return type " ++ prettyTuple ts ++
     " describing " ++ show (length ts) ++ " values, but body returns " ++
     show (length es) ++ " values: " ++ prettyTuple es
   | otherwise = forM_ (zip ts es) $ \(t, e) -> do
       et <- checkSubExp e
       unless (et == t) $
-        bad $ TypeError noLoc $
+        bad $ TypeError $
         "Subexpression " ++ pretty e ++ " has type " ++ pretty et ++
         " but expected " ++ pretty t
 
@@ -611,7 +720,7 @@ checkPrimOp (ArrayLit (e:es') t) = do
   let check elemt eleme = do
         elemet <- checkSubExp eleme
         unless (elemet == elemt) $
-          bad $ TypeError noLoc $ pretty elemet ++
+          bad $ TypeError $ pretty elemet ++
           " is not of expected type " ++ pretty elemt ++ "."
   et <- checkSubExp e
 
@@ -633,7 +742,7 @@ checkPrimOp (Index cs ident idxes) = do
   vt <- lookupType ident
   observe ident
   when (arrayRank vt < length idxes) $
-    bad $ IndexingError (arrayRank vt) (length idxes) noLoc
+    bad $ IndexingError (arrayRank vt) (length idxes)
   mapM_ (require [Prim int32]) idxes
 
 checkPrimOp (Iota e x) = do
@@ -656,7 +765,7 @@ checkPrimOp (Reshape cs newshape arrexp) = do
           return ()
         checkDimChange rank (DimCoercion se) i
           | i >= rank =
-            bad $ TypeError noLoc $
+            bad $ TypeError $
             "Asked to coerce dimension " ++ show i ++ " to " ++ pretty se ++
             ", but array " ++ pretty arrexp ++ " has only " ++ pretty rank ++ " dimensions"
           | otherwise =
@@ -667,7 +776,7 @@ checkPrimOp (Rearrange cs perm arr) = do
   arrt <- lookupType arr
   let rank = arrayRank arrt
   when (length perm /= rank || sort perm /= [0..rank-1]) $
-    bad $ PermutationError noLoc perm rank $ Just arr
+    bad $ PermutationError perm rank $ Just arr
 
 checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Prim Cert]) cs
@@ -681,7 +790,7 @@ checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
   let success = all (== stripArray 1 arr1t) $
                 map (stripArray 1) arr2ts
   unless success $
-    bad $ TypeError noLoc $
+    bad $ TypeError $
     "Types of arguments to concat do not match.  Got " ++
     pretty arr1t ++ " and " ++ intercalate ", " (map pretty arr2ts)
   require [Prim int32] ressize
@@ -696,11 +805,11 @@ checkPrimOp (Partition cs _ flags arrs) = do
   mapM_ (requireI [Prim Cert]) cs
   flagst <- lookupType flags
   unless (rowType flagst == Prim int32) $
-    bad $ TypeError noLoc $ "Flag array has type " ++ pretty flagst ++ "."
+    bad $ TypeError $ "Flag array has type " ++ pretty flagst ++ "."
   forM_ arrs $ \arr -> do
     arrt <- lookupType arr
     unless (arrayRank arrt > 0) $
-      bad $ TypeError noLoc $
+      bad $ TypeError $
       "Array argument " ++ pretty arr ++
       " to partition has type " ++ pretty arrt ++ "."
 
@@ -716,7 +825,7 @@ checkExp (If e1 e2 e3 ts) = do
   ts2 <- bodyExtType e2
   ts3 <- bodyExtType e3
   unless ((ts2 `generaliseExtTypes` ts3) `subtypesOf` ts) $
-    bad $ TypeError noLoc $
+    bad $ TypeError $
     unlines ["If-expression branches have types",
              "  " ++ prettyTuple ts2 ++ ", and",
              "  " ++ prettyTuple ts3,
@@ -727,14 +836,14 @@ checkExp (Apply fname args t)
   | "trace" <- nameToString fname = do
   argts <- mapM (checkSubExp . fst) args
   when (staticShapes argts /= map fromDecl (retTypeValues t)) $
-    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty t
+    bad $ TypeError $ "Expected apply result type " ++ pretty t
     ++ " but got " ++ pretty argts
 
 checkExp (Apply fname args rettype_annot) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
   when (rettype_derived /= rettype_annot) $
-    bad $ TypeError noLoc $ "Expected apply result type " ++ pretty rettype_derived
+    bad $ TypeError $ "Expected apply result type " ++ pretty rettype_derived
     ++ " but annotation is " ++ pretty rettype_annot
   checkFuncall (Just fname) paramtypes argflows
 
@@ -756,11 +865,11 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
       case find ((==cond) . paramName . fst) merge of
         Just (condparam,_) ->
           unless (paramType condparam == Prim Bool) $
-          bad $ TypeError noLoc $
+          bad $ TypeError $
           "Conditional '" ++ pretty cond ++ "' of while-loop is not boolean, but " ++
           pretty (paramType condparam) ++ "."
         Nothing ->
-          bad $ TypeError noLoc $
+          bad $ TypeError $
           "Conditional '" ++ pretty cond ++ "' of while-loop is not a merge varible."
       let funparams = mergepat
           paramts   = map paramDeclType funparams
@@ -783,9 +892,9 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
         bodyt <- map (`toDecl` Unique) <$> bodyExtType loopbody
         unless (map rankShaped bodyt `subtypesOf`
                 map rankShaped (staticShapes rettype)) $
-          bad $ ReturnTypeError noLoc (nameFromString "<loop body>")
-          (Several $ map fromDecl $ staticShapes rettype)
-          (Several $ map fromDecl bodyt)
+          bad $ ReturnTypeError (nameFromString "<loop body>")
+          (map fromDecl $ staticShapes rettype)
+          (map fromDecl bodyt)
 
 checkExp (Op op) = checkOp op
 
@@ -796,7 +905,7 @@ checkSOACArrayArgs width vs =
     (vt, v') <- checkSOACArrayArg v
     let argSize = arraySize 0 vt
     unless (argSize == width) $
-      bad $ TypeError noLoc $
+      bad $ TypeError $
       "SOAC argument " ++ pretty v ++ " has outer size " ++
       pretty argSize ++ ", but width of SOAC is " ++
       pretty width
@@ -804,7 +913,7 @@ checkSOACArrayArgs width vs =
   where checkSOACArrayArg ident = do
           (t, als) <- checkArg $ Var ident
           case peelArray 1 t of
-            Nothing -> bad $ TypeError noLoc $
+            Nothing -> bad $ TypeError $
                        "SOAC argument " ++ pretty ident ++ " is not an array"
             Just rt -> return (t, (rt, als))
 
@@ -858,7 +967,7 @@ checkBindage (BindInPlace cs src is) = do
   -- Check that the new value has the same type as what is already
   -- there (It does not have to be unique, though.)
   case peelArray (length is) srct of
-    Nothing -> bad $ IndexingError (arrayRank srct) (length is) noLoc
+    Nothing -> bad $ IndexingError (arrayRank srct) (length is)
     Just _  -> return ()
 
 checkBinding :: Checkable lore =>
@@ -878,7 +987,7 @@ matchExtPattern :: Checkable lore =>
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts
   unless (length restpat == length ts') $
-    bad $ InvalidPatternError (Several pat) (Several ts) Nothing noLoc
+    bad $ InvalidPatternError (Pattern [] pat) ts Nothing
   evalStateT (zipWithM_ checkBinding' restpat ts') []
   where checkBinding' patElem@(PatElem name _ _) t = do
           lift $ checkAnnotation ("binding of variable " ++ textual name)
@@ -888,7 +997,7 @@ matchExtPattern pat ts = do
         add name = do
           seen <- gets $ elem name
           if seen
-            then lift $ bad $ DupPatternError name noLoc noLoc
+            then lift $ bad $ DupPatternError name
             else modify (name:)
 
 matchExtReturnType :: Checkable lore =>
@@ -897,9 +1006,7 @@ matchExtReturnType :: Checkable lore =>
 matchExtReturnType fname rettype ses = do
   ts <- staticShapes <$> mapM subExpType ses
   unless (ts `subtypesOf` rettype) $
-    bad $ ReturnTypeError noLoc fname
-          (Several rettype)
-          (Several ts)
+    bad $ ReturnTypeError fname rettype ts
 
 patternContext :: Typed attr =>
                   [PatElemT attr] -> [ExtType] ->
@@ -954,9 +1061,9 @@ checkFuncall :: Checkable lore =>
 checkFuncall fname paramts args = do
   let argts = map argType args
   unless (validApply paramts argts) $
-    bad $ ParameterMismatch fname noLoc
-          (Right $ map (justOne . staticShapes1 . fromDecl) paramts) $
-          map (justOne . staticShapes1 . argType) args
+    bad $ ParameterMismatch fname
+          (map fromDecl paramts) $
+          map argType args
   forM_ (zip (map diet paramts) args) $ \(d, (_, als)) ->
     occur [consumption (consumeArg als d)]
   where consumeArg als Consume = als
@@ -981,7 +1088,7 @@ checkLambda (Lambda i params body rettype) args = do
       checkLambdaParams params
       mapM_ checkType rettype
       checkLambdaBody rettype body
-  else bad $ TypeError noLoc $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
+  else bad $ TypeError $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
@@ -1000,7 +1107,7 @@ checkExtLambda (ExtLambda i params body rettype) args =
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body
         matchExtReturnType fname rettype $ bodyResult body
-    else bad $ TypeError noLoc $
+    else bad $ TypeError $
          "Existential lambda defined with " ++ show (length params) ++
          " parameters, but expected to take " ++ show (length args) ++ " arguments."
 

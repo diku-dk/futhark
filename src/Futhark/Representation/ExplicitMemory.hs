@@ -106,7 +106,6 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Foldable (traverse_)
 import Data.Maybe
 import Data.List
-import Data.Loc
 import Data.Monoid
 import Prelude
 
@@ -118,7 +117,6 @@ import Futhark.Representation.AST.Syntax
           RetType)
 import qualified Futhark.Analysis.ScalExp as SE
 
-import Futhark.TypeCheck.TypeError
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -578,7 +576,7 @@ instance TypeCheck.Checkable ExplicitMemory where
     rt <- runReaderT (expReturns $ removeExpAliases e) =<<
           asksScope removeScopeAliases
     matchPatternToReturns (wrong rt) (removePatternAliases pat) rt
-    where wrong rt s = TypeCheck.bad $ TypeError noLoc $
+    where wrong rt s = TypeCheck.bad $ TypeCheck.TypeError $
                        ("Pattern\n" ++ TypeCheck.message "  " pat ++
                         "\ncannot match result type\n") ++
                        "  " ++ prettyTuple rt ++ "\n" ++ s
@@ -598,7 +596,7 @@ instance TypeCheck.Checkable ExplicitMemory where
                 | IxFun.isDirect ixfun ->
                   return ()
                 | otherwise ->
-                    TypeCheck.bad $ TypeError noLoc $
+                    TypeCheck.bad $ TypeCheck.TypeError $
                     "Array " ++ pretty v ++
                     " returned by function, but has nontrivial index function" ++
                     pretty ixfun
@@ -753,7 +751,7 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
     Mem{} ->
       return ()
     _        ->
-      TypeCheck.bad $ TypeCheck.TypeError noLoc $
+      TypeCheck.bad $ TypeCheck.TypeError $
       "Variable " ++ textual v ++
       " used as memory block, but is of type " ++
       pretty t ++ "."
@@ -763,7 +761,7 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
     let ixfun_rank = IxFun.rank ixfun
         ident_rank = shapeRank shape
     unless (ixfun_rank == ident_rank) $
-      TypeCheck.bad $ TypeCheck.TypeError noLoc $
+      TypeCheck.bad $ TypeCheck.TypeError $
       "Arity of index function (" ++ pretty ixfun_rank ++
       ") does not match rank of array " ++ pretty name ++
       " (" ++ show ident_rank ++ ")"

@@ -32,7 +32,6 @@ import Control.Monad.Writer
 import Control.Monad.Identity
 import qualified Data.HashSet as HS
 import Data.List
-import Data.Loc (noLoc)
 
 import Prelude
 
@@ -379,7 +378,7 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
   forM_ returns $ \(t, perm) ->
     let return_rank = arrayRank t + rank
     in unless (sort perm == [0..return_rank - 1]) $
-       TC.bad $ TC.TypeError noLoc $
+       TC.bad $ TC.TypeError $
        "Permutation " ++ pretty perm ++
        " not valid for returning " ++ pretty t ++
        " from a rank " ++ pretty rank ++ " kernel."
@@ -400,9 +399,8 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
     unless (map rankShaped bodyt ==
             map rankShaped (staticShapes rettype)) $
       TC.bad $
-      TC.ReturnTypeError noLoc (nameFromString "<kernel body>")
-      (TC.Several $ staticShapes rettype)
-      (TC.Several bodyt)
+      TC.ReturnTypeError (nameFromString "<kernel body>")
+      (staticShapes rettype) bodyt
   where (iparams, bounds) = unzip ispace
         rank = length ispace
         (rettype, _) = unzip returns
@@ -413,7 +411,7 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
           arr_t <- lookupType $ kernelInputArray inp
           unless (stripArray (length $ kernelInputIndices inp) arr_t ==
                   kernelInputType inp) $
-            TC.bad $ TC.TypeError noLoc $
+            TC.bad $ TC.TypeError $
             "Kernel input " ++ pretty inp ++ " has inconsistent type."
 
 typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) = do
@@ -427,7 +425,7 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) 
         splitAt (length accexps) $ lambdaReturnType seqfun
 
   case lambdaParams seqfun of
-    [] -> TC.bad $ TC.TypeError noLoc "Fold function takes no parameters."
+    [] -> TC.bad $ TC.TypeError "Fold function takes no parameters."
     chunk_param : _
       | Prim (IntType Int32) <- paramType chunk_param -> do
           let seq_args = (Prim int32, mempty) :
@@ -435,17 +433,17 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) 
                          | (t, als) <- arrargs ]
           TC.checkLambda seqfun seq_args
       | otherwise ->
-          TC.bad $ TC.TypeError noLoc "First parameter of fold function is not int32-typed."
+          TC.bad $ TC.TypeError "First parameter of fold function is not int32-typed."
 
   let asArg t = (t, mempty)
   TC.checkLambda parfun $ map asArg $ Prim int32 : fold_acc_ret ++ fold_acc_ret
   let acct = map TC.argType accargs
       parRetType = lambdaReturnType parfun
   unless (acct == fold_acc_ret) $
-    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
   unless (acct == parRetType) $
-    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
 
 typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
@@ -461,11 +459,11 @@ typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
   unless (startt == funret) $
-    TC.bad $ TC.TypeError noLoc $
+    TC.bad $ TC.TypeError $
     "Initial value is of type " ++ prettyTuple startt ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
   unless (intupletype == funret) $
-    TC.bad $ TC.TypeError noLoc $
+    TC.bad $ TC.TypeError $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
@@ -477,7 +475,7 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
   arrargs <- TC.checkSOACArrayArgs w arrs
 
   case lambdaParams fun of
-    [] -> TC.bad $ TC.TypeError noLoc "Chunked map function takes no parameters."
+    [] -> TC.bad $ TC.TypeError "Chunked map function takes no parameters."
     chunk_param : _
       | Prim (IntType Int32) <- paramType chunk_param -> do
           let args = (Prim int32, mempty) :
@@ -485,7 +483,7 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
                      | (t, als) <- arrargs ]
           TC.checkLambda fun args
       | otherwise ->
-          TC.bad $ TC.TypeError noLoc "First parameter of chunked map function is not int32-typed."
+          TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
