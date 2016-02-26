@@ -2,7 +2,7 @@
 -- | This module exports a facility for assigning every name in a
 -- Futhark program a unique integer, thus getting rid of name
 -- shadowing.
-module Futhark.Representation.External.Renamer
+module Language.Futhark.Renamer
   (
   -- * Tagging
     tagProg
