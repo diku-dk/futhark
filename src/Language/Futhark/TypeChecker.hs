@@ -5,7 +5,7 @@
 -- The program does not need to have any particular properties for the
 -- type checker to function; in particular it does not need unique
 -- names.
-module Futhark.Representation.External.TypeChecker
+module Language.Futhark.TypeChecker
   ( checkProg
   , checkProgNoUniqueness
   , TypeError)
@@ -27,14 +27,14 @@ import qualified Data.HashSet as HS
 import Prelude
 
 import Language.Futhark
-import Futhark.Representation.External.Renamer
+import Language.Futhark.Renamer
   (tagProg', untagProg, untagExp, untagPattern)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
 import Futhark.TypeCheck.TypeError
+
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-
 type TypeError vn =
   GenTypeError
   vn

@@ -30,8 +30,8 @@ import Futhark.Pipeline
 import Futhark.Actions
 
 import qualified Language.Futhark as E
-import qualified Futhark.Representation.External.TypeChecker as E
-import qualified Futhark.Representation.External.Renamer as E
+import qualified Language.Futhark.TypeChecker as E
+import qualified Language.Futhark.Renamer as E
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
