@@ -163,8 +163,6 @@ Library
                    Futhark.Representation.ExplicitMemory.Simplify
                    Futhark.Representation.ExplicitMemory.SymSet
                    Futhark.Representation.ExplicitMemory.SymSet.Unsafe
-                   Futhark.Representation.External.Renamer
-                   Futhark.Representation.External.TypeChecker
                    Futhark.Representation.Primitive
                    Futhark.Representation.SOACS
                    Futhark.Representation.SOACS.Simplify
@@ -191,11 +189,13 @@ Library
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
+                   Language.Futhark.Renamer
                    Language.Futhark.Parser
                    Language.Futhark.Parser.RealConfiguration
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
                    Language.Futhark.Traversals
+                   Language.Futhark.TypeChecker
 
   Other-modules: Language.Futhark.Parser.Parser
                  Language.Futhark.Parser.Lexer
