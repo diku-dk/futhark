@@ -178,7 +178,6 @@ Library
                    Futhark.Transform.Rename
                    Futhark.Transform.Substitute
                    Futhark.TypeCheck
-                   Futhark.TypeCheck.TypeError
                    Futhark.Util
                    Futhark.Util.Options
                    Futhark.Util.Pretty
