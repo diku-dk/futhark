@@ -200,7 +200,7 @@ cFloatConvOps :: [C.Definition]
                 map (mkFPConvIF "sitofp") [minBound..maxBound] ++
                 map (mkFPConvUF "uitofp") [minBound..maxBound] ++
                 map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
-                map (flip $ mkFPConvFU "tptoui") [minBound..maxBound]
+                map (flip $ mkFPConvFU "fptoui") [minBound..maxBound]
 
         mkFDiv = simpleFloatOp "fdiv" [C.cexp|x / y|]
         mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
