@@ -231,16 +231,18 @@ fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 def fptoui_T_i8(x):
   return uint8(trunc(x))
+fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
 
 def fptoui_T_i16(x):
   return uint16(trunc(x))
+fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
 
 def fptoui_T_i32(x):
   return uint32(trunc(x))
+fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
 
 def fptoui_T_i64(x):
   return uint64(trunc(x))
-
 fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
 
 def fpconv_f32_f64(x):
