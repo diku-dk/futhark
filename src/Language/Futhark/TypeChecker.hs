@@ -768,8 +768,9 @@ checkExp (If e1 e2 e3 t pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
   tell dflow
+  brancht <- unifyExpTypes e2' e3'
   t' <- checkAnnotation pos "branch result" t $
-        addAliases (typeOf e2' `unifyUniqueness` typeOf e3')
+        addAliases brancht
         (`HS.difference` allConsumed (usageOccurences dflow))
   return $ If e1' e2' e3' t' pos
 
