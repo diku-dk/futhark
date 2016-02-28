@@ -7,6 +7,6 @@
 --   29
 -- }
 
-include "include_basic_includee.fut.module"
+include include_basic_includee.fut.module
 
 fun i32 main(i32 s) = includee_function(s) + 1
