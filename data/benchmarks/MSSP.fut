@@ -27,7 +27,4 @@ fun {int,int,int,int} mssp([int] inarr) =
 fun int main() =
     let inarr  = [ 1, -2, 3, 4, -1, 5, -6, 1 ] in
     let {res,t1,t2,t3} = mssp(inarr)           in
-    let x = trace("\n\nMSSP Result Is: ")      in
-    let p = trace(res)                         in
-    let x = trace("\n")                        in
-        res
+    res
