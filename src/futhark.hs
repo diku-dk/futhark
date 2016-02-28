@@ -32,7 +32,6 @@ import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
 import qualified Futhark.Util.Pretty as PP
 
-import Futhark.Pass.Untrace
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -239,7 +238,6 @@ commandLineOptions =
      \config -> config { futharkRealConfiguration = RealAsFloat64 } )
     "Map 'real' to 64-bit floating point (the default)."
 
-  , soacsPassOption untraceProg "u"
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAggressively []

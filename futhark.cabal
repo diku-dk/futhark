@@ -133,7 +133,6 @@ Library
                    Futhark.Pass.FirstOrderTransform
                    Futhark.Pass.KernelBabysitting
                    Futhark.Pass.Simplify
-                   Futhark.Pass.Untrace
                    Futhark.Pipeline
                    Futhark.Representation.Aliases
                    Futhark.Representation.AST

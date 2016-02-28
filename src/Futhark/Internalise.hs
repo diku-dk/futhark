@@ -152,17 +152,6 @@ internaliseExp desc (E.ArrayLit es rowtype _) = do
       letSubExps desc (zipWith arraylit (transpose es') ets)
 
 internaliseExp desc (E.Apply fname args _ _)
-  | "trace" <- nameToString fname = do
-  args' <- mapM (internaliseExp "arg" . fst) args
-  let args'' = concatMap tag args'
-  rettype <- ExtRetType <$>
-             map (`I.toDecl` Nonunique) <$>
-             staticShapes <$>
-             mapM (subExpType . fst) args''
-  letTupExp' desc $ I.Apply fname args'' rettype
-  where tag ses = [ (se, I.Observe) | se <- ses ]
-
-internaliseExp desc (E.Apply fname args _ _)
   | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
