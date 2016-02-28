@@ -106,8 +106,9 @@ runPipelineOnSource config pipeline filename srccode = do
 
 parseSourceProgram :: FilePath -> String
                    -> FutharkM E.UncheckedProg
-parseSourceProgram filename file_contents =
-  case parseFuthark filename file_contents of
+parseSourceProgram filename file_contents = do
+  parsed <- liftIO $ parseFuthark filename file_contents
+  case parsed of
     Left err   -> compileError (T.pack $ show err) ()
     Right prog -> return prog
 

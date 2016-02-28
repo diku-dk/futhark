@@ -144,6 +144,7 @@ keyword s =
     "streamRedPer" -> STREAM_REDPER
     "streamSeq"    -> STREAM_SEQ
     "assert"       -> ASSERT
+    "include"      -> INCLUDE
     _              -> ID $ nameFromString s
 
 type Byte = Word8

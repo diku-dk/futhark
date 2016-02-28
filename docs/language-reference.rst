@@ -82,6 +82,18 @@ collides with reality.  Shape declarations matter most when used for
 the input parameters of the ``main`` function and for the return type
 of functions used to ``map``.
 
+File inclusions
+---------------
+
+You can include other files into your main Futhark file like this::
+
+  include "other_file.fut.module"
+
+You need to give the entire filename in the string.
+
+All include headers must be at the top of the Futhark file, before any function
+declarations.
+
 Simple Expressions
 ------------------
 
