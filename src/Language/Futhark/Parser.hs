@@ -23,6 +23,8 @@ import Control.Monad.Trans.State
 import Control.Monad.Except
 import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
+import Data.Maybe (mapMaybe)
+import Data.List (intersect)
 
 import Prelude
 
@@ -88,10 +90,46 @@ parseExpIncrIO :: RealConfiguration -> FilePath -> String
 parseExpIncrIO = parseIncrementalIO expression
 
 -- | Parse an entire Futhark program from the given 'String', using the
--- 'FilePath' as the source name for error messages.
+-- 'FilePath' as the source name for error messages, and parsing and reacting to
+-- all headers.
 parseFuthark :: RealConfiguration -> FilePath -> String
-             -> Either ParseError UncheckedProg
-parseFuthark = parse prog
+                -> IO (Either ParseError UncheckedProg)
+parseFuthark rc fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
+  where parseWithPrevIncludes :: [FilePath] -> (FilePath, String)
+                              -> IO (Either ParseError UncheckedProg)
+        parseWithPrevIncludes prevIncludes (fp, s) =
+          case parse prog rc fp s of
+            Left e -> return $ Left e
+            Right p ->
+              let newIncludes = mapMaybe headerInclude $ progWHHeaders p
+                  intersection = prevIncludes `intersect` newIncludes
+              in if not (null intersection)
+                 then return $ Left $ ParseError
+                      ("Include cycle with " ++ show intersection ++ ".")
+                 else let p' = Prog $ progWHFunctions p
+                      in if null newIncludes
+                         then return $ Right p'
+                         else includeIncludes prevIncludes newIncludes p'
+
+        includeIncludes :: [FilePath] -> [FilePath] -> UncheckedProg
+                           -> IO (Either ParseError UncheckedProg)
+        includeIncludes prevIncludes newIncludes endProg = do
+          let allIncludes = prevIncludes ++ newIncludes
+          ss <- liftIO $ mapM readFile newIncludes
+          parses <- liftIO $ mapM (parseWithPrevIncludes allIncludes)
+            (zip newIncludes ss)
+          return $ foldr mergePrograms (Right $ endProg) parses
+
+        mergePrograms :: Either ParseError UncheckedProg
+                      -> Either ParseError UncheckedProg
+                      -> Either ParseError UncheckedProg
+        mergePrograms a b = case (a, b) of
+          (Right (Prog fs), Right (Prog gs)) -> Right (Prog (fs ++ gs))
+          (Left err, _) -> Left err
+          (_, Left err) -> Left err
+
+        headerInclude :: ProgHeader -> Maybe String
+        headerInclude (Include name) = Just name
 
 -- | Parse an Futhark expression from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
