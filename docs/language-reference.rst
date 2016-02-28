@@ -87,9 +87,9 @@ File inclusions
 
 You can include other files into your main Futhark file like this::
 
-  include "other_file.fut.module"
+  include other_file.fut.module
 
-You need to give the entire filename in the string.
+You need to give the entire filename in the statement.
 
 All include headers must be at the top of the Futhark file, before any function
 declarations.
