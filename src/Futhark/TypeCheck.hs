@@ -832,13 +832,6 @@ checkExp (If e1 e2 e3 ts) = do
              "But the annotation is",
              "  " ++ prettyTuple ts]
 
-checkExp (Apply fname args t)
-  | "trace" <- nameToString fname = do
-  argts <- mapM (checkSubExp . fst) args
-  when (staticShapes argts /= map fromDecl (retTypeValues t)) $
-    bad $ TypeError $ "Expected apply result type " ++ pretty t
-    ++ " but got " ++ pretty argts
-
 checkExp (Apply fname args rettype_annot) = do
   (rettype_derived, paramtypes) <- lookupFun fname $ map fst args
   argflows <- mapM (checkArg . fst) args
