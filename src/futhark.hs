@@ -32,7 +32,6 @@ import Futhark.TypeCheck (Checkable)
 import Futhark.Util.Log
 import qualified Futhark.Util.Pretty as PP
 
-import Futhark.Pass.Untrace
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
@@ -227,8 +226,6 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
-
-  , soacsPassOption untraceProg "u"
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAggressively []

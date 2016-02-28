@@ -89,9 +89,7 @@ interpret parseValues prog =
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
-      let (res, trace) = runFunWithShapes defaultEntryPoint args prog
-      mapM_ (hPutStrLn stderr) trace
-      case res of
+      case runFunWithShapes defaultEntryPoint args prog of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val

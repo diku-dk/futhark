@@ -15,7 +15,6 @@
 module Futhark.Interpreter
   ( runFun
   , runFunWithShapes
-  , Trace
   , InterpreterError(..) )
 where
 
@@ -102,19 +101,14 @@ data FutharkEnv = FutharkEnv { envVtable :: VTable
                              , envFtable :: FunTable
                              }
 
--- | A list of the prettyprinted values that were passed to @trace@
-type Trace = [String]
-
 newtype FutharkM a = FutharkM (ReaderT FutharkEnv
-                               (ExceptT InterpreterError
-                                (Writer Trace)) a)
+                               (Except InterpreterError) a)
   deriving (Monad, Applicative, Functor,
-            MonadReader FutharkEnv,
-            MonadWriter Trace)
+            MonadReader FutharkEnv)
 
 runFutharkM :: FutharkM a -> FutharkEnv
-            -> (Either InterpreterError a, Trace)
-runFutharkM (FutharkM m) env = runWriter $ runExceptT $ runReaderT m env
+            -> Either InterpreterError a
+runFutharkM (FutharkM m) env = runExcept $ runReaderT m env
 
 bad :: InterpreterError -> FutharkM a
 bad = FutharkM . throwError
@@ -256,22 +250,20 @@ indexArray name shape is
 -- |  @runFun name args prog@ invokes the @name@ function of program
 -- @prog@, with the parameters bound in order to the values in @args@.
 -- Returns either an error or the return value of @fun@.
--- Additionally, a list of all calls to the special built-in function
--- @trace@ is always returned.  This is useful for debugging.
 --
 -- Note that if 'prog' is not type-correct, you cannot be sure that
 -- you'll get an error from the interpreter - it may just as well
 -- silently return a wrong value.  You are, however, guaranteed that
 -- the initial call to 'prog' is properly checked.
 runFun :: Name -> [Value] -> Prog
-       -> (Either InterpreterError [Value], Trace)
+       -> Either InterpreterError [Value]
 runFun fname mainargs prog = do
   let ftable = buildFunTable prog
       futharkenv = FutharkEnv { envVtable = HM.empty
                               , envFtable = ftable
                               }
   case (funDecByName fname prog, HM.lookup fname ftable) of
-    (Nothing, Nothing) -> (Left $ MissingEntryPoint fname, mempty)
+    (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
       runThisFun fundec mainargs ftable
     (_ , Just fun) -> -- It's a builtin function, it'll do its own
@@ -281,14 +273,14 @@ runFun fname mainargs prog = do
 -- | Like 'runFun', but prepends parameters corresponding to the
 -- required shape context of the function being called.
 runFunWithShapes :: Name -> [Value] -> Prog
-                 -> (Either InterpreterError [Value], Trace)
+                 -> Either InterpreterError [Value]
 runFunWithShapes fname valargs prog = do
   let ftable = buildFunTable prog
       futharkenv = FutharkEnv { envVtable = HM.empty
                               , envFtable = ftable
                               }
   case (funDecByName fname prog, HM.lookup fname ftable) of
-    (Nothing, Nothing) -> (Left $ MissingEntryPoint fname, mempty)
+    (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
       let args' = shapes (funDecParams fundec) ++ valargs
       in runThisFun fundec args' ftable
@@ -307,15 +299,14 @@ runFunWithShapes fname valargs prog = do
              shapeparams
 
 runThisFun :: FunDec -> [Value] -> FunTable
-           -> (Either InterpreterError [Value], Trace)
+           -> Either InterpreterError [Value]
 runThisFun (FunDec fname _ fparams _) args ftable
   | argtypes == paramtypes =
     runFutharkM (evalFuncall fname args) futharkenv
   | otherwise =
-    (Left $ InvalidFunctionArguments fname
-     (Just paramtypes)
-     argtypes,
-     mempty)
+    Left $ InvalidFunctionArguments fname
+    (Just paramtypes)
+    argtypes
   where argtypes = map (rankShaped . valueType) args
         paramtypes = map (rankShaped . paramType) fparams
         futharkenv = FutharkEnv { envVtable = HM.empty
@@ -406,11 +397,6 @@ evalExp (If e1 e2 e3 rettype) = do
                   PrimVal (BoolValue False) -> evalBody e3
                   _                       -> bad $ TypeError "evalExp If"
   return $ valueShapeContext rettype vs ++ vs
-evalExp (Apply fname args _)
-  | "trace" <- nameToString fname = do
-  vs <- mapM (evalSubExp . fst) args
-  tell [pretty vs]
-  return vs
 evalExp (Apply fname args rettype) = do
   args' <- mapM (evalSubExp . fst) args
   vs <- evalFuncall fname args'

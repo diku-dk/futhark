@@ -20,8 +20,8 @@
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
 --
--- The "Futhark.Renamer" and "Futhark.Untrace" modules are simple examples of
--- how to use this facility.
+-- The "Futhark.Transform.Rename" is a simple example of how to use
+-- this facility.
 --
 -----------------------------------------------------------------------------
 module Futhark.Representation.AST.Traversals
