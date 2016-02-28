@@ -14,7 +14,7 @@
 --    Map    1
 -- }
 --
-fun {[real],[real]} main([real] arr) =
+fun {[f64],[f64]} main([f64] arr) =
     let sa = scan(+, 0.0, arr) in
     let b  = map (*  2.0, sa ) in
     {sa, b}

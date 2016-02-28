@@ -12,7 +12,7 @@
 --      Redomap 1 
 -- }
 --
-fun {real,[real]} main([real] arr) =
+fun {f64,[f64]} main([f64] arr) =
     let r = reduce(+, 0.0, arr) in
     let x = map   (+1.0,   arr) in
     {r,x}

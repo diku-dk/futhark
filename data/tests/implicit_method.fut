@@ -43,7 +43,7 @@
 --           [[0.226438, -0.114818], [-0.527942, 0.242899]]]
 -- }
 
-fun *[real] tridagSeq( [real] a, *[real] b, [real] c, *[real] y ) =
+fun *[f64] tridagSeq( [f64] a, *[f64] b, [f64] c, *[f64] y ) =
     let n     = size(0, a)            in
     loop ({y, b}) =
       for i < n-1 do
@@ -60,12 +60,12 @@ fun *[real] tridagSeq( [real] a, *[real] b, [real] c, *[real] y ) =
                  in  y
     in  y
 
-fun *[[real,m],n] implicitMethod( [[real,3],m] myD,  [[real,3],m] myDD,
-                                  [[real,m],n] myMu, [[real,m],n] myVar,
-                                  [[real,m],n] u,    real     dtInv  ) =
-  map( fn *[real] ( {[real],[real],*[real]} tup )  =>
+fun *[[f64,m],n] implicitMethod( [[f64,3],m] myD,  [[f64,3],m] myDD,
+                                  [[f64,m],n] myMu, [[f64,m],n] myVar,
+                                  [[f64,m],n] u,    f64     dtInv  ) =
+  map( fn *[f64] ( {[f64],[f64],*[f64]} tup )  =>
          let {mu_row,var_row,u_row} = tup in
-         let abc = map( fn {real,real,real} ({real,real,[real],[real]} tup) =>
+         let abc = map( fn {f64,f64,f64} ({f64,f64,[f64],[f64]} tup) =>
                           let {mu, var, d, dd} = tup in
                           { 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                           , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
@@ -78,10 +78,10 @@ fun *[[real,m],n] implicitMethod( [[real,3],m] myD,  [[real,3],m] myDD,
      , zip(myMu,myVar,copy(u))
      )
 
-fun *[[[real,m],n],num_samples]
-  main( [[real,3],m] myD,  [[real,3],m] myDD,
-        [[real,m],n] myMu, [[real,m],n] myVar,
-        *[[real,m],n] u,    real     dtInv,
+fun *[[[f64,m],n],num_samples]
+  main( [[f64,3],m] myD,  [[f64,3],m] myDD,
+        [[f64,m],n] myMu, [[f64,m],n] myVar,
+        *[[f64,m],n] u,    f64     dtInv,
         int num_samples) =
   map(implicitMethod(myD, myDD, myMu, myVar, u),
-      map (*dtInv, map (/real(num_samples), map(real, map(+1, iota(num_samples))))))
+      map (*dtInv, map (/f64(num_samples), map(f64, map(+1, iota(num_samples))))))

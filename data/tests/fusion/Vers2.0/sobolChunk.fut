@@ -39,10 +39,10 @@ fun int xorInds(int n, [int,num_bits] dir_vs) =
 fun [int] sobolIndI ( [[int]] dir_vs, int n ) =
     map( xorInds(n), dir_vs )
 
-fun [real] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
-    let divisor = 2.0 ** real(num_bits) in
+fun [f64] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
+    let divisor = 2.0 ** f64(num_bits) in
     let arri    = sobolIndI( dir_vs, n )     in
-        map( fn real (int x) => real(x) / divisor, arri )
+        map( fn f64 (int x) => f64(x) / divisor, arri )
 
 --------------------------------/
 ---- STRENGTH-REDUCED FORMULA
@@ -63,8 +63,8 @@ fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
   let bit= index_of_least_significant_0(num_bits,i) in
   map( fn int([int] row) => unsafe row[bit], sob_dirs )
 
-fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
-  let sob_fact= 1.0 / real(1 << num_bits)       in
+fun [[f64],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
+  let sob_fact= 1.0 / f64(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
   let contrbs = map( fn [int] (int k) =>
                         let sob = k + n in
@@ -74,18 +74,18 @@ fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let vct_ints= scan( fn [int] ([int] x, [int] y) =>
                         zipWith(^, x, y)
                     , replicate(len, 0), contrbs ) in
-  map( fn [real] ([int] xs) =>
-             map ( fn real (int x) =>
-                     real(x) * sob_fact
+  map( fn [f64] ([int] xs) =>
+             map ( fn f64 (int x) =>
+                     f64(x) * sob_fact
                  , xs)
          , vct_ints)
 
-fun real main( int num_dates, int num_und, int num_mc_it,
+fun f64 main( int num_dates, int num_und, int num_mc_it,
                [[int,num_bits]] dir_vs_nosz ) =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = streamMap( fn [[real,sobvctsz]] (int chunk, [int] ns) =>
+  let sobol_mat = streamMap( fn [[f64,sobvctsz]] (int chunk, [int] ns) =>
                                 sobolChunk(dir_vs, ns[0], chunk)
                            , iota(num_mc_it) ) in
-  reduce (+, 0.0, map ( fn real ([real] row) => reduce(+, 0.0, row), sobol_mat ) )
+  reduce (+, 0.0, map ( fn f64 ([f64] row) => reduce(+, 0.0, row), sobol_mat ) )
