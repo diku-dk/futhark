@@ -779,15 +779,6 @@ checkExp (Var ident) = do
   observe ident'
   return $ Var ident'
 
-checkExp (Apply fname args t pos)
-  | "trace" <- nameToString fname =
-  case args of
-    [(e, _)] -> do
-      e'  <- checkExp e
-      t'  <- checkAnnotation pos "return" t $ typeOf e'
-      return $ Apply fname [(e', Observe)] t' pos
-    _ -> bad $ TypeError pos "Trace function takes a single parameter"
-
 checkExp (Apply fname args rettype loc) = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of

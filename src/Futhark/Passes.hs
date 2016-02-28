@@ -6,7 +6,6 @@ where
 
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Pipeline
-import Futhark.Pass.Untrace
 import Futhark.Pass.Simplify
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
@@ -14,8 +13,7 @@ import Futhark.Optimise.Fusion
 
 standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
-  passes [ untraceProg
-         , simplifySOACS
+  passes [ simplifySOACS
          , inlineAggressively
          , removeDeadFunctions
          , performCSE
