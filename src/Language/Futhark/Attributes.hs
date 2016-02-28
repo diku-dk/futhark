@@ -92,6 +92,7 @@ module Language.Futhark.Attributes
   , UncheckedPattern
   , UncheckedFunDec
   , UncheckedProg
+  , UncheckedProgWithHeaders
   )
   where
 
@@ -955,3 +956,6 @@ type UncheckedFunDec = FunDecBase NoInfo Name
 
 -- | An Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name
+
+-- | An Futhark program with no type annotations, but with headers.
+type UncheckedProgWithHeaders = ProgBaseWithHeaders NoInfo Name

@@ -155,6 +155,7 @@ import Language.Futhark.Parser.Lexer
       streamRed       { L $$ STREAM_RED }
       streamRedPer    { L $$ STREAM_REDPER }
       streamSeq       { L $$ STREAM_SEQ }
+      include         { L $$ INCLUDE }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -171,8 +172,9 @@ import Language.Futhark.Parser.Lexer
 %nonassoc '['
 %%
 
-Prog :: { UncheckedProg }
-     :   FunDecs { Prog $1 }
+Prog :: { UncheckedProgWithHeaders }
+     :   Headers FunDecs { ProgWithHeaders $1 $2 }
+     |   FunDecs { ProgWithHeaders [] $1 }
 ;
 
 -- Note that this production does not include Minus.
@@ -207,6 +209,15 @@ UnOp :: { (UnOp, SrcLoc) }
      | SignedType { (ToSigned (fst $1), snd $1) }
      | UnsignedType { (ToUnsigned (fst $1), snd $1) }
      | FloatType { (ToFloat (fst $1), snd $1) }
+
+Headers :: { [ProgHeader] }
+        : Header Headers { $1 : $2 }
+        | Header { [$1] }
+;
+
+Header :: { ProgHeader }
+Header : include stringlit { let L pos (STRINGLIT s) = $2 in Include s }
+;
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
