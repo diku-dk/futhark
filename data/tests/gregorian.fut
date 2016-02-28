@@ -6,7 +6,7 @@ fun int MOD(int x, int y) = x - (x/y)*y
 fun int hours_in_dayI   () = 24
 fun int minutes_in_dayI () = hours_in_dayI() * 60
 fun int minutes_to_noonI() = (hours_in_dayI() / 2) * 60
-fun real minutes_in_day  () = 24.0*60.0
+fun f64 minutes_in_day  () = 24.0*60.0
 
 fun int date_of_gregorian( {int,int,int,int,int} date) =
   let {year, month, day, hour, mins} = date in

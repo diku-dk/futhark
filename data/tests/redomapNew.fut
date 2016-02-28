@@ -22,18 +22,18 @@
 --
 --
 -- }
-fun {[real],[[[real]]]} main([int] arr) =
-  let vs = map(fn [real] (int a) =>
-                  map( fn real (int x) => real(2*x*a)
+fun {[f64],[[[f64]]]} main([int] arr) =
+  let vs = map(fn [f64] (int a) =>
+                  map( fn f64 (int x) => f64(2*x*a)
                      , iota(3) )
               ,  arr)
-  in {reduce( fn [real] ([real] a, [real] b) =>
+  in {reduce( fn [f64] ([f64] a, [f64] b) =>
                 zipWith(+, a, b)
             , replicate(3,0.0), vs),
-      map(fn [[real]] ([real] r) =>
+      map(fn [[f64]] ([f64] r) =>
              transpose(replicate(5, r)),
           vs)}
 
 
-fun real main0([int] arr) =
-  reduce( +, 0.0, map(real, map(2*, arr)))
+fun f64 main0([int] arr) =
+  reduce( +, 0.0, map(f64, map(2*, arr)))

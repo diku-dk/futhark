@@ -9,5 +9,5 @@
 --   2.000000
 -- }
 
-fun {int,real} main([{int,real}] a, int i) =
+fun {int,f64} main([{int,f64}] a, int i) =
   a[i]
