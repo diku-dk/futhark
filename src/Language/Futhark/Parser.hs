@@ -25,6 +25,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
 import Data.Maybe (mapMaybe)
 import Data.List (intersect)
+import System.FilePath (takeDirectory, (</>))
 
 import Prelude
 
@@ -89,9 +90,10 @@ parseExpIncrIO :: RealConfiguration -> FilePath -> String
                -> IO (Either ParseError UncheckedExp)
 parseExpIncrIO = parseIncrementalIO expression
 
--- | Parse an entire Futhark program from the given 'String', using the
--- 'FilePath' as the source name for error messages, and parsing and reacting to
--- all headers.
+-- | Parse an entire Futhark program from the given 'String', using
+-- the 'FilePath' as the source name for error messages and the
+-- relative path to use for includes, and parsing and reacting to all
+-- headers.
 parseFuthark :: RealConfiguration -> FilePath -> String
                 -> IO (Either ParseError UncheckedProg)
 parseFuthark rc fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
@@ -118,7 +120,7 @@ parseFuthark rc fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
           ss <- liftIO $ mapM readFile newIncludes
           parses <- liftIO $ mapM (parseWithPrevIncludes allIncludes)
             (zip newIncludes ss)
-          return $ foldr mergePrograms (Right $ endProg) parses
+          return $ foldr mergePrograms (Right endProg) parses
 
         mergePrograms :: Either ParseError UncheckedProg
                       -> Either ParseError UncheckedProg
@@ -129,7 +131,9 @@ parseFuthark rc fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
           (_, Left err) -> Left err
 
         headerInclude :: ProgHeader -> Maybe String
-        headerInclude (Include name) = Just name
+        headerInclude (Include name) = Just $ search_dir </> name
+
+        search_dir = takeDirectory fp0
 
 -- | Parse an Futhark expression from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
