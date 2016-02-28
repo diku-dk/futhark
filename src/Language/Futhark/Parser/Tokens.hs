@@ -118,4 +118,5 @@ data Token = IF
            | ABS
            | SIGNUM
            | EOF
+           | INCLUDE
              deriving (Show, Eq)

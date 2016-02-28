@@ -46,6 +46,8 @@ module Language.Futhark.Syntax
   -- * Definitions
   , FunDecBase
   , ProgBase(..)
+  , ProgBaseWithHeaders(..)
+  , ProgHeader(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -550,6 +552,16 @@ type FunDecBase ty vn = (Name,
 -- | An entire Futhark program.
 newtype ProgBase ty vn = Prog { progFunctions :: [FunDecBase ty vn] }
   deriving (Show)
+
+-- | An entire Futhark program, including headers.
+data ProgBaseWithHeaders ty vn =
+  ProgWithHeaders { progWHHeaders :: [ProgHeader]
+                  , progWHFunctions :: [FunDecBase ty vn]
+                  }
+  deriving (Show)
+
+data ProgHeader = Include String
+                deriving (Show)
 
 -- | A set of names.
 type Names = HS.HashSet
