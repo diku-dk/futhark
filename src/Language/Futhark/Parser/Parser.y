@@ -216,7 +216,7 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include stringlit { let L pos (STRINGLIT s) = $2 in Include s }
+Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
 FunDecs : fun Fun FunDecs   { $2 : $3 }
