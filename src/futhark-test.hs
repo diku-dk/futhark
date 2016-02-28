@@ -361,7 +361,7 @@ data TestConfig = TestConfig
 
 defaultConfig :: TestConfig
 defaultConfig = TestConfig { configTestMode = Everything
-                           , configExclude = []
+                           , configExclude = [ "disable" ]
                            , configPrograms =
                              ProgConfig
                              { configCompiler = Left "futhark-c"

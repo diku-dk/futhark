@@ -78,7 +78,7 @@ tokens :-
   @reallit f32             { F32LIT . read . takeWhile (/='f') }
   @reallit f64             { F64LIT . read . takeWhile (/='f') }
   @reallit                 { REALLIT . readReal }
-  [a-zA-Z] [a-zA-Z0-9_'\.]*{ keyword }
+  [a-zA-Z] [a-zA-Z0-9_']*  { keyword }
   "'" @charlit "'"         { CHARLIT . read }
   \" @stringcharlit* \"    { STRINGLIT . read }
 
