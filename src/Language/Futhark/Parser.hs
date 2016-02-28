@@ -25,7 +25,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
 import Data.Maybe (mapMaybe)
 import Data.List (intersect)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (takeDirectory, (</>), (<.>))
 
 import Prelude
 
@@ -131,7 +131,7 @@ parseFuthark rc fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
           (_, Left err) -> Left err
 
         headerInclude :: ProgHeader -> Maybe String
-        headerInclude (Include name) = Just $ search_dir </> name
+        headerInclude (Include name) = Just $ search_dir </> name <.> "fut"
 
         search_dir = takeDirectory fp0
 
