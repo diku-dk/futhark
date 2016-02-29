@@ -324,7 +324,7 @@ runTests config files = do
   all_tests <- mapM (makeTestCase (configPrograms config) mode) files
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar) included
-  isTTY <- hIsTerminalDevice stdout
+  isTTY <- (&& mode /= OnTravis) <$> hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
@@ -409,6 +409,7 @@ data TestMode = OnlyTypeCheck
               | OnlyInterpret
               | OnTravis
               | Everything
+              deriving (Eq)
 
 commandLineOptions :: [FunOptDescr TestConfig]
 commandLineOptions = [
