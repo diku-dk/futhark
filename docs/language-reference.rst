@@ -7,10 +7,8 @@ The primitive types in Futhark are the signed integer types ``i8``,
 ``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
 ``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
 as ``bool`` and ``char``.  Furthermore, ``int`` is an alias for
-``i32`` and ``real`` is an alias for ``f64``.  Some compiler frontends
-permit configuration of whether ``real`` maps to a 32-bit or 64-bit
-float.  An ``f32`` is always a single-precision float and a ``f64`` is
-a double-precision float.  All primitive types can be combined in
+``i32``.  An ``f32`` is always a single-precision float and a ``f64``
+is a double-precision float.  All primitive types can be combined in
 tuples and arrays.
 
 Numeric literals can be suffixed with their intended type.  For
@@ -56,7 +54,7 @@ The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun real dotProduct([real,n] a, [real,n] b) =
+  fun int dotProduct([int,n] a, [int,n] b) =
     reduce(+, 0, zipWith(*, a, b))
 
 Or matrix multiplication::
@@ -373,14 +371,14 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[{int, real}]`` is transformed to ``{[int],
-[real]}`` during the compilation process, and all code interacting
+arrays.  The type ``[{int, f32}]`` is transformed to ``{[int],
+[f32]}`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[{[int], [real]}]``, which is transformed
-into ``{[[int]], [[real]]}``.  These two types are not
+Consider the type ``[{[int], [f32]}]``, which is transformed
+into ``{[[int]], [[f32]]}``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 
