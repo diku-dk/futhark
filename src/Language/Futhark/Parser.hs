@@ -39,7 +39,7 @@ parseInMonad p file program =
   either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (evalStateT (runExceptT p) env))
   (alexScanTokens file program)
-  where env = newParserEnv file Int64 Float64
+  where env = newParserEnv file Int32 Float64
 
 parseIncrementalIO :: ParserMonad a -> FilePath -> String
                    -> IO (Either ParseError a)
