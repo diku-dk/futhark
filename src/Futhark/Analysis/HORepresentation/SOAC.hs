@@ -642,13 +642,18 @@ soacToStream soac = do
       -- the chunked-outersize of the array result and input types
           loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
           lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
+          -- the lambda with proper index
+          foldlam = lam' { lambdaIndex = j
+                         , lambdaBody =
+                             insertBinding compute_index $ lambdaBody lam'
+                         }
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
-      let insoac = Futhark.Redomap cs chvar comm lamin lam' nes (map paramName strm_inpids)
+      let insoac = Futhark.Redomap cs chvar comm lamin foldlam nes (map paramName strm_inpids)
           insbnd = mkLet' [] (acc0_ids++strm_resids) $ Op insoac
       -- 2. let acc'     = acc + acc0_ids    in
       addaccbdy <- mkPlusBnds lamin $ map Futhark.Var $
