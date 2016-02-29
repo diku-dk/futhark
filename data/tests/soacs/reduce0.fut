@@ -1,6 +1,7 @@
 -- How quickly can we reduce arrays?
 --
 -- ==
+-- tags { no_python }
 -- input { 0 }
 -- output { 0 }
 -- input { 100 }
