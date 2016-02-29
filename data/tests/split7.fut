@@ -17,17 +17,17 @@
 --   [0.000000, 0.600000, 0.950000]
 -- }
 
-fun [real] take(int n, [real] a) =
+fun [f64] take(int n, [f64] a) =
   let {first, rest} = unsafe split( (n), a) in
   first
 
-fun [real] fftmp([[real]] md_c) =
-  map( fn real (int j) =>
+fun [f64] fftmp([[f64]] md_c) =
+  map( fn f64 (int j) =>
          let x = take(j,md_c[j])
          in  reduce(+, 0.0, x),
        iota(size(0, md_c))
      )
 
-fun [real] main([[[real]]] all_md_c) =
+fun [f64] main([[[f64]]] all_md_c) =
   let md_c = all_md_c[0] in
   fftmp(md_c)

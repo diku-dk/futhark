@@ -217,10 +217,8 @@ commandLineOptions =
        opts { futharkAction = ExplicitMemoryAction kernelImpCodeGenAction })
     "Translate program into the imperative IL with kernels and write it on standard output."
   , Option "i" ["interpret"]
-    (NoArg $ Right $ \opts -> opts { futharkAction = SOACSAction $
-                                                     interpretAction' $
-                                                      futharkRealConfiguration $
-                                                      futharkConfig opts })
+    (NoArg $ Right $ \opts -> opts { futharkAction = SOACSAction
+                                                     interpretAction' })
     "Run the program via an interpreter."
      , Option [] ["range-analysis"]
        (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction rangeAction rangeAction rangeAction })
@@ -228,16 +226,6 @@ commandLineOptions =
   , Option "p" ["print"]
     (NoArg $ Right $ \opts -> opts { futharkAction = PolyAction printAction printAction printAction })
     "Prettyprint the resulting internal representation on standard output (default action)."
-
-  , Option [] ["real-as-single"]
-    (NoArg $ Right $ changeFutharkConfig $
-     \config -> config { futharkRealConfiguration = RealAsFloat32 } )
-    "Map 'real' to 32-bit floating point."
-  , Option [] ["real-as-double"]
-    (NoArg $ Right $ changeFutharkConfig $
-     \config -> config { futharkRealConfiguration = RealAsFloat64 } )
-    "Map 'real' to 64-bit floating point (the default)."
-
   , typedPassOption soacsProg Kernels firstOrderTransform "f"
   , soacsPassOption fuseSOACs "o"
   , soacsPassOption inlineAggressively []

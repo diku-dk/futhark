@@ -39,41 +39,41 @@
 --    [9882.132352013321, 33465.152508625804, 2992.2059021836353]]
 -- }
 
-fun [real] take(int n, [real] a) = let {first, rest} = split((n), a) in first
+fun [f64] take(int n, [f64] a) = let {first, rest} = split((n), a) in first
 
-fun [[real,num_und],num_dates]
-  correlateDeltas([[real,num_und],num_und  ] md_c,
-                  [[real,num_und],num_dates] zds) =
-  map( fn [real,num_und] ([real,num_und] zi) =>
-         map( fn real (int j) =>
+fun [[f64,num_und],num_dates]
+  correlateDeltas([[f64,num_und],num_und  ] md_c,
+                  [[f64,num_und],num_dates] zds) =
+  map( fn [f64,num_und] ([f64,num_und] zi) =>
+         map( fn f64 (int j) =>
                 let x = zipWith( *, take(j+1,zi), take(j+1,md_c[j]) )
                 in  reduce( +, 0.0, x )
             , iota(num_und) )
      , zds )
 
-fun [real,num_und] combineVs(  [real,num_und] n_row,
-                               [real,num_und] vol_row,
-                               [real,num_und] dr_row ) =
+fun [f64,num_und] combineVs(  [f64,num_und] n_row,
+                               [f64,num_und] vol_row,
+                               [f64,num_und] dr_row ) =
   map(+, zip(dr_row, map(*, zip(n_row, vol_row ) )))
 
-fun [[real,num_und],num_dates]
-  mkPrices([real,num_und]             md_starts,
-           [[real,num_und],num_dates] md_vols,
-           [[real,num_und],num_dates] md_drifts,
-           [[real,num_und],num_dates] noises) =
+fun [[f64,num_und],num_dates]
+  mkPrices([f64,num_und]             md_starts,
+           [[f64,num_und],num_dates] md_vols,
+           [[f64,num_und],num_dates] md_drifts,
+           [[f64,num_und],num_dates] noises) =
   let c_rows = map( combineVs, zip(noises, md_vols, md_drifts) ) in
-  let e_rows = map( fn [real] ([real] x) => map(exp, x)
+  let e_rows = map( fn [f64] ([f64] x) => map(exp, x)
                   , c_rows --map( combineVs, zip(noises, md_vols, md_drifts) )
                   )
-  in  scan( fn [real] ([real] x, [real] y) => zipWith(*, x, y)
+  in  scan( fn [f64] ([f64] x, [f64] y) => zipWith(*, x, y)
           , md_starts, e_rows )
 
   -- Formerly blackScholes.
-fun [[real,num_und],num_dates] main([[real,num_und],num_und  ] md_c,
-                                    [[real,num_und],num_dates] md_vols,
-                                    [[real,num_und],num_dates] md_drifts,
-                                    [real,num_und]            md_starts,
-                                    [[real,num_dates],num_und] bb_arr) =
+fun [[f64,num_und],num_dates] main([[f64,num_und],num_und  ] md_c,
+                                    [[f64,num_und],num_dates] md_vols,
+                                    [[f64,num_und],num_dates] md_drifts,
+                                    [f64,num_und]            md_starts,
+                                    [[f64,num_dates],num_und] bb_arr) =
   -- I don't want to include the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose(bb_arr) in

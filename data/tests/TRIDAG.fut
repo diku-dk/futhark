@@ -34,11 +34,11 @@
 -- }
 
 
-fun {[real],[real]} tridag(  int  nn,
-                            *[real] b, *[real] d,
-                            [real] a, [real] c ) =
+fun {[f64],[f64]} tridag(  int  nn,
+                            *[f64] b, *[f64] d,
+                            [f64] a, [f64] c ) =
     if (nn == 1)
-    --then ( b, zipWith(fn real (real x, real y) => x / y, d, b) )
+    --then ( b, zipWith(fn f64 (f64 x, f64 y) => x / y, d, b) )
     then {b, [d[0]/b[0]]}
     else
         loop({b, d}) = for i < (nn-1) do
@@ -57,10 +57,10 @@ fun {[real],[real]} tridag(  int  nn,
             {b, d}
 
 
-fun {[real],[real]} main() =
+fun {[f64],[f64]} main() =
     let nn = reduce(+, 0, [1,2,3,4]) in
     let a = replicate(nn, 3.33) in
-    let b = map(fn real (int x) => real(x) + 1.0, iota(nn)) in
-    let c = map(fn real (int x) => 1.11*real(x) + 0.5, iota(nn)) in
-    let d = map(fn real (int x) => 1.01*real(x) + 0.25, iota(nn)) in
+    let b = map(fn f64 (int x) => f64(x) + 1.0, iota(nn)) in
+    let c = map(fn f64 (int x) => 1.11*f64(x) + 0.5, iota(nn)) in
+    let d = map(fn f64 (int x) => 1.01*f64(x) + 0.25, iota(nn)) in
         tridag(nn, b, d, a, c)

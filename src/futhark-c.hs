@@ -58,12 +58,6 @@ commandLineOptions =
     (ReqArg (\filename -> Right $ \config -> config { compilerOutput = Just filename })
      "FILE")
     "Name of the compiled binary."
-  , Option [] ["real-as-single"]
-    (NoArg $ Right $ \config -> config { compilerRealConfiguration = RealAsFloat32 } )
-    "Map 'real' to 32-bit floating point."
-  , Option [] ["real-as-double"]
-    (NoArg $ Right $ \config -> config { compilerRealConfiguration = RealAsFloat64 } )
-    "Map 'real' to 64-bit floating point (the default)."
   , Option "V" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
@@ -72,13 +66,11 @@ commandLineOptions =
 data CompilerConfig =
   CompilerConfig { compilerOutput :: Maybe FilePath
                  , compilerVerbose :: Maybe (Maybe FilePath)
-                 , compilerRealConfiguration :: RealConfiguration
                  }
 
 newCompilerConfig :: CompilerConfig
 newCompilerConfig = CompilerConfig { compilerOutput = Nothing
                                    , compilerVerbose = Nothing
-                                   , compilerRealConfiguration = RealAsFloat64
                                    }
 
 outputFilePath :: FilePath -> CompilerConfig -> FilePath
@@ -87,9 +79,7 @@ outputFilePath srcfile =
 
 futharkConfig :: CompilerConfig -> FutharkConfig
 futharkConfig config =
-  newFutharkConfig { futharkVerbose = compilerVerbose config
-                   , futharkRealConfiguration = compilerRealConfiguration config
-                   }
+  newFutharkConfig { futharkVerbose = compilerVerbose config }
 
 compilerPipeline :: Pipeline SOACS ExplicitMemory
 compilerPipeline =

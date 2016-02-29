@@ -7,7 +7,6 @@ module Futhark.Compiler
        , interpretAction'
        , FutharkConfig (..)
        , newFutharkConfig
-       , RealConfiguration (..)
        , dumpError
        )
 where
@@ -41,13 +40,10 @@ import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig {
     futharkVerbose :: Maybe (Maybe FilePath)
-  , futharkRealConfiguration :: RealConfiguration
 }
 
 newFutharkConfig :: FutharkConfig
-newFutharkConfig = FutharkConfig { futharkVerbose = Nothing
-                                 , futharkRealConfiguration = RealAsFloat64
-                                 }
+newFutharkConfig = FutharkConfig { futharkVerbose = Nothing }
 
 dumpError :: FutharkConfig -> CompileError -> IO ()
 dumpError config err = do
@@ -93,7 +89,7 @@ runPipelineOnSource :: FutharkConfig
                     -> String
                     -> FutharkM (Prog tolore)
 runPipelineOnSource config pipeline filename srccode = do
-  parsed_prog <- parseSourceProgram (futharkRealConfiguration config) filename srccode
+  parsed_prog <- parseSourceProgram filename srccode
   (tagged_ext_prog, namesrc) <- E.tagProg <$> typeCheckSourceProgram parsed_prog
   putNameSource namesrc
   res <- internaliseProg tagged_ext_prog
@@ -108,10 +104,10 @@ runPipelineOnSource config pipeline filename srccode = do
                          , pipelineValidate = True
                          }
 
-parseSourceProgram :: RealConfiguration -> FilePath -> String
+parseSourceProgram :: FilePath -> String
                    -> FutharkM E.UncheckedProg
-parseSourceProgram rconf filename file_contents = do
-  parsed <- liftIO $ parseFuthark rconf filename file_contents
+parseSourceProgram filename file_contents = do
+  parsed <- liftIO $ parseFuthark filename file_contents
   case parsed of
     Left err   -> compileError (T.pack $ show err) ()
     Right prog -> return prog
@@ -129,12 +125,12 @@ typeCheckInternalProgram prog =
     Left err -> compileError (T.pack $ "After internalisation:\n" ++ show err) prog
     Right () -> return ()
 
-interpretAction' :: RealConfiguration -> Action I.SOACS
-interpretAction' rconf =
+interpretAction' :: Action I.SOACS
+interpretAction' =
   interpretAction parseValues'
   where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
         parseValues' path s =
-          fmap concat $ mapM internalise =<< parseValues rconf path s
+          fmap concat $ mapM internalise =<< parseValues path s
         internalise v =
           maybe (Left $ ParseError $ "Invalid input value: " ++ I.pretty v) Right $
           internaliseValue v
