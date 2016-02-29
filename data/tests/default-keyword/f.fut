@@ -1,3 +1,5 @@
+-- Default default real literal test.
+-- Should not use the default keyword.
 -- ==
 -- input {
 -- }

@@ -1,10 +1,10 @@
+-- Default default int literal test.
+-- Should not use the default keyword.
 -- ==
 -- input {
 -- }
 -- output {
---   0i64
+--   0i32
 -- }
 
-default(i64)
-
-fun i64 main() = 0
+fun i32 main() = 0
