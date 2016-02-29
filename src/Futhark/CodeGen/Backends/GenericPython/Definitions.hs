@@ -266,6 +266,12 @@ def futhark_cos64(x):
 def futhark_sin64(x):
   return sin(x)
 
+def futhark_isnan64(x):
+  return isnan(x)
+
+def futhark_isinf64(x):
+  return isinf(x)
+
 def futhark_log32(x):
   return float32(log(x))
 
@@ -280,6 +286,12 @@ def futhark_cos32(x):
 
 def futhark_sin32(x):
   return sin(x)
+
+def futhark_isnan32(x):
+  return isnan(x)
+
+def futhark_isinf32(x):
+  return isinf(x)
 |]
 
 pyTestMain :: PyDefinition

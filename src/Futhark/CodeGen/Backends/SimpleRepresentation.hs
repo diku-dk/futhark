@@ -18,8 +18,8 @@ module Futhark.CodeGen.Backends.SimpleRepresentation
   , cFloatConvOps
 
     -- * Specific builtin functions
-  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32
-  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64
+  , c_log32, c_sqrt32, c_exp32, c_sin32, c_cos32, c_isnan32, c_isinf32
+  , c_log64, c_sqrt64, c_exp64, c_sin64, c_cos64, c_isnan64, c_isinf64
   )
   where
 
@@ -268,6 +268,20 @@ c_sin32 = [C.cfun|
     }
   |]
 
+c_isnan32 ::C.Func
+c_isnan32 = [C.cfun|
+    static inline char $id:(funName' "isnan32")(float x) {
+      return isnan(x);
+    }
+  |]
+
+c_isinf32 ::C.Func
+c_isinf32 = [C.cfun|
+    static inline char $id:(funName' "isinf32")(float x) {
+      return isinf(x);
+    }
+  |]
+
 c_log64 :: C.Func
 c_log64 = [C.cfun|
     static inline double $id:(funName' "log64")(double x) {
@@ -303,8 +317,22 @@ c_sin64 = [C.cfun|
     }
   |]
 
+c_isnan64 ::C.Func
+c_isnan64 = [C.cfun|
+    static inline char $id:(funName' "isnan64")(double x) {
+      return isnan(x);
+    }
+  |]
+
+c_isinf64 ::C.Func
+c_isinf64 = [C.cfun|
+    static inline char $id:(funName' "isinf64")(double x) {
+      return isinf(x);
+    }
+  |]
+
 -- | C definitions of the Futhark "standard library".
 builtInFunctionDefs :: [C.Func]
 builtInFunctionDefs =
-  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32,
-   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64]
+  [c_log32, c_sqrt32, c_exp32, c_cos32, c_sin32, c_isnan32, c_isinf32,
+   c_log64, c_sqrt64, c_exp64, c_cos64, c_sin64, c_isnan64, c_isinf64]
