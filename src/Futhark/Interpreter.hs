@@ -335,12 +335,16 @@ builtins = HM.fromList $ map namify
            ,("exp32", builtin "exp32")
            ,("cos32", builtin "cos32")
            ,("sin32", builtin "sin32")
+           ,("isinf32", builtin "isinf32")
+           ,("isnan32", builtin "isnan32")
 
            ,("sqrt64", builtin "sqrt64")
            ,("log64", builtin "log64")
            ,("exp64", builtin "exp64")
            ,("cos64", builtin "cos64")
            ,("sin64", builtin "sin64")
+           ,("isinf64", builtin "isinf64")
+           ,("isnan64", builtin "isnan64")
            ]
   where namify (k,v) = (nameFromString k, v)
 
@@ -355,6 +359,10 @@ builtin "cos32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ cos x]
 builtin "sin32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ sin x]
+builtin "isnan32" [PrimVal (FloatValue (Float32Value x))] =
+  return [PrimVal $ BoolValue $ isNaN x]
+builtin "isinf32" [PrimVal (FloatValue (Float32Value x))] =
+  return [PrimVal $ BoolValue $ isInfinite x]
 builtin "sqrt64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ sqrt x]
 builtin "log64" [PrimVal (FloatValue (Float64Value x))] =
@@ -365,6 +373,10 @@ builtin "cos64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ cos x]
 builtin "sin64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ sin x]
+builtin "isnan64" [PrimVal (FloatValue (Float64Value x))] =
+  return [PrimVal $ BoolValue $ isNaN x]
+builtin "isinf64" [PrimVal (FloatValue (Float64Value x))] =
+  return [PrimVal $ BoolValue $ isInfinite x]
 builtin fname args =
   bad $ InvalidFunctionArguments (nameFromString fname) Nothing $
         map (rankShaped . valueType) args
