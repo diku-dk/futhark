@@ -14,7 +14,7 @@
 --      Redomap 1 
 -- }
 --
-fun {real,[real],[real],[real]} main([real] arr) =
+fun {f64,[f64],[f64],[f64]} main([f64] arr) =
     let A = map(+3.0, arr)   in
     let B = map(+7.0, arr)   in
     let s = reduce(+,0.0, A) in

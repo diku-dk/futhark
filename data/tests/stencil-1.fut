@@ -14,9 +14,9 @@
 --    5.444444444444444] }
 
 
-fun [real] main(int num_iterations, [real,n] a) =
+fun [f64] main(int num_iterations, [f64,n] a) =
   loop (a) = for i < num_iterations do
-    map(fn real (int i) =>
+    map(fn f64 (int i) =>
           let x = if i == 0 then a[i] else unsafe a[i-1] in
           let y = a[i] in
           let z = if i == n-1 then a[i] else unsafe a[i+1] in

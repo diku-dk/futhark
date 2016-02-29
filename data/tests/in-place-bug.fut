@@ -2,27 +2,27 @@
 -- in-place-lowering (after the maps had been turned into do-loops).
 -- ==
 
-fun [real] tridagSeq( [real] a, [real] b, [real] c, [real] y ) =
+fun [f64] tridagSeq( [f64] a, [f64] b, [f64] c, [f64] y ) =
   copy(concat(a,b,c,y))
 
-fun [[real]] explicitMethod( [[real]] myD,  [[real]] myDD,
-                              [[real]] myMu, [[real]] myVar, [[real]] result ) =
+fun [[f64]] explicitMethod( [[f64]] myD,  [[f64]] myDD,
+                              [[f64]] myMu, [[f64]] myVar, [[f64]] result ) =
   let m = size(0,myD) in
-  copy( map( fn [real] ( {[real],[real],[real]} tup ) =>
+  copy( map( fn [f64] ( {[f64],[f64],[f64]} tup ) =>
                let {mu_row, var_row, result_row} = tup in
-               map( fn real ({[real], [real], real, real, int} tup) =>
+               map( fn f64 ({[f64], [f64], f64, f64, int} tup) =>
                       let { dx, dxx, mu, var, j } = tup in
                       ( mu*dx[1] + 0.5*var*dxx[1] ) * result_row[j]
                   , zip( myD, myDD, mu_row, var_row, iota(m) )
                   )
            , zip(myMu, myVar, result)))
 
-fun [[real]] implicitMethod( [[real]] myD,  [[real]] myDD,
-                              [[real]] myMu, [[real]] myVar,
-                             [[real]] u,    real     dtInv  ) =
-  map( fn [real] ( {[real],[real],[real]} tup )  =>
+fun [[f64]] implicitMethod( [[f64]] myD,  [[f64]] myDD,
+                              [[f64]] myMu, [[f64]] myVar,
+                             [[f64]] u,    f64     dtInv  ) =
+  map( fn [f64] ( {[f64],[f64],[f64]} tup )  =>
          let {mu_row,var_row,u_row} = tup in
-         let abc = map( fn {real,real,real} ({real,real,[real],[real]} tup) =>
+         let abc = map( fn {f64,f64,f64} ({f64,f64,[f64],[f64]} tup) =>
                           let {mu, var, d, dd} = tup in
                           { 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                           , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
@@ -35,21 +35,21 @@ fun [[real]] implicitMethod( [[real]] myD,  [[real]] myDD,
      , zip(myMu,myVar,u)
      )
 
-fun real main(int numX, int numY, int numT, real s0, real strike, real t, real alpha, real nu, real beta) =
-    let myX = map(real, iota(numX)) in
-    let myY = map(real, iota(numY)) in
-    let {myDx, myDxx} = {empty([real]), empty([real])} in
-    let {myDy, myDyy} = {empty([real]), empty([real])} in
-    let myResult = copy(empty([real])) in
+fun f64 main(int numX, int numY, int numT, f64 s0, f64 strike, f64 t, f64 alpha, f64 nu, f64 beta) =
+    let myX = map(f64, iota(numX)) in
+    let myY = map(f64, iota(numY)) in
+    let {myDx, myDxx} = {empty([f64]), empty([f64])} in
+    let {myDy, myDyy} = {empty([f64]), empty([f64])} in
+    let myResult = copy(empty([f64])) in
     let myMuX  = replicate(numY, replicate(numX, 0.0)) in
-    let myVarX = map(fn [real] (real yj) => map(exp, myX ), myY) in
+    let myVarX = map(fn [f64] (f64 yj) => map(exp, myX ), myY) in
 
     -- explicitX
     let u = explicitMethod( myDx, myDxx, myMuX, myVarX, myResult ) in
     -- implicitX
     let u = implicitMethod( myDx, myDxx, myMuX, myVarX, u, 1.0 ) in
     -- implicitY
-    let y = map( fn [real] ([real] u_row) =>
+    let y = map( fn [f64] ([f64] u_row) =>
                    map(+1.0, u_row),
                    transpose(u)) in
     y[0,0]

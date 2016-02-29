@@ -28,12 +28,12 @@ data Token = IF
            | U64
            | BOOL
            | CHAR
-           | REAL
            | F32
            | F64
            | ID Name
            | STRINGLIT String
-           | INTLIT Int32
+           | DEFAULT
+           | INTLIT Int64
            | I8LIT Int8
            | I16LIT Int16
            | I32LIT Int32

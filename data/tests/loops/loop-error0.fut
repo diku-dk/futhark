@@ -1,7 +1,7 @@
 -- ==
 -- error:
-fun {[real],[[real]]} main() =
-  let e_rows = empty([real]) in
+fun {[f64],[[f64]]} main() =
+  let e_rows = empty([f64]) in
   let arr = copy(e_rows) in
   let acc = copy([1.0]) in
   loop ({acc, arr} = {acc, arr}) = for i < size(0, arr) do
