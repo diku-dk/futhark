@@ -961,13 +961,15 @@ computeThreadChunkSize :: Commutativity
                        -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM op ()
-computeThreadChunkSize Commutative thread_index _ elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
   remaining_elements <- newVName "remaining_elements"
   ImpGen.emit $
     Imp.DeclareScalar remaining_elements int32
   ImpGen.emit $
-    Imp.SetScalar remaining_elements $ Imp.innerExp $
-    num_elements - Imp.elements thread_index * elements_per_thread
+    Imp.SetScalar remaining_elements $
+    (Imp.innerExp num_elements - thread_index)
+    `quotRoundingUp`
+    num_threads
   ImpGen.emit $
     Imp.If (Imp.CmpOp (CmpSlt Int32)
             (Imp.innerExp elements_per_thread)
