@@ -77,8 +77,7 @@ transformBinding expmap (Let pat ()
   where num_groups = kernelWorkgroups kernel_size
 
 transformBinding expmap (Let pat ()
-                         (Op (ChunkedMapKernel cs w kernel_size o lam arrs)))
-  | num_groups /= constant (1::Int32) = do
+                         (Op (ChunkedMapKernel cs w kernel_size o lam arrs))) = do
   -- We want to pad and transpose the input arrays.
 
   (w', kernel_size', arrs') <-
@@ -89,8 +88,7 @@ transformBinding expmap (Let pat ()
   addBinding $ Let pat () $ Op $
     ChunkedMapKernel cs w' kernel_size' o lam' arrs'
   return expmap
-  where num_groups = kernelWorkgroups kernel_size
-        comm = case o of Disorder -> Commutative
+  where comm = case o of Disorder -> Commutative
                          InOrder -> Noncommutative
 
 transformBinding expmap (Let pat ()
