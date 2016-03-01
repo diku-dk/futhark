@@ -310,7 +310,7 @@ void setup_opencl() {
                                  sizeof(size_t), &max_group_size, NULL));
 
   if (max_group_size < cl_group_size) {
-    fprintf(stderr, "Warning: Device limits group size to %d (setting was %d)\n",
+    fprintf(stderr, "Warning: Device limits group size to %zu (setting was %zu)\n",
             max_group_size, cl_group_size);
     cl_group_size = max_group_size;
   }
