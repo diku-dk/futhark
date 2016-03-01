@@ -4,7 +4,7 @@
 --
 -- It is probably not the nicest way to do this in Futhark, but it
 -- found a bug in fusion (related to the 'reverse' function).
---
+-- ==
 -- input { [2,6,3,5,2,8,1,4,2,2,5,3,5,7,4,1] }
 -- output { 35 }
 
