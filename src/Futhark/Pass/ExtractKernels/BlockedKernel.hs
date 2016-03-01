@@ -33,7 +33,7 @@ blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
                        -> [SubExp]
                        -> [VName]
                        -> m [Binding]
-blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $ do
+blockedReductionStream pat cs w _comm reduce_lam fold_lam nes arrs = runBinder_ $ do
   step_one_size <- blockedKernelSize w
 
   let one = constant (1 :: Int32)
@@ -61,7 +61,7 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
 
   addBinding =<< renameBinding
     (Let step_one_pat () $
-     Op $ ReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs_copies)
+     Op $ ReduceKernel cs w step_one_size Noncommutative reduce_lam' fold_lam' nes arrs_copies)
 
   chunk_size <- newVName "chunk_size"
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
@@ -89,7 +89,7 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   addBinding $
     Let step_two_pat () $
     Op $ ReduceKernel [] num_chunks step_two_size
-    comm reduce_lam' identity_lam nes $
+    Noncommutative reduce_lam' identity_lam nes $
     take (length nes) $ patternNames step_one_pat
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
