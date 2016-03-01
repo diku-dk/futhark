@@ -550,7 +550,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
     parens (ppr w <> comma </>
             ppr kernel_size </>
             PP.braces (commasep $ map ppr es) <> comma </>
-            commasep (map ppr as) </>
+            commasep (map ppr as) <> comma </>
             ppr comm </>
             ppr parfun <> comma </> ppr seqfun)
   ppr (ScanKernel cs w kernel_size order fun input) =
@@ -559,14 +559,14 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr kernel_size <> comma </>
             ppr order <> comma </>
             PP.braces (commasep $ map ppr es) <> comma </>
-            commasep (map ppr as) </>
+            commasep (map ppr as) <> comma </>
             ppr fun)
     where (es, as) = unzip input
   ppr (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
     ppCertificates' cs <> text ("chunkedMapKernel"++ord_str) <>
     parens (ppr w <> comma </>
             ppr kernel_size <> comma </>
-            commasep (map ppr arrs) </>
+            commasep (map ppr arrs) <> comma </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
   ppr NumGroups = text "$num_groups()"
@@ -576,13 +576,13 @@ instance Pretty KernelSize where
   ppr (KernelSize
        num_chunks workgroup_size per_thread_elements
        num_elements offset_multiple num_threads) =
-    commasep [ppr num_chunks,
-              ppr workgroup_size,
-              ppr per_thread_elements,
-              ppr num_elements,
-              ppr offset_multiple,
-              ppr num_threads
-             ]
+    PP.braces $ commasep [ppr num_chunks,
+                          ppr workgroup_size,
+                          ppr per_thread_elements,
+                          ppr num_elements,
+                          ppr offset_multiple,
+                          ppr num_threads
+                         ]
 
 instance Pretty ScanKernelOrder where
   ppr ScanFlat = text "flat"
