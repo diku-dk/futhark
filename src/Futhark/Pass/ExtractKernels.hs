@@ -305,7 +305,7 @@ transformBinding (Let pat () (Op (Scan cs w fun input))) = do
 -- sequentialise the body or we keep it parallel and distribute.
 
 transformBinding (Let pat () (Op (Stream cs w
-                                  (RedLike o comm red_fun nes) fold_fun arrs)))
+                                  (RedLike _o comm red_fun nes) fold_fun arrs)))
   | any (not . primType) $ lambdaReturnType red_fun,
     Just fold_fun' <- extLambdaToLambda fold_fun  = do
   -- Split into a chunked map and a reduction, with the latter
@@ -318,7 +318,7 @@ transformBinding (Let pat () (Op (Stream cs w
       red_pat = Pattern [] red_pat_elems
       concat_pat = Pattern [] concat_pat_elems
 
-  (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w o fold_fun_sequential nes arrs
+  (map_bnd, map_misc_bnds) <- blockedMap concat_pat cs w InOrder fold_fun_sequential nes arrs
   let num_threads = arraysSize 0 $ patternTypes $ bindingPattern map_bnd
       red_input = zip nes $ patternNames $ bindingPattern map_bnd
 
@@ -625,6 +625,26 @@ maybeDistributeBinding bnd@(Let _ _ (Op (Scan cs w lam input))) acc =
     _ ->
       addBindingToKernel bnd acc
 
+-- If the reduction can be distributed by itself, we will turn it into a
+-- segmented reduce.
+--
+-- If the reduction cannot be distributed by itself, it will be
+-- sequentialised in the default case for this function.
+maybeDistributeBinding bnd@(Let _pat _ (Op (Reduce cs w comm lam input))) acc =
+  distributeSingleBinding acc bnd >>= \case
+    Just (kernels, _, nest, acc') ->
+      localScope (typeEnvFromKernelAcc acc') $ do
+        lam' <- FOT.transformLambda lam
+        segmentedReduceKernel nest cs w comm lam' input >>= \case
+          Nothing ->
+            addBindingToKernel bnd acc
+          Just bnds -> do
+            addKernels kernels
+            addKernel bnds
+            return acc'
+    _ ->
+      addBindingToKernel bnd acc
+
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc = do
   acc' <- distribute acc
   distribute =<< addBindingToKernel bnd acc'
@@ -675,10 +695,43 @@ distributeSingleBinding acc bnd = do
 segmentedScanKernel :: KernelNest
                     -> Certificates -> SubExp -> Out.Lambda -> [(SubExp, VName)]
                     -> KernelM (Maybe [Out.Binding])
-segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
-  -- We must verify that array inputs to the scan are inputs to the
-  -- outermost loop nesting or free in the loop nest, and that none of
-  -- the names bound by the loop nest are used in the lambda.
+segmentedScanKernel nest cs segment_size lam scan_inps =
+  isSegmentedOp nest segment_size lam scan_inps $
+  \pat flat_pat total_num_elements scan_inps' -> do
+    blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
+
+    forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
+      \(dst_pat_elem, flat) -> do
+        let ident = patElemIdent dst_pat_elem
+            bindage = patElemBindage dst_pat_elem
+            dims = arrayDims $ identType ident
+        addBinding $ mkLet [] [(ident, bindage)] $
+          PrimOp $ Reshape [] (map DimNew dims) flat
+
+segmentedReduceKernel :: KernelNest
+                      -> Certificates -> SubExp -> Commutativity -> Out.Lambda -> [(SubExp, VName)]
+                      -> KernelM (Maybe [Out.Binding])
+segmentedReduceKernel nest _cs segment_size _comm lam reduce_inps
+  | False =
+  isSegmentedOp nest segment_size lam reduce_inps $
+  \_pat _flat_pat _total_num_elements _reduce_inps' ->
+    return () -- Does not actually work yet.
+  | otherwise = return Nothing
+
+isSegmentedOp :: KernelNest
+              -> SubExp
+              -> Out.Lambda
+              -> [(SubExp, VName)]
+              -> (Pattern
+                  -> Pattern
+                  -> SubExp
+                  -> [(SubExp, VName)]
+                  -> Binder Out.Kernels ())
+              -> KernelM (Maybe [Out.Binding])
+isSegmentedOp nest segment_size lam scan_inps m = runMaybeT $ do
+  -- We must verify that array inputs to the operation are inputs to
+  -- the outermost loop nesting or free in the loop nest, and that
+  -- none of the names bound by the loop nest are used in the lambda.
   -- Furthermore, the neutral elements must be free in the loop nest.
 
   let bound_by_nest = boundInKernelNest nest
@@ -729,7 +782,7 @@ segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
                   PrimOp $ Reshape [] reshape arr
           return (ne, arr')
 
-    scan_inps' <- mapM flatten =<< sequence mk_inps
+    op_inps' <- mapM flatten =<< sequence mk_inps
 
     let pat = loopNestingPattern $ fst nest
         flatPatElem pat_elem t = do
@@ -740,12 +793,6 @@ segmentedScanKernel nest cs segment_size lam scan_inps = runMaybeT $ do
                 zipWithM flatPatElem
                 (patternValueElements pat)
                 (lambdaReturnType lam)
-    blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
 
-    forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
-      \(dst_pat_elem, flat) -> do
-        let ident = patElemIdent dst_pat_elem
-            bindage = patElemBindage dst_pat_elem
-            dims = arrayDims $ identType ident
-        addBinding $ mkLet [] [(ident, bindage)] $
-          PrimOp $ Reshape [] (map DimNew dims) flat
+
+    m pat flat_pat total_num_elements op_inps'
