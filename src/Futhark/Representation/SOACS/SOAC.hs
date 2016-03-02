@@ -56,6 +56,7 @@ data SOAC lore =
   | Reduce Certificates SubExp Commutativity (LambdaT lore) [(SubExp, VName)]
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
+  | Scanomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
   | Write Certificates [Type] VName [VName] [VName]
     -- ^ Not really a SOAC, but gets its own kernel.
