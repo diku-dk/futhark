@@ -32,7 +32,7 @@ fun [f32] MC2([[[f32]]] WQsss, [f32] r1s) =
   map(MC2sim, zip(WQsss, r1s))
 fun f32 MC2sim({[[f32]], f32} arg) =
   let { WQss, r1 } = arg in
-  mean(map(exp, (map(MC2step, zip(WQss, replicate(n(), r1))))))
+  mean(map(exp, map(MC2step, zip(WQss, replicate(n(), r1)))))
 fun f32 MC2step({[f32], f32} arg) =
   let { WQs, r1 } = arg in
   sum(scan(nextrQ, r1, WQs))
