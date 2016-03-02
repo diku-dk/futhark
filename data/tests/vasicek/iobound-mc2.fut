@@ -6,7 +6,7 @@ default(f64)
 
 -- Some useful (for MC2) Futhark extensions.
 fun f64 sum([f64] xs) = reduce(+, 0.0, xs)
-fun f64 mean([f64] xs) = sum(map(/(f64), xs))
+fun f64 mean([f64,n] xs) = sum(map(/f64(n), xs))
 fun f64 e() = -- wolframalpha.com
   2.718281828459045235360287471352662497757247093699959574966
 fun [f64] exp([f64] xs) = map(fn f64 (f64 x) => e() ** x, xs)
