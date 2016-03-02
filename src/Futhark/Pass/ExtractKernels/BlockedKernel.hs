@@ -13,8 +13,10 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
 
 import Control.Applicative
 import Control.Monad
+import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 
 import Prelude
 
@@ -23,6 +25,7 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Transform.Rename
 import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
+import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Analysis.Alias as Alias
 
 blockedReductionStream :: (MonadFreshNames m, HasScope Kernels m) =>
@@ -55,9 +58,15 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
       reduce_lam' = reduce_lam { lambdaParams = other_index_param :
                                                 lambdaParams reduce_lam
                                }
+      params_to_arrs = zip (map paramName $ drop 1 $ lambdaParams fold_lam') arrs
+      consumedArray v = fromMaybe v $ lookup v params_to_arrs
+      consumed_in_fold =
+        HS.map consumedArray $ consumedByLambda $ Alias.analyseLambda fold_lam
 
   arrs_copies <- forM arrs $ \arr ->
-    letExp (baseString arr <> "_copy") $ PrimOp $ Copy arr
+    if arr `HS.member` consumed_in_fold then
+      letExp (baseString arr <> "_copy") $ PrimOp $ Copy arr
+    else return arr
 
   addBinding =<< renameBinding
     (Let step_one_pat () $

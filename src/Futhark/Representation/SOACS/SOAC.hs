@@ -259,12 +259,6 @@ substNamesInExtDimSize :: HM.HashMap VName SubExp -> ExtDimSize -> ExtDimSize
 substNamesInExtDimSize _ (Ext o) = Ext o
 substNamesInExtDimSize subs (Free o) = Free $ substNamesInSubExp subs o
 
-consumedByLambda :: Aliased lore => Lambda lore -> Names
-consumedByLambda = consumedInBody . lambdaBody
-
-consumedByExtLambda :: Aliased lore => ExtLambda lore -> Names
-consumedByExtLambda = consumedInBody . extLambdaBody
-
 instance (Attributes inner, Ranged inner) => RangedOp (SOAC inner) where
   opRanges op = replicate (length $ soacType op) unknownRange
 
