@@ -26,7 +26,7 @@ fun f64 nextrP(f64 lastr, f64 WP) =
 fun f64 nextrQ(f64 lastr, f64 WQ) =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * WQ
 
-fun [f64] MC1([[f64]] WPss) = map(MC1Step, WPss)
-fun f64 MC1Step([f64] WPs) = sum(scan(nextrP, r0(), WPs))
+fun [f64] MC1([[f64]] WPss) = map(MC1step, WPss)
+fun f64 MC1step([f64] WPs) = sum(scan(nextrP, r0(), WPs))
 
 fun [f64] main([[f64]] WPss) = MC1(WPss)
