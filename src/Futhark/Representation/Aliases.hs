@@ -1,4 +1,8 @@
-{-# LANGUAGE TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | A representation where all bindings are annotated with aliasing
 -- information.
 module Futhark.Representation.Aliases
@@ -15,8 +19,6 @@ module Futhark.Representation.Aliases
        , Binding
        , Pattern
        , PrimOp
-       , LoopOp
-       , SegOp
        , Exp
        , Lambda
        , ExtLambda
@@ -33,8 +35,7 @@ module Futhark.Representation.Aliases
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.ExpT(LoopOp)
-       , AST.ExpT(SegOp)
+       , AST.ExpT(DoLoop)
        , AST.FunDecT(FunDec)
          -- * Adding aliases
        , addAliasesToPattern
@@ -49,11 +50,14 @@ module Futhark.Representation.Aliases
        , removeBodyAliases
        , removeBindingAliases
        , removeLambdaAliases
+       , removeExtLambdaAliases
        , removePatternAliases
+       , removeScopeAliases
        )
 where
 
 import Control.Applicative
+import Control.Monad.Reader
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
@@ -61,21 +65,19 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, LoopOp, SegOp, Exp, Body, Binding,
+  hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, Lambda, ExtLambda, FunDec, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty
-import qualified Futhark.Representation.AST.Lore as Lore
 import Futhark.Transform.Rename
 import Futhark.Binder
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
-import Futhark.Representation.AST.Attributes.Ranges
+import Futhark.Representation.AST.Attributes.Ranges()
 import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
@@ -118,35 +120,21 @@ type ConsumedInExp = Names'
 -- consumed inside of it.
 type BodyAliasing = ([VarAliases], ConsumedInExp)
 
-instance Annotations.Annotations lore => Annotations.Annotations (Aliases lore) where
-  type LetBound (Aliases lore) = (VarAliases, Annotations.LetBound lore)
-  type Exp (Aliases lore) = (ConsumedInExp, Annotations.Exp lore)
-  type Body (Aliases lore) = (BodyAliasing, Annotations.Body lore)
-  type FParam (Aliases lore) = Annotations.FParam lore
-  type LParam (Aliases lore) = Annotations.LParam lore
-  type RetType (Aliases lore) = Annotations.RetType lore
+instance (Annotations lore, CanBeAliased (Op lore)) =>
+         Annotations (Aliases lore) where
+  type LetAttr (Aliases lore) = (VarAliases, LetAttr lore)
+  type ExpAttr (Aliases lore) = (ConsumedInExp, ExpAttr lore)
+  type BodyAttr (Aliases lore) = (BodyAliasing, BodyAttr lore)
+  type FParamAttr (Aliases lore) = FParamAttr lore
+  type LParamAttr (Aliases lore) = LParamAttr lore
+  type RetType (Aliases lore) = AST.RetType lore
+  type Op (Aliases lore) = OpWithAliases (Op lore)
 
-instance Lore.Lore lore => Lore.Lore (Aliases lore) where
-  representative =
-    Aliases representative
-
-  loopResultContext (Aliases lore) =
-    loopResultContext lore
-
-  applyRetType (Aliases lore) =
-    applyRetType lore
-
-  expContext pat e =
-    expContext (removePatternAliases pat) (removeExpAliases e)
-
-instance Ranged lore => Ranged (Aliases lore) where
-  bodyRanges = bodyRanges . removeBodyAliases
-  patternRanges = patternRanges . removePatternAliases
+instance AliasesOf (VarAliases, attr) where
+  aliasesOf = unNames . fst
 
 type Prog lore = AST.Prog (Aliases lore)
 type PrimOp lore = AST.PrimOp (Aliases lore)
-type LoopOp lore = AST.LoopOp (Aliases lore)
-type SegOp lore = AST.SegOp (Aliases lore)
 type Exp lore = AST.Exp (Aliases lore)
 type Body lore = AST.Body (Aliases lore)
 type Binding lore = AST.Binding (Aliases lore)
@@ -156,40 +144,41 @@ type ExtLambda lore = AST.ExtLambda (Aliases lore)
 type FunDec lore = AST.FunDec (Aliases lore)
 type RetType lore = AST.RetType (Aliases lore)
 
-instance Renameable lore => Renameable (Aliases lore) where
-instance Substitutable lore => Substitutable (Aliases lore) where
-instance Proper lore => Proper (Aliases lore) where
+instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
+  representative =
+    Aliases representative
 
-instance Lore.Lore lore => Aliased (Aliases lore) where
+  expContext pat e = do
+    env <- asksScope removeScopeAliases
+    return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
+
+instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) where
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
-  patternAliases = map (unNames . fst . patElemLore) . patternElements
 
-instance (PrettyLore lore) => PrettyLore (Aliases lore) where
+instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) where
   ppBindingLore binding@(Let pat (consumed,_) _) =
-    maybeComment $ catMaybes [patElemAttrs,
+    maybeComment $ catMaybes [patElemComments,
                               expAttr,
                               ppBindingLore $ removeBindingAliases binding]
     where expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
-            als -> Just $ oneline $
+            als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
 
-          patElemAttrs =
-            maybeComment $ mapMaybe patElemAttr $ patternElements pat
+          patElemComments =
+            maybeComment $ mapMaybe patElemComment $ patternElements pat
 
-          patElemAttr patelem =
-            oneline <$>
-            aliasComment (patElemName patelem)
-            (unNames . fst . patElemLore $ patelem)
+          patElemComment (PatElem name _ (Names' als, _)) =
+            PP.oneLine <$> aliasComment name als
 
   ppFunDecLore = ppFunDecLore . removeFunDecAliases
   ppLambdaLore = ppLambdaLore . removeLambdaAliases
 
-  ppExpLore e@(AST.LoopOp (DoLoop _ merge _ body)) =
+  ppExpLore e@(DoLoop _ merge _ body) =
     maybeComment $ catMaybes [expAttr, mergeAttr]
     where mergeAttr = let mergeParamAliases fparam als
-                            | basicType (paramType fparam) =
+                            | primType (paramType fparam) =
                               Nothing
                             | otherwise =
                               resultAliasComment (paramName fparam) als
@@ -200,9 +189,6 @@ instance (PrettyLore lore) => PrettyLore (Aliases lore) where
   ppExpLore e =
     ppExpLore $ removeExpAliases e
 
-oneline :: PP.Doc -> PP.Doc
-oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
-
 maybeComment :: [PP.Doc] -> Maybe PP.Doc
 maybeComment [] = Nothing
 maybeComment cs = Just $ PP.folddoc (PP.</>) cs
@@ -212,7 +198,7 @@ aliasComment :: (PP.Pretty a, PP.Pretty b) =>
 aliasComment name als =
   case HS.toList als of
     [] -> Nothing
-    als' -> Just $ oneline $
+    als' -> Just $ PP.oneLine $
             PP.text "-- " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
@@ -221,64 +207,87 @@ resultAliasComment :: (PP.Pretty a, PP.Pretty b) =>
 resultAliasComment name als =
   case HS.toList als of
     [] -> Nothing
-    als' -> Just $ oneline $
+    als' -> Just $ PP.oneLine $
             PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
-removeAliases :: Rephraser (Aliases lore) lore
+removeAliases :: CanBeAliased (Op lore) => Rephraser (Aliases lore) lore
 removeAliases = Rephraser { rephraseExpLore = snd
                           , rephraseLetBoundLore = snd
                           , rephraseBodyLore = snd
                           , rephraseFParamLore = id
                           , rephraseLParamLore = id
                           , rephraseRetType = id
+                          , rephraseOp = removeOpAliases
                           }
 
-removeProgAliases :: AST.Prog (Aliases lore) -> AST.Prog lore
+removeScopeAliases :: Scope (Aliases lore) -> Scope lore
+removeScopeAliases = HM.map unAlias
+  where unAlias (LetInfo (_, attr)) = LetInfo attr
+        unAlias (FParamInfo attr) = FParamInfo attr
+        unAlias (LParamInfo attr) = LParamInfo attr
+        unAlias IndexInfo = IndexInfo
+
+removeProgAliases :: CanBeAliased (Op lore) =>
+                     AST.Prog (Aliases lore) -> AST.Prog lore
 removeProgAliases = rephraseProg removeAliases
 
-removeFunDecAliases :: AST.FunDec (Aliases lore) -> AST.FunDec lore
+removeFunDecAliases :: CanBeAliased (Op lore) =>
+                       AST.FunDec (Aliases lore) -> AST.FunDec lore
 removeFunDecAliases = rephraseFunDec removeAliases
 
-removeExpAliases :: AST.Exp (Aliases lore) -> AST.Exp lore
+removeExpAliases :: CanBeAliased (Op lore) =>
+                    AST.Exp (Aliases lore) -> AST.Exp lore
 removeExpAliases = rephraseExp removeAliases
 
-removeBodyAliases :: AST.Body (Aliases lore) -> AST.Body lore
+removeBodyAliases :: CanBeAliased (Op lore) =>
+                     AST.Body (Aliases lore) -> AST.Body lore
 removeBodyAliases = rephraseBody removeAliases
 
-removeBindingAliases :: AST.Binding (Aliases lore) -> AST.Binding lore
+removeBindingAliases :: CanBeAliased (Op lore) =>
+                        AST.Binding (Aliases lore) -> AST.Binding lore
 removeBindingAliases = rephraseBinding removeAliases
 
-removeLambdaAliases :: AST.Lambda (Aliases lore) -> AST.Lambda lore
+removeLambdaAliases :: CanBeAliased (Op lore) =>
+                       AST.Lambda (Aliases lore) -> AST.Lambda lore
 removeLambdaAliases = rephraseLambda removeAliases
 
-removePatternAliases :: AST.Pattern (Aliases lore) -> AST.Pattern lore
-removePatternAliases = rephrasePattern removeAliases
+removeExtLambdaAliases :: CanBeAliased (Op lore) =>
+                          AST.ExtLambda (Aliases lore) -> AST.ExtLambda lore
+removeExtLambdaAliases = rephraseExtLambda removeAliases
 
-addAliasesToPattern :: Lore.Lore lore =>
-                       AST.Pattern lore -> Exp lore -> Pattern lore
+removePatternAliases :: AST.PatternT (Names', a)
+                     -> AST.PatternT a
+removePatternAliases = rephrasePattern snd
+
+addAliasesToPattern :: (Attributes lore, CanBeAliased (Op lore), Typed attr) =>
+                       AST.PatternT attr -> Exp lore
+                    -> AST.PatternT (VarAliases, attr)
 addAliasesToPattern pat e =
   uncurry AST.Pattern $ mkPatternAliases pat e
 
-mkAliasedBody :: Lore.Lore lore =>
-                 Annotations.Body lore -> [Binding lore] -> Result -> Body lore
+mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
+                 BodyAttr lore -> [Binding lore] -> Result -> Body lore
 mkAliasedBody innerlore bnds res =
   AST.Body (mkBodyAliases bnds res, innerlore) bnds res
 
-mkPatternAliases :: (Lore.Lore anylore, Aliased lore) =>
-                    AST.Pattern anylore -> AST.Exp lore
-                 -> ([PatElemT (VarAliases, Annotations.LetBound anylore)],
-                     [PatElemT (VarAliases, Annotations.LetBound anylore)])
+mkPatternAliases :: (Attributes lore, Aliased lore,
+                     AliasedOp (Op lore), Typed attr) =>
+                    AST.PatternT attr -> AST.Exp lore
+                 -> ([PatElemT (VarAliases, attr)],
+                     [PatElemT (VarAliases, attr)])
 mkPatternAliases pat e =
   -- Some part of the pattern may  be the context.  This does not have
-  -- aliases from aliasesOf, so we  use a hack to compute some aliases
+  -- aliases from expAliases, so we  use a hack to compute some aliases
   -- from do-loops.  FIXME.  This should be more general.
-  let als = aliasesOf e
+  let als = expAliases e ++ repeat mempty -- In case the pattern has
+                                          -- more elements (this
+                                          -- implies a type error).
       context_als = mkContextAliases pat e
   in (zipWith annotateBindee (patternContextElements pat) context_als,
       zipWith annotateBindee (patternValueElements pat) als)
   where annotateBindee bindee names =
-            bindee `setPatElemLore` (Names' names', patElemLore bindee)
+            bindee `setPatElemLore` (Names' names', patElemAttr bindee)
           where names' =
                   case (patElemBindage bindee, patElemRequires bindee) of
                     (BindInPlace {}, _) -> mempty
@@ -286,19 +295,22 @@ mkPatternAliases pat e =
                     (_, Mem _ _)        -> names
                     _                   -> mempty
 
-mkContextAliases :: forall anylore lore.
-                    (Lore.Lore anylore, Aliased lore) =>
-                    AST.Pattern anylore -> AST.Exp lore
+mkContextAliases :: forall lore attr.
+                    (Attributes lore, Aliased lore) =>
+                    AST.PatternT attr -> AST.Exp lore
                  -> [Names]
-mkContextAliases _ (AST.LoopOp (DoLoop res merge _ body)) =
-  let ctx = loopResultContext (representative :: lore) res $ map fst merge
-      init_als = zip mergenames $ map (subExpAliases . snd) merge
+mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
+  let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
+      init_als = zip mergenames $ map (subExpAliases . snd) $ ctxmerge ++ valmerge
       expand als = als <> HS.unions (mapMaybe (`lookup` init_als) (HS.toList als))
       merge_als = zip mergenames $
                   map ((`HS.difference` mergenames_set) . expand) $
                   bodyAliases body
-  in map (fromMaybe mempty . flip lookup merge_als) ctx
-  where mergenames = map (paramName . fst) merge
+  -- FIXME: sometimes loopResultContext will not return the correct number of elements.
+  in if length ctx == length (patternContextElements pat)
+     then map (fromMaybe mempty . flip lookup merge_als . paramName) ctx
+     else map (const mempty) $ patternContextElements pat
+  where mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
         mergenames_set = HS.fromList mergenames
 mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
@@ -333,22 +345,25 @@ mkBodyAliases bnds res =
           names `HS.union` mconcat (map look $ HS.toList names)
           where look k = HM.lookupDefault mempty k aliasmap
 
-mkAliasedLetBinding :: Lore.Lore lore =>
-                       AST.Pattern lore -> Annotations.Exp lore -> Exp lore
+mkAliasedLetBinding :: (Attributes lore, CanBeAliased (Op lore)) =>
+                       AST.Pattern lore
+                    -> ExpAttr lore -> Exp lore
                     -> Binding lore
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e)
   (Names' $ consumedInPattern pat <> consumedInExp e, explore)
   e
 
-instance Bindable lore => Bindable (Aliases lore) where
+instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) where
   mkLet context values e =
     let Let pat' explore _ = mkLet context values $ removeExpAliases e
     in mkAliasedLetBinding pat' explore e
 
   mkLetNames names e = do
-    Let pat explore _ <- mkLetNames names $ removeExpAliases e
-    return $ mkAliasedLetBinding pat explore e
+    env <- asksScope removeScopeAliases
+    flip runReaderT env $ do
+      Let pat explore _ <- mkLetNames names $ removeExpAliases e
+      return $ mkAliasedLetBinding pat explore e
 
   mkBody bnds res =
     let AST.Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res

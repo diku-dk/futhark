@@ -1,4 +1,7 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- |
 --
 -- This module contains exports a single function, 'substituteNames',
@@ -13,10 +16,8 @@ import Control.Monad.Identity
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 
-import qualified Futhark.Representation.AST.Annotations as Annotations
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.RetType
 
 -- | The substitutions to be made are given by a mapping from names to
 -- names.
@@ -79,10 +80,12 @@ instance Substitute Bindage where
     (map (substituteNames substs) is)
 
 instance Substitute attr => Substitute (ParamT attr) where
-  substituteNames substs (Param ident attr) =
-    Param (substituteNames substs ident) (substituteNames substs attr)
+  substituteNames substs (Param name attr) =
+    Param
+    (substituteNames substs name)
+    (substituteNames substs attr)
 
-instance Substitutable lore => Substitute (Pattern lore) where
+instance Substitute attr => Substitute (PatternT attr) where
   substituteNames substs (Pattern context values) =
     Pattern (substituteNames substs context) (substituteNames substs values)
 
@@ -105,11 +108,10 @@ replace substs = Mapper {
                    mapOnVName = return . substituteNames substs
                  , mapOnSubExp = return . substituteNames substs
                  , mapOnBody = return . substituteNames substs
-                 , mapOnLambda = return . substituteNames substs
-                 , mapOnExtLambda = return . substituteNames substs
                  , mapOnCertificates = return . map (substituteNames substs)
                  , mapOnRetType = return . substituteNames substs
                  , mapOnFParam = return . substituteNames substs
+                 , mapOnOp = return . substituteNames substs
                  }
 
 instance Substitute Rank where
@@ -133,8 +135,8 @@ instance Substitute ExtDimSize where
 instance Substitute Names where
   substituteNames = HS.map . substituteNames
 
-instance (Substitute shape) => Substitute (TypeBase shape) where
-  substituteNames _ (Basic et) = Basic et
+instance Substitute shape => Substitute (TypeBase shape u) where
+  substituteNames _ (Prim et) = Prim et
   substituteNames substs (Array et sz u) =
     Array et (substituteNames substs sz) u
   substituteNames substs (Mem sz space) =
@@ -170,12 +172,13 @@ instance Substitute d => Substitute (DimChange d) where
   substituteNames substs =
     fmap $ substituteNames substs
 
--- | The class of lores in which all annotations support name
+-- | Lores in which all annotations support name
 -- substitution.
-class (Substitute (Annotations.Exp lore),
-       Substitute (Annotations.Body lore),
-       Substitute (Annotations.LetBound lore),
-       Substitute (Annotations.FParam lore),
-       Substitute (Annotations.LParam lore),
-       Substitute (Annotations.RetType lore)) =>
-      Substitutable lore where
+type Substitutable lore = (Annotations lore,
+                           Substitute (ExpAttr lore),
+                           Substitute (BodyAttr lore),
+                           Substitute (LetAttr lore),
+                           Substitute (FParamAttr lore),
+                           Substitute (LParamAttr lore),
+                           Substitute (RetType lore),
+                           Substitute (Op lore))

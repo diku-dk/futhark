@@ -11,6 +11,7 @@ module Futhark.Construct
   , eSubExp
   , eIf
   , eBinOp
+  , eCmpOp
   , eNegate
   , eNot
   , eAbs
@@ -133,36 +134,68 @@ eIf ce te fe = do
   return $ If ce' te' fe' ts
 
 eBinOp :: MonadBinder m =>
-          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> BasicType
+          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
        -> m (Exp (Lore m))
-eBinOp op x y t = do
+eBinOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
-  return $ PrimOp $ BinOp op x' y' t
+  return $ PrimOp $ BinOp op x' y'
+
+eCmpOp :: MonadBinder m =>
+          CmpOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
+       -> m (Exp (Lore m))
+eCmpOp op x y = do
+  x' <- letSubExp "x" =<< x
+  y' <- letSubExp "y" =<< y
+  return $ PrimOp $ CmpOp op x' y'
 
 eNegate :: MonadBinder m =>
            m (Exp (Lore m)) -> m (Exp (Lore m))
-eNegate e = do
-  e' <- letSubExp "negate_arg" =<< e
-  return $ PrimOp $ Negate e'
+eNegate em = do
+  e <- em
+  e' <- letSubExp "negate_arg" e
+  t <- subExpType e'
+  case t of
+    Prim (IntType int_t) ->
+      return $ PrimOp $
+      BinOp (Sub int_t) (intConst int_t 0) e'
+    Prim (FloatType float_t) ->
+      return $ PrimOp $
+      BinOp (FSub float_t) (floatConst float_t 0) e'
+    _ ->
+      fail $ "eNegate: operand " ++ pretty e ++ " has invalid type."
 
 eNot :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
 eNot e = do
   e' <- letSubExp "not_arg" =<< e
-  return $ PrimOp $ Not e'
+  return $ PrimOp $ UnOp Not e'
 
 eAbs :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
-eAbs e = do
-  e' <- letSubExp "abs_arg" =<< e
-  return $ PrimOp $ Abs e'
+eAbs em = do
+  e <- em
+  e' <- letSubExp "abs_arg" e
+  t <- subExpType e'
+  case t of
+    Prim (IntType int_t) ->
+      return $ PrimOp $ UnOp (Abs int_t) e'
+    Prim (FloatType float_t) ->
+      return $ PrimOp $ UnOp (FAbs float_t) e'
+    _ ->
+      fail $ "eAbs: operand " ++ pretty e ++ " has invalid type."
 
 eSignum :: MonadBinder m =>
         m (Exp (Lore m)) -> m (Exp (Lore m))
-eSignum e = do
-  e' <- letSubExp "signum_arg" =<< e
-  return $ PrimOp $ Signum e'
+eSignum em = do
+  e <- em
+  e' <- letSubExp "signum_arg" e
+  t <- subExpType e'
+  case t of
+    Prim (IntType int_t) ->
+      return $ PrimOp $ UnOp (SSignum int_t) e'
+    _ ->
+      fail $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
 eIndex :: MonadBinder m =>
           Certificates -> VName -> [m (Exp (Lore m))]
@@ -182,17 +215,18 @@ eAssert e loc = do e' <- letSubExp "assert_arg" =<< e
                    return $ PrimOp $ Assert e' loc
 
 eValue :: MonadBinder m => Value -> m (Exp (Lore m))
-eValue (BasicVal bv) =
+eValue (PrimVal bv) =
   return $ PrimOp $ SubExp $ Constant bv
 eValue (ArrayVal a bt [_]) = do
   let ses = map Constant $ A.elems a
-  return $ PrimOp $ ArrayLit ses $ Basic bt
+  return $ PrimOp $ ArrayLit ses $ Prim bt
 eValue (ArrayVal a bt shape) = do
   let rowshape = drop 1 shape
       rowsize  = product rowshape
       rows     = [ ArrayVal (A.listArray (0,rowsize-1) r) bt rowshape
                  | r <- chunk rowsize $ A.elems a ]
-      rowtype = Array bt (Shape $ map (Constant . IntVal . fromIntegral) rowshape) Nonunique
+      rowtype = Array bt (Shape $ map (intConst Int32 . toInteger) rowshape)
+                NoUniqueness
   ses <- mapM (letSubExp "array_elem" <=< eValue) rows
   return $ PrimOp $ ArrayLit ses rowtype
 
@@ -212,45 +246,47 @@ eLambda lam args = do zipWithM_ letBindNames params $
   where params = [ [(param, BindVar)] |
                    param <- map paramName $ lambdaParams lam ]
 
+-- | Note: unsigned division.
 eDivRoundingUp :: MonadBinder m =>
-                  m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
-eDivRoundingUp x y =
-  eBinOp Quot (eBinOp Plus x (eBinOp Minus y (eSubExp one) Int) Int) y Int
-  where one = Constant $ IntVal 1
+                  IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
+eDivRoundingUp t x y =
+  eBinOp (SQuot t) (eBinOp (Add t) x (eBinOp (Sub t) y (eSubExp one))) y
+  where one = intConst t 1
 
 eRoundToMultipleOf :: MonadBinder m =>
-                      m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
-eRoundToMultipleOf x d =
+                      IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
+eRoundToMultipleOf t x d =
   ePlus x (eMod (eMinus d (eMod x d)) d)
-  where eMod a b = eBinOp Mod a b Int
-        eMinus a b = eBinOp Minus a b Int
-        ePlus a b = eBinOp Plus a b Int
+  where eMod = eBinOp (SMod t)
+        eMinus = eBinOp (Sub t)
+        ePlus = eBinOp (Add t)
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
 foldBinOp :: MonadBinder m =>
-             BinOp -> SubExp -> [SubExp] -> BasicType -> m (Exp (Lore m))
-foldBinOp _ ne [] _   = return $ PrimOp $ SubExp ne
-foldBinOp bop ne (e:es) t =
-  eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es t) t
+             BinOp -> SubExp -> [SubExp] -> m (Exp (Lore m))
+foldBinOp _ ne [] =
+  return $ PrimOp $ SubExp ne
+foldBinOp bop ne (e:es) =
+  eBinOp bop (pure $ PrimOp $ SubExp e) (foldBinOp bop ne es)
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
 binOpLambda :: (MonadFreshNames m, Bindable lore) =>
-               BinOp -> BasicType -> m (Lambda lore)
+               BinOp -> PrimType -> m (Lambda lore)
 binOpLambda bop t = do
   x   <- newVName "x"
   y   <- newVName "y"
   i   <- newVName "i"
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
-    res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y) t
+    res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
              lambdaIndex      = i
-           , lambdaParams     = [Param (Ident x (Basic t)) (),
-                                 Param (Ident y (Basic t)) ()]
-           , lambdaReturnType = [Basic t]
+           , lambdaParams     = [Param x (Prim t),
+                                 Param y (Prim t)]
+           , lambdaReturnType = [Prim t]
            , lambdaBody       = body
            }
 
@@ -291,13 +327,13 @@ mapResult f (Body _ bnds res) =
   in mkBody (bnds<>bnds2) newres
 
 -- | Instantiate all existential parts dimensions of the given
--- 'RetType', using a monadic action to create the necessary
--- 'SubExp's.  You should call this function within some monad that
--- allows you to collect the actions performed (say, 'Writer').
+-- type, using a monadic action to create the necessary 'SubExp's.
+-- You should call this function within some monad that allows you to
+-- collect the actions performed (say, 'Writer').
 instantiateShapes :: Monad m =>
                      (Int -> m SubExp)
-                  -> [TypeBase ExtShape]
-                  -> m [TypeBase Shape]
+                  -> [TypeBase ExtShape u]
+                  -> m [TypeBase Shape u]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
   where instantiate t = do
           shape <- mapM instantiate' $ extShapeDims $ arrayShape t
@@ -312,11 +348,11 @@ instantiateShapes f ts = evalStateT (mapM instantiate ts) HM.empty
         instantiate' (Free se) = return se
 
 instantiateShapes' :: MonadFreshNames m =>
-                      [TypeBase ExtShape]
-                   -> m ([TypeBase Shape], [Ident])
+                      [TypeBase ExtShape u]
+                   -> m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
-  where instantiate _ = do v <- lift $ newIdent "size" (Basic Int)
+  where instantiate _ = do v <- lift $ newIdent "size" (Prim $ IntType Int32)
                            tell [v]
                            return $ Var $ identName v
 
@@ -333,7 +369,7 @@ instantiateShapesFromIdentList idents ts =
 instantiateExtTypes :: [VName] -> [ExtType] -> [Ident]
 instantiateExtTypes names rt =
   let (shapenames,valnames) = splitAt (shapeContextSize rt) names
-      shapes = [ Ident name (Basic Int) | name <- shapenames ]
+      shapes = [ Ident name (Prim $ IntType Int32) | name <- shapenames ]
       valts  = instantiateShapesFromIdentList shapes rt
       vals   = [ Ident name t | (name,t) <- zip valnames valts ]
   in shapes ++ vals
@@ -347,7 +383,7 @@ instantiateIdents names ts
         nextShape _ = do
           (context', remaining) <- get
           case remaining of []   -> lift Nothing
-                            x:xs -> do let ident = Ident x (Basic Int)
+                            x:xs -> do let ident = Ident x (Prim $ IntType Int32)
                                        put (context'++[ident], xs)
                                        return $ Var x
     (ts', (context', _)) <-

@@ -38,13 +38,16 @@
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with"
     "fun" "fn" "for" "while" "do" "do" "op" "not" "pow"
-    "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "zip" "unzip" "zipWith"
+    "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "reduceComm"
+    "zip" "unzip" "zipWith"
     "scan" "split" "concat" "filter" "partition" "redomap"
-    "empty" "copy" "size")
+    "empty" "copy" "size" "unsafe" "default" "include")
   "A list of Futhark keywords.")
 
 (defconst futhark-types
-  '("int" "real" "bool" "char", "float32", "float64")
+  '("i8" "i16" "i32" "i64"
+    "u8" "u16" "u32" "u64"
+    "int" "real" "bool" "char" "f32" "f64")
   "A list of Futhark types.")
 
 (defconst futhark-vars

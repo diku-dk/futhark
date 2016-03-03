@@ -1,15 +1,22 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# Language FlexibleInstances, FlexibleContexts #-}
 module Futhark.Representation.AST.Attributes.Aliases
        ( vnameAliases
        , subExpAliases
        , primOpAliases
-       , loopOpAliases
-       , aliasesOf
+       , expAliases
+       , patternAliases
        , Aliased (..)
+       , AliasesOf (..)
          -- * Consumption
        , consumedInBinding
        , consumedInExp
        , consumedInPattern
+       , consumedByLambda
+       , consumedByExtLambda
+       -- * Extensibility
+       , AliasedOp (..)
+       , CanBeAliased (..)
        )
        where
 
@@ -17,97 +24,53 @@ import Control.Arrow (first)
 import Data.Monoid
 import qualified Data.HashSet as HS
 
+import Futhark.Representation.AST.Attributes (IsOp)
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Lore (Lore)
-import Futhark.Representation.AST.RetType
-import Futhark.Representation.AST.Attributes.Types
 import Futhark.Representation.AST.Attributes.Patterns
+import Futhark.Representation.AST.Attributes.Types
 
-class Lore lore => Aliased lore where
+class (Annotations lore, AliasedOp (Op lore),
+       AliasesOf (LetAttr lore)) => Aliased lore where
   bodyAliases :: Body lore -> [Names]
   consumedInBody :: Body lore -> Names
-  patternAliases :: Pattern lore -> [Names]
 
 vnameAliases :: VName -> Names
 vnameAliases = HS.singleton
 
 subExpAliases :: SubExp -> Names
-subExpAliases (Constant {}) = mempty
-subExpAliases (Var v)       = vnameAliases v
+subExpAliases Constant{} = mempty
+subExpAliases (Var v)    = vnameAliases v
 
 primOpAliases :: PrimOp lore -> [Names]
 primOpAliases (SubExp se) = [subExpAliases se]
 primOpAliases (ArrayLit es _) = [mconcat $ map subExpAliases es]
-primOpAliases (BinOp {}) = [mempty]
-primOpAliases (Not {}) = [mempty]
-primOpAliases (Complement {}) = [mempty]
-primOpAliases (Negate {}) = [mempty]
-primOpAliases (Abs {}) = [mempty]
-primOpAliases (Signum {}) = [mempty]
+primOpAliases BinOp{} = [mempty]
+primOpAliases ConvOp{} = [mempty]
+primOpAliases CmpOp{} = [mempty]
+primOpAliases UnOp{} = [mempty]
+
 primOpAliases (Index _ ident _) =
   [vnameAliases ident]
-primOpAliases (Iota {}) =
+primOpAliases Iota{} =
   [mempty]
-primOpAliases (Replicate _ e) =
-  [subExpAliases e]
-primOpAliases (Scratch {}) =
+primOpAliases Replicate{} =
+  [mempty]
+primOpAliases Scratch{} =
   [mempty]
 primOpAliases (Reshape _ _ e) =
   [vnameAliases e]
 primOpAliases (Rearrange _ _ e) =
   [vnameAliases e]
-primOpAliases (Stripe _ _ e) =
-  [vnameAliases e]
-primOpAliases (Unstripe _ _ e) =
-  [vnameAliases e]
 primOpAliases (Split _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
-primOpAliases (Concat _ x ys _) =
-  [vnameAliases x <> mconcat (map vnameAliases ys)]
-primOpAliases (Copy {}) =
+primOpAliases Concat{} =
   [mempty]
-primOpAliases (Assert {}) =
+primOpAliases Copy{} =
   [mempty]
-primOpAliases (Alloc {}) =
+primOpAliases Assert{} =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr
-
-loopOpAliases :: (Aliased lore) => LoopOp lore -> [Names]
-loopOpAliases (DoLoop res merge _ loopbody) =
-  map snd $ filter fst $
-  zip (map (((`elem` res) . identName) . paramIdent . fst) merge) (bodyAliases loopbody)
-loopOpAliases (Map _ _ f _) =
-  bodyAliases $ lambdaBody f
-loopOpAliases (Reduce _ _ f _) =
-  map (const mempty) $ lambdaReturnType f
-loopOpAliases (Scan _ _ f _) =
-  map (const mempty) $ lambdaReturnType f
-loopOpAliases (Redomap _ _ _ innerfun _ _) =
-  map (const mempty) $ lambdaReturnType innerfun
-loopOpAliases (Stream _ _ form lam _ _) =
-  let a1 = case form of
-             MapLike _        -> []
-             RedLike _ lam0 _ -> bodyAliases $ lambdaBody lam0
-             Sequential _     -> []
-  in  a1 ++ bodyAliases (extLambdaBody lam)
-loopOpAliases (ConcatMap {}) =
-  [mempty]
-loopOpAliases (Kernel _ _ _ _ _ returns _) =
-  map (const mempty) returns
-loopOpAliases (ReduceKernel _ _ _ _ _ nes _) =
-  map (const mempty) nes
-loopOpAliases (ScanKernel _ _ _ lam _) =
-  replicate (length (lambdaReturnType lam) * 2) mempty
-
-segOpAliases :: (Aliased lore) => SegOp lore -> [Names]
-segOpAliases (SegReduce _ _ f _ _) =
-  map (const mempty) $ lambdaReturnType f
-segOpAliases (SegScan _ _ _ f _ _) =
-  map (const mempty) $ lambdaReturnType f
-segOpAliases (SegReplicate{}) =
-  [mempty]
--- TODO: Troels, should this be vnameAliases ?
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =
@@ -115,30 +78,33 @@ ifAliases (als1,cons1) (als2,cons2) =
   where notConsumed = not . (`HS.member` cons)
         cons = cons1 <> cons2
 
-funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape] -> [Names]
+funcallAliases :: [(SubExp, Diet)] -> [TypeBase shape Uniqueness] -> [Names]
 funcallAliases args t =
   returnAliases t [(subExpAliases se, d) | (se,d) <- args ]
 
-aliasesOf :: Aliased lore => Exp lore -> [Names]
-aliasesOf (If _ tb fb _) =
+expAliases :: (Aliased lore) => Exp lore -> [Names]
+expAliases (If _ tb fb _) =
   ifAliases
   (bodyAliases tb, consumedInBody tb)
   (bodyAliases fb, consumedInBody fb)
-aliasesOf (PrimOp op) = primOpAliases op
-aliasesOf (LoopOp op) = loopOpAliases op
-aliasesOf (SegOp op) = segOpAliases op
-aliasesOf (Apply _ args t) =
+expAliases (PrimOp op) = primOpAliases op
+expAliases (DoLoop ctxmerge valmerge _ loopbody) =
+  map (`HS.difference` merge_names) $ bodyAliases loopbody
+  where merge_names = HS.fromList $
+                      map (paramName . fst) $ ctxmerge ++ valmerge
+expAliases (Apply _ args t) =
   funcallAliases args $ retTypeValues t
+expAliases (Op op) = opAliases op
 
-returnAliases :: [TypeBase shape1] -> [(Names, Diet)] -> [Names]
+returnAliases :: [TypeBase shaper Uniqueness] -> [(Names, Diet)] -> [Names]
 returnAliases rts args = map returnType' rts
   where returnType' (Array _ _ Nonunique) =
           mconcat $ map (uncurry maskAliases) args
         returnType' (Array _ _ Unique) =
           mempty
-        returnType' (Basic _) =
+        returnType' (Prim _) =
           mempty
-        returnType' (Mem {}) =
+        returnType' Mem{} =
           error "returnAliases Mem"
 
 maskAliases :: Names -> Diet -> Names
@@ -156,30 +122,50 @@ consumedInExp (Apply _ args _) =
         consumeArg (_,   Observe) = mempty
 consumedInExp (If _ tb fb _) =
   consumedInBody tb <> consumedInBody fb
-consumedInExp (LoopOp (DoLoop _ merge _ _)) =
+consumedInExp (DoLoop _ merge _ _) =
   mconcat (map (subExpAliases . snd) $
-           filter (unique . paramType . fst) merge)
-consumedInExp (LoopOp (Map _ _ lam arrs)) =
-  consumedByLambda lam $ map vnameAliases arrs
-consumedInExp (LoopOp (Reduce _ _ lam input)) =
-  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
-  where (accs, arrs) = unzip input
-consumedInExp (LoopOp (Scan _ _ lam input)) =
-  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
-  where (accs, arrs) = unzip input
-consumedInExp (LoopOp (Redomap _ _ _ lam accs arrs)) =
-  consumedByLambda lam $ map subExpAliases accs ++ map vnameAliases arrs
+           filter (unique . paramDeclType . fst) merge)
+consumedInExp (Op op) = consumedInOp op
 consumedInExp _ = mempty
 
-consumedByLambda :: Lambda lore -> [Names] -> Names
-consumedByLambda lam param_als =
-  mconcat [ als
-          | (param, als) <- zip (lambdaParams lam) param_als,
-            unique $ paramType param ]
+consumedByLambda :: Aliased lore => Lambda lore -> Names
+consumedByLambda = consumedInBody . lambdaBody
 
-consumedInPattern :: Pattern lore -> Names
+consumedByExtLambda :: Aliased lore => ExtLambda lore -> Names
+consumedByExtLambda = consumedInBody . extLambdaBody
+
+patternAliases :: AliasesOf attr => PatternT attr -> [Names]
+patternAliases = map (aliasesOf . patElemAttr) . patternElements
+
+consumedInPattern :: PatternT attr -> Names
 consumedInPattern pat =
   mconcat (map (consumedInBindage . patElemBindage) $
            patternContextElements pat ++ patternValueElements pat)
   where consumedInBindage BindVar = mempty
         consumedInBindage (BindInPlace _ src _) = vnameAliases src
+
+-- | Something that contains alias information.
+class AliasesOf a where
+  -- | The alias of the argument element.
+  aliasesOf :: a -> Names
+
+instance AliasesOf Names where
+  aliasesOf = id
+
+class IsOp op => AliasedOp op where
+  opAliases :: op -> [Names]
+  consumedInOp :: op -> Names
+
+instance AliasedOp () where
+  opAliases () = []
+  consumedInOp () = mempty
+
+class AliasedOp (OpWithAliases op) => CanBeAliased op where
+  type OpWithAliases op :: *
+  removeOpAliases :: OpWithAliases op -> op
+  addOpAliases :: op -> OpWithAliases op
+
+instance CanBeAliased () where
+  type OpWithAliases () = ()
+  removeOpAliases = id
+  addOpAliases = id

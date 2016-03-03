@@ -13,27 +13,28 @@
 --     scan
 --
 -- ==
--- structure distributed { DoLoop/Kernel 4 DoLoop 2 Map 0}
+-- structure distributed { DoLoop/MapKernel 3 DoLoop 2 Map 0}
 
-fun [real] combineVs([real] n_row, [real] vol_row, [real] dr_row) =
+fun [f64] combineVs([f64] n_row, [f64] vol_row, [f64] dr_row) =
     map(+, zip(dr_row, map(*, zip(n_row, vol_row ) )))
 
-fun [[real]] mkPrices(  [real]  md_starts, [[real]] md_vols,
-		       [[real]] md_drifts, [[real]] noises ) =
-  let e_rows = map( fn [real] ([real] x) =>
+fun [[f64,num_und],num_dates]
+  mkPrices([f64,num_und] md_starts, [[f64,num_und],num_dates] md_vols,
+	   [[f64,num_und],num_dates] md_drifts, [[f64,num_und],num_dates] noises) =
+  let e_rows = map( fn [f64] ([f64] x) =>
                       map(exp, x)
                   , map(combineVs, zip(noises, md_vols, md_drifts)))
-  in  scan( fn [real] ([real] x, [real] y) =>
+  in  scan( fn [f64] ([f64] x, [f64] y) =>
               map(*, zip(x, y))
           , md_starts, e_rows )
 
-fun [[[real]]] main(int n,
-                    [[real]] md_vols,
-                    [[real]] md_drifts,
-                    [real]  md_starts,
-                    [[[real]]] noises_mat) =
+fun [[[f64]]] main(int n,
+                    [[f64]] md_vols,
+                    [[f64]] md_drifts,
+                    [f64]  md_starts,
+                    [[[f64]]] noises_mat) =
   loop (noises_mat) = for i < n do
-    map (fn [[real]] ([[real]] noises) =>
+    map (fn [[f64]] ([[f64]] noises) =>
            mkPrices(md_starts, md_vols, md_drifts, noises),
          noises_mat) in
   noises_mat

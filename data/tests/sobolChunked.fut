@@ -63,11 +63,11 @@ fun [int] sobolRecI([[int,num_bits]] sob_dir_vs, [int] prev, int n) =
 
 fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map( fn int([int] row) => row[bit], sob_dirs )
+  map( fn int([int] row) => unsafe row[bit], sob_dirs )
 
 -- computes sobol numbers: n,..,n+chunk-1
-fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
-  let sob_fact= 1.0 / toFloat(1 << num_bits)       in
+fun [[f64],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
+  let sob_fact= 1.0 / f64(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
   let contrbs = map( fn [int] (int k) =>
                         let sob = k + n in
@@ -77,9 +77,9 @@ fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let vct_ints= scan( fn [int] ([int] x, [int] y) =>
                         zipWith(^, x, y)
                     , replicate(len, 0), contrbs ) in
-  map( fn [real] ([int] xs) =>
-             map ( fn real (int x) =>
-                     toFloat(x) * sob_fact
+  map( fn [f64] ([int] xs) =>
+             map ( fn f64 (int x) =>
+                     f64(x) * sob_fact
                  , xs)
          , vct_ints)
 
@@ -87,14 +87,14 @@ fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
 -- MAIN
 ----------------------------------------
 
-fun [[real]] main(int num_mc_it,
+fun [[f64]] main(int num_mc_it,
                   [[int,num_bits]] dir_vs_nosz,
                   int num_dates,
                   int num_und) =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
-  let sobol_mat = streamMapMax ( fn [[real,sobvctsz]] (int chunk, [int] ns) =>
-                                    sobolChunk(dir_vs, ns[0], chunk)
-                               , iota(num_mc_it) ) in
+  let sobol_mat = streamMap( fn [[f64,sobvctsz]] (int chunk, [int] ns) =>
+                                sobolChunk(dir_vs, ns[0], chunk)
+                           , iota(num_mc_it) ) in
 
   sobol_mat

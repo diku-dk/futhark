@@ -193,9 +193,40 @@ readerFunctions =
       return ret;
     }
 
-    int read_int(void* dest) {
+    int read_int8(void* dest) {
       skipspaces();
-      if (scanf("%d", (int*)dest) == 1) {
+      if (scanf("%hhi", (typename int8_t*)dest) == 1) {
+        scanf("i8");
+        return 0;
+      } else {
+        return 1;
+      }
+    }
+
+    int read_int16(void* dest) {
+      skipspaces();
+      if (scanf("%hi", (typename int16_t*)dest) == 1) {
+        scanf("i16");
+        return 0;
+      } else {
+        return 1;
+      }
+    }
+
+    int read_int32(void* dest) {
+      skipspaces();
+      if (scanf("%i", (typename int32_t*)dest) == 1) {
+        scanf("i32");
+        return 0;
+      } else {
+        return 1;
+      }
+    }
+
+    int read_int64(void* dest) {
+      skipspaces();
+      if (scanf("%Li", (typename int64_t*)dest) == 1) {
+        scanf("i64");
         return 0;
       } else {
         return 1;
@@ -214,6 +245,7 @@ readerFunctions =
     int read_double(void* dest) {
       skipspaces();
       if (scanf("%lf", (double*)dest) == 1) {
+        scanf("f64");
         return 0;
       } else {
         return 1;
@@ -223,6 +255,7 @@ readerFunctions =
     int read_float(void* dest) {
       skipspaces();
       if (scanf("%f", (float*)dest) == 1) {
+        scanf("f32");
         return 0;
       } else {
         return 1;

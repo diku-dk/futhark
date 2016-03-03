@@ -12,7 +12,7 @@ import Control.Monad.Reader
 
 import qualified Data.HashMap.Lazy as HM
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 
 type FunctionTable = HM.HashMap Name FunDec
 
@@ -69,5 +69,21 @@ buildCGexp :: [Name] -> Exp -> [Name]
 buildCGexp callees (Apply fname _ _)
   | fname `elem` callees = callees
   | otherwise            = fname:callees
+buildCGexp callees (Op op) =
+  case op of Map _ _ lam _ ->
+               buildCGbody callees $ lambdaBody lam
+             Reduce _ _ _ lam _ ->
+               buildCGbody callees $ lambdaBody lam
+             Scan _ _ lam _ ->
+               buildCGbody callees $ lambdaBody lam
+             Redomap _ _ _ lam0 lam1 _ _ ->
+               buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
+             Stream _ _ (RedLike _ _ lam0 _) lam _ ->
+               buildCGbody (buildCGbody callees $ lambdaBody lam0) (extLambdaBody lam)
+             Stream _ _ _ lam _ ->
+               buildCGbody callees (extLambdaBody lam)
 buildCGexp callees e =
-  foldlPattern buildCGexp callees e
+  foldExp folder callees e
+  where folder =
+          identityFolder { foldOnBody = \x body -> return $ buildCGbody x body
+                         }

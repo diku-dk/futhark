@@ -26,6 +26,8 @@ import Futhark.Util.Pretty hiding (space)
 
 -- | An program calling OpenCL kernels.
 data Program = Program { openClProgram :: String
+                       , openClPrelude :: String
+                         -- ^ Must be prepended to the program.
                        , openClKernelNames :: [KernelName]
                        , hostFunctions :: Functions OpenCL
                        }
@@ -40,7 +42,7 @@ type Code = Imp.Code OpenCL
 type KernelName = String
 
 -- | An argument to be passed to a kernel.
-data KernelArg = ValueArg Exp BasicType
+data KernelArg = ValueArg Exp PrimType
                  -- ^ Pass the value of this scalar expression as argument.
                | MemArg VName
                  -- ^ Pass this pointer as argument.
@@ -49,7 +51,9 @@ data KernelArg = ValueArg Exp BasicType
                deriving (Show)
 
 -- | Host-level OpenCL operation.
-data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] (Maybe [Exp])
+data OpenCL = LaunchKernel KernelName [KernelArg] [Exp] [Exp]
+            | GetNumGroups VName
+            | GetGroupSize VName
             deriving (Show)
 
 -- | The block size when transposing.

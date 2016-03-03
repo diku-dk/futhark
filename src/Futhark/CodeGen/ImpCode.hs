@@ -20,8 +20,11 @@ module Futhark.CodeGen.ImpCode
   , Space (..)
   , SpaceId
   , Code (..)
+  , PrimValue (..)
   , Exp (..)
   , BinOp (..)
+  , CmpOp (..)
+  , ConvOp (..)
   , UnOp (..)
 
     -- * Typed enumerations
@@ -43,6 +46,7 @@ module Futhark.CodeGen.ImpCode
 
     -- * Re-exports from other modules.
   , module Language.Futhark.Core
+  , module Futhark.Representation.Primitive
   )
   where
 
@@ -58,7 +62,8 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude hiding (foldr)
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Syntax (BinOp (..), Space(..), SpaceId)
+import Futhark.Representation.Primitive
+import Futhark.Representation.AST.Syntax (Space(..), SpaceId)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
@@ -72,10 +77,10 @@ data Size = ConstSize Int32
 type MemSize = Size
 type DimSize = Size
 
-data Type = Scalar BasicType | Mem MemSize Space
+data Type = Scalar PrimType | Mem MemSize Space
 
 data Param = MemParam VName DimSize Space
-           | ScalarParam VName BasicType
+           | ScalarParam VName PrimType
              deriving (Show)
 
 paramName :: Param -> VName
@@ -85,8 +90,8 @@ paramName (ScalarParam name _) = name
 -- | A collection of imperative functions.
 newtype Functions a = Functions [(Name, Function a)]
 
-data ValueDecl = ArrayValue VName BasicType [DimSize]
-               | ScalarValue BasicType VName
+data ValueDecl = ArrayValue VName PrimType [DimSize]
+               | ScalarValue PrimType VName
                deriving (Show)
 
 data FunctionT a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
@@ -99,7 +104,7 @@ data Code a = Skip
             | For VName Exp (Code a)
             | While Exp (Code a)
             | DeclareMem VName Space
-            | DeclareScalar VName BasicType
+            | DeclareScalar VName PrimType
             | Allocate VName (Count Bytes) Space
               -- ^ Memory space must match the corresponding
               -- 'DeclareMem'.
@@ -107,7 +112,7 @@ data Code a = Skip
               -- ^ Destination, offset in destination, destination
               -- space, source, offset in source, offset space, number
               -- of bytes.
-            | Write VName (Count Bytes) BasicType Space Exp
+            | Write VName (Count Bytes) PrimType Space Exp
             | SetScalar VName Exp
             | SetMem VName VName
               -- ^ Must be in same space.
@@ -127,62 +132,63 @@ instance Monoid (Code a) where
   x    `mappend` Skip = x
   x    `mappend` y    = x :>>: y
 
-data Exp = Constant BasicValue
+data Exp = Constant PrimValue
          | BinOp BinOp Exp Exp
+         | CmpOp CmpOp Exp Exp
+         | ConvOp ConvOp Exp
          | UnOp UnOp Exp
-         | Index VName (Count Bytes) BasicType Space
+         | Index VName (Count Bytes) PrimType Space
          | ScalarVar VName
-         | SizeOf BasicType
+         | SizeOf PrimType
          | Cond Exp Exp Exp
            deriving (Eq, Show)
 
-data UnOp = Not -- ^ Boolean negation.
-          | Complement -- ^ Bitwise complement.
-          | Negate -- ^ Numerical negation.
-          | Abs -- ^ Absolute/numerical value.
-          | Signum -- ^ Sign function.
-            deriving (Eq, Show)
+-- FIXME: At the moment, the Num instances (and family) assume that we
+-- only operate on Int32 values.
 
 instance Num Exp where
   0 + y = y
   x + 0 = x
-  x + y = BinOp Plus x y
+  x + y = BinOp (Add Int32) x y
 
   x - 0 = x
-  x - y = BinOp Minus x y
+  x - y = BinOp (Sub Int32) x y
 
   0 * _ = 0
   _ * 0 = 0
   1 * y = y
   y * 1 = y
-  x * y = BinOp Times x y
+  x * y = BinOp (Mul Int32) x y
 
-  abs = UnOp Abs
-  signum = UnOp Signum
-  fromInteger = Constant . IntVal . fromInteger
-  negate = UnOp Negate
+  abs = UnOp (Abs Int32)
+  signum = UnOp (SSignum Int32)
+  fromInteger = Constant . IntValue . Int32Value . fromInteger
+  negate x = 0 - x
 
 instance IntegralExp Exp where
   0 `div` _ = 0
   x `div` 1 = x
-  x `div` y = BinOp FloatDiv x y
+  x `div` y = BinOp (SDiv Int32) x y
+
   0 `mod` _ = 0
   _ `mod` 1 = 0
-  x `mod` y = BinOp Mod x y
+  x `mod` y = BinOp (SMod Int32) x y
+
   0 `quot` _ = 0
   x `quot` 1 = x
-  x `quot` y = BinOp Quot x y
+  x `quot` y = BinOp (SQuot Int32) x y
+
   0 `rem` _ = 0
   _ `rem` 1 = 0
-  x `rem` y = BinOp Rem x y
+  x `rem` y = BinOp (SRem Int32) x y
 
 instance IntegralCond Exp where
   oneIfZero x =
-    Cond (BinOp Equal x 0) 1 x
+    Cond (CmpOp (CmpEq $ IntType Int32) x 0) 1 x
   ifZero c =
-    Cond (BinOp Equal c 0)
+    Cond (CmpOp (CmpEq $ IntType Int32) c 0)
   ifLessThan a b =
-    Cond (BinOp Less a b)
+    Cond (CmpOp (CmpSlt Int32) a b)
 
 -- | A wrapper around 'Imp.Exp' that maintains a unit as a phantom
 -- type.
@@ -203,7 +209,7 @@ bytes = Count
 
 -- | Convert a count of elements into a count of bytes, given the
 -- per-element size.
-withElemType :: Count Elements -> BasicType -> Count Bytes
+withElemType :: Count Elements -> PrimType -> Count Bytes
 withElemType (Count e) t = bytes $ e * SizeOf t
 
 dimSizeToExp :: DimSize -> Count Elements
@@ -214,7 +220,7 @@ memSizeToExp = bytes . sizeToExp
 
 sizeToExp :: Size -> Exp
 sizeToExp (VarSize v)   = ScalarVar v
-sizeToExp (ConstSize x) = Constant $ IntVal $ fromIntegral x
+sizeToExp (ConstSize x) = Constant $ IntValue $ Int32Value $ fromIntegral x
 
 -- Prettyprinting definitions.
 
@@ -299,60 +305,36 @@ instance Pretty op => Pretty (Code op) where
     text "--" <+> text s </> ppr code
 
 instance Pretty Exp where
-  ppr = pprPrec (-1)
-  pprPrec _ (Constant v) = ppr v
-  pprPrec p (BinOp op x y) =
-    parensIf (p >= precedence op) $
-    pprPrec (precedence op) x <+/>
-    ppr op <+>
-    pprPrec (rprecedence op) y
-  pprPrec _ (UnOp Not x) =
+  ppr (Constant v) = ppr v
+  ppr (BinOp op x y) =
+    ppr op <> parens (ppr x <> comma <+> ppr y)
+  ppr (CmpOp op x y) =
+    ppr op <> parens (ppr x <> comma <+> ppr y)
+  ppr (ConvOp conv x) =
+    text "convert" <+> ppr fromtype <+> ppr x <+> text "to" <+> ppr totype
+    where (fromtype, totype) = convTypes conv
+  ppr (UnOp Not{} x) =
     text "not" <+> ppr x
-  pprPrec _ (UnOp Complement x) =
+  ppr (UnOp Complement{} x) =
     text "~" <+> ppr x
-  pprPrec _ (UnOp Negate x) =
-    text "-" <+> ppr x
-  pprPrec _ (UnOp Abs x) =
+  ppr (UnOp Abs{} x) =
     text "abs" <> parens (ppr x)
-  pprPrec _ (UnOp Signum x) =
-    text "signum" <> parens (ppr x)
-  pprPrec _ (ScalarVar v) =
+  ppr (UnOp FAbs{} x) =
+    text "fabs" <> parens (ppr x)
+  ppr (UnOp SSignum{} x) =
+    text "ssignum" <> parens (ppr x)
+  ppr (UnOp USignum{} x) =
+    text "usignum" <> parens (ppr x)
+  ppr (ScalarVar v) =
     ppr v
-  pprPrec _ (Index v is bt space) =
+  ppr (Index v is bt space) =
     ppr v <> langle <> ppr bt <> space' <> rangle <> brackets (ppr is)
     where space' = case space of DefaultSpace -> mempty
                                  Space s      -> text "@" <> text s
-  pprPrec _ (SizeOf t) =
+  ppr (SizeOf t) =
     text "sizeof" <> parens (ppr t)
-  pprPrec p (Cond c t f) =
-    parensIf (p >= 0) $
+  ppr (Cond c t f) =
     ppr c <+> text "?" <+> ppr t <+> text ":" <+> ppr f
-
-precedence :: BinOp -> Int
-precedence LogAnd = 0
-precedence LogOr = 0
-precedence Band = 1
-precedence Bor = 1
-precedence Xor = 1
-precedence Equal = 2
-precedence Less = 2
-precedence Leq = 2
-precedence ShiftL = 3
-precedence ShiftR = 3
-precedence Plus = 4
-precedence Minus = 4
-precedence Times = 5
-precedence FloatDiv = 5
-precedence Div = 5
-precedence Mod = 5
-precedence Quot = 5
-precedence Rem = 5
-precedence Pow = 6
-
-rprecedence :: BinOp -> Int
-rprecedence Minus = 10
-rprecedence FloatDiv = 10
-rprecedence op = precedence op
 
 instance Functor Functions where
   fmap = fmapDefault
@@ -433,9 +415,9 @@ instance FreeIn a => FreeIn (Code a) where
     i `HS.delete` (freeIn bound <> freeIn body)
   freeIn (While cond body) =
     freeIn cond <> freeIn body
-  freeIn (DeclareMem {}) =
+  freeIn DeclareMem{} =
     mempty
-  freeIn (DeclareScalar {}) =
+  freeIn DeclareScalar{} =
     mempty
   freeIn (Allocate name size _) =
     freeIn name <> freeIn size
@@ -462,6 +444,8 @@ instance FreeIn Exp where
   freeIn (Constant _) = mempty
   freeIn (BinOp _ x y) = freeIn x <> freeIn y
   freeIn (UnOp _ x) = freeIn x
+  freeIn (CmpOp _ x y) = freeIn x <> freeIn y
+  freeIn (ConvOp _ x) = freeIn x
   freeIn (Index v e _ _) = freeIn v <> freeIn e
   freeIn (ScalarVar v) = freeIn v
   freeIn (SizeOf _) = mempty
@@ -488,9 +472,9 @@ functionsCalled _ = mempty
 --
 -- This function is intended to help figure out alignment restrictions
 -- for memory blocks.
-memoryUsage :: (op -> HM.HashMap VName (HS.HashSet BasicType))
+memoryUsage :: (op -> HM.HashMap VName (HS.HashSet PrimType))
             -> Code op
-            -> HM.HashMap VName (HS.HashSet BasicType)
+            -> HM.HashMap VName (HS.HashSet PrimType)
 memoryUsage _ (Write mem _ bt _ e) =
   HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
 memoryUsage f (c1 :>>: c2) =
@@ -516,21 +500,25 @@ memoryUsage f (Comment _ c) =
   memoryUsage f c
 memoryUsage f (Op op) =
   f op
-memoryUsage _ (SetMem {}) =
+memoryUsage _ SetMem{} =
   HM.empty
 memoryUsage _ Skip =
   HM.empty
-memoryUsage _ (DeclareMem {})  =
+memoryUsage _ DeclareMem{}  =
   HM.empty
-memoryUsage _ (DeclareScalar {})  =
+memoryUsage _ DeclareScalar{}  =
   HM.empty
 
-expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet BasicType)
+expMemoryUsage :: Exp -> HM.HashMap VName (HS.HashSet PrimType)
 expMemoryUsage (Index mem (Count e) bt _) =
   HM.insertWith (<>) mem (HS.singleton bt) $ expMemoryUsage e
 expMemoryUsage (BinOp _ e1 e2) =
   HM.unionWith (<>) (expMemoryUsage e1) (expMemoryUsage e2)
+expMemoryUsage (CmpOp _ e1 e2) =
+  HM.unionWith (<>) (expMemoryUsage e1) (expMemoryUsage e2)
 expMemoryUsage (UnOp _ e) =
+  expMemoryUsage e
+expMemoryUsage (ConvOp _ e) =
   expMemoryUsage e
 expMemoryUsage (Cond e1 e2 e3) =
   foldr (HM.unionWith (<>)) mempty
@@ -539,5 +527,5 @@ expMemoryUsage (ScalarVar _) =
   HM.empty
 expMemoryUsage (SizeOf _) =
   HM.empty
-expMemoryUsage (Constant {}) =
+expMemoryUsage Constant{} =
   HM.empty

@@ -10,7 +10,7 @@ fun [int] plus1([int] x) = map(fn int(int y)=>y+1, x)
 
 fun {int,int} main() =
     let n  = getInt()          in   -- Int
-    let x  = copy(iota(n))     in   -- [Int,n]
+    let x  = iota(n)     in   -- [Int,n]
     let m  = (n * (5-4))       in
     let y  = copy(replicate(n,   x)) in   -- [[Int,n],n] copy necessary as y otherwise aliases x.
     let z  = copy(replicate(n+n, y)) in   -- [[[Int,n],n],m+n]; copy necessary as z otherwise aliases x.

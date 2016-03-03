@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Actions
   ( printAction
   , interpretAction
@@ -20,14 +21,16 @@ import Futhark.Pipeline
 import Futhark.Analysis.Alias
 import Futhark.Analysis.Range
 import Futhark.Representation.AST
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.AST.Attributes.Aliases
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Interpreter
 import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGenSequential
 import qualified Futhark.CodeGen.ImpGen.Kernels as ImpGenKernels
 import qualified Futhark.CodeGen.Backends.SequentialC as SequentialC
+import Futhark.Representation.AST.Attributes.Ranges (CanBeRanged)
 
-printAction :: PrettyLore lore => Action lore
+printAction :: (Attributes lore, CanBeAliased (Op lore)) => Action lore
 printAction =
   Action { actionName = "Prettyprint"
          , actionDescription = "Prettyprint the resulting internal representation on standard output."
@@ -35,14 +38,14 @@ printAction =
          }
 
 interpretAction :: Show error => (FilePath -> String -> Either error [Value])
-                -> Action Basic
+                -> Action SOACS
 interpretAction parser =
   Action { actionName = "Interpret"
          , actionDescription = "Run the program via an interpreter."
          , actionProcedure = liftIO . interpret parser
          }
 
-rangeAction :: PrettyLore lore => Action lore
+rangeAction :: (Attributes lore, CanBeRanged (Op lore)) => Action lore
 rangeAction =
     Action { actionName = "Range analysis"
            , actionDescription = "Print the program with range annotations added."
@@ -53,7 +56,8 @@ seqCodeGenAction :: Action ExplicitMemory
 seqCodeGenAction =
   Action { actionName = "Compile sequentially"
          , actionDescription = "Translate program into sequential C and write it on standard output."
-         , actionProcedure = liftIO . either error putStrLn . SequentialC.compileProg
+         , actionProcedure = either compileFail (liftIO . putStrLn) <=<
+                             SequentialC.compileProg
          }
 
 
@@ -61,31 +65,31 @@ impCodeGenAction :: Action ExplicitMemory
 impCodeGenAction =
   Action { actionName = "Compile imperative"
          , actionDescription = "Translate program into imperative IL and write it on standard output."
-         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenSequential.compileProg
+         , actionProcedure = either compileFail (liftIO . putStrLn . pretty) <=<
+                             ImpGenSequential.compileProg
          }
 
 kernelImpCodeGenAction :: Action ExplicitMemory
 kernelImpCodeGenAction =
   Action { actionName = "Compile imperative kernels"
          , actionDescription = "Translate program into imperative IL with kernels and write it on standard output."
-         , actionProcedure = liftIO . either error (putStrLn . pretty) . ImpGenKernels.compileProg
+         , actionProcedure = either compileFail (liftIO . putStrLn . pretty) <=<
+                             ImpGenKernels.compileProg
          }
 
-interpret :: (Show error, PrettyLore lore) =>
+interpret :: Show error =>
              (FilePath -> String -> Either error [Value])
-          -> Prog lore -> IO ()
+          -> Prog SOACS -> IO ()
 interpret parseValues prog =
   case funDecByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just _ -> do
-      parseres <- liftM (parseValues "<stdin>") getContents
+      parseres <- fmap (parseValues "<stdin>") getContents
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs
-      let (res, trace) = runFunWithShapes defaultEntryPoint args prog
-      mapM_ (hPutStrLn stderr) trace
-      case res of
+      case runFunWithShapes defaultEntryPoint args prog of
         Left err -> do hPutStrLn stderr $ "Interpreter error:\n" ++ show err
                        exitWith $ ExitFailure 2
         Right val  -> putStrLn $ ppOutput val

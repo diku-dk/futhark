@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies, LambdaCase #-}
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
@@ -21,43 +22,69 @@ import Futhark.Representation.ExplicitMemory
 import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
-import Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedLambdaParameters)
+import Futhark.Util.IntegralExp (quotRoundingUp)
 
-type CallKernelGen = ImpGen.ImpM Imp.CallKernel
-type InKernelGen = ImpGen.ImpM Imp.InKernel
+type CallKernelGen = ImpGen.ImpM Imp.HostOp
+type InKernelGen = ImpGen.ImpM Imp.KernelOp
 
-callKernelOperations :: ImpGen.Operations Imp.CallKernel
+callKernelOperations :: ImpGen.Operations Imp.HostOp
 callKernelOperations =
-  ImpGen.Operations { ImpGen.opsExpCompiler = kernelCompiler
+  ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
                     , ImpGen.opsCopyCompiler = callKernelCopy
+                    , ImpGen.opsOpCompiler = opCompiler
                     }
 
-inKernelOperations :: ImpGen.Operations Imp.InKernel
-inKernelOperations = ImpGen.defaultOperations
-                     { ImpGen.opsCopyCompiler = inKernelCopy }
 
-compileProg :: Prog -> Either String Imp.Program
-compileProg = liftM (setDefaultSpace (Imp.Space "device")) .
-              ImpGen.compileProg callKernelOperations
-              (Imp.Space "device")
+inKernelOperations :: ImpGen.Operations Imp.KernelOp
+inKernelOperations = (ImpGen.defaultOperations cannotAllocInKernel)
+                     { ImpGen.opsCopyCompiler = inKernelCopy
+                     , ImpGen.opsExpCompiler = inKernelExpCompiler
+                     }
+
+compileProg :: MonadFreshNames m => Prog -> m (Either String Imp.Program)
+compileProg prog =
+  fmap (setDefaultSpace (Imp.Space "device")) <$>
+  ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
+
+opCompiler :: ImpGen.Destination -> Op ExplicitMemory
+              -> ImpGen.ImpM Imp.HostOp ()
+opCompiler dest (Alloc e space) =
+  ImpGen.compileAlloc dest e space
+opCompiler dest (Inner kernel) =
+  kernelCompiler dest kernel
+
+cannotAllocInKernel :: ImpGen.Destination -> Op ExplicitMemory
+                    -> ImpGen.ImpM Imp.KernelOp ()
+cannotAllocInKernel _ _ =
+  throwError "Cannot allocate memory in kernel."
 
 -- | Recognise kernels (maps), give everything else back.
-kernelCompiler :: ImpGen.ExpCompiler Imp.CallKernel
+kernelCompiler :: ImpGen.Destination -> Kernel ExplicitMemory
+               -> ImpGen.ImpM Imp.HostOp ()
+
+kernelCompiler dest NumGroups = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit $ Imp.Op $ Imp.GetNumGroups v
+
+kernelCompiler dest GroupSize = do
+  [v] <- ImpGen.funcallTargets dest
+  ImpGen.emit $ Imp.Op $ Imp.GetGroupSize v
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (Kernel _ w global_thread_index ispace inps returns body)) = do
+  (MapKernel _ _ global_thread_index ispace inps returns body) = do
 
-  kernel_size <- ImpGen.subExpToDimSize w
+  let kernel_size = product $ map (ImpGen.compileSubExp . snd) ispace
 
-  let global_thread_index_param = Imp.ScalarParam global_thread_index Int
+      global_thread_index_param = Imp.ScalarParam global_thread_index int32
       shape = map (ImpGen.compileSubExp . snd) ispace
       indices = map fst ispace
 
-  let indices_lparams = [ Param (Ident index $ Basic Int) Scalar | index <- indices ]
+      indices_lparams = [ Param index (Scalar int32) | index <- indices ]
       bound_in_kernel = global_thread_index : indices ++ map kernelInputName inps
       kernel_bnds = bodyBindings body
 
@@ -72,40 +99,139 @@ kernelCompiler
         sequence_ $ zipWith3 (writeThreadResult indices) perms dest $ bodyResult body
 
   makeAllMemoryGlobal $ do
-    kernel_body <- liftM (setBodySpace $ Imp.Space "global") $
+    kernel_body <- fmap (setBodySpace $ Imp.Space "global") $
                    ImpGen.subImpM_ inKernelOperations $
                    ImpGen.withParams [global_thread_index_param] $
-                   ImpGen.declaringLParams (indices_lparams++map kernelInputParam inps) $ do
+                   ImpGen.declaringLParams (indices_lparams ++ map kernelInputParam inps) $ do
                      ImpGen.comment "compute thread index" set_indices
                      ImpGen.comment "read kernel parameters" read_params
                      ImpGen.compileBindings kernel_bnds $
                       ImpGen.comment "write kernel result" write_result
 
+    group_size <- newVName "group_size"
+    num_groups <- newVName "num_groups"
+    let group_size_var = Imp.ScalarVar group_size
+    ImpGen.emit $ Imp.DeclareScalar group_size int32
+    ImpGen.emit $ Imp.DeclareScalar num_groups int32
+    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
+    ImpGen.emit $ Imp.SetScalar num_groups $
+      kernel_size `quotRoundingUp` group_size_var
+
     -- Compute the variables that we need to pass to and from the
     -- kernel.
-    uses <- computeKernelUses dest kernel_body bound_in_kernel
+    uses <- computeKernelUses dest (kernel_size, kernel_body) bound_in_kernel
 
-    ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
       , Imp.mapKernelBody = kernel_body
       , Imp.mapKernelUses = uses
       , Imp.mapKernelSize = kernel_size
+      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
+      , Imp.mapKernelGroupSize = Imp.VarSize group_size
       }
-    return ImpGen.Done
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (ReduceKernel _ _ kernel_size reduce_lam fold_lam nes _)) = do
+  (ChunkedMapKernel _ _ kernel_size o lam _) = do
+    local_id <- newVName "local_id"
+    group_id <- newVName "group_id"
+
+    (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
+      compileKernelSize kernel_size
+
+    let num_nonconcat = chunkedKernelNonconcatOutputs lam
+        (nonconcat_targets, concat_targets) = splitAt num_nonconcat dest
+        (arr_chunk_param, _) =
+          partitionChunkedLambdaParameters $ lambdaParams lam
+
+    (call_with_prologue, prologue) <-
+      makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
+      ImpGen.withPrimVar local_id int32 $
+      ImpGen.declaringPrimVar local_id int32 $
+      ImpGen.declaringPrimVar group_id int32 $
+      ImpGen.declaringPrimVar (lambdaIndex lam) int32 $
+      ImpGen.declaringLParams (lambdaParams lam) $ do
+
+        ImpGen.emit $
+          Imp.Op (Imp.GetLocalId local_id 0) <>
+          Imp.Op (Imp.GetGroupId group_id 0) <>
+          Imp.Op (Imp.GetGlobalId (lambdaIndex lam) 0)
+
+        let indexNonconcatTarget (Prim t) (ImpGen.ArrayDestination
+                                           (ImpGen.CopyIntoMemory dest_loc) [_]) = do
+              (mem, space, offset) <-
+                ImpGen.fullyIndexArray' dest_loc [ImpGen.varIndex (lambdaIndex lam)] t
+              return $ ImpGen.ArrayElemDestination mem t space offset
+            indexNonconcatTarget _ (ImpGen.ArrayDestination
+                                    (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.sliceArray dest_loc
+                              [ImpGen.varIndex (lambdaIndex lam)]
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') dest_dims
+            indexNonconcatTarget _ _ =
+              throwError "indexNonconcatTarget: invalid target."
+            indexConcatTarget (ImpGen.ArrayDestination
+                               (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.offsetArray dest_loc $
+                              ImpGen.sizeToScalExp per_thread_chunk *
+                              ImpGen.varIndex (lambdaIndex lam)
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                Nothing : dest_dims
+            indexConcatTarget _ =
+              throwError "indexConcatTarget: invalid target."
+        nonconcat_elem_targets <-
+          zipWithM indexNonconcatTarget (lambdaReturnType lam) nonconcat_targets
+        concat_elem_targets <- mapM indexConcatTarget concat_targets
+
+        let map_dest =
+              ImpGen.Destination $ nonconcat_elem_targets <> concat_elem_targets
+
+        map_op <-
+          ImpGen.subImpM_ inKernelOperations $ do
+            computeThreadChunkSize
+              comm
+              (Imp.ScalarVar $ lambdaIndex lam)
+              (Imp.innerExp $ Imp.dimSizeToExp num_threads)
+              (ImpGen.dimSizeToExp per_thread_chunk)
+              (ImpGen.dimSizeToExp num_elements) $
+              paramName arr_chunk_param
+            ImpGen.compileBody map_dest $ lambdaBody lam
+
+        let bound_in_kernel = map paramName (lambdaParams lam) ++
+                              [lambdaIndex lam,
+                               local_id,
+                               group_id]
+
+        return $ \prologue -> do
+          let body = mconcat [prologue, map_op]
+
+          uses <- computeKernelUses dest (freeIn body) bound_in_kernel
+
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
+            { Imp.kernelBody = body
+            , Imp.kernelLocalMemory = mempty
+            , Imp.kernelUses = uses
+            , Imp.kernelNumGroups = num_groups
+            , Imp.kernelGroupSize = group_size
+            , Imp.kernelName = lambdaIndex lam
+            }
+    call_with_prologue prologue
+    where comm = case o of Disorder -> Commutative
+                           InOrder -> Noncommutative
+
+kernelCompiler
+  (ImpGen.Destination dest)
+  (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam nes _) = do
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
     wave_size <- newVName "wave_size"
     skip_waves <- newVName "skip_waves"
 
-    (num_groups, group_size, per_thread_chunk, num_elements, _, _) <-
+    (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
 
     let fold_lparams = lambdaParams fold_lam
+        (reduce_targets, arr_targets) = splitAt (length nes) dest
         (fold_chunk_param, _) =
           partitionChunkedLambdaParameters $ lambdaParams fold_lam
 
@@ -122,13 +248,13 @@ kernelCompiler
 
     (call_with_prologue, prologue) <-
       makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
-      ImpGen.withBasicVar local_id Int $
-      ImpGen.declaringBasicVar local_id Int $
-      ImpGen.declaringBasicVar group_id Int $
-      ImpGen.declaringBasicVar wave_size Int $
-      ImpGen.declaringBasicVar skip_waves Int $
-      ImpGen.declaringBasicVar (lambdaIndex reduce_lam) Int $
-      ImpGen.declaringBasicVar (lambdaIndex fold_lam) Int $
+      ImpGen.withPrimVar local_id int32 $
+      ImpGen.declaringPrimVar local_id int32 $
+      ImpGen.declaringPrimVar group_id int32 $
+      ImpGen.declaringPrimVar wave_size int32 $
+      ImpGen.declaringPrimVar skip_waves int32 $
+      ImpGen.declaringPrimVar (lambdaIndex reduce_lam) int32 $
+      ImpGen.declaringPrimVar (lambdaIndex fold_lam) int32 $
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (fold_lparams++reduce_lparams) $ do
 
@@ -139,16 +265,33 @@ kernelCompiler
           Imp.Op (Imp.GetGlobalId (lambdaIndex fold_lam) 0) <>
           Imp.Op (Imp.GetWaveSize wave_size)
 
-        reduce_acc_dest <- ImpGen.destinationFromParams reduce_acc_params
+        ImpGen.Destination reduce_acc_targets <-
+          ImpGen.destinationFromParams reduce_acc_params
+
+        let indexArrayTarget (ImpGen.ArrayDestination
+                              (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.offsetArray dest_loc $
+                              ImpGen.sizeToScalExp per_thread_chunk *
+                              ImpGen.varIndex (lambdaIndex fold_lam)
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                Nothing : dest_dims
+            indexArrayTarget _ =
+              throwError "indexArrayTarget: invalid target for map-out."
+        arr_chunk_targets <- mapM indexArrayTarget arr_targets
+
+        let fold_dest =
+              ImpGen.Destination $ reduce_acc_targets <> arr_chunk_targets
 
         fold_op <-
           ImpGen.subImpM_ inKernelOperations $ do
             computeThreadChunkSize
+              comm
               (Imp.ScalarVar $ lambdaIndex fold_lam)
+              (Imp.innerExp $ Imp.dimSizeToExp num_threads)
               (ImpGen.dimSizeToExp per_thread_chunk)
               (ImpGen.dimSizeToExp num_elements) $
               paramName fold_chunk_param
-            ImpGen.compileBody reduce_acc_dest $ lambdaBody fold_lam
+            ImpGen.compileBody fold_dest $ lambdaBody fold_lam
 
         write_fold_result <-
           ImpGen.subImpM_ inKernelOperations $
@@ -157,6 +300,7 @@ kernelCompiler
 
         let read_reduce_args = zipWithM_ (readReduceArgument local_id offset)
                                reduce_arr_params acc_local_mem
+            reduce_acc_dest = ImpGen.Destination reduce_acc_targets
 
         reduce_op <-
           ImpGen.subImpM_ inKernelOperations $ do
@@ -165,7 +309,7 @@ kernelCompiler
 
         write_result <-
           ImpGen.subImpM_ inKernelOperations $
-          zipWithM_ (writeFinalResult [group_id]) dest reduce_acc_params
+          zipWithM_ (writeFinalResult [group_id]) reduce_targets reduce_acc_params
 
         let bound_in_kernel = map paramName (lambdaParams fold_lam ++
                                              lambdaParams reduce_lam) ++
@@ -187,21 +331,21 @@ kernelCompiler
           -- the loops where they are used, without losing
           -- performance.  This can be done when we become tired of
           -- looking at ugly kernel code.
-          let wave_id = Imp.BinOp Quot
+          let wave_id = Imp.BinOp (SQuot Int32)
                         (Imp.ScalarVar local_id)
                         (Imp.ScalarVar wave_size)
               in_wave_id = Imp.ScalarVar local_id -
                            (wave_id * Imp.ScalarVar wave_size)
-              num_waves = Imp.BinOp Quot
+              num_waves = Imp.BinOp (SQuot Int32)
                           (Imp.innerExp (Imp.dimSizeToExp group_size) +
                            Imp.ScalarVar wave_size - 1)
                           (Imp.ScalarVar wave_size)
 
               doing_in_wave_reductions =
-                Imp.BinOp Less (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
+                Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar offset) $ Imp.ScalarVar wave_size
               apply_in_in_wave_iteration =
-                Imp.BinOp Equal
-                (Imp.BinOp Band in_wave_id (2 * Imp.ScalarVar offset - 1)) 0
+                Imp.CmpOp (CmpEq int32)
+                (Imp.BinOp (And Int32) in_wave_id (2 * Imp.ScalarVar offset - 1)) 0
               in_wave_reductions =
                 Imp.SetScalar offset 1 <>
                 Imp.While doing_in_wave_reductions
@@ -210,12 +354,12 @@ kernelCompiler
                    Imp.SetScalar offset (Imp.ScalarVar offset * 2))
 
               doing_cross_wave_reductions =
-                Imp.BinOp Less (Imp.ScalarVar skip_waves) num_waves
+                Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar skip_waves) num_waves
               is_first_thread_in_wave =
-                Imp.BinOp Equal in_wave_id 0
+                Imp.CmpOp (CmpEq int32) in_wave_id 0
               wave_not_skipped =
-                Imp.BinOp Equal (Imp.BinOp Band wave_id
-                                 (2 * Imp.ScalarVar skip_waves - 1))
+                Imp.CmpOp (CmpEq int32)
+                (Imp.BinOp (And Int32) wave_id (2 * Imp.ScalarVar skip_waves - 1))
                 0
               apply_in_cross_wave_iteration =
                 Imp.BinOp LogAnd is_first_thread_in_wave wave_not_skipped
@@ -230,7 +374,7 @@ kernelCompiler
                    Imp.SetScalar skip_waves (Imp.ScalarVar skip_waves * 2))
 
               write_group_result =
-                Imp.If (Imp.BinOp Equal (Imp.ScalarVar local_id) 0)
+                Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar local_id) 0)
                 write_result mempty
 
               body = mconcat [prologue,
@@ -244,7 +388,7 @@ kernelCompiler
 
           uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
-          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = body
             , Imp.kernelLocalMemory = local_mem
             , Imp.kernelUses = uses
@@ -252,10 +396,9 @@ kernelCompiler
             , Imp.kernelGroupSize = group_size
             , Imp.kernelName = lambdaIndex fold_lam
             }
-          return ImpGen.Done
     call_with_prologue prologue
   where readReduceArgument local_id offset param (mem, _)
-          | Basic _ <- paramType param =
+          | Prim _ <- paramType param =
               ImpGen.emit $
                 Imp.SetScalar (paramName param) $
                 Imp.Index mem (bytes i) bt (Space "local")
@@ -266,7 +409,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (LoopOp (ScanKernel _ _ kernel_size lam input)) = do
+  (ScanKernel _ _ kernel_size order lam input) = do
     let (nes, arrs) = unzip input
         (arrs_dest, partials_dest) = splitAt (length input) dest
     local_id <- newVName "local_id"
@@ -277,7 +420,8 @@ kernelCompiler
 
     renamed_lam <- renameLambda lam
 
-    (num_groups, local_size, elements_per_thread, num_elements, _, _) <-
+    (num_groups, local_size, elements_per_thread,
+     num_elements, _offset_multiple, num_threads) <-
       compileKernelSize kernel_size
 
     let (other_index_param, actual_params) =
@@ -288,17 +432,27 @@ kernelCompiler
     (acc_mem_params, acc_local_mem) <-
       unzip <$> mapM (createAccMem local_size) x_params
 
+    let twoDimInput (ImpGen.ArrayEntry (ImpGen.MemLocation mem shape ixfun) bt) =
+          let shape' = [num_threads, elements_per_thread] ++ drop 1 shape
+              ixfun' = IxFun.reshape ixfun $
+                       [DimNew $ kernelNumThreads kernel_size,
+                        DimNew $ kernelElementsPerThread kernel_size] ++
+                       map (DimNew . ImpGen.dimSizeToSubExp) (drop 1 shape)
+          in ImpGen.ArrayEntry (ImpGen.MemLocation mem shape' ixfun') bt
+
     (call_with_body, body) <-
       makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
-      ImpGen.declaringBasicVar local_id Int $
-      ImpGen.declaringBasicVar group_id Int $
-      ImpGen.declaringBasicVar wave_size Int $
-      ImpGen.declaringBasicVar thread_chunk_size Int $
-      ImpGen.declaringBasicVar (lambdaIndex lam) Int $
-      ImpGen.declaringBasicVar global_id Int $
+      ImpGen.declaringPrimVar local_id int32 $
+      ImpGen.declaringPrimVar group_id int32 $
+      ImpGen.declaringPrimVar wave_size int32 $
+      ImpGen.declaringPrimVar thread_chunk_size int32 $
+      ImpGen.declaringPrimVar (lambdaIndex lam) int32 $
+      ImpGen.declaringPrimVar (lambdaIndex renamed_lam) int32 $
+      ImpGen.declaringPrimVar global_id int32 $
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (lambdaParams lam) $
-      ImpGen.declaringLParams (lambdaParams renamed_lam) $ do
+      ImpGen.declaringLParams (lambdaParams renamed_lam) $
+      ImpGen.modifyingArrays arrs twoDimInput $ do
 
         ImpGen.emit $
           Imp.Op (Imp.GetLocalId local_id 0) <>
@@ -318,32 +472,51 @@ kernelCompiler
         x_dest <- ImpGen.destinationFromParams x_params
         y_dest <- ImpGen.destinationFromParams y_params
 
-        let readScanElement param inp_arr
-              | Basic _ <- paramType param = do
-                  let global_i = ImpGen.varIndex $ lambdaIndex lam
-                  read_input <-
-                    ImpGen.readFromArray inp_arr [global_i]
-                  ImpGen.emit $
-                    Imp.SetScalar (paramName param) read_input
-              | otherwise =
-                  fail "readScanElement: cannot handle array accumulator yet."
+        -- The number of elements processed by the thread so far.
+        elements_scanned <- newVName "elements_scanned"
+
+        let readScanElement param inp_arr =
+              ImpGen.copyDWIM (paramName param) []
+              (Var inp_arr) [ImpGen.varIndex global_id,
+                             ImpGen.varIndex elements_scanned]
 
         computeThreadChunkSize
+          Noncommutative
           (Imp.ScalarVar global_id)
+          (Imp.innerExp $ Imp.dimSizeToExp num_threads)
           (ImpGen.dimSizeToExp elements_per_thread)
           (ImpGen.dimSizeToExp num_elements)
           thread_chunk_size
-        elements_scanned <- newVName "elements_scanned"
 
-        zipWithM_ ImpGen.compileResultSubExp
-          (ImpGen.valueDestinations x_dest) nes
-        zipWithM_ ImpGen.compileResultSubExp
+        zipWithM_ ImpGen.compileSubExpTo
           (ImpGen.valueDestinations x_dest) nes
 
         read_params <-
           ImpGen.collect $ zipWithM_ readScanElement y_params arrs
 
-        let writeScanElement = writeFinalResult [lambdaIndex lam]
+        let (indices, explode_n, explode_m) = case order of
+              ScanTransposed -> ([elements_scanned, global_id],
+                                 kernelElementsPerThread kernel_size,
+                                 kernelNumThreads kernel_size)
+              ScanFlat       ->  ([global_id, elements_scanned],
+                                  kernelNumThreads kernel_size,
+                                  kernelElementsPerThread kernel_size)
+
+            writeScanElement (ImpGen.ArrayDestination
+                              (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun))
+                              setdims) =
+              writeFinalResult indices $
+              ImpGen.ArrayDestination
+              (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem dims ixfun'))
+              setdims
+              where ixfun' = explodeOuterDimension
+                             (Shape $ map sizeToSubExp dims)
+                             explode_n explode_m ixfun
+            writeScanElement _ =
+              const $ fail "writeScanElement: invalid destination"
+
+            sizeToSubExp (Imp.ConstSize k) = constant k
+            sizeToSubExp (Imp.VarSize v)   = Var v
 
         write_arrs <-
           ImpGen.collect $ zipWithM_ writeScanElement arrs_dest x_params
@@ -356,12 +529,12 @@ kernelCompiler
             op_to_x <>
             write_arrs <>
             Imp.SetScalar (lambdaIndex lam)
-            (Imp.BinOp Plus (Imp.ScalarVar $ lambdaIndex lam) 1)
+            (Imp.BinOp (Add Int32) (Imp.ScalarVar $ lambdaIndex lam) 1)
 
         zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
           acc_local_mem x_params
 
-        let wave_id = Imp.BinOp Quot
+        let wave_id = Imp.BinOp (SQuot Int32)
                       (Imp.ScalarVar local_id)
                       (Imp.ScalarVar wave_size)
             in_wave_id = Imp.ScalarVar local_id -
@@ -376,14 +549,18 @@ kernelCompiler
           zipWithM_ (writeParamToLocalMemory wave_id) acc_local_mem y_params
 
         let last_in_wave =
-              Imp.BinOp Equal in_wave_id $ Imp.ScalarVar wave_size - 1
-        ImpGen.emit $ Imp.If last_in_wave pack_wave_results mempty
+              Imp.CmpOp (CmpEq int32) in_wave_id $ Imp.ScalarVar wave_size - 1
+        ImpGen.emit $
+          Imp.Comment "last thread of wave 'i' writes its result to offset 'i'" $
+          Imp.If last_in_wave pack_wave_results mempty
 
         ImpGen.emit $ Imp.Op Imp.Barrier
 
-        let is_first_wave = Imp.BinOp Equal wave_id 0
+        let is_first_wave = Imp.CmpOp (CmpEq int32) wave_id 0
         scan_first_wave <- ImpGen.collect $ inWaveScan' renamed_lam
-        ImpGen.emit $ Imp.If is_first_wave scan_first_wave mempty
+        ImpGen.emit $
+          Imp.Comment "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $
+          Imp.If is_first_wave scan_first_wave mempty
 
         ImpGen.emit $ Imp.Op Imp.Barrier
 
@@ -395,6 +572,7 @@ kernelCompiler
 
         op_to_y <- ImpGen.collect $ ImpGen.compileBody y_dest $ lambdaBody lam
         ImpGen.emit $
+          Imp.Comment "carry-in for every wave except the first" $
           Imp.If is_first_wave mempty $
           Imp.Comment "read operands" read_carry_in <>
           Imp.Comment "perform operation" op_to_y
@@ -404,17 +582,16 @@ kernelCompiler
         return $ \body -> do
 
           let local_mem = map (ensureAlignment $ alignmentMap body) acc_local_mem
-              bound_in_kernel = map paramName (lambdaParams lam) ++
-                                map paramName (lambdaParams renamed_lam) ++
-                                [lambdaIndex lam,
-                                 local_id,
+              bound_in_kernel = HM.keys (scopeOf lam) ++
+                                HM.keys (scopeOf renamed_lam) ++
+                                [local_id,
                                  group_id,
                                  global_id] ++
                                 map Imp.paramName acc_mem_params
 
           uses <- computeKernelUses dest (freeIn body) bound_in_kernel
 
-          ImpGen.emit $ Imp.Op $ Imp.CallKernel Imp.Kernel
+          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
             { Imp.kernelBody = body
             , Imp.kernelLocalMemory = local_mem
             , Imp.kernelUses = uses
@@ -422,28 +599,49 @@ kernelCompiler
             , Imp.kernelGroupSize = local_size
             , Imp.kernelName = lambdaIndex lam
             }
-          return ImpGen.Done
 
     call_with_body body
 
+expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
-kernelCompiler target (PrimOp (Iota n)) = do
+expCompiler target (PrimOp (Iota n x)) = do
   i <- newVName "i"
+  v <- newVName "v"
   global_thread_index <- newVName "global_thread_index"
+  let bnd = Let (Pattern [] [PatElem v BindVar $ Scalar int32]) () $
+            PrimOp $ BinOp (Add Int32) (Var i) x
   kernelCompiler target $
-    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(Basic Int,[0])] (Body () [] [Var i])
-kernelCompiler target (PrimOp (Replicate n v)) = do
-  i <- newVName "i"
-  global_thread_index <- newVName "global_thread_index"
-  t <- subExpType v
-  kernelCompiler target $
-    LoopOp $ Kernel [] n global_thread_index [(i,n)] [] [(t,[0..arrayRank t])] (Body () [] [v])
-
--- Allocation in the "local" space is just a placeholder.
-kernelCompiler _ (PrimOp (Alloc _ (Space "local"))) =
+    MapKernel [] n global_thread_index [(i,n)] [] [(Prim int32,[0])] (Body () [bnd] [Var v])
   return ImpGen.Done
 
-kernelCompiler _ e =
+expCompiler target (PrimOp (Replicate n se)) = do
+  global_thread_index <- newVName "global_thread_index"
+  t <- subExpType se
+  let row_rank = arrayRank t
+      row_dims = arrayDims t
+  i <- newVName "i"
+  js <- replicateM row_rank $ newVName "j"
+  let indices = (i,n) : zip js row_dims
+  kernelCompiler target =<<
+    case se of
+      Var v | row_rank > 0 -> do
+        input_name <- newVName "input"
+        let input = KernelInput (Param input_name $ Scalar $ elemType t)
+                    v (map Var js)
+        return $
+          MapKernel [] n global_thread_index indices [input]
+          [(t,[0..row_rank])] (Body () [] [Var input_name])
+      _ ->
+        return $
+        MapKernel [] n global_thread_index [(i,n)] []
+        [(t,[0..arrayRank t])] (Body () [] [se])
+  return ImpGen.Done
+
+-- Allocation in the "local" space is just a placeholder.
+expCompiler _ (Op (Alloc _ (Space "local"))) =
+  return ImpGen.Done
+
+expCompiler _ e =
   return $ ImpGen.CompileExp e
 
 compileKernelSize :: KernelSize
@@ -460,17 +658,20 @@ compileKernelSize (KernelSize num_groups local_size per_thread_elements
   return (num_groups', local_size', per_thread_elements',
           num_elements', offset_multiple', num_threads')
 
-callKernelCopy :: ImpGen.CopyCompiler Imp.CallKernel
+callKernelCopy :: ImpGen.CopyCompiler Imp.HostOp
 callKernelCopy bt
   destloc@(ImpGen.MemLocation destmem destshape destIxFun)
   srcloc@(ImpGen.MemLocation srcmem srcshape srcIxFun)
   n
   | Just (destoffset, srcoffset,
-          num_arrays, size_x, size_y) <- isMapTranspose bt destloc srcloc =
-  ImpGen.emit $ Imp.Op $ Imp.MapTranspose bt destmem destoffset srcmem srcoffset
+          num_arrays, size_x, size_y) <- isMapTransposeKernel bt destloc srcloc =
+  ImpGen.emit $ Imp.Op $ Imp.CallKernel $
+  Imp.MapTranspose bt
+  destmem destoffset
+  srcmem srcoffset
   num_arrays size_x size_y
 
-  | bt_size <- ImpGen.basicScalarSize bt,
+  | bt_size <- primByteSize bt,
     Just destoffset <-
       ImpGen.scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun bt_size,
@@ -509,22 +710,38 @@ callKernelCopy bt
                   HS.singleton srcmem <>
                   freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
 
-    kernel_size <- newVName "copy_kernel_size"
-    ImpGen.emit $ Imp.DeclareScalar kernel_size Int
-    ImpGen.emit $ Imp.SetScalar kernel_size $
-      Imp.innerExp n * product (drop 1 shape)
+    group_size <- newVName "group_size"
+    num_groups <- newVName "num_groups"
+    let group_size_var = Imp.ScalarVar group_size
+        kernel_size = Imp.innerExp n * product (drop 1 shape)
+    ImpGen.emit $ Imp.DeclareScalar group_size int32
+    ImpGen.emit $ Imp.DeclareScalar num_groups int32
+    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
+    ImpGen.emit $ Imp.SetScalar num_groups $
+      kernel_size `quotRoundingUp` group_size_var
 
-    ImpGen.emit $ Imp.Op $ Imp.Map Imp.MapKernel {
+    let bound_in_kernel = [global_thread_index]
+    body_uses <- computeKernelUses [] (kernel_size, body) bound_in_kernel
+
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
         Imp.mapKernelThreadNum = global_thread_index
-      , Imp.mapKernelSize = Imp.VarSize kernel_size
-      , Imp.mapKernelUses = nub $ reads_from ++ writes_to
+      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
+      , Imp.mapKernelGroupSize = Imp.VarSize group_size
+      , Imp.mapKernelSize = kernel_size
+      , Imp.mapKernelUses = nub $ body_uses ++ writes_to ++ reads_from
       , Imp.mapKernelBody = body
       }
 
 -- | We have no bulk copy operation (e.g. memmove) inside kernels, so
 -- turn any copy into a loop.
-inKernelCopy :: ImpGen.CopyCompiler Imp.InKernel
+inKernelCopy :: ImpGen.CopyCompiler Imp.KernelOp
 inKernelCopy = ImpGen.copyElementWise
+
+inKernelExpCompiler :: ImpGen.ExpCompiler Imp.KernelOp
+inKernelExpCompiler _ (PrimOp (Assert _ loc)) =
+  fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
+inKernelExpCompiler _ e =
+  return $ ImpGen.CompileExp e
 
 computeKernelUses :: FreeIn a =>
                      [ImpGen.ValueDestination]
@@ -547,7 +764,7 @@ computeKernelUses dest kernel_body bound_in_kernel = do
 
     -- Compute what memory to copy out.  Must be allocated on device
     -- before kernel execution anyway.
-    writes_to <- liftM catMaybes $ forM dest $ \case
+    writes_to <- fmap catMaybes $ forM dest $ \case
       (ImpGen.ArrayDestination
        (ImpGen.CopyIntoMemory
         (ImpGen.MemLocation mem _ _)) _) -> do
@@ -559,7 +776,7 @@ computeKernelUses dest kernel_body bound_in_kernel = do
 
 readsFromSet :: Names -> ImpGen.ImpM op [Imp.KernelUse]
 readsFromSet free =
-  liftM catMaybes $
+  fmap catMaybes $
   forM (HS.toList free) $ \var -> do
     t <- lookupType var
     case t of
@@ -567,7 +784,7 @@ readsFromSet free =
       Mem _ (Space "local") -> return Nothing
       Mem memsize _ -> Just <$> (Imp.MemoryUse var <$>
                                  ImpGen.subExpToDimSize memsize)
-      Basic bt ->
+      Prim bt ->
         if bt == Cert
         then return Nothing
         else return $ Just $ Imp.ScalarUse var bt
@@ -603,22 +820,22 @@ writeThreadResult thread_idxs perm
   space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
   let is = map ImpGen.varIndex thread_idxs
   case set of
-    Basic bt -> do
+    Prim bt -> do
       (_, _, elemOffset) <-
         ImpGen.fullyIndexArray' destloc' is bt
-      ImpGen.compileResultSubExp (ImpGen.ArrayElemDestination mem bt space elemOffset) se
+      ImpGen.compileSubExpTo (ImpGen.ArrayElemDestination mem bt space elemOffset) se
     _ -> do
-      memloc <- ImpGen.indexArray destloc' is
+      let memloc = ImpGen.sliceArray destloc' is
       let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
                  replicate (arrayRank set) Nothing
-      ImpGen.compileResultSubExp dest se
+      ImpGen.compileSubExpTo dest se
 writeThreadResult _ _ _ _ =
   fail "Cannot handle kernel that does not return an array."
 
 readKernelInput :: KernelInput ExplicitMemory
                 -> InKernelGen ()
 readKernelInput inp =
-  when (basicType t) $ do
+  when (primType t) $ do
     (srcmem, space, srcoffset) <-
       ImpGen.fullyIndexArray arr $ map SE.intSubExpToScalExp is
     ImpGen.emit $ Imp.SetScalar name $
@@ -628,53 +845,54 @@ readKernelInput inp =
         t = kernelInputType inp
         is = kernelInputIndices inp
 
-isMapTranspose :: BasicType -> ImpGen.MemLocation -> ImpGen.MemLocation
-               -> Maybe (Imp.Exp, Imp.Exp,
-                         Imp.Exp, Imp.Exp, Imp.Exp)
-isMapTranspose bt
-  (ImpGen.MemLocation _ destshape destIxFun)
-  (ImpGen.MemLocation _ _ srcIxFun)
+isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
+                     -> Maybe (Imp.Exp, Imp.Exp,
+                               Imp.Exp, Imp.Exp, Imp.Exp)
+isMapTransposeKernel bt
+  (ImpGen.MemLocation _ _ destIxFun)
+  (ImpGen.MemLocation _ srcshape srcIxFun)
   | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
-    permIsTranspose perm =
-    isOk dest_offset src_offset
+    Just (r1, r2, _) <- isMapTranspose perm =
+    isOk swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
     Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
-    permIsTranspose perm  =
-    isOk dest_offset src_offset
+    Just (r1, r2, _) <- isMapTranspose perm =
+    isOk id r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
-  where bt_size = ImpGen.basicScalarSize bt
-        permIsTranspose = (`elem` [ [0,2,1], [1,0] ])
+  where bt_size = primByteSize bt
+        swap (x,y) = (y,x)
 
-        isOk dest_offset src_offset = do
+        isOk f r1 r2 dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
           src_offset' <- ImpGen.scalExpToImpExp src_offset
-          (num_arrays, size_x, size_y) <- getSizes
+          let (num_arrays, size_x, size_y) = getSizes f r1 r2
           return (dest_offset', src_offset',
                   num_arrays, size_x, size_y)
-        getSizes =
-          case map Imp.sizeToExp destshape of
-            [num_arrays, size_x, size_y] -> Just (num_arrays, size_x, size_y)
-            [size_x, size_y]             -> Just (1, size_x, size_y)
-            _                            -> Nothing
+
+        getSizes f r1 r2 =
+          let (mapped, notmapped) =
+                splitAt r1 $ map Imp.sizeToExp srcshape
+              (pretrans, posttrans) =
+                f $ splitAt r2 notmapped
+          in (product mapped, product pretrans, product posttrans)
 
 createAccMem :: Imp.DimSize
              -> LParam
              -> ImpGen.ImpM op (Imp.Param, (VName, Imp.Size))
 createAccMem local_size param
-  | Basic bt <- paramType param = do
+  | Prim bt <- paramType param = do
       mem_shared <- newVName (baseString (paramName param) <> "_mem_local")
       total_size <- newVName "total_size"
       ImpGen.emit $
-        Imp.DeclareScalar total_size Int
+        Imp.DeclareScalar total_size int32
       ImpGen.emit $
         Imp.SetScalar total_size $
         Imp.SizeOf bt * Imp.innerExp (ImpGen.dimSizeToExp local_size)
       return (Imp.MemParam mem_shared (Imp.VarSize total_size) $ Space "local",
               (mem_shared, Imp.VarSize total_size))
-  | Array {} <- paramType param,
-    MemSummary mem _ <- paramLore param = do
+  | ArrayMem _ _ _ mem _ <- paramAttr param = do
       mem_size <-
         ImpGen.entryMemSize <$> ImpGen.lookupMemory mem
       return (Imp.MemParam mem mem_size $ Space "local",
@@ -683,10 +901,11 @@ createAccMem local_size param
       fail $ "createAccMem: cannot deal with accumulator param " ++
       pretty param
 
-writeParamToLocalMemory :: Imp.Exp -> (VName, t) -> FParam
+writeParamToLocalMemory :: Typed (MemBound u) =>
+                           Imp.Exp -> (VName, t) -> Param (MemBound u)
                         -> ImpGen.ImpM op ()
 writeParamToLocalMemory i (mem, _) param
-  | Basic _ <- paramType param =
+  | Prim _ <- paramType param =
       ImpGen.emit $
       Imp.Write mem (bytes i') bt (Space "local") $
       Imp.ScalarVar (paramName param)
@@ -695,10 +914,11 @@ writeParamToLocalMemory i (mem, _) param
   where i' = i * Imp.SizeOf bt
         bt = elemType $ paramType param
 
-readParamFromLocalMemory :: VName -> Imp.Exp -> ParamT attr -> (VName, t)
+readParamFromLocalMemory :: Typed (MemBound u) =>
+                            VName -> Imp.Exp -> Param (MemBound u) -> (VName, t)
                          -> ImpGen.ImpM op ()
 readParamFromLocalMemory index i param (l_mem, _)
-  | Basic _ <- paramType param =
+  | Prim _ <- paramType param =
       ImpGen.emit $
       Imp.SetScalar (paramName param) $
       Imp.Index l_mem (bytes i') bt (Space "local")
@@ -708,9 +928,10 @@ readParamFromLocalMemory index i param (l_mem, _)
   where i' = i * Imp.SizeOf bt
         bt = elemType $ paramType param
 
-writeFinalResult :: [VName]
+writeFinalResult :: Typed (MemBound u) =>
+                    [VName]
                  -> ImpGen.ValueDestination
-                 -> FParam
+                 -> Param (MemBound u)
                  -> ImpGen.ImpM op ()
 writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
   | ImpGen.CopyIntoMemory
@@ -728,34 +949,55 @@ writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
           return $
             ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) $
             map (const Nothing) ds
-      ImpGen.compileResultSubExp target $ Var $ paramName acc_param
+      ImpGen.compileSubExpTo target $ Var $ paramName acc_param
   where bt = elemType $ paramType acc_param
 writeFinalResult _ _ _ =
   fail "writeFinalResult: invalid destination"
 
-computeThreadChunkSize :: Imp.Exp
+computeThreadChunkSize :: Commutativity
+                       -> Imp.Exp
+                       -> Imp.Exp
                        -> Imp.Count Imp.Elements
                        -> Imp.Count Imp.Elements
                        -> VName
                        -> ImpGen.ImpM op ()
-computeThreadChunkSize thread_index elements_per_thread num_elements chunk_var = do
+computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
+  remaining_elements <- newVName "remaining_elements"
+  ImpGen.emit $
+    Imp.DeclareScalar remaining_elements int32
+  ImpGen.emit $
+    Imp.SetScalar remaining_elements $
+    (Imp.innerExp num_elements - thread_index)
+    `quotRoundingUp`
+    num_threads
+  ImpGen.emit $
+    Imp.If (Imp.CmpOp (CmpSlt Int32)
+            (Imp.innerExp elements_per_thread)
+            (Imp.ScalarVar remaining_elements))
+    (Imp.SetScalar chunk_var (Imp.innerExp elements_per_thread))
+    (Imp.SetScalar chunk_var (Imp.ScalarVar remaining_elements))
+
+computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_elements chunk_var = do
   starting_point <- newVName "starting_point"
   remaining_elements <- newVName "remaining_elements"
 
   ImpGen.emit $
-    Imp.DeclareScalar starting_point Int
+    Imp.DeclareScalar starting_point int32
   ImpGen.emit $
     Imp.SetScalar starting_point $
     thread_index * Imp.innerExp elements_per_thread
 
   ImpGen.emit $
-    Imp.DeclareScalar remaining_elements Int
+    Imp.DeclareScalar remaining_elements int32
   ImpGen.emit $
     Imp.SetScalar remaining_elements $
     Imp.innerExp num_elements - Imp.ScalarVar starting_point
 
-  let no_remaining_elements = Imp.BinOp Leq (Imp.ScalarVar remaining_elements) 0
-      beyond_bounds = Imp.BinOp Leq (Imp.innerExp num_elements) (Imp.ScalarVar starting_point)
+  let no_remaining_elements = Imp.CmpOp (CmpSle Int32)
+                              (Imp.ScalarVar remaining_elements) 0
+      beyond_bounds = Imp.CmpOp (CmpSle Int32)
+                      (Imp.innerExp num_elements)
+                      (Imp.ScalarVar starting_point)
 
   ImpGen.emit $
     Imp.If (Imp.BinOp LogOr no_remaining_elements beyond_bounds)
@@ -766,7 +1008,9 @@ computeThreadChunkSize thread_index elements_per_thread num_elements chunk_var =
   where last_thread_elements =
           num_elements - Imp.elements thread_index * elements_per_thread
         is_last_thread =
-          Imp.BinOp Less (Imp.innerExp num_elements) ((thread_index + 1) * Imp.innerExp elements_per_thread)
+          Imp.CmpOp (CmpSlt Int32)
+          (Imp.innerExp num_elements)
+          ((thread_index + 1) * Imp.innerExp elements_per_thread)
 
 inWaveScan :: Imp.Exp
            -> VName
@@ -776,7 +1020,7 @@ inWaveScan :: Imp.Exp
 inWaveScan wave_size local_id acc_local_mem scan_lam = do
   skip_threads <- newVName "skip_threads"
   let in_wave_thread_active =
-        Imp.BinOp Leq (Imp.ScalarVar skip_threads) in_wave_id
+        Imp.CmpOp (CmpSle Int32) (Imp.ScalarVar skip_threads) in_wave_id
       (other_index_param, actual_params) =
         partitionChunkedLambdaParameters $ lambdaParams scan_lam
       (x_params, y_params) =
@@ -800,35 +1044,40 @@ inWaveScan wave_size local_id acc_local_mem scan_lam = do
     acc_local_mem y_params
   ImpGen.emit $
     Imp.Comment "in-wave scan (no barriers needed)" $
-    Imp.DeclareScalar skip_threads Int <>
+    Imp.DeclareScalar skip_threads int32 <>
     Imp.SetScalar skip_threads 1 <>
-    Imp.While (Imp.BinOp Less (Imp.ScalarVar skip_threads) wave_size)
+    Imp.While (Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar skip_threads) wave_size)
     (Imp.If in_wave_thread_active
      (Imp.Comment "read operands" read_operands <>
       Imp.Comment "perform operation" op_to_y <>
       Imp.Comment "write result" write_operation_result)
      mempty <>
      Imp.SetScalar skip_threads (Imp.ScalarVar skip_threads * 2))
-  where wave_id = Imp.BinOp Quot (Imp.ScalarVar local_id) wave_size
+  where wave_id = Imp.BinOp (SQuot Int32) (Imp.ScalarVar local_id) wave_size
         in_wave_id = Imp.ScalarVar local_id - wave_id * wave_size
 
-type AlignmentMap = HM.HashMap VName BasicType
+type AlignmentMap = HM.HashMap VName PrimType
 
-lookupAlignment :: VName -> AlignmentMap -> BasicType
+lookupAlignment :: VName -> AlignmentMap -> PrimType
 lookupAlignment = HM.lookupDefault smallestType
 
-smallestType :: BasicType
+smallestType :: PrimType
 smallestType = Bool
 
 alignmentMap :: Imp.KernelCode  -> AlignmentMap
 alignmentMap = HM.map alignment . Imp.memoryUsage (const mempty)
   where alignment = HS.foldr mostRestrictive smallestType
         mostRestrictive bt1 bt2 =
-          if (basicSize bt1 :: Int) > basicSize bt2
+          if (primByteSize bt1 :: Int) > primByteSize bt2
           then bt1 else bt2
 
 ensureAlignment :: AlignmentMap
                 -> (VName, Imp.Size)
-                -> (VName, Imp.Size, BasicType)
+                -> (VName, Imp.Size, PrimType)
 ensureAlignment alignments (name, size) =
   (name, size, lookupAlignment name alignments)
+
+explodeOuterDimension :: Shape -> SubExp -> SubExp -> IxFun.IxFun -> IxFun.IxFun
+explodeOuterDimension orig_shape n m ixfun =
+  IxFun.reshape ixfun explode_dims
+  where explode_dims = reshapeOuter [DimNew n, DimNew m] 1 orig_shape

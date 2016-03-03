@@ -4,10 +4,10 @@
 -- }
 -- output {
 --   { 129.6
---   , [1.0,-3.0,- 5.4]
+--   , [1.0,-3.0, -5.4]
 --   , [2.0,-6.0,-10.8]
 --   , [2.0,-4.0,-14.8]
---   , [7.0, 1.0,- 9.8]
+--   , [7.0, 1.0, -9.8]
 --   }
 -- }
 -- structure { 
@@ -17,7 +17,7 @@
 --    Redomap 1
 -- }
 --
-fun {real,[real],[real],[real],[real]} main([real] arr) =
+fun {f64,[f64],[f64],[f64],[f64]} main([f64] arr) =
     let sa = scan(+, 0.0, arr) in
     let b  = map (*  2.0, sa ) in
     let sb = scan(+, 0.0, b  ) in

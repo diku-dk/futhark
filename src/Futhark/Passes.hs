@@ -4,28 +4,26 @@ module Futhark.Passes
   )
 where
 
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.SOACS (SOACS)
 import Futhark.Pipeline
-import Futhark.Pass.Untrace
 import Futhark.Pass.Simplify
 import Futhark.Optimise.InliningDeadFun
 import Futhark.Optimise.CSE
 import Futhark.Optimise.Fusion
 
-standardPipeline :: Pipeline Basic Basic
+standardPipeline :: Pipeline SOACS SOACS
 standardPipeline =
-  passes [ untraceProg
-         , simplifyBasic
+  passes [ simplifySOACS
          , inlineAggressively
          , removeDeadFunctions
          , performCSE
-         , simplifyBasic
+         , simplifySOACS
            -- We run fusion twice
          , fuseSOACs
          , performCSE
-         , simplifyBasic
+         , simplifySOACS
          , fuseSOACs
          , performCSE
-         , simplifyBasic
+         , simplifySOACS
          , removeDeadFunctions
          ]

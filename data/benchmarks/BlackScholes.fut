@@ -256,23 +256,23 @@
 --    24.862296]
 -- }
 
-fun real horner (real x) =
+fun f64 horner (f64 x) =
    let {c1,c2,c3,c4,c5} = {0.31938153,-0.356563782,1.781477937,-1.821255978,1.330274429}
    in x * (c1 + x * (c2 + x * (c3 + x * (c4 + x * c5))))
 
-fun real fabs (real x) = if x < 0.0 then -x else x
+fun f64 fabs (f64 x) = if x < 0.0 then -x else x
 
-fun real cnd0 (real d) =
+fun f64 cnd0 (f64 d) =
    let k        = 1.0 / (1.0 + 0.2316419 * fabs(d)) in
    let p        = horner(k) in
    let rsqrt2pi = 0.39894228040143267793994605993438 in
    rsqrt2pi * exp(-0.5*d*d) * p
 
-fun real cnd (real d) =
+fun f64 cnd (f64 d) =
    let c = cnd0(d)
    in if 0.0 < d then 1.0 - c else c
 
-fun real go ({bool,real,real,real} x) =
+fun f64 go ({bool,f64,f64,f64} x) =
    let {call, price, strike, years} = x in
    let r       = 0.08 in  -- riskfree
    let v       = 0.30 in  -- volatility
@@ -287,12 +287,12 @@ fun real go ({bool,real,real,real} x) =
    else
      x_expRT * (1.0 - cndD2) - price * (1.0 - cndD1)
 
-fun [real] blackscholes ([{bool,real,real,real}] xs) =
+fun [f64] blackscholes ([{bool,f64,f64,f64}] xs) =
    map (go, xs)
 
-fun [real] main (int years) =
+fun [f64] main (int years) =
   let days = years*365 in
   let a = map(+1, iota(days)) in
-  let a = map(toFloat, a) in
-  let a = map(fn {bool,real,real,real} (real x) => {True, 58.0 + 4.0 * x / toFloat(days), 65.0, x / 365.0}, a) in
+  let a = map(f64, a) in
+  let a = map(fn {bool,f64,f64,f64} (f64 x) => {True, 58.0 + 4.0 * x / f64(days), 65.0, x / 365.0}, a) in
   blackscholes(a)

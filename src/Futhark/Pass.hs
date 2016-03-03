@@ -38,8 +38,10 @@ instance MonadFreshNames PassM where
 
 -- | Execute a 'PassM' action, yielding logging information and either
 -- an error text or a result.
-runPassM :: PassM a -> VNameSource -> (Either T.Text a, Log)
-runPassM (PassM m) = evalState $ runWriterT $ runExceptT m
+runPassM :: MonadFreshNames m =>
+            PassM a -> m (Either T.Text a, Log)
+runPassM (PassM m) = modifyNameSource $ \src ->
+  runState (runWriterT $ runExceptT m) src
 
 -- | Turn an 'Either' computation into a 'PassM'.  If the 'Either' is
 -- 'Left', the result is an exception.

@@ -5,6 +5,9 @@
 # Directory containing tests.
 testdir=$(dirname "$0")
 
+compiler=futhark-c
+exclude=""
+
 while true; do
     case $1 in
         -t) echo Only type-checking;
@@ -19,11 +22,31 @@ while true; do
             onlyinterpret=true;
             shift
             ;;
+        --compiler=*)
+            compiler=$(echo $1|cut -d= -f2-)
+            shift
+            ;;
+        --compiler)
+            compiler=$2
+            shift
+            shift
+            ;;
+        --exclude=*)
+            exclude="$exclude --exclude $(echo $1|cut -d= -f2-)"
+            shift
+            ;;
+        --exclude)
+            exclude="$exclude --exclude $2"
+            shift
+            shift
+            ;;
         -*) echo "Unknown option $1."; exit 1;;
         --) break ;;
         *) break;;
     esac
 done
+
+echo "compiler: $compiler"
 
 tests() {
     find $testdir/tests/ -name '*fut'
@@ -39,11 +62,21 @@ else
 fi
 
 if [ "$onlytypecheck" = true ]; then
-    futhark-test -t $tests
+    futhark_test_command() {
+        futhark-test -t --compiler="$compiler" "$@"
+    }
 elif [ "$onlycompile" = true ]; then
-    futhark-test -c $tests
+    futhark_test_command() {
+        futhark-test --compiler="$compiler" -c "$@"
+    }
 elif [ "$onlyinterpret" = true ]; then
-    futhark-test -i $tests
+    futhark_test_command() {
+        futhark-test -i "$@"
+    }
 else
-    futhark-test $tests
+    futhark_test_command() {
+        futhark-test  --compiler="$compiler" "$@"
+    }
 fi
+
+futhark_test_command $exclude $tests

@@ -10,8 +10,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , offsetIndex
        , permute
        , reshape
-       , stripe
-       , unstripe
        , applyInd
        , base
        , rebase
@@ -40,7 +38,6 @@ import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape hiding (sliceSizes)
-import Futhark.Representation.AST.Attributes.Stripe
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 
@@ -54,8 +51,6 @@ data IxFun :: * -> Nat -> Nat -> * where
   Permute :: IxFun num c n -> Perm.Permutation n -> IxFun num c n
   Index :: SNat n -> IxFun num c (m:+:n) -> Indices num m -> IxFun num c n
   Reshape :: IxFun num c ('S m) -> ShapeChange num n -> IxFun num c n
-  Stripe :: IxFun num c n -> num -> IxFun num c n
-  Unstripe :: IxFun num c n -> num -> IxFun num c n
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -82,16 +77,6 @@ instance (IntegralCond num, Eq num) => Eq (IxFun num c n) where
       Just Refl ->
         ixfun1 == ixfun2 && Vec.length shape1 == Vec.length shape2
       _ -> False
-  Stripe ixfun1 stride1 == Stripe ixfun2 stride2 =
-    case testEquality (rank ixfun1) (rank ixfun2) of
-      Just Refl ->
-        ixfun1 == ixfun2 && stride1 == stride2
-      _ -> False
-  Unstripe ixfun1 stride1 == Unstripe ixfun2 stride2 =
-    case testEquality (rank ixfun1) (rank ixfun2) of
-      Just Refl ->
-        ixfun1 == ixfun2 && stride1 == stride2
-      _ -> False
   _ == _ = False
 
 instance Show num => Show (IxFun num c n) where
@@ -100,8 +85,6 @@ instance Show num => Show (IxFun num c n) where
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
   show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
   show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
-  show (Stripe fun stride) = "Stripe (" ++ show fun ++ ", " ++ show stride ++ ")"
-  show (Unstripe fun stride) = "Unstripe (" ++ show fun ++ ", " ++ show stride ++ ")"
 
 instance Pretty num => Pretty (IxFun num c n) where
   ppr (Direct dims) =
@@ -112,10 +95,6 @@ instance Pretty num => Pretty (IxFun num c n) where
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->" <>
     parens (commasep (map ppr $ Vec.toList oldshape))
-  ppr (Stripe fun stride) =
-    ppr fun <> text "->+" <> ppr stride
-  ppr (Unstripe fun stride) =
-    ppr fun <> text "->-" <> ppr stride
 
 instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num c n) where
   substituteNames _ (Direct n) =
@@ -132,10 +111,6 @@ instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num c n
     reshape
     (substituteNames subst fun)
     (Vec.map (substituteNames subst) newshape)
-  substituteNames subst (Stripe fun stride) =
-    stripe (substituteNames subst fun) stride
-  substituteNames subst (Unstripe fun stride) =
-    unstripe (substituteNames subst fun) stride
 
 instance (Eq num, IntegralCond num, Substitute num, Rename num) => Rename (IxFun num c n) where
   -- Because there is no mapM-like function on sized vectors, we
@@ -181,14 +156,6 @@ index (Reshape (fun :: IxFun num c ('S m)) newshape) is element_size =
       innerslicesizes = Vec.tail $ sliceSizes oldshape
       new_indices = computeNewIndices innerslicesizes flatidx
   in index fun new_indices element_size
-
-index (Stripe fun stride) (i :- is) element_size =
-  index fun (stripeIndex (stripeToNumBlocks i_n stride) i :- is) element_size
-  where i_n = Vec.head $ shape fun
-
-index (Unstripe fun stride) (i :- is) element_size =
-  index fun (stripeIndexInverse (stripeToNumBlocks i_n stride) i :- is) element_size
-  where i_n = Vec.head $ shape fun
 
 computeNewIndices :: IntegralCond num =>
                      Vector num k -> num -> Indices num k
@@ -245,12 +212,6 @@ reshape ixfun newshape =
           Offset ixfun' offset ->
             Offset (reshape ixfun' newshape) offset
 
-          Stripe ixfun' stride ->
-            Stripe (reshape ixfun' newshape) stride
-
-          Unstripe ixfun' stride ->
-            Unstripe (reshape ixfun' newshape) stride
-
           Index sm (ixfun' :: IxFun num c (k :+: 'S m)) (is :: Indices num k)
             | Dict <- propToBoolLeq $ plusLeqL (Vec.sLength is) sm ->
             let ixfun'' :: IxFun num c ('S (k :+: m))
@@ -260,7 +221,7 @@ reshape ixfun newshape =
                   Vec.map DimCoercion $ Vec.take (Vec.sLength is) $ shape ixfun'
                 newshape' :: ShapeChange num (k :+: 'S m)
                 newshape' = Vec.append unchanged_shape newshape
-            in Index sm (reshape ixfun'' newshape') is
+            in applyInd sm (reshape ixfun'' newshape') is
 
           Reshape _ _ ->
             Reshape ixfun newshape
@@ -270,17 +231,10 @@ reshape ixfun newshape =
     _ ->
       Reshape ixfun newshape
 
-stripe :: forall num c n.(Eq num, IntegralCond num) =>
-          IxFun num c n -> num -> IxFun num c n
-stripe = Stripe
-
-unstripe :: forall num c n.(Eq num, IntegralCond num) =>
-            IxFun num c n -> num -> IxFun num c n
-unstripe = Unstripe
-
 applyInd :: forall num c n m.
             IntegralCond num =>
             SNat n -> IxFun num c (m:+:n) -> Indices num m -> IxFun num c n
+applyInd _ ixfun Nil = ixfun
 applyInd n (Index m_plus_n (ixfun :: IxFun num c (k:+:(m:+:n))) (mis :: Indices num k)) is =
   Index n ixfun' is'
   where k :: SNat k
@@ -306,10 +260,6 @@ rank (Offset ixfun _) = rank ixfun
 rank (Permute ixfun _) = rank ixfun
 rank (Index n _ _) = n
 rank (Reshape _ newshape) = sLength newshape
-rank (Stripe ixfun _) =
-  rank ixfun
-rank (Unstripe ixfun _) =
-  rank ixfun
 
 shape :: IntegralCond num =>
          IxFun num c n -> Shape num n
@@ -336,10 +286,6 @@ shape (Index n (ixfun::IxFun num c (m :+ n)) (indices::Indices num m)) =
        in resshape
 shape (Reshape _ dims) =
   Vec.map newDim dims
-shape (Stripe ixfun _) =
-  shape ixfun
-shape (Unstripe ixfun _) =
-  shape ixfun
 
 base :: IxFun num k c
      -> Shape num k
@@ -353,28 +299,21 @@ base (Index _ ixfun _) =
   base ixfun
 base (Reshape ixfun _) =
   base ixfun
-base (Stripe ixfun _) =
-  base ixfun
-base (Unstripe ixfun _) =
-  base ixfun
 
-rebase :: IxFun num k c
+rebase :: (Eq num, IntegralCond num) =>
+          IxFun num k c
        -> IxFun num c n
        -> IxFun num k n
 rebase new_base (Direct _) =
   new_base
 rebase new_base (Offset ixfun o) =
-  Offset (rebase new_base ixfun) o
+  offsetIndex (rebase new_base ixfun) o
 rebase new_base (Permute ixfun perm) =
-  Permute (rebase new_base ixfun) perm
+  permute (rebase new_base ixfun) perm
 rebase new_base (Index n ixfun is) =
-  Index n (rebase new_base ixfun) is
+  applyInd n (rebase new_base ixfun) is
 rebase new_base (Reshape ixfun new_shape) =
-  Reshape (rebase new_base ixfun) new_shape
-rebase new_base (Stripe ixfun stride) =
-  Stripe (rebase new_base ixfun) stride
-rebase new_base (Unstripe ixfun stride) =
-  Unstripe (rebase new_base ixfun) stride
+  reshape (rebase new_base ixfun) new_shape
 
 -- This function does not cover all possible cases.  It's a "best
 -- effort" kind of thing.
@@ -418,7 +357,3 @@ instance FreeIn num => FreeIn (IxFun num c n) where
     mconcat (map freeIn $ toList is)
   freeIn (Reshape ixfun dims) =
     freeIn ixfun <> mconcat (map freeIn $ Vec.toList dims)
-  freeIn (Stripe ixfun stride) =
-    freeIn ixfun <> freeIn stride
-  freeIn (Unstripe ixfun stride) =
-    freeIn ixfun <> freeIn stride

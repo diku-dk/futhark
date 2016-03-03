@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleInstances, TypeFamilies, GeneralizedNewtypeDeriving, MultiParamTypeClasses #-}
 module Futhark.Internalise.Monad
   ( InternaliseM
   , runInternaliseM
@@ -26,16 +26,15 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.DList as DL
 import Data.List
 
-import qualified Futhark.Representation.External as E
-import Futhark.Representation.Basic
+import qualified Language.Futhark as E
+import Futhark.Representation.SOACS
 import Futhark.MonadFreshNames
-import qualified Futhark.Binder as B
-import Futhark.Tools hiding (bindingIdentTypes, bindingParamTypes)
+import Futhark.Tools
 
 import Prelude hiding (mapM)
 
 data FunBinding = FunBinding
-                  { internalFun :: ([VName], [Type],
+                  { internalFun :: ([VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
                   , externalFun :: (E.DeclType, [E.DeclType])
                   }
@@ -54,15 +53,7 @@ data InternaliseEnv = InternaliseEnv {
   , envDoBoundsChecks :: Bool
   }
 
-initialFtable :: FunTable
-initialFtable = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, paramts) =
-          FunBinding
-          ([], map Basic paramts,
-           const $ Just $ ExtRetType [Basic t])
-          (E.Basic t, map E.Basic paramts)
-
-newtype InternaliseM  a = InternaliseM (BinderT Basic
+newtype InternaliseM  a = InternaliseM (BinderT SOACS
                                         (ReaderT InternaliseEnv
                                          (StateT VNameSource
                                           (Except String)))
@@ -77,11 +68,11 @@ instance MonadFreshNames InternaliseM where
   getNameSource = get
   putNameSource = put
 
-instance HasTypeEnv InternaliseM where
-  askTypeEnv = InternaliseM askTypeEnv
+instance HasScope SOACS InternaliseM where
+  askScope = InternaliseM askScope
 
 instance MonadBinder InternaliseM where
-  type Lore InternaliseM = Basic
+  type Lore InternaliseM = SOACS
   mkLetM pat e = InternaliseM $ mkLetM pat e
   mkBodyM bnds res = InternaliseM $ mkBodyM bnds res
   mkLetNamesM pat e = InternaliseM $ mkLetNamesM pat e
@@ -92,9 +83,9 @@ instance MonadBinder InternaliseM where
     InternaliseM $ collectBindings m
 
 runInternaliseM :: MonadFreshNames m =>
-                   Bool -> FunTable -> InternaliseM a
+                   FunTable -> InternaliseM a
                 -> m (Either String a)
-runInternaliseM boundsCheck ftable (InternaliseM m) =
+runInternaliseM ftable (InternaliseM m) =
   modifyNameSource $ \src ->
   let onError e                 = (Left e, src)
       onSuccess ((prog,_),src') = (Right prog, src')
@@ -102,8 +93,8 @@ runInternaliseM boundsCheck ftable (InternaliseM m) =
      runStateT (runReaderT (runBinderT m mempty) newEnv) src
   where newEnv = InternaliseEnv {
                    envSubsts = HM.empty
-                 , envFtable = initialFtable `HM.union` ftable
-                 , envDoBoundsChecks = boundsCheck
+                 , envFtable = ftable
+                 , envDoBoundsChecks = True
                  }
 
 lookupFunction :: Name -> InternaliseM FunBinding
@@ -115,7 +106,11 @@ lookupFunction fname = do
 bindingIdentTypes :: [Ident] -> InternaliseM a
                   -> InternaliseM a
 bindingIdentTypes idents (InternaliseM m) =
-  InternaliseM $ B.bindingIdentTypes idents m
+  InternaliseM $ localScope (typeEnvFromIdents idents) m
+
+typeEnvFromIdents :: [Ident] -> Scope SOACS
+typeEnvFromIdents = HM.fromList . map assoc
+  where assoc ident = (identName ident, LetInfo $ identType ident)
 
 bindingParamTypes :: [LParam] -> InternaliseM a
                   -> InternaliseM a

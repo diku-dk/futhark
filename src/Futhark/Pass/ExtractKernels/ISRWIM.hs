@@ -7,14 +7,15 @@ module Futhark.Pass.ExtractKernels.ISRWIM
 import Control.Arrow (first)
 import Control.Monad.State
 import Data.Monoid
+import qualified Data.HashSet as HS
 
 import Prelude
 
 import Futhark.MonadFreshNames
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS
 import Futhark.Tools
 
-iswim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+iswim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
@@ -24,7 +25,7 @@ iswim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
 iswim res_pat cs w scan_fun scan_input
   | Body () [bnd] res <- lambdaBody scan_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    LoopOp (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
+    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
     map paramName (lambdaParams scan_fun) == map_arrs = Just $ do
       let (accs, arrs) = unzip scan_input
       arrs' <- forM arrs $ \arr -> do
@@ -49,14 +50,14 @@ iswim res_pat cs w scan_fun scan_input
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
           map_body = mkBody [Let (setPatternOuterDimTo w $ bindingPattern bnd) () $
-                             LoopOp $ Scan cs w scan_fun' scan_input']
+                             Op $ Scan cs w scan_fun' scan_input']
                             res
 
-      res_pat' <- liftM (basicPattern' []) $
+      res_pat' <- fmap (basicPattern' []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
                   patternValueIdents res_pat
 
-      addBinding $ Let res_pat' () $ LoopOp $ Map map_cs map_w map_fun' map_arrs'
+      addBinding $ Let res_pat' () $ Op $ Map map_cs map_w map_fun' map_arrs'
 
       forM_ (zip (patternValueIdents res_pat)
                  (patternValueIdents res_pat')) $ \(to, from) -> do
@@ -65,30 +66,33 @@ iswim res_pat cs w scan_fun scan_input
                      PrimOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
-irwim :: (MonadBinder m, Futhark.Tools.Lore m ~ Basic) =>
+irwim :: (MonadBinder m, Lore m ~ SOACS) =>
          Pattern
       -> Certificates
       -> SubExp
-      -> Lambda
+      -> Commutativity -> Lambda
       -> [(SubExp, VName)]
       -> Maybe (m ())
-irwim res_pat cs w red_fun red_input
+irwim res_pat cs w comm red_fun red_input
   | Body () [bnd] res <- lambdaBody red_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    LoopOp (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
-    map paramName (lambdaParams red_fun) == map_arrs = Just $ do
+    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
+    map paramName (lambdaParams red_fun) == map_arrs,
+    not (lambdaIndex red_fun `HS.member` freeInLambda red_fun) = Just $ do
       let (accs, arrs) = unzip red_input
       arrs' <- forM arrs $ \arr -> do
                  t <- lookupType arr
                  let perm = [1,0] ++ [2..arrayRank t-1]
                  letExp (baseString arr) $ PrimOp $ Rearrange [] perm arr
-      accs' <- mapM (letExp "acc" . PrimOp . SubExp) accs
+      -- FIXME?  Can we reasonably assume that the accumulator is a
+      -- replicate?  We also assume that it is non-empty.
+      let indexAcc (Var v) = letSubExp "acc" $ PrimOp $ Index [] v [intConst Int32 0]
+          indexAcc Constant{} = fail "irwim: array accumulator is a constant."
+      accs' <- mapM indexAcc accs
 
-      let map_arrs' = accs' ++ arrs'
-          (red_acc_params, red_elem_params) =
+      let (_red_acc_params, red_elem_params) =
             splitAt (length arrs) $ lambdaParams red_fun
-          map_params = map removeParamOuterDim red_acc_params ++
-                       map (setParamOuterDimTo w) red_elem_params
+          map_params = map (setParamOuterDimTo w) red_elem_params
           map_rettype = map rowType $ lambdaReturnType red_fun
           map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
 
@@ -96,25 +100,24 @@ irwim res_pat cs w red_fun red_input
           red_body = lambdaBody map_fun
           red_rettype = lambdaReturnType map_fun
           red_fun' = Lambda (lambdaIndex red_fun) red_params red_body red_rettype
-          red_input' = map (first Var) $
-                       uncurry zip $ splitAt (length arrs') $ map paramName map_params
+          red_input' = zip accs' $ map paramName map_params
 
           map_body = mkBody [Let (stripPatternOuterDim $ bindingPattern bnd) () $
-                             LoopOp $ Reduce cs w red_fun' red_input']
+                             Op $ Reduce cs w comm red_fun' red_input']
                             res
 
-      addBinding $ Let res_pat () $ LoopOp $ Map map_cs map_w map_fun' map_arrs'
+      addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
   | otherwise = Nothing
 
-removeParamOuterDim :: Param attr -> Param attr
+removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
   let t = rowType $ paramType param
-  in param { paramIdent = (paramIdent param) { identType = t } }
+  in param { paramAttr = t }
 
-setParamOuterDimTo :: SubExp -> Param attr -> Param attr
+setParamOuterDimTo :: SubExp -> LParam -> LParam
 setParamOuterDimTo w param =
   let t = setOuterDimTo w $ paramType param
-  in param { paramIdent = (paramIdent param) { identType = t } }
+  in param { paramAttr = t }
 
 setIdentOuterDimTo :: SubExp -> Ident -> Ident
 setIdentOuterDimTo w ident =

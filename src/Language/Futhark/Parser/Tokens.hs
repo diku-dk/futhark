@@ -6,7 +6,7 @@ module Language.Futhark.Parser.Tokens
   )
   where
 
-import Language.Futhark.Core
+import Language.Futhark.Core (Int8, Int16, Int32, Int64, Name)
 
 -- | A lexical token.  It does not itself contain position
 -- information, so in practice the parser will consume tokens tagged
@@ -18,17 +18,34 @@ data Token = IF
            | LOOP
            | IN
            | INT
+           | I8
+           | I16
+           | I32
+           | I64
+           | U8
+           | U16
+           | U32
+           | U64
            | BOOL
-           | CERT
            | CHAR
-           | REAL
-           | FLOAT32
-           | FLOAT64
-           | ID { idName :: Name }
-           | STRINGLIT { stringLit :: String }
-           | INTLIT { intLit :: Int32 }
-           | REALLIT { realLit :: Double }
-           | CHARLIT { charLit :: Char }
+           | F32
+           | F64
+           | ID Name
+           | STRINGLIT String
+           | DEFAULT
+           | INTLIT Int64
+           | I8LIT Int8
+           | I16LIT Int16
+           | I32LIT Int32
+           | I64LIT Int64
+           | U8LIT Int8
+           | U16LIT Int16
+           | U32LIT Int32
+           | U64LIT Int64
+           | REALLIT Double
+           | F32LIT Float
+           | F64LIT Double
+           | CHARLIT Char
            | PLUS
            | MINUS
            | TIMES
@@ -38,6 +55,7 @@ data Token = IF
            | REM
            | EQU
            | EQU2
+           | NEQU
            | LTH
            | GTH
            | LEQ
@@ -45,6 +63,7 @@ data Token = IF
            | POW
            | SHIFTL
            | SHIFTR
+           | ZSHIFTR
            | BOR
            | BAND
            | XOR
@@ -67,45 +86,37 @@ data Token = IF
            | IOTA
            | REPLICATE
            | MAP
-           | CONCATMAP
            | REDUCE
+           | REDUCECOMM
            | RESHAPE
            | REARRANGE
-           | STRIPE
-           | UNSTRIPE
            | TRANSPOSE
            | ZIPWITH
            | ZIP
            | UNZIP
+           | UNSAFE
            | SCAN
            | SPLIT
            | CONCAT
            | FILTER
            | PARTITION
-           | REDOMAP
            | TRUE
            | FALSE
-           | CHECKED
            | TILDE
            | AND
            | OR
-           | OP
            | EMPTY
            | COPY
            | ASSERT
            | WHILE
            | STREAM_MAP
-           | STREAM_MAPMAX
            | STREAM_MAPPER
-           | STREAM_MAPPERMAX
            | STREAM_RED
-           | STREAM_REDMAX
            | STREAM_REDPER
-           | STREAM_REDPERMAX
            | STREAM_SEQ
-           | STREAM_SEQMAX
            | BANG
            | ABS
            | SIGNUM
            | EOF
+           | INCLUDE
              deriving (Show, Eq)

@@ -11,6 +11,6 @@ module Futhark.Representation.AST
 where
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes hiding (Lore)
+import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Traversals
 import Futhark.Representation.AST.Pretty

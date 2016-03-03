@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Optimise.Fusion.LoopKernel
   ( FusedKer(..)
@@ -21,29 +22,31 @@ import Control.Monad
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 import Data.Maybe
+import Data.Monoid
 import Data.List
 
 import Prelude
 
-import Futhark.Representation.Basic
+import Futhark.Representation.SOACS hiding (SOAC(..))
+import qualified Futhark.Representation.SOACS as Futhark
 import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
-import qualified Futhark.Representation.AST as Futhark
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
+import qualified Futhark.Analysis.ScalExp as SE
 
-type SOAC = SOAC.SOAC Basic
-type SOACNest = Nest.SOACNest Basic
-type MapNest = MapNest.MapNest Basic
+type SOAC = SOAC.SOAC SOACS
+type SOACNest = Nest.SOACNest SOACS
+type MapNest = MapNest.MapNest SOACS
 
 -- XXX: This function is very gross.
 transformOutput :: SOAC.ArrayTransforms -> [VName] -> SOAC
-                -> Binder Basic ()
+                -> Binder SOACS ()
 transformOutput ts names soac = do
   validents <- zipWithM newIdent (map baseString names) $ SOAC.typeOf soac
   e <- SOAC.toExp soac
@@ -56,7 +59,7 @@ transformOutput ts names soac = do
               letBindNames' [k] $ PrimOp $ SubExp $ Var $ identName valident
             t SOAC.:< ts'' -> do
               let es = map (applyTransform t) validents
-                  mkPat ident = Pattern [] [PatElem ident BindVar ()]
+                  mkPat (Ident nm tp) = Pattern [] [PatElem nm BindVar tp]
               opts <- concat <$> mapM primOpType es
               newIds <- forM (zip names opts) $ \(k, opt) ->
                 newIdent (baseString k) opt
@@ -78,9 +81,9 @@ applyTransform (SOAC.Replicate n) v =
   Replicate n $ Var $ identName v
 
 inputToOutput :: SOAC.Input -> Maybe (SOAC.ArrayTransform, SOAC.Input)
-inputToOutput (SOAC.Input ts ia) =
+inputToOutput (SOAC.Input ts ia iat) =
   case SOAC.viewf ts of
-    t SOAC.:< ts' -> Just (t, SOAC.Input ts' ia)
+    t SOAC.:< ts' -> Just (t, SOAC.Input ts' ia iat)
     SOAC.EmptyF   -> Nothing
 
 data FusedKer = FusedKer {
@@ -96,22 +99,26 @@ data FusedKer = FusedKer {
   , fusedVars :: [VName]
   -- ^ whether at least a fusion has been performed.
 
+  , kernelScope :: Scope SOACS
+  -- ^ The names in scope at the kernel.
+
   , outputTransform :: SOAC.ArrayTransforms
   , outNames :: [VName]
   }
                 deriving (Show)
 
-newKernel :: SOAC -> [VName] -> FusedKer
-newKernel soac out_nms =
+newKernel :: SOAC -> [VName] -> Scope SOACS -> FusedKer
+newKernel soac out_nms scope =
   FusedKer { fsoac = soac
            , inplace = HS.empty
            , fusedVars = []
            , outputTransform = SOAC.noTransforms
            , outNames = out_nms
+           , kernelScope = scope
            }
 
 arrInputs :: FusedKer -> HS.HashSet VName
-arrInputs = HS.fromList . mapMaybe SOAC.inputArray . inputs
+arrInputs = HS.fromList . map SOAC.inputArray . inputs
 
 inputs :: FusedKer -> [SOAC.Input]
 inputs = SOAC.inputs . fsoac
@@ -156,9 +163,9 @@ fixInputTypes outIdents ker =
   ker { fsoac = fixInputTypes' $ fsoac ker }
   where fixInputTypes' soac =
           map fixInputType (SOAC.inputs soac) `SOAC.setInputs` soac
-        fixInputType (SOAC.Input ts (SOAC.Var v _))
+        fixInputType (SOAC.Input ts v _)
           | Just v' <- find ((==v) . identName) outIdents =
-            SOAC.Input ts $ SOAC.Var v $ identType v'
+            SOAC.Input ts v $ identType v'
         fixInputType inp = inp
 
 applyFusionRules :: Names -> [VName] -> SOAC -> FusedKer
@@ -169,13 +176,13 @@ applyFusionRules    unfus_nms outVars soac ker =
   tryExposeInputs   unfus_nms outVars soac ker <|>
   fuseSOACwithKer   unfus_nms outVars soac ker
 
-attemptFusion :: (MonadFreshNames m, HasTypeEnv m) =>
+attemptFusion :: (MonadFreshNames m, HasScope SOACS m) =>
                  Names -> [VName] -> SOAC -> FusedKer
               -> m (Maybe FusedKer)
-attemptFusion unfus_nms outVars soac ker = do
-  types <- askTypeEnv
-  liftM removeUnusedParamsFromKer <$>
-    tryFusion (applyFusionRules unfus_nms outVars soac ker) types
+attemptFusion unfus_nms outVars soac ker =
+  fmap removeUnusedParamsFromKer <$>
+    tryFusion (applyFusionRules unfus_nms outVars soac ker)
+    (kernelScope ker)
 
 removeUnusedParamsFromKer :: FusedKer -> FusedKer
 removeUnusedParamsFromKer ker =
@@ -225,6 +232,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2
       unfus_nms= HS.toList unfus_set
+      w        = SOAC.width soac1
       success res_outnms res_soac = do
         let fusedVars_new = fusedVars ker++outVars
         -- Avoid name duplication, because the producer lambda is not
@@ -244,22 +252,22 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
-          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
-                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          (extra_nms,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+                                   zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ unfus_nms) $
-              SOAC.Map (cs1++cs2) res_lam' new_inp
+      success (outNames ker ++ extra_nms) $
+              SOAC.Map (cs1++cs2) w res_lam' new_inp
 
-    (SOAC.Map {}, SOAC.Redomap _ lam11 _ nes _)
+    (SOAC.Map {}, SOAC.Redomap _ _ comm1 lam11 _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
       let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes lam1 inp1_arr
                                             outPairs lam2 inp2_arr
           unfus_accs  = take (length nes) outVars
           unfus_arrs  = unfus_nms \\ unfus_accs
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-              SOAC.Redomap (cs1++cs2) lam11 res_lam' nes new_inp
+              SOAC.Redomap (cs1++cs2) w comm1 lam11 res_lam' nes new_inp
 
-    (SOAC.Redomap _ lam2r _ nes2 _, SOAC.Redomap _ lam1r _ nes1 _)
+    (SOAC.Redomap _ _ comm2 lam2r _ nes2 _, SOAC.Redomap _ _ comm1 lam1r _ nes1 _)
       | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
       let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1 inp1_arr
                                             outPairs lam2 inp2_arr
@@ -267,35 +275,35 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
           unfus_arrs  = unfus_nms \\ unfus_accs
           lamr        = mergeReduceOps lam1r lam2r
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-              SOAC.Redomap (cs1++cs2) lamr res_lam' (nes1++nes2) new_inp
+              SOAC.Redomap (cs1++cs2) w (comm1<>comm2) lamr res_lam' (nes1++nes2) new_inp
 
-    (SOAC.Redomap _ lam21 _ nes _, SOAC.Map {})
+    (SOAC.Redomap _ _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ unfus_nms) $
-              SOAC.Redomap (cs1++cs2) lam21 res_lam' nes new_inp
+              SOAC.Redomap (cs1++cs2) w comm2 lam21 res_lam' nes new_inp
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
-    (SOAC.Stream _ Sequential{} _ _ _, SOAC.Stream _ form1@Sequential{} _ _ _)
+    (SOAC.Stream _ _ Sequential{} _ _, SOAC.Stream _ _ form1@Sequential{} _ _)
      | mapFusionOK (drop (length $ getStreamAccums form1) outVars) ker || horizFuse -> do
       -- fuse two SEQUENTIAL streams
       (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_nms outVars outPairs soac2 soac1
       success res_nms res_stream
 
-    (SOAC.Stream _ Sequential{} _ _ _, SOAC.Stream _ Sequential{} _ _ _) ->
+    (SOAC.Stream _ _ Sequential{} _ _, SOAC.Stream _ _ Sequential{} _ _) ->
       fail "Fusion conditions not met for two SEQ streams!"
 
-    (SOAC.Stream _ Sequential{} _ _ _, SOAC.Stream{}) ->
+    (SOAC.Stream _ _ Sequential{} _ _, SOAC.Stream{}) ->
       fail "Cannot fuse a parallel with a sequential Stream!"
 
-    (SOAC.Stream{}, SOAC.Stream _ Sequential{} _ _ _) ->
+    (SOAC.Stream{}, SOAC.Stream _ _ Sequential{} _ _) ->
       fail "Cannot fuse a parallel with a sequential Stream!"
 
-    (SOAC.Stream{}, SOAC.Stream _ form1 _ _ _)
+    (SOAC.Stream{}, SOAC.Stream _ _ form1 _ _)
      | mapFusionOK (drop (length $ getStreamAccums form1) outVars) ker || horizFuse -> do
       -- fuse two PARALLEL streams
       (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_nms outVars outPairs soac2 soac1
@@ -312,7 +320,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     ---   we could run in an infinite recursion, i.e., repeatedly   ---
     ---   fusing map o scan into an infinity of Stream levels!      ---
     -------------------------------------------------------------------
-    (SOAC.Stream _ form2 _ _ _, _) -> do
+    (SOAC.Stream _ _ form2 _ _, _) -> do
       -- If this rule is matched then soac1 is NOT a stream.
       -- To fuse a stream kernel, we transform soac1 to a stream, which
       -- borrows the sequential/parallel property of the soac2 Stream,
@@ -330,7 +338,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       (soac1', newacc_ids) <- SOAC.soacToStream soac1
       fuseSOACwithKer unfus_set (map identName newacc_ids++outVars) soac1' ker
 
-    (_, SOAC.Stream _ form1 _ _ _) -> do
+    (_, SOAC.Stream _ _ form1 _ _) -> do
       -- If it reached this case then soac2 is NOT a Stream kernel,
       -- hence transform the kernel's soac to a stream and attempt
       -- stream-stream fusion recursivelly.
@@ -351,19 +359,15 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
 fuseStreamHelper :: [VName] -> [VName] -> [VName] -> [(VName,Ident)]
                  -> SOAC -> SOAC -> TryFusion ([VName], SOAC)
 fuseStreamHelper out_kernms unfus_nms outVars outPairs
-                 (SOAC.Stream cs2 form2 lam2 ii2 inp2_arr)
-                 (SOAC.Stream cs1 form1 lam1 ii1 inp1_arr) =
+                 (SOAC.Stream cs2 w2 form2 lam2 inp2_arr)
+                 (SOAC.Stream cs1 _ form1 lam1 inp1_arr) =
   if getStreamOrder form2 /= getStreamOrder form1
   then fail "fusion conditions not met!"
   else do -- very similar to redomap o redomap composition,
           -- but need to remove first the `chunk' and `i'
           -- parameters of streams' lambdas and put them
           -- lab in the resulting stream lambda.
-          let res_ii  = case (ii1, ii2) of
-                            (MaxChunk, _) -> MaxChunk
-                            (_, MaxChunk) -> MaxChunk
-                            (_,_        ) -> MinChunk
-              nes1    = getStreamAccums form1
+          let nes1    = getStreamAccums form1
               chunk1  = head $ lambdaParams lam1
               chunk2  = head $ lambdaParams lam2
               hmnms = HM.fromList [(paramName chunk2, paramName chunk1)]
@@ -377,49 +381,44 @@ fuseStreamHelper out_kernms unfus_nms outVars outPairs
               unfus_arrs  = unfus_nms \\ unfus_accs
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
-                    SOAC.Stream (cs1++cs2) res_form res_lam'' res_ii new_inp )
-  where mergeForms (MapLike _) (MapLike o )           = return $ MapLike o
-        mergeForms (MapLike _) (RedLike o lam0 acc0)  = return $ RedLike o lam0 acc0
-        mergeForms (RedLike o lam0 acc0) (MapLike _)  = return $ RedLike o lam0 acc0
-        mergeForms (Sequential acc2) (Sequential acc1)= return $ Sequential (acc1++acc2)
-        mergeForms (RedLike _ lam2r acc2) (RedLike o1 lam1r acc1) =
-            return $ RedLike o1 (mergeReduceOps lam1r lam2r) (acc1++acc2)
+                    SOAC.Stream (cs1++cs2) w2 res_form res_lam'' new_inp )
+  where mergeForms (MapLike _) (MapLike o ) = return $ MapLike o
+        mergeForms (MapLike _) (RedLike o comm lam0 acc0) = return $ RedLike o comm lam0 acc0
+        mergeForms (RedLike o comm lam0 acc0) (MapLike _) = return $ RedLike o comm lam0 acc0
+        mergeForms (Sequential acc2) (Sequential acc1) = return $ Sequential (acc1++acc2)
+        mergeForms (RedLike _ comm2 lam2r acc2) (RedLike o1 comm1 lam1r acc1) =
+            return $ RedLike o1 (comm1<>comm2) (mergeReduceOps lam1r lam2r) (acc1++acc2)
         mergeForms _ _ = fail "Fusing sequential to parallel stream disallowed!"
 fuseStreamHelper _ _ _ _ _ _ = fail "Cannot Fuse Streams!"
 
 -- | If a Stream is passed as argument then it converts it to a
 --   Sequential Stream; Otherwise it FAILS!
 toSeqStream :: SOAC -> TryFusion SOAC
-toSeqStream s@(SOAC.Stream _ (Sequential _) _ _ _) = return s
-toSeqStream (SOAC.Stream cs (MapLike _) l ii inps) =
-    return $ SOAC.Stream cs (Sequential  []) l ii inps
-toSeqStream (SOAC.Stream cs (RedLike _ _ acc) l ii inps) =
-    return $ SOAC.Stream cs (Sequential acc) l ii inps
+toSeqStream s@(SOAC.Stream _ _ (Sequential _) _ _) = return s
+toSeqStream (SOAC.Stream cs w (MapLike _) l inps) =
+    return $ SOAC.Stream cs w (Sequential  []) l inps
+toSeqStream (SOAC.Stream cs w (RedLike _ _ _ acc) l inps) =
+    return $ SOAC.Stream cs w (Sequential acc) l inps
 toSeqStream _ = fail "toSeqStream expects a string, but given a SOAC."
 
 -- | This is not currently used, but it might be useful in the future,
 --   so I am going to export it in order not to complain about it.
 toNestedSeqStream :: SOAC -> TryFusion SOAC
 --toNestedSeqStream s@(SOAC.Stream _ (Sequential _) _ _ _) = return s
-toNestedSeqStream   (SOAC.Stream cs form lam ii arrs) = do
+toNestedSeqStream   (SOAC.Stream cs w form lam arrs) = do
   innerlam      <- renameLambda lam
   instrm_resids <- mapM (newIdent "res_instream") $ lambdaReturnType lam
   let inner_extlam = ExtLambda (lambdaIndex innerlam)
                                (lambdaParams innerlam)
                                (lambdaBody   innerlam)
                                (staticShapes $ lambdaReturnType innerlam)
-      w = arraysSize 0 $ map SOAC.inputType arrs
       nes      = getStreamAccums form
       instrm_inarrs = drop (1 + length nes) $ map paramName $ lambdaParams lam
-      (ii_outer,ii_inner) = case (form, ii) of
-                              (Sequential _, _) -> (MaxChunk, MinChunk)
-                              (_,     MaxChunk) -> (MaxChunk, MaxChunk)
-                              (_,     MinChunk) -> (MaxChunk, MinChunk)
-      insoac   = Futhark.Stream cs w form inner_extlam instrm_inarrs ii_inner
-      lam_bind = mkLet' [] instrm_resids $ LoopOp insoac
+      insoac   = Futhark.Stream cs w form inner_extlam instrm_inarrs
+      lam_bind = mkLet' [] instrm_resids $ Op insoac
       lam_body = mkBody [lam_bind] $ map (Futhark.Var . identName) instrm_resids
       lam' = lam { lambdaBody = lam_body }
-  return $ SOAC.Stream cs (Sequential nes) lam' ii_outer arrs
+  return $ SOAC.Stream cs w (Sequential nes) lam' arrs
 toNestedSeqStream _ = fail "In toNestedSeqStream: Input paramter not a stream"
 
 -- Here follows optimizations and transforms to expose fusability.
@@ -464,8 +463,8 @@ optimizations = [iswim]
 iswim :: Maybe [VName] -> SOACNest -> SOAC.ArrayTransforms
       -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 iswim _ nest ots
-  | Nest.Scan cs1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
-    Nest.Map cs2 mb <- nn,
+  | Nest.Scan cs1 w1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
+    Nest.Map cs2 w2 mb <- nn,
     Just es' <- mapM Nest.inputFromTypedSubExp es,
     Nest.Nesting i paramIds mapArrs bndIds retTypes <- lvl,
     mapM isVarInput mapArrs == Just paramIds = do
@@ -477,7 +476,7 @@ iswim _ nest ots
         innerAccParams = zipWith Nest.TypedSubExp
                          (map Var $ take (length es) paramIds) accsizes
         innerArrParams = zipWith Ident (drop (length es) paramIds) arrsizes
-    let innerScan = Nest.Scan cs2 mb innerAccParams
+    let innerScan = Nest.Scan cs2 w1 mb innerAccParams
         scanNest = Nest.Nesting {
                      Nest.nestingInputs = map SOAC.identInput innerArrParams
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
@@ -490,7 +489,7 @@ iswim _ nest ots
                                 t:_ -> transposeIndex 0 1 [0..arrayRank t]
         nest' = Nest.SOACNest
                 newInputs
-                (Nest.Map cs1 (Nest.NewNest scanNest innerScan))
+                (Nest.Map cs1 w2 (Nest.NewNest scanNest innerScan))
     return (nest',
             ots SOAC.|> SOAC.Rearrange cs2 perm)
 iswim _ _ _ = fail "ISWIM does not apply"
@@ -500,8 +499,8 @@ iswim _ _ _ = fail "ISWIM does not apply"
 commonTransforms :: [VName] -> [SOAC.Input]
                  -> (SOAC.ArrayTransforms, [SOAC.Input])
 commonTransforms interesting inps = commonTransforms' inps'
-  where inps' = [ (maybe False (`elem` interesting) $ SOAC.inputArray inp, inp)
-                    | inp <- inps ]
+  where inps' = [ (SOAC.inputArray inp `elem` interesting, inp)
+                | inp <- inps ]
 
 commonTransforms' :: [(Bool, SOAC.Input)] -> (SOAC.ArrayTransforms, [SOAC.Input])
 commonTransforms' inps =
@@ -517,7 +516,7 @@ commonTransforms' inps =
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
 mapDepth :: MapNest -> Int
-mapDepth (MapNest.MapNest _ body levels _) =
+mapDepth (MapNest.MapNest _ _ body levels _) =
   -- XXX: The restriction to pure nests is conservative, but we cannot
   -- know whether an arbitrary postbody is dependent on the exact size
   -- of the nesting result.
@@ -561,9 +560,10 @@ pushRearrange inpIds nest ots = do
             ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
 
+-- | Actually also rearranges indices.
 rearrangeReturnTypes :: MapNest -> [Int] -> MapNest
-rearrangeReturnTypes nest@(MapNest.MapNest cs body nestings inps) perm =
-  MapNest.MapNest cs
+rearrangeReturnTypes nest@(MapNest.MapNest cs w body nestings inps) perm =
+  MapNest.MapNest cs w
   (inner_index `Nest.setNestBodyIndex` body)
   (zipWith setIndex
    (zipWith setReturnType
@@ -594,9 +594,9 @@ fixupInputs inpIds inps =
     perm:_ -> do inps' <- mapM (fixupInput (rearrangeReach perm) perm) inps
                  return (perm, inps')
     _    -> Nothing
-  where exposable = maybe False (`elem` inpIds) . SOAC.inputArray
+  where exposable = (`elem` inpIds) . SOAC.inputArray
 
-        inputRearrange (SOAC.Input ts _)
+        inputRearrange (SOAC.Input ts _ _)
           | _ SOAC.:> SOAC.Rearrange _ perm <- SOAC.viewl ts = Just perm
         inputRearrange _                                     = Nothing
 
@@ -608,24 +608,42 @@ fixupInputs inpIds inps =
 pullReshape :: SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)
 pullReshape nest ots
   | SOAC.Reshape cs shape SOAC.:< ots' <- SOAC.viewf ots,
-    op@Nest.Map {} <- Nest.operation nest,
-    all basicType $ Nest.returnType op = do
-  let inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
+    op@(Nest.Map _ _ mapbody) <- Nest.operation nest,
+    all primType $ Nest.returnType op = do
+  let mapw' = case reverse $ newDims shape of
+        []  -> intConst Int32 0
+        d:_ -> d
+      inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) $
                 Nest.inputs nest
       inputTypes = map SOAC.inputType inputs'
-      outernest inner outershape = do
-        let addDims t = arrayOf t (Shape outershape) $ uniqueness t
+      innermost_input_ts = map (stripArray (length shape - 1)) inputTypes
+  new_index <- newVName "pull_reshape_inner_index"
+  new_indices <- replicateM (length (newDims shape) - 1) $
+                 newVName "pull_reshape_index"
+  maplam <- Nest.bodyToLambda innermost_input_ts mapbody
+  let old_index = lambdaIndex maplam
+      indices_scope = HM.fromList $ zip (new_index:new_indices) $ repeat IndexInfo
+      flat_idx = flattenIndex
+                 (map SE.intSubExpToScalExp $ newDims shape)
+                 (map (SE.intSubExpToScalExp . Var) $ new_indices++[new_index])
+  compute_old_index_bnds <- runBinder_ $ localScope indices_scope $
+    letBindNames'_ [old_index] =<< SE.fromScalExp flat_idx
+
+  let mapbody' = Nest.Fun maplam { lambdaIndex = new_index
+                                 , lambdaBody =
+                                     insertBindings compute_old_index_bnds $
+                                     lambdaBody maplam
+                                 }
+      outernest inner (i, w, outershape) = do
+        let addDims t = arrayOf t (Shape outershape) NoUniqueness
             retTypes = map addDims $ Nest.returnType op
 
-        ps <- forM (zip (Nest.params op) inputTypes) $
-              \(p, inpt) -> do
-                let t = rowType (stripArray (length outershape-1) inpt)
-                        `setUniqueness` uniqueness (identType p)
-                newIdent "pullReshape_param" t
+        ps <- forM inputTypes $ \inpt -> do
+          let t = rowType (stripArray (length outershape-2) inpt)
+          newIdent "pullReshape_param" t
 
         bnds <- forM retTypes $ \_ ->
                   newNameFromString "pullReshape_bnd"
-        i <- newVName "pull_reshape_index"
 
         let nesting = Nest.Nesting {
                         Nest.nestingIndex = i
@@ -634,11 +652,12 @@ pullReshape nest ots
                       , Nest.nestingResult = bnds
                       , Nest.nestingReturnType = retTypes
                       }
-        return $ Nest.Map [] (Nest.NewNest nesting inner)
+        return $ Nest.Map [] w (Nest.NewNest nesting inner)
   -- Only have the certificates on the outermost loop nest.  This
   -- only has the significance of making the generated code look
   -- very slightly neater.
-  op' <- foldM outernest ([] `Nest.setCombCertificates` op) $
+  op' <- foldM outernest (Nest.Map [] mapw' mapbody') $
+         zip3 new_indices (drop 1 $ reverse $ newDims shape) $
          drop 1 $ reverse $ drop 1 $ tails $ newDims shape
   let nest'   = Nest.SOACNest {
                   Nest.inputs    = inputs'
@@ -681,9 +700,9 @@ exposeInputs inpIds ker = do
               return (ker' { fsoac = inps' `SOAC.setInputs` fsoac ker'}, ot')
             _ -> fail "Cannot expose"
 
-        exposed (SOAC.Input ts (SOAC.Var {}))
+        exposed (SOAC.Input ts _ _)
           | SOAC.nullTransforms ts = True
-        exposed inp = maybe True (`notElem` inpIds) $ SOAC.inputArray inp
+        exposed inp = SOAC.inputArray inp `notElem` inpIds
 
 outputTransformPullers :: [SOACNest -> SOAC.ArrayTransforms -> TryFusion (SOACNest, SOAC.ArrayTransforms)]
 outputTransformPullers = [pullRearrange, pullReshape]

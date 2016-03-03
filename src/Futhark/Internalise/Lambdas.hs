@@ -1,7 +1,6 @@
 module Futhark.Internalise.Lambdas
   ( InternaliseLambda
   , internaliseMapLambda
-  , internaliseConcatMapLambda
   , internaliseFoldLambda
   , internaliseRedomapInnerLambda
   , internaliseStreamLambda
@@ -14,8 +13,8 @@ import Control.Monad
 import Data.List
 import Data.Loc
 
-import Futhark.Representation.External as E
-import Futhark.Representation.Basic as I
+import Language.Futhark as E
+import Futhark.Representation.SOACS as I
 import Futhark.MonadFreshNames
 
 import Futhark.Internalise.Monad
@@ -47,18 +46,6 @@ internaliseMapLambda internaliseLambda asserting lam args = do
   i <- newVName "i"
   return $ I.Lambda i params body' rettype'
 
-internaliseConcatMapLambda :: InternaliseLambda
-                           -> E.Lambda
-                           -> InternaliseM I.Lambda
-internaliseConcatMapLambda internaliseLambda lam = do
-  (params, body, rettype) <- internaliseLambda lam Nothing
-  i <- newVName "i"
-  case rettype of
-    [I.Array bt (ExtShape [_]) _] ->
-      return $ I.Lambda i params body [I.Basic bt]
-    _ ->
-      fail "concatMap lambda does not return a single-dimensional array"
-
 makeShapeFun :: [I.LParam] -> I.Body -> Int
              -> InternaliseM I.Lambda
 makeShapeFun params body n = do
@@ -70,7 +57,7 @@ makeShapeFun params body n = do
   (params', copybnds) <- nonuniqueParams params
   i <- newVName "i"
   return $ I.Lambda i params' (insertBindings copybnds body) rettype
-  where rettype = replicate n $ I.Basic Int
+  where rettype = replicate n $ I.Prim int32
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
               -> InternaliseM ()
@@ -79,18 +66,17 @@ bindMapShapes inner_shapes sizefun args outer_shape
   | otherwise =
     letBind_ (basicPattern' [] inner_shapes) =<<
     eIf isempty emptybranch nonemptybranch
-  where zero = intconst 0
-        isempty = eBinOp I.Equal
+  where zero = constant (0::I.Int32)
+        isempty = eCmpOp (I.CmpEq I.int32)
                   (pure $ I.PrimOp $ I.SubExp outer_shape)
                   (pure $ I.PrimOp $ SubExp zero)
-                  I.Bool
         emptybranch =
           pure $ resultBody (map (const zero) $ I.lambdaReturnType sizefun)
         nonemptybranch = insertBindingsM $
           resultBody <$> (eLambda sizefun =<< mapM index0 args)
         index0 arg = do
           arg' <- letExp "arg" $ I.PrimOp $ I.SubExp arg
-          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [intconst 0]
+          letSubExp "elem" $ I.PrimOp $ I.Index [] arg' [zero]
 
 internaliseFoldLambda :: InternaliseLambda
                       -> (InternaliseM Certificates -> InternaliseM Certificates)
@@ -202,8 +188,8 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
                                                     Free s -> s
                                            ) dsx dsrtpx
                       return $ I.Array btp (I.Shape resdims) u
-                    mkArrType (_, I.Basic btp ) =
-                      return $ I.Basic btp
+                    mkArrType (_, I.Prim btp ) =
+                      return $ I.Prim btp
                     mkArrType (_, I.Mem se space) =
                       return $ I.Mem se space
                 lamres <- bodyBind body
@@ -233,28 +219,30 @@ internalisePartitionLambdas internaliseLambda lams args = do
     (params, body, _) <- internaliseLambda lam $ Just rowtypes
     return (params, body)
   params <- newIdents "partition_param" rowtypes
+  let params' = [ Param name t
+                | I.Ident name t <- params]
   body <- mkCombinedLambdaBody params 0 lams'
   i <- newVName "i"
-  return $ I.Lambda i (map (`Param` ()) params) body [I.Basic Int]
+  return $ I.Lambda i params' body [I.Prim int32]
   where mkCombinedLambdaBody :: [I.Ident]
-                             -> Int
+                             -> Int32
                              -> [([I.LParam], I.Body)]
                              -> InternaliseM I.Body
         mkCombinedLambdaBody _      i [] =
-          return $ resultBody [intconst i]
+          return $ resultBody [constant i]
         mkCombinedLambdaBody params i ((lam_params,lam_body):lams') =
           case lam_body of
             Body () bodybnds [boolres] -> do
-              intres <- newIdent "partition_equivalence_class" $ I.Basic Int
+              intres <- newIdent "partition_equivalence_class" $ I.Prim int32
               next_lam_body <-
                 mkCombinedLambdaBody (map paramIdent lam_params) (i+1) lams'
               let parambnds =
                     [ mkLet' [] [paramIdent top] $ I.PrimOp $ I.SubExp $ I.Var $ I.identName fromp
                     | (top,fromp) <- zip lam_params params ]
                   branchbnd = mkLet' [] [intres] $ I.If boolres
-                              (resultBody [intconst i])
+                              (resultBody [constant i])
                               next_lam_body
-                              [I.Basic Int]
+                              [I.Prim int32]
               return $ mkBody
                 (parambnds++bodybnds++[branchbnd])
                 [I.Var $ I.identName intres]

@@ -1,37 +1,35 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts, FlexibleInstances, StandaloneDeriving #-}
--- | This Is an ever-changing abstract syntax for Futhark.  Some types,
--- such as @Exp@, are parametrised by type and name representation.
--- See the @doc/@ subdirectory in the Futhark repository for a language
--- reference, or this module may be a little hard to understand.
+-- | Futhark core language skeleton.  Concrete representations further
+-- extend this skeleton by defining a "lore", which specifies concrete
+-- annotations ("Futhark.Representation.AST.Annotations") and
+-- semantics.
 module Futhark.Representation.AST.Syntax
   (
     module Language.Futhark.Core
+  , module Futhark.Representation.AST.Annotations
+  , module Futhark.Representation.AST.Syntax.Core
 
   -- * Types
   , Uniqueness(..)
+  , NoUniqueness(..)
   , Shape(..)
   , ExtDimSize(..)
   , ExtShape(..)
   , Rank(..)
   , ArrayShape(..)
   , Space (..)
-  , SpaceId
   , TypeBase(..)
-  , Type
-  , ExtType
   , Diet(..)
 
   -- * Values
-  , BasicValue(..)
+  , PrimValue(..)
   , Value(..)
 
   -- * Abstract syntax tree
   , Ident (..)
-  , Certificates
   , SubExp(..)
   , Bindage (..)
   , PatElemT (..)
-  , PatElem
   , PatternT (..)
   , Pattern
   , Binding(..)
@@ -39,10 +37,10 @@ module Futhark.Representation.AST.Syntax
   , BodyT(..)
   , Body
   , PrimOp (..)
-  , LoopOp (..)
-  , SegOp (..)
-  , ScanType(..)
+  , UnOp (..)
   , BinOp (..)
+  , CmpOp (..)
+  , ConvOp (..)
   , DimChange (..)
   , ShapeChange
   , ExpT(..)
@@ -52,23 +50,15 @@ module Futhark.Representation.AST.Syntax
   , Lambda
   , ExtLambdaT (..)
   , ExtLambda
-  , Annotations.RetType
-  , StreamForm(..)
-  , KernelInput (..)
-  , KernelSize (..)
 
   -- * Definitions
   , ParamT (..)
-  , Param
   , FParam
   , LParam
   , FunDecT (..)
   , FunDec
   , ProgT(..)
   , Prog
-
-  -- * Miscellaneous
-  , Names
   )
   where
 
@@ -81,32 +71,26 @@ import Data.Loc
 import Prelude
 
 import Language.Futhark.Core
-import Futhark.Representation.AST.Annotations (Annotations)
-import qualified Futhark.Representation.AST.Annotations as Annotations
+import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax.Core
 
-type PatElem lore = PatElemT (Annotations.LetBound lore)
-
 -- | A pattern is conceptually just a list of names and their types.
-data PatternT lore =
-  Pattern { patternContextElements :: [PatElem lore]
-          , patternValueElements   :: [PatElem lore]
+data PatternT attr =
+  Pattern { patternContextElements :: [PatElem attr]
+          , patternValueElements   :: [PatElem attr]
           }
-
-deriving instance Annotations lore => Ord (PatternT lore)
-deriving instance Annotations lore => Show (PatternT lore)
-deriving instance Annotations lore => Eq (PatternT lore)
+  deriving (Ord, Show, Eq)
 
 instance Monoid (PatternT lore) where
   mempty = Pattern [] []
   Pattern cs1 vs1 `mappend` Pattern cs2 vs2 = Pattern (cs1++cs2) (vs1++vs2)
 
 -- | A type alias for namespace control.
-type Pattern = PatternT
+type Pattern lore = PatternT (LetAttr lore)
 
 -- | A local variable binding.
 data Binding lore = Let { bindingPattern :: Pattern lore
-                        , bindingLore :: Annotations.Exp lore
+                        , bindingLore :: ExpAttr lore
                         , bindingExp :: Exp lore
                         }
 
@@ -119,7 +103,7 @@ type Result = [SubExp]
 
 -- | A body consists of a number of bindings, terminating in a result
 -- (essentially a tuple literal).
-data BodyT lore = Body { bodyLore :: Annotations.Body lore
+data BodyT lore = Body { bodyLore :: BodyAttr lore
                        , bodyBindings :: [Binding lore]
                        , bodyResult :: Result
                        }
@@ -129,29 +113,6 @@ deriving instance Annotations lore => Show (BodyT lore)
 deriving instance Annotations lore => Eq (BodyT lore)
 
 type Body = BodyT
-
--- | Binary operators.
-data BinOp = Plus -- Binary Ops for Numbers
-           | Minus
-           | Pow
-           | Times
-           | FloatDiv
-           | Div -- ^ Rounds towards negative infinity.
-           | Mod
-           | Quot -- ^ Rounds towards zero.
-           | Rem
-           | ShiftR
-           | ShiftL
-           | Band
-           | Xor
-           | Bor
-           | LogAnd
-           | LogOr
-           -- Relational Ops for all basic types at least
-           | Equal
-           | Less
-           | Leq
-             deriving (Eq, Ord, Enum, Bounded, Show)
 
 -- | The new dimension in a 'Reshape'-like operation.  This allows us to
 -- disambiguate "real" reshapes, that change the actual shape of the
@@ -190,14 +151,18 @@ data PrimOp lore
     -- Second arg is the element type of of the rows of the array.
     -- Scalar operations
 
-  | BinOp BinOp SubExp SubExp BasicType
-    -- ^ The type is the result type.
+  | UnOp UnOp SubExp
+    -- ^ Unary operation - result type is the same as the input type.
 
-  | Not SubExp -- ^ E.g., @! True == False@.
-  | Negate SubExp -- ^ E.g., @-(-1) = 1@.
-  | Complement SubExp -- ^ E.g., @~(~1) = 1@.
-  | Abs SubExp -- ^ @abs(-2) = 2@.
-  | Signum SubExp -- ^ @signum(2)@ = 1.
+  | BinOp BinOp SubExp SubExp
+    -- ^ Binary operation - result type is the same as the input
+    -- types.
+
+  | CmpOp CmpOp SubExp SubExp
+    -- ^ Comparison - result type is always boolean.
+
+  | ConvOp ConvOp SubExp
+    -- ^ Conversion "casting".
 
   -- Assertion management.
   | Assert SubExp SrcLoc
@@ -228,11 +193,11 @@ data PrimOp lore
   -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.
-  | Iota SubExp
-  -- ^ @iota(n) = [0,1,..,n-1]@
+  | Iota SubExp SubExp
+  -- ^ @iota(n, x) = [x,x+1,..,x+n-1]@
   | Replicate SubExp SubExp
   -- ^ @replicate(3,1) = [1, 1, 1]@
-  | Scratch BasicType [SubExp]
+  | Scratch PrimType [SubExp]
   -- ^ Create array of given type and shape, with undefined elements.
 
   -- Array index space transformation.
@@ -245,128 +210,11 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
-  | Stripe Certificates SubExp VName
-
-  | Unstripe Certificates SubExp VName
-
   | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element
     -- arrays.  If no arrays are given, the returned offsets are zero,
     -- and no arrays are returned.
-
-  | Alloc SubExp Space
-    -- ^ Allocate a memory block.  This really should not be an
-    -- expression, but what are you gonna do...
   deriving (Eq, Ord, Show)
-
-data LoopOp lore
-  = DoLoop [VName] [(FParam lore, SubExp)] LoopForm (BodyT lore)
-    -- ^ @loop {b} <- {a} = {v} (for i < n|while b) do b@.
-
-  | Map Certificates SubExp (LambdaT lore) [VName]
-    -- ^ @map(+1, {1,2,..,n}) = [2,3,..,n+1]@.
-
-  | ConcatMap Certificates SubExp (LambdaT lore) [[VName]]
-
-  | Reduce  Certificates SubExp (LambdaT lore) [(SubExp, VName)]
-  | Scan   Certificates SubExp (LambdaT lore) [(SubExp, VName)]
-  | Redomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
-  | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName] ChunkIntent
-
-  | Kernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
-    [(Type, [Int])] (Body lore)
-  | ReduceKernel Certificates SubExp
-    KernelSize
-    (LambdaT lore)
-    (LambdaT lore)
-    [SubExp]
-    [VName]
-  | ScanKernel Certificates SubExp
-    KernelSize
-    (LambdaT lore)
-    [(SubExp, VName)]
-
-data StreamForm lore  = MapLike    StreamOrd
-                      | RedLike    StreamOrd (LambdaT lore) [SubExp]
-                      | Sequential [SubExp]
-                        deriving (Eq, Ord, Show)
-
-data KernelInput lore = KernelInput { kernelInputParam :: FParam lore
-                                    , kernelInputArray :: VName
-                                    , kernelInputIndices :: [SubExp]
-                                    }
-
-deriving instance Annotations lore => Eq (KernelInput lore)
-deriving instance Annotations lore => Show (KernelInput lore)
-deriving instance Annotations lore => Ord (KernelInput lore)
-
-data KernelSize = KernelSize { kernelWorkgroups :: SubExp
-                             , kernelWorkgroupSize :: SubExp
-                             , kernelElementsPerThread :: SubExp
-                             , kernelTotalElements :: SubExp
-                             , kernelThreadOffsetMultiple :: SubExp
-                             , kernelNumThreads :: SubExp
-                             }
-                deriving (Eq, Ord, Show)
-
--- | a @scan op ne xs@ can either be /'ScanInclusive'/ or /'ScanExclusive'/.
--- Inclusive = @[ ne `op` x_1 , ne `op` x_1 `op` x_2 , ... , ne `op` x_1 ... `op` x_n ]@
--- Exclusive = @[ ne, ne `op` x_1, ... , ne `op` x_1 ... `op` x_{n-1} ]@
---
--- Both versions generate arrays of the same size as @xs@ (this is not
--- always the semantics).
---
--- An easy way to remember which is which, is that inclusive /includes/
--- the last element in the calculation, whereas the exclusive does not
-data ScanType = ScanInclusive
-              | ScanExclusive
-              deriving(Eq, Ord, Show)
-
--- | Segmented version of SOACS that use flat array representation.
--- This means a /single/ flat array for data, and segment descriptors
--- (integer arrays) for each dimension of the array.
---
--- For example the array
--- @ [ [ [1,2] , [3,4,5] ]
---   , [ [6]             ]
---   , []
---   ]
--- @
---
--- Can be represented as
--- @ data  = [1,2, 3,4,5, 6    ]
---   seg_1 = [2,   3,     1,   ]
---   seg_0 = [2,          1,  0]
--- @
-data SegOp lore = SegReduce Certificates SubExp (LambdaT lore) [(SubExp, VName)] VName
-                  -- ^ @map (\xs -> reduce(op,ne,xs), xss@ can loosely
-                  -- be transformed into
-                  -- @segreduce(op, ne, xss_flat, xss_descpritor)@
-                  --
-                  -- Note that this requires the neutral element to be constant
-                | SegScan Certificates SubExp ScanType (LambdaT lore) [(SubExp, VName)] VName
-                  -- ^ Identical to 'Scan', except that the last arg
-                  -- is a segment descriptor.
-                | SegReplicate Certificates VName VName (Maybe VName)
-                  -- ^ @segreplicate(counts,data,seg)@ splits the
-                  -- @data@ array into subarrays based on the lengths
-                  -- given in @seg@. Subarray @sa_i@ is replicated
-                  -- @counts_i@ times.
-                  --
-                  -- If @seg@ is @Nothing@, this is the same as
-                  -- @seg = replicate (length counts) 1@
-                  --
-                  -- It should always be the case that
-                  -- @length(counts) == length(seg)@
-                deriving (Eq, Ord, Show)
-
-deriving instance Annotations lore => Eq (LoopOp lore)
-deriving instance Annotations lore => Show (LoopOp lore)
-deriving instance Annotations lore => Ord (LoopOp lore)
-
-data LoopForm = ForLoop VName SubExp
-              | WhileLoop VName
-              deriving (Eq, Show, Ord)
 
 -- | Futhark Expression Language: literals + vars + int binops + array
 -- constructors + array combinators (SOAC) + if + function calls +
@@ -376,17 +224,24 @@ data ExpT lore
   = PrimOp (PrimOp lore)
     -- ^ A simple (non-recursive) operation.
 
-  | LoopOp (LoopOp lore)
-
-  | SegOp (SegOp lore)
-
-  | Apply  Name [(SubExp, Diet)] (Annotations.RetType lore)
+  | Apply  Name [(SubExp, Diet)] (RetType lore)
 
   | If     SubExp (BodyT lore) (BodyT lore) [ExtType]
+
+  | DoLoop [(FParam lore, SubExp)] [(FParam lore, SubExp)] LoopForm (BodyT lore)
+    -- ^ @loop {a} = {v} (for i < n|while b) do b@.  The merge
+    -- parameters are divided into context and value part.
+
+  | Op (Op lore)
 
 deriving instance Annotations lore => Eq (ExpT lore)
 deriving instance Annotations lore => Show (ExpT lore)
 deriving instance Annotations lore => Ord (ExpT lore)
+
+-- | For-loop or while-loop?
+data LoopForm = ForLoop VName SubExp
+              | WhileLoop VName
+              deriving (Eq, Show, Ord)
 
 -- | A type alias for namespace control.
 type Exp = ExpT
@@ -420,13 +275,13 @@ deriving instance Annotations lore => Ord (ExtLambdaT lore)
 
 type ExtLambda = ExtLambdaT
 
-type FParam lore = ParamT (Annotations.FParam lore)
+type FParam lore = ParamT (FParamAttr lore)
 
-type LParam lore = ParamT (Annotations.LParam lore)
+type LParam lore = ParamT (LParamAttr lore)
 
 -- | Function Declarations
 data FunDecT lore = FunDec { funDecName :: Name
-                           , funDecRetType :: Annotations.RetType lore
+                           , funDecRetType :: RetType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore
                            }

@@ -7,8 +7,9 @@ module Language.Futhark.Parser.Lexer
   , L(..)
   ) where
 
+import Data.Char (ord)
 import Data.Loc hiding (L)
-import Data.Int (Int32)
+import Data.Int (Int8, Int16, Int32, Int64)
 
 import Language.Futhark.Core (nameFromString)
 import Language.Futhark.Parser.Tokens
@@ -21,6 +22,10 @@ import Data.Bits
 
 @charlit = ($printable#['\\]|\\($printable|[0-9]+))
 @stringcharlit = ($printable#[\"\\]|\\($printable|[0-9]+)|\n)
+@hexlit = 0[xX][0-9a-fA-F]+
+@declit = [0-9]+
+@intlit = @hexlit|@declit
+@reallit = (([0-9]+("."[0-9]+)?))([eE][\+\-]?[0-9]+)?
 
 tokens :-
 
@@ -29,6 +34,7 @@ tokens :-
   "&&"                     { const AND }
   "||"                     { const OR }
   ">>"                     { const SHIFTR }
+  ">>>"                    { const ZSHIFTR }
   "<<"                     { const SHIFTL }
   "=>"                     { const ARROW }
   "<-"                     { const SETTO }
@@ -45,6 +51,7 @@ tokens :-
   "%%"                     { const REM }
   "="                      { const EQU }
   "=="                     { const EQU2 }
+  "!="                     { const NEQU }
   "<"                      { const LTH }
   ">"                      { const GTH }
   "&"                      { const BAND }
@@ -59,13 +66,21 @@ tokens :-
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
   "!"                      { const BANG }
-  0[xX][0-9a-fA-F]*        { INTLIT . readInt32 }
-  [0-9]+                   { INTLIT . readInt32 }
-  (([0-9]+("."[0-9]+)?))
-    ([eE][\+\-]?[0-9]+)?   { REALLIT . readReal }
-  [a-zA-Z] [a-zA-Z0-9_']* { keyword }
-  "'" @charlit "'" { CHARLIT . read }
-  \" @stringcharlit* \" { STRINGLIT . read }
+  @intlit i8               { I8LIT . readInt8 . takeWhile (/='i') }
+  @intlit i16              { I16LIT . readInt16 . takeWhile (/='i') }
+  @intlit i32              { I32LIT . readInt32 . takeWhile (/='i') }
+  @intlit i64              { I64LIT . readInt64 . takeWhile (/='i') }
+  @intlit u8               { U8LIT . readInt8 . takeWhile (/='u') }
+  @intlit u16              { U16LIT . readInt16 . takeWhile (/='u') }
+  @intlit u32              { U32LIT . readInt32 . takeWhile (/='u') }
+  @intlit u64              { U64LIT . readInt64 . takeWhile (/='u') }
+  @intlit                  { INTLIT . readInt64 }
+  @reallit f32             { F32LIT . read . takeWhile (/='f') }
+  @reallit f64             { F64LIT . read . takeWhile (/='f') }
+  @reallit                 { REALLIT . readReal }
+  [a-zA-Z] [a-zA-Z0-9_']*  { keyword }
+  "'" @charlit "'"         { CHARLIT . read }
+  \" @stringcharlit* \"    { STRINGLIT . read }
 
 {
 
@@ -79,21 +94,26 @@ keyword s =
     "loop"         -> LOOP
     "in"           -> IN
     "with"         -> WITH
+    "default"      -> DEFAULT
     "int"          -> INT
-    "real"         -> REAL
-    "float32"      -> FLOAT32
-    "float64"      -> FLOAT64
+    "i8"           -> I8
+    "i16"          -> I16
+    "i32"          -> I32
+    "i64"          -> I64
+    "u8"           -> U8
+    "u16"          -> U16
+    "u32"          -> U32
+    "u64"          -> U64
+    "f32"          -> F32
+    "f64"          -> F64
     "bool"         -> BOOL
-    "cert"         -> CERT
     "char"         -> CHAR
     "fun"          -> FUN
     "fn"           -> FN
     "for"          -> FOR
     "do"           -> DO
-    "op"           -> OP
     "True"         -> TRUE
     "False"        -> FALSE
-    "Checked"      -> CHECKED
     "abs"          -> ABS
     "signum"       -> SIGNUM
 
@@ -102,35 +122,29 @@ keyword s =
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
-    "stripe"       -> STRIPE
-    "unstripe"     -> UNSTRIPE
     "transpose"    -> TRANSPOSE
     "map"          -> MAP
     "reduce"       -> REDUCE
+    "reduceComm"   -> REDUCECOMM
     "zip"          -> ZIP
     "zipWith"      -> ZIPWITH
     "unzip"        -> UNZIP
+    "unsafe"       -> UNSAFE
     "scan"         -> SCAN
     "split"        -> SPLIT
     "concat"       -> CONCAT
-    "concatMap"    -> CONCATMAP
     "filter"       -> FILTER
     "partition"    -> PARTITION
-    "redomap"      -> REDOMAP
     "empty"        -> EMPTY
     "copy"         -> COPY
     "while"        -> WHILE
-    "streamMap"       -> STREAM_MAP
-    "streamMapMax"    -> STREAM_MAPMAX
-    "streamMapPer"    -> STREAM_MAPPER
-    "streamMapPerMax" -> STREAM_MAPPERMAX
-    "streamRed"       -> STREAM_RED
-    "streamRedMax"    -> STREAM_REDMAX
-    "streamRedPer"    -> STREAM_REDPER
-    "streamRedPerMax" -> STREAM_REDPERMAX
-    "streamSeq"       -> STREAM_SEQ
-    "streamSeqMax"    -> STREAM_SEQMAX
+    "streamMap"    -> STREAM_MAP
+    "streamMapPer" -> STREAM_MAPPER
+    "streamRed"    -> STREAM_RED
+    "streamRedPer" -> STREAM_REDPER
+    "streamSeq"    -> STREAM_SEQ
     "assert"       -> ASSERT
+    "include"      -> INCLUDE
     _              -> ID $ nameFromString s
 
 type Byte = Word8
@@ -207,8 +221,17 @@ alexScanTokens file str = go (alexStartPos,'\n',[],str)
 readReal :: String -> Double
 readReal = read
 
+readInt8 :: String -> Int8
+readInt8 = read
+
+readInt16 :: String -> Int16
+readInt16 = read
+
 readInt32 :: String -> Int32
 readInt32 = read
+
+readInt64 :: String -> Int64
+readInt64 = read
 
 -- | A value tagged with a source location.
 data L a = L SrcLoc a

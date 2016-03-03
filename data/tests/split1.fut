@@ -6,5 +6,5 @@
 -- output {
 --   [9.000000, 8.000000]
 -- }
-fun [real] main(int n, [real] a) =
+fun [f64] main(int n, [f64] a) =
   let {first, rest} = split( (n), a) in first

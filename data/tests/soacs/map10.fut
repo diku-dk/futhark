@@ -6,7 +6,7 @@
 -- output {
 --   [[1.000000, 2.000000], [1.000000, 2.000000]]
 -- }
-fun [[real]] main(*[[real]] a) =
-  map(fn *[real] (*[real] r) =>
+fun [[f64]] main(*[[f64]] a) =
+  map(fn *[f64] (*[f64] r) =>
         r,
       a)

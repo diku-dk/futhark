@@ -6,5 +6,5 @@
 -- ==
 -- input { 3.14 } output { 3.0 }
 
-fun float32 main(float64 x) =
-  toFloat32(trunc64(x))
+fun f32 main(f64 x) =
+  f32(int(x))

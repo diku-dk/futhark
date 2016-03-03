@@ -30,7 +30,7 @@ hlintable() {
 
 hlint_check() {
     # Some hlint-suggestions are terrible, so ignore them here.
-    hlint -i "Reduce duplication" -i "Use import/export shortcut" -i "Functor law" "$@"
+    hlint -i "Reduce duplication" -i "Use import/export shortcut" -i "Functor law"
 }
 
 no_trailing_blank_lines() {

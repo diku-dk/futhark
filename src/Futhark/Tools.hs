@@ -1,4 +1,6 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Tools
   (
     module Futhark.Construct
@@ -8,8 +10,10 @@ module Futhark.Tools
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
   , partitionChunkedLambdaParameters
+  , extLambdaToLambda
+  , partitionChunkedFoldParameters
+
   , intraproceduralTransformation
-  , boundInBody
   )
 where
 
@@ -22,53 +26,51 @@ import qualified Data.HashMap.Lazy as HM
 import Prelude
 
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Annotations as Annotations
+import Futhark.Representation.SOACS.SOAC
 import Futhark.MonadFreshNames
 import Futhark.Construct
 
-nonuniqueParams :: (MonadFreshNames m, Bindable lore) =>
+nonuniqueParams :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
                    [LParam lore] -> m ([LParam lore], [Binding lore])
 nonuniqueParams params =
-  modifyNameSource $ runState $ liftM fst $ runBinderEmptyEnv $
+  modifyNameSource $ runState $ fmap fst $ runBinderEmptyEnv $
   collectBindings $ forM params $ \param ->
-    if unique $ paramType param then do
-      param' <- Param <$>
-                (nonuniqueParam <$> newIdent' (++"_nonunique") (paramIdent param)) <*>
-                pure ()
-      bindingIdentTypes [paramIdent param'] $
+    if not $ primType $ paramType param then do
+      param_name <- newVName $ baseString (paramName param) ++ "_nonunique"
+      let param' = Param param_name $ paramType param
+      localScope (scopeOfLParams [param']) $
         letBindNames_ [(paramName param,BindVar)] $
         PrimOp $ Copy $ paramName param'
       return param'
     else
       return param
-  where nonuniqueParam ident =
-          ident { identType = identType ident `setUniqueness` Nonunique }
 
 -- | Turns a binding of a @redomap@ into two seperate bindings, a
 -- @map@ binding and a @reduce@ binding (returned in that order).
 --
 -- Reuses the original pattern for the @reduce@, and creates a new
 -- pattern with new 'Ident's for the result of the @map@. Does /not/
--- add the new idents to the 'TypeEnv'.
+-- add the new idents to the 'Scope'.
 --
 -- Only handles a 'Pattern' with an empty 'patternContextElements'
-redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore) =>
-                         PatternT lore -> Annotations.Exp lore
+redomapToMapAndReduce :: (MonadFreshNames m, Bindable lore, Op lore ~ SOAC lore) =>
+                         Pattern lore -> ExpAttr lore
                       -> ( Certificates, SubExp
+                         , Commutativity
                          , LambdaT lore, LambdaT lore, [SubExp]
                          , [VName])
                       -> m (Binding lore, Binding lore)
 redomapToMapAndReduce (Pattern [] patelems) lore
-                      (certs, outersz, redlam, redmap_lam, accs, arrs) = do
+                      (certs, outersz, comm, redlam, redmap_lam, accs, arrs) = do
   let (acc_patelems, arr_patelems) = splitAt (length accs) patelems
   map_accpat <- mapM accMapPatElem acc_patelems
   map_arrpat <- mapM arrMapPatElem arr_patelems
   let map_pat = map_accpat ++ map_arrpat
       map_bnd = mkLet [] map_pat $
-                LoopOp $ Map certs outersz newmap_lam arrs
+                Op $ Map certs outersz newmap_lam arrs
       red_args = zip accs $ map (identName . fst) map_accpat
       red_bnd = Let (Pattern [] patelems) lore $
-                LoopOp $ Reduce certs outersz redlam red_args
+                Op $ Reduce certs outersz comm redlam red_args
   return (map_bnd, red_bnd)
   where
     accMapPatElem pe = do
@@ -98,6 +100,8 @@ sequentialStreamWholeArrayBindings :: Bindable lore =>
 sequentialStreamWholeArrayBindings width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
+      index_bnd = mkLet' [] [Ident (extLambdaIndex lam) $ Prim int32] $
+                  PrimOp $ SubExp $ intConst Int32 0
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
@@ -105,7 +109,8 @@ sequentialStreamWholeArrayBindings width accs lam arrs =
                    PrimOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
-  in (chunk_bnd :
+  in (index_bnd :
+      chunk_bnd :
       acc_bnds ++
       arr_bnds ++
       bodyBindings (extLambdaBody lam),
@@ -134,6 +139,7 @@ sequentialStreamWholeArray pat cs width nes fun arrs = do
     when (name `elem` patternContextNames pat) $
       addBinding =<< mkLetNames' [name] (PrimOp $ SubExp se)
   mapM_ addBinding res_bnds
+
 singletonChunkRedLikeStreamLambda :: (Bindable lore, MonadFreshNames m) =>
                                      [Type] -> ExtLambda lore -> m (Lambda lore)
 singletonChunkRedLikeStreamLambda acc_ts lam = do
@@ -142,12 +148,12 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length acc_ts) $ extLambdaParams lam
   unchunked_arr_params <- forM arr_params $ \arr_param ->
-    flip Param () <$>
-    newIdent (baseString (paramName arr_param) <> "_unchunked")
-    (rowType $ paramType arr_param)
+    Param <$>
+    newVName (baseString (paramName arr_param) <> "_unchunked") <*>
+    pure (rowType $ paramType arr_param)
   let chunk_name = paramName chunk_param
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $
-                  PrimOp $ SubExp $ Constant $ IntVal 1
+                  PrimOp $ SubExp $ intConst Int32 1
       arr_bnds = [ mkLet' [] [paramIdent arr_param] $
                    PrimOp $ Replicate (Var chunk_name) $
                    Var $ paramName unchunked_arr_param |
@@ -157,6 +163,17 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
   return Lambda { lambdaBody = unchunked_body
                 , lambdaParams = acc_params <> unchunked_arr_params
                 , lambdaReturnType = acc_ts
+                , lambdaIndex = extLambdaIndex lam
+                }
+
+-- | Convert an 'ExtLambda' to a 'Lambda' if the return type is
+-- non-existential anyway.
+extLambdaToLambda :: ExtLambda lore -> Maybe (Lambda lore)
+extLambdaToLambda lam = do
+  ret <- hasStaticShapes $ extLambdaReturnType lam
+  return Lambda { lambdaReturnType = ret
+                , lambdaBody = extLambdaBody lam
+                , lambdaParams = extLambdaParams lam
                 , lambdaIndex = extLambdaIndex lam
                 }
 

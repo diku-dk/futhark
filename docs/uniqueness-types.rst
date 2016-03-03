@@ -25,11 +25,11 @@ what should be an algorithm with complexity *O(n)* becomes *(n^2)*
 due to copying the size *n* array (an *O(n)* operation) for each of
 the *n* iterations of the loop.
 
-To prevent this, we will want to update the array \textit{in-place},
+To prevent this, we will want to update the array *in-place*,
 that is, with a static guarantee that the operation will not require
 any additional memory allocation, such as copying the array.  With an
-in-place modification, a \texttt{let-with} can modify the array in
-time proportional to the slice being updated ($O(1)$ in the case of
+in-place modification, a ``let-with`` can modify the array in
+time proportional to the slice being updated (*O(1)* in the case of
 the Fibonacci function), rather than time proportional to the size of
 the final array, as would the case if we perform a copy.  In order to
 perform the update without violating referential transparency, we need

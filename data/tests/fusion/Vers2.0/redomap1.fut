@@ -15,8 +15,8 @@
 --      Redomap 1 
 -- }
 --
-fun {real,[real],[real],[real],[real]} main([real] arr) =
-    let xy = map(fn {real,real} (real a) => {a+1.0,a+2.0}, arr) in
+fun {f64,[f64],[f64],[f64],[f64]} main([f64] arr) =
+    let xy = map(fn {f64,f64} (f64 a) => {a+1.0,a+2.0}, arr) in
     let {x,y} = unzip(xy) in
     let z  = map(*2.0, x) in
     let w  = map(*3.0, y) in
