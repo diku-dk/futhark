@@ -63,14 +63,9 @@ fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
   let bit= index_of_least_significant_0(num_bits,i) in
   map( fn int([int] row) => unsafe row[bit], sob_dirs )
 
-<<<<<<< HEAD
-fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
-  let sob_fact= 1.0 / toFloat(1 << num_bits)       in
-=======
 fun [[f64],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let sob_fact= 1.0 / f64(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
->>>>>>> b669179ab9a9adb5b7687200427d05d5fd9d9653
   let contrbs = map( fn [int] (int k) =>
                         let sob = k + n in
                         if(k==0) then sobolIndI(dir_vs, n+1)
