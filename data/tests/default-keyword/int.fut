@@ -7,4 +7,4 @@
 --   0i32
 -- }
 
-fun i32 main() = 0
+fun int main() = 0
