@@ -6,4 +6,4 @@
 --   [[1, 4], [2, 5], [3, 6]]
 -- }
 fun [[int]] main([[int]] a) =
-  transpose(0,1,a)
+  transpose(a)

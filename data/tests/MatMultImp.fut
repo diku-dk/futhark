@@ -8,7 +8,7 @@
 -- }
 fun *[[int]] matmultImp([[int]] a, [[int]] b) =
     let N   = size(0, a)            in
-    let res = copy(replicate(N, iota(N))) in
+    let res = replicate(N, iota(N)) in
     loop (res) = for i < N do
         loop (res) = for j < N do
             let partsum =

@@ -1,25 +1,36 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Futhark.Optimise.CSE
-       ( performCSE )
+       ( performCSE
+       , CSEInOp
+       )
        where
 
+import Control.Applicative
 import Control.Monad.Reader
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map.Lazy as M
 
+import Prelude
+
 import Futhark.Representation.AST
-import qualified Futhark.Representation.AST.Annotations as Annotations
+import qualified Futhark.Representation.Kernels.Kernel as Kernel
+import qualified Futhark.Representation.SOACS.SOAC as SOAC
+import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Transform.Substitute
 import Futhark.Pass
 import Futhark.Tools
 
-performCSE :: Proper lore =>
+performCSE :: CSEInOp lore (Op lore) =>
               Pass lore lore
 performCSE = simplePass
              "CSE"
              "Combine common subexpressions." $
              intraproceduralTransformation $ return . cseInFunDec
 
-cseInFunDec :: Proper lore =>
+cseInFunDec :: CSEInOp lore (Op lore) =>
                FunDec lore -> FunDec lore
 cseInFunDec fundec =
   fundec { funDecBody =
@@ -28,20 +39,26 @@ cseInFunDec fundec =
 
 type CSEM lore = Reader (CSEState lore)
 
-cseInBody :: Proper lore =>
+cseInBody :: CSEInOp lore (Op lore) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
   cseInBindings bnds $ do
     CSEState (_, nsubsts) <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
-cseInLambda :: Proper lore =>
+cseInLambda :: CSEInOp lore (Op lore) =>
                Lambda lore -> CSEM lore (Lambda lore)
 cseInLambda lam = do
   body' <- cseInBody $ lambdaBody lam
   return lam { lambdaBody = body' }
 
-cseInBindings :: Proper lore =>
+cseInExtLambda :: CSEInOp lore (Op lore) =>
+                  ExtLambda lore -> CSEM lore (ExtLambda lore)
+cseInExtLambda lam = do
+  body' <- cseInBody $ extLambdaBody lam
+  return lam { extLambdaBody = body' }
+
+cseInBindings :: CSEInOp lore (Op lore) =>
                  [Binding lore]
               -> CSEM lore (Body lore)
               -> CSEM lore (Body lore)
@@ -55,10 +72,10 @@ cseInBindings (bnd:bnds) m =
           e <- mapExpM cse $ bindingExp bnd'
           return bnd' { bindingExp = e }
         cse = identityMapper { mapOnBody = cseInBody
-                             , mapOnLambda = cseInLambda
+                             , mapOnOp = cseInOp
                              }
 
-cseInBinding :: Proper lore =>
+cseInBinding :: Attributes lore =>
                 Binding lore
              -> ([Binding lore] -> CSEM lore a)
              -> CSEM lore a
@@ -77,16 +94,16 @@ cseInBinding (Let pat eattr e) m = do
           let lets =
                 [ Let (Pattern [] [patElem']) eattr $ PrimOp $ SubExp $ Var $ patElemName patElem
                 | (name,patElem) <- zip (patternNames pat') $ patternElements subpat ,
-                  let patElem' = setPatElemName patElem name
+                  let patElem' = patElem { patElemName = name }
                 ]
           m lets
-  where bad (Array _ _ Unique) = True
-        bad (Mem {})           = True
-        bad _                  = False
-        setPatElemName patElem name =
-          patElem { patElemIdent = Ident name $ identType $ patElemIdent patElem }
+  where bad Array{} = True
+        bad Mem{}   = True
+        bad _       = False
 
-type ExpressionSubstitutions lore = M.Map (Annotations.Exp lore, Exp lore) (Pattern lore)
+type ExpressionSubstitutions lore = M.Map
+                                    (ExpAttr lore, Exp lore)
+                                    (Pattern lore)
 type NameSubstitutions = HM.HashMap VName VName
 
 newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitutions)
@@ -94,16 +111,37 @@ newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitution
 newCSEState :: CSEState lore
 newCSEState = CSEState (M.empty, HM.empty)
 
-mkSubsts :: Pattern lore -> Pattern lore -> HM.HashMap VName VName
+mkSubsts :: PatternT attr -> PatternT attr -> HM.HashMap VName VName
 mkSubsts pat vs = HM.fromList $ zip (patternNames pat) (patternNames vs)
 
-addNameSubst :: Pattern lore -> Pattern lore -> CSEState lore -> CSEState lore
+addNameSubst :: PatternT attr -> PatternT attr -> CSEState lore -> CSEState lore
 addNameSubst pat subpat (CSEState (esubsts, nsubsts)) =
   CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts)
 
-addExpSubst :: Proper lore =>
-               Pattern lore -> Annotations.Exp lore -> Exp lore
+addExpSubst :: Attributes lore =>
+               Pattern lore -> ExpAttr lore -> Exp lore
             -> CSEState lore
             -> CSEState lore
 addExpSubst pat eattr e (CSEState (esubsts, nsubsts)) =
   CSEState (M.insert (eattr,e) pat esubsts, nsubsts)
+
+-- | The operations that permit CSE.
+class Attributes lore => CSEInOp lore op where
+  cseInOp :: op -> CSEM lore op
+
+instance Attributes lore => CSEInOp lore () where
+  cseInOp () = return ()
+
+instance CSEInOp lore (Op lore) => CSEInOp lore (Kernel.Kernel lore) where
+  cseInOp = Kernel.mapKernelM $
+            Kernel.KernelMapper return cseInLambda cseInBody
+            return return return
+
+instance CSEInOp lore (Op lore) => CSEInOp lore (ExplicitMemory.MemOp lore) where
+  cseInOp o@ExplicitMemory.Alloc{} = return o
+  cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> cseInOp k
+
+instance CSEInOp lore (Op lore) => CSEInOp lore (SOAC.SOAC lore) where
+  cseInOp = SOAC.mapSOACM $
+            SOAC.SOACMapper return cseInLambda cseInExtLambda
+            return return

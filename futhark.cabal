@@ -11,7 +11,7 @@ Homepage:            https://github.com/HIPERFIT/futhark
 Category:            Language
 License:             BSD3
 License-file:        LICENSE
-Build-type:          Custom
+Build-type:          Simple
 Maintainer:          athas@sigkill.dk
 
 -- Constraint on the version of Cabal needed to build this package.
@@ -29,9 +29,12 @@ Library
                  mtl >= 2.2.1,
                  transformers >= 0.3,
                  srcloc >= 0.4,
-                 language-c-quote == 0.11,
+                 language-c-quote >= 0.11,
                  mainland-pretty >= 0.4,
                  hashable >= 1.2.1.0,
+                 parsec >= 3,
+                 regex-tdfa >= 1.2,
+                 filepath,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
                  text,
@@ -40,7 +43,9 @@ Library
                  sized-vector >= 1.4,
                  singletons >= 0.9,
                  monomorphic >= 0.0.3,
-                 equational-reasoning >= 0.0.2
+                 equational-reasoning >= 0.0.2,
+                 raw-strings-qq,
+                 neat-interpolation < 0.3
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -61,11 +66,18 @@ Library
                    Futhark.Binder.Class
                    Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
+                   Futhark.CodeGen.Backends.GenericPython
+                   Futhark.CodeGen.Backends.GenericPython.AST
+                   Futhark.CodeGen.Backends.GenericPython.Definitions
+                   Futhark.CodeGen.Backends.GenericPython.Options
                    Futhark.CodeGen.Backends.GenericC.Options
                    Futhark.CodeGen.Backends.GenericC.Reading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.COpenCL.Boilerplate
+                   Futhark.CodeGen.Backends.PyOpenCL
+                   Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
                    Futhark.CodeGen.Backends.SequentialC
+                   Futhark.CodeGen.Backends.SequentialPython
                    Futhark.CodeGen.Backends.SimpleRepresentation
                    Futhark.CodeGen.ImpCode
                    Futhark.CodeGen.ImpCode.Kernels
@@ -89,7 +101,6 @@ Library
                    Futhark.Internalise.TypesValues
                    Futhark.Interpreter
                    Futhark.MonadFreshNames
-                   Futhark.NeedNames
                    Futhark.Optimise.CSE
                    Futhark.Optimise.DeadVarElim
                    Futhark.Optimise.DoubleBuffer
@@ -102,7 +113,6 @@ Library
                    Futhark.Optimise.InPlaceLowering.LowerIntoBinding
                    Futhark.Optimise.InPlaceLowering.SubstituteIndices
                    Futhark.Optimise.Simplifier
-                   Futhark.Optimise.Simplifier.Apply
                    Futhark.Optimise.Simplifier.ClosedForm
                    Futhark.Optimise.Simplifier.Engine
                    Futhark.Optimise.Simplifier.Lore
@@ -110,27 +120,19 @@ Library
                    Futhark.Optimise.Simplifier.RuleM
                    Futhark.Optimise.Simplifier.Rules
                    Futhark.Optimise.Simplifier.Simple
-                   Futhark.Optimise.Simplifier.Simplifiable
                    Futhark.Optimise.Simplifier.Simplify
-                   Futhark.Optimise.SimplifyLambda
-                   Futhark.Optimise.SplitShapes
-                   Futhark.Optimise.SuffCond
-                   Futhark.Optimise.SuffCond.GenPredicates
-                   Futhark.Optimise.SuffCond.OptPredicates
                    Futhark.Pass
                    Futhark.Passes
                    Futhark.Pass.ExpandAllocations
-                   Futhark.Pass.ExpandArrays
                    Futhark.Pass.ExplicitAllocations
                    Futhark.Pass.ExtractKernels
                    Futhark.Pass.ExtractKernels.BlockedKernel
                    Futhark.Pass.ExtractKernels.Distribution
                    Futhark.Pass.ExtractKernels.ISRWIM
+                   Futhark.Pass.ExtractKernels.Interchange
                    Futhark.Pass.FirstOrderTransform
-                   Futhark.Pass.Flattening
                    Futhark.Pass.KernelBabysitting
                    Futhark.Pass.Simplify
-                   Futhark.Pass.Untrace
                    Futhark.Pipeline
                    Futhark.Representation.Aliases
                    Futhark.Representation.AST
@@ -144,35 +146,37 @@ Library
                    Futhark.Representation.AST.Attributes.Ranges
                    Futhark.Representation.AST.Attributes.Rearrange
                    Futhark.Representation.AST.Attributes.Reshape
-                   Futhark.Representation.AST.Attributes.Stripe
-                   Futhark.Representation.AST.Attributes.TypeEnv
+                   Futhark.Representation.AST.Attributes.Scope
                    Futhark.Representation.AST.Attributes.TypeOf
                    Futhark.Representation.AST.Attributes.Types
                    Futhark.Representation.AST.Attributes.Values
-                   Futhark.Representation.AST.Lore
                    Futhark.Representation.AST.Pretty
                    Futhark.Representation.AST.RetType
                    Futhark.Representation.AST.Syntax
                    Futhark.Representation.AST.Syntax.Core
                    Futhark.Representation.AST.Traversals
-                   Futhark.Representation.Basic
                    Futhark.Representation.ExplicitMemory
                    Futhark.Representation.ExplicitMemory.IndexFunction
                    Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
                    Futhark.Representation.ExplicitMemory.Permutation
+                   Futhark.Representation.ExplicitMemory.Simplify
                    Futhark.Representation.ExplicitMemory.SymSet
                    Futhark.Representation.ExplicitMemory.SymSet.Unsafe
-                   Futhark.Representation.External
-                   Futhark.Representation.External.Renamer
-                   Futhark.Representation.External.TypeChecker
+                   Futhark.Representation.Primitive
+                   Futhark.Representation.SOACS
+                   Futhark.Representation.SOACS.Simplify
+                   Futhark.Representation.SOACS.SOAC
+                   Futhark.Representation.Kernels
+                   Futhark.Representation.Kernels.Simplify
+                   Futhark.Representation.Kernels.Kernel
                    Futhark.Representation.Ranges
+                   Futhark.Test
                    Futhark.Tools
                    Futhark.Transform.CopyPropagate
                    Futhark.Transform.FirstOrderTransform
                    Futhark.Transform.Rename
                    Futhark.Transform.Substitute
                    Futhark.TypeCheck
-                   Futhark.TypeCheck.TypeError
                    Futhark.Util
                    Futhark.Util.Options
                    Futhark.Util.Pretty
@@ -183,11 +187,12 @@ Library
                    Language.Futhark
                    Language.Futhark.Attributes
                    Language.Futhark.Core
+                   Language.Futhark.Renamer
                    Language.Futhark.Parser
-                   Language.Futhark.Parser.RealConfiguration
                    Language.Futhark.Pretty
                    Language.Futhark.Syntax
                    Language.Futhark.Traversals
+                   Language.Futhark.TypeChecker
 
   Other-modules: Language.Futhark.Parser.Parser
                  Language.Futhark.Parser.Lexer
@@ -205,8 +210,6 @@ Library
 
   Ghc-Options:        -Wall
 
-  Ghc-prof-options:   -fprof-auto
-
 Executable futhark
   Main-is: src/futhark.hs
 
@@ -215,13 +218,12 @@ Executable futhark
                  array >= 0.4,
                  mtl >= 2.2.1,
                  text,
+                 transformers,
                  futhark
 
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall
-
-  Ghc-prof-options:   -fprof-auto
 
 Executable futhark-c
   Main-is: src/futhark-c.hs
@@ -234,6 +236,40 @@ Executable futhark-c
                  filepath,
                  process,
                  transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+Executable futhark-py
+  Main-is: src/futhark-py.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 text,
+                 filepath,
+                 process,
+                 transformers,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
+Executable futhark-pyopencl
+  Main-is: src/futhark-pyopencl.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 filepath,
+                 process,
+                 transformers,
+                 text,
                  futhark
 
   Default-Language:   Haskell2010
@@ -274,7 +310,30 @@ Executable futhark-test
 
   Default-Language:   Haskell2010
 
-  Ghc-Options:        -Wall
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+
+Executable futhark-bench
+  Main-is: src/futhark-bench.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 containers >= 0.5,
+                 directory,
+                 filepath,
+                 process,
+                 transformers,
+                 parsec >= 3,
+                 regex-tdfa >= 1.2,
+                 unordered-containers,
+                 text,
+                 temporary,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
 Executable futhark-opencl
   Main-is: src/futhark-opencl.hs
@@ -301,7 +360,7 @@ Test-suite unit
   Default-language:  Haskell2010
   GHC-options:       -Wall
   Build-Depends:     base >=4,
-                     QuickCheck >= 2,
+                     QuickCheck >= 2.8,
                      test-framework >= 0.4.0,
                      parsec >= 3,
                      test-framework-quickcheck2,
@@ -319,7 +378,9 @@ Test-suite unit
                  Futhark.Representation.AST.AttributesTests
                  Futhark.Representation.AST.Attributes.ValuesTests
                  Futhark.Representation.AST.Attributes.ReshapeTests
+                 Futhark.Representation.AST.Attributes.RearrangeTests
                  Futhark.Representation.AST.Syntax.CoreTests
                  Futhark.Representation.AST.SyntaxTests
-                 Language.Futhark.CoreTests
+                 Futhark.Representation.PrimitiveTests
                  Language.Futhark.SyntaxTests
+                 Language.Futhark.CoreTests

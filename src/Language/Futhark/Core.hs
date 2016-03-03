@@ -3,12 +3,8 @@
 -- representation.
 module Language.Futhark.Core
   ( Uniqueness(..)
-  , BasicType(..)
-  , BasicValue(..)
-  , basicValueType
-  , blankBasicValue
-  , ChunkIntent(..)
   , StreamOrd(..)
+  , Commutativity(..)
 
   -- * Location utilities
   , locStr
@@ -26,31 +22,27 @@ module Language.Futhark.Core
 
   -- * Special identifiers
   , defaultEntryPoint
-  , isBuiltInFunction
-  , builtInFunctions
 
     -- * Integer re-export
-  , Int32
+  , Int8, Int16, Int32, Int64
   )
 
 where
 
 import Data.Char
 import Data.Hashable
-import Data.Int (Int32)
+import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Loc
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Text as T
-import qualified Data.HashMap.Lazy as HM
 
 import Text.PrettyPrint.Mainland
-import Text.Printf
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.
-data Uniqueness = Unique    -- ^ At most one outer reference.
-                | Nonunique -- ^ Any number of references.
+data Uniqueness = Unique    -- ^ No references outside current function.
+                | Nonunique -- ^ May have references outside current function.
                   deriving (Eq, Ord, Show)
 
 instance Monoid Uniqueness where
@@ -63,99 +55,23 @@ instance Hashable Uniqueness where
   hashWithSalt salt Unique    = salt
   hashWithSalt salt Nonunique = salt * 2
 
-data ChunkIntent = MaxChunk
-                 | MinChunk
-                    deriving (Eq, Ord, Show)
-
 data StreamOrd  = InOrder
                 | Disorder
                     deriving (Eq, Ord, Show)
 
--- | Low-level primitive types.  TODO: please add float, double, long
--- int, etc.
-data BasicType = Int
-               | Bool
-               | Char
-               | Float32
-               | Float64
-               | Cert
-                 deriving (Eq, Ord, Show, Enum, Bounded)
+-- | Whether some operator is commutative or not.  The 'Monoid'
+-- instance returns the least commutative of its arguments.
+data Commutativity = Noncommutative
+                   | Commutative
+                     deriving (Eq, Ord, Show)
 
-instance Hashable BasicType where
-  hashWithSalt salt = hashWithSalt salt . fromEnum
-
--- | Non-array values.
-data BasicValue = IntVal !Int32
-                | Float32Val !Float
-                | Float64Val !Double
-                | LogVal !Bool
-                | CharVal !Char
-                | Checked -- ^ The only value of type @cert@.
-                  deriving (Eq, Ord, Show)
-
--- | The type of a basic value.
-basicValueType :: BasicValue -> BasicType
-basicValueType (IntVal _) = Int
-basicValueType (Float32Val _) = Float32
-basicValueType (Float64Val _) = Float64
-basicValueType (LogVal _) = Bool
-basicValueType (CharVal _) = Char
-basicValueType Checked = Cert
-
--- | A "blank" value of the given basic type - this is zero, or
--- whatever is close to it.  Don't depend on this value, but use it
--- for e.g. creating arrays to be populated by do-loops.
-blankBasicValue :: BasicType -> BasicValue
-blankBasicValue Int = IntVal 0
-blankBasicValue Float32 = Float32Val 0.0
-blankBasicValue Float64 = Float64Val 0.0
-blankBasicValue Bool = LogVal False
-blankBasicValue Char = CharVal '\0'
-blankBasicValue Cert = Checked
-
-instance Pretty BasicType where
-  ppr Int = text "int"
-  ppr Char = text "char"
-  ppr Bool = text "bool"
-  ppr Float32 = text "float32"
-  ppr Float64 = text "float64"
-  ppr Cert = text "cert"
-
-instance Pretty BasicValue where
-  ppr (IntVal x) = text $ show x
-  ppr (CharVal c) = text $ show c
-  ppr (LogVal b) = text $ show b
-  ppr (Float32Val x) = text $ printf "%f" x
-  ppr (Float64Val x) = text $ printf "%f" x
-  ppr Checked = text "Checked"
+instance Monoid Commutativity where
+  mempty = Commutative
+  mappend = min
 
 -- | The name of the default program entry point (main).
 defaultEntryPoint :: Name
 defaultEntryPoint = nameFromString "main"
-
--- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
-isBuiltInFunction :: Name -> Bool
-isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
-
--- | A map of all built-in functions and their types.
-builtInFunctions :: HM.HashMap Name (BasicType,[BasicType])
-builtInFunctions = HM.fromList $ map namify
-                   [("toFloat32", (Float32, [Int]))
-                   ,("trunc32", (Int, [Float32]))
-                   ,("sqrt32", (Float32, [Float32]))
-                   ,("log32", (Float32, [Float32]))
-                   ,("exp32", (Float32, [Float32]))
-
-                   ,("toFloat64", (Float64, [Int]))
-                   ,("trunc64", (Int, [Float64]))
-                   ,("sqrt64", (Float64, [Float64]))
-                   ,("log64", (Float64, [Float64]))
-                   ,("exp64", (Float64, [Float64]))
-
-                   ,("num_groups", (Int, []))
-                   ,("group_size", (Int, []))
-                   ]
-  where namify (k,v) = (nameFromString k, v)
 
 -- | The abstract (not really) type representing names in the Futhark
 -- compiler.  'String's, being lists of characters, are very slow,

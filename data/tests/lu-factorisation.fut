@@ -10,11 +10,11 @@
 --    [0.000000, -1.500000]]
 -- }
 
-fun {*[[real]], *[[real]]} lu_inplace(*[[real]] a) =
+fun {*[[f64]], *[[f64]]} lu_inplace(*[[f64]] a) =
   let n = size(0, a) in
   loop ({a,l,u} = {a,
-                   copy(replicate(n,replicate(n,0.0))),
-                   copy(replicate(n,replicate(n,0.0)))}) =
+                   replicate(n,replicate(n,0.0)),
+                   replicate(n,replicate(n,0.0))}) =
     for k < n do
       let u[k,k] = a[k,k] in
       loop ({l,u}) = for i < n-k do
@@ -31,5 +31,5 @@ fun {*[[real]], *[[real]]} lu_inplace(*[[real]] a) =
     in
   {l,u}
 
-fun {[[real]], [[real]]} main([[real]] a) =
+fun {[[f64]], [[f64]]} main([[f64]] a) =
   lu_inplace(copy(a))

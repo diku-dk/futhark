@@ -6,21 +6,20 @@ module Main ( ProgramTest (..)
             , TestCase (..)
             , main) where
 
-import Control.Category ((>>>))
+
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad hiding (forM_)
 import Control.Exception hiding (try)
 import Control.Monad.Except hiding (forM_)
-import Data.Char
-import Data.List
+
+import Data.List hiding (foldl')
+import Data.Maybe
 import Data.Monoid
 import Data.Ord
 import Data.Foldable (forM_)
-import qualified Data.Array as A
 import qualified Data.Set as S
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import qualified Data.HashMap.Lazy as HM
 import System.Console.GetOpt
 import System.Directory
@@ -28,221 +27,26 @@ import System.Process
 import System.Exit
 import System.IO
 import System.FilePath
-
-import Text.Parsec hiding ((<|>), many, optional)
-import Text.Parsec.Text
-import Text.Parsec.Error
 import Text.Regex.TDFA
 
 import Prelude
 
 import Futhark.Util.Pretty (pretty)
-import Futhark.Representation.AST.Syntax.Core hiding (Basic)
-import Futhark.Internalise.TypesValues (internaliseValue)
-import qualified Language.Futhark.Parser as F
-import Futhark.Representation.Basic (Basic)
+import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
-import Futhark.Pass.Simplify
-import Futhark.Pass.ExtractKernels
-import Futhark.Passes
 import Futhark.Util.Log
+import Futhark.Test
 
 import Futhark.Util.Options
 
--- | Number of tests to run concurrently.
-concurrency :: Int
-concurrency = 8
-
----
---- Test specification parser
----
-
--- | Description of a test to be carried out on a Futhark program.
--- The Futhark program is stored separately.
-data ProgramTest =
-  ProgramTest { testDescription ::
-                   T.Text
-              , testAction ::
-                   TestAction
-              , testExpectedStructure ::
-                   Maybe StructureTest
-              }
-  deriving (Show)
-
-data TestAction
-  = CompileTimeFailure ExpectedError
-  | RunCases [TestRun]
-  deriving (Show)
-
-data ExpectedError = AnyError
-                   | ThisError T.Text Regex
-
-instance Show ExpectedError where
-  show AnyError = "AnyError"
-  show (ThisError r _) = "ThisError " ++ show r
-
-data StructureTest = StructureTest (Pipeline Basic Basic) AstMetrics
-
-instance Show StructureTest where
-  show (StructureTest _ metrics) =
-    "StructureTest <config> " ++ show metrics
-
-data RunMode
-  = CompiledOnly
-  | InterpretedOnly
-  | InterpretedAndCompiled
-  deriving (Eq, Show)
-
-data TestRun = TestRun
-               { runMode :: RunMode
-               , runInput :: Values
-               , runExpectedResult :: ExpectedResult Values
-               }
-             deriving (Show)
-
-data Values = Values [Value]
-            | InFile FilePath
-            deriving (Show)
-
-data ExpectedResult values
-  = Succeeds values
-  | RunTimeFailure ExpectedError
-  deriving (Show)
-
-lexeme :: Parser a -> Parser a
-lexeme p = p <* spaces
-
-lexstr :: String -> Parser ()
-lexstr = void . lexeme . string
-
-braces :: Parser a -> Parser a
-braces p = lexstr "{" *> p <* lexstr "}"
-
-parseNatural :: Parser Int
-parseNatural = lexeme $ foldl (\acc x -> acc * 10 + x) 0 <$>
-               map num <$> some digit
-  where num c = ord c - ord '0'
-
-parseDescription :: Parser T.Text
-parseDescription = lexeme $ T.pack <$> (anyChar `manyTill` parseDescriptionSeparator)
-
-parseDescriptionSeparator :: Parser ()
-parseDescriptionSeparator = try (string descriptionSeparator >> void newline) <|> eof
-
-descriptionSeparator :: String
-descriptionSeparator = "=="
-
-parseAction :: Parser TestAction
-parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
-              RunCases <$> parseRunCases
-
-parseRunMode :: Parser RunMode
-parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
-               pure InterpretedAndCompiled
-
-parseRunCases :: Parser [TestRun]
-parseRunCases = many $ TestRun <$> parseRunMode <*> parseInput <*> parseExpectedResult
-
-parseExpectedResult :: Parser (ExpectedResult Values)
-parseExpectedResult = (Succeeds <$> (lexstr "output" *> parseValues)) <|>
-                 (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError))
-
-parseExpectedError :: Parser ExpectedError
-parseExpectedError = lexeme $ do
-  s <- restOfLine
-  if T.all isSpace s
-    then return AnyError
-         -- blankCompOpt creates a regular expression that treats
-         -- newlines like ordinary characters, which is what we want.
-    else ThisError s <$> makeRegexOptsM blankCompOpt defaultExecOpt (T.unpack s)
-
-parseInput :: Parser Values
-parseInput = lexstr "input" *> parseValues
-
-parseValues :: Parser Values
-parseValues = do s <- parseBlock
-                 case parseValuesFromString "input" $ T.unpack s of
-                   Left err -> fail $ show err
-                   Right vs -> return $ Values vs
-              <|> lexstr "@" *> lexeme (InFile <$> T.unpack <$> restOfLine)
-
-parseValuesFromString :: SourceName -> String -> Either F.ParseError [Value]
-parseValuesFromString srcname s =
-  liftM concat $ mapM internalise =<< F.parseValues F.RealAsFloat64 srcname s
-  where internalise v =
-          maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
-          internaliseValue v
-
-parseBlock :: Parser T.Text
-parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
-
-parseBlockBody :: Int -> Parser String
-parseBlockBody n = do
-  c <- lookAhead anyChar
-  case (c,n) of
-    ('}', 0) -> return mempty
-    ('}', _) -> (:) <$> anyChar <*> parseBlockBody (n-1)
-    ('{', _) -> (:) <$> anyChar <*> parseBlockBody (n+1)
-    _        -> (:) <$> anyChar <*> parseBlockBody n
-
-restOfLine :: Parser T.Text
-restOfLine = T.pack <$> (anyChar `manyTill` (void newline <|> eof))
-
-parseExpectedStructure :: Parser StructureTest
-parseExpectedStructure =
-  lexstr "structure" *>
-  (StructureTest <$> parsePipeline <*> parseMetrics)
-
-parsePipeline :: Parser (Pipeline Basic Basic)
-parsePipeline = lexstr "distributed" *> pure distributePipelineConfig <|>
-                pure defaultPipelineConfig
-  where defaultPipelineConfig =
-          standardPipeline
-        distributePipelineConfig =
-          standardPipeline >>>
-          passes [extractKernels, simplifyBasic]
-
-parseMetrics :: Parser AstMetrics
-parseMetrics = braces $ liftM HM.fromList $ many $
-               (,) <$> (T.pack <$> lexeme (many1 (satisfy constituent))) <*> parseNatural
-  where constituent c = isAlpha c || c == '/'
-
-testSpec :: Parser ProgramTest
-testSpec =
-  ProgramTest <$> parseDescription <*> parseAction <*> optional parseExpectedStructure
-
-readTestSpec :: SourceName -> T.Text -> Either ParseError ProgramTest
-readTestSpec = parse $ testSpec <* eof
-
-commentPrefix :: T.Text
-commentPrefix = "--"
-
-fixPosition :: ParseError -> ParseError
-fixPosition err =
-  let newpos = incSourceColumn (errorPos err) $ T.length commentPrefix
-  in setErrorPos newpos err
-
-testSpecFromFile :: FilePath -> IO ProgramTest
-testSpecFromFile path = do
-  s <- T.unlines <$>
-       map (T.drop 2) <$>
-       takeWhile (commentPrefix `T.isPrefixOf`) <$>
-       T.lines <$>
-       T.readFile path
-  case readTestSpec path s of
-    Left err -> error $ show $ fixPosition err
-    Right v  -> return v
-
----
 --- Test execution
----
 
 type TestM = ExceptT String IO
 
 runTestM :: TestM () -> IO TestResult
-runTestM = liftM (either Failure $ const Success) . runExceptT
+runTestM = fmap (either Failure $ const Success) . runExceptT
 
 io :: IO a -> TestM a
 io = liftIO
@@ -272,9 +76,16 @@ data RunResult = ErrorResult Int String
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-optimisedProgramMetrics :: Pipeline Basic Basic -> FilePath -> TestM AstMetrics
-optimisedProgramMetrics pipeline program = do
-  res <- io $ runPipelineOnProgram newFutharkConfig pipeline program
+optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
+optimisedProgramMetrics (SOACSPipeline pipeline) program = do
+  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
+  case res of
+    (Left err, msgs) ->
+      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
+    (Right prog, _) ->
+      return $ progMetrics prog
+optimisedProgramMetrics (KernelsPipeline pipeline) program = do
+  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
       throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
@@ -341,7 +152,7 @@ checkError _ _ =
 
 runResult :: FilePath -> ExitCode -> String -> String -> TestM RunResult
 runResult program ExitSuccess stdout_s _ =
-  case parseValuesFromString "stdout" stdout_s of
+  case valuesFromString "stdout" stdout_s of
     Left e   -> do
       actual <- io $ writeOutFile program "actual" stdout_s
       throwError $ show e <> "\n(See " <> actual <> ")"
@@ -349,19 +160,9 @@ runResult program ExitSuccess stdout_s _ =
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
-getValues :: MonadIO m => FilePath -> Values -> m [Value]
-getValues _ (Values vs) =
-  return vs
-getValues dir (InFile file) = do
-  s <- liftIO $ readFile file'
-  case parseValuesFromString file' s of
-    Left e   -> fail $ show e
-    Right vs -> return vs
-  where file' = dir </> file
-
-getExpectedResult :: MonadIO m =>
+getExpectedResult :: (Functor m, MonadIO m) =>
                      FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
-getExpectedResult dir (Succeeds vals)      = liftM Succeeds $ getValues dir vals
+getExpectedResult dir (Succeeds vals)      = Succeeds <$> getValues dir vals
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
@@ -378,7 +179,7 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = d
 
 compileTestProgram :: String -> FilePath -> TestRun -> TestM ()
 compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
-  input <- intercalate "\n" <$> map pretty <$> getValues dir inputValues
+  input <- getValuesString dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (futcode, _, futerr) <-
     io $ readProcessWithExitCode futharkc
@@ -414,18 +215,21 @@ justCompileTestProgram futharkc program =
 
 compareResult :: FilePath -> ExpectedResult [Value] -> RunResult -> TestM ()
 compareResult program (Succeeds expectedResult) (SuccessResult actualResult) =
-  unless (compareValues actualResult expectedResult) $ do
-    actualf <-
-      io $ writeOutFile program "actual" $
-      unlines $ map pretty actualResult
-    expectedf <-
-      io $ writeOutFile program "expected" $
-      unlines $ map pretty expectedResult
-    throwError $ actualf ++ " and " ++ expectedf ++ " do not match."
+  case compareValues actualResult expectedResult of
+    Just mismatch -> do
+      actualf <-
+        io $ writeOutFile program "actual" $
+        unlines $ map pretty actualResult
+      expectedf <-
+        io $ writeOutFile program "expected" $
+        unlines $ map pretty expectedResult
+      throwError $ actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
+    Nothing ->
+      return ()
 compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
-compareResult _ (Succeeds _) (ErrorResult _ err) =
-  throwError $ "Program failed with error:\n  " ++ err
+compareResult _ (Succeeds _) (ErrorResult code err) =
+  throwError $ "Program failed with error code " ++ show code ++ " and stderr:\n  " ++ err
 compareResult _ (RunTimeFailure f) (SuccessResult _) =
   throwError $ "Program succeeded, but expected failure:\n  " ++ show f
 
@@ -440,35 +244,6 @@ writeOutFile base ext content =
             then attempt $ i+1
             else do writeFile filename content
                     return filename
-
-compareValues :: [Value] -> [Value] -> Bool
-compareValues vs1 vs2
-  | length vs1 /= length vs2 = False
-  | otherwise = and $ zipWith compareValue vs1 vs2
-
-compareValue :: Value -> Value -> Bool
-compareValue (BasicVal bv1) (BasicVal bv2) =
-  compareBasicValue bv1 bv2
-compareValue (ArrayVal vs1 _ _) (ArrayVal vs2 _ _) =
-  A.bounds vs1 == A.bounds vs2 &&
-  and (zipWith compareBasicValue (A.elems vs1) (A.elems vs2))
-compareValue _ _ =
-  False
-
-compareBasicValue :: BasicValue -> BasicValue -> Bool
-compareBasicValue (Float32Val x) (Float32Val y) = floatToDouble (abs (x - y)) < epsilon
-compareBasicValue (Float64Val x) (Float64Val y) = abs (x - y) < epsilon
-compareBasicValue (Float64Val x) (Float32Val y) = abs (x - floatToDouble y) < epsilon
-compareBasicValue (Float32Val x) (Float64Val y) = abs (floatToDouble x - y) < epsilon
-compareBasicValue x y = x == y
-
-epsilon :: Double
-epsilon = 0.001
-
-floatToDouble :: Float -> Double
-floatToDouble x =
-  let (m,n) = decodeFloat x
-  in encodeFloat m n
 
 ---
 --- Test manager
@@ -492,26 +267,32 @@ applyMode mode test =
   test { testAction = applyModeToAction mode $ testAction test }
 
 applyModeToAction :: TestMode -> TestAction -> TestAction
-applyModeToAction _ a@(CompileTimeFailure {}) =
+applyModeToAction _ a@CompileTimeFailure{} =
   a
 applyModeToAction OnlyTypeCheck (RunCases _) =
   RunCases []
 applyModeToAction mode (RunCases cases) =
-  RunCases $ map (applyModeToCase mode) cases
+  RunCases $ mapMaybe (applyModeToCase mode) cases
 
-applyModeToCase :: TestMode -> TestRun -> TestRun
+applyModeToCase :: TestMode -> TestRun -> Maybe TestRun
 applyModeToCase OnlyInterpret run =
-  run { runMode = InterpretedOnly }
+  Just run { runMode = InterpretedOnly }
 applyModeToCase OnlyCompile run =
-  run { runMode = CompiledOnly }
+  Just run { runMode = CompiledOnly }
+applyModeToCase OnTravis run | runMode run == NoTravis =
+  Nothing
 applyModeToCase _ run =
-  run
+  Just run
 
 runTest :: MVar TestCase -> MVar (TestCase, TestResult) -> IO ()
 runTest testmvar resmvar = forever $ do
   test <- takeMVar testmvar
   res <- doTest test
   putMVar resmvar (test, res)
+
+excludedTest :: TestConfig -> TestCase -> Bool
+excludedTest config =
+  any (`elem` configExclude config) . testTags . testCaseTest
 
 clearLine :: IO ()
 clearLine = putStr "\27[2K"
@@ -538,10 +319,12 @@ runTests config files = do
   let mode = configTestMode config
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
+  concurrency <- getNumCapabilities
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
-  tests <- mapM (makeTestCase (configPrograms config) mode) files
-  _ <- forkIO $ mapM_ (putMVar testmvar) tests
-  isTTY <- hIsTerminalDevice stdout
+  all_tests <- mapM (makeTestCase (configPrograms config) mode) files
+  let (excluded, included) = partition (excludedTest config) all_tests
+  _ <- forkIO $ mapM_ (putMVar testmvar) included
+  isTTY <- (&& mode /= OnTravis) <$> hIsTerminalDevice stdout
 
   let report = if isTTY then reportInteractive else reportText
       clear  = if isTTY then clearLine else putStr "\n"
@@ -558,8 +341,11 @@ runTests config files = do
                               putStrLn (testCaseProgram test ++ ":\n" ++ s)
                               next (failed+1) passed
 
-  (failed, passed) <- getResults (S.fromList tests) 0 0
-  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed."
+  (failed, passed) <- getResults (S.fromList included) 0 0
+  let excluded_str = if null excluded
+                     then ""
+                     else " (" ++ show (length excluded) ++ " excluded)"
+  putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed" ++ excluded_str ++ "."
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
 
@@ -570,10 +356,12 @@ runTests config files = do
 data TestConfig = TestConfig
                   { configTestMode :: TestMode
                   , configPrograms :: ProgConfig
+                  , configExclude :: [T.Text]
                   }
 
 defaultConfig :: TestConfig
 defaultConfig = TestConfig { configTestMode = Everything
+                           , configExclude = [ "disable" ]
                            , configPrograms =
                              ProgConfig
                              { configCompiler = Left "futhark-c"
@@ -619,7 +407,9 @@ addTypeChecker typeChecker config = case configTypeChecker config of
 data TestMode = OnlyTypeCheck
               | OnlyCompile
               | OnlyInterpret
+              | OnTravis
               | Everything
+              deriving (Eq)
 
 commandLineOptions :: [FunOptDescr TestConfig]
 commandLineOptions = [
@@ -632,6 +422,11 @@ commandLineOptions = [
   , Option "c" ["only-compile"]
     (NoArg $ Right $ \config -> config { configTestMode = OnlyCompile })
     "Only run compiled code"
+  , Option [] ["travis"]
+    (NoArg $ Right $ \config -> config { configTestMode = OnTravis
+                                       , configExclude = T.pack "notravis" :
+                                                         configExclude config })
+    "Only run compiled code not marked notravis"
 
   , Option [] ["typechecker"]
     (ReqArg (Right . changeProgConfig . addTypeChecker)
@@ -645,6 +440,12 @@ commandLineOptions = [
     (ReqArg (Right . changeProgConfig . addInterpreter)
      "PROGRAM")
     "What to run for interpretation (defaults to 'futharki')."
+  , Option [] ["exclude"]
+    (ReqArg (\tag ->
+               Right $ \config ->
+               config { configExclude = T.pack tag : configExclude config })
+     "TAG")
+    "Exclude test programs that define this tag."
   ]
 
 main :: IO ()

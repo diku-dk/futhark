@@ -3,13 +3,22 @@
 Language Reference
 ==================
 
-The builtin types in Futhark are ``int``, ``real``, ``float32``,
-``float64``, ``bool`` and ``char``, as well as their combination in
-tuples and arrays.  An ``int`` is currently 32 bits and ``real`` is by
-default a double-precision float (64 bits).  Some compiler frontends
-permit configuration of whether ``real`` maps to a 32-bit or 64-bit
-float.  A ``float32`` is always a single-precision float and a
-``float64`` is a double-precision float.
+The primitive types in Futhark are the signed integer types ``i8``,
+``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
+``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
+as ``bool`` and ``char``.  Furthermore, ``int`` is an alias for
+``i32``.  An ``f32`` is always a single-precision float and a ``f64``
+is a double-precision float.  All primitive types can be combined in
+tuples and arrays.
+
+Numeric literals can be suffixed with their intended type.  For
+example ``42i8`` is of type ``i8``, and ``1337e2f64`` is of type
+``f64``.  If no suffix is given, integer literals are of type ``i32``,
+and decimal literals are of type ``f64``.
+
+Numeric values can be converted between different types by using the
+desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
+the floating-point number ``1.0`` to a 32-bit signed integer.
 
 The following list describes every syntactical language construct in
 the language.  For convenience, we will sometimes talk of expressions
@@ -36,15 +45,16 @@ the function, e.g::
 
 The above declaration specifies a function that takes an array
 containing ``n`` elements and returns an array likewise containing
-``n`z elements.  In general, shape declarations in parameters are
+``n`` elements.  In general, shape declarations in parameters are
 fresh names, whilst shape declarations in return types must refer to a
-name in scope.  A shape declaration can also be an integer constant.
+name of type ``i32`` in scope.  A shape declaration can also be an
+integer constant (with no suffix).
 
 The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun real dotProduct([real,n] a, [real,n] b) =
+  fun int dotProduct([int,n] a, [int,n] b) =
     reduce(+, 0, zipWith(*, a, b))
 
 Or matrix multiplication::
@@ -70,6 +80,19 @@ collides with reality.  Shape declarations matter most when used for
 the input parameters of the ``main`` function and for the return type
 of functions used to ``map``.
 
+File inclusions
+---------------
+
+You can include other files into your main Futhark file like this::
+
+  include other_file
+
+The ``.fut`` extension is implied, so the above will include the file
+``other_file.fut``.
+
+All include headers must be at the top of the Futhark file, before any function
+declarations.
+
 Simple Expressions
 ------------------
 
@@ -87,17 +110,18 @@ Evaluates to its value in the environment.
 ~~~~~~~~~~~~~~~~~~~~~
 
 Evaluate the binary arithmetic operator on its operands, which must
-both be of either type ``int`` or ``real``.  The following operators
-are supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``,
-``==``, ``<``, ``<=``, ``**``.
+both be of the same numeric type.  The following operators are
+supported: ``+``, ``*``, ``-``, ``/``, ``%``, ``//``, ``%%``, ``==``,
+``!=`` ``<``, ``<=``, ``**``.
 
 ``x`` *bitop* ``y``
 ~~~~~~~~~~~~~~~~~~~
 
 Evaluate the binary bitwise operator on its operands, which must both
-be of type ``int``.  The following operators are supported: ``^``,
-``&``, ``|``, ``>>``, ``<<``, i.e., bitwise xor, and, or, and
-arithmetic shift right and left.
+be of integer type.  The following operators are supported: ``^``,
+``&``, ``|``, ``>>``, ``<<``, ``>>>``, i.e., bitwise xor, and, or,
+arithmetic shift right and left, and logical shift right.  Shift
+amounts must be non-negative.
 
 ``x && y``
 ~~~~~~~~~~
@@ -121,23 +145,23 @@ Logical negation of ``x``, which must be of type ``bool``.
 ``- x``
 ~~~~~~~
 
-Numerical negation of ``x``, which must be of type ``real`` or
-``int``.
+Numerical negation of ``x``, which must be of numeric type.
 
 ``~ x``
 ~~~~~~~
 
-Bitwise negation of ``x``, which must be of type ``int``.
+Bitwise negation of ``x``, which must be of integral type.
 
 ``abs x``
 ~~~~~~~~~
 
-Absolute value of ``x``, which must be of type ``int``.
+Absolute value of ``x``, which must be of integral type.
 
 ``signum x``
 ~~~~~~~~~~~~
 
-Sign of ``x``, which must be of type ``int``.  Returns 1, 0, or -1.
+Sign of ``x``, which must be of an integral type.  Returns 1, 0, or
+-1.
 
 ``a[i]``
 ~~~~~~~~
@@ -164,6 +188,14 @@ the tuple components may themselves be arrays).
 If the type of ``a`` is ``[{t_1, ..., t_n}]``, the result is a tuple
 of *n* arrays, i.e., ``{[t_1], ..., [t_n]}``, and otherwise a type
 error.
+
+``unsafe e``
+~~~~~~~~~~~~
+
+Elide safety checks (such as bounds checking) for operations lexically
+with ``e``.  This is useful if the compiler is otherwise unable to
+avoids bounds checks (e.g. when using indirect indexes), but you
+really do not want them here.
 
 ``iota(n)``
 ~~~~~~~~~~~
@@ -217,34 +249,10 @@ Permute the dimensions in the array, returning a new array.
 For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
 a[y,z,x]``.
 
-``transpose(k, n, a)``
-~~~~~~~~~~~~~~~~~~~~~~
-
-Return the generalised transpose of \textit{a}.  If
-``b==transpose(k,n,a)``, then
-
-::
-
-    a[i_1, ..., i_k, i_(k+1), ..., i_(k+n), ..., i_q ]
-      =
-    b[i_1 , ..., i_(k+1) , ..., i_(k+n), i_k, ..., i_q ]
-
-We will call this an operation an *(k,n)-transposition*.  Note that
-``transpose(0,1,a)`` is the common two-dimensional transpose.
-
-Be aware that ``k`` and ``n`` must be static integer literals, and
-``k+n`` must be non-negative and smaller than the rank of ``a``, or it
-is considered a type error.
-
-This operation is merely syntactical sugar for the equivalent
-``rearrange`` operation.
-
 ``transpose(a)``
 ~~~~~~~~~~~~~~~~
 
-Return the transpose of ``a``.  Syntactical sugar for
-``transpose(0,1,a)``, which is again syntactical sugar for
-``rearrange``.
+Return the transpose of ``a``, which must be a two-dimensional array.
 
 
 ``let pat = e in body``
@@ -363,14 +371,14 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[{int, real}]`` is transformed to ``{[int],
-[real]}`` during the compilation process, and all code interacting
+arrays.  The type ``[{int, f32}]`` is transformed to ``{[int],
+[f32]}`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[{[int], [real]}]``, which is transformed
-into ``{[[int]], [[real]]}``.  These two types are not
+Consider the type ``[{[int], [f32]}]``, which is transformed
+into ``{[[int]], [[f32]]}``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 

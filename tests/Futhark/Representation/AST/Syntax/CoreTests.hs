@@ -14,6 +14,7 @@ import Test.QuickCheck
 import Prelude
 
 import Language.Futhark.CoreTests ()
+import Futhark.Representation.PrimitiveTests()
 import Futhark.Representation.AST.Syntax.Core
 import Futhark.Representation.AST.Pretty
 
@@ -33,7 +34,7 @@ subShapeTests =
         shape = ExtShape
 
         free :: Int -> ExtDimSize
-        free = Free . Constant . IntVal . fromIntegral
+        free = Free . Constant . IntValue . Int32Value . fromIntegral
 
         isSubShapeOf shape1 shape2 =
           subShapeTest shape1 shape2 True
@@ -47,15 +48,17 @@ subShapeTests =
                     show expected) $
           shape1 `subShapeOf` shape2 @?= expected
 
+instance Arbitrary NoUniqueness where
+  arbitrary = pure NoUniqueness
 
-instance Arbitrary shape => Arbitrary (TypeBase shape) where
+instance (Arbitrary shape, Arbitrary u) => Arbitrary (TypeBase shape u) where
   arbitrary =
-    oneof [ Basic <$> arbitrary
+    oneof [ Prim <$> arbitrary
           , Array <$> arbitrary <*> arbitrary <*> arbitrary
           ]
 
 instance Arbitrary Value where
-  arbitrary = BasicVal <$> arbitrary
+  arbitrary = PrimVal <$> arbitrary
 
 instance Arbitrary Ident where
   arbitrary = Ident <$> arbitrary <*> arbitrary
@@ -65,4 +68,4 @@ instance Arbitrary Rank where
 
 instance Arbitrary Shape where
   arbitrary = Shape <$> map intconst <$> listOf1 (elements [1..9])
-    where intconst x = Constant $ IntVal x
+    where intconst = Constant . IntValue . Int32Value

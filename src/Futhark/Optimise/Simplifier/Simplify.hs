@@ -1,6 +1,6 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Optimise.Simplifier.Simplify
-  ( Simplifiable
-  , SimpleOps (..)
+  ( SimpleOps (..)
   , SimpleM
   , bindableSimpleOps
   , simplifyProg
@@ -16,69 +16,68 @@ import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplifier.Lore (Wise)
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Simple
+import Futhark.Optimise.Simplifier.Lore (addScopeWisdom)
 import Futhark.Tools (intraproceduralTransformation)
 
 -- | Simplify the given program.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyProg :: (Simplifiable lore, MonadFreshNames m) =>
+simplifyProg :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
+             -> Engine.HoistBlockers (SimpleM lore)
              -> Prog lore
              -> m (Prog (Wise lore))
-simplifyProg simpl rules prog =
-  intraproceduralTransformation
-  (simplifyFun' simpl rules (Just prog))
-  prog
+simplifyProg simpl rules blockers =
+  intraproceduralTransformation $
+  simplifyFun simpl rules blockers
 
 -- | Simplify the given function.  Even if the output differs from the
 -- output, meaningful simplification may not have taken place - the
 -- order of bindings may simply have been rearranged.
-simplifyFun :: (MonadFreshNames m, Simplifiable lore) =>
-               SimpleOps (SimpleM lore)
-            -> RuleBook (SimpleM lore)
-            -> FunDec lore
-            -> m (FunDec (Wise lore))
-simplifyFun simpl rules =
-  simplifyFun' simpl rules Nothing
-
-simplifyFun' :: (MonadFreshNames m, Simplifiable lore) =>
+simplifyFun :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
-             -> Maybe (Prog lore)
+             -> Engine.HoistBlockers (SimpleM lore)
              -> FunDec lore
              -> m (FunDec (Wise lore))
-simplifyFun' simpl rules prog fundec =
+simplifyFun simpl rules blockers fundec =
   modifyNameSource $ runSimpleM (Engine.simplifyFun fundec) simpl $
-  Engine.emptyEnv rules prog
+  Engine.emptyEnv rules blockers
 
 -- | Simplify just a single 'Lambda'.
-simplifyLambda :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
+simplifyLambda :: (MonadFreshNames m,
+                   HasScope lore m,
+                   Engine.MonadEngine (SimpleM lore)) =>
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
-               -> Maybe (Prog lore)
-               -> Lambda lore -> SubExp -> [Maybe VName]
+               -> Engine.HoistBlockers (SimpleM lore)
+               -> Lambda lore -> SubExp -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Wise lore))
-simplifyLambda simpl rules prog lam w args = do
-  types <- askTypeEnv
-  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
-          Engine.simplifyLambdaNoHoisting lam w args
+simplifyLambda simpl rules blockers lam w nes args = do
+  types <- askScope
+  let m = Engine.localVtable
+          (<> ST.fromScope (addScopeWisdom types)) $
+          Engine.simplifyLambdaNoHoisting lam w nes args
   modifyNameSource $ runSimpleM m simpl $
-    Engine.emptyEnv rules prog
+    Engine.emptyEnv rules blockers
 
 -- | Simplify a list of 'Binding's.
-simplifyBindings :: (MonadFreshNames m, HasTypeEnv m, Simplifiable lore) =>
+simplifyBindings :: (MonadFreshNames m,
+                     HasScope lore m,
+                     Engine.MonadEngine (SimpleM lore)) =>
                     SimpleOps (SimpleM lore)
                  -> RuleBook (SimpleM lore)
-                 -> Maybe (Prog lore) -> [Binding lore]
+                 -> Engine.HoistBlockers (SimpleM lore)
+                 -> [Binding lore]
                  -> m [Binding (Wise lore)]
-simplifyBindings simpl rules prog bnds = do
-  types <- askTypeEnv
-  let m = Engine.localVtable (<> ST.fromTypeEnv types) $
+simplifyBindings simpl rules blockers bnds = do
+  types <- askScope
+  let m = Engine.localVtable
+          (<> ST.fromScope (addScopeWisdom types)) $
           fmap snd $ Engine.collectBindingsEngine $
           mapM_ Engine.simplifyBinding bnds
   modifyNameSource $ runSimpleM m simpl $
-    Engine.emptyEnv rules prog
+    Engine.emptyEnv rules blockers

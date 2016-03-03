@@ -15,23 +15,23 @@
 --    [0.0, 0.0, 0.0]]
 -- }
 
-fun [[real]] main(
+fun [[f64]] main(
               int                  num_und,
              [[int, num_dates],3]  bb_inds,
-             [real]                arr_usz
+             [f64]                arr_usz
 ) =
   let arr    = reshape( (num_dates*num_und), arr_usz ) in
-  let bb_data= map(fn [real] ([int] row) =>
-                        map(toFloat,row)
+  let bb_data= map(fn [f64] ([int] row) =>
+                        map(f64,row)
                   , bb_inds )   in
   let bb_mat = brownianBridge( num_und, bb_inds, bb_data, arr )
   in  bb_mat
 
 
-fun [real] brownianBridgeDates (
+fun [f64] brownianBridgeDates (
                 [[int, num_dates],3] bb_inds,
-                [[real,num_dates],3] bb_data,
-                 [real,num_dates]    gauss
+                [[f64,num_dates],3] bb_data,
+                 [f64,num_dates]    gauss
             ) =
     let bi = bb_inds[0] in
     let li = bb_inds[1] in
@@ -40,16 +40,17 @@ fun [real] brownianBridgeDates (
     let lw = bb_data[1] in
     let rw = bb_data[2] in
 
-    let bbrow = copy(replicate(num_dates, 0.0))   in
-    let bbrow[ bi[0]-1 ] = sd[0] * gauss[0]       in
+    let bbrow = replicate(num_dates, 0.0) in
+    let bbrow[ bi[0]-1 ] = sd[0] * gauss[0] in
 
     loop (bbrow) =
         for i < num_dates-1 do  -- use i+1 since i in 1 .. num_dates-1
+            unsafe
             let j  = li[i+1] - 1 in
             let k  = ri[i+1] - 1 in
             let l  = bi[i+1] - 1 in
 
-            let wk = bbrow [k  ] in
+            let wk = unsafe bbrow [k  ] in
             let zi = gauss [i+1] in
             let tmp= rw[i+1] * wk + sd[i+1] * zi in
 
@@ -67,11 +68,11 @@ fun [real] brownianBridgeDates (
             in  bbrow
        in bbrow
 
-fun [[real]] brownianBridge (
+fun [[f64]] brownianBridge (
                 int                  num_und,
                 [[int, num_dates],3] bb_inds,
-                [[real,num_dates],3] bb_data,
-                 [real]  gaussian_arr
+                [[f64,num_dates],3] bb_data,
+                 [f64]  gaussian_arr
             ) =
     let gauss2d  = reshape((num_dates,num_und), gaussian_arr) in
     let gauss2dT = transpose(gauss2d) in

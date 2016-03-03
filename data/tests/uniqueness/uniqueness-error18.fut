@@ -4,5 +4,5 @@
 -- error:
 
 fun {*[int], *[int]} main(int n) =
-  let a = copy(iota(n)) in
+  let a = iota(n) in
   {a, a}

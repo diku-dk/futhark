@@ -1,18 +1,17 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | Inspecing and modifying 'Pattern's, function parameters and
 -- pattern elements.
 module Futhark.Representation.AST.Attributes.Patterns
        (
          -- * Function parameters
          paramIdent
-       , paramName
        , paramType
-       , paramLore
+       , paramDeclType
          -- * Pattern elements
        , patElemIdent
-       , patElemName
        , patElemType
        , patElemRequires
-       , patElemLore
        , setPatElemLore
        , patternElements
        , patternIdents
@@ -26,36 +25,40 @@ module Futhark.Representation.AST.Attributes.Patterns
        , patternSize
          -- * Bindage
        , bindageRequires
-         -- * Kernel inputs
-       , kernelInputName
-       , kernelInputType
-       , kernelInputIdent
+         -- *
+       , basicPattern
+       , basicPattern'
        )
        where
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Types (stripArray, setUniqueness)
+import Futhark.Representation.AST.Attributes.Types
+  (stripArray, Typed(..), DeclTyped(..))
 
--- | The name of the 'Ident' bound by an 'FParam'.
-paramName :: ParamT attr -> VName
-paramName = identName . paramIdent
+-- | The 'Type' of a parameter.
+paramType :: Typed attr => ParamT attr -> Type
+paramType = typeOf
 
--- | The type of the 'Ident' bound by an 'FParam'.
-paramType :: ParamT attr -> Type
-paramType = identType . paramIdent
+-- | The 'DeclType' of a parameter.
+paramDeclType :: DeclTyped attr => ParamT attr -> DeclType
+paramDeclType = declTypeOf
 
--- | The name of the ident bound by a 'PatElem'.
-patElemName :: PatElemT attr -> VName
-patElemName = identName . patElemIdent
+-- | An 'Ident' corresponding to a parameter.
+paramIdent :: Typed attr => ParamT attr -> Ident
+paramIdent param = Ident (paramName param) (typeOf param)
+
+-- | An 'Ident' corresponding to a pattern element.
+patElemIdent :: Typed attr => PatElemT attr -> Ident
+patElemIdent pelem = Ident (patElemName pelem) (typeOf pelem)
 
 -- | The type of a name bound by a 'PatElem'.
-patElemType :: PatElemT attr -> Type
-patElemType = identType . patElemIdent
+patElemType :: Typed attr => PatElemT attr -> Type
+patElemType = typeOf
 
 -- | The type of the value being bound by a 'PatElem'.
-patElemRequires :: PatElemT attr -> Type
-patElemRequires (PatElem ident bindage _) =
-  bindageRequires (identType ident) bindage
+patElemRequires :: Typed attr => PatElemT attr -> Type
+patElemRequires (PatElem _ bindage attr) =
+  bindageRequires (typeOf attr) bindage
 
 -- | The type of the value being bound by an pattern element with the
 -- given result 'Type' and 'Bindage'.
@@ -63,7 +66,7 @@ bindageRequires :: Type -> Bindage -> Type
 bindageRequires t BindVar =
   t
 bindageRequires t (BindInPlace _ _ is) =
-  stripArray (length is) t `setUniqueness` Nonunique
+  stripArray (length is) t
 
 -- | Set the lore of a 'PatElem'.
 setPatElemLore :: PatElemT oldattr -> newattr -> PatElemT newattr
@@ -71,50 +74,54 @@ setPatElemLore (PatElem ident bindage _) =
   PatElem ident bindage
 
 -- | All pattern elements in the pattern - context first, then values.
-patternElements :: Pattern lore -> [PatElem lore]
+patternElements :: PatternT attr -> [PatElemT attr]
 patternElements pat = patternContextElements pat ++ patternValueElements pat
 
 -- | Return a list of the 'Ident's bound by the 'Pattern'.
-patternIdents :: Pattern lore -> [Ident]
+patternIdents :: Typed attr => PatternT attr -> [Ident]
 patternIdents pat = patternContextIdents pat ++ patternValueIdents pat
 
 -- | Return a list of the context 'Ident's bound by the 'Pattern'.
-patternContextIdents :: Pattern lore -> [Ident]
+patternContextIdents :: Typed attr => PatternT attr -> [Ident]
 patternContextIdents = map patElemIdent . patternContextElements
 
 -- | Return a list of the value 'Ident's bound by the 'Pattern'.
-patternValueIdents :: Pattern lore -> [Ident]
+patternValueIdents :: Typed attr => PatternT attr -> [Ident]
 patternValueIdents = map patElemIdent . patternValueElements
 
 -- | Return a list of the 'Name's bound by the 'Pattern'.
-patternNames :: Pattern lore -> [VName]
-patternNames = map identName . patternIdents
+patternNames :: PatternT attr -> [VName]
+patternNames = map patElemName . patternElements
 
 -- | Return a list of the 'Name's bound by the context part of the 'Pattern'.
-patternContextNames :: Pattern lore -> [VName]
-patternContextNames = map identName . patternContextIdents
+patternContextNames :: PatternT attr -> [VName]
+patternContextNames = map patElemName . patternContextElements
 
 -- | Return a list of the 'Name's bound by the value part of the 'Pattern'.
-patternValueNames :: Pattern lore -> [VName]
-patternValueNames = map identName . patternValueIdents
+patternValueNames :: PatternT attr -> [VName]
+patternValueNames = map patElemName . patternValueElements
 
 -- | Return a list of the 'types's bound by the 'Pattern'.
-patternTypes :: Pattern lore -> [Type]
+patternTypes :: Typed attr => PatternT attr -> [Type]
 patternTypes = map identType . patternIdents
 
 -- | Return a list of the 'types's bound by the value part of the 'Pattern'.
-patternValueTypes :: Pattern lore -> [Type]
+patternValueTypes :: Typed attr => PatternT attr -> [Type]
 patternValueTypes = map identType . patternValueIdents
 
 -- | Return the number of names bound by the 'Pattern'.
-patternSize :: Pattern lore -> Int
+patternSize :: PatternT attr -> Int
 patternSize (Pattern context values) = length context + length values
 
-kernelInputName :: KernelInput lore -> VName
-kernelInputName = paramName . kernelInputParam
+-- | Create a pattern using 'Type' as the attribute.
+basicPattern :: [(Ident,Bindage)] -> [(Ident,Bindage)] -> PatternT Type
+basicPattern context values =
+  Pattern (map patElem context) (map patElem values)
+  where patElem (Ident name t,bindage) = PatElem name bindage t
 
-kernelInputType :: KernelInput lore -> Type
-kernelInputType = paramType . kernelInputParam
-
-kernelInputIdent :: KernelInput lore -> Ident
-kernelInputIdent = paramIdent . kernelInputParam
+-- | Like 'basicPattern', but all 'Bindage's are assumed to be
+-- 'BindVar'.
+basicPattern' :: [Ident] -> [Ident] -> PatternT Type
+basicPattern' context values =
+  basicPattern (map addBindVar context) (map addBindVar values)
+    where addBindVar name = (name, BindVar)

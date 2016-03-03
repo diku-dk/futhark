@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 -- | Queries and operations on values.  Useful for the interpreter and
 -- constant folding.
 module Futhark.Representation.AST.Attributes.Values
@@ -5,33 +6,36 @@ module Futhark.Representation.AST.Attributes.Values
          valueType
        , valueShape
        , valueSize
-       , IsValue (..)
-       , intconst
+
+         -- * Extracting
+       , valueInt
 
          -- * Rearranging
        , permuteArray
-       , stripeArray
-       , unstripeArray
 
          -- * Miscellaneous
        , arrayString
+       , zeroIsh
+       , oneIsh
        )
        where
 
 import Data.Array
 import Data.List
 
+
+import Prelude
+
 import Futhark.Representation.AST.Syntax
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.AST.Attributes.Rearrange
-import Futhark.Representation.AST.Attributes.Stripe
 
 -- | Return the type of the given value.
 valueType :: Value -> Type
-valueType (BasicVal v) =
-  Basic $ basicValueType v
+valueType (PrimVal v) =
+  Prim $ primValueType v
 valueType (ArrayVal _ et shape) =
-  Array et (Shape $ map (Constant . IntVal . fromIntegral) shape) Nonunique
+  Array et (Shape $ map constant shape) NoUniqueness
 
 -- | Return the size of the first dimension of an array, or zero for
 -- non-arrays.
@@ -48,6 +52,13 @@ valueSize t = case valueShape t of
 valueShape :: Value -> [Int]
 valueShape (ArrayVal _ _ shape) = shape
 valueShape _ = []
+
+-- | Convert an 'IntValue' to an 'Integer'.
+valueInt :: IntValue -> Integer
+valueInt (Int8Value x) = toInteger x
+valueInt (Int16Value x) = toInteger x
+valueInt (Int32Value x) = toInteger x
+valueInt (Int64Value x) = toInteger x
 
 -- | Permute the dimensions of an array value.  If the given value is
 -- not an array, it is returned unchanged.  The length of the
@@ -67,34 +78,12 @@ permuteArray perm (ArrayVal inarr et oldshape) =
         picks (n:ns) = [ i:is | is <- picks ns, i <- [0..n-1] ]
 permuteArray _ v = v
 
--- | Stripe the elements of an array value.  If the given value is
--- not an array, it is returned unchanged.
-stripeArray :: Int -> Value -> Value
-stripeArray stride (ArrayVal inarr et shape) =
-  ArrayVal (listArray (0, upper_bound)
-            [ inarr ! i | i <- stripeIndices n stride ])
-  et shape
-  where upper_bound = snd $ bounds inarr
-        n = upper_bound + 1
-stripeArray _ v = v
-
--- | Inversely stripe the elements of an array value.  If the given value is
--- not an array, it is returned unchanged.
-unstripeArray :: Int -> Value -> Value
-unstripeArray stride (ArrayVal inarr et shape) =
-  ArrayVal (listArray (0, upper_bound)
-            [ inarr ! i | i <- stripeIndicesInverse n stride ])
-  et shape
-  where upper_bound = snd $ bounds inarr
-        n = upper_bound + 1
-unstripeArray _ v = v
-
 -- | If the given value is a nonempty array containing only
 -- characters, return the corresponding 'String', otherwise return
 -- 'Nothing'.
 arrayString :: Value -> Maybe String
 arrayString (ArrayVal arr _ _)
   | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (CharVal c) = Just c
+  where asChar (CharValue c) = Just c
         asChar _           = Nothing
 arrayString _ = Nothing

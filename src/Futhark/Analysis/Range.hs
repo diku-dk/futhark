@@ -1,5 +1,12 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Analysis.Range
        ( rangeAnalysis
+       , runRangeM
+       , RangeM
+       , analyseExp
+       , analyseLambda
+       , analyseExtLambda
+       , analyseBody
        )
        where
 
@@ -12,34 +19,36 @@ import Data.List
 import Prelude
 
 import qualified Futhark.Analysis.ScalExp as SE
-import Futhark.Representation.AST.Lore (Lore)
 import qualified Futhark.Representation.AST as In
 import qualified Futhark.Representation.Ranges as Out
 import qualified Futhark.Analysis.AlgSimplify as AS
+import qualified Futhark.Representation.AST.Attributes.Ranges as In
 
 -- Entry point
 
 -- | Perform variable range analysis on the given program, returning a
 -- program with embedded range annotations.
-rangeAnalysis :: Lore lore => In.Prog lore -> Out.Prog lore
+rangeAnalysis :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
+                 In.Prog lore -> Out.Prog lore
 rangeAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 -- Implementation
 
-analyseFun :: Lore lore => In.FunDec lore -> Out.FunDec lore
+analyseFun :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
+              In.FunDec lore -> Out.FunDec lore
 analyseFun (In.FunDec fname restype params body) =
   runRangeM $ bindFunParams params $ do
     body' <- analyseBody body
     return $ Out.FunDec fname restype params body'
 
-analyseBody :: Lore lore =>
+analyseBody :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                In.Body lore
             -> RangeM (Out.Body lore)
 analyseBody (In.Body lore origbnds result) =
   analyseBindings origbnds $ \bnds' ->
     return $ Out.mkRangedBody lore bnds' result
 
-analyseBindings :: Lore lore =>
+analyseBindings :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                    [In.Binding lore]
                 -> ([Out.Binding lore] -> RangeM a)
                 -> RangeM a
@@ -51,7 +60,7 @@ analyseBindings = analyseBindings' []
           bindPattern (Out.bindingPattern bnd') $
             analyseBindings' (bnd':acc) bnds m
 
-analyseBinding :: Lore lore =>
+analyseBinding :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                   In.Binding lore
                -> RangeM (Out.Binding lore)
 analyseBinding (In.Let pat lore e) = do
@@ -59,49 +68,21 @@ analyseBinding (In.Let pat lore e) = do
   pat' <- simplifyPatRanges $ Out.addRangesToPattern pat e'
   return $ Out.Let pat' lore e'
 
-analyseExp :: Lore lore =>
+analyseExp :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
               In.Exp lore
            -> RangeM (Out.Exp lore)
-analyseExp (Out.LoopOp (In.Map cs w lam args)) =
-  Out.LoopOp <$>
-  (Out.Map cs w <$> analyseLambda lam <*> pure args)
-analyseExp (Out.LoopOp (In.ConcatMap cs w lam args)) =
-  Out.LoopOp <$>
-  (Out.ConcatMap cs w <$> analyseLambda lam <*> pure args)
-analyseExp (Out.LoopOp (In.Reduce cs w lam input)) =
-  Out.LoopOp <$>
-  (Out.Reduce cs w <$> analyseLambda lam <*> pure input)
-analyseExp (Out.LoopOp (In.Scan cs w lam input)) =
-  Out.LoopOp <$>
-  (Out.Scan cs w <$> analyseLambda lam <*> pure input)
-analyseExp (Out.LoopOp (In.Redomap cs w outerlam innerlam acc arr)) =
-  Out.LoopOp <$>
-  (Out.Redomap cs w <$>
-   analyseLambda outerlam <*>
-   analyseLambda innerlam <*>
-   pure acc <*> pure arr)
-analyseExp (Out.LoopOp (In.Stream cs w form lam arr ii)) =
-  Out.LoopOp <$>
-  (Out.Stream cs w <$> analyseStreamForm form <*> analyseExtLambda lam <*>
-                       pure arr <*> pure ii)
-  where analyseStreamForm (In.MapLike    o  ) = return $ Out.MapLike o
-        analyseStreamForm (In.Sequential acc) = return $ Out.Sequential acc
-        analyseStreamForm (In.RedLike o lam0 acc) = do
-            lam0' <- analyseLambda lam0
-            return $ Out.RedLike o lam0' acc
-analyseExp e = Out.mapExpM analyse e
+analyseExp = Out.mapExpM analyse
   where analyse =
-          Out.Mapper { Out.mapOnSubExp = return
-                     , Out.mapOnCertificates = return
-                     , Out.mapOnVName = return
-                     , Out.mapOnBody = analyseBody
-                     , Out.mapOnLambda = error "Improperly handled lambda in alias analysis"
-                     , Out.mapOnExtLambda = error "Improperly handled existential lambda in alias analysis"
-                     , Out.mapOnRetType = return
-                     , Out.mapOnFParam = return
-                     }
+          In.Mapper { In.mapOnSubExp = return
+                    , In.mapOnCertificates = return
+                    , In.mapOnVName = return
+                    , In.mapOnBody = analyseBody
+                    , In.mapOnRetType = return
+                    , In.mapOnFParam = return
+                    , In.mapOnOp = return . In.addOpRanges
+                    }
 
-analyseLambda :: Lore lore =>
+analyseLambda :: (In.Attributes lore, In.CanBeRanged (Out.Op lore)) =>
                  In.Lambda lore
               -> RangeM (Out.Lambda lore)
 analyseLambda lam = do
@@ -110,7 +91,7 @@ analyseLambda lam = do
                , Out.lambdaParams = In.lambdaParams lam
                }
 
-analyseExtLambda :: Lore lore =>
+analyseExtLambda :: (In.Attributes lore, In.CanBeRanged (Out.Op lore)) =>
                     In.ExtLambda lore
                  -> RangeM (Out.ExtLambda lore)
 analyseExtLambda lam = do
@@ -131,7 +112,8 @@ type RangeM = Reader RangeEnv
 runRangeM :: RangeM a -> a
 runRangeM = flip runReader emptyRangeEnv
 
-bindFunParams :: [Out.ParamT attr] -> RangeM a -> RangeM a
+bindFunParams :: Out.Typed attr =>
+                 [Out.ParamT attr] -> RangeM a -> RangeM a
 bindFunParams []             m =
   m
 bindFunParams (param:params) m = do
@@ -142,7 +124,8 @@ bindFunParams (param:params) m = do
   where bindFunParam = HM.insert (In.paramName param) Out.unknownRange
         dims = In.arrayDims $ In.paramType param
 
-bindPattern :: Out.Pattern lore -> RangeM a -> RangeM a
+bindPattern :: Out.Typed attr =>
+               Out.PatternT (Out.Range, attr) -> RangeM a -> RangeM a
 bindPattern pat m = do
   ranges <- rangesRep
   local bindPatElems $
@@ -151,7 +134,7 @@ bindPattern pat m = do
   where bindPatElems env =
           foldl bindPatElem env $ Out.patternElements pat
         bindPatElem env patElem =
-          HM.insert (Out.patElemName patElem) (fst $ Out.patElemLore patElem) env
+          HM.insert (Out.patElemName patElem) (fst $ Out.patElemAttr patElem) env
         dims = nub $ concatMap Out.arrayDims $ Out.patternTypes pat
 
 refineDimensionRanges :: AS.RangesRep -> [Out.SubExp]
@@ -163,7 +146,7 @@ refineDimensionRanges ranges = flip $ foldl refineShape
           env
         -- A dimension is never negative.
         dimBound :: Out.Range
-        dimBound = (Just $ Out.ScalarBound $ SE.Val $ In.IntVal 0,
+        dimBound = (Just $ Out.ScalarBound 0,
                     Nothing)
 
 refineRange :: AS.RangesRep -> Out.VName -> Out.Range -> RangeEnv
@@ -188,12 +171,12 @@ refineUpperBound = flip Out.minimumBound
 lookupRange :: Out.VName -> RangeM Out.Range
 lookupRange = asks . HM.lookupDefault Out.unknownRange
 
-simplifyPatRanges :: Out.Pattern lore
-                  -> RangeM (Out.Pattern lore)
+simplifyPatRanges :: Out.PatternT (Out.Range, attr)
+                  -> RangeM (Out.PatternT (Out.Range, attr))
 simplifyPatRanges (Out.Pattern context values) =
   Out.Pattern <$> mapM simplifyPatElemRange context <*> mapM simplifyPatElemRange values
   where simplifyPatElemRange patElem = do
-          let (range, innerattr) = Out.patElemLore patElem
+          let (range, innerattr) = Out.patElemAttr patElem
           range' <- simplifyRange range
           return $ Out.setPatElemLore patElem (range', innerattr)
 
@@ -205,7 +188,7 @@ simplifyRange (lower, upper) = do
   return (lower', upper')
 
 simplifyBound :: AS.RangesRep -> Out.Bound -> Out.Bound
-simplifyBound ranges = liftM $ simplifyKnownBound ranges
+simplifyBound ranges = fmap $ simplifyKnownBound ranges
 
 simplifyKnownBound :: AS.RangesRep -> Out.KnownBound -> Out.KnownBound
 simplifyKnownBound ranges bound

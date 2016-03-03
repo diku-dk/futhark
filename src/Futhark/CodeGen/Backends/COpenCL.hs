@@ -4,10 +4,11 @@ module Futhark.CodeGen.Backends.COpenCL
   ) where
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad hiding (mapM)
+import Data.Traversable
 import Data.List
 
-import Prelude
+import Prelude hiding (mapM)
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
@@ -20,19 +21,18 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: Prog -> Either String String
+compileProg :: MonadFreshNames m => Prog -> m (Either String String)
 compileProg prog = do
-  Program opencl_code kernel_names prog' <- ImpGen.compileProg prog
-  let header = unlines [ "#include <CL/cl.h>\n"
-                       , "#define FUT_KERNEL(s) #s"
-                       , "#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)"
-                       , blockDimPragma
-                       ]
-  return $
-    header ++
-    GenericC.compileProg operations ()
-    (openClDecls kernel_names opencl_code)
-    openClInit (openClReport kernel_names) options prog'
+  res <- ImpGen.compileProg prog
+  case res of
+    Left err -> return $ Left err
+    Right (Program opencl_code opencl_prelude kernel_names prog') -> do
+      Right <$> GenericC.compileProg operations ()
+                (openClDecls transposeBlockDim kernel_names opencl_code opencl_prelude)
+                openClInit
+                [[C.cstm|OPENCL_SUCCEED(clFinish(fut_cl_queue));|]]
+                (openClReport kernel_names)
+                options prog'
   where operations :: GenericC.Operations OpenCL ()
         operations = GenericC.Operations
                      { GenericC.opsCompiler = callKernel
@@ -53,6 +53,21 @@ compileProg prog = do
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_preferred_device = optarg;|]
                            }
+                  , Option { optionLongName = "synchronous"
+                           , optionShortName = Just 's'
+                           , optionArgument = NoArgument
+                           , optionAction = [C.cstm|cl_synchronous = 1;|]
+                           }
+                  , Option { optionLongName = "group-size"
+                           , optionShortName = Nothing
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_group_size = atoi(optarg);|]
+                           }
+                  , Option { optionLongName = "num-groups"
+                           , optionShortName = Nothing
+                           , optionArgument = RequiredArgument
+                           , optionAction = [C.cstm|cl_num_groups = atoi(optarg);|]
+                           }
                   ]
 
 writeOpenCLScalar :: GenericC.WriteScalar OpenCL ()
@@ -60,12 +75,11 @@ writeOpenCLScalar mem i t "device" val = do
   val' <- newVName "write_tmp"
   GenericC.stm [C.cstm|{
                    $ty:t $id:val' = $exp:val;
-                   assert(clEnqueueWriteBuffer(fut_cl_queue, $id:mem, CL_TRUE,
-                                               $exp:i, sizeof($ty:t),
-                                               &$id:val',
-                                               0, NULL, NULL)
-                          == CL_SUCCESS);
-                   assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+                   OPENCL_SUCCEED(
+                     clEnqueueWriteBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                                          $exp:i, sizeof($ty:t),
+                                          &$id:val',
+                                          0, NULL, NULL));
                 }|]
 writeOpenCLScalar _ _ _ space _ =
   fail $ "Cannot write to '" ++ space ++ "' memory space."
@@ -74,14 +88,13 @@ readOpenCLScalar :: GenericC.ReadScalar OpenCL ()
 readOpenCLScalar mem i t "device" = do
   val <- newVName "read_res"
   GenericC.decl [C.cdecl|$ty:t $id:val;|]
-  GenericC.stm [C.cstm|{
-                 assert(clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
-                                            $exp:i, sizeof($ty:t),
-                                            &$id:val,
-                                            0, NULL, NULL)
-                        == CL_SUCCESS);
-                 assert(clFinish(fut_cl_queue) == CL_SUCCESS);
-              }|]
+  GenericC.stm [C.cstm|
+                 OPENCL_SUCCEED(
+                   clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                                       $exp:i, sizeof($ty:t),
+                                       &$id:val,
+                                       0, NULL, NULL));
+              |]
   return [C.cexp|$id:val|]
 readOpenCLScalar _ _ _ space =
   fail $ "Cannot read from '" ++ space ++ "' memory space."
@@ -101,7 +114,7 @@ allocateOpenCLBuffer mem size "device" = do
     $id:mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
                              $exp:size > 0 ? $exp:size : 1, NULL,
                              &$id:errorname);
-    assert($id:errorname == 0);
+    OPENCL_SUCCEED($id:errorname);
   }|]
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
@@ -111,39 +124,39 @@ copyOpenCLMemory :: GenericC.Copy OpenCL ()
 -- out of bounds, even if asked to read zero bytes.  We protect with a
 -- branch to avoid this.
 copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nbytes =
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      assert(clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
-                                 $exp:srcidx, $exp:nbytes,
-                                 $id:destmem + $exp:destidx,
-                                 0, NULL, NULL)
-             == CL_SUCCESS);
-      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+      OPENCL_SUCCEED(
+        clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
+                            $exp:srcidx, $exp:nbytes,
+                            $id:destmem + $exp:destidx,
+                            0, NULL, NULL));
    }
-  }|]
+  |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nbytes =
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
-      assert(clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
-                                  $exp:destidx, $exp:nbytes,
-                                  $id:srcmem + $exp:srcidx,
-                                  0, NULL, NULL)
-             == CL_SUCCESS);
-      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+      OPENCL_SUCCEED(
+        clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
+                             $exp:destidx, $exp:nbytes,
+                             $id:srcmem + $exp:srcidx,
+                             0, NULL, NULL));
     }
-  }|]
+  |]
 copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device") nbytes =
   -- Be aware that OpenCL swaps the usual order of operands for
   -- memcpy()-like functions.  The order below is not a typo.
   GenericC.stm [C.cstm|{
     if ($exp:nbytes > 0) {
-      assert(clEnqueueCopyBuffer(fut_cl_queue,
-                                 $id:srcmem, $id:destmem,
-                                 $exp:srcidx, $exp:destidx,
-                                 $exp:nbytes,
-                                 0, NULL, NULL)
-             == CL_SUCCESS);
-      assert(clFinish(fut_cl_queue) == CL_SUCCESS);
+      OPENCL_SUCCEED(
+        clEnqueueCopyBuffer(fut_cl_queue,
+                            $id:srcmem, $id:destmem,
+                            $exp:srcidx, $exp:destidx,
+                            $exp:nbytes,
+                            0, NULL, NULL));
+      if (cl_synchronous) {
+        OPENCL_SUCCEED(clFinish(fut_cl_queue));
+      }
     }
   }|]
 copyOpenCLMemory _ _ destspace _ _ srcspace _ =
@@ -156,54 +169,50 @@ openclMemoryType space =
   fail $ "OpenCL backend does not support '" ++ space ++ "' memory space."
 
 callKernel :: GenericC.OpCompiler OpenCL ()
+callKernel (GetNumGroups v) = do
+  -- Must be a power of two.
+  GenericC.stm [C.cstm|$id:v = cl_num_groups;|]
+  return GenericC.Done
+callKernel (GetGroupSize v) = do
+  GenericC.stm [C.cstm|$id:v = cl_group_size;|]
+  return GenericC.Done
+
 callKernel (LaunchKernel name args kernel_size workgroup_size) = do
   zipWithM_ setKernelArg [(0::Int)..] args
   kernel_size' <- mapM GenericC.compileExp kernel_size
-  workgroup_size' <- case workgroup_size of
-    Nothing -> return Nothing
-    Just es -> Just <$> mapM GenericC.compileExp es
+  workgroup_size' <- mapM GenericC.compileExp workgroup_size
   launchKernel name kernel_size' workgroup_size'
   return GenericC.Done
   where setKernelArg i (ValueArg e bt) = do
           v <- GenericC.compileExpToName "kernel_arg" bt e
           GenericC.stm [C.cstm|
-            assert(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v)
-                   == CL_SUCCESS);
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
           |]
 
         setKernelArg i (MemArg v) =
           GenericC.stm [C.cstm|
-            assert(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v)
-                   == CL_SUCCESS);
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
           |]
 
         setKernelArg i (SharedMemoryArg num_bytes) = do
           num_bytes' <- GenericC.compileExp $ innerExp num_bytes
           GenericC.stm [C.cstm|
-            assert(clSetKernelArg($id:name, $int:i, $exp:num_bytes', NULL)
-                   == CL_SUCCESS);
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, $exp:num_bytes', NULL));
             |]
 
 launchKernel :: C.ToExp a =>
-                String -> [a] -> Maybe [a] -> GenericC.CompilerM op s ()
+                String -> [a] -> [a] -> GenericC.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims = do
   global_work_size <- newVName "global_work_size"
   time_start <- newVName "time_start"
   time_end <- newVName "time_end"
   time_diff <- newVName "time_diff"
-
-  local_work_size_arg <- case workgroup_dims of
-    Nothing ->
-      return [C.cexp|NULL|]
-    Just es -> do
-      local_work_size <- newVName "local_work_size"
-      let workgroup_dims' = map toInit es
-      GenericC.decl [C.cdecl|const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};|]
-      return [C.cexp|$id:local_work_size|]
+  local_work_size <- newVName "local_work_size"
 
   GenericC.stm [C.cstm|{
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
+      const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       struct timeval $id:time_start, $id:time_end, $id:time_diff;
       fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
       $stms:(printKernelSize global_work_size)
@@ -211,9 +220,11 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       gettimeofday(&$id:time_start, NULL);
       OPENCL_SUCCEED(
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
-                               $id:global_work_size, $exp:local_work_size_arg,
+                               $id:global_work_size, $id:local_work_size,
                                0, NULL, NULL));
-      OPENCL_SUCCEED(clFinish(fut_cl_queue));
+      if (cl_synchronous) {
+        OPENCL_SUCCEED(clFinish(fut_cl_queue));
+      }
       gettimeofday(&$id:time_end, NULL);
       timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
       $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
@@ -227,6 +238,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         kernel_runs = kernel_name ++ "_runs"
         kernel_rank = length kernel_dims
         kernel_dims' = map toInit kernel_dims
+        workgroup_dims' = map toInit workgroup_dims
         total_elements = foldl multExp [C.cexp|1|] kernel_dims
 
         toInit e = [C.cinit|$exp:e|]
@@ -238,6 +250,3 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
           map (printKernelDim global_work_size) [0..kernel_rank-1]
         printKernelDim global_work_size i =
           [[C.cstm|fprintf(stderr, "%zu", $id:global_work_size[$int:i]);|]]
-
-blockDimPragma :: String
-blockDimPragma = "#define FUT_BLOCK_DIM " ++ show (transposeBlockDim :: Int)

@@ -24,14 +24,14 @@ fun bool testBit(int n, int ind) =
     let t = (1 << ind) in (n & t) == t
 
 ----------------------------------------------------------------/
----- INDEPENDENT FORMULA: 
+---- INDEPENDENT FORMULA:
 ----    filter is redundantly computed inside map.
 ----    Currently Futhark hoists it outside, but this will
 ----    not allow fusing the filter with reduce => redomap,
 ----------------------------------------------------------------/
 fun int xorInds(int n, [int,num_bits] dir_vs) =
-    let reldv_vals = map( fn int (int dv, int i) => 
-                            if testBit(grayCode(n),i) 
+    let reldv_vals = map( fn int (int dv, int i) =>
+                            if testBit(grayCode(n),i)
                             then dv else 0
                         , zip(dir_vs,iota(num_bits)) ) in
     reduce( ^, 0, reldv_vals )
@@ -39,52 +39,58 @@ fun int xorInds(int n, [int,num_bits] dir_vs) =
 fun [int] sobolIndI ( [[int]] dir_vs, int n ) =
     map( xorInds(n), dir_vs )
 
-fun [real] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
-    let divisor = 2.0 ** toFloat (num_bits) in
+fun [f64] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
+    let divisor = 2.0 ** f64(num_bits) in
     let arri    = sobolIndI( dir_vs, n )     in
-        map( fn real (int x) => toFloat(x) / divisor, arri )
+        map( fn f64 (int x) => f64(x) / divisor, arri )
 
 --------------------------------/
 ---- STRENGTH-REDUCED FORMULA
 --------------------------------/
 
-fun int index_of_least_significant_0(int num_bits, int n) = 
+fun int index_of_least_significant_0(int num_bits, int n) =
   let {goon,k} = {True,0} in
   loop ({goon,k,n}) =
         for i < num_bits do
-	  if(goon) 
-	  then if (n & 1) == 1
-	       then {True, k+1, n>>1}
-	       else {False,k,   n   }
-	  else      {False,k,   n   }
+          if(goon)
+          then if (n & 1) == 1
+               then {True, k+1, n>>1}
+               else {False,k,   n   }
+          else      {False,k,   n   }
   in k
 
 fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
   let bit= index_of_least_significant_0(num_bits,i) in
-  map( fn int([int] row) => row[bit], sob_dirs )
+  map( fn int([int] row) => unsafe row[bit], sob_dirs )
 
+<<<<<<< HEAD
 fun [[real],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let sob_fact= 1.0 / toFloat(1 << num_bits)       in
+=======
+fun [[f64],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
+  let sob_fact= 1.0 / f64(1 << num_bits)       in
+  let sob_beg = sobolIndI(dir_vs, n+1)             in
+>>>>>>> b669179ab9a9adb5b7687200427d05d5fd9d9653
   let contrbs = map( fn [int] (int k) =>
                         let sob = k + n in
                         if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
                    , iota(chunk) )                 in
-  let vct_ints= scan( fn [int] ([int] x, [int] y) => 
+  let vct_ints= scan( fn [int] ([int] x, [int] y) =>
                         zipWith(^, x, y)
                     , replicate(len, 0), contrbs ) in
-  map( fn [real] ([int] xs) => 
-	     map ( fn real (int x) => 
-		     toFloat(x) * sob_fact 
-		 , xs)
-	 , vct_ints)
+  map( fn [f64] ([int] xs) =>
+             map ( fn f64 (int x) =>
+                     f64(x) * sob_fact
+                 , xs)
+         , vct_ints)
 
-fun real main( int num_dates, int num_und, int num_mc_it, 
+fun f64 main( int num_dates, int num_und, int num_mc_it,
                [[int,num_bits]] dir_vs_nosz ) =
   let sobvctsz  = num_dates*num_und in
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
-  let sobol_mat = streamMapMax ( fn [[real,sobvctsz]] (int chunk, [int] ns) =>
-                                    sobolChunk(dir_vs, ns[0], chunk)
-                               , iota(num_mc_it) ) in
-  reduce (+, 0.0, map ( fn real ([real] row) => reduce(+, 0.0, row), sobol_mat ) )
+  let sobol_mat = streamMap( fn [[f64,sobvctsz]] (int chunk, [int] ns) =>
+                                sobolChunk(dir_vs, ns[0], chunk)
+                           , iota(num_mc_it) ) in
+  reduce (+, 0.0, map ( fn f64 ([f64] row) => reduce(+, 0.0, row), sobol_mat ) )

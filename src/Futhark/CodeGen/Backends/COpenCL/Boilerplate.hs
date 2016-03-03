@@ -3,16 +3,18 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   ( openClDecls
   , openClInit
   , openClReport
+
   ) where
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-openClDecls :: [String] -> String -> [C.Definition]
-openClDecls kernel_names opencl_program =
-  kernelDeclarations ++ openclBoilerplate
+openClDecls :: Int -> [String] -> String -> String -> [C.Definition]
+openClDecls block_dim kernel_names opencl_program opencl_prelude =
+  openclPrelude ++ kernelDeclarations ++ openclBoilerplate
   where kernelDeclarations =
-          [C.cedecl|$esc:("static const char fut_opencl_src[] = FUT_KERNEL(\n" ++
+          [C.cedecl|static const char fut_opencl_prelude[] = $string:opencl_prelude;|] :
+          [C.cedecl|$esc:("static const char fut_opencl_program[] = FUT_KERNEL(\n" ++
                          opencl_program ++
                          ");")|] :
           concat
@@ -22,13 +24,21 @@ openClDecls kernel_names opencl_program =
             ]
           | name <- kernel_names ]
 
+        openclPrelude = [ [C.cedecl|$esc:("#include <CL/cl.h>\n")|]
+                        , [C.cedecl|$esc:("#define FUT_KERNEL(s) #s")|]
+                        , [C.cedecl|$esc:("#define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)")|]
+                        , [C.cedecl|$esc:("#define FUT_BLOCK_DIM " ++ show block_dim)|]
+                          ]
+
         openclBoilerplate = [C.cunit|
 typename cl_context fut_cl_context;
 typename cl_command_queue fut_cl_queue;
 const char *cl_preferred_platform = "";
 const char *cl_preferred_device = "";
 int cl_verbosity = 1;
-static size_t cl_group_size = 512;
+int cl_synchronous = 0;
+
+static size_t cl_group_size = 512, cl_num_groups = 128;
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
@@ -300,6 +310,8 @@ void setup_opencl() {
                                  sizeof(size_t), &max_group_size, NULL));
 
   if (max_group_size < cl_group_size) {
+    fprintf(stderr, "Warning: Device limits group size to %zu (setting was %zu)\n",
+            max_group_size, cl_group_size);
     cl_group_size = max_group_size;
   }
 
@@ -316,30 +328,29 @@ void setup_opencl() {
   assert(error == 0);
 
   // Some drivers complain if we compile empty programs, so bail out early if so.
-  if (strlen(fut_opencl_src) == 0) return;
+  if (strlen(fut_opencl_program) == 0) return;
 
-  // Build the OpenCL program.
-  size_t src_size;
+  // Build the OpenCL program.  First we have to prepend the prelude to the program source.
+  size_t prelude_size = strlen(fut_opencl_prelude);
+  size_t program_size = strlen(fut_opencl_program);
+  size_t src_size = prelude_size + program_size;
+  char *fut_opencl_src = malloc(src_size + 1);
+  strncpy(fut_opencl_src, fut_opencl_prelude, src_size);
+  strncpy(fut_opencl_src+prelude_size, fut_opencl_program, src_size-prelude_size);
+  fut_opencl_src[src_size] = '0';
+
   typename cl_program prog;
   error = 0;
-  src_size = sizeof(fut_opencl_src);
   const char* src_ptr[] = {fut_opencl_src};
   prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
   assert(error == 0);
   char compile_opts[1024];
   snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DWAVE_SIZE=32", FUT_BLOCK_DIM);
   OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
+  free(fut_opencl_src);
 
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)
-}
-
-size_t futhark_num_groups() {
-  return 128; /* Must be a power of two */
-}
-
-size_t futhark_group_size() {
-  return cl_group_size;
 }
 |]
 
@@ -361,8 +372,8 @@ openClReport = map reportKernel
               total_runtime = name ++ "_total_runtime"
           in [C.cstm|
                fprintf(stderr,
-                       "Kernel %s executed %d times, with average runtime:\t %6dus\n",
+                       "Kernel %s executed %d times, with average runtime:\t %6ldus\n",
                        $string:name,
                        $id:runs,
-                       $id:total_runtime / ($id:runs != 0 ? $id:runs : 1));
+                       (long int) $id:total_runtime / ($id:runs != 0 ? $id:runs : 1));
              |]

@@ -11,12 +11,11 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , offsetIndex
        , permute
        , reshape
-       , stripe
-       , unstripe
        , applyInd
        , base
        , rebase
        , codomain
+       , shape
        , linearWithOffset
        , rearrangeWithOffset
        , isDirect
@@ -50,7 +49,6 @@ import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
 import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
-import Language.Futhark.Core
 import Futhark.Util.Pretty as PP
 
 data IxFun = forall c n .
@@ -107,10 +105,10 @@ index f is element_size = case f of
         " incompatible with index function " ++ pretty f'
 
 iota :: Shape -> IxFun
-iota shape = case toSing (intToNat $ n-1) of
+iota sh = case toSing (intToNat $ n-1) of
   SomeSing (sb::SNat n) ->
-    IxFun (SS sb) (SS sb) $ Safe.iota $ Vec.unsafeFromList (SS sb) shape
-  where n = Prelude.length shape
+    IxFun (SS sb) (SS sb) $ Safe.iota $ Vec.unsafeFromList (SS sb) sh
+  where n = Prelude.length sh
 
 offsetIndex :: IxFun -> ScalExp -> IxFun
 offsetIndex (IxFun c n f) se =
@@ -153,16 +151,6 @@ reshape (IxFun c _ ixfun) newshape =
       Safe.reshape ixfun $ Vec.unsafeFromList (SS sn) $
       map (fmap intSubExpToScalExp) newshape
 
-stripe :: IxFun -> ScalExp -> IxFun
-stripe (IxFun c n ixfun) stride =
-  IxFun c n $
-  Safe.stripe ixfun stride
-
-unstripe :: IxFun -> ScalExp -> IxFun
-unstripe (IxFun c n ixfun) stride =
-  IxFun c n $
-  Safe.unstripe ixfun stride
-
 applyInd :: IxFun -> Indices -> IxFun
 applyInd ixfun@(IxFun (scnat::SNat ('S c)) (snnat::SNat ('S n))
                 (f::Safe.IxFun ScalExp ('S c) ('S n))) is =
@@ -186,7 +174,7 @@ applyInd ixfun@(IxFun (scnat::SNat ('S c)) (snnat::SNat ('S n))
           error $
           unlines ["IndexFunction.Unsafe.applyInd: Too many indices given.",
                    "  Index function: " ++ pretty ixfun,
-                   "  Indices" ++ pretty is]
+                   "  Indices: " ++ pretty is]
   where nnat :: SNat n
         nnat = snnat %- sOne
 
@@ -210,11 +198,13 @@ codomain :: IxFun -> SymSet
 codomain (IxFun _ n f) =
   SymSet n $ Safe.codomain f
 
+shape :: IxFun -> Shape
+shape (IxFun _ _ f) =
+  Vec.toList $ Safe.shape f
+
 isDirect :: IxFun -> Bool
 isDirect =
-  maybe False (==zeroscal) . flip linearWithOffset onescal
-  where zeroscal = Val (IntVal 0)
-        onescal = Val (IntVal 1)
+  maybe False (==0) . flip linearWithOffset 1
 
 linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ _ ixfun) =

@@ -5,10 +5,10 @@
 -- output {
 --    [2.0, 3.0, 4.0, 5.0, 0.0]
 -- }
-fun [real] main( [real] result ) =
+fun [f64] main( [f64] result ) =
   -- 0 <= i < m AND 0 <= j < n
   let m = size(0, result) in
-  map ( fn real (int j) =>
+  map ( fn f64 (int j) =>
             if j < (m-1)
             then result[j+1]
             else 0.0

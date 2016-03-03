@@ -1,7 +1,7 @@
 -- ==
-fun [real] main([{real,int}] a, [bool] oks) =
-  let {b, _} = unzip(filter(fn bool ({real,int} x) =>
+fun [f64] main([{f64,int}] a, [bool] oks) =
+  let {b, _} = unzip(filter(fn bool ({f64,int} x) =>
                               let {_,i} = x in
-                              oks[i],
+                              unsafe oks[i],
                             a)) in
   b

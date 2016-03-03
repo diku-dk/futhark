@@ -16,6 +16,7 @@ import Prelude
 
 import Futhark.Representation.AST.Attributes.Reshape
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes.Constants
 
 tests :: [Test]
 tests = fuseReshapeTests ++
@@ -50,7 +51,7 @@ informReshapeTests =
 reshapeOuterTests :: [Test]
 reshapeOuterTests =
   [ testCase (unwords ["reshapeOuter", show sc, show n, show shape, "==", show sc_res]) $
-    reshapeOuter (intShapeChange sc) n (intShape shape) @?= (intShapeChange sc_res)
+    reshapeOuter (intShapeChange sc) n (intShape shape) @?= intShapeChange sc_res
   | (sc, n, shape, sc_res) <-
     [ ([DimNew 1], 1, [4, 3], [DimNew 1, DimCoercion 3])
     , ([DimNew 1], 2, [4, 3], [DimNew 1])
@@ -62,7 +63,7 @@ reshapeOuterTests =
 reshapeInnerTests :: [Test]
 reshapeInnerTests =
   [ testCase (unwords ["reshapeInner", show sc, show n, show shape, "==", show sc_res]) $
-    reshapeInner (intShapeChange sc) n (intShape shape) @?= (intShapeChange sc_res)
+    reshapeInner (intShapeChange sc) n (intShape shape) @?= intShapeChange sc_res
   | (sc, n, shape, sc_res) <-
     [ ([DimNew 1], 1, [4, 3], [DimCoercion 4, DimNew 1])
     , ([DimNew 1], 0, [4, 3], [DimNew 1])
@@ -72,10 +73,10 @@ reshapeInnerTests =
   ]
 
 intShape :: [Int] -> Shape
-intShape = Shape . map (Constant . IntVal . fromIntegral)
+intShape = Shape . map (intConst Int32 . toInteger)
 
 intShapeChange :: ShapeChange Int -> ShapeChange SubExp
-intShapeChange = map (fmap $ Constant . IntVal . fromIntegral)
+intShapeChange = map (fmap $ intConst Int32 . toInteger)
 
 fuseReshapeProp :: Test
 fuseReshapeProp = testProperty "fuseReshape result matches second argument" prop

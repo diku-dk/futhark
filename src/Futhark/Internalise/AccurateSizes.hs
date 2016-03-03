@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Internalise.AccurateSizes
   ( shapeBody
   , annotateArrayShape
@@ -20,7 +21,7 @@ import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.MonadFreshNames
 
-shapeBody :: (HasTypeEnv m, MonadFreshNames m, Bindable lore) =>
+shapeBody :: (HasScope lore m, MonadFreshNames m, Bindable lore) =>
              [VName] -> [Type] -> Body lore
           -> m (Body lore)
 shapeBody shapenames ts body =
@@ -30,17 +31,18 @@ shapeBody shapenames ts body =
     return $ resultBody $ argShapes shapenames ts sets
 
 annotateArrayShape :: ArrayShape shape =>
-                      TypeBase shape -> [Int] -> TypeBase Shape
+                      TypeBase shape u -> [Int] -> TypeBase Shape u
 annotateArrayShape t newshape =
-  t `setArrayShape` Shape (take (arrayRank t) (map intconst $ newshape ++ repeat 0))
+  t `setArrayShape` Shape (take (arrayRank t) $
+                           map (intConst Int32 . toInteger) $ newshape ++ repeat 0)
 
-argShapes :: [VName] -> [Type] -> [Type] -> [SubExp]
+argShapes :: [VName] -> [TypeBase Shape u0] -> [TypeBase Shape u1] -> [SubExp]
 argShapes shapes valts valargts =
   map addShape shapes
   where mapping = shapeMapping valts valargts
         addShape name
           | Just se <- HM.lookup name mapping = se
-          | otherwise                         = Constant (IntVal 0)
+          | otherwise                         = intConst Int32 0
 
 ensureResultShape :: MonadBinder m =>
                      (m Certificates -> m Certificates)
@@ -87,7 +89,7 @@ ensureShapeVar asserting loc t name v
     oldshape <- arrayDims <$> lookupType v
     let checkDim desired has =
           letExp "shape_cert" =<<
-          eAssert (pure $ PrimOp $ BinOp Equal desired has Bool) loc
+          eAssert (pure $ PrimOp $ CmpOp (CmpEq int32) desired has) loc
     certs <- asserting $ zipWithM checkDim newshape oldshape
     letExp name $ shapeCoerce certs newshape v
   | otherwise = return v

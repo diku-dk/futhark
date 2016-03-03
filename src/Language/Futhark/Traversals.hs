@@ -1,4 +1,3 @@
------------------------------------------------------------------------------
 -- |
 --
 -- Functions for generic traversals across Futhark syntax trees.  The
@@ -19,11 +18,6 @@
 -- A traversal of the Futhark syntax tree is expressed as a tuple of
 -- functions expressing the operations to be performed on the various
 -- types of nodes.
---
--- The "Futhark.Renamer" and "Futhark.Untrace" modules are simple examples of
--- how to use this facility.
---
------------------------------------------------------------------------------
 module Language.Futhark.Traversals
   (
   -- * Mapping
@@ -32,12 +26,6 @@ module Language.Futhark.Traversals
   , identityMapper
   , mapExpM
   , mapExp
-
-  -- * Folding
-  , Folder(..)
-  , foldExpM
-  , foldExp
-  , identityFolder
 
   -- * Walking
   , Walker(..)
@@ -49,8 +37,6 @@ module Language.Futhark.Traversals
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Identity
-import Control.Monad.Writer
-import Control.Monad.State
 
 import Prelude
 
@@ -63,7 +49,7 @@ data MapperBase tyf tyt vnf vnt m = Mapper {
     mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
   , mapOnType :: tyf vnf -> m (tyt vnt)
   , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
-  , mapOnPattern :: TupIdentBase tyf vnf -> m (TupIdentBase tyt vnt)
+  , mapOnPattern :: PatternBase tyf vnf -> m (PatternBase tyt vnt)
   , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
   , mapOnValue :: Value -> m Value
   }
@@ -119,7 +105,7 @@ mapExpM tv (LetWith dest src idxexps vexp body loc) =
        mapOnExp tv body <*> pure loc
 mapExpM tv (Index arr idxexps loc) =
   pure Index <*>
-       mapOnIdent tv arr <*>
+       mapOnExp tv arr <*>
        mapM (mapOnExp tv) idxexps <*>
        pure loc
 mapExpM tv (Iota nexp loc) =
@@ -131,23 +117,14 @@ mapExpM tv (Replicate nexp vexp loc) =
 mapExpM tv (Reshape shape arrexp loc) =
   pure Reshape <*> mapM (mapOnExp tv) shape <*>
                    mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Transpose k n e3 loc) =
-  pure Transpose <*>
-       pure k <*> pure n <*>
-       mapOnExp tv e3 <*> pure loc
+mapExpM tv (Transpose e loc) =
+  Transpose <$> mapOnExp tv e <*> pure loc
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Stripe stride e loc) =
-  Stripe <$> mapOnExp tv stride <*> mapOnExp tv e <*> pure loc
-mapExpM tv (Unstripe stride e loc) =
-  Unstripe <$> mapOnExp tv stride <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
   pure Map <*> mapOnLambda tv fun <*> mapOnExp tv e <*> pure loc
-mapExpM tv (ConcatMap fun e es loc) =
-  pure ConcatMap <*> mapOnLambda tv fun <*>
-  mapOnExp tv e <*> mapM (mapOnExp tv) es <*> pure loc
-mapExpM tv (Reduce fun startexp arrexp loc) =
-  pure Reduce <*> mapOnLambda tv fun <*>
+mapExpM tv (Reduce comm fun startexp arrexp loc) =
+  Reduce comm <$> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Zip args loc) = do
   args' <- forM args $ \(argexp, argt) -> do
@@ -157,6 +134,8 @@ mapExpM tv (Zip args loc) = do
   pure $ Zip args' loc
 mapExpM tv (Unzip e ts loc) =
   pure Unzip <*> mapOnExp tv e <*> mapM (mapOnType tv) ts <*> pure loc
+mapExpM tv (Unsafe e loc) =
+  pure Unsafe <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Scan fun startexp arrexp loc) =
   pure Scan <*> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*>
@@ -165,16 +144,14 @@ mapExpM tv (Filter fun arrexp loc) =
   pure Filter <*> mapOnLambda tv fun <*> mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Partition funs arrexp loc) =
   pure Partition <*> mapM (mapOnLambda tv) funs <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Redomap redfun mapfun accexp arrexp loc) =
-  pure Redomap <*> mapOnLambda tv redfun <*> mapOnLambda tv mapfun <*>
-       mapOnExp tv accexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Stream form fun arr mm loc) =
+mapExpM tv (Stream form fun arr loc) =
   pure Stream <*> mapOnStreamForm form <*> mapOnLambda tv fun <*>
-       mapOnExp tv arr <*> pure mm <*> pure loc
+       mapOnExp tv arr <*> pure loc
   where mapOnStreamForm (MapLike o) = pure $ MapLike o
-        mapOnStreamForm (RedLike o lam acc) =
-            pure RedLike <*> pure o <*>
-                 mapOnLambda tv lam <*> mapOnExp tv acc
+        mapOnStreamForm (RedLike o comm lam acc) =
+            RedLike o comm <$>
+            mapOnLambda tv lam <*>
+            mapOnExp tv acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapOnExp tv acc
 mapExpM tv (Split splitexps arrexp loc) =
@@ -206,50 +183,6 @@ mapLoopFormM tv (For FromDownTo lbound i ubound) =
 mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
 
--- | Reification of a left-reduction across a syntax tree.
-data Folder ty vn a m = Folder {
-    foldOnExp :: a -> ExpBase ty vn -> m a
-  , foldOnType :: a -> ty vn -> m a
-  , foldOnLambda :: a -> LambdaBase ty vn -> m a
-  , foldOnPattern :: a -> TupIdentBase ty vn -> m a
-  , foldOnIdent :: a -> IdentBase ty vn -> m a
-  , foldOnValue :: a -> Value -> m a
-  }
-
--- | A folding operation where the accumulator is returned verbatim.
-identityFolder :: Monad m => Folder ty vn a m
-identityFolder = Folder {
-                   foldOnExp = const . return
-                 , foldOnType = const . return
-                 , foldOnLambda = const . return
-                 , foldOnPattern = const . return
-                 , foldOnIdent = const . return
-                 , foldOnValue = const . return
-                 }
-
--- | Perform a left-reduction across the immediate children of an
--- expression.  Importantly, the 'foldOnExp' action is not invoked for
--- the expression itself, and the reduction does not descend recursively
--- into subexpressions.  The reduction is done left-to-right.
-foldExpM :: (Monad m, Functor m) => Folder ty vn a m -> a -> ExpBase ty vn -> m a
-foldExpM f x e = execStateT (mapExpM m e) x
-  where m = Mapper {
-              mapOnExp = wrap foldOnExp
-            , mapOnType = wrap foldOnType
-            , mapOnLambda = wrap foldOnLambda
-            , mapOnPattern = wrap foldOnPattern
-            , mapOnIdent = wrap foldOnIdent
-            , mapOnValue = wrap foldOnValue
-            }
-        wrap op k = do
-          v <- get
-          put =<< lift (op f v k)
-          return k
-
--- | As 'foldExpM', but in the 'Identity' monad.
-foldExp :: Folder ty vn a Identity -> a -> ExpBase ty vn -> a
-foldExp m x = runIdentity . foldExpM m x
-
 -- | Express a monad expression on a syntax node.  Each element of
 -- this structure expresses the action to be performed on a given
 -- child.
@@ -257,7 +190,7 @@ data Walker ty vn m = Walker {
     walkOnExp :: ExpBase ty vn -> m ()
   , walkOnType :: ty vn -> m ()
   , walkOnLambda :: LambdaBase ty vn -> m ()
-  , walkOnPattern :: TupIdentBase ty vn -> m ()
+  , walkOnPattern :: PatternBase ty vn -> m ()
   , walkOnIdent :: IdentBase ty vn -> m ()
   , walkOnValue :: Value -> m ()
   }

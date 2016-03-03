@@ -27,6 +27,7 @@ Contents:
    language-overview.rst
    uniqueness-types.rst
    language-reference.rst
+   c-porting-guide.rst
    publications.rst
 
 Manual pages:
@@ -38,6 +39,7 @@ Manual pages:
    man/futhark-opencl.rst
    man/futharki.rst
    man/futhark-test.rst
+   man/futhark-bench.rst
 
 Indices and tables
 ==================

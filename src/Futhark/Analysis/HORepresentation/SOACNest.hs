@@ -1,3 +1,7 @@
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Analysis.HORepresentation.SOACNest
   ( SOACNest (..)
   , TypedSubExp (..)
@@ -33,7 +37,9 @@ import Data.Maybe
 
 import Prelude
 
-import Futhark.Representation.AST hiding (Map, Reduce, Scan, Redomap, Stream, subExpType)
+import Futhark.Representation.AST hiding (subExpType, typeOf)
+import Futhark.Representation.SOACS.SOAC (StreamForm(..), getStreamAccums)
+import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.MonadFreshNames
 import Futhark.Binder
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
@@ -74,14 +80,14 @@ setNestBodyIndex index (Fun lam) =
 setNestBodyIndex index (NewNest nesting comb) =
   NewNest nesting { nestingIndex = index } comb
 
-nestBodyParams :: NestBody lore -> [Ident]
+nestBodyParams :: Annotations lore => NestBody lore -> [Ident]
 nestBodyParams (Fun lam) =
   map paramIdent $ lambdaParams lam
-nestBodyParams (NewNest nesting (Reduce _ _ acc)) =
+nestBodyParams (NewNest nesting (Reduce _ _ _ _ acc)) =
   foldNestParams nesting $ map subExpType acc
-nestBodyParams (NewNest nesting (Scan _ _ acc)) =
+nestBodyParams (NewNest nesting (Scan _ _ _ acc)) =
   foldNestParams nesting $ map subExpType acc
-nestBodyParams (NewNest nesting (Redomap _ _ _ acc)) =
+nestBodyParams (NewNest nesting (Redomap _ _ _ _ _ acc)) =
   foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting _) =
   foldNestParams nesting []
@@ -102,11 +108,12 @@ instance Substitutable lore => Substitute (NestBody lore) where
               substituteNames m $ lambdaBody l
           }
 
-bodyToLambda :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m) =>
+bodyToLambda :: (Bindable lore, MonadFreshNames m, LocalScope lore m,
+                 Op lore ~ Futhark.SOAC lore) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
 bodyToLambda pts (NewNest (Nesting i ps inps bndIds retTypes) op) =
-  withParamTypes lparams $ do
+  localScope (scopeOfLParams lparams) $ do
     (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
     bnd <- mkLetNames' bndIds e
     return
@@ -116,12 +123,13 @@ bodyToLambda pts (NewNest (Nesting i ps inps bndIds retTypes) op) =
              , lambdaBody = mkBody (bnds++[bnd]) $
                             map Var bndIds
              }
-  where lparams = map (`Param` ()) $ zipWith Ident ps pts
+  where lparams = [ Param p t | (p, t) <- zip ps pts ]
 
-lambdaToBody :: (LocalTypeEnv m, Monad m, Bindable lore) =>
+lambdaToBody :: (LocalScope lore m, Bindable lore,
+                Op lore ~ Futhark.SOAC lore) =>
                 Lambda lore -> m (NestBody lore)
 lambdaToBody l =
-  withParamTypes (lambdaParams l) $
+  localScope (scopeOfLParams $ lambdaParams l) $
   maybe (Fun l) (uncurry $ flip NewNest) <$> nested l
 
 data TypedSubExp = TypedSubExp { subExpExp :: SubExp
@@ -133,59 +141,66 @@ inputFromTypedSubExp :: TypedSubExp -> Maybe SOAC.Input
 inputFromTypedSubExp (TypedSubExp (Var v) t) = Just $ SOAC.identInput $ Ident v t
 inputFromTypedSubExp _                       = Nothing
 
-data Combinator lore = Map Certificates (NestBody lore)
-                     | Reduce Certificates (NestBody lore) [TypedSubExp]
-                     | Scan Certificates (NestBody lore) [TypedSubExp]
-                     | Redomap Certificates (Lambda lore) (NestBody lore) [TypedSubExp]
-                     | Stream  Certificates (StreamFormN lore) (Lambda lore) ChunkIntent
+data Combinator lore = Map Certificates SubExp (NestBody lore)
+                     | Reduce Certificates SubExp Commutativity (NestBody lore) [TypedSubExp]
+                     | Scan Certificates SubExp (NestBody lore) [TypedSubExp]
+                     | Redomap Certificates SubExp Commutativity (Lambda lore) (NestBody lore) [TypedSubExp]
+                     | Stream  Certificates SubExp (StreamFormN lore) (Lambda lore)
                       -- Cosmin: I think it might be helpful to make Stream part of a
                       --         nest, although the stream might not be parallel: that
                       --         is because it might enable, for example tiling.
                  deriving (Show)
 
 data StreamFormN lore  = MapLikeN StreamOrd
-                       | RedLikeN StreamOrd (LambdaT lore) [TypedSubExp]
+                       | RedLikeN StreamOrd Commutativity (LambdaT lore) [TypedSubExp]
                        | SequentN [TypedSubExp]
                             deriving (Show)
 
 getStreamAccumsN :: StreamFormN lore -> [TypedSubExp]
-getStreamAccumsN (MapLikeN _       ) = []
-getStreamAccumsN (RedLikeN _ _ accs) = accs
-getStreamAccumsN (SequentN     accs) = accs
+getStreamAccumsN (MapLikeN _)          = []
+getStreamAccumsN (RedLikeN _ _ _ accs) = accs
+getStreamAccumsN (SequentN       accs) = accs
 
 
 instance Substitutable lore => Substitute (Combinator lore) where
-  substituteNames m (Map     cs b      ) = Map     cs $  substituteNames m b
-  substituteNames m (Reduce  cs b   ses) = Reduce  cs   (substituteNames m b) ses
-  substituteNames m (Scan    cs b   ses) = Scan    cs   (substituteNames m b) ses
-  substituteNames m (Redomap cs l b ses) =
-        Redomap cs (substituteNames m l) (substituteNames m b) ses
-  substituteNames m (Stream  cs (RedLikeN o l0 acc) l ii) =
-        Stream cs (RedLikeN o (substituteNames m l0) acc) (substituteNames m l) ii
-  substituteNames m (Stream  cs f l ii) = Stream cs f (substituteNames m l) ii
+  substituteNames m (Map cs w b) =
+    Map cs (substituteNames m w) $ substituteNames m b
+  substituteNames m (Reduce cs w comm b ses) =
+    Reduce cs (substituteNames m w) comm (substituteNames m b) ses
+  substituteNames m (Scan cs w b ses) =
+    Scan cs (substituteNames m w) (substituteNames m b) ses
+  substituteNames m (Redomap cs w comm l b ses) =
+    Redomap cs (substituteNames m w) comm (substituteNames m l) (substituteNames m b) ses
+  substituteNames m (Stream cs w (RedLikeN o comm l0 acc) l) =
+    Stream cs (substituteNames m w) (RedLikeN o comm (substituteNames m l0) acc) (substituteNames m l)
+  substituteNames m (Stream cs w f l) =
+    Stream cs (substituteNames m w) f (substituteNames m l)
 
 instance Substitutable lore => Substitute (Nesting lore) where
   substituteNames m n =
     n { nestingInputs = map (substituteNames m) $ nestingInputs n }
 
 body :: Combinator lore -> NestBody lore
-body (Map _ b) = b
-body (Reduce _ b _) = b
-body (Scan _ b _) = b
-body (Redomap _ _ b _) = b
-body (Stream  _ _ l _) = Fun l
+body (Map _ _ b) = b
+body (Reduce _ _ _ b _) = b
+body (Scan _ _ b _) = b
+body (Redomap _ _ _ _ b _) = b
+body (Stream _ _ _ l) = Fun l
 
-combinatorFirstLoop :: Combinator lore -> ([Ident], [Type])
+combinatorFirstLoop :: Annotations lore =>
+                       Combinator lore -> ([Ident], [Type])
 combinatorFirstLoop comb =
   (nestBodyParams $ body comb,
    case body comb of
      Fun l          -> lambdaReturnType l
      NewNest nest _ -> nestingReturnType nest)
 
-params :: Combinator lore -> [Ident]
+params :: Annotations lore =>
+          Combinator lore -> [Ident]
 params = fst . combinatorFirstLoop
 
-returnType :: Combinator lore -> [Type]
+returnType :: Annotations lore =>
+              Combinator lore -> [Type]
 returnType = snd . combinatorFirstLoop
 
 data SOACNest lore = SOACNest { inputs :: [SOAC.Input]
@@ -209,88 +224,85 @@ setCertificates cs (SOACNest inp comb) =
 
 -- | Returns the certificates used in a 'Combinator'.
 combCertificates :: Combinator lore -> Certificates
-combCertificates (Map     cs _    ) = cs
-combCertificates (Reduce  cs _   _) = cs
-combCertificates (Scan    cs _   _) = cs
-combCertificates (Redomap cs _ _ _) = cs
-combCertificates (Stream  cs _ _ _) = cs
+combCertificates (Map     cs _   _    ) = cs
+combCertificates (Reduce  cs _ _ _   _) = cs
+combCertificates (Scan    cs _   _   _) = cs
+combCertificates (Redomap cs _ _ _ _ _) = cs
+combCertificates (Stream  cs _   _ _  ) = cs
 
 -- | Sets the certificates used in a 'Combinator'.
 setCombCertificates :: Certificates -> Combinator lore -> Combinator lore
-setCombCertificates cs (Map     _ bdy    ) = Map    cs bdy
-setCombCertificates cs (Reduce  _ bdy acc) = Reduce cs bdy acc
-setCombCertificates cs (Scan    _ bdy acc) = Scan   cs bdy acc
-setCombCertificates cs (Redomap _ fun bdy acc) = Redomap cs fun bdy acc
-setCombCertificates cs (Stream  _ f   bdy ii ) = Stream  cs f bdy ii
+setCombCertificates cs (Map     _ w bdy    ) = Map cs w bdy
+setCombCertificates cs (Reduce  _ w comm bdy acc) = Reduce cs w comm bdy acc
+setCombCertificates cs (Scan    _ w bdy acc) = Scan cs w bdy acc
+setCombCertificates cs (Redomap _ w comm fun bdy acc) = Redomap cs w comm fun bdy acc
+setCombCertificates cs (Stream  _ w f bdy) = Stream cs w f bdy
 
-typeOf :: SOACNest lore -> [ExtType]
-typeOf (SOACNest inps (Map _ b)) =
-  staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
-               | t <- nestBodyReturnType b ]
-  where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest _ (Reduce _ _ accinit)) =
+typeOf :: Annotations lore =>
+          SOACNest lore -> [ExtType]
+typeOf (SOACNest _ (Map _ w b)) =
+  staticShapes $ map (`arrayOfRow` w) $ nestBodyReturnType b
+typeOf (SOACNest _ (Reduce _ _ _ _ accinit)) =
   staticShapes $ map subExpType accinit
-typeOf (SOACNest inps (Scan _ _ accinit)) =
-  staticShapes [ arrayOf t (Shape [outersize]) (uniqueness t)
-               | t <- map subExpType accinit ]
-  where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest inps (Redomap _ _ b nes)) =
+typeOf (SOACNest _ (Scan _ w _ accinit)) =
+  staticShapes $ map ((`arrayOfRow` w) . subExpType) accinit
+typeOf (SOACNest _ (Redomap _ w _ _ b nes)) =
   let allrtps = nestBodyReturnType b
       accrtps = take (length nes) allrtps
-      arrrtps = [ arrayOf t (Shape [outersize]) (uniqueness t)
-                  | t <- drop (length nes) allrtps ]
+      arrrtps = map (`arrayOfRow` w) $ drop (length nes) allrtps
   in  staticShapes $ accrtps ++ arrrtps
-  where outersize = arraysSize 0 $ map SOAC.inputType inps
-typeOf (SOACNest inps (Stream  _ form lam _)) =
+typeOf (SOACNest _ (Stream  _ w form lam)) =
   let nes     = getStreamAccumsN form
       allrtps = lambdaReturnType lam
       accrtps = take (length nes) allrtps
-      arrrtps = [ arrayOf (stripArray 1 t) (Shape [outersize]) (uniqueness t)
-                  | t <- drop (length nes) allrtps ]
+      arrrtps = map (`arrayOfRow` w) $ drop (length nes) allrtps
   in  staticShapes $ accrtps ++ arrrtps
-  where outersize = arraysSize 0 $ map SOAC.inputType inps
 
-fromExp :: (Bindable lore, LocalTypeEnv f, Monad f) =>
+fromExp :: (Bindable lore, LocalScope lore f, Monad f,
+           Op lore ~ Futhark.SOAC lore) =>
            Exp lore -> f (Either SOAC.NotSOAC (SOACNest lore))
-fromExp e = either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
+fromExp e = either (return . Left) (fmap Right . fromSOAC) =<< SOAC.fromExp e
 
-toExp :: Bindable lore => SOACNest lore -> Binder lore (Exp lore)
+toExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore) =>
+         SOACNest lore -> Binder lore (Exp lore)
 toExp = SOAC.toExp <=< toSOAC
 
-fromSOAC :: (Bindable lore, LocalTypeEnv m, Monad m) =>
+fromSOAC :: (Bindable lore, LocalScope lore m,
+             Op lore ~ Futhark.SOAC lore) =>
             SOAC lore -> m (SOACNest lore)
-fromSOAC (SOAC.Map cs l as) =
-  SOACNest as <$> Map cs <$> lambdaToBody l
-fromSOAC (SOAC.Reduce cs l args) =
+fromSOAC (SOAC.Map cs w l as) =
+  SOACNest as <$> Map cs w <$> lambdaToBody l
+fromSOAC (SOAC.Reduce cs w comm l args) =
   SOACNest (map snd args) <$>
-  (Reduce cs <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
-fromSOAC (SOAC.Scan cs l args) =
+  (Reduce cs w comm <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
+fromSOAC (SOAC.Scan cs w l args) =
   SOACNest (map snd args) <$>
-  (Scan cs <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
-fromSOAC (SOAC.Redomap cs ol l es as) =
+  (Scan cs w <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
+fromSOAC (SOAC.Redomap cs w comm ol l es as) =
   -- Never nested, because we need a way to test alpha-equivalence of
   -- the outer combining function.
-  SOACNest as <$> (Redomap cs ol <$> lambdaToBody l <*>
+  SOACNest as <$> (Redomap cs w comm ol <$> lambdaToBody l <*>
                    pure (accSubExps l es))
-fromSOAC (SOAC.Stream cs form lam ii as) = do
+fromSOAC (SOAC.Stream cs w form lam as) = do
   let es  = getStreamAccums form
       tes = zipWith TypedSubExp es $ map paramType $ take (length es) $
                                      drop 1 $ lambdaParams lam
       form' = case form of
-                MapLike o      -> MapLikeN o
-                Sequential   _ -> SequentN      tes
-                RedLike o l0 _ -> RedLikeN o l0 tes
-  SOACNest as <$> (Stream  cs  <$> return form' <*>
-                                   return lam   <*> pure ii)
+                MapLike o           -> MapLikeN o
+                Sequential   _      -> SequentN tes
+                RedLike o comm l0 _ -> RedLikeN o comm l0 tes
+  SOACNest as <$> (Stream cs w <$> return form' <*> return lam)
 
-accSubExps :: Lambda lore -> [SubExp] -> [TypedSubExp]
+accSubExps :: Annotations lore =>
+              Lambda lore -> [SubExp] -> [TypedSubExp]
 accSubExps l args = zipWith TypedSubExp args (map paramType $ lambdaParams l)
 
-nested :: (LocalTypeEnv m, Monad m, Bindable lore) =>
+nested :: (LocalScope lore m, Monad m, Bindable lore,
+          Op lore ~ Futhark.SOAC lore) =>
           Lambda lore -> m (Maybe (Combinator lore, Nesting lore))
 nested l
   | Body _ [Let pat _ e] res <- lambdaBody l = do -- Is a let-binding...
-    maybesoac <- either (return . Left) (liftM Right . fromSOAC) =<< SOAC.fromExp e
+    maybesoac <- either (return . Left) (fmap Right . fromSOAC) =<< SOAC.fromExp e
     case maybesoac of
       Right soac -- ...the bindee is a SOAC...
         | res == map Var (patternNames pat) ->
@@ -304,29 +316,30 @@ nested l
       _ -> pure Nothing
   | otherwise = pure Nothing
 
-toSOAC :: (Bindable lore, MonadFreshNames m, LocalTypeEnv m) =>
+toSOAC :: (Bindable lore, MonadFreshNames m, LocalScope lore m,
+          Op lore ~ Futhark.SOAC lore) =>
           SOACNest lore -> m (SOAC lore)
-toSOAC (SOACNest as (Map cs b)) =
-  SOAC.Map cs <$>
+toSOAC (SOACNest as (Map cs w b)) =
+  SOAC.Map cs w <$>
   bodyToLambda (map SOAC.inputRowType as) b <*>
   pure as
-toSOAC (SOACNest as (Reduce cs b es)) =
-  SOAC.Reduce cs <$>
+toSOAC (SOACNest as (Reduce cs w comm b es)) =
+  SOAC.Reduce cs w comm <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (zip (map subExpExp es) as)
-toSOAC (SOACNest as (Scan cs b es)) =
-  SOAC.Scan cs <$>
+toSOAC (SOACNest as (Scan cs w b es)) =
+  SOAC.Scan cs w <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (zip (map subExpExp es) as)
-toSOAC (SOACNest as (Redomap cs l b es)) =
-  SOAC.Redomap cs l <$>
+toSOAC (SOACNest as (Redomap cs w comm l b es)) =
+  SOAC.Redomap cs w comm l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (map subExpExp es) <*> pure as
-toSOAC (SOACNest as (Stream  cs form lam ii)) = do
+toSOAC (SOACNest as (Stream cs w form lam)) = do
   let tes   = getStreamAccumsN form
       nes   = map subExpExp tes
       form' = case form of
-                MapLikeN o      -> MapLike o
-                SequentN      _ -> Sequential   nes
-                RedLikeN o l0 _ -> RedLike o l0 nes
-  return $ SOAC.Stream cs form' lam ii as
+                MapLikeN o           -> MapLike o
+                SequentN _           -> Sequential nes
+                RedLikeN o comm l0 _ -> RedLike o comm l0 nes
+  return $ SOAC.Stream cs w form' lam as
