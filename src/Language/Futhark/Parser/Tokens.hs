@@ -28,6 +28,7 @@ data Token = IF
            | U64
            | BOOL
            | CHAR
+           | FLOAT
            | F32
            | F64
            | ID Name
