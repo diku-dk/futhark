@@ -463,6 +463,9 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                                                    HS.fromList (mapMaybe SOAC.isVarInput ker_inp)
                                          unfuse2 = HS.intersection curker_outset ufus_nms
                                      in  HS.null $ HS.intersection unfuse1 unfuse2
+                    -- Disable horizontal fusion if consumer has any
+                    -- output transforms.
+                    cons_no_out_transf = SOAC.nullTransforms $ outputTransform ker
                 consumer_ok   <- do let consumer_bnd   = rem_bnds !! bnd_ind
                                     maybesoac <- SOAC.fromExp $ bindingExp consumer_bnd
                                     case maybesoac of
@@ -471,7 +474,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
                                       Right conssoac -> return $ HS.null $ HS.intersection curker_outset $
                                                                  freeInBody $ lambdaBody $ SOAC.lambda conssoac
                                       Left _         -> return True
-                let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok &&
+                let interm_bnds_ok = cur_ok && consumer_ok && out_transf_ok && cons_no_out_transf &&
                       foldl (\ok bnd-> ok && -- hardwired to False after first fail
                                        -- (i) check that the in-between bindings do
                                        --     not use the result of current kernel OR
@@ -714,6 +717,7 @@ fuseIn = identityMapper {
            mapOnBody    = fuseInBody
          , mapOnOp      = mapSOACM identitySOACMapper
                           { mapOnSOACLambda = fuseInLambda
+                          , mapOnSOACExtLambda = fuseInExtLambda
                           }
          }
 
@@ -721,6 +725,12 @@ fuseInLambda :: Lambda -> FusionGM Lambda
 fuseInLambda (Lambda i params body rtp) = do
   body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
   return $ Lambda i params body' rtp
+  where i_ident = Ident i $ Prim int32
+
+fuseInExtLambda :: ExtLambda -> FusionGM ExtLambda
+fuseInExtLambda (ExtLambda i params body rtp) = do
+  body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
+  return $ ExtLambda i params body' rtp
   where i_ident = Ident i $ Prim int32
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
