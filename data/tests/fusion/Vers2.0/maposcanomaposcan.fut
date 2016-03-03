@@ -11,9 +11,9 @@
 --   }
 -- }
 -- structure { 
---    Stream  1
---    Scan    2
---    Map     1
+--    Stream  2
+--    Scan    3
+--    Map     2
 --    Redomap 1
 -- }
 --
