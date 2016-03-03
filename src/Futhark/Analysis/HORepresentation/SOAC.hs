@@ -466,7 +466,7 @@ width (Map _ w _ _) = w
 width (Reduce _ w _ _ _) = w
 width (Scan _ w _ _) = w
 width (Redomap _ w _ _ _ _ _) = w
-width (Scanomap _ w _ _ _ _)                                
+width (Scanomap _ w _ _ _ _) = w
 width (Stream _ w _ _ _) = w
 
 -- | Convert a SOAC to the corresponding expression.
@@ -483,6 +483,8 @@ toExp (Scan cs w l args) =
   where (es, as) = unzip args
 toExp (Redomap cs w comm l1 l2 es as) =
   Op <$> (Futhark.Redomap cs w comm l1 l2 es <$> inputsToSubExps as)
+toExp (Scanomap cs w l1 l2 es as) =
+  Op <$> (Futhark.Scanomap cs w l1 l2 es <$> inputsToSubExps as)
 toExp (Stream cs w form lam inps) = Op <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
       extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
@@ -513,6 +515,8 @@ fromExp (Op (Futhark.Scan cs w l args)) = do
   Right . Scan cs w l . zip es <$> traverse varInput as
 fromExp (Op (Futhark.Redomap cs w comm l1 l2 es as)) =
   Right . Redomap cs w comm l1 l2 es <$> traverse varInput as
+fromExp (Op (Futhark.Scanomap cs w l1 l2 es as)) =
+  Right <$> Scanomap cs w l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Stream cs w form extlam as)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
