@@ -23,15 +23,17 @@ fun f32 nextrP(f32 lastr, f32 WP) =
 fun f32 nextrQ(f32 lastr, f32 WQ) =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * WQ
 
-fun [f32] MC1([[f32]] WPss) = map(MC1step, WPss)
-fun f32 MC1step([f32] WPs) = sum(scan(nextrP, r0(), WPs))
+fun [f32] MC1([[f32]] WPss) =
+  map(MC1step, WPss)
+fun f32 MC1step([f32] WPs) =
+  sum(reduce(nextrP, r0(), WPs))
 
 fun [f32] MC2([[[f32]]] WQsss, [f32] r1s) =
   map(MC2sim, zip(WQsss, r1s))
 fun f32 MC2sim({[[f32]], f32} arg) =
   let { WQss, r1 } = arg in
   let tn = size(0, WQss) in
-  mean(map(exp, zipWith(MC2step, WQss, replicate(tn, r1))))
+  mean(zipWith(MC2step, WQss, replicate(tn, r1)))
 fun f32 MC2step({[f32], f32} arg) =
   let { WQs, r1 } = arg in
   sum(scan(nextrQ, r1, WQs))
