@@ -418,8 +418,13 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                             Scratch (elemType tp) (arrayDims tp)
                          ) outarrinit initrtps
   mapM_ addBinding (outinibds++allbnds)
-  forM_ (zip (patternNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
+  forM_ (zip (patternValueNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
     letBindNames'_ [p] $ PrimOp $ SubExp $ Var $ identName v
+  let mapping = shapeMapping (patternValueTypes respat) $
+                map identType $ strmresacc ++ strmresarr
+  forM_ (HM.toList mapping) $ \(p, se) ->
+    when (p `elem` patternContextNames respat) $
+    letBindNames'_ [p] $ PrimOp $ SubExp se
   where myLetBind :: Transformer m =>
                      AST.Exp (Lore m) -> Ident -> m ()
         myLetBind e idd = addBinding $ mkLet' [] [idd] e
