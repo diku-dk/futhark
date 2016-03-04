@@ -76,6 +76,7 @@ data Token = IF
            | RCURLY
            | COMMA
            | UNDERSCORE
+           | CONST
            | FUN
            | FN
            | ARROW
