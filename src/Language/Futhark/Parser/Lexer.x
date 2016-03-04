@@ -96,6 +96,7 @@ keyword s =
     "with"         -> WITH
     "default"      -> DEFAULT
     "int"          -> INT
+    "float"        -> FLOAT
     "i8"           -> I8
     "i16"          -> I16
     "i32"          -> I32

@@ -57,6 +57,7 @@ import Language.Futhark.Parser.Lexer
       in              { L $$ IN }
       default         { L $$ DEFAULT }
       int             { L $$ INT }
+      float           { L $$ FLOAT }
       i8              { L $$ I8 }
       i16             { L $$ I16 }
       i32             { L $$ I32 }
@@ -170,7 +171,7 @@ import Language.Futhark.Parser.Lexer
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '~' '!' signum abs f32 f64 int i8 i16 i32 i64 unsafe default
+%nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
 %%
 
@@ -310,7 +311,8 @@ UnsignedType :: { (IntType, SrcLoc) }
              | u64 { (Int64, $1) }
 
 FloatType :: { (FloatType, SrcLoc) }
-          : f32  { (Float32, $1) }
+          : float { (Float64, $1) }
+          | f32  { (Float32, $1) }
           | f64  { (Float64, $1) }
 
 Types : Type ',' Types { $1 : $3 }
