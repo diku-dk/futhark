@@ -474,10 +474,16 @@ updateBounds isTrue cond vtable =
       in updateBounds' cond'' vtable
   where types = typeEnv vtable
 
+-- | Updating the ranges of all symbols whenever we enter a branch is
+-- presently too expensive, and disabled here.
+noUpdateBounds :: Bool
+noUpdateBounds = True
+
 -- | Refines the ranges in the symbol table with
 --     ranges extracted from branch conditions.
 --   `cond' is the condition of the if-branch.
 updateBounds' :: ScalExp -> SymbolTable lore -> SymbolTable lore
+updateBounds' _ sym_tab | noUpdateBounds = sym_tab
 updateBounds' cond sym_tab =
   foldr updateBound sym_tab $ mapMaybe solve_leq0 $
   getNotFactorsLEQ0 $ AS.simplify (SNot cond) ranges

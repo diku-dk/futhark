@@ -726,10 +726,14 @@ simplifyScalExp vtable (Let pat _ e) = do
     Just se@(SE.RelExp SE.LTH0 _)
       | Right (SE.Val (BoolValue True)) <- mkDisj <$> AS.mkSuffConds se ranges ->
         letBind_ pat $ PrimOp $ SubExp $ Constant $ BoolValue True
-    Just se
-      | new@(SE.Val val) <- AS.simplify se ranges,
-        se /= new ->
-           letBind_ pat $ PrimOp $ SubExp $ Constant val
+      | SE.Val val <- AS.simplify se ranges ->
+        letBind_ pat $ PrimOp $ SubExp $ Constant val
+    Just se@(SE.RelExp SE.LEQ0 x)
+      | let se' = SE.RelExp SE.LTH0 $ x - 1,
+        Right (SE.Val (BoolValue True)) <- mkDisj <$> AS.mkSuffConds se' ranges ->
+        letBind_ pat $ PrimOp $ SubExp $ Constant $ BoolValue True
+      | SE.Val val <- AS.simplify se ranges ->
+        letBind_ pat $ PrimOp $ SubExp $ Constant val
     _ -> cannotSimplify
   where ranges = ST.rangesRep vtable
         mkDisj []     = SE.Val $ BoolValue False
