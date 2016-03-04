@@ -184,6 +184,14 @@ soacType (Redomap _ outersize _ outerfun innerfun _ _) =
   in  case res_el_tp of
         [] -> acc_tp
         _  -> acc_tp ++ map (`arrayOfRow` outersize) res_el_tp
+soacType (Scanomap _ outersize outerfun innerfun _ _) =
+  staticShapes $
+  let acc_tp    = map (`arrayOfRow` outersize) $ lambdaReturnType outerfun
+      acc_el_tp = lambdaReturnType innerfun
+      res_el_tp = drop (length acc_tp) acc_el_tp
+  in  case res_el_tp of
+        [] -> acc_tp
+        _  -> acc_tp ++ map (`arrayOfRow` outersize) res_el_tp
 soacType (Stream _ outersize form lam _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
@@ -207,6 +215,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases (Scan _ _ f _) =
     map (const mempty) $ lambdaReturnType f
   opAliases (Redomap _ _ _ _ innerfun _ _) =
+    map (const mempty) $ lambdaReturnType innerfun
+  opAliases (Scanomap _ _ _ innerfun _ _)  =
     map (const mempty) $ lambdaReturnType innerfun
   opAliases (Stream _ _ form lam _) =
     let a1 = case form of
@@ -253,6 +263,10 @@ instance (Attributes lore,
   addOpAliases (Redomap cs size comm outerlam innerlam acc arr) =
     Redomap cs size
      comm (Alias.analyseLambda outerlam)
+     (Alias.analyseLambda innerlam)
+     acc arr
+  addOpAliases (Scanomap cs size outerlam innerlam acc arr) =
+    Scanomap cs size (Alias.analyseLambda outerlam)
      (Alias.analyseLambda innerlam)
      acc arr
   addOpAliases (Stream cs size form lam arr) =
@@ -304,6 +318,11 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
     Scan cs w (Range.runRangeM $ Range.analyseLambda lam) input
   addOpRanges (Redomap cs w comm outerlam innerlam acc arr) =
     Redomap cs w comm
+     (Range.runRangeM $ Range.analyseLambda outerlam)
+     (Range.runRangeM $ Range.analyseLambda innerlam)
+     acc arr
+  addOpRanges (Scanomap cs w outerlam innerlam acc arr) =
+    Scanomap cs w
      (Range.runRangeM $ Range.analyseLambda outerlam)
      (Range.runRangeM $ Range.analyseLambda innerlam)
      acc arr
@@ -361,7 +380,24 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   unless (acct == outerRetType) $
     TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
-
+typeCheckSOAC (Scanomap ass size outerfun innerfun accexps arrexps) = do
+  mapM_ (TC.requireI [Prim Cert]) ass
+  TC.require [Prim int32] size
+  arrargs <- TC.checkSOACArrayArgs size arrexps
+  accargs <- mapM TC.checkArg accexps
+  TC.checkLambda innerfun $ accargs ++ arrargs
+  let innerReturnType = lambdaReturnType innerfun
+      innerAccType = take (length accexps) innerRetType
+      asArg t = (t, mempty)
+  TC.checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
+  let acct = map TC.argType accargs
+      outerRetType = lambdaReturnType outerfun
+  unless (acct == innerAccType ) $
+    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but scanomap inner reduction returns type " ++ prettyTuple innerRetType ++ "."
+  unless (acct == outerRetType) $
+    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but scanomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 typeCheckSOAC (Stream ass size form lam arrexps) = do
   let accexps = getStreamAccums form
   mapM_ (TC.requireI [Prim Cert]) ass
@@ -583,6 +619,12 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
+  ppr (Scanomap cs size outer inner es as) =
+    PP.ppCertificates' cs <> text "scanomap" <>
+    parens (ppr size <> comma </>
+               ppr outer <> comma </>
+               ppr inner <> comma </>
+               commasep (PP.braces (commasep $ map ppr es) : map ppr as))
   ppr (Write cs _ts i vs as) =
     PP.ppCertificates' cs <> text "write"
     <> parens (semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
