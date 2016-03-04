@@ -112,6 +112,11 @@ mapSOACM tv (Redomap cs w comm lam0 lam1 nes arrs) =
   pure comm <*>
   mapOnSOACLambda tv lam0 <*> mapOnSOACLambda tv lam1 <*>
   mapM (mapOnSOACSubExp tv) nes <*> mapM (mapOnSOACVName tv) arrs
+mapSOACM tv (Scanomap cs w lam0 lam1 nes arrs) =
+  Scanomap <$>
+  mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv w <*>
+  mapOnSOACLambda tv lam0 <*> mapOnSOACLambda tv lam1 <*>
+  mapM (mapOnSOACSubExp tv) nes <*> mapM (mapOnSOACVName tv) arrs
 mapSOACM tv (Stream cs size form lam arrs) =
   Stream <$>
   mapOnSOACCertificates tv cs <*> mapOnSOACSubExp tv size <*>
