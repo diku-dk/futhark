@@ -59,14 +59,14 @@ fun int index_of_least_significant_0(int num_bits, int n) =
           else      {False,k,   n   }
   in k
 
-fun [int] recM( [[int,num_bits]] sob_dirs, int i ) =
+fun [int,len] recM( [[int,num_bits],len] sob_dirs, int i ) =
   let bit= index_of_least_significant_0(num_bits,i) in
   map( fn int([int] row) => unsafe row[bit], sob_dirs )
 
-fun [[f64],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
+fun [[f64,sobvctsz],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk, int sobvctsz) =
   let sob_fact= 1.0 / f64(1 << num_bits)       in
   let sob_beg = sobolIndI(dir_vs, n+1)             in
-  let contrbs = map( fn [int] (int k) =>
+  let contrbs = map( fn [int,len] (int k) =>
                         let sob = k + n in
                         if(k==0) then sobolIndI(dir_vs, n+1)
                         else recM(dir_vs, k+n)
@@ -74,7 +74,7 @@ fun [[f64],chunk] sobolChunk([[int,num_bits],len] dir_vs, int n, int chunk) =
   let vct_ints= scan( fn [int] ([int] x, [int] y) =>
                         zipWith(^, x, y)
                     , replicate(len, 0), contrbs ) in
-  map( fn [f64] ([int] xs) =>
+  map( fn [f64,len] ([int] xs) =>
              map ( fn f64 (int x) =>
                      f64(x) * sob_fact
                  , xs)
@@ -86,6 +86,6 @@ fun f64 main( int num_dates, int num_und, int num_mc_it,
   let dir_vs    = reshape( (sobvctsz,num_bits), dir_vs_nosz ) in
 --  let sobol_mat = sobolChunk( dir_vs, 0, num_mc_it ) in
   let sobol_mat = streamMap( fn [[f64,sobvctsz]] (int chunk, [int] ns) =>
-                                sobolChunk(dir_vs, ns[0], chunk)
+                                sobolChunk(dir_vs, ns[0], chunk, sobvctsz)
                            , iota(num_mc_it) ) in
   reduce (+, 0.0, map ( fn f64 ([f64] row) => reduce(+, 0.0, row), sobol_mat ) )

@@ -10,6 +10,6 @@ fun [f64] main( [f64] result ) =
   let m = size(0, result) in
   map ( fn f64 (int j) =>
             if j < (m-1)
-            then result[j+1]
+            then unsafe result[j+1]
             else 0.0
       , iota(m) )
