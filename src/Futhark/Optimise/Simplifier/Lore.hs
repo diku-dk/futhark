@@ -5,7 +5,7 @@
 -- | Definition of the lore used by the simplification engine.
 module Futhark.Optimise.Simplifier.Lore
        (
-         Wise (..)
+         Wise
        , removeBindingWisdom
        , removeLambdaWisdom
        , removeExtLambdaWisdom
