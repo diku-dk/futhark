@@ -406,28 +406,20 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
         PrimOp $ Split [] [Var $ identName indvar] $ identName arrl
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
-  thenbody <- runBodyBinder $ do
-      lUBexp <- eBinOp (SDiv Int32)
-                       (eBinOp (Add Int32)
-                        (pure $ PrimOp $ SubExp outersz)
-                        (eBinOp (Sub Int32) (pure $ PrimOp $ SubExp $ Var chunkglb)
-                                            (pure $ PrimOp $ SubExp $ constant (1 :: Int32))))
-                       (pure $ PrimOp $ SubExp $ Var chunkglb)
-      myLetBind lUBexp loopcnt
-      let outinibds= zipWith (\ idd tp ->
-                                mkLet' [] [idd] $ PrimOp $
-                                Scratch (elemType tp) (arrayDims tp)
-                             ) outarrinit initrtps
-      mapM_ addBinding (outinibds++allbnds)
-      return $ resultBody (map (Var . identName) strmresacc ++
-                           map (Var . identName) strmresarr)
-  elsebody <- runBodyBinder $ do
-      fakeoutarrs <- resultArray  initrtps
-      return $ resultBody (accexps ++ map Var fakeoutarrs)
-  letBind_ respat =<<
-    eIf (pure $ PrimOp $ SubExp $ Constant $ BoolValue True)
-    (pure thenbody)
-    (pure elsebody)
+  lUBexp <- eBinOp (SDiv Int32)
+                   (eBinOp (Add Int32)
+                    (pure $ PrimOp $ SubExp outersz)
+                    (eBinOp (Sub Int32) (pure $ PrimOp $ SubExp $ Var chunkglb)
+                                        (pure $ PrimOp $ SubExp $ constant (1 :: Int32))))
+                   (pure $ PrimOp $ SubExp $ Var chunkglb)
+  myLetBind lUBexp loopcnt
+  let outinibds= zipWith (\ idd tp ->
+                            mkLet' [] [idd] $ PrimOp $
+                            Scratch (elemType tp) (arrayDims tp)
+                         ) outarrinit initrtps
+  mapM_ addBinding (outinibds++allbnds)
+  forM_ (zip (patternNames respat) $ strmresacc ++ strmresarr) $ \(p, v) ->
+    letBindNames'_ [p] $ PrimOp $ SubExp $ Var $ identName v
   where myLetBind :: Transformer m =>
                      AST.Exp (Lore m) -> Ident -> m ()
         myLetBind e idd = addBinding $ mkLet' [] [idd] e
