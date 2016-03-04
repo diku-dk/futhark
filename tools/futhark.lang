@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+ Author: Svip <svip@flagland.org>
+ 
+ This library is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+-->
+<language id="futhark" _name="Futhark" version="2.0" _section="Sources">
+  <metadata>
+    <property name="mimetypes">text/x-futhark;application/x-futhark;text/x-futhark-source;application/x-futhark-source</property>
+    <property name="globs">*.fut</property>
+    <property name="line-comment-start">--</property>
+  </metadata>
+  
+  <styles>
+    <style id="comment"        _name="Comment"               map-to="def:comment" />
+<!--    <style id="error" _name="Error" map-to="def:error"/>-->
+    <style id="keyword"        _name="Keyword"               map-to="def:keyword" />
+    <style id="builtin-functionlikes" _name="Functionlikes"  map-to="def:identifier" />
+    <style id="variable"       _name="Variable"/> <!-- map to nothing -->
+    <style id="identifier"     _name="Identifier"/> <!-- map to nothing -->
+<!--    <style id="common-function" _name="Common Function" map-to="def:keyword"/>-->
+    <style id="operator"       _name="Operator"              map-to="def:operator"/>
+    <style id="boolean"        _name="Boolean"               map-to="def:boolean"/>
+    <style id="type"           _name="Datatype"              map-to="def:type"/>
+    <style id="floating-point" _name="Floating point number" map-to="def:floating-point"/>
+    <style id="decimal"        _name="Decimal number"        map-to="def:decimal"/>
+<!--    <style id="octal" _name="Octal number" map-to="def:base-n-integer"/>-->
+    <style id="hexadecimal"    _name="Hexadecimal number"    map-to="def:decimal"/>
+  </styles>
+  
+  <definitions>
+
+    <context id="line-comment" style-ref="comment" end-at-line-end="true" extend-parent="false" class="comment" class-disabled="no-spell-check">
+      <start>--</start>
+      <include>
+        <context ref="def:in-line-comment"/>
+      </include>
+    </context>
+
+    <context id="variable" style-ref="variable">
+      <match>[a-zA-Z_][a-zA-Z0-9_']*</match>
+    </context>
+
+    <context id="keywords" style-ref="keyword">
+      <keyword>if</keyword>
+      <keyword>then</keyword>
+      <keyword>else</keyword>
+      <keyword>let</keyword>
+      <keyword>loop</keyword>
+      <keyword>with</keyword>
+      <keyword>fun</keyword>
+      <keyword>fn</keyword>
+      <keyword>for</keyword>
+      <keyword>while</keyword>
+      <keyword>do</keyword>
+      <keyword>in</keyword>
+      <keyword>op</keyword>
+      <keyword>not</keyword>
+      <keyword>pow</keyword>
+      <keyword>shape</keyword>
+      <keyword>reshape</keyword>
+      <keyword>transpose</keyword>
+      <keyword>split</keyword>
+      <keyword>redomap</keyword>
+      <keyword>empty</keyword>
+      <keyword>copy</keyword>
+      <keyword>size</keyword>
+      <keyword>unsafe</keyword>
+      <keyword>default</keyword>
+      <keyword>include</keyword>
+    </context>
+
+    <context id="builtin-functionlikes" style-ref="builtin-functionlikes">
+      <keyword>map</keyword>
+      <keyword>streamMap</keyword>
+      <keyword>streamMapPer</keyword>
+      <keyword>zipWith</keyword>
+      <keyword>filter</keyword>
+      <keyword>partition</keyword>
+      <keyword>reduce</keyword>
+      <keyword>reduceComm</keyword>
+      <keyword>streamRed</keyword>
+      <keyword>streamRedPer</keyword>
+      <keyword>scan</keyword>
+      <keyword>streamSeq</keyword>
+      
+      <keyword>iota</keyword>
+      
+      <keyword>replicate</keyword>
+      <keyword>concat</keyword>
+      <keyword>zip</keyword>
+      <keyword>unzip</keyword>
+    </context>
+
+    <context id="operators" style-ref="operator" extend-parent="false">
+      <match>[+\-\*/&gt;&lt;%=&amp;\|]</match>
+    </context>
+
+    <context id="type" style-ref="type">
+      <keyword>i8</keyword>
+      <keyword>i16</keyword>
+      <keyword>i32</keyword>
+      <keyword>i64</keyword>
+      <keyword>u8</keyword>
+      <keyword>u16</keyword>
+      <keyword>u32</keyword>
+      <keyword>u64</keyword>
+      <keyword>int</keyword>
+      <keyword>real</keyword>
+      <keyword>bool</keyword>
+      <keyword>char</keyword>
+      <keyword>f32</keyword>
+      <keyword>f64</keyword>
+    </context>
+
+    <context id="boolean" style-ref="boolean">
+      <prefix>(?&lt;![\w\.])</prefix>
+      <keyword>False</keyword>
+      <keyword>True</keyword>
+    </context>
+
+    <context id="float" style-ref="floating-point">
+      <match extended="true">
+        (?&lt;![\w\.])
+        (([0-9]+(\.[0-9]+)?))
+        ([eE][\+\-]?[0-9]+)?
+        (f(32|64))?
+        (?![\w\.])
+      </match>
+    </context>
+
+    <context id="integer" style-ref="decimal">
+      <match extended="true">
+        (?&lt;![\w\.])
+        [+-]?[0-9]+
+        ([ui](8|16|32|64))?
+        (?![\w\.])
+      </match>
+    </context>
+
+    <context id="hexadecimal-number" style-ref="hexadecimal">
+      <match extended="true">
+        (?&lt;![\w\.])
+        [+-]?0x[0-9a-fA-F]+
+        ([ui](8|16|32|64))?
+        (?![\w\.])
+      </match>
+    </context>
+    
+    <context id="futhark" class="no-spell-check">
+      <include>
+        <context ref="line-comment" />
+        <context ref="type" />
+        <context ref="boolean" />
+        <context ref="keywords" />
+        <context ref="builtin-functionlikes" />
+        <context ref="operators" />
+        <context ref="float" />
+        <context ref="hexadecimal-number" />
+        <context ref="integer" />
+        <context ref="variable" />
+      </include>
+    </context>
+  </definitions>
+</language>
