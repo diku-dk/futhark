@@ -82,7 +82,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesString dir input_spec
-  expected <- getValues dir expected_spec
+  maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
 
   runtimes <- forM [0..optRuns opts-1] $ \_ -> do
     -- Explicitly prefixing the current directory is necessary for
@@ -90,7 +90,11 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
     -- no program component.
     (progCode, output, progerr) <-
       liftIO $ readProcessWithExitCode ("." </> binaryName program) ["-t", tmpfile] input
-    compareResult program expected =<< runResult program progCode output progerr
+    case maybe_expected of
+      Nothing ->
+        didNotFail program progCode progerr
+      Just expected ->
+        compareResult program expected =<< runResult program progCode output progerr
     runtime_result <- readFile tmpfile
     case reads runtime_result of
       [(runtime, _)] -> return $ RunResult runtime
@@ -104,6 +108,13 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   reportResult (optRawReporting opts) runtimes
 
   where dir = takeDirectory program
+
+didNotFail :: Monad m => FilePath -> ExitCode -> String -> m ()
+didNotFail _ ExitSuccess _ =
+  return ()
+didNotFail program (ExitFailure code) stderr_s =
+  fail $ program ++ " failed with error code " ++ show code ++
+  " and output:\n" ++ stderr_s
 
 runResult :: MonadIO m =>
              FilePath

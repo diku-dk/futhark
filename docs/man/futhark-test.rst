@@ -43,7 +43,9 @@ block, the expected result of the test case is written as either
 another block of values, or an expected run-time error, in which a
 regular expression can be used to specify the exact error message
 expected.  If no regular expression is given, any error message is
-accepted.
+accepted.  If neither ``output`` nor ``error`` is given, the program
+will be expected to execute succesfully, but its output will not be
+validated.
 
 Alternatively, instead of input-output pairs, the test cases can
 simply be a description of an expected compile time type error::
