@@ -109,6 +109,7 @@ keyword s =
     "f64"          -> F64
     "bool"         -> BOOL
     "char"         -> CHAR
+    "const"        -> CONST
     "fun"          -> FUN
     "fn"           -> FN
     "for"          -> FOR
