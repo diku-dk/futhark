@@ -118,7 +118,6 @@ import Language.Futhark.Parser.Lexer
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
-      const           { L $$ CONST }
       fun             { L $$ FUN }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
@@ -181,8 +180,8 @@ Prog :: { UncheckedProgWithHeaders }
      |   Decs { ProgWithHeaders [] $1 }
 ;
 
-Decs : ConstFunDecs { $1 }
-     | DefaultDec ConstFunDecs { $2 }
+Decs : FunDecs { $1 }
+     | DefaultDec FunDecs { $2 }
 ;
 
 DefaultDec :: { () }
@@ -234,12 +233,8 @@ Header :: { ProgHeader }
 Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
-ConstFunDecs : ConstFunDec ConstFunDecs   { $1 : $2 }
-             | ConstFunDec                { [$1] }
-
-ConstFunDec : const Type id '=' Exp
-                      { let L pos (ID name) = $3 in (name, $2, [], $5, pos) }
-            | fun Fun { $2 }
+FunDecs : fun Fun FunDecs   { $2 : $3 }
+        | fun Fun           { [$2] }
 ;
 
 Fun :     Type id '(' TypeIds ')' '=' Exp
