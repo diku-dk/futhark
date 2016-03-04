@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts, ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Futhark.Construct
   ( letSubExp
   , letSubExps

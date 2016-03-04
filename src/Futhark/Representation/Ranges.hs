@@ -69,7 +69,7 @@ import Futhark.Analysis.Rephrase
 import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
-data Ranges lore = Ranges lore
+data Ranges lore
 
 instance (Annotations lore, CanBeRanged (Op lore)) =>
          Annotations (Ranges lore) where
@@ -83,8 +83,6 @@ instance (Annotations lore, CanBeRanged (Op lore)) =>
 
 instance (Attributes lore, CanBeRanged (Op lore)) =>
          Attributes (Ranges lore) where
-  representative =
-    Ranges representative
 
 instance RangeOf (Range, attr) where
   rangeOf = fst

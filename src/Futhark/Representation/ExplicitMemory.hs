@@ -135,7 +135,7 @@ import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Analysis.Usage
 
 -- | A lore containing explicit memory information.
-data ExplicitMemory = ExplicitMemory
+data ExplicitMemory
 
 type Prog = AST.Prog ExplicitMemory
 type PrimOp = AST.PrimOp ExplicitMemory
@@ -567,10 +567,10 @@ instance TypeCheck.Checkable ExplicitMemory where
   checkOp (Alloc size _) = TypeCheck.require [Prim int32] size
   checkOp (Inner k) = typeCheckKernel k
 
-  primFParam _ name t =
-    AST.Param name (Scalar t)
-  primLParam _ name t =
-    AST.Param name (Scalar t)
+  primFParam name t =
+    return $ AST.Param name (Scalar t)
+  primLParam name t =
+    return $ AST.Param name (Scalar t)
 
   matchPattern pat e = do
     rt <- runReaderT (expReturns $ removeExpAliases e) =<<
@@ -767,8 +767,6 @@ checkMemBound name (ArrayMem _ shape _ v ixfun) = do
       " (" ++ show ident_rank ++ ")"
 
 instance Attributes ExplicitMemory where
-  representative = ExplicitMemory
-
   expContext pat e = do
     ext_context <- expExtContext pat e
     case e of

@@ -373,8 +373,8 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
   mapM_ (TC.requireI [Prim Cert]) cs
   TC.require [Prim int32] w
   mapM_ (TC.require [Prim int32]) bounds
-  index_param <- TC.primLParamM index int32
-  iparams' <- forM iparams $ \iparam -> TC.primLParamM iparam int32
+  index_param <- TC.primLParam index int32
+  iparams' <- forM iparams $ \iparam -> TC.primLParam iparam int32
   forM_ returns $ \(t, perm) ->
     let return_rank = arrayRank t + rank
     in unless (sort perm == [0..return_rank - 1]) $

@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, ScopedTypeVariables, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -19,8 +19,6 @@ module Futhark.TypeCheck
   , UsageMap
   , usageMap
   , collectOccurences
-  , primLParamM
-  , primFParamM
 
     -- * Checkers
   , require
@@ -530,15 +528,16 @@ checkProgNoUniqueness = checkProg' False
 checkProg' :: Checkable lore =>
               Bool -> AST.Prog lore -> Either (TypeError lore) ()
 checkProg' checkoccurs prog = do
-  ftable <- buildFtable
   let typeenv = Env { envVtable = HM.empty
-                    , envFtable = ftable
+                    , envFtable = mempty
                     , envCheckOccurences = checkoccurs
                     , envContext = []
                     }
 
-  runTypeM typeenv $
-    mapM_ (noDataflow . checkFun) $ progFunctions prog'
+  runTypeM typeenv $ do
+    ftable <- buildFtable
+    local (\env -> env { envFtable = ftable }) $
+      mapM_ (noDataflow . checkFun) $ progFunctions prog'
   where
     prog' = aliasAnalysis prog
     -- To build the ftable we loop through the list of function
@@ -547,21 +546,21 @@ checkProg' checkoccurs prog = do
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = foldM expand (initialFtable prog')
-                  (progFunctions prog')
+    buildFtable = do table <- initialFtable prog'
+                     foldM expand table $ progFunctions prog'
     expand ftable (FunDec name ret params _)
       | HM.member name ftable =
-        Left $ Error [] $ DupDefinitionError name
+        bad $ DupDefinitionError name
       | otherwise =
-        Right $ HM.insert name (ret,params) ftable
+        return $ HM.insert name (ret,params) ftable
 
 -- The prog argument is just to disambiguate the lore.
-initialFtable :: forall lore.Checkable lore =>
-                 Prog lore -> HM.HashMap Name (FunBinding lore)
-initialFtable _ = HM.map addBuiltin builtInFunctions
-  where addBuiltin (t, ts) =
-          (primRetType t,
-           map (primFParam (representative :: lore) name) ts)
+initialFtable :: Checkable lore =>
+                 Prog lore -> TypeM lore (HM.HashMap Name (FunBinding lore))
+initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunctions
+  where addBuiltin (fname, (t, ts)) = do
+          ps <- mapM (primFParam name) ts
+          return (fname, (primRetType t, ps))
         name = ID (nameFromString "x", 0)
 
 checkFun :: Checkable lore =>
@@ -847,7 +846,7 @@ checkExp (DoLoop ctxmerge valmerge form loopbody) = do
 
   funparams <- case form of
     ForLoop loopvar boundexp -> do
-      iparam <- primFParamM loopvar int32
+      iparam <- primFParam loopvar int32
       let funparams = iparam : mergepat
           paramts   = map paramDeclType funparams
 
@@ -1065,7 +1064,7 @@ checkFuncall fname paramts args = do
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore ()
 checkLambda (Lambda i params body rettype) args = do
-  iparam <- primLParamM i int32
+  iparam <- primLParam i int32
   let fname = nameFromString "<anonymous>"
   if length params == length args then do
     checkFuncall Nothing
@@ -1087,7 +1086,7 @@ checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
 checkExtLambda (ExtLambda i params body rettype) args =
   if length params == length args then do
-    iparam <- primLParamM i int32
+    iparam <- primLParam i int32
     checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
     let fname = nameFromString "<anonymous>"
         consumable = zip (map paramName params) (map argAliases args)
@@ -1114,16 +1113,6 @@ class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   checkRetType :: AST.RetType lore -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
   matchPattern :: Pattern lore -> Exp lore -> TypeM lore ()
-  primFParam :: lore -> VName -> PrimType -> AST.FParam (Aliases lore)
-  primLParam :: lore -> VName -> PrimType -> AST.LParam (Aliases lore)
+  primFParam :: VName -> PrimType -> TypeM lore (AST.FParam (Aliases lore))
+  primLParam :: VName -> PrimType -> TypeM lore (AST.LParam (Aliases lore))
   matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()
-
-primFParamM :: forall lore.Checkable lore =>
-                VName -> PrimType -> TypeM lore (AST.FParam lore)
-primFParamM name t =
-  return $ primFParam (representative :: lore) name t
-
-primLParamM :: forall lore.Checkable lore =>
-                VName -> PrimType -> TypeM lore (AST.LParam lore)
-primLParamM name t =
-  return $ primLParam (representative :: lore) name t

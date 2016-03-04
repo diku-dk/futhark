@@ -61,13 +61,12 @@ import Futhark.Analysis.Rephrase
 -- system.
 
 -- | The lore for the basic representation.
-data Kernels = Kernels
+data Kernels
 
 instance Annotations Kernels where
   type Op Kernels = Kernel Kernels
 
 instance Attributes Kernels where
-  representative = Kernels
 
 type Prog = AST.Prog Kernels
 type PrimOp = AST.PrimOp Kernels
@@ -94,10 +93,10 @@ instance TypeCheck.Checkable Kernels where
   matchPattern pat e = do
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
-  primFParam _ name t =
-    AST.Param name (AST.Prim t)
-  primLParam _ name t =
-    AST.Param name (AST.Prim t)
+  primFParam name t =
+    return $ AST.Param name (AST.Prim t)
+  primLParam name t =
+    return $ AST.Param name (AST.Prim t)
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 

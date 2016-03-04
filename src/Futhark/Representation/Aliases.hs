@@ -1,7 +1,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
 -- | A representation where all bindings are annotated with aliasing
 -- information.
@@ -81,7 +80,7 @@ import Futhark.Representation.AST.Attributes.Ranges()
 import qualified Futhark.Util.Pretty as PP
 
 -- | The lore for the basic representation.
-data Aliases lore = Aliases lore
+data Aliases lore
 
 -- | A wrapper around 'Names' to get around the fact that we need an
 -- 'Ord' instance, which 'Names' does not have.
@@ -145,9 +144,6 @@ type FunDec lore = AST.FunDec (Aliases lore)
 type RetType lore = AST.RetType (Aliases lore)
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
-  representative =
-    Aliases representative
-
   expContext pat e = do
     env <- asksScope removeScopeAliases
     return $ runReader (expContext (removePatternAliases pat) (removeExpAliases e)) env
@@ -295,8 +291,7 @@ mkPatternAliases pat e =
                     (_, Mem _ _)        -> names
                     _                   -> mempty
 
-mkContextAliases :: forall lore attr.
-                    (Attributes lore, Aliased lore) =>
+mkContextAliases :: (Attributes lore, Aliased lore) =>
                     AST.PatternT attr -> AST.Exp lore
                  -> [Names]
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =

@@ -1,6 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 -- | This module defines a collection of simplification rules, as per
 -- "Futhark.Optimise.Simplifier.Rule".  They are used in the
 -- simplifier.
