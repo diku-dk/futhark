@@ -88,7 +88,6 @@ compilerPipeline =
   standardPipeline >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
-         , simplifyKernels
          , babysitKernels
          , simplifyKernels
          , inPlaceLowering
