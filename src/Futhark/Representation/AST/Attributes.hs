@@ -156,11 +156,6 @@ class (Annotations lore,
        FreeIn (RetType lore),
 
        IsOp (Op lore)) => Attributes lore where
-  -- | A constant used to disambiguate method calls.  XXX, this is a
-  -- hack to get around mising type application in Haskell, sometimes
-  -- resulting in ambiguous types.
-  representative :: lore
-
   -- | As far as possible, determine the subexpression to which each
   -- context pattern element will be bound due to evaluation of the
   -- given expression.  The resulting list must have the same number

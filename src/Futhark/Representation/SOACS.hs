@@ -61,13 +61,12 @@ import Futhark.Analysis.Rephrase
 -- system.
 
 -- | The lore for the basic representation.
-data SOACS = SOACS
+data SOACS
 
 instance Annotations SOACS where
   type Op SOACS = SOAC SOACS
 
 instance Attributes SOACS where
-  representative = SOACS
 
 type Prog = AST.Prog SOACS
 type PrimOp = AST.PrimOp SOACS
@@ -94,10 +93,10 @@ instance TypeCheck.Checkable SOACS where
   matchPattern pat e = do
     et <- expExtType e
     TypeCheck.matchExtPattern (patternElements pat) et
-  primFParam _ name t =
-    AST.Param name (AST.Prim t)
-  primLParam _ name t =
-    AST.Param name (AST.Prim t)
+  primFParam name t =
+    return $ AST.Param name (AST.Prim t)
+  primLParam name t =
+    return $ AST.Param name (AST.Prim t)
   matchReturnType name (ExtRetType ts) =
     TypeCheck.matchExtReturnType name $ map fromDecl ts
 

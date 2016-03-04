@@ -1,6 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 -- | A nonoptimising interpreter for Futhark.  It makes no assumptions of
 -- the form of the input program, and in particular permits shadowing.
 -- This interpreter should be considered the primary benchmark for

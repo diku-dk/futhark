@@ -43,7 +43,7 @@ import Futhark.Analysis.Rephrase
 
 import Prelude
 
-data Wise lore = Wise lore
+data Wise lore
 
 -- | The wisdom of the let-bound variable.
 data VarWisdom = VarWisdom { varWisdomAliases :: VarAliases
@@ -97,9 +97,6 @@ instance (Annotations lore,
   type Op (Wise lore) = OpWithWisdom (Op lore)
 
 instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
-  representative =
-    Wise representative
-
   expContext pat e = do
     types <- asksScope removeScopeWisdom
     runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
