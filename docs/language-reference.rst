@@ -405,3 +405,25 @@ corresponding transformed tuple::
 is not a full array.  Hence, when determining whether a program
 generates full arrays, we must hence look at the *transformed*
 values - in a sense, the fullness requirement "transcends" the tuples.
+
+Literal Defaults
+----------------
+
+By default, Futhark interprets integer literals as ``i32`` values, and decimal
+literals (integer literals containing a decimal point) as ``f64`` values. These
+defaults can be changed using the `Hakell-inspired
+<https://wiki.haskell.org/Keywords#default>`_ ``default`` keyword.
+
+To change the ``i32`` default to e.g. ``i64``, type the following at the top of
+your file::
+
+  default(i64)
+
+To change the ``f64`` default to ``f32``, type the following at the top of your
+file::
+
+  default(f32)
+
+To change both, type::
+
+  default(i64,f32)
