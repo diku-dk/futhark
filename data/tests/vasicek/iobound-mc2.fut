@@ -10,11 +10,11 @@ fun float mean([float,n] xs) = sum(map(/float(n), xs))
 
 
 -- Vasicek model parameters.
-const float r0 = 0.03       -- initial interest rate
-const float thetaP = 0.03   -- short-rate mean
-const float thetaQ = 0.045  -- long-rate mean
-const float kappa = 0.1     -- speed of mean reversion
-const float sigma = 0.01    -- interest rate volatility
+fun float r0() = 0.03       -- initial interest rate
+fun float thetaP() = 0.03   -- short-rate mean
+fun float thetaQ() = 0.045  -- long-rate mean
+fun float kappa() = 0.1     -- speed of mean reversion
+fun float sigma() = 0.01    -- interest rate volatility
 
 
 fun float nextrP(float lastr, float WP) =
