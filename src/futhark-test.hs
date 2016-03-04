@@ -161,8 +161,10 @@ runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
 getExpectedResult :: (Functor m, MonadIO m) =>
-                     FilePath -> ExpectedResult Values -> m (ExpectedResult [Value])
-getExpectedResult dir (Succeeds vals)      = Succeeds <$> getValues dir vals
+                     FilePath -> ExpectedResult Values
+                  -> m (ExpectedResult [Value])
+getExpectedResult dir (Succeeds (Just vals)) = Succeeds <$> Just <$> getValues dir vals
+getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
@@ -213,8 +215,11 @@ justCompileTestProgram futharkc program =
 
         compiling = ("compiling:\n"++)
 
-compareResult :: FilePath -> ExpectedResult [Value] -> RunResult -> TestM ()
-compareResult program (Succeeds expectedResult) (SuccessResult actualResult) =
+compareResult :: FilePath -> ExpectedResult [Value] -> RunResult
+              -> TestM ()
+compareResult _ (Succeeds Nothing) SuccessResult{} =
+  return ()
+compareResult program (Succeeds (Just expectedResult)) (SuccessResult actualResult) =
   case compareValues actualResult expectedResult of
     Just mismatch -> do
       actualf <-

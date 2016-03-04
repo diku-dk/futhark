@@ -111,8 +111,9 @@ data Values = Values [Value]
             deriving (Show)
 
 data ExpectedResult values
-  = Succeeds values
-  | RunTimeFailure ExpectedError
+  = Succeeds (Maybe values) -- ^ Execution suceeds, with or without
+                            -- expected result values.
+  | RunTimeFailure ExpectedError -- ^ Execution fails with this error.
   deriving (Show)
 
 lexeme :: Parser a -> Parser a
@@ -156,8 +157,10 @@ parseRunCases :: Parser [TestRun]
 parseRunCases = many $ TestRun <$> parseRunMode <*> parseInput <*> parseExpectedResult
 
 parseExpectedResult :: Parser (ExpectedResult Values)
-parseExpectedResult = (Succeeds <$> (lexstr "output" *> parseValues)) <|>
-                 (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError))
+parseExpectedResult =
+  (Succeeds . Just <$> (lexstr "output" *> parseValues)) <|>
+  (RunTimeFailure <$> (lexstr "error:" *> parseExpectedError)) <|>
+  pure (Succeeds Nothing)
 
 parseExpectedError :: Parser ExpectedError
 parseExpectedError = lexeme $ do
