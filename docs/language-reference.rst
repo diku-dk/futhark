@@ -80,6 +80,13 @@ collides with reality.  Shape declarations matter most when used for
 the input parameters of the ``main`` function and for the return type
 of functions used to ``map``.
 
+Constants
+---------
+
+Constants can be declared along-side functions like so::
+
+  const float pi = 3.14
+
 File inclusions
 ---------------
 
