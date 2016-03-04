@@ -48,6 +48,6 @@ for file in $(git diff-index --cached --name-only HEAD | egrep '\.l?hsc?$'); do
     fi
 done
 
-if ! cabal build; then
+if ! stack build; then
     fail
 fi
