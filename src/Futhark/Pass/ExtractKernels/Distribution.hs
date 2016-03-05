@@ -232,7 +232,7 @@ flatKernel (MapNesting pat _ nesting_w i params_and_arrs, []) =
 flatKernel (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
   (w_bnds, w, ispace, inps, returns) <- flatKernel (nest, nests)
 
-  w' <- newVName "kernel_w"
+  w' <- newVName "nesting_size"
   let w_bnd = mkLet' [] [Ident w' $ Prim int32] $
               PrimOp $ BinOp (Mul Int32) w nesting_w
 
