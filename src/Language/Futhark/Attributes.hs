@@ -40,6 +40,7 @@ module Language.Futhark.Attributes
   , similarTo
   , arrayRank
   , arrayDims
+  , nestedDims
   , setArrayShape
   , removeShapeAnnotations
   , vacuousShapeAnnotations
@@ -128,6 +129,23 @@ arrayShape _                             = mempty
 -- | Return the dimensions of a type with (possibly) known dimensions.
 arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
+
+-- | Return any shape declaration in the type, with duplicates removed.
+nestedDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
+nestedDims t =
+  case t of Array a -> nub $ arrayNestedDims a
+            Tuple ts -> nub $ mconcat $ map nestedDims ts
+            Prim{} -> mempty
+  where arrayNestedDims (PrimArray _ ds _ _) =
+          shapeDims ds
+        arrayNestedDims (TupleArray ts ds _) =
+          shapeDims ds <> mconcat (map tupleArrayElemNestedDims ts)
+        tupleArrayElemNestedDims (ArrayArrayElem a) =
+          arrayNestedDims a
+        tupleArrayElemNestedDims (TupleArrayElem ts) =
+          mconcat $ map tupleArrayElemNestedDims ts
+        tupleArrayElemNestedDims PrimArrayElem{} =
+          mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.

@@ -459,19 +459,18 @@ bindingParams :: VarName vn => [TaggedParam vn] -> TypeM vn a -> TypeM vn a
 bindingParams params m =
   -- We need to bind both the identifiers themselves, as well as any
   -- presently non-bound shape annotations.
-  binding (map fromParam params) $ do
-    -- Figure out the not already bound shape annotations.
-    dims <- fmap concat $ forM params $ \param ->
-      fmap catMaybes $
-      mapM (inspectDim $ srclocOf param) $
-      arrayDims $ identType param
-    binding dims m
+  binding (map fromParam params) $
+  -- Figure out the not already bound shape annotations.
+  binding (concat [ mapMaybe (inspectDim $ srclocOf param) $
+                    nestedDims $ identType param
+                  | param <- params ])
+  m
   where inspectDim _ AnyDim =
-          return Nothing
+          Nothing
         inspectDim _ (ConstDim _) =
-          return Nothing
+          Nothing
         inspectDim loc (NamedDim name) =
-          return $ Just $ Ident name (Prim $ Signed Int32) loc
+          Just $ Ident name (Prim $ Signed Int32) loc
 
 lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
 lookupVar name pos = do
@@ -668,7 +667,7 @@ checkFun (fname, rettype, params, body, loc) = do
             bad $ DupParamError fname (baseName name) loc
           | otherwise =
             return ()
-          where boundDims = mapMaybe boundDim $ arrayDims ptype
+          where boundDims = mapMaybe boundDim $ nestedDims ptype
                 boundDim (NamedDim name) = Just name
                 boundDim _ = Nothing
 
