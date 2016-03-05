@@ -115,11 +115,11 @@ instance (Applicative m, Monad m, Monoid w, Annotations lore) =>
 -- | The class of monads that not only provide a 'Scope', but also
 -- the ability to locally extend it.  A 'Reader' containing a
 -- 'Scope' is the prototypical example of such a monad.
-class (HasScope t m, Monad m) => LocalScope t m where
+class (HasScope lore m, Monad m) => LocalScope lore m where
   -- | Run a computation with an extended type environment.  Note that
   -- this is intended to *add* to the current type environment, it
   -- does not replace it.
-  localScope :: Scope t -> m a -> m a
+  localScope :: Scope lore -> m a -> m a
 
 instance (Applicative m, Monad m, Annotations lore) =>
          LocalScope lore (ReaderT (Scope lore) m) where
