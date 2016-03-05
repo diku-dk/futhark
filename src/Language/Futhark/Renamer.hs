@@ -137,7 +137,7 @@ bindParams :: VarName f =>
            -> RenameM f t a
 bindParams params =
   bind params .
-  bindNames (concatMap (mapMaybe inspectDim . arrayDims . identType) params)
+  bindNames (concatMap (mapMaybe inspectDim . nestedDims . identType) params)
   where inspectDim AnyDim =
           Nothing
         inspectDim (ConstDim _) =
