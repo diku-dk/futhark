@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.ISRWIM
        ( iswim
@@ -66,7 +67,7 @@ iswim res_pat cs w scan_fun scan_input
                      PrimOp $ Rearrange [] perm $ identName from
   | otherwise = Nothing
 
-irwim :: (MonadBinder m, Lore m ~ SOACS) =>
+irwim :: (MonadBinder m, Lore m ~ SOACS, LocalScope SOACS m) =>
          Pattern
       -> Certificates
       -> SubExp
@@ -92,19 +93,25 @@ irwim res_pat cs w comm red_fun red_input
 
       let (_red_acc_params, red_elem_params) =
             splitAt (length arrs) $ lambdaParams red_fun
-          map_params = map (setParamOuterDimTo w) red_elem_params
           map_rettype = map rowType $ lambdaReturnType red_fun
-          map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
+          map_params = map (setParamOuterDimTo w) red_elem_params
 
           red_params = lambdaParams map_fun
           red_body = lambdaBody map_fun
           red_rettype = lambdaReturnType map_fun
           red_fun' = Lambda (lambdaIndex red_fun) red_params red_body red_rettype
           red_input' = zip accs' $ map paramName map_params
+          red_pat = stripPatternOuterDim $ bindingPattern bnd
 
-          map_body = mkBody [Let (stripPatternOuterDim $ bindingPattern bnd) () $
-                             Op $ Reduce cs w comm red_fun' red_input']
-                            res
+      map_body <-
+        case irwim red_pat cs w comm red_fun' red_input' of
+          Nothing ->
+            return $ mkBody [Let red_pat () $ Op $ Reduce cs w comm red_fun' red_input'] res
+          Just m -> localScope (scopeOfLParams map_params) $ do
+            map_body_bnds <- collectBindings_ m
+            return $ mkBody map_body_bnds res
+
+      let map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
 
       addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
   | otherwise = Nothing
