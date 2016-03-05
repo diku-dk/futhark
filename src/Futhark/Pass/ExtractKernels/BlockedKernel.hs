@@ -173,7 +173,9 @@ kerneliseLambda elements_per_thread nes lam = do
       (fold_chunk_param, fold_acc_params, fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
-      mkAccInit p (Var v) = mkLet' [] [paramIdent p] $ PrimOp $ Copy v
+      mkAccInit p (Var v)
+        | not $ primType $ paramType p =
+            mkLet' [] [paramIdent p] $ PrimOp $ Copy v
       mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
       acc_init_bnds = zipWith mkAccInit fold_acc_params nes
   return lam { lambdaIndex = loop_iterator
