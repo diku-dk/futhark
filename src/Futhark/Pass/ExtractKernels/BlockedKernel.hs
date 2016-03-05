@@ -6,8 +6,6 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedMap
        , blockedScan
        , blockedSegmentedScan
-
-       , kerneliseLambda
        )
        where
 
