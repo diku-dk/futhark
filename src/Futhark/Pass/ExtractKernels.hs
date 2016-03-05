@@ -179,6 +179,7 @@ import Futhark.Transform.CopyPropagate
 import Futhark.Pass.ExtractKernels.Distribution
 import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
+import Futhark.Pass.ExtractKernels.SegmentedReduce
 import Futhark.Pass.ExtractKernels.Interchange
 import Futhark.Util.Log
 
@@ -635,7 +636,7 @@ maybeDistributeBinding bnd@(Let _pat _ (Op (Reduce cs w comm lam input))) acc =
     Just (kernels, _, nest, acc') ->
       localScope (typeEnvFromKernelAcc acc') $ do
         lam' <- FOT.transformLambda lam
-        segmentedReduceKernel nest cs w comm lam' input >>= \case
+        regularSegmentedReduceKernel nest cs w comm lam' input >>= \case
           Nothing ->
             addBindingToKernel bnd acc
           Just bnds -> do
@@ -697,7 +698,7 @@ segmentedScanKernel :: KernelNest
                     -> KernelM (Maybe [Out.Binding])
 segmentedScanKernel nest cs segment_size lam scan_inps =
   isSegmentedOp nest segment_size lam scan_inps $
-  \pat flat_pat total_num_elements scan_inps' -> do
+  \pat flat_pat _num_segments total_num_elements scan_inps' -> do
     blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
 
     forM_ (zip (patternValueElements pat) (patternNames flat_pat)) $
@@ -708,15 +709,13 @@ segmentedScanKernel nest cs segment_size lam scan_inps =
         addBinding $ mkLet [] [(ident, bindage)] $
           PrimOp $ Reshape [] (map DimNew dims) flat
 
-segmentedReduceKernel :: KernelNest
+regularSegmentedReduceKernel :: KernelNest
                       -> Certificates -> SubExp -> Commutativity -> Out.Lambda -> [(SubExp, VName)]
                       -> KernelM (Maybe [Out.Binding])
-segmentedReduceKernel nest _cs segment_size _comm lam reduce_inps
-  | False =
+regularSegmentedReduceKernel nest cs segment_size comm lam reduce_inps =
   isSegmentedOp nest segment_size lam reduce_inps $
-  \_pat _flat_pat _total_num_elements _reduce_inps' ->
-    return () -- Does not actually work yet.
-  | otherwise = return Nothing
+  \pat _flat_pat num_segments _total_num_elements reduce_inps' ->
+    regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps'
 
 isSegmentedOp :: KernelNest
               -> SubExp
@@ -724,6 +723,7 @@ isSegmentedOp :: KernelNest
               -> [(SubExp, VName)]
               -> (Pattern
                   -> Pattern
+                  -> SubExp
                   -> SubExp
                   -> [(SubExp, VName)]
                   -> Binder Out.Kernels ())
@@ -795,4 +795,4 @@ isSegmentedOp nest segment_size lam scan_inps m = runMaybeT $ do
                 (lambdaReturnType lam)
 
 
-    m pat flat_pat total_num_elements op_inps'
+    m pat flat_pat nesting_size total_num_elements op_inps'
