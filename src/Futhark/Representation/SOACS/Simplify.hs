@@ -8,6 +8,7 @@ module Futhark.Representation.SOACS.Simplify
        ( simplifySOACS
        , simplifyFun
        , simplifyLambda
+       , simplifyBindings
        )
 where
 
@@ -50,6 +51,11 @@ simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> SubExp -> Maybe [SubExp] -> [Maybe VName] -> m Lambda
 simplifyLambda =
   Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
+
+simplifyBindings :: (HasScope SOACS m, MonadFreshNames m) =>
+                    [Binding] -> m [Binding]
+simplifyBindings =
+  Simplifier.simplifyBindingsWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
 instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
   simplifyOp (Stream cs outerdim form lam arr) = do
