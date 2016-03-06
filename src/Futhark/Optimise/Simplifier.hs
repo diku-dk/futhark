@@ -12,7 +12,6 @@ module Futhark.Optimise.Simplifier
   , simplifyLambdaWithRules
   , simplifyBindingsWithRules
   , standardRules
-  , basicRules
   , RuleBook
   , noExtraHoistBlockers
   , HoistBlockers (..)
