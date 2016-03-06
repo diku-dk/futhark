@@ -21,6 +21,7 @@ import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExpandAllocations
+import Futhark.Pass.CoalesceMemoryAccesses
 import Futhark.Util.Options
 import Futhark.Optimise.DoubleBuffer
 
@@ -99,5 +100,6 @@ compilerPipeline =
          , doubleBuffer
          , simplifyExplicitMemory
          , expandAllocations
+         , coalesceMemoryAccesses
          , simplifyExplicitMemory
          ]
