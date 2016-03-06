@@ -54,12 +54,17 @@ transformBody (Body () bnds res) = inScopeOf bnds $ do
 transformBinding :: Binding -> ExpandM [Binding]
 
 transformBinding (Let (Pattern [] pat_elems) ()
-                  e@(Op (Inner ChunkedMapKernel{}))) = do
+                  e@(Op (Inner (ChunkedMapKernel _ _ _ _ lam _)))) = do
   -- We create a new pattern for the kernel that is similar to the old
   -- one, but transposed.  Then we add transpose operations following
   -- the kernel to re-create the original arrays.
-  (alloc_bnds, pat_elems', tr_bnds) <- unzip3 <$> mapM transposePatElem pat_elems
-  return $ alloc_bnds ++ [Let (Pattern [] pat_elems') () e] ++ tr_bnds
+  let (nonconcat_pat_elems, concat_pat_elems) =
+        splitAt (chunkedKernelNonconcatOutputs lam) pat_elems
+  (alloc_bnds, nonconcat_pat_elems', tr_bnds) <- unzip3 <$> mapM transposePatElem nonconcat_pat_elems
+  return $
+    alloc_bnds ++
+    [Let (Pattern [] (nonconcat_pat_elems' ++ concat_pat_elems)) () e] ++
+    tr_bnds
   where transposePatElem pat_elem = do
           name <- newVName (baseString (patElemName pat_elem) ++ "_transposed")
           case patElemAttr pat_elem of
