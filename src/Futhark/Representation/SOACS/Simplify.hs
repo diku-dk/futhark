@@ -14,6 +14,7 @@ where
 
 import Control.Applicative
 import Control.Monad
+import Data.Foldable (any)
 import Data.Either
 import Data.List hiding (any, all)
 import Data.Maybe
@@ -25,6 +26,7 @@ import Prelude hiding (any, all)
 
 import Futhark.Representation.SOACS
 import qualified Futhark.Representation.AST as AST
+import Futhark.Representation.AST.Attributes.Aliases
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
@@ -153,7 +155,8 @@ topDownRules = [liftIdentityMapping,
 bottomUpRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
-bottomUpRules = [removeDeadMapping
+bottomUpRules = [removeDeadMapping,
+                 removeUnnecessaryCopy
                 ]
 
 liftIdentityMapping :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
@@ -341,6 +344,18 @@ simplifyClosedFormReduce vtable (Let pat _ (Op (Reduce _ _ _ fun args))) =
   foldClosedForm (`ST.lookupExp` vtable) pat fun acc arr
   where (acc, arr) = unzip args
 simplifyClosedFormReduce _ _ = cannotSimplify
+
+-- This simplistic rule is only valid here, and not after we introduce
+-- memory.
+removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
+removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) | False = do
+  t <- lookupType v
+  let originalNotUsedAnymore =
+        not (any (`UT.used` used) $ vnameAliases v)
+  if primType t || originalNotUsedAnymore
+    then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
+    else cannotSimplify
+removeUnnecessaryCopy _ _ = cannotSimplify
 
 -- The simplifyStream stuff is something that Cosmin left lodged in
 -- the simplification engine itself at some point.  I moved it here

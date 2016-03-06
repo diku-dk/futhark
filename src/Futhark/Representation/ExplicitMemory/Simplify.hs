@@ -171,4 +171,10 @@ copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (PrimOp (Copy v1)))
 
       letBind_ pat $ PrimOp $ Copy v2
 
+copyCopyToCopy vtable (Let pat _ (PrimOp (Copy v0)))
+  | Just (PrimOp (Rearrange cs perm v1)) <- ST.lookupExp v0 vtable,
+    Just (PrimOp (Copy v2)) <- ST.lookupExp v1 vtable = do
+      v0' <- letExp "rearrange_v0" $ PrimOp $ Rearrange cs perm v2
+      letBind_ pat $ PrimOp $ Copy v0'
+
 copyCopyToCopy _ _ = cannotSimplify

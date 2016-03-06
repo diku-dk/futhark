@@ -5,7 +5,6 @@
 -- simplifier.
 module Futhark.Optimise.Simplifier.Rules
   ( standardRules
-  , basicRules
 
   , simplifyIndexing
   , IndexResult (..)
@@ -72,15 +71,10 @@ topDownRules = [ hoistLoopInvariantMergeVariables
 bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
-                , removeUnnecessaryCopy
                 ]
 
 standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
 standardRules = (topDownRules, bottomUpRules)
-
--- | Rules that only work on 'Basic' lores or similar.  Includes 'standardRules'.
-basicRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
-basicRules = (topDownRules, removeUnnecessaryCopy : bottomUpRules)
 
 -- This next one is tricky - it's easy enough to determine that some
 -- loop result is not used after the loop, but here, we must also make
@@ -783,16 +777,6 @@ copyScratchToScratch defOf seType (Copy src) = do
             _ -> False
 copyScratchToScratch _ _ _ =
   Nothing
-
-removeUnnecessaryCopy :: MonadBinder m => BottomUpRule m
-removeUnnecessaryCopy (_,used) (Let (Pattern [] [d]) _ (PrimOp (Copy v))) = do
-  t <- lookupType v
-  let originalNotUsedAnymore =
-        not (any (`UT.used` used) $ vnameAliases v)
-  if primType t || originalNotUsedAnymore
-    then letBind_ (Pattern [] [d]) $ PrimOp $ SubExp $ Var v
-    else cannotSimplify
-removeUnnecessaryCopy _ _ = cannotSimplify
 
 removeIdentityInPlace :: MonadBinder m => TopDownRule m
 removeIdentityInPlace vtable (Let (Pattern [] [d]) _ e)
