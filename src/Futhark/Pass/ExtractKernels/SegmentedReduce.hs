@@ -3,14 +3,17 @@
 -- | Multiversion segmented reduction.
 module Futhark.Pass.ExtractKernels.SegmentedReduce
        ( regularSegmentedReduce
+       , regularSegmentedReduceAsScan
        )
        where
 
 import Control.Applicative
 import Control.Monad
+import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
+import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
@@ -72,3 +75,37 @@ regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps = d
           return $ PatElem name BindVar $ t `arrayOfRow` num_segments
 
         acct = lambdaReturnType lam
+
+regularSegmentedReduceAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
+                                SubExp
+                             -> SubExp
+                             -> [SubExp]
+                             -> Pattern
+                             -> Pattern
+                             -> Certificates
+                             -> SubExp
+                             -> LambdaT Kernels
+                             -> [(SubExp, VName)]
+                             -> m ()
+regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat cs w lam reduce_inps = do
+  blockedSegmentedScan segment_size flat_pat cs w lam reduce_inps
+
+  global_index <- newVName "global_index"
+  is <- replicateM (length nest_sizes) $ newVName "i"
+
+  body <- runBodyBinder $ localScope (HM.fromList $ zip is $ repeat IndexInfo) $ do
+    let segment_id = flattenIndex
+                     (map SE.intSubExpToScalExp nest_sizes)
+                     (map (SE.intSubExpToScalExp . Var) is)
+        offset = (segment_id + 1) * SE.intSubExpToScalExp segment_size - 1
+    j <- letSubExp "j" =<< SE.fromScalExp offset
+    vals <- forM (patternValueNames flat_pat) $ \arr ->
+      letSubExp "v" $ PrimOp $ Index [] arr [j]
+    return $ resultBody vals
+
+  let n = length nest_sizes
+      rets = [ (t, [0..n-1] ++ [n..n+arrayRank t-1]) | t <- acct ]
+  letBind_ pat $ Op $ MapKernel [] num_segments global_index
+    (zip is nest_sizes) []
+    rets body
+  where acct = lambdaReturnType lam

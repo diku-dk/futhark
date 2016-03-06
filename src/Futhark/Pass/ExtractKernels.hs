@@ -714,8 +714,13 @@ regularSegmentedReduceKernel :: KernelNest
                       -> KernelM (Maybe [Out.Binding])
 regularSegmentedReduceKernel nest cs segment_size comm lam reduce_inps =
   isSegmentedOp nest segment_size lam reduce_inps $
-  \pat _flat_pat num_segments _total_num_elements reduce_inps' ->
-    regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps'
+  \pat flat_pat num_segments total_num_elements reduce_inps' ->
+    if False -- Using a scan seems an efficient general method.
+      then regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps'
+      else regularSegmentedReduceAsScan
+           segment_size num_segments (kernelNestWidths nest)
+           flat_pat pat
+           cs total_num_elements lam reduce_inps'
 
 isSegmentedOp :: KernelNest
               -> SubExp
