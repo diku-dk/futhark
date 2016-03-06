@@ -10,12 +10,13 @@
 --     concat
 -- map
 --   map
---     reduce
+--     reduce (which becomes a segmented reduction)
 --
 -- ==
 --
 -- structure distributed {
---   MapKernel 3
+--   MapKernel 8
+--   ScanKernel 2
 --   Map 0
 --   Concat 1
 --   Reduce 0
