@@ -466,7 +466,7 @@ Exp  :: { UncheckedExp }
      | streamRed       '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (RedLike InOrder (commutativity $3) $3 $7) $5 $9 $1 }
      | streamRedPer    '(' FunAbstr ',' FunAbstr ',' Exp ',' Exp ')'
-                         { Stream (RedLike Disorder (commutativity $3) $3 $7) $5 $9 $1 }
+                         { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
 
