@@ -227,16 +227,14 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       }
       gettimeofday(&$id:time_end, NULL);
       timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
-      $id:kernel_total_runtime += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
-      $id:kernel_runs++;
+      $id:(kernelRuntime kernel_name) += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
+      $id:(kernelRuns kernel_name)++;
       fprintf(stderr, "kernel %s runtime: %dus\n",
               $string:kernel_name,
               (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
     }
     }|]
-  where kernel_total_runtime = kernel_name ++ "_total_runtime"
-        kernel_runs = kernel_name ++ "_runs"
-        kernel_rank = length kernel_dims
+  where kernel_rank = length kernel_dims
         kernel_dims' = map toInit kernel_dims
         workgroup_dims' = map toInit workgroup_dims
         total_elements = foldl multExp [C.cexp|1|] kernel_dims
