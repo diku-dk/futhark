@@ -366,14 +366,19 @@ openClInit =
   [[C.cstm|setup_opencl();|]]
 
 openClReport :: [String] -> [C.Stm]
-openClReport = map reportKernel
-  where reportKernel name =
+openClReport names = map reportKernel names
+  where longest_name = foldl max 0 $ map length names
+        format_string name =
+          let padding = replicate (longest_name - length name) ' '
+          in unwords ["Kernel",
+                      name ++ padding,
+                      "executed %6d times, with average runtime: %6ldus\tand total runtime: %6ldus\n"]
+        reportKernel name =
           let runs = name ++ "_runs"
               total_runtime = name ++ "_total_runtime"
           in [C.cstm|
                fprintf(stderr,
-                       "Kernel %s executed %d times, with average runtime:\t %6ldus\tand total runtime:\t %6ld\n",
-                       $string:name,
+                       $string:(format_string name),
                        $id:runs,
                        (long int) $id:total_runtime / ($id:runs != 0 ? $id:runs : 1),
                        (long int) $id:total_runtime);
