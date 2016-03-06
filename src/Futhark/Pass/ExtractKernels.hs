@@ -783,8 +783,10 @@ isSegmentedOp nest segment_size lam scan_inps m = runMaybeT $ do
           let reshape = reshapeOuter [DimNew total_num_elements]
                         (shapeRank arr_shape - shapeRank ne_shape)
                         arr_shape
+          arr_manifest <- letExp (baseString arr ++ "_manifest") $
+                          PrimOp $ Copy arr
           arr' <- letExp (baseString arr ++ "_flat") $
-                  PrimOp $ Reshape [] reshape arr
+                  PrimOp $ Reshape [] reshape arr_manifest
           return (ne, arr')
 
     op_inps' <- mapM flatten =<< sequence mk_inps
