@@ -167,7 +167,7 @@ import Prelude
 
 import Futhark.Optimise.Simplifier.Simple (bindableSimpleOps)
 import Futhark.Representation.SOACS
-import Futhark.Representation.SOACS.Simplify()
+import Futhark.Representation.SOACS.Simplify (simplifyBindings)
 import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
@@ -284,7 +284,7 @@ transformBinding (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
 transformBinding (Let res_pat () (Op (Reduce cs w comm red_fun red_input)))
   | Just do_irwim <- irwim res_pat cs w comm red_fun red_input = do
       types <- asksScope scopeForSOACs
-      bnds <- snd <$> runBinderT do_irwim types
+      bnds <- fst <$> runBinderT (simplifyBindings =<< collectBindings_ do_irwim) types
       transformBindings bnds
 
 transformBinding (Let pat () (Op (Reduce cs w comm red_fun red_input))) = do
@@ -603,7 +603,7 @@ maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
 maybeDistributeBinding (Let pat _ (Op (Reduce cs w comm lam input))) acc
   | Just m <- irwim pat cs w comm lam input = do
       types <- asksScope scopeForSOACs
-      ((), bnds) <- runBinderT m types
+      (_, bnds) <- runBinderT m types
       distributeMapBodyBindings acc bnds
 
 -- If the scan can be distributed by itself, we will turn it into a
