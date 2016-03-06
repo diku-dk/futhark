@@ -4,6 +4,8 @@ module Futhark.CodeGen.Backends.COpenCL.Boilerplate
   , openClInit
   , openClReport
 
+  , kernelRuntime
+  , kernelRuns
   ) where
 
 import qualified Language.C.Syntax as C
@@ -19,8 +21,8 @@ openClDecls block_dim kernel_names opencl_program opencl_prelude =
                          ");")|] :
           concat
           [ [ [C.cedecl|static typename cl_kernel $id:name;|]
-            , [C.cedecl|static typename suseconds_t $id:(name ++ "_total_runtime") = 0;|]
-            , [C.cedecl|static int $id:(name ++ "_runs") = 0;|]
+            , [C.cedecl|static typename suseconds_t $id:(kernelRuntime name) = 0;|]
+            , [C.cedecl|static int $id:(kernelRuns name) = 0;|]
             ]
           | name <- kernel_names ]
 
@@ -365,8 +367,14 @@ openClInit :: [C.Stm]
 openClInit =
   [[C.cstm|setup_opencl();|]]
 
-openClReport :: [String] -> [C.Stm]
-openClReport names = map reportKernel names
+kernelRuntime :: String -> String
+kernelRuntime = (++"total_runtime")
+
+kernelRuns :: String -> String
+kernelRuns = (++"runs")
+
+openClReport :: [String] -> [C.BlockItem]
+openClReport names = declares ++ concatMap reportKernel names ++ [report_total]
   where longest_name = foldl max 0 $ map length names
         format_string name =
           let padding = replicate (longest_name - length name) ' '
@@ -374,12 +382,21 @@ openClReport names = map reportKernel names
                       name ++ padding,
                       "executed %6d times, with average runtime: %6ldus\tand total runtime: %6ldus\n"]
         reportKernel name =
-          let runs = name ++ "_runs"
-              total_runtime = name ++ "_total_runtime"
-          in [C.cstm|
+          let runs = kernelRuns name
+              total_runtime = kernelRuntime name
+          in [[C.citem|
                fprintf(stderr,
                        $string:(format_string name),
                        $id:runs,
                        (long int) $id:total_runtime / ($id:runs != 0 ? $id:runs : 1),
                        (long int) $id:total_runtime);
-             |]
+              |],
+              [C.citem|total_runtime += $id:total_runtime;|],
+              [C.citem|total_runs += $id:runs;|]]
+
+        declares = [[C.citem|typename suseconds_t total_runtime = 0;|],
+                    [C.citem|typename suseconds_t total_runs = 0;|]]
+        report_total = [C.citem|
+                          fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
+                                  total_runs, total_runtime);
+                        |]

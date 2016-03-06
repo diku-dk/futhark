@@ -523,11 +523,11 @@ timingOption =
 compileProg :: MonadFreshNames m =>
                Operations op s
             -> s
-            -> [C.Definition] -> [C.Stm] -> [C.Stm] -> [C.Stm]
+            -> [C.Definition] -> [C.Stm] -> [C.Stm] -> [C.BlockItem]
             -> [Option]
             -> Functions op
             -> m String
-compileProg ops userstate decls pre_main_stms pre_timing post_main_stms options prog@(Functions funs) = do
+compileProg ops userstate decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
   let ((prototypes, definitions, main), endstate) =
         runCompilerM prog ops src userstate compileProg'
@@ -580,7 +580,7 @@ int main(int argc, char** argv) {
   argv += parsed_options;
   $stms:pre_main_stms
   $stm:main;
-  $stms:post_main_stms
+  $items:post_main_items
   if (runtime_file != NULL) {
     timeval_subtract(&t_diff, &t_end, &t_start);
     elapsed_usec = t_diff.tv_sec*1e6+t_diff.tv_usec;
