@@ -20,6 +20,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.Kernels.Simplify()
 import Futhark.Pass.ExplicitAllocations (simplifiable, arraySizeInBytesExp)
+import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
@@ -63,6 +64,7 @@ topDownRules :: (MonadBinder m,
                  (Lore m) ~ Wise ExplicitMemory,
                  Aliased (Lore m)) => TopDownRules m
 topDownRules = [ unExistentialiseMemory
+               , copyCopyToCopy
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -148,3 +150,25 @@ unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
           return (size, space, pat_elem : ctx')
 
 unExistentialiseMemory _ _ = cannotSimplify
+
+-- | If we are copying something that is itself a copy, just copy the
+-- original one instead.
+copyCopyToCopy :: (MonadBinder m, (Lore m) ~ Wise ExplicitMemory) =>
+                  TopDownRule m
+copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (PrimOp (Copy v1)))
+  | Just (PrimOp (Copy v2)) <- ST.lookupExp v1 vtable,
+
+    Just (_, ArrayMem _ _ _ srcmem src_ixfun) <-
+      ST.entryLetBoundAttr =<< ST.lookup v1 vtable,
+
+    Just (Mem _ src_space) <- ST.lookupType srcmem vtable,
+
+    (_, ArrayMem _ _ _ destmem dest_ixfun) <- patElemAttr pat_elem,
+
+    Just (Mem _ dest_space) <- ST.lookupType destmem vtable,
+
+    src_space == dest_space, dest_ixfun == src_ixfun =
+
+      letBind_ pat $ PrimOp $ Copy v2
+
+copyCopyToCopy _ _ = cannotSimplify
