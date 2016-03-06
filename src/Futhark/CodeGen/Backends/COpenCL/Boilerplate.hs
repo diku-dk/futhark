@@ -38,7 +38,7 @@ const char *cl_preferred_device = "";
 int cl_verbosity = 1;
 int cl_synchronous = 0;
 
-static size_t cl_group_size = 512, cl_num_groups = 128;
+static size_t cl_group_size = 256, cl_num_groups = 128;
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
