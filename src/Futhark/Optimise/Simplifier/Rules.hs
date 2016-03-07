@@ -14,8 +14,8 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.Either
-import Data.Foldable (any, all)
-import Data.List hiding (any, all)
+import Data.Foldable (all)
+import Data.List hiding (all)
 import Data.Maybe
 import Data.Monoid
 
@@ -31,11 +31,10 @@ import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.AlgSimplify as AS
 import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
-import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Construct
 import Futhark.Transform.Substitute
 
-import Prelude hiding (any, all)
+import Prelude hiding (all)
 
 topDownRules :: (MonadBinder m, LocalScope (Lore m) m) => TopDownRules m
 topDownRules = [ hoistLoopInvariantMergeVariables
