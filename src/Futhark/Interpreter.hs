@@ -334,6 +334,7 @@ builtins = HM.fromList $ map namify
            ,("exp32", builtin "exp32")
            ,("cos32", builtin "cos32")
            ,("sin32", builtin "sin32")
+           ,("atan2_32", builtin "atan2_32")
            ,("isinf32", builtin "isinf32")
            ,("isnan32", builtin "isnan32")
 
@@ -342,6 +343,7 @@ builtins = HM.fromList $ map namify
            ,("exp64", builtin "exp64")
            ,("cos64", builtin "cos64")
            ,("sin64", builtin "sin64")
+           ,("atan2_64", builtin "atan2_64")
            ,("isinf64", builtin "isinf64")
            ,("isnan64", builtin "isnan64")
            ]
@@ -358,6 +360,9 @@ builtin "cos32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ cos x]
 builtin "sin32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ FloatValue $ Float32Value $ sin x]
+builtin "atan2_32" [PrimVal (FloatValue (Float32Value x)),
+                    PrimVal (FloatValue (Float32Value y))] =
+  return [PrimVal $ FloatValue $ Float32Value $ atan2 x y]
 builtin "isnan32" [PrimVal (FloatValue (Float32Value x))] =
   return [PrimVal $ BoolValue $ isNaN x]
 builtin "isinf32" [PrimVal (FloatValue (Float32Value x))] =
@@ -372,6 +377,9 @@ builtin "cos64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ cos x]
 builtin "sin64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ FloatValue $ Float64Value $ sin x]
+builtin "atan2_64" [PrimVal (FloatValue (Float64Value x)),
+                    PrimVal (FloatValue (Float64Value y))] =
+  return [PrimVal $ FloatValue $ Float64Value $ atan2 x y]
 builtin "isnan64" [PrimVal (FloatValue (Float64Value x))] =
   return [PrimVal $ BoolValue $ isNaN x]
 builtin "isinf64" [PrimVal (FloatValue (Float64Value x))] =
