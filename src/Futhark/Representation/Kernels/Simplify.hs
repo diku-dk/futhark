@@ -216,12 +216,12 @@ removeInvariantKernelOutputs _ _ = cannotSimplify
 removeDeadKernelOutputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) => BottomUpRule m
 removeDeadKernelOutputs (_, used) (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
   | (used_pat_elems, used_returns, used_result) <-
-      unzip3 $ filter (not . deadOutput) pats_rets_and_ses,
+      unzip3 $ filter usedOutput pats_rets_and_ses,
     used_returns /= returns = do
       let pat' = pat { patternValueElements = used_pat_elems }
       letBind_ pat' $ Op $
         MapKernel cs w index ispace inps used_returns
         body { bodyResult = used_result }
   where pats_rets_and_ses = zip3 (patternValueElements pat) returns $ bodyResult body
-        deadOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
+        usedOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
 removeDeadKernelOutputs _ _ = cannotSimplify
