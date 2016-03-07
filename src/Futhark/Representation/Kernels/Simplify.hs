@@ -33,6 +33,7 @@ import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
 
 simplifyKernels :: MonadFreshNames m => Prog -> m Prog
 simplifyKernels =
@@ -139,7 +140,7 @@ topDownRules = [removeUnusedKernelInputs
 bottomUpRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Op (Lore m) ~ Kernel (Lore m)) => BottomUpRules m
-bottomUpRules = [
+bottomUpRules = [ removeDeadKernelOutputs
                 ]
 
 -- | Remove inputs that are not used inside the @kernel@.
@@ -211,3 +212,17 @@ removeInvariantKernelOutputs vtable (Let pat _ (Op (MapKernel cs w index ispace 
         isInvariant pat_elem ret (Constant v) = Left (pat_elem, ret, Constant v)
         isInvariant pat_elem ret se = Right (pat_elem, ret, se)
 removeInvariantKernelOutputs _ _ = cannotSimplify
+
+removeDeadKernelOutputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) => BottomUpRule m
+removeDeadKernelOutputs (_, used) (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
+  | (used, unused) <- partition deadOutput pats_rets_and_ses,
+    not $ null unused = do
+      let (used_pat_elems, used_returns, used_result) =
+            unzip3 used
+          pat' = pat { patternValueElements = used_pat_elems }
+      letBind_ pat' $ Op $
+        MapKernel cs w index ispace inps used_returns
+        body { bodyResult = used_result }
+  where pats_rets_and_ses = zip3 (patternValueElements pat) returns $ bodyResult body
+        deadOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
+removeDeadKernelOutputs _ _ = cannotSimplify
