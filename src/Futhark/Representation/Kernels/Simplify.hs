@@ -62,7 +62,7 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
                                par_blocker) $
                Engine.simplifyBody (map (const Observe) returns) body
       return $ MapKernel cs' w' index ispace' inps' returns' body'
-    where bound_here = HS.fromList $ map kernelInputName inps ++ map fst ispace
+    where bound_here = HS.fromList $ index : map kernelInputName inps ++ map fst ispace
 
   simplifyOp (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs) = do
     cs' <- Engine.simplify cs
