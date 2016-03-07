@@ -266,6 +266,9 @@ def futhark_cos64(x):
 def futhark_sin64(x):
   return sin(x)
 
+def futhark_atan2_64(x, y):
+  return arctan2(x, y)
+
 def futhark_isnan64(x):
   return isnan(x)
 
@@ -286,6 +289,9 @@ def futhark_cos32(x):
 
 def futhark_sin32(x):
   return sin(x)
+
+def futhark_atan2_32(x, y):
+  return arctan2(x, y)
 
 def futhark_isnan32(x):
   return isnan(x)
