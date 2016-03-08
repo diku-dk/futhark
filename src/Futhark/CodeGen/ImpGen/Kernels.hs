@@ -213,6 +213,7 @@ kernelCompiler
             , Imp.kernelNumGroups = num_groups
             , Imp.kernelGroupSize = group_size
             , Imp.kernelName = lambdaIndex lam
+            , Imp.kernelDesc = Just "chunkedmap"
             }
     call_with_prologue prologue
     where comm = case o of Disorder -> Commutative
@@ -395,6 +396,7 @@ kernelCompiler
             , Imp.kernelNumGroups = num_groups
             , Imp.kernelGroupSize = group_size
             , Imp.kernelName = lambdaIndex fold_lam
+            , Imp.kernelDesc = Just "reduce"
             }
     call_with_prologue prologue
   where readReduceArgument local_id offset param (mem, _)
@@ -598,6 +600,7 @@ kernelCompiler
             , Imp.kernelNumGroups = num_groups
             , Imp.kernelGroupSize = local_size
             , Imp.kernelName = lambdaIndex lam
+            , Imp.kernelDesc = Just "scan"
             }
 
     call_with_body body
