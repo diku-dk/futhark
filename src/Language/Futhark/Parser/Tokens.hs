@@ -108,7 +108,6 @@ data Token = IF
            | OR
            | EMPTY
            | COPY
-           | ASSERT
            | WHILE
            | STREAM_MAP
            | STREAM_MAPPER

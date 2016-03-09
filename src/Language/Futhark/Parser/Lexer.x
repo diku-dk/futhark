@@ -144,7 +144,6 @@ keyword s =
     "streamRed"    -> STREAM_RED
     "streamRedPer" -> STREAM_REDPER
     "streamSeq"    -> STREAM_SEQ
-    "assert"       -> ASSERT
     "include"      -> INCLUDE
     _              -> ID $ nameFromString s
 
