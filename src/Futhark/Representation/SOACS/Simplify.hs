@@ -127,6 +127,24 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                 in return (lam { lambdaParams = accparams ++ arrparams' },
                            arrinps')
             | otherwise = return (lam, arrinps)
+  simplifyOp (Scanomap cs w outerfun innerfun acc arrs) = do
+    cs' <- Engine.simplify cs
+    w' <- Engine.simplify w
+    acc' <- mapM Engine.simplify acc
+    arrs' <- mapM Engine.simplify arrs
+    outerfun' <- Engine.simplifyLambda outerfun w (Just acc) $
+                 map (const Nothing) arrs'
+    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w (Just acc) $ map Just arrs
+    (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
+    return $ Scanomap cs' w' outerfun' innerfun'' acc' arrs''
+    where removeUnusedParams used lam arrinps
+            | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
+                let (arrparams', arrinps') =
+                      unzip $ filter ((`UT.used` used) . paramName . fst) $
+                      zip arrparams arrinps
+                in return (lam { lambdaParams = accparams ++ arrparams' },
+                           arrinps')
+            | otherwise = return (lam, arrinps)
 
   simplifyOp (Write cs ts i vs as) = do
     cs' <- Engine.simplify cs

@@ -574,6 +574,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Scan" $ lambdaMetrics fun
   opMetrics (Redomap _ _ _ fun1 fun2 _ _) =
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
+  opMetrics (Scanomap _ _ fun1 fun2 _ _) =
+    inside "Scanomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
   opMetrics Write{} =
