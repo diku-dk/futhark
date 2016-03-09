@@ -411,7 +411,7 @@ Exp  :: { UncheckedExp }
      | scan '(' FunAbstr ',' Exp ',' Exp ')'
                       { Scan $3 $5 $7 $1 }
 
-     | zip '(' Exps2 ')'
+     | zip '(' Exps ')'
                       { Zip (map (\x -> (x, NoInfo)) $3) $1 }
 
      | unzip '(' Exp ')'
@@ -425,7 +425,7 @@ Exp  :: { UncheckedExp }
      | partition '(' FunAbstrsThenExp ')'
                       { Partition (fst $3) (snd $3) $1 }
 
-     | zipWith '(' FunAbstr ',' Exps2 ')'
+     | zipWith '(' FunAbstr ',' Exps ')'
                       { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
@@ -491,10 +491,6 @@ Index : '[' Exps ']'                  { $2 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
-
-Exps2 : Exp ',' Exps2 { $1 : $3 }
-      | Exp ',' Exp   { [$1, $3] }
-
 
 TupleExp : '{' Exps '}' { ($2, $1) }
          | '{'      '}' { ([], $1) }
