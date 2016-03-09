@@ -211,7 +211,7 @@ fuseScanomap :: (Input input, Bindable lore) =>
             -> [SubExp] -> Lambda lore -> [input] -> [(VName,Ident)]
             -> Lambda lore -> [input]
             -> (Lambda lore, [input])
-fuseScamomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
+fuseScanomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   -- We hack the implementation of map o redomap to handle this case:
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
