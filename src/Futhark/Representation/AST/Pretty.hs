@@ -111,8 +111,9 @@ instance Pretty SubExp where
   ppr (Constant v) = ppr v
 
 instance PrettyLore lore => Pretty (Body lore) where
-  ppr (Body lore (bnd:bnds) res) =
-    ppr bnd <+> text "in" </> ppr (Body lore bnds res)
+  ppr (Body _ (bnd:bnds) res) =
+    stack (map ppr (bnd:bnds)) </>
+    text "in" <+> braces (commasep $ map ppr res)
   ppr (Body _ [] res) =
     braces (commasep $ map ppr res)
 

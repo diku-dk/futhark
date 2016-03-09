@@ -259,7 +259,8 @@ Return the transpose of ``a``, which must be a two-dimensional array.
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 Evaluate ``e`` and bind the result to the pattern ``pat`` while
-evaluating ``body``.
+evaluating ``body``.  The ``in`` keyword is optional if ``body`` is a
+``let`` or ``loop`` expression.
 
 ``let dest = src with [i] <- v in body``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
