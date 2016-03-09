@@ -332,8 +332,8 @@ Exp  :: { UncheckedExp }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
-     | TupleExp       { let (exps, pos) = $1 in TupLit exps pos }
-
+     | '{' Exps '}'   { TupLit $2 $1 }
+     | '{'      '}'   { TupLit [] $1 }
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
@@ -491,9 +491,6 @@ Index : '[' Exps ']'                  { $2 }
 
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
-
-TupleExp : '{' Exps '}' { ($2, $1) }
-         | '{'      '}' { ([], $1) }
 
 Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
 
