@@ -432,32 +432,10 @@ Exp  :: { UncheckedExp }
 
      | '(' Exp ')' { $2 }
 
-     | let Id '=' Exp in Exp %prec letprec
-                      { LetPat (Id $2) $4 $6 $1 }
-
-     | let '_' '=' Exp in Exp %prec letprec
-                      { LetPat (Wildcard NoInfo $2) $4 $6 $1 }
-
-     | let '{' Patterns '}' '=' Exp in Exp %prec letprec
-                      { LetPat (TuplePattern $3 $1) $6 $8 $1 }
-
-     | let Id '=' Id with Index '<-' Exp in Exp %prec letprec
-                      { LetWith $2 $4 $6 $8 $10 $1 }
-
-     | let Id Index '=' Exp in Exp %prec letprec
-                      { LetWith $2 $2 $3 $5 $7 $1 }
-
-     | let Id '[' ']' '=' Exp in Exp %prec letprec
-                      { LetWith $2 $2 [] $6 $8 $1 }
+     | LetExp         { $1 }
 
      | Exp Index
                       { Index $1 $2 (srclocOf $1) }
-
-     | loop '(' Pattern ')' '=' LoopForm do Exp in Exp %prec letprec
-                      {% liftM (\t -> DoLoop $3 t $6 $8 $10 $1)
-                               (patternExp $3) }
-     | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp in Exp %prec letprec
-                      { DoLoop $3 $5 $8 $10 $12 $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
                          { Stream (MapLike InOrder)  $3 $5 $1 }
@@ -469,6 +447,35 @@ Exp  :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
+
+LetExp :: { UncheckedExp }
+     : let Id '=' Exp LetBody
+                      { LetPat (Id $2) $4 $5 $1 }
+
+     | let '_' '=' Exp LetBody
+                      { LetPat (Wildcard NoInfo $2) $4 $5 $1 }
+
+     | let '{' Patterns '}' '=' Exp LetBody
+                      { LetPat (TuplePattern $3 $1) $6 $7 $1 }
+
+     | let Id '=' Id with Index '<-' Exp LetBody
+                      { LetWith $2 $4 $6 $8 $9 $1 }
+
+     | let Id Index '=' Exp LetBody
+                      { LetWith $2 $2 $3 $5 $6 $1 }
+
+     | let Id '[' ']' '=' Exp LetBody
+                      { LetWith $2 $2 [] $6 $7 $1 }
+
+     | loop '(' Pattern ')' '=' LoopForm do Exp LetBody
+                      {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
+                               (patternExp $3) }
+     | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
+                      { DoLoop $3 $5 $8 $10 $11 $1 }
+
+LetBody :: { UncheckedExp }
+    : in Exp %prec letprec { $2 }
+    | LetExp { $1 }
 
 LoopForm : for Id '<' Exp
            { For FromUpTo (zeroExpression (srclocOf $1)) $2 $4 }
