@@ -4,11 +4,15 @@ module Futhark.Util.Pretty
        , pretty
        , prettyDoc
        , prettyTuple
+       , prettyText
 
        , apply
        , oneLine
        )
        where
+
+import Data.Text (Text)
+import qualified Data.Text.Lazy as LT
 
 import Text.PrettyPrint.Mainland hiding (pretty)
 import qualified Text.PrettyPrint.Mainland as PP
@@ -16,6 +20,10 @@ import qualified Text.PrettyPrint.Mainland as PP
 -- | Prettyprint a value, wrapped to 80 characters.
 pretty :: Pretty a => a -> String
 pretty = PP.pretty 80 . ppr
+
+-- | Prettyprint a value to a 'Text', wrapped to 80 characters.
+prettyText :: Pretty a => a -> Text
+prettyText = LT.toStrict . PP.prettyLazyText 80 . ppr
 
 -- | Re-export of 'PP.pretty'.
 prettyDoc :: Int -> Doc -> String
