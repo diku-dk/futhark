@@ -13,6 +13,7 @@
 module Futhark.Optimise.Fusion.Composing
   ( fuseMaps
   , fuseRedomap
+  , fuseScanomap
   , mergeReduceOps
   , Input(..)
   )
@@ -177,6 +178,46 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --       (body) result from from redomap's fold-lambda body
   let acc_len     = length p_nes
       unfus_arrs  = filter (`elem` unfus_nms) outVars
+      lam1_body   = lambdaBody p_lam
+      lam1_accres = take acc_len $ bodyResult lam1_body
+      lam1_arrres = drop acc_len $ bodyResult lam1_body
+      lam1_hacked = p_lam { lambdaParams = drop acc_len $ lambdaParams p_lam
+                          , lambdaBody   = lam1_body { bodyResult = lam1_arrres }
+                          , lambdaReturnType = drop acc_len $ lambdaReturnType p_lam }
+  --  (ii) we remove the accumulator's (global) output result from
+  --       @outPairs@, then ``map o redomap'' fuse the two lambdas
+  --       (in the usual way), and construct the extra return types
+  --       for the arrays that fall through.
+      (res_lam, new_inp) = fuseMaps unfus_arrs lam1_hacked p_inparr
+                                    (drop acc_len outPairs) c_lam c_inparr
+      (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
+                       zip (drop acc_len outVars) $ drop acc_len $
+                       lambdaReturnType p_lam
+  -- (iii) Finally, we put back the accumulator's formal parameter and
+  --       (body) result in the first position of the obtained lambda.
+      (accrtps, accpars)  = ( take acc_len $ lambdaReturnType p_lam
+                            , take acc_len $ lambdaParams p_lam )
+      res_body = lambdaBody res_lam
+      res_rses = bodyResult res_body
+      res_body'= res_body { bodyResult = lam1_accres ++ res_rses }
+      res_lam' = res_lam { lambdaParams     = accpars ++ lambdaParams res_lam
+                         , lambdaBody       = res_body'
+                         , lambdaReturnType = accrtps ++ lambdaReturnType res_lam ++ extra_rtps
+                         }
+  in  (res_lam', new_inp)
+
+fuseScanomap :: (Input input, Bindable lore) =>
+               [VName]  -> [VName]
+            -> [SubExp] -> Lambda lore -> [input] -> [(VName,Ident)]
+            -> Lambda lore -> [input]
+            -> (Lambda lore, [input])
+fuseScamomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
+  -- We hack the implementation of map o redomap to handle this case:
+  --   (i) we remove the accumulator formal paramter and corresponding
+  --       (body) result from from redomap's fold-lambda body
+  let acc_len     = length p_nes
+      unfus_accs  = take acc_len outVars
+      unfus_arrs  = unfus_nms \\ unfus_accs
       lam1_body   = lambdaBody p_lam
       lam1_accres = take acc_len $ bodyResult lam1_body
       lam1_arrres = drop acc_len $ bodyResult lam1_body
