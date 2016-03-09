@@ -1,4 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE OverloadedStrings #-}
 -- | Simple tool for benchmarking Futhark programs.  Supports raw
 -- output if you want to do your own analysis, but will normally print
 -- the average runtime.
@@ -10,18 +11,20 @@ import Control.Monad.IO.Class
 import Data.Maybe
 import Data.Monoid
 import Data.List
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.Console.GetOpt
 import System.FilePath
 import System.Directory
 import System.IO
 import System.IO.Temp
-import System.Process (readProcessWithExitCode)
+import System.Process.Text (readProcessWithExitCode)
 import System.Exit
 import Text.Printf
 
 import Futhark.Test
 import Futhark.Representation.AST.Syntax (Value)
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Options
 
 import Prelude
@@ -49,7 +52,7 @@ runBenchmark opts program = do
         [program, "-o", binaryName program] ""
       case futcode of
         ExitFailure 127 -> fail $ progNotFound compiler
-        ExitFailure _   -> fail futerr
+        ExitFailure _   -> fail $ T.unpack futerr
         ExitSuccess     -> return ()
 
       zipWithM_ (runBenchmarkCase opts program) [0..] cases
@@ -81,7 +84,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
-  input <- getValuesString dir input_spec
+  input <- getValuesText dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
 
   runtimes <- forM [0..optRuns opts-1] $ \_ -> do
@@ -109,30 +112,30 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
 
   where dir = takeDirectory program
 
-didNotFail :: Monad m => FilePath -> ExitCode -> String -> m ()
+didNotFail :: Monad m => FilePath -> ExitCode -> T.Text -> m ()
 didNotFail _ ExitSuccess _ =
   return ()
 didNotFail program (ExitFailure code) stderr_s =
   fail $ program ++ " failed with error code " ++ show code ++
-  " and output:\n" ++ stderr_s
+  " and output:\n" ++ T.unpack stderr_s
 
 runResult :: MonadIO m =>
              FilePath
           -> ExitCode
-          -> String
-          -> String
+          -> T.Text
+          -> T.Text
           -> m [Value]
 runResult program ExitSuccess stdout_s _ =
-  case valuesFromString "stdout" stdout_s of
+  case valuesFromText "stdout" stdout_s of
     Left e   -> do
       actual <- liftIO $ writeOutFile program "actual" stdout_s
       fail $ show e <> "\n(See " <> actual <> ")"
     Right vs -> return vs
 runResult program (ExitFailure code) _ stderr_s =
   fail $ program ++ " failed with error code " ++ show code ++
-  " and output:\n" ++ stderr_s
+  " and output:\n" ++ T.unpack stderr_s
 
-writeOutFile :: FilePath -> String -> String -> IO FilePath
+writeOutFile :: FilePath -> String -> T.Text -> IO FilePath
 writeOutFile base ext content =
   attempt (0::Int)
   where template = base `replaceExtension` ext
@@ -141,7 +144,7 @@ writeOutFile base ext content =
           exists <- doesFileExist filename
           if exists
             then attempt $ i+1
-            else do writeFile filename content
+            else do T.writeFile filename content
                     return filename
 
 compareResult :: MonadIO m => FilePath -> [Value] -> [Value]
@@ -151,10 +154,10 @@ compareResult program expectedResult actualResult =
     Just mismatch -> do
       actualf <-
         liftIO $ writeOutFile program "actual" $
-        unlines $ map pretty actualResult
+        T.unlines $ map prettyText actualResult
       expectedf <-
         liftIO $ writeOutFile program "expected" $
-        unlines $ map pretty expectedResult
+        T.unlines $ map prettyText expectedResult
       fail $ actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
     Nothing ->
       return ()

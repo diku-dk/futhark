@@ -4,8 +4,10 @@
 module Futhark.Test
        ( testSpecFromFile
        , valuesFromString
+       , valuesFromText
        , getValues
        , getValuesString
+       , getValuesText
        , compareValues
        , Mismatch
 
@@ -55,7 +57,7 @@ import Futhark.Pipeline
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Passes
-import Futhark.Util.Pretty (Pretty, pretty)
+import Futhark.Util.Pretty (Pretty, pretty, prettyText)
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -254,6 +256,11 @@ valuesFromString srcname s =
           maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
           internaliseValue v
 
+-- | Try to parse a several core Futhark values from a text.  The
+-- 'SourceName' parameter is used for error messages.
+valuesFromText :: SourceName -> T.Text -> Either F.ParseError [Value]
+valuesFromText srcname = valuesFromString srcname . T.unpack
+
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
 -- are read relative to.
@@ -272,6 +279,13 @@ getValuesString _ (Values vs) =
   return $ unlines $ map pretty vs
 getValuesString dir (InFile file) =
   liftIO $ readFile file'
+  where file' = dir </> file
+
+getValuesText :: MonadIO m => FilePath -> Values -> m T.Text
+getValuesText _ (Values vs) =
+  return $ T.unlines $ map prettyText vs
+getValuesText dir (InFile file) =
+  liftIO $ T.readFile file'
   where file' = dir </> file
 
 data Mismatch = PrimValueMismatch Int PrimValue PrimValue
