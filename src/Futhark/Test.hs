@@ -3,10 +3,8 @@
 -- block specifies input- and output-sets.
 module Futhark.Test
        ( testSpecFromFile
-       , valuesFromString
        , valuesFromText
        , getValues
-       , getValuesString
        , getValuesText
        , compareValues
        , Mismatch
@@ -178,7 +176,7 @@ parseInput = lexstr "input" *> parseValues
 
 parseValues :: Parser Values
 parseValues = do s <- parseBlock
-                 case valuesFromString "input" $ T.unpack s of
+                 case valuesFromText "input" s of
                    Left err -> fail $ show err
                    Right vs -> return $ Values vs
               <|> lexstr "@" *> lexeme (InFile <$> T.unpack <$> restOfLine)
@@ -272,13 +270,6 @@ getValues dir (InFile file) = do
   case valuesFromString file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
-  where file' = dir </> file
-
-getValuesString :: MonadIO m => FilePath -> Values -> m String
-getValuesString _ (Values vs) =
-  return $ unlines $ map pretty vs
-getValuesString dir (InFile file) =
-  liftIO $ readFile file'
   where file' = dir </> file
 
 getValuesText :: MonadIO m => FilePath -> Values -> m T.Text
