@@ -370,12 +370,11 @@ Exp  :: { UncheckedExp }
                       { If $2 $4 $6 NoInfo $1 }
 
      | id '(' Exps ')'
-                      {% let L pos (ID name) = $1 in do{
-                            name' <- getFunName name;
-                            return (Apply name' [ (arg, Observe) | arg <- $3 ] NoInfo pos)}
+                      { let L pos (ID name) = $1
+                        in Apply name [ (arg, Observe) | arg <- $3 ] NoInfo pos
                       }
-     | id '(' ')'     {% let L pos (ID name) = $1
-                        in do { name' <- getFunName name; return (Apply name' [] NoInfo pos) } }
+     | id '(' ')'     { let L pos (ID name) = $1
+                        in Apply name [] NoInfo pos }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
@@ -507,14 +506,14 @@ FunAbstr :: { UncheckedLambda }
          : fn Type '(' TypeIds ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
-           {% let L pos (ID name) = $1 in do {
-             name' <- getFunName name; return (CurryFun name' $3 NoInfo pos) } }
+           { let L pos (ID name) = $1
+             in CurryFun name $3 NoInfo pos }
          | id '(' ')'
-           {% let L pos (ID name) = $1 in do {
-             name' <- getFunName name; return (CurryFun name' [] NoInfo pos) } }
+           { let L pos (ID name) = $1
+             in CurryFun name [] NoInfo pos }
          | id
-           {% let L pos (ID name) = $1 in do {
-             name' <- getFunName name; return (CurryFun name' [] NoInfo pos ) } }
+           { let L pos (ID name) = $1
+             in CurryFun name [] NoInfo pos }
            -- Minus is handed explicitly here because I could figure
            -- out how to resolve the ambiguity with negation.
          | '-' Exp
@@ -618,12 +617,11 @@ data ParserEnv = ParserEnv {
                , parserIntType :: IntType
                , parserRealType :: FloatType
                , parserRealFun :: Double -> FloatValue
-               , parserFunMap :: HM.HashMap Name Name
                }
 
 newParserEnv :: FilePath -> IntType -> FloatType -> ParserEnv
 newParserEnv path intType realType =
-  let s = ParserEnv path intType realType Float64Value HM.empty
+  let s = ParserEnv path intType realType Float64Value
   in modParserEnv s realType
 
 modParserEnv :: ParserEnv -> FloatType -> ParserEnv
@@ -631,13 +629,11 @@ modParserEnv s realType =
   case realType of
     Float32 -> s {
         parserRealType = Float32,
-        parserRealFun = float32RealFun,
-        parserFunMap = float32FunMap
+        parserRealFun = float32RealFun
       }
     Float64 -> s {
         parserRealType = Float64,
-        parserRealFun = float64RealFun,
-        parserFunMap = float64FunMap
+        parserRealFun = float64RealFun
       }
   where
 
@@ -645,14 +641,6 @@ modParserEnv s realType =
       let (m,n) = decodeFloat x
       in Float32Value $ encodeFloat m n
     float64RealFun = Float64Value
-
-    float32FunMap = HM.map (<>nameFromString "32") funs
-    float64FunMap = HM.map (<>nameFromString "64") funs
-
-    funs = HM.fromList $ zip funnames funnames
-    funnames = map nameFromString ["sqrt", "log", "exp", "sin", "cos"]
-
-
 
 type ParserMonad a =
   ExceptT String (
@@ -752,10 +740,6 @@ getIntFun Int64 = Int64Value . fromInteger
 getRealValue :: Double -> ParserMonad FloatValue
 getRealValue x = do f <- lift $ gets parserRealFun
                     return $ f x
-
-getFunName :: Name -> ParserMonad Name
-getFunName name = do substs <- lift $ gets parserFunMap
-                     return $ HM.lookupDefault name name substs
 
 intNegate :: IntValue -> IntValue
 intNegate (Int8Value v) = Int8Value (-v)
