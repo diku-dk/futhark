@@ -618,6 +618,12 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
 
+internaliseExp desc (E.Write i v a _) = do
+  sis <- internaliseExpToVars "write_arg_i" i
+  svs <- internaliseExpToVars "write_arg_v" v
+  sas <- internaliseExpToVars "write_arg_a" a
+  letSubExps desc [I.PrimOp $ I.Write [] si sv sa | (si, sv, sa) <- zip3 sis svs sas]
+
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
   vs <- internaliseExp desc e

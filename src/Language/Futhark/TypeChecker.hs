@@ -1177,6 +1177,23 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     form'
                     loopbody' letbody' loc
 
+checkExp (Write i v a pos) = do
+  i' <- checkExp i
+  v' <- checkExp v
+  a' <- checkExp a
+
+  let it = typeOf i'
+  checkWriteIndexes it
+  _ <- unifyExpTypes v' a'
+  return (Write i' v' a' pos)
+
+  where checkWriteIndexes it = case it of
+          Array (PrimArray (Signed Int32)
+                 (Rank 1) _uniqueness _annotations) ->
+            return ()
+          _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
+
+
 checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
                      TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
 checkSOACArrayArg e = do

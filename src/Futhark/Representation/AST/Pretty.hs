@@ -215,6 +215,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates' cs <>
     text "partition" <>
     parens (commasep $ [ ppr n, ppr flags ] ++ map ppr arrs)
+  ppr (Write cs i v a) =
+    ppCertificates cs <> text "write" <> apply [ppr i, ppr v, ppr a]
 
 instance PrettyLore lore => Pretty (Exp lore) where
   ppr (If c t f _) = text "if" <+> ppr c </>
