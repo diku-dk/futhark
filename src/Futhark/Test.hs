@@ -301,9 +301,9 @@ explainMismatch i what got expected =
 compareValues :: [Value] -> [Value] -> Maybe Mismatch
 compareValues got expected
   | n /= m = Just $ ValueCountMismatch n m
-  | otherwise = case sequence $ zipWith3 compareValue [0..] got expected of
-    Just (e:_) -> Just e
-    _          -> Nothing
+  | otherwise = case catMaybes $ zipWith3 compareValue [0..] got expected of
+    e : _ -> Just e
+    []    -> Nothing
   where n = length got
         m = length expected
 
@@ -333,11 +333,12 @@ comparePrimValue tol  (FloatValue (Float32Value x)) (FloatValue (Float64Value y)
 comparePrimValue _ x y =
   x == y
 
-compareFractional :: (Ord num, Fractional num, Real tol) =>
+compareFractional :: (Show num, Ord num, Fractional num, Show tol, Real tol) =>
                      tol -> num -> num -> Bool
 compareFractional tol x y =
-  diff < fromRational (toRational tol)
+  diff < tol'
   where diff = abs $ x - y
+        tol' = fromRational $ toRational tol
 
 minTolerance :: Fractional a => a
 minTolerance = 0.002 -- 0.2%
