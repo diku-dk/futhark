@@ -20,10 +20,11 @@ import Data.Ord
 import Data.Foldable (forM_)
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.HashMap.Lazy as HM
 import System.Console.GetOpt
 import System.Directory
-import System.Process
+import System.Process.Text (readProcessWithExitCode)
 import System.Exit
 import System.IO
 import System.FilePath
@@ -31,7 +32,7 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Util.Pretty (pretty)
+import Futhark.Util.Pretty (prettyText)
 import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
@@ -43,7 +44,7 @@ import Futhark.Util.Options
 
 --- Test execution
 
-type TestM = ExceptT String IO
+type TestM = ExceptT T.Text IO
 
 runTestM :: TestM () -> IO TestResult
 runTestM = fmap (either Failure $ const Success) . runExceptT
@@ -51,11 +52,11 @@ runTestM = fmap (either Failure $ const Success) . runExceptT
 io :: IO a -> TestM a
 io = liftIO
 
-context :: String -> TestM a -> TestM a
-context s = withExceptT ((s ++ ":\n") ++)
+context :: T.Text -> TestM a -> TestM a
+context s = withExceptT ((s<>":\n")<>)
 
 data TestResult = Success
-                | Failure String
+                | Failure T.Text
                 deriving (Eq, Show)
 
 data TestCase = TestCase { testCaseProgram :: FilePath
@@ -70,25 +71,25 @@ instance Eq TestCase where
 instance Ord TestCase where
   x `compare` y = testCaseProgram x `compare` testCaseProgram y
 
-data RunResult = ErrorResult Int String
+data RunResult = ErrorResult Int T.Text
                | SuccessResult [Value]
 
-progNotFound :: String -> String
-progNotFound s = s ++ ": command not found"
+progNotFound :: T.Text -> T.Text
+progNotFound s = s <> ": command not found"
 
 optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
 optimisedProgramMetrics (SOACSPipeline pipeline) program = do
   res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
-      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
+      throwError $ T.unlines [toText msgs, errorDesc err]
     (Right prog, _) ->
       return $ progMetrics prog
 optimisedProgramMetrics (KernelsPipeline pipeline) program = do
   res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
   case res of
     (Left err, msgs) ->
-      throwError $ T.unpack $ T.unlines [toText msgs, errorDesc err]
+      throwError $ T.unlines [toText msgs, errorDesc err]
     (Right prog, _) ->
       return $ progMetrics prog
 
@@ -100,12 +101,12 @@ testMetrics program (StructureTest pipeline expected) = context "Checking metric
           case HM.lookup name metrics of
             Nothing
               | expected_occurences > 0 ->
-              throwError $ T.unpack name ++ " should have occurred " ++ show expected_occurences ++
+              throwError $ name <> " should have occurred " <> T.pack (show expected_occurences) <>
               " times, but did not occur at all in optimised program."
             Just actual_occurences
               | expected_occurences /= actual_occurences ->
-                throwError $ T.unpack name ++ " should have occurred " ++ show expected_occurences ++
-              " times, but occured " ++ show actual_occurences ++ " times."
+                throwError $ name <> " should have occurred " <> T.pack (show expected_occurences) <>
+              " times, but occured " <> T.pack (show actual_occurences) <> " times."
             _ -> return ()
 
 runTestCase :: TestCase -> TestM ()
@@ -116,46 +117,46 @@ runTestCase (TestCase program testcase progs) = do
 
     CompileTimeFailure expected_error ->
       forM_ (configTypeCheckers progs) $ \typeChecker ->
-        context ("Type-checking with " ++ typeChecker) $ do
+        context ("Type-checking with " <> T.pack typeChecker) $ do
           (code, _, err) <-
             io $ readProcessWithExitCode typeChecker [program] ""
           case code of
            ExitSuccess -> throwError "Expected failure\n"
-           ExitFailure 127 -> throwError $ progNotFound typeChecker
+           ExitFailure 127 -> throwError $ progNotFound $ T.pack typeChecker
            ExitFailure 1 -> throwError err
            ExitFailure _ -> checkError expected_error err
 
     RunCases [] ->
       forM_ (configCompilers progs) $ \compiler ->
-      context ("Compiling with " ++ compiler) $
+      context ("Compiling with " <> T.pack compiler) $
       justCompileTestProgram compiler program
 
     RunCases run_cases ->
       forM_ run_cases $ \run -> do
         unless (runMode run == CompiledOnly) $
           forM_ (configInterpreters progs) $ \interpreter ->
-            context ("Interpreting with " ++ interpreter) $
+            context ("Interpreting with " <> T.pack interpreter) $
               interpretTestProgram interpreter program run
 
         unless (runMode run == InterpretedOnly) $
           forM_ (configCompilers progs) $ \compiler ->
-            context ("Compiling with " ++ compiler) $
+            context ("Compiling with " <> T.pack compiler) $
               compileTestProgram compiler program run
 
-checkError :: ExpectedError -> String -> TestM ()
+checkError :: ExpectedError -> T.Text -> TestM ()
 checkError (ThisError regex_s regex) err
-  | not (match regex err) =
-     throwError $ "Expected error:\n  " ++ T.unpack regex_s ++
-     "\nGot error:\n  " ++ err
+  | not (match regex $ T.unpack err) =
+     throwError $ "Expected error:\n  " <> regex_s <>
+     "\nGot error:\n  " <> err
 checkError _ _ =
   return ()
 
-runResult :: FilePath -> ExitCode -> String -> String -> TestM RunResult
+runResult :: FilePath -> ExitCode -> T.Text -> T.Text -> TestM RunResult
 runResult program ExitSuccess stdout_s _ =
-  case valuesFromString "stdout" stdout_s of
+  case valuesFromText "stdout" stdout_s of
     Left e   -> do
       actual <- io $ writeOutFile program "actual" stdout_s
-      throwError $ show e <> "\n(See " <> actual <> ")"
+      throwError $ T.pack (show e) <> "\n(See " <> T.pack actual <> ")"
     Right vs -> return $ SuccessResult vs
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
@@ -169,25 +170,25 @@ getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
 interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = do
-  input <- intercalate "\n" <$> map pretty <$> getValues dir inputValues
+  input <- T.unlines <$> map prettyText <$> getValues dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (code, output, err) <- io $ readProcessWithExitCode futharki [program] input
   case code of
     ExitFailure 127 ->
-      throwError $ progNotFound futharki
+      throwError $ progNotFound $ T.pack futharki
     _               ->
       compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
 compileTestProgram :: String -> FilePath -> TestRun -> TestM ()
 compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
-  input <- getValuesString dir inputValues
+  input <- getValuesText dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (futcode, _, futerr) <-
     io $ readProcessWithExitCode futharkc
     [program, "-o", binOutputf] ""
   case futcode of
-    ExitFailure 127 -> throwError $ progNotFound futharkc
+    ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
     ExitFailure _   -> throwError futerr
     ExitSuccess     -> return ()
   -- Explicitly prefixing the current directory is necessary for
@@ -199,21 +200,21 @@ compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
     compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
-        validating = ("validating test result:\n"++)
+        validating = ("validating test result:\n"<>)
 
 justCompileTestProgram :: String -> FilePath -> TestM ()
 justCompileTestProgram futharkc program =
   withExceptT compiling $ do
     (futcode, _, futerr) <-
       io $ readProcessWithExitCode futharkc
-      [program, "-o", binOutputf] ""
+      [program, "-o", binOutputf] mempty
     case futcode of
-      ExitFailure 127 -> throwError $ progNotFound futharkc
+      ExitFailure 127 -> throwError $ progNotFound $ T.pack futharkc
       ExitFailure _   -> throwError futerr
       ExitSuccess     -> return ()
   where binOutputf = program `replaceExtension` "bin"
 
-        compiling = ("compiling:\n"++)
+        compiling = ("compiling:\n"<>)
 
 compareResult :: FilePath -> ExpectedResult [Value] -> RunResult
               -> TestM ()
@@ -224,21 +225,23 @@ compareResult program (Succeeds (Just expectedResult)) (SuccessResult actualResu
     Just mismatch -> do
       actualf <-
         io $ writeOutFile program "actual" $
-        unlines $ map pretty actualResult
+        T.unlines $ map prettyText actualResult
       expectedf <-
         io $ writeOutFile program "expected" $
-        unlines $ map pretty expectedResult
-      throwError $ actualf ++ " and " ++ expectedf ++ " do not match:\n" ++ show mismatch
+        T.unlines $ map prettyText expectedResult
+      throwError $ T.pack actualf <> " and " <> T.pack expectedf <>
+        " do not match:\n" <> T.pack (show mismatch)
     Nothing ->
       return ()
 compareResult _ (RunTimeFailure expectedError) (ErrorResult _ actualError) =
   checkError expectedError actualError
 compareResult _ (Succeeds _) (ErrorResult code err) =
-  throwError $ "Program failed with error code " ++ show code ++ " and stderr:\n  " ++ err
+  throwError $ "Program failed with error code " <>
+  T.pack (show code) <> " and stderr:\n  " <> err
 compareResult _ (RunTimeFailure f) (SuccessResult _) =
-  throwError $ "Program succeeded, but expected failure:\n  " ++ show f
+  throwError $ "Program succeeded, but expected failure:\n  " <> T.pack (show f)
 
-writeOutFile :: FilePath -> String -> String -> IO FilePath
+writeOutFile :: FilePath -> String -> T.Text -> IO FilePath
 writeOutFile base ext content =
   attempt (0::Int)
   where template = base `replaceExtension` ext
@@ -247,7 +250,7 @@ writeOutFile base ext content =
           exists <- doesFileExist filename
           if exists
             then attempt $ i+1
-            else do writeFile filename content
+            else do T.writeFile filename content
                     return filename
 
 ---
@@ -257,7 +260,7 @@ writeOutFile base ext content =
 catching :: IO TestResult -> IO TestResult
 catching m = m `catch` save
   where save :: SomeException -> IO TestResult
-        save e = return $ Failure $ show e
+        save e = return $ Failure $ T.pack $ show e
 
 doTest :: TestCase -> IO TestResult
 doTest = catching . runTestM . runTestCase
@@ -343,7 +346,7 @@ runTests config files = do
             case res of
               Success -> next failed (passed+1)
               Failure s -> do clear
-                              putStrLn (testCaseProgram test ++ ":\n" ++ s)
+                              T.putStrLn (T.pack (testCaseProgram test) <> ":\n" <> s)
                               next (failed+1) passed
 
   (failed, passed) <- getResults (S.fromList included) 0 0

@@ -303,6 +303,7 @@ Executable futhark-test
                  directory,
                  filepath,
                  process,
+                 process-extras,
                  transformers,
                  parsec >= 3,
                  regex-tdfa >= 1.2,
