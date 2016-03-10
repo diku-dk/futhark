@@ -637,6 +637,32 @@ evalPrimOp (Partition _ n flags arrs) = do
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
+evalPrimOp (Write _ i v a) = do
+  i' <- lookupVar i
+  v' <- lookupVar v
+  a' <- lookupVar a
+
+  case (i', v', a') of
+    (ArrayVal iArr _iPrim [iLength],
+     ArrayVal vArr _vPrim vShape,
+     ArrayVal aArr aPrim aShape@(aShapeOuter : _)) -> do
+      unless (vShape == aShape && iLength == aShapeOuter)
+        $ bad $ TypeError "evalPrimOp Write: Wrong shapes"
+
+      let handlePair arr iter = do
+            let arrIndex = iArr ! iter
+                arrValue = vArr ! iter
+            case arrIndex of
+              IntValue (Int32Value arrIndex') ->
+                if arrIndex' == -1
+                then return arr
+                else return (arr // [(fromIntegral arrIndex', arrValue)])
+              _ -> bad $ TypeError "evalPrimOp Write: Wrong index type"
+      res <- foldM handlePair aArr [0..iLength - 1]
+      return [ArrayVal res aPrim aShape]
+    _ ->
+      bad $ TypeError "evalPrimOp Write: Wrong argument types"
+
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
 evalSOAC (Stream _ w form elam arrs) = do

@@ -71,6 +71,8 @@ primOpAliases Assert{} =
   [mempty]
 primOpAliases (Partition _ n _ arr) =
   replicate n mempty ++ map vnameAliases arr
+primOpAliases (Write _ _ _ a) =
+  [vnameAliases a]
 
 ifAliases :: ([Names], Names) -> ([Names], Names) -> [Names]
 ifAliases (als1,cons1) (als2,cons2) =

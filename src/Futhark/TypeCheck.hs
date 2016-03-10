@@ -812,6 +812,9 @@ checkPrimOp (Partition cs _ flags arrs) = do
       "Array argument " ++ pretty arr ++
       " to partition has type " ++ pretty arrt ++ "."
 
+checkPrimOp (Write cs i v a) = do
+  mapM_ (requireI [Prim Cert]) cs
+  -- FIXME: Actually typecheck.
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()

@@ -149,6 +149,11 @@ mapExpM tv (PrimOp (Partition cs n flags arr)) =
               pure n <*>
               mapOnVName tv flags <*>
               mapM (mapOnVName tv) arr)
+mapExpM tv (PrimOp (Write cs i v a)) =
+  PrimOp <$> (pure Write <*> mapOnCertificates tv cs
+              <*> mapOnVName tv i
+              <*> mapOnVName tv v
+              <*> mapOnVName tv a)
 mapExpM tv (DoLoop ctxmerge valmerge form loopbody) =
   DoLoop <$>
   (zip <$> mapM (mapOnFParam tv) ctxparams <*> mapM (mapOnSubExp tv) ctxinits) <*>

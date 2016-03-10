@@ -159,6 +159,7 @@ import Language.Futhark.Parser.Lexer
       streamRedPer    { L $$ STREAM_REDPER }
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
+      write           { L $$ WRITE }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -447,6 +448,8 @@ Exp  :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
+     | write           '(' Exp ',' Exp ',' Exp ')'
+                         { Write $3 $5 $7 $1 }
 
 LetExp :: { UncheckedExp }
      : let Id '=' Exp LetBody
