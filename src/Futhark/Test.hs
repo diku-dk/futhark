@@ -266,8 +266,8 @@ getValues :: MonadIO m => FilePath -> Values -> m [Value]
 getValues _ (Values vs) =
   return vs
 getValues dir (InFile file) = do
-  s <- liftIO $ readFile file'
-  case valuesFromString file' s of
+  s <- liftIO $ T.readFile file'
+  case valuesFromText file' s of
     Left e   -> fail $ show e
     Right vs -> return vs
   where file' = dir </> file
