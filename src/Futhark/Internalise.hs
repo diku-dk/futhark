@@ -1,7 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 -- |
 --
--- This module implements a transformation from external to internal
+-- This module implements a transformation from source to core
 -- Futhark.
 --
 module Futhark.Internalise
@@ -34,9 +34,8 @@ import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
 
--- | Convert a program in external Futhark to a program in internal
--- Futhark.  If the boolean parameter is false, do not add bounds
--- checks to array indexing.
+-- | Convert a program in source Futhark to a program in the Futhark
+-- core language.
 internaliseProg :: MonadFreshNames m =>
                    E.Prog -> m (Either String I.Prog)
 internaliseProg prog = do
