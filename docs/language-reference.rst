@@ -355,8 +355,8 @@ elements of the partitions retain their original relative positions.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Write each index of the ``indexes`` array in the ``a`` array to each value of
-the ``values`` array.  If an index is -1, ignore it.  Return the modified
-array.  Requires that ``a`` is unique.
+the ``values`` array.  If an index is -1, ignore it and its associated value.
+Return the modified array.  Requires that ``a`` is unique.
 
 Tuple Shimming
 --------------
