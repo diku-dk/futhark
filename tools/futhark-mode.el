@@ -41,7 +41,7 @@
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "reduceComm"
     "zip" "unzip" "zipWith"
     "scan" "split" "concat" "filter" "partition" "redomap"
-    "empty" "copy" "size" "unsafe" "default" "include")
+    "empty" "copy" "size" "unsafe" "default" "include" "write")
   "A list of Futhark keywords.")
 
 (defconst futhark-types
