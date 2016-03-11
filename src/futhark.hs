@@ -9,7 +9,6 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Monoid
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import System.IO
 import System.Exit
 import System.Console.GetOpt
@@ -29,7 +28,6 @@ import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Representation.ExplicitMemory (ExplicitMemory)
 import Futhark.Representation.AST (Prog, pretty)
 import Futhark.TypeCheck (Checkable)
-import Futhark.Util.Log
 import qualified Futhark.Util.Pretty as PP
 
 import Futhark.Optimise.InliningDeadFun
@@ -254,9 +252,8 @@ main :: IO ()
 main = mainWithOptions newConfig commandLineOptions compile
   where compile [file] config =
           Just $ do
-            (res, msgs) <- runFutharkM $ m file config
-            when (isJust $ futharkVerbose $ futharkConfig config) $
-              liftIO $ T.hPutStrLn stderr $ toText msgs
+            res <- runFutharkM (m file config) $
+                   isJust $ futharkVerbose $ futharkConfig config
             case res of
               Left err -> do
                 dumpError (futharkConfig config) err

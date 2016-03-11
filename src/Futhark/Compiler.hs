@@ -36,7 +36,6 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.AST
 import qualified Futhark.Representation.SOACS as I
 import qualified Futhark.TypeCheck as I
-import Futhark.Util.Log
 
 data FutharkConfig = FutharkConfig {
     futharkVerbose :: Maybe (Maybe FilePath)
@@ -59,9 +58,7 @@ runCompilerOnProgram :: FutharkConfig
                      -> FilePath
                      -> IO ()
 runCompilerOnProgram config pipeline action file = do
-  (res, msgs) <- runFutharkM compile
-  when (isJust $ futharkVerbose config) $
-    liftIO $ T.hPutStrLn stderr $ toText msgs
+  res <- runFutharkM compile $ isJust $ futharkVerbose config
   case res of
     Left err -> liftIO $ do
       dumpError config err
@@ -72,7 +69,7 @@ runCompilerOnProgram config pipeline action file = do
           source <- liftIO $ readFile file
           prog <- runPipelineOnSource config pipeline file source
           when (isJust $ futharkVerbose config) $
-            liftIO $ hPutStrLn stderr $ "Running " ++ actionDescription action ++ "."
+            liftIO $ hPutStrLn stderr $ "Running action " ++ actionName action
           actionProcedure action prog
 
 runPipelineOnProgram :: FutharkConfig
