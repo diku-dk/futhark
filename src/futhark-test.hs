@@ -37,7 +37,6 @@ import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler
-import Futhark.Util.Log
 import Futhark.Test
 
 import Futhark.Util.Options
@@ -79,18 +78,18 @@ progNotFound s = s <> ": command not found"
 
 optimisedProgramMetrics :: StructurePipeline -> FilePath -> TestM AstMetrics
 optimisedProgramMetrics (SOACSPipeline pipeline) program = do
-  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
+  res <- io $ runFutharkM (runPipelineOnProgram newFutharkConfig pipeline program) False
   case res of
-    (Left err, msgs) ->
-      throwError $ T.unlines [toText msgs, errorDesc err]
-    (Right prog, _) ->
+    Left err ->
+      throwError $ errorDesc err
+    Right prog ->
       return $ progMetrics prog
 optimisedProgramMetrics (KernelsPipeline pipeline) program = do
-  res <- io $ runFutharkM $ runPipelineOnProgram newFutharkConfig pipeline program
+  res <- io $ runFutharkM (runPipelineOnProgram newFutharkConfig pipeline program) False
   case res of
-    (Left err, msgs) ->
-      throwError $ T.unlines [toText msgs, errorDesc err]
-    (Right prog, _) ->
+    Left err ->
+      throwError $ errorDesc err
+    Right prog ->
       return $ progMetrics prog
 
 testMetrics :: FilePath -> StructureTest -> TestM ()
