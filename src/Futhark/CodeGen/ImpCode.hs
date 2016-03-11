@@ -198,7 +198,7 @@ newtype Count u = Count { innerExp :: Exp }
 -- | Phantom type for a count of elements.
 data Elements
 
--- | Phanton type for a count of bytes.
+-- | Phantom type for a count of bytes.
 data Bytes
 
 elements :: Exp -> Count Elements
