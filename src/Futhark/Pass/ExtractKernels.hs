@@ -592,7 +592,10 @@ maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
         types <- asksScope scopeForSOACs
         bnds <- runReaderT
                 (interchangeLoops nest (SeqLoop pat val form body)) types
-        bnds' <- runDistribM $ transformBindings bnds
+        -- runDistribM starts out with an empty scope, so we have to
+        -- immmediately insert the real one.
+        scope <- askScope
+        bnds' <- runDistribM $ localScope scope $ transformBindings bnds
         addKernel bnds'
       return acc'
     _ ->
