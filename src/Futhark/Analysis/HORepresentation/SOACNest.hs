@@ -133,6 +133,7 @@ data Combinator lore = Map Certificates SubExp (NestBody lore)
                      | Reduce Certificates SubExp Commutativity (NestBody lore) [TypedSubExp]
                      | Scan Certificates SubExp (NestBody lore) [TypedSubExp]
                      | Redomap Certificates SubExp Commutativity (Lambda lore) (NestBody lore) [TypedSubExp]
+                     | Scanomap Certificates SubExp (Lambda lore) (NestBody lore) [TypedSubExp]
                      | Stream  Certificates SubExp (StreamFormN lore) (Lambda lore)
                       -- Cosmin: I think it might be helpful to make Stream part of a
                       --         nest, although the stream might not be parallel: that
