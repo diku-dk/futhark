@@ -323,6 +323,9 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
                         SOAC.Redomap{} -> True
                         --SOAC.Stream {} -> True
                         _              -> False
+      is_scanomap = case orig soac of
+                        SOAC.Scanomap{} -> True
+                        _               -> False
   --
   -- Conditions for fusion:
   -- If current soac is a replicate OR (current soac not a redomap AND
@@ -331,7 +334,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- ELSE try applying horizontal        fusion
   -- (without duplicating computation in both cases)
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-        if   is_redomap || any isUnfusable out_nms
+        if   is_redomap || any isUnfusable out_nms || is_scanomap
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
         else prodconsGreedyFuse          res (out_idds, soac)
   --
@@ -421,6 +424,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
                         SOAC.Redomap _ _ _ _ _ nes _ -> drop (length nes) out_nms
+                        SOAC.Scanomap _ _ _ _ nes _ -> drop (length nes) out_nms
                         SOAC.Stream  _ _ frm _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
