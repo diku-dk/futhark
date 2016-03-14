@@ -399,15 +399,15 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
 prodconsGreedyFuse :: FusedRes -> (Pattern, SOAC)
                    -> FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 prodconsGreedyFuse res (out_idds, soac) = do
-  let out_nms        = patternNames out_idds
-      to_fuse_knmSet = getKersWithInpArrs res out_nms
+  let out_nms        = patternNames out_idds    -- Extract VNames from output patterns
+      to_fuse_knmSet = getKersWithInpArrs res out_nms  -- Find kernels which consume outputs
       to_fuse_knms   = HS.toList to_fuse_knmSet
       lookup_kern k  = case HM.lookup k (kernels res) of
                          Nothing  -> badFusionGM $ Error
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
                                       ++ "kernel name not found in kernels field!")
                          Just ker -> return ker
-  to_fuse_kers <- mapM lookup_kern to_fuse_knms
+  to_fuse_kers <- mapM lookup_kern to_fuse_knms -- Get all consumer kernels
   -- try producer-consumer fusion
   (ok_kers_compat, fused_kers) <- do
       kers <- forM to_fuse_kers $
