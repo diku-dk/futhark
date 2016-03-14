@@ -319,13 +319,11 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- Assumption: the free vars in lambda are already in @unfusable res@.
   let out_nms     = patternNames out_idds
       isUnfusable = (`HS.member` unfusable res)
-      is_redomap  = case orig_soac of
+      is_redomap_scanomap  = case orig_soac of
                         SOAC.Redomap{} -> True
+                        SOAC.Scanomap{} -> True
                         --SOAC.Stream {} -> True
                         _              -> False
-      is_scanomap = case orig soac of -- Should be correct [Brian]
-                        SOAC.Scanomap{} -> True
-                        _               -> False
   --
   -- Conditions for fusion:
   -- If current soac is a replicate OR (current soac not a redomap AND
@@ -336,7 +334,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
 
   -- Not sure this works without changing anything [Brian]
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-        if   is_redomap || any isUnfusable out_nms || is_scanomap
+        if   is_redomap_scanomap || any isUnfusable out_nms || is_scanomap
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
         else prodconsGreedyFuse          res (out_idds, soac)
   --
