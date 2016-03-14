@@ -7,7 +7,6 @@
 -- names.
 module Language.Futhark.TypeChecker
   ( checkProg
-  , checkProgNoUniqueness
   , TypeError(..))
   where
 
@@ -542,21 +541,6 @@ unifyExpTypes e1 e2 =
         e2' = untagExp e2
         t2  = toDecl $ typeOf e2'
 
--- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
--- type, and otherwise tries to unify them with 'unifyTypes'.  If
--- this fails, a 'BadAnnotation' is raised.
-checkAnnotation :: (VarName vn, TypeBox ty) =>
-                   SrcLoc -> String -> ty (ID vn) -> TaggedType vn
-                -> TypeM vn (TaggedType vn)
-checkAnnotation loc desc t1 t2 =
-  case unboxType t1 of
-    Nothing -> return t2
-    Just t1' -> case unifyTypes (t1' `setAliases` HS.empty) t2 of
-                  Nothing -> bad $ BadAnnotation loc desc
-                                   (toStructural t1')
-                                   (toStructural t2)
-                  Just t  -> return t
-
 anySignedType :: [TaggedType vn]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
 
@@ -587,26 +571,16 @@ rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
   where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
 
--- | Type check a program containing arbitrary type information,
+-- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
 -- information.
-checkProg :: (TypeBox ty, VarName vn) =>
-             ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
-checkProg = checkProg' True
-
--- | As 'checkProg', but don't check whether uniqueness constraints
--- are being upheld.  The uniqueness of types must still be correct.
-checkProgNoUniqueness :: (VarName vn, TypeBox ty) =>
-                         ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
-checkProgNoUniqueness = checkProg' False
-
-checkProg' :: (VarName vn, TypeBox ty) =>
-              Bool -> ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
-checkProg' checkoccurs prog = do
+checkProg :: VarName vn =>
+             ProgBase NoInfo vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
+checkProg prog = do
   ftable <- buildFtable
   let typeenv = Scope { envVtable = HM.empty
                         , envFtable = ftable
-                        , envCheckOccurences = checkoccurs
+                        , envCheckOccurences = True
                         }
   fmap (untagProg . Prog) $
           runTypeM typeenv src $ mapM (noDataflow . checkFun) $ progFunctions prog'
@@ -710,7 +684,7 @@ checkExp (TupLit es pos) = do
   let res = TupLit es' pos
   return $ fromMaybe res (Literal <$> expToValue res <*> pure pos)
 
-checkExp (ArrayLit es t loc) = do
+checkExp (ArrayLit es _ loc) = do
   es' <- mapM checkExp es
   -- Find the universal type of the array arguments.
   et <- case es' of
@@ -723,10 +697,7 @@ checkExp (ArrayLit es t loc) = do
                     bad $ TypeError loc $ ppExp eleme ++ " is not of expected type " ++ ppType elemt ++ "."
             in foldM check (typeOf e) es''
 
-  -- Unify that type with the one given for the array literal.
-  t' <- checkAnnotation loc "array-element" t et
-
-  let lit = ArrayLit es' t' loc
+  let lit = ArrayLit es' et loc
   return $ fromMaybe lit (Literal <$> expToValue lit <*> pure loc)
 
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
@@ -763,14 +734,13 @@ checkExp (UnOp (ToUnsigned t) e loc) = do
   e' <- require anyNumberType =<< checkExp e
   return $ UnOp (ToUnsigned t) e' loc
 
-checkExp (If e1 e2 e3 t pos) = do
+checkExp (If e1 e2 e3 _ pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
   tell dflow
   brancht <- unifyExpTypes e2' e3'
-  t' <- checkAnnotation pos "branch result" t $
-        addAliases brancht
-        (`HS.difference` allConsumed (usageOccurences dflow))
+  let t' = addAliases brancht
+           (`HS.difference` allConsumed (usageOccurences dflow))
   return $ If e1' e2' e3' t' pos
 
 checkExp (Var ident) = do
@@ -778,16 +748,15 @@ checkExp (Var ident) = do
   observe ident'
   return $ Var ident'
 
-checkExp (Apply fname args rettype loc) = do
+checkExp (Apply fname args _ loc) = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
       (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
-      rettype' <- checkAnnotation loc "return" rettype $
-                  returnType (removeShapeAnnotations ftype)
-                  (map diet paramtypes) (map typeOf args')
+      let rettype' = returnType (removeShapeAnnotations ftype)
+                     (map diet paramtypes) (map typeOf args')
 
       checkFuncall (Just fname) loc paramtypes ftype argflows
 
@@ -800,11 +769,11 @@ checkExp (LetPat pat e body pos) = do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
+checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
   idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
-  destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
-  let dest' = Ident dest destt' destpos
+  let destt' = identType src' `setAliases` HS.empty
+      dest' = Ident dest destt' destpos
 
   unless (unique $ identType src') $
     bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++
@@ -876,8 +845,7 @@ checkExp (Zip arrexps loc) = do
       bad $ TypeError (srclocOf arrexp) $
       "Type of expression is not array, but " ++ ppType arrt ++ "."
     return arrt
-  arrts' <- zipWithM (checkAnnotation loc "operand element") (map snd arrexps) arrts
-  return $ Zip (zip arrexps' arrts') loc
+  return $ Zip (zip arrexps' arrts) loc
 
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
@@ -1199,10 +1167,9 @@ checkLiteral loc (ArrayValue arr rt) = do
 
 checkIdent :: (TypeBox ty, VarName vn) =>
               TaggedIdent ty vn -> TypeM vn (TaggedIdent CompTypeBase vn)
-checkIdent (Ident name t pos) = do
+checkIdent (Ident name _ pos) = do
   vt <- lookupVar name pos
-  t' <- checkAnnotation pos ("variable " ++ textual (baseName name)) t vt
-  return $ Ident name t' pos
+  return $ Ident name vt pos
 
 checkBinOp :: (TypeBox ty, VarName vn) =>
               BinOp -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
@@ -1235,23 +1202,21 @@ checkRelOp :: (TypeBox ty, VarName vn) =>
            -> TaggedExp ty vn -> TaggedExp ty vn
            -> ty (ID vn) -> SrcLoc
            -> TypeM vn (TaggedExp CompTypeBase vn)
-checkRelOp op tl e1 e2 t pos = do
+checkRelOp op tl e1 e2 _ pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos (ppBinOp op ++ " result") t $ Prim Bool
-  return $ BinOp op e1' e2' t' pos
+  return $ BinOp op e1' e2' (Prim Bool) pos
 
 checkPolyBinOp :: (TypeBox ty, VarName vn) =>
                   BinOp -> [TaggedType vn]
                -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
                -> TypeM vn (TaggedExp CompTypeBase vn)
-checkPolyBinOp op tl e1 e2 t pos = do
+checkPolyBinOp op tl e1 e2 _ pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
-  t'' <- checkAnnotation pos (ppBinOp op ++ " result") t t'
-  return $ BinOp op e1' e2' t'' pos
+  return $ BinOp op e1' e2' t' pos
 
 sequentially :: VarName vn =>
                 TypeM vn a -> (a -> Dataflow vn -> TypeM vn b) -> TypeM vn b
@@ -1269,20 +1234,16 @@ checkBinding pat et dflow = do
   (pat', idds) <-
     runStateT (checkBinding' pat et) []
   return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
-  where checkBinding' (Id (Ident name namet pos)) t = do
-          t' <- lift $
-                checkAnnotation (srclocOf pat)
-                ("binding of variable " ++ textual (baseName name)) namet t
-          let t'' = typeOf $ Var $ Ident name t' pos
-          add $ Ident name t'' pos
-          return $ Id $ Ident name t'' pos
+  where checkBinding' (Id (Ident name _ pos)) t = do
+          let t' = typeOf $ Var $ Ident name t pos
+          add $ Ident name t' pos
+          return $ Id $ Ident name t' pos
         checkBinding' (TuplePattern pats pos) (Tuple ts)
           | length pats == length ts = do
           pats' <- zipWithM checkBinding' pats ts
           return $ TuplePattern pats' pos
-        checkBinding' (Wildcard wt loc) t = do
-          t' <- lift $ checkAnnotation (srclocOf pat) "wildcard" wt t
-          return $ Wildcard t' loc
+        checkBinding' (Wildcard _ loc) t =
+          return $ Wildcard t loc
         checkBinding' _ _ =
           lift $ bad $ InvalidPatternError
                        (untagPattern errpat) (toStructural et)
@@ -1366,15 +1327,14 @@ checkLambda (AnonymFun params body ret pos) args =
           return $ AnonymFun params body' ret' pos
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname curryargexps rettype pos) args = do
+checkLambda (CurryFun fname curryargexps _ pos) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      rettype' <- checkAnnotation pos "return" rettype $
-                  fromDecl $ removeShapeAnnotations rt
-      let paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
+      let rettype' = fromDecl $ removeShapeAnnotations rt
+          paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
       case () of
         _ | [(Tuple ets, _, _)] <- args,
             validApply paramtypes ets -> do
@@ -1406,13 +1366,11 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               _ <- checkLambda fun args
               return $ CurryFun fname curryargexps' rettype' pos
 
-checkLambda (UnOpFun unop paramtype rettype loc) [arg] = do
+checkLambda (UnOpFun unop _ _ loc) [arg] = do
   var <- newIdent "x" (argType arg) loc
   binding [var] $ do
     e <- checkExp $ UnOp unop (Var var) loc
-    paramtype' <- checkAnnotation loc "param" paramtype $ argType arg
-    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
-    return $ UnOpFun unop paramtype' rettype' loc
+    return $ UnOpFun unop (argType arg) (typeOf e) loc
 
 checkLambda (UnOpFun unop _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
@@ -1421,30 +1379,26 @@ checkLambda (UnOpFun unop _ _ loc) args =
 checkLambda (BinOpFun op _ _ rettype loc) args =
   checkPolyLambdaOp op [] rettype args loc
 
-checkLambda (CurryBinOpLeft binop x paramtype rettype loc) [arg] = do
+checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] = do
   x' <- checkExp x
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
     e <- checkExp $ BinOp binop (Var $ untype xvar) (Var $ untype y) NoInfo loc
-    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
-    paramtype' <- checkAnnotation loc "param" paramtype $ argType arg
-    return $ CurryBinOpLeft binop x' paramtype' rettype' loc
+    return $ CurryBinOpLeft binop x' (argType arg) (typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x paramtype rettype loc) [arg] = do
+checkLambda (CurryBinOpRight binop x _ _ loc) [arg] = do
   x' <- checkExp x
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
     e <- checkExp $ BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc
-    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
-    paramtype' <- checkAnnotation loc "param" paramtype $ argType arg
-    return $ CurryBinOpRight binop x' paramtype' rettype' loc
+    return $ CurryBinOpRight binop x' (argType arg) (typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
 checkLambda (CurryBinOpRight binop _ _ _ loc) args =
