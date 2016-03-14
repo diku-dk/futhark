@@ -323,7 +323,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
                         SOAC.Redomap{} -> True
                         --SOAC.Stream {} -> True
                         _              -> False
-      is_scanomap = case orig soac of
+      is_scanomap = case orig soac of -- Should be correct [Brian]
                         SOAC.Scanomap{} -> True
                         _               -> False
   --
@@ -333,6 +333,8 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- THEN try applying producer-consumer fusion
   -- ELSE try applying horizontal        fusion
   -- (without duplicating computation in both cases)
+
+  -- Not sure this works without changing anything [Brian]
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
         if   is_redomap || any isUnfusable out_nms || is_scanomap
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
@@ -535,6 +537,11 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
+fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Scan cs w lam args)):bnds) res) = do
+  let (ne, arrs) = unzip args
+      equivsoac = Futhark.Scanomap cs w lam lam ne arrs
+  fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
+
 fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
@@ -551,7 +558,10 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       -- a redomap always starts a new kernel
       reduceLike soac [outer_red, inner_red] nes
 
-    Right soac@(SOAC.Scan _ _ lam args) ->
+    Right soac@(SOAC.Scanomap _ _ _ outer_red inner_red nes _) -> do
+      reduceLike soac [outer_red, inner_red] nes
+
+    Right soac@(SOAC.Scan _ _ lam args) -> do
       -- NOT FUSABLE (probably), but still add as kernel, as
       -- optimisations like ISWIM may make it fusable.
       reduceLike soac [lam] $ map fst args
@@ -587,6 +597,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
           bres  <- bindingFamily pat $ fusionGatherBody lres body
           bres' <- foldM fusionGatherSubExp bres nes
           greedyFuse rem_bnds used_lam bres' (pat, soac)
+
 
 fusionGatherBody fres (Body _ [] res) =
   foldM fusionGatherExp fres $ map (PrimOp . SubExp) res
