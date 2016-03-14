@@ -658,7 +658,7 @@ evalPrimOp (Write _ i v a) = do
                 else do
                   let prod = product vShapeRest
                       iBase = prod * fromIntegral arrIndex'
-                      updates = [ (iBase + iOffset, vArr ! (iter + iOffset))
+                      updates = [ (iBase + iOffset, vArr ! (prod * iter + iOffset))
                                 | iOffset <- [0..prod - 1]
                                 ]
                   return (arr // updates)
