@@ -567,7 +567,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
 
     Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
-      -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
+      -- @let a= reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel

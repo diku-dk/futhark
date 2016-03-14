@@ -387,14 +387,14 @@ typeCheckSOAC (Scanomap ass size outerfun innerfun accexps arrexps) = do
   accargs <- mapM TC.checkArg accexps
   TC.checkLambda innerfun $ accargs ++ arrargs
   let innerReturnType = lambdaReturnType innerfun
-      innerAccType = take (length accexps) innerRetType
+      innerAccType = take (length accexps) innerReturnType
       asArg t = (t, mempty)
   TC.checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
   let acct = map TC.argType accargs
       outerRetType = lambdaReturnType outerfun
   unless (acct == innerAccType ) $
     TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but scanomap inner reduction returns type " ++ prettyTuple innerRetType ++ "."
+          ", but scanomap inner reduction returns type " ++ prettyTuple innerReturnType ++ "."
   unless (acct == outerRetType) $
     TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
           ", but scanomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
