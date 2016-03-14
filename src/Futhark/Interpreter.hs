@@ -644,19 +644,24 @@ evalPrimOp (Write _ i v a) = do
 
   case (i', v', a') of
     (ArrayVal iArr _iPrim [iLength],
-     ArrayVal vArr _vPrim vShape,
-     ArrayVal aArr aPrim aShape@(aShapeOuter : _)) -> do
-      unless (vShape == aShape && iLength == aShapeOuter)
+     ArrayVal vArr vPrim _vShape@(vShapeOuter : vShapeRest),
+     ArrayVal aArr aPrim aShape) -> do
+      unless (vPrim == aPrim && iLength == vShapeOuter)
         $ bad $ TypeError "evalPrimOp Write: Wrong shapes"
 
       let handlePair arr iter = do
             let arrIndex = iArr ! iter
-                arrValue = vArr ! iter
             case arrIndex of
               IntValue (Int32Value arrIndex') ->
                 if arrIndex' == -1
                 then return arr
-                else return (arr // [(fromIntegral arrIndex', arrValue)])
+                else do
+                  let prod = product vShapeRest
+                      iBase = prod * fromIntegral arrIndex'
+                      updates = [ (iBase + iOffset, vArr ! (iter + iOffset))
+                                | iOffset <- [0..prod - 1]
+                                ]
+                  return (arr // updates)
               _ -> bad $ TypeError "evalPrimOp Write: Wrong index type"
       res <- foldM handlePair aArr [0..iLength - 1]
       return [ArrayVal res aPrim aShape]
