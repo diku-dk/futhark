@@ -673,9 +673,15 @@ defCompilePrimOp
     emit =<< (Imp.For iter (Imp.sizeToExp iLength) <$>
               collect (do indexExp <- readFromArray i [varIndex iter]
                           emit $ Imp.SetScalar index indexExp
-                          valueExp <- readFromArray v [varIndex iter]
-                          emit $ Imp.SetScalar val valueExp
-                          copyDWIMDest dest [varIndex index] (Var val) []))
+                          let cond = (Imp.CmpOp
+                                      (CmpEq int32)
+                                      (Imp.ScalarVar index)
+                                      (Imp.Constant (IntValue (Int32Value (-1)))))
+                          body <- collect $ do
+                            valueExp <- readFromArray v [varIndex iter]
+                            emit $ Imp.SetScalar val valueExp
+                            copyDWIMDest dest [varIndex index] (Var val) []
+                          emit $ Imp.If cond Imp.Skip body))
 
 --                          let memLoc' = offsetArray memLoc (SE.Id index int32)
 --                          let dest' = ArrayDestination (CopyIntoMemory memLoc') stuff
