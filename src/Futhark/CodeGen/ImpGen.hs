@@ -641,6 +641,78 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
         arrDestLoc _ =
           Nothing
 
+defCompilePrimOp
+  (Destination [dest])
+   -- [dest@(ArrayDestination
+   --        (CopyIntoMemory memLoc@(MemLocation destMem destShape destIxFun))
+   --        stuff)])
+  (Write _ i v a) = do
+  iEntry <- lookupArray i
+  -- vEntry <- lookupArray v
+  -- aEntry <- lookupArray a
+  at <- elemType <$> lookupType a
+
+  compileSubExpTo dest $ Var a
+
+  iLength <- case entryArrayShape iEntry of
+    [] -> throwError ("defCompilePrimOp Write: empty array shape for " ++ pretty i)
+    (l : _) -> return l
+  
+  -- index <- newVName "write_index"
+  -- value <- newVName "write_value"
+  --emit $ Imp.DeclareScalar index int32
+  --emit $ Imp.DeclareScalar value
+  iter <- newVName "write_iter"
+  emit $ Imp.DeclareScalar iter int32
+  index <- newVName "write_index"
+  emit $ Imp.DeclareScalar index int32
+--  destSpace <- entryMemSpace <$> lookupMemory destMem
+  val <- newVName "write_value"
+  emit $ Imp.DeclareScalar val at
+  declaringLoopVar iter $ withPrimVar val at $
+    emit =<< (Imp.For iter (Imp.sizeToExp iLength) <$>
+              collect (do indexExp <- readFromArray i [varIndex iter]
+                          emit $ Imp.SetScalar index indexExp
+                          valueExp <- readFromArray v [varIndex iter]
+                          emit $ Imp.SetScalar val valueExp
+                          copyDWIMDest dest [varIndex index] (Var val) []))
+
+--                          let memLoc' = offsetArray memLoc (SE.Id index int32)
+--                          let dest' = ArrayDestination (CopyIntoMemory memLoc') stuff
+
+
+                          --let (MemLocation destMem destShape destIxFun) = memLoc'
+
+    
+--                          let dest' = ArrayElemDestination destMem at space count
+--                          destSpace <- entryMemSpace <$> lookupMemory destMem
+--                          let destIdx = simplifyScalExp destIxFun -- $ IxFun.index destIxFun ivars (primByteSize at)
+--                          let bytesCount = 
+--                          emit $ Imp.Write destMem bytesCount at destSpace
+
+
+--                          writeExp dest' valueExp))
+
+--                          writeExp dest' valueExp))
+--                          copyDWIMDest dest [index] value []))
+--                          If (index /= -1) $ do
+
+
+
+  
+    -- et <- elemType <$> lookupType a
+    -- offs_glb <- newVName "tmp_offs"
+    -- withPrimVar offs_glb int32 $ do
+    --   emit $ Imp.DeclareScalar offs_glb int32
+    --   emit $ Imp.SetScalar offs_glb 0
+
+    --   let destloc = MemLocation destmem destshape
+    --                 (IxFun.offsetIndex destixfun $ SE.Id offs_glb int32)
+
+
+      
+    --   iLength
+      
 defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 
 defCompilePrimOp target e =
