@@ -908,7 +908,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr pos) = do
         (acc',accarg) <- checkArg acc
         lam0' <- checkLambda lam0 [accarg, accarg]
         let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
-        unless (redtype `subtypeOf` typeOf acc') $
+        unless (typeOf acc' `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
                   ppType (typeOf acc') ++ ", but reduce fun returns type "++ppType redtype++"."
         return (RedLike o comm lam0' acc', Just(acc',accarg))
