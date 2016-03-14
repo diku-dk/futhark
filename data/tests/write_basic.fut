@@ -12,7 +12,7 @@
 -- }
 
 fun [i32, n]
-  main([i32, n] indexes,
-       [i32, n] values,
+  main([i32, k] indexes,
+       [i32, k] values,
        [i32, n] array) =
   write(indexes, values, array)
