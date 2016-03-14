@@ -624,8 +624,7 @@ simplifyBoolBranch _ (Let pat _ (If cond tb fb ts))
   | Body _ [] [tres] <- tb,
     Body _ [] [fres] <- fb,
     patternSize pat == length ts,
-    all (==Prim Bool) ts,
-    False = do -- FIXME: disable because algebraic optimiser cannot handle it.
+    all (==Prim Bool) ts = do
   e <- eBinOp LogOr (pure $ PrimOp $ BinOp LogAnd cond tres)
                     (eBinOp LogAnd (pure $ PrimOp $ UnOp Not cond)
                      (pure $ PrimOp $ SubExp fres))

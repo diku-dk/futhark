@@ -7,7 +7,6 @@
 -- names.
 module Language.Futhark.TypeChecker
   ( checkProg
-  , checkProgNoUniqueness
   , TypeError(..))
   where
 
@@ -28,7 +27,7 @@ import Prelude
 
 import Language.Futhark
 import Language.Futhark.Renamer
-  (tagProg', untagProg, untagExp, untagPattern)
+  (tagProg', untagExp, untagPattern)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
 import Futhark.Util.Pretty
@@ -37,16 +36,16 @@ import Futhark.Util.Pretty
 -- instance for this type produces a human-readable description.
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
-data TypeError vn =
+data TypeError =
     TypeError SrcLoc String
   -- ^ A general error happened at the given position and
   -- for the given reason.
   | UnifyError
-    (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ())
-    (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ())
+    (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
+    (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
   -- ^ Types of two expressions failed to unify.
   | UnexpectedType SrcLoc
-    (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
+    (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
   -- ^ Expression of type was not one of the expected
   -- types.
   | ReturnTypeError SrcLoc Name (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
@@ -54,15 +53,15 @@ data TypeError vn =
   -- type than its declaration.
   | DupDefinitionError Name SrcLoc SrcLoc
   -- ^ Two functions have been defined with the same name.
-  | DupParamError Name vn SrcLoc
+  | DupParamError Name Name SrcLoc
   -- ^ Two function parameters share the same name.
-  | DupPatternError vn SrcLoc SrcLoc
+  | DupPatternError Name SrcLoc SrcLoc
   -- ^ Two pattern variables share the same name.
-  | InvalidPatternError (PatternBase NoInfo vn)
+  | InvalidPatternError (PatternBase NoInfo Name)
     (TypeBase Rank NoInfo ()) (Maybe String) SrcLoc
   -- ^ The pattern is not compatible with the type or is otherwise
   -- inconsistent.
-  | UnknownVariableError vn SrcLoc
+  | UnknownVariableError Name SrcLoc
   -- ^ Unknown variable of the given name referenced at the given spot.
   | UnknownFunctionError Name SrcLoc
   -- ^ Unknown function of the given name called at the given spot.
@@ -73,7 +72,7 @@ data TypeError vn =
   -- number of parameters, or the specific types of
   -- parameters accepted (sometimes, only the former can
   -- be determined).
-  | UseAfterConsume vn SrcLoc SrcLoc
+  | UseAfterConsume Name SrcLoc SrcLoc
   -- ^ A variable was attempted used after being
   -- consumed.  The last location is the point of
   -- consumption.
@@ -96,19 +95,19 @@ data TypeError vn =
   -- ^ A function is being curried with an argument to be consumed.
   | BadLetWithValue SrcLoc
   -- ^ The new value for an array slice in let-with is aliased to the source.
-  | ReturnAliased Name vn SrcLoc
+  | ReturnAliased Name Name SrcLoc
   -- ^ The unique return value of the function aliases
   -- one of the function parameters.
   | UniqueReturnAliased Name SrcLoc
   -- ^ A unique element of the tuple returned by the
   -- function aliases some other element of the tuple.
-  | NotAnArray SrcLoc (ExpBase CompTypeBase vn) (TypeBase Rank NoInfo ())
-  | PermutationError SrcLoc [Int] Int (Maybe vn)
+  | NotAnArray SrcLoc (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
+  | PermutationError SrcLoc [Int] Int (Maybe Name)
   -- ^ The permutation is not valid.
-  | DimensionNotInteger SrcLoc vn
+  | DimensionNotInteger SrcLoc Name
   -- ^ A dimension annotation was a non-integer variable.
 
-instance VarName vn => Show (TypeError vn) where
+instance Show TypeError where
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
   show (UnifyError e1 t1 e2 t2) =
@@ -199,62 +198,46 @@ instance VarName vn => Show (TypeError vn) where
     "Dimension declaration " ++ textual name ++ " at " ++ locStr loc ++
     " should be an integer."
 
-type TaggedIdent ty vn = IdentBase ty (ID vn)
-
-type TaggedParam vn = ParamBase (ID vn)
-
-type TaggedExp ty vn = ExpBase ty (ID vn)
-
-type TaggedLambda ty vn = LambdaBase ty (ID vn)
-
-type TaggedPattern ty vn = PatternBase ty (ID vn)
-
-type TaggedFunDec ty vn = FunDecBase ty (ID vn)
-
-type TaggedType vn = TypeBase Rank Names (ID vn)
-
-type TaggedDeclType vn = DeclTypeBase (ID vn)
-
 -- | A tuple of a return type and a list of argument types.
-type FunBinding vn = (DeclTypeBase (ID vn), [DeclTypeBase (ID vn)])
+type FunBinding = (DeclTypeBase VName, [DeclTypeBase VName])
 
-data Binding vn = Bound (TaggedType vn)
-                | WasConsumed SrcLoc
+data Binding = Bound Type
+             | WasConsumed SrcLoc
 
 data Usage = Consumed SrcLoc
            | Observed SrcLoc
              deriving (Eq, Ord, Show)
 
-data Occurence vn = Occurence { observed :: Names (ID vn)
-                              , consumed :: Names (ID vn)
-                              , location :: SrcLoc
-                              }
+data Occurence = Occurence { observed :: Names VName
+                           , consumed :: Names VName
+                           , location :: SrcLoc
+                           }
              deriving (Eq, Show)
 
-instance Located (Occurence vn) where
+instance Located Occurence where
   locOf = locOf . location
 
-observation :: Names (ID vn) -> SrcLoc -> Occurence vn
+observation :: Names VName -> SrcLoc -> Occurence
 observation = flip Occurence HS.empty
 
-consumption :: Names (ID vn) -> SrcLoc -> Occurence vn
+consumption :: Names VName -> SrcLoc -> Occurence
 consumption = Occurence HS.empty
 
-nullOccurence :: Occurence vn -> Bool
+nullOccurence :: Occurence -> Bool
 nullOccurence occ = HS.null (observed occ) && HS.null (consumed occ)
 
-type Occurences vn = [Occurence vn]
+type Occurences = [Occurence]
 
-type UsageMap vn = HM.HashMap (ID vn) [Usage]
+type UsageMap = HM.HashMap VName [Usage]
 
-usageMap :: Occurences vn -> UsageMap vn
+usageMap :: Occurences -> UsageMap
 usageMap = foldl comb HM.empty
   where comb m (Occurence obs cons loc) =
           let m' = HS.foldl' (ins $ Observed loc) m obs
           in HS.foldl' (ins $ Consumed loc) m' cons
         ins v m k = HM.insertWith (++) k [v] m
 
-combineOccurences :: ID vn -> Usage -> Usage -> Either (TypeError vn) Usage
+combineOccurences :: VName -> Usage -> Usage -> Either TypeError Usage
 combineOccurences _ (Observed loc) (Observed _) = Right $ Observed loc
 combineOccurences name (Consumed wloc) (Observed rloc) =
   Left $ UseAfterConsume (baseName name) rloc wloc
@@ -263,22 +246,22 @@ combineOccurences name (Observed rloc) (Consumed wloc) =
 combineOccurences name (Consumed loc1) (Consumed loc2) =
   Left $ UseAfterConsume (baseName name) (max loc1 loc2) (min loc1 loc2)
 
-checkOccurences :: Occurences vn -> Either (TypeError vn) ()
+checkOccurences :: Occurences -> Either TypeError ()
 checkOccurences = void . HM.traverseWithKey comb . usageMap
   where comb _    []     = Right ()
         comb name (u:us) = foldM_ (combineOccurences name) u us
 
-allConsumed :: Occurences vn -> Names (ID vn)
+allConsumed :: Occurences -> Names VName
 allConsumed = HS.unions . map consumed
 
-seqOccurences :: Occurences vn -> Occurences vn -> Occurences vn
+seqOccurences :: Occurences -> Occurences -> Occurences
 seqOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
           occ { observed = observed occ `HS.difference` postcons }
         postcons = allConsumed occurs2
 
-altOccurences :: Occurences vn -> Occurences vn -> Occurences vn
+altOccurences :: Occurences -> Occurences -> Occurences
 altOccurences occurs1 occurs2 =
   filter (not . nullOccurence) $ map filt occurs1 ++ occurs2
   where filt occ =
@@ -290,11 +273,11 @@ altOccurences occurs1 occurs2 =
 -- | The 'VarUsage' data structure is used to keep track of which
 -- variables have been referenced inside an expression, as well as
 -- which variables the resulting expression may possibly alias.
-data Dataflow vn = Dataflow {
-    usageOccurences :: Occurences vn
+data Dataflow = Dataflow {
+    usageOccurences :: Occurences
   } deriving (Show)
 
-instance VarName vn => Monoid (Dataflow vn) where
+instance Monoid Dataflow where
   mempty = Dataflow mempty
   Dataflow o1 `mappend` Dataflow o2 =
     Dataflow (o1 ++ o2)
@@ -304,95 +287,96 @@ instance VarName vn => Monoid (Dataflow vn) where
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data Scope vn = Scope { envVtable :: HM.HashMap (ID vn) (Binding vn)
-                          , envFtable :: HM.HashMap Name (FunBinding vn)
-                          , envCheckOccurences :: Bool
-                          }
+data Scope = Scope { envVtable :: HM.HashMap VName Binding
+                   , envFtable :: HM.HashMap Name FunBinding
+                   , envCheckOccurences :: Bool
+                   }
 
 -- | The type checker runs in this monad.  The 'Either' monad is used
 -- for error handling.
-newtype TypeM vn a = TypeM (RWST
-                            (Scope vn)            -- Reader
-                            (Dataflow vn)           -- Writer
-                            (NameSource (ID vn))    -- State
-                            (Either (TypeError vn)) -- Inner monad
-                            a)
+newtype TypeM a = TypeM (RWST
+                         Scope       -- Reader
+                         Dataflow    -- Writer
+                         VNameSource -- State
+                         (Either TypeError) -- Inner monad
+                         a)
   deriving (Monad, Functor, Applicative,
-            MonadReader (Scope vn),
-            MonadWriter (Dataflow vn),
-            MonadState (NameSource (ID vn)))
+            MonadReader Scope,
+            MonadWriter Dataflow,
+            MonadState VNameSource)
 
-runTypeM :: Scope vn -> NameSource (ID vn) -> TypeM vn a
-         -> Either (TypeError vn) a
-runTypeM env src (TypeM m) = fst <$> evalRWST m env src
+runTypeM :: Scope -> VNameSource -> TypeM a
+         -> Either TypeError (a, VNameSource)
+runTypeM env src (TypeM m) = do
+  (x, src', _) <- runRWST m env src
+  return (x, src')
 
-bad :: VarName vn => TypeError vn -> TypeM vn a
+bad :: TypeError -> TypeM a
 bad = TypeM . lift . Left
 
-newName :: VarName vn => ID vn -> TypeM vn (ID vn)
+newName :: VName -> TypeM VName
 newName s = do src <- get
                let (s', src') = Futhark.FreshNames.newName src s
                put src'
                return s'
 
-newFname :: VarName vn => String -> TypeM vn Name
+newFname :: String -> TypeM Name
 newFname s = do s' <- newName $ varName s Nothing
                 return $ nameFromString $ textual $ baseName s'
 
-newID :: VarName vn => vn -> TypeM vn (ID vn)
+newID :: Name -> TypeM VName
 newID s = newName $ ID (s, 0)
 
-newIDFromString :: VarName vn => String -> TypeM vn (ID vn)
+newIDFromString :: String -> TypeM VName
 newIDFromString s = newID $ varName s Nothing
 
-newIdent :: VarName vn =>
-            String -> ty (ID vn) -> SrcLoc -> TypeM vn (IdentBase ty (ID vn))
+newIdent :: String -> ty VName -> SrcLoc -> TypeM (IdentBase ty VName)
 newIdent s t loc = do
   s' <- newID $ varName s Nothing
   return $ Ident s' t loc
 
-liftEither :: VarName vn => Either (TypeError vn) a -> TypeM vn a
+liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
 
-occur :: VarName vn => Occurences vn -> TypeM vn ()
+occur :: Occurences -> TypeM ()
 occur occurs = tell Dataflow { usageOccurences = occurs }
 
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.
-observe :: VarName vn => TaggedIdent CompTypeBase vn -> TypeM vn ()
+observe :: Ident -> TypeM ()
 observe (Ident nm t loc)
   | primType t = return ()
   | otherwise   = let als = nm `HS.insert` aliases t
                   in occur [observation als loc]
 
 -- | Proclaim that we have written to the given variable.
-consume :: VarName vn => SrcLoc -> Names (ID vn) -> TypeM vn ()
+consume :: SrcLoc -> Names VName -> TypeM ()
 consume loc als = occur [consumption als loc]
 
 -- | Proclaim that we have written to the given variable, and mark
 -- accesses to it and all of its aliases as invalid inside the given
 -- computation.
-consuming :: VarName vn => TaggedIdent CompTypeBase vn -> TypeM vn a -> TypeM vn a
+consuming :: Ident -> TypeM a -> TypeM a
 consuming (Ident name t loc) m = do
   consume loc $ aliases t
   local consume' m
   where consume' env =
           env { envVtable = HM.insert name (WasConsumed loc) $ envVtable env }
 
-collectDataflow :: VarName vn => TypeM vn a -> TypeM vn (a, Dataflow vn)
+collectDataflow :: TypeM a -> TypeM (a, Dataflow)
 collectDataflow m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
-noDataflow :: VarName vn => TypeM vn a -> TypeM vn a
+noDataflow :: TypeM a -> TypeM a
 noDataflow = censor $ const mempty
 
-maybeCheckOccurences :: VarName vn => Occurences vn -> TypeM vn ()
+maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences us = do
   check <- asks envCheckOccurences
   when check $ liftEither $ checkOccurences us
 
-alternative :: VarName vn => TypeM vn a -> TypeM vn b -> TypeM vn (a,b)
+alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
   (x, Dataflow occurs1) <- listen m1
   (y, Dataflow occurs2) <- listen m2
@@ -403,21 +387,21 @@ alternative m1 m2 = pass $ do
 
 -- | Remove all variable bindings from the vtable inside the given
 -- computation.
-unbinding :: VarName vn => TypeM vn a -> TypeM vn a
+unbinding :: TypeM a -> TypeM a
 unbinding = local (\env -> env { envVtable = HM.empty})
 
 -- | Make all bindings nonunique.
-noUnique :: VarName vn => TypeM vn a -> TypeM vn a
+noUnique :: TypeM a -> TypeM a
 noUnique = local (\env -> env { envVtable = HM.map f $ envVtable env})
   where f (Bound t)         = Bound $ t `setUniqueness` Nonunique
         f (WasConsumed loc) = WasConsumed loc
 
-binding :: VarName vn => [TaggedIdent CompTypeBase vn] -> TypeM vn a -> TypeM vn a
+binding :: [Ident] -> TypeM a -> TypeM a
 binding bnds = check . local (`bindVars` bnds)
-  where bindVars :: Scope vn -> [TaggedIdent CompTypeBase vn] -> Scope vn
+  where bindVars :: Scope -> [Ident] -> Scope
         bindVars = foldl bindVar
 
-        bindVar :: Scope vn -> TaggedIdent CompTypeBase vn -> Scope vn
+        bindVar :: Scope -> Ident -> Scope
         bindVar env (Ident name tp _) =
           let inedges = HS.toList $ aliases tp
               update (Bound tp')
@@ -455,7 +439,7 @@ binding bnds = check . local (`bindVars` bnds)
                 names = HS.fromList $ map identName bnds
                 divide s = (s `HS.intersection` names, s `HS.difference` names)
 
-bindingParams :: VarName vn => [TaggedParam vn] -> TypeM vn a -> TypeM vn a
+bindingParams :: [Parameter] -> TypeM a -> TypeM a
 bindingParams params m =
   -- We need to bind both the identifiers themselves, as well as any
   -- presently non-bound shape annotations.
@@ -472,7 +456,7 @@ bindingParams params m =
         inspectDim loc (NamedDim name) =
           Just $ Ident name (Prim $ Signed Int32) loc
 
-lookupVar :: VarName vn => ID vn -> SrcLoc -> TypeM vn (TaggedType vn)
+lookupVar :: VName -> SrcLoc -> TypeM Type
 lookupVar name pos = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
@@ -528,12 +512,9 @@ unifyTupleArrayElemTypes _ _ =
   Nothing
 
 -- | Determine if two types are identical, ignoring uniqueness.
--- Causes a '(TypeError vn)' if they fail to match, and otherwise returns
+-- Causes a 'TypeError' if they fail to match, and otherwise returns
 -- one of them.
-unifyExpTypes :: VarName vn =>
-                 TaggedExp CompTypeBase vn
-              -> TaggedExp CompTypeBase vn
-              -> TypeM vn (TaggedType vn)
+unifyExpTypes :: Exp -> Exp -> TypeM Type
 unifyExpTypes e1 e2 =
   maybe (bad $ UnifyError e1' (toStructural t1) e2' (toStructural t2)) return $
   unifyTypes (typeOf e1) (typeOf e2)
@@ -542,40 +523,25 @@ unifyExpTypes e1 e2 =
         e2' = untagExp e2
         t2  = toDecl $ typeOf e2'
 
--- | @checkAnnotation loc s t1 t2@ returns @t2@ if @t1@ contains no
--- type, and otherwise tries to unify them with 'unifyTypes'.  If
--- this fails, a 'BadAnnotation' is raised.
-checkAnnotation :: (VarName vn, TypeBox ty) =>
-                   SrcLoc -> String -> ty (ID vn) -> TaggedType vn
-                -> TypeM vn (TaggedType vn)
-checkAnnotation loc desc t1 t2 =
-  case unboxType t1 of
-    Nothing -> return t2
-    Just t1' -> case unifyTypes (t1' `setAliases` HS.empty) t2 of
-                  Nothing -> bad $ BadAnnotation loc desc
-                                   (toStructural t1')
-                                   (toStructural t2)
-                  Just t  -> return t
-
-anySignedType :: [TaggedType vn]
+anySignedType :: [Type]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
 
-anyUnsignedType :: [TaggedType vn]
+anyUnsignedType :: [Type]
 anyUnsignedType = map (Prim . Unsigned) [minBound .. maxBound]
 
-anyIntType :: [TaggedType vn]
+anyIntType :: [Type]
 anyIntType = anySignedType ++ anyUnsignedType
 
-anyFloatType :: [TaggedType vn]
+anyFloatType :: [Type]
 anyFloatType = map (Prim . FloatType) [minBound .. maxBound]
 
-anyNumberType :: [TaggedType vn]
+anyNumberType :: [Type]
 anyNumberType = anyIntType ++ anyFloatType
 
--- | @require ts e@ causes a '(TypeError vn)' if @typeOf e@ does not unify
+-- | @require ts e@ causes a 'TypeError' if @typeOf e@ does not unify
 -- with one of the types in @ts@.  Otherwise, simply returns @e@.
 -- This function is very useful in 'checkExp'.
-require :: VarName vn => [TaggedType vn] -> TaggedExp CompTypeBase vn -> TypeM vn (TaggedExp CompTypeBase vn)
+require :: [Type] -> Exp -> TypeM Exp
 require ts e
   | any (typeOf e `similarTo`) ts = return e
   | otherwise = bad $ UnexpectedType (srclocOf e') e'
@@ -583,33 +549,22 @@ require ts e
                       map toStructural ts
   where e' = untagExp e
 
-rowTypeM :: VarName vn => TaggedExp CompTypeBase vn -> TypeM vn (TaggedType vn)
+rowTypeM :: Exp -> TypeM Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
   where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
 
--- | Type check a program containing arbitrary type information,
+-- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
 -- information.
-checkProg :: (TypeBox ty, VarName vn) =>
-             ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
-checkProg = checkProg' True
-
--- | As 'checkProg', but don't check whether uniqueness constraints
--- are being upheld.  The uniqueness of types must still be correct.
-checkProgNoUniqueness :: (VarName vn, TypeBox ty) =>
-                         ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
-checkProgNoUniqueness = checkProg' False
-
-checkProg' :: (VarName vn, TypeBox ty) =>
-              Bool -> ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
-checkProg' checkoccurs prog = do
+checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
+checkProg prog = do
   ftable <- buildFtable
   let typeenv = Scope { envVtable = HM.empty
                         , envFtable = ftable
-                        , envCheckOccurences = checkoccurs
+                        , envCheckOccurences = True
                         }
-  fmap (untagProg . Prog) $
-          runTypeM typeenv src $ mapM (noDataflow . checkFun) $ progFunctions prog'
+  runTypeM typeenv src $
+    Prog <$> mapM (noDataflow . checkFun) (progFunctions prog')
   where
     (prog', src) = tagProg' blankNameSource prog
     -- To build the ftable we loop through the list of function
@@ -630,12 +585,11 @@ checkProg' checkoccurs prog = do
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
-initialFtable :: HM.HashMap Name (FunBinding vn)
+initialFtable :: HM.HashMap Name FunBinding
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (Prim t, map Prim ts)
 
-checkFun :: (TypeBox ty, VarName vn) =>
-            TaggedFunDec ty vn -> TypeM vn (TaggedFunDec CompTypeBase vn)
+checkFun :: TypeBox ty => FunDecBase ty VName -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   checkParams
   body' <- bindingParams params $ do
@@ -699,8 +653,7 @@ checkFun (fname, rettype, params, body, loc) = do
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
-checkExp :: (TypeBox ty, VarName vn) =>
-             TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn)
+checkExp :: TypeBox ty => ExpBase ty VName -> TypeM Exp
 
 checkExp (Literal val pos) =
   Literal <$> checkLiteral pos val <*> pure pos
@@ -710,7 +663,7 @@ checkExp (TupLit es pos) = do
   let res = TupLit es' pos
   return $ fromMaybe res (Literal <$> expToValue res <*> pure pos)
 
-checkExp (ArrayLit es t loc) = do
+checkExp (ArrayLit es _ loc) = do
   es' <- mapM checkExp es
   -- Find the universal type of the array arguments.
   et <- case es' of
@@ -723,10 +676,7 @@ checkExp (ArrayLit es t loc) = do
                     bad $ TypeError loc $ ppExp eleme ++ " is not of expected type " ++ ppType elemt ++ "."
             in foldM check (typeOf e) es''
 
-  -- Unify that type with the one given for the array literal.
-  t' <- checkAnnotation loc "array-element" t et
-
-  let lit = ArrayLit es' t' loc
+  let lit = ArrayLit es' et loc
   return $ fromMaybe lit (Literal <$> expToValue lit <*> pure loc)
 
 checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
@@ -763,14 +713,13 @@ checkExp (UnOp (ToUnsigned t) e loc) = do
   e' <- require anyNumberType =<< checkExp e
   return $ UnOp (ToUnsigned t) e' loc
 
-checkExp (If e1 e2 e3 t pos) = do
+checkExp (If e1 e2 e3 _ pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
   ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
   tell dflow
   brancht <- unifyExpTypes e2' e3'
-  t' <- checkAnnotation pos "branch result" t $
-        addAliases brancht
-        (`HS.difference` allConsumed (usageOccurences dflow))
+  let t' = addAliases brancht
+           (`HS.difference` allConsumed (usageOccurences dflow))
   return $ If e1' e2' e3' t' pos
 
 checkExp (Var ident) = do
@@ -778,16 +727,15 @@ checkExp (Var ident) = do
   observe ident'
   return $ Var ident'
 
-checkExp (Apply fname args rettype loc) = do
+checkExp (Apply fname args _ loc) = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
       (args', argflows) <- unzip <$> mapM (checkArg . fst) args
 
-      rettype' <- checkAnnotation loc "return" rettype $
-                  returnType (removeShapeAnnotations ftype)
-                  (map diet paramtypes) (map typeOf args')
+      let rettype' = returnType (removeShapeAnnotations ftype)
+                     (map diet paramtypes) (map typeOf args')
 
       checkFuncall (Just fname) loc paramtypes ftype argflows
 
@@ -800,11 +748,11 @@ checkExp (LetPat pat e body pos) = do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith (Ident dest destt destpos) src idxes ve body pos) = do
+checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
   idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
-  destt' <- checkAnnotation pos "source" destt $ identType src' `setAliases` HS.empty
-  let dest' = Ident dest destt' destpos
+  let destt' = identType src' `setAliases` HS.empty
+      dest' = Ident dest destt' destpos
 
   unless (unique $ identType src') $
     bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++
@@ -876,8 +824,7 @@ checkExp (Zip arrexps loc) = do
       bad $ TypeError (srclocOf arrexp) $
       "Type of expression is not array, but " ++ ppType arrt ++ "."
     return arrt
-  arrts' <- zipWithM (checkAnnotation loc "operand element") (map snd arrexps) arrts
-  return $ Zip (zip arrexps' arrts') loc
+  return $ Zip (zip arrexps' arrts) loc
 
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
@@ -1194,15 +1141,15 @@ checkExp (Write i v a pos) = do
           _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
 
-checkSOACArrayArg :: (TypeBox ty, VarName vn) =>
-                     TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
+checkSOACArrayArg :: TypeBox ty =>
+                     ExpBase ty VName -> TypeM (Exp, Arg)
 checkSOACArrayArg e = do
   (e', (t, dflow, argloc)) <- checkArg e
   case peelArray 1 t of
     Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (e', (rt, dflow, argloc))
 
-checkLiteral :: VarName vn => SrcLoc -> Value -> TypeM vn Value
+checkLiteral :: SrcLoc -> Value -> TypeM Value
 checkLiteral _ (PrimValue bv) = return $ PrimValue bv
 checkLiteral loc (TupValue vals) = do
   vals' <- mapM (checkLiteral loc) vals
@@ -1214,16 +1161,15 @@ checkLiteral loc (ArrayValue arr rt) = do
     _          -> return ()
   return $ ArrayValue (listArray (bounds arr) vals) rt
 
-checkIdent :: (TypeBox ty, VarName vn) =>
-              TaggedIdent ty vn -> TypeM vn (TaggedIdent CompTypeBase vn)
-checkIdent (Ident name t pos) = do
+checkIdent :: TypeBox ty =>
+              IdentBase ty VName -> TypeM Ident
+checkIdent (Ident name _ pos) = do
   vt <- lookupVar name pos
-  t' <- checkAnnotation pos ("variable " ++ textual (baseName name)) t vt
-  return $ Ident name t' pos
+  return $ Ident name vt pos
 
-checkBinOp :: (TypeBox ty, VarName vn) =>
-              BinOp -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
-           -> TypeM vn (TaggedExp CompTypeBase vn)
+checkBinOp :: TypeBox ty =>
+              BinOp -> ExpBase ty VName -> ExpBase ty VName -> ty VName -> SrcLoc
+           -> TypeM Exp
 checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus anyNumberType e1 e2 t pos
 checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus anyNumberType e1 e2 t pos
 checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow anyNumberType e1 e2 t pos
@@ -1247,31 +1193,28 @@ checkBinOp Leq e1 e2 t pos = checkRelOp Leq anyNumberType e1 e2 t pos
 checkBinOp Greater e1 e2 t pos = checkRelOp Greater anyNumberType e1 e2 t pos
 checkBinOp Geq e1 e2 t pos = checkRelOp Geq anyNumberType e1 e2 t pos
 
-checkRelOp :: (TypeBox ty, VarName vn) =>
-              BinOp -> [TaggedType vn]
-           -> TaggedExp ty vn -> TaggedExp ty vn
-           -> ty (ID vn) -> SrcLoc
-           -> TypeM vn (TaggedExp CompTypeBase vn)
-checkRelOp op tl e1 e2 t pos = do
+checkRelOp :: TypeBox ty =>
+              BinOp -> [Type]
+           -> ExpBase ty VName -> ExpBase ty VName
+           -> ty VName -> SrcLoc
+           -> TypeM Exp
+checkRelOp op tl e1 e2 _ pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
-  t' <- checkAnnotation pos (ppBinOp op ++ " result") t $ Prim Bool
-  return $ BinOp op e1' e2' t' pos
+  return $ BinOp op e1' e2' (Prim Bool) pos
 
-checkPolyBinOp :: (TypeBox ty, VarName vn) =>
-                  BinOp -> [TaggedType vn]
-               -> TaggedExp ty vn -> TaggedExp ty vn -> ty (ID vn) -> SrcLoc
-               -> TypeM vn (TaggedExp CompTypeBase vn)
-checkPolyBinOp op tl e1 e2 t pos = do
+checkPolyBinOp :: TypeBox ty =>
+                  BinOp -> [Type]
+               -> ExpBase ty VName -> ExpBase ty VName -> ty VName -> SrcLoc
+               -> TypeM Exp
+checkPolyBinOp op tl e1 e2 _ pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
-  t'' <- checkAnnotation pos (ppBinOp op ++ " result") t t'
-  return $ BinOp op e1' e2' t'' pos
+  return $ BinOp op e1' e2' t' pos
 
-sequentially :: VarName vn =>
-                TypeM vn a -> (a -> Dataflow vn -> TypeM vn b) -> TypeM vn b
+sequentially :: TypeM a -> (a -> Dataflow -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
   (a, m1flow) <- collectDataflow m1
   (b, m2flow) <- collectDataflow $ m2 a m1flow
@@ -1279,27 +1222,23 @@ sequentially m1 m2 = do
           usageOccurences m2flow
   return b
 
-checkBinding :: (VarName vn, TypeBox ty) =>
-                TaggedPattern ty vn -> TaggedType vn -> Dataflow vn
-             -> TypeM vn (TypeM vn a -> TypeM vn a, TaggedPattern CompTypeBase vn)
+checkBinding :: (TypeBox ty) =>
+                PatternBase ty VName -> Type -> Dataflow
+             -> TypeM (TypeM a -> TypeM a, Pattern)
 checkBinding pat et dflow = do
   (pat', idds) <-
     runStateT (checkBinding' pat et) []
   return (\m -> sequentially (tell dflow) (const . const $ binding idds m), pat')
-  where checkBinding' (Id (Ident name namet pos)) t = do
-          t' <- lift $
-                checkAnnotation (srclocOf pat)
-                ("binding of variable " ++ textual (baseName name)) namet t
-          let t'' = typeOf $ Var $ Ident name t' pos
-          add $ Ident name t'' pos
-          return $ Id $ Ident name t'' pos
+  where checkBinding' (Id (Ident name _ pos)) t = do
+          let t' = typeOf $ Var $ Ident name t pos
+          add $ Ident name t' pos
+          return $ Id $ Ident name t' pos
         checkBinding' (TuplePattern pats pos) (Tuple ts)
           | length pats == length ts = do
           pats' <- zipWithM checkBinding' pats ts
           return $ TuplePattern pats' pos
-        checkBinding' (Wildcard wt loc) t = do
-          t' <- lift $ checkAnnotation (srclocOf pat) "wildcard" wt t
-          return $ Wildcard t' loc
+        checkBinding' (Wildcard _ loc) t =
+          return $ Wildcard t loc
         checkBinding' _ _ =
           lift $ bad $ InvalidPatternError
                        (untagPattern errpat) (toStructural et)
@@ -1317,26 +1256,24 @@ checkBinding pat et dflow = do
         rmTypes (TuplePattern pats pos) = TuplePattern (map rmTypes pats) pos
         rmTypes (Wildcard _ loc) = Wildcard NoInfo loc
 
-validApply :: VarName vn =>
-              [DeclTypeBase (ID vn)] -> [TaggedType vn] -> Bool
+validApply :: [DeclTypeBase VName] -> [Type] -> Bool
 validApply expected got =
   length got == length expected &&
   and (zipWith subtypeOf (map toStructural got) (map toStructural expected))
 
-type Arg vn = (TaggedType vn, Dataflow vn, SrcLoc)
+type Arg = (Type, Dataflow, SrcLoc)
 
-argType :: Arg vn -> TaggedType vn
+argType :: Arg -> Type
 argType (t, _, _) = t
 
-checkArg :: (TypeBox ty, VarName vn) =>
-            TaggedExp ty vn -> TypeM vn (TaggedExp CompTypeBase vn, Arg vn)
+checkArg :: TypeBox ty =>
+            ExpBase ty VName -> TypeM (Exp, Arg)
 checkArg arg = do (arg', dflow) <- collectDataflow $ checkExp arg
                   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
-checkFuncall :: VarName vn =>
-                Maybe Name -> SrcLoc
-             -> [DeclTypeBase (ID vn)] -> DeclTypeBase (ID vn) -> [Arg vn]
-             -> TypeM vn ()
+checkFuncall :: Maybe Name -> SrcLoc
+             -> [DeclType] -> DeclType -> [Arg]
+             -> TypeM ()
 checkFuncall fname loc paramtypes _ args = do
   let argts = map argType args
 
@@ -1349,14 +1286,15 @@ checkFuncall fname loc paramtypes _ args = do
     let occurs = consumeArg argloc t d
     occur $ usageOccurences dflow `seqOccurences` occurs
 
-consumeArg :: SrcLoc -> TaggedType vn -> Diet -> [Occurence vn]
+consumeArg :: SrcLoc -> Type -> Diet -> [Occurence]
 consumeArg loc (Tuple ets) (TupleDiet ds) =
   concat $ zipWith (consumeArg loc) ets ds
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
-checkLambda :: (TypeBox ty, VarName vn) =>
-               TaggedLambda ty vn -> [Arg vn] -> TypeM vn (TaggedLambda CompTypeBase vn)
+checkLambda :: TypeBox ty =>
+               LambdaBase ty VName -> [Arg]
+            -> TypeM Lambda
 checkLambda (AnonymFun params body ret pos) args =
   case () of
     _ | length params == length args -> do
@@ -1383,15 +1321,14 @@ checkLambda (AnonymFun params body ret pos) args =
           return $ AnonymFun params body' ret' pos
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname curryargexps rettype pos) args = do
+checkLambda (CurryFun fname curryargexps _ pos) args = do
   (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      rettype' <- checkAnnotation pos "return" rettype $
-                  fromDecl $ removeShapeAnnotations rt
-      let paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
+      let rettype' = fromDecl $ removeShapeAnnotations rt
+          paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
       case () of
         _ | [(Tuple ets, _, _)] <- args,
             validApply paramtypes ets -> do
@@ -1423,13 +1360,11 @@ checkLambda (CurryFun fname curryargexps rettype pos) args = do
               _ <- checkLambda fun args
               return $ CurryFun fname curryargexps' rettype' pos
 
-checkLambda (UnOpFun unop paramtype rettype loc) [arg] = do
+checkLambda (UnOpFun unop _ _ loc) [arg] = do
   var <- newIdent "x" (argType arg) loc
   binding [var] $ do
     e <- checkExp $ UnOp unop (Var var) loc
-    paramtype' <- checkAnnotation loc "param" paramtype $ argType arg
-    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
-    return $ UnOpFun unop paramtype' rettype' loc
+    return $ UnOpFun unop (argType arg) (typeOf e) loc
 
 checkLambda (UnOpFun unop _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
@@ -1438,39 +1373,35 @@ checkLambda (UnOpFun unop _ _ loc) args =
 checkLambda (BinOpFun op _ _ rettype loc) args =
   checkPolyLambdaOp op [] rettype args loc
 
-checkLambda (CurryBinOpLeft binop x paramtype rettype loc) [arg] = do
+checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] = do
   x' <- checkExp x
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
     e <- checkExp $ BinOp binop (Var $ untype xvar) (Var $ untype y) NoInfo loc
-    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
-    paramtype' <- checkAnnotation loc "param" paramtype $ argType arg
-    return $ CurryBinOpLeft binop x' paramtype' rettype' loc
+    return $ CurryBinOpLeft binop x' (argType arg) (typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x paramtype rettype loc) [arg] = do
+checkLambda (CurryBinOpRight binop x _ _ loc) [arg] = do
   x' <- checkExp x
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
     e <- checkExp $ BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc
-    rettype' <- checkAnnotation loc "return" rettype $ typeOf e
-    paramtype' <- checkAnnotation loc "param" paramtype $ argType arg
-    return $ CurryBinOpRight binop x' paramtype' rettype' loc
+    return $ CurryBinOpRight binop x' (argType arg) (typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
 checkLambda (CurryBinOpRight binop _ _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkPolyLambdaOp :: (TypeBox ty, VarName vn) =>
-                     BinOp -> [TaggedExp ty vn] -> ty (ID vn) -> [Arg vn] -> SrcLoc
-                  -> TypeM vn (TaggedLambda CompTypeBase vn)
+checkPolyLambdaOp :: TypeBox ty =>
+                     BinOp -> [ExpBase ty VName] -> ty VName -> [Arg] -> SrcLoc
+                  -> TypeM Lambda
 checkPolyLambdaOp op curryargexps rettype args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   let argts = [ argt | (argt, _, _) <- args ]
@@ -1497,27 +1428,24 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
     args
   where fname = nameFromString $ ppBinOp op
 
-checkRetType :: VarName vn =>
-                SrcLoc -> TaggedDeclType vn -> TypeM vn ()
+checkRetType :: SrcLoc -> DeclType -> TypeM ()
 checkRetType loc (Tuple ts) = mapM_ (checkRetType loc) ts
 checkRetType _ (Prim _) = return ()
 checkRetType loc (Array at) =
   checkArrayType loc at
 
-checkArrayType :: VarName vn =>
-                  SrcLoc
-               -> DeclArrayTypeBase (ID vn)
-               -> TypeM vn ()
+checkArrayType :: SrcLoc
+               -> DeclArrayTypeBase VName
+               -> TypeM ()
 checkArrayType loc (PrimArray _ ds _ _) =
   mapM_ (checkDim loc) $ shapeDims ds
 checkArrayType loc (TupleArray cts ds _) = do
   mapM_ (checkDim loc) $ shapeDims ds
   mapM_ (checkTupleArrayElem loc) cts
 
-checkTupleArrayElem :: VarName vn =>
-                       SrcLoc
-                    -> DeclTupleArrayElemTypeBase (ID vn)
-                    -> TypeM vn ()
+checkTupleArrayElem :: SrcLoc
+                    -> DeclTupleArrayElemTypeBase VName
+                    -> TypeM ()
 checkTupleArrayElem _ PrimArrayElem{} =
   return ()
 checkTupleArrayElem loc (ArrayArrayElem at) =
@@ -1525,8 +1453,7 @@ checkTupleArrayElem loc (ArrayArrayElem at) =
 checkTupleArrayElem loc (TupleArrayElem cts) =
   mapM_ (checkTupleArrayElem loc) cts
 
-checkDim :: VarName vn =>
-            SrcLoc -> DimDecl (ID vn) -> TypeM vn ()
+checkDim :: SrcLoc -> DimDecl VName -> TypeM ()
 checkDim _ AnyDim =
   return ()
 checkDim _ (ConstDim _) =

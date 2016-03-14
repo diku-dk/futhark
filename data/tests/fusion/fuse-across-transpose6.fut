@@ -62,7 +62,7 @@ fun [[f64,num_und],num_dates]
            [[f64,num_und],num_dates] md_drifts,
            [[f64,num_und],num_dates] noises) =
   let c_rows = map( combineVs, zip(noises, md_vols, md_drifts) ) in
-  let e_rows = map( fn [f64] ([f64] x) => map(exp, x)
+  let e_rows = map( fn [f64] ([f64] x) => map(exp64, x)
                   , c_rows --map( combineVs, zip(noises, md_vols, md_drifts) )
                   )
   in  scan( fn [f64] ([f64] x, [f64] y) => zipWith(*, x, y)
