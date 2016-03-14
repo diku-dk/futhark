@@ -28,7 +28,7 @@ module Futhark.Analysis.HORepresentation.SOACNest
   , toSOAC
   )
   where
-
+v
 import Control.Applicative
 import Control.Monad
 import Data.Maybe
@@ -75,6 +75,8 @@ nestBodyParams (NewNest nesting (Reduce _ _ _ _ acc)) =
 nestBodyParams (NewNest nesting (Scan _ _ _ acc)) =
   foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting (Redomap _ _ _ _ _ acc)) =
+  foldNestParams nesting $ map subExpType acc
+nestBodyParams (NewNest nesting (Scanomap _ _ _ _ acc)) =
   foldNestParams nesting $ map subExpType acc
 nestBodyParams (NewNest nesting _) =
   foldNestParams nesting []
@@ -269,6 +271,11 @@ fromSOAC (SOAC.Redomap cs w comm ol l es as) =
   -- the outer combining function.
   SOACNest as <$> (Redomap cs w comm ol <$> lambdaToBody l <*>
                    pure (accSubExps l es))
+fromSOAC (SOAC.Scanomap cs w ol l es as) =
+  -- Never nested, because we need a way to test alpha-equivalence of
+  -- the outer combining function.
+  SOACNest as <$> (Scanomap cs w ol <$> lambdaToBody l <*>
+                   pure (accSubExps l es))
 fromSOAC (SOAC.Stream cs w form lam as) = do
   let es  = getStreamAccums form
       tes = zipWith TypedSubExp es $ map paramType $ take (length es) $
@@ -318,6 +325,10 @@ toSOAC (SOACNest as (Scan cs w b es)) =
   pure (zip (map subExpExp es) as)
 toSOAC (SOACNest as (Redomap cs w comm l b es)) =
   SOAC.Redomap cs w comm l <$>
+  bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
+  pure (map subExpExp es) <*> pure as
+toSOAC (SOACNest as (Scanomap cs w l b es)) =
+  SOAC.Scanomap cs w l <$>
   bodyToLambda (map subExpType es ++ map SOAC.inputRowType as) b <*>
   pure (map subExpExp es) <*> pure as
 toSOAC (SOACNest as (Stream cs w form lam)) = do
