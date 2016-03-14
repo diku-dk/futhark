@@ -102,6 +102,16 @@ instance Pretty PyExp where
     ppr None = text "None"
 
 instance Pretty PyStmt where
+  ppr (If cond [] []) =
+    text "if" <+> ppr cond <> text ":" </>
+    indent 2 (text "pass")
+
+  ppr (If cond [] fbranch) =
+    text "if" <+> ppr cond <> text ":" </>
+    indent 2 (text "pass") </>
+    text "else:" </>
+    indent 2 (stack $ map ppr fbranch)
+
   ppr (If cond tbranch []) =
     text "if" <+> ppr cond <> text ":" </>
     indent 2 (stack $ map ppr tbranch)
