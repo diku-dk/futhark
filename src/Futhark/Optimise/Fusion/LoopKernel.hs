@@ -188,6 +188,7 @@ removeUnusedParamsFromKer ker =
   case soac of
     SOAC.Map {}     -> ker { fsoac = soac' }
     SOAC.Redomap {} -> ker { fsoac = soac' }
+    SOAC.Scanomap {} -> ker { fsoac = soac' }
     _               -> ker
   where soac = fsoac ker
         l = SOAC.lambda soac
@@ -279,11 +280,29 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Redomap _ _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+          -- Get the lists from soac1 that still need to be returned
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ unfus_nms) $
               SOAC.Redomap (cs1++cs2) w comm2 lam21 res_lam' nes new_inp
+
+    ----------------------------
+    -- Scanomap Fusions:      --
+    ----------------------------
+
+    -- Map -> Scanomap Fusion
+    (SOAC.Scanomap _ _ lam21 _ nes _, SOAC.Map {})
+      | mapFusionOK outVars ker || horizFuse -> do
+      -- Create new inner reduction function
+      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+          -- Get the lists from soac1 that still need to be returned
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+      success (outNames ker ++ unfus_nms) $
+              SOAC.Scanomap (cs1++cs2) w lam21 res_lam' nes new_inp
+
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------

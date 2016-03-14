@@ -556,6 +556,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       -- a redomap always starts a new kernel
       reduceLike soac [outer_red, inner_red] nes
 
+
     Right soac@(SOAC.Scanomap _ _ _ outer_red inner_red nes _) -> do
       reduceLike soac [outer_red, inner_red] nes
 
