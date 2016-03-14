@@ -622,6 +622,7 @@ internaliseExp desc (E.Write i v a _) = do
   sis <- internaliseExpToVars "write_arg_i" i
   svs <- internaliseExpToVars "write_arg_v" v
   sas <- internaliseExpToVars "write_arg_a" a
+  -- FIXME: Generate bounds checking!
   letSubExps desc [I.PrimOp $ I.Write [] si sv sa | (si, sv, sa) <- zip3 sis svs sas]
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
