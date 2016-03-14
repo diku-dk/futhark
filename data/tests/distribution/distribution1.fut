@@ -21,7 +21,7 @@ fun [[f64,num_und],num_dates]
   mkPrices([f64,num_und] md_starts, [[f64,num_und],num_dates] md_vols,
 	   [[f64,num_und],num_dates] md_drifts, [[f64,num_und],num_dates] noises) =
   let e_rows = map( fn [f64] ([f64] x) =>
-                      map(exp, x)
+                      map(exp64, x)
                   , map(combineVs, zip(noises, md_vols, md_drifts)))
   in  scan( fn [f64] ([f64] x, [f64] y) =>
               map(*, zip(x, y))

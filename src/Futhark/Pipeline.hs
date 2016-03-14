@@ -24,7 +24,10 @@ import Control.Monad
 import Control.Monad.Writer.Strict hiding (pass)
 import Control.Monad.Except
 import Control.Monad.State
+import Control.Monad.Reader
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import System.IO
 
 import Prelude hiding (id, (.))
 
@@ -40,11 +43,15 @@ data CompileError = CompileError {
   , errorData :: T.Text
   }
 
-newtype FutharkM a = FutharkM (ExceptT CompileError (StateT VNameSource (WriterT Log IO)) a)
+data FutharkEnv = FutharkEnv { futharkVerbose :: Bool
+                             -- ^ If true, print log messages to standard error.
+                             }
+
+newtype FutharkM a = FutharkM (ExceptT CompileError (StateT VNameSource (ReaderT FutharkEnv IO)) a)
                      deriving (Applicative, Functor, Monad,
-                               MonadWriter Log,
                                MonadError CompileError,
                                MonadState VNameSource,
+                               MonadReader FutharkEnv,
                                MonadIO)
 
 instance MonadFreshNames FutharkM where
@@ -52,11 +59,13 @@ instance MonadFreshNames FutharkM where
   putNameSource = put
 
 instance MonadLogger FutharkM where
-  addLog = tell
+  addLog msg = do verb <- asks futharkVerbose
+                  when verb $ liftIO $ T.hPutStr stderr $ toText msg
 
-runFutharkM :: FutharkM a -> IO (Either CompileError a, Log)
-runFutharkM (FutharkM m) =
-  runWriterT (evalStateT (runExceptT m) blankNameSource)
+runFutharkM :: FutharkM a -> Bool -> IO (Either CompileError a)
+runFutharkM (FutharkM m) verbose =
+  runReaderT (evalStateT (runExceptT m) blankNameSource) newEnv
+  where newEnv = FutharkEnv verbose
 
 compileError :: (MonadError CompileError m, PP.Pretty err) =>
                 T.Text -> err -> m a
@@ -134,6 +143,6 @@ runPass :: Pass fromlore tolore
         -> FutharkM (Prog tolore)
 runPass pass prog = do
   (res, logged) <- runPassM (passFunction pass prog)
-  tell logged
+  addLog logged
   case res of Left err -> compileError err ()
               Right x  -> return x

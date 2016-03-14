@@ -266,7 +266,7 @@ fun f64 cnd0 (f64 d) =
    let k        = 1.0 / (1.0 + 0.2316419 * fabs(d)) in
    let p        = horner(k) in
    let rsqrt2pi = 0.39894228040143267793994605993438 in
-   rsqrt2pi * exp(-0.5*d*d) * p
+   rsqrt2pi * exp64(-0.5*d*d) * p
 
 fun f64 cnd (f64 d) =
    let c = cnd0(d)
@@ -276,12 +276,12 @@ fun f64 go ({bool,f64,f64,f64} x) =
    let {call, price, strike, years} = x in
    let r       = 0.08 in  -- riskfree
    let v       = 0.30 in  -- volatility
-   let v_sqrtT = v * sqrt(years) in
-   let d1      = (log (price / strike) + (r + 0.5 * v * v) * years) / v_sqrtT in
+   let v_sqrtT = v * sqrt64(years) in
+   let d1      = (log64(price / strike) + (r + 0.5 * v * v) * years) / v_sqrtT in
    let d2      = d1 - v_sqrtT in
    let cndD1   = cnd(d1) in
    let cndD2   = cnd(d2) in
-   let x_expRT = strike * exp (-r * years) in
+   let x_expRT = strike * exp64(-r * years) in
    if call then
      price * cndD1 - x_expRT * cndD2
    else
