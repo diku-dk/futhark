@@ -11,7 +11,6 @@ module Futhark.Compiler
        )
 where
 
-import Control.Applicative
 import Data.Monoid
 import Control.Monad
 import Control.Monad.IO.Class
@@ -30,7 +29,6 @@ import Futhark.Actions
 
 import qualified Language.Futhark as E
 import qualified Language.Futhark.TypeChecker as E
-import qualified Language.Futhark.Renamer as E
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
@@ -87,7 +85,7 @@ runPipelineOnSource :: FutharkConfig
                     -> FutharkM (Prog tolore)
 runPipelineOnSource config pipeline filename srccode = do
   parsed_prog <- parseSourceProgram filename srccode
-  (tagged_ext_prog, namesrc) <- E.tagProg <$> typeCheckSourceProgram parsed_prog
+  (tagged_ext_prog, namesrc) <- typeCheckSourceProgram parsed_prog
   putNameSource namesrc
   res <- internaliseProg tagged_ext_prog
   case res of
@@ -110,7 +108,7 @@ parseSourceProgram filename file_contents = do
     Right prog -> return prog
 
 typeCheckSourceProgram :: E.UncheckedProg
-                       -> FutharkM (E.ProgBase E.CompTypeBase I.Name)
+                       -> FutharkM (E.Prog, VNameSource)
 typeCheckSourceProgram prog =
   case E.checkProg prog of
     Left err    -> compileError (T.pack $ show err) ()
