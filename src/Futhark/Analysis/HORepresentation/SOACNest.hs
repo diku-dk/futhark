@@ -28,7 +28,7 @@ module Futhark.Analysis.HORepresentation.SOACNest
   , toSOAC
   )
   where
-v
+
 import Control.Applicative
 import Control.Monad
 import Data.Maybe
