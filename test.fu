@@ -1,0 +1,8 @@
+fun [int] f([int,n] a) =
+  let A = map(fn bool (int x) => x < 4, a) in
+  let A[1] = False in
+  let B = scan(&&, True, A) in
+  map(fn int (bool x, bool y) => if x && y then 2 else 0, zip(A,B))
+
+fun [int] main() =
+  f([1,2,3,4,2,6,7,1])
