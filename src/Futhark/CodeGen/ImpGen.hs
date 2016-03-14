@@ -678,9 +678,10 @@ defCompilePrimOp
                                       (Imp.ScalarVar index)
                                       (Imp.Constant (IntValue (Int32Value (-1)))))
                           body <- collect $ do
-                            valueExp <- readFromArray v [varIndex iter]
-                            emit $ Imp.SetScalar val valueExp
-                            copyDWIMDest dest [varIndex index] (Var val) []
+                            copyDWIMDest dest [varIndex index] (Var v) [varIndex iter]
+                            -- valueExp <- readFromArray v [varIndex iter]
+                            -- emit $ Imp.SetScalar val valueExp
+                            -- copyDWIMDest dest [varIndex index] (Var val) []
                           emit $ Imp.If cond Imp.Skip body))
 
 --                          let memLoc' = offsetArray memLoc (SE.Id index int32)
