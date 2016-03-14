@@ -334,7 +334,7 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
 
   -- Not sure this works without changing anything [Brian]
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-        if   is_redomap_scanomap || any isUnfusable out_nms || is_scanomap
+        if   is_redomap_scanomap || any isUnfusable out_nms
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
         else prodconsGreedyFuse          res (out_idds, soac)
   --
