@@ -698,6 +698,31 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
                 res_arr = drop acc_len res_lam
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
+evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do
+  startaccs <- mapM evalSubExp accexp
+  if res_len == acc_len
+  then do (acc, vals) <- foldM foldfun (startaccs, []) =<< (zip [0..] <$> soacArrays w arrexps)
+          arrays (map valueType acc) $ reverse vals
+  else do let startaccs'= (startaccs, [], replicate (res_len - acc_len) [])
+          (acc_res, vals,  arr_res) <- foldM foldfun' startaccs' =<<
+                                       (zip [0..] <$> soacArrays w arrexps)
+          vals' <- arrays (map valueType acc_res) $ reverse vals
+          arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
+          return $ vals' ++ arr_res_fut
+    where
+        lam_ret_tp     = lambdaReturnType innerfun
+        res_len        = length lam_ret_tp
+        acc_len        = length accexp
+        lam_ret_arr_tp = drop acc_len lam_ret_tp
+        foldfun  (acc, l) (i,x) = do
+            acc' <- applyLambda innerfun i $ acc ++ x
+            return (acc', acc':l)
+        foldfun' (acc, l, arr) (i,x) = do
+            res_lam <- applyLambda innerfun i $ acc ++ x
+            let res_acc = take acc_len res_lam
+                res_arr = drop acc_len res_lam
+                acc_arr = zipWith (:) res_arr arr
+            return (res_acc, res_acc:l, acc_arr)
 
 evalSOAC (Write _cs _ts i vs as) = do
   i' <- lookupVar i
