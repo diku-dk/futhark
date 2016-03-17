@@ -163,6 +163,25 @@ transformSOAC pat (Scan cs width fun args) = do
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
+  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun 
+  arr_ts <- mapM lookupType arrexps  
+  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness  
+                         | t <- map_arr_tps ]
+  let innerfun' = Alias.analyseLambda innerfun 
+      consumed = consumedInBody $ lambdaBody innerfun' 
+  arrexps' <- forM (zip
+                    (drop (length accexps) (lambdaParams innerfun))
+                    arrexps) $ \(p,a) ->
+    if paramName p `HS.member` consumed then
+      letExp (baseString a ++ "_fot_redomap_copy") $ PrimOp $ Copy a
+    else return a
+  pat' <- discardPattern arr_ts pat
+  letBind_ pat' =<<
+    doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
+    (constant (0::Int32))
+
+
+transformSOAC pat (Scanomap cs width  _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun -- [Brian] Drop (length of subexp) i lamdaReturnType innLambda (list of return types)
   arr_ts <- mapM lookupType arrexps  -- Look up all return types in the list of variable names. 
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness  -- Takes a list of types and returns list of vnames packed in monad. (not sure why...)
@@ -173,7 +192,7 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
                     (drop (length accexps) (lambdaParams innerfun))
                     arrexps) $ \(p,a) ->
     if paramName p `HS.member` consumed then
-      letExp (baseString a ++ "_fot_redomap_copy") $ PrimOp $ Copy a
+      letExp (baseString a ++ "_fot_scanomap_copy") $ PrimOp $ Copy a
     else return a
   pat' <- discardPattern arr_ts pat
   letBind_ pat' =<<
