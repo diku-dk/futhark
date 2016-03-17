@@ -163,11 +163,11 @@ transformSOAC pat (Scan cs width fun args) = do
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
-  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
-  arr_ts <- mapM lookupType arrexps
-  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
+  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun -- [Brian] Drop (length of subexp) i lamdaReturnType innLambda (list of return types)
+  arr_ts <- mapM lookupType arrexps  -- Look up all return types in the list of variable names. 
+  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness  -- Takes a list of types and returns list of vnames packed in monad. (not sure why...)
                          | t <- map_arr_tps ]
-  let innerfun' = Alias.analyseLambda innerfun
+  let innerfun' = Alias.analyseLambda innerfun -- 
       consumed = consumedInBody $ lambdaBody innerfun'
   arrexps' <- forM (zip
                     (drop (length accexps) (lambdaParams innerfun))
