@@ -167,8 +167,8 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   arr_ts <- mapM lookupType arrexps  -- Look up all return types in the list of variable names. 
   maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness  -- Takes a list of types and returns list of vnames packed in monad. (not sure why...)
                          | t <- map_arr_tps ]
-  let innerfun' = Alias.analyseLambda innerfun -- 
-      consumed = consumedInBody $ lambdaBody innerfun'
+  let innerfun' = Alias.analyseLambda innerfun -- Not sure what this does.. maybe check for variables in innerfun ? 
+      consumed = consumedInBody $ lambdaBody innerfun' -- Presume it checks for variables consumed, that are used in innerfun
   arrexps' <- forM (zip
                     (drop (length accexps) (lambdaParams innerfun))
                     arrexps) $ \(p,a) ->
