@@ -614,18 +614,19 @@ maybeDistributeBinding (Let pat _ (Op (Reduce cs w comm lam input))) acc
 --
 -- If the scan cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeBinding bnd@(Let _ _ (Op (Scan cs w lam input))) acc =
+maybeDistributeBinding bnd@(Let pat _ (Op (Scan cs w lam input))) acc =
   distributeSingleBinding acc bnd >>= \case
-    Just (kernels, _, nest, acc') -> do
-      lam' <- FOT.transformLambda lam
-      localScope (typeEnvFromKernelAcc acc') $
-        segmentedScanKernel nest cs w lam' input >>= \case
-          Nothing ->
-            addBindingToKernel bnd acc
-          Just bnds -> do
-            addKernels kernels
-            addKernel bnds
-            return acc'
+    Just (kernels, res, nest, acc')
+      | Just perm <- res `isPermutationOf` map Var (patternNames pat) -> do
+          lam' <- FOT.transformLambda lam
+          localScope (typeEnvFromKernelAcc acc') $
+            segmentedScanKernel nest perm cs w lam' input >>= \case
+              Nothing ->
+                addBindingToKernel bnd acc
+              Just bnds -> do
+                addKernels kernels
+                addKernel bnds
+                return acc'
     _ ->
       addBindingToKernel bnd acc
 
@@ -634,18 +635,19 @@ maybeDistributeBinding bnd@(Let _ _ (Op (Scan cs w lam input))) acc =
 --
 -- If the reduction cannot be distributed by itself, it will be
 -- sequentialised in the default case for this function.
-maybeDistributeBinding bnd@(Let _pat _ (Op (Reduce cs w comm lam input))) acc =
+maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
   distributeSingleBinding acc bnd >>= \case
-    Just (kernels, _, nest, acc') ->
-      localScope (typeEnvFromKernelAcc acc') $ do
-        lam' <- FOT.transformLambda lam
-        regularSegmentedReduceKernel nest cs w comm lam' input >>= \case
-          Nothing ->
-            addBindingToKernel bnd acc
-          Just bnds -> do
-            addKernels kernels
-            addKernel bnds
-            return acc'
+    Just (kernels, res, nest, acc')
+      | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
+          localScope (typeEnvFromKernelAcc acc') $ do
+          lam' <- FOT.transformLambda lam
+          regularSegmentedReduceKernel nest perm cs w comm lam' input >>= \case
+            Nothing ->
+              addBindingToKernel bnd acc
+            Just bnds -> do
+              addKernels kernels
+              addKernel bnds
+              return acc'
     _ ->
       addBindingToKernel bnd acc
 
@@ -697,10 +699,11 @@ distributeSingleBinding acc bnd = do
                                    })
 
 segmentedScanKernel :: KernelNest
+                    -> [Int]
                     -> Certificates -> SubExp -> Out.Lambda -> [(SubExp, VName)]
                     -> KernelM (Maybe [Out.Binding])
-segmentedScanKernel nest cs segment_size lam scan_inps =
-  isSegmentedOp nest segment_size lam scan_inps $
+segmentedScanKernel nest perm cs segment_size lam scan_inps =
+  isSegmentedOp nest perm segment_size lam scan_inps $
   \pat flat_pat _num_segments total_num_elements scan_inps' -> do
     blockedSegmentedScan segment_size flat_pat cs total_num_elements lam scan_inps'
 
@@ -713,10 +716,11 @@ segmentedScanKernel nest cs segment_size lam scan_inps =
           PrimOp $ Reshape [] (map DimNew dims) flat
 
 regularSegmentedReduceKernel :: KernelNest
-                      -> Certificates -> SubExp -> Commutativity -> Out.Lambda -> [(SubExp, VName)]
-                      -> KernelM (Maybe [Out.Binding])
-regularSegmentedReduceKernel nest cs segment_size comm lam reduce_inps =
-  isSegmentedOp nest segment_size lam reduce_inps $
+                             -> [Int]
+                             -> Certificates -> SubExp -> Commutativity -> Out.Lambda -> [(SubExp, VName)]
+                             -> KernelM (Maybe [Out.Binding])
+regularSegmentedReduceKernel nest perm cs segment_size comm lam reduce_inps =
+  isSegmentedOp nest perm segment_size lam reduce_inps $
   \pat flat_pat num_segments total_num_elements reduce_inps' ->
     if False -- Using a scan seems an efficient general method.
       then regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps'
@@ -726,6 +730,7 @@ regularSegmentedReduceKernel nest cs segment_size comm lam reduce_inps =
            cs total_num_elements lam reduce_inps'
 
 isSegmentedOp :: KernelNest
+              -> [Int]
               -> SubExp
               -> Out.Lambda
               -> [(SubExp, VName)]
@@ -736,7 +741,7 @@ isSegmentedOp :: KernelNest
                   -> [(SubExp, VName)]
                   -> Binder Out.Kernels ())
               -> KernelM (Maybe [Out.Binding])
-isSegmentedOp nest segment_size lam scan_inps m = runMaybeT $ do
+isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
   -- the outermost loop nesting or free in the loop nest, and that
   -- none of the names bound by the loop nest are used in the lambda.
@@ -794,7 +799,8 @@ isSegmentedOp nest segment_size lam scan_inps m = runMaybeT $ do
 
     op_inps' <- mapM flatten =<< sequence mk_inps
 
-    let pat = loopNestingPattern $ fst nest
+    let pat = Pattern [] $ rearrangeShape perm $
+              patternValueElements $ loopNestingPattern $ fst nest
         flatPatElem pat_elem t = do
           let t' = arrayOfRow t total_num_elements
           name <- newVName $ baseString (patElemName pat_elem) ++ "_flat"
