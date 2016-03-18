@@ -27,7 +27,7 @@ import Prelude
 
 import Language.Futhark
 import Language.Futhark.Renamer
-  (tagProg', untagExp, untagPattern)
+  (tagProg', untagPattern)
 import Futhark.FreshNames hiding (newID, newName)
 import qualified Futhark.FreshNames
 import Futhark.Util.Pretty
@@ -40,12 +40,10 @@ data TypeError =
     TypeError SrcLoc String
   -- ^ A general error happened at the given position and
   -- for the given reason.
-  | UnifyError
-    (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
-    (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ())
+  | UnifyError SrcLoc (TypeBase Rank NoInfo ()) SrcLoc (TypeBase Rank NoInfo ())
   -- ^ Types of two expressions failed to unify.
   | UnexpectedType SrcLoc
-    (ExpBase CompTypeBase Name) (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
+    (TypeBase Rank NoInfo ()) [TypeBase Rank NoInfo ()]
   -- ^ Expression of type was not one of the expected
   -- types.
   | ReturnTypeError SrcLoc Name (TypeBase Rank NoInfo ()) (TypeBase Rank NoInfo ())
@@ -110,19 +108,17 @@ data TypeError =
 instance Show TypeError where
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
-  show (UnifyError e1 t1 e2 t2) =
+  show (UnifyError e1loc t1 e2loc t2) =
     "Cannot unify type " ++ pretty t1 ++
-    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e1) ++
+    " of expression at " ++ locStr e1loc ++
     "\nwith type " ++ pretty t2 ++
-    " of expression\n" ++ prettyDoc 160 (indent 2 $ ppr e2)
-  show (UnexpectedType loc e _ []) =
-    "Type of expression at " ++ locStr loc ++ "\n" ++
-    prettyDoc 160 (indent 2 $ ppr e) ++
-    "\ncannot have any type - possibly a bug in the type checker."
-  show (UnexpectedType loc e t ts) =
-    "Type of expression at " ++ locStr loc ++ "\n" ++
-    prettyDoc 160 (indent 2 $ ppr e) ++
-    "\nmust be one of " ++ intercalate ", " (map pretty ts) ++ ", but is " ++
+    " of expression at " ++ locStr e2loc
+  show (UnexpectedType loc _ []) =
+    "Type of expression at " ++ locStr loc ++
+    "cannot have any type - possibly a bug in the type checker."
+  show (UnexpectedType loc t ts) =
+    "Type of expression at " ++ locStr loc ++ " must be one of " ++
+    intercalate ", " (map pretty ts) ++ ", but is " ++
     pretty t ++ "."
   show (ReturnTypeError pos fname rettype bodytype) =
     "Declaration of function " ++ nameToString fname ++ " at " ++ locStr pos ++
@@ -516,12 +512,12 @@ unifyTupleArrayElemTypes _ _ =
 -- one of them.
 unifyExpTypes :: Exp -> Exp -> TypeM Type
 unifyExpTypes e1 e2 =
-  maybe (bad $ UnifyError e1' (toStructural t1) e2' (toStructural t2)) return $
+  maybe (bad $ UnifyError
+         (srclocOf e1) (toStructural t1)
+         (srclocOf e2) (toStructural t2)) return $
   unifyTypes (typeOf e1) (typeOf e2)
-  where e1' = untagExp e1
-        t1  = toDecl $ typeOf e1'
-        e2' = untagExp e2
-        t2  = toDecl $ typeOf e2'
+  where t1 = typeOf e1
+        t2 = typeOf e2
 
 anySignedType :: [Type]
 anySignedType = map (Prim . Signed) [minBound .. maxBound]
@@ -544,10 +540,9 @@ anyNumberType = anyIntType ++ anyFloatType
 require :: [Type] -> Exp -> TypeM Exp
 require ts e
   | any (typeOf e `similarTo`) ts = return e
-  | otherwise = bad $ UnexpectedType (srclocOf e') e'
-                      (toStructural $ typeOf e') $
+  | otherwise = bad $ UnexpectedType (srclocOf e)
+                      (toStructural $ typeOf e) $
                       map toStructural ts
-  where e' = untagExp e
 
 rowTypeM :: Exp -> TypeM Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
