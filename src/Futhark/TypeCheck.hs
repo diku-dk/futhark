@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -194,7 +194,6 @@ instance Checkable lore => Show (TypeError lore) where
 type FunBinding lore = (RetType lore, [FParam lore])
 
 data VarBinding lore = Bound (NameInfo (Aliases lore))
-                     | WasConsumed
 
 data Usage = Consumed
            | Observed
@@ -296,7 +295,6 @@ instance Checkable lore =>
   lookupType = fmap typeOf . lookupVar
   askScope = asks $ HM.fromList . mapMaybe varType . HM.toList . envVtable
     where varType (name, Bound attr) = Just (name, attr)
-          varType (_, WasConsumed) = Nothing
 
 runTypeM :: Env lore -> TypeM lore a
          -> Either (TypeError lore) a
@@ -376,8 +374,7 @@ consumeOnlyParams consumable m = do
   (x, os) <- collectOccurences m
   tell . Consumption =<< mapM inspect os
   return x
-  where inspect :: Occurence -> TypeM lore Occurence
-        inspect o = do
+  where inspect o = do
           new_consumed <- mconcat <$> mapM wasConsumed (HS.toList $ consumed o)
           return o { consumed = new_consumed }
         wasConsumed v
@@ -407,17 +404,19 @@ binding bnds = check . local (`bindVars` bnds)
         boundnames = HM.keys bnds
         boundnameset = HS.fromList boundnames
 
-        bindVar env name attr =
-          let names = expandAliases (aliases attr) env
-              inedges = HS.toList names
+        bindVar env name (LetInfo (Names' als, attr)) =
+          let als' = expandAliases als env
+              inedges = HS.toList als'
               update (Bound (LetInfo (Names' thesenames, thisattr))) =
                 Bound $ LetInfo (Names' $ HS.insert name thesenames, thisattr)
               update b = b
           in env { envVtable =
-                      HM.insert name (Bound attr) $
+                      HM.insert name (Bound $ LetInfo (Names' als', attr)) $
                       adjustSeveral update inedges $
                       envVtable env
                  }
+        bindVar env name attr =
+          env { envVtable = HM.insert name (Bound attr) $ envVtable env }
 
         adjustSeveral f = flip $ foldl $ flip $ HM.adjust f
 
@@ -439,7 +438,6 @@ lookupVar name = do
   case bnd of
     Nothing -> bad $ UnknownVariableError name
     Just (Bound attr) -> return attr
-    Just WasConsumed  -> bad $ UseAfterConsume name
 
 lookupAliases :: VName -> TypeM lore Names
 lookupAliases name = do
