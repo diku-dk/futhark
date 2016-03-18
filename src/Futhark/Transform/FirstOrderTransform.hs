@@ -162,6 +162,39 @@ transformSOAC pat (Scan cs width fun args) = do
   where (accexps, arrexps) = unzip args
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
+transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
+  -- Name accumulators, do something with the corresponding expressions
+  (acc, initacc) <- newFold $ zip accexps accts
+  -- Get types of input arrays
+  arrts <- mapM lookupType arrexps
+  -- Create output arrays.
+  initarr <- resultArray arrts
+  -- Name Outputarrays?
+  arr <- mapM (newIdent "scan_arr" ) arrts
+  -- Create arrays for our map results.
+  initmaparrs <- resultArray map_res_ts
+  mapoutarrs <- mapM (newIdent "scanomap_map_outarr") map_res_ts
+  -- Get the names
+  let arr_names = map identName arr
+      map_names = map identName mapoutarrs
+      merge = loopMerge (acc++arr++mapoutarrs) (initacc++map Var initarr ++ map Var initmaparrs)
+  loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
+    -- Bind function parameters to arguments.
+    x <- bindLambda fun (map (PrimOp . SubExp . Var . identName) acc ++
+                              index cs arrexps (Var i))
+    -- Set function destinations
+    dests <- letwith cs arr_names (pexp (Var i)) $ map (PrimOp . SubExp) (take (length accexps) x)
+    mapdests <- letwith cs map_names (pexp (Var i)) $ map (PrimOp . SubExp) (drop (length accexps) x)
+    irows <- letSubExps "row" $ index cs dests $ Var i
+    rowcopies <- mapM copyIfArray irows
+    return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
+  pat' <- discardPattern (map identType acc) pat
+  letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
+  where i = lambdaIndex fun
+        accts = take (length accexps) $ map paramType $ lambdaParams fun
+        map_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
+                     | t <- (drop (length accexps) (lambdaReturnType fun))]
+
 transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun 
   arr_ts <- mapM lookupType arrexps  
@@ -180,23 +213,6 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
     doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
     (constant (0::Int32))
 
-
-transformSOAC pat (Scanomap cs width  _ innerfun accexps arrexps) = do
-  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun -- [Brian] Drop (length of subexp) i lamdaReturnType innLambda (list of return types)
-  arr_ts <- mapM lookupType arrexps  -- Look up all return types in the list of variable names. 
-  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness  -- Takes a list of types and returns list of vnames packed in monad. (not sure why...)
-                         | t <- map_arr_tps ]
-  let innerfun' = Alias.analyseLambda innerfun -- Not sure what this does.. maybe check for variables in innerfun ? 
-      consumed = consumedInBody $ lambdaBody innerfun' -- Presume it checks for variables consumed, that are used in innerfun
-  arrexps' <- forM (zip
-                    (drop (length accexps) (lambdaParams innerfun))
-                    arrexps) $ \(p,a) ->
-    if paramName p `HS.member` consumed then
-      letExp (baseString a ++ "_fot_scanomap_copy") $ PrimOp $ Copy a
-    else return a
-  pat' <- discardPattern arr_ts pat
-  letBind_ pat' =<<
-    doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
 -- Assumming size of @A@ is @m@, @?0@ has a known upper bound @U@, and @?1@
