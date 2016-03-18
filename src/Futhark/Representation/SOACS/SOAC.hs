@@ -393,10 +393,10 @@ typeCheckSOAC (Scanomap ass size outerfun innerfun accexps arrexps) = do
   let acct = map TC.argType accargs
       outerRetType = lambdaReturnType outerfun
   unless (acct == innerAccType ) $
-    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but scanomap inner reduction returns type " ++ prettyTuple innerReturnType ++ "."
   unless (acct == outerRetType) $
-    TC.bad $ TC.TypeError noLoc $ "Initial value is of type " ++ prettyTuple acct ++
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
           ", but scanomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
 typeCheckSOAC (Stream ass size form lam arrexps) = do
   let accexps = getStreamAccums form
