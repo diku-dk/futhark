@@ -574,7 +574,7 @@ initialFtable :: HM.HashMap Name FunBinding
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (Prim t, map Prim ts)
 
-checkFun :: TypeBox ty => FunDecBase ty VName -> TypeM FunDec
+checkFun :: FunDecBase NoInfo VName -> TypeM FunDec
 checkFun (fname, rettype, params, body, loc) = do
   checkParams
   body' <- bindingParams params $ do
@@ -638,7 +638,7 @@ checkFun (fname, rettype, params, body, loc) = do
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
-checkExp :: TypeBox ty => ExpBase ty VName -> TypeM Exp
+checkExp :: ExpBase NoInfo VName -> TypeM Exp
 
 checkExp (Literal val pos) =
   Literal <$> checkLiteral pos val <*> pure pos
@@ -664,7 +664,7 @@ checkExp (ArrayLit es _ loc) = do
   let lit = ArrayLit es' et loc
   return $ fromMaybe lit (Literal <$> expToValue lit <*> pure loc)
 
-checkExp (BinOp op e1 e2 t pos) = checkBinOp op e1 e2 t pos
+checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
 checkExp (UnOp Not e pos) = do
   e' <- require [Prim Bool] =<< checkExp e
@@ -733,7 +733,7 @@ checkExp (LetPat pat e body pos) = do
     body' <- checkExp body
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
+checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
   src' <- checkIdent src
   idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
   let destt' = identType src' `setAliases` HS.empty
@@ -750,7 +750,7 @@ checkExp (LetWith (Ident dest _ destpos) src idxes ve body pos) = do
       sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
         when (identName src `HS.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
-        (scope, _) <- checkBinding (Id dest') destt' mempty
+        (scope, _) <- checkBinding (Id d) destt' mempty
         body' <- consuming src' $ scope $ checkExp body
         return $ LetWith dest' src' idxes' ve' body' pos
 
@@ -1088,8 +1088,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     form'
                     loopbody' letbody' loc
 
-checkSOACArrayArg :: TypeBox ty =>
-                     ExpBase ty VName -> TypeM (Exp, Arg)
+checkSOACArrayArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
 checkSOACArrayArg e = do
   (e', (t, dflow, argloc)) <- checkArg e
   case peelArray 1 t of
@@ -1108,54 +1107,49 @@ checkLiteral loc (ArrayValue arr rt) = do
     _          -> return ()
   return $ ArrayValue (listArray (bounds arr) vals) rt
 
-checkIdent :: TypeBox ty =>
-              IdentBase ty VName -> TypeM Ident
+checkIdent :: IdentBase NoInfo VName -> TypeM Ident
 checkIdent (Ident name _ pos) = do
   vt <- lookupVar name pos
   return $ Ident name vt pos
 
-checkBinOp :: TypeBox ty =>
-              BinOp -> ExpBase ty VName -> ExpBase ty VName -> ty VName -> SrcLoc
+checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
-checkBinOp Plus e1 e2 t pos = checkPolyBinOp Plus anyNumberType e1 e2 t pos
-checkBinOp Minus e1 e2 t pos = checkPolyBinOp Minus anyNumberType e1 e2 t pos
-checkBinOp Pow e1 e2 t pos = checkPolyBinOp Pow anyNumberType e1 e2 t pos
-checkBinOp Times e1 e2 t pos = checkPolyBinOp Times anyNumberType e1 e2 t pos
-checkBinOp Divide e1 e2 t pos = checkPolyBinOp Divide anyNumberType e1 e2 t pos
-checkBinOp Mod e1 e2 t pos = checkPolyBinOp Mod anyIntType e1 e2 t pos
-checkBinOp Quot e1 e2 t pos = checkPolyBinOp Quot anyIntType e1 e2 t pos
-checkBinOp Rem e1 e2 t pos = checkPolyBinOp Rem anyIntType e1 e2 t pos
-checkBinOp ShiftR e1 e2 t pos = checkPolyBinOp ShiftR anyIntType e1 e2 t pos
-checkBinOp ZShiftR e1 e2 t pos = checkPolyBinOp ZShiftR anyIntType e1 e2 t pos
-checkBinOp ShiftL e1 e2 t pos = checkPolyBinOp ShiftL anyIntType e1 e2 t pos
-checkBinOp Band e1 e2 t pos = checkPolyBinOp Band anyIntType e1 e2 t pos
-checkBinOp Xor e1 e2 t pos = checkPolyBinOp Xor anyIntType e1 e2 t pos
-checkBinOp Bor e1 e2 t pos = checkPolyBinOp Bor anyIntType e1 e2 t pos
-checkBinOp LogAnd e1 e2 t pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 t pos
-checkBinOp LogOr e1 e2 t pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 t pos
-checkBinOp Equal e1 e2 t pos = checkRelOp Equal anyNumberType e1 e2 t pos
-checkBinOp NotEqual e1 e2 t pos = checkRelOp NotEqual anyNumberType e1 e2 t pos
-checkBinOp Less e1 e2 t pos = checkRelOp Less anyNumberType e1 e2 t pos
-checkBinOp Leq e1 e2 t pos = checkRelOp Leq anyNumberType e1 e2 t pos
-checkBinOp Greater e1 e2 t pos = checkRelOp Greater anyNumberType e1 e2 t pos
-checkBinOp Geq e1 e2 t pos = checkRelOp Geq anyNumberType e1 e2 t pos
+checkBinOp Plus e1 e2 pos = checkPolyBinOp Plus anyNumberType e1 e2 pos
+checkBinOp Minus e1 e2 pos = checkPolyBinOp Minus anyNumberType e1 e2 pos
+checkBinOp Pow e1 e2 pos = checkPolyBinOp Pow anyNumberType e1 e2 pos
+checkBinOp Times e1 e2 pos = checkPolyBinOp Times anyNumberType e1 e2 pos
+checkBinOp Divide e1 e2 pos = checkPolyBinOp Divide anyNumberType e1 e2 pos
+checkBinOp Mod e1 e2 pos = checkPolyBinOp Mod anyIntType e1 e2 pos
+checkBinOp Quot e1 e2 pos = checkPolyBinOp Quot anyIntType e1 e2 pos
+checkBinOp Rem e1 e2 pos = checkPolyBinOp Rem anyIntType e1 e2 pos
+checkBinOp ShiftR e1 e2 pos = checkPolyBinOp ShiftR anyIntType e1 e2 pos
+checkBinOp ZShiftR e1 e2 pos = checkPolyBinOp ZShiftR anyIntType e1 e2 pos
+checkBinOp ShiftL e1 e2 pos = checkPolyBinOp ShiftL anyIntType e1 e2 pos
+checkBinOp Band e1 e2 pos = checkPolyBinOp Band anyIntType e1 e2 pos
+checkBinOp Xor e1 e2 pos = checkPolyBinOp Xor anyIntType e1 e2 pos
+checkBinOp Bor e1 e2 pos = checkPolyBinOp Bor anyIntType e1 e2 pos
+checkBinOp LogAnd e1 e2 pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 pos
+checkBinOp LogOr e1 e2 pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 pos
+checkBinOp Equal e1 e2 pos = checkRelOp Equal anyNumberType e1 e2 pos
+checkBinOp NotEqual e1 e2 pos = checkRelOp NotEqual anyNumberType e1 e2 pos
+checkBinOp Less e1 e2 pos = checkRelOp Less anyNumberType e1 e2 pos
+checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
+checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
+checkBinOp Geq e1 e2 pos = checkRelOp Geq anyNumberType e1 e2 pos
 
-checkRelOp :: TypeBox ty =>
-              BinOp -> [Type]
-           -> ExpBase ty VName -> ExpBase ty VName
-           -> ty VName -> SrcLoc
+checkRelOp :: BinOp -> [Type]
+           -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
-checkRelOp op tl e1 e2 _ pos = do
+checkRelOp op tl e1 e2 pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Prim Bool) pos
 
-checkPolyBinOp :: TypeBox ty =>
-                  BinOp -> [Type]
-               -> ExpBase ty VName -> ExpBase ty VName -> ty VName -> SrcLoc
+checkPolyBinOp :: BinOp -> [Type]
+               -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
                -> TypeM Exp
-checkPolyBinOp op tl e1 e2 _ pos = do
+checkPolyBinOp op tl e1 e2 pos = do
   e1' <- require tl =<< checkExp e1
   e2' <- require tl =<< checkExp e2
   t' <- unifyExpTypes e1' e2'
@@ -1169,8 +1163,7 @@ sequentially m1 m2 = do
           usageOccurences m2flow
   return b
 
-checkBinding :: (TypeBox ty) =>
-                PatternBase ty VName -> Type -> Dataflow
+checkBinding :: PatternBase NoInfo VName -> Type -> Dataflow
              -> TypeM (TypeM a -> TypeM a, Pattern)
 checkBinding pat et dflow = do
   (pat', idds) <-
@@ -1213,8 +1206,7 @@ type Arg = (Type, Dataflow, SrcLoc)
 argType :: Arg -> Type
 argType (t, _, _) = t
 
-checkArg :: TypeBox ty =>
-            ExpBase ty VName -> TypeM (Exp, Arg)
+checkArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
 checkArg arg = do (arg', dflow) <- collectDataflow $ checkExp arg
                   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
@@ -1239,8 +1231,7 @@ consumeArg loc (Tuple ets) (TupleDiet ds) =
 consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
-checkLambda :: TypeBox ty =>
-               LambdaBase ty VName -> [Arg]
+checkLambda :: LambdaBase NoInfo VName -> [Arg]
             -> TypeM Lambda
 checkLambda (AnonymFun params body ret pos) args =
   case () of
@@ -1261,9 +1252,10 @@ checkLambda (AnonymFun params body ret pos) args =
                                     removeShapeAnnotations .
                                     identType) params)
                       pos
-          let tupfun = AnonymFun [toParam tupparam] tuplet ret pos
-              tuplet = LetPat (TuplePattern (map (Id . fromParam) params) pos)
-                              (Var tupparam) body' pos
+          let untype ident = ident { identType = NoInfo }
+              tupfun = AnonymFun [toParam tupparam] tuplet ret pos
+              tuplet = LetPat (TuplePattern (map (Id . untype) params) pos)
+                              (Var $ untype tupparam) body pos
           _ <- checkLambda tupfun args
           return $ AnonymFun params body' ret' pos
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
@@ -1285,12 +1277,13 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
                          map uniqueness paramtypes
               params <- zipWithM mkparam [(0::Int)..] paramtypes'
               tupparam <- newIdent "x" (removeShapeAnnotations tupt) pos
-              let tuplet = LetPat (TuplePattern (map Id params) pos) (Var tupparam) body pos
+              let tuplet = LetPat (TuplePattern (map (Id . untype) params) pos)
+                           (Var $ untype tupparam) body pos
                   tupfun = AnonymFun [toParam tupparam] tuplet
                            (vacuousShapeAnnotations rt) pos
-                  body = Apply fname [(Var param, diet paramt) |
+                  body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
-                         rettype' pos
+                         NoInfo pos
               checkLambda tupfun args
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of
@@ -1301,24 +1294,25 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
                         drop (length curryargs) paramtypes'
               let fun = AnonymFun (map toParam params) body
                         (vacuousShapeAnnotations rt) pos
-                  body = Apply fname (zip (curryargexps'++map Var params) $
+                  body = Apply fname (zip (curryargexps++map (Var . untype) params) $
                                       map diet paramtypes)
-                         rettype' pos
+                         NoInfo pos
               _ <- checkLambda fun args
               return $ CurryFun fname curryargexps' rettype' pos
+    where untype ident = ident { identType = NoInfo }
 
-checkLambda (UnOpFun unop _ _ loc) [arg] = do
+checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
   var <- newIdent "x" (argType arg) loc
   binding [var] $ do
-    e <- checkExp $ UnOp unop (Var var) loc
+    e <- checkExp $ UnOp unop (Var var { identType = NoInfo }) loc
     return $ UnOpFun unop (argType arg) (typeOf e) loc
 
-checkLambda (UnOpFun unop _ _ loc) args =
+checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (BinOpFun op _ _ rettype loc) args =
-  checkPolyLambdaOp op [] rettype args loc
+checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
+  checkPolyLambdaOp op [] args loc
 
 checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] = do
   x' <- checkExp x
@@ -1346,10 +1340,9 @@ checkLambda (CurryBinOpRight binop _ _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkPolyLambdaOp :: TypeBox ty =>
-                     BinOp -> [ExpBase ty VName] -> ty VName -> [Arg] -> SrcLoc
+checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg] -> SrcLoc
                   -> TypeM Lambda
-checkPolyLambdaOp op curryargexps rettype args pos = do
+checkPolyLambdaOp op curryargexps args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   let argts = [ argt | (argt, _, _) <- args ]
   tp <- case curryargexpts ++ argts of
@@ -1368,9 +1361,9 @@ checkPolyLambdaOp op curryargexps rettype args pos = do
                                    Var $ yident $ boxType tp,
                                    [yident tp])
                     (e1:e2:_) -> return (e1, e2, [])
-  body <- binding params $ checkBinOp op x y rettype pos
+  body <- binding params $ checkBinOp op x y pos
   checkLambda
-    (AnonymFun (map toParam params) body
+    (AnonymFun (map toParam params) (BinOp op x y NoInfo pos)
      (vacuousShapeAnnotations $ toDecl $ typeOf body) pos)
     args
   where fname = nameFromString $ ppBinOp op
