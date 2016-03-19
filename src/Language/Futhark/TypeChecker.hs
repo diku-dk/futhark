@@ -1354,11 +1354,11 @@ checkPolyLambdaOp op curryargexps args pos = do
   let xident t = Ident xname t pos
       yident t = Ident yname t pos
   (x,y,params) <- case curryargexps of
-                    [] -> return (Var $ xident (boxType tp),
-                                  Var $ yident (boxType tp),
+                    [] -> return (Var $ xident NoInfo,
+                                  Var $ yident NoInfo,
                                   [xident tp, yident tp])
                     [e] -> return (e,
-                                   Var $ yident $ boxType tp,
+                                   Var $ yident NoInfo,
                                    [yident tp])
                     (e1:e2:_) -> return (e1, e2, [])
   body <- binding params $ checkBinOp op x y pos
