@@ -265,7 +265,6 @@ altOccurences occurs1 occurs2 =
               , observed = observed occ `HS.difference` postcons }
         postcons = allConsumed occurs2
 
-
 -- | The 'VarUsage' data structure is used to keep track of which
 -- variables have been referenced inside an expression, as well as
 -- which variables the resulting expression may possibly alias.
@@ -315,10 +314,6 @@ newName s = do src <- get
                let (s', src') = Futhark.FreshNames.newName src s
                put src'
                return s'
-
-newFname :: String -> TypeM Name
-newFname s = do s' <- newName $ varName s Nothing
-                return $ nameFromString $ textual $ baseName s'
 
 newID :: Name -> TypeM VName
 newID s = newName $ ID (s, 0)
@@ -380,11 +375,6 @@ alternative m1 m2 = pass $ do
   maybeCheckOccurences occurs2
   let usage = Dataflow $ occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
-
--- | Remove all variable bindings from the vtable inside the given
--- computation.
-unbinding :: TypeM a -> TypeM a
-unbinding = local (\env -> env { envVtable = HM.empty})
 
 -- | Make all bindings nonunique.
 noUnique :: TypeM a -> TypeM a
@@ -992,19 +982,13 @@ checkExp (Copy e pos) = do
   e' <- checkExp e
   return $ Copy e' pos
 
--- Checking of loops is done by synthesing the (almost) equivalent
--- function and type-checking a call to it.  The difficult part is
--- assigning uniqueness attributes to the parameters of the function -
--- we'll do this by inspecting the loop body, and look at which of the
--- variables in mergepat are actually consumed.  Also, any variables
--- that are free in the loop body must be passed along as (non-unique)
--- parameters to the function.
 checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
-  -- First, check the bound and initial merge expression and throw
-  -- away the dataflow.  The dataflow will be reconstructed later, but
-  -- we need the result of this to synthesize the function.
-  (mergeexp', bindExtra) <-
-    noDataflow $ do
+  -- First we do a basic check of the loop body to figure out which of
+  -- the merge parameters are being consumed.  For this, we first need
+  -- to check the merge pattern, which requires the (initial) merge
+  -- expression.
+  ((mergeexp', bindExtra), mergeflow) <-
+    collectDataflow $ do
       mergeexp' <- checkExp mergeexp
       return $
         case form of
@@ -1016,106 +1000,91 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 
   -- Check the loop body.
   (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
-  (loopbody', form', extraargs, letExtra, boundExtra, extraparams, freeInForm) <-
-    binding bindExtra $ noDataflow $
+  ((form', loopbody'), bodyflow) <-
+    noUnique $ firstscope $ binding bindExtra $ collectDataflow $
     case form of
       For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
         lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
         uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp
-        firstscope $ do
-          loopbody' <- checkExp loopbody
-          let iparam = Ident loopvar (Prim $ Signed Int32) loc
-          return (loopbody',
-                  For dir lboundexp' (Ident loopvar (Prim $ Signed Int32) loopvarloc) uboundexp',
-                  [(Literal (PrimValue $ SignedValue $ Int32Value 0) loc, Observe)],
-                  id,
-                  HS.singleton iparam,
-                  [iparam],
-                  mempty)
-      While condexp -> firstscope $ do
+        loopbody' <- checkExp loopbody
+        return (For dir lboundexp' (Ident loopvar (Prim $ Signed Int32) loopvarloc) uboundexp',
+                loopbody')
+      While condexp -> do
         (condexp', condflow) <-
           collectDataflow $ require [Prim Bool] =<< checkExp condexp
         (loopbody', bodyflow) <-
           collectDataflow $ checkExp loopbody
         occur $ usageOccurences condflow `seqOccurences`
                 usageOccurences bodyflow
-        cond <- newIdent "loop_cond" (Prim Bool) loc
-        return (loopbody',
-                While condexp',
-                [(Var cond, Observe)],
-                \inner -> LetPat (Id cond) condexp'
-                          inner (srclocOf mergeexp),
-                HS.empty,
-                [toParam cond],
-                freeInExp condexp')
+        return (While condexp',
+                loopbody')
 
-  -- We can use the name generator in a slightly hacky way to generate
-  -- a unique Name for the function.
-  fname <- newFname "loop_fun"
+  let consumed_merge = patNameSet mergepat' `HS.intersection`
+                       allConsumed (usageOccurences bodyflow)
+      uniquePat (Wildcard t wloc) =
+        Wildcard (t `setUniqueness` Nonunique) wloc
+      uniquePat (Id (Ident name t iloc))
+        | name `HS.member` consumed_merge =
+            Id $ Ident name (t `setUniqueness` Unique `setAliases` mempty) iloc
+        | otherwise =
+            let t' = case t of Tuple{} -> t
+                               _       -> t `setUniqueness` Nonunique
+            in Id $ Ident name t' iloc
+      uniquePat (TuplePattern pats ploc) =
+        TuplePattern (map uniquePat pats) ploc
 
-  let rettype = vacuousShapeAnnotations $
-                case map (toDecl . identType) $ patIdents mergepat' of
-                  [t] -> t
-                  ts  -> Tuple ts
-      rettype' = removeShapeAnnotations $ fromDecl rettype
+      -- Make the pattern unique where needed.
+      mergepat'' = uniquePat mergepat'
 
-  merge <- newIdent "merge_val" rettype' $ srclocOf mergeexp'
+  -- Now check that the loop returned the right type.
+  unless (typeOf loopbody' `subtypeOf` patternType mergepat'') $
+    bad $ UnexpectedType (srclocOf loopbody')
+    (toStructural $ typeOf loopbody')
+    [toStructural $ patternType mergepat'']
 
-  let boundnames = boundExtra `HS.union` patIdentSet mergepat'
-      ununique ident =
-        ident { identType = toDecl $ identType ident `setUniqueness` Nonunique }
-      -- Find the free variables of the loop body.
-      free = map ununique $ HS.toList $
-             (freeInExp loopbody' <> freeInForm)
-             `HS.difference` boundnames
+  -- Check that the new values of consumed merge parameters do not
+  -- alias something bound outside the loop, AND that anything
+  -- returned for a unique merge parameter does not alias anything
+  -- else returned.
+  bound_outside <- asks $ HS.fromList . HM.keys . envVtable
+  let checkMergeReturn (Id ident) t
+        | unique $ identType ident,
+          v:_ <- HS.toList $ aliases t `HS.intersection` bound_outside =
+            lift $ bad $ TypeError loc $ "Loop return value corresponding to merge parameter " ++
+            pretty (identName ident) ++ " aliases " ++ pretty v ++ "."
+        | otherwise = do
+            (cons,obs) <- get
+            unless (HS.null $ aliases t `HS.intersection` cons) $
+              lift $ bad $ TypeError loc $ "Loop return value for merge parameter " ++
+              pretty (identName ident) ++ " aliases other consumed merge parameter."
+            when (unique (identType ident) &&
+                  not (HS.null (aliases t `HS.intersection` (cons<>obs)))) $
+              lift $ bad $ TypeError loc $ "Loop return value for consuming merge parameter " ++
+              pretty (identName ident) ++ " aliases previously returned value." ++ show (aliases t, cons, obs)
+            if unique (identType ident)
+              then put (cons<>aliases t, obs)
+              else put (cons, obs<>aliases t)
+      checkMergeReturn (TuplePattern pats _) (Tuple ts) =
+        zipWithM_ checkMergeReturn pats ts
+      checkMergeReturn _ _ =
+        return ()
+  evalStateT (checkMergeReturn mergepat'' $ typeOf loopbody') (mempty, mempty)
 
-      -- These are the parameters expected by the function: All of the
-      -- free variables, followed by the merge value, followed by
-      -- whatever needed by the loop form.
-      params = map toParam free ++
-               [toParam merge] ++
-               extraparams
-      bindfun env = env { envFtable = HM.insert fname
-                                      (rettype,
-                                       map (vacuousShapeAnnotations . identType) params) $
-                                      envFtable env }
+  let consumeMerge (Id (Ident _ pt ploc)) mt
+        | unique pt = consume ploc $ aliases mt
+      consumeMerge (TuplePattern pats _) (Tuple ts) =
+        zipWithM_ consumeMerge pats ts
+      consumeMerge _ _ =
+        return ()
+  ((), merge_consume) <-
+    collectDataflow $ consumeMerge mergepat'' $ typeOf mergeexp'
 
-      -- The body of the function will be the loop body, but with all
-      -- tails replaced with recursive calls.
-      recurse e = Apply fname
-                    ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                     [(e, diet $ typeOf e)] ++
-                     extraargs)
-                    rettype' (srclocOf e)
-      funbody' = LetPat mergepat' (Var merge) (mapTails recurse id $ letExtra loopbody')
-                 (srclocOf loopbody')
+  occur $ usageOccurences mergeflow `seqOccurences`
+          usageOccurences merge_consume
 
-  (funcall, callflow) <- collectDataflow $ local bindfun $ do
-    -- Check that the function is internally consistent.
-    _ <- unbinding $ checkFun (fname, rettype, params, funbody', loc)
-    -- Check the actual function call - we start by computing the
-    -- bound and initial merge value, in case they use something
-    -- consumed in the call.  This reintroduces the dataflow for
-    -- boundexp and mergeexp that we previously threw away.
-    let call = LetPat (Id merge) mergeexp'
-               (LetPat mergepat' (Var merge)
-                (letExtra
-                 (Apply fname
-                  ([(Var (fromParam k), diet (identType k)) | k <- free ] ++
-                   [(Var merge, diet rettype)] ++
-                   extraargs)
-                  rettype' $ srclocOf mergeexp))
-                (srclocOf mergeexp))
-               (srclocOf mergeexp)
-    checkExp call
-  -- Now we just need to bind the result of the function call to the
-  -- original merge pattern...
-  (secondscope, _) <- checkBinding mergepat (typeOf funcall) callflow
-
-  -- And then check the let-body.
-  secondscope $ do
+  binding (patIdents mergepat'') $ do
     letbody' <- checkExp letbody
-    return $ DoLoop mergepat' mergeexp'
+    return $ DoLoop mergepat'' mergeexp'
                     form'
                     loopbody' letbody' loc
 
@@ -1441,3 +1410,8 @@ checkDim loc (NamedDim name) = do
   case t of
     Prim (Signed Int32) -> return ()
     _                   -> bad $ DimensionNotInteger loc $ baseName name
+
+patternType :: Pattern -> Type
+patternType (Wildcard t _) = t
+patternType (Id ident) = identType ident
+patternType (TuplePattern pats _) = Tuple $ map patternType pats
