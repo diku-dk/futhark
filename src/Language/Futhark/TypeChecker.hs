@@ -28,7 +28,7 @@ import Prelude
 import Language.Futhark
 import Language.Futhark.Renamer
   (tagProg', untagPattern)
-import Futhark.FreshNames hiding (newID, newName)
+import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
 import Futhark.Util.Pretty
 
@@ -128,11 +128,11 @@ instance Show TypeError where
     "Duplicate definition of function " ++ nameToString name ++ ".  Defined at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (DupParamError funname paramname pos) =
-    "Parameter " ++ textual paramname ++
+    "Parameter " ++ pretty paramname ++
     " mentioned multiple times in argument list of function " ++
     nameToString funname ++ " at " ++ locStr pos ++ "."
   show (DupPatternError name pos1 pos2) =
-    "Variable " ++ textual name ++ " bound twice in tuple pattern; at " ++
+    "Variable " ++ pretty name ++ " bound twice in tuple pattern; at " ++
     locStr pos1 ++ " and " ++ locStr pos2 ++ "."
   show (InvalidPatternError pat t desc loc) =
     "Pattern " ++ pretty pat ++
@@ -140,7 +140,7 @@ instance Show TypeError where
     where end = case desc of Nothing -> "."
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name pos) =
-    "Unknown variable " ++ textual name ++ " referenced at " ++ locStr pos ++ "."
+    "Unknown variable " ++ pretty name ++ " referenced at " ++ locStr pos ++ "."
   show (UnknownFunctionError fname pos) =
     "Unknown function " ++ nameToString fname ++ " called at " ++ locStr pos ++ "."
   show (ParameterMismatch fname pos expected got) =
@@ -155,7 +155,7 @@ instance Show TypeError where
           ngot = length got
           fname' = maybe "anonymous function" (("function "++) . nameToString) fname
   show (UseAfterConsume name rloc wloc) =
-    "Variable " ++ textual name ++ " used at " ++ locStr rloc ++
+    "Variable " ++ pretty name ++ " used at " ++ locStr rloc ++
     ", but it was consumed at " ++ locStr wloc ++ ".  (Possibly through aliasing)"
   show (IndexingError dims got pos) =
     show got ++ " indices given at " ++ locStr pos ++
@@ -177,7 +177,7 @@ instance Show TypeError where
     locStr loc ++ ".  This is illegal, as it prevents in-place modification."
   show (ReturnAliased fname name loc) =
     "Unique return value of function " ++ nameToString fname ++ " at " ++
-    locStr loc ++ " is aliased to " ++ textual name ++ ", which is not consumed."
+    locStr loc ++ " is aliased to " ++ pretty name ++ ", which is not consumed."
   show (UniqueReturnAliased fname loc) =
     "A unique tuple element of return value of function " ++
     nameToString fname ++ " at " ++ locStr loc ++
@@ -189,9 +189,9 @@ instance Show TypeError where
     "The permutation (" ++ intercalate ", " (map show perm) ++
     ") is not valid for array " ++ name' ++ "of rank " ++ show rank ++ " at " ++
     locStr loc ++ "."
-    where name' = maybe "" ((++" ") . textual) name
+    where name' = maybe "" ((++" ") . pretty) name
   show (DimensionNotInteger loc name) =
-    "Dimension declaration " ++ textual name ++ " at " ++ locStr loc ++
+    "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
     " should be an integer."
 
 -- | A tuple of a return type and a list of argument types.
@@ -319,11 +319,11 @@ newID :: Name -> TypeM VName
 newID s = newName $ ID (s, 0)
 
 newIDFromString :: String -> TypeM VName
-newIDFromString s = newID $ varName s Nothing
+newIDFromString = newID . nameFromString
 
 newIdent :: String -> ty VName -> SrcLoc -> TypeM (IdentBase ty VName)
 newIdent s t loc = do
-  s' <- newID $ varName s Nothing
+  s' <- newID $ nameFromString s
   return $ Ident s' t loc
 
 liftEither :: Either TypeError a -> TypeM a
@@ -740,7 +740,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
       dest' = Ident dest destt' destpos
 
   unless (unique $ identType src') $
-    bad $ TypeError pos $ "Source '" ++ textual (baseName $ identName src) ++
+    bad $ TypeError pos $ "Source '" ++ pretty (baseName $ identName src) ++
     "' has type " ++ ppType (identType src') ++ ", which is not unique"
 
   case peelArray (length idxes) (identType src') of
@@ -940,7 +940,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr pos) = do
         AnyDim      -> return ()
         NamedDim _  -> return ()
         ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
-                                            " be specified since it is "++textual chunk++"by default.")
+                                            " be specified since it is "++pretty chunk++"by default.")
   _ <- case lam_rtp of
         Tuple res_tps -> do
             let res_arr_tps = tail res_tps
@@ -955,7 +955,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr pos) = do
                     rtp_iner_syms <- catMaybes <$> mapM boundDim arr_iner_dims
                     case find (`HS.member` lam_params) rtp_iner_syms of
                       Just name -> bad $ TypeError pos $
-                                          "Stream's lambda: " ++ textual (baseName name) ++
+                                          "Stream's lambda: " ++ pretty (baseName name) ++
                                           " cannot specify a variant inner result shape"
                       _ -> return ()
             else bad $ TypeError pos "Stream with result arrays of non-array type."

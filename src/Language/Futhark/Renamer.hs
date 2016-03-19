@@ -18,6 +18,7 @@ module Language.Futhark.Renamer
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.Hashable
 import Data.Maybe
 
 import qualified Data.HashMap.Strict as HM
@@ -32,7 +33,7 @@ import Futhark.FreshNames
 -- that the program was correct to begin with.
 tagProg :: ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
 tagProg prog = runReader (runStateT f blankNameSource) env
-  where env = RenameEnv HM.empty newID
+  where env = RenameEnv HM.empty newVNameFromName
         f = Prog <$> mapM renameFun (progFunctions prog)
 
 -- | As 'tagProg', but accepts an initial name source and returns the
@@ -40,7 +41,7 @@ tagProg prog = runReader (runStateT f blankNameSource) env
 tagProg' :: VNameSource -> ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
 tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
                     in (Prog funs, src')
-  where env = RenameEnv HM.empty newID
+  where env = RenameEnv HM.empty newVNameFromName
         f = mapM renameFun $ progFunctions prog
 
 -- | Remove tags from a program.  Note that this is potentially
@@ -58,18 +59,17 @@ untagExp = untagger renameExp
 untagPattern :: PatternBase NoInfo VName -> PatternBase NoInfo Name
 untagPattern = untagger renamePattern
 
-untagger :: VarName vn =>
-            (t -> RenameM (ID vn) vn a) -> t -> a
+untagger :: (t -> RenameM VName Name a) -> t -> a
 untagger f x = runReader (evalStateT (f x) blankNameSource) env
   where env = RenameEnv HM.empty rmTag
         rmTag src (ID (s, _)) = (s, src)
 
 data RenameEnv f t = RenameEnv {
     envNameMap :: HM.HashMap f t
-  , envNameFn  :: NameSource t -> f -> (t, NameSource t)
+  , envNameFn  :: VNameSource -> f -> (t, VNameSource)
   }
 
-type RenameM f t = StateT (NameSource t) (Reader (RenameEnv f t))
+type RenameM f t = StateT VNameSource (Reader (RenameEnv f t))
 
 -- | Return a fresh, unique name.  The @Name@ is prepended to the
 -- name.
@@ -79,13 +79,13 @@ new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            return k'
 
 -- | 'repl s' returns the new name of the variable 's'.
-repl :: (VarName f, VarName t) =>
+repl :: (Eq f, Hashable f) =>
         IdentBase NoInfo f -> RenameM f t (IdentBase NoInfo t)
 repl (Ident name NoInfo loc) = do
   name' <- replName name
   return $ Ident name' NoInfo loc
 
-declRepl :: (VarName f, VarName t) =>
+declRepl :: (Eq f, Hashable f) =>
             IdentBase (TypeBase ShapeDecl NoInfo) f
          -> RenameM f t (IdentBase (TypeBase ShapeDecl NoInfo) t)
 declRepl (Ident name tp loc) = do
@@ -93,11 +93,11 @@ declRepl (Ident name tp loc) = do
   tp' <- renameDeclType tp
   return $ Ident name' tp' loc
 
-replName :: (VarName f, VarName t) => f -> RenameM f t t
+replName :: (Eq f, Hashable f) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
                 asks (HM.lookup name . envNameMap)
 
-bindNames :: VarName f => [f] -> RenameM f t a -> RenameM f t a
+bindNames :: (Eq f, Hashable f) => [f] -> RenameM f t a -> RenameM f t a
 bindNames varnames body = do
   vars' <- mapM new varnames
   -- This works because map union prefers elements from left
@@ -106,10 +106,10 @@ bindNames varnames body = do
   where bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
                                              `HM.union` envNameMap env }
 
-bind :: (VarName f) => [IdentBase ty f] -> RenameM f t a -> RenameM f t a
+bind :: (Eq f, Hashable f) => [IdentBase ty f] -> RenameM f t a -> RenameM f t a
 bind = bindNames . map identName
 
-bindParams :: VarName f =>
+bindParams :: (Eq f, Ord f, Hashable f) =>
               [ParamBase f]
            -> RenameM f t a
            -> RenameM f t a
@@ -123,7 +123,7 @@ bindParams params =
         inspectDim (NamedDim name) =
           Just name
 
-renameFun :: (VarName f, VarName t) =>
+renameFun :: (Eq f, Ord f, Hashable f) =>
              FunDecBase NoInfo f -> RenameM f t (FunDecBase NoInfo t)
 renameFun (fname, ret, params, body, pos) =
   bindParams params $ do
@@ -132,7 +132,7 @@ renameFun (fname, ret, params, body, pos) =
     ret' <- renameDeclType ret
     return (fname, ret', params', body', pos)
 
-renameExp :: (VarName f, VarName t) =>
+renameExp :: (Eq f, Hashable f) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
 renameExp (LetWith dest src idxs ve body loc) = do
   src' <- repl src
@@ -184,7 +184,7 @@ renameExp (Stream form lam arr pos) = do
   return $ Stream form' lam' arr' pos
 renameExp e = mapExpM rename e
 
-renameDeclType :: (VarName f, VarName t) =>
+renameDeclType :: (Eq f, Hashable f) =>
                   TypeBase ShapeDecl NoInfo f
                -> RenameM f t (TypeBase ShapeDecl NoInfo t)
 renameDeclType = renameTypeGeneric
@@ -194,7 +194,7 @@ renameDeclType = renameTypeGeneric
         renameDim (NamedDim v) = NamedDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n
 
-renameTypeGeneric :: (VarName f, VarName t) =>
+renameTypeGeneric :: (Eq f, Hashable f) =>
                      (shape f -> RenameM f t (shape t))
                   -> (als f -> RenameM f t (als t))
                   -> TypeBase shape als f
@@ -218,7 +218,7 @@ renameTypeGeneric renameShape renameAliases = renameType'
         renameTupleArrayElem (TupleArrayElem ts) =
           TupleArrayElem <$> mapM renameTupleArrayElem ts
 
-rename :: (VarName f, VarName t) => MapperBase NoInfo NoInfo f t (RenameM f t)
+rename :: (Eq f, Hashable f) => MapperBase NoInfo NoInfo f t (RenameM f t)
 rename = Mapper {
            mapOnExp = renameExp
          , mapOnPattern = renamePattern
@@ -228,7 +228,7 @@ rename = Mapper {
          , mapOnValue = return
          }
 
-renameLambda :: (VarName f, VarName t) =>
+renameLambda :: (Eq f, Hashable f) =>
                 LambdaBase NoInfo f -> RenameM f t (LambdaBase NoInfo t)
 renameLambda (AnonymFun params body ret pos) =
   bind params $ do
@@ -250,7 +250,7 @@ renameLambda (CurryBinOpRight bop x NoInfo NoInfo loc) =
   CurryBinOpRight bop <$> renameExp x <*>
   pure NoInfo <*> pure NoInfo <*> pure loc
 
-renamePattern :: (VarName f, VarName t) =>
+renamePattern :: (Eq f, Hashable f) =>
                  PatternBase NoInfo f -> RenameM f t (PatternBase NoInfo t)
 renamePattern (Id ident) = do
   ident' <- repl ident
