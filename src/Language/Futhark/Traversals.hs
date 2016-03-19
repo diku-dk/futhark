@@ -28,7 +28,7 @@ module Language.Futhark.Traversals
 
 import Control.Applicative
 import Control.Monad
-import Data.Traversable hiding (mapM)
+import Data.Traversable hiding (mapM, forM)
 
 import Prelude
 
