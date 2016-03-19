@@ -29,10 +29,13 @@ module Language.Futhark.Core
 
 where
 
+import Data.Monoid
 import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Loc
 import qualified Data.Text as T
+
+import Prelude
 
 import Futhark.Util.Pretty
 

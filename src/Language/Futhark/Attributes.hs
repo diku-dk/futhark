@@ -598,12 +598,12 @@ arrayString _ = Nothing
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: (Ord vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
+typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
 typeOf (Literal val _) = fromDecl $ valueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
-typeOf (ArrayLit es t _) =
+typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
-typeOf (BinOp _ _ _ t _) = t
+typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (UnOp Not _ _) = Prim Bool
 typeOf (UnOp Negate e _) = typeOf e
 typeOf (UnOp Complement e _) = typeOf e
@@ -612,12 +612,12 @@ typeOf (UnOp Signum e _) = typeOf e
 typeOf (UnOp (ToFloat t) _ _) = Prim $ FloatType t
 typeOf (UnOp (ToSigned t) _ _) = Prim $ Signed t
 typeOf (UnOp (ToUnsigned t) _ _) = Prim $ Unsigned t
-typeOf (If _ _ _ t _) = t
+typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var ident) =
-  case identType ident of
+  case unInfo $ identType ident of
     Tuple ets -> Tuple ets
     t         -> t `addAliases` HS.insert (identName ident)
-typeOf (Apply _ _ t _) = t
+typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
@@ -636,9 +636,9 @@ typeOf (Map f arr _) = arrayType 1 et Unique
 typeOf (Reduce _ fun start arr _) =
   removeShapeAnnotations $
   lambdaType fun [typeOf start, rowType (typeOf arr)]
-typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . snd) es) Nonunique
+typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . unInfo . snd) es) Nonunique
 typeOf (Unzip _ ts _) =
-  Tuple ts
+  Tuple $ map unInfo ts
 typeOf (Unsafe e _) =
   typeOf e
 typeOf (Scan fun start arr _) =
@@ -669,19 +669,18 @@ typeOf (DoLoop _ _ _ _ body _) = typeOf body
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple
 -- literal expressions into literal values instead.
-expToValue :: ArrayShape (shape vn) =>
-              ExpBase (TypeBase shape as) vn -> Maybe Value
+expToValue :: ExpBase Info vn -> Maybe Value
 expToValue (Literal val _) = Just val
 expToValue (TupLit es _) = do es' <- mapM expToValue es
                               Just $ TupValue es'
-expToValue (ArrayLit es t _) = do es' <- mapM expToValue es
-                                  Just $ arrayValue es' t
+expToValue (ArrayLit es (Info t) _) = do es' <- mapM expToValue es
+                                         Just $ arrayValue es' t
 expToValue _ = Nothing
 
 -- | The result of applying the arguments of the given types to the
 -- given lambda function.
 lambdaType :: (Ord vn, Hashable vn) =>
-              LambdaBase CompTypeBase vn -> [CompTypeBase vn]
+              LambdaBase Info vn -> [CompTypeBase vn]
            -> TypeBase Rank Names vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
@@ -729,17 +728,17 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 
 -- | The specified return type of a lambda.
 lambdaReturnType :: Ord vn =>
-                    LambdaBase CompTypeBase vn -> TypeBase Rank NoInfo vn
+                    LambdaBase Info vn -> TypeBase Rank NoInfo vn
 lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations t
-lambdaReturnType (CurryFun _ _ t _) = toDecl t
-lambdaReturnType (UnOpFun _ _ t _) = toDecl t
-lambdaReturnType (BinOpFun _ _ _ t _) = toDecl t
-lambdaReturnType (CurryBinOpLeft _ _ _ t _) = toDecl t
-lambdaReturnType (CurryBinOpRight _ _ _ t _) = toDecl t
+lambdaReturnType (CurryFun _ _ (Info t) _) = toDecl t
+lambdaReturnType (UnOpFun _ _ (Info t) _) = toDecl t
+lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toDecl t
+lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toDecl t
+lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toDecl t
 
 -- | The parameter 'Diet's of a lambda.
-lambdaParamDiets :: LambdaBase ty vn -> [Diet]
-lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
+lambdaParamDiets :: LambdaBase f vn -> [Diet]
+lambdaParamDiets (AnonymFun params _ _ _) = map (diet . paramType) params
 lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
 lambdaParamDiets UnOpFun{} = [Observe]
 lambdaParamDiets BinOpFun{} = [Observe, Observe]
@@ -754,19 +753,18 @@ funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
 commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
--- | Remove alias information from the type of an ident.
-toParam :: ArrayShape (shape vn) =>
-           IdentBase (TypeBase shape as) vn
-        -> IdentBase (TypeBase ShapeDecl NoInfo) vn
-toParam (Ident name t loc) = Ident name (vacuousShapeAnnotations $ toDecl t) loc
+-- | Turn an identifier into a parameter.
+toParam :: IdentBase Info vn
+        -> ParamBase vn
+toParam (Ident name (Info t) loc) =
+  Param name (vacuousShapeAnnotations $ toDecl t) loc
 
--- | Add (vacuous) alias information and remove shape annotations from
--- the type of an identifier.
-fromParam :: ArrayShape (shape vn) =>
-             IdentBase (TypeBase shape NoInfo) vn
-          -> IdentBase (TypeBase Rank Names) vn
-fromParam (Ident name t loc) =
-  Ident name (removeShapeAnnotations $ fromDecl t) loc
+-- | Turn a parameter into an identifier.
+fromParam :: Ord vn =>
+             ParamBase vn
+          -> IdentBase Info vn
+fromParam (Param name t loc) =
+  Ident name (Info $ removeShapeAnnotations $ fromDecl t) loc
 
 -- | The list of names bound in the given pattern.
 patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]

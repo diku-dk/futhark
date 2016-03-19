@@ -17,26 +17,26 @@ import Language.Futhark.Pretty
 import Language.Futhark.Traversals
 
 -- | An identifier with type- and aliasing information information.
-type Ident = IdentBase (TypeBase Rank Names) VName
+type Ident = IdentBase Info VName
 
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
-type Parameter = IdentBase (TypeBase ShapeDecl NoInfo) VName
+type Parameter = ParamBase VName
 
 -- | An expression with type information.
-type Exp = ExpBase (TypeBase Rank Names) VName
+type Exp = ExpBase Info VName
 
 -- | A lambda with type information.
-type Lambda = LambdaBase (TypeBase Rank Names) VName
+type Lambda = LambdaBase Info VName
 
 -- | A pattern with type information.
-type Pattern = PatternBase (TypeBase Rank Names) VName
+type Pattern = PatternBase Info VName
 
 -- | An function declaration with type information.
-type FunDec = FunDecBase (TypeBase Rank Names) VName
+type FunDec = FunDecBase Info VName
 
 -- | An Futhark program with type information.
-type Prog = ProgBase (TypeBase Rank Names) VName
+type Prog = ProgBase Info VName
 
 -- | A known type with no shape annotations, but aliasing information.
 type Type = TypeBase Rank Names VName

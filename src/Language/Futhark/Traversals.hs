@@ -22,16 +22,13 @@ module Language.Futhark.Traversals
   (
   -- * Mapping
     MapperBase(..)
-  , Mapper
-  , identityMapper
   , mapExpM
-  , mapExp
   )
   where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Identity
+import Data.Traversable
 
 import Prelude
 
@@ -40,35 +37,21 @@ import Language.Futhark.Syntax
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
-data MapperBase tyf tyt vnf vnt m = Mapper {
-    mapOnExp :: ExpBase tyf vnf -> m (ExpBase tyt vnt)
-  , mapOnType :: tyf vnf -> m (tyt vnt)
-  , mapOnLambda :: LambdaBase tyf vnf -> m (LambdaBase tyt vnt)
-  , mapOnPattern :: PatternBase tyf vnf -> m (PatternBase tyt vnt)
-  , mapOnIdent :: IdentBase tyf vnf -> m (IdentBase tyt vnt)
+data MapperBase f vnf vnt m = Mapper {
+    mapOnExp :: ExpBase f vnf -> m (ExpBase f vnt)
+  , mapOnLambda :: LambdaBase f vnf -> m (LambdaBase f vnt)
+  , mapOnType :: CompTypeBase vnf -> m (CompTypeBase vnt)
+  , mapOnPattern :: PatternBase f vnf -> m (PatternBase f vnt)
+  , mapOnIdent :: IdentBase f vnf -> m (IdentBase f vnt)
   , mapOnValue :: Value -> m Value
   }
-
--- | A special case of 'MapperBase' when the name- and type
--- representation does not change.
-type Mapper ty vn m = MapperBase ty ty vn vn m
-
--- | A mapper that simply returns the tree verbatim.
-identityMapper :: Monad m => Mapper ty vn m
-identityMapper = Mapper {
-                   mapOnExp = return
-                 , mapOnType = return
-                 , mapOnLambda = return
-                 , mapOnPattern = return
-                 , mapOnIdent = return
-                 , mapOnValue = return
-                 }
 
 -- | Map a monadic action across the immediate children of an
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
 -- the expression itself, and the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
-mapExpM :: (Applicative m, Monad m) => MapperBase tyf tyt vnf vnt m -> ExpBase tyf vnf -> m (ExpBase tyt vnt)
+mapExpM :: (Traversable f, Applicative m, Monad m) =>
+           MapperBase f vnf vnt m -> ExpBase f vnf -> m (ExpBase f vnt)
 mapExpM tv (Var ident) =
   pure Var <*> mapOnIdent tv ident
 mapExpM tv (Literal val loc) =
@@ -76,20 +59,20 @@ mapExpM tv (Literal val loc) =
 mapExpM tv (TupLit els loc) =
   pure TupLit <*> mapM (mapOnExp tv) els <*> pure loc
 mapExpM tv (ArrayLit els elt loc) =
-  pure ArrayLit <*> mapM (mapOnExp tv) els <*> mapOnType tv elt <*> pure loc
+  pure ArrayLit <*> mapM (mapOnExp tv) els <*> mapTypeM tv elt <*> pure loc
 mapExpM tv (BinOp bop x y t loc) =
   pure (BinOp bop) <*>
          mapOnExp tv x <*> mapOnExp tv y <*>
-         mapOnType tv t <*> pure loc
+         mapTypeM tv t <*> pure loc
 mapExpM tv (UnOp unop x loc) =
   pure (UnOp unop) <*> mapOnExp tv x <*> pure loc
 mapExpM tv (If c texp fexp t loc) =
   pure If <*> mapOnExp tv c <*> mapOnExp tv texp <*> mapOnExp tv fexp <*>
-       mapOnType tv t <*> pure loc
+       mapTypeM tv t <*> pure loc
 mapExpM tv (Apply fname args t loc) = do
   args' <- forM args $ \(arg, d) ->
              (,) <$> mapOnExp tv arg <*> pure d
-  pure (Apply fname) <*> pure args' <*> mapOnType tv t <*> pure loc
+  pure (Apply fname) <*> pure args' <*> mapTypeM tv t <*> pure loc
 mapExpM tv (LetPat pat e body loc) =
   pure LetPat <*> mapOnPattern tv pat <*> mapOnExp tv e <*>
          mapOnExp tv body <*> pure loc
@@ -124,11 +107,11 @@ mapExpM tv (Reduce comm fun startexp arrexp loc) =
 mapExpM tv (Zip args loc) = do
   args' <- forM args $ \(argexp, argt) -> do
                               argexp' <- mapOnExp tv argexp
-                              argt' <- mapOnType tv argt
+                              argt' <- mapTypeM tv argt
                               pure (argexp', argt')
   pure $ Zip args' loc
 mapExpM tv (Unzip e ts loc) =
-  pure Unzip <*> mapOnExp tv e <*> mapM (mapOnType tv) ts <*> pure loc
+  pure Unzip <*> mapOnExp tv e <*> mapM (mapTypeM tv) ts <*> pure loc
 mapExpM tv (Unsafe e loc) =
   pure Unsafe <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Scan fun startexp arrexp loc) =
@@ -163,17 +146,18 @@ mapExpM tv (DoLoop mergepat mergeexp form loopbody letbody loc) =
        mapLoopFormM tv form <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
 
--- | Like 'mapExp', but in the 'Identity' monad.
-mapExp :: Mapper ty vn Identity -> ExpBase ty vn -> ExpBase ty vn
-mapExp m = runIdentity . mapExpM m
-
 mapLoopFormM :: (Applicative m, Monad m) =>
-                MapperBase tyf tyt vnf vnt m
-             -> LoopFormBase tyf vnf
-             -> m (LoopFormBase tyt vnt)
+                MapperBase f vnf vnt m
+             -> LoopFormBase f vnf
+             -> m (LoopFormBase f vnt)
 mapLoopFormM tv (For FromUpTo lbound i ubound) =
   For FromUpTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (For FromDownTo lbound i ubound) =
   For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
+
+mapTypeM :: (Applicative m, Monad m, Traversable f) =>
+            MapperBase f vnf vnt m
+         -> f (CompTypeBase vnf) -> m (f (CompTypeBase vnt))
+mapTypeM = traverse . mapOnType

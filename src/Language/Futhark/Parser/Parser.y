@@ -237,7 +237,7 @@ FunDecs : fun Fun FunDecs   { $2 : $3 }
         | fun Fun           { [$2] }
 ;
 
-Fun :     Type id '(' TypeIds ')' '=' Exp
+Fun :     Type id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
         | Type id '(' ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
@@ -320,10 +320,8 @@ Types : Type ',' Types { $1 : $3 }
       |                { [] }
 ;
 
-TypeIds : Type id ',' TypeIds
-                        { let L pos (ID name) = $2 in Ident name $1 pos : $4 }
-        | Type id       { let L pos (ID name) = $2 in [Ident name $1 pos] }
-;
+Params : Type id ',' Params { let L pos (ID name) = $2 in Param name $1 pos : $4 }
+       | Type id            { let L pos (ID name) = $2 in [Param name $1 pos] }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -503,7 +501,7 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '{' Patterns '}' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn Type '(' TypeIds ')' '=>' Exp
+         : fn Type '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
            { let L pos (ID name) = $1
