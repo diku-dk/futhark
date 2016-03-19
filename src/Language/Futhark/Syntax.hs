@@ -25,6 +25,7 @@ module Language.Futhark.Syntax
   , DeclArrayTypeBase
   , DeclTupleArrayElemTypeBase
   , Diet(..)
+  , TypeDeclBase (..)
 
     -- * Values
   , IntValue(..)
@@ -74,7 +75,8 @@ import Language.Futhark.Core
 -- | Convenience class for deriving Show instances for the AST.
 class (Show vn,
        Show (f vn),
-       Show (f (CompTypeBase vn))) => Showable f vn where
+       Show (f (CompTypeBase vn)),
+       Show (f (StructTypeBase vn))) => Showable f vn where
 
 -- | No information.  Usually used for placeholder type- or aliasing
 -- information.
@@ -261,6 +263,15 @@ type DeclArrayTypeBase = ArrayTypeBase ShapeDecl NoInfo
 -- information, used for declarations.
 type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
+-- | A declaration of the type of something.
+data TypeDeclBase f vn =
+  TypeDecl { declaredType :: StructTypeBase vn
+                             -- ^ The type declared by the user.
+           , expandedType :: f (StructTypeBase vn)
+                             -- ^ The type deduced by the type checker.
+           }
+deriving instance Showable f vn => Show (TypeDeclBase f vn)
+
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type
 -- @([int], *[int], [int])@ has diet @ConsumeTuple [Observe, Consume,
@@ -303,22 +314,22 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 
 -- | A name with no aliasing information, but known type.  These are
 -- used for function parameters.
-data ParamBase vn = Param { paramName :: vn
-                          , paramType :: StructTypeBase vn
-                          , paramSrcLoc :: SrcLoc
-                          }
-                  deriving (Show)
+data ParamBase f vn = Param { paramName :: vn
+                            , paramTypeDecl :: TypeDeclBase f vn
+                            , paramSrcLoc :: SrcLoc
+                            }
+deriving instance Showable f vn => Show (ParamBase f vn)
 
-instance Eq vn => Eq (ParamBase vn) where
+instance Eq vn => Eq (ParamBase f vn) where
   x == y = paramName x == paramName y
 
-instance Ord vn => Ord (ParamBase vn) where
+instance Ord vn => Ord (ParamBase f vn) where
   x `compare` y = paramName x `compare` paramName y
 
-instance Located (ParamBase vn) where
+instance Located (ParamBase f vn) where
   locOf = locOf . paramSrcLoc
 
-instance Hashable vn => Hashable (ParamBase vn) where
+instance Hashable vn => Hashable (ParamBase f vn) where
   hashWithSalt salt = hashWithSalt salt . paramName
 
 -- | Unary operators.
@@ -553,7 +564,7 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
                         deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
-data LambdaBase f vn = AnonymFun [ParamBase vn] (ExpBase f vn) (StructTypeBase vn) SrcLoc
+data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
                       | CurryFun Name [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
@@ -588,10 +599,10 @@ instance Located (PatternBase f vn) where
 
 -- | Function Declarations
 type FunDecBase f vn = (Name,
-                         StructTypeBase vn,
-                         [ParamBase vn],
-                         ExpBase f vn,
-                         SrcLoc)
+                        TypeDeclBase f vn,
+                        [ParamBase f vn],
+                        ExpBase f vn,
+                        SrcLoc)
 
 -- | An entire Futhark program.
 newtype ProgBase f vn = Prog { progFunctions :: [FunDecBase f vn] }

@@ -87,12 +87,12 @@ repl (Ident name NoInfo loc) = do
   return $ Ident name' NoInfo loc
 
 declRepl :: (Eq f, Hashable f) =>
-            ParamBase f
-         -> RenameM f t (ParamBase t)
-declRepl (Param name tp loc) = do
+            ParamBase NoInfo f
+         -> RenameM f t (ParamBase NoInfo t)
+declRepl (Param name (TypeDecl tp NoInfo) loc) = do
   name' <- replName name
   tp' <- renameDeclType tp
-  return $ Param name' tp' loc
+  return $ Param name' (TypeDecl tp' NoInfo) loc
 
 replName :: (Eq f, Hashable f) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
@@ -111,12 +111,12 @@ bind :: (Eq f, Hashable f) => [IdentBase x f] -> RenameM f t a -> RenameM f t a
 bind = bindNames . map identName
 
 bindParams :: (Eq f, Ord f, Hashable f) =>
-              [ParamBase f]
+              [ParamBase NoInfo f]
            -> RenameM f t a
            -> RenameM f t a
 bindParams params =
   bindNames (map paramName params) .
-  bindNames (concatMap (mapMaybe inspectDim . nestedDims . paramType) params)
+  bindNames (concatMap (mapMaybe inspectDim . nestedDims . paramDeclaredType) params)
   where inspectDim AnyDim =
           Nothing
         inspectDim (ConstDim _) =
@@ -126,12 +126,12 @@ bindParams params =
 
 renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
              FunDecBase NoInfo f -> RenameM f t (FunDecBase NoInfo t)
-renameFun (fname, ret, params, body, pos) =
+renameFun (fname, TypeDecl ret NoInfo, params, body, pos) =
   bindParams params $ do
     params' <- mapM declRepl params
     body' <- renameExp body
     ret' <- renameDeclType ret
-    return (fname, ret', params', body', pos)
+    return (fname, TypeDecl ret' NoInfo, params', body', pos)
 
 renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
@@ -239,12 +239,12 @@ rename = Mapper {
 
 renameLambda :: (Eq f, Hashable f, Eq t, Hashable t) =>
                 LambdaBase NoInfo f -> RenameM f t (LambdaBase NoInfo t)
-renameLambda (AnonymFun params body ret pos) =
+renameLambda (AnonymFun params body (TypeDecl ret NoInfo) pos) =
   bindNames (map paramName params) $ do
     params' <- mapM declRepl params
     body' <- renameExp body
     ret' <- renameDeclType ret
-    return (AnonymFun params' body' ret' pos)
+    return (AnonymFun params' body' (TypeDecl ret' NoInfo) pos)
 renameLambda (CurryFun fname curryargexps NoInfo pos) = do
   curryargexps' <- mapM renameExp curryargexps
   return (CurryFun fname curryargexps' NoInfo pos)

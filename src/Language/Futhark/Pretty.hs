@@ -133,10 +133,13 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
+  ppr = ppr . declaredType
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase f vn) where
   ppr = ppr . paramName
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where
@@ -318,8 +321,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
-ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase vn -> Doc
-ppParam param = ppr (paramType param) <+> ppr param
+ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase t vn -> Doc
+ppParam param = ppr (paramDeclaredType param) <+> ppr param
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) =>
                Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
