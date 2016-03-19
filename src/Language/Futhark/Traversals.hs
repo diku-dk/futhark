@@ -26,11 +26,6 @@ module Language.Futhark.Traversals
   , identityMapper
   , mapExpM
   , mapExp
-
-  -- * Walking
-  , Walker(..)
-  , identityWalker
-  , walkExpM
   )
   where
 
@@ -182,43 +177,3 @@ mapLoopFormM tv (For FromDownTo lbound i ubound) =
   For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
-
--- | Express a monad expression on a syntax node.  Each element of
--- this structure expresses the action to be performed on a given
--- child.
-data Walker ty vn m = Walker {
-    walkOnExp :: ExpBase ty vn -> m ()
-  , walkOnType :: ty vn -> m ()
-  , walkOnLambda :: LambdaBase ty vn -> m ()
-  , walkOnPattern :: PatternBase ty vn -> m ()
-  , walkOnIdent :: IdentBase ty vn -> m ()
-  , walkOnValue :: Value -> m ()
-  }
-
--- | A no-op traversal.
-identityWalker :: Monad m => Walker ty vn m
-identityWalker = Walker {
-                   walkOnExp = const $ return ()
-                 , walkOnType = const $ return ()
-                 , walkOnLambda = const $ return ()
-                 , walkOnPattern = const $ return ()
-                 , walkOnIdent = const $ return ()
-                 , walkOnValue = const $ return ()
-                 }
-
--- | Perform a monadic action on each of the immediate children of an
--- expression.  Importantly, the 'walkOnExp' action is not invoked for
--- the expression itself, and the traversal does not descend
--- recursively into subexpressions.  The traversal is done
--- left-to-right.
-walkExpM :: (Monad m, Applicative m) => Walker ty vn m -> ExpBase ty vn -> m ()
-walkExpM f = void . mapExpM m
-  where m = Mapper {
-              mapOnExp = wrap walkOnExp
-            , mapOnType = wrap walkOnType
-            , mapOnLambda = wrap walkOnLambda
-            , mapOnPattern = wrap walkOnPattern
-            , mapOnIdent = wrap walkOnIdent
-            , mapOnValue = wrap walkOnValue
-            }
-        wrap op k = op f k >> return k
