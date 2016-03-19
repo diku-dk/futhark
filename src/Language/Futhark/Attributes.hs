@@ -51,8 +51,8 @@ module Language.Futhark.Attributes
   , arrayType
   , rowType
   , toStructural
-  , toDecl
-  , fromDecl
+  , toStruct
+  , fromStruct
   , setAliases
   , addAliases
   , setUniqueness
@@ -298,14 +298,14 @@ toStructural :: (ArrayShape (shape vn)) =>
 toStructural = removeNames . removeShapeAnnotations
 
 -- | Remove aliasing information from a type.
-toDecl :: TypeBase shape as vn
+toStruct :: TypeBase shape as vn
        -> TypeBase shape NoInfo vn
-toDecl t = t `setAliases` NoInfo
+toStruct t = t `setAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
-fromDecl :: TypeBase shape as vn
+fromStruct :: TypeBase shape as vn
          -> TypeBase shape Names vn
-fromDecl t = t `setAliases` HS.empty
+fromStruct t = t `setAliases` HS.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -579,7 +579,7 @@ valueType (ArrayValue _ (Array (TupleArray et shape _))) =
 -- | Construct an array value containing the given elements.
 arrayValue :: ArrayShape (shape vn) =>
             [Value] -> TypeBase shape as vn -> Value
-arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toDecl
+arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toStruct
 
 -- | An empty array with the given row type.
 emptyArray :: ArrayShape (shape vn) =>
@@ -599,7 +599,7 @@ arrayString _ = Nothing
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
-typeOf (Literal val _) = fromDecl $ valueType val
+typeOf (Literal val _) = fromStruct $ valueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
@@ -730,11 +730,11 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 lambdaReturnType :: Ord vn =>
                     LambdaBase Info vn -> TypeBase Rank NoInfo vn
 lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations t
-lambdaReturnType (CurryFun _ _ (Info t) _) = toDecl t
-lambdaReturnType (UnOpFun _ _ (Info t) _) = toDecl t
-lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toDecl t
-lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toDecl t
-lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toDecl t
+lambdaReturnType (CurryFun _ _ (Info t) _) = toStruct t
+lambdaReturnType (UnOpFun _ _ (Info t) _) = toStruct t
+lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toStruct t
+lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toStruct t
+lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
 
 -- | The parameter 'Diet's of a lambda.
 lambdaParamDiets :: LambdaBase f vn -> [Diet]
@@ -757,14 +757,14 @@ commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 toParam :: IdentBase Info vn
         -> ParamBase vn
 toParam (Ident name (Info t) loc) =
-  Param name (vacuousShapeAnnotations $ toDecl t) loc
+  Param name (vacuousShapeAnnotations $ toStruct t) loc
 
 -- | Turn a parameter into an identifier.
 fromParam :: Ord vn =>
              ParamBase vn
           -> IdentBase Info vn
 fromParam (Param name t loc) =
-  Ident name (Info $ removeShapeAnnotations $ fromDecl t) loc
+  Ident name (Info $ removeShapeAnnotations $ fromStruct t) loc
 
 -- | The list of names bound in the given pattern.
 patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]

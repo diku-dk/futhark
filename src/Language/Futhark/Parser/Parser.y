@@ -593,7 +593,7 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | charlit { let L pos (CHARLIT char) = $1 in (CharValue char, pos) }
 
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toStruct $ valueType $2
              }
            |  '[' Value ',' Values ']'
              {% case combArrayTypes (valueType $2) $ map valueType $4 of
