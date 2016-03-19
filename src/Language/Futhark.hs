@@ -21,7 +21,7 @@ type Ident = IdentBase Info VName
 
 -- | A name with a type, but no aliasing information.  Used for
 -- denoting function parameters.
-type Parameter = ParamBase VName
+type Parameter = ParamBase Info VName
 
 -- | An expression with type information.
 type Exp = ExpBase Info VName

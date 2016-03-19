@@ -12,6 +12,8 @@ module Language.Futhark.Attributes
   -- * Parameter handling
   , toParam
   , fromParam
+  , paramType
+  , paramDeclaredType
 
   -- * Queries on expressions
   , expToValue
@@ -84,6 +86,7 @@ module Language.Futhark.Attributes
   , UncheckedType
   , UncheckedArrayType
   , UncheckedIdent
+  , UncheckedTypeDecl
   , UncheckedExp
   , UncheckedLambda
   , UncheckedPattern
@@ -729,7 +732,7 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 -- | The specified return type of a lambda.
 lambdaReturnType :: Ord vn =>
                     LambdaBase Info vn -> TypeBase Rank NoInfo vn
-lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations t
+lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations $ unInfo $ expandedType t
 lambdaReturnType (CurryFun _ _ (Info t) _) = toStruct t
 lambdaReturnType (UnOpFun _ _ (Info t) _) = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toStruct t
@@ -737,7 +740,7 @@ lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
 
 -- | The parameter 'Diet's of a lambda.
-lambdaParamDiets :: LambdaBase f vn -> [Diet]
+lambdaParamDiets :: LambdaBase Info vn -> [Diet]
 lambdaParamDiets (AnonymFun params _ _ _) = map (diet . paramType) params
 lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
 lambdaParamDiets UnOpFun{} = [Observe]
@@ -755,16 +758,25 @@ commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
 -- | Turn an identifier into a parameter.
 toParam :: IdentBase Info vn
-        -> ParamBase vn
+        -> ParamBase Info vn
 toParam (Ident name (Info t) loc) =
-  Param name (vacuousShapeAnnotations $ toStruct t) loc
+  Param name (TypeDecl t' $ Info t') loc
+  where t' = vacuousShapeAnnotations $ toStruct t
 
 -- | Turn a parameter into an identifier.
 fromParam :: Ord vn =>
-             ParamBase vn
+             ParamBase Info vn
           -> IdentBase Info vn
-fromParam (Param name t loc) =
+fromParam (Param name (TypeDecl _ (Info t)) loc) =
   Ident name (Info $ removeShapeAnnotations $ fromStruct t) loc
+
+paramType :: ParamBase Info vn
+          -> StructTypeBase vn
+paramType = unInfo . expandedType . paramTypeDecl
+
+paramDeclaredType :: ParamBase f vn
+                  -> StructTypeBase vn
+paramDeclaredType = declaredType . paramTypeDecl
 
 -- | The list of names bound in the given pattern.
 patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]
@@ -821,6 +833,9 @@ type UncheckedType = TypeBase ShapeDecl NoInfo Name
 
 -- | An array type with no aliasing information.
 type UncheckedArrayType = ArrayTypeBase ShapeDecl NoInfo Name
+
+-- | A type declaration with no expanded type.
+type UncheckedTypeDecl = TypeDeclBase NoInfo Name
 
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name
