@@ -602,9 +602,6 @@ checkProgNoUniqueness = checkProg' False
 
 checkProg' :: (VarName vn, TypeBox ty) =>
               Bool -> ProgBase ty vn -> Either (TypeError vn) (ProgBase CompTypeBase vn)
---  det er ikke nok, at checkProg checker funktioner. Det skal udvides til at checke typer, og
--- efterfølgende også moduler og signaturer.
-
 checkProg' checkoccurs prog = do
   ftable <- buildFtable
   let typeenv = Scope { envVtable = HM.empty

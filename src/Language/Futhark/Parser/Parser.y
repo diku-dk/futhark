@@ -177,20 +177,12 @@ import Language.Futhark.Parser.Lexer
 
 Prog :: { UncheckedProgWithHeaders }
      :   Headers Decs { ProgWithHeaders $1 $2 }
-     |   TopDecs { ProgWithHeaders [] $1 }
+     |   Decs { ProgWithHeaders [] $1 }
 ;
 
-TopDecs : DefaultDec Decs { $2 }
-        | Decs { $2 }
+Decs : FunDecs { $1 }
+     | DefaultDec FunDecs { $2 }
 ;
-
-Decs : Dec Decs { $1 : $2 }
-     | Dec { $1 }
-
-Dec : fun Fun { $2 }
-    | type id = Type
- rse       type Name = string
-        /home/mikkel/Documents/KU/Bachelor/futhark/src/Language/Futhark/Parser/Parser.y
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
@@ -212,7 +204,7 @@ BinOp :: { (BinOp, SrcLoc) }
       | '<'     { (Less, $1) }
       | '<='    { (Leq, $1) }
       | '>'     { (Greater, $1) }
-*      | '>='    { (Geq, $1) }
+      | '>='    { (Geq, $1) }
       | '&&'    { (LogAnd, $1) }
       | '||'    { (LogOr, $1) }
       | pow     { (Pow, $1) }
@@ -251,7 +243,6 @@ Fun :     Type id '(' TypeIds ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
-
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
@@ -259,9 +250,7 @@ Type :: { UncheckedType }
         : PrimType     { Prim $1 }
         | ArrayType     { Array $1 }
         | '{' Types '}' { Tuple $2 }
-        | id { TypeAlias $1 }
 ;
-
 
 DimDecl :: { DimDecl Name }
         : ',' id
