@@ -65,7 +65,8 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
                                                 (ExtRetType rettype')
                                                 (shapes++values)
                                                )
-                               , externalFun = (rettype, map E.identType params)
+                               , externalFun = (rettype,
+                                                map E.paramType params)
                                })
 
         builtinFtable = HM.map addBuiltin E.builtInFunctions
@@ -88,7 +89,7 @@ internaliseFun (fname,rettype,params,body,loc) =
       body'
 
 internaliseIdent :: E.Ident -> InternaliseM I.VName
-internaliseIdent (E.Ident name tp _) =
+internaliseIdent (E.Ident name (Info tp) _) =
   case internaliseType tp of
     [I.Prim _] -> return name
     _           -> fail $ "Futhark.Internalise.internaliseIdent: asked to internalise non-prim-typed ident '"
@@ -131,12 +132,12 @@ internaliseExp desc (E.Index e idxs loc) = do
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 
-internaliseExp desc (E.ArrayLit [] et _) =
+internaliseExp desc (E.ArrayLit [] (Info et) _) =
   letSubExps desc $ map arrayLit $ internaliseType et
   where arrayLit et' =
           I.PrimOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
 
-internaliseExp desc (E.ArrayLit es rowtype _) = do
+internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
   aes <- mapM (internaliseExpToVars "arr_elem") es
   let es'@((e':_):_) = aes --- XXX, ugh.
   Shape rowshape <- arrayShape <$> lookupType e'
@@ -280,7 +281,7 @@ internaliseExp desc (E.DoLoop mergepat mergeexp form loopbody letbody _) = do
     internaliseExp desc letbody
 
   where addAnother t =
-          TuplePattern [E.Wildcard (E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
+          TuplePattern [E.Wildcard (Info $ E.Prim $ E.Signed E.Int32) (srclocOf t), t] noLoc
 
 internaliseExp desc (E.LetWith name src idxs ve body loc) = do
   idxs' <- mapM (internaliseExp1 "idx") idxs
@@ -487,7 +488,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
              E.MapLike _         -> return []
              E.RedLike _ _ _ acc -> internaliseExp "stream_acc" acc
              E.Sequential  acc   -> internaliseExp "stream_acc" acc
-  lam'  <- bindingParams [E.toParam chunk] $ \_ [chunk'] -> do
+  lam'  <- bindingParams [chunk] $ \_ [chunk'] -> do
              rowts <- mapM (fmap (I.stripArray 1) . lookupType) arrs'
              let lam_arrs' = [ I.arrayOf t
                               (Shape [I.Var $ I.paramName chunk'])
@@ -523,7 +524,7 @@ internaliseExp _ (E.Literal v _) =
     Nothing -> throwError $ "Invalid value: " ++ pretty v
     Just v' -> mapM (letSubExp "literal" <=< eValue) v'
 
-internaliseExp desc (E.If ce te fe t _) = do
+internaliseExp desc (E.If ce te fe (Info t) _) = do
   ce' <- internaliseExp1 "cond" ce
   te' <- internaliseBody te
   fe' <- internaliseBody fe
@@ -810,9 +811,9 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
   curarg_types <- mapM subExpType curargs'
   ext_params <- forM ext_param_ts $ \param_t -> do
     name <- newVName "not_curried"
-    return E.Ident { E.identName = name
-                   , E.identType = param_t
-                   , E.identSrcLoc = noLoc
+    return E.Param { E.paramName = name
+                   , E.paramType = param_t
+                   , E.paramSrcLoc = noLoc
                    }
   bindingParams ext_params $ \shape_params value_params -> do
     let params = map (fmap I.fromDecl) $ shape_params ++ value_params
@@ -834,20 +835,20 @@ internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
           resultBodyM $ map I.Var res
         return (params, funbody, map I.fromDecl ts)
 
-internaliseLambda (E.UnOpFun unop paramtype rettype loc) rowts = do
+internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
   internaliseLambda (E.AnonymFun params body rettype' loc) rowts
 
-internaliseLambda (E.BinOpFun unop xtype ytype rettype loc) rowts = do
+internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
   internaliseLambda (AnonymFun params body rettype' loc) rowts
 
-internaliseLambda (E.CurryBinOpLeft binop e paramtype rettype loc) rowts = do
+internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
   internaliseLambda (AnonymFun params body rettype' loc) rowts
 
-internaliseLambda (E.CurryBinOpRight binop e paramtype rettype loc) rowts = do
+internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
   internaliseLambda (AnonymFun params body rettype' loc) rowts
@@ -856,12 +857,12 @@ unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
-  let param = E.Ident { E.identType = paramtype
-                      , E.identSrcLoc = noLoc
-                      , E.identName = paramname
+  let param = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl paramtype
+                      , E.paramSrcLoc = noLoc
+                      , E.paramName = paramname
                       }
-  return ([toParam param],
-          E.UnOp op (E.Var param) noLoc,
+  return ([param],
+          E.UnOp op (E.Var $ E.fromParam param) noLoc,
           E.vacuousShapeAnnotations $ E.toDecl rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
@@ -869,16 +870,17 @@ binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
-  let param_x = E.Ident { E.identType = xtype
-                        , E.identSrcLoc = noLoc
-                        , E.identName = x_name
+  let param_x = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl xtype
+                        , E.paramSrcLoc = noLoc
+                        , E.paramName = x_name
                         }
-      param_y = E.Ident { E.identType = ytype
-                        , E.identSrcLoc = noLoc
-                        , E.identName = y_name
+      param_y = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl ytype
+                        , E.paramSrcLoc = noLoc
+                        , E.paramName = y_name
                         }
-  return ([toParam param_x, toParam param_y],
-          E.BinOp op (E.Var param_x) (E.Var param_y) rettype noLoc,
+  return ([param_x, param_y],
+          E.BinOp op (E.Var $ E.fromParam param_x)
+          (E.Var $ E.fromParam param_y) (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toDecl rettype)
 
 binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
@@ -887,13 +889,13 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
                      -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
-  let param = E.Ident { E.identType = paramtype
-                      , E.identSrcLoc = noLoc
-                      , E.identName = paramname
-                        }
-      (x', y') = swap (E.Var param, e)
-  return ([toParam param],
-          E.BinOp op x' y' rettype noLoc,
+  let param = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl paramtype
+                      , E.paramSrcLoc = noLoc
+                      , E.paramName = paramname
+                      }
+      (x', y') = swap (E.Var $ E.fromParam param, e)
+  return ([param],
+          E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toDecl rettype)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise

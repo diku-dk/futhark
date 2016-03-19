@@ -32,20 +32,20 @@ apply = parens . commasep . map align
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
-class AliasAnnotation ty where
-  aliasComment :: (Eq vn, Pretty vn, Hashable vn) => PatternBase ty vn -> Doc -> Doc
+class AliasAnnotation f where
+  aliasComment :: (Eq vn, Pretty vn, Hashable vn) => PatternBase f vn -> Doc -> Doc
 
 instance AliasAnnotation NoInfo where
   aliasComment _ = id
 
-instance AliasAnnotation CompTypeBase where
+instance AliasAnnotation Info where
   aliasComment pat d = case aliasComment' pat of
     []   -> d
     l:ls -> foldl (</>) l ls </> d
     where aliasComment' Wildcard{} = []
           aliasComment' (TuplePattern pats _) = concatMap aliasComment' pats
           aliasComment' (Id ident) =
-            case clean . HS.toList . aliases $ identType ident of
+            case clean . HS.toList . aliases $ unInfo $ identType ident of
               [] -> []
               als -> [oneline $
                       text "// " <> ppr ident <> text " aliases " <>
@@ -132,6 +132,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Prim et) = ppr et
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase vn) where
+  ppr = ppr . paramName
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
   ppr = ppr . identName
@@ -315,8 +318,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
 
-ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn) => IdentBase ty vn -> Doc
-ppParam param = ppr (identType param) <+> ppr param
+ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase vn -> Doc
+ppParam param = ppr (paramType param) <+> ppr param
 
 prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) =>
                Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
