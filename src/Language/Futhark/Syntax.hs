@@ -21,7 +21,7 @@ module Language.Futhark.Syntax
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
-  , DeclTypeBase
+  , StructTypeBase
   , DeclArrayTypeBase
   , DeclTupleArrayElemTypeBase
   , Diet(..)
@@ -247,9 +247,9 @@ data TypeBase shape as vn = Prim PrimType
 -- for describing the type of a computation.
 type CompTypeBase = TypeBase Rank Names
 
--- | A type with shape annotations and no aliasing information, used
--- for declarations.
-type DeclTypeBase = TypeBase ShapeDecl NoInfo
+-- | A "structural" type with shape annotations and no aliasing
+-- information, used for declarations.
+type StructTypeBase = TypeBase ShapeDecl NoInfo
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
@@ -302,7 +302,7 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 -- | A name with no aliasing information, but known type.  These are
 -- used for function parameters.
 data ParamBase vn = Param { paramName :: vn
-                          , paramType :: DeclTypeBase vn
+                          , paramType :: StructTypeBase vn
                           , paramSrcLoc :: SrcLoc
                           }
                   deriving (Show)
@@ -551,7 +551,7 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
                         deriving (Eq, Ord, Show)
 
 -- | Anonymous Function
-data LambdaBase f vn = AnonymFun [ParamBase vn] (ExpBase f vn) (DeclTypeBase vn) SrcLoc
+data LambdaBase f vn = AnonymFun [ParamBase vn] (ExpBase f vn) (StructTypeBase vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
                       | CurryFun Name [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
@@ -586,7 +586,7 @@ instance Located (PatternBase f vn) where
 
 -- | Function Declarations
 type FunDecBase f vn = (Name,
-                         DeclTypeBase vn,
+                         StructTypeBase vn,
                          [ParamBase vn],
                          ExpBase f vn,
                          SrcLoc)

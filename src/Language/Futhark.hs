@@ -7,7 +7,7 @@ module Language.Futhark
 
   , Ident, Parameter, Exp, Lambda
   , Pattern, FunDec, Prog
-  , Type, DeclType, ArrayType
+  , Type, StructType, ArrayType
   )
   where
 
@@ -42,7 +42,7 @@ type Prog = ProgBase Info VName
 type Type = TypeBase Rank Names VName
 
 -- | A known type with shape annotations but no aliasing information.
-type DeclType = TypeBase ShapeDecl NoInfo VName
+type StructType = TypeBase ShapeDecl NoInfo VName
 
 -- | A known array type with no shape annotations, but aliasing
 -- information.

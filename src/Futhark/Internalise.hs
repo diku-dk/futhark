@@ -854,49 +854,49 @@ internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc
   internaliseLambda (AnonymFun params body rettype' loc) rowts
 
 unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
-                -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+                -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
-  let param = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl paramtype
+  let param = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toStruct paramtype
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
   return ([param],
           E.UnOp op (E.Var $ E.fromParam param) noLoc,
-          E.vacuousShapeAnnotations $ E.toDecl rettype)
+          E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpFunToLambda :: E.BinOp -> E.Type -> E.Type -> E.Type
-                 -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
-  let param_x = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl xtype
+  let param_x = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toStruct xtype
                         , E.paramSrcLoc = noLoc
                         , E.paramName = x_name
                         }
-      param_y = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl ytype
+      param_y = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toStruct ytype
                         , E.paramSrcLoc = noLoc
                         , E.paramName = y_name
                         }
   return ([param_x, param_y],
           E.BinOp op (E.Var $ E.fromParam param_x)
           (E.Var $ E.fromParam param_y) (Info rettype) noLoc,
-          E.vacuousShapeAnnotations $ E.toDecl rettype)
+          E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
                      -> E.Exp
                      -> ((E.Exp,E.Exp) -> (E.Exp,E.Exp))
-                     -> InternaliseM ([E.Parameter], E.Exp, E.DeclType)
+                     -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
-  let param = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toDecl paramtype
+  let param = E.Param { E.paramType = E.vacuousShapeAnnotations $ E.toStruct paramtype
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
       (x', y') = swap (E.Var $ E.fromParam param, e)
   return ([param],
           E.BinOp op x' y' (Info rettype) noLoc,
-          E.vacuousShapeAnnotations $ E.toDecl rettype)
+          E.vacuousShapeAnnotations $ E.toStruct rettype)
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

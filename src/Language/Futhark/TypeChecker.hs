@@ -195,7 +195,7 @@ instance Show TypeError where
     " should be an integer."
 
 -- | A tuple of a return type and a list of argument types.
-type FunBinding = (DeclTypeBase VName, [DeclTypeBase VName])
+type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
 
 data Binding = Bound Type
              | WasConsumed SrcLoc
@@ -565,7 +565,7 @@ checkProg prog = do
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise =
-        let argtypes = map (toDecl . paramType) args -- Throw away argument names.
+        let argtypes = map (toStruct . paramType) args -- Throw away argument names.
         in Right $ HM.insert name (ret,argtypes,pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
@@ -903,7 +903,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ lam_rtp _) arr pos) = do
   -- (i) properly check the lambda on its parameter and
   --(ii) make some fake arguments, which do not alias `arr', and
   --     check that aliases of `arr' are not used inside lam.
-  let fakearg = (fromDecl $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
+  let fakearg = (fromStruct $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
       (aas,faas) = case macctup of
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
@@ -1196,7 +1196,7 @@ checkBinding pat et dflow = do
         rmTypes (TuplePattern pats pos) = TuplePattern (map rmTypes pats) pos
         rmTypes (Wildcard _ loc) = Wildcard NoInfo loc
 
-validApply :: [DeclTypeBase VName] -> [Type] -> Bool
+validApply :: [StructTypeBase VName] -> [Type] -> Bool
 validApply expected got =
   length got == length expected &&
   and (zipWith subtypeOf (map toStructural got) (map toStructural expected))
@@ -1211,7 +1211,7 @@ checkArg arg = do (arg', dflow) <- collectDataflow $ checkExp arg
                   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe Name -> SrcLoc
-             -> [DeclType] -> DeclType -> [Arg]
+             -> [StructType] -> StructType -> [Arg]
              -> TypeM ()
 checkFuncall fname loc paramtypes _ args = do
   let argts = map argType args
@@ -1248,7 +1248,7 @@ checkLambda (AnonymFun params body ret pos) args =
           (_, ret', _, body', _) <-
             noUnique $ checkFun (nameFromString "<anonymous>", ret, params, body, pos)
           tupparam <- newIdent "tup_shim"
-                      (Tuple $ map (fromDecl .
+                      (Tuple $ map (fromStruct .
                                     removeShapeAnnotations .
                                     paramType) params)
                       pos
@@ -1266,8 +1266,8 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
     Just (rt, paramtypes) -> do
-      let rettype' = fromDecl $ removeShapeAnnotations rt
-          paramtypes' = map (fromDecl . removeShapeAnnotations) paramtypes
+      let rettype' = fromStruct $ removeShapeAnnotations rt
+          paramtypes' = map (fromStruct . removeShapeAnnotations) paramtypes
       case () of
         _ | [(Tuple ets, _, _)] <- args,
             validApply paramtypes ets -> do
@@ -1364,11 +1364,11 @@ checkPolyLambdaOp op curryargexps args pos = do
   body <- binding params $ checkBinOp op x y pos
   checkLambda
     (AnonymFun (map toParam params) (BinOp op x y NoInfo pos)
-     (vacuousShapeAnnotations $ toDecl $ typeOf body) pos)
+     (vacuousShapeAnnotations $ toStruct $ typeOf body) pos)
     args
   where fname = nameFromString $ ppBinOp op
 
-checkRetType :: SrcLoc -> DeclType -> TypeM ()
+checkRetType :: SrcLoc -> StructType -> TypeM ()
 checkRetType loc (Tuple ts) = mapM_ (checkRetType loc) ts
 checkRetType _ (Prim _) = return ()
 checkRetType loc (Array at) =
