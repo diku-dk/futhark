@@ -16,10 +16,7 @@ module Language.Futhark.Attributes
 
   -- * Queries on expressions
   , expToValue
-  , mapTails
   , typeOf
-  , freeInExp
-  , freeNamesInExp
   , commutative
 
   -- * Queries on patterns
@@ -104,13 +101,11 @@ import Data.Array
 import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
 import Language.Futhark.Syntax
-import Language.Futhark.Traversals
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -780,114 +775,6 @@ lambdaParamDiets CurryBinOpRight{} = [Observe]
 -- | Find the function of the given name in the Futhark program.
 funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
 funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
-
--- | Change those subexpressions where evaluation of the expression
--- would stop.  Also change type annotations at branches.
-mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
-         -> ExpBase ty vn -> ExpBase ty vn
-mapTails f g (LetPat pat e body loc) =
-  LetPat pat e (mapTails f g body) loc
-mapTails f g (LetWith dest src idxs ve body loc) =
-  LetWith dest src idxs ve (mapTails f g body) loc
-mapTails f g (DoLoop pat me form loopbody body loc) =
-  DoLoop pat me form loopbody (mapTails f g body) loc
-mapTails f g (If c te fe t loc) =
-  If c (mapTails f g te) (mapTails f g fe) (g t) loc
-mapTails f _ e = f e
-
--- | Return the set of identifiers that are free in the given
--- expression.
-freeInExp :: (TypeBox ty, Eq vn, Hashable vn) =>
-             ExpBase ty vn -> HS.HashSet (IdentBase ty vn)
-freeInExp = execWriter . expFree
-  where names = identityWalker {
-                  walkOnExp = expFree
-                , walkOnLambda = lambdaFree
-                , walkOnIdent = identFree
-                }
-
-        identFree ident =
-          tell $ HS.singleton ident
-
-        expFree (LetPat pat e body _) = do
-          expFree e
-          binding (patIdentSet pat) $ expFree body
-        expFree (LetWith dest src idxs ve body _) = do
-          identFree src
-          mapM_ expFree idxs
-          expFree ve
-          binding (HS.singleton dest) $ expFree body
-        expFree (DoLoop pat mergeexp (For _ lbound i ubound) loopbody letbody _) = do
-          expFree mergeexp
-          expFree lbound
-          expFree ubound
-          binding (i `HS.insert` patIdentSet pat) $ do
-            expFree loopbody
-            expFree letbody
-        expFree (DoLoop pat mergeexp (While cond) loopbody letbody _) = do
-          expFree mergeexp
-          binding (patIdentSet pat) $ do
-            expFree cond
-            expFree loopbody
-            expFree letbody
-
-        expFree e = walkExpM names e
-
-        lambdaFree = tell . freeInLambda
-
-        binding bound = censor (`HS.difference` bound)
-
--- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
-freeNamesInExp :: (TypeBox ty, Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet vn
-freeNamesInExp = HS.map identName . freeInExp
-
--- | Return the set of identifiers that are free in the given lambda.
-freeInLambda :: (TypeBox ty, Eq vn, Hashable vn) =>
-                LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)
-freeInLambda (AnonymFun params body rettype _) =
-  HS.filter ((`notElem` params') . identName) (freeInExp body) <>
-  freeInDeclType rettype
-    where params' = map identName params
-freeInLambda (CurryFun _ exps _ _) =
-  HS.unions (map freeInExp exps)
-freeInLambda UnOpFun{} =
-  mempty
-freeInLambda BinOpFun{} =
-  mempty
-freeInLambda (CurryBinOpLeft _ e _ _ _) =
-  freeInExp e
-freeInLambda (CurryBinOpRight _ e _ _ _) =
-  freeInExp e
-
-freeInDeclType :: (TypeBox ty, Eq vn, Hashable vn) =>
-                  DeclTypeBase vn -> HS.HashSet (IdentBase ty vn)
-freeInDeclType (Prim _) = mempty
-freeInDeclType (Array at) = freeInDeclArrayType at
-freeInDeclType (Tuple ts) = mconcat $ map freeInDeclType ts
-
-freeInDeclArrayType :: (TypeBox ty, Eq vn, Hashable vn) =>
-                       DeclArrayTypeBase vn -> HS.HashSet (IdentBase ty vn)
-freeInDeclArrayType (PrimArray _ shape _ _) =
-  mconcat $ map freeInDimDecl $ shapeDims shape
-freeInDeclArrayType (TupleArray ts shape _) =
-  mconcat (map freeInDeclTupleArrayElemType ts) <>
-  mconcat (map freeInDimDecl $ shapeDims shape)
-
-freeInDeclTupleArrayElemType :: (TypeBox ty, Eq vn, Hashable vn) =>
-                                DeclTupleArrayElemTypeBase vn
-                             -> HS.HashSet (IdentBase ty vn)
-freeInDeclTupleArrayElemType (PrimArrayElem _ _) =
-  mempty
-freeInDeclTupleArrayElemType (ArrayArrayElem at) =
-  freeInDeclArrayType at
-freeInDeclTupleArrayElemType (TupleArrayElem ts) =
-  mconcat $ map freeInDeclTupleArrayElemType ts
-
-freeInDimDecl :: (TypeBox ty, Eq vn, Hashable vn) =>
-                 DimDecl vn -> HS.HashSet (IdentBase ty vn)
-freeInDimDecl (NamedDim name) = HS.singleton $
-                                Ident name (boxType $ Prim $ Signed Int32) noLoc
-freeInDimDecl _               = mempty
 
 -- | Is the given binary operator commutative?
 commutative :: BinOp -> Bool
