@@ -58,9 +58,11 @@ module Language.Futhark.Syntax
   )
   where
 
+import Control.Applicative
 import Data.Array
 import Data.Hashable
 import Data.Loc
+import Data.Functor
 import Data.Monoid
 import Data.Foldable
 import Data.Traversable
