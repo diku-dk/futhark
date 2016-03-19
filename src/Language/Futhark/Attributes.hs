@@ -5,8 +5,7 @@
 -- we need here.
 module Language.Futhark.Attributes
   (
-    TypeBox(..)
-  , funDecByName
+    funDecByName
   , isBuiltInFunction
   , builtInFunctions
 
@@ -94,9 +93,7 @@ module Language.Futhark.Attributes
   )
   where
 
-import Control.Applicative
 import Control.Monad.Writer
-
 import Data.Array
 import Data.Hashable
 import Data.List
@@ -309,29 +306,6 @@ toDecl t = t `setAliases` NoInfo
 fromDecl :: TypeBase shape as vn
          -> TypeBase shape Names vn
 fromDecl t = t `setAliases` HS.empty
-
--- | A type box provides a way to box a 'CompTypeBase', and possibly
--- retrieve one, if the box is not empty.  This can be used to write
--- function on Futhark terms that are polymorphic in the type annotations,
--- yet can still inspect types if they are present.
-class TypeBox ty where
-  -- | Try to retrieve a type from the type box.
-  unboxType :: ty vn -> Maybe (CompTypeBase vn)
-  -- | Put a type in the box.
-  boxType :: CompTypeBase vn -> ty vn
-  -- | Apply a mapping action to the type contained in the box.
-  mapType :: Applicative f =>
-             (CompTypeBase vn -> f (CompTypeBase vn')) -> ty vn -> f (ty vn')
-
-instance TypeBox NoInfo where
-  unboxType = const Nothing
-  boxType = const NoInfo
-  mapType = const . const (pure NoInfo)
-
-instance TypeBox CompTypeBase where
-  unboxType = Just
-  boxType = id
-  mapType = ($)
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
