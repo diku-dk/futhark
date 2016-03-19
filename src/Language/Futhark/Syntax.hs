@@ -61,6 +61,8 @@ import Data.Array
 import Data.Hashable
 import Data.Loc
 import Data.Monoid
+import Data.Foldable
+import Data.Traversable
 import qualified Data.HashSet as HS
 
 import Prelude
