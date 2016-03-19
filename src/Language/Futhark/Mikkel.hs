@@ -106,6 +106,44 @@ exampleDecls = [ TypeDecl "t0" $ UserPrim Int
                , TypeDecl "t2" $ UserArray $
                  UserTuple [UserType "t0", UserType "t1", UserPrim Float]
                ]
+-- | checkTypes exampleDecls returns
+-- | Right [("t2",Tuple [Prim Int,Prim Int,Prim Float]),
+-- |        ("t1",Prim Int),
+-- |        ("t0",Prim Int)]
+
+
+redefinitionOfTypeTest :: [TypeDecl]
+redefinitionOfTypeTest = [ TypeDecl "t0" $ UserPrim Int
+                         , TypeDecl "t1" $ UserType "t0"
+                         , TypeDecl "t0" $ UserPrim Float
+                         , TypeDecl "t2" $ UserArray $
+                           UserTuple [UserType "t0", UserType "t1", UserPrim Float]
+                         ]
+
+-- | checkTypes redefinitionOfTypeTest returns Left "Error: type t0 already defined"
+
+
+cycleTest :: [TypeDecl]
+cycleTest = [ TypeDecl "t0" $ UserPrim Int
+            , TypeDecl "t1" $ UserType "t2"
+            , TypeDecl "t2" $ UserType "t3"
+            , TypeDecl "t3" $ UserArray $ UserType "t1"
+            ]
+
+-- | checkTypes cycleTest returns Left "Error: Cyclical definition of t1"
+
+cycleTest2 :: [TypeDecl]
+cycleTest2 = [ TypeDecl "t0" $ UserPrim Int
+            , TypeDecl "t1" $ UserType "t2"
+            , TypeDecl "t2" $ UserType "t3"
+            , TypeDecl "t3" $ UserArray $ UserTuple [UserPrim Float, UserType "t1"]
+            ]
+
+
+-- | checkTypes cycleTest2 returns Left "Error: Cyclical definition of t1"
+
+
+
 
 -- | Corresponds to the type environment to be produced from
 -- exampleDecls.
@@ -118,3 +156,4 @@ exampleTypeEnv = [ ("t0", Prim Int)
                                 PrimArrayElem Float]
                     1)
                  ]
+
