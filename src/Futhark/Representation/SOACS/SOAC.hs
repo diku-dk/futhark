@@ -440,7 +440,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
             rtp_iner_syms <- catMaybes <$> mapM boundDim innerdims
             case find (`HS.member` lamparnms) rtp_iner_syms of
                 Just name -> TC.bad $ TC.TypeError $
-                             "Stream's lambda: " ++ textual (baseName name) ++
+                             "Stream's lambda: " ++ pretty name ++
                              " cannot specify an inner result shape"
                 _ -> return True
 

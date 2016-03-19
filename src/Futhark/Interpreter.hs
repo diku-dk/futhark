@@ -191,13 +191,13 @@ lookupVar :: VName -> FutharkM Value
 lookupVar vname = do
   val <- asks $ HM.lookup vname . envVtable
   case val of Just val' -> return val'
-              Nothing   -> bad $ TypeError $ "lookupVar " ++ textual vname
+              Nothing   -> bad $ TypeError $ "lookupVar " ++ pretty vname
 
 lookupFun :: Name -> FutharkM ([Value] -> FutharkM [Value])
 lookupFun fname = do
   fun <- asks $ HM.lookup fname . envFtable
   case fun of Just fun' -> return fun'
-              Nothing   -> bad $ TypeError $ "lookupFun " ++ textual fname
+              Nothing   -> bad $ TypeError $ "lookupFun " ++ pretty fname
 
 arrToList :: Value -> FutharkM [Value]
 arrToList (ArrayVal l _ [_]) =
