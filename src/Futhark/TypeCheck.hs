@@ -130,8 +130,8 @@ instance Checkable lore => Show (ErrorCase lore) where
     pretty t ++ "."
   show (ReturnTypeError fname rettype bodytype) =
     "Declaration of function " ++ nameToString fname ++
-    " declares return type " ++ pretty rettype ++ ", but body has type " ++
-    pretty bodytype
+    " declares return type\n  " ++ prettyTuple rettype ++
+    "\nBut body has type\n  " ++ prettyTuple bodytype
   show (DupDefinitionError name) =
     "Duplicate definition of function " ++ nameToString name ++ ""
   show (DupParamError funname paramname) =
