@@ -375,12 +375,12 @@ compileFunDec :: Operations op -> Imp.Space
               -> VNameSource
               -> FunDec
               -> Either String (VNameSource, (Name, Imp.Function op))
-compileFunDec ops ds src (FunDec fname rettype params body) = do
+compileFunDec ops ds src (FunDec entry fname rettype params body) = do
   ((outparams, inparams, results, args), src', body') <-
     runImpM compile ops ds src
   return (src',
           (fname,
-           Imp.Function outparams inparams body' results args))
+           Imp.Function entry outparams inparams body' results args))
   where compile = do
           (inparams, arraydecls, args) <- compileInParams params
           (results, outparams, dests) <- compileOutParams rettype

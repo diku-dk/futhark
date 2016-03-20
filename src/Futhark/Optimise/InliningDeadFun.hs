@@ -101,9 +101,9 @@ aggInlining cg = do
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
 doInlineInCaller :: FunDec ->  [FunDec] -> FunDec
-doInlineInCaller (FunDec name rtp args body) inlcallees =
+doInlineInCaller (FunDec entry name rtp args body) inlcallees =
   let body' = inlineInBody inlcallees body
-  in FunDec name rtp args body'
+  in FunDec entry name rtp args body'
 
 inlineInBody :: [FunDec] -> Body -> Body
 inlineInBody
@@ -117,9 +117,9 @@ inlineInBody
         (runReader (withShapes res') $ scopeOf callbnds)
   in case filter ((== fname) . funDecName) inlcallees of
        [] -> continue [bnd]
-       FunDec _ _ fargs body:_ ->
-         let revbnds = zip (map paramIdent fargs) $ map fst args
-         in  continue' $ foldr addArgBnd body revbnds
+       fun:_ ->
+         let revbnds = zip (map paramIdent $ funDecParams fun) $ map fst args
+         in  continue' $ foldr addArgBnd (funDecBody fun) revbnds
   where
 
       addArgBnd :: (Ident, SubExp) -> Body -> Body

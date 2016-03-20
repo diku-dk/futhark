@@ -172,12 +172,12 @@ bind vars body = do
                                              `HM.union` envNameMap env }
 
 instance Renameable lore => Rename (FunDec lore) where
-  rename (FunDec fname ret params body) =
+  rename (FunDec entry fname ret params body) =
     bind (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
-      return $ FunDec fname ret' params' body'
+      return $ FunDec entry fname ret' params' body'
 
 instance Rename SubExp where
   rename (Var v)      = Var <$> rename v

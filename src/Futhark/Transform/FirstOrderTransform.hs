@@ -57,13 +57,13 @@ transformFunDec :: (MonadFreshNames m, Bindable tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
                    FunDec -> m (AST.FunDec tolore)
-transformFunDec (FunDec fname rettype params body) = do
+transformFunDec (FunDec entry fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
     localScope (scopeOfFParams params) $
     insertBindingsM $
     transformBody body
-  return $ FunDec fname rettype params body'
+  return $ FunDec entry fname rettype params body'
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.

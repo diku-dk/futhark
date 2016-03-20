@@ -12,8 +12,8 @@ setDefaultSpace space (Functions fundecs) =
             | (fname, func) <- fundecs ]
 
 setFunctionSpace :: Space -> Function op -> Function op
-setFunctionSpace space (Function outputs inputs body results args) =
-  Function
+setFunctionSpace space (Function entry outputs inputs body results args) =
+  Function entry
   (map (setParamSpace space) outputs)
   (map (setParamSpace space) inputs)
   (setBodySpace space body)

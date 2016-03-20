@@ -54,7 +54,7 @@ buildFtable :: MonadFreshNames m => E.Prog
 buildFtable = fmap (HM.union builtinFtable<$>) .
               runInternaliseM mempty .
               fmap HM.fromList . mapM inspect . E.progFunctions
-  where inspect (fname, TypeDecl _ (Info rettype), params, _, _) =
+  where inspect (E.FunDec _ fname (TypeDecl _ (Info rettype)) params _ _) =
           bindingParams params $ \shapes values -> do
             (rettype', _) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
@@ -77,13 +77,13 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
           (E.Prim t, map E.Prim paramts)
 
 internaliseFun :: E.FunDec -> InternaliseM I.FunDec
-internaliseFun (fname, TypeDecl _ (Info rettype), params, body, loc) =
+internaliseFun (E.FunDec entry fname (TypeDecl _ (Info rettype)) params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
     body' <- ensureResultExtShape asserting loc
              (map I.fromDecl rettype') firstbody
-    return $ FunDec
+    return $ I.FunDec entry
       fname (ExtRetType rettype')
       (shapeparams ++ params')
       body'

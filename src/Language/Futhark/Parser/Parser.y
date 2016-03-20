@@ -119,6 +119,7 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
       fun             { L $$ FUN }
+      entry           { L $$ ENTRY }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
       '<-'            { L $$ SETTO }
@@ -233,14 +234,22 @@ Header :: { ProgHeader }
 Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
-FunDecs : fun Fun FunDecs   { $2 : $3 }
-        | fun Fun           { [$2] }
+FunDecs : Fun FunDecs   { $1 : $2 }
+        | Fun           { [$1] }
 ;
 
-Fun :     TypeDecl id '(' Params ')' '=' Exp
-                        { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
-        | TypeDecl id '(' ')' '=' Exp
-                        { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
+Fun     : fun TypeDecl id '(' Params ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDec (name==defaultEntryPoint) name $2 $5 $8 pos }
+        | fun TypeDecl id '(' ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDec (name==defaultEntryPoint) name $2 [] $7 pos }
+        | entry TypeDecl id '(' Params ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDec True name $2 $5 $8 pos }
+        | entry TypeDecl id '(' ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDec True name $2 [] $7 pos }
 ;
 
 Uniqueness : '*' { Unique }
