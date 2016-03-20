@@ -280,7 +280,9 @@ type FParam lore = ParamT (FParamAttr lore)
 type LParam lore = ParamT (LParamAttr lore)
 
 -- | Function Declarations
-data FunDecT lore = FunDec { funDecName :: Name
+data FunDecT lore = FunDec { funDecEntryPoint :: Bool
+                             -- ^ True if this function is an entry point.
+                           , funDecName :: Name
                            , funDecRetType :: RetType lore
                            , funDecParams :: [FParam lore]
                            , funDecBody :: BodyT lore

@@ -315,11 +315,13 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBa
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
-    where ppFun (name, rettype, args, body, _) =
-            text "fun" <+> ppr rettype <+>
+    where ppFun (FunDec entry name rettype args body _) =
+            text fun <+> ppr rettype <+>
             text (nameToString name) <//>
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
+            where fun | entry     = "entry"
+                      | otherwise = "fun"
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase t vn -> Doc
 ppParam param = ppr (paramDeclaredType param) <+> ppr param

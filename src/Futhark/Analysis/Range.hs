@@ -36,10 +36,10 @@ rangeAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 analyseFun :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
               In.FunDec lore -> Out.FunDec lore
-analyseFun (In.FunDec fname restype params body) =
+analyseFun (In.FunDec entry fname restype params body) =
   runRangeM $ bindFunParams params $ do
     body' <- analyseBody body
-    return $ Out.FunDec fname restype params body'
+    return $ Out.FunDec entry fname restype params body'
 
 analyseBody :: (In.Attributes lore, In.CanBeRanged (In.Op lore)) =>
                In.Body lore

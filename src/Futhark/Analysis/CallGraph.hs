@@ -19,8 +19,8 @@ type FunctionTable = HM.HashMap Name FunDec
 buildFunctionTable :: Prog -> FunctionTable
 buildFunctionTable =
   foldl expand HM.empty . progFunctions
-  where expand ftab f@(FunDec name _ _ _) =
-          HM.insert name f ftab
+  where expand ftab f =
+          HM.insert (funDecName f) f ftab
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: FunctionTable }
@@ -42,12 +42,11 @@ type CallGraph = HM.HashMap Name [Name]
 buildCallGraph :: Prog -> CallGraph
 buildCallGraph prog = do
   let ftable = buildFunctionTable prog
-  runCGM (buildCGfun HM.empty defaultEntryPoint) $ CGEnv ftable
+  runCGM (foldM buildCGfun HM.empty entry_points) $ CGEnv ftable
+  where entry_points = map funDecName $ filter funDecEntryPoint $ progFunctions prog
 
--- | @buildCallGraph cg fname@ updates Call Graph @cg@ with the contributions of function
+-- | @buildCallGraph cg f@ updates Call Graph @cg@ with the contributions of function
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
--- In particular, @buildCGfun HM.empty defaultEntryPoint@ should construct the Call Graph
--- of the whole program.
 buildCGfun :: CallGraph -> Name -> CGM CallGraph
 buildCGfun cg fname  = do
   bnd <- asks $ HM.lookup fname . envFtable

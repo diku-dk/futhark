@@ -206,10 +206,10 @@ runDistribM (DistribM m) = do
   where positionNameSource (x, src, msgs) = ((x, msgs), src)
 
 transformFunDec :: FunDec -> DistribM Out.FunDec
-transformFunDec (FunDec name rettype params body) = do
+transformFunDec (FunDec entry name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $
            transformBody body
-  return $ FunDec name rettype params body'
+  return $ FunDec entry name rettype params body'
 
 transformBody :: Body -> DistribM Out.Body
 transformBody body = do bnds <- transformBindings $ bodyBindings body

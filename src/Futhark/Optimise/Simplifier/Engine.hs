@@ -736,8 +736,8 @@ instance Simplifiable Certificates where
 
 simplifyFun :: MonadEngine m =>
                FunDec (InnerLore m) -> m (FunDec (Lore m))
-simplifyFun (FunDec fname rettype params body) = do
+simplifyFun (FunDec entry fname rettype params body) = do
   rettype' <- simplify rettype
   body' <- bindFParams params $ insertAllBindings $
            simplifyBody (map diet $ retTypeValues rettype') body
-  return $ FunDec fname rettype' params body'
+  return $ FunDec entry fname rettype' params body'

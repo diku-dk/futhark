@@ -46,7 +46,7 @@ module Language.Futhark.Syntax
   , StreamForm(..)
 
   -- * Definitions
-  , FunDecBase
+  , FunDecBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
@@ -600,11 +600,15 @@ instance Located (PatternBase f vn) where
   locOf (Wildcard _ loc) = locOf loc
 
 -- | Function Declarations
-type FunDecBase f vn = (Name,
-                        TypeDeclBase f vn,
-                        [ParamBase f vn],
-                        ExpBase f vn,
-                        SrcLoc)
+data FunDecBase f vn = FunDec { funDecEntryPoint :: Bool
+                                -- ^ True if this function is an entry point.
+                              , funDecName :: Name
+                              , funDecRetType :: TypeDeclBase f vn
+                              , funDecParams :: [ParamBase f vn]
+                              , funDecBody :: ExpBase f vn
+                              , funDecLocation :: SrcLoc
+                              }
+deriving instance Showable f vn => Show (FunDecBase f vn)
 
 -- | An entire Futhark program.
 newtype ProgBase f vn = Prog { progFunctions :: [FunDecBase f vn] }

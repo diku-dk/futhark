@@ -256,12 +256,14 @@ instance Pretty ExtRetType where
   ppr = ppTuple' . retTypeValues
 
 instance PrettyLore lore => Pretty (FunDec lore) where
-  ppr fundec@(FunDec name rettype args body) =
+  ppr fundec@(FunDec entry name rettype args body) =
     maybe id (</>) (ppFunDecLore fundec) $
-    text "fun" <+> ppr rettype <+>
+    text fun <+> ppr rettype <+>
     text (nameToString name) <//>
     apply (map ppr args) <+>
     equals </> indent 2 (ppr body)
+    where fun | entry = "entry"
+              | otherwise = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions

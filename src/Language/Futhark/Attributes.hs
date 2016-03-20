@@ -5,9 +5,7 @@
 -- we need here.
 module Language.Futhark.Attributes
   (
-    funDecByName
-  , isBuiltInFunction
-  , builtInFunctions
+    builtInFunctions
 
   -- * Parameter handling
   , toParam
@@ -748,10 +746,6 @@ lambdaParamDiets BinOpFun{} = [Observe, Observe]
 lambdaParamDiets CurryBinOpLeft{} = [Observe]
 lambdaParamDiets CurryBinOpRight{} = [Observe]
 
--- | Find the function of the given name in the Futhark program.
-funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
-funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
-
 -- | Is the given binary operator commutative?
 commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
@@ -800,10 +794,6 @@ patIdents (Wildcard _ _) = []
 -- you want).
 patIdentSet :: (Eq vn, Hashable vn) => PatternBase ty vn -> HS.HashSet (IdentBase ty vn)
 patIdentSet = HS.fromList . patIdents
-
--- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
-isBuiltInFunction :: Name -> Bool
-isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
 
 -- | A map of all built-in functions and their types.
 builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])

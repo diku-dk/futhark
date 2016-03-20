@@ -299,7 +299,7 @@ runFunWithShapes fname valargs prog = do
 
 runThisFun :: FunDec -> [Value] -> FunTable
            -> Either InterpreterError [Value]
-runThisFun (FunDec fname _ fparams _) args ftable
+runThisFun (FunDec _ fname _ fparams _) args ftable
   | argtypes == paramtypes =
     runFutharkM (evalFuncall fname args) futharkenv
   | otherwise =
@@ -316,7 +316,7 @@ buildFunTable :: Prog -> FunTable
 buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
-        expand ftable' (FunDec name _ params body) =
+        expand ftable' (FunDec _ name _ params body) =
           let fun funargs = binding (zip3 (map paramIdent params) (repeat BindVar) funargs) $
                             evalBody body
           in HM.insert name fun ftable'
