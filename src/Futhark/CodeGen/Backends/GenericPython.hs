@@ -23,7 +23,6 @@ module Futhark.CodeGen.Backends.GenericPython
   , stms
   , collect'
   , collect
-  , asscalar
 
   , compileSizeOfType
     ) where
@@ -319,11 +318,10 @@ packArg memsizes spacemap (Imp.ArrayValue vname bt dims) = do
     Just Imp.DefaultSpace -> stm $ Assign src_data unwrap_call
     Nothing -> error "Space is not set correctly"
 
-unpackOutput :: HM.HashMap VName VName -> HM.HashMap VName Imp.Space -> Imp.ValueDecl -> CompilerM op s ()
-unpackOutput _ _ (Imp.ScalarValue _ vname) = do
-  let vname' = Var $ pretty vname
-  let newbt = asscalar vname'
-  stm $ Assign vname' newbt
+unpackOutput :: HM.HashMap VName VName -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
+             -> CompilerM op s ()
+unpackOutput _ _ Imp.ScalarValue{} =
+  return ()
 
 unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
   let cast = Cast (Var $ pretty vname) (compilePrimType bt)
@@ -364,16 +362,6 @@ readerElem bt = case bt of
   Bool              -> "read_bool"
   Char              -> "read_char"
   Cert              -> error "Cert is never used. ReaderElem doesn't handle this"
-
---since all constants are numpy types, we would sometimes like to use python types, and this function allows us to convert to python.
-asscalar :: PyExp -> PyExp
-asscalar (Constant v) = Constant v
-asscalar (Call "int32" [Arg (Constant v)]) = Constant v
-asscalar (Call "float32" [Arg (Constant v)]) = Constant v
-asscalar (Call "float64" [Arg (Constant v)]) = Constant v
-asscalar (Call "bool_" [Arg (Constant v)]) = Constant v
-asscalar (Call "uint8" [Arg (Constant v)]) = Constant v
-asscalar e = simpleCall "asscalar" [e]
 
 readInput :: Imp.ValueDecl -> PyStmt
 readInput (Imp.ScalarValue bt vname) =

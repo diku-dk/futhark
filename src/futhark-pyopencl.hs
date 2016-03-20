@@ -20,6 +20,7 @@ import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExpandAllocations
+import Futhark.Pass.CoalesceMemoryAccesses
 import Futhark.Util.Options
 import Futhark.Optimise.DoubleBuffer
 
@@ -90,7 +91,6 @@ compilerPipeline =
   standardPipeline >>>
   onePass extractKernels >>>
   passes [ simplifyKernels
-         , simplifyKernels
          , babysitKernels
          , simplifyKernels
          , inPlaceLowering
@@ -102,5 +102,6 @@ compilerPipeline =
          , doubleBuffer
          , simplifyExplicitMemory
          , expandAllocations
+         , coalesceMemoryAccesses
          , simplifyExplicitMemory
          ]
