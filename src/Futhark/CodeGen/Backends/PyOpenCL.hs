@@ -115,11 +115,10 @@ readOpenCLScalar mem i bt "device" = do
   let mem' = Var $ pretty mem
   let nparr = Call "empty" [Arg $ Constant $ value (1::Int32),
                             ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
-  let toNp = Py.asscalar i
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call "cl.enqueue_copy"
     [Arg $ Var "queue", Arg val', Arg mem',
-     ArgKeyword "device_offset" $ asLong toNp,
+     ArgKeyword "device_offset" $ asLong i,
      ArgKeyword "is_blocking" $ Constant $ BoolValue True]
   return $ Index val' $ IdxExp $ Constant $ value (0::Int32)
 
@@ -128,8 +127,7 @@ readOpenCLScalar _ _ _ space =
 
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
-  let toNp = Py.asscalar size
-  let cond' = Cond (BinaryOp ">" size (Constant $ value (0::Int32))) toNp (Constant $ value (1::Int32))
+  let cond' = Cond (BinaryOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
   let call' = Call "cl.Buffer" [Arg $ Var "ctx",
                                 Arg $ Var "cl.mem_flags.READ_WRITE",
                                 Arg $ asLong cond']
@@ -164,15 +162,12 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
   let destmem' = Var $ pretty destmem
   let srcmem'  = Var $ pretty srcmem
-  let dest_offset = Py.asscalar destidx
-  let src_offset = Py.asscalar srcidx
-  let bytecount = Py.asscalar nbytes
   let cond = BinaryOp ">" nbytes (Constant $ value (0::Int32))
   let tb = Exp $ Call "cl.enqueue_copy"
            [Arg $ Var "queue", Arg destmem', Arg srcmem',
-            ArgKeyword "dest_offset" $ asLong dest_offset,
-            ArgKeyword "src_offset" $ asLong src_offset,
-            ArgKeyword "byte_count" $ asLong bytecount]
+            ArgKeyword "dest_offset" $ asLong destidx,
+            ArgKeyword "src_offset" $ asLong srcidx,
+            ArgKeyword "byte_count" $ asLong nbytes]
   Py.stm $ If cond [tb] []
   finishIfSynchronous
 
