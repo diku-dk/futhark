@@ -20,12 +20,7 @@ import Language.Futhark.Attributes
 import Futhark.Representation.PrimitiveTests()
 
 tests :: [Test]
-tests = testBuiltins
-
-testBuiltins :: [Test]
-testBuiltins = [ testCase (nameToString f ++ " is builtin") $
-                 isBuiltInFunction f @?= True
-                 | f <- HM.keys builtInFunctions ]
+tests = []
 
 instance Arbitrary BinOp where
   arbitrary = elements [minBound..maxBound]
