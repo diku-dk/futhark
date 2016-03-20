@@ -544,12 +544,12 @@ compilePrimToNp bt =
     Cert -> "int8"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
-compilePrimValue (IntValue (Int8Value v)) = simpleCall "int8" [Constant $ value v]
-compilePrimValue (IntValue (Int16Value v)) = simpleCall "int16" [Constant $ value v]
-compilePrimValue (IntValue (Int32Value v)) = simpleCall "int32" [Constant $ value v]
-compilePrimValue (IntValue (Int64Value v)) = simpleCall "int64" [Constant $ value v]
-compilePrimValue (FloatValue (Float32Value v)) = simpleCall "float32" [Constant $ value v]
-compilePrimValue (FloatValue (Float64Value v)) = simpleCall "float64" [Constant $ value v]
+compilePrimValue (IntValue (Int8Value v)) = Constant $ value v
+compilePrimValue (IntValue (Int16Value v)) = Constant $ value v
+compilePrimValue (IntValue (Int32Value v)) = Constant $ value v
+compilePrimValue (IntValue (Int64Value v)) = Constant $ value v
+compilePrimValue (FloatValue (Float32Value v)) = Constant $ value v
+compilePrimValue (FloatValue (Float64Value v)) = Constant $ value v
 compilePrimValue (BoolValue v) = simpleCall "bool_" [Constant $ BoolValue v]
 compilePrimValue (CharValue v) = Constant $ CharValue v
 compilePrimValue Checked = Var "Cert"
