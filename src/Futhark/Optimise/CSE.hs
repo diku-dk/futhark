@@ -28,13 +28,13 @@ performCSE :: CSEInOp lore (Op lore) =>
 performCSE = simplePass
              "CSE"
              "Combine common subexpressions." $
-             intraproceduralTransformation $ return . cseInFunDec
+             intraproceduralTransformation $ return . cseInFunDef
 
-cseInFunDec :: CSEInOp lore (Op lore) =>
-               FunDec lore -> FunDec lore
-cseInFunDec fundec =
-  fundec { funDecBody =
-              runReader (cseInBody $ funDecBody fundec) newCSEState
+cseInFunDef :: CSEInOp lore (Op lore) =>
+               FunDef lore -> FunDef lore
+cseInFunDef fundec =
+  fundec { funDefBody =
+              runReader (cseInBody $ funDefBody fundec) newCSEState
          }
 
 type CSEM lore = Reader (CSEState lore)

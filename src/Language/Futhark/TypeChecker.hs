@@ -566,7 +566,7 @@ checkProg prog = do
     buildFtable = HM.map rmLoc <$>
                   foldM expand (HM.map addLoc initialFtable)
                   (progFunctions prog')
-    expand ftable (FunDec _ name (TypeDecl ret NoInfo) args _ pos)
+    expand ftable (FunDef _ name (TypeDecl ret NoInfo) args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise =
@@ -579,8 +579,8 @@ initialFtable :: HM.HashMap Name FunBinding
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (Prim t, map Prim ts)
 
-checkFun :: FunDecBase NoInfo VName -> TypeM FunDec
-checkFun (FunDec entry fname (TypeDecl rettype NoInfo) params body loc) = do
+checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
+checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
   params' <- checkParams
   body' <- bindingParams params' $ do
     checkRetType loc rettype
@@ -589,7 +589,7 @@ checkFun (FunDec entry fname (TypeDecl rettype NoInfo) params body loc) = do
   checkReturnAlias params' $ typeOf body'
 
   if toStructural (typeOf body') `subtypeOf` toStructural rettype then
-    return $ FunDec entry fname (TypeDecl rettype $ Info rettype) params' body' loc
+    return $ FunDef entry fname (TypeDecl rettype $ Info rettype) params' body' loc
   else bad $ ReturnTypeError loc fname (toStructural rettype) $
              toStructural $ typeOf body'
 
@@ -1251,8 +1251,8 @@ checkLambda (AnonymFun params body ret pos) args = do
   params' <- mapM checkParam params
   case () of
     _ | length params == length args -> do
-          FunDec _ _ ret' params'' body' _ <-
-            noUnique $ checkFun $ FunDec False (nameFromString "<anonymous>") ret params body pos
+          FunDef _ _ ret' params'' body' _ <-
+            noUnique $ checkFun $ FunDef False (nameFromString "<anonymous>") ret params body pos
           checkFuncall Nothing pos (map paramType params') (unInfo $ expandedType ret') args
           return $ AnonymFun params'' body' ret' pos
       | [(Tuple ets, _, _)] <- args,
@@ -1260,8 +1260,8 @@ checkLambda (AnonymFun params body ret pos) args = do
           -- The function expects N parameters, but the argument is a
           -- single N-tuple whose types match the parameters.
           -- Generate a shim to make it fit.
-          FunDec _ _ ret' _ body' _ <-
-            noUnique $ checkFun $ FunDec False (nameFromString "<anonymous>") ret params body pos
+          FunDef _ _ ret' _ body' _ <-
+            noUnique $ checkFun $ FunDef False (nameFromString "<anonymous>") ret params body pos
           tupident <- newIdent "tup_shim"
                       (Tuple $ map (fromStruct .
                                     removeShapeAnnotations .

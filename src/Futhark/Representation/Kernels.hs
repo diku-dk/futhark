@@ -13,7 +13,7 @@ module Futhark.Representation.Kernels
        , Exp
        , Lambda
        , ExtLambda
-       , FunDec
+       , FunDef
        , FParam
        , LParam
        , RetType
@@ -31,11 +31,11 @@ module Futhark.Representation.Kernels
        , AST.PatElemT(PatElem)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.FunDecT(FunDec)
+       , AST.FunDefT(FunDef)
        , AST.ParamT(Param)
          -- Removing lore
        , removeProgLore
-       , removeFunDecLore
+       , removeFunDefLore
        , removeBodyLore
        )
 where
@@ -45,7 +45,7 @@ import Control.Monad
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDec, FParam, LParam,
+          Pattern, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType, PatElem)
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Attributes
@@ -76,7 +76,7 @@ type Binding = AST.Binding Kernels
 type Pattern = AST.Pattern Kernels
 type Lambda = AST.Lambda Kernels
 type ExtLambda = AST.ExtLambda Kernels
-type FunDec = AST.FunDecT Kernels
+type FunDef = AST.FunDefT Kernels
 type FParam = AST.FParam Kernels
 type LParam = AST.LParam Kernels
 type RetType = AST.RetType Kernels
@@ -134,8 +134,8 @@ removeLore =
 removeProgLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.Prog lore -> Prog
 removeProgLore = rephraseProg removeLore
 
-removeFunDecLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.FunDec lore -> FunDec
-removeFunDecLore = rephraseFunDec removeLore
+removeFunDefLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.FunDef lore -> FunDef
+removeFunDefLore = rephraseFunDef removeLore
 
 removeBodyLore :: (Attributes lore, Op lore ~ Op Kernels) => AST.Body lore -> Body
 removeBodyLore = rephraseBody removeLore

@@ -546,7 +546,7 @@ checkProg' checkoccurs prog = do
     -- removed at the end.
     buildFtable = do table <- initialFtable prog'
                      foldM expand table $ progFunctions prog'
-    expand ftable (FunDec _ name ret params _)
+    expand ftable (FunDef _ name ret params _)
       | HM.member name ftable =
         bad $ DupDefinitionError name
       | otherwise =
@@ -562,8 +562,8 @@ initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunction
         name = ID (nameFromString "x", 0)
 
 checkFun :: Checkable lore =>
-            FunDec lore -> TypeM lore ()
-checkFun (FunDec _ fname rettype params body) =
+            FunDef lore -> TypeM lore ()
+checkFun (FunDef _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
                retTypeValues rettype,

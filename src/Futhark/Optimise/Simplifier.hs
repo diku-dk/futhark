@@ -27,7 +27,7 @@ import Futhark.Binder.Class (Bindable)
 import Futhark.Representation.AST
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.Lore
-  (removeProgWisdom, removeFunDecWisdom, removeLambdaWisdom, removeBindingWisdom)
+  (removeProgWisdom, removeFunDefWisdom, removeLambdaWisdom, removeBindingWisdom)
 import Futhark.Optimise.Simplifier.Rule (RuleBook)
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Simplify
@@ -51,10 +51,10 @@ simplifyFunWithRules :: (MonadFreshNames m, MonadEngine (SimpleM lore)) =>
                         SimpleOps (SimpleM lore)
                      -> RuleBook (SimpleM lore)
                      -> HoistBlockers (SimpleM lore)
-                     -> FunDec lore
-                     -> m (FunDec lore)
+                     -> FunDef lore
+                     -> m (FunDef lore)
 simplifyFunWithRules simpl rules blockers =
-  fmap removeFunDecWisdom .
+  fmap removeFunDefWisdom .
   simplifyFun simpl rules blockers
 
 -- | Simplify just a single 'Lambda'.

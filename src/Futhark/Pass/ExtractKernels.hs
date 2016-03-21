@@ -187,7 +187,7 @@ extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
   Pass { passName = "extract kernels"
        , passDescription = "Perform kernel extraction"
-       , passFunction = runDistribM . fmap Prog . mapM transformFunDec . progFunctions
+       , passFunction = runDistribM . fmap Prog . mapM transformFunDef . progFunctions
        }
 
 newtype DistribM a = DistribM (RWS (Scope Out.Kernels) Log VNameSource a)
@@ -205,11 +205,11 @@ runDistribM (DistribM m) = do
   return x
   where positionNameSource (x, src, msgs) = ((x, msgs), src)
 
-transformFunDec :: FunDec -> DistribM Out.FunDec
-transformFunDec (FunDec entry name rettype params body) = do
+transformFunDef :: FunDef -> DistribM Out.FunDef
+transformFunDef (FunDef entry name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $
            transformBody body
-  return $ FunDec entry name rettype params body'
+  return $ FunDef entry name rettype params body'
 
 transformBody :: Body -> DistribM Out.Body
 transformBody body = do bnds <- transformBindings $ bodyBindings body
