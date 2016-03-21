@@ -10,7 +10,7 @@ module Futhark.Optimise.Simplifier.Lore
        , removeLambdaWisdom
        , removeExtLambdaWisdom
        , removeProgWisdom
-       , removeFunDecWisdom
+       , removeFunDefWisdom
        , removeExpWisdom
        , removePatternWisdom
        , removeBodyWisdom
@@ -143,8 +143,8 @@ addScopeWisdom = HM.map alias
 removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
 removeProgWisdom = rephraseProg removeWisdom
 
-removeFunDecWisdom :: CanBeWise (Op lore) => FunDec (Wise lore) -> FunDec lore
-removeFunDecWisdom = rephraseFunDec removeWisdom
+removeFunDefWisdom :: CanBeWise (Op lore) => FunDef (Wise lore) -> FunDef lore
+removeFunDefWisdom = rephraseFunDef removeWisdom
 
 removeBindingWisdom :: CanBeWise (Op lore) => Binding (Wise lore) -> Binding lore
 removeBindingWisdom = rephraseBinding removeWisdom

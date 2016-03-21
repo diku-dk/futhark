@@ -1,7 +1,7 @@
 -- | Facilities for changing the lore of some fragment, with no context.
 module Futhark.Analysis.Rephrase
        ( rephraseProg
-       , rephraseFunDec
+       , rephraseFunDef
        , rephraseExp
        , rephraseBody
        , rephraseBinding
@@ -26,14 +26,14 @@ data Rephraser from to
               }
 
 rephraseProg :: Rephraser from to -> Prog from -> Prog to
-rephraseProg rephraser = Prog . map (rephraseFunDec rephraser) . progFunctions
+rephraseProg rephraser = Prog . map (rephraseFunDef rephraser) . progFunctions
 
-rephraseFunDec :: Rephraser from to -> FunDec from -> FunDec to
-rephraseFunDec rephraser fundec =
-  fundec { funDecBody = rephraseBody rephraser $ funDecBody fundec
-         , funDecParams = map (rephraseParam $ rephraseFParamLore rephraser) $
-                          funDecParams fundec
-         , funDecRetType = rephraseRetType rephraser $ funDecRetType fundec
+rephraseFunDef :: Rephraser from to -> FunDef from -> FunDef to
+rephraseFunDef rephraser fundec =
+  fundec { funDefBody = rephraseBody rephraser $ funDefBody fundec
+         , funDefParams = map (rephraseParam $ rephraseFParamLore rephraser) $
+                          funDefParams fundec
+         , funDefRetType = rephraseRetType rephraser $ funDefRetType fundec
          }
 
 rephraseExp :: Rephraser from to -> Exp from -> Exp to

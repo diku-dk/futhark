@@ -119,6 +119,7 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
       fun             { L $$ FUN }
+      entry           { L $$ ENTRY }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
       '<-'            { L $$ SETTO }
@@ -181,8 +182,8 @@ Prog :: { UncheckedProgWithHeaders }
      |   Decs { ProgWithHeaders [] $1 }
 ;
 
-Decs : FunDecs { $1 }
-     | DefaultDec FunDecs { $2 }
+Decs : FunDefs { $1 }
+     | DefaultDec FunDefs { $2 }
 ;
 
 DefaultDec :: { () }
@@ -234,18 +235,29 @@ Header :: { ProgHeader }
 Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
-FunDecs : fun Fun FunDecs   { $2 : $3 }
-        | fun Fun           { [$2] }
+FunDefs : Fun FunDefs   { $1 : $2 }
+        | Fun           { [$1] }
 ;
 
-Fun :     Type id '(' TypeIds ')' '=' Exp
-                        { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
-        | Type id '(' ')' '=' Exp
-                        { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
+Fun     : fun TypeDecl id '(' Params ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
+        | fun TypeDecl id '(' ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
+        | entry TypeDecl id '(' Params ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef True name $2 $5 $8 pos }
+        | entry TypeDecl id '(' ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef True name $2 [] $7 pos }
 ;
 
 Uniqueness : '*' { Unique }
            |     { Nonunique }
+
+TypeDecl :: { UncheckedTypeDecl }
+            : Type { TypeDecl $1 NoInfo }
 
 Type :: { UncheckedType }
         : PrimType     { Prim $1 }
@@ -321,10 +333,8 @@ Types : Type ',' Types { $1 : $3 }
       |                { [] }
 ;
 
-TypeIds : Type id ',' TypeIds
-                        { let L pos (ID name) = $2 in Ident name $1 pos : $4 }
-        | Type id       { let L pos (ID name) = $2 in [Ident name $1 pos] }
-;
+Params : TypeDecl id ',' Params { let L pos (ID name) = $2 in Param name $1 pos : $4 }
+       | TypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -506,7 +516,7 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '{' Patterns '}' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn Type '(' TypeIds ')' '=>' Exp
+         : fn TypeDecl '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
            { let L pos (ID name) = $1
@@ -598,7 +608,7 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | charlit { let L pos (CHARLIT char) = $1 in (CharValue char, pos) }
 
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toStruct $ valueType $2
              }
            |  '[' Value ',' Values ']'
              {% case combArrayTypes (valueType $2) $ map valueType $4 of

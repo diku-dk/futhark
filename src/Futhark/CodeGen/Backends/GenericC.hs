@@ -178,8 +178,8 @@ newCompilerEnv (Functions funs) ops =
               , envFtable = ftable <> builtinFtable
               }
   where ftable = HM.fromList $ map funReturn funs
-        funReturn (name, Function outparams _ _ _ _) =
-          (name, paramsTypes outparams)
+        funReturn (name, fun) =
+          (name, paramsTypes $ functionOutput fun)
         builtinFtable =
           HM.map (map Scalar . snd) builtInFunctions
 
@@ -380,7 +380,7 @@ readPrimStm _ t =
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
 mainCall :: [C.Stm] -> Name -> Function op -> CompilerM op s C.Stm
-mainCall pre_timing fname (Function outputs inputs _ results args) = do
+mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
   let readstms = readInputs inputs args
@@ -608,7 +608,7 @@ int main(int argc, char** argv) {
           where asDecl fun = [C.cedecl|$func:fun|]
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
-compileFun (fname, Function outputs inputs body _ _) = do
+compileFun (fname, Function _ outputs inputs body _ _) = do
   args' <- mapM compileInput inputs
   body' <- collect $ do
              mapM_ compileOutput outputs

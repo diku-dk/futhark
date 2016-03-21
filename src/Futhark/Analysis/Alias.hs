@@ -31,9 +31,9 @@ aliasAnalysis :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
 aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
 
 analyseFun :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
-              In.FunDec lore -> Out.FunDec lore
-analyseFun (In.FunDec fname restype params body) =
-  Out.FunDec fname restype params body'
+              In.FunDef lore -> Out.FunDef lore
+analyseFun (In.FunDef entry fname restype params body) =
+  Out.FunDef entry fname restype params body'
   where body' = analyseBody body
 
 analyseBody :: (Attributes lore,

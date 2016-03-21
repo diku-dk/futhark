@@ -39,7 +39,7 @@ simplifyKernels :: MonadFreshNames m => Prog -> m Prog
 simplifyKernels =
   simplifyProgWithRules bindableSimpleOps kernelRules noExtraHoistBlockers
 
-simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
+simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps kernelRules Engine.noExtraHoistBlockers
 

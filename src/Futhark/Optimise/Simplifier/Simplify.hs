@@ -41,8 +41,8 @@ simplifyFun :: (MonadFreshNames m, Engine.MonadEngine (SimpleM lore)) =>
                 SimpleOps (SimpleM lore)
              -> RuleBook (SimpleM lore)
              -> Engine.HoistBlockers (SimpleM lore)
-             -> FunDec lore
-             -> m (FunDec (Wise lore))
+             -> FunDef lore
+             -> m (FunDef (Wise lore))
 simplifyFun simpl rules blockers fundec =
   modifyNameSource $ runSimpleM (Engine.simplifyFun fundec) simpl $
   Engine.emptyEnv rules blockers

@@ -99,7 +99,7 @@ renameLambda = modifyNameSource . runRenamer . rename
 -- was correct to begin with.  Any free variables are left untouched.
 -- Note in particular that the parameters of the lambda are renamed.
 renameFun :: (Renameable lore, MonadFreshNames m) =>
-             FunDec lore -> m (FunDec lore)
+             FunDef lore -> m (FunDef lore)
 renameFun = modifyNameSource . runRenamer . rename
 
 data RenameEnv = RenameEnv {
@@ -171,13 +171,13 @@ bind vars body = do
   where bind' vars' env = env { envNameMap = HM.fromList (zip vars vars')
                                              `HM.union` envNameMap env }
 
-instance Renameable lore => Rename (FunDec lore) where
-  rename (FunDec fname ret params body) =
+instance Renameable lore => Rename (FunDef lore) where
+  rename (FunDef entry fname ret params body) =
     bind (map paramName params) $ do
       params' <- mapM rename params
       body' <- rename body
       ret' <- rename ret
-      return $ FunDec fname ret' params' body'
+      return $ FunDef entry fname ret' params' body'
 
 instance Rename SubExp where
   rename (Var v)      = Var <$> rename v

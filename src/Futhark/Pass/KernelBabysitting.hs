@@ -20,15 +20,15 @@ babysitKernels :: Pass Kernels Kernels
 babysitKernels =
   Pass { passName = "babysit kernels"
        , passDescription = "Transpose kernel input arrays for better performance."
-       , passFunction = intraproceduralTransformation transformFunDec
+       , passFunction = intraproceduralTransformation transformFunDef
        }
 
-transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
-transformFunDec fundec = do
+transformFunDef :: MonadFreshNames m => FunDef -> m FunDef
+transformFunDef fundec = do
   (body', _) <- modifyNameSource $ runState (runBinderT m HM.empty)
-  return fundec { funDecBody = body' }
+  return fundec { funDefBody = body' }
   where m = inScopeOf fundec $
-            transformBody $ funDecBody fundec
+            transformBody $ funDefBody fundec
 
 type BabysitM = Binder Kernels
 

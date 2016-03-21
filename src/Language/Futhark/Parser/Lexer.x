@@ -146,6 +146,7 @@ keyword s =
     "streamSeq"    -> STREAM_SEQ
     "include"      -> INCLUDE
     "write"        -> WRITE
+    "entry"        -> ENTRY
     _              -> ID $ nameFromString s
 
 type Byte = Word8
