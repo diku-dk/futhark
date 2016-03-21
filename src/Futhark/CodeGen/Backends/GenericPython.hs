@@ -23,7 +23,6 @@ module Futhark.CodeGen.Backends.GenericPython
   , stms
   , collect'
   , collect
-  , asscalar
 
   , compileSizeOfType
     ) where
@@ -133,7 +132,7 @@ newCompilerEnv (Imp.Functions funs) ops =
               , envFtable = ftable <> builtinFtable
               }
   where ftable = HM.fromList $ map funReturn funs
-        funReturn (name, Imp.Function outparams _ _ _ _) = (name, paramsTypes outparams)
+        funReturn (name, Imp.Function _ outparams _ _ _ _) = (name, paramsTypes outparams)
         builtinFtable = HM.map (map Imp.Scalar . snd) builtInFunctions
 
 data CompilerState s = CompilerState {
@@ -177,12 +176,6 @@ stms = mapM_ stm
 futharkFun :: String -> String
 futharkFun s = "futhark_" ++ s
 
---we replace the entry points with appended _
-replaceFuncName :: String -> PyFunc -> PyFunc
-replaceFuncName key fun@(PyFunc str args body)
-  | str == key = PyFunc ('_':str) args body
-  | otherwise = fun
-
 paramsTypes :: [Imp.Param] -> [Imp.Type]
 paramsTypes = map paramType
   where paramType (Imp.MemParam _ size space) = Imp.Mem size space
@@ -214,7 +207,8 @@ timingOption =
   }
 
 compileProg :: MonadFreshNames m =>
-               [PyImport]
+               Bool
+            -> [PyImport]
             -> [PyDefinition]
             -> Operations op s
             -> s
@@ -222,23 +216,25 @@ compileProg :: MonadFreshNames m =>
             -> [Option]
             -> Imp.Functions op
             -> m String
-compileProg imports defines ops userstate pre_timing options prog@(Imp.Functions funs)  = do
+compileProg as_module imports defines ops userstate pre_timing options prog@(Imp.Functions funs)  = do
   src <- getNameSource
   let (prog', maincall) = runCompilerM prog ops src userstate compileProg'
-  return $ pretty (PyProg prog' (imports++["import argparse"]) defines) ++ "\n" ++ pretty maincall
+  return $ pretty (PyProg prog' (imports++["import argparse"]) defines) ++
+    if as_module then "" else "\n" ++ pretty maincall
   where compileProg' = do
           definitions <- mapM compileFunc funs
-          let mainname = nameFromString "main"
-          (main, maincall) <- case lookup mainname funs of
-            Nothing   -> fail "No main function"
-            Just func -> compileEntryFun pre_timing options (mainname, func)
+          entry_points <- mapM compileEntryFun $
+                          filter (Imp.functionEntry . snd) funs
+          maincall <-
+            if as_module then return Pass
+            else case lookup defaultEntryPoint funs of
+              Nothing   -> fail "No main function"
+              Just func -> callEntryFun pre_timing options (defaultEntryPoint, func)
 
-          let renamed = map (replaceFuncName "futhark_main") definitions
-
-          return (renamed ++ [main], maincall)
+          return (definitions ++ entry_points, maincall)
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunc
-compileFunc (fname, Imp.Function outputs inputs body _ _) = do
+compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (pretty . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
@@ -319,11 +315,10 @@ packArg memsizes spacemap (Imp.ArrayValue vname bt dims) = do
     Just Imp.DefaultSpace -> stm $ Assign src_data unwrap_call
     Nothing -> error "Space is not set correctly"
 
-unpackOutput :: HM.HashMap VName VName -> HM.HashMap VName Imp.Space -> Imp.ValueDecl -> CompilerM op s ()
-unpackOutput _ _ (Imp.ScalarValue _ vname) = do
-  let vname' = Var $ pretty vname
-  let newbt = asscalar vname'
-  stm $ Assign vname' newbt
+unpackOutput :: HM.HashMap VName VName -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
+             -> CompilerM op s ()
+unpackOutput _ _ Imp.ScalarValue{} =
+  return ()
 
 unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
   let cast = Cast (Var $ pretty vname) (compilePrimType bt)
@@ -364,16 +359,6 @@ readerElem bt = case bt of
   Bool              -> "read_bool"
   Char              -> "read_char"
   Cert              -> error "Cert is never used. ReaderElem doesn't handle this"
-
---since all constants are numpy types, we would sometimes like to use python types, and this function allows us to convert to python.
-asscalar :: PyExp -> PyExp
-asscalar (Constant v) = Constant v
-asscalar (Call "int32" [Arg (Constant v)]) = Constant v
-asscalar (Call "float32" [Arg (Constant v)]) = Constant v
-asscalar (Call "float64" [Arg (Constant v)]) = Constant v
-asscalar (Call "bool_" [Arg (Constant v)]) = Constant v
-asscalar (Call "uint8" [Arg (Constant v)]) = Constant v
-asscalar e = simpleCall "asscalar" [e]
 
 readInput :: Imp.ValueDecl -> PyStmt
 readInput (Imp.ScalarValue bt vname) =
@@ -417,41 +402,44 @@ writeOutput (Imp.ArrayValue vname bt _) =
     Char -> Exp $ simpleCall "write_chars" [stdout, name]
     _ -> Exp $ simpleCall "write_array" [stdout, name, bt']
 
-compileEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
-                -> CompilerM op s (PyFunc, PyStmt)
-compileEntryFun pre_timing options (fname, Imp.Function outputs inputs _ decl_outputs decl_args) = do
+compileEntryFun :: (Name, Imp.Function op)
+                -> CompilerM op s PyFunc
+compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
-  let funName = pretty fname
-  let funTuple = tupleOrSingle $ fmap Var output_paramNames
-  let ret = Return $ tupleOrSingle $ map (Var . valueDeclName) decl_outputs
-  let hashSizeInput = hashSizeVars inputs
-  let hashSizeOutput = hashSizeVars outputs
-  let hashSpaceInput = hashSpace inputs
-  let hashSpaceOutput = hashSpace outputs
+      funTuple = tupleOrSingle $ fmap Var output_paramNames
+      ret = Return $ tupleOrSingle $ map (Var . valueDeclName) decl_outputs
+      hashSizeInput = hashSizeVars inputs
+      hashSizeOutput = hashSizeVars outputs
+      hashSpaceInput = hashSpace inputs
+      hashSpaceOutput = hashSpace outputs
 
   prepareIn <- collect $ mapM_ (packArg hashSizeInput hashSpaceInput) decl_args
   prepareOut <- collect $ mapM_ (unpackOutput hashSizeOutput hashSpaceOutput) decl_outputs
 
   let inputArgs = map (pretty . Imp.paramName) inputs
-  let funCall = simpleCall ('_' : (futharkFun . pretty $ fname)) (fmap Var inputArgs)
-  let body' = prepareIn ++ [Assign funTuple funCall] ++ prepareOut
+      funCall = simpleCall (futharkFun . nameToString $ fname) (fmap Var inputArgs)
+      body' = prepareIn ++ [Assign funTuple funCall] ++ prepareOut
+
+  return $ PyFunc (nameToString fname) (map valueDeclName decl_args) (body'++[ret])
+
+callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
+             -> CompilerM op s PyStmt
+callEntryFun pre_timing options (fname, Imp.Function _ _ _ _ decl_outputs decl_args) = do
   let str_input = map readInput decl_args
-  let str_output = map writeOutput decl_outputs
-  let decl_output_names = tupleOrSingle $ fmap Var (map valueDeclName decl_outputs)
-  let decl_input_names = fmap Var (map valueDeclName decl_args)
+      str_output = map writeOutput decl_outputs
+      decl_output_names = tupleOrSingle $ fmap Var (map valueDeclName decl_outputs)
+      decl_input_names = fmap Var (map valueDeclName decl_args)
 
-  let callmain = simpleCall "main" decl_input_names
-  let exitcall = [Exp $ simpleCall "sys.exit" [Field (StringLiteral "Assertion.{} failed") "format(e)"]]
-  let except' = Catch (Var "AssertionError") exitcall
-  let main_with_timing =
+      callmain = simpleCall (nameToString fname) decl_input_names
+      exitcall = [Exp $ simpleCall "sys.exit" [Field (StringLiteral "Assertion.{} failed") "format(e)"]]
+      except' = Catch (Var "AssertionError") exitcall
+      main_with_timing =
         addTiming $ Assign decl_output_names callmain : pre_timing
-  let trys = Try main_with_timing [except']
-  let iff = If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
-            (parse_options ++ str_input ++ [trys] ++ str_output)
-            []
-
-  return (PyFunc funName (map valueDeclName decl_args) (body'++[ret]),
-          iff)
+      trys = Try main_with_timing [except']
+  return $
+    If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
+    (parse_options ++ str_input ++ [trys] ++ str_output)
+    []
   where parse_options =
           Assign (Var "runtime_file") None :
           generateOptionParser (timingOption : options)
@@ -544,12 +532,12 @@ compilePrimToNp bt =
     Cert -> "int8"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
-compilePrimValue (IntValue (Int8Value v)) = simpleCall "int8" [Constant $ value v]
-compilePrimValue (IntValue (Int16Value v)) = simpleCall "int16" [Constant $ value v]
-compilePrimValue (IntValue (Int32Value v)) = simpleCall "int32" [Constant $ value v]
-compilePrimValue (IntValue (Int64Value v)) = simpleCall "int64" [Constant $ value v]
-compilePrimValue (FloatValue (Float32Value v)) = simpleCall "float32" [Constant $ value v]
-compilePrimValue (FloatValue (Float64Value v)) = simpleCall "float64" [Constant $ value v]
+compilePrimValue (IntValue (Int8Value v)) = Constant $ value v
+compilePrimValue (IntValue (Int16Value v)) = Constant $ value v
+compilePrimValue (IntValue (Int32Value v)) = Constant $ value v
+compilePrimValue (IntValue (Int64Value v)) = Constant $ value v
+compilePrimValue (FloatValue (Float32Value v)) = Constant $ value v
+compilePrimValue (FloatValue (Float64Value v)) = Constant $ value v
 compilePrimValue (BoolValue v) = simpleCall "bool_" [Constant $ BoolValue v]
 compilePrimValue (CharValue v) = Constant $ CharValue v
 compilePrimValue Checked = Var "Cert"

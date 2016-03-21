@@ -14,13 +14,13 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.SOACS
 
-type FunctionTable = HM.HashMap Name FunDec
+type FunctionTable = HM.HashMap Name FunDef
 
 buildFunctionTable :: Prog -> FunctionTable
 buildFunctionTable =
   foldl expand HM.empty . progFunctions
-  where expand ftab f@(FunDec name _ _ _) =
-          HM.insert name f ftab
+  where expand ftab f =
+          HM.insert (funDefName f) f ftab
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: FunctionTable }
@@ -42,12 +42,11 @@ type CallGraph = HM.HashMap Name [Name]
 buildCallGraph :: Prog -> CallGraph
 buildCallGraph prog = do
   let ftable = buildFunctionTable prog
-  runCGM (buildCGfun HM.empty defaultEntryPoint) $ CGEnv ftable
+  runCGM (foldM buildCGfun HM.empty entry_points) $ CGEnv ftable
+  where entry_points = map funDefName $ filter funDefEntryPoint $ progFunctions prog
 
--- | @buildCallGraph cg fname@ updates Call Graph @cg@ with the contributions of function
+-- | @buildCallGraph cg f@ updates Call Graph @cg@ with the contributions of function
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
--- In particular, @buildCGfun HM.empty defaultEntryPoint@ should construct the Call Graph
--- of the whole program.
 buildCGfun :: CallGraph -> Name -> CGM CallGraph
 buildCGfun cg fname  = do
   bnd <- asks $ HM.lookup fname . envFtable
@@ -56,7 +55,7 @@ buildCGfun cg fname  = do
     Just f ->
       case HM.lookup fname cg of
         Just _  -> return cg
-        Nothing -> do let callees = buildCGbody [] $ funDecBody f
+        Nothing -> do let callees = buildCGbody [] $ funDefBody f
                       let cg' = HM.insert fname callees cg
 
                       -- recursively build the callees

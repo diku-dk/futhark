@@ -44,15 +44,15 @@ doubleBuffer :: Pass ExplicitMemory ExplicitMemory
 doubleBuffer =
   Pass { passName = "Double buffer"
        , passDescription = "Perform double buffering for merge parameters of sequential loops."
-       , passFunction = intraproceduralTransformation optimiseFunDec
+       , passFunction = intraproceduralTransformation optimiseFunDef
        }
 
-optimiseFunDec :: MonadFreshNames m => FunDec -> m FunDec
-optimiseFunDec fundec = do
+optimiseFunDef :: MonadFreshNames m => FunDef -> m FunDef
+optimiseFunDef fundec = do
   body' <- runReaderT (runDoubleBufferM $ inScopeOf fundec $
-                       optimiseBody $ funDecBody fundec) $
+                       optimiseBody $ funDefBody fundec) $
            Env emptyScope False
-  return fundec { funDecBody = body' }
+  return fundec { funDefBody = body' }
   where emptyScope :: Scope ExplicitMemory
         emptyScope = mempty
 

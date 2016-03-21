@@ -37,7 +37,7 @@
 
 (defconst futhark-keywords
   '("if" "then" "else" "let" "loop" "in" "with"
-    "fun" "fn" "for" "while" "do" "do" "op" "not" "pow"
+    "fun" "entry" "fn" "for" "while" "do" "do" "op" "not" "pow"
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "reduceComm"
     "zip" "unzip" "zipWith"
     "scan" "split" "concat" "filter" "partition" "redomap"
@@ -146,7 +146,7 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
       (or (cond
 
            ;; Function definitions to column 0.
-           ((looking-at "fun\\>")
+           ((or (looking-at "fun\\>") (looking-at "entry\\>"))
             0)
 
            ;; Closing paren and comma indents to opening paren.
@@ -228,7 +228,8 @@ and \"else\", and \"let\", \"loop\", and \"in\"."
                             (make-futhark-indkwd :name "loop" :level 1)
                             (make-futhark-indkwd :name "for" :level 1)
                             (make-futhark-indkwd :name "fn" :level 1)
-                            (make-futhark-indkwd :name "fun" :level 1))))
+                            (make-futhark-indkwd :name "fun" :level 1)
+                            (make-futhark-indkwd :name "entry" :level 1))))
               (mapc (lambda (k)
                       (save-excursion
                         (when (futhark-find-keyword-first-on-line-backward (futhark-indkwd-name k))
@@ -303,7 +304,8 @@ return t if found; return nil otherwise."
                 (> (point) topp)
                 (futhark-backward-part)
                 (or (not (or (looking-at word)
-                             (looking-at "fun")))
+                             (looking-at "fun")
+                             (looking-at "entry")))
                     (> missing-ifs 0)
                     (> missing-outs 0)
                     ))

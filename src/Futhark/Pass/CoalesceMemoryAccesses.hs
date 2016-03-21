@@ -36,13 +36,13 @@ coalesceMemoryAccesses =
   simplePass
   "coalesce memory accesses"
   "Coalesce memory accesses" $
-  intraproceduralTransformation transformFunDec
+  intraproceduralTransformation transformFunDef
 
-transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
-transformFunDec fundec = do
+transformFunDef :: MonadFreshNames m => FunDef -> m FunDef
+transformFunDef fundec = do
   body' <- modifyNameSource $ runState (runReaderT m $ scopeOf fundec)
-  return fundec { funDecBody = body' }
-  where m = transformBody $ funDecBody fundec
+  return fundec { funDefBody = body' }
+  where m = transformBody $ funDefBody fundec
 
 type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
 

@@ -120,4 +120,5 @@ data Token = IF
            | EOF
            | INCLUDE
            | WRITE
+           | ENTRY
              deriving (Show, Eq)

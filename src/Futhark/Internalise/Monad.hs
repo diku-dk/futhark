@@ -36,7 +36,7 @@ import Prelude hiding (mapM)
 data FunBinding = FunBinding
                   { internalFun :: ([VName], [DeclType],
                                     [(SubExp,Type)] -> Maybe ExtRetType)
-                  , externalFun :: (E.DeclType, [E.DeclType])
+                  , externalFun :: (E.StructType, [E.StructType])
                   }
 
 type ShapeTable = HM.HashMap VName [SubExp]

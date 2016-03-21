@@ -44,26 +44,26 @@ import Futhark.Representation.AST.Attributes.Aliases
 -- import Futhark.Analysis.LastUse
 -- transformProg prg = do
 --  let glob_arr_env = gatherGlobArrsProg prg
---  intraproceduralTransformation transformFunDec prg
+--  intraproceduralTransformation transformFunDef prg
 
 -- | Perform the first-order transformation on an Futhark program.
 transformProg :: (MonadFreshNames m, Bindable tolore,
                   LetAttr SOACS ~ LetAttr tolore,
                   CanBeAliased (Op tolore)) =>
                  Prog -> m (AST.Prog tolore)
-transformProg = intraproceduralTransformation transformFunDec
+transformProg = intraproceduralTransformation transformFunDef
 
-transformFunDec :: (MonadFreshNames m, Bindable tolore,
+transformFunDef :: (MonadFreshNames m, Bindable tolore,
                     LetAttr SOACS ~ LetAttr tolore,
                     CanBeAliased (Op tolore)) =>
-                   FunDec -> m (AST.FunDec tolore)
-transformFunDec (FunDec fname rettype params body) = do
+                   FunDef -> m (AST.FunDef tolore)
+transformFunDef (FunDef entry fname rettype params body) = do
   (body',_) <-
     runBinderEmptyEnv $
     localScope (scopeOfFParams params) $
     insertBindingsM $
     transformBody body
-  return $ FunDec fname rettype params body'
+  return $ FunDef entry fname rettype params body'
 
 -- | The constraints that a monad must uphold in order to be used for
 -- first-order transformation.

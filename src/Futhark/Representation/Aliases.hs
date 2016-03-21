@@ -21,7 +21,7 @@ module Futhark.Representation.Aliases
        , Exp
        , Lambda
        , ExtLambda
-       , FunDec
+       , FunDef
        , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
@@ -35,7 +35,7 @@ module Futhark.Representation.Aliases
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
        , AST.ExpT(DoLoop)
-       , AST.FunDecT(FunDec)
+       , AST.FunDefT(FunDef)
          -- * Adding aliases
        , addAliasesToPattern
        , mkAliasedLetBinding
@@ -44,7 +44,7 @@ module Futhark.Representation.Aliases
        , mkBodyAliases
          -- * Removing aliases
        , removeProgAliases
-       , removeFunDecAliases
+       , removeFunDefAliases
        , removeExpAliases
        , removeBodyAliases
        , removeBindingAliases
@@ -67,7 +67,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDec, RetType)
+          Pattern, Lambda, ExtLambda, FunDef, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -140,7 +140,7 @@ type Binding lore = AST.Binding (Aliases lore)
 type Pattern lore = AST.Pattern (Aliases lore)
 type Lambda lore = AST.Lambda (Aliases lore)
 type ExtLambda lore = AST.ExtLambda (Aliases lore)
-type FunDec lore = AST.FunDec (Aliases lore)
+type FunDef lore = AST.FunDef (Aliases lore)
 type RetType lore = AST.RetType (Aliases lore)
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
@@ -168,7 +168,7 @@ instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) 
           patElemComment (PatElem name _ (Names' als, _)) =
             PP.oneLine <$> aliasComment name als
 
-  ppFunDecLore = ppFunDecLore . removeFunDecAliases
+  ppFunDefLore = ppFunDefLore . removeFunDefAliases
   ppLambdaLore = ppLambdaLore . removeLambdaAliases
 
   ppExpLore e@(DoLoop _ merge _ body) =
@@ -228,9 +228,9 @@ removeProgAliases :: CanBeAliased (Op lore) =>
                      AST.Prog (Aliases lore) -> AST.Prog lore
 removeProgAliases = rephraseProg removeAliases
 
-removeFunDecAliases :: CanBeAliased (Op lore) =>
-                       AST.FunDec (Aliases lore) -> AST.FunDec lore
-removeFunDecAliases = rephraseFunDec removeAliases
+removeFunDefAliases :: CanBeAliased (Op lore) =>
+                       AST.FunDef (Aliases lore) -> AST.FunDef lore
+removeFunDefAliases = rephraseFunDef removeAliases
 
 removeExpAliases :: CanBeAliased (Op lore) =>
                     AST.Exp (Aliases lore) -> AST.Exp lore

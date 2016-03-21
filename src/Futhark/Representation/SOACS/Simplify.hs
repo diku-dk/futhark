@@ -45,7 +45,7 @@ simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =
   simplifyProgWithRules bindableSimpleOps soacRules noExtraHoistBlockers
 
-simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
+simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 

@@ -33,9 +33,9 @@ internaliseParams :: [E.Parameter]
                   -> InternaliseM (HM.HashMap VName Int,
                                    [[(VName, I.DeclExtType)]])
 internaliseParams params = do
-  (param_ts, ctx) <- internaliseParamTypes $ map E.identType params
+  (param_ts, ctx) <- internaliseParamTypes $ map E.paramType params
   vss <- forM (zip params param_ts) $ \(param, ts) -> do
-    let base = nameToString $ baseName $ E.identName param
+    let base = nameToString $ baseName $ E.paramName param
     forM ts $ \t -> do
       name <- newVName base
       return (name, t)
@@ -45,7 +45,7 @@ internaliseBindee :: MonadFreshNames m =>
                      E.Ident
                   -> m [(VName, I.DeclExtType)]
 internaliseBindee bindee =
-  forM (internaliseTypeWithUniqueness $ E.identType bindee) $ \t -> do
+  forM (internaliseTypeWithUniqueness $ E.unInfo $ E.identType bindee) $ \t -> do
     name <- newVName base
     return (name, t)
   where base = nameToString $ baseName $ E.identName bindee
@@ -70,7 +70,7 @@ internaliseFunParams params = do
             ((new_param_name, _), t) <- zip params' instantiated_param_types ]
     return (param_implicit_shapes, instantiated_params)
   let subst = HM.fromList $ zip
-              (map E.identName params)
+              (map E.paramName params)
               (map (map I.paramName) value_params)
   return (declared_shape_params ++ concat implicit_shape_params,
           concat value_params,

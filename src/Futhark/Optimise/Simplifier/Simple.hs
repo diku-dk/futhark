@@ -58,12 +58,12 @@ newtype SimpleM lore a =
   SimpleM (RWS
            (SimpleOps (SimpleM lore), Engine.Env (SimpleM lore)) -- Reader
            (Engine.Need (Wise lore))                             -- Writer
-           (Engine.State (SimpleM lore), NameSource VName)       -- State
+           (Engine.State (SimpleM lore), VNameSource)       -- State
            a)
   deriving (Applicative, Functor, Monad,
             MonadWriter (Engine.Need (Wise lore)),
             MonadReader (SimpleOps (SimpleM lore), Engine.Env (SimpleM lore)),
-            MonadState (Engine.State (SimpleM lore), NameSource VName))
+            MonadState (Engine.State (SimpleM lore), VNameSource))
 
 instance MonadFreshNames (SimpleM lore) where
   getNameSource   = snd <$> get

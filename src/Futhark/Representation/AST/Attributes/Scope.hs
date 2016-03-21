@@ -159,8 +159,8 @@ instance Scoped lore a =>
 instance Scoped lore (Binding lore) where
   scopeOf = scopeOf . bindingPattern
 
-instance Scoped lore (FunDec lore) where
-  scopeOf = scopeOfFParams . funDecParams
+instance Scoped lore (FunDef lore) where
+  scopeOf = scopeOfFParams . funDefParams
 
 instance Scoped lore (VName, NameInfo lore) where
   scopeOf = uncurry HM.singleton

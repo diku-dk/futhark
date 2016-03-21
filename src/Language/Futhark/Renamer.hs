@@ -11,20 +11,18 @@ module Language.Futhark.Renamer
   -- * Untagging
   , untagProg
   , untagExp
-  , untagLambda
   , untagPattern
-  , untagType
   )
   where
 
 import Control.Applicative
 import Control.Monad.State
 import Control.Monad.Reader
+import Data.Hashable
 import Data.Maybe
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
-
 import Prelude
 
 import Language.Futhark
@@ -34,63 +32,45 @@ import Futhark.FreshNames
 -- binding into account, such that the resulting 'VName's are unique.
 -- The semantics of the program are unaffected, under the assumption
 -- that the program was correct to begin with.
-tagProg :: (TypeBox ty, VarName vn) =>
-           ProgBase ty vn -> (ProgBase ty (ID vn), NameSource (ID vn))
+tagProg :: ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
 tagProg prog = runReader (runStateT f blankNameSource) env
-  where env = RenameEnv HM.empty newID
+  where env = RenameEnv HM.empty newVNameFromName
         f = Prog <$> mapM renameFun (progFunctions prog)
 
 -- | As 'tagProg', but accepts an initial name source and returns the
 -- resulting one.
-tagProg' :: (TypeBox ty, VarName vn) =>
-            NameSource (ID vn) -> ProgBase ty vn -> (ProgBase ty (ID vn), NameSource (ID vn))
+tagProg' :: VNameSource -> ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
 tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
                     in (Prog funs, src')
-  where env = RenameEnv HM.empty newID
+  where env = RenameEnv HM.empty newVNameFromName
         f = mapM renameFun $ progFunctions prog
 
 -- | Remove tags from a program.  Note that this is potentially
 -- semantics-changing if the underlying names are not each unique.
-untagProg :: (TypeBox ty, VarName vn) =>
-             ProgBase ty (ID vn) -> ProgBase ty vn
+untagProg :: ProgBase NoInfo VName -> ProgBase NoInfo Name
 untagProg = untagger $ fmap Prog . mapM renameFun . progFunctions
 
 -- | Remove tags from an expression.  The same caveats as with
 -- 'untagProg' apply.
-untagExp :: (TypeBox ty, VarName vn) =>
-            ExpBase ty (ID vn) -> ExpBase ty vn
+untagExp :: ExpBase NoInfo VName -> ExpBase NoInfo Name
 untagExp = untagger renameExp
-
--- | Remove tags from an anonymous function.  The same caveats as with
--- 'untagProg' apply.
-untagLambda :: (TypeBox ty, VarName vn) =>
-               LambdaBase ty (ID vn) -> LambdaBase ty vn
-untagLambda = untagger renameLambda
 
 -- | Remove tags from a pattern.  The same caveats as with 'untagProg'
 -- apply.
-untagPattern :: (TypeBox ty, VarName vn) =>
-                PatternBase ty (ID vn) -> PatternBase ty vn
+untagPattern :: PatternBase NoInfo VName -> PatternBase NoInfo Name
 untagPattern = untagger renamePattern
 
--- | Remove tags from a type.  The same caveats as with 'untagProg'
--- apply.
-untagType :: (TypeBox (TypeBase shape als), VarName vn) =>
-             TypeBase shape als (ID vn) -> TypeBase shape als vn
-untagType = untagger renameType
-
-untagger :: VarName vn =>
-            (t -> RenameM (ID vn) vn a) -> t -> a
+untagger :: (t -> RenameM VName Name a) -> t -> a
 untagger f x = runReader (evalStateT (f x) blankNameSource) env
   where env = RenameEnv HM.empty rmTag
         rmTag src (ID (s, _)) = (s, src)
 
 data RenameEnv f t = RenameEnv {
     envNameMap :: HM.HashMap f t
-  , envNameFn  :: NameSource t -> f -> (t, NameSource t)
+  , envNameFn  :: VNameSource -> f -> (t, VNameSource)
   }
 
-type RenameM f t = StateT (NameSource t) (Reader (RenameEnv f t))
+type RenameM f t = StateT VNameSource (Reader (RenameEnv f t))
 
 -- | Return a fresh, unique name.  The @Name@ is prepended to the
 -- name.
@@ -100,26 +80,25 @@ new k = do (k', src') <- asks envNameFn <*> get <*> pure k
            return k'
 
 -- | 'repl s' returns the new name of the variable 's'.
-repl :: (TypeBox ty, VarName f, VarName t) =>
-        IdentBase ty f -> RenameM f t (IdentBase ty t)
-repl (Ident name tp loc) = do
+repl :: (Eq f, Hashable f) =>
+        IdentBase NoInfo f -> RenameM f t (IdentBase NoInfo t)
+repl (Ident name NoInfo loc) = do
   name' <- replName name
-  tp' <- renameType tp
-  return $ Ident name' tp' loc
+  return $ Ident name' NoInfo loc
 
-declRepl :: (VarName f, VarName t) =>
-            IdentBase (TypeBase ShapeDecl NoInfo) f
-         -> RenameM f t (IdentBase (TypeBase ShapeDecl NoInfo) t)
-declRepl (Ident name tp loc) = do
+declRepl :: (Eq f, Hashable f) =>
+            ParamBase NoInfo f
+         -> RenameM f t (ParamBase NoInfo t)
+declRepl (Param name (TypeDecl tp NoInfo) loc) = do
   name' <- replName name
   tp' <- renameDeclType tp
-  return $ Ident name' tp' loc
+  return $ Param name' (TypeDecl tp' NoInfo) loc
 
-replName :: (VarName f, VarName t) => f -> RenameM f t t
+replName :: (Eq f, Hashable f) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
                 asks (HM.lookup name . envNameMap)
 
-bindNames :: VarName f => [f] -> RenameM f t a -> RenameM f t a
+bindNames :: (Eq f, Hashable f) => [f] -> RenameM f t a -> RenameM f t a
 bindNames varnames body = do
   vars' <- mapM new varnames
   -- This works because map union prefers elements from left
@@ -128,16 +107,16 @@ bindNames varnames body = do
   where bind' vars' env = env { envNameMap = HM.fromList (zip varnames vars')
                                              `HM.union` envNameMap env }
 
-bind :: (VarName f) => [IdentBase ty f] -> RenameM f t a -> RenameM f t a
+bind :: (Eq f, Hashable f) => [IdentBase x f] -> RenameM f t a -> RenameM f t a
 bind = bindNames . map identName
 
-bindParams :: VarName f =>
-              [ParamBase f]
+bindParams :: (Eq f, Ord f, Hashable f) =>
+              [ParamBase NoInfo f]
            -> RenameM f t a
            -> RenameM f t a
 bindParams params =
-  bind params .
-  bindNames (concatMap (mapMaybe inspectDim . nestedDims . identType) params)
+  bindNames (map paramName params) .
+  bindNames (concatMap (mapMaybe inspectDim . nestedDims . paramDeclaredType) params)
   where inspectDim AnyDim =
           Nothing
         inspectDim (ConstDim _) =
@@ -145,17 +124,17 @@ bindParams params =
         inspectDim (NamedDim name) =
           Just name
 
-renameFun :: (TypeBox ty, VarName f, VarName t) =>
-             FunDecBase ty f -> RenameM f t (FunDecBase ty t)
-renameFun (fname, ret, params, body, pos) =
+renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
+             FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
+renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
   bindParams params $ do
     params' <- mapM declRepl params
     body' <- renameExp body
     ret' <- renameDeclType ret
-    return (fname, ret', params', body', pos)
+    return $ FunDef entry fname (TypeDecl ret' NoInfo) params' body' pos
 
-renameExp :: (TypeBox ty, VarName f, VarName t) =>
-             ExpBase ty f -> RenameM f t (ExpBase ty t)
+renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
+             ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
 renameExp (LetWith dest src idxs ve body loc) = do
   src' <- repl src
   idxs' <- mapM renameExp idxs
@@ -206,12 +185,7 @@ renameExp (Stream form lam arr pos) = do
   return $ Stream form' lam' arr' pos
 renameExp e = mapExpM rename e
 
-renameType :: (TypeBox ty, VarName f, VarName t) => ty f -> RenameM f t (ty t)
-renameType = mapType $ renameTypeGeneric
-             (\(Rank n) -> return $ Rank n)
-             (fmap HS.fromList . mapM replName . HS.toList)
-
-renameDeclType :: (VarName f, VarName t) =>
+renameDeclType :: (Eq f, Hashable f) =>
                   TypeBase ShapeDecl NoInfo f
                -> RenameM f t (TypeBase ShapeDecl NoInfo t)
 renameDeclType = renameTypeGeneric
@@ -221,7 +195,14 @@ renameDeclType = renameTypeGeneric
         renameDim (NamedDim v) = NamedDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n
 
-renameTypeGeneric :: (VarName f, VarName t) =>
+renameCompType :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                  CompTypeBase f
+               -> RenameM f t (CompTypeBase t)
+renameCompType = renameTypeGeneric
+                 (pure . Rank . shapeRank)
+                 (fmap HS.fromList . mapM replName . HS.toList)
+
+renameTypeGeneric :: (Eq f, Hashable f) =>
                      (shape f -> RenameM f t (shape t))
                   -> (als f -> RenameM f t (als t))
                   -> TypeBase shape als f
@@ -245,51 +226,49 @@ renameTypeGeneric renameShape renameAliases = renameType'
         renameTupleArrayElem (TupleArrayElem ts) =
           TupleArrayElem <$> mapM renameTupleArrayElem ts
 
-rename :: (TypeBox ty, VarName f, VarName t) => MapperBase ty ty f t (RenameM f t)
+rename :: (Eq f, Hashable f, Eq t, Hashable t) =>
+          MapperBase NoInfo f t (RenameM f t)
 rename = Mapper {
            mapOnExp = renameExp
          , mapOnPattern = renamePattern
          , mapOnIdent = repl
          , mapOnLambda = renameLambda
-         , mapOnType = renameType
+         , mapOnType = renameCompType
          , mapOnValue = return
          }
 
-renameLambda :: (TypeBox ty, VarName f, VarName t) =>
-                LambdaBase ty f -> RenameM f t (LambdaBase ty t)
-renameLambda (AnonymFun params body ret pos) =
-  bind params $ do
+renameLambda :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                LambdaBase NoInfo f -> RenameM f t (LambdaBase NoInfo t)
+renameLambda (AnonymFun params body (TypeDecl ret NoInfo) pos) =
+  bindNames (map paramName params) $ do
     params' <- mapM declRepl params
     body' <- renameExp body
     ret' <- renameDeclType ret
-    return (AnonymFun params' body' ret' pos)
-renameLambda (CurryFun fname curryargexps rettype pos) = do
+    return (AnonymFun params' body' (TypeDecl ret' NoInfo) pos)
+renameLambda (CurryFun fname curryargexps NoInfo pos) = do
   curryargexps' <- mapM renameExp curryargexps
-  rettype' <- renameType rettype
-  return (CurryFun fname curryargexps' rettype' pos)
-renameLambda (UnOpFun bop paramt rest loc) =
-  UnOpFun bop <$> renameType paramt <*> renameType rest <*> pure loc
-renameLambda (BinOpFun bop xtype ytype rettype loc) =
-  BinOpFun bop <$> renameType xtype <*> renameType ytype <*>
-  renameType rettype <*> pure loc
-renameLambda (CurryBinOpLeft bop x xtype rettype loc) =
+  return (CurryFun fname curryargexps' NoInfo pos)
+renameLambda (UnOpFun bop NoInfo NoInfo loc) =
+  pure $ UnOpFun bop NoInfo NoInfo loc
+renameLambda (BinOpFun bop NoInfo NoInfo NoInfo loc) =
+  pure $ BinOpFun bop NoInfo NoInfo NoInfo loc
+renameLambda (CurryBinOpLeft bop x NoInfo NoInfo loc) =
   CurryBinOpLeft bop <$> renameExp x <*>
-  renameType xtype <*> renameType rettype <*> pure loc
-renameLambda (CurryBinOpRight bop x xtype rettype loc) =
+  pure NoInfo <*> pure NoInfo <*> pure loc
+renameLambda (CurryBinOpRight bop x NoInfo NoInfo loc) =
   CurryBinOpRight bop <$> renameExp x <*>
-  renameType xtype <*> renameType rettype <*> pure loc
+  pure NoInfo <*> pure NoInfo <*> pure loc
 
-renamePattern :: (TypeBox ty, VarName f, VarName t) =>
-                 PatternBase ty f -> RenameM f t (PatternBase ty t)
+renamePattern :: (Eq f, Hashable f) =>
+                 PatternBase NoInfo f -> RenameM f t (PatternBase NoInfo t)
 renamePattern (Id ident) = do
   ident' <- repl ident
   return $ Id ident'
 renamePattern (TuplePattern pats pos) = do
   pats' <- mapM renamePattern pats
   return $ TuplePattern pats' pos
-renamePattern (Wildcard t loc) = do
-  t' <- renameType t
-  return $ Wildcard t' loc
+renamePattern (Wildcard NoInfo loc) =
+  pure $ Wildcard NoInfo loc
 
 patternNames :: PatternBase ty f -> [IdentBase ty f]
 patternNames (Id ident) = [ident]

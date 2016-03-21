@@ -94,7 +94,13 @@ data ValueDecl = ArrayValue VName PrimType [DimSize]
                | ScalarValue PrimType VName
                deriving (Show)
 
-data FunctionT a = Function [Param] [Param] (Code a) [ValueDecl] [ValueDecl]
+data FunctionT a = Function { functionEntry :: Bool
+                            , functionOutput :: [Param]
+                            , functionInput :: [Param]
+                            , functionbBody :: Code a
+                            , functionResult :: [ValueDecl]
+                            , functionArgs :: [ValueDecl]
+                            }
                  deriving (Show)
 
 type Function = FunctionT
@@ -230,7 +236,7 @@ instance Pretty op => Pretty (Functions op) where
             text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty op => Pretty (FunctionT op) where
-  ppr (Function outs ins body results args) =
+  ppr (Function _ outs ins body results args) =
     text "Inputs:" </> block ins </>
     text "Outputs:" </> block outs </>
     text "Arguments:" </> block args </>
@@ -354,8 +360,8 @@ instance Foldable FunctionT where
   foldMap = foldMapDefault
 
 instance Traversable FunctionT where
-  traverse f (Function outs ins body results args) =
-    Function outs ins <$> traverse f body <*> pure results <*> pure args
+  traverse f (Function entry outs ins body results args) =
+    Function entry outs ins <$> traverse f body <*> pure results <*> pure args
 
 instance Functor Code where
   fmap = fmapDefault

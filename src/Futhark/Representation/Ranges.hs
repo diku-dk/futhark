@@ -18,7 +18,7 @@ module Futhark.Representation.Ranges
        , Exp
        , Lambda
        , ExtLambda
-       , FunDec
+       , FunDef
        , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
@@ -31,7 +31,7 @@ module Futhark.Representation.Ranges
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.FunDecT(FunDec)
+       , AST.FunDefT(FunDef)
          -- * Adding ranges
        , addRangesToPattern
        , mkRangedLetBinding
@@ -40,7 +40,7 @@ module Futhark.Representation.Ranges
        , mkBodyRanges
          -- * Removing ranges
        , removeProgRanges
-       , removeFunDecRanges
+       , removeFunDefRanges
        , removeExpRanges
        , removeBodyRanges
        , removeBindingRanges
@@ -60,7 +60,7 @@ import Prelude
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDec, RetType)
+          Pattern, Lambda, ExtLambda, FunDef, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Traversals
@@ -98,7 +98,7 @@ type Binding lore = AST.Binding (Ranges lore)
 type Pattern lore = AST.Pattern (Ranges lore)
 type Lambda lore = AST.Lambda (Ranges lore)
 type ExtLambda lore = AST.ExtLambda (Ranges lore)
-type FunDec lore = AST.FunDec (Ranges lore)
+type FunDef lore = AST.FunDef (Ranges lore)
 type RetType lore = AST.RetType (Ranges lore)
 
 instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) where
@@ -120,7 +120,7 @@ instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) wh
                 PP.ppr range
           oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
 
-  ppFunDecLore = ppFunDecLore . removeFunDecRanges
+  ppFunDefLore = ppFunDefLore . removeFunDefRanges
   ppExpLore = ppExpLore . removeExpRanges
 
 removeRanges :: CanBeRanged (Op lore) => Rephraser (Ranges lore) lore
@@ -137,9 +137,9 @@ removeProgRanges :: CanBeRanged (Op lore) =>
                     AST.Prog (Ranges lore) -> AST.Prog lore
 removeProgRanges = rephraseProg removeRanges
 
-removeFunDecRanges :: CanBeRanged (Op lore) =>
-                      AST.FunDec (Ranges lore) -> AST.FunDec lore
-removeFunDecRanges = rephraseFunDec removeRanges
+removeFunDefRanges :: CanBeRanged (Op lore) =>
+                      AST.FunDef (Ranges lore) -> AST.FunDef lore
+removeFunDefRanges = rephraseFunDef removeRanges
 
 removeExpRanges :: CanBeRanged (Op lore) =>
                    AST.Exp (Ranges lore) -> AST.Exp lore

@@ -81,7 +81,7 @@ interpret :: Show error =>
              (FilePath -> String -> Either error [Value])
           -> Prog SOACS -> IO ()
 interpret parseValues prog =
-  case funDecByName defaultEntryPoint prog of
+  case funDefByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just _ -> do

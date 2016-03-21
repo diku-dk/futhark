@@ -21,7 +21,7 @@ module Futhark.Representation.AST.Attributes
   , builtInFunctions
 
   -- * Extra tools
-  , funDecByName
+  , funDefByName
   , asPrimOp
   , safeExp
   , subExpVars
@@ -81,8 +81,8 @@ builtInFunctions = HM.fromList $ map namify
   where namify (k,v) = (nameFromString k, v)
 
 -- | Find the function of the given name in the Futhark program.
-funDecByName :: Name -> Prog lore -> Maybe (FunDec lore)
-funDecByName fname = find ((fname ==) . funDecName) . progFunctions
+funDefByName :: Name -> Prog lore -> Maybe (FunDef lore)
+funDefByName fname = find ((fname ==) . funDefName) . progFunctions
 
 -- | If the expression is a 'PrimOp', return that 'PrimOp', otherwise 'Nothing'.
 asPrimOp :: Exp lore -> Maybe (PrimOp lore)

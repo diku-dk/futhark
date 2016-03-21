@@ -5,21 +5,17 @@
 -- we need here.
 module Language.Futhark.Attributes
   (
-    TypeBox(..)
-  , funDecByName
-  , isBuiltInFunction
-  , builtInFunctions
+    builtInFunctions
 
   -- * Parameter handling
   , toParam
   , fromParam
+  , paramType
+  , paramDeclaredType
 
   -- * Queries on expressions
   , expToValue
-  , mapTails
   , typeOf
-  , freeInExp
-  , freeNamesInExp
   , commutative
 
   -- * Queries on patterns
@@ -55,8 +51,8 @@ module Language.Futhark.Attributes
   , arrayType
   , rowType
   , toStructural
-  , toDecl
-  , fromDecl
+  , toStruct
+  , fromStruct
   , setAliases
   , addAliases
   , setUniqueness
@@ -88,29 +84,26 @@ module Language.Futhark.Attributes
   , UncheckedType
   , UncheckedArrayType
   , UncheckedIdent
+  , UncheckedTypeDecl
   , UncheckedExp
   , UncheckedLambda
   , UncheckedPattern
-  , UncheckedFunDec
+  , UncheckedFunDef
   , UncheckedProg
   , UncheckedProgWithHeaders
   )
   where
 
-import Control.Applicative
 import Control.Monad.Writer
-
 import Data.Array
 import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
-import Data.Loc
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
 
 import Language.Futhark.Syntax
-import Language.Futhark.Traversals
 
 -- | Return the dimensionality of a type.  For non-arrays, this is
 -- zero.  For a one-dimensional array it is one, for a two-dimensional
@@ -306,37 +299,14 @@ toStructural :: (ArrayShape (shape vn)) =>
 toStructural = removeNames . removeShapeAnnotations
 
 -- | Remove aliasing information from a type.
-toDecl :: TypeBase shape as vn
+toStruct :: TypeBase shape as vn
        -> TypeBase shape NoInfo vn
-toDecl t = t `setAliases` NoInfo
+toStruct t = t `setAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
-fromDecl :: TypeBase shape as vn
+fromStruct :: TypeBase shape as vn
          -> TypeBase shape Names vn
-fromDecl t = t `setAliases` HS.empty
-
--- | A type box provides a way to box a 'CompTypeBase', and possibly
--- retrieve one, if the box is not empty.  This can be used to write
--- function on Futhark terms that are polymorphic in the type annotations,
--- yet can still inspect types if they are present.
-class TypeBox ty where
-  -- | Try to retrieve a type from the type box.
-  unboxType :: ty vn -> Maybe (CompTypeBase vn)
-  -- | Put a type in the box.
-  boxType :: CompTypeBase vn -> ty vn
-  -- | Apply a mapping action to the type contained in the box.
-  mapType :: Applicative f =>
-             (CompTypeBase vn -> f (CompTypeBase vn')) -> ty vn -> f (ty vn')
-
-instance TypeBox NoInfo where
-  unboxType = const Nothing
-  boxType = const NoInfo
-  mapType = const . const (pure NoInfo)
-
-instance TypeBox CompTypeBase where
-  unboxType = Just
-  boxType = id
-  mapType = ($)
+fromStruct t = t `setAliases` HS.empty
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less
@@ -610,7 +580,7 @@ valueType (ArrayValue _ (Array (TupleArray et shape _))) =
 -- | Construct an array value containing the given elements.
 arrayValue :: ArrayShape (shape vn) =>
             [Value] -> TypeBase shape as vn -> Value
-arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toDecl
+arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toStruct
 
 -- | An empty array with the given row type.
 emptyArray :: ArrayShape (shape vn) =>
@@ -629,12 +599,12 @@ arrayString _ = Nothing
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
-typeOf :: (Ord vn, Hashable vn) => ExpBase CompTypeBase vn -> CompTypeBase vn
-typeOf (Literal val _) = fromDecl $ valueType val
+typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
+typeOf (Literal val _) = fromStruct $ valueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
-typeOf (ArrayLit es t _) =
+typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
-typeOf (BinOp _ _ _ t _) = t
+typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (UnOp Not _ _) = Prim Bool
 typeOf (UnOp Negate e _) = typeOf e
 typeOf (UnOp Complement e _) = typeOf e
@@ -643,12 +613,12 @@ typeOf (UnOp Signum e _) = typeOf e
 typeOf (UnOp (ToFloat t) _ _) = Prim $ FloatType t
 typeOf (UnOp (ToSigned t) _ _) = Prim $ Signed t
 typeOf (UnOp (ToUnsigned t) _ _) = Prim $ Unsigned t
-typeOf (If _ _ _ t _) = t
+typeOf (If _ _ _ (Info t) _) = t
 typeOf (Var ident) =
-  case identType ident of
+  case unInfo $ identType ident of
     Tuple ets -> Tuple ets
     t         -> t `addAliases` HS.insert (identName ident)
-typeOf (Apply _ _ t _) = t
+typeOf (Apply _ _ (Info t) _) = t
 typeOf (LetPat _ _ body _) = typeOf body
 typeOf (LetWith _ _ _ _ body _) = typeOf body
 typeOf (Index ident idx _) =
@@ -667,9 +637,9 @@ typeOf (Map f arr _) = arrayType 1 et Unique
 typeOf (Reduce _ fun start arr _) =
   removeShapeAnnotations $
   lambdaType fun [typeOf start, rowType (typeOf arr)]
-typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . snd) es) Nonunique
+typeOf (Zip es _) = arrayType 1 (Tuple $ map (rowType . unInfo . snd) es) Nonunique
 typeOf (Unzip _ ts _) =
-  Tuple ts
+  Tuple $ map unInfo ts
 typeOf (Unsafe e _) =
   typeOf e
 typeOf (Scan fun start arr _) =
@@ -701,19 +671,18 @@ typeOf (Write _i _v a _) = typeOf a
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple
 -- literal expressions into literal values instead.
-expToValue :: ArrayShape (shape vn) =>
-              ExpBase (TypeBase shape as) vn -> Maybe Value
+expToValue :: ExpBase Info vn -> Maybe Value
 expToValue (Literal val _) = Just val
 expToValue (TupLit es _) = do es' <- mapM expToValue es
                               Just $ TupValue es'
-expToValue (ArrayLit es t _) = do es' <- mapM expToValue es
-                                  Just $ arrayValue es' t
+expToValue (ArrayLit es (Info t) _) = do es' <- mapM expToValue es
+                                         Just $ arrayValue es' t
 expToValue _ = Nothing
 
 -- | The result of applying the arguments of the given types to the
 -- given lambda function.
 lambdaType :: (Ord vn, Hashable vn) =>
-              LambdaBase CompTypeBase vn -> [CompTypeBase vn]
+              LambdaBase Info vn -> [CompTypeBase vn]
            -> TypeBase Rank Names vn
 lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
@@ -761,152 +730,48 @@ tupleArrayElemReturnType (TupleArrayElem ts) ds args =
 
 -- | The specified return type of a lambda.
 lambdaReturnType :: Ord vn =>
-                    LambdaBase CompTypeBase vn -> TypeBase Rank NoInfo vn
-lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations t
-lambdaReturnType (CurryFun _ _ t _) = toDecl t
-lambdaReturnType (UnOpFun _ _ t _) = toDecl t
-lambdaReturnType (BinOpFun _ _ _ t _) = toDecl t
-lambdaReturnType (CurryBinOpLeft _ _ _ t _) = toDecl t
-lambdaReturnType (CurryBinOpRight _ _ _ t _) = toDecl t
+                    LambdaBase Info vn -> TypeBase Rank NoInfo vn
+lambdaReturnType (AnonymFun _ _ t _) = removeShapeAnnotations $ unInfo $ expandedType t
+lambdaReturnType (CurryFun _ _ (Info t) _) = toStruct t
+lambdaReturnType (UnOpFun _ _ (Info t) _) = toStruct t
+lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toStruct t
+lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toStruct t
+lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
 
 -- | The parameter 'Diet's of a lambda.
-lambdaParamDiets :: LambdaBase ty vn -> [Diet]
-lambdaParamDiets (AnonymFun params _ _ _) = map (diet . identType) params
+lambdaParamDiets :: LambdaBase Info vn -> [Diet]
+lambdaParamDiets (AnonymFun params _ _ _) = map (diet . paramType) params
 lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
 lambdaParamDiets UnOpFun{} = [Observe]
 lambdaParamDiets BinOpFun{} = [Observe, Observe]
 lambdaParamDiets CurryBinOpLeft{} = [Observe]
 lambdaParamDiets CurryBinOpRight{} = [Observe]
 
--- | Find the function of the given name in the Futhark program.
-funDecByName :: Name -> ProgBase ty vn -> Maybe (FunDecBase ty vn)
-funDecByName fname = find (\(fname',_,_,_,_) -> fname == fname') . progFunctions
-
--- | Change those subexpressions where evaluation of the expression
--- would stop.  Also change type annotations at branches.
-mapTails :: (ExpBase ty vn -> ExpBase ty vn) -> (ty vn -> ty vn)
-         -> ExpBase ty vn -> ExpBase ty vn
-mapTails f g (LetPat pat e body loc) =
-  LetPat pat e (mapTails f g body) loc
-mapTails f g (LetWith dest src idxs ve body loc) =
-  LetWith dest src idxs ve (mapTails f g body) loc
-mapTails f g (DoLoop pat me form loopbody body loc) =
-  DoLoop pat me form loopbody (mapTails f g body) loc
-mapTails f g (If c te fe t loc) =
-  If c (mapTails f g te) (mapTails f g fe) (g t) loc
-mapTails f _ e = f e
-
--- | Return the set of identifiers that are free in the given
--- expression.
-freeInExp :: (TypeBox ty, Eq vn, Hashable vn) =>
-             ExpBase ty vn -> HS.HashSet (IdentBase ty vn)
-freeInExp = execWriter . expFree
-  where names = identityWalker {
-                  walkOnExp = expFree
-                , walkOnLambda = lambdaFree
-                , walkOnIdent = identFree
-                }
-
-        identFree ident =
-          tell $ HS.singleton ident
-
-        expFree (LetPat pat e body _) = do
-          expFree e
-          binding (patIdentSet pat) $ expFree body
-        expFree (LetWith dest src idxs ve body _) = do
-          identFree src
-          mapM_ expFree idxs
-          expFree ve
-          binding (HS.singleton dest) $ expFree body
-        expFree (DoLoop pat mergeexp (For _ lbound i ubound) loopbody letbody _) = do
-          expFree mergeexp
-          expFree lbound
-          expFree ubound
-          binding (i `HS.insert` patIdentSet pat) $ do
-            expFree loopbody
-            expFree letbody
-        expFree (DoLoop pat mergeexp (While cond) loopbody letbody _) = do
-          expFree mergeexp
-          binding (patIdentSet pat) $ do
-            expFree cond
-            expFree loopbody
-            expFree letbody
-
-        expFree e = walkExpM names e
-
-        lambdaFree = tell . freeInLambda
-
-        binding bound = censor (`HS.difference` bound)
-
--- | As 'freeInExp', but returns the raw names rather than 'IdentBase's.
-freeNamesInExp :: (TypeBox ty, Eq vn, Hashable vn) => ExpBase ty vn -> HS.HashSet vn
-freeNamesInExp = HS.map identName . freeInExp
-
--- | Return the set of identifiers that are free in the given lambda.
-freeInLambda :: (TypeBox ty, Eq vn, Hashable vn) =>
-                LambdaBase ty vn -> HS.HashSet (IdentBase ty vn)
-freeInLambda (AnonymFun params body rettype _) =
-  HS.filter ((`notElem` params') . identName) (freeInExp body) <>
-  freeInDeclType rettype
-    where params' = map identName params
-freeInLambda (CurryFun _ exps _ _) =
-  HS.unions (map freeInExp exps)
-freeInLambda UnOpFun{} =
-  mempty
-freeInLambda BinOpFun{} =
-  mempty
-freeInLambda (CurryBinOpLeft _ e _ _ _) =
-  freeInExp e
-freeInLambda (CurryBinOpRight _ e _ _ _) =
-  freeInExp e
-
-freeInDeclType :: (TypeBox ty, Eq vn, Hashable vn) =>
-                  DeclTypeBase vn -> HS.HashSet (IdentBase ty vn)
-freeInDeclType (Prim _) = mempty
-freeInDeclType (Array at) = freeInDeclArrayType at
-freeInDeclType (Tuple ts) = mconcat $ map freeInDeclType ts
-
-freeInDeclArrayType :: (TypeBox ty, Eq vn, Hashable vn) =>
-                       DeclArrayTypeBase vn -> HS.HashSet (IdentBase ty vn)
-freeInDeclArrayType (PrimArray _ shape _ _) =
-  mconcat $ map freeInDimDecl $ shapeDims shape
-freeInDeclArrayType (TupleArray ts shape _) =
-  mconcat (map freeInDeclTupleArrayElemType ts) <>
-  mconcat (map freeInDimDecl $ shapeDims shape)
-
-freeInDeclTupleArrayElemType :: (TypeBox ty, Eq vn, Hashable vn) =>
-                                DeclTupleArrayElemTypeBase vn
-                             -> HS.HashSet (IdentBase ty vn)
-freeInDeclTupleArrayElemType (PrimArrayElem _ _) =
-  mempty
-freeInDeclTupleArrayElemType (ArrayArrayElem at) =
-  freeInDeclArrayType at
-freeInDeclTupleArrayElemType (TupleArrayElem ts) =
-  mconcat $ map freeInDeclTupleArrayElemType ts
-
-freeInDimDecl :: (TypeBox ty, Eq vn, Hashable vn) =>
-                 DimDecl vn -> HS.HashSet (IdentBase ty vn)
-freeInDimDecl (NamedDim name) = HS.singleton $
-                                Ident name (boxType $ Prim $ Signed Int32) noLoc
-freeInDimDecl _               = mempty
-
 -- | Is the given binary operator commutative?
 commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
--- | Remove alias information from the type of an ident.
-toParam :: ArrayShape (shape vn) =>
-           IdentBase (TypeBase shape as) vn
-        -> IdentBase (TypeBase ShapeDecl NoInfo) vn
-toParam (Ident name t loc) = Ident name (vacuousShapeAnnotations $ toDecl t) loc
+-- | Turn an identifier into a parameter.
+toParam :: IdentBase Info vn
+        -> ParamBase Info vn
+toParam (Ident name (Info t) loc) =
+  Param name (TypeDecl t' $ Info t') loc
+  where t' = vacuousShapeAnnotations $ toStruct t
 
--- | Add (vacuous) alias information and remove shape annotations from
--- the type of an identifier.
-fromParam :: ArrayShape (shape vn) =>
-             IdentBase (TypeBase shape NoInfo) vn
-          -> IdentBase (TypeBase Rank Names) vn
-fromParam (Ident name t loc) =
-  Ident name (removeShapeAnnotations $ fromDecl t) loc
+-- | Turn a parameter into an identifier.
+fromParam :: Ord vn =>
+             ParamBase Info vn
+          -> IdentBase Info vn
+fromParam (Param name (TypeDecl _ (Info t)) loc) =
+  Ident name (Info $ removeShapeAnnotations $ fromStruct t) loc
+
+paramType :: ParamBase Info vn
+          -> StructTypeBase vn
+paramType = unInfo . expandedType . paramTypeDecl
+
+paramDeclaredType :: ParamBase f vn
+                  -> StructTypeBase vn
+paramDeclaredType = declaredType . paramTypeDecl
 
 -- | The list of names bound in the given pattern.
 patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]
@@ -930,10 +795,6 @@ patIdents (Wildcard _ _) = []
 -- you want).
 patIdentSet :: (Eq vn, Hashable vn) => PatternBase ty vn -> HS.HashSet (IdentBase ty vn)
 patIdentSet = HS.fromList . patIdents
-
--- | @isBuiltInFunction k@ is 'True' if @k@ is an element of 'builtInFunctions'.
-isBuiltInFunction :: Name -> Bool
-isBuiltInFunction fnm = fnm `HM.member` builtInFunctions
 
 -- | A map of all built-in functions and their types.
 builtInFunctions :: HM.HashMap Name (PrimType,[PrimType])
@@ -964,6 +825,9 @@ type UncheckedType = TypeBase ShapeDecl NoInfo Name
 -- | An array type with no aliasing information.
 type UncheckedArrayType = ArrayTypeBase ShapeDecl NoInfo Name
 
+-- | A type declaration with no expanded type.
+type UncheckedTypeDecl = TypeDeclBase NoInfo Name
+
 -- | An identifier with no type annotations.
 type UncheckedIdent = IdentBase NoInfo Name
 
@@ -977,7 +841,7 @@ type UncheckedLambda = LambdaBase NoInfo Name
 type UncheckedPattern = PatternBase NoInfo Name
 
 -- | A function declaration with no type annotations.
-type UncheckedFunDec = FunDecBase NoInfo Name
+type UncheckedFunDef = FunDefBase NoInfo Name
 
 -- | An Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name

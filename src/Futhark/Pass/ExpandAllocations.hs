@@ -27,13 +27,13 @@ expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations = simplePass
                     "expand allocations"
                     "Expand allocations" $
-                    intraproceduralTransformation transformFunDec
+                    intraproceduralTransformation transformFunDef
 
-transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
-transformFunDec fundec = do
+transformFunDef :: MonadFreshNames m => FunDef -> m FunDef
+transformFunDef fundec = do
   body' <- modifyNameSource $ runState m
-  return fundec { funDecBody = body' }
-  where m = transformBody $ funDecBody fundec
+  return fundec { funDefBody = body' }
+  where m = transformBody $ funDefBody fundec
 
 type ExpandM = State VNameSource
 

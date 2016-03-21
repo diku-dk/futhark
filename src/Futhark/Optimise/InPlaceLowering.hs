@@ -86,15 +86,15 @@ inPlaceLowering = simplePass
                   "In-place lowering"
                   "Lower in-place updates into loops" $
                   fmap removeProgAliases .
-                  intraproceduralTransformation optimiseFunDec .
+                  intraproceduralTransformation optimiseFunDef .
                   aliasAnalysis
 
-optimiseFunDec :: MonadFreshNames m => FunDec Kernels -> m (FunDec Kernels)
-optimiseFunDec fundec =
+optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
+optimiseFunDef fundec =
   modifyNameSource $ runForwardingM $
-  bindingFParams (funDecParams fundec) $ do
-    body <- optimiseBody $ funDecBody fundec
-    return $ fundec { funDecBody = body }
+  bindingFParams (funDefParams fundec) $ do
+    body <- optimiseBody $ funDefBody fundec
+    return $ fundec { funDefBody = body }
 
 optimiseBody :: Body Kernels -> ForwardingM (Body Kernels)
 optimiseBody (Body als bnds res) = do

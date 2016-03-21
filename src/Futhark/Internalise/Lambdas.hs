@@ -219,7 +219,7 @@ internalisePartitionLambdas internaliseLambda lams args = do
     (params, body, _) <- internaliseLambda lam $ Just rowtypes
     return (params, body)
   params <- newIdents "partition_param" rowtypes
-  let params' = [ Param name t
+  let params' = [ I.Param name t
                 | I.Ident name t <- params]
   body <- mkCombinedLambdaBody params 0 lams'
   i <- newVName "i"
