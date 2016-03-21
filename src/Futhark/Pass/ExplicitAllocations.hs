@@ -465,11 +465,11 @@ memoryInRetType (ExtRetType ts) =
 startOfFreeIDRange :: [TypeBase ExtShape u] -> Int
 startOfFreeIDRange = (1+) . HS.foldl' max 0 . shapeContext
 
-allocInFun :: MonadFreshNames m => In.FunDec -> m FunDec
-allocInFun (In.FunDec entry fname rettype params body) =
+allocInFun :: MonadFreshNames m => In.FunDef -> m FunDef
+allocInFun (In.FunDef entry fname rettype params body) =
   runAllocM $ allocInFParams params $ \params' -> do
     body' <- insertBindingsM $ allocInBody body
-    return $ FunDec entry fname (memoryInRetType rettype) params' body'
+    return $ FunDef entry fname (memoryInRetType rettype) params' body'
 
 allocInBody :: In.Body -> AllocM Body
 allocInBody (Body _ bnds res) =

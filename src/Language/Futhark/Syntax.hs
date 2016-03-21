@@ -46,7 +46,7 @@ module Language.Futhark.Syntax
   , StreamForm(..)
 
   -- * Definitions
-  , FunDecBase(..)
+  , FunDefBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
@@ -600,24 +600,24 @@ instance Located (PatternBase f vn) where
   locOf (Wildcard _ loc) = locOf loc
 
 -- | Function Declarations
-data FunDecBase f vn = FunDec { funDecEntryPoint :: Bool
+data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
-                              , funDecName :: Name
-                              , funDecRetType :: TypeDeclBase f vn
-                              , funDecParams :: [ParamBase f vn]
-                              , funDecBody :: ExpBase f vn
-                              , funDecLocation :: SrcLoc
+                              , funDefName :: Name
+                              , funDefRetType :: TypeDeclBase f vn
+                              , funDefParams :: [ParamBase f vn]
+                              , funDefBody :: ExpBase f vn
+                              , funDefLocation :: SrcLoc
                               }
-deriving instance Showable f vn => Show (FunDecBase f vn)
+deriving instance Showable f vn => Show (FunDefBase f vn)
 
 -- | An entire Futhark program.
-newtype ProgBase f vn = Prog { progFunctions :: [FunDecBase f vn] }
+newtype ProgBase f vn = Prog { progFunctions :: [FunDefBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 -- | An entire Futhark program, including headers.
 data ProgBaseWithHeaders f vn =
   ProgWithHeaders { progWHHeaders :: [ProgHeader]
-                  , progWHFunctions :: [FunDecBase f vn]
+                  , progWHFunctions :: [FunDefBase f vn]
                   }
 deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 

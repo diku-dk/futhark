@@ -315,7 +315,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBa
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase ty vn) where
   ppr = stack . punctuate line . map ppFun . progFunctions
-    where ppFun (FunDec entry name rettype args body _) =
+    where ppFun (FunDef entry name rettype args body _) =
             text fun <+> ppr rettype <+>
             text (nameToString name) <//>
             apply (map ppParam args) <+>

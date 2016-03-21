@@ -56,10 +56,10 @@ inside what m = seen what >> censor addWhat m
           HM.insert (what <> "/" <> k) v new_metrics
 
 progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
-progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDecMetrics . progFunctions
+progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDefMetrics . progFunctions
 
-funDecMetrics :: OpMetrics (Op lore) => FunDec lore -> MetricsM ()
-funDecMetrics = bodyMetrics . funDecBody
+funDefMetrics :: OpMetrics (Op lore) => FunDef lore -> MetricsM ()
+funDefMetrics = bodyMetrics . funDefBody
 
 bodyMetrics :: OpMetrics (Op lore) => Body lore -> MetricsM ()
 bodyMetrics = mapM_ bindingMetrics . bodyBindings

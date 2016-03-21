@@ -267,7 +267,7 @@ compileProg :: MonadFreshNames m =>
             -> Prog -> m (Either String (Imp.Functions op))
 compileProg ops ds prog =
   modifyNameSource $ \src ->
-  case mapAccumLM (compileFunDec ops ds) src (progFunctions prog) of
+  case mapAccumLM (compileFunDef ops ds) src (progFunctions prog) of
     Left err -> (Left err, src)
     Right (src', funs) -> (Right $ Imp.Functions funs, src')
 
@@ -371,11 +371,11 @@ compileOutParams rts = do
                                return (sizeout, Just sizeout)
             Just sizeout -> return (sizeout, Nothing)
 
-compileFunDec :: Operations op -> Imp.Space
+compileFunDef :: Operations op -> Imp.Space
               -> VNameSource
-              -> FunDec
+              -> FunDef
               -> Either String (VNameSource, (Name, Imp.Function op))
-compileFunDec ops ds src (FunDec entry fname rettype params body) = do
+compileFunDef ops ds src (FunDef entry fname rettype params body) = do
   ((outparams, inparams, results, args), src', body') <-
     runImpM compile ops ds src
   return (src',

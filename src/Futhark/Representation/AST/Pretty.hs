@@ -33,8 +33,8 @@ class (Annotations lore,
        Pretty (Op lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
-  ppFunDecLore :: FunDec lore -> Maybe Doc
-  ppFunDecLore = const Nothing
+  ppFunDefLore :: FunDef lore -> Maybe Doc
+  ppFunDefLore = const Nothing
   ppLambdaLore :: Lambda lore -> Maybe Doc
   ppLambdaLore = const Nothing
   ppExpLore :: Exp lore -> Maybe Doc
@@ -255,9 +255,9 @@ instance PrettyLore lore => Pretty (ExtLambda lore) where
 instance Pretty ExtRetType where
   ppr = ppTuple' . retTypeValues
 
-instance PrettyLore lore => Pretty (FunDec lore) where
-  ppr fundec@(FunDec entry name rettype args body) =
-    maybe id (</>) (ppFunDecLore fundec) $
+instance PrettyLore lore => Pretty (FunDef lore) where
+  ppr fundec@(FunDef entry name rettype args body) =
+    maybe id (</>) (ppFunDefLore fundec) $
     text fun <+> ppr rettype <+>
     text (nameToString name) <//>
     apply (map ppr args) <+>

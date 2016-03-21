@@ -55,8 +55,8 @@ module Futhark.Representation.AST.Syntax
   , ParamT (..)
   , FParam
   , LParam
-  , FunDecT (..)
-  , FunDec
+  , FunDefT (..)
+  , FunDef
   , ProgT(..)
   , Prog
   )
@@ -280,22 +280,22 @@ type FParam lore = ParamT (FParamAttr lore)
 type LParam lore = ParamT (LParamAttr lore)
 
 -- | Function Declarations
-data FunDecT lore = FunDec { funDecEntryPoint :: Bool
+data FunDefT lore = FunDef { funDefEntryPoint :: Bool
                              -- ^ True if this function is an entry point.
-                           , funDecName :: Name
-                           , funDecRetType :: RetType lore
-                           , funDecParams :: [FParam lore]
-                           , funDecBody :: BodyT lore
+                           , funDefName :: Name
+                           , funDefRetType :: RetType lore
+                           , funDefParams :: [FParam lore]
+                           , funDefBody :: BodyT lore
                            }
 
-deriving instance Annotations lore => Eq (FunDecT lore)
-deriving instance Annotations lore => Show (FunDecT lore)
-deriving instance Annotations lore => Ord (FunDecT lore)
+deriving instance Annotations lore => Eq (FunDefT lore)
+deriving instance Annotations lore => Show (FunDefT lore)
+deriving instance Annotations lore => Ord (FunDefT lore)
 
-type FunDec = FunDecT
+type FunDef = FunDefT
 
 -- | An entire Futhark program.
-newtype ProgT lore = Prog { progFunctions :: [FunDec lore] }
+newtype ProgT lore = Prog { progFunctions :: [FunDef lore] }
                      deriving (Eq, Ord, Show)
 
 type Prog = ProgT

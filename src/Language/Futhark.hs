@@ -6,7 +6,7 @@ module Language.Futhark
   , module Language.Futhark.Traversals
 
   , Ident, Parameter, Exp, Lambda
-  , Pattern, FunDec, Prog
+  , Pattern, FunDef, Prog
   , Type, StructType, ArrayType
   )
   where
@@ -33,7 +33,7 @@ type Lambda = LambdaBase Info VName
 type Pattern = PatternBase Info VName
 
 -- | An function declaration with type information.
-type FunDec = FunDecBase Info VName
+type FunDef = FunDefBase Info VName
 
 -- | An Futhark program with type information.
 type Prog = ProgBase Info VName

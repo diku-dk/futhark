@@ -125,13 +125,13 @@ bindParams params =
           Just name
 
 renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
-             FunDecBase NoInfo f -> RenameM f t (FunDecBase NoInfo t)
-renameFun (FunDec entry fname (TypeDecl ret NoInfo) params body pos) =
+             FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
+renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
   bindParams params $ do
     params' <- mapM declRepl params
     body' <- renameExp body
     ret' <- renameDeclType ret
-    return $ FunDec entry fname (TypeDecl ret' NoInfo) params' body' pos
+    return $ FunDef entry fname (TypeDecl ret' NoInfo) params' body' pos
 
 renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)

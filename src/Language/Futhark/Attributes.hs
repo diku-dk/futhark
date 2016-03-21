@@ -88,7 +88,7 @@ module Language.Futhark.Attributes
   , UncheckedExp
   , UncheckedLambda
   , UncheckedPattern
-  , UncheckedFunDec
+  , UncheckedFunDef
   , UncheckedProg
   , UncheckedProgWithHeaders
   )
@@ -840,7 +840,7 @@ type UncheckedLambda = LambdaBase NoInfo Name
 type UncheckedPattern = PatternBase NoInfo Name
 
 -- | A function declaration with no type annotations.
-type UncheckedFunDec = FunDecBase NoInfo Name
+type UncheckedFunDef = FunDefBase NoInfo Name
 
 -- | An Futhark program with no type annotations.
 type UncheckedProg = ProgBase NoInfo Name

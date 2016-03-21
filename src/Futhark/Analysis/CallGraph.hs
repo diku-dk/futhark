@@ -14,13 +14,13 @@ import qualified Data.HashMap.Lazy as HM
 
 import Futhark.Representation.SOACS
 
-type FunctionTable = HM.HashMap Name FunDec
+type FunctionTable = HM.HashMap Name FunDef
 
 buildFunctionTable :: Prog -> FunctionTable
 buildFunctionTable =
   foldl expand HM.empty . progFunctions
   where expand ftab f =
-          HM.insert (funDecName f) f ftab
+          HM.insert (funDefName f) f ftab
 
 -- | The symbol table for functions
 data CGEnv = CGEnv { envFtable  :: FunctionTable }
@@ -43,7 +43,7 @@ buildCallGraph :: Prog -> CallGraph
 buildCallGraph prog = do
   let ftable = buildFunctionTable prog
   runCGM (foldM buildCGfun HM.empty entry_points) $ CGEnv ftable
-  where entry_points = map funDecName $ filter funDecEntryPoint $ progFunctions prog
+  where entry_points = map funDefName $ filter funDefEntryPoint $ progFunctions prog
 
 -- | @buildCallGraph cg f@ updates Call Graph @cg@ with the contributions of function
 -- @fname@, and recursively, with the contributions of the callees of @fname@.
@@ -55,7 +55,7 @@ buildCGfun cg fname  = do
     Just f ->
       case HM.lookup fname cg of
         Just _  -> return cg
-        Nothing -> do let callees = buildCGbody [] $ funDecBody f
+        Nothing -> do let callees = buildCGbody [] $ funDefBody f
                       let cg' = HM.insert fname callees cg
 
                       -- recursively build the callees

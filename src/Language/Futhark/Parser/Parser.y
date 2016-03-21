@@ -181,8 +181,8 @@ Prog :: { UncheckedProgWithHeaders }
      |   Decs { ProgWithHeaders [] $1 }
 ;
 
-Decs : FunDecs { $1 }
-     | DefaultDec FunDecs { $2 }
+Decs : FunDefs { $1 }
+     | DefaultDec FunDefs { $2 }
 ;
 
 DefaultDec :: { () }
@@ -234,22 +234,22 @@ Header :: { ProgHeader }
 Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
-FunDecs : Fun FunDecs   { $1 : $2 }
+FunDefs : Fun FunDefs   { $1 : $2 }
         | Fun           { [$1] }
 ;
 
 Fun     : fun TypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDec (name==defaultEntryPoint) name $2 $5 $8 pos }
+                          in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
         | fun TypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDec (name==defaultEntryPoint) name $2 [] $7 pos }
+                          in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
         | entry TypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDec True name $2 $5 $8 pos }
+                          in FunDef True name $2 $5 $8 pos }
         | entry TypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDec True name $2 [] $7 pos }
+                          in FunDef True name $2 [] $7 pos }
 ;
 
 Uniqueness : '*' { Unique }

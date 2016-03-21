@@ -23,7 +23,7 @@ import Futhark.Binder
 import Futhark.Pass
 
 -- | The symbol table for functions
-data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDec }
+data CGEnv = CGEnv { envFtable  :: HM.HashMap Name FunDef }
 
 type CGM = Reader CGEnv
 
@@ -49,20 +49,20 @@ inlineAggressively =
           renameProg $ runCGM (aggInlining cg) env
 
 -- | Bind a name as a common (non-merge) variable.
-bindVarFtab :: CGEnv -> (Name, FunDec) -> CGEnv
+bindVarFtab :: CGEnv -> (Name, FunDef) -> CGEnv
 bindVarFtab env (name,val) =
   env { envFtable = HM.insert name val $ envFtable env }
 
-bindVarsFtab :: CGEnv -> [(Name, FunDec)] -> CGEnv
+bindVarsFtab :: CGEnv -> [(Name, FunDef)] -> CGEnv
 bindVarsFtab = foldl bindVarFtab
 
-bindingFtab :: [(Name, FunDec)] -> CGM a -> CGM a
+bindingFtab :: [(Name, FunDef)] -> CGM a -> CGM a
 bindingFtab bnds = local (`bindVarsFtab` bnds)
 
 aggInlining :: CallGraph -> CGM Prog
 aggInlining cg = do
     to_be_inlined <- filter funHasNoCalls <$> asks (HM.elems . envFtable)
-    let names_of_to_be_inlined = map funDecName to_be_inlined
+    let names_of_to_be_inlined = map funDefName to_be_inlined
 
     if not $ any (callsAnyOf names_of_to_be_inlined) $ HM.elems cg
     -- Nothing to inline, hence gather the program from the ftable and
@@ -88,9 +88,9 @@ aggInlining cg = do
 
         callsAnyOf to_be_inlined = any (`elem` to_be_inlined)
 
-        funHasNoCalls :: FunDec -> Bool
+        funHasNoCalls :: FunDef -> Bool
         funHasNoCalls fundec =
-          case HM.lookup (funDecName fundec) cg of
+          case HM.lookup (funDefName fundec) cg of
             Just calls | not $ any (`elem` known_funs) calls -> True
             _                                                -> False
 
@@ -100,12 +100,12 @@ aggInlining cg = do
 -- not call any other functions. Further extensions that transform a
 -- tail-recursive function to a do or while loop, should do the transformation
 -- first and then do the inlining.
-doInlineInCaller :: FunDec ->  [FunDec] -> FunDec
-doInlineInCaller (FunDec entry name rtp args body) inlcallees =
+doInlineInCaller :: FunDef ->  [FunDef] -> FunDef
+doInlineInCaller (FunDef entry name rtp args body) inlcallees =
   let body' = inlineInBody inlcallees body
-  in FunDec entry name rtp args body'
+  in FunDef entry name rtp args body'
 
-inlineInBody :: [FunDec] -> Body -> Body
+inlineInBody :: [FunDef] -> Body -> Body
 inlineInBody
   inlcallees
   (Body _ (bnd@(Let pat _ (Apply fname args rtp)):bnds) res) =
@@ -115,11 +115,11 @@ inlineInBody
         continue $ callbnds ++
         zipWith reshapeIfNecessary (patternIdents pat)
         (runReader (withShapes res') $ scopeOf callbnds)
-  in case filter ((== fname) . funDecName) inlcallees of
+  in case filter ((== fname) . funDefName) inlcallees of
        [] -> continue [bnd]
        fun:_ ->
-         let revbnds = zip (map paramIdent $ funDecParams fun) $ map fst args
-         in  continue' $ foldr addArgBnd (funDecBody fun) revbnds
+         let revbnds = zip (map paramIdent $ funDefParams fun) $ map fst args
+         in  continue' $ foldr addArgBnd (funDefBody fun) revbnds
   where
 
       addArgBnd :: (Ident, SubExp) -> Body -> Body
@@ -145,25 +145,25 @@ inlineInBody inlcallees (Body () (bnd:bnds) res) =
 inlineInBody _ (Body () [] res) =
   Body () [] res
 
-inliner :: Monad m => [FunDec] -> Mapper SOACS SOACS m
+inliner :: Monad m => [FunDef] -> Mapper SOACS SOACS m
 inliner funs = identityMapper { mapOnBody = return . inlineInBody funs
                               , mapOnOp = return . inlineInSOAC funs
                               }
 
-inlineInSOAC :: [FunDec] -> SOAC SOACS -> SOAC SOACS
+inlineInSOAC :: [FunDef] -> SOAC SOACS -> SOAC SOACS
 inlineInSOAC inlcallees = runIdentity . mapSOACM identitySOACMapper
                           { mapOnSOACLambda = return . inlineInLambda inlcallees
                           , mapOnSOACExtLambda = return . inlineInExtLambda inlcallees
                           }
 
-inlineInBinding :: [FunDec] -> Binding -> Binding
+inlineInBinding :: [FunDef] -> Binding -> Binding
 inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
 
-inlineInLambda :: [FunDec] -> Lambda -> Lambda
+inlineInLambda :: [FunDef] -> Lambda -> Lambda
 inlineInLambda inlcallees (Lambda i params body ret) =
   Lambda i params (inlineInBody inlcallees body) ret
 
-inlineInExtLambda :: [FunDec] -> ExtLambda -> ExtLambda
+inlineInExtLambda :: [FunDef] -> ExtLambda -> ExtLambda
 inlineInExtLambda inlcallees (ExtLambda i params body ret) =
   ExtLambda i params (inlineInBody inlcallees body) ret
 
@@ -180,4 +180,4 @@ removeDeadFunctions =
               cg     = buildCallGraph prog
               ftable' = HM.filter (isFunInCallGraph cg) ftable
           in Prog $ HM.elems ftable'
-        isFunInCallGraph cg fundec = isJust $ HM.lookup (funDecName fundec) cg
+        isFunInCallGraph cg fundec = isJust $ HM.lookup (funDefName fundec) cg

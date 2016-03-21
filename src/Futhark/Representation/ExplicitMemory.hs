@@ -76,7 +76,7 @@ module Futhark.Representation.ExplicitMemory
        , Exp
        , Lambda
        , ExtLambda
-       , FunDec
+       , FunDef
        , FParam
        , LParam
        , RetType
@@ -93,7 +93,7 @@ module Futhark.Representation.ExplicitMemory
        , AST.PatternT(Pattern)
        , AST.ProgT(Prog)
        , AST.ExpT(PrimOp)
-       , AST.FunDecT(FunDec)
+       , AST.FunDefT(FunDef)
        , AST.ParamT(Param)
        )
 where
@@ -113,7 +113,7 @@ import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.Kernels.Kernel
 import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, PatElem, Lambda, ExtLambda, FunDec, FParam, LParam,
+          Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType)
 import qualified Futhark.Analysis.ScalExp as SE
 
@@ -145,7 +145,7 @@ type Binding = AST.Binding ExplicitMemory
 type Pattern = AST.Pattern ExplicitMemory
 type Lambda = AST.Lambda ExplicitMemory
 type ExtLambda = AST.ExtLambda ExplicitMemory
-type FunDec = AST.FunDec ExplicitMemory
+type FunDef = AST.FunDef ExplicitMemory
 type FParam = AST.FParam ExplicitMemory
 type LParam = AST.LParam ExplicitMemory
 type RetType = AST.RetType ExplicitMemory
@@ -799,8 +799,8 @@ instance PrettyLore ExplicitMemory where
     case mapMaybe patElemAnnot $ patternElements $ bindingPattern binding of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
-  ppFunDecLore fundec =
-    case mapMaybe fparamAnnot $ funDecParams fundec of
+  ppFunDefLore fundec =
+    case mapMaybe fparamAnnot $ funDefParams fundec of
       []     -> Nothing
       annots -> Just $ PP.folddoc (PP.</>) annots
   ppLambdaLore lam =
