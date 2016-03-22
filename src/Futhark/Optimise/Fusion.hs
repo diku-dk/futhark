@@ -649,6 +649,7 @@ fusionGatherExp _ (Op Futhark.Map{}) = errorIllegal "map"
 fusionGatherExp _ (Op Futhark.Reduce{}) = errorIllegal "reduce"
 fusionGatherExp _ (Op Futhark.Scan{}) = errorIllegal "scan"
 fusionGatherExp _ (Op Futhark.Redomap{}) = errorIllegal "redomap"
+fusionGatherExp _ (Op Futhark.Scanomap{}) = errorIllegal "scanomap"
 
 -----------------------------------
 ---- Generic Traversal         ----

@@ -165,12 +165,10 @@ transformSOAC pat (Scan cs width fun args) = do
 transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
   -- Name accumulators, do something with the corresponding expressions
   (acc, initacc) <- newFold $ zip accexps accts
-  -- Get types of input arrays
-  arrts <- mapM lookupType arrexps
   -- Create output arrays.
-  initarr <- resultArray arrts
+  initarr <- resultArray scan_res_ts
   -- Name Outputarrays?
-  arr <- mapM (newIdent "scan_arr" ) arrts
+  arr <- mapM (newIdent "scan_arr" ) scan_res_ts
   -- Create arrays for our map results.
   initmaparrs <- resultArray map_res_ts
   mapoutarrs <- mapM (newIdent "scanomap_map_outarr") map_res_ts
@@ -191,9 +189,12 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
   pat' <- discardPattern (map identType acc) pat
   letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
   where i = lambdaIndex fun
-        accts = take (length accexps) $ map paramType $ lambdaParams fun
+        accts = map paramType $ take (length accexps) $  lambdaParams fun
+        scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
+                     | t <- (take (length accexps) (lambdaReturnType fun))]
         map_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                      | t <- (drop (length accexps) (lambdaReturnType fun))]
+
 
 transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun 
