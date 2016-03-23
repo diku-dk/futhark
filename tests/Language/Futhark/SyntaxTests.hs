@@ -33,7 +33,6 @@ instance Arbitrary PrimType where
                     , Unsigned <$> arbitrary
                     , FloatType <$> arbitrary
                     , pure Bool
-                    , pure Char
                     ]
 
 instance Arbitrary PrimValue where
@@ -41,5 +40,4 @@ instance Arbitrary PrimValue where
                     , UnsignedValue <$> arbitrary
                     , FloatValue <$> arbitrary
                     , BoolValue <$> arbitrary
-                    , CharValue <$> arbitrary
                     ]
