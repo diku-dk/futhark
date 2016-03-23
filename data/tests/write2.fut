@@ -1,4 +1,4 @@
--- Test that write works in even less non-trivial cases.
+-- Test that write works in even more non-trivial cases.
 -- ==
 --
 -- input {
