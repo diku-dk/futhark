@@ -78,7 +78,6 @@ instance Pretty PyArg where
   ppr (Arg e) = ppr e
 
 instance Pretty PyExp where
-    ppr (Constant chr@(CharValue _)) = text "b" <> ppr chr
     ppr (Constant (IntValue (Int8Value v))) = text "int8" <> parens (text $ show v)
     ppr (Constant (IntValue (Int16Value v))) = text "int16" <> parens (text $ show v)
     ppr (Constant (IntValue (Int32Value v))) = text "int32" <> parens (text $ show v)

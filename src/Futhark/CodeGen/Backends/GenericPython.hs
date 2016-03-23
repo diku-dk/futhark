@@ -357,7 +357,6 @@ readerElem bt = case bt of
   FloatType Float64 -> "read_double_signed"
   IntType{}         -> "read_int"
   Bool              -> "read_bool"
-  Char              -> "read_char"
   Cert              -> error "Cert is never used. ReaderElem doesn't handle this"
 
 readInput :: Imp.ValueDecl -> PyStmt
@@ -391,16 +390,13 @@ writeOutput (Imp.ScalarValue bt vname) =
                      [BinaryOp "%" (StringLiteral "%di32") name]
     IntType Int64 -> Exp $ simpleCall "print"
                      [BinaryOp "%" (StringLiteral "%di64") name]
-    Char -> Exp $ simpleCall "print" [Field name ".decode()"]
     _ -> Exp $ simpleCall "print" [name]
 
 writeOutput (Imp.ArrayValue vname bt _) =
   let name = Var $ pretty vname
       bt' = StringLiteral $ pretty bt
       stdout = Var "sys.stdout"
-  in case bt of
-    Char -> Exp $ simpleCall "write_chars" [stdout, name]
-    _ -> Exp $ simpleCall "write_array" [stdout, name, bt']
+  in Exp $ simpleCall "write_array" [stdout, name, bt']
 
 compileEntryFun :: (Name, Imp.Function op)
                 -> CompilerM op s PyFunc
@@ -499,7 +495,6 @@ compileSizeOfType t =
     IntType Int16 -> "2"
     IntType Int32 -> "4"
     IntType Int64 -> "8"
-    Char -> "1"
     FloatType Float32 -> "4"
     FloatType Float64 -> "8"
     Bool -> "1"
@@ -512,7 +507,6 @@ compilePrimType t =
     IntType Int16 -> "c_int16"
     IntType Int32 -> "c_int32"
     IntType Int64 -> "c_int64"
-    Char -> "c_char"
     FloatType Float32 -> "c_float"
     FloatType Float64 -> "c_double"
     Bool -> "c_bool"
@@ -525,7 +519,6 @@ compilePrimToNp bt =
     IntType Int16 -> "int16"
     IntType Int32 -> "int32"
     IntType Int64 -> "int64"
-    Char -> "uint8"
     FloatType Float32 -> "float32"
     FloatType Float64 -> "float64"
     Bool -> "bool_"
@@ -539,7 +532,6 @@ compilePrimValue (IntValue (Int64Value v)) = Constant $ value v
 compilePrimValue (FloatValue (Float32Value v)) = Constant $ value v
 compilePrimValue (FloatValue (Float64Value v)) = Constant $ value v
 compilePrimValue (BoolValue v) = simpleCall "bool_" [Constant $ BoolValue v]
-compilePrimValue (CharValue v) = Constant $ CharValue v
 compilePrimValue Checked = Var "Cert"
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp

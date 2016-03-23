@@ -113,7 +113,6 @@ data PrimType = Signed IntType
               | Unsigned IntType
               | FloatType FloatType
               | Bool
-              | Char
               deriving (Eq, Ord, Show)
 
 -- | Non-array values.
@@ -121,7 +120,6 @@ data PrimValue = SignedValue !IntValue
                | UnsignedValue !IntValue
                | FloatValue !FloatValue
                | BoolValue !Bool
-               | CharValue !Char
                deriving (Eq, Ord, Show)
 
 -- | The class of types that can represent an array size.  The
