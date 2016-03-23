@@ -192,9 +192,6 @@ data PrimOp lore
   | Copy VName
   -- ^ Copy the given array.  The result will not alias anything.
 
-  | Write Certificates VName VName VName
-  -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
-
   -- Array construction.
   | Iota SubExp SubExp
   -- ^ @iota(n, x) = [x,x+1,..,x+n-1]@

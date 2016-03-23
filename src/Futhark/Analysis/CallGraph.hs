@@ -81,6 +81,8 @@ buildCGexp callees (Op op) =
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (extLambdaBody lam)
              Stream _ _ _ lam _ ->
                buildCGbody callees (extLambdaBody lam)
+             Write {} ->
+               []
 buildCGexp callees e =
   foldExp folder callees e
   where folder =
