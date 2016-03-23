@@ -130,8 +130,15 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                            arrinps')
             | otherwise = return (lam, arrinps)
 
-  simplifyOp (Write cs w nMods t i v a) =
-    return $ Write cs w nMods t i v a
+  simplifyOp (Write cs w nMods t i v a) = do
+    cs' <- Engine.simplify cs
+    w' <- Engine.simplify w
+    nMods' <- Engine.simplify nMods
+    t' <- Engine.simplify t
+    i' <- Engine.simplify i
+    v' <- Engine.simplify v
+    a' <- Engine.simplify a
+    return $ Write cs' w' nMods' t' i' v' a'
 
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
