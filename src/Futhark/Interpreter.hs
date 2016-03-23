@@ -700,7 +700,7 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalSOAC (Write _cs _nMods _t i v a) = do
+evalSOAC (Write _cs _w _nMods _t i v a) = do
   i' <- lookupVar i
   v' <- lookupVar v
   a' <- lookupVar a

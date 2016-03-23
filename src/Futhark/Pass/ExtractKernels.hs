@@ -350,6 +350,10 @@ transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   transformBindings =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
+transformBinding (Let pat () (Op (Write cs w nMods t i v a))) = do
+  -- It really is this simple (right now).
+  return [Let pat () (Op (WriteKernel cs w nMods t i v a))]
+
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd
 
@@ -494,6 +498,8 @@ unbalancedLambda lam =
         unbalancedBinding bound (Op (Redomap _ w _ _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Stream _ w _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (Op (Write _ w _ _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (DoLoop _ merge (ForLoop i iterations) body) =
           iterations `subExpBound` bound ||

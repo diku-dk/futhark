@@ -629,9 +629,10 @@ internaliseExp desc (E.Write i v a _) = do
       -- FIXME: Generate checking for no index occuring more than once in @si@!
       let cs = []
 
+      w <- arraySize 0 <$> lookupType sa
       nMods <- arraySize 0 <$> lookupType si
       t <- lookupType sa
-      letTupExp' desc $ I.Op $ I.Write cs nMods t si sv sa
+      letTupExp' desc $ I.Op $ I.Write cs w nMods t si sv sa
     _ ->
       fail "Futhark.Internalise.internaliseExp: tuples in Write"
 
