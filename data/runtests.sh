@@ -50,7 +50,6 @@ echo "compiler: $compiler"
 
 tests() {
     find $testdir/tests/ -name '*fut'
-    find $testdir/benchmarks/ -name '*fut'
 }
 
 # You can control exactly which tests to run by passing their names as
