@@ -13,5 +13,5 @@
 fun [[f64, m], n]
   main([i32, k] indexes,
        [[f64, m], k] values,
-       [[f64, m], n] array) =
+       *[[f64, m], n] array) =
   write(indexes, values, array)
