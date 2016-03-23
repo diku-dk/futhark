@@ -581,8 +581,8 @@ allocInExp (Op (ScanKernel cs w size order lam input)) = do
   return $ Op $ Inner $ ScanKernel cs w size order lam' input
 
 allocInExp (Op (WriteKernel cs w nMods t i v a)) = do
-  -- FIXME: Actually allocate space (unless @write@ is always in-place, which is
-  -- arguably the easier option).
+  -- We require Write to be in-place, so there is no need to allocate any
+  -- memory.
   return $ Op $ Inner $ WriteKernel cs w nMods t i v a
 
 allocInExp (Op GroupSize) =

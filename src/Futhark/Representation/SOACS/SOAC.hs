@@ -467,7 +467,10 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                 _ -> return True
 
 typeCheckSOAC (Write cs w nMods t i v a) = do
-  -- FIXME: Actually typecheck.
+  -- FIXME: Check that @a@ is unique.  Or do that somewhere else.  Where should
+  -- this be done?
+  
+  -- FIXME: Do basic type checking.
   return ()
 
 -- | Get Stream's accumulators as a sub-expression list

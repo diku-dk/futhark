@@ -581,13 +581,12 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs _w nMods arrayInType indexes values arrayIn) = do
+transformSOAC pat (Write cs _w nMods arrayIOType indexes values arrayIO) = do
   iter <- newVName "write_iter"
-  arrayOut <- newIdent "write_out" arrayInType
+  arrayOut <- newIdent "write_out" arrayIOType
 
-  -- FIXME: Maybe modify Write to always require uniqueness, to avoid having to
-  -- copy the old array over.
-  arrayResult <- letExp "write_result" $ PrimOp $ Copy arrayIn
+  -- Write is in-place, so we use the input array as the output array.
+  arrayResult <- letExp "write_result" $ PrimOp $ SubExp $ Var arrayIO
 
   let merge = loopMerge [arrayOut] [Var arrayResult]
   loopBody <- runBodyBinder $
