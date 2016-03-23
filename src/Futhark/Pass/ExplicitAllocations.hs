@@ -580,6 +580,11 @@ allocInExp (Op (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
   return $ Op $ Inner $ ScanKernel cs w size order lam' input
 
+allocInExp (Op (WriteKernel cs w nMods t i v a)) = do
+  -- FIXME: Actually allocate space (unless @write@ is always in-place, which is
+  -- arguably the easier option).
+  return $ Op $ Inner $ WriteKernel cs w nMods t i v a
+
 allocInExp (Op GroupSize) =
   return $ Op $ Inner GroupSize
 
