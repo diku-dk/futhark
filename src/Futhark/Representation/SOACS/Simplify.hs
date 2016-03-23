@@ -130,6 +130,9 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                            arrinps')
             | otherwise = return (lam, arrinps)
 
+  simplifyOp (Write cs nMods t i v a) =
+    return $ Write cs nMods t i v a
+
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
               Op (Lore m) ~ SOAC (Lore m)) => RuleBook m

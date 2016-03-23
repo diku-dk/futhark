@@ -641,33 +641,6 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
         arrDestLoc _ =
           Nothing
 
-defCompilePrimOp (Destination [dest]) (Write _ i v a) = do
-  iEntry <- lookupArray i
-
-  -- FIXME: Unnecessary if we choose to require write uniqueness.
-  compileSubExpTo dest $ Var a
-
-  iLength <- case entryArrayShape iEntry of
-    [] -> throwError ("defCompilePrimOp Write: empty array shape for " ++ pretty i)
-    (l : _) -> return l
-
-  iter <- newVName "write_iter"
-  emit $ Imp.DeclareScalar iter int32
-  index <- newVName "write_index"
-  emit $ Imp.DeclareScalar index int32
-  declaringLoopVar iter $ do
-    bodyLoop <- collect $ do
-      indexExp <- readFromArray i [varIndex iter]
-      emit $ Imp.SetScalar index indexExp
-      let cond = Imp.CmpOp
-            (CmpEq int32)
-            (Imp.ScalarVar index)
-            (Imp.Constant (IntValue (Int32Value (-1))))
-      bodyIf <- collect $ copyDWIMDest dest [varIndex index] (Var v) [varIndex iter]
-      emit $ Imp.If cond Imp.Skip bodyIf
-
-    emit $ Imp.For iter (Imp.sizeToExp iLength) bodyLoop
-
 defCompilePrimOp (Destination []) _ = return () -- No arms, no cake.
 
 defCompilePrimOp target e =

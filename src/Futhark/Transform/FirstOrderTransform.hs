@@ -581,6 +581,26 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
+transformSOAC pat (Write cs nMods arrayInType indexes values arrayIn) = do
+  iter <- newVName "write_iter"
+  arrayOut <- newIdent "write_out" arrayInType
+
+  -- FIXME: Maybe modify Write to always require uniqueness, to avoid having to
+  -- copy the old array over.
+  arrayResult <- letExp "write_result" $ PrimOp $ Copy arrayIn
+
+  let merge = loopMerge [arrayOut] [Var arrayResult]
+  loopBody <- runBodyBinder $
+    localScope (HM.insert iter IndexInfo $
+                scopeOfFParams $ map fst merge) $ do
+    indexCur <- letExp "write_index" $ PrimOp $ Index cs indexes [Var iter]
+    valueCur <- letExp "write_value" $ PrimOp $ Index cs values [Var iter]
+    res <- letInPlace "write_result_body" cs (identName arrayOut) [Var indexCur]
+      $ PrimOp $ SubExp $ Var valueCur
+    return $ resultBody [Var res]
+  letBind_ pat $ DoLoop [] merge (ForLoop iter nMods) loopBody
+
+
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
                     Bindable lore,

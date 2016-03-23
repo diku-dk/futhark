@@ -622,8 +622,18 @@ internaliseExp desc (E.Write i v a _) = do
   sis <- internaliseExpToVars "write_arg_i" i
   svs <- internaliseExpToVars "write_arg_v" v
   sas <- internaliseExpToVars "write_arg_a" a
-  -- FIXME: Generate bounds checking!
-  letSubExps desc [I.PrimOp $ I.Write [] si sv sa | (si, sv, sa) <- zip3 sis svs sas]
+
+  case (sis, svs, sas) of
+    ([si], [sv], [sa]) -> do
+      -- FIXME: Generate bounds checking for every index!
+      -- FIXME: Generate checking for no index occuring more than once in @si@!
+      let cs = []
+
+      nMods <- arraySize 0 <$> lookupType si
+      t <- lookupType sa
+      letTupExp' desc $ I.Op $ I.Write cs nMods t si sv sa
+    _ ->
+      fail "Futhark.Internalise.internaliseExp: tuples in Write"
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do

@@ -76,6 +76,7 @@ data Kernel lore =
     StreamOrd
     (LambdaT lore)
     [VName]
+  | WriteKernel Certificates VName VName VName
 
   | NumGroups
   | GroupSize
