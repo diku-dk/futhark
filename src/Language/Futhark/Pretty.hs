@@ -61,7 +61,6 @@ instance Pretty Value where
     | otherwise =
       braces $ commasep $ map ppr vs
   ppr v@(ArrayValue a t)
-    | Just s <- arrayString v = text $ show s
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
@@ -73,7 +72,6 @@ instance Pretty PrimType where
   ppr (Unsigned Int64) = text "u64"
   ppr (Signed t) = ppr t
   ppr (FloatType t) = ppr t
-  ppr Char = text"char"
   ppr Bool = text "bool"
 
 instance Pretty PrimValue where
@@ -82,7 +80,6 @@ instance Pretty PrimValue where
   ppr (UnsignedValue (Int32Value v)) = text (show v) <> text "u32"
   ppr (UnsignedValue (Int64Value v)) = text (show v) <> text "u64"
   ppr (SignedValue v) = ppr v
-  ppr (CharValue c) = text $ show c
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
 

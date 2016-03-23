@@ -42,9 +42,6 @@ instance IsValue Float where
 instance IsValue Bool where
   value = BoolValue
 
-instance IsValue Char where
-  value = CharValue
-
 instance IsValue PrimValue where
   value = id
 

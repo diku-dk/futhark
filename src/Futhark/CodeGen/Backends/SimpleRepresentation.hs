@@ -49,7 +49,6 @@ primTypeToCType :: PrimType -> C.Type
 primTypeToCType (IntType t) = intTypeToCType t
 primTypeToCType (FloatType t) = floatTypeToCType t
 primTypeToCType Bool = [C.cty|char|]
-primTypeToCType Char = [C.cty|char|]
 primTypeToCType Cert = [C.cty|char|]
 
 -- | True if both types map to the same runtime representation.  This
