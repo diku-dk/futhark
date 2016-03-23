@@ -115,7 +115,6 @@ instance Pretty FloatType where
 data PrimType = IntType IntType
               | FloatType FloatType
               | Bool
-              | Char
               | Cert
               deriving (Eq, Ord, Show)
 
@@ -127,7 +126,6 @@ instance Enum PrimType where
   toEnum 4 = FloatType Float32
   toEnum 5 = FloatType Float64
   toEnum 6 = Bool
-  toEnum 7 = Char
   toEnum _ = Cert
 
   fromEnum (IntType Int8) = 0
@@ -137,8 +135,7 @@ instance Enum PrimType where
   fromEnum (FloatType Float32) = 4
   fromEnum (FloatType Float64) = 5
   fromEnum Bool = 6
-  fromEnum Char = 7
-  fromEnum Cert = 8
+  fromEnum Cert = 7
 
 instance Bounded PrimType where
   minBound = IntType Int8
@@ -150,7 +147,6 @@ instance Hashable PrimType where
 instance Pretty PrimType where
   ppr (IntType t) = ppr t
   ppr (FloatType t) = ppr t
-  ppr Char = text"char"
   ppr Bool = text "bool"
   ppr Cert = text "cert"
 
@@ -203,13 +199,11 @@ floatValueType Float64Value{} = Float64
 data PrimValue = IntValue !IntValue
                | FloatValue !FloatValue
                | BoolValue !Bool
-               | CharValue !Char
                | Checked -- ^ The only value of type @cert@.
                deriving (Eq, Ord, Show)
 
 instance Pretty PrimValue where
   ppr (IntValue v) = ppr v
-  ppr (CharValue c) = text $ show c
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
   ppr Checked = text "Checked"
@@ -219,7 +213,6 @@ primValueType :: PrimValue -> PrimType
 primValueType (IntValue v) = IntType $ intValueType v
 primValueType (FloatValue v) = FloatType $ floatValueType v
 primValueType BoolValue{} = Bool
-primValueType CharValue{} = Char
 primValueType Checked = Cert
 
 -- | A "blank" value of the given primitive type - this is zero, or
@@ -233,7 +226,6 @@ blankPrimValue (IntType Int64) = IntValue $ Int64Value 0
 blankPrimValue (FloatType Float32) = FloatValue $ Float32Value 0.0
 blankPrimValue (FloatType Float64) = FloatValue $ Float64Value 0.0
 blankPrimValue Bool = BoolValue False
-blankPrimValue Char = CharValue '\0'
 blankPrimValue Cert = Checked
 
 -- | Various unary operators.  It is a bit ad-hoc what is a unary
@@ -711,7 +703,6 @@ primByteSize :: Num a => PrimType -> a
 primByteSize (IntType t) = intByteSize t
 primByteSize (FloatType t) = floatByteSize t
 primByteSize Bool = 1
-primByteSize Char = 1
 primByteSize Cert = 1
 
 -- | The size of a value of a given integer type in eight-bit bytes.

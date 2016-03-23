@@ -67,7 +67,6 @@ module Language.Futhark.Attributes
   , removeNames
 
   -- * Queries on values
-  , arrayString
   , primValueType
   , valueType
 
@@ -562,7 +561,6 @@ primValueType (SignedValue v) = Signed $ intValueType v
 primValueType (UnsignedValue v) = Unsigned $ intValueType v
 primValueType (FloatValue v) = FloatType $ floatValueType v
 primValueType BoolValue{} = Bool
-primValueType CharValue{} = Char
 
 -- | The type of an Futhark value.
 valueType :: Value -> TypeBase Rank NoInfo vn
@@ -586,16 +584,6 @@ arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toStr
 emptyArray :: ArrayShape (shape vn) =>
               TypeBase shape as vn -> Value
 emptyArray = arrayValue []
-
--- | If the given value is a nonempty array containing only
--- characters, return the corresponding 'String', otherwise return
--- 'Nothing'.
-arrayString :: Value -> Maybe String
-arrayString (ArrayValue arr (Prim Char))
-  | c:cs <- elems arr = mapM asChar $ c:cs
-  where asChar (PrimValue (CharValue c)) = Just c
-        asChar _                       = Nothing
-arrayString _ = Nothing
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.

@@ -21,7 +21,6 @@ import Data.Monoid
 import Futhark.Util.Pretty
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Values
 import Futhark.Util
 
 -- | The class of lores whose annotations can be prettyprinted.
@@ -56,8 +55,6 @@ instance Pretty Commutativity where
 
 instance Pretty Value where
   ppr (PrimVal bv) = ppr bv
-  ppr v
-    | Just s <- arrayString v = text $ show s
   ppr (ArrayVal a t _)
     | null $ elems a = text "empty" <> parens (ppr t)
   ppr (ArrayVal a t (_:rowshape@(_:_))) =
