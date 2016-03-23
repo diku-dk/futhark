@@ -113,7 +113,7 @@ Grammar of First-Order Fragment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. productionlist::
-   t : "int" | "real" | "bool" | "char" | "f32" | "f64"
+   t : "int" | "real" | "bool" | "f32" | "f64"
    t : "{" `t` "," ... "," `t` "}"
    t : "[" t "]"
    t : "*" "[" t "]"

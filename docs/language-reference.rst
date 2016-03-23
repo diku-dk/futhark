@@ -6,7 +6,7 @@ Language Reference
 The primitive types in Futhark are the signed integer types ``i8``,
 ``i16``, ``i32``, ``i64``, the unsigned integer types ``u8``, ``u16``,
 ``u32``, ``u64``, the floating-point types ``f32``, ``f64``, as well
-as ``bool`` and ``char``.  Furthermore, ``int`` is an alias for
+as ``bool``.  Furthermore, ``int`` is an alias for
 ``i32``.  An ``f32`` is always a single-precision float and a ``f64``
 is a double-precision float.  All primitive types can be combined in
 tuples and arrays.
@@ -19,6 +19,10 @@ and decimal literals are of type ``f64``.
 Numeric values can be converted between different types by using the
 desired type name as a function.  E.g., ``i32(1.0f32)`` would convert
 the floating-point number ``1.0`` to a 32-bit signed integer.
+
+Character and string literals are supported, but only as an alias for
+integers and arrays of integers, respectively.  There is no character
+data type.
 
 The following list describes every syntactical language construct in
 the language.  For convenience, we will sometimes talk of expressions

@@ -293,7 +293,6 @@ printPrimStm val (IntType Int8) = [C.cstm|printf("%hhdi8", $exp:val);|]
 printPrimStm val (IntType Int16) = [C.cstm|printf("%hdi16", $exp:val);|]
 printPrimStm val (IntType Int32) = [C.cstm|printf("%di32", $exp:val);|]
 printPrimStm val (IntType Int64) = [C.cstm|printf("%lldi64", $exp:val);|]
-printPrimStm val Char = [C.cstm|printf("'%c'", $exp:val);|]
 printPrimStm val Bool = [C.cstm|printf($exp:val ? "True" : "False");|]
 printPrimStm val (FloatType Float32) = [C.cstm|printf("%.6ff32", $exp:val);|]
 printPrimStm val (FloatType Float64) = [C.cstm|printf("%.6ff64", $exp:val);|]
@@ -306,17 +305,6 @@ printStm (ScalarValue bt name) =
 printStm (ArrayValue mem bt []) =
   return $ printPrimStm val bt
   where val = [C.cexp|*$id:mem|]
-printStm (ArrayValue mem Char [size]) = do
-  i <- newVName "print_i"
-  let size' = dimSizeToExp size
-  return [C.cstm|{
-          int $id:i;
-          printf("\"");
-          for ($id:i = 0; $id:i < $exp:size'; $id:i++) {
-            printf("%c", ((char*)$id:mem)[$id:i]);
-          }
-          printf("\"");
-          }|]
 printStm (ArrayValue mem bt (dim:shape)) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
@@ -346,7 +334,6 @@ readFun (IntType Int8) = Just "read_int8"
 readFun (IntType Int16) = Just "read_int16"
 readFun (IntType Int32) = Just "read_int32"
 readFun (IntType Int64) = Just "read_int64"
-readFun Char = Just "read_char"
 readFun Bool = Just "read_bool"
 readFun (FloatType Float32) = Just "read_float"
 readFun (FloatType Float64) = Just "read_double"
@@ -646,9 +633,6 @@ compilePrimValue (BoolValue b) =
   [C.cexp|$int:b'|]
   where b' :: Int
         b' = if b then 1 else 0
-
-compilePrimValue (CharValue c) =
-  [C.cexp|$char:c|]
 
 compilePrimValue Checked =
   [C.cexp|0|]
