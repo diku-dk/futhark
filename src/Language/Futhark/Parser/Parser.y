@@ -25,6 +25,7 @@ import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
+import Data.Char (ord)
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
 import qualified Data.HashMap.Lazy as HM
@@ -67,7 +68,6 @@ import Language.Futhark.Parser.Lexer
       u32             { L $$ U32 }
       u64             { L $$ U64 }
       bool            { L $$ BOOL }
-      char            { L $$ CHAR }
       f32             { L $$ F32 }
       f64             { L $$ F64 }
 
@@ -307,7 +307,6 @@ PrimType : UnsignedType { Unsigned (fst $1) }
          | SignedType   { Signed (fst $1) }
          | FloatType    { FloatType (fst $1) }
          | bool         { Bool }
-         | char         { Char }
 
 SignedType :: { (IntType, SrcLoc) }
            : int { (Int32, $1) }
@@ -337,8 +336,10 @@ Params : TypeDecl id ',' Params { let L pos (ID name) = $2 in Param name $1 pos 
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
-     | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
+     | stringlit      {% let L pos (STRINGLIT s) = $1 in do
+                             s' <- mapM (getIntValue . fromIntegral . ord) s
+                             t <- lift $ gets parserIntType
+                             return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -546,7 +547,6 @@ FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
 
 Value : IntValue { $1 }
       | FloatValue { $1 }
-      | CharValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
       | ArrayValue { $1 }
@@ -571,17 +571,22 @@ FloatValue :: { Value }
          : FloatLit { PrimValue (FloatValue (fst $1)) }
          | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
 
-CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValue char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
+StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
+                             s' <- mapM (getIntValue . fromIntegral . ord) s
+                             t <- lift $ gets parserIntType
+                             return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
 BoolValue : true          { PrimValue $ BoolValue True }
          | false          { PrimValue $ BoolValue False }
 
 SignedLit :: { (IntValue, SrcLoc) }
-          : i8lit  { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
-          | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
-          | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
-          | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | intlit {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
+          : i8lit   { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
+          | i16lit  { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
+          | i32lit  { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
+          | i64lit  { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
+          | intlit  {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
+          | charlit {% let L pos (CHARLIT char) = $1 in do
+                       num <- getIntValue $ fromIntegral $ ord char
+                       return (num, pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
             : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
@@ -601,8 +606,6 @@ PrimLit :: { (PrimValue, SrcLoc) }
 
         | true   { (BoolValue True, $1) }
         | false  { (BoolValue False, $1) }
-
-        | charlit { let L pos (CHARLIT char) = $1 in (CharValue char, pos) }
 
 ArrayValue :  '[' Value ']'
              {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toStruct $ valueType $2
