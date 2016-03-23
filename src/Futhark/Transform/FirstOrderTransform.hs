@@ -581,7 +581,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs nMods arrayInType indexes values arrayIn) = do
+transformSOAC pat (Write cs _w nMods arrayInType indexes values arrayIn) = do
   iter <- newVName "write_iter"
   arrayOut <- newIdent "write_out" arrayInType
 

@@ -605,6 +605,12 @@ kernelCompiler
 
     call_with_body body
 
+kernelCompiler
+  (ImpGen.Destination dest)
+  (WriteKernel {}) = do
+    -- FIXME: Implement.
+    fail "Write kernel not implemented yet"
+
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler target (PrimOp (Iota n x)) = do

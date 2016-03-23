@@ -76,7 +76,7 @@ data Kernel lore =
     StreamOrd
     (LambdaT lore)
     [VName]
-  | WriteKernel Certificates VName VName VName
+  | WriteKernel Certificates SubExp SubExp Type VName VName VName
 
   | NumGroups
   | GroupSize
@@ -179,8 +179,26 @@ mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
+mapKernelM tv (WriteKernel cs w nMods t i v a) =
+  WriteKernel <$>
+  mapOnKernelCertificates tv cs <*>
+  mapOnKernelSubExp tv w <*>
+  mapOnKernelSubExp tv nMods <*>
+  mapOnKernelType tv t <*>
+  mapOnKernelVName tv i <*>
+  mapOnKernelVName tv v <*>
+  mapOnKernelVName tv a
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
+
+-- FIXME: Make this less hacky.
+mapOnKernelType :: Monad m =>
+                   KernelMapper flore tlore m -> Type -> m Type
+mapOnKernelType _tv (Prim pt) = pure $ Prim pt
+mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
+  where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
+mapOnKernelType _tv (Mem se s) = pure $ Mem se s
+
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -290,6 +308,8 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
+kernelType (WriteKernel _ _ _ t _ _ _) =
+  [t]
 kernelType NumGroups =
   [Prim int32]
 kernelType GroupSize =
@@ -365,6 +385,8 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     map (UT.consumedUsage . kernelInputArray) $
     filter ((`HS.member` consumed_in_body) . kernelInputName) inps
     where consumed_in_body = consumedInBody body
+  usageInOp (WriteKernel {}) =
+    mempty -- FIXME: ???
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
 
@@ -486,6 +508,10 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
+typeCheckKernel (WriteKernel {}) = do
+  -- FIXME: Actually typecheck.
+  return ()
+
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 
@@ -529,6 +555,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
+  opMetrics (WriteKernel {}) =
+    inside "WriteKernel" $ return () -- FIXME: ???
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
 
@@ -570,6 +598,11 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr arrs) <> comma </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
+  ppr (WriteKernel cs w nMods _t i v a) =
+    ppCertificates' cs <> text "writeKernel" <+>
+    PP.align (parens (text "width:" <+> ppr w) </>
+           parens (text "nMods:" <+> ppr nMods) </>
+           commasep (map ppr [i, v, a]))
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
 
