@@ -176,14 +176,14 @@ cseOption :: String -> FutharkOption
 cseOption short =
   passOption (passDescription pass) (UntypedPass perform) short long
   where perform (SOACS prog) config =
-          SOACS <$> runPasses (onePass performCSE) config prog
+          SOACS <$> runPasses (onePass $ performCSE True) config prog
         perform (Kernels prog) config =
-          Kernels <$> runPasses (onePass performCSE) config prog
+          Kernels <$> runPasses (onePass $ performCSE True) config prog
         perform (ExplicitMemory prog) config =
-          ExplicitMemory <$> runPasses (onePass performCSE) config prog
+          ExplicitMemory <$> runPasses (onePass $ performCSE False) config prog
 
         long = [passLongOption pass]
-        pass = performCSE :: Pass SOACS SOACS
+        pass = performCSE True :: Pass SOACS SOACS
 
 soacsPipelineOption :: String -> Pipeline SOACS SOACS -> String -> [String]
                     -> FutharkOption

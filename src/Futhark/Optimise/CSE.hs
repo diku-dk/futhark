@@ -30,18 +30,19 @@ import Futhark.Tools
 
 performCSE :: (Attributes lore, CanBeAliased (Op lore),
                CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
-              Pass lore lore
-performCSE = simplePass
-             "CSE"
-             "Combine common subexpressions." $
-             intraproceduralTransformation $
-             return . removeFunDefAliases . cseInFunDef . analyseFun
+              Bool -> Pass lore lore
+performCSE cse_arrays =
+  simplePass
+  "CSE"
+  "Combine common subexpressions." $
+  intraproceduralTransformation $
+  return . removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
 cseInFunDef :: (Aliased lore, CSEInOp lore (Op lore)) =>
-               FunDef lore -> FunDef lore
-cseInFunDef fundec =
+               Bool -> FunDef lore -> FunDef lore
+cseInFunDef cse_arrays fundec =
   fundec { funDefBody =
-              runReader (cseInBody $ funDefBody fundec) newCSEState
+              runReader (cseInBody $ funDefBody fundec) $ newCSEState cse_arrays
          }
 
 type CSEM lore = Reader (CSEState lore)
@@ -50,7 +51,7 @@ cseInBody :: (Aliased lore, CSEInOp lore (Op lore)) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
   cseInBindings (mconcat $ map consumedInBinding bnds) bnds $ do
-    CSEState (_, nsubsts) <- ask
+    CSEState (_, nsubsts) _ <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
 cseInLambda :: (Aliased lore, CSEInOp lore (Op lore)) =>
@@ -87,10 +88,10 @@ cseInBinding :: Attributes lore =>
              -> ([Binding lore] -> CSEM lore a)
              -> CSEM lore a
 cseInBinding consumed (Let pat eattr e) m = do
-  CSEState (esubsts, nsubsts) <- ask
+  CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
-  if any bad $ patternValueElements pat then
+  if any (bad cse_arrays) $ patternValueElements pat then
     m [Let pat' eattr e']
     else
     case M.lookup (eattr, e') esubsts of
@@ -104,8 +105,9 @@ cseInBinding consumed (Let pat eattr e) m = do
                   let patElem' = patElem { patElemName = name }
                 ]
           m lets
-  where bad pat_elem
+  where bad cse_arrays pat_elem
           | Mem{} <- patElemType pat_elem = True
+          | Array{} <- patElemType pat_elem, not cse_arrays = True
           | patElemName pat_elem `HS.member` consumed = True
           | BindInPlace{} <- patElemBindage pat_elem = True
           | otherwise = False
@@ -115,24 +117,27 @@ type ExpressionSubstitutions lore = M.Map
                                     (Pattern lore)
 type NameSubstitutions = HM.HashMap VName VName
 
-newtype CSEState lore = CSEState (ExpressionSubstitutions lore, NameSubstitutions)
+data CSEState lore = CSEState
+                     { _cseSubstitutions :: (ExpressionSubstitutions lore, NameSubstitutions)
+                     , _cseArrays :: Bool
+                     }
 
-newCSEState :: CSEState lore
+newCSEState :: Bool -> CSEState lore
 newCSEState = CSEState (M.empty, HM.empty)
 
 mkSubsts :: PatternT attr -> PatternT attr -> HM.HashMap VName VName
 mkSubsts pat vs = HM.fromList $ zip (patternNames pat) (patternNames vs)
 
 addNameSubst :: PatternT attr -> PatternT attr -> CSEState lore -> CSEState lore
-addNameSubst pat subpat (CSEState (esubsts, nsubsts)) =
-  CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts)
+addNameSubst pat subpat (CSEState (esubsts, nsubsts) cse_arrays) =
+  CSEState (esubsts, mkSubsts pat subpat `HM.union` nsubsts) cse_arrays
 
 addExpSubst :: Attributes lore =>
                Pattern lore -> ExpAttr lore -> Exp lore
             -> CSEState lore
             -> CSEState lore
-addExpSubst pat eattr e (CSEState (esubsts, nsubsts)) =
-  CSEState (M.insert (eattr,e) pat esubsts, nsubsts)
+addExpSubst pat eattr e (CSEState (esubsts, nsubsts) cse_arrays) =
+  CSEState (M.insert (eattr,e) pat esubsts, nsubsts) cse_arrays
 
 -- | The operations that permit CSE.
 class Attributes lore => CSEInOp lore op where
