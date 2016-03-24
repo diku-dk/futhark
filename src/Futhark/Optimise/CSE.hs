@@ -13,6 +13,7 @@ import Control.Monad.Reader
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Map.Lazy as M
+import Data.Monoid
 
 import Prelude
 
