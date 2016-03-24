@@ -366,7 +366,7 @@ readPrimStm _ t =
 --
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
-mainCall :: [C.Stm] -> Name -> Function op -> CompilerM op s C.Stm
+mainCall :: [C.Stm] -> Name -> Function op -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem])
 mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
@@ -377,18 +377,31 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   -- paramDecl will always create DefaultSpace memory.
   paramdecls <- liftM2 (++) (mapM paramDecl outputs) (mapM paramDecl inputs)
   printstms <- printResult results
-  return [C.cstm|{
+  return ([C.citems|
+               /* Declare and read input. */
                $decls:paramdecls
                $ty:crettype $id:ret;
                $stms:readstms
                $items:prepare
+             |],
+          [C.citems|
+               /* Run the program once. */
                gettimeofday(&t_start, NULL);
                $id:ret = $id:(funName fname)($args:argexps);
                $stms:pre_timing
                gettimeofday(&t_end, NULL);
+               long int elapsed_usec =
+                 (t_end.tv_sec * 1000000 + t_end.tv_usec) -
+                 (t_start.tv_sec * 1000000 + t_start.tv_usec);
+               if (runtime_file != NULL) {
+                 fprintf(runtime_file, "%ld\n", elapsed_usec);
+               }
+             |],
+          [C.citems|
+               /* Print the final result. */
                $items:unpackstms
                $stms:printstms
-             }|]
+             |])
   where paramDecl (MemParam name _ _) = do
           ty <- memToCType DefaultSpace
           return [C.cdecl|$ty:ty $id:name;|]
@@ -491,19 +504,31 @@ unpackResult ret (MemParam name size (Space srcspace)) = do
   stm [C.cstm|$id:name = malloc($exp:size');|]
   copy name [C.cexp|0|] DefaultSpace ret [C.cexp|0|] (Space srcspace) size'
 
-timingOption :: Option
-timingOption =
-  Option { optionLongName = "write-runtime-to"
-         , optionShortName = Just 't'
-         , optionArgument = RequiredArgument
-         , optionAction =
-           [C.cstm|{
-  runtime_file = fopen(optarg, "w");
-  if (runtime_file == NULL) {
-    errx(1, "Cannot open %s: %s", optarg, strerror(errno));
-  }
-  }|]
-  }
+benchmarkOptions :: [Option]
+benchmarkOptions =
+   [ Option { optionLongName = "write-runtime-to"
+            , optionShortName = Just 't'
+            , optionArgument = RequiredArgument
+            , optionAction = set_runtime_file
+            }
+   , Option { optionLongName = "runs"
+            , optionShortName = Just 'r'
+            , optionArgument = RequiredArgument
+            , optionAction = set_num_runs
+            }
+   ]
+  where set_runtime_file = [C.cstm|{
+          runtime_file = fopen(optarg, "w");
+          if (runtime_file == NULL) {
+            errx(1, "Cannot open %s: %s", optarg, strerror(errno));
+          }
+        }|]
+        set_num_runs = [C.cstm|{
+          num_runs = atoi(optarg);
+          if (num_runs <= 0) {
+            errx(1, "Need a positive number of runs, not %s", optarg);
+          }
+        }|]
 
 -- | Compile imperative program to a C program.  Always uses the
 -- function named "main" as entry point, so make sure it is defined.
@@ -516,7 +541,7 @@ compileProg :: MonadFreshNames m =>
             -> m String
 compileProg ops userstate decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
-  let ((prototypes, definitions, main), endstate) =
+  let ((prototypes, definitions, (main_pre, main, main_post)), endstate) =
         runCompilerM prog ops src userstate compileProg'
   return $ pretty [C.cunit|
 $esc:("#include <stdio.h>")
@@ -530,15 +555,6 @@ $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
 $esc:("#include <err.h>")
 $esc:("#include <getopt.h>")
-
-int timeval_subtract(struct timeval *result, struct timeval *t2, struct timeval *t1)
-{
-    unsigned int resolution=1000000;
-    long int diff = (t2->tv_usec + resolution * t2->tv_sec) - (t1->tv_usec + resolution * t1->tv_sec);
-    result->tv_sec = diff / resolution;
-    result->tv_usec = diff % resolution;
-    return (diff<0);
-}
 
 $edecls:decls
 
@@ -555,8 +571,9 @@ $edecls:(map funcToDef definitions)
 $edecls:readerFunctions
 
 static typename FILE *runtime_file;
+static int num_runs = 1;
 
-$func:(generateOptionParser "parse_options" (timingOption:options))
+$func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 
 int main(int argc, char** argv) {
   struct timeval t_start, t_end, t_diff;
@@ -566,12 +583,13 @@ int main(int argc, char** argv) {
   argc -= parsed_options;
   argv += parsed_options;
   $stms:pre_main_stms
-  $stm:main;
+  $items:main_pre
+  for (int run = 0; run < num_runs; run++) {
+    $items:main;
+  }
+  $items:main_post
   $items:post_main_items
   if (runtime_file != NULL) {
-    timeval_subtract(&t_diff, &t_end, &t_start);
-    elapsed_usec = t_diff.tv_sec*1e6+t_diff.tv_usec;
-    fprintf(runtime_file, "%ld\n", elapsed_usec);
     fclose(runtime_file);
   }
   return 0;

@@ -226,8 +226,9 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
       }
       gettimeofday(&$id:time_end, NULL);
-      timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
-      $id:(kernelRuntime kernel_name) += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
+      $id:(kernelRuntime kernel_name) +=
+        ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
+        ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
       $id:(kernelRuns kernel_name)++;
       fprintf(stderr, "kernel %s runtime: %dus\n",
               $string:kernel_name,
