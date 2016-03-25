@@ -93,11 +93,13 @@ compilerPipeline =
   passes [ simplifyKernels
          , babysitKernels
          , simplifyKernels
+         , performCSE True
+         , simplifyKernels
          , inPlaceLowering
          ] >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory
-         , performCSE
+         , performCSE False
          , simplifyExplicitMemory
          , doubleBuffer
          , simplifyExplicitMemory

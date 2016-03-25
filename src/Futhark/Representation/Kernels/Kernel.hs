@@ -32,6 +32,7 @@ import Control.Monad.Writer
 import Control.Monad.Identity
 import qualified Data.HashSet as HS
 import Data.List
+import Data.Maybe
 
 import Prelude
 
@@ -332,6 +333,10 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     map kernelInputArray $
     filter ((`HS.member` consumed) . kernelInputName) inps
     where consumed = consumedInBody body
+  consumedInOp (ReduceKernel _ _ _ _ _ foldlam _ arrs) =
+    HS.map consumedArray $ consumedByLambda foldlam
+    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
+          params_to_arrs = zip (map paramName (lambdaParams foldlam)) arrs
   consumedInOp _ = mempty
 
 instance (Attributes lore,

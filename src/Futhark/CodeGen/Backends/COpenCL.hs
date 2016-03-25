@@ -213,7 +213,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
-      struct timeval $id:time_start, $id:time_end, $id:time_diff;
+      struct timeval $id:time_start, $id:time_end;
       fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
       $stms:(printKernelSize global_work_size)
       fprintf(stderr, "].\n");
@@ -226,12 +226,13 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
       }
       gettimeofday(&$id:time_end, NULL);
-      timeval_subtract(&$id:time_diff, &$id:time_end, &$id:time_start);
-      $id:(kernelRuntime kernel_name) += $id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec;
+      typename suseconds_t $id:time_diff =
+         ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
+         ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
+      $id:(kernelRuntime kernel_name) += $id:time_diff;
       $id:(kernelRuns kernel_name)++;
       fprintf(stderr, "kernel %s runtime: %dus\n",
-              $string:kernel_name,
-              (int)(($id:time_diff.tv_sec*1e6+$id:time_diff.tv_usec)));
+              $string:kernel_name, (int)$id:time_diff);
     }
     }|]
   where kernel_rank = length kernel_dims

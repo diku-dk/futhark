@@ -95,7 +95,7 @@ compilerPipeline =
          ] >>>
   onePass explicitAllocations >>>
   passes [ simplifyExplicitMemory
-         , performCSE
+         , performCSE False
          , simplifyExplicitMemory
          , doubleBuffer
          , simplifyExplicitMemory

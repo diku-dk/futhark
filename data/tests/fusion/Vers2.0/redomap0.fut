@@ -1,18 +1,21 @@
 -- ==
 -- input {
---   [1.0,-4.0,-2.4]
+--   [1.0f32,-4.0f32,-2.4f32]
 -- }
 -- output {
---   {  -5.4
---   , [2.0, -3.0, -1.4]
---   , [3.0, -7.0, -3.8]
+--   {  -5.4f32
+--   , [2.0f32, -3.0f32, -1.4f32]
+--   , [3.0f32, -7.0f32, -3.8f32]
 --   }
 -- }
 -- structure { 
 --      Redomap 1 
 -- }
 --
-fun {f64,[f64],[f64]} main([f64] arr) =
+
+default(f32)
+
+fun {f32,[f32],[f32]} main([f32] arr) =
     let x = map    (+ 1.0, arr) in
     let y = zipWith(+,  x, arr) in
     let r = reduce (+,0.0, arr) in

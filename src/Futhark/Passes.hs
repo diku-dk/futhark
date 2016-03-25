@@ -16,14 +16,14 @@ standardPipeline =
   passes [ simplifySOACS
          , inlineAggressively
          , removeDeadFunctions
-         , performCSE
+         , performCSE True
          , simplifySOACS
            -- We run fusion twice
          , fuseSOACs
-         , performCSE
+         , performCSE True
          , simplifySOACS
          , fuseSOACs
-         , performCSE
+         , performCSE True
          , simplifySOACS
          , removeDeadFunctions
          ]
