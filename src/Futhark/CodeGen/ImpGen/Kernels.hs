@@ -607,9 +607,53 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (WriteKernel {}) = do
-    -- FIXME: Implement.
-    fail "Write kernel not implemented yet"
+  (WriteKernel cs w nDims t i v a) = do
+
+  let kernel_size = ImpGen.compileSubExp nDims
+
+  global_thread_index <- newVName "write_thread_index"
+  let global_thread_index_param = Imp.ScalarParam global_thread_index int32
+
+  let find_index = ImpGen.emit Imp.Skip
+
+  let find_value = ImpGen.emit Imp.Skip
+
+  let write_result = ImpGen.emit Imp.Skip
+
+  makeAllMemoryGlobal $ do
+    kernel_body <- (setBodySpace (Imp.Space "global") <$>)
+      $ ImpGen.subImpM_ inKernelOperations
+      $ ImpGen.withParams [global_thread_index_param] $ do
+      ImpGen.comment "find index" find_index
+      ImpGen.comment "find value" find_value
+      ImpGen.comment "write result" write_result
+
+    -- Calculate the group size and the number of groups.
+    group_size <- newVName "group_size"
+    num_groups <- newVName "num_groups"
+    let group_size_var = Imp.ScalarVar group_size
+    ImpGen.emit $ Imp.DeclareScalar group_size int32
+    ImpGen.emit $ Imp.DeclareScalar num_groups int32
+    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
+    ImpGen.emit $ Imp.SetScalar num_groups $
+      kernel_size `quotRoundingUp` group_size_var
+    --ImpGen.emit $ Imp.Op $ Imp.GetGlobalId global_thread_index 0
+
+    let bound_in_kernel = [global_thread_index]
+
+    -- Compute the variables that we need to pass to and from the kernel.
+    uses <- computeKernelUses dest (kernel_size, kernel_body) bound_in_kernel
+
+    kernel_name <- newVName "a_write_kernel"
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
+      { Imp.kernelBody = kernel_body
+      , Imp.kernelLocalMemory = mempty
+      , Imp.kernelUses = uses
+      , Imp.kernelNumGroups = Imp.VarSize num_groups
+      , Imp.kernelGroupSize = Imp.VarSize group_size
+      , Imp.kernelName = kernel_name
+      , Imp.kernelDesc = Just "write"
+      }
 
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
