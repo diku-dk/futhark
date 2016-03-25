@@ -6,54 +6,52 @@ module Futhark.CodeGen.Backends.GenericPython.Definitions
     ,pyTestMain
   ) where
 
-import Futhark.CodeGen.Backends.GenericPython.AST
-
 import Text.RawString.QQ
 
-pyFunctions :: PyDefinition
+pyFunctions :: String
 pyFunctions = [r|
 def addressOffset(x, offset, bt):
-  offset = asscalar(offset)
-  return cast(addressof(x.contents)+offset, POINTER(bt))
+  offset = np.asscalar(offset)
+  return ct.cast(ct.addressof(x.contents)+offset, ct.POINTER(bt))
 
 def allocateMem(size):
-  return cast((c_byte * size)(), POINTER(c_byte))
+  return ct.cast((ct.c_byte * size)(), ct.POINTER(ct.c_byte))
 
 def unwrapArray(x):
-  return x.ctypes.data_as(POINTER(c_byte))
+  return x.ctypes.data_as(ct.POINTER(ct.c_byte))
 
 def createArray(x, dim):
-  return ctypeslib.as_array(x, shape=dim)
+  return np.ctypeslib.as_array(x, shape=dim)
 
 def indexArray(x, offset, bt, nptype):
   return nptype(addressOffset(x, offset, bt)[0])
 
 def writeScalarArray(x, offset, v):
-  offset = asscalar(offset)
-  memmove(addressof(x.contents)+offset, addressof(v), sizeof(v))
+  offset = np.asscalar(offset)
+  ct.memmove(ct.addressof(x.contents)+offset, ct.addressof(v), ct.sizeof(v))
 |]
 
-pyUtility :: PyDefinition
+pyUtility :: String
 pyUtility = [r|
 def signed(x):
-  if type(x) == uint8:
-    return int8(x)
-  elif type(x) == uint16:
-    return int16(x)
-  elif type(x) == uint32:
-    return int32(x)
+  if type(x) == np.uint8:
+    return np.int8(x)
+  elif type(x) == np.uint16:
+    return np.int16(x)
+  elif type(x) == np.uint32:
+    return np.int32(x)
   else:
-    return int64(x)
+    return np.int64(x)
 
 def unsigned(x):
-  if type(x) == int8:
-    return uint8(x)
-  elif type(x) == int16:
-    return uint16(x)
-  elif type(x) == int32:
-    return uint32(x)
+  if type(x) == np.int8:
+    return np.uint8(x)
+  elif type(x) == np.int16:
+    return np.uint16(x)
+  elif type(x) == np.int32:
+    return np.uint32(x)
   else:
-    return uint64(x)
+    return np.uint64(x)
 
 def shlN(x,y):
   return x << y
@@ -74,10 +72,10 @@ def umodN(x,y):
   return signed(unsigned(x) % unsigned(y))
 
 def squotN(x,y):
-  return int32(float(x) / float(y))
+  return np.int32(float(x) / float(y))
 
 def sremN(x,y):
-  return fmod(x,y)
+  return np.fmod(x,y)
 
 def powN(x,y):
   return x ** y
@@ -98,76 +96,76 @@ def ultN(x,y):
   return unsigned(x) < unsigned(y)
 
 def lshr8(x,y):
-  return int8(uint8(x) >> uint8(y))
+  return np.int8(np.uint8(x) >> np.uint8(y))
 
 def lshr16(x,y):
-  return int16(uint16(x) >> uint16(y))
+  return np.int16(np.uint16(x) >> np.uint16(y))
 
 def lshr32(x,y):
-  return int32(uint32(x) >> uint32(y))
+  return np.int32(np.uint32(x) >> np.uint32(y))
 
 def lshr64(x,y):
-  return int64(uint64(x) >> uint64(y))
+  return np.int64(np.uint64(x) >> np.uint64(y))
 
 def sext_T_i8(x):
-  return int8(x)
+  return np.int8(x)
 
 def sext_T_i16(x):
-  return int16(x)
+  return np.int16(x)
 
 def sext_T_i32(x):
-  return int32(x)
+  return np.int32(x)
 
 def sext_T_i64(x):
-  return int32(x)
+  return np.int32(x)
 
 def zext_i8_i8(x):
-  return int8(uint8(x))
+  return np.int8(np.uint8(x))
 
 def zext_i8_i16(x):
-  return int16(uint8(x))
+  return np.int16(np.uint8(x))
 
 def zext_i8_i32(x):
-  return int32(uint8(x))
+  return np.int32(np.uint8(x))
 
 def zext_i8_i64(x):
-  return int64(uint8(x))
+  return np.int64(np.uint8(x))
 
 def zext_i16_i8(x):
-  return int8(uint16(x))
+  return np.int8(np.uint16(x))
 
 def zext_i16_i16(x):
-  return int16(uint16(x))
+  return np.int16(np.uint16(x))
 
 def zext_i16_i32(x):
-  return int32(uint16(x))
+  return np.int32(np.uint16(x))
 
 def zext_i16_i64(x):
-  return int64(uint16(x))
+  return np.int64(np.uint16(x))
 
 def zext_i32_i8(x):
-  return int8(uint32(x))
+  return np.int8(np.uint32(x))
 
 def zext_i32_i16(x):
-  return int16(uint32(x))
+  return np.int16(np.uint32(x))
 
 def zext_i32_i32(x):
-  return int32(uint32(x))
+  return np.int32(np.uint32(x))
 
 def zext_i32_i64(x):
-  return int64(uint32(x))
+  return np.int64(np.uint32(x))
 
 def zext_i64_i8(x):
-  return int8(uint64(x))
+  return np.int8(np.uint64(x))
 
 def zext_i64_i16(x):
-  return int16(uint64(x))
+  return np.int16(np.uint64(x))
 
 def zext_i64_i32(x):
-  return int32(uint64(x))
+  return np.int32(np.uint64(x))
 
 def zext_i64_i64(x):
-  return int64(uint64(x))
+  return np.int64(np.uint64(x))
 
 shl8 = shl16 = shl32 = shl64 = shlN
 ashr8 = ashr16 = ashr32 = ashr64 = ashrN
@@ -189,7 +187,7 @@ sext_i8_i32 = sext_i16_i32 = sext_i32_i32 = sext_i64_i32 = sext_T_i32
 sext_i8_i64 = sext_i16_i64 = sext_i32_i64 = sext_i64_i64 = sext_T_i64
 
 def ssignum(x):
-  return sign(x)
+  return np.sign(x)
 
 def usignum(x):
   if x < 0:
@@ -198,109 +196,109 @@ def usignum(x):
     return ssignum(x)
 
 def sitofp_T_f32(x):
-  return float32(x)
+  return np.float32(x)
 sitofp_i8_f32 = sitofp_i16_f32 = sitofp_i32_f32 = sitofp_i64_f32 = sitofp_T_f32
 
 def sitofp_T_f64(x):
-  return float64(x)
+  return np.float64(x)
 sitofp_i8_f64 = sitofp_i16_f64 = sitofp_i32_f64 = sitofp_i64_f64 = sitofp_T_f64
 
 def uitofp_T_f32(x):
-  return float32(unsigned(x))
+  return np.float32(unsigned(x))
 uitofp_i8_f32 = uitofp_i16_f32 = uitofp_i32_f32 = uitofp_i64_f32 = uitofp_T_f32
 
 def uitofp_T_f64(x):
-  return float64(unsigned(x))
+  return np.float64(unsigned(x))
 uitofp_i8_f64 = uitofp_i16_f64 = uitofp_i32_f64 = uitofp_i64_f64 = uitofp_T_f64
 
 def fptosi_T_i8(x):
-  return int8(trunc(x))
+  return np.int8(np.trunc(x))
 fptosi_f32_i8 = fptosi_f64_i8 = fptosi_T_i8
 
 def fptosi_T_i16(x):
-  return int16(trunc(x))
+  return np.int16(np.trunc(x))
 fptosi_f32_i16 = fptosi_f64_i16 = fptosi_T_i16
 
 def fptosi_T_i32(x):
-  return int32(trunc(x))
+  return np.int32(np.trunc(x))
 fptosi_f32_i32 = fptosi_f64_i32 = fptosi_T_i32
 
 def fptosi_T_i64(x):
-  return int64(trunc(x))
+  return np.int64(np.trunc(x))
 fptosi_f32_i64 = fptosi_f64_i64 = fptosi_T_i64
 
 def fptoui_T_i8(x):
-  return uint8(trunc(x))
+  return np.uint8(np.trunc(x))
 fptoui_f32_i8 = fptoui_f64_i8 = fptoui_T_i8
 
 def fptoui_T_i16(x):
-  return uint16(trunc(x))
+  return np.uint16(np.trunc(x))
 fptoui_f32_i16 = fptoui_f64_i16 = fptoui_T_i16
 
 def fptoui_T_i32(x):
-  return uint32(trunc(x))
+  return np.uint32(np.trunc(x))
 fptoui_f32_i32 = fptoui_f64_i32 = fptoui_T_i32
 
 def fptoui_T_i64(x):
-  return uint64(trunc(x))
+  return np.uint64(np.trunc(x))
 fptoui_f32_i64 = fptoui_f64_i64 = fptoui_T_i64
 
 def fpconv_f32_f64(x):
-  return float64(x)
+  return np.float64(x)
 
 def fpconv_f64_f32(x):
-  return float32(x)
+  return np.float32(x)
 
 def futhark_log64(x):
-  return float64(log(x))
+  return np.float64(log(x))
 
 def futhark_sqrt64(x):
-  return sqrt(x)
+  return np.sqrt(x)
 
 def futhark_exp64(x):
-  return exp(x)
+  return np.exp(x)
 
 def futhark_cos64(x):
-  return cos(x)
+  return np.cos(x)
 
 def futhark_sin64(x):
-  return sin(x)
+  return np.sin(x)
 
 def futhark_atan2_64(x, y):
-  return arctan2(x, y)
+  return np.arctan2(x, y)
 
 def futhark_isnan64(x):
-  return isnan(x)
+  return np.isnan(x)
 
 def futhark_isinf64(x):
-  return isinf(x)
+  return np.isinf(x)
 
 def futhark_log32(x):
-  return float32(log(x))
+  return np.float32(log(x))
 
 def futhark_sqrt32(x):
-  return float32(sqrt(x))
+  return np.float32(np.sqrt(x))
 
 def futhark_exp32(x):
-  return exp(x)
+  return np.exp(x)
 
 def futhark_cos32(x):
-  return cos(x)
+  return np.cos(x)
 
 def futhark_sin32(x):
-  return sin(x)
+  return np.sin(x)
 
 def futhark_atan2_32(x, y):
-  return arctan2(x, y)
+  return np.arctan2(x, y)
 
 def futhark_isnan32(x):
-  return isnan(x)
+  return np.isnan(x)
 
 def futhark_isinf32(x):
-  return isinf(x)
+  return np.isinf(x)
 |]
 
-pyTestMain :: PyDefinition
+pyTestMain :: String
 pyTestMain = [r|
 lookahead_buffer = []
 
@@ -515,7 +513,7 @@ def read_array(f, elem_reader, rank, bt):
     elems = read_array_helper(f, elem_reader, rank)
     dims = expected_array_dims(elems, rank)
     verify_array_dims(elems, dims)
-    return array(elems, dtype=bt)
+    return np.array(elems, dtype=bt)
 
 def write_chars(f, arr):
     f.write("\"")

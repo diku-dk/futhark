@@ -208,8 +208,8 @@ timingOption =
 
 compileProg :: MonadFreshNames m =>
                Bool
-            -> [PyImport]
-            -> [PyDefinition]
+            -> [PyStmt]
+            -> [PyStmt]
             -> Operations op s
             -> s
             -> [PyStmt]
@@ -219,8 +219,11 @@ compileProg :: MonadFreshNames m =>
 compileProg as_module imports defines ops userstate pre_timing options prog@(Imp.Functions funs)  = do
   src <- getNameSource
   let (prog', maincall) = runCompilerM prog ops src userstate compileProg'
-  return $ pretty (PyProg prog' (imports++["import argparse"]) defines) ++
-    if as_module then "" else "\n" ++ pretty maincall
+      (maybe_shebang, maybe_maincall)
+        | as_module = ("", [])
+        | otherwise = ("#!/usr/bin/env python\n", [maincall])
+  return $ maybe_shebang ++
+    pretty (PyProg $ imports ++ [Import "argparse" Nothing] ++ defines ++ prog' ++ maybe_maincall)
   where compileProg' = do
           definitions <- mapM compileFunc funs
           entry_points <- mapM compileEntryFun $
@@ -233,12 +236,12 @@ compileProg as_module imports defines ops userstate pre_timing options prog@(Imp
 
           return (definitions ++ entry_points, maincall)
 
-compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunc
+compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyStmt
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (pretty . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
-  return $ PyFunc (futharkFun . nameToString $ fname) inputs' (body'++[ret])
+  return $ FuncDef (futharkFun . nameToString $ fname) inputs' (body'++[ret])
 
 tupleOrSingle :: [PyExp] -> PyExp
 tupleOrSingle [e] = e
@@ -263,7 +266,7 @@ unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Var $ pretty arr_name  ++ ".shape"
   let src = Index shape_name $ IdxExp $ Constant $ value i
   let dest = Var $ pretty var
-  let makeNumpy = simpleCall "int32" [src]
+  let makeNumpy = simpleCall "np.int32" [src]
   stm $ Assign dest makeNumpy
 
 hashSizeVars :: [Imp.Param] -> HM.HashMap VName VName
@@ -293,7 +296,7 @@ packArg _ _ (Imp.ScalarValue bt vname) = do
 packArg memsizes spacemap (Imp.ArrayValue vname bt dims) = do
   zipWithM_ (unpackDim vname) dims [0..]
   let src_size = Var $ pretty vname ++ ".nbytes"
-  let makeNumpy = simpleCall "int32" [src_size]
+  let makeNumpy = simpleCall "np.int32" [src_size]
   let src_data = Var $ pretty vname
   let unwrap_call = simpleCall "unwrapArray" [Var $ pretty vname]
 
@@ -399,7 +402,7 @@ writeOutput (Imp.ArrayValue vname bt _) =
   in Exp $ simpleCall "write_array" [stdout, name, bt']
 
 compileEntryFun :: (Name, Imp.Function op)
-                -> CompilerM op s PyFunc
+                -> CompilerM op s PyStmt
 compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
@@ -416,7 +419,7 @@ compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) 
       funCall = simpleCall (futharkFun . nameToString $ fname) (fmap Var inputArgs)
       body' = prepareIn ++ [Assign funTuple funCall] ++ prepareOut
 
-  return $ PyFunc (nameToString fname) (map valueDeclName decl_args) (body'++[ret])
+  return $ FuncDef (nameToString fname) (map valueDeclName decl_args) (body'++[ret])
 
 callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
              -> CompilerM op s PyStmt
@@ -503,26 +506,26 @@ compileSizeOfType t =
 compilePrimType :: PrimType -> String
 compilePrimType t =
   case t of
-    IntType Int8 -> "c_int8"
-    IntType Int16 -> "c_int16"
-    IntType Int32 -> "c_int32"
-    IntType Int64 -> "c_int64"
-    FloatType Float32 -> "c_float"
-    FloatType Float64 -> "c_double"
-    Bool -> "c_bool"
-    Cert -> "c_byte"
+    IntType Int8 -> "ct.c_int8"
+    IntType Int16 -> "ct.c_int16"
+    IntType Int32 -> "ct.c_int32"
+    IntType Int64 -> "ct.c_int64"
+    FloatType Float32 -> "ct.c_float"
+    FloatType Float64 -> "ct.c_double"
+    Bool -> "ct.c_bool"
+    Cert -> "ct.c_bool"
 
 compilePrimToNp :: Imp.PrimType -> String
 compilePrimToNp bt =
   case bt of
-    IntType Int8 -> "int8"
-    IntType Int16 -> "int16"
-    IntType Int32 -> "int32"
-    IntType Int64 -> "int64"
-    FloatType Float32 -> "float32"
-    FloatType Float64 -> "float64"
-    Bool -> "bool_"
-    Cert -> "int8"
+    IntType Int8 -> "np.int8"
+    IntType Int16 -> "np.int16"
+    IntType Int32 -> "np.int32"
+    IntType Int64 -> "np.int64"
+    FloatType Float32 -> "np.float32"
+    FloatType Float64 -> "np.float64"
+    Bool -> "bool"
+    Cert -> "bool"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
 compilePrimValue (IntValue (Int8Value v)) = Constant $ value v
@@ -531,7 +534,7 @@ compilePrimValue (IntValue (Int32Value v)) = Constant $ value v
 compilePrimValue (IntValue (Int64Value v)) = Constant $ value v
 compilePrimValue (FloatValue (Float32Value v)) = Constant $ value v
 compilePrimValue (FloatValue (Float64Value v)) = Constant $ value v
-compilePrimValue (BoolValue v) = simpleCall "bool_" [Constant $ BoolValue v]
+compilePrimValue (BoolValue v) = simpleCall "bool" [Constant $ BoolValue v]
 compilePrimValue Checked = Var "Cert"
 
 compileExp :: Imp.Exp -> CompilerM op s PyExp
@@ -612,7 +615,7 @@ compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = pretty i
   body' <- collect $ compileCode body
-  stm $ For i' (simpleCall "range" [bound']) (Assign (Var i') (simpleCall "int32" [Var i']) : body')
+  stm $ For i' (simpleCall "range" [bound']) (Assign (Var i') (simpleCall "np.int32" [Var i']) : body')
 
 compileCode (Imp.SetScalar vname exp1) = do
   let name' = Var $ pretty vname
@@ -659,9 +662,9 @@ compileCode (Imp.Copy dest (Imp.Count destoffset) DefaultSpace src (Imp.Count sr
   let dest' = Var (pretty dest)
   let src' = Var (pretty src)
   size' <- compileExp size
-  let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "c_byte"]
-  let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "c_byte"]
-  stm $ Exp $ simpleCall "memmove" [offset_call1, offset_call2, size']
+  let offset_call1 = simpleCall "addressOffset" [dest', destoffset', Var "ct.c_byte"]
+  let offset_call2 = simpleCall "addressOffset" [src', srcoffset', Var "ct.c_byte"]
+  stm $ Exp $ simpleCall "ct.memmove" [offset_call1, offset_call2, size']
 
 compileCode (Imp.Copy dest (Imp.Count destoffset) destspace src (Imp.Count srcoffset) srcspace (Imp.Count size)) = do
   copy <- asks envCopy

@@ -60,7 +60,7 @@ instance Pretty Value where
       braces $ commastack $ map ppr vs
     | otherwise =
       braces $ commasep $ map ppr vs
-  ppr v@(ArrayValue a t)
+  ppr (ArrayValue a t)
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a

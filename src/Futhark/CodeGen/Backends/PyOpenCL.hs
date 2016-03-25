@@ -28,7 +28,6 @@ compileProg as_module prog = do
   res <- ImpGen.compileProg prog
   --could probably be a better why do to this..
   let initCL = if as_module then [] else [openClInit]
-  let shebang = if as_module then [] else ["#!/usr/bin/env python"]
   case res of
     Left err -> return $ Left err
     Right (Imp.Program opencl_code opencl_prelude kernel_names prog')  -> do
@@ -38,8 +37,21 @@ compileProg as_module prog = do
       let kernel_declare = map (\x -> "global " ++ x ++ "_var") kernel_names
       let kernel_concat = intercalate "\n" kernel_declare
 
-      let defines = [blockDimPragma, "ctx=0", "program=0", "queue=0", "synchronous=False", pyUtility, pyTestMain, openClDecls (opencl_prelude ++ "\n" ++ opencl_code) assign_concat kernel_concat] ++ initCL
-      let imports = shebang ++ ["import sys", "from numpy import *", "from ctypes import *", "import pyopencl as cl", "import time"]
+      let defines =
+            [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
+             Assign (Var "ctx") $ Constant $ value (0::Int),
+             Assign (Var "program") $ Constant $ value (0::Int),
+             Assign (Var "queue") $ Constant $ value (0::Int),
+             Assign (Var "synchronise") $ Constant $ value False,
+             Escape pyUtility,
+             Escape pyTestMain,
+             Escape $ openClDecls (opencl_prelude ++ "\n" ++ opencl_code) assign_concat kernel_concat,
+             Escape $ unlines initCL]
+      let imports = [Import "sys" Nothing,
+                     Import "numpy" $ Just "np",
+                     Import "ctypes" $ Just "ct",
+                     Import "pyopencl" $ Just "cl",
+                     Import "time" Nothing]
 
       Right <$> Py.compileProg as_module imports defines operations ()
         [Exp $ Call "queue.finish" []] [] prog'
@@ -173,9 +185,6 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
-
-blockDimPragma :: String
-blockDimPragma = "FUT_BLOCK_DIM = " ++ show (Imp.transposeBlockDim :: Int)
 
 finishIfSynchronous :: Py.CompilerM op s ()
 finishIfSynchronous =

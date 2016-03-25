@@ -48,7 +48,6 @@ instance Arbitrary PrimValue where
   arbitrary = oneof [ IntValue <$> arbitrary
                     , FloatValue <$> arbitrary
                     , BoolValue <$> arbitrary
-                    , CharValue <$> arbitrary
                     , pure Checked
                     ]
 
@@ -60,5 +59,4 @@ arbitraryPrimValOfType (IntType Int64) = IntValue <$> Int64Value <$> arbitrary
 arbitraryPrimValOfType (FloatType Float32) = FloatValue <$> Float32Value <$> arbitrary
 arbitraryPrimValOfType (FloatType Float64) = FloatValue <$> Float32Value <$> arbitrary
 arbitraryPrimValOfType Bool = BoolValue <$> arbitrary
-arbitraryPrimValOfType Char = CharValue <$> arbitrary
 arbitraryPrimValOfType Cert = return Checked
