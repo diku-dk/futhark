@@ -606,27 +606,57 @@ kernelCompiler
     call_with_body body
 
 kernelCompiler
-  (ImpGen.Destination dest)
-  (WriteKernel cs w nDims t i v a) = do
+  (ImpGen.Destination dests)
+  (WriteKernel _cs _w nDims _t i v a) = do
+
+  dest <- case dests of
+    [d] -> return d
+    _ -> fail "write has multiple dests"
 
   let kernel_size = ImpGen.compileSubExp nDims
 
   global_thread_index <- newVName "write_thread_index"
-  let global_thread_index_param = Imp.ScalarParam global_thread_index int32
+  write_index <- newVName "write_index"
 
-  let find_index = ImpGen.emit Imp.Skip
+  let get_thread_index =
+        ImpGen.emit $ Imp.Op $ Imp.GetGlobalId global_thread_index 0
 
-  let find_value = ImpGen.emit Imp.Skip
+  let check_thread_index body =
+        let cond = Imp.CmpOp (CmpSlt Int32)
+              (Imp.ScalarVar global_thread_index) kernel_size
+        in Imp.If cond body Imp.Skip
 
-  let write_result = ImpGen.emit Imp.Skip
+  let find_index = do
+        (srcmem, space, srcoffset) <-
+          ImpGen.fullyIndexArray i $ map SE.intSubExpToScalExp [Var global_thread_index]
+        ImpGen.emit $ Imp.SetScalar write_index $
+          Imp.Index srcmem srcoffset int32 space
 
+  let check_write_index body =
+        let cond = Imp.CmpOp (Imp.CmpEq int32)
+              (Imp.ScalarVar write_index)
+              (Imp.Constant (IntValue (Int32Value (-1))))
+        in Imp.If cond Imp.Skip body
+
+  let write_result = ImpGen.copyDWIMDest dest [ImpGen.varIndex write_index]
+        (Var v) [ImpGen.varIndex global_thread_index]
   makeAllMemoryGlobal $ do
-    kernel_body <- (setBodySpace (Imp.Space "global") <$>)
-      $ ImpGen.subImpM_ inKernelOperations
-      $ ImpGen.withParams [global_thread_index_param] $ do
-      ImpGen.comment "find index" find_index
-      ImpGen.comment "find value" find_value
-      ImpGen.comment "write result" write_result
+
+    kernel_body <- ImpGen.subImpM_ inKernelOperations $ do
+      ImpGen.emit $ Imp.DeclareScalar global_thread_index int32
+      ImpGen.emit $ Imp.DeclareScalar write_index int32
+
+      body_body <- ImpGen.collect $ do
+        ImpGen.comment "find write index" find_index
+        body_body_body <- ImpGen.collect $ do
+          ImpGen.comment "write result" write_result
+
+        ImpGen.comment "check write index"
+          $ ImpGen.emit $ check_write_index body_body_body
+
+      ImpGen.comment "get thread index" get_thread_index
+      ImpGen.comment "check thread index"
+        $ ImpGen.emit $ check_thread_index body_body
 
     -- Calculate the group size and the number of groups.
     group_size <- newVName "group_size"
@@ -637,12 +667,17 @@ kernelCompiler
     ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
     ImpGen.emit $ Imp.SetScalar num_groups $
       kernel_size `quotRoundingUp` group_size_var
-    --ImpGen.emit $ Imp.Op $ Imp.GetGlobalId global_thread_index 0
 
-    let bound_in_kernel = [global_thread_index]
+    -- FIXME: This works for now, but is obviously bad.  Instead, @dest@ should
+    -- be the same memory as @a@, since @write@ is in-place.  The code below
+    -- does not disable the memory allocation of @dest@; it just ignores that
+    -- it ever happened.
+    let ImpGen.ArrayDestination (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem _ _)) _ = dest
+    a' <- ImpGen.lookupArray a
+    ImpGen.emit $ Imp.SetMem mem (ImpGen.memLocationName $ ImpGen.entryArrayLocation a')
 
     -- Compute the variables that we need to pass to and from the kernel.
-    uses <- computeKernelUses dest (kernel_size, kernel_body) bound_in_kernel
+    uses <- computeKernelUses dests (kernel_size, kernel_body) []
 
     kernel_name <- newVName "a_write_kernel"
     ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
