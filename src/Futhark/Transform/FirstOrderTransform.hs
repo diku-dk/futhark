@@ -586,15 +586,13 @@ transformSOAC pat (Write cs _w nMods arrayIOType indexes values arrayIO) = do
   arrayOut <- newIdent "write_out" arrayIOType
 
   -- Write is in-place, so we use the input array as the output array.
-  arrayResult <- letExp "write_result" $ PrimOp $ SubExp $ Var arrayIO
-
-  let merge = loopMerge [arrayOut] [Var arrayResult]
+  let merge = loopMerge [arrayOut] [Var arrayIO]
   loopBody <- runBodyBinder $
     localScope (HM.insert iter IndexInfo $
                 scopeOfFParams $ map fst merge) $ do
     indexCur <- letExp "write_index" $ PrimOp $ Index cs indexes [Var iter]
     valueCur <- letExp "write_value" $ PrimOp $ Index cs values [Var iter]
-    res <- letInPlace "write_result_body" cs (identName arrayOut) [Var indexCur]
+    res <- letInPlace "write_out_body" cs (identName arrayOut) [Var indexCur]
       $ PrimOp $ SubExp $ Var valueCur
     return $ resultBody [Var res]
   letBind_ pat $ DoLoop [] merge (ForLoop iter nMods) loopBody
