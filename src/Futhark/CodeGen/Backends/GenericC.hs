@@ -393,7 +393,7 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
                long int elapsed_usec =
                  (t_end.tv_sec * 1000000 + t_end.tv_usec) -
                  (t_start.tv_sec * 1000000 + t_start.tv_usec);
-               if (runtime_file != NULL) {
+               if (time_runs && runtime_file != NULL) {
                  fprintf(runtime_file, "%ld\n", elapsed_usec);
                }
              |],
@@ -566,6 +566,8 @@ $edecls:prototypes
 
 $edecls:builtin
 
+static int detail_timing = 0;
+
 $edecls:(map funcToDef definitions)
 
 $edecls:readerFunctions
@@ -576,16 +578,29 @@ static int num_runs = 1;
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 
 int main(int argc, char** argv) {
-  struct timeval t_start, t_end, t_diff;
-  unsigned long int elapsed_usec;
+  struct timeval t_start, t_end;
+  int time_runs;
+
   $stms:(compInit endstate)
+
   int parsed_options = parse_options(argc, argv);
   argc -= parsed_options;
   argv += parsed_options;
+
   $stms:pre_main_stms
   $items:main_pre
+  /* Warmup run */
+  if (num_runs > 1) {
+    time_runs = 0;
+    $items:main
+  }
+  time_runs = 1;
+  /* Proper run. */
   for (int run = 0; run < num_runs; run++) {
-    $items:main;
+    if (run == num_runs-1) {
+      detail_timing = 1;
+    }
+    $items:main
   }
   $items:main_post
   $items:post_main_items

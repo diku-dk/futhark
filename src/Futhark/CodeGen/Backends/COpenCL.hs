@@ -229,10 +229,12 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       typename suseconds_t $id:time_diff =
          ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
          ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
-      $id:(kernelRuntime kernel_name) += $id:time_diff;
-      $id:(kernelRuns kernel_name)++;
-      fprintf(stderr, "kernel %s runtime: %dus\n",
-              $string:kernel_name, (int)$id:time_diff);
+      if (detail_timing) {
+        $id:(kernelRuntime kernel_name) += $id:time_diff;
+        $id:(kernelRuns kernel_name)++;
+        fprintf(stderr, "kernel %s runtime: %dus\n",
+                $string:kernel_name, (int)$id:time_diff);
+      }
     }
     }|]
   where kernel_rank = length kernel_dims
