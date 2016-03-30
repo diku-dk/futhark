@@ -210,10 +210,15 @@ linearWithOffset :: IxFun -> ScalExp -> Maybe ScalExp
 linearWithOffset (IxFun _ _ ixfun) =
   Safe.linearWithOffset ixfun
 
-rearrangeWithOffset :: IxFun -> ScalExp -> Maybe (ScalExp, [Int])
+rearrangeWithOffset :: IxFun -> ScalExp -> Maybe (ScalExp, [(Int,ScalExp)])
+rearrangeWithOffset (IxFun _ _ (Safe.Reshape ixfun _)) element_size = do
+  (offset, perm) <- Safe.rearrangeWithOffset ixfun element_size
+  return (offset, zip (Vec.toList $ Perm.apply perm $ Vec.unsafeFromList (Safe.rank ixfun) [0..])
+                      (Vec.toList $ Safe.shape ixfun))
 rearrangeWithOffset (IxFun _ n ixfun) element_size = do
   (offset, perm) <- Safe.rearrangeWithOffset ixfun element_size
-  return (offset, Vec.toList $ Perm.apply perm $ Vec.unsafeFromList n [0..])
+  return (offset, zip (Vec.toList $ Perm.apply perm $ Vec.unsafeFromList n [0..])
+                      (Vec.toList $ Safe.shape ixfun))
 
 data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 

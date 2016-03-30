@@ -853,32 +853,34 @@ isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
                                Imp.Exp, Imp.Exp, Imp.Exp)
 isMapTransposeKernel bt
   (ImpGen.MemLocation _ _ destIxFun)
-  (ImpGen.MemLocation _ srcshape srcIxFun)
-  | Just (dest_offset, perm) <- IxFun.rearrangeWithOffset destIxFun bt_size,
+  (ImpGen.MemLocation _ _ srcIxFun)
+  | Just (dest_offset, perm_and_destshape) <- IxFun.rearrangeWithOffset destIxFun bt_size,
+    (perm, destshape) <- unzip perm_and_destshape,
+    Just destshape' <- mapM ImpGen.scalExpToImpExp destshape,
     Just src_offset <- IxFun.linearWithOffset srcIxFun bt_size,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk swap r1 r2 dest_offset src_offset
+    isOk destshape' swap r1 r2 dest_offset src_offset
   | Just dest_offset <- IxFun.linearWithOffset destIxFun bt_size,
-    Just (src_offset, perm) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
+    Just (src_offset, perm_and_srcshape) <- IxFun.rearrangeWithOffset srcIxFun bt_size,
+    (perm, srcshape) <- unzip perm_and_srcshape,
+    Just srcshape' <- mapM ImpGen.scalExpToImpExp srcshape,
     Just (r1, r2, _) <- isMapTranspose perm =
-    isOk id r1 r2 dest_offset src_offset
+    isOk srcshape' id r1 r2 dest_offset src_offset
   | otherwise =
     Nothing
   where bt_size = primByteSize bt
         swap (x,y) = (y,x)
 
-        isOk f r1 r2 dest_offset src_offset = do
+        isOk shape f r1 r2 dest_offset src_offset = do
           dest_offset' <- ImpGen.scalExpToImpExp dest_offset
           src_offset' <- ImpGen.scalExpToImpExp src_offset
-          let (num_arrays, size_x, size_y) = getSizes f r1 r2
+          let (num_arrays, size_x, size_y) = getSizes shape f r1 r2
           return (dest_offset', src_offset',
                   num_arrays, size_x, size_y)
 
-        getSizes f r1 r2 =
-          let (mapped, notmapped) =
-                splitAt r1 $ map Imp.sizeToExp srcshape
-              (pretrans, posttrans) =
-                f $ splitAt r2 notmapped
+        getSizes shape f r1 r2 =
+          let (mapped, notmapped) = splitAt r1 shape
+              (pretrans, posttrans) = f $ splitAt r2 notmapped
           in (product mapped, product pretrans, product posttrans)
 
 createAccMem :: Imp.DimSize
