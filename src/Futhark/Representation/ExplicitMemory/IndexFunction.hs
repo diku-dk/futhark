@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs, DataKinds, TypeOperators, KindSignatures, ScopedTypeVariables #-}
 module Futhark.Representation.ExplicitMemory.IndexFunction
        (
-         IxFun
+         IxFun(..)
        , Shape
        , ShapeChange
        , Indices
@@ -15,6 +15,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , rebase
        , codomain
        , shape
+       , rank
        , linearWithOffset
        , rearrangeWithOffset
        )
