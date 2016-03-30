@@ -3,11 +3,11 @@
 -- coalesced memory access from within GPU kernels.
 --
 -- This module is presently embryonic: all it does is fiddle with the
--- index functions of 'ChunkedMapKernel's to ensure that their
--- writeback is coalesced.  Most of the actual coalescing work is done
--- in hacky ways in KernelBabysitting and in slightly less hacky ways
--- in ExpandAllocations - in time, we wish to move as much as possible
--- in here, and do it properly.
+-- index functions of 'ChunkedMapKernel's and 'ReduceKernel's to
+-- ensure that their writeback is coalesced.  Most of the actual
+-- coalescing work is done in hacky ways in KernelBabysitting and in
+-- slightly less hacky ways in ExpandAllocations - in time, we wish to
+-- move as much as possible in here, and do it properly.
 --
 -- This module plays fast and loose with the symbol table (only puts
 -- in things that are let-bound) - if you get strange errors about
