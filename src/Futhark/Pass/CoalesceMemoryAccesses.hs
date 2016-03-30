@@ -87,16 +87,52 @@ transformBinding (Let (Pattern [] pat_elems) ()
             attr ->
               fail $ "Invalid attribute for let-binding of ChunkedMapKernel return: " ++ pretty attr
 
-        lookupMem mem = do
-          t <- lookupType mem
-          case t of Mem size space -> return (size, space)
-                    _              -> fail $ "CoalesceMemoryAccesses.lookupMem: " ++
-                                              pretty mem ++
-                                              " is supposed to be a memory block, but has type "
-                                              ++ pretty t
+transformBinding (Let (Pattern [] pat_elems) ()
+                  e@(Op (Inner (ReduceKernel _ _ size _ _ _ nes _))))
+  | (red_pat_elems, map_pat_elems) <- splitAt (length nes) pat_elems,
+    not $ null map_pat_elems = do
+      (alloc_bnds, map_pat_elems', tr_bnds) <-
+        unzip3 <$> mapM transposePatElem map_pat_elems
+      return $
+        alloc_bnds ++
+        [Let (Pattern [] (red_pat_elems ++ map_pat_elems')) () e] ++
+        tr_bnds
+  where transposePatElem pat_elem = do
+          name <- newVName (baseString (patElemName pat_elem) ++ "_transposed")
+          case patElemAttr pat_elem of
+            ArrayMem bt (Shape old_dims) u mem _old_ixfun -> do
+
+              (memsize, space) <- lookupMem mem
+              coalescing_mem <- newVName "coalescing_mem"
+              let alloc_pat_elem = PatElem coalescing_mem BindVar $ MemMem memsize space
+
+              let imaginary_dims = kernelNumThreads size : kernelElementsPerThread size :
+                                   drop 1 old_dims
+                  perm = [1..length imaginary_dims-1] ++ [0]
+                  tr_dims = rearrangeShape perm imaginary_dims
+                  attr = ArrayMem bt (Shape old_dims) u coalescing_mem $
+                         IxFun.reshape (IxFun.permute (IxFun.iota $ IxFun.shapeFromSubExps tr_dims)
+                                        (rearrangeInverse perm)) $
+                         map DimNew old_dims
+              return (Let (Pattern [] [alloc_pat_elem]) () $ Op $ Alloc memsize space,
+
+                      PatElem name BindVar attr,
+
+                      Let (Pattern [] [pat_elem]) () $ PrimOp $ Copy name)
+            attr ->
+              fail $ "Invalid attribute for let-binding of ReduceKernel return: " ++ pretty attr
 
 transformBinding (Let pat () e) = do
   e' <- mapExpM transform e
   return [Let pat () e']
   where transform = identityMapper { mapOnBody = transformBody
                                    }
+
+lookupMem :: (Monad m, HasScope lore m) => VName -> m (SubExp, Space)
+lookupMem mem = do
+  t <- lookupType mem
+  case t of Mem size space -> return (size, space)
+            _              -> fail $ "CoalesceMemoryAccesses.lookupMem: " ++
+                                      pretty mem ++
+                                      " is supposed to be a memory block, but has type "
+                                      ++ pretty t
