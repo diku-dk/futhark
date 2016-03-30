@@ -101,19 +101,27 @@ transformBinding (Let (Pattern [] pat_elems) ()
           name <- newVName (baseString (patElemName pat_elem) ++ "_transposed")
           case patElemAttr pat_elem of
             ArrayMem bt (Shape old_dims) u mem _old_ixfun -> do
-
               (memsize, space) <- lookupMem mem
               coalescing_mem <- newVName "coalescing_mem"
               let alloc_pat_elem = PatElem coalescing_mem BindVar $ MemMem memsize space
 
-              let imaginary_dims = kernelNumThreads size : kernelElementsPerThread size :
-                                   drop 1 old_dims
-                  perm = [1..length imaginary_dims-1] ++ [0]
-                  tr_dims = rearrangeShape perm imaginary_dims
-                  attr = ArrayMem bt (Shape old_dims) u coalescing_mem $
-                         IxFun.reshape (IxFun.permute (IxFun.iota $ IxFun.shapeFromSubExps tr_dims)
-                                        (rearrangeInverse perm)) $
-                         map DimNew old_dims
+              let attr
+                    | length old_dims == 1 =
+                        let imaginary_dims = kernelNumThreads size : kernelElementsPerThread size :
+                                             drop 1 old_dims
+                            perm = [1..length imaginary_dims-1] ++ [0]
+                            tr_dims = rearrangeShape perm imaginary_dims
+                        in ArrayMem bt (Shape old_dims) u coalescing_mem $
+                           IxFun.reshape (IxFun.permute (IxFun.iota $ IxFun.shapeFromSubExps tr_dims)
+                                          (rearrangeInverse perm)) $
+                           map DimNew old_dims
+                    | otherwise =
+                        let perm = [1..length old_dims-1] ++ [0]
+                            tr_dims = rearrangeShape perm old_dims
+                        in ArrayMem bt (Shape old_dims) u coalescing_mem $
+                           IxFun.permute (IxFun.iota $ IxFun.shapeFromSubExps tr_dims)
+                           (rearrangeInverse perm)
+
               return (Let (Pattern [] [alloc_pat_elem]) () $ Op $ Alloc memsize space,
 
                       PatElem name BindVar attr,
