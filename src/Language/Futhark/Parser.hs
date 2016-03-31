@@ -93,7 +93,7 @@ parseFuthark fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
               in if not (null intersection)
                  then return $ Left $ ParseError
                       ("Include cycle with " ++ show intersection ++ ".")
-                 else let p' = Prog $ progWHFunctions p
+                 else let p' = Prog $ progWHDeclarations p
                       in if null newIncludes
                          then return $ Right p'
                          else includeIncludes prevIncludes newIncludes p'
