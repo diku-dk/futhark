@@ -159,6 +159,7 @@ import Language.Futhark.Parser.Lexer
       streamRedPer    { L $$ STREAM_REDPER }
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
+      type            { L $$ TYPE }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -176,13 +177,20 @@ import Language.Futhark.Parser.Lexer
 %%
 
 Prog :: { UncheckedProgWithHeaders }
-     :   Headers Decs { ProgWithHeaders $1 $2 }
-     |   Decs { ProgWithHeaders [] $1 }
+     :   Headers DecStart { ProgWithHeaders $1 $2 }
+     |   DecStart { ProgWithHeaders [] $1 }
 ;
 
-Decs : FunDecs { $1 }
-     | DefaultDec FunDecs { $2 }
+DecStart : Decs { $1 }
+         | DefaultDec Decs { $2 }
 ;
+
+Decs : Dec Decs { $1 : $2 }
+     | Dec { [$1] }
+
+Dec  : fun Fun { $2 }
+     | type TypeAlias { $2 }
+
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
@@ -233,23 +241,23 @@ Header :: { ProgHeader }
 Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
-FunDecs : fun Fun FunDecs   { $2 : $3 }
-        | fun Fun           { [$2] }
-;
-
 Fun :     Type id '(' TypeIds ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
         | Type id '(' ')' '=' Exp
                         { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
+TypeAlias: id '=' Type { let L pos (ID name) = $1 in (name, $3 , pos) }
+;
+
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
 Type :: { UncheckedType }
-        : PrimType     { Prim $1 }
-        | ArrayType     { Array $1 }
-        | '{' Types '}' { Tuple $2 }
+        : PrimType      { UserPrim $1 }
+        | ArrayType     { UserArray $1 }
+        | '{' Types '}' { UserTuple $2 }
+        | id            { let L pos (ID name) = $1 in UserTypeAlias (Name name) }
 ;
 
 DimDecl :: { DimDecl Name }
@@ -264,16 +272,26 @@ DimDecl :: { DimDecl Name }
 ArrayType :: { UncheckedArrayType }
           : Uniqueness '[' PrimArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in PrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
+              in UserPrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
+          | Uniqueness '[' TypeAliasArrayRowType DimDecl ']'
+            { let (ds, et) = $3
+              in UserTupleArray et (ShapeDecl ($4:ds)) $1 }
           | Uniqueness '[' TupleArrayRowType DimDecl ']'
             { let (ds, et) = $3
-              in TupleArray et (ShapeDecl ($4:ds)) $1 }
+              in UserTupleArray et (ShapeDecl ($4:ds)) $1 }
 
 PrimArrayRowType : PrimType
                     { ([], $1) }
                   | '[' PrimArrayRowType DimDecl ']'
                     { let (ds, et) = $2
                       in ($3:ds, et) }
+
+TypeAliasArrayRowType : id
+                        { ([], $1)}
+                      | '[' TypeAliasArrayRowType ']'
+                        { let (ds, et) = $2
+                          in ($3:ds, et) }
+
 
 TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { ([], $2) }
@@ -290,6 +308,9 @@ TupleArrayElemTypes : { [] }
 TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
+                   | id
+                   { let L _ (ID name) = $1 in TypeAliasArrayElem (Name name) }
+
 
 PrimType : UnsignedType { Unsigned (fst $1) }
          | SignedType   { Signed (fst $1) }
