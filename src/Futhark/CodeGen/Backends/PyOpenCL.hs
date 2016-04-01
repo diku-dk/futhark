@@ -42,7 +42,7 @@ compileProg as_module prog = do
              Assign (Var "ctx") $ Constant $ value (0::Int),
              Assign (Var "program") $ Constant $ value (0::Int),
              Assign (Var "queue") $ Constant $ value (0::Int),
-             Assign (Var "synchronise") $ Constant $ value False,
+             Assign (Var "synchronous") $ Constant $ value False,
              Escape pyUtility,
              Escape pyTestMain,
              Escape $ openClDecls (opencl_prelude ++ "\n" ++ opencl_code) assign_concat kernel_concat,
@@ -125,8 +125,8 @@ readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ pretty val
   let mem' = Var $ pretty mem
-  let nparr = Call "empty" [Arg $ Constant $ value (1::Int32),
-                            ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
+  let nparr = Call "np.empty" [Arg $ Constant $ value (1::Int32),
+                               ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call "cl.enqueue_copy"
     [Arg $ Var "queue", Arg val', Arg mem',
