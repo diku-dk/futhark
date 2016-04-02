@@ -32,8 +32,7 @@ import Futhark.MonadFreshNames
 import Futhark.Binder (Bindable)
 
 data Nesting lore = Nesting {
-    nestingIndex        :: VName
-  , nestingParamNames   :: [VName]
+    nestingParamNames   :: [VName]
   , nestingResult       :: [VName]
   , nestingReturnType   :: [Type]
   , nestingWidth        :: SubExp
@@ -86,8 +85,7 @@ fromSOACNest' bound (Nest.SOACNest inps
     unzip <$> fixInputs (zip (Nest.nestingParamNames n) inps)
                         (zip (params mn) inps')
   let n' = Nesting {
-             nestingIndex        = Nest.nestingIndex n
-           , nestingParamNames   = ps
+             nestingParamNames   = ps
            , nestingResult       = Nest.nestingResult n
            , nestingReturnType   = Nest.nestingReturnType n
            , nestingWidth        = inner_w
@@ -152,8 +150,7 @@ toSOACNest' cs w body (nest:ns) inpts =
   let body' = toSOACNest' cs (nestingWidth nest) body ns (map rowType inpts)
   in Nest.Map cs w (Nest.NewNest nest' body')
   where nest' = Nest.Nesting {
-                  Nest.nestingIndex = nestingIndex nest
-                , Nest.nestingParamNames = nestingParamNames nest
+                  Nest.nestingParamNames = nestingParamNames nest
                 , Nest.nestingResult = nestingResult nest
                 , Nest.nestingReturnType = nestingReturnType nest
                 , Nest.nestingInputs = map SOAC.identInput newparams

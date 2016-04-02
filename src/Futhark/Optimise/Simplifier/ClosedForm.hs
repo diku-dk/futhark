@@ -57,7 +57,7 @@ foldClosedForm :: MonadBinder m =>
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
   closedBody <- checkResults (patternNames pat) inputsize mempty knownBindings
-                (map paramName (lambdaParams lam) ++ [lambdaIndex lam])
+                (map paramName (lambdaParams lam))
                 (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames'_ [isEmpty] $

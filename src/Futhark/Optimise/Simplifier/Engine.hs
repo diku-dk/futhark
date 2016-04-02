@@ -656,7 +656,7 @@ simplifyLambdaMaybeHoist :: MonadEngine m =>
                             Bool -> Lambda (InnerLore m)
                          -> SubExp -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
-simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w nes arrs = do
+simplifyLambdaMaybeHoist hoisting lam@(Lambda params body rettype) _w nes arrs = do
   params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
@@ -664,7 +664,6 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w nes arrs 
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   body' <-
     enterLoop $
-    bindLoopVar i w $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
     blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
@@ -682,7 +681,7 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda i params body rettype) w nes arrs 
       zipWithM_ paramWasConsumed (map paramName accparams) $ map Just nes'
     Nothing -> return ()
 
-  return $ Lambda i params' body' rettype'
+  return $ Lambda params' body' rettype'
 
 simplifyExtLambda :: MonadEngine m =>
                      ExtLambda (InnerLore m)
@@ -690,13 +689,12 @@ simplifyExtLambda :: MonadEngine m =>
                   -> [SubExp]
                   -> [(LParam (Lore m), SE.ScalExp, SE.ScalExp)]
                   -> m (ExtLambda (Lore m))
-simplifyExtLambda lam@(ExtLambda index params body rettype) w nes parbnds = do
+simplifyExtLambda lam@(ExtLambda params body rettype) _w nes parbnds = do
   params' <- mapM (simplifyParam simplify) params
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
   body' <- enterLoop $
-           bindLoopVar index w $
            bindLParams params' $
            localVtable extendSymTab $
            blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
@@ -708,7 +706,7 @@ simplifyExtLambda lam@(ExtLambda index params body rettype) w nes parbnds = do
         return ()
       accparams = take (length nes) $ drop 1 params
   zipWithM_ paramWasConsumed (map paramName accparams) nes
-  return $ ExtLambda index params' body' rettype'
+  return $ ExtLambda params' body' rettype'
   where extendSymTab vtb =
           foldl (\ vt (i,l,u) ->
                    let i_name = paramName i

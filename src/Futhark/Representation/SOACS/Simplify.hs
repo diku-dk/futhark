@@ -37,7 +37,6 @@ import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Tools
-import Futhark.Transform.Rename (renameLambda)
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
@@ -144,10 +143,6 @@ topDownRules :: (MonadBinder m,
 topDownRules = [liftIdentityMapping,
                 removeReplicateMapping,
                 removeReplicateRedomap,
-                removeIotaMapping,
-                removeIotaRedomap,
-                removeIotaReduce,
-                removeIotaStream,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
@@ -206,60 +201,6 @@ removeReplicateMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
 
 removeReplicateMapping _ _ = cannotSimplify
 
--- | Remove all arguments to the map that are iotas.
--- These can be turned into references to the index variable instead.
-removeIotaMapping :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                     TopDownRule m
-removeIotaMapping vtable (Let pat _ (Op (Map cs outersize fun arrs)))
-  | Just m <- removeIotaInput vtable fun arrs = do
-      (fun', arrs') <- m
-      letBind_ pat $ Op $ Map cs outersize fun' arrs'
-removeIotaMapping _ _ = cannotSimplify
-
--- | Like 'removeIotaMapping', but for 'Redomap'.
-removeIotaRedomap :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                     TopDownRule m
-removeIotaRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
-  | Just m <- removeIotaInput vtable foldfun arrs = do
-      (foldfun', arrs') <- m
-      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
-removeIotaRedomap _ _ = cannotSimplify
-
--- | Like 'removeIotaMapping', but for 'Reduce'.  This means that we
--- have to turn it into a 'Redomap'.
-removeIotaReduce :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                     TopDownRule m
-removeIotaReduce vtable (Let pat _ (Op (Reduce cs w comm fun input)))
-  | Just m <- removeIotaInput vtable fun arrs = do
-      (foldfun, arrs') <- m
-      redfun <- renameLambda fun
-      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun nes arrs'
-  where (nes, arrs) = unzip input
-removeIotaReduce _ _ = cannotSimplify
-
--- | Like 'removeIotaMapping', but for 'Stream'.
-removeIotaStream :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                    TopDownRule m
-removeIotaStream vtable (Let pat _ (Op (Stream cs w form lam arrs)))
-  | ([chunk_param], params) <- splitAt 1 $ extLambdaParams lam,
-    (acc_params, arr_params) <- splitAt (length params - length arrs) params,
-    (iota_params, noniota_params) <- partition isIotaParam $ zip arr_params arrs,
-    not $ null iota_params = do
-      lam_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
-        forM_ iota_params $ \(p, _) ->
-          letBindNames'_ [paramName p] $
-          PrimOp $ Iota (Var $ paramName chunk_param) $ Var $ extLambdaIndex lam
-        mapM_ addBinding $ bodyBindings $ extLambdaBody lam
-        return $ bodyResult $ extLambdaBody lam
-      let lam' = lam { extLambdaBody = lam_body
-                     , extLambdaParams = [chunk_param] <> acc_params <> map fst noniota_params
-                     }
-      letBind_ pat $ Op $ Stream cs w form lam' $ map snd noniota_params
-  where isIotaParam (_, v)
-          | Just (PrimOp Iota{}) <- ST.lookupExp v vtable = True
-          | otherwise = False
-removeIotaStream _ _ = cannotSimplify
-
 -- | Like 'removeReplicateMapping', but for 'Redomap'.
 removeReplicateRedomap :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
 removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes arrs)))
@@ -267,34 +208,6 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
       mapM_ (uncurry letBindNames') bnds
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
-
-removeIotaInput :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
-                   ST.SymbolTable lore
-                -> AST.Lambda (Lore m) -> [VName] -> Maybe (m (AST.Lambda (Lore m), [VName]))
-removeIotaInput vtable fun arrs
-  | not $ null iota_params = Just $ do
-    let (arr_params', arrs') = unzip params_and_arrs
-    fun_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf fun $ do
-      forM_ iota_params $ \(p, x) ->
-        letBindNames'_ [p] $ PrimOp $
-        BinOp (Add Int32) (Var $ lambdaIndex fun) x
-      mapM_ addBinding $ bodyBindings $ lambdaBody fun
-      return $ bodyResult $ lambdaBody fun
-    let fun' = fun { lambdaParams = acc_params <> arr_params'
-                   , lambdaBody = fun_body }
-    return (fun', arrs')
-  | otherwise = Nothing
-  where params = lambdaParams fun
-        (acc_params, arr_params) =
-          splitAt (length params - length arrs) params
-        (params_and_arrs, iota_params) =
-          partitionEithers $ zipWith isIota arr_params arrs
-
-        isIota p v
-          | Just (Iota _ x) <- asPrimOp =<< ST.lookupExp v vtable =
-              Right (paramName p, x)
-          | otherwise =
-              Left (p, v)
 
 removeReplicateInput :: Attributes lore =>
                         ST.SymbolTable lore
@@ -433,12 +346,12 @@ frobExtLambda :: (MonadBinder m, LocalScope (Lore m) m) =>
                  ST.SymbolTable (Lore m)
               -> AST.ExtLambda (Lore m)
               -> m (AST.ExtLambda (Lore m))
-frobExtLambda vtable (ExtLambda index params body rettype) = do
+frobExtLambda vtable (ExtLambda params body rettype) = do
   let bodyres = bodyResult body
       bodyenv = scopeOf $ bodyBindings body
       vtable' = foldr ST.insertLParam vtable params
   rettype' <- zipWithM (refineArrType vtable' bodyenv params) bodyres rettype
-  return $ ExtLambda index params body rettype'
+  return $ ExtLambda params body rettype'
     where refineArrType :: (MonadBinder m, LocalScope (Lore m) m) =>
                            ST.SymbolTable (Lore m)
                         -> Scope (Lore m)

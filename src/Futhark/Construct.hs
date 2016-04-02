@@ -278,13 +278,11 @@ binOpLambda :: (MonadFreshNames m, Bindable lore) =>
 binOpLambda bop t = do
   x   <- newVName "x"
   y   <- newVName "y"
-  i   <- newVName "i"
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
     res <- letSubExp "res" $ PrimOp $ BinOp bop (Var x) (Var y)
     return $ resultBody [res]
   return Lambda {
-             lambdaIndex      = i
-           , lambdaParams     = [Param x (Prim t),
+             lambdaParams     = [Param x (Prim t),
                                  Param y (Prim t)]
            , lambdaReturnType = [Prim t]
            , lambdaBody       = body

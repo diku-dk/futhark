@@ -235,18 +235,16 @@ instance PrettyLore lore => Pretty (Exp lore) where
           (valparams, valinit) = unzip val
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr lambda@(Lambda index params body rettype) =
+  ppr lambda@(Lambda params body rettype) =
     maybe id (</>) (ppLambdaLore lambda) $
     text "fn" <+> ppTuple' rettype <+>
-    parens (ppr index <> semi <+>
-            commasep (map ppr params)) <+>
+    parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
-  ppr (ExtLambda index params body rettype) =
+  ppr (ExtLambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    parens (ppr index <> semi <+>
-            commasep (map ppr params)) <+>
+    parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where

@@ -40,7 +40,6 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   let one = constant (1 :: Int32)
       num_chunks = kernelWorkgroups step_one_size
 
-  seq_lam_index <- newVName "lam_index"
   let (acc_idents, arr_idents) = splitAt (length nes) $ patternIdents pat
   step_one_pat <- basicPattern' [] <$>
                   ((++) <$>
@@ -49,11 +48,14 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
   let (_fold_chunk_param, fold_acc_params, _fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams fold_lam
 
-  fold_lam' <- kerneliseLambda (kernelElementsPerThread step_one_size) nes fold_lam
+  fold_lam' <- kerneliseLambda nes fold_lam
 
+  my_index <- newVName "my_index"
   other_index <- newVName "other_index"
-  let other_index_param = Param other_index (Prim int32)
-      reduce_lam' = reduce_lam { lambdaParams = other_index_param :
+  let my_index_param = Param my_index (Prim int32)
+      other_index_param = Param other_index (Prim int32)
+      reduce_lam' = reduce_lam { lambdaParams = my_index_param :
+                                                other_index_param :
                                                 lambdaParams reduce_lam
                                }
       params_to_arrs = zip (map paramName $ drop 1 $ lambdaParams fold_lam') arrs
@@ -70,22 +72,25 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
     (Let step_one_pat () $
      Op $ ReduceKernel cs w step_one_size comm reduce_lam' fold_lam' arrs_copies)
 
+  identity_index <- newVName "identity_index"
   chunk_size <- newVName "chunk_size"
   identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
 
   elements <- zipWithM newIdent
               (map (baseString . paramName) identity_lam_params) $
               lambdaReturnType fold_lam'
-  let chunk_size_param = Param chunk_size (Prim int32)
+  let identity_index_param = Param identity_index (Prim int32)
+      chunk_size_param = Param chunk_size (Prim int32)
       read_elements =
         [ mkLet' [] [element] $
           PrimOp $ Index [] arr [constant (0 :: Int32)]
         | (element, arr) <- zip elements $ map paramName identity_lam_params ]
       identity_body = mkBody read_elements $ map (Var . identName) elements
-      identity_lam = Lambda { lambdaParams = chunk_size_param : identity_lam_params
+      identity_lam = Lambda { lambdaParams = identity_index_param :
+                                             chunk_size_param :
+                                             identity_lam_params
                             , lambdaReturnType = lambdaReturnType reduce_lam
                             , lambdaBody = identity_body
-                            , lambdaIndex = seq_lam_index
                             }
 
   step_two_pat <- basicPattern' [] <$>
@@ -114,7 +119,6 @@ chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
 chunkLambda pat nes fold_lam = do
   chunk_size <- newVName "chunk_size"
 
-  seq_lam_index <- newVName "lam_index"
   let arr_idents = drop (length nes) $ patternIdents pat
       (fold_acc_params, fold_arr_params) =
         splitAt (length nes) $ lambdaParams fold_lam
@@ -130,7 +134,6 @@ chunkLambda pat nes fold_lam = do
     localScope (scopeOfLParams $ arr_chunk_params ++ map_arr_params) $
     doLoopMapAccumL [] (Var chunk_size) (Alias.analyseLambda fold_lam)
     nes (map paramName arr_chunk_params) (map paramName map_arr_params)
-    (Var seq_lam_index)
 
   dummys <- mapM (newIdent "dummy" . paramType) arr_chunk_params
 
@@ -150,7 +153,6 @@ chunkLambda pat nes fold_lam = do
                                  map_arr_params
                 , lambdaReturnType = seq_rt
                 , lambdaBody = seq_body
-                , lambdaIndex = seq_lam_index
                 }
   where mkArrChunkParam chunk_size arr_param =
           newParam (baseString (paramName arr_param) <> "_chunk") $
@@ -160,14 +162,10 @@ chunkLambda pat nes fold_lam = do
 -- value as parameters, bind those parameters to the neutral element
 -- instead.  Also fix the index computation.
 kerneliseLambda :: MonadFreshNames m =>
-                   SubExp -> [SubExp] -> Lambda -> m Lambda
-kerneliseLambda elements_per_thread nes lam = do
-  -- We need to play some tricks to ensure that @lambdaIndex lam@
-  -- has the right value inside the chunk loop.
-  loop_iterator <- newVName "i"
-  let compute_index =
-        mkLet' [] [Ident (lambdaIndex lam) $ Prim int32] $
-        PrimOp $ BinOp (Mul Int32) (Var loop_iterator) elements_per_thread
+                   [SubExp] -> Lambda -> m Lambda
+kerneliseLambda nes lam = do
+  thread_index <- newVName "thread_index"
+  let thread_index_param = Param thread_index $ Prim int32
       (fold_chunk_param, fold_acc_params, fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams lam
 
@@ -176,11 +174,11 @@ kerneliseLambda elements_per_thread nes lam = do
             mkLet' [] [paramIdent p] $ PrimOp $ Copy v
       mkAccInit p x = mkLet' [] [paramIdent p] $ PrimOp $ SubExp x
       acc_init_bnds = zipWith mkAccInit fold_acc_params nes
-  return lam { lambdaIndex = loop_iterator
-             , lambdaBody = insertBinding compute_index $
-                            insertBindings acc_init_bnds $
+  return lam { lambdaBody = insertBindings acc_init_bnds $
                             lambdaBody lam
-             , lambdaParams = fold_chunk_param : fold_inp_params
+             , lambdaParams = thread_index_param :
+                              fold_chunk_param :
+                              fold_inp_params
              }
 
 blockedReduction :: (MonadFreshNames m, HasScope Kernels m) =>
@@ -219,7 +217,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
 
   let pat = nonconcat_pat <> concat_pat
 
-  lam' <- kerneliseLambda (kernelElementsPerThread kernel_size) nes lam
+  lam' <- kerneliseLambda nes lam
 
   return $ Let pat () $ Op $ ChunkedMapKernel cs w kernel_size ordering lam' arrs
 
@@ -246,13 +244,18 @@ blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
             -> m ()
 blockedScan pat cs w lam input = do
   first_scan_size <- blockedKernelSize w
+  my_index <- newVName "my_index"
   other_index <- newVName "other_index"
   let num_groups = kernelWorkgroups first_scan_size
       group_size = kernelWorkgroupSize first_scan_size
       num_threads = kernelNumThreads first_scan_size
       elems_per_thread = kernelElementsPerThread first_scan_size
+      my_index_param = Param my_index (Prim int32)
       other_index_param = Param other_index (Prim int32)
-      first_scan_lam = lam { lambdaParams = other_index_param : lambdaParams lam }
+      first_scan_lam = lam { lambdaParams = my_index_param :
+                                            other_index_param :
+                                            lambdaParams lam
+                           }
 
   sequential_scan_result <-
     letTupExp "sequentially_scanned" $
@@ -323,8 +326,8 @@ blockedScan pat cs w lam input = do
 
   lam''' <- renameLambda lam
   result_map_index <- newVName "result_map_index"
-  let j = lambdaIndex lam'''
-      (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam'''
+  j <- newVName "j"
+  let (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam'''
       result_inputs = zipWith (mkKernelInput [Var j]) arr_params sequentially_scanned
 
   result_map_body <- runBodyBinder $ inScopeOf result_inputs $ do
@@ -404,8 +407,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
     flags_body
 
   unused_flag_array <- newVName "unused_flag_array"
-  let lam' = Lambda { lambdaIndex = lambdaIndex lam
-                    , lambdaParams = params
+  let lam' = Lambda { lambdaParams = params
                     , lambdaBody = body
                     , lambdaReturnType = Prim Bool : lambdaReturnType lam
                     }

@@ -160,12 +160,12 @@ inlineInBinding :: [FunDef] -> Binding -> Binding
 inlineInBinding inlcallees (Let pat () e) = Let pat () $ mapExp (inliner inlcallees) e
 
 inlineInLambda :: [FunDef] -> Lambda -> Lambda
-inlineInLambda inlcallees (Lambda i params body ret) =
-  Lambda i params (inlineInBody inlcallees body) ret
+inlineInLambda inlcallees (Lambda params body ret) =
+  Lambda params (inlineInBody inlcallees body) ret
 
 inlineInExtLambda :: [FunDef] -> ExtLambda -> ExtLambda
-inlineInExtLambda inlcallees (ExtLambda i params body ret) =
-  ExtLambda i params (inlineInBody inlcallees body) ret
+inlineInExtLambda inlcallees (ExtLambda params body ret) =
+  ExtLambda params (inlineInBody inlcallees body) ret
 
 -- | @removeDeadFunctions prog@ removes the functions that are unreachable from
 -- the main function from the program.
