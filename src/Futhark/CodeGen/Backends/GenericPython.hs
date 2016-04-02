@@ -338,7 +338,7 @@ unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
                                  name <- newVName $ baseString vname <> "_" <> space
                                  let name' = Var $ pretty name
                                  let bt'' = compilePrimType bt
-                                 let emptyArray = Call "empty"
+                                 let emptyArray = Call "np.empty"
                                                   [Arg $ Tuple $ map compileDim dims,
                                                    ArgKeyword "dtype" (Var bt'')]
                                  stm $ Assign name' emptyArray
@@ -377,29 +377,56 @@ readInput (Imp.ArrayValue vname bt dims) =
       stdin = Var "sys.stdin"
   in Assign vname' $ simpleCall "read_array" [stdin, reader', rank', bt']
 
-writeOutput :: Imp.ValueDecl -> PyStmt
-writeOutput (Imp.ScalarValue bt vname) =
-  let name = Var $ pretty vname
-  in case bt of
-    FloatType Float32 -> Exp $ simpleCall "print"
-                         [BinaryOp "%" (StringLiteral "%ff32") name]
-    FloatType Float64 -> Exp $ simpleCall "print"
-                         [BinaryOp "%" (StringLiteral "%ff64") name]
-    IntType Int8 -> Exp $ simpleCall "print"
-                    [BinaryOp "%" (StringLiteral "%di8") name]
-    IntType Int16 -> Exp $ simpleCall "print"
-                     [BinaryOp "%" (StringLiteral "%di16") name]
-    IntType Int32 -> Exp $ simpleCall "print"
-                     [BinaryOp "%" (StringLiteral "%di32") name]
-    IntType Int64 -> Exp $ simpleCall "print"
-                     [BinaryOp "%" (StringLiteral "%di64") name]
-    _ -> Exp $ simpleCall "print" [name]
 
-writeOutput (Imp.ArrayValue vname bt _) =
-  let name = Var $ pretty vname
-      bt' = StringLiteral $ pretty bt
-      stdout = Var "sys.stdout"
-  in Exp $ simpleCall "write_array" [stdout, name, bt']
+printPrimStm :: PyExp -> PrimType -> PyStmt
+printPrimStm val t =
+  case t of
+    IntType Int8 -> p "%di8"
+    IntType Int16 -> p "%di16"
+    IntType Int32 -> p "%di32"
+    IntType Int64 -> p "%di64"
+    Bool -> If val
+      [Exp $ simpleCall "sys.stdout.write" [StringLiteral "True"]]
+      [Exp $ simpleCall "sys.stdout.write" [StringLiteral "False"]]
+    Cert -> Exp $ simpleCall "sys.stdout.write" [StringLiteral "Checked"]
+    FloatType Float32 -> p "%.6ff32"
+    FloatType Float64 -> p "%.6ff64"
+  where p s =
+          Exp $ simpleCall "sys.stdout.write"
+          [BinaryOp "%" (StringLiteral s) val]
+
+printStm :: Imp.ValueDecl -> CompilerM op s PyStmt
+printStm (Imp.ScalarValue bt name) =
+  return $ printPrimStm (Var $ textual name) bt
+printStm (Imp.ArrayValue name bt []) =
+  return $ printPrimStm (Var $ textual name) bt
+printStm (Imp.ArrayValue mem bt (_:shape)) = do
+  v <- newVName "print_elem"
+  first <- newVName "print_first"
+  let size = simpleCall "np.product" [Var $ pretty mem ++ ".shape"]
+      emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
+  printelem <- printStm $ Imp.ArrayValue v bt shape
+  return $ If (BinaryOp "==" size (Constant (value (0::Int32))))
+    [puts emptystr]
+    [Assign (Var $ pretty first) $ Var "True",
+     puts "[",
+     For (pretty v) (Var $ pretty mem) [
+        If (simpleCall "not" [Var $ pretty first])
+        [puts ", "] [],
+        printelem,
+        Assign (Var $ pretty first) $ Var "False"
+    ],
+    puts "]"]
+    where ppArrayType :: PrimType -> Int -> String
+          ppArrayType t 0 = pretty t
+          ppArrayType t n = "[" ++ ppArrayType t (n-1) ++ "]"
+
+          puts s = Exp $ simpleCall "sys.stdout.write" [StringLiteral s]
+
+printResult :: [Imp.ValueDecl] -> CompilerM op s [PyStmt]
+printResult vs = fmap concat $ forM vs $ \v -> do
+  p <- printStm v
+  return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
 compileEntryFun :: (Name, Imp.Function op)
                 -> CompilerM op s PyStmt
@@ -424,8 +451,8 @@ compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) 
 callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
              -> CompilerM op s PyStmt
 callEntryFun pre_timing options (fname, Imp.Function _ _ _ _ decl_outputs decl_args) = do
+  str_output <- printResult decl_outputs
   let str_input = map readInput decl_args
-      str_output = map writeOutput decl_outputs
       decl_output_names = tupleOrSingle $ fmap Var (map valueDeclName decl_outputs)
       decl_input_names = fmap Var (map valueDeclName decl_args)
 
