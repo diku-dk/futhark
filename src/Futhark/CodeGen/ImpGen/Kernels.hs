@@ -221,7 +221,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam nes _) = do
+  (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam _) = do
 
     local_id <- newVName "local_id"
     group_id <- newVName "group_id"
@@ -231,8 +231,9 @@ kernelCompiler
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
 
-    let fold_lparams = lambdaParams fold_lam
-        (reduce_targets, arr_targets) = splitAt (length nes) dest
+    let num_reds = length $ lambdaReturnType reduce_lam
+        fold_lparams = lambdaParams fold_lam
+        (reduce_targets, arr_targets) = splitAt num_reds dest
         (fold_chunk_param, _) =
           partitionChunkedLambdaParameters $ lambdaParams fold_lam
 
@@ -240,7 +241,7 @@ kernelCompiler
         (other_index_param, actual_reduce_params) =
           partitionChunkedLambdaParameters $ lambdaParams reduce_lam
         (reduce_acc_params, reduce_arr_params) =
-          splitAt (length nes) actual_reduce_params
+          splitAt num_reds actual_reduce_params
 
         offset = paramName other_index_param
 
