@@ -88,8 +88,8 @@ transformBinding (Let (Pattern [] pat_elems) ()
               fail $ "Invalid attribute for let-binding of ChunkedMapKernel return: " ++ pretty attr
 
 transformBinding (Let (Pattern [] pat_elems) ()
-                  e@(Op (Inner (ReduceKernel _ _ size _ _ _ nes _))))
-  | (red_pat_elems, map_pat_elems) <- splitAt (length nes) pat_elems,
+                  e@(Op (Inner (ReduceKernel _ _ size _ redfun _ _))))
+  | (red_pat_elems, map_pat_elems) <- splitAt (length $ lambdaReturnType redfun) pat_elems,
     not $ null map_pat_elems = do
       (alloc_bnds, map_pat_elems', tr_bnds) <-
         unzip3 <$> mapM transposePatElem map_pat_elems

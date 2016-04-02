@@ -78,7 +78,7 @@ transformExp (Op (Inner (ChunkedMapKernel cs w kernel_size ordering lam arrs)))
   where num_threads = kernelNumThreads kernel_size
         bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
 
-transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam nes arrs)))
+transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam arrs)))
   -- Extract allocations from the lambdas.
   | Right (red_lam_body', red_lam_thread_allocs) <-
       extractKernelAllocations bound_in_red_lam $ lambdaBody red_lam,
@@ -95,7 +95,7 @@ transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam nes
       red_lam' = red_lam { lambdaBody = red_lam_body'' }
       fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
   return (red_alloc_bnds <> fold_alloc_bnds,
-          Op $ Inner $ ReduceKernel cs w kernel_size comm red_lam' fold_lam' nes arrs)
+          Op $ Inner $ ReduceKernel cs w kernel_size comm red_lam' fold_lam' arrs)
   where num_threads = kernelNumThreads kernel_size
 
         bound_in_red_lam = HS.fromList $ HM.keys $ scopeOf red_lam

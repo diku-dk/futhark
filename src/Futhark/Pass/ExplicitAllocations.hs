@@ -566,7 +566,7 @@ allocInExp (Op (ChunkedMapKernel cs w size o lam arrs)) = do
           lam arr_summaries
   return $ Op $ Inner $ ChunkedMapKernel cs w size o lam' arrs
 
-allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam nes arrs)) = do
+allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam arrs)) = do
   arr_summaries <- mapM lookupMemBound arrs
   fold_lam' <- allocInFoldLambda
                comm
@@ -574,7 +574,7 @@ allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam nes arrs)) = do
                (kernelNumThreads size)
                fold_lam arr_summaries
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
-  return $ Op $ Inner $ ReduceKernel cs w size comm red_lam' fold_lam' nes arrs
+  return $ Op $ Inner $ ReduceKernel cs w size comm red_lam' fold_lam' arrs
 
 allocInExp (Op (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
