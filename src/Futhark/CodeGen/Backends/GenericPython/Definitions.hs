@@ -520,10 +520,4 @@ def write_chars(f, arr):
     for x in arr:
       f.write(x.decode())
     f.write("\"")
-
-def write_array(f, arr, bt):
-    if arr.size == 0:
-        print("empty({})".format(bt))
-    else:
-        print(arr.tolist())
 |]
