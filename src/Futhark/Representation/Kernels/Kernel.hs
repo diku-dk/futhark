@@ -431,6 +431,7 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
     chunk_param : _
       | Prim (IntType Int32) <- paramType chunk_param -> do
           let seq_args = (Prim int32, mempty) :
+                         (Prim int32, mempty) :
                          [ (t `arrayOfRow` Var (paramName chunk_param), als)
                          | (t, als) <- arrargs ]
           TC.checkLambda seqfun seq_args
@@ -439,7 +440,7 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
 
   let asArg t = (t, mempty)
       redt = lambdaReturnType parfun
-  TC.checkLambda parfun $ map asArg $ Prim int32 : fold_acc_ret ++ fold_acc_ret
+  TC.checkLambda parfun $ map asArg $ Prim int32 : Prim int32 : fold_acc_ret ++ fold_acc_ret
   unless (redt == fold_acc_ret) $
     TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple redt ++
           ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
@@ -449,10 +450,10 @@ typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
   TC.require [Prim int32] w
   typeCheckKernelSize kernel_size
   let (nes, arrs) = unzip input
-      other_index_arg = (Prim int32, mempty)
+      index_arg = (Prim int32, mempty)
   arrargs <- TC.checkSOACArrayArgs w arrs
   accargs <- mapM TC.checkArg nes
-  TC.checkLambda fun $ other_index_arg : accargs ++ arrargs
+  TC.checkLambda fun $ index_arg : index_arg : accargs ++ arrargs
   let startt      = map TC.argType accargs
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
@@ -477,6 +478,7 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
     chunk_param : _
       | Prim (IntType Int32) <- paramType chunk_param -> do
           let args = (Prim int32, mempty) :
+                     (Prim int32, mempty) :
                      [ (t `arrayOfRow` Var (paramName chunk_param), als)
                      | (t, als) <- arrargs ]
           TC.checkLambda fun args

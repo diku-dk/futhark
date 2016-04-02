@@ -472,7 +472,7 @@ toExp (Redomap cs w comm l1 l2 es as) =
   Op <$> (Futhark.Redomap cs w comm l1 l2 es <$> inputsToSubExps as)
 toExp (Stream cs w form lam inps) = Op <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
-      extlam = ExtLambda (lambdaIndex lam) (lambdaParams lam) (lambdaBody lam) extrtp
+      extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
   inpexp <- inputsToSubExps inps
   return $ Futhark.Stream cs w form extlam inpexp
 
@@ -504,8 +504,7 @@ fromExp (Op (Futhark.Stream cs w form extlam as)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
   if length mrtps == length rtps
-  then Right <$> do let lam = Lambda (extLambdaIndex extlam)
-                                     (extLambdaParams extlam)
+  then Right <$> do let lam = Lambda (extLambdaParams extlam)
                                      (extLambdaBody extlam)
                                      rtps
                     Stream cs w form lam <$> traverse varInput as
@@ -523,11 +522,7 @@ soacToStream soac = do
       (cs, lam, inps) = (certificates soac, lambda soac, inputs soac)
       w = width soac
   lam'     <- renameLambda lam
-  i <- newVName "stream_i"
-  j <- newVName "stream_j"
-  let compute_index =
-        mkLet' [] [Ident (lambdaIndex lam') $ Prim int32] $
-        PrimOp $ BinOp (Add Int32) (Futhark.Var i) (Futhark.Var j)
+
   -- Treat each SOAC case individually:
   case soac of
     -- Map(f,a) => is translated in strem's body to:
@@ -538,10 +533,7 @@ soacToStream soac = do
       -- the chunked-outersize of the array result and input types
           loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
           lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
-          maplam = lam' { lambdaIndex = j
-                        , lambdaBody =
-                            insertBinding compute_index $ lambdaBody lam'
-                        }
+          maplam = lam'
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
@@ -549,7 +541,7 @@ soacToStream soac = do
           insbnd = mkLet' [] strm_resids $ Op insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
-          strmlam= Lambda i strmpar strmbdy loutps
+          strmlam= Lambda strmpar strmbdy loutps
       -- map(f,a) creates a stream with NO accumulators
       return (Stream cs w (MapLike Disorder) strmlam inps, [])
     -- Scan(+,nes,a) => is translated in strem's body to:
@@ -600,7 +592,7 @@ soacToStream soac = do
           strmbdy= mkBody (insbnd:mapbnd:outszm1bnd:lelbnds++addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
-          strmlam= Lambda i strmpar strmbdy (accrtps++loutps)
+          strmlam= Lambda strmpar strmbdy (accrtps++loutps)
       return (Stream cs w (Sequential nes) strmlam inps,
               map paramIdent inpacc_ids)
     -- Reduce(+,nes,a) => is translated in strem's body to:
@@ -628,7 +620,7 @@ soacToStream soac = do
       let (addaccbnd,addaccres) = (bodyBindings addaccbdy, bodyResult addaccbdy)
           strmbdy= mkBody (insbnd : addaccbnd) addaccres
           strmpar= chunk_param:inpacc_ids++strm_inpids
-          strmlam= Lambda i strmpar strmbdy accrtps
+          strmlam= Lambda strmpar strmbdy accrtps
       lam0 <- renameLambda lam
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
     -- Redomap(+,lam,nes,a) => is translated in strem's body to:
@@ -643,10 +635,7 @@ soacToStream soac = do
           loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
           lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
           -- the lambda with proper index
-          foldlam = lam' { lambdaIndex = j
-                         , lambdaBody =
-                             insertBinding compute_index $ lambdaBody lam'
-                         }
+          foldlam = lam'
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
       strm_inpids <- mapM (newParam "inp") lintps
@@ -663,7 +652,7 @@ soacToStream soac = do
           strmbdy= mkBody (insbnd : addaccbnd) $
                           addaccres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
-          strmlam= Lambda i strmpar strmbdy (accrtps++loutps)
+          strmlam= Lambda strmpar strmbdy (accrtps++loutps)
       lam0 <- renameLambda lamin
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
@@ -672,7 +661,6 @@ soacToStream soac = do
     where mkMapPlusAccLam :: (MonadFreshNames m, Bindable lore)
                           => [SubExp] -> Lambda lore -> m (Lambda lore)
           mkMapPlusAccLam accs plus = do
-            i <- newVName "map_plus_i"
             let lampars = lambdaParams plus
                 (accpars, rempars) = (  take (length accs) lampars,
                                         drop (length accs) lampars  )
@@ -683,7 +671,7 @@ soacToStream soac = do
                 newlambdy = Body (bodyLore plus_bdy)
                                  (parbnds ++ bodyBindings plus_bdy)
                                  (bodyResult plus_bdy)
-            renameLambda $ Lambda i rempars newlambdy $ lambdaReturnType plus
+            renameLambda $ Lambda rempars newlambdy $ lambdaReturnType plus
 
           mkPlusBnds :: (MonadFreshNames m, Bindable lore)
                      => Lambda lore -> [SubExp] -> m (Body lore)

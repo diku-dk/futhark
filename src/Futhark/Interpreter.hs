@@ -643,12 +643,8 @@ evalSOAC (Stream _ w form elam arrs) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
-  let ExtLambda i elam_params elam_body elam_rtp = elam
-      bind_i = (Ident i (Prim int32),
-                BindVar,
-                PrimVal $ IntValue $ Int32Value 0)
-  let fun funargs = binding (bind_i :
-                             zip3 (map paramIdent elam_params)
+  let ExtLambda elam_params elam_body elam_rtp = elam
+  let fun funargs = binding (zip3 (map paramIdent elam_params)
                                   (repeat BindVar)
                                   funargs) $
                     evalBody elam_body
@@ -658,32 +654,32 @@ evalSOAC (Stream _ w form elam arrs) = do
   return $ valueShapeContext elam_rtp vs ++ vs
 
 evalSOAC (Map _ w fun arrexps) = do
-  vss' <- zipWithM (applyLambda fun) [0..] =<< soacArrays w arrexps
+  vss' <- mapM (applyLambda fun) =<< soacArrays w arrexps
   arrays (lambdaReturnType fun) vss'
 
 evalSOAC (Reduce _ w _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
-  let foldfun acc (i, x) = applyLambda fun i $ acc ++ x
-  foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
+  let foldfun acc x = applyLambda fun $ acc ++ x
+  foldM foldfun startaccs =<< soacArrays w arrexps
 
 evalSOAC (Scan _ w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   (acc, vals') <- foldM scanfun (startvals, []) =<<
-                  (zip [0..] <$> soacArrays w arrexps)
+                  soacArrays w arrexps
   arrays (map valueType acc) $ reverse vals'
-    where scanfun (acc, l) (i,x) = do
-            acc' <- applyLambda fun i $ acc ++ x
+    where scanfun (acc, l) x = do
+            acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
 evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   if res_len == acc_len
-  then foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
+  then foldM foldfun startaccs =<< soacArrays w arrexps
   else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
           (acc_res, arr_res) <- foldM foldfun' startaccs' =<<
-                                (zip [0..] <$> soacArrays w arrexps)
+                                soacArrays w arrexps
           arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
           return $ acc_res ++ arr_res_fut
     where
@@ -691,9 +687,9 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
         res_len        = length lam_ret_tp
         acc_len        = length accexp
         lam_ret_arr_tp = drop acc_len lam_ret_tp
-        foldfun  acc (i,x) = applyLambda innerfun i $ acc ++ x
-        foldfun' (acc,arr) (i,x) = do
-            res_lam <- applyLambda innerfun i $ acc ++ x
+        foldfun  acc x = applyLambda innerfun $ acc ++ x
+        foldfun' (acc,arr) x = do
+            res_lam <- applyLambda innerfun $ acc ++ x
             let res_acc = take acc_len res_lam
                 res_arr = drop acc_len res_lam
                 acc_arr = zipWith (:) res_arr arr
@@ -704,15 +700,12 @@ evalFuncall fname args = do
   fun <- lookupFun fname
   fun args
 
-applyLambda :: Lambda -> Int32 -> [Value] -> FutharkM [Value]
-applyLambda (Lambda i params body rettype) j args = do
-  v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) args) $
+applyLambda :: Lambda -> [Value] -> FutharkM [Value]
+applyLambda (Lambda params body rettype) args = do
+  v <- binding (zip3 (map paramIdent params) (repeat BindVar) args) $
        evalBody body
   checkReturnShapes (staticShapes rettype) v
   return v
-  where bind_i = (Ident i $ Prim int32,
-                 BindVar,
-                 PrimVal $ value j)
 
 checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM ()
 checkReturnShapes = zipWithM_ checkShape

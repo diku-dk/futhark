@@ -248,8 +248,7 @@ type Exp = ExpT
 
 -- | Anonymous function for use in a SOAC.
 data LambdaT lore =
-  Lambda { lambdaIndex      :: VName
-         , lambdaParams     :: [LParam lore]
+  Lambda { lambdaParams     :: [LParam lore]
          , lambdaBody       :: BodyT lore
          , lambdaReturnType :: [Type]
          }
@@ -263,8 +262,7 @@ type Lambda = LambdaT
 -- | Anonymous function for use in a SOAC, with an existential return
 -- type.
 data ExtLambdaT lore =
-  ExtLambda { extLambdaIndex      :: VName
-            , extLambdaParams     :: [LParam lore]
+  ExtLambda { extLambdaParams     :: [LParam lore]
             , extLambdaBody       :: BodyT lore
             , extLambdaReturnType :: [ExtType]
             }

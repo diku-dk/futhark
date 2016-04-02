@@ -43,8 +43,7 @@ internaliseMapLambda internaliseLambda asserting lam args = do
   bindMapShapes inner_shapes shapefun args outer_shape
   body' <- bindingParamTypes params $
            ensureResultShape asserting (srclocOf lam) rettype' body
-  i <- newVName "i"
-  return $ I.Lambda i params body' rettype'
+  return $ I.Lambda params body' rettype'
 
 makeShapeFun :: [I.LParam] -> I.Body -> Int
              -> InternaliseM I.Lambda
@@ -55,8 +54,7 @@ makeShapeFun params body n = do
   -- we create a substitute non-unique parameter, and insert a
   -- copy-binding in the body of the function.
   (params', copybnds) <- nonuniqueParams params
-  i <- newVName "i"
-  return $ I.Lambda i params' (insertBindings copybnds body) rettype
+  return $ I.Lambda params' (insertBindings copybnds body) rettype
   where rettype = replicate n $ I.Prim int32
 
 bindMapShapes :: [I.Ident] -> I.Lambda -> [I.SubExp] -> SubExp
@@ -94,10 +92,7 @@ internaliseFoldLambda internaliseLambda asserting lam acctypes arrtypes = do
   -- reshape().
   body' <- bindingParamTypes params $
            ensureResultShape asserting (srclocOf lam) rettype' body
-
-  i <- newVName "i"
-
-  return $ I.Lambda i params body' rettype'
+  return $ I.Lambda params body' rettype'
 
 
 internaliseRedomapInnerLambda :: InternaliseLambda
@@ -147,8 +142,7 @@ internaliseRedomapInnerLambda internaliseLambda asserting lam nes arr_args = do
   -- finally, place assertions and return result
   body' <- bindingParamTypes params $
            ensureResultShape asserting (srclocOf lam) (acctype'++rettypearr') body
-  i <- newVName "i"
-  return $ I.Lambda i params body' (acctype'++rettypearr')
+  return $ I.Lambda params body' (acctype'++rettypearr')
 
 internaliseStreamLambda :: InternaliseLambda
                         -> (InternaliseM Certificates -> InternaliseM Certificates)
@@ -202,8 +196,7 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
                 reses1 <- zipWithM assertProperShape acctype' lamacc_res
                 reses2 <- zipWithM assertProperShape arrtype' lamarr_res
                 return $ resultBody $ reses1 ++ reses2
-  i <- newVName "i"
-  return $ I.ExtLambda i params body' $
+  return $ I.ExtLambda params body' $
             staticShapes acctypes ++ lam_arr_tps
 
 -- Given @n@ lambdas, this will return a lambda that returns an
@@ -222,8 +215,7 @@ internalisePartitionLambdas internaliseLambda lams args = do
   let params' = [ I.Param name t
                 | I.Ident name t <- params]
   body <- mkCombinedLambdaBody params 0 lams'
-  i <- newVName "i"
-  return $ I.Lambda i params' body [I.Prim int32]
+  return $ I.Lambda params' body [I.Prim int32]
   where mkCombinedLambdaBody :: [I.Ident]
                              -> Int32
                              -> [([I.LParam], I.Body)]

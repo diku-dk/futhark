@@ -365,7 +365,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askScope
   let env = KernelEnv { kernelNest =
                         singleNesting (Nesting mempty $
-                                       MapNesting pat cs w (lambdaIndex lam) $
+                                       MapNesting pat cs w $
                                        zip (lambdaParams lam) arrs)
                       , kernelScope =
                         types <> scopeForKernels (scopeOf lam)
@@ -468,7 +468,7 @@ mapNesting pat cs w lam arrs = local $ \env ->
       , kernelScope = kernelScope env <> scopeForKernels (scopeOf lam)
       }
   where nest = Nesting mempty $
-               MapNesting pat cs w (lambdaIndex lam) $
+               MapNesting pat cs w $
                zip (lambdaParams lam) arrs
 
 unbalancedLambda :: Lambda -> Bool
@@ -546,7 +546,6 @@ leavingNesting (MapLoop cs w lam arrs) acc =
              lam' = Lambda { lambdaBody = body
                            , lambdaReturnType = map rowType $ patternTypes pat
                            , lambdaParams = used_params
-                           , lambdaIndex = lambdaIndex lam
                            }
          in addSOACtoKernel pat (Map cs w lam' used_arrs)
             acc' { kernelBindings = [] }
