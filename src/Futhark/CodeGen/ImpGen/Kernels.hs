@@ -601,14 +601,18 @@ kernelCompiler
 
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
-expCompiler target (PrimOp (Iota n x)) = do
+expCompiler target (PrimOp (Iota n x s)) = do
   i <- newVName "i"
+  b <- newVName "b"
   v <- newVName "v"
   global_thread_index <- newVName "global_thread_index"
-  let bnd = Let (Pattern [] [PatElem v BindVar $ Scalar int32]) () $
-            PrimOp $ BinOp (Add Int32) (Var i) x
+  let bnd_b = Let (Pattern [] [PatElem b BindVar $ Scalar int32]) () $
+              PrimOp $ BinOp (Mul Int32) s $ Var i
+      bnd_v = Let (Pattern [] [PatElem v BindVar $ Scalar int32]) () $
+              PrimOp $ BinOp (Add Int32) (Var b) x
   kernelCompiler target $
-    MapKernel [] n global_thread_index [(i,n)] [] [(Prim int32,[0])] (Body () [bnd] [Var v])
+    MapKernel [] n global_thread_index [(i,n)] [] [(Prim int32,[0])]
+    (Body () [bnd_b, bnd_v] [Var v])
   return ImpGen.Done
 
 expCompiler target (PrimOp (Replicate n se)) = do

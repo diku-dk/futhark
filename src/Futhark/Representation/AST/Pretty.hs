@@ -193,7 +193,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
-  ppr (Iota e x) = text "iota" <> apply [ppr e, ppr x]
+  ppr (Iota e x s) = text "iota" <> apply [ppr e, ppr x, ppr s]
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   ppr (Scratch t shape) =

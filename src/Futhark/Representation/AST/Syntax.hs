@@ -193,8 +193,8 @@ data PrimOp lore
   -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.
-  | Iota SubExp SubExp
-  -- ^ @iota(n, x) = [x,x+1,..,x+n-1]@
+  | Iota SubExp SubExp SubExp
+  -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@
   | Replicate SubExp SubExp
   -- ^ @replicate(3,1) = [1, 1, 1]@
   | Scratch PrimType [SubExp]

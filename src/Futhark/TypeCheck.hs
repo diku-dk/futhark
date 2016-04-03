@@ -742,9 +742,10 @@ checkPrimOp (Index cs ident idxes) = do
     bad $ IndexingError (arrayRank vt) (length idxes)
   mapM_ (require [Prim int32]) idxes
 
-checkPrimOp (Iota e x) = do
+checkPrimOp (Iota e x s) = do
   require [Prim int32] e
   require [Prim int32] x
+  require [Prim int32] s
 
 checkPrimOp (Replicate countexp valexp) = do
   require [Prim int32] countexp

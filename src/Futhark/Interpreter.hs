@@ -512,13 +512,16 @@ evalPrimOp (Index _ ident idxs) = do
                         bt resshape]
     _ -> bad $ TypeError "evalPrimOp Index: ident is not an array"
 
-evalPrimOp (Iota e x) = do
+evalPrimOp (Iota e x s) = do
   v1 <- evalSubExp e
   v2 <- evalSubExp x
-  case (v1, v2) of
-    (PrimVal (IntValue (Int32Value e')), PrimVal (IntValue (Int32Value x')))
+  v3 <- evalSubExp s
+  case (v1, v2, v3) of
+    (PrimVal (IntValue (Int32Value e')),
+     PrimVal (IntValue (Int32Value x')),
+     PrimVal (IntValue (Int32Value s')))
       | e' >= 0    ->
-        return [ArrayVal (listArray (0,fromIntegral e'-1) $ map value [x'..x'+e'-1])
+        return [ArrayVal (listArray (0,fromIntegral e'-1) $ map value [x',x'+s'..x'+(e'-1)*s'])
                 int32 [fromIntegral e']]
       | otherwise ->
         bad $ NegativeIota $ fromIntegral x'
