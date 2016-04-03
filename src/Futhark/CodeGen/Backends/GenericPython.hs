@@ -226,15 +226,14 @@ compileProg as_module imports defines ops userstate pre_timing options prog@(Imp
     pretty (PyProg $ imports ++ [Import "argparse" Nothing] ++ defines ++ prog' ++ maybe_maincall)
   where compileProg' = do
           definitions <- mapM compileFunc funs
-          entry_points <- mapM compileEntryFun $
-                          filter (Imp.functionEntry . snd) funs
-          maincall <-
-            if as_module then return Pass
-            else case lookup defaultEntryPoint funs of
+          if as_module then do
+            entry_points <- mapM compileEntryFun $ filter (Imp.functionEntry . snd) funs
+            return (map FunDef $ definitions ++ entry_points, Pass)
+          else do
+            maincall <- case lookup defaultEntryPoint funs of
               Nothing   -> fail "No main function"
               Just func -> callEntryFun pre_timing options (defaultEntryPoint, func)
-
-          return (map FunDef $ definitions ++ entry_points, maincall)
+            return (map FunDef definitions, maincall)
 
 compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
@@ -428,12 +427,12 @@ printResult vs = fmap concat $ forM vs $ \v -> do
   p <- printStm v
   return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
-compileEntryFun :: (Name, Imp.Function op)
-                -> CompilerM op s PyFunDef
-compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
+prepareEntry :: (Name, Imp.Function op)
+             -> CompilerM op s
+                (String, [String], [PyStmt], [PyStmt], [PyStmt], [PyExp])
+prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
-      ret = Return $ tupleOrSingle $ map (Var . valueDeclName) decl_outputs
       hashSizeInput = hashSizeVars inputs
       hashSizeOutput = hashSizeVars outputs
       hashSpaceInput = hashSpace inputs
@@ -444,27 +443,38 @@ compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) 
 
   let inputArgs = map (pretty . Imp.paramName) inputs
       funCall = simpleCall (futharkFun . nameToString $ fname) (fmap Var inputArgs)
-      body' = prepareIn ++ [Assign funTuple funCall] ++ prepareOut
+      call = [Assign funTuple funCall]
+      res = map (Var . valueDeclName) decl_outputs
 
-  return $ Def (nameToString fname) (map valueDeclName decl_args) (body'++[ret])
+  return (nameToString fname, map valueDeclName decl_args,
+          prepareIn, call, prepareOut,
+          res)
+
+compileEntryFun :: (Name, Imp.Function op)
+                -> CompilerM op s PyFunDef
+compileEntryFun entry = do
+  (fname', params, prepareIn, body, prepareOut, res) <- prepareEntry entry
+  let ret = Return $ tupleOrSingle res
+  return $ Def fname' params $
+    prepareIn ++ body ++ prepareOut ++ [ret]
 
 callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
              -> CompilerM op s PyStmt
-callEntryFun pre_timing options (fname, Imp.Function _ _ _ _ decl_outputs decl_args) = do
-  str_output <- printResult decl_outputs
-  let str_input = map readInput decl_args
-      decl_output_names = tupleOrSingle $ fmap Var (map valueDeclName decl_outputs)
-      decl_input_names = fmap Var (map valueDeclName decl_args)
+callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ decl_outputs decl_args) = do
+  (_, _, prepareIn, body, prepareOut, _) <- prepareEntry entry
 
-      callmain = simpleCall (nameToString fname) decl_input_names
+  let str_input = map readInput decl_args
+
       exitcall = [Exp $ simpleCall "sys.exit" [Field (StringLiteral "Assertion.{} failed") "format(e)"]]
       except' = Catch (Var "AssertionError") exitcall
-      main_with_timing =
-        addTiming $ Assign decl_output_names callmain : pre_timing
+      main_with_timing = addTiming $ body ++ pre_timing
       trys = Try main_with_timing [except']
+
+  str_output <- printResult decl_outputs
+
   return $
     If (BinaryOp "==" (Var "__name__") (StringLiteral "__main__"))
-    (parse_options ++ str_input ++ [trys] ++ str_output)
+    (parse_options ++ str_input ++ prepareIn ++ [trys] ++ prepareOut ++ str_output)
     []
   where parse_options =
           Assign (Var "runtime_file") None :
