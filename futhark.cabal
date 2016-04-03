@@ -45,7 +45,8 @@ Library
                  monomorphic >= 0.0.3,
                  equational-reasoning >= 0.0.2,
                  raw-strings-qq,
-                 neat-interpolation < 0.3
+                 neat-interpolation < 0.3,
+                 file-embed
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
