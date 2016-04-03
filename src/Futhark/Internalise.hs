@@ -517,7 +517,8 @@ internaliseExp _ E.Stream{} =
 
 internaliseExp desc (E.Iota e _) = do
   e' <- internaliseExp1 "n" e
-  letTupExp' desc $ I.PrimOp $ I.Iota e' $ constant (0::Int32)
+  letTupExp' desc $ I.PrimOp $
+    I.Iota e' (constant (0::Int32)) (constant (1::Int32))
 
 internaliseExp _ (E.Literal v _) =
   case internaliseValue v of

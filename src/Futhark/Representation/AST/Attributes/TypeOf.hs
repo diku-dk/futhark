@@ -88,7 +88,7 @@ primOpType (ConvOp conv _) =
 primOpType (Index _ ident idx) =
   result <$> lookupType ident
   where result t = [stripArray (length idx) t]
-primOpType (Iota n _) =
+primOpType (Iota n _ _) =
   pure [arrayOf (Prim $ IntType Int32) (Shape [n]) NoUniqueness]
 primOpType (Replicate ne e) =
   result <$> subExpType e

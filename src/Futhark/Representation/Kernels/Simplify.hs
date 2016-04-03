@@ -26,8 +26,7 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.MonadFreshNames
-import Futhark.Binder.Class
-import Futhark.Construct
+import Futhark.Tools
 import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
 import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
@@ -134,6 +133,7 @@ topDownRules :: (MonadBinder m,
 topDownRules = [removeUnusedKernelInputs
                , simplifyKernelInputs
                , removeInvariantKernelOutputs
+               , fuseReduceIota
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -224,3 +224,48 @@ removeDeadKernelOutputs (_, used) (Let pat _ (Op (MapKernel cs w index ispace in
   where pats_rets_and_ses = zip3 (patternValueElements pat) returns $ bodyResult body
         usedOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
 removeDeadKernelOutputs _ _ = cannotSimplify
+
+fuseReduceIota :: (LocalScope (Lore m) m,
+                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                  TopDownRule m
+fuseReduceIota vtable (Let pat _ (Op (ReduceKernel cs w size comm redlam foldlam arrs)))
+  | not $ null iota_params = do
+      fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf foldlam $ do
+        case comm of
+          Noncommutative -> do
+            start_offset <- letSubExp "iota_start_offset" $
+              PrimOp $ BinOp (Mul Int32) (Var thread_index) elems_per_thread
+            forM_ iota_params $ \(p, x) -> do
+              start <- letSubExp "iota_start" $
+                PrimOp $ BinOp (Add Int32) start_offset x
+              letBindNames'_ [p] $
+                PrimOp $ Iota (Var $ paramName chunk_param) start $
+                constant (1::Int32)
+          Commutative ->
+            forM_ iota_params $ \(p, x) -> do
+              start <- letSubExp "iota_start" $
+                PrimOp $ BinOp (Add Int32) (Var thread_index) x
+              letBindNames'_ [p] $
+                PrimOp $ Iota (Var $ paramName chunk_param) start
+                num_threads
+        mapM_ addBinding $ bodyBindings $ lambdaBody foldlam
+        return $ bodyResult $ lambdaBody foldlam
+      let (arr_params', arrs') = unzip params_and_arrs
+          foldlam' = foldlam { lambdaBody = fold_body
+                             , lambdaParams = Param thread_index (paramAttr chunk_param) :
+                                              chunk_param :
+                                              arr_params'
+                             }
+      letBind_ pat $ Op $ ReduceKernel cs w size comm redlam foldlam' arrs'
+  where elems_per_thread = kernelElementsPerThread size
+        num_threads = kernelNumThreads size
+        (thread_index, chunk_param, arr_params) =
+          partitionChunkedKernelLambdaParameters $ lambdaParams foldlam
+        (params_and_arrs, iota_params) =
+          partitionEithers $ zipWith isIota arr_params arrs
+        isIota p v
+          | Just (Iota _ x (Constant (IntValue (Int32Value 1)))) <- asPrimOp =<< ST.lookupExp v vtable =
+              Right (paramName p, x)
+          | otherwise =
+              Left (p, v)
+fuseReduceIota _ _ = cannotSimplify
