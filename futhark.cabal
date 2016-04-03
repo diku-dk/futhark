@@ -13,6 +13,12 @@ License:             BSD3
 License-file:        LICENSE
 Build-type:          Simple
 Maintainer:          athas@sigkill.dk
+-- Extra Files to include in source distributions
+Extra-source-files:  rts/python/memory.py,
+                     rts/python/reader.py,
+                     rts/python/scalar.py,
+                     rts/c/reader.h
+
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
