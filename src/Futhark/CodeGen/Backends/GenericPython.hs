@@ -234,14 +234,14 @@ compileProg as_module imports defines ops userstate pre_timing options prog@(Imp
               Nothing   -> fail "No main function"
               Just func -> callEntryFun pre_timing options (defaultEntryPoint, func)
 
-          return (definitions ++ entry_points, maincall)
+          return (map FunDef $ definitions ++ entry_points, maincall)
 
-compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyStmt
+compileFunc :: (Name, Imp.Function op) -> CompilerM op s PyFunDef
 compileFunc (fname, Imp.Function _ outputs inputs body _ _) = do
   body' <- collect $ compileCode body
   let inputs' = map (pretty . Imp.paramName) inputs
   let ret = Return $ tupleOrSingle $ compileOutput outputs
-  return $ FuncDef (futharkFun . nameToString $ fname) inputs' (body'++[ret])
+  return $ Def (futharkFun . nameToString $ fname) inputs' (body'++[ret])
 
 tupleOrSingle :: [PyExp] -> PyExp
 tupleOrSingle [e] = e
@@ -429,7 +429,7 @@ printResult vs = fmap concat $ forM vs $ \v -> do
   return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
 compileEntryFun :: (Name, Imp.Function op)
-                -> CompilerM op s PyStmt
+                -> CompilerM op s PyFunDef
 compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
@@ -446,7 +446,7 @@ compileEntryFun (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) 
       funCall = simpleCall (futharkFun . nameToString $ fname) (fmap Var inputArgs)
       body' = prepareIn ++ [Assign funTuple funCall] ++ prepareOut
 
-  return $ FuncDef (nameToString fname) (map valueDeclName decl_args) (body'++[ret])
+  return $ Def (nameToString fname) (map valueDeclName decl_args) (body'++[ret])
 
 callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
              -> CompilerM op s PyStmt
