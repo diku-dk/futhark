@@ -134,6 +134,7 @@ topDownRules = [removeUnusedKernelInputs
                , simplifyKernelInputs
                , removeInvariantKernelOutputs
                , fuseReduceIota
+               , fuseChunkedMapIota
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -229,8 +230,33 @@ fuseReduceIota :: (LocalScope (Lore m) m,
                    MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                   TopDownRule m
 fuseReduceIota vtable (Let pat _ (Op (ReduceKernel cs w size comm redlam foldlam arrs)))
-  | not $ null iota_params = do
-      fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf foldlam $ do
+  | Just f <- fuseIota vtable size comm foldlam arrs = do
+      (foldlam', arrs') <- f
+      letBind_ pat $ Op $ ReduceKernel cs w size comm redlam foldlam' arrs'
+fuseReduceIota _ _ = cannotSimplify
+
+fuseChunkedMapIota :: (LocalScope (Lore m) m,
+                       MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                      TopDownRule m
+fuseChunkedMapIota vtable (Let pat _ (Op (ChunkedMapKernel cs w size o lam arrs)))
+  | Just f <- fuseIota vtable size comm lam arrs = do
+      (lam', arrs') <- f
+      letBind_ pat $ Op $ ChunkedMapKernel cs w size o lam' arrs'
+  where comm = case o of Disorder -> Commutative
+                         InOrder -> Noncommutative
+fuseChunkedMapIota _ _ = cannotSimplify
+
+fuseIota :: (LocalScope (Lore m) m, MonadBinder m) =>
+            ST.SymbolTable (Lore m)
+         -> KernelSize
+         -> Commutativity
+         -> LambdaT (Lore m)
+         -> [VName]
+         -> Maybe (m (LambdaT (Lore m), [VName]))
+fuseIota vtable size comm lam arrs
+  | null iota_params = Nothing
+  | otherwise = Just $ do
+      fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
         case comm of
           Noncommutative -> do
             start_offset <- letSubExp "iota_start_offset" $
@@ -248,24 +274,34 @@ fuseReduceIota vtable (Let pat _ (Op (ReduceKernel cs w size comm redlam foldlam
               letBindNames'_ [p] $
                 PrimOp $ Iota (Var $ paramName chunk_param) start
                 num_threads
-        mapM_ addBinding $ bodyBindings $ lambdaBody foldlam
-        return $ bodyResult $ lambdaBody foldlam
+        mapM_ addBinding $ bodyBindings $ lambdaBody lam
+        return $ bodyResult $ lambdaBody lam
       let (arr_params', arrs') = unzip params_and_arrs
-          foldlam' = foldlam { lambdaBody = fold_body
-                             , lambdaParams = Param thread_index (paramAttr chunk_param) :
-                                              chunk_param :
-                                              arr_params'
-                             }
-      letBind_ pat $ Op $ ReduceKernel cs w size comm redlam foldlam' arrs'
+          lam' = lam { lambdaBody = fold_body
+                     , lambdaParams = Param thread_index (paramAttr chunk_param) :
+                       chunk_param :
+                       arr_params'
+                     }
+      return (lam', arrs')
   where elems_per_thread = kernelElementsPerThread size
         num_threads = kernelNumThreads size
-        (thread_index, chunk_param, arr_params) =
-          partitionChunkedKernelLambdaParameters $ lambdaParams foldlam
+        (thread_index, chunk_param, params_and_arrs, iota_params) =
+          iotaParams vtable lam arrs
+
+iotaParams :: ST.SymbolTable lore
+           -> LambdaT lore
+           -> [VName]
+           -> (VName,
+               Param (LParamAttr lore),
+               [(ParamT (LParamAttr lore), VName)],
+               [(VName, SubExp)])
+iotaParams vtable lam arrs = (thread_index, chunk_param, params_and_arrs, iota_params)
+  where (thread_index, chunk_param, arr_params) =
+          partitionChunkedKernelLambdaParameters $ lambdaParams lam
         (params_and_arrs, iota_params) =
           partitionEithers $ zipWith isIota arr_params arrs
         isIota p v
           | Just (Iota _ x (Constant (IntValue (Int32Value 1)))) <- asPrimOp =<< ST.lookupExp v vtable =
-              Right (paramName p, x)
+            Right (paramName p, x)
           | otherwise =
-              Left (p, v)
-fuseReduceIota _ _ = cannotSimplify
+            Left (p, v)
