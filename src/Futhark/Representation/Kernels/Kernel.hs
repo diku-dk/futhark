@@ -313,7 +313,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   consumedInOp (ReduceKernel _ _ _ _ _ foldlam arrs) =
     HS.map consumedArray $ consumedByLambda foldlam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
-          params_to_arrs = zip (map paramName (lambdaParams foldlam)) arrs
+          params_to_arrs = zip (map paramName (drop 2 $ lambdaParams foldlam)) arrs
   consumedInOp _ = mempty
 
 instance (Attributes lore,
