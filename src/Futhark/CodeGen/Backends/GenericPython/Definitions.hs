@@ -514,10 +514,4 @@ def read_array(f, elem_reader, rank, bt):
     dims = expected_array_dims(elems, rank)
     verify_array_dims(elems, dims)
     return np.array(elems, dtype=bt)
-
-def write_chars(f, arr):
-    f.write("\"")
-    for x in arr:
-      f.write(x.decode())
-    f.write("\"")
 |]
