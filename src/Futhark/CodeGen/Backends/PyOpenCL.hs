@@ -8,7 +8,6 @@ import Control.Monad
 import Data.List
 
 import Prelude
-import NeatInterpolation()
 
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.ExplicitMemory (Prog)
