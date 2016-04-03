@@ -2,7 +2,6 @@
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   ( openClDecls
   , openClInit
---  , openClReport
   ) where
 
 import NeatInterpolation

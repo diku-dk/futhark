@@ -34,8 +34,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 
-import NeatInterpolation()
-
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
