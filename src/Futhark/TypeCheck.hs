@@ -742,9 +742,10 @@ checkPrimOp (Index cs ident idxes) = do
     bad $ IndexingError (arrayRank vt) (length idxes)
   mapM_ (require [Prim int32]) idxes
 
-checkPrimOp (Iota e x) = do
+checkPrimOp (Iota e x s) = do
   require [Prim int32] e
   require [Prim int32] x
+  require [Prim int32] s
 
 checkPrimOp (Replicate countexp valexp) = do
   require [Prim int32] countexp
@@ -1060,19 +1061,17 @@ checkFuncall fname paramts args = do
 
 checkLambda :: Checkable lore =>
                Lambda lore -> [Arg] -> TypeM lore ()
-checkLambda (Lambda i params body rettype) args = do
-  iparam <- primLParam i int32
+checkLambda (Lambda params body rettype) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args then do
     checkFuncall Nothing
-      (map ((`toDecl` Nonunique) . paramType) $ iparam:params) $
-      (Prim int32, mempty) : args
+      (map ((`toDecl` Nonunique) . paramType) params) args
     let consumable = zip (map paramName params) (map argAliases args)
     checkFun' (fname,
                staticShapes $ map (`toDecl` Nonunique) rettype,
                [ (paramName param,
                   LParamInfo $ paramAttr param)
-               | param <- iparam:params ],
+               | param <- params ],
                body) consumable $ do
       checkLambdaParams params
       mapM_ checkType rettype
@@ -1081,9 +1080,8 @@ checkLambda (Lambda i params body rettype) args = do
 
 checkExtLambda :: Checkable lore =>
                   ExtLambda lore -> [Arg] -> TypeM lore ()
-checkExtLambda (ExtLambda i params body rettype) args =
+checkExtLambda (ExtLambda params body rettype) args =
   if length params == length args then do
-    iparam <- primLParam i int32
     checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
     let fname = nameFromString "<anonymous>"
         consumable = zip (map paramName params) (map argAliases args)
@@ -1091,7 +1089,7 @@ checkExtLambda (ExtLambda i params body rettype) args =
                map (`toDecl` Nonunique) rettype,
                [ (paramName param,
                   LParamInfo $ paramAttr param)
-               | param <- iparam:params ],
+               | param <- params ],
                body) consumable $
       checkBindings (bodyBindings body) $ do
         checkResult $ bodyResult body

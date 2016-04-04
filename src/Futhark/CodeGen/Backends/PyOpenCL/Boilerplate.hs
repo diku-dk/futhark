@@ -2,7 +2,6 @@
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   ( openClDecls
   , openClInit
---  , openClReport
   ) where
 
 import NeatInterpolation
@@ -16,11 +15,11 @@ setup_opencl(c, q)
 
 openClDecls ::String -> String -> String -> String
 openClDecls pyopencl_code assign declare =
-    kernelDeclarations ++ openclBoilerplate assign declare
+    kernelDeclarations ++ openclBoilerplate
     where kernelDeclarations =
             [string|fut_opencl_src = """
             ${pyopencl_code}"""|]
-          openclBoilerplate assignBlock declareBlock = [string|
+          openclBoilerplate = [string|
 
 cl_group_size = 512
 
@@ -29,7 +28,7 @@ def setup_opencl(context_set, queue_set):
   global ctx
   global queue
   global program
-  $declareBlock
+  $declare
 
   ctx = context_set
   queue = queue_set
@@ -40,5 +39,5 @@ def setup_opencl(context_set, queue_set):
 
   program = cl.Program(ctx, fut_opencl_src).build(["-DFUT_BLOCK_DIM={}".format(FUT_BLOCK_DIM), "-DWAVE_SIZE=32"])
 
-  $assignBlock
+  $assign
 |]

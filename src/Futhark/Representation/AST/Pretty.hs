@@ -193,7 +193,7 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
   ppr (Index cs v idxs) =
     ppCertificates cs <> ppr v <>
     brackets (commasep (map ppr idxs))
-  ppr (Iota e x) = text "iota" <> apply [ppr e, ppr x]
+  ppr (Iota e x s) = text "iota" <> apply [ppr e, ppr x, ppr s]
   ppr (Replicate ne ve) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   ppr (Scratch t shape) =
@@ -235,18 +235,16 @@ instance PrettyLore lore => Pretty (Exp lore) where
           (valparams, valinit) = unzip val
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr lambda@(Lambda index params body rettype) =
+  ppr lambda@(Lambda params body rettype) =
     maybe id (</>) (ppLambdaLore lambda) $
     text "fn" <+> ppTuple' rettype <+>
-    parens (ppr index <> semi <+>
-            commasep (map ppr params)) <+>
+    parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
-  ppr (ExtLambda index params body rettype) =
+  ppr (ExtLambda params body rettype) =
     text "fn" <+> ppTuple' rettype <+>
-    parens (ppr index <> semi <+>
-            commasep (map ppr params)) <+>
+    parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
 
 instance Pretty ExtRetType where

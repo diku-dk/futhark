@@ -120,8 +120,8 @@ mapExpM tv (PrimOp (Index cs arr idxexps)) =
   PrimOp <$> (pure Index <*> mapOnCertificates tv cs <*>
                  mapOnVName tv arr <*>
                  mapM (mapOnSubExp tv) idxexps)
-mapExpM tv (PrimOp (Iota n x)) =
-  PrimOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x)
+mapExpM tv (PrimOp (Iota n x s)) =
+  PrimOp <$> (pure Iota <*> mapOnSubExp tv n <*> mapOnSubExp tv x <*> mapOnSubExp tv s)
 mapExpM tv (PrimOp (Replicate nexp vexp)) =
   PrimOp <$> (pure Replicate <*> mapOnSubExp tv nexp <*> mapOnSubExp tv vexp)
 mapExpM tv (PrimOp (Scratch t shape)) =

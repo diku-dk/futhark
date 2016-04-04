@@ -664,7 +664,7 @@ addVarToUnfusable fres name = do
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the unfusable set.
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
-fusionGatherLam (u_set,fres) (Lambda _ idds body _) = do
+fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     let null_res = mkFreshFusionRes
     new_res <- binding (map paramIdent idds) $
                fusionGatherBody null_res body
@@ -722,16 +722,14 @@ fuseIn = identityMapper {
          }
 
 fuseInLambda :: Lambda -> FusionGM Lambda
-fuseInLambda (Lambda i params body rtp) = do
-  body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
-  return $ Lambda i params body' rtp
-  where i_ident = Ident i $ Prim int32
+fuseInLambda (Lambda params body rtp) = do
+  body' <- binding (map paramIdent params) $ fuseInBody body
+  return $ Lambda params body' rtp
 
 fuseInExtLambda :: ExtLambda -> FusionGM ExtLambda
-fuseInExtLambda (ExtLambda i params body rtp) = do
-  body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
-  return $ ExtLambda i params body' rtp
-  where i_ident = Ident i $ Prim int32
+fuseInExtLambda (ExtLambda params body rtp) = do
+  body' <- binding (map paramIdent params) $ fuseInBody body
+  return $ ExtLambda params body' rtp
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern _ []) _ body = return body

@@ -566,7 +566,7 @@ allocInExp (Op (ChunkedMapKernel cs w size o lam arrs)) = do
           lam arr_summaries
   return $ Op $ Inner $ ChunkedMapKernel cs w size o lam' arrs
 
-allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam nes arrs)) = do
+allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam arrs)) = do
   arr_summaries <- mapM lookupMemBound arrs
   fold_lam' <- allocInFoldLambda
                comm
@@ -574,7 +574,7 @@ allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam nes arrs)) = do
                (kernelNumThreads size)
                fold_lam arr_summaries
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
-  return $ Op $ Inner $ ReduceKernel cs w size comm red_lam' fold_lam' nes arrs
+  return $ Op $ Inner $ ReduceKernel cs w size comm red_lam' fold_lam' arrs
 
 allocInExp (Op (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
@@ -608,9 +608,8 @@ allocInFoldLambda :: Commutativity
                   -> In.Lambda -> [MemBound NoUniqueness]
                   -> AllocM Lambda
 allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
-  let i = lambdaIndex lam
-      (chunk_size_param, chunked_params) =
-        partitionChunkedLambdaParameters $ lambdaParams lam
+  let (i, chunk_size_param, chunked_params) =
+        partitionChunkedKernelLambdaParameters $ lambdaParams lam
   chunked_params' <-
     forM (zip chunked_params arr_summaries) $ \(p,summary) ->
     case summary of
@@ -641,16 +640,17 @@ allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
       _ ->
         fail $ "Chunked lambda non-array lambda parameter " ++ pretty p
   local (HM.insert (paramName chunk_size_param) elems_per_thread) $
-    allocInLambda i (Param (paramName chunk_size_param) (Scalar int32) : chunked_params')
+    allocInLambda (Param i (Scalar int32) :
+                   Param (paramName chunk_size_param) (Scalar int32) :
+                   chunked_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceLambda :: In.Lambda
                     -> SubExp
                     -> AllocM Lambda
 allocInReduceLambda lam workgroup_size = do
-  let i = lambdaIndex lam
-      (other_index_param, actual_params) =
-        partitionChunkedLambdaParameters $ lambdaParams lam
+  let (i, other_index_param, actual_params) =
+        partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
         splitAt (length actual_params `div` 2) actual_params
       this_index = SE.Id i int32 `SE.SRem`
@@ -671,8 +671,9 @@ allocInReduceLambda lam workgroup_size = do
       _ ->
         return param { paramAttr = attr }
 
-  allocInLambda i (other_index_param { paramAttr = Scalar int32 } :
-                   acc_params' ++ arr_params')
+  allocInLambda (Param i (Scalar int32) :
+                 other_index_param { paramAttr = Scalar int32 } :
+                 acc_params' ++ arr_params')
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceParameters :: SubExp
@@ -695,15 +696,13 @@ allocInReduceParameters workgroup_size local_id = mapM allocInReduceParameter
             Mem size space ->
               return p { paramAttr = MemMem size space }
 
-allocInLambda :: VName -> [LParam] -> In.Body -> [Type]
+allocInLambda :: [LParam] -> In.Body -> [Type]
               -> AllocM Lambda
-allocInLambda i params body rettype = do
-  let param_summaries = lparamsSummary params
-      all_summaries = HM.insert i IndexInfo param_summaries
-  body' <- localScope all_summaries $
+allocInLambda params body rettype = do
+  body' <- localScope (lparamsSummary params) $
            allocInBindings (bodyBindings body) $ \bnds' ->
            return $ Body () bnds' $ bodyResult body
-  return $ Lambda i params body' rettype
+  return $ Lambda params body' rettype
 
 simplifiable :: (Engine.MonadEngine m,
                  Engine.InnerLore m ~ ExplicitMemory) =>

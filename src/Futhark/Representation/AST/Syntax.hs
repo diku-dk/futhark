@@ -193,8 +193,8 @@ data PrimOp lore
   -- ^ Copy the given array.  The result will not alias anything.
 
   -- Array construction.
-  | Iota SubExp SubExp
-  -- ^ @iota(n, x) = [x,x+1,..,x+n-1]@
+  | Iota SubExp SubExp SubExp
+  -- ^ @iota(n, x, s) = [x,x+s,..,x+(n-1)*s]@
   | Replicate SubExp SubExp
   -- ^ @replicate(3,1) = [1, 1, 1]@
   | Scratch PrimType [SubExp]
@@ -248,8 +248,7 @@ type Exp = ExpT
 
 -- | Anonymous function for use in a SOAC.
 data LambdaT lore =
-  Lambda { lambdaIndex      :: VName
-         , lambdaParams     :: [LParam lore]
+  Lambda { lambdaParams     :: [LParam lore]
          , lambdaBody       :: BodyT lore
          , lambdaReturnType :: [Type]
          }
@@ -263,8 +262,7 @@ type Lambda = LambdaT
 -- | Anonymous function for use in a SOAC, with an existential return
 -- type.
 data ExtLambdaT lore =
-  ExtLambda { extLambdaIndex      :: VName
-            , extLambdaParams     :: [LParam lore]
+  ExtLambda { extLambdaParams     :: [LParam lore]
             , extLambdaBody       :: BodyT lore
             , extLambdaReturnType :: [ExtType]
             }

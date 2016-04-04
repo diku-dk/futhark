@@ -471,14 +471,14 @@ simplifyIndexing defOf seType idd inds consuming =
 
     Just (SubExp (Var v)) -> Just $ IndexResult [] v inds
 
-    Just (Iota _ (Constant (IntValue (Int32Value 0))))
+    Just (Iota _ (Constant (IntValue (Int32Value 0))) (Constant (IntValue (Int32Value 1))))
       | [ii] <- inds ->
           Just $ SubExpResult ii
 
-    Just (Iota _ x)
+    Just (Iota _ x s)
       | [ii] <- inds ->
           Just $ ScalExpResult $
-          SE.intSubExpToScalExp ii + SE.intSubExpToScalExp x
+          SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s + SE.intSubExpToScalExp x
 
     Just (Index cs aa ais) ->
       Just $ IndexResult cs aa (ais ++ inds)

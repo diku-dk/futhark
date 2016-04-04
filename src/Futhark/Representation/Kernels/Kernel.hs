@@ -65,7 +65,6 @@ data Kernel lore =
     Commutativity
     (LambdaT lore)
     (LambdaT lore)
-    [SubExp]
     [VName]
   | ScanKernel Certificates SubExp
     KernelSize
@@ -152,7 +151,7 @@ mapKernelM tv (MapKernel cs w index ispace inps rettype body) =
   mapOnKernelBody tv body
   where (iparams, bounds) = unzip ispace
         (ts, perms) = unzip rettype
-mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun accs arrs) =
+mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun arrs) =
   ReduceKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv w <*>
@@ -160,7 +159,6 @@ mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun accs arrs) =
   pure comm <*>
   mapOnKernelLambda tv red_fun <*>
   mapOnKernelLambda tv fold_fun <*>
-  mapM (mapOnKernelSubExp tv) accs <*>
   mapM (mapOnKernelVName tv) arrs
 mapKernelM tv (ScanKernel cs w kernel_size order fun input) =
   ScanKernel <$>
@@ -294,7 +292,7 @@ kernelType (MapKernel _ _ _ is _ returns _) =
   [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
-kernelType (ReduceKernel _ _ size _ redlam foldlam _ _) =
+kernelType (ReduceKernel _ _ size _ redlam foldlam _) =
   let acc_tp = map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType redlam
       arr_row_tp = drop (length acc_tp) $ lambdaReturnType foldlam
   in acc_tp ++
@@ -333,10 +331,10 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     map kernelInputArray $
     filter ((`HS.member` consumed) . kernelInputName) inps
     where consumed = consumedInBody body
-  consumedInOp (ReduceKernel _ _ _ _ _ foldlam _ arrs) =
+  consumedInOp (ReduceKernel _ _ _ _ _ foldlam arrs) =
     HS.map consumedArray $ consumedByLambda foldlam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
-          params_to_arrs = zip (map paramName (lambdaParams foldlam)) arrs
+          params_to_arrs = zip (map paramName (drop 2 $ lambdaParams foldlam)) arrs
   consumedInOp _ = mempty
 
 instance (Attributes lore,
@@ -378,7 +376,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    return return return
 
 instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
-  usageInOp (ReduceKernel _ _ _ _ _ foldfun _ arrs) =
+  usageInOp (ReduceKernel _ _ _ _ _ foldfun arrs) =
     usageInLambda foldfun arrs
   usageInOp (ScanKernel _ _ _ _ fun input) =
     usageInLambda fun arrs
@@ -442,21 +440,21 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
             TC.bad $ TC.TypeError $
             "Kernel input " ++ pretty inp ++ " has inconsistent type."
 
-typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) = do
+typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
   mapM_ (TC.requireI [Prim Cert]) cs
   TC.require [Prim int32] w
   typeCheckKernelSize kernel_size
   arrargs <- TC.checkSOACArrayArgs w arrexps
-  accargs <- mapM TC.checkArg accexps
 
   let (fold_acc_ret, _) =
-        splitAt (length accexps) $ lambdaReturnType seqfun
+        splitAt (length $ lambdaReturnType parfun) $ lambdaReturnType seqfun
 
   case lambdaParams seqfun of
     [] -> TC.bad $ TC.TypeError "Fold function takes no parameters."
     chunk_param : _
       | Prim (IntType Int32) <- paramType chunk_param -> do
           let seq_args = (Prim int32, mempty) :
+                         (Prim int32, mempty) :
                          [ (t `arrayOfRow` Var (paramName chunk_param), als)
                          | (t, als) <- arrargs ]
           TC.checkLambda seqfun seq_args
@@ -464,25 +462,21 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun accexps arrexps) 
           TC.bad $ TC.TypeError "First parameter of fold function is not int32-typed."
 
   let asArg t = (t, mempty)
-  TC.checkLambda parfun $ map asArg $ Prim int32 : fold_acc_ret ++ fold_acc_ret
-  let acct = map TC.argType accargs
-      parRetType = lambdaReturnType parfun
-  unless (acct == fold_acc_ret) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
+      redt = lambdaReturnType parfun
+  TC.checkLambda parfun $ map asArg $ Prim int32 : Prim int32 : fold_acc_ret ++ fold_acc_ret
+  unless (redt == fold_acc_ret) $
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple redt ++
           ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
-  unless (acct == parRetType) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap reduction function returns type " ++ prettyTuple parRetType ++ "."
 
 typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
   mapM_ (TC.requireI [Prim Cert]) cs
   TC.require [Prim int32] w
   typeCheckKernelSize kernel_size
   let (nes, arrs) = unzip input
-      other_index_arg = (Prim int32, mempty)
+      index_arg = (Prim int32, mempty)
   arrargs <- TC.checkSOACArrayArgs w arrs
   accargs <- mapM TC.checkArg nes
-  TC.checkLambda fun $ other_index_arg : accargs ++ arrargs
+  TC.checkLambda fun $ index_arg : index_arg : accargs ++ arrargs
   let startt      = map TC.argType accargs
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
@@ -507,6 +501,7 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
     chunk_param : _
       | Prim (IntType Int32) <- paramType chunk_param -> do
           let args = (Prim int32, mempty) :
+                     (Prim int32, mempty) :
                      [ (t `arrayOfRow` Var (paramName chunk_param), als)
                      | (t, als) <- arrargs ]
           TC.checkLambda fun args
@@ -554,7 +549,7 @@ consumableInputs is = map (first kernelInputName) .
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (MapKernel _ _ _ _ _ _ body) =
     inside "MapKernel" $ bodyMetrics body
-  opMetrics (ReduceKernel _ _ _ _ lam1 lam2 _ _) =
+  opMetrics (ReduceKernel _ _ _ _ lam1 lam2 _) =
     inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
   opMetrics (ScanKernel _ _ _ _ lam _) =
     inside "ScanKernel" $ lambdaMetrics lam
@@ -579,11 +574,10 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr name <+> text "<" <+> ppr bound
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> PP.apply (map ppr perm)
-  ppr (ReduceKernel cs w kernel_size comm parfun seqfun es as) =
+  ppr (ReduceKernel cs w kernel_size comm parfun seqfun as) =
     ppCertificates' cs <> text "reduceKernel" <>
     parens (ppr w <> comma </>
             ppr kernel_size </>
-            PP.braces (commasep $ map ppr es) <> comma </>
             commasep (map ppr as) <> comma </>
             ppr comm </>
             ppr parfun <> comma </> ppr seqfun)
