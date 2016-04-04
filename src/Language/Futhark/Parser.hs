@@ -20,7 +20,7 @@ import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Except
 import Data.Maybe (mapMaybe)
-import Data.List (intersect, intercalate)
+import Data.List (intersect, (\\))
 import System.FilePath (takeDirectory, (</>), (<.>))
 
 import Prelude
@@ -75,49 +75,81 @@ parseExpIncrIO :: FilePath -> String
                -> IO (Either ParseError UncheckedExp)
 parseExpIncrIO = parseIncrementalIO expression
 
+-- Needed @parseFuthark@, since it might read files.  Kept as simple as
+-- possible and without external dependencies.
+newtype ErrorIO e t = ErrorIO { evalErrorIO :: IO (Either e t) }
+
+instance Monad (ErrorIO e) where
+  m >>= g = ErrorIO $ do
+    eith <- evalErrorIO m
+    case eith of
+      Left e -> return $ Left e
+      Right t -> evalErrorIO $ g t
+
+  return x = ErrorIO $ return $ Right x
+
+bad :: e -> ErrorIO e t
+bad e = ErrorIO $ return $ Left e
+
+liftEither :: Either e t -> ErrorIO e t
+liftEither eith = ErrorIO $ return eith
+
+instance MonadIO (ErrorIO e) where
+  liftIO io = ErrorIO (Right <$> io)
+
+instance Functor (ErrorIO e) where
+  fmap = liftM
+
+instance Applicative (ErrorIO e) where
+  (<*>) = ap
+  pure = return
+
 -- | Parse an entire Futhark program from the given 'String', using
 -- the 'FilePath' as the source name for error messages and the
 -- relative path to use for includes, and parsing and reacting to all
 -- headers.
 parseFuthark :: FilePath -> String
                 -> IO (Either ParseError UncheckedProg)
-parseFuthark fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
-  where parseWithPrevIncludes :: [FilePath] -> (FilePath, String)
-                              -> IO (Either ParseError UncheckedProg)
-        parseWithPrevIncludes prevIncludes (fp, s) =
-          case parse prog fp s of
-            Left e -> return $ Left e
-            Right p ->
-              let newIncludes = mapMaybe headerInclude $ progWHHeaders p
-                  intersection = prevIncludes `intersect` newIncludes
-              in if not (null intersection)
-                 then return $ Left $ ParseError
-                      ("Include cycle with " ++ show intersection ++ ".")
-                 else let p' = Prog $ progWHFunctions p
-                      in if null newIncludes
-                         then return $ Right p'
-                         else includeIncludes prevIncludes newIncludes p'
+parseFuthark fp0 s0 =
+  (snd <$>) <$> (evalErrorIO $ parseWithIncludes [fp0] [fp0] (fp0, s0))
+  where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, String)
+                             -> ErrorIO ParseError ([FilePath], UncheckedProg)
+        parseWithIncludes alreadyIncluded includeSources (fp, s) = do
+          p <- liftEither $ parse prog fp s
+          let newIncludes = mapMaybe headerInclude $ progWHHeaders p
+              intersectionSources = includeSources `intersect` newIncludes
 
-        includeIncludes :: [FilePath] -> [FilePath] -> UncheckedProg
-                           -> IO (Either ParseError UncheckedProg)
-        includeIncludes prevIncludes newIncludes endProg = do
-          let allIncludes = prevIncludes ++ newIncludes
-          ss <- liftIO $ mapM readFile newIncludes
-          parses <- liftIO $ mapM (parseWithPrevIncludes allIncludes)
-            (zip newIncludes ss)
-          return $ foldr mergePrograms (Right endProg) parses
+          when (not $ null intersectionSources) $ bad
+            $ ParseError ("Include cycle with " ++ show intersectionSources ++ ".")
 
-        mergePrograms :: Either ParseError UncheckedProg
-                      -> Either ParseError UncheckedProg
-                      -> Either ParseError UncheckedProg
-        mergePrograms a b = case (a, b) of
-          (Right (Prog fs), Right (Prog gs)) -> Right (Prog (fs ++ gs))
-          (Left err, _) -> Left err
-          (_, Left err) -> Left err
+          let newIncludes' = newIncludes \\ alreadyIncluded
+              alreadyIncluded' = fp : alreadyIncluded
+              includeSources' = fp : includeSources
+              p' = Prog $ progWHFunctions p
+          if null newIncludes'
+            then return (alreadyIncluded', p')
+            else includeIncludes alreadyIncluded' includeSources' newIncludes' p'
+
+        includeIncludes :: [FilePath] -> [FilePath] -> [FilePath] -> UncheckedProg
+                          -> ErrorIO ParseError ([FilePath], UncheckedProg)
+        includeIncludes alreadyIncluded includeSources newIncludes baseProg = do
+          foldM (\(already, p) new -> do
+                    (already', p1) <- includeInclude already includeSources new
+                    return (already', mergePrograms p p1))
+            (alreadyIncluded, baseProg) newIncludes
+
+        includeInclude :: [FilePath] -> [FilePath] -> FilePath
+                          -> ErrorIO ParseError ([FilePath], UncheckedProg)
+        includeInclude alreadyIncluded includeSources newInclude = do
+          s <- liftIO $ readFile newInclude
+          parseWithIncludes alreadyIncluded includeSources (newInclude, s)
+
+        mergePrograms :: UncheckedProg -> UncheckedProg -> UncheckedProg
+        mergePrograms (Prog fs) (Prog gs) = Prog (fs ++ gs)
 
         headerInclude :: ProgHeader -> Maybe String
         headerInclude (Include strings) =
-          Just $ search_dir </> intercalate "/" strings <.> "fut"
+          Just $ (foldl (</>) search_dir strings) <.> "fut"
 
         search_dir = takeDirectory fp0
 
