@@ -125,7 +125,7 @@ parseFuthark fp0 s0 =
             $ ParseError ("Include cycle with " ++ show intersectionSources ++ ".")
 
           let newIncludes' = newIncludes \\ alreadyIncluded
-              alreadyIncluded' = fp : alreadyIncluded
+              alreadyIncluded' = fp : newIncludes' ++ alreadyIncluded
               includeSources' = fp : includeSources
               p' = Prog $ progWHFunctions p
           if null newIncludes'
