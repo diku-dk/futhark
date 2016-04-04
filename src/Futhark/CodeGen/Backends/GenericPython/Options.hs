@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
 -- | This module defines a generator for @getopt@ based command
 -- line argument parsing.  Each option is associated with arbitrary
 -- Python code that will perform side effects, usually by setting some
@@ -45,7 +44,7 @@ generateOptionParser options =
   where parseOption option =
           Exp $ Call "parser.add_argument" $
           map (Arg . StringLiteral) name_args ++ argument_args
-          where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option) $
+          where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option)
                             ["--" ++ optionLongName option]
                 argument_args = case optionArgument option of
                   RequiredArgument ->
