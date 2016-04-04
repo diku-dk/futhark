@@ -58,7 +58,6 @@ import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Reading
-import qualified Futhark.CodeGen.Backends.CUtils as C
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
@@ -301,7 +300,7 @@ printPrimStm _ Cert = [C.cstm|printf("Checked");|]
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
 printStm (ScalarValue bt name) =
-  return $ printPrimStm (C.var name) bt
+  return $ printPrimStm (var name) bt
 printStm (ArrayValue mem bt []) =
   return $ printPrimStm val bt
   where val = [C.cexp|*$id:mem|]
@@ -309,7 +308,7 @@ printStm (ArrayValue mem bt (dim:shape)) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
   let dim' = dimSizeToExp dim
-      shape' = C.product $ map dimSizeToExp shape
+      shape' = cproduct $ map dimSizeToExp shape
       bt'  = primTypeToCType bt
   printelem <- printStm $ ArrayValue v bt shape
   return [C.cstm|{
@@ -423,7 +422,7 @@ prepareArg (MemParam name size (Space space)) = do
   copy name' [C.cexp|0|] (Space space) name [C.cexp|0|] DefaultSpace size'
   return [C.cexp|$id:name'|]
 
-prepareArg p = return $ C.var $ paramName p
+prepareArg p = return $ var $ paramName p
 
 readInputs :: [Param] -> [ValueDecl] -> [C.Stm]
 readInputs inputparams = map $ readInput memsizes
@@ -431,7 +430,7 @@ readInputs inputparams = map $ readInput memsizes
 
 readInput :: HM.HashMap VName VName -> ValueDecl -> C.Stm
 readInput _ (ScalarValue t name) =
-  readPrimStm (C.var name) t
+  readPrimStm (var name) t
 readInput memsizes (ArrayValue name t shape)
   | Just f <- readFun t =
   -- We need to create an array for the array parser to put
@@ -443,7 +442,7 @@ readInput memsizes (ArrayValue name t shape)
       maybeCopyDim (VarSize dimname) i =
         Just [C.cstm|$id:dimname = shape[$int:i];|]
       copyshape = catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
-      memsize = C.product $ [C.cexp|sizeof($ty:t')|] :
+      memsize = cproduct $ [C.cexp|sizeof($ty:t')|] :
                              [ [C.cexp|shape[$int:i]|] |
                               i <- [0..rank-1] ]
       copymemsize = case HM.lookup name memsizes of
@@ -489,7 +488,7 @@ unpackResults ret outparams =
                          return $ primTypeToCType bt
                        MemParam _ _ space ->
                          memToCType space
-          let field_e = tupleFieldExp (C.var ret) i
+          let field_e = tupleFieldExp (var ret) i
           item [C.citem|$ty:field_t $id:ret_field_tmp = $exp:field_e;|]
           unpackResult ret_field_tmp param
 
@@ -672,7 +671,7 @@ compilePrimValue Checked =
 
 dimSizeToExp :: DimSize -> C.Exp
 dimSizeToExp (ConstSize x) = [C.cexp|$int:x|]
-dimSizeToExp (VarSize v)   = C.var v
+dimSizeToExp (VarSize v)   = var v
 
 derefPointer :: VName -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
@@ -922,7 +921,7 @@ compileCode (Call dests fname args) = do
       decl [C.cdecl|$ty:crestype $id:ret;|]
       stm [C.cstm|$id:ret = $id:(funName fname)($args:args');|]
       forM_ (zip [0..] dests) $ \(i,dest) ->
-        stm [C.cstm|$id:dest = $exp:(tupleFieldExp (C.var ret) i);|]
+        stm [C.cstm|$id:dest = $exp:(tupleFieldExp (var ret) i);|]
 
 compileFunBody :: [Param] -> Code op -> CompilerM op s ()
 compileFunBody outputs code = do
@@ -931,7 +930,7 @@ compileFunBody outputs code = do
   compileCode code
   decl [C.cdecl|$ty:bodytype $id:retval;|]
   let setRetVal' i output =
-        stm [C.cstm|$exp:(tupleFieldExp (C.var retval) i) = $id:(paramName output);|]
+        stm [C.cstm|$exp:(tupleFieldExp (var retval) i) = $id:(paramName output);|]
   case outputs of
     [output] -> stm [C.cstm|$id:retval = $id:(paramName output);|]
     _        -> zipWithM_ setRetVal' [0..] outputs
@@ -953,3 +952,14 @@ assignmentOperator Add{}  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
 assignmentOperator Sub{} = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
 assignmentOperator Mul{} = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
 assignmentOperator _     = Nothing
+
+-- | Return an expression multiplying together the given expressions.
+-- If an empty list is given, the expression @1@ is returned.
+cproduct :: [C.Exp] -> C.Exp
+cproduct []     = [C.cexp|1|]
+cproduct (e:es) = foldl mult e es
+  where mult x y = [C.cexp|$exp:x * $exp:y|]
+
+-- | Turn a name into a C expression consisting of just that name.
+var :: C.ToIdent a => a -> C.Exp
+var k = [C.cexp|$id:k|]

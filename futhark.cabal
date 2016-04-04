@@ -71,7 +71,6 @@ Library
                    Futhark.Analysis.Metrics
                    Futhark.Binder
                    Futhark.Binder.Class
-                   Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericPython
                    Futhark.CodeGen.Backends.GenericPython.AST
