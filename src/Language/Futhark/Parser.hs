@@ -20,7 +20,7 @@ import Control.Monad
 import Control.Monad.Trans.State
 import Control.Monad.Except
 import Data.Maybe (mapMaybe)
-import Data.List (intersect)
+import Data.List (intersect, intercalate)
 import System.FilePath (takeDirectory, (</>), (<.>))
 
 import Prelude
@@ -116,7 +116,8 @@ parseFuthark fp0 s0 = parseWithPrevIncludes [fp0] (fp0, s0)
           (_, Left err) -> Left err
 
         headerInclude :: ProgHeader -> Maybe String
-        headerInclude (Include name) = Just $ search_dir </> name <.> "fut"
+        headerInclude (Include strings) =
+          Just $ search_dir </> intercalate "/" strings <.> "fut"
 
         search_dir = takeDirectory fp0
 

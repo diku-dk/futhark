@@ -623,7 +623,7 @@ data ProgBaseWithHeaders f vn =
                   }
 deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 
-data ProgHeader = Include String
+data ProgHeader = Include [String]
                 deriving (Show)
 
 -- | A set of names.

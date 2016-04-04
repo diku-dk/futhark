@@ -66,6 +66,7 @@ tokens :-
   ","                      { const COMMA }
   "_"                      { const UNDERSCORE }
   "!"                      { const BANG }
+  "."                      { const DOT }
   @intlit i8               { I8LIT . readInt8 . takeWhile (/='i') }
   @intlit i16              { I16LIT . readInt16 . takeWhile (/='i') }
   @intlit i32              { I32LIT . readInt32 . takeWhile (/='i') }

@@ -32,6 +32,7 @@ data Token = IF
            | F32
            | F64
            | ID Name
+           | DOT
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64
