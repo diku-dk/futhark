@@ -118,6 +118,7 @@ import Language.Futhark.Parser.Lexer
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
+      '.'             { L $$ DOT }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
       fn              { L $$ FN }
@@ -232,8 +233,12 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
+Header : include IncludeParts { Include $2 }
 ;
+
+IncludeParts :: { [String] }
+IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
+IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
 
 FunDefs : Fun FunDefs   { $1 : $2 }
         | Fun           { [$1] }
