@@ -17,7 +17,8 @@ Maintainer:          athas@sigkill.dk
 Extra-source-files:  rts/python/memory.py,
                      rts/python/reader.py,
                      rts/python/scalar.py,
-                     rts/c/reader.h
+                     rts/c/reader.h,
+                     rts/c/opencl.h
 
 
 -- Constraint on the version of Cabal needed to build this package.
