@@ -252,15 +252,15 @@ compileDim :: Imp.DimSize -> PyExp
 compileDim (Imp.ConstSize i) = Constant $ value i
 compileDim (Imp.VarSize v) = Var $ pretty v
 
-unpackDim :: VName -> Imp.DimSize -> Int32 -> CompilerM op s ()
+unpackDim :: String -> Imp.DimSize -> Int32 -> CompilerM op s ()
 unpackDim arr_name (Imp.ConstSize c) i = do
-  let shape_name = Var $ pretty arr_name  ++ ".shape"
+  let shape_name = Var $ arr_name  ++ ".shape"
   let constant_c = Constant $ value c
   let constant_i = Constant $ value i
   stm $ Assert (BinaryOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "shape dimension is incorrect for the constant dimension"
 
 unpackDim arr_name (Imp.VarSize var) i = do
-  let shape_name = Var $ pretty arr_name  ++ ".shape"
+  let shape_name = Var $ arr_name  ++ ".shape"
   let src = Index shape_name $ IdxExp $ Constant $ value i
   let dest = Var $ pretty var
   let makeNumpy = simpleCall "np.int32" [src]
@@ -284,18 +284,19 @@ packArg :: HM.HashMap VName VName
         -> HM.HashMap VName Imp.Space
         -> Imp.ValueDecl
         -> CompilerM op s ()
-packArg _ _ (Imp.ScalarValue bt vname) = do
+packArg _ _ decl@(Imp.ScalarValue bt vname) = do
   let vname' = Var $ pretty vname
-  let npobject = compilePrimToNp bt
-  let call = simpleCall npobject [vname']
+      npobject = compilePrimToNp bt
+      call = simpleCall npobject [Var $ valueDeclName decl]
   stm $ Assign vname' call
 
-packArg memsizes spacemap (Imp.ArrayValue vname bt dims) = do
-  zipWithM_ (unpackDim vname) dims [0..]
-  let src_size = Var $ pretty vname ++ ".nbytes"
-  let makeNumpy = simpleCall "np.int32" [src_size]
-  let src_data = Var $ pretty vname
-  let unwrap_call = simpleCall "unwrapArray" [Var $ pretty vname]
+packArg memsizes spacemap decl@(Imp.ArrayValue vname bt dims) = do
+  let extname = valueDeclName decl
+  zipWithM_ (unpackDim extname) dims [0..]
+  let src_size = Var $ extname ++ ".nbytes"
+      makeNumpy = simpleCall "np.int32" [src_size]
+      dest = Var $ pretty vname
+      unwrap_call = simpleCall "unwrapArray" [Var extname]
 
   sizevar <- case HM.lookup vname memsizes of
     Nothing -> error "Param name does not exist in array declarations"
@@ -307,12 +308,13 @@ packArg memsizes spacemap (Imp.ArrayValue vname bt dims) = do
                                  alloc <- asks envAllocate
                                  name <- newVName $ baseString vname <> "_" <> space
                                  alloc name (Var $ pretty sizevar) space
+                                 stm $ Assign dest $ Var $ valueDeclName decl
                                  copy
                                    name (Constant $ value (0 :: Int32)) (Imp.Space $ pretty space)
                                    vname (Constant $ value (0 :: Int32)) Imp.DefaultSpace src_size bt
-                                 stm $ Assign src_data (Var $ pretty name)
+                                 stm $ Assign dest (Var $ pretty name)
 
-    Just Imp.DefaultSpace -> stm $ Assign src_data unwrap_call
+    Just Imp.DefaultSpace -> stm $ Assign dest unwrap_call
     Nothing -> error "Space is not set correctly"
 
 unpackOutput :: HM.HashMap VName VName -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
@@ -348,8 +350,8 @@ unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
     Nothing -> error "Space is not set correctly"
 
 valueDeclName :: Imp.ValueDecl -> String
-valueDeclName (Imp.ScalarValue _ vname) = pretty vname
-valueDeclName (Imp.ArrayValue vname _ _) = pretty vname
+valueDeclName (Imp.ScalarValue _ vname) = pretty vname ++ "_ext"
+valueDeclName (Imp.ArrayValue vname _ _) = pretty vname ++ "_ext"
 
 readerElem :: PrimType -> String
 readerElem bt = case bt of
@@ -360,20 +362,17 @@ readerElem bt = case bt of
   Cert              -> error "Cert is never used. ReaderElem doesn't handle this"
 
 readInput :: Imp.ValueDecl -> PyStmt
-readInput (Imp.ScalarValue bt vname) =
-  let name = Var $ pretty vname
-      reader' = readerElem bt
+readInput decl@(Imp.ScalarValue bt _) =
+  let reader' = readerElem bt
       stdin = Var "sys.stdin"
-  in Assign name $ simpleCall reader' [stdin]
+  in Assign (Var $ valueDeclName decl) $ simpleCall reader' [stdin]
 
-readInput (Imp.ArrayValue vname bt dims) =
-  let vname' = Var $ pretty vname
-      rank' = Var $ show $ length dims
+readInput decl@(Imp.ArrayValue _ bt dims) =
+  let rank' = Var $ show $ length dims
       reader' = Var $ readerElem bt
       bt' = Var $ compilePrimType bt
       stdin = Var "sys.stdin"
-  in Assign vname' $ simpleCall "read_array" [stdin, reader', rank', bt']
-
+  in Assign (Var $ valueDeclName decl) $ simpleCall "read_array" [stdin, reader', rank', bt']
 
 printPrimStm :: PyExp -> PrimType -> PyStmt
 printPrimStm val t =
