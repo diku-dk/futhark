@@ -75,8 +75,8 @@ parseExpIncrIO :: FilePath -> String
                -> IO (Either ParseError UncheckedExp)
 parseExpIncrIO = parseIncrementalIO expression
 
--- Needed @parseFuthark@, since it might read files.  Kept as simple as
--- possible and without external dependencies.
+-- Needed by @parseFuthark@, since that function might read files.  Kept as
+-- simple as possible and without external dependencies.
 newtype ErrorIO e t = ErrorIO { evalErrorIO :: IO (Either e t) }
 
 instance Monad (ErrorIO e) where
@@ -108,6 +108,8 @@ instance Applicative (ErrorIO e) where
 -- the 'FilePath' as the source name for error messages and the
 -- relative path to use for includes, and parsing and reacting to all
 -- headers.
+--
+-- Fails on cyclical includes.  Ignores repeat non-cyclical includes.
 parseFuthark :: FilePath -> String
                 -> IO (Either ParseError UncheckedProg)
 parseFuthark fp0 s0 =
