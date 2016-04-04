@@ -61,7 +61,7 @@ transformBinding expmap (Let pat () (DoLoop ctx val form body)) = do
   return expmap
 
 transformBinding expmap (Let pat ()
-                         (Op (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs)))
+                         (Op (ReduceKernel cs w kernel_size comm parlam seqlam arrs)))
   | num_groups /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
 
@@ -72,7 +72,7 @@ transformBinding expmap (Let pat ()
   seqlam' <- transformLambda seqlam
 
   addBinding $ Let pat () $ Op $
-    ReduceKernel cs w' kernel_size' comm parlam' seqlam' nes arrs'
+    ReduceKernel cs w' kernel_size' comm parlam' seqlam' arrs'
   return expmap
   where num_groups = kernelWorkgroups kernel_size
 

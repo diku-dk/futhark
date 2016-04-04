@@ -8,7 +8,6 @@ module Futhark.Pass.ExtractKernels.ISRWIM
 import Control.Arrow (first)
 import Control.Monad.State
 import Data.Monoid
-import qualified Data.HashSet as HS
 
 import Prelude
 
@@ -41,12 +40,12 @@ iswim res_pat cs w scan_fun scan_input
           map_params = map removeParamOuterDim scan_acc_params ++
                        map (setParamOuterDimTo w) scan_elem_params
           map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
-          map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
+          map_fun' = Lambda map_params map_body map_rettype
 
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
-          scan_fun' = Lambda (lambdaIndex scan_fun) scan_params scan_body scan_rettype
+          scan_fun' = Lambda scan_params scan_body scan_rettype
           scan_input' = map (first Var) $
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
@@ -78,8 +77,7 @@ irwim res_pat cs w comm red_fun red_input
   | Body () [bnd] res <- lambdaBody red_fun, -- Body has a single binding
     map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
     Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
-    map paramName (lambdaParams red_fun) == map_arrs,
-    not (lambdaIndex red_fun `HS.member` freeInLambda red_fun) = Just $ do
+    map paramName (lambdaParams red_fun) == map_arrs = Just $ do
       let (accs, arrs) = unzip red_input
       arrs' <- forM arrs $ \arr -> do
                  t <- lookupType arr
@@ -99,7 +97,7 @@ irwim res_pat cs w comm red_fun red_input
           red_params = lambdaParams map_fun
           red_body = lambdaBody map_fun
           red_rettype = lambdaReturnType map_fun
-          red_fun' = Lambda (lambdaIndex red_fun) red_params red_body red_rettype
+          red_fun' = Lambda red_params red_body red_rettype
           red_input' = zip accs' $ map paramName map_params
           red_pat = stripPatternOuterDim $ bindingPattern bnd
 
@@ -111,7 +109,7 @@ irwim res_pat cs w comm red_fun red_input
             map_body_bnds <- collectBindings_ m
             return $ mkBody map_body_bnds res
 
-      let map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
+      let map_fun' = Lambda map_params map_body map_rettype
 
       addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
   | otherwise = Nothing

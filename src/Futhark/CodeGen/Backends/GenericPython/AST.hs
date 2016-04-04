@@ -7,6 +7,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   , module Futhark.Representation.Primitive
   , PyProg(..)
   , PyExcept(..)
+  , PyFunDef(..)
   )
   where
 
@@ -57,13 +58,17 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
 
               -- Definition-like statements.
             | Import String (Maybe String)
-            | FuncDef String [String] [PyStmt]
+            | FunDef PyFunDef
 
               -- Some arbitrary string of Python code.
             | Escape String
             deriving (Eq, Show)
 
-data PyExcept = Catch PyExp [PyStmt] deriving (Eq, Show)
+data PyExcept = Catch PyExp [PyStmt]
+              deriving (Eq, Show)
+
+data PyFunDef = Def String [String] [PyStmt]
+              deriving (Eq, Show)
 
 data PyProg = PyProg [PyStmt]
             deriving (Eq, Show)
@@ -153,11 +158,14 @@ instance Pretty PyStmt where
   ppr (Import from Nothing) =
     text "import" <+> text from
 
-  ppr (FuncDef fname params body) =
-    text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
-    indent 2 (stack (map ppr body))
+  ppr (FunDef d) = ppr d
 
   ppr (Escape s) = text s
+
+instance Pretty PyFunDef where
+  ppr (Def fname params body) =
+    text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
+    indent 2 (stack (map ppr body))
 
 instance Pretty PyExcept where
   ppr (Catch pyexp stms) =

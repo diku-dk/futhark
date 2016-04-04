@@ -514,13 +514,14 @@ defCompilePrimOp (Destination [dest]) (Replicate n se) = do
 defCompilePrimOp (Destination [_]) Scratch{} =
   return ()
 
-defCompilePrimOp (Destination [dest]) (Iota n e) = do
+defCompilePrimOp (Destination [dest]) (Iota n e s) = do
   i <- newVName "i"
   x <- newVName "x"
   emit $ Imp.DeclareScalar x int32
   declaringLoopVar i $ withPrimVar x int32 $
     emit =<< (Imp.For i (compileSubExp n) <$>
-              collect (do emit $ Imp.SetScalar x $ compileSubExp e + Imp.ScalarVar i
+              collect (do emit $ Imp.SetScalar x $
+                            compileSubExp e + Imp.ScalarVar i * compileSubExp s
                           copyDWIMDest dest [varIndex i] (Var x) []))
 
 defCompilePrimOp (Destination [target]) (Copy src) =

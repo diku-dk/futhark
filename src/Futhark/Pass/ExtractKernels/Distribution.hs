@@ -89,13 +89,12 @@ pushInnerTarget target (inner_target, targets) =
 data LoopNesting = MapNesting { loopNestingPattern :: Pattern
                               , loopNestingCertificates :: Certificates
                               , loopNestingWidth :: SubExp
-                              , loopNestingIndex :: VName
                               , loopNestingParamsAndArrs :: [(Param Type, VName)]
                               }
                  deriving (Show)
 
 ppLoopNesting :: LoopNesting -> String
-ppLoopNesting (MapNesting _ _ _ _ params_and_arrs) =
+ppLoopNesting (MapNesting _ _ _ params_and_arrs) =
   pretty (map fst params_and_arrs) ++
   " <- " ++
   pretty (map snd params_and_arrs)
@@ -104,14 +103,14 @@ loopNestingParams :: LoopNesting -> [LParam]
 loopNestingParams  = map fst . loopNestingParamsAndArrs
 
 instance FreeIn LoopNesting where
-  freeIn (MapNesting pat cs w _ params_and_arrs) =
+  freeIn (MapNesting pat cs w params_and_arrs) =
     freeIn pat <>
     freeIn cs <>
     freeIn w <>
     freeIn params_and_arrs
 
 consumedIn :: LoopNesting -> Names
-consumedIn (MapNesting pat _ _ _ params_and_arrs) =
+consumedIn (MapNesting pat _ _ params_and_arrs) =
   consumedInPattern pat <>
   mconcat (map (vnameAliases . snd) params_and_arrs)
 
@@ -144,7 +143,7 @@ pushInnerNesting nesting (inner_nesting, nestings) =
 -- | Both parameters and let-bound.
 boundInNesting :: Nesting -> Names
 boundInNesting nesting =
-  HS.fromList (loopNestingIndex loop : map paramName (loopNestingParams loop)) <>
+  HS.fromList (map paramName (loopNestingParams loop)) <>
   nestingLetBound nesting
   where loop = nestingLoop nesting
 
@@ -223,14 +222,16 @@ flatKernel :: MonadFreshNames m =>
                  [(VName, SubExp)],
                  [KernelInput Kernels],
                  [Type])
-flatKernel (MapNesting pat _ nesting_w i params_and_arrs, []) =
+flatKernel (MapNesting pat _ nesting_w params_and_arrs, []) = do
+  i <- newVName "i"
+  let inps = [ KernelInput param arr [Var i] |
+               (param, arr) <- params_and_arrs ]
   return ([], nesting_w, [(i,nesting_w)], inps,
           map rowType $ patternTypes pat)
-  where inps = [ KernelInput param arr [Var i] |
-                 (param, arr) <- params_and_arrs ]
 
-flatKernel (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
+flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   (w_bnds, w, ispace, inps, returns) <- flatKernel (nest, nests)
+  i <- newVName "i"
 
   w' <- newVName "nesting_size"
   let w_bnd = mkLet' [] [Ident w' $ Prim int32] $
@@ -246,8 +247,8 @@ flatKernel (MapNesting _ _ nesting_w i params_and_arrs, nest : nests) = do
         | otherwise =
             inp
 
-  return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps <> inps', returns)
-  where extra_inps =
+  return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps i <> inps', returns)
+  where extra_inps i =
           [ KernelInput param arr [Var i] |
             (param, arr) <- params_and_arrs ]
 
@@ -322,7 +323,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
           identity_map
           inner_returned_arrs
           addTarget = do
-          let nest'@(MapNesting _ cs w i params_and_arrs) =
+          let nest'@(MapNesting _ cs w params_and_arrs) =
                 removeUnusedNestingParts free_in_kernel nest
               (params,arrs) = unzip params_and_arrs
               param_names = HS.fromList $ map paramName params
@@ -366,7 +367,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
               nest'' =
                 removeUnusedNestingParts free_in_kernel $
-                MapNesting pat cs w i $ zip actual_params actual_arrs
+                MapNesting pat cs w $ zip actual_params actual_arrs
 
               free_in_kernel'' =
                 (freeIn nest'' <> free_in_kernel) `HS.difference` actual_param_names
@@ -417,8 +418,8 @@ createKernelNest (inner_nest, nests) distrib_body = do
             ((`pushOuterTarget` kernel_targets) . expand_target)
 
 removeUnusedNestingParts :: Names -> LoopNesting -> LoopNesting
-removeUnusedNestingParts used (MapNesting pat cs w i params_and_arrs) =
-  MapNesting pat cs w i $ zip used_params used_arrs
+removeUnusedNestingParts used (MapNesting pat cs w params_and_arrs) =
+  MapNesting pat cs w $ zip used_params used_arrs
   where (params,arrs) = unzip params_and_arrs
         (used_params, used_arrs) =
           unzip $

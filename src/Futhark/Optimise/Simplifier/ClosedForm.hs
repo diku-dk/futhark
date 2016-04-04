@@ -57,7 +57,8 @@ foldClosedForm :: MonadBinder m =>
 foldClosedForm look pat lam accs arrs = do
   inputsize <- arraysSize 0 <$> mapM lookupType arrs
   closedBody <- checkResults (patternNames pat) inputsize mempty knownBindings
-                (map paramIdent $ lambdaParams lam) (lambdaBody lam) accs
+                (map paramName (lambdaParams lam))
+                (lambdaBody lam) accs
   isEmpty <- newVName "fold_input_is_empty"
   letBindNames'_ [isEmpty] $
     PrimOp $ CmpOp (CmpEq int32) inputsize (intConst Int32 0)
@@ -77,7 +78,7 @@ loopClosedForm :: MonadBinder m =>
 loopClosedForm pat merge i bound body
   | respat == mergenames = do
     closedBody <- checkResults respat bound i knownBindings
-                  mergeidents body mergeexp
+                  (map identName mergeidents) body mergeexp
     isEmpty <- newVName "bound_is_zero"
     letBindNames'_ [isEmpty] $
       PrimOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
@@ -97,7 +98,7 @@ checkResults :: MonadBinder m =>
              -> SubExp
              -> Names
              -> HM.HashMap VName SubExp
-             -> [Ident]
+             -> [VName] -- ^ Lambda-bound
              -> Body (Lore m)
              -> [SubExp]
              -> RuleM m (Body (Lore m))
@@ -111,7 +112,7 @@ checkResults pat size untouchable knownBindings params body accs = do
         res = bodyResult body
 
         nonFree = boundInBody body <>
-                  HS.fromList (map identName params) <>
+                  HS.fromList params <>
                   untouchable
 
         checkResult (p, e) _
@@ -120,7 +121,7 @@ checkResults pat size untouchable knownBindings params body accs = do
           e@(PrimOp (BinOp bop x y)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must
           -- be something that is free in the body.
-          let isThisAccum = (==Var (identName accparam))
+          let isThisAccum = (==Var accparam)
           (this, el) <- liftMaybe $
                         case ((asFreeSubExp x, isThisAccum y),
                               (asFreeSubExp y, isThisAccum x)) of
