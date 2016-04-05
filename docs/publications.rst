@@ -9,6 +9,6 @@ Papers and projects about Futhark are listed here.
 
   **Bounds Checking: An Instance of Hybrid Analysis** :download:`PDF <publications/array14.pdf>`
 
-  **Size Slicing - A Hybrid Approach to Size Inference in Futhark** :download `PDF <publications/fhpc14.pdf`>
+  **Size Slicing - A Hybrid Approach to Size Inference in Futhark** :download:`PDF <publications/fhpc14.pdf`>
 
   **Exploiting functional invariants to optimise parallelism: a dataflow approach** :download:`PDF <publications/troels-masters-thesis.pdf>`
