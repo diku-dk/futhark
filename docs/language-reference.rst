@@ -232,7 +232,7 @@ The size of dimension ``i`` of array ``a``, where ``i`` is a static
 integer constant.
 
 ``split((i_1, ..., i_n), a)``
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Partitions the given array ``a`` into ``n+1`` disjoint arrays
 ``{a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...]}``, returned as a tuple.
