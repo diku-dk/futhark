@@ -372,11 +372,10 @@ elements of the partitions retain their original relative positions.
 ``write(indexes, values, a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Write each index of the ``indexes`` array in the ``a`` array to each value of
+Set each index of the ``indexes`` array in the ``a`` array to each value of
 the ``values`` array.  If an index is -1, ignore it and its associated value.
-Return the modified array.  ``write`` does its work in-place and requires that
-``a`` is unique.  (If you need to write to a non-unique array, you must first
-copy it.)  It is an error if there are duplicate indexes.
+Return the modified array.  It is an error if there are duplicate indexes.
+``write`` does its work in-place and consumes ``a``.
 
 Tuple Shimming
 --------------
