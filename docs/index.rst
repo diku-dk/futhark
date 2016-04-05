@@ -7,17 +7,16 @@ Futhark User's Guide
 ====================
 
 This document has been prepared as an informal overview of the Futhark
-(formerly L0) language.  In time, we hope to develop it into a formal
-specification, with accompanying proofs of correctness, but for now,
-words will have to suffice where formulae would be ideal.
+language.  In time, we hope to develop it into a formal specification,
+with accompanying proofs of correctness, but for now, words will have
+to suffice where formulae would be ideal.
 
 Futhark is an eagerly evaluated, purely functional language with
-built-in arrays and second-order array combinators, which is intended
-for use as an *intermediate language* (sometimes called a *core
-language*) with a focus towards efficient execution on vector hardware
-(GPUs).  While Futhark is not designed to be a pleasant programming
-experience for humans, it does have a textual syntax to facilitate the
-writing of benchmark programs.
+built-in arrays and second-order array combinators with a focus
+towards efficient execution on vector hardware (GPUs).  While Futhark
+is not designed to be a pleasant programming experience for humans, it
+does have a textual syntax to facilitate the writing of benchmark
+programs.
 
 Contents:
 
