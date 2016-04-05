@@ -44,7 +44,7 @@ fun [i32, n] plus_scan([i32, n] X) =
   scan(+, 0, X)
 
 fun [i32, n] plus_prescan([i32, n] X) =
-  let Xshifted = map(fn i32 (i32 i) => if i == 0 then 0 else X[i - 1], iota(n))
+  let Xshifted = map(fn i32 (i32 i) => if i == 0 then 0 else unsafe X[i - 1], iota(n))
   in scan(+, 0, Xshifted)
 
 fun [u32, n] permute([u32, n] A, [i32, n] Index) =
