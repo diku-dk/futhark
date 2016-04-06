@@ -626,6 +626,10 @@ internaliseExp desc (E.Write i v a _) = do
 
   case (sis, svs, sas) of
     ([si], [sv], [sa]) -> do
+      w <- arraySize 0 <$> lookupType sa
+      nModsI <- arraySize 0 <$> lookupType si
+      nModsV <- arraySize 0 <$> lookupType sv
+      t <- lookupType sa
 
       -- Generate certificates.  Goals:
       --
@@ -635,13 +639,11 @@ internaliseExp desc (E.Write i v a _) = do
       --
       --   3. Check that @si@ and @sv@ have the same length.
       --
-      -- Code: FIXME
+      -- Code: FIXME: How???
+      
       let cs = []
 
-      w <- arraySize 0 <$> lookupType sa
-      nMods <- arraySize 0 <$> lookupType si
-      t <- lookupType sa
-      letTupExp' desc $ I.Op $ I.Write cs w nMods t si sv sa
+      letTupExp' desc $ I.Op $ I.Write cs w nModsI t si sv sa
     _ ->
       fail "Futhark.Internalise.internaliseExp: tuples in Write"
 
