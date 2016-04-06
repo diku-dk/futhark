@@ -596,19 +596,18 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
           return ()
 
 prepareArg :: Param -> CompilerM op s C.Exp
-prepareArg (MemParam name size (Space space)) = do
+prepareArg (MemParam name size (Space sid)) = do
   -- Futhark main expects some other memory space than default, so
   -- create a new memory block and copy it there.
-  name' <- newVName $ baseString name <> "_" <> space
-  ty <- memToCType $ Space space
+  name' <- newVName $ baseString name <> "_" <> sid
+  ty <- memToCType $ Space sid
   copy <- asks envCopy
-  alloc <- asks envAllocate
   let size' = dimSizeToExp size
       dest = rawMem' True $ var name'
       src = rawMem' True $ var name
   decl [C.cdecl|$ty:ty $id:name';|]
-  alloc dest size' space
-  copy dest [C.cexp|0|] (Space space) src [C.cexp|0|] DefaultSpace size'
+  allocMem name' size' $ Space sid
+  copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size'
   return [C.cexp|$id:name'|]
 
 prepareArg p = return $ var $ paramName p
