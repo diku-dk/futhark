@@ -673,7 +673,7 @@ compileCode (Imp.Call dests fname args) = do
   let call' = simpleCall (futharkFun . pretty $ fname) args'
   stm $ Assign dests' call'
 
-compileCode (Imp.SetMem dest src) = do
+compileCode (Imp.SetMem dest src _) = do
   let src' = Var (pretty src)
   let dest' = Var (pretty dest)
   stm $ Assign dest' src'
