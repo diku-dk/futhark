@@ -191,7 +191,7 @@ mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
 
 -- FIXME: Make this less hacky.
-mapOnKernelType :: Monad m =>
+mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
                    KernelMapper flore tlore m -> Type -> m Type
 mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
