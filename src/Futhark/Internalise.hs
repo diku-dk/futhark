@@ -640,7 +640,7 @@ internaliseExp desc (E.Write i v a _) = do
       --   3. Check that @si@ and @sv@ have the same length.
       --
       -- Code: FIXME: How???
-      
+
       let cs = []
 
       letTupExp' desc $ I.Op $ I.Write cs w nModsI t si sv sa

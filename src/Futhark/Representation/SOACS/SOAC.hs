@@ -506,7 +506,7 @@ typeCheckSOAC (Write cs w nMods t i v a) = do
   TC.require [t] (Var a)
 
   -- 4.  FIXME: How???
-  
+
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
