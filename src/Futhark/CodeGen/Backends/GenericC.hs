@@ -600,12 +600,11 @@ prepareArg (MemParam name size (Space sid)) = do
   -- Futhark main expects some other memory space than default, so
   -- create a new memory block and copy it there.
   name' <- newVName $ baseString name <> "_" <> sid
-  ty <- memToCType $ Space sid
   copy <- asks envCopy
   let size' = dimSizeToExp size
       dest = rawMem' True $ var name'
       src = rawMem' True $ var name
-  decl [C.cdecl|$ty:ty $id:name';|]
+  declMem name' $ Space sid
   allocMem name' size' $ Space sid
   copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size'
   return [C.cexp|$id:name'|]
