@@ -125,6 +125,8 @@ allocateOpenCLBuffer _ _ space =
 deallocateOpenCLBuffer :: GenericC.Deallocate OpenCL ()
 deallocateOpenCLBuffer mem "device" =
   GenericC.stm [C.cstm|OPENCL_SUCCEED(clReleaseMemObject($exp:mem));|]
+deallocateOpenCLBuffer _ "local" =
+  return () -- Hack - these memory blocks do not actually exist.
 deallocateOpenCLBuffer _ space =
   fail $ "Cannot deallocate in '" ++ space ++ "' space"
 
