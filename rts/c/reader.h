@@ -158,7 +158,7 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
   reader.n_elems_used = 0;
   reader.elem_size = elem_size;
   reader.n_elems_space = 16;
-  reader.elems = calloc(elem_size, reader.n_elems_space);
+  reader.elems = realloc(*data, elem_size*reader.n_elems_space);
   reader.elem_reader = elem_reader;
 
   ret = read_array_elems(&reader, dims);

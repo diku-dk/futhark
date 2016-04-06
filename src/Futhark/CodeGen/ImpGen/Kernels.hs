@@ -668,7 +668,9 @@ kernelCompiler
     -- it ever happened.
     let ImpGen.ArrayDestination (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem _ _)) _ = dest
     a' <- ImpGen.lookupArray a
-    ImpGen.emit $ Imp.SetMem mem (ImpGen.memLocationName $ ImpGen.entryArrayLocation a')
+    let memA = ImpGen.entryArrayLocation a'
+    entryMemSpace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
+    ImpGen.emit $ Imp.SetMem mem (ImpGen.memLocationName memA) entryMemSpace
 
     -- Compute the variables that we need to pass to and from the kernel.
     uses <- computeKernelUses dests (kernel_size, kernel_body) []
