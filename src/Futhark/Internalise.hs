@@ -626,8 +626,16 @@ internaliseExp desc (E.Write i v a _) = do
 
   case (sis, svs, sas) of
     ([si], [sv], [sa]) -> do
-      -- FIXME: Generate bounds checking for every index!
-      -- FIXME: Generate checking for no index occuring more than once in @si@!
+
+      -- Generate certificates.  Goals:
+      --
+      --   1. Check that every index in @si@ is within bounds.
+      --
+      --   2. Check that no index occurs more than once in @si@.
+      --
+      --   3. Check that @si@ and @sv@ have the same length.
+      --
+      -- Code: FIXME
       let cs = []
 
       w <- arraySize 0 <$> lookupType sa
