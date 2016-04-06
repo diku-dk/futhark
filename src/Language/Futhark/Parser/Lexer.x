@@ -71,21 +71,21 @@ tokens :-
   "_"                      { tokenC UNDERSCORE }
   "!"                      { tokenC BANG }
   "."                      { tokenC DOT }
-  @intlit i8               { tokenS $ I8LIT . readInt8 . T.takeWhile (/='i') }
-  @intlit i16              { tokenS $ I16LIT . readInt16 . T.takeWhile (/='i') }
-  @intlit i32              { tokenS $ I32LIT . readInt32 . T.takeWhile (/='i') }
-  @intlit i64              { tokenS $ I64LIT . readInt64 . T.takeWhile (/='i') }
-  @intlit u8               { tokenS $ U8LIT . readInt8 . T.takeWhile (/='u') }
-  @intlit u16              { tokenS $ U16LIT . readInt16 . T.takeWhile (/='u') }
-  @intlit u32              { tokenS $ U32LIT . readInt32 . T.takeWhile (/='u') }
-  @intlit u64              { tokenS $ U64LIT . readInt64 . T.takeWhile (/='u') }
-  @intlit                  { tokenS $ INTLIT . readInt64 }
-  @reallit f32             { tokenS $ F32LIT . readFloat32 . T.takeWhile (/='f') }
-  @reallit f64             { tokenS $ F64LIT . readFloat64 . T.takeWhile (/='f') }
-  @reallit                 { tokenS $ REALLIT . readReal }
+  @intlit i8               { tokenM $ fmap I8LIT . tryRead "i8" . T.takeWhile (/='i') }
+  @intlit i16              { tokenM $ fmap I16LIT . tryRead "i16" . T.takeWhile (/='i') }
+  @intlit i32              { tokenM $ fmap I32LIT . tryRead "i32" . T.takeWhile (/='i') }
+  @intlit i64              { tokenM $ fmap I64LIT . tryRead "i64" . T.takeWhile (/='i') }
+  @intlit u8               { tokenM $ fmap U8LIT . tryRead "u8" . T.takeWhile (/='u') }
+  @intlit u16              { tokenM $ fmap U16LIT . tryRead "u16" . T.takeWhile (/='u') }
+  @intlit u32              { tokenM $ fmap U32LIT . tryRead "u32" . T.takeWhile (/='u') }
+  @intlit u64              { tokenM $ fmap U64LIT . tryRead "u64" . T.takeWhile (/='u') }
+  @intlit                  { tokenM $ fmap INTLIT . tryRead "int" }
+  @reallit f32             { tokenM $ fmap F32LIT . tryRead "f32" . T.takeWhile (/='f') }
+  @reallit f64             { tokenM $ fmap F64LIT . tryRead "f64" . T.takeWhile (/='f') }
+  @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
+  "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
+  \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
   [a-zA-Z] [a-zA-Z0-9_']*  { tokenS keyword }
-  "'" @charlit "'"         { tokenS $ CHARLIT . read . T.unpack }
-  \" @stringcharlit* \"    { tokenS $ STRINGLIT . read . T.unpack }
 
 {
 
@@ -153,26 +153,22 @@ keyword s =
     "entry"        -> ENTRY
     _              -> ID $ nameFromText s
 
-readReal :: T.Text -> Double
-readReal = read . T.unpack
+tryRead :: Read a => String -> T.Text -> Alex a
+tryRead desc s = case reads s' of
+  [(x, "")] -> return x
+  _         -> fail $ "Invalid " ++ desc ++ " literal: " ++ T.unpack s
+  where s' = T.unpack s
 
-readInt8 :: T.Text -> Int8
-readInt8 = read . T.unpack
+tokenC v  = tokenS $ const v
 
-readInt16 :: T.Text -> Int16
-readInt16 = read . T.unpack
+tokenS f = tokenM $ return . f
 
-readInt32 :: T.Text -> Int32
-readInt32 = read . T.unpack
+tokenM f (AlexPn addr line col, _, s, _) len = do
+  x <- f $ T.decodeUtf8 $ BS.toStrict $ BS.take len s
+  return (pos, pos, x)
+  where pos = (line, col, addr)
 
-readInt64 :: T.Text -> Int64
-readInt64 = read . T.unpack
-
-readFloat32 :: T.Text -> Float
-readFloat32 = read . T.unpack
-
-readFloat64 :: T.Text -> Double
-readFloat64 = read . T.unpack
+alexEOF = return ((0,0,0), (0,0,0), EOF)
 
 -- | A value tagged with a source location.
 data L a = L SrcLoc a
@@ -299,16 +295,6 @@ data Token = IF
 
            | EOF
              deriving (Show, Eq)
-
-tokenC v (AlexPn addr line col, _, _, _) _ =
-  return (pos, pos, v)
-  where pos = (line, col, addr)
-
-tokenS f (AlexPn addr line col, _, s, _) _ =
-  return (pos, pos, f $ T.decodeUtf8 $ BS.toStrict s)
-  where pos = (line, col, addr)
-
-alexEOF = return ((0,0,0), (0,0,0), EOF)
 
 -- The Alex wrapper only works on ByteStrings, so we have to encode
 -- the Text as UTF-8.  Ugh.
