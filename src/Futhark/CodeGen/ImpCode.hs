@@ -120,7 +120,7 @@ data Code a = Skip
               -- of bytes.
             | Write VName (Count Bytes) PrimType Space Exp
             | SetScalar VName Exp
-            | SetMem VName VName
+            | SetMem VName VName Space
               -- ^ Must be in same space.
             | Call [VName] Name [Exp]
             | If Exp (Code a) (Code a)
@@ -287,8 +287,8 @@ instance Pretty op => Pretty (Code op) where
     text "<-" <+> ppr val
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
-  ppr (SetMem dest from) =
-    ppr dest <+> text "<-" <+> ppr from
+  ppr (SetMem dest from space) =
+    ppr dest <+> text "<-" <+> ppr from <+> text "@" <> ppr space
   ppr (Assert e _) =
     text "assert" <> parens (ppr e)
   ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
@@ -394,8 +394,8 @@ instance Traversable Code where
     pure $ Write name i bt val space
   traverse _ (SetScalar name val) =
     pure $ SetScalar name val
-  traverse _ (SetMem dest from) =
-    pure $ SetMem dest from
+  traverse _ (SetMem dest from space) =
+    pure $ SetMem dest from space
   traverse _ (Assert e loc) =
     pure $ Assert e loc
   traverse _ (Call dests fname args) =
@@ -429,7 +429,7 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn name <> freeIn size
   freeIn (Copy dest x _ src y _ n) =
     freeIn dest <> freeIn x <> freeIn src <> freeIn y <> freeIn n
-  freeIn (SetMem x y) =
+  freeIn (SetMem x y _) =
     freeIn x <> freeIn y
   freeIn (Write v i _ _ e) =
     freeIn v <> freeIn i <> freeIn e
