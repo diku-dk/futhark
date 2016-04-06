@@ -21,6 +21,7 @@ import Control.Monad.Trans.State
 import Control.Monad.Except
 import Data.Maybe (mapMaybe)
 import Data.List (intersect)
+import Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import System.FilePath (takeDirectory, (</>), (<.>))
