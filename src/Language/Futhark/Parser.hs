@@ -21,6 +21,8 @@ import Control.Monad.Trans.State
 import Control.Monad.Except
 import Data.Maybe (mapMaybe)
 import Data.List (intersect, (\\))
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.FilePath (takeDirectory, (</>), (<.>))
 
 import Prelude
@@ -36,27 +38,27 @@ data ParseError = ParseError String
 instance Show ParseError where
   show (ParseError s) = s
 
-parseInMonad :: ParserMonad a -> FilePath -> String
+parseInMonad :: ParserMonad a -> FilePath -> T.Text
              -> ReadLineMonad (Either ParseError a)
 parseInMonad p file program =
   either (Left . ParseError) Right <$> either (return . Left)
   (evalStateT (evalStateT (runExceptT p) env))
-  (alexScanTokens file program)
+  (scanTokens file program)
   where env = newParserEnv file Int32 Float64
 
-parseIncrementalIO :: ParserMonad a -> FilePath -> String
+parseIncrementalIO :: ParserMonad a -> FilePath -> T.Text
                    -> IO (Either ParseError a)
 parseIncrementalIO p file program =
   getLinesFromIO $ parseInMonad p file program
 
-parseIncremental :: ParserMonad a -> FilePath -> String
+parseIncremental :: ParserMonad a -> FilePath -> T.Text
                  -> Either ParseError a
 parseIncremental p file program =
   either (Left . ParseError) id
-  $ getLinesFromStrings (lines program)
-  $ parseInMonad p file ""
+  $ getLinesFromTexts (T.lines program)
+  $ parseInMonad p file mempty
 
-parse :: ParserMonad a -> FilePath -> String
+parse :: ParserMonad a -> FilePath -> T.Text
       -> Either ParseError a
 parse p file program =
   either (Left . ParseError) id
@@ -65,13 +67,13 @@ parse p file program =
 -- | Parse an Futhark expression greedily from the given 'String', only parsing
 -- enough lines to get a correct expression, using the 'FilePath' as the source
 -- name for error messages.
-parseExpIncr :: FilePath -> String
+parseExpIncr :: FilePath -> T.Text
              -> Either ParseError UncheckedExp
 parseExpIncr = parseIncremental expression
 
 -- | Parse an Futhark expression incrementally from IO 'getLine' calls, using the
 -- 'FilePath' as the source name for error messages.
-parseExpIncrIO :: FilePath -> String
+parseExpIncrIO :: FilePath -> T.Text
                -> IO (Either ParseError UncheckedExp)
 parseExpIncrIO = parseIncrementalIO expression
 
@@ -110,11 +112,11 @@ instance Applicative (ErrorIO e) where
 -- headers.
 --
 -- Fails on cyclical includes.  Ignores repeat non-cyclical includes.
-parseFuthark :: FilePath -> String
+parseFuthark :: FilePath -> T.Text
                 -> IO (Either ParseError UncheckedProg)
 parseFuthark fp0 s0 =
   (snd <$>) <$> (evalErrorIO $ parseWithIncludes [fp0] [fp0] (fp0, s0))
-  where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, String)
+  where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, T.Text)
                              -> ErrorIO ParseError ([FilePath], UncheckedProg)
         parseWithIncludes alreadyIncluded includeSources (fp, s) = do
           p <- liftEither $ parse prog fp s
@@ -143,8 +145,8 @@ parseFuthark fp0 s0 =
         includeInclude :: [FilePath] -> [FilePath] -> FilePath
                           -> ErrorIO ParseError ([FilePath], UncheckedProg)
         includeInclude alreadyIncluded includeSources newInclude = do
-          s <- liftIO $ readFile newInclude
-          parseWithIncludes alreadyIncluded includeSources (newInclude, s)
+          t <- liftIO $ T.readFile newInclude
+          parseWithIncludes alreadyIncluded includeSources (newInclude, t)
 
         mergePrograms :: UncheckedProg -> UncheckedProg -> UncheckedProg
         mergePrograms (Prog fs) (Prog gs) = Prog (fs ++ gs)
@@ -157,31 +159,31 @@ parseFuthark fp0 s0 =
 
 -- | Parse an Futhark expression from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
-parseExp :: FilePath -> String
+parseExp :: FilePath -> T.Text
          -> Either ParseError UncheckedExp
 parseExp = parse expression
 
 -- | Parse an Futhark type from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
-parseType :: FilePath -> String
+parseType :: FilePath -> T.Text
           -> Either ParseError UncheckedType
 parseType = parse futharktype
 
 -- | Parse an Futhark anonymous function from the given 'String', using the
 -- 'FilePath' as the source name for error messages.
-parseLambda :: FilePath -> String
+parseLambda :: FilePath -> T.Text
             -> Either ParseError UncheckedLambda
 parseLambda = parse lambda
 
 -- | Parse any Futhark value from the given 'String', using the 'FilePath'
 -- as the source name for error messages.
-parseValue :: FilePath -> String
+parseValue :: FilePath -> T.Text
            -> Either ParseError Value
 parseValue = parse anyValue
 
 -- | Parse several Futhark values (separated by anything) from the given
 -- 'String', using the 'FilePath' as the source name for error
 -- messages.
-parseValues :: FilePath -> String
+parseValues :: FilePath -> T.Text
             -> Either ParseError [Value]
 parseValues = parse anyValues

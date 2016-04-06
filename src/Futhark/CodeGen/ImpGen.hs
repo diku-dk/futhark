@@ -412,8 +412,8 @@ compileLoopBody mergenames (Body _ bnds ses) = do
           return $ emit $ Imp.SetScalar d $ Imp.ScalarVar tmp
         Mem _ space | Var v <- se -> do
           emit $ Imp.DeclareMem tmp space
-          emit $ Imp.SetMem tmp v
-          return $ emit $ Imp.SetMem d tmp
+          emit $ Imp.SetMem tmp v space
+          return $ emit $ Imp.SetMem d tmp space
         _ -> return $ return ()
     sequence_ copy_to_merge_params
 
@@ -1034,8 +1034,8 @@ copyDWIMDest dest dest_is (Constant v) [] =
 copyDWIMDest dest dest_is (Var src) src_is = do
   src_entry <- lookupVar src
   case (dest, src_entry) of
-    (MemoryDestination mem memsizetarget, MemVar (MemEntry memsize _)) -> do
-      emit $ Imp.SetMem mem src
+    (MemoryDestination mem memsizetarget, MemVar (MemEntry memsize space)) -> do
+      emit $ Imp.SetMem mem src space
       case memsizetarget of
         Nothing ->
           return ()
@@ -1110,9 +1110,10 @@ copyDWIMDest dest dest_is (Var src) src_is = do
 
     (ArrayDestination (SetMemory dest_mem dest_memsize) dest_dims, ArrayVar src_arr) -> do
       let src_mem = memLocationName $ entryArrayLocation src_arr
-      emit $ Imp.SetMem dest_mem src_mem
-      zipWithM_ maybeSetShape dest_dims $ entryArrayShape src_arr
+      space <- entryMemSpace <$> lookupMemory src_mem
       srcmemsize <- entryMemSize <$> lookupMemory src_mem
+      emit $ Imp.SetMem dest_mem src_mem space
+      zipWithM_ maybeSetShape dest_dims $ entryArrayShape src_arr
       case dest_memsize of
         Nothing -> return ()
         Just dest_memsize' -> emit $ Imp.SetScalar dest_memsize' $

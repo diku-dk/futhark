@@ -57,8 +57,8 @@ setBodySpace _ (DeclareScalar name bt) =
   DeclareScalar name bt
 setBodySpace space (SetScalar name e) =
   SetScalar name $ setExpSpace space e
-setBodySpace _ (SetMem to from) =
-  SetMem to from
+setBodySpace space (SetMem to from old_space) =
+  SetMem to from $ setSpace space old_space
 setBodySpace space (Call dests fname args) =
   Call dests fname $ map (setExpSpace space) args
 setBodySpace space (Assert e loc) =

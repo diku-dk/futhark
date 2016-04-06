@@ -74,7 +74,9 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsWriteScalar = GenericC.writeScalarPointerWithQuals pointerQuals
                      , GenericC.opsReadScalar = GenericC.readScalarPointerWithQuals pointerQuals
                      , GenericC.opsAllocate = cannotAllocate
+                     , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
+                     , GenericC.opsFatMemory = False
                      }
   where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
         kernelOps (GetGroupId v i) = do
@@ -103,6 +105,10 @@ inKernelOperations = GenericC.Operations
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
 
+        cannotDeallocate :: GenericC.Deallocate KernelOp UsedFunctions
+        cannotDeallocate _ _ =
+          fail "Cannot deallocate memory in kernel"
+
         copyInKernel :: GenericC.Copy KernelOp UsedFunctions
         copyInKernel _ _ _ _ _ _ _ =
           fail $ "Cannot bulk copy in kernel."
@@ -123,7 +129,7 @@ compileKernel called@(Map kernel) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
           size <- GenericC.compileExp $ mapKernelSize kernel
           let check = [C.citem|if ($id:(mapKernelThreadNum kernel) >= $exp:size) return;|]
-          body <- GenericC.collect $ GenericC.compileCode $ mapKernelBody kernel
+          body <- GenericC.blockScope $ GenericC.compileCode $ mapKernelBody kernel
           return $ check : body
 
       used_funs = GenericC.compUserState s
@@ -143,7 +149,7 @@ compileKernel called@(Map kernel) =
 compileKernel called@(AnyKernel kernel) =
   let (kernel_body, s) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
-        GenericC.collect $ GenericC.compileCode $ kernelBody kernel
+        GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
 
       used_funs = GenericC.compUserState s
 
