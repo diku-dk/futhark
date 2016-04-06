@@ -484,9 +484,29 @@ typeCheckSOAC (Write cs w nMods t i v a) = do
   --   will mean it cannot be consumed.  FIXME: How should this be done, and
   --   where?
   --
-  -- Code: FIXME
+  -- Code:
+
+  -- Check the certificates.
+  mapM_ (TC.requireI [Prim Cert]) cs
+
+  -- 1.
+  iLen <- arraySize 0 <$> lookupType i
+  TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+
+  -- 2.
+  vType <- lookupType v
+  aType <- lookupType a
+  case (vType, aType) of
+    (Array pt0 _ _, Array pt1 _ _) ->
+      return ()
+    _ ->
+      TC.bad $ TC.TypeError "Write values and input arrays do not have the same primitive type"
+
+  -- 3.
+  TC.require [t] (Var a)
+
+  -- 4.  FIXME: How???
   
-  return ()
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
