@@ -119,6 +119,8 @@ allocateOpenCLBuffer mem size "device" = do
                               &$id:errorname);
     OPENCL_SUCCEED($id:errorname);
   }|]
+allocateOpenCLBuffer _ _ "local" =
+  return () -- Hack - these memory blocks do not actually exist.
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
 
