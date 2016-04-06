@@ -467,10 +467,25 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                 _ -> return True
 
 typeCheckSOAC (Write cs w nMods t i v a) = do
-  -- FIXME: Check that @a@ is unique.  Or do that somewhere else.  Where should
-  -- this be done?
+  -- Requirements:
+  --
+  --   1. @i@ must be an array of i32.
+  --
+  --   2. @v@ and @a@ must have the same type (though not necessarily the same
+  --   length).
+  --
+  --   3. The return type @t@ must be the same type as @a@.
+  --
+  --   4. @v@ must not alias @a@, since otherwise there might be indeterministic
+  --   behaviour.
+  --
+  --   5. @a@ is consumed.  But this is not really a check, but more of a
+  --   requirement, so that e.g. the source is not hoisted out of a loop, which
+  --   will mean it cannot be consumed.  FIXME: How should this be done, and
+  --   where?
+  --
+  -- Code: FIXME
   
-  -- FIXME: Do basic type checking.
   return ()
 
 -- | Get Stream's accumulators as a sub-expression list
