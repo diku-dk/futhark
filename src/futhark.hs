@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Monoid
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.IO
 import System.Exit
 import System.Console.GetOpt
@@ -262,7 +263,7 @@ main = mainWithOptions newConfig commandLineOptions compile
         compile _      _      =
           Nothing
         m file config = do
-          source <- liftIO $ readFile file
+          source <- liftIO $ T.readFile file
           prog <- runPipelineOnSource (futharkConfig config) id file source
           runPolyPasses config prog
 
