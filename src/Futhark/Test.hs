@@ -249,7 +249,7 @@ testSpecFromFile path = do
 -- 'SourceName' parameter is used for error messages.
 valuesFromString :: SourceName -> String -> Either F.ParseError [Value]
 valuesFromString srcname s =
-  fmap concat $ mapM internalise =<< F.parseValues srcname s
+  fmap concat $ mapM internalise =<< F.parseValues srcname (T.pack s)
   where internalise v =
           maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
           internaliseValue v

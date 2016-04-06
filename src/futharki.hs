@@ -2,6 +2,9 @@ module Main where
 
 import Data.Version
 import Control.Monad
+import Data.Monoid
+
+import Prelude
 
 import Language.Futhark.Parser
 import Futhark.Version
@@ -30,7 +33,7 @@ repl = do
   putStrLn "(C) HIPERFIT research centre"
   putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
   putStrLn ""
-  forever $ print =<< parseExpIncrIO "input" ""
+  forever $ print =<< parseExpIncrIO "input" mempty
 
 interpret :: FutharkConfig -> FilePath -> IO ()
 interpret config =

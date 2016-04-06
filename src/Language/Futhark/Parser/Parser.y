@@ -11,7 +11,7 @@ module Language.Futhark.Parser.Parser
   , ParserMonad
   , ReadLineMonad(..)
   , getLinesFromIO
-  , getLinesFromStrings
+  , getLinesFromTexts
   , getNoLines
   , newParserEnv
   )
@@ -25,6 +25,8 @@ import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import Data.Char (ord)
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
@@ -661,9 +663,9 @@ type ParserMonad a =
        StateT [L Token] ReadLineMonad)) a
 
 data ReadLineMonad a = Value a
-                     | GetLine (String -> ReadLineMonad a)
+                     | GetLine (T.Text -> ReadLineMonad a)
 
-readLineFromMonad :: ReadLineMonad String
+readLineFromMonad :: ReadLineMonad T.Text
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
@@ -681,13 +683,13 @@ instance Applicative ReadLineMonad where
 getLinesFromIO :: ReadLineMonad a -> IO a
 getLinesFromIO (Value x) = return x
 getLinesFromIO (GetLine f) = do
-  s <- getLine
+  s <- T.getLine
   getLinesFromIO $ f s
 
-getLinesFromStrings :: [String] -> ReadLineMonad a -> Either String a
-getLinesFromStrings _ (Value x) = Right x
-getLinesFromStrings (x : xs) (GetLine f) = getLinesFromStrings xs $ f x
-getLinesFromStrings [] (GetLine _) = Left "Ran out of input"
+getLinesFromTexts :: [T.Text] -> ReadLineMonad a -> Either String a
+getLinesFromTexts _ (Value x) = Right x
+getLinesFromTexts (x : xs) (GetLine f) = getLinesFromTexts xs $ f x
+getLinesFromTexts [] (GetLine _) = Left "Ran out of input"
 
 getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
@@ -764,7 +766,7 @@ floatNegate :: FloatValue -> FloatValue
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
 
-readLine :: ParserMonad String
+readLine :: ParserMonad T.Text
 readLine = lift $ lift $ lift readLineFromMonad
 
 lexer :: (L Token -> ParserMonad a) -> ParserMonad a
@@ -776,7 +778,7 @@ lexer cont = do
       case ended of
         Right x -> return x
         Left _ -> do
-          ts' <- alexScanTokens <$> getFilename <*> readLine
+          ts' <- scanTokens <$> getFilename <*> readLine
           ts'' <- case ts' of Right x -> return x
                               Left e  -> throwError e
           case ts'' of

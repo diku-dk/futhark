@@ -13,6 +13,8 @@ module Language.Futhark.Core
   , Name
   , nameToString
   , nameFromString
+  , nameToText
+  , nameFromText
   , ID(..)
   , baseTag
   , baseName
@@ -96,6 +98,14 @@ nameToString (Name t) = T.unpack t
 -- | Convert a list of characters to the corresponding name.
 nameFromString :: String -> Name
 nameFromString = Name . T.pack
+
+-- | Convert a name to the corresponding 'T.Text'.
+nameToText :: Name -> T.Text
+nameToText (Name t) = t
+
+-- | Convert a 'T.Text' to the corresponding name.
+nameFromText :: T.Text -> Name
+nameFromText = Name
 
 -- | A human-readable location string, of the form
 -- @filename:lineno:columnno@.
