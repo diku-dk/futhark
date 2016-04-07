@@ -8,6 +8,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , index
        , iota
        , offsetIndex
+       , strideIndex
        , permute
        , reshape
        , applyInd
@@ -52,6 +53,7 @@ data IxFun :: * -> Nat -> Nat -> * where
   Permute :: IxFun num c n -> Perm.Permutation n -> IxFun num c n
   Index :: SNat n -> IxFun num c (m:+:n) -> Indices num m -> IxFun num c n
   Reshape :: IxFun num c ('S m) -> ShapeChange num n -> IxFun num c n
+  Stride :: IxFun num c n -> num -> IxFun num c n
 
 --- XXX: this is almost just structural equality, which may be too
 --- conservative - unless we normalise first, somehow.
@@ -86,6 +88,7 @@ instance Show num => Show (IxFun num c n) where
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
   show (Index _ fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
   show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
+  show (Stride fun stride) = "Stride (" ++ show fun ++ ", " ++ show stride ++ ")"
 
 instance Pretty num => Pretty (IxFun num c n) where
   ppr (Direct dims) =
@@ -96,6 +99,8 @@ instance Pretty num => Pretty (IxFun num c n) where
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->" <>
     parens (commasep (map ppr $ Vec.toList oldshape))
+  ppr (Stride fun stride) =
+    ppr fun <> text "*" <> ppr stride
 
 instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num c n) where
   substituteNames _ (Direct n) =
@@ -112,6 +117,10 @@ instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num c n
     reshape
     (substituteNames subst fun)
     (Vec.map (substituteNames subst) newshape)
+  substituteNames subst (Stride fun stride) =
+    Stride
+    (substituteNames subst fun)
+    (substituteNames subst stride)
 
 instance (Eq num, IntegralCond num, Substitute num, Rename num) => Rename (IxFun num c n) where
   -- Because there is no mapM-like function on sized vectors, we
@@ -158,6 +167,9 @@ index (Reshape (fun :: IxFun num c ('S m)) newshape) is element_size =
       new_indices = computeNewIndices innerslicesizes flatidx
   in index fun new_indices element_size
 
+index (Stride fun stride) (i :- is) element_size =
+  index fun (i * stride :- is) element_size
+
 computeNewIndices :: IntegralCond num =>
                      Vector num k -> num -> Indices num k
 computeNewIndices Nil _ =
@@ -187,6 +199,10 @@ offsetIndex :: IntegralCond num =>
                IxFun num c n -> num -> IxFun num c n
 offsetIndex = Offset
 
+strideIndex :: IntegralCond num =>
+               IxFun num c n -> num -> IxFun num c n
+strideIndex = Stride
+
 permute :: IntegralCond num =>
            IxFun num c n -> Perm.Permutation n -> IxFun num c n
 permute (Permute ixfun oldperm) perm
@@ -212,6 +228,9 @@ reshape ixfun newshape =
 
           Offset ixfun' offset ->
             Offset (reshape ixfun' newshape) offset
+
+          Stride{} ->
+            Reshape ixfun newshape
 
           Index sm (ixfun' :: IxFun num c (k :+: 'S m)) (is :: Indices num k)
             | Dict <- propToBoolLeq $ plusLeqL (Vec.sLength is) sm ->
@@ -261,6 +280,7 @@ rank (Offset ixfun _) = rank ixfun
 rank (Permute ixfun _) = rank ixfun
 rank (Index n _ _) = n
 rank (Reshape _ newshape) = sLength newshape
+rank (Stride ixfun _) = rank ixfun
 
 shape :: IntegralCond num =>
          IxFun num c n -> Shape num n
@@ -287,6 +307,8 @@ shape (Index n (ixfun::IxFun num c (m :+ n)) (indices::Indices num m)) =
        in resshape
 shape (Reshape _ dims) =
   Vec.map newDim dims
+shape (Stride ixfun _) =
+  shape ixfun
 
 base :: IxFun num k c
      -> Shape num k
@@ -300,6 +322,8 @@ base (Index _ ixfun _) =
   base ixfun
 base (Reshape ixfun _) =
   base ixfun
+base (Stride ixfun _) =
+  base ixfun
 
 rebase :: (Eq num, IntegralCond num) =>
           IxFun num k c
@@ -309,6 +333,8 @@ rebase new_base (Direct _) =
   new_base
 rebase new_base (Offset ixfun o) =
   offsetIndex (rebase new_base ixfun) o
+rebase new_base (Stride ixfun stride) =
+  strideIndex (rebase new_base ixfun) stride
 rebase new_base (Permute ixfun perm) =
   permute (rebase new_base ixfun) perm
 rebase new_base (Index n ixfun is) =
@@ -352,6 +378,7 @@ rearrangeWithOffset _ _ =
 instance FreeIn num => FreeIn (IxFun num c n) where
   freeIn (Direct dims) = freeIn (Vec.toList dims)
   freeIn (Offset ixfun e) = freeIn ixfun <> freeIn e
+  freeIn (Stride ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Permute ixfun _) = freeIn ixfun
   freeIn (Index _ ixfun is) =
     freeIn ixfun <>
