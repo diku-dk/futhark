@@ -10,6 +10,9 @@
 # Ignore cabal build directory.
 dist
 
+# Ignore Stack junk
+.stack-work
+
 # Ignore result of test suite.
 data/*actual-*
 data/**/*actual-*
