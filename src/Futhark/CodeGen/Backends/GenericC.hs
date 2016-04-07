@@ -1012,13 +1012,11 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e loc) = do
   e' <- compileExp e
-  stm [C.cstm|{
-            if (!$exp:e') {
+  stm [C.cstm|if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
                                    $string:(pretty e), $string:(locStr loc));
                    abort();
-                 }
-          }|]
+                 }|]
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
