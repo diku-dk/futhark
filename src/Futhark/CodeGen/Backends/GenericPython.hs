@@ -287,11 +287,11 @@ packArg :: HM.HashMap VName VName
 packArg _ _ decl@(Imp.ScalarValue bt vname) = do
   let vname' = Var $ pretty vname
       npobject = compilePrimToNp bt
-      call = simpleCall npobject [Var $ valueDeclName decl]
+      call = simpleCall npobject [Var $ extValueDeclName decl]
   stm $ Assign vname' call
 
 packArg memsizes spacemap decl@(Imp.ArrayValue vname bt dims) = do
-  let extname = valueDeclName decl
+  let extname = extValueDeclName decl
   zipWithM_ (unpackDim extname) dims [0..]
   let src_size = Var $ extname ++ ".nbytes"
       makeNumpy = simpleCall "np.int32" [src_size]
@@ -308,7 +308,7 @@ packArg memsizes spacemap decl@(Imp.ArrayValue vname bt dims) = do
                                  alloc <- asks envAllocate
                                  name <- newVName $ baseString vname <> "_" <> space
                                  alloc name (Var $ pretty sizevar) space
-                                 stm $ Assign dest $ Var $ valueDeclName decl
+                                 stm $ Assign dest $ Var $ extValueDeclName decl
                                  copy
                                    name (Constant $ value (0 :: Int32)) (Imp.Space $ pretty space)
                                    vname (Constant $ value (0 :: Int32)) Imp.DefaultSpace src_size bt
@@ -349,9 +349,12 @@ unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
     Just Imp.DefaultSpace -> stm $ Assign dest funCall
     Nothing -> error "Space is not set correctly"
 
+extValueDeclName :: Imp.ValueDecl -> String
+extValueDeclName = (++"_ext") . valueDeclName
+
 valueDeclName :: Imp.ValueDecl -> String
-valueDeclName (Imp.ScalarValue _ vname) = pretty vname ++ "_ext"
-valueDeclName (Imp.ArrayValue vname _ _) = pretty vname ++ "_ext"
+valueDeclName (Imp.ScalarValue _ vname) = pretty vname
+valueDeclName (Imp.ArrayValue vname _ _) = pretty vname
 
 readerElem :: PrimType -> String
 readerElem bt = case bt of
@@ -365,14 +368,14 @@ readInput :: Imp.ValueDecl -> PyStmt
 readInput decl@(Imp.ScalarValue bt _) =
   let reader' = readerElem bt
       stdin = Var "sys.stdin"
-  in Assign (Var $ valueDeclName decl) $ simpleCall reader' [stdin]
+  in Assign (Var $ extValueDeclName decl) $ simpleCall reader' [stdin]
 
 readInput decl@(Imp.ArrayValue _ bt dims) =
   let rank' = Var $ show $ length dims
       reader' = Var $ readerElem bt
       bt' = Var $ compilePrimType bt
       stdin = Var "sys.stdin"
-  in Assign (Var $ valueDeclName decl) $ simpleCall "read_array" [stdin, reader', rank', bt']
+  in Assign (Var $ extValueDeclName decl) $ simpleCall "read_array" [stdin, reader', rank', bt']
 
 printPrimStm :: PyExp -> PrimType -> PyStmt
 printPrimStm val t =
@@ -443,7 +446,7 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = d
       call = [Assign funTuple funCall]
       res = map (Var . valueDeclName) decl_outputs
 
-  return (nameToString fname, map valueDeclName decl_args,
+  return (nameToString fname, map extValueDeclName decl_args,
           prepareIn, call, prepareOut,
           res)
 
