@@ -561,8 +561,8 @@ compilePrimToNp bt =
     IntType Int64 -> "np.int64"
     FloatType Float32 -> "np.float32"
     FloatType Float64 -> "np.float64"
-    Bool -> "bool"
-    Cert -> "bool"
+    Bool -> "np.byte"
+    Cert -> "np.byte"
 
 compilePrimValue :: Imp.PrimValue -> PyExp
 compilePrimValue (IntValue (Int8Value v)) = Constant $ value v
