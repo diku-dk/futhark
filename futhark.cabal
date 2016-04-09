@@ -7,7 +7,7 @@ description:
         efficient execution on GPUs.  This package implements an
         optimising Futhark compiler.
 
-Homepage:            https://github.com/HIPERFIT/futhark
+Homepage:            http://futhark-lang.org
 Category:            Language
 License:             BSD3
 License-file:        LICENSE

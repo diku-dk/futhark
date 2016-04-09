@@ -11,7 +11,8 @@ source language still lacks many niceties for manual programming - it
 is fairly usable as a target for high-level code generation, however.
 
 The [incomplete documentation is
-here](http://futhark.readthedocs.org).
+here](http://futhark.readthedocs.org).  You can also check our our
+[website](http://futhark-lang.org).
 
 Installation
 ============
