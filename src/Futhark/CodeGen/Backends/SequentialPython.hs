@@ -15,15 +15,20 @@ import Futhark.MonadFreshNames
 
 import Prelude
 
-compileProg :: MonadFreshNames m => Bool -> Prog -> m (Either String String)
-compileProg as_module =
+compileProg :: MonadFreshNames m => Maybe String -> Prog -> m (Either String String)
+compileProg module_name =
   ImpGen.compileProg >=>
-  traverse (GenericPython.compileProg as_module imports defines operations () [] [])
+  traverse (GenericPython.compileProg
+            module_name
+            GenericPython.emptyConstructor
+            imports
+            defines
+            operations () [] [])
   where imports = [Import "sys" Nothing,
                    Import "numpy" $ Just "np",
                    Import "ctypes" $ Just "ct",
                    Import "time" Nothing]
-        defines = [Escape pyTestMain, Escape pyFunctions, Escape pyUtility]
+        defines = [Escape pyTestMain, Escape pyFunctions]
         operations :: GenericPython.Operations Imp.Sequential ()
         operations = GenericPython.defaultOperations {
           GenericPython.opsCompiler = const $ return GenericPython.Done

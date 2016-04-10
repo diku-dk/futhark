@@ -41,7 +41,10 @@ pyCodeAction filepath config =
          , actionProcedure = procedure
          }
   where procedure prog = do
-          pyprog <- either compileFail return =<< SequentialPy.compileProg (compilerModule config) prog
+          let class_name
+                | compilerModule config = Just $ dropExtension filepath
+                | otherwise             = Nothing
+          pyprog <- either compileFail return =<< SequentialPy.compileProg class_name prog
           let binpath = outputFilePath filepath config
           let pypath = if compilerModule config
                        then binpath `replaceExtension` "py"
