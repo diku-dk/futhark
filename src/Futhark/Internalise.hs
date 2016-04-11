@@ -626,9 +626,6 @@ internaliseExp desc (E.Write i v a _) = do
 
   case (sis, svs, sas) of
     ([si], [sv], [sa]) -> do
-      w <- arraySize 0 <$> lookupType sa
-      nModsI <- arraySize 0 <$> lookupType si
-      nModsV <- arraySize 0 <$> lookupType sv
       t <- lookupType sa
 
       -- Generate certificates.  Goals:
@@ -644,7 +641,7 @@ internaliseExp desc (E.Write i v a _) = do
 
       let cs = []
 
-      letTupExp' desc $ I.Op $ I.Write cs w nModsI t si sv sa
+      letTupExp' desc $ I.Op $ I.Write cs t si sv sa
     _ ->
       fail "Futhark.Internalise.internaliseExp: tuples in Write"
 
