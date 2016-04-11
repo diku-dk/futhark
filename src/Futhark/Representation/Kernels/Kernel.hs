@@ -556,7 +556,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
   opMetrics (WriteKernel {}) =
-    inside "WriteKernel" $ return () -- FIXME: ???
+    inside "WriteKernel" $ return ()
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
 

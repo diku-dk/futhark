@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies, LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
   )
@@ -626,11 +627,20 @@ kernelCompiler
         ImpGen.emit $ Imp.SetScalar write_index $
           Imp.Index srcmem srcoffset int32 space
 
-  let check_write_index body =
-        let cond = Imp.CmpOp (Imp.CmpEq int32)
-              (Imp.ScalarVar write_index)
-              (Imp.Constant (IntValue (Int32Value (-1))))
-        in Imp.If cond Imp.Skip body
+
+  let cond = Imp.CmpOp (Imp.CmpEq int32)
+        (Imp.ScalarVar write_index)
+        (Imp.Constant (IntValue (Int32Value (-1))))
+
+      -- If an index is out of bounds, just ignore it.  This piece of code is
+      -- needed, because no earlier phase currently generates bounds checking.
+      condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
+        (Imp.ScalarVar write_index)
+        (Imp.Constant (IntValue (Int32Value 0)))
+      condOutOfBounds1 = Imp.CmpOp (Imp.CmpUle Int32)
+        kernel_size
+        (Imp.ScalarVar write_index)
+      cond' = Imp.BinOp LogOr cond (Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1)
 
   let write_result = ImpGen.copyDWIMDest dest [ImpGen.varIndex write_index]
         (Var v) [ImpGen.varIndex global_thread_index]
@@ -646,7 +656,7 @@ kernelCompiler
           ImpGen.comment "write result" write_result
 
         ImpGen.comment "check write index"
-          $ ImpGen.emit $ check_write_index body_body_body
+          $ ImpGen.emit $ Imp.If cond' Imp.Skip body_body_body
 
       ImpGen.comment "get thread index" get_thread_index
       ImpGen.comment "check thread index"
