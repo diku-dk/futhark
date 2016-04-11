@@ -633,13 +633,14 @@ internaliseExp desc (E.Write i v a _) = do
 
       -- Generate certificates.  Goals:
       --
-      --   1. Check that every index in @si@ is within bounds.
+      --   1. Check that every index in @si@ is within bounds.  This check is
+      --   currently hard-coded into CodeGen/ImpCode/Kernels.hs.
       --
       --   2. Check that no index occurs more than once in @si@.
       --
       --   3. Check that @si@ and @sv@ have the same length.
       --
-      -- Code: FIXME: How???
+      -- Code: FIXME.
 
       let cs = []
 

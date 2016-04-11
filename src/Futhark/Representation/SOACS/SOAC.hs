@@ -505,7 +505,7 @@ typeCheckSOAC (Write cs w nMods t i v a) = do
   -- 3.
   TC.require [t] (Var a)
 
-  -- 4.  FIXME: How???
+  -- 4.  FIXME.
 
 
 -- | Get Stream's accumulators as a sub-expression list
@@ -531,7 +531,7 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
   opMetrics (Write {}) =
-    inside "Write" $ return () -- FIXME: ???
+    inside "Write" $ return ()
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
