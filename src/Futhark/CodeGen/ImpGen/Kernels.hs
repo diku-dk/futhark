@@ -610,13 +610,13 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dests)
-  (WriteKernel _cs _w nDims _t i v a) = do
+  (WriteKernel _cs _t i v a) = do
 
   dest <- case dests of
     [d] -> return d
     _ -> fail "write has multiple dests"
 
-  let kernel_size = ImpGen.compileSubExp nDims
+  kernel_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType i
 
   global_thread_index <- newVName "write_thread_index"
   write_index <- newVName "write_index"
@@ -660,7 +660,7 @@ kernelCompiler
 
       body_body <- ImpGen.collect $ do
         ImpGen.comment "find write index" find_index
-        body_body_body <- ImpGen.collect $ do
+        body_body_body <- ImpGen.collect $
           ImpGen.comment "write result" write_result
 
         ImpGen.comment "check write index"

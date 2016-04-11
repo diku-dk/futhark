@@ -580,10 +580,10 @@ allocInExp (Op (ScanKernel cs w size order lam input)) = do
   lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
   return $ Op $ Inner $ ScanKernel cs w size order lam' input
 
-allocInExp (Op (WriteKernel cs w nMods t i v a)) = do
+allocInExp (Op (WriteKernel cs t i v a)) =
   -- We require Write to be in-place, so there is no need to allocate any
   -- memory.
-  return $ Op $ Inner $ WriteKernel cs w nMods t i v a
+  return $ Op $ Inner $ WriteKernel cs t i v a
 
 allocInExp (Op GroupSize) =
   return $ Op $ Inner GroupSize

@@ -580,9 +580,10 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs _w nMods arrayIOType indexes values arrayIO) = do
+transformSOAC pat (Write cs arrayIOType indexes values arrayIO) = do
   iter <- newVName "write_iter"
   arrayOut <- newIdent "write_out" arrayIOType
+  nMods <- arraySize 0 <$> lookupType indexes
 
   -- Write is in-place, so we use the input array as the output array.
   let merge = loopMerge [arrayOut] [Var arrayIO]
