@@ -54,7 +54,7 @@ import Futhark.Representation.Aliases
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
-import Futhark.Tools (partitionChunkedLambdaParameters)
+import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
 
 data Kernel lore =
@@ -318,7 +318,7 @@ chunkedKernelNonconcatOutputs :: Lambda lore -> Int
 chunkedKernelNonconcatOutputs fun =
   length $ takeWhile (not . outerSizeIsChunk) $ lambdaReturnType fun
   where outerSizeIsChunk = (==Var (paramName chunk)) . arraySize 0
-        (chunk, _) = partitionChunkedLambdaParameters $ lambdaParams fun
+        (_, chunk, _) = partitionChunkedKernelLambdaParameters $ lambdaParams fun
 
 instance Attributes lore => TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType

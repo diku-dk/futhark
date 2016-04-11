@@ -8,7 +8,6 @@ module Futhark.Tools
   , redomapToMapAndReduce
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
-  , partitionChunkedLambdaParameters
   , extLambdaToLambda
   , partitionChunkedFoldParameters
   , partitionChunkedKernelLambdaParameters
@@ -180,13 +179,6 @@ partitionChunkedFoldParameters _ [] =
 partitionChunkedFoldParameters num_accs (chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
   in (chunk_param, acc_params, arr_params)
-
-partitionChunkedLambdaParameters :: [Param attr]
-                               -> (Param attr, [Param attr])
-partitionChunkedLambdaParameters [] =
-  error "partitionChunkedLambdaParameters: lambda takes no parameters"
-partitionChunkedLambdaParameters (chunk_param : params) =
-  (chunk_param, params)
 
 partitionChunkedKernelFoldParameters :: Int -> [Param attr]
                                      -> (VName, Param attr, [Param attr], [Param attr])

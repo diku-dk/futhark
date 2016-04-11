@@ -269,12 +269,20 @@ kernelCompiler
           ImpGen.destinationFromParams reduce_acc_params
 
         let indexArrayTarget (ImpGen.ArrayDestination
-                              (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
-              let dest_loc' = ImpGen.offsetArray dest_loc $
-                              ImpGen.sizeToScalExp per_thread_chunk *
-                              ImpGen.varIndex fold_i
-              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
-                Nothing : dest_dims
+                              (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims))
+              | Noncommutative <- comm = do
+                  let dest_loc' = ImpGen.offsetArray dest_loc $
+                                  ImpGen.sizeToScalExp per_thread_chunk *
+                                  ImpGen.varIndex fold_i
+                  return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                    Nothing : dest_dims
+              | Commutative <- comm = do
+                  let dest_loc' = ImpGen.strideArray
+                                  (ImpGen.offsetArray dest_loc $
+                                   ImpGen.varIndex fold_i) $
+                                  ImpGen.sizeToScalExp num_threads
+                  return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                    Nothing : dest_dims
             indexArrayTarget _ =
               throwError "indexArrayTarget: invalid target for map-out."
         arr_chunk_targets <- mapM indexArrayTarget arr_targets

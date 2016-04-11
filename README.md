@@ -11,12 +11,14 @@ source language still lacks many niceties for manual programming - it
 is fairly usable as a target for high-level code generation, however.
 
 The [incomplete documentation is
-here](http://futhark.readthedocs.org).
+here](http://futhark.readthedocs.org).  You can also check our our
+[website](http://futhark-lang.org).
 
 Installation
 ============
 
-You will need GHC 7.8 or newer to compile Futhark.
+You will need GHC 7.8 or newer and a recent version of
+[Alex](https://www.haskell.org/alex/) to compile Futhark.
 
 Just run `cabal install` and executables by the names of `futhark`,
 `futhark-c`, `futhark-opencl` and `futharki` will be installed in your
@@ -24,6 +26,12 @@ Cabal bin directory, most likely $HOME/.cabal/bin.
 
 Otherwise, just run `cabal configure`, followed by `cabal build`, and
 the executable can be found in `dist/build/futhark/futhark`.
+
+You can get a sufficiently new version of Alex by running `cabal
+install alex if `$HOME/.cabal/bin` is in your `$PATH`.  If you
+accidentally try (and fail) to install Futhark with an older version
+of Alex, you will need to run `cabal clean` to ensure that the broken
+build artifacts will not interfere with the new build.
 
 Make sure that you have a recent Cabal to go with your GHC.  A common
 mistake is to only upgrade GHC, but use an old Cabal (i.e. older than

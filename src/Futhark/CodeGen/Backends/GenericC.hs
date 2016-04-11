@@ -413,9 +413,9 @@ setMem dest src space = do
     then stm [C.cstm|$id:(fatMemSet space)(&$exp:dest, &$id:src);|]
     else stm [C.cstm|$exp:dest = $id:src;|]
 
-unRefMem :: VName -> Space -> CompilerM op s ()
+unRefMem :: C.Exp -> Space -> CompilerM op s ()
 unRefMem mem space =
-  stm [C.cstm|$id:(fatMemUnRef space)(&$id:mem);|]
+  stm [C.cstm|$id:(fatMemUnRef space)(&$exp:mem);|]
 
 allocMem :: C.ToIdent a =>
             a -> C.Exp -> Space -> CompilerM op s ()
@@ -534,7 +534,7 @@ readPrimStm _ t =
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
 mainCall :: [C.Stm] -> Name -> Function op
-         -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem])
+         -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem],[C.BlockItem])
 mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
@@ -543,11 +543,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   (argexps, prepare) <- collect' $ mapM prepareArg inputs
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
+  freestms <- freeResults ret outputs
   -- makeParam will always create DefaultSpace memory.
   inputdecls <- collect $ mapM_ makeParam inputs
   outputdecls <- collect $ mapM_ stubParam outputs
   free_in <- collect $ mapM_ freeParam inputs
-  free_out <- collect $ mapM_ freeParam outputs
   printstms <- printResult results
   return ([C.citems|
                /* Declare and read input. */
@@ -575,8 +575,8 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
                /* Print the final result. */
                $items:unpackstms
                $stms:printstms
-               $items:free_out
-             |])
+             |],
+          freestms)
   where makeParam (MemParam name _ _) = do
           declMem name DefaultSpace
           allocMem name [C.cexp|0|] DefaultSpace
@@ -591,7 +591,7 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
           decl [C.cdecl|$ty:ty' $id:name;|]
 
         freeParam (MemParam name _ _) =
-          unRefMem name DefaultSpace
+          unRefMem (var name) DefaultSpace
         freeParam ScalarParam{} =
           return ()
 
@@ -666,32 +666,36 @@ printResult vs = fmap concat $ forM vs $ \v -> do
 
 unpackResults :: VName -> [Param] -> CompilerM op s [C.BlockItem]
 unpackResults ret [p] =
-  collect $ unpackResult ret p
+  collect $ unpackResult (var ret) p
 unpackResults ret outparams =
   collect $ zipWithM_ assign outparams [0..]
-  where assign param i = do
-          ret_field_tmp <- newVName "ret_field_tmp"
-          field_t <- case param of
-                       ScalarParam _ bt ->
-                         return $ primTypeToCType bt
-                       MemParam _ _ space ->
-                         memToCType space
-          let field_e = tupleFieldExp (var ret) i
-          item [C.citem|$ty:field_t $id:ret_field_tmp = $exp:field_e;|]
-          unpackResult ret_field_tmp param
+  where assign param i =
+          unpackResult (tupleFieldExp (var ret) i) param
 
-unpackResult :: VName -> Param -> CompilerM op s ()
+unpackResult :: C.Exp -> Param -> CompilerM op s ()
 unpackResult ret (ScalarParam name _) =
-  stm [C.cstm|$id:name = $id:ret;|]
+  stm [C.cstm|$id:name = $exp:ret;|]
 unpackResult ret (MemParam name _ DefaultSpace) =
-  stm [C.cstm|$id:name = $id:ret;|]
+  stm [C.cstm|$id:name = $exp:ret;|]
 unpackResult ret (MemParam name size (Space srcspace)) = do
   copy <- asks envCopy
   let size' = dimSizeToExp size
   allocMem name size' DefaultSpace
   copy (rawMem' True $ var name) [C.cexp|0|] DefaultSpace
-    (rawMem' True $ var ret) [C.cexp|0|] (Space srcspace) size'
-  unRefMem ret (Space srcspace)
+    (rawMem' True ret) [C.cexp|0|] (Space srcspace) size'
+
+freeResults :: VName -> [Param] -> CompilerM op s [C.BlockItem]
+freeResults ret [p] =
+  collect $ freeResult (var ret) p
+freeResults ret outparams =
+  collect $ zipWithM_ free outparams [0..]
+  where free param i = freeResult (tupleFieldExp (var ret) i) param
+
+freeResult :: C.Exp -> Param -> CompilerM op s ()
+freeResult _ ScalarParam{} =
+  return ()
+freeResult e (MemParam _ _ space) = do
+  unRefMem e space
 
 benchmarkOptions :: [Option]
 benchmarkOptions =
@@ -731,7 +735,8 @@ compileProg :: MonadFreshNames m =>
             -> m String
 compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
-  let ((memtypes, prototypes, definitions, (main_pre, main, main_post)), endstate) =
+  let ((memtypes, prototypes, definitions,
+        (main_pre, main, main_post, free_out)), endstate) =
         runCompilerM prog ops src userstate compileProg'
   return $ pretty [C.cunit|
 $esc:("#include <stdio.h>")
@@ -785,6 +790,7 @@ int main(int argc, char** argv) {
   if (num_runs > 1) {
     time_runs = 0;
     $items:main
+    $items:free_out
   }
   time_runs = 1;
   /* Proper run. */
@@ -793,9 +799,13 @@ int main(int argc, char** argv) {
       detail_timing = 1;
     }
     $items:main
+    if (run < num_runs-1) {
+      $items:free_out
+    }
   }
   $items:main_post
   $items:post_main_items
+  $items:free_out
   if (runtime_file != NULL) {
     fclose(runtime_file);
   }
@@ -1012,13 +1022,11 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e loc) = do
   e' <- compileExp e
-  stm [C.cstm|{
-            if (!$exp:e') {
+  stm [C.cstm|if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
                                    $string:(pretty e), $string:(locStr loc));
                    abort();
-                 }
-          }|]
+                 }|]
 
 compileCode (Allocate name (Count e) space) = do
   size <- compileExp e
@@ -1127,7 +1135,8 @@ blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 blockScope' m = pass $ do
   (x, w) <- listen m
   let items = DL.toList $ accItems w
-  releases <- collect $ mapM_ (uncurry unRefMem) $ accDeclaredMem w
+  releases <- collect $ forM_ (accDeclaredMem w) $ \(mem, space) ->
+    unRefMem (var mem) space
   return ((x, items ++ releases),
           const mempty)
 
