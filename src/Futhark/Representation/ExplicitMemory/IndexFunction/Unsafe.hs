@@ -9,6 +9,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , index
        , iota
        , offsetIndex
+       , strideIndex
        , permute
        , reshape
        , applyInd
@@ -113,6 +114,10 @@ iota sh = case toSing (intToNat $ n-1) of
 offsetIndex :: IxFun -> ScalExp -> IxFun
 offsetIndex (IxFun c n f) se =
   IxFun c n $ Safe.offsetIndex f se
+
+strideIndex :: IxFun -> ScalExp -> IxFun
+strideIndex (IxFun c n f) se =
+  IxFun c n $ Safe.strideIndex f se
 
 permute :: IxFun -> [Int] -> IxFun
 permute (IxFun (c::SNat ('S c)) (n::SNat ('S n)) f) perm

@@ -8,6 +8,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   , PyProg(..)
   , PyExcept(..)
   , PyFunDef(..)
+  , PyClassDef(..)
   )
   where
 
@@ -24,6 +25,7 @@ data UnOp = Not -- ^ Boolean negation.
 
 data PyExp = Constant PrimValue
            | StringLiteral String
+           | RawStringLiteral String
            | Var String
            | BinaryOp String PyExp PyExp
            | UnOp String PyExp
@@ -59,6 +61,7 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
               -- Definition-like statements.
             | Import String (Maybe String)
             | FunDef PyFunDef
+            | ClassDef PyClassDef
 
               -- Some arbitrary string of Python code.
             | Escape String
@@ -69,6 +72,9 @@ data PyExcept = Catch PyExp [PyStmt]
 
 data PyFunDef = Def String [String] [PyStmt]
               deriving (Eq, Show)
+
+data PyClassDef = Class String [PyStmt]
+                deriving (Eq, Show)
 
 data PyProg = PyProg [PyStmt]
             deriving (Eq, Show)
@@ -91,6 +97,7 @@ instance Pretty PyExp where
     ppr (Constant Checked) = text "Checked"
     ppr (Constant (BoolValue b)) = ppr b
     ppr (StringLiteral s) = text $ show s
+    ppr (RawStringLiteral s) = text "\"\"\"" <> text s <> text "\"\"\""
     ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
     ppr (Field e s) = ppr e <> text "." <> text s
     ppr (BinaryOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
@@ -160,11 +167,18 @@ instance Pretty PyStmt where
 
   ppr (FunDef d) = ppr d
 
-  ppr (Escape s) = text s
+  ppr (ClassDef d) = ppr d
+
+  ppr (Escape s) = stack $ map text $ lines s
 
 instance Pretty PyFunDef where
   ppr (Def fname params body) =
     text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
+    indent 2 (stack (map ppr body))
+
+instance Pretty PyClassDef where
+  ppr (Class cname body) =
+    text "class" <+> text cname <> text ":" </>
     indent 2 (stack (map ppr body))
 
 instance Pretty PyExcept where
