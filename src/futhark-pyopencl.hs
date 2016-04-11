@@ -42,7 +42,7 @@ pyCodeAction filepath config =
          }
   where procedure prog = do
           let class_name
-                | compilerModule config = Just $ dropExtension filepath
+                | compilerModule config = Just $ takeBaseName filepath
                 | otherwise             = Nothing
           pyprog <- either compileFail return =<< PyOpenCL.compileProg class_name prog
           let binpath = outputFilePath filepath config
