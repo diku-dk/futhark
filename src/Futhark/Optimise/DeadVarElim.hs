@@ -61,10 +61,10 @@ deadCodeElim :: Attributes lore => Prog lore -> Prog lore
 deadCodeElim = Prog . map deadCodeElimFun . progFunctions
 
 -- | Applies Dead-Code Elimination to just a single function.
-deadCodeElimFun :: Attributes lore => FunDec lore -> FunDec lore
-deadCodeElimFun (FunDec fname rettype args body) =
+deadCodeElimFun :: Attributes lore => FunDef lore -> FunDef lore
+deadCodeElimFun (FunDef entry fname rettype args body) =
   let body' = deadCodeElimBody body
-  in FunDec fname rettype args body'
+  in FunDef entry fname rettype args body'
 
 -- | Applies Dead-Code Elimination to just a single body.
 deadCodeElimBody :: Attributes lore => Body lore -> Body lore

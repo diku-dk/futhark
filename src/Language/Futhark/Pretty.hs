@@ -32,21 +32,26 @@ apply = parens . commasep . map align
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
-aliasComment :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => PatternBase ty vn -> Doc -> Doc
-aliasComment pat d = case aliasComment' pat of
-                       []   -> d
-                       l:ls -> foldl (</>) l ls </> d
-  where aliasComment' Wildcard{} = []
-        aliasComment' (TuplePattern pats _) = concatMap aliasComment' pats
-        aliasComment' (Id ident) =
-          case maybe [] (clean . HS.toList . aliases)
-                 $ unboxType $ identType ident of
-            [] -> []
-            als -> [oneline $
-                    text "// " <> ppr ident <> text " aliases " <>
-                    commasep (map ppr als)]
-          where clean = filter (/= identName ident)
-                oneline s = text $ displayS (renderCompact s) ""
+class AliasAnnotation f where
+  aliasComment :: (Eq vn, Pretty vn, Hashable vn) => PatternBase f vn -> Doc -> Doc
+
+instance AliasAnnotation NoInfo where
+  aliasComment _ = id
+
+instance AliasAnnotation Info where
+  aliasComment pat d = case aliasComment' pat of
+    []   -> d
+    l:ls -> foldl (</>) l ls </> d
+    where aliasComment' Wildcard{} = []
+          aliasComment' (TuplePattern pats _) = concatMap aliasComment' pats
+          aliasComment' (Id ident) =
+            case clean . HS.toList . aliases $ unInfo $ identType ident of
+              [] -> []
+              als -> [oneline $
+                      text "// " <> ppr ident <> text " aliases " <>
+                      commasep (map ppr als)]
+            where clean = filter (/= identName ident)
+                  oneline s = text $ displayS (renderCompact s) ""
 
 instance Pretty Value where
   ppr (PrimValue bv) = ppr bv
@@ -55,8 +60,7 @@ instance Pretty Value where
       braces $ commastack $ map ppr vs
     | otherwise =
       braces $ commasep $ map ppr vs
-  ppr v@(ArrayValue a t)
-    | Just s <- arrayString v = text $ show s
+  ppr (ArrayValue a t)
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
     | otherwise     = brackets $ commasep $ map ppr $ elems a
@@ -68,7 +72,6 @@ instance Pretty PrimType where
   ppr (Unsigned Int64) = text "u64"
   ppr (Signed t) = ppr t
   ppr (FloatType t) = ppr t
-  ppr Char = text"char"
   ppr Bool = text "bool"
 
 instance Pretty PrimValue where
@@ -77,7 +80,6 @@ instance Pretty PrimValue where
   ppr (UnsignedValue (Int32Value v)) = text (show v) <> text "u32"
   ppr (UnsignedValue (Int64Value v)) = text (show v) <> text "u64"
   ppr (SignedValue v) = ppr v
-  ppr (CharValue c) = text $ show c
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
 
@@ -128,7 +130,13 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
+  ppr = ppr . declaredType
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase f vn) where
+  ppr = ppr . paramName
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where
@@ -176,17 +184,15 @@ hasArrayVal ArrayValue{} = True
 hasArrayVal (TupValue vs) = any hasArrayVal vs
 hasArrayVal _ = False
 
-instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = braces $ commastack $ map ppr es
     | otherwise          = braces $ commasep $ map ppr es
-  pprPrec _ (ArrayLit es rt _) =
-    case unboxType rt of
-      Just Array{} -> brackets $ commastack $ map ppr es
-      _            -> brackets $ commasep $ map ppr es
+  pprPrec _ (ArrayLit es _ _) =
+    brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
   pprPrec _ (UnOp op e _) = ppr op <+> pprPrec 9 e
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
@@ -274,7 +280,7 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ExpBase ty vn) w
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
 
-instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LoopFormBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopFormBase ty vn) where
   ppr (For FromUpTo lbound i ubound) =
     text "for" <+> align (ppr lbound) <+> ppr i <+> text "<" <+> align (ppr ubound)
   ppr (For FromDownTo lbound i ubound) =
@@ -287,7 +293,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (TuplePattern pats _) = braces $ commasep $ map ppr pats
   ppr (Wildcard _ _) = text "_"
 
-instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn) where
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBase ty vn) where
   ppr (CurryFun fname [] _ _) = text $ nameToString fname
   ppr (CurryFun fname curryargs _ _) =
     text (nameToString fname) <+> apply (map ppr curryargs)
@@ -304,18 +310,20 @@ instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (LambdaBase ty vn
   ppr (CurryBinOpRight binop x _ _ _) =
     ppr binop <+> ppr x
 
-instance (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => Pretty (ProgBase ty vn) where
-  ppr = stack . punctuate line . map ppFun . progFunctions
-    where ppFun (name, rettype, args, body, _) =
-            text "fun" <+> ppr rettype <+>
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase ty vn) where
+  ppr = stack . punctuate line . map ppDec . progFunctions
+    where ppDec (FunDef entry name rettype args body _) =
+            text fun <+> ppr rettype <+>
             text (nameToString name) <//>
             apply (map ppParam args) <+>
             equals </> indent 2 (ppr body)
+            where fun | entry     = "entry"
+                      | otherwise = "fun"
 
-ppParam :: (Eq vn, Hashable vn, Pretty (ty vn), Pretty vn) => IdentBase ty vn -> Doc
-ppParam param = ppr (identType param) <+> ppr param
+ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase t vn -> Doc
+ppParam param = ppr (paramDeclaredType param) <+> ppr param
 
-prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) =>
+prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) =>
                Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
 prettyBinOp p bop x y = parensIf (p > precedence bop) $
                         pprPrec (precedence bop) x <+/>
@@ -347,7 +355,7 @@ prettyBinOp p bop x y = parensIf (p > precedence bop) $
         rprecedence Divide = 10
         rprecedence op = precedence op
 
-ppSOAC :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty, Pretty fn) =>
+ppSOAC :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty, Pretty fn) =>
           String -> [fn] -> [ExpBase ty vn] -> Doc
 ppSOAC name funs es =
   text name <> parens (ppList funs </>
@@ -378,13 +386,13 @@ ppBinOp :: BinOp -> String
 ppBinOp = render80
 
 -- | Prettyprint an expression, wrapped to 80 characters.
-ppExp :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => ExpBase ty vn -> String
+ppExp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => ExpBase ty vn -> String
 ppExp = render80
 
 -- | Prettyprint a lambda, wrapped to 80 characters.
-ppLambda :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => LambdaBase ty vn -> String
+ppLambda :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => LambdaBase ty vn -> String
 ppLambda = render80
 
 -- | Prettyprint an entire Futhark program, wrapped to 80 characters.
-prettyPrint :: (Eq vn, Hashable vn, Pretty vn, TypeBox ty) => ProgBase ty vn -> String
+prettyPrint :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => ProgBase ty vn -> String
 prettyPrint = render80

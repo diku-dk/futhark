@@ -195,17 +195,17 @@ fuseProg prog = do
   else do funs' <- liftEitherM $ runFusionGatherM (zipWithM fuseInFun ks' funs) env
           deadCodeElim <$> renameProg (Prog funs')
 
-fusionGatherFun :: FunDec -> FusionGM FusedRes
+fusionGatherFun :: FunDef -> FusionGM FusedRes
 fusionGatherFun fundec =
-  bindingFParams (funDecParams fundec) $
-  fusionGatherBody mkFreshFusionRes $ funDecBody fundec
+  bindingFParams (funDefParams fundec) $
+  fusionGatherBody mkFreshFusionRes $ funDefBody fundec
 
-fuseInFun :: FusedRes -> FunDec -> FusionGM FunDec
+fuseInFun :: FusedRes -> FunDef -> FusionGM FunDef
 fuseInFun res fundec = do
-  body' <- bindingFParams (funDecParams fundec) $
+  body' <- bindingFParams (funDefParams fundec) $
            bindRes res $
-           fuseInBody $ funDecBody fundec
-  return $ fundec { funDecBody = body' }
+           fuseInBody $ funDefBody fundec
+  return $ fundec { funDefBody = body' }
 
 ---------------------------------------------------
 ---------------------------------------------------

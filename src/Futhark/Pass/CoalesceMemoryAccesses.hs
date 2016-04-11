@@ -3,11 +3,11 @@
 -- coalesced memory access from within GPU kernels.
 --
 -- This module is presently embryonic: all it does is fiddle with the
--- index functions of 'ChunkedMapKernel's to ensure that their
--- writeback is coalesced.  Most of the actual coalescing work is done
--- in hacky ways in KernelBabysitting and in slightly less hacky ways
--- in ExpandAllocations - in time, we wish to move as much as possible
--- in here, and do it properly.
+-- index functions of 'ChunkedMapKernel's and 'ReduceKernel's to
+-- ensure that their writeback is coalesced.  Most of the actual
+-- coalescing work is done in hacky ways in KernelBabysitting and in
+-- slightly less hacky ways in ExpandAllocations - in time, we wish to
+-- move as much as possible in here, and do it properly.
 --
 -- This module plays fast and loose with the symbol table (only puts
 -- in things that are let-bound) - if you get strange errors about
@@ -36,13 +36,13 @@ coalesceMemoryAccesses =
   simplePass
   "coalesce memory accesses"
   "Coalesce memory accesses" $
-  intraproceduralTransformation transformFunDec
+  intraproceduralTransformation transformFunDef
 
-transformFunDec :: MonadFreshNames m => FunDec -> m FunDec
-transformFunDec fundec = do
+transformFunDef :: MonadFreshNames m => FunDef -> m FunDef
+transformFunDef fundec = do
   body' <- modifyNameSource $ runState (runReaderT m $ scopeOf fundec)
-  return fundec { funDecBody = body' }
-  where m = transformBody $ funDecBody fundec
+  return fundec { funDefBody = body' }
+  where m = transformBody $ funDefBody fundec
 
 type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
 
@@ -87,16 +87,60 @@ transformBinding (Let (Pattern [] pat_elems) ()
             attr ->
               fail $ "Invalid attribute for let-binding of ChunkedMapKernel return: " ++ pretty attr
 
-        lookupMem mem = do
-          t <- lookupType mem
-          case t of Mem size space -> return (size, space)
-                    _              -> fail $ "CoalesceMemoryAccesses.lookupMem: " ++
-                                              pretty mem ++
-                                              " is supposed to be a memory block, but has type "
-                                              ++ pretty t
+transformBinding (Let (Pattern [] pat_elems) ()
+                  e@(Op (Inner (ReduceKernel _ _ size _ _ _ nes _))))
+  | (red_pat_elems, map_pat_elems) <- splitAt (length nes) pat_elems,
+    not $ null map_pat_elems = do
+      (alloc_bnds, map_pat_elems', tr_bnds) <-
+        unzip3 <$> mapM transposePatElem map_pat_elems
+      return $
+        alloc_bnds ++
+        [Let (Pattern [] (red_pat_elems ++ map_pat_elems')) () e] ++
+        tr_bnds
+  where transposePatElem pat_elem = do
+          name <- newVName (baseString (patElemName pat_elem) ++ "_transposed")
+          case patElemAttr pat_elem of
+            ArrayMem bt (Shape old_dims) u mem _old_ixfun -> do
+              (memsize, space) <- lookupMem mem
+              coalescing_mem <- newVName "coalescing_mem"
+              let alloc_pat_elem = PatElem coalescing_mem BindVar $ MemMem memsize space
+
+              let attr
+                    | length old_dims == 1 =
+                        let imaginary_dims = kernelNumThreads size : kernelElementsPerThread size :
+                                             drop 1 old_dims
+                            perm = [1..length imaginary_dims-1] ++ [0]
+                            tr_dims = rearrangeShape perm imaginary_dims
+                        in ArrayMem bt (Shape old_dims) u coalescing_mem $
+                           IxFun.reshape (IxFun.permute (IxFun.iota $ IxFun.shapeFromSubExps tr_dims)
+                                          (rearrangeInverse perm)) $
+                           map DimNew old_dims
+                    | otherwise =
+                        let perm = [1..length old_dims-1] ++ [0]
+                            tr_dims = rearrangeShape perm old_dims
+                        in ArrayMem bt (Shape old_dims) u coalescing_mem $
+                           IxFun.permute (IxFun.iota $ IxFun.shapeFromSubExps tr_dims)
+                           (rearrangeInverse perm)
+
+              return (Let (Pattern [] [alloc_pat_elem]) () $ Op $ Alloc memsize space,
+
+                      PatElem name BindVar attr,
+
+                      Let (Pattern [] [pat_elem]) () $ PrimOp $ Copy name)
+            attr ->
+              fail $ "Invalid attribute for let-binding of ReduceKernel return: " ++ pretty attr
 
 transformBinding (Let pat () e) = do
   e' <- mapExpM transform e
   return [Let pat () e']
   where transform = identityMapper { mapOnBody = transformBody
                                    }
+
+lookupMem :: (Monad m, HasScope lore m) => VName -> m (SubExp, Space)
+lookupMem mem = do
+  t <- lookupType mem
+  case t of Mem size space -> return (size, space)
+            _              -> fail $ "CoalesceMemoryAccesses.lookupMem: " ++
+                                      pretty mem ++
+                                      " is supposed to be a memory block, but has type "
+                                      ++ pretty t

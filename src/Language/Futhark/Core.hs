@@ -18,7 +18,7 @@ module Language.Futhark.Core
   , baseName
   , baseString
   , VName
-  , VarName(..)
+  , textual
 
   -- * Special identifiers
   , defaultEntryPoint
@@ -29,15 +29,15 @@ module Language.Futhark.Core
 
 where
 
-import Data.Char
+import Data.Monoid
 import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Loc
-import Data.Maybe
-import Data.Monoid
 import qualified Data.Text as T
 
-import Text.PrettyPrint.Mainland
+import Prelude
+
+import Futhark.Util.Pretty
 
 -- | The uniqueness attribute of a type.  This essentially indicates
 -- whether or not in-place modifications are acceptable.
@@ -140,28 +140,5 @@ instance Pretty vn => Pretty (ID vn) where
 instance Hashable (ID vn) where
   hashWithSalt salt (ID (_,i)) = salt * i
 
--- | A type that can be used for representing variable names.  These
--- must support tagging, as well as conversion to a textual format.
-class (Ord vn, Show vn, Pretty vn, Hashable vn) => VarName vn where
-  -- | Set the numeric tag associated with this name.
-  setID :: vn -> Int -> vn
-  -- | Identity-preserving prettyprinting of a name.  This means that
-  -- if and only if @x == y@, @textual x == textual y@.
-  textual :: vn -> String
-  -- | Create a name based on a string and a numeric tag.
-  varName :: String -> Maybe Int -> vn
-
-instance VarName vn => VarName (ID vn) where
-  setID (ID (vn, _)) i = ID (vn, i)
-  textual (ID (vn, i)) = textual vn ++ '_' : show i
-  varName s i = ID (varName s Nothing, fromMaybe 0 i)
-
-instance VarName Name where
-  setID (Name t) i = Name $ stripSuffix t <> T.pack ('_' : show i)
-  textual = nameToString
-  varName s (Just i) = nameFromString s `setID` i
-  varName s Nothing = nameFromString s
-
--- | Chop off terminating underscore followed by numbers.
-stripSuffix :: T.Text -> T.Text
-stripSuffix = T.dropWhileEnd (=='_') . T.dropWhileEnd isDigit
+textual :: VName -> String
+textual = pretty

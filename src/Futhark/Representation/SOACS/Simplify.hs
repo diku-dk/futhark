@@ -37,6 +37,7 @@ import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.ClosedForm
 import Futhark.Tools
+import Futhark.Transform.Rename (renameLambda)
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
@@ -45,7 +46,7 @@ simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =
   simplifyProgWithRules bindableSimpleOps soacRules noExtraHoistBlockers
 
-simplifyFun :: MonadFreshNames m => FunDec -> m FunDec
+simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
   Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
 
@@ -145,6 +146,7 @@ topDownRules = [liftIdentityMapping,
                 removeReplicateRedomap,
                 removeIotaMapping,
                 removeIotaRedomap,
+                removeIotaReduce,
                 removeIotaStream,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
@@ -222,6 +224,18 @@ removeIotaRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun nes ar
       (foldfun', arrs') <- m
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeIotaRedomap _ _ = cannotSimplify
+
+-- | Like 'removeIotaMapping', but for 'Reduce'.  This means that we
+-- have to turn it into a 'Redomap'.
+removeIotaReduce :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>
+                     TopDownRule m
+removeIotaReduce vtable (Let pat _ (Op (Reduce cs w comm fun input)))
+  | Just m <- removeIotaInput vtable fun arrs = do
+      (foldfun, arrs') <- m
+      redfun <- renameLambda fun
+      letBind_ pat $ Op $ Redomap cs w comm redfun foldfun nes arrs'
+  where (nes, arrs) = unzip input
+removeIotaReduce _ _ = cannotSimplify
 
 -- | Like 'removeIotaMapping', but for 'Stream'.
 removeIotaStream :: (MonadBinder m, LocalScope (Lore m) m, Op (Lore m) ~ SOAC (Lore m)) =>

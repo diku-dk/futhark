@@ -87,7 +87,7 @@ getUserTypeBase target hashmap unknowns =
          (Just (UserType someTarget)) -> getUserType (UserType someTarget) hashmap $ target : unknowns
          (Just (UserTuple userTypes)) -> getUserTupleBaseTypes userTypes hashmap unknowns
          (Just (UserArray userType)) -> getUserType userType hashmap unknowns
-         Nothing -> Left $ "UserType " ++ target ++ " not defined"
+         Nothing -> Left $ "UserType " ++ target ++ " not defined."
 
 getUserTupleBaseTypes :: [UserType] -> HM.HashMap String UserType -> [String] -> Either String TypeBase
 getUserTupleBaseTypes declarations hashmap unknowns =

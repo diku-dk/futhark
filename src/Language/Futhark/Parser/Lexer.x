@@ -108,7 +108,6 @@ keyword s =
     "f32"          -> F32
     "f64"          -> F64
     "bool"         -> BOOL
-    "char"         -> CHAR
     "fun"          -> FUN
     "fn"           -> FN
     "for"          -> FOR
@@ -146,6 +145,7 @@ keyword s =
     "streamSeq"    -> STREAM_SEQ
     "include"      -> INCLUDE
     "type"         -> TYPE
+    "entry"        -> ENTRY
     _              -> ID $ nameFromString s
 
 type Byte = Word8

@@ -21,7 +21,6 @@ import Data.Monoid
 import Futhark.Util.Pretty
 
 import Futhark.Representation.AST.Syntax
-import Futhark.Representation.AST.Attributes.Values
 import Futhark.Util
 
 -- | The class of lores whose annotations can be prettyprinted.
@@ -33,8 +32,8 @@ class (Annotations lore,
        Pretty (Op lore)) => PrettyLore lore where
   ppBindingLore :: Binding lore -> Maybe Doc
   ppBindingLore = const Nothing
-  ppFunDecLore :: FunDec lore -> Maybe Doc
-  ppFunDecLore = const Nothing
+  ppFunDefLore :: FunDef lore -> Maybe Doc
+  ppFunDefLore = const Nothing
   ppLambdaLore :: Lambda lore -> Maybe Doc
   ppLambdaLore = const Nothing
   ppExpLore :: Exp lore -> Maybe Doc
@@ -56,8 +55,6 @@ instance Pretty Commutativity where
 
 instance Pretty Value where
   ppr (PrimVal bv) = ppr bv
-  ppr v
-    | Just s <- arrayString v = text $ show s
   ppr (ArrayVal a t _)
     | null $ elems a = text "empty" <> parens (ppr t)
   ppr (ArrayVal a t (_:rowshape@(_:_))) =
@@ -255,13 +252,15 @@ instance PrettyLore lore => Pretty (ExtLambda lore) where
 instance Pretty ExtRetType where
   ppr = ppTuple' . retTypeValues
 
-instance PrettyLore lore => Pretty (FunDec lore) where
-  ppr fundec@(FunDec name rettype args body) =
-    maybe id (</>) (ppFunDecLore fundec) $
-    text "fun" <+> ppr rettype <+>
+instance PrettyLore lore => Pretty (FunDef lore) where
+  ppr fundec@(FunDef entry name rettype args body) =
+    maybe id (</>) (ppFunDefLore fundec) $
+    text fun <+> ppr rettype <+>
     text (nameToString name) <//>
     apply (map ppr args) <+>
     equals </> indent 2 (ppr body)
+    where fun | entry = "entry"
+              | otherwise = "fun"
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions

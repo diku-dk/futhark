@@ -192,7 +192,7 @@ partitionChunkedLambdaParameters (chunk_param : params) =
   (chunk_param, params)
 
 intraproceduralTransformation :: MonadFreshNames m =>
-                                 (FunDec fromlore -> State VNameSource (FunDec tolore))
+                                 (FunDef fromlore -> State VNameSource (FunDef tolore))
                               -> Prog fromlore -> m (Prog tolore)
 intraproceduralTransformation ft prog =
   modifyNameSource $ runState $ Prog <$> mapM ft (progFunctions prog)

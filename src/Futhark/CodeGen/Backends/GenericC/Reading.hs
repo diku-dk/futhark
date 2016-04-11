@@ -43,6 +43,11 @@ readerFunctions =
       return c;
     }
 
+    int next_is_not_constituent() {
+      int c = peekc();
+      return c == EOF || !isalnum(c);
+    }
+
     void skipspaces() {
       int c = getchar();
       if (isspace(c)) {
@@ -197,7 +202,7 @@ readerFunctions =
       skipspaces();
       if (scanf("%hhi", (typename int8_t*)dest) == 1) {
         scanf("i8");
-        return 0;
+        return next_is_not_constituent() ? 0 : 1;
       } else {
         return 1;
       }
@@ -207,7 +212,7 @@ readerFunctions =
       skipspaces();
       if (scanf("%hi", (typename int16_t*)dest) == 1) {
         scanf("i16");
-        return 0;
+        return next_is_not_constituent() ? 0 : 1;
       } else {
         return 1;
       }
@@ -217,7 +222,7 @@ readerFunctions =
       skipspaces();
       if (scanf("%i", (typename int32_t*)dest) == 1) {
         scanf("i32");
-        return 0;
+        return next_is_not_constituent() ? 0 : 1;
       } else {
         return 1;
       }
@@ -227,7 +232,7 @@ readerFunctions =
       skipspaces();
       if (scanf("%Li", (typename int64_t*)dest) == 1) {
         scanf("i64");
-        return 0;
+        return next_is_not_constituent() ? 0 : 1;
       } else {
         return 1;
       }
@@ -246,7 +251,7 @@ readerFunctions =
       skipspaces();
       if (scanf("%lf", (double*)dest) == 1) {
         scanf("f64");
-        return 0;
+        return next_is_not_constituent() ? 0 : 1;
       } else {
         return 1;
       }
@@ -256,7 +261,7 @@ readerFunctions =
       skipspaces();
       if (scanf("%f", (float*)dest) == 1) {
         scanf("f32");
-        return 0;
+        return next_is_not_constituent() ? 0 : 1;
       } else {
         return 1;
       }

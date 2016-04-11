@@ -5,11 +5,8 @@ module Futhark.CodeGen.Backends.GenericPython.AST
   , PyStmt(..)
   , module Language.Futhark.Core
   , module Futhark.Representation.Primitive
-  , PyFunc(..)
   , PyProg(..)
   , PyExcept(..)
-  , PyDefinition
-  , PyImport
   )
   where
 
@@ -57,17 +54,19 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
             | Exp PyExp
             | Return PyExp
             | Pass
+
+              -- Definition-like statements.
+            | Import String (Maybe String)
+            | FuncDef String [String] [PyStmt]
+
+              -- Some arbitrary string of Python code.
+            | Escape String
             deriving (Eq, Show)
 
 data PyExcept = Catch PyExp [PyStmt] deriving (Eq, Show)
 
-data PyFunc = PyFunc String [String] [PyStmt]
-
-type PyDefinition = String
-
-type PyImport = String
-
-data PyProg = PyProg [PyFunc] [PyImport] [PyDefinition]
+data PyProg = PyProg [PyStmt]
+            deriving (Eq, Show)
 
 instance Pretty PyIdx where
   ppr (IdxExp e) = ppr e
@@ -78,13 +77,12 @@ instance Pretty PyArg where
   ppr (Arg e) = ppr e
 
 instance Pretty PyExp where
-    ppr (Constant chr@(CharValue _)) = text "b" <> ppr chr
-    ppr (Constant (IntValue (Int8Value v))) = text "int8" <> parens (text $ show v)
-    ppr (Constant (IntValue (Int16Value v))) = text "int16" <> parens (text $ show v)
-    ppr (Constant (IntValue (Int32Value v))) = text "int32" <> parens (text $ show v)
-    ppr (Constant (IntValue (Int64Value v))) = text "int64" <> parens (text $ show v)
-    ppr (Constant (FloatValue (Float32Value v))) = text "float32" <> parens (text $ show v)
-    ppr (Constant (FloatValue (Float64Value v))) = text "float64" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int8Value v))) = text "np.int8" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int16Value v))) = text "np.int16" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int32Value v))) = text "np.int32" <> parens (text $ show v)
+    ppr (Constant (IntValue (Int64Value v))) = text "np.int64" <> parens (text $ show v)
+    ppr (Constant (FloatValue (Float32Value v))) = text "np.float32" <> parens (text $ show v)
+    ppr (Constant (FloatValue (Float64Value v))) = text "np.float64" <> parens (text $ show v)
     ppr (Constant Checked) = text "Checked"
     ppr (Constant (BoolValue b)) = ppr b
     ppr (StringLiteral s) = text $ show s
@@ -93,7 +91,9 @@ instance Pretty PyExp where
     ppr (BinaryOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
     ppr (UnOp s e) = text s <> parens (ppr e)
     ppr (Cond e1 e2 e3) = ppr e2 <+> text "if" <+> ppr e1 <+> text "else" <+> ppr e3
-    ppr (Cast src bt) = text "cast" <> parens(ppr src <> text "," <+> text "POINTER" <> parens(text bt))
+    ppr (Cast src bt) = text "ct.cast" <>
+                        parens (ppr src <> text "," <+>
+                                text "ct.POINTER" <> parens(text bt))
     ppr (Index src idx) = ppr src <> brackets(ppr idx)
     ppr (Call fname exps) = text fname <> parens(commasep $ map ppr exps)
     ppr (Tuple [dim]) = parens(ppr dim <> text ",")
@@ -102,6 +102,16 @@ instance Pretty PyExp where
     ppr None = text "None"
 
 instance Pretty PyStmt where
+  ppr (If cond [] []) =
+    text "if" <+> ppr cond <> text ":" </>
+    indent 2 (text "pass")
+
+  ppr (If cond [] fbranch) =
+    text "if" <+> ppr cond <> text ":" </>
+    indent 2 (text "pass") </>
+    text "else:" </>
+    indent 2 (stack $ map ppr fbranch)
+
   ppr (If cond tbranch []) =
     text "if" <+> ppr cond <> text ":" </>
     indent 2 (stack $ map ppr tbranch)
@@ -137,18 +147,22 @@ instance Pretty PyStmt where
 
   ppr Pass = text "pass"
 
+  ppr (Import from (Just as)) =
+    text "import" <+> text from <+> text "as" <+> text as
+
+  ppr (Import from Nothing) =
+    text "import" <+> text from
+
+  ppr (FuncDef fname params body) =
+    text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
+    indent 2 (stack (map ppr body))
+
+  ppr (Escape s) = text s
+
 instance Pretty PyExcept where
   ppr (Catch pyexp stms) =
     text "except" <+> ppr pyexp <+> text "as e:" </>
     indent 2 (stack $ map ppr stms)
 
-instance Pretty PyFunc where
-  ppr (PyFunc fname params body) =
-    text "def" <+> text fname <> parens (commasep $ map ppr params) <> text ":" </>
-    indent 2 (stack (map ppr body))
-
 instance Pretty PyProg where
-  ppr (PyProg funcs imports defines) =
-    stack(map ppr imports) </>
-    stack(map ppr defines) </>
-    stack(map ppr funcs)
+  ppr (PyProg stms) = stack (map ppr stms)

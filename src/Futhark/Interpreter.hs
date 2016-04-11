@@ -191,13 +191,13 @@ lookupVar :: VName -> FutharkM Value
 lookupVar vname = do
   val <- asks $ HM.lookup vname . envVtable
   case val of Just val' -> return val'
-              Nothing   -> bad $ TypeError $ "lookupVar " ++ textual vname
+              Nothing   -> bad $ TypeError $ "lookupVar " ++ pretty vname
 
 lookupFun :: Name -> FutharkM ([Value] -> FutharkM [Value])
 lookupFun fname = do
   fun <- asks $ HM.lookup fname . envFtable
   case fun of Just fun' -> return fun'
-              Nothing   -> bad $ TypeError $ "lookupFun " ++ textual fname
+              Nothing   -> bad $ TypeError $ "lookupFun " ++ pretty fname
 
 arrToList :: Value -> FutharkM [Value]
 arrToList (ArrayVal l _ [_]) =
@@ -261,7 +261,7 @@ runFun fname mainargs prog = do
       futharkenv = FutharkEnv { envVtable = HM.empty
                               , envFtable = ftable
                               }
-  case (funDecByName fname prog, HM.lookup fname ftable) of
+  case (funDefByName fname prog, HM.lookup fname ftable) of
     (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
       runThisFun fundec mainargs ftable
@@ -278,10 +278,10 @@ runFunWithShapes fname valargs prog = do
       futharkenv = FutharkEnv { envVtable = HM.empty
                               , envFtable = ftable
                               }
-  case (funDecByName fname prog, HM.lookup fname ftable) of
+  case (funDefByName fname prog, HM.lookup fname ftable) of
     (Nothing, Nothing) -> Left $ MissingEntryPoint fname
     (Just fundec, _) ->
-      let args' = shapes (funDecParams fundec) ++ valargs
+      let args' = shapes (funDefParams fundec) ++ valargs
       in runThisFun fundec args' ftable
     (_ , Just fun) -> -- It's a builtin function, it'll do its own
                       -- error checking.
@@ -297,9 +297,9 @@ runFunWithShapes fname valargs prog = do
                   paramName)
              shapeparams
 
-runThisFun :: FunDec -> [Value] -> FunTable
+runThisFun :: FunDef -> [Value] -> FunTable
            -> Either InterpreterError [Value]
-runThisFun (FunDec fname _ fparams _) args ftable
+runThisFun (FunDef _ fname _ fparams _) args ftable
   | argtypes == paramtypes =
     runFutharkM (evalFuncall fname args) futharkenv
   | otherwise =
@@ -316,7 +316,7 @@ buildFunTable :: Prog -> FunTable
 buildFunTable = foldl expand builtins . progFunctions
   where -- We assume that the program already passed the type checker, so
         -- we don't check for duplicate definitions.
-        expand ftable' (FunDec name _ params body) =
+        expand ftable' (FunDef _ name _ params body) =
           let fun funargs = binding (zip3 (map paramIdent params) (repeat BindVar) funargs) $
                             evalBody body
           in HM.insert name fun ftable'
