@@ -483,6 +483,8 @@ typeCheckSOAC (Write cs t i v a) = do
   --   requirement, so that e.g. the source is not hoisted out of a loop, which
   --   will mean it cannot be consumed.
   --
+  --   6. @i@ and @v@ must have the same length.
+  --
   -- Code:
 
   -- Check the certificates.
@@ -490,6 +492,7 @@ typeCheckSOAC (Write cs t i v a) = do
 
   -- 1.
   iLen <- arraySize 0 <$> lookupType i
+  vLen <- arraySize 0 <$> lookupType v
   TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
 
   -- 2.
@@ -506,7 +509,12 @@ typeCheckSOAC (Write cs t i v a) = do
 
   -- 4.
 
+  -- 5.
   TC.consume =<< TC.lookupAliases a
+
+  -- 6.
+  unless (iLen == vLen) $
+    TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
 
 
 -- | Get Stream's accumulators as a sub-expression list

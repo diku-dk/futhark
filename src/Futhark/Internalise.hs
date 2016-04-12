@@ -619,7 +619,7 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write i v a _) = do
+internaliseExp desc (E.Write i v a loc) = do
   sis <- internaliseExpToVars "write_arg_i" i
   svs <- internaliseExpToVars "write_arg_v" v
   sas <- internaliseExpToVars "write_arg_a" a
@@ -627,21 +627,20 @@ internaliseExp desc (E.Write i v a _) = do
   case (sis, svs, sas) of
     ([si], [sv], [sa]) -> do
       t <- lookupType sa
+      si_len <- arraySize 0 <$> lookupType si
+      sv_shape <- arrayShape <$> lookupType sv
+      let sv_len = shapeSize 0 sv_shape
 
-      -- Generate certificates.  Goals:
-      --
-      --   1. Check that every index in @si@ is within bounds.  This check is
-      --   currently hard-coded into CodeGen/ImpCode/Kernels.hs.
-      --
-      --   2. Check that no index occurs more than once in @si@.
-      --
-      --   3. Check that @si@ and @sv@ have the same length.
-      --
-      -- Code: FIXME.
+      -- Generate an assertion and reshape to ensure that sv is the same size and si.
+      cmp <- letSubExp "write_cmp" $ I.PrimOp $
+        I.CmpOp (I.CmpEq I.int32) si_len sv_len
+      c   <- assertingOne $
+        letExp "write_cert" $ I.PrimOp $
+        I.Assert cmp loc
+      sv' <- letExp (baseString sv ++ "_write_sv") $
+        I.PrimOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
 
-      let cs = []
-
-      letTupExp' desc $ I.Op $ I.Write cs t si sv sa
+      letTupExp' desc $ I.Op $ I.Write [] t si sv' sa
     _ ->
       fail "Futhark.Internalise.internaliseExp: tuples in Write"
 
