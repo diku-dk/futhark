@@ -15,7 +15,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
        , applyInd
        , base
        , rebase
-       , codomain
        , shape
        , linearWithOffset
        , rearrangeWithOffset
@@ -49,7 +48,6 @@ import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
 import Futhark.Representation.ExplicitMemory.Permutation
   (Swap (..), Permutation (..))
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as Safe
-import qualified Futhark.Representation.ExplicitMemory.SymSet as SymSet
 import Futhark.Util.Pretty as PP
 
 data IxFun = forall c n .
@@ -199,10 +197,6 @@ rebase (IxFun (sc0nat::SNat ('S c0)) (sn0nat::SNat ('S n0)) new_base)
                "cannot be used as base for index function",
                "  " ++ pretty f]
 
-codomain :: IxFun -> SymSet
-codomain (IxFun _ n f) =
-  SymSet n $ Safe.codomain f
-
 shape :: IxFun -> Shape
 shape (IxFun _ _ f) =
   Vec.toList $ Safe.shape f
@@ -224,8 +218,6 @@ rearrangeWithOffset (IxFun _ n ixfun) element_size = do
   (offset, perm) <- Safe.rearrangeWithOffset ixfun element_size
   return (offset, zip (Vec.toList $ Perm.apply perm $ Vec.unsafeFromList n [0..])
                       (Vec.toList $ Safe.shape ixfun))
-
-data SymSet = forall n . SymSet (SNat n) (SymSet.SymSet n)
 
 instance FreeIn IxFun where
   freeIn (IxFun _ _ ixfun) = freeIn ixfun

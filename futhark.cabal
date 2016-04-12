@@ -170,8 +170,6 @@ Library
                    Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
                    Futhark.Representation.ExplicitMemory.Permutation
                    Futhark.Representation.ExplicitMemory.Simplify
-                   Futhark.Representation.ExplicitMemory.SymSet
-                   Futhark.Representation.ExplicitMemory.SymSet.Unsafe
                    Futhark.Representation.Primitive
                    Futhark.Representation.SOACS
                    Futhark.Representation.SOACS.Simplify
