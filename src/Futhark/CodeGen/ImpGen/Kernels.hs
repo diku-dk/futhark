@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies, LambdaCase #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
   )
@@ -606,6 +607,89 @@ kernelCompiler
             }
 
     call_with_body body
+
+kernelCompiler
+  (ImpGen.Destination dests)
+  (WriteKernel _cs _t i v a) = do
+
+  dest <- case dests of
+    [d] -> return d
+    _ -> fail "write has multiple dests"
+
+  kernel_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType i
+  arr_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType a
+
+  global_thread_index <- newVName "write_thread_index"
+  write_index <- newVName "write_index"
+
+  let get_thread_index =
+        ImpGen.emit $ Imp.Op $ Imp.GetGlobalId global_thread_index 0
+
+  let check_thread_index body =
+        let cond = Imp.CmpOp (CmpSlt Int32)
+              (Imp.ScalarVar global_thread_index) kernel_size
+        in Imp.If cond body Imp.Skip
+
+  let find_index = do
+        (srcmem, space, srcoffset) <-
+          ImpGen.fullyIndexArray i $ map SE.intSubExpToScalExp [Var global_thread_index]
+        ImpGen.emit $ Imp.SetScalar write_index $
+          Imp.Index srcmem srcoffset int32 space
+
+
+  let -- If an index is out of bounds, just ignore it.  This piece of code is
+      -- needed, because no earlier phase currently generates bounds checking.
+      condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
+        (Imp.ScalarVar write_index)
+        (Imp.Constant (IntValue (Int32Value 0)))
+      condOutOfBounds1 = Imp.CmpOp (Imp.CmpUle Int32)
+        arr_size
+        (Imp.ScalarVar write_index)
+      cond' = Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1
+
+  let write_result = ImpGen.copyDWIMDest dest [ImpGen.varIndex write_index]
+        (Var v) [ImpGen.varIndex global_thread_index]
+  makeAllMemoryGlobal $ do
+
+    kernel_body <- ImpGen.subImpM_ inKernelOperations $ do
+      ImpGen.emit $ Imp.DeclareScalar global_thread_index int32
+      ImpGen.emit $ Imp.DeclareScalar write_index int32
+
+      body_body <- ImpGen.collect $ do
+        ImpGen.comment "find write index" find_index
+        body_body_body <- ImpGen.collect $
+          ImpGen.comment "write result" write_result
+
+        ImpGen.comment "check write index"
+          $ ImpGen.emit $ Imp.If cond' Imp.Skip body_body_body
+
+      ImpGen.comment "get thread index" get_thread_index
+      ImpGen.comment "check thread index"
+        $ ImpGen.emit $ check_thread_index body_body
+
+    -- Calculate the group size and the number of groups.
+    group_size <- newVName "group_size"
+    num_groups <- newVName "num_groups"
+    let group_size_var = Imp.ScalarVar group_size
+    ImpGen.emit $ Imp.DeclareScalar group_size int32
+    ImpGen.emit $ Imp.DeclareScalar num_groups int32
+    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
+    ImpGen.emit $ Imp.SetScalar num_groups $
+      kernel_size `quotRoundingUp` group_size_var
+
+    -- Compute the variables that we need to pass to and from the kernel.
+    uses <- computeKernelUses dests (kernel_size, kernel_body) []
+
+    kernel_name <- newVName "a_write_kernel"
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
+      { Imp.kernelBody = kernel_body
+      , Imp.kernelLocalMemory = mempty
+      , Imp.kernelUses = uses
+      , Imp.kernelNumGroups = Imp.VarSize num_groups
+      , Imp.kernelGroupSize = Imp.VarSize group_size
+      , Imp.kernelName = kernel_name
+      , Imp.kernelDesc = Just "write"
+      }
 
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.

@@ -119,6 +119,7 @@ primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Prim $ IntType Int32) ++ ts
 
+
 -- | The type of an expression.
 expExtType :: (HasScope lore m,
                IsRetType (RetType lore),

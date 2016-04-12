@@ -1098,6 +1098,28 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     form'
                     loopbody' letbody' loc
 
+checkExp (Write i v a pos) = do
+  i' <- checkExp i
+  v' <- checkExp v
+  (a', aflow) <- collectDataflow $ checkExp a
+
+  let it = typeOf i'
+      at = typeOf a'
+  checkWriteIndexes it
+  _ <- unifyExpTypes v' a'
+
+  if unique at
+    then occur $ usageOccurences aflow `seqOccurences` [consumption (aliases at) pos]
+    else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
+         "' has type " ++ ppType at ++ ", which is not unique."
+
+  return (Write i' v' a' pos)
+
+  where checkWriteIndexes it = case it of
+          Array (PrimArray (Signed Int32) (Rank 1) _uniqueness _annotations) ->
+            return ()
+          _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
+
 checkSOACArrayArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
 checkSOACArrayArg e = do
   (e', (t, dflow, argloc)) <- checkArg e

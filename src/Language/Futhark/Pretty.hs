@@ -279,6 +279,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
+  pprPrec _ (Write i v a _) = text "write" <> parens (commasep [ppr i, ppr v, ppr a])
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopFormBase ty vn) where
   ppr (For FromUpTo lbound i ubound) =

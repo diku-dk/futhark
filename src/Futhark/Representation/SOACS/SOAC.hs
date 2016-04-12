@@ -57,6 +57,8 @@ data SOAC lore =
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
+  | Write Certificates Type VName VName VName
+    -- ^ Not really a SOAC, but has its own kernel.
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -121,6 +123,18 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
+mapSOACM tv (Write cs t i v a) =
+  Write <$> mapOnSOACCertificates tv cs
+  <*> mapOnSOACType tv t
+  <*> mapOnSOACVName tv i <*> mapOnSOACVName tv v <*> mapOnSOACVName tv a
+
+-- FIXME: Make this less hacky.
+mapOnSOACType :: (Monad m, Applicative m) =>
+                 SOACMapper flore tlore m -> Type -> m Type
+mapOnSOACType _tv (Prim pt) = pure $ Prim pt
+mapOnSOACType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
+  where f (Shape dims) = Shape <$> mapM (mapOnSOACSubExp tv) dims
+mapOnSOACType _tv (Mem se s) = pure $ Mem se s
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
@@ -171,6 +185,8 @@ soacType (Stream _ outersize form lam _) =
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
+soacType (Write _ t _ _ _) =
+  staticShapes [t]
 
 instance Attributes lore => TypedOp (SOAC lore) where
   opType = pure . soacType
@@ -190,6 +206,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
                Sequential _       -> []
     in  a1 ++ bodyAliases (extLambdaBody lam)
+  opAliases Write{} =
+    [mempty]
 
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
@@ -236,6 +254,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
+  addOpAliases (Write cs t i v a) =
+    Write cs t i v a
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -291,6 +311,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
+  addOpRanges (Write cs t i v a) =
+    Write cs t i v a
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -444,6 +466,57 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
+typeCheckSOAC (Write cs t i v a) = do
+  -- Requirements:
+  --
+  --   1. @i@ must be an array of i32.
+  --
+  --   2. @v@ and @a@ must have the same type (though not necessarily the same
+  --   length).
+  --
+  --   3. The return type @t@ must be the same type as @a@.
+  --
+  --   4. @a@ must be unique and must not alias @v@, since otherwise
+  --   there might be indeterministic behaviour.
+  --
+  --   5. @a@ is consumed.  But this is not really a check, but more of a
+  --   requirement, so that e.g. the source is not hoisted out of a loop, which
+  --   will mean it cannot be consumed.
+  --
+  --   6. @i@ and @v@ must have the same length.
+  --
+  -- Code:
+
+  -- Check the certificates.
+  mapM_ (TC.requireI [Prim Cert]) cs
+
+  -- 1.
+  iLen <- arraySize 0 <$> lookupType i
+  vLen <- arraySize 0 <$> lookupType v
+  TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+
+  -- 2.
+  vType <- lookupType v
+  aType <- lookupType a
+  case (vType, aType) of
+    (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
+      return ()
+    _ ->
+      TC.bad $ TC.TypeError "Write values and input arrays do not have the same primitive type"
+
+  -- 3.
+  TC.require [t] (Var a)
+
+  -- 4.
+
+  -- 5.
+  TC.consume =<< TC.lookupAliases a
+
+  -- 6.
+  unless (iLen == vLen) $
+    TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
+
+
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
 getStreamAccums (MapLike _       ) = []
@@ -466,6 +539,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
+  opMetrics Write{} =
+    inside "Write" $ return ()
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
@@ -507,6 +582,9 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
+  ppr (Write cs _t i v a) =
+    PP.ppCertificates' cs <> text "write"
+    <> parens (commasep (map ppr [i, v, a]))
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =

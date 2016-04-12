@@ -37,6 +37,7 @@ module Futhark.TypeCheck
   , checkFun'
   , checkLambdaParams
   , checkBody
+  , consume
   , consumeOnlyParams
   )
   where
@@ -810,7 +811,6 @@ checkPrimOp (Partition cs _ flags arrs) = do
       bad $ TypeError $
       "Array argument " ++ pretty arr ++
       " to partition has type " ++ pretty arrt ++ "."
-
 
 checkExp :: Checkable lore =>
             Exp lore -> TypeM lore ()
