@@ -1104,13 +1104,19 @@ checkExp (Write i v a pos) = do
   a' <- checkExp a
 
   let it = typeOf i'
+      at = typeOf a'
   checkWriteIndexes it
   _ <- unifyExpTypes v' a'
+
+  if unique at
+    then consume pos $ aliases at
+    else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
+         "' has type " ++ ppType at ++ ", which is not unique."
+
   return (Write i' v' a' pos)
 
   where checkWriteIndexes it = case it of
-          Array (PrimArray (Signed Int32)
-                 (Rank 1) _uniqueness _annotations) ->
+          Array (PrimArray (Signed Int32) (Rank 1) _uniqueness _annotations) ->
             return ()
           _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
