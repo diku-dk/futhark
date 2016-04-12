@@ -1101,7 +1101,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 checkExp (Write i v a pos) = do
   i' <- checkExp i
   v' <- checkExp v
-  a' <- checkExp a
+  (a', aflow) <- collectDataflow $ checkExp a
 
   let it = typeOf i'
       at = typeOf a'
@@ -1109,7 +1109,7 @@ checkExp (Write i v a pos) = do
   _ <- unifyExpTypes v' a'
 
   if unique at
-    then consume pos $ aliases at
+    then occur $ usageOccurences aflow `seqOccurences` [consumption (aliases at) pos]
     else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
          "' has type " ++ ppType at ++ ", which is not unique."
 
