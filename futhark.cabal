@@ -47,7 +47,7 @@ Library
                  bytestring,
                  text,
                  raw-strings-qq,
-                 neat-interpolation < 0.3,
+                 neat-interpolation >= 0.2,
                  file-embed
 
   Exposed-modules: Futhark.Actions
