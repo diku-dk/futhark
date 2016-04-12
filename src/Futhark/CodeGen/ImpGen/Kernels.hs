@@ -610,14 +610,10 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dests)
-  (WriteKernel _cs _t i v a) = do
+  (WriteKernel _cs _ts i vs as) = do
 
-  dest <- case dests of
-    [d] -> return d
-    _ -> fail "write has multiple dests"
-
-  kernel_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType i
-  arr_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType a
+  kernel_size <- ImpGen.compileSubExp . arraySize 0 <$> lookupType i
+  arr_size <- ImpGen.compileSubExp . arraySize 0 <$> lookupType (head as) -- any a will do
 
   global_thread_index <- newVName "write_thread_index"
   write_index <- newVName "write_index"
@@ -636,7 +632,6 @@ kernelCompiler
         ImpGen.emit $ Imp.SetScalar write_index $
           Imp.Index srcmem srcoffset int32 space
 
-
   let -- If an index is out of bounds, just ignore it.  This piece of code is
       -- needed, because no earlier phase currently generates bounds checking.
       condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
@@ -645,10 +640,13 @@ kernelCompiler
       condOutOfBounds1 = Imp.CmpOp (Imp.CmpUle Int32)
         arr_size
         (Imp.ScalarVar write_index)
-      cond' = Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1
+      condOutOfBounds = Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1
 
-  let write_result = ImpGen.copyDWIMDest dest [ImpGen.varIndex write_index]
-        (Var v) [ImpGen.varIndex global_thread_index]
+  let write_result = foldl (>>) (return ())
+        [ ImpGen.copyDWIMDest dest [ImpGen.varIndex write_index]
+          (Var v) [ImpGen.varIndex global_thread_index]
+        | (dest, v) <- zip dests vs
+        ]
   makeAllMemoryGlobal $ do
 
     kernel_body <- ImpGen.subImpM_ inKernelOperations $ do
@@ -661,7 +659,7 @@ kernelCompiler
           ImpGen.comment "write result" write_result
 
         ImpGen.comment "check write index"
-          $ ImpGen.emit $ Imp.If cond' Imp.Skip body_body_body
+          $ ImpGen.emit $ Imp.If condOutOfBounds Imp.Skip body_body_body
 
       ImpGen.comment "get thread index" get_thread_index
       ImpGen.comment "check thread index"

@@ -624,25 +624,34 @@ internaliseExp desc (E.Write i v a loc) = do
   svs <- internaliseExpToVars "write_arg_v" v
   sas <- internaliseExpToVars "write_arg_a" a
 
-  case (sis, svs, sas) of
-    ([si], [sv], [sa]) -> do
-      t <- lookupType sa
-      si_len <- arraySize 0 <$> lookupType si
-      sv_shape <- arrayShape <$> lookupType sv
-      let sv_len = shapeSize 0 sv_shape
+  si <- case sis of
+    [si] -> return si
+    _ -> fail "Futhark.Internalise.internaliseExp: write indices array must not consist of tuples"
 
-      -- Generate an assertion and reshape to ensure that sv is the same size as si.
-      cmp <- letSubExp "write_cmp" $ I.PrimOp $
-        I.CmpOp (I.CmpEq I.int32) si_len sv_len
-      c   <- assertingOne $
-        letExp "write_cert" $ I.PrimOp $
-        I.Assert cmp loc
-      sv' <- letExp (baseString sv ++ "_write_sv") $
-        I.PrimOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
+  when (length svs /= length sas) $
+    fail ("Futhark.Internalise.internaliseExp: size of write svs and sas tuples are not equal"
+          ++ " (svs: " ++ show (length svs) ++ ", sas: " ++ show (length sas) ++ ")")
 
-      letTupExp' desc $ I.Op $ I.Write [] t si sv' sa
-    _ ->
-      fail "Futhark.Internalise.internaliseExp: tuples in Write"
+  res <- forM (zip svs sas) $ \(sv, sa) -> do
+    t <- lookupType sa
+    si_len <- arraySize 0 <$> lookupType si
+    sv_shape <- arrayShape <$> lookupType sv
+    let sv_len = shapeSize 0 sv_shape
+
+    -- Generate an assertion and reshape to ensure that sv is the same size as si.
+    cmp <- letSubExp "write_cmp" $ I.PrimOp $
+      I.CmpOp (I.CmpEq I.int32) si_len sv_len
+    c   <- assertingOne $
+      letExp "write_cert" $ I.PrimOp $
+      I.Assert cmp loc
+    sv' <- letExp (baseString sv ++ "_write_sv") $
+      I.PrimOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
+
+    return (t, sv', sa)
+
+  let (ts, svs', sas') = unzip3 res
+  letTupExp' desc $ I.Op $ I.Write [] ts si svs' sas'
+
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do

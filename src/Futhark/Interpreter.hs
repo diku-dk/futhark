@@ -699,37 +699,59 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalSOAC (Write _cs _t i v a) = do
+evalSOAC (Write _cs _ts i vs as) = do
   i' <- lookupVar i
-  v' <- lookupVar v
-  a' <- lookupVar a
+  vs' <- mapM lookupVar vs
+  as' <- mapM lookupVar as
 
-  case (i', v', a') of
-    (ArrayVal iArr _iPrim [iLength],
-     ArrayVal vArr vPrim _vShape@(vShapeOuter : vShapeRest),
-     ArrayVal aArr aPrim aShape) -> do
-      unless (vPrim == aPrim && iLength == vShapeOuter)
-        $ bad $ TypeError "evalPrimOp Write: Wrong shapes"
+  (iArr, iLength) <- case i' of
+    ArrayVal iArr _iPrim [iLength] -> return (iArr, iLength)
+    _ -> bad $ TypeError "evalSOAC Write: Wrong type for indices array"
 
-      let handlePair arr iter = do
-            let arrIndex = iArr ! iter
-            case arrIndex of
-              IntValue (Int32Value arrIndex') ->
-                if arrIndex' == -1
-                then return arr
-                else do
-                  let prod = product vShapeRest
-                      iterBase = prod * iter
-                      iBase = prod * fromIntegral arrIndex'
-                      updates = [ (iBase + iOffset, vArr ! (iterBase + iOffset))
-                                | iOffset <- [0..prod - 1]
-                                ]
-                  return (arr // updates)
-              _ -> bad $ TypeError "evalPrimOp Write: Wrong index type"
-      res <- foldM handlePair aArr [0..iLength - 1]
-      return [ArrayVal res aPrim aShape]
-    _ ->
-      bad $ TypeError "evalPrimOp Write: Wrong argument types"
+  (vArrs, vPrimTypes, vShapes) <-
+    unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for values array") vs'
+  
+  (aArrs, aPrimTypes, aShapes) <-
+    unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for 'array' array") as'
+
+  let vShapeOuter : _ = head vShapes -- same for all lists
+  let aShapeOuter : _ = head aShapes -- same for all lists
+
+  unless (vPrimTypes == aPrimTypes)
+    $ bad $ TypeError "evalSOAC Write: Inconsistent types"
+
+  unless (iLength == vShapeOuter)
+    $ bad $ TypeError "evalSOAC Write: Wrong shapes"
+
+  let handlePair arrs iter = do
+        let arrIndex = iArr ! iter
+        idx <- case arrIndex of
+          IntValue (Int32Value arrIndex') -> return arrIndex'
+          _ -> bad $ TypeError "evalSOAC Write: Wrong index type"
+          
+        if idx < 0 || idx >= fromIntegral aShapeOuter
+          then return arrs
+          else do
+          let 
+              updatess = [ [ (iBase + iOffset, vArr ! (iterBase + iOffset))
+                           | iOffset <- [0..prod - 1]
+                           ]
+                         | (vArr, vShape) <- zip vArrs vShapes,
+                           let prod = product $ tail vShape
+                               iterBase = prod * iter
+                               iBase = prod * fromIntegral idx
+                         ]
+          return [ arr // updates
+                 | (arr, updates) <- zip arrs updatess
+                 ]
+
+  ress <- foldM handlePair aArrs [0..iLength - 1]
+  return $ zipWith3 ArrayVal ress aPrimTypes aShapes
+
+toArrayVal :: String -> Value -> FutharkM (Array Int PrimValue, PrimType, [Int])
+toArrayVal err v = case v of
+  ArrayVal a b c -> return (a, b, c)
+  _ -> bad $ TypeError err
 
 
 evalFuncall :: Name -> [Value] -> FutharkM [Value]

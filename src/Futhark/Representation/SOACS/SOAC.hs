@@ -35,7 +35,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), ppr, comma, commasep, Doc, Pretty, parens, text)
+  ((</>), ppr, comma, commasep, semisep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
@@ -57,8 +57,8 @@ data SOAC lore =
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
-  | Write Certificates Type VName VName VName
-    -- ^ Not really a SOAC, but has its own kernel.
+  | Write Certificates [Type] VName [VName] [VName]
+    -- ^ Not really a SOAC, but gets its own kernel.
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -123,10 +123,12 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
-mapSOACM tv (Write cs t i v a) =
+mapSOACM tv (Write cs ts i vs as) =
   Write <$> mapOnSOACCertificates tv cs
-  <*> mapOnSOACType tv t
-  <*> mapOnSOACVName tv i <*> mapOnSOACVName tv v <*> mapOnSOACVName tv a
+  <*> mapM (mapOnSOACType tv) ts
+  <*> mapOnSOACVName tv i
+  <*> mapM (mapOnSOACVName tv) vs
+  <*> mapM (mapOnSOACVName tv) as
 
 -- FIXME: Make this less hacky.
 mapOnSOACType :: (Monad m, Applicative m) =>
@@ -185,8 +187,8 @@ soacType (Stream _ outersize form lam _) =
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
-soacType (Write _ t _ _ _) =
-  staticShapes [t]
+soacType (Write _ ts _ _ _) =
+  staticShapes ts
 
 instance Attributes lore => TypedOp (SOAC lore) where
   opType = pure . soacType
@@ -254,8 +256,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
-  addOpAliases (Write cs t i v a) =
-    Write cs t i v a
+  addOpAliases (Write cs ts i vs as) =
+    Write cs ts i vs as
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -311,8 +313,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
-  addOpRanges (Write cs t i v a) =
-    Write cs t i v a
+  addOpRanges (Write cs ts i vs as) =
+    Write cs ts i vs as
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -466,7 +468,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs t i v a) = do
+typeCheckSOAC (Write cs ts i vs as) = do
   -- Requirements:
   --
   --   1. @i@ must be an array of i32.
@@ -490,31 +492,33 @@ typeCheckSOAC (Write cs t i v a) = do
   -- Check the certificates.
   mapM_ (TC.requireI [Prim Cert]) cs
 
-  -- 1.
-  iLen <- arraySize 0 <$> lookupType i
-  vLen <- arraySize 0 <$> lookupType v
-  TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+  forM_ (zip3 ts vs as) $ \(t, v, a) -> do
+    -- 1.
+    iLen <- arraySize 0 <$> lookupType i
+    vLen <- arraySize 0 <$> lookupType v
+    TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
 
-  -- 2.
-  vType <- lookupType v
-  aType <- lookupType a
-  case (vType, aType) of
-    (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
-      return ()
-    _ ->
-      TC.bad $ TC.TypeError "Write values and input arrays do not have the same primitive type"
+    -- 2.
+    vType <- lookupType v
+    aType <- lookupType a
+    case (vType, aType) of
+      (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
+        return ()
+      _ ->
+        TC.bad $ TC.TypeError
+        "Write values and input arrays do not have the same primitive type"
 
-  -- 3.
-  TC.require [t] (Var a)
+    -- 3.
+    TC.require [t] (Var a)
 
-  -- 4.
+    -- 4.
 
-  -- 5.
-  TC.consume =<< TC.lookupAliases a
+    -- 5.
+    TC.consume =<< TC.lookupAliases a
 
-  -- 6.
-  unless (iLen == vLen) $
-    TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
+    -- 6.
+    unless (iLen == vLen) $
+      TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
 
 
 -- | Get Stream's accumulators as a sub-expression list
@@ -582,9 +586,9 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Write cs _t i v a) =
+  ppr (Write cs _ts i vs as) =
     PP.ppCertificates' cs <> text "write"
-    <> parens (commasep (map ppr [i, v, a]))
+    <> parens (semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =
