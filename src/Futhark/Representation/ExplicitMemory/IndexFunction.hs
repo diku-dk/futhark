@@ -290,13 +290,11 @@ linearWithOffset _ _ = Nothing
 
 rearrangeWithOffset :: IntegralCond num =>
                        IxFun num -> num -> Maybe (num, [(Int,num)])
-rearrangeWithOffset (Reshape ixfun _) element_size = do
-  (offset, perm_and_shape) <- rearrangeWithOffset ixfun element_size
-  let (perm, _) = unzip perm_and_shape
-  return (offset, zip perm $ shape ixfun)
+rearrangeWithOffset (Reshape ixfun _) element_size =
+  rearrangeWithOffset ixfun element_size
 rearrangeWithOffset (Permute ixfun perm) element_size = do
   offset <- linearWithOffset ixfun element_size
-  return (offset, zip perm $ shape ixfun)
+  return (offset, zip perm $ rearrangeShape perm $ shape ixfun)
 rearrangeWithOffset _ _ =
   Nothing
 
