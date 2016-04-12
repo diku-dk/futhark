@@ -631,7 +631,7 @@ internaliseExp desc (E.Write i v a loc) = do
       sv_shape <- arrayShape <$> lookupType sv
       let sv_len = shapeSize 0 sv_shape
 
-      -- Generate an assertion and reshape to ensure that sv is the same size and si.
+      -- Generate an assertion and reshape to ensure that sv is the same size as si.
       cmp <- letSubExp "write_cmp" $ I.PrimOp $
         I.CmpOp (I.CmpEq I.int32) si_len sv_len
       c   <- assertingOne $
