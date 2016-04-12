@@ -91,7 +91,7 @@ import Futhark.CodeGen.ImpCode
    bytes, withElemType)
 import Futhark.Representation.ExplicitMemory
 import Futhark.Representation.SOACS (SOACS)
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.MonadFreshNames
 import Futhark.Util
 import Futhark.Util.IntegralExp
@@ -137,7 +137,7 @@ defaultOperations opc = Operations { opsExpCompiler = const $ return . CompileEx
 -- | When an array is declared, this is where it is stored.
 data MemLocation = MemLocation { memLocationName :: VName
                                , memLocationShape :: [Imp.DimSize]
-                               , memLocationIxFun :: IxFun.IxFun
+                               , memLocationIxFun :: IxFun.IxFun SE.ScalExp
                                }
                    deriving (Eq, Show)
 

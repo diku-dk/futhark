@@ -21,7 +21,7 @@ import Futhark.Representation.ExplicitMemory
 import Futhark.Tools
 import Futhark.Util
 import Futhark.Pass
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 
 expandAllocations :: Pass ExplicitMemory ExplicitMemory
 expandAllocations = simplePass
@@ -182,13 +182,13 @@ expandedAllocations num_threads thread_index thread_allocs = do
           in offset_ixfun
 
 data RebaseMap = RebaseMap {
-    rebaseMap :: HM.HashMap VName (IxFun.Shape -> IxFun.IxFun)
+    rebaseMap :: HM.HashMap VName ([SE.ScalExp] -> IxFun.IxFun SE.ScalExp)
     -- ^ A map from memory block names to new index function bases.
   , indexVariable :: VName
   , kernelWidth :: SubExp
   }
 
-lookupNewBase :: VName -> RebaseMap -> Maybe (IxFun.Shape -> IxFun.IxFun)
+lookupNewBase :: VName -> RebaseMap -> Maybe ([SE.ScalExp] -> IxFun.IxFun SE.ScalExp)
 lookupNewBase name = HM.lookup name . rebaseMap
 
 offsetMemoryInBody :: RebaseMap -> Body -> Body
