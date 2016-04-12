@@ -87,15 +87,29 @@ of functions used to ``map``.
 File inclusions
 ---------------
 
-You can include other files into your main Futhark file like this::
+You can include external Futhark code into a Futhark file like this::
+
+  include module
+
+The above will include all functions from whatever ``module`` is and make them
+available in the current Futhark program.
+
+All include headers must be at the top of the Futhark file, before any function
+declarations.
+
+Currently, Futhark can only include files.  You can include a file into your
+main Futhark program like this::
 
   include other_file
 
 The ``.fut`` extension is implied, so the above will include the file
 ``other_file.fut``.
 
-All include headers must be at the top of the Futhark file, before any function
-declarations.
+You can also include files from subdirectories::
+
+  include path.to.a.file
+
+The above will include the file ``path/to/a/file.fut``.
 
 Simple Expressions
 ------------------
@@ -354,6 +368,14 @@ If none of the functions return ``True``, the element is added to a
 catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
+
+``write(indexes, values, a)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Set each index of the ``indexes`` array in the ``a`` array to each value of
+the ``values`` array.  If an index is -1, ignore it and its associated value.
+Return the modified array.  It is an error if there are duplicate indexes.
+``write`` does its work in-place and consumes ``a``.
 
 Tuple Shimming
 --------------

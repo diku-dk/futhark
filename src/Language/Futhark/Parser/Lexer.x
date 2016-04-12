@@ -70,6 +70,7 @@ tokens :-
   ","                      { tokenC COMMA }
   "_"                      { tokenC UNDERSCORE }
   "!"                      { tokenC BANG }
+  "."                      { tokenC DOT }
   @intlit i8               { tokenM $ fmap I8LIT . tryRead "i8" . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ fmap I16LIT . tryRead "i16" . T.takeWhile (/='i') }
   @intlit i32              { tokenM $ fmap I32LIT . tryRead "i32" . T.takeWhile (/='i') }
@@ -147,6 +148,7 @@ keyword s =
     "streamRed"    -> STREAM_RED
     "streamRedPer" -> STREAM_REDPER
     "streamSeq"    -> STREAM_SEQ
+    "write"        -> WRITE
     "include"      -> INCLUDE
     "entry"        -> ENTRY
     _              -> ID $ nameFromText s
@@ -284,8 +286,10 @@ data Token = IF
            | STREAM_REDPER
            | STREAM_SEQ
            | BANG
+           | DOT
            | ABS
            | SIGNUM
+           | WRITE
            | INCLUDE
            | ENTRY
 

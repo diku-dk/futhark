@@ -499,6 +499,9 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
+            | Write (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
+
             | Zip [(ExpBase f vn, f (CompTypeBase vn))] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the full type of
@@ -550,6 +553,7 @@ instance Located (ExpBase f vn) where
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _  pos) = locOf pos
   locOf (Unsafe _ loc) = locOf loc
+  locOf (Write _ _ _ loc) = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (ExpBase f vn) (IdentBase f vn) (ExpBase f vn)
@@ -619,7 +623,7 @@ data ProgBaseWithHeaders f vn =
                   }
 deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 
-data ProgHeader = Include String
+data ProgHeader = Include [String]
                 deriving (Show)
 
 -- | A set of names.

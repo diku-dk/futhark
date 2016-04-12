@@ -96,6 +96,13 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     lam' <- Engine.simplifyLambda lam w' Nothing $ map Just arrs'
     return $ ChunkedMapKernel cs' w' kernel_size' o lam' arrs'
 
+  simplifyOp (WriteKernel cs t i v a) = do
+    cs' <- Engine.simplify cs
+    i' <- Engine.simplify i
+    v' <- Engine.simplify v
+    a' <- Engine.simplify a
+    return $ WriteKernel cs' t i' v' a'
+
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
 

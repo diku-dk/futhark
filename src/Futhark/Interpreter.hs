@@ -640,6 +640,7 @@ evalPrimOp (Partition _ n flags arrs) = do
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
+
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
 evalSOAC (Stream _ w form elam arrs) = do
@@ -697,6 +698,39 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
                 res_arr = drop acc_len res_lam
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
+
+evalSOAC (Write _cs _t i v a) = do
+  i' <- lookupVar i
+  v' <- lookupVar v
+  a' <- lookupVar a
+
+  case (i', v', a') of
+    (ArrayVal iArr _iPrim [iLength],
+     ArrayVal vArr vPrim _vShape@(vShapeOuter : vShapeRest),
+     ArrayVal aArr aPrim aShape) -> do
+      unless (vPrim == aPrim && iLength == vShapeOuter)
+        $ bad $ TypeError "evalPrimOp Write: Wrong shapes"
+
+      let handlePair arr iter = do
+            let arrIndex = iArr ! iter
+            case arrIndex of
+              IntValue (Int32Value arrIndex') ->
+                if arrIndex' == -1
+                then return arr
+                else do
+                  let prod = product vShapeRest
+                      iterBase = prod * iter
+                      iBase = prod * fromIntegral arrIndex'
+                      updates = [ (iBase + iOffset, vArr ! (iterBase + iOffset))
+                                | iOffset <- [0..prod - 1]
+                                ]
+                  return (arr // updates)
+              _ -> bad $ TypeError "evalPrimOp Write: Wrong index type"
+      res <- foldM handlePair aArr [0..iLength - 1]
+      return [ArrayVal res aPrim aShape]
+    _ ->
+      bad $ TypeError "evalPrimOp Write: Wrong argument types"
+
 
 evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do

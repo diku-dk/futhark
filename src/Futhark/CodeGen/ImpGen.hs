@@ -62,6 +62,7 @@ module Futhark.CodeGen.ImpGen
   , funcallTargets
   , copy
   , copyDWIM
+  , copyDWIMDest
   , copyElementWise
   )
   where
@@ -1011,7 +1012,7 @@ copyArrayDWIM bt
              product $ map Imp.dimSizeToExp $
              take 1 $ drop (length srcis) srcshape
 
--- | Like 'copyDWIMDest', but the target is a 'ValueDestination'
+-- | Like 'copyDWIM', but the target is a 'ValueDestination'
 -- instead of a variable name.
 copyDWIMDest :: ValueDestination -> [SE.ScalExp] -> SubExp -> [SE.ScalExp]
              -> ImpM op ()

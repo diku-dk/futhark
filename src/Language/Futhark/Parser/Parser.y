@@ -120,6 +120,7 @@ import Language.Futhark.Parser.Lexer
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
+      '.'             { L $$ DOT }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
       fn              { L $$ FN }
@@ -162,6 +163,7 @@ import Language.Futhark.Parser.Lexer
       streamRedPer    { L $$ STREAM_REDPER }
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
+      write           { L $$ WRITE }
 
 %nonassoc ifprec letprec
 %left '||'
@@ -233,8 +235,12 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
+Header : include IncludeParts { Include $2 }
 ;
+
+IncludeParts :: { [String] }
+IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
+IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
 
 FunDefs : Fun FunDefs   { $1 : $2 }
         | Fun           { [$1] }
@@ -459,6 +465,8 @@ Exp  :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
+     | write           '(' Exp ',' Exp ',' Exp ')'
+                         { Write $3 $5 $7 $1 }
 
 LetExp :: { UncheckedExp }
      : let Id '=' Exp LetBody
