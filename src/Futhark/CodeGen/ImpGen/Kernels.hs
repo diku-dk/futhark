@@ -617,6 +617,7 @@ kernelCompiler
     _ -> fail "write has multiple dests"
 
   kernel_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType i
+  arr_size <- ImpGen.compileSubExp <$> arraySize 0 <$> lookupType a
 
   global_thread_index <- newVName "write_thread_index"
   write_index <- newVName "write_index"
@@ -636,19 +637,15 @@ kernelCompiler
           Imp.Index srcmem srcoffset int32 space
 
 
-  let cond = Imp.CmpOp (Imp.CmpEq int32)
-        (Imp.ScalarVar write_index)
-        (Imp.Constant (IntValue (Int32Value (-1))))
-
-      -- If an index is out of bounds, just ignore it.  This piece of code is
+  let -- If an index is out of bounds, just ignore it.  This piece of code is
       -- needed, because no earlier phase currently generates bounds checking.
       condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
         (Imp.ScalarVar write_index)
         (Imp.Constant (IntValue (Int32Value 0)))
       condOutOfBounds1 = Imp.CmpOp (Imp.CmpUle Int32)
-        kernel_size
+        arr_size
         (Imp.ScalarVar write_index)
-      cond' = Imp.BinOp LogOr cond (Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1)
+      cond' = Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1
 
   let write_result = ImpGen.copyDWIMDest dest [ImpGen.varIndex write_index]
         (Var v) [ImpGen.varIndex global_thread_index]
@@ -679,16 +676,6 @@ kernelCompiler
     ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
     ImpGen.emit $ Imp.SetScalar num_groups $
       kernel_size `quotRoundingUp` group_size_var
-
-    -- FIXME: This works for now, but is obviously bad.  Instead, @dest@ should
-    -- be the same memory as @a@, since @write@ is in-place.  The code below
-    -- does not disable the memory allocation of @dest@; it just ignores that
-    -- it ever happened.
-    let ImpGen.ArrayDestination (ImpGen.CopyIntoMemory (ImpGen.MemLocation mem _ _)) _ = dest
-    a' <- ImpGen.lookupArray a
-    let memA = ImpGen.entryArrayLocation a'
-    entryMemSpace <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
-    ImpGen.emit $ Imp.SetMem mem (ImpGen.memLocationName memA) entryMemSpace
 
     -- Compute the variables that we need to pass to and from the kernel.
     uses <- computeKernelUses dests (kernel_size, kernel_body) []
