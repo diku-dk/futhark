@@ -20,8 +20,7 @@ Installation
 You are *strongly recommended* to use [Stack](http://haskellstack.org)
 for building the Futhark compiler from scratch.  It avoids many of the
 problems usually associated with the older Haskell build tool,
-`cabal-install`.  Instructions for installation with `cabal-install`
-are still provided below.
+`cabal-install`.  This section describes how to use Stack.
 
 To get all the prerequisites for building the Futhark compiler
 (including, if necessary, the appropriate version of the Haskell
