@@ -481,8 +481,7 @@ typeCheckSOAC (Write cs t i v a) = do
   --
   --   5. @a@ is consumed.  But this is not really a check, but more of a
   --   requirement, so that e.g. the source is not hoisted out of a loop, which
-  --   will mean it cannot be consumed.  FIXME: How should this be done, and
-  --   where?
+  --   will mean it cannot be consumed.
   --
   -- Code:
 
