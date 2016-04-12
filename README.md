@@ -17,6 +17,39 @@ here](http://futhark.readthedocs.org).  You can also check our our
 Installation
 ============
 
+You are *strongly recommended* to use [Stack](http://haskellstack.org)
+for building the Futhark compiler from scratch.  It avoids many of the
+problems usually associated with the older Haskell build tool,
+`cabal-install`.  Instructions for installation with `cabal-install`
+are still provided below.
+
+To get all the prerequisites for building the Futhark compiler
+(including, if necessary, the appropriate version of the Haskell
+compiler), run:
+
+    stack setup
+
+*Note that this will not install anything system-wide and will have no
+effect outside the Futhark build directory*.  Now you can run the
+following command to build the Futhark compiler, including all
+dependencies:
+
+    stack build
+
+The Futhark compiler and its tools will now be built.  You can install
+it to your `$HOME/.local/bin` by running:
+
+    stack install
+
+Make sure this directory is in your `$PATH`.  Alternatively, just copy
+the binaries where you need them.
+
+Installation with `cabal-install`
+---------------------------------
+
+*Using Stack, as described in the previous section, is strongly
+ recommended.*
+
 You will need GHC 7.8 or newer and a recent version of
 [Alex](https://www.haskell.org/alex/) to compile Futhark.
 
