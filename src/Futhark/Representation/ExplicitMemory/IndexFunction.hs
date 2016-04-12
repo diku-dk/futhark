@@ -14,7 +14,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , applyInd
        , base
        , rebase
-       , codomain
        , shape
        , rank
        , linearWithOffset
@@ -37,9 +36,9 @@ import Futhark.Transform.Rename
 
 import Futhark.Representation.AST.Syntax (DimChange (..))
 import qualified Futhark.Representation.ExplicitMemory.Permutation as Perm
-import Futhark.Representation.ExplicitMemory.SymSet (SymSet)
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Attributes.Reshape hiding (sliceSizes)
+import Futhark.Representation.AST.Pretty ()
 import Futhark.Util.IntegralExp
 import Futhark.Util.Pretty
 
@@ -268,10 +267,6 @@ applyInd n (Index m_plus_n (ixfun :: IxFun num c (k:+:(m:+:n))) (mis :: Indices 
         ixfun' = coerce (plusCongR n (plusCommutative k m)) $
                  coerce (plusAssociative k m n) ixfun
 applyInd n ixfun is = Index n ixfun is
-
-codomain :: IntegralCond num =>
-            IxFun num c n -> SymSet n
-codomain = undefined
 
 rank :: IntegralCond num =>
         IxFun num c n -> SNat n
