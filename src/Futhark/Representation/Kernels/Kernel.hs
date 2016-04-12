@@ -506,9 +506,27 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
-typeCheckKernel WriteKernel{} =
-  -- FIXME: Actually typecheck.
-  return ()
+typeCheckKernel (WriteKernel cs t i v a) = do
+  mapM_ (TC.requireI [Prim Cert]) cs
+  iLen <- arraySize 0 <$> lookupType i
+  vLen <- arraySize 0 <$> lookupType v
+
+  unless (iLen == vLen) $
+    TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
+
+  TC.require [Array int32 (Shape [iLen]) NoUniqueness] $ Var i
+
+  vType <- lookupType v
+  aType <- lookupType a
+  case (vType, aType) of
+    (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
+      return ()
+    _ ->
+      TC.bad $ TC.TypeError "Write values and input arrays do not have the same primitive type"
+
+  TC.require [t] $ Var a
+
+  TC.consume =<< TC.lookupAliases a
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
