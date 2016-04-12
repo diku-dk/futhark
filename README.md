@@ -60,7 +60,7 @@ Otherwise, just run `cabal configure`, followed by `cabal build`, and
 the executable can be found in `dist/build/futhark/futhark`.
 
 You can get a sufficiently new version of Alex by running `cabal
-install alex if `$HOME/.cabal/bin` is in your `$PATH`.  If you
+install alex` if `$HOME/.cabal/bin` is in your `$PATH`.  If you
 accidentally try (and fail) to install Futhark with an older version
 of Alex, you will need to run `cabal clean` to ensure that the broken
 build artifacts will not interfere with the new build.
