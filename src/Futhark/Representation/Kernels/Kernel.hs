@@ -41,7 +41,7 @@ import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, comma, commasep, Pretty, parens, text)
+  ((</>), (<+>), ppr, comma, commasep, semisep, Pretty, parens, text)
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplifier.Lore
@@ -76,7 +76,7 @@ data Kernel lore =
     StreamOrd
     (LambdaT lore)
     [VName]
-  | WriteKernel Certificates Type VName VName VName
+  | WriteKernel Certificates [Type] VName [VName] [VName]
 
   | NumGroups
   | GroupSize
@@ -178,13 +178,13 @@ mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (WriteKernel cs t i v a) =
+mapKernelM tv (WriteKernel cs ts i vs as) =
   WriteKernel <$>
   mapOnKernelCertificates tv cs <*>
-  mapOnKernelType tv t <*>
+  mapM (mapOnKernelType tv) ts <*>
   mapOnKernelVName tv i <*>
-  mapOnKernelVName tv v <*>
-  mapOnKernelVName tv a
+  mapM (mapOnKernelVName tv) vs <*>
+  mapM (mapOnKernelVName tv) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
 
@@ -305,8 +305,8 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
-kernelType (WriteKernel _ t _ _ _) =
-  [t]
+kernelType (WriteKernel _ ts _ _ _) =
+  ts
 kernelType NumGroups =
   [Prim int32]
 kernelType GroupSize =
@@ -386,8 +386,8 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     map (UT.consumedUsage . kernelInputArray) $
     filter ((`HS.member` consumed_in_body) . kernelInputName) inps
     where consumed_in_body = consumedInBody body
-  usageInOp (WriteKernel _ _ _ _ a) =
-    UT.consumedUsage a
+  usageInOp (WriteKernel _ _ _ _ as) =
+    mconcat $ map UT.consumedUsage as
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
 
@@ -506,27 +506,30 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
-typeCheckKernel (WriteKernel cs t i v a) = do
+typeCheckKernel (WriteKernel cs ts i vs as) = do
   mapM_ (TC.requireI [Prim Cert]) cs
-  iLen <- arraySize 0 <$> lookupType i
-  vLen <- arraySize 0 <$> lookupType v
 
-  unless (iLen == vLen) $
-    TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
+  forM_ (zip3 ts vs as) $ \(t, v, a) -> do
+    iLen <- arraySize 0 <$> lookupType i
+    vLen <- arraySize 0 <$> lookupType v
 
-  TC.require [Array int32 (Shape [iLen]) NoUniqueness] $ Var i
+    unless (iLen == vLen) $
+      TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
 
-  vType <- lookupType v
-  aType <- lookupType a
-  case (vType, aType) of
-    (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
-      return ()
-    _ ->
-      TC.bad $ TC.TypeError "Write values and input arrays do not have the same primitive type"
+    TC.require [Array int32 (Shape [iLen]) NoUniqueness] $ Var i
 
-  TC.require [t] $ Var a
+    vType <- lookupType v
+    aType <- lookupType a
+    case (vType, aType) of
+      (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
+        return ()
+      _ ->
+        TC.bad $ TC.TypeError
+        "Write values and input arrays do not have the same primitive type"
 
-  TC.consume =<< TC.lookupAliases a
+    TC.require [t] $ Var a
+
+    TC.consume =<< TC.lookupAliases a
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
@@ -613,9 +616,9 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr arrs) <> comma </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
-  ppr (WriteKernel cs _t i v a) =
+  ppr (WriteKernel cs _ts i vs as) =
     ppCertificates' cs <> text "writeKernel" <+>
-    PP.align (commasep (map ppr [i, v, a]))
+    PP.align (PP.semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
 

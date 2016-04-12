@@ -580,14 +580,14 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs arrayIOType indexes values arrayIO) = do
+transformSOAC pat (Write cs arrayIOTypes indexes valuess arrayIOs) = do
   iter <- newVName "write_iter"
-  arrayOut <- newIdent "write_out" arrayIOType
+  arrayOuts <- mapM (newIdent "write_out") arrayIOTypes
   nMods <- arraySize 0 <$> lookupType indexes
-  w <- arraySize 0 <$> lookupType arrayIO
+  w <- arraySize 0 <$> lookupType (head arrayIOs) -- any arrayIO will do
 
   -- Write is in-place, so we use the input array as the output array.
-  let merge = loopMerge [arrayOut] [Var arrayIO]
+  let merge = loopMerge arrayOuts (map Var arrayIOs)
   loopBody <- runBodyBinder $
     localScope (HM.insert iter IndexInfo $
                 scopeOfFParams $ map fst merge) $ do
@@ -599,15 +599,17 @@ transformSOAC pat (Write cs arrayIOType indexes values arrayIO) = do
     outside_bounds <- letSubExp "outside_bounds" $
       PrimOp $ BinOp LogOr less_than_zero greater_than_size
     in_bounds_branch <- runBodyBinder $ do
-      valueCur <- letExp "write_value" $ PrimOp $ Index cs values [Var iter]
-      res <- letInPlace "write_out_body" cs (identName arrayOut) [indexCur] $
-        PrimOp $ SubExp $ Var valueCur
-      return $ resultBody [Var res]
+      ress <- forM (zip valuess arrayOuts) $ \(values, arrayOut) -> do
+        valueCur <- letExp "write_value" $ PrimOp $ Index cs values [Var iter]
+        letInPlace "write_out_body" cs (identName arrayOut) [indexCur] $
+          PrimOp $ SubExp $ Var valueCur
+      return $ resultBody (map Var ress)
     outside_bounds_branch <- runBodyBinder $
-      return $ resultBody [Var $ identName arrayOut]
-    arrayOut' <- letSubExp "write_out" $ If outside_bounds outside_bounds_branch in_bounds_branch $
-      staticShapes [arrayIOType]
-    return $ resultBody [arrayOut']
+      return $ resultBody (map (Var . identName) arrayOuts)
+    arrayOuts' <- letTupExp' "write_out"
+      $ If outside_bounds outside_bounds_branch in_bounds_branch
+      $ staticShapes arrayIOTypes
+    return $ resultBody arrayOuts'
   letBind_ pat $ DoLoop [] merge (ForLoop iter nMods) loopBody
 
 
