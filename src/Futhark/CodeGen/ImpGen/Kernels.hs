@@ -24,7 +24,7 @@ import qualified Futhark.CodeGen.ImpCode.Kernels as Imp
 import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.Analysis.ScalExp as SE
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import Futhark.Util.IntegralExp (quotRoundingUp)
@@ -442,9 +442,9 @@ kernelCompiler
     let twoDimInput (ImpGen.ArrayEntry (ImpGen.MemLocation mem shape ixfun) bt) =
           let shape' = [num_threads, elements_per_thread] ++ drop 1 shape
               ixfun' = IxFun.reshape ixfun $
-                       [DimNew $ kernelNumThreads kernel_size,
-                        DimNew $ kernelElementsPerThread kernel_size] ++
-                       map (DimNew . ImpGen.dimSizeToSubExp) (drop 1 shape)
+                       [DimNew $ SE.intSubExpToScalExp $ kernelNumThreads kernel_size,
+                        DimNew $ SE.intSubExpToScalExp $ kernelElementsPerThread kernel_size] ++
+                       map (DimNew . SE.intSubExpToScalExp . ImpGen.dimSizeToSubExp) (drop 1 shape)
           in ImpGen.ArrayEntry (ImpGen.MemLocation mem shape' ixfun') bt
 
     (call_with_body, body) <-
@@ -1172,7 +1172,10 @@ ensureAlignment :: AlignmentMap
 ensureAlignment alignments (name, size) =
   (name, size, lookupAlignment name alignments)
 
-explodeOuterDimension :: Shape -> SubExp -> SubExp -> IxFun.IxFun -> IxFun.IxFun
+explodeOuterDimension :: Shape -> SubExp -> SubExp
+                      -> IxFun.IxFun SE.ScalExp -> IxFun.IxFun SE.ScalExp
 explodeOuterDimension orig_shape n m ixfun =
   IxFun.reshape ixfun explode_dims
-  where explode_dims = reshapeOuter [DimNew n, DimNew m] 1 orig_shape
+  where explode_dims =
+          map (fmap SE.intSubExpToScalExp) $
+          reshapeOuter [DimNew n, DimNew m] 1 orig_shape

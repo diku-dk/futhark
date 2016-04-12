@@ -37,7 +37,8 @@ import           Prelude
 import           Futhark.MonadFreshNames
 import           Futhark.Tools (intraproceduralTransformation)
 import           Futhark.Representation.ExplicitMemory
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import qualified Futhark.Analysis.ScalExp as SE
 import           Futhark.Pass
 
 doubleBuffer :: Pass ExplicitMemory ExplicitMemory
@@ -133,7 +134,7 @@ optimiseLoop ctx val body = do
 -- | The booleans indicate whether we should also play with the
 -- initial merge values.
 data DoubleBuffer = BufferAlloc VName SubExp Space Bool
-                  | BufferCopy VName IxFun.IxFun VName Bool
+                  | BufferCopy VName (IxFun.IxFun SE.ScalExp) VName Bool
                     -- ^ First name is the memory block to copy to,
                     -- second is the name of the array copy.
                   | NoBuffer

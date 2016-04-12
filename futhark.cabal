@@ -46,12 +46,6 @@ Library
                  dlist >= 0.6.0.1,
                  bytestring,
                  text,
-                 constraints >= 0.4,
-                 type-natural >= 0.2,
-                 sized-vector >= 1.4,
-                 singletons >= 0.9,
-                 monomorphic >= 0.0.3,
-                 equational-reasoning >= 0.0.2,
                  raw-strings-qq,
                  neat-interpolation < 0.3,
                  file-embed
@@ -167,8 +161,6 @@ Library
                    Futhark.Representation.AST.Traversals
                    Futhark.Representation.ExplicitMemory
                    Futhark.Representation.ExplicitMemory.IndexFunction
-                   Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
-                   Futhark.Representation.ExplicitMemory.Permutation
                    Futhark.Representation.ExplicitMemory.Simplify
                    Futhark.Representation.Primitive
                    Futhark.Representation.SOACS
@@ -189,7 +181,6 @@ Library
                    Futhark.Util.Options
                    Futhark.Util.Pretty
                    Futhark.Util.Log
-                   Futhark.Util.Truths
                    Futhark.Util.IntegralExp
                    Futhark.Version
                    Language.Futhark

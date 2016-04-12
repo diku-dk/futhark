@@ -124,7 +124,7 @@ import Futhark.Representation.AST.Pretty
 import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import qualified Futhark.TypeCheck as TypeCheck
-import qualified Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe as IxFun
+import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import qualified Futhark.Util.Pretty as PP
 import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import Futhark.Optimise.Simplifier.Lore
@@ -245,7 +245,7 @@ data MemBound u = Scalar PrimType
                  -- ^ The corresponding identifier is a
                  -- scalar.  It must not be of array type.
                | MemMem SubExp Space
-               | ArrayMem PrimType Shape u VName IxFun.IxFun
+               | ArrayMem PrimType Shape u VName (IxFun.IxFun SE.ScalExp)
                  -- ^ The array is stored in the named memory block,
                  -- and with the given index function.  The index
                  -- function maps indices in the array to /element/
@@ -343,7 +343,7 @@ instance PP.Pretty (PatElemT (MemBound NoUniqueness)) where
 -- by an operation.  Note that the 'Eq' and 'Ord' instances are
 -- useless (everything is equal).  This type is merely a building
 -- block for 'Returns'.
-data MemReturn = ReturnsInBlock VName IxFun.IxFun
+data MemReturn = ReturnsInBlock VName (IxFun.IxFun SE.ScalExp)
                  -- ^ The array is located in a memory block that is
                  -- already in scope.
                | ReturnsNewBlock Int (Maybe SubExp)
@@ -731,7 +731,7 @@ lookupMemBound name = do
     IndexInfo -> return $ Scalar int32
 
 lookupArraySummary :: (HasScope ExplicitMemory m, Monad m) =>
-                      VName -> m (VName, IxFun.IxFun)
+                      VName -> m (VName, IxFun.IxFun SE.ScalExp)
 lookupArraySummary name = do
   summary <- lookupMemBound name
   case summary of
@@ -865,7 +865,7 @@ extReturns ts =
 
 arrayVarReturns :: (HasScope ExplicitMemory m, Monad m) =>
                    VName
-                -> m (PrimType, Shape, VName, IxFun.IxFun)
+                -> m (PrimType, Shape, VName, IxFun.IxFun SE.ScalExp)
 arrayVarReturns v = do
   summary <- lookupMemBound v
   case summary of
@@ -900,7 +900,7 @@ expReturns (AST.PrimOp (Reshape _ newshape v)) = do
   (et, _, mem, ixfun) <- arrayVarReturns v
   return [ReturnsArray et (ExtShape $ map (Free . newDim) newshape) NoUniqueness $
           Just $ ReturnsInBlock mem $
-          IxFun.reshape ixfun newshape]
+          IxFun.reshape ixfun $ map (fmap SE.intSubExpToScalExp) newshape]
 
 expReturns (AST.PrimOp (Rearrange _ perm v)) = do
   (et, Shape dims, mem, ixfun) <- arrayVarReturns v
