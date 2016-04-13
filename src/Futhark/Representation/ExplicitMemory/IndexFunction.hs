@@ -210,6 +210,7 @@ applyInd :: IntegralCond num =>
             IxFun num -> Indices num -> IxFun num
 applyInd (Index ixfun mis) is =
   Index ixfun $ mis ++ is
+applyInd ixfun [] = ixfun
 applyInd ixfun is = Index ixfun is
 
 rank :: IntegralCond num =>
