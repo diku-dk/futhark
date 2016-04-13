@@ -17,6 +17,7 @@ module Language.Futhark.Pretty
 
 import Data.Array
 import Data.Hashable
+import Data.Word
 import qualified Data.HashSet as HS
 
 import Text.PrettyPrint.Mainland
@@ -75,10 +76,14 @@ instance Pretty PrimType where
   ppr Bool = text "bool"
 
 instance Pretty PrimValue where
-  ppr (UnsignedValue (Int8Value v)) = text (show v) <> text "u8"
-  ppr (UnsignedValue (Int16Value v)) = text (show v) <> text "u16"
-  ppr (UnsignedValue (Int32Value v)) = text (show v) <> text "u32"
-  ppr (UnsignedValue (Int64Value v)) = text (show v) <> text "u64"
+  ppr (UnsignedValue (Int8Value v)) =
+    text (show (fromIntegral v::Word8)) <> text "u8"
+  ppr (UnsignedValue (Int16Value v)) =
+    text (show (fromIntegral v::Word16)) <> text "u16"
+  ppr (UnsignedValue (Int32Value v)) =
+    text (show (fromIntegral v::Word32)) <> text "u32"
+  ppr (UnsignedValue (Int64Value v)) =
+    text (show (fromIntegral v::Word64)) <> text "u64"
   ppr (SignedValue v) = ppr v
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
