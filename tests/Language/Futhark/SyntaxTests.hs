@@ -9,13 +9,9 @@ import Control.Applicative
 import Prelude
 
 import Test.QuickCheck
-import Test.HUnit hiding (Test)
 import Test.Framework
-import Test.Framework.Providers.HUnit
-import qualified Data.HashMap.Lazy as HM
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes
 
 import Futhark.Representation.PrimitiveTests()
 
