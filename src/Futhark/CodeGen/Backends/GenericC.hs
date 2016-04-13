@@ -718,6 +718,7 @@ benchmarkOptions =
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
+          perform_warmup = 1;
           if (num_runs <= 0) {
             errx(1, "Need a positive number of runs, not %s", optarg);
           }
@@ -770,6 +771,7 @@ $edecls:(map funcToDef definitions)
 $edecls:readerFunctions
 
 static typename FILE *runtime_file;
+static int perform_warmup = 0;
 static int num_runs = 1;
 
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
@@ -787,7 +789,7 @@ int main(int argc, char** argv) {
   $stms:pre_main_stms
   $items:main_pre
   /* Warmup run */
-  if (num_runs > 1) {
+  if (perform_warmup) {
     time_runs = 0;
     $items:main
     $items:free_out
