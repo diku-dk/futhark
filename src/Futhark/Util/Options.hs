@@ -35,7 +35,7 @@ mainWithOptions emptyConfig commandLineOptions f = do
         Left m       -> m
     (_, nonopts, unrecs, errs) -> invalid nonopts unrecs errs
   where applyOpts opts = do fs <- sequence opts
-                            return $ foldl (.) id fs emptyConfig
+                            return $ foldl (.) id (reverse fs) emptyConfig
 
         invalid nonopts unrecs errs = do usage <- usageStr commandLineOptions'
                                          badOptions usage nonopts errs unrecs
