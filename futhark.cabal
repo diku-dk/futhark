@@ -335,6 +335,23 @@ Executable futhark-bench
 
   Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
+Executable futhark-dataset
+  Main-is: src/futhark-dataset.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 containers >= 0.5,
+                 transformers,
+                 random,
+                 text,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
+
 Executable futhark-opencl
   Main-is: src/futhark-opencl.hs
 
