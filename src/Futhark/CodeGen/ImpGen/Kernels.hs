@@ -613,7 +613,7 @@ kernelCompiler
   (WriteKernel _cs _ts i vs as) = do
 
   kernel_size <- ImpGen.compileSubExp . arraySize 0 <$> lookupType i
-  arr_size <- ImpGen.compileSubExp . arraySize 0 <$> lookupType (head as) -- any a will do
+  arr_size <- ImpGen.compileSubExp . arraysSize 0 <$> mapM lookupType as
 
   global_thread_index <- newVName "write_thread_index"
   write_index <- newVName "write_index"
