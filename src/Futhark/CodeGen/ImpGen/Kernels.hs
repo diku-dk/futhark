@@ -610,10 +610,10 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dests)
-  (WriteKernel _cs _ts i vs as) = do
+  (WriteKernel _cs ts i vs _as) = do
 
   kernel_size <- ImpGen.compileSubExp . arraySize 0 <$> lookupType i
-  arr_size <- ImpGen.compileSubExp . arraysSize 0 <$> mapM lookupType as
+  let arr_size = ImpGen.compileSubExp $ arraysSize 0 ts
 
   global_thread_index <- newVName "write_thread_index"
   write_index <- newVName "write_index"
