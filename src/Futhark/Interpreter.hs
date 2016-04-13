@@ -710,7 +710,7 @@ evalSOAC (Write _cs _ts i vs as) = do
 
   (vArrs, vPrimTypes, vShapes) <-
     unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for values array") vs'
-  
+
   (aArrs, aPrimTypes, aShapes) <-
     unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for 'array' array") as'
 
@@ -728,12 +728,11 @@ evalSOAC (Write _cs _ts i vs as) = do
         idx <- case arrIndex of
           IntValue (Int32Value arrIndex') -> return arrIndex'
           _ -> bad $ TypeError "evalSOAC Write: Wrong index type"
-          
+
         if idx < 0 || idx >= fromIntegral aShapeOuter
           then return arrs
           else do
-          let 
-              updatess = [ [ (iBase + iOffset, vArr ! (iterBase + iOffset))
+          let updatess = [ [ (iBase + iOffset, vArr ! (iterBase + iOffset))
                            | iOffset <- [0..prod - 1]
                            ]
                          | (vArr, vShape) <- zip vArrs vShapes,
