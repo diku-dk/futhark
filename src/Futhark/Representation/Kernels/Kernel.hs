@@ -41,7 +41,7 @@ import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), (<+>), ppr, comma, commasep, semisep, Pretty, parens, text)
+  ((</>), (<+>), ppr, comma, commasep, Pretty, parens, text)
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
 import Futhark.Optimise.Simplifier.Lore
