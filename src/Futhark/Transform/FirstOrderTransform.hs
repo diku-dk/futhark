@@ -584,7 +584,7 @@ transformSOAC pat (Write cs arrayIOTypes indexes valuess arrayIOs) = do
   iter <- newVName "write_iter"
   arrayOuts <- mapM (newIdent "write_out") arrayIOTypes
   nMods <- arraySize 0 <$> lookupType indexes
-  w <- arraySize 0 <$> lookupType (head arrayIOs) -- any arrayIO will do
+  w <- arraysSize 0 <$> mapM lookupType arrayIOs -- any arrayIO will do
 
   -- Write is in-place, so we use the input array as the output array.
   let merge = loopMerge arrayOuts (map Var arrayIOs)
