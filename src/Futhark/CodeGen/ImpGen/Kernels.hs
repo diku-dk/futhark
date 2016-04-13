@@ -632,8 +632,7 @@ kernelCompiler
         ImpGen.emit $ Imp.SetScalar write_index $
           Imp.Index srcmem srcoffset int32 space
 
-  let -- If an index is out of bounds, just ignore it.  This piece of code is
-      -- needed, because no earlier phase currently generates bounds checking.
+  let -- If an index is out of bounds, just ignore it.
       condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
         (Imp.ScalarVar write_index)
         (Imp.Constant (IntValue (Int32Value 0)))
