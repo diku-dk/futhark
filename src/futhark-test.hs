@@ -61,6 +61,8 @@ data TestResult = Success
 data TestCase = TestCase { testCaseProgram :: FilePath
                          , testCaseTest :: ProgramTest
                          , testCasePrograms :: ProgConfig
+                         , testCaseOptions :: [String]
+                         -- ^ Extra options to pass to the program.
                          }
                 deriving (Show)
 
@@ -109,7 +111,7 @@ testMetrics program (StructureTest pipeline expected) = context "Checking metric
             _ -> return ()
 
 runTestCase :: TestCase -> TestM ()
-runTestCase (TestCase program testcase progs) = do
+runTestCase (TestCase program testcase progs extra_options) = do
   forM_ (testExpectedStructure testcase) $ testMetrics program
 
   case testAction testcase of
@@ -140,7 +142,7 @@ runTestCase (TestCase program testcase progs) = do
         unless (runMode run == InterpretedOnly) $
           forM_ (configCompilers progs) $ \compiler ->
             context ("Compiling with " <> T.pack compiler) $
-              compileTestProgram compiler program run
+              compileTestProgram extra_options compiler program run
 
 checkError :: ExpectedError -> T.Text -> TestM ()
 checkError (ThisError regex_s regex) err
@@ -179,8 +181,8 @@ interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = d
       compareResult program expectedResult' =<< runResult program code output err
   where dir = takeDirectory program
 
-compileTestProgram :: String -> FilePath -> TestRun -> TestM ()
-compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
+compileTestProgram :: [String] -> String -> FilePath -> TestRun -> TestM ()
+compileTestProgram extra_options futharkc program (TestRun _ inputValues expectedResult) = do
   input <- getValuesText dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (futcode, _, futerr) <-
@@ -193,10 +195,12 @@ compileTestProgram futharkc program (TestRun _ inputValues expectedResult) = do
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no path component.
-  (progCode, output, progerr) <-
-    io $ readProcessWithExitCode ("." </> binOutputf) [] input
-  withExceptT validating $
-    compareResult program expectedResult' =<< runResult program progCode output progerr
+  let binpath = "." </> binOutputf
+  context ("Running " <> T.pack (unwords $ binpath : extra_options)) $ do
+    (progCode, output, progerr) <-
+      io $ readProcessWithExitCode binpath extra_options input
+    withExceptT validating $
+      compareResult program expectedResult' =<< runResult program progCode output progerr
   where binOutputf = program `replaceExtension` "bin"
         dir = takeDirectory program
         validating = ("validating test result:\n"<>)
@@ -264,10 +268,10 @@ catching m = m `catch` save
 doTest :: TestCase -> IO TestResult
 doTest = catching . runTestM . runTestCase
 
-makeTestCase :: ProgConfig -> TestMode -> FilePath -> IO TestCase
-makeTestCase progs mode file = do
+makeTestCase :: TestConfig -> TestMode -> FilePath -> IO TestCase
+makeTestCase config mode file = do
   spec <- applyMode mode <$> testSpecFromFile file
-  return $ TestCase file spec progs
+  return $ TestCase file spec (configPrograms config) (configExtraOptions config)
 
 applyMode :: TestMode -> ProgramTest -> ProgramTest
 applyMode mode test =
@@ -328,7 +332,7 @@ runTests config files = do
   resmvar <- newEmptyMVar
   concurrency <- getNumCapabilities
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
-  all_tests <- mapM (makeTestCase (configPrograms config) mode) files
+  all_tests <- mapM (makeTestCase config mode) files
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- (&& mode /= OnTravis) <$> hIsTerminalDevice stdout
@@ -364,6 +368,8 @@ data TestConfig = TestConfig
                   { configTestMode :: TestMode
                   , configPrograms :: ProgConfig
                   , configExclude :: [T.Text]
+                  , configExtraOptions :: [String]
+                  -- ^ Extra options passed to the programs being run.
                   }
 
 defaultConfig :: TestConfig
@@ -375,6 +381,7 @@ defaultConfig = TestConfig { configTestMode = Everything
                              , configInterpreter = Left "futharki"
                              , configTypeChecker = Left "futhark"
                              }
+                           , configExtraOptions = []
                            }
 
 data ProgConfig = ProgConfig
@@ -453,6 +460,12 @@ commandLineOptions = [
                config { configExclude = T.pack tag : configExclude config })
      "TAG")
     "Exclude test programs that define this tag."
+  , Option "p" ["pass-option"]
+    (ReqArg (\opt ->
+               Right $ \config ->
+               config { configExtraOptions = opt : configExtraOptions config })
+     "OPT")
+    "Pass this option to programs being run."
   ]
 
 main :: IO ()

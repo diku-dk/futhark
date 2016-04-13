@@ -33,10 +33,11 @@ data BenchOptions = BenchOptions
                    { optCompiler :: String
                    , optRuns :: Int
                    , optRawReporting :: Bool
+                   , optExtraOptions :: [String]
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 False
+initialBenchOptions = BenchOptions "futhark-c" 10 False []
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -92,7 +93,8 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
     -- readProcessWithExitCode to find the binary when binOutputf has
     -- no program component.
     (progCode, output, progerr) <-
-      liftIO $ readProcessWithExitCode ("." </> binaryName program) ["-t", tmpfile] input
+      liftIO $ readProcessWithExitCode
+      ("." </> binaryName program) (optExtraOptions opts++["-t", tmpfile]) input
     case maybe_expected of
       Nothing ->
         didNotFail program progCode progerr
@@ -183,6 +185,12 @@ commandLineOptions = [
   , Option [] ["raw"]
     (NoArg $ Right $ \config -> config { optRawReporting = True })
     "Print all runtime numbers, not just the average."
+  , Option "p" ["pass-option"]
+    (ReqArg (\opt ->
+               Right $ \config ->
+               config { optExtraOptions = opt : optExtraOptions config })
+     "OPT")
+    "Pass this option to programs being run."
   ]
 
 main :: IO ()
