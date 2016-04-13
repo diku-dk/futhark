@@ -104,7 +104,7 @@ passOption :: String -> UntypedPass -> String -> [String] -> FutharkOption
 passOption desc pass short long =
   Option short long
   (NoArg $ Right $ \cfg ->
-   cfg { futharkPipeline = pass : futharkPipeline cfg })
+   cfg { futharkPipeline = futharkPipeline cfg ++ [pass] })
   desc
 
 explicitMemoryProg :: String -> UntypedPassState -> FutharkM ExplicitMemory.Prog
