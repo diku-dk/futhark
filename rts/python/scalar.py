@@ -219,7 +219,7 @@ def fpconv_f64_f32(x):
   return np.float32(x)
 
 def futhark_log64(x):
-  return np.float64(log(x))
+  return np.float64(np.log(x))
 
 def futhark_sqrt64(x):
   return np.sqrt(x)
@@ -243,7 +243,7 @@ def futhark_isinf64(x):
   return np.isinf(x)
 
 def futhark_log32(x):
-  return np.float32(log(x))
+  return np.float32(np.log(x))
 
 def futhark_sqrt32(x):
   return np.float32(np.sqrt(x))
