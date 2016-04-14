@@ -702,7 +702,12 @@ compileCode (Imp.For i bound body) = do
   bound' <- compileExp bound
   let i' = pretty i
   body' <- collect $ compileCode body
-  stm $ For i' (simpleCall "range" [bound']) (Assign (Var i') (simpleCall "np.int32" [Var i']) : body')
+  counter <- pretty <$> newVName "counter"
+  one <- pretty <$> newVName "one"
+  stm $ Assign (Var i') $ Constant $ value (0::Int32)
+  stm $ Assign (Var one) $ Constant $ value (1::Int32)
+  stm $ For counter (simpleCall "range" [bound']) $
+    body' ++ [AssignOp "+" (Var i') (Var one)]
 
 compileCode (Imp.SetScalar vname exp1) = do
   let name' = Var $ pretty vname
