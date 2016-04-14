@@ -536,7 +536,7 @@ addTiming statements =
    [ Assign (Var "time_end") $ Call "time.time" []
    , If (Var "runtime_file") print_runtime [] ],
 
-   Exp $ simpleCall "runtime_file.close" [])
+   If (Var "runtime_file") [Exp $ simpleCall "runtime_file.close" []] [])
   where print_runtime =
           [Exp $ simpleCall "runtime_file.write"
            [simpleCall "str"
