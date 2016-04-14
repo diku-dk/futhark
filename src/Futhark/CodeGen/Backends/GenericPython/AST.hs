@@ -52,6 +52,7 @@ data PyStmt = If PyExp [PyStmt] [PyStmt]
             | While PyExp [PyStmt]
             | For String PyExp [PyStmt]
             | Assign PyExp PyExp
+            | AssignOp String PyExp PyExp
             | Comment String [PyStmt]
             | Assert PyExp String
             | Exp PyExp
@@ -148,6 +149,8 @@ instance Pretty PyStmt where
     indent 2 (stack $ map ppr body)
 
   ppr (Assign e1 e2) = ppr e1 <+> text "=" <+> ppr e2
+
+  ppr (AssignOp op e1 e2) = ppr e1 <+> text (op ++ "=") <+> ppr e2
 
   ppr (Comment s body) = text "#" <> text s </> stack (map ppr body)
 
