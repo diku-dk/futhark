@@ -59,7 +59,7 @@ compileProg prog = do
                   , Option { optionLongName = "synchronous"
                            , optionShortName = Just 's'
                            , optionArgument = NoArgument
-                           , optionAction = [C.cstm|cl_synchronous = 1;|]
+                           , optionAction = [C.cstm|cl_debug = 1;|]
                            }
                   , Option { optionLongName = "group-size"
                            , optionShortName = Nothing
@@ -168,7 +168,7 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
                             $exp:srcidx, $exp:destidx,
                             $exp:nbytes,
                             0, NULL, NULL));
-      if (cl_synchronous) {
+      if (cl_debug) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
       }
     }
@@ -224,33 +224,34 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
   time_diff <- newVName "time_diff"
   local_work_size <- newVName "local_work_size"
 
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       struct timeval $id:time_start, $id:time_end;
-      fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
-      $stms:(printKernelSize global_work_size)
-      fprintf(stderr, "].\n");
-      gettimeofday(&$id:time_start, NULL);
+      if (cl_debug) {
+        fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
+        $stms:(printKernelSize global_work_size)
+        fprintf(stderr, "].\n");
+        gettimeofday(&$id:time_start, NULL);
+      }
       OPENCL_SUCCEED(
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
                                0, NULL, NULL));
-      if (cl_synchronous) {
+      if (cl_debug) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
+        gettimeofday(&$id:time_end, NULL);
+        typename suseconds_t $id:time_diff =
+          ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
+          ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
+        if (detail_timing) {
+          $id:(kernelRuntime kernel_name) += $id:time_diff;
+          $id:(kernelRuns kernel_name)++;
+          fprintf(stderr, "kernel %s runtime: %dus\n",
+                  $string:kernel_name, (int)$id:time_diff);
+        }
       }
-      gettimeofday(&$id:time_end, NULL);
-      typename suseconds_t $id:time_diff =
-         ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
-         ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
-      if (detail_timing) {
-        $id:(kernelRuntime kernel_name) += $id:time_diff;
-        $id:(kernelRuns kernel_name)++;
-        fprintf(stderr, "kernel %s runtime: %dus\n",
-                $string:kernel_name, (int)$id:time_diff);
-      }
-    }
     }|]
   where kernel_rank = length kernel_dims
         kernel_dims' = map toInit kernel_dims

@@ -46,7 +46,9 @@ loadKernelByName :: String -> C.Stm
 loadKernelByName name = [C.cstm|{
   $id:name = clCreateKernel(prog, $string:name, &error);
   assert(error == 0);
-  fprintf(stderr, "Created kernel %s.\n", $string:name);
+  if (cl_debug) {
+    fprintf(stderr, "Created kernel %s.\n", $string:name);
+  }
   }|]
 
 openClInit :: [C.Stm]
@@ -60,8 +62,12 @@ kernelRuns :: String -> String
 kernelRuns = (++"runs")
 
 openClReport :: [String] -> [C.BlockItem]
-openClReport names = declares ++ concatMap reportKernel names ++ [report_total]
+openClReport names =
+  declares ++
+  [[C.citem|if (cl_debug) { $items:report_kernels }|],
+   report_total]
   where longest_name = foldl max 0 $ map length names
+        report_kernels = concatMap reportKernel names
         format_string name =
           let padding = replicate (longest_name - length name) ' '
           in unwords ["Kernel",
@@ -83,6 +89,8 @@ openClReport names = declares ++ concatMap reportKernel names ++ [report_total]
         declares = [[C.citem|typename suseconds_t total_runtime = 0;|],
                     [C.citem|typename suseconds_t total_runs = 0;|]]
         report_total = [C.citem|
-                          fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
-                                  total_runs, total_runtime);
+                          if (cl_debug) {
+                            fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
+                                    total_runs, total_runtime);
+                          }
                         |]

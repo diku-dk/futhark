@@ -9,8 +9,7 @@ static cl_context fut_cl_context;
 static cl_command_queue fut_cl_queue;
 static const char *cl_preferred_platform = "";
 static const char *cl_preferred_device = "";
-static int cl_verbosity = 1;
-static int cl_synchronous = 0;
+static int cl_debug = 0;
 
 static size_t cl_group_size = 256, cl_num_groups = 128;
 
@@ -273,7 +272,7 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
 
   struct opencl_device_option device_option = get_preferred_device();
 
-  if (cl_verbosity > 0) {
+  if (cl_debug) {
     describe_device_option(device_option);
   }
 
