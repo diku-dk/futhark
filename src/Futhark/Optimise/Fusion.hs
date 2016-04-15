@@ -531,14 +531,15 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
-fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
+fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
   let body = mkBody bnds res
+      rem_bnds = bnd : bnds
   case maybesoac of
     Right soac@(SOAC.Map _ _ lam _) -> do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-      greedyFuse (bodyBindings body) used_lam blres (pat, soac)
+      greedyFuse rem_bnds used_lam blres (pat, soac)
 
     Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -550,7 +551,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       bres  <- bindingFamily pat $ fusionGatherBody lres body
       bres' <- foldM fusionGatherSubExp bres nes
       -- addNewKer bres' (patternIdents pat, soac)
-      greedyFuse (bodyBindings body) used_lam bres' (pat, soac)
+      greedyFuse rem_bnds used_lam bres' (pat, soac)
 
     Right soac@(SOAC.Scan _ _ lam args) -> do
       -- NOT FUSABLE (probably), but still add as kernel, as
@@ -559,7 +560,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
       blres' <- foldM fusionGatherSubExp blres nes
-      greedyFuse (bodyBindings body) used_lam blres' (pat, soac)
+      greedyFuse rem_bnds used_lam blres' (pat, soac)
 
     Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -574,7 +575,7 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
       bres  <- bindingFamily pat $ fusionGatherBody lres body
       bres' <- foldM fusionGatherSubExp bres nes
-      greedyFuse (bodyBindings body) used_lam bres' (pat, soac)
+      greedyFuse rem_bnds used_lam bres' (pat, soac)
 
     Left (SOAC.InvalidArrayInput inpe) ->
       badFusionGM $ Error
