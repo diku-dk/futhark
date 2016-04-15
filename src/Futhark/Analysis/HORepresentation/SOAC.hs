@@ -567,29 +567,29 @@ soacToStream soac = do
       lastel_ids <- mapM (newIdent "lstel")   accrtps
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       outszm1id  <- newIdent "szm1" $ Prim int32
-      -- 1. let scan0_ids   = scan(+,nes,a_ch)             in
+      -- 1. let scan0_ids   = scan(+,nes,a_ch)
       let insoac = Futhark.Scan cs chvar lam' $ zip nes (map paramName strm_inpids)
           insbnd = mkLet' [] scan0_ids $ Op insoac
-      -- 2. let strm_resids = map (acc `+`,nes, scan0_ids) in
-      maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam
-      let mapbnd = mkLet' [] strm_resids $ Op $
-                   Futhark.Map cs chvar maplam $ map identName scan0_ids
-      -- 3. let outerszm1id = sizeof(0,strm_resids) - 1    in
+      -- 2. let outerszm1id = chunksize - 1
           outszm1bnd = mkLet' [] [outszm1id] $ PrimOp $
                        BinOp (Sub Int32)
                        (Futhark.Var $ paramName chunk_param)
                        (constant (1::Int32))
-      -- 4. let lasteel_ids = strm_resids[outerszm1id]     in
+      -- 3. let lasteel_ids = scan0_ids[outerszm1id]
           lelbnds= zipWith (\ lid arrid -> mkLet' [] [lid] $ PrimOp $
                                            Index cs (identName arrid)
                                            [Futhark.Var $ identName outszm1id]
                            ) lastel_ids scan0_ids
-      -- 5. let acc'        = acc + lasteel_ids            in
+      -- 4. let strm_resids = map (acc `+`,nes, scan0_ids)
+      maplam <- mkMapPlusAccLam (map (Futhark.Var . paramName) inpacc_ids) lam
+      let mapbnd = mkLet' [] strm_resids $ Op $
+                   Futhark.Map cs chvar maplam $ map identName scan0_ids
+      -- 5. let acc'        = acc + lasteel_ids
       addlelbdy <- mkPlusBnds lam $ map Futhark.Var $
                    map paramName inpacc_ids++map identName lastel_ids
       -- Finally, construct the stream
       let (addlelbnd,addlelres) = (bodyBindings addlelbdy, bodyResult addlelbdy)
-          strmbdy= mkBody (insbnd:mapbnd:outszm1bnd:lelbnds++addlelbnd) $
+          strmbdy= mkBody (insbnd:outszm1bnd:lelbnds++mapbnd:addlelbnd) $
                           addlelres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
           strmlam= Lambda strmpar strmbdy (accrtps++loutps)
