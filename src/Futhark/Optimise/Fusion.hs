@@ -603,13 +603,15 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
 
   let pat_vars = map (Var . paramName)  merge_pat
   fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
-  fres'' <- case form of ForLoop _ bound ->
-                           fusionGatherSubExp fres' bound
-                         WhileLoop cond ->
-                           fusionGatherSubExp fres' $ Var cond
+  (fres'', form_idents) <- case form of
+    ForLoop i bound ->
+      (,) <$> fusionGatherSubExp fres' bound <*> pure [Ident i $ Prim int32]
+    WhileLoop cond ->
+      (,) <$> fusionGatherSubExp fres' (Var cond) <*> pure []
 
   let null_res = mkFreshFusionRes
-  new_res <- binding (map paramIdent merge_pat) $ fusionGatherBody null_res loop_body
+  new_res <- binding (form_idents ++ map paramIdent merge_pat) $
+    fusionGatherBody null_res loop_body
   -- make the inpArr unfusable, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res
@@ -706,9 +708,13 @@ fuseInExp :: Exp -> FusionGM Exp
 -- Handle loop specially because we need to bind the types of the
 -- merge variables.
 fuseInExp (DoLoop ctx val form loopbody) =
+  binding form_idents $
   bindingFParams (map fst $ ctx ++ val) $ do
     loopbody' <- fuseInBody loopbody
     return $ DoLoop ctx val form loopbody'
+  where form_idents = case form of
+          WhileLoop{} -> []
+          ForLoop i _ -> [Ident i $ Prim int32]
 
 fuseInExp e = mapExpM fuseIn e
 
