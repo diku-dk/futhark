@@ -10,9 +10,9 @@
 --   , [7.0, 1.0, -9.8]
 --   }
 -- }
--- structure { 
+-- structure {
 --    Stream  2
---    Scan    3
+--    Scan    2
 --    Map     2
 --    Redomap 1
 -- }

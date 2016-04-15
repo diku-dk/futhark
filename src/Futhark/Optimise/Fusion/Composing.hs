@@ -176,8 +176,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
   let acc_len     = length p_nes
-      unfus_accs  = take acc_len outVars
-      unfus_arrs  = unfus_nms \\ unfus_accs
+      unfus_arrs  = filter (`elem` unfus_nms) outVars
       lam1_body   = lambdaBody p_lam
       lam1_accres = take acc_len $ bodyResult lam1_body
       lam1_arrres = drop acc_len $ bodyResult lam1_body

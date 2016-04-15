@@ -377,7 +377,7 @@ fuseStreamHelper out_kernms unfus_nms outVars outPairs
                                                 inp1_arr outPairs lam2' inp2_arr
               res_lam'' = res_lam' { lambdaParams = chunk1 : lambdaParams res_lam' }
               unfus_accs  = take (length nes1) outVars
-              unfus_arrs  = unfus_nms \\ unfus_accs
+              unfus_arrs  = filter (`elem` unfus_nms) outVars
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
                     SOAC.Stream (cs1++cs2) w2 res_form res_lam'' new_inp )
