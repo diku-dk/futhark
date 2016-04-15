@@ -656,6 +656,21 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
     _ ->
       addBindingToKernel bnd acc
 
+maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
+  | [t] <- patternTypes pat = do
+      -- XXX: We need a temporary dummy binding to prevent an empty
+      -- map body.  The kernel extractor does not like empty map
+      -- bodies.
+      tmp <- newVName "tmp"
+      let rowt = rowType t
+          newbnd = Let pat attr $ Op $ Map [] n lam []
+          tmpbnd = Let (Pattern [] [PatElem tmp BindVar rowt]) () $ PrimOp $ SubExp v
+          lam = Lambda { lambdaReturnType = [rowt]
+                       , lambdaParams = []
+                       , lambdaBody = mkBody [tmpbnd] [Var tmp]
+                       }
+      maybeDistributeBinding newbnd acc
+
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc = do
   acc' <- distribute acc
   distribute =<< addBindingToKernel bnd acc'
