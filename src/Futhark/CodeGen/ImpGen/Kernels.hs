@@ -263,7 +263,7 @@ kernelCompiler
           Imp.Op (Imp.GetGroupId group_id 0) <>
           Imp.Op (Imp.GetGlobalId reduce_i 0) <>
           Imp.Op (Imp.GetGlobalId fold_i 0) <>
-          Imp.Op (Imp.GetWaveSize wave_size)
+          Imp.Op (Imp.GetLockstepWidth wave_size)
 
         ImpGen.Destination reduce_acc_targets <-
           ImpGen.destinationFromParams reduce_acc_params
@@ -463,7 +463,7 @@ kernelCompiler
           Imp.Op (Imp.GetLocalId local_id 0) <>
           Imp.Op (Imp.GetGroupId group_id 0) <>
           Imp.Op (Imp.GetGlobalId global_id 0) <>
-          Imp.Op (Imp.GetWaveSize wave_size)
+          Imp.Op (Imp.GetLockstepWidth wave_size)
 
         -- 'lam_i' is the offset of the element that the
         -- current thread is responsible for.  Since a single

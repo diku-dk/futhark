@@ -1,11 +1,43 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Futhark.CodeGen.OpenCL.Kernels
-       ( mapTranspose
+       ( LockstepWidthHeuristic (..)
+       , DeviceType (..)
+       , lockstepWidthHeuristicsTable
+
+       , mapTranspose
        )
        where
 
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
+
+-- Some OpenCL platforms have a SIMD/warp/wavefront-based execution
+-- model that execute groups of threads in lockstep, permitting us to
+-- perform cross-thread synchronisation within each such group without
+-- the use of barriers.  Unfortunately, there seems to be no reliable
+-- way to query these sizes at runtime.  Instead, we use this table to
+-- figure out which size we should use for a specific platform and
+-- device.  If nothing matches here, the wave size should be set to
+-- one.
+
+-- | The type of OpenCL device that this heuristic applies to.
+data DeviceType = DeviceCPU | DeviceGPU
+
+-- | A rule for picking the lockstep width.  If the platform and device
+-- type matches, then the lockstep width should be set to the given
+-- integer.
+data LockstepWidthHeuristic =
+  LockstepWidthHeuristic { platformName :: String
+                         , deviceType :: DeviceType
+                         , lockstepWidth :: Int
+                         }
+
+-- | All of our heuristics.
+lockstepWidthHeuristicsTable :: [LockstepWidthHeuristic]
+lockstepWidthHeuristicsTable =
+  [ LockstepWidthHeuristic "NVIDIA CUDA" DeviceGPU 32
+  , LockstepWidthHeuristic "AMD Accelerated Parallel Processing" DeviceGPU 32
+  ]
 
 mapTranspose :: C.ToIdent a => a -> C.Type -> C.Func
 mapTranspose kernel_name elem_type =

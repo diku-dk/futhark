@@ -13,7 +13,10 @@ import Data.FileEmbed
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-openClDecls :: Int -> [String] -> String -> String -> [C.Definition]
+import Futhark.CodeGen.OpenCL.Kernels
+
+openClDecls :: Int -> [String] -> String -> String
+            -> [C.Definition]
 openClDecls block_dim kernel_names opencl_program opencl_prelude =
   openclPrelude ++ openclBoilerplate ++ kernelDeclarations
   where kernelDeclarations =
@@ -34,6 +37,9 @@ void setup_opencl_and_load_kernels() {
 
   // Load all the kernels.
   $stms:(map (loadKernelByName) kernel_names)
+}|]] ++ [[C.cedecl|
+void post_opencl_setup(struct opencl_device_option *option) {
+  $stms:(map lockstepWidthHeuristicsCode lockstepWidthHeuristicsTable)
 }|]]
 
         openclPrelude = [ [C.cedecl|$esc:("#define FUT_BLOCK_DIM " ++ show block_dim)|] ]
@@ -94,3 +100,18 @@ openClReport names =
                                     total_runs, total_runtime);
                           }
                         |]
+
+lockstepWidthHeuristicsCode :: LockstepWidthHeuristic -> C.Stm
+lockstepWidthHeuristicsCode
+  (LockstepWidthHeuristic platform_name device_type width) =
+  [C.cstm|
+   if (strcmp(option->platform_name, $string:platform_name) == 0 &&
+      option->device_type == $exp:(clDeviceType device_type)) {
+     cl_lockstep_width = $int:width;
+     if (cl_debug) {
+       fprintf(stderr, "Setting lockstep width to: %d\n", cl_lockstep_width);
+     }
+   }
+   |]
+  where clDeviceType DeviceGPU = [C.cexp|CL_DEVICE_TYPE_GPU|]
+        clDeviceType DeviceCPU = [C.cexp|CL_DEVICE_TYPE_CPU|]

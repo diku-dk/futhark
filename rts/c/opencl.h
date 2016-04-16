@@ -11,7 +11,23 @@ static const char *cl_preferred_platform = "";
 static const char *cl_preferred_device = "";
 static int cl_debug = 0;
 
-static size_t cl_group_size = 256, cl_num_groups = 128;
+static size_t cl_group_size = 256;
+static size_t cl_num_groups = 128;
+static size_t cl_lockstep_width = 1;
+
+struct opencl_device_option {
+  cl_platform_id platform;
+  cl_device_id device;
+  cl_device_type device_type;
+  char *platform_name;
+  char *device_name;
+};
+
+/* This function must be defined by the user.  It is invoked by
+   setup_opencl() after the platform and device has been found, but
+   before the program is loaded.  Its intended use is to tune
+   constants based on the selected platform and device. */
+static void post_opencl_setup(struct opencl_device_option*);
 
 static char *strclone(const char *str) {
   size_t size = strlen(str) + 1;
@@ -115,13 +131,6 @@ static char* opencl_device_info(cl_device_id device,
   return info;
 }
 
-struct opencl_device_option {
-  cl_platform_id platform;
-  cl_device_id device;
-  char *platform_name;
-  char *device_name;
-};
-
 static void opencl_all_device_options(struct opencl_device_option **devices_out,
                                       size_t *num_devices_out) {
   size_t num_devices = 0, num_devices_added = 0;
@@ -178,6 +187,10 @@ static void opencl_all_device_options(struct opencl_device_option **devices_out,
       char *device_name = opencl_device_info(platform_devices[i], CL_DEVICE_NAME);
       devices[num_devices_added].platform = platform;
       devices[num_devices_added].device = platform_devices[i];
+      OPENCL_SUCCEED(clGetDeviceInfo(platform_devices[i], CL_DEVICE_TYPE,
+                                     sizeof(cl_device_type),
+                                     &devices[num_devices_added].device_type,
+                                     NULL));
       // We don't want the structs to share memory, so copy the platform name.
       // Each device name is already unique.
       devices[num_devices_added].platform_name = strclone(platform_name);
@@ -300,6 +313,9 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
   fut_cl_queue = clCreateCommandQueue(fut_cl_context, device, 0, &error);
   assert(error == 0);
 
+  /* Make sure this function is defined. */
+  post_opencl_setup(&device_option);
+
   // Build the OpenCL program.  First we have to prepend the prelude to the program source.
   size_t prelude_size = strlen(prelude_src);
   size_t program_size = strlen(src);
@@ -315,7 +331,7 @@ static cl_program setup_opencl(const char *prelude_src, const char *src) {
   prog = clCreateProgramWithSource(fut_cl_context, 1, src_ptr, &src_size, &error);
   assert(error == 0);
   char compile_opts[1024];
-  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DWAVE_SIZE=32", FUT_BLOCK_DIM);
+  snprintf(compile_opts, sizeof(compile_opts), "-DFUT_BLOCK_DIM=%d -DLOCKSTEP_WIDTH=%d", FUT_BLOCK_DIM, cl_lockstep_width);
   OPENCL_SUCCEED(build_opencl_program(prog, device, compile_opts));
   free(fut_opencl_src);
 

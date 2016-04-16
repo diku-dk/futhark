@@ -94,8 +94,8 @@ inKernelOperations = GenericC.Operations
         kernelOps (GetGlobalSize v i) = do
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
           return GenericC.Done
-        kernelOps (GetWaveSize v) = do
-          GenericC.stm [C.cstm|$id:v = WAVE_SIZE;|]
+        kernelOps (GetLockstepWidth v) = do
+          GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
           return GenericC.Done
         kernelOps Barrier = do
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
