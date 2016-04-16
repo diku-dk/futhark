@@ -36,7 +36,7 @@ data LockstepWidthHeuristic =
 lockstepWidthHeuristicsTable :: [LockstepWidthHeuristic]
 lockstepWidthHeuristicsTable =
   [ LockstepWidthHeuristic "NVIDIA CUDA" DeviceGPU 32
-  , LockstepWidthHeuristic "AMD Accelerated Parallel Processing" DeviceGPU 32
+  , LockstepWidthHeuristic "AMD Accelerated Parallel Processing" DeviceGPU 64
   ]
 
 mapTranspose :: C.ToIdent a => a -> C.Type -> C.Func
