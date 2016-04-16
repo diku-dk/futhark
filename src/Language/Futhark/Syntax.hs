@@ -175,21 +175,21 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
 
 -- | Types that can be elements of tuple-arrays.
 data TupleArrayElemTypeBase shape as vn =
-    PrimArrayElem PrimType (as vn)
+    PrimArrayElem PrimType (as vn) Uniqueness
   | ArrayArrayElem (ArrayTypeBase shape as vn)
   | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
   deriving (Show)
 
 instance Eq (shape vn) =>
          Eq (TupleArrayElemTypeBase shape as vn) where
-  PrimArrayElem bt1 _ == PrimArrayElem bt2 _ = bt1 == bt2
-  ArrayArrayElem at1   == ArrayArrayElem at2   = at1 == at2
-  TupleArrayElem ts1   == TupleArrayElem ts2   = ts1 == ts2
-  _                    == _                    = False
+  PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
+  ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
+  TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
+  _                      == _                      = False
 
 instance Ord (shape vn) =>
          Ord (TupleArrayElemTypeBase shape as vn) where
-  PrimArrayElem bt1 _ `compare` PrimArrayElem bt2 _ = bt1 `compare` bt2
+  PrimArrayElem bt1 _ u1 `compare` PrimArrayElem bt2 _ u2 = (bt1,u1) `compare` (bt2,u2)
   ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
   TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
   PrimArrayElem {}    `compare` ArrayArrayElem {}    = LT

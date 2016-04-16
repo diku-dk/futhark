@@ -307,7 +307,7 @@ TupleArrayElemTypes : { [] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
-TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
+TupleArrayElemType : PrimType                    { PrimArrayElem $1 NoInfo Nonunique }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 

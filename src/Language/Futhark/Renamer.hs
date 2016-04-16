@@ -219,8 +219,8 @@ renameTypeGeneric renameShape renameAliases = renameType'
           et' <- mapM renameTupleArrayElem et
           shape' <- renameShape shape
           return $ TupleArray et' shape' u
-        renameTupleArrayElem (PrimArrayElem bt als) =
-          PrimArrayElem bt <$> renameAliases als
+        renameTupleArrayElem (PrimArrayElem bt als u) =
+          PrimArrayElem bt <$> renameAliases als <*> pure u
         renameTupleArrayElem (ArrayArrayElem at) =
           ArrayArrayElem <$> renameArrayType at
         renameTupleArrayElem (TupleArrayElem ts) =

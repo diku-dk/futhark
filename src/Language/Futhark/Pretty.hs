@@ -94,15 +94,15 @@ instance Pretty Uniqueness where
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
-  ppr (PrimArrayElem bt _) = ppr bt
-  ppr (ArrayArrayElem at)   = ppr at
-  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
+  ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (ArrayArrayElem at)    = ppr at
+  ppr (TupleArrayElem ts)    = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase Rank as vn) where
-  ppr (PrimArrayElem bt _) = ppr bt
-  ppr (ArrayArrayElem at)   = ppr at
-  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
+  ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (ArrayArrayElem at)    = ppr at
+  ppr (TupleArrayElem ts)    = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (ArrayTypeBase ShapeDecl as vn) where
