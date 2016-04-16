@@ -492,8 +492,8 @@ unifyTupleArrayElemTypes :: Monoid (as vn) =>
                             TupleArrayElemTypeBase Rank as vn
                          -> TupleArrayElemTypeBase Rank as vn
                          -> Maybe (TupleArrayElemTypeBase Rank as vn)
-unifyTupleArrayElemTypes (PrimArrayElem bt1 als1) (PrimArrayElem bt2 als2)
-  | bt1 == bt2 = Just $ PrimArrayElem bt1 $ als1 <> als2
+unifyTupleArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
+  | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
 unifyTupleArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
   ArrayArrayElem <$> unifyArrayTypes at1 at2
@@ -821,9 +821,11 @@ checkExp (Zip arrexps loc) = do
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
   case typeOf e' of
-    Array (TupleArray ets shape u) ->
+    Array (TupleArray ets shape _) ->
       let componentType et =
-            arrayOf (tupleArrayElemToType et) shape u
+            let et' = tupleArrayElemToType et
+                u' = tupleArrayElemUniqueness et
+            in arrayOf et' shape u'
       in return $ Unzip e' (map (Info . componentType) ets) pos
     t ->
       bad $ TypeError pos $

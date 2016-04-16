@@ -72,7 +72,7 @@ internaliseDeclType' ddi (E.Array at) =
                         else I.uniqueness ct
                  | ct <- ts ]
 
-        internaliseTupleArrayElem (PrimArrayElem bt _) =
+        internaliseTupleArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseTupleArrayElem (ArrayArrayElem aet) =
           internaliseArrayType aet
@@ -135,7 +135,7 @@ internaliseTypeWithUniqueness = flip evalState 0 . internaliseType'
                          else I.uniqueness t
                  | t <- ts ]
 
-        internaliseTupleArrayElem (PrimArrayElem bt _) =
+        internaliseTupleArrayElem (PrimArrayElem bt _ _) =
           return [I.Prim $ internalisePrimType bt]
         internaliseTupleArrayElem (ArrayArrayElem at) =
           internaliseArrayType at
