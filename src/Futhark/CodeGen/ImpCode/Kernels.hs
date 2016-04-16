@@ -154,7 +154,7 @@ data KernelOp = GetGroupId VName Int
               | GetLocalSize VName Int
               | GetGlobalSize VName Int
               | GetGlobalId VName Int
-              | GetWaveSize VName
+              | GetLockstepWidth VName
               | Barrier
               deriving (Show)
 
@@ -174,9 +174,9 @@ instance Pretty KernelOp where
   ppr (GetGlobalId dest i) =
     ppr dest <+> text "<-" <+>
     text "get_global_id" <> parens (ppr i)
-  ppr (GetWaveSize dest) =
+  ppr (GetLockstepWidth dest) =
     ppr dest <+> text "<-" <+>
-    text "get_wave_size()"
+    text "get_lockstep_width()"
   ppr Barrier =
     text "barrier()"
 
