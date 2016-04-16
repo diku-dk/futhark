@@ -637,7 +637,7 @@ typeOf (Zip es _) =
   Array $ TupleArray (zipWith typeToTupleArrayElem es_ts es_us) (Rank 1) u
   where es_ts = map (rowType . unInfo . snd) es
         es_us = map (uniqueness . unInfo . snd) es
-        u     = mconcat_us
+        u     = mconcat es_us
 typeOf (Unzip _ ts _) =
   Tuple $ map unInfo ts
 typeOf (Unsafe e _) =
