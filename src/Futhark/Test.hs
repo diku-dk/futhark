@@ -344,7 +344,7 @@ minTolerance :: Fractional a => a
 minTolerance = 0.002 -- 0.2%
 
 tolerance :: A.Array Int PrimValue -> Double
-tolerance = foldl' tolerance' 0
+tolerance = foldl' tolerance' minTolerance
   where tolerance' t (FloatValue (Float32Value v)) = max t $ minTolerance * floatToDouble v
         tolerance' t (FloatValue (Float64Value v)) = max t $ minTolerance * v
         tolerance' t _                             = t
