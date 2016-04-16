@@ -13,7 +13,7 @@
 -- structure {
 --    Stream  1
 --    Scan    2
---    Map     2
+--    Map     1
 --    Redomap 1
 -- }
 --
