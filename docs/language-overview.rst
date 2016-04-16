@@ -109,73 +109,6 @@ Function calls are written as the function name followed by the
 arguments enclosed in parentheses.  All function calls must be fully
 saturated - currying is only permitted in SOACs_.
 
-Grammar of First-Order Fragment
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. productionlist::
-   t : "int" | "real" | "bool" | "f32" | "f64"
-   t : "{" `t` "," ... "," `t` "}"
-   t : "[" t "]"
-   t : "*" "[" t "]"
-
-.. productionlist::
-   v : integer constant
-   v : boolean constant
-   v : character constant
-   v : "{" `v` "," ...  "," `v` "}"
-   v : "[" `v` "," ...  "," `v` "]"
-
-.. productionlist::
-   p : name
-   p : "{" `p` "," ...  "," `p` "}"
-
-.. productionlist::
-   op : "+" | "-" | "*" | "/" | ">>" | "<<" | "%"  | "**"
-      : "==" | "<" | ">" | ">=" | "&&" | "||" "&" | "|"
-
-.. productionlist::
-   e : `v`
-   e : variable
-   e : "{" `e` "," ...  "," `e` "}"
-   e : "[" `e` "," ...  "," `e` "]"
-   e : `e` `op` `e`
-   e : "-" `e`
-   e : "!" `e`
-   e : "abs" `e`
-   e : "signum" `e`
-   e : "if" `e` "then" `e` "else" `e`
-   e : variable "[" `e` "," ...  "," `e` "]"
-   e : funname "(" `e` "," ...  "," `e` ")"
-   e : "let" `p` "=" `e` "in" `e`
-   e : "zip" "(" `e` "," ...  "," `e` ")"
-   e : "unzip" "(" `e` ")"
-   e : "iota" "(" `e` ")"
-   e : "replicate" "(" `e` "," `e` ")"
-   e : "size" "(" i "," `e` ")"
-   e : "reshape" "(" "(" `e` "," ...  "," `e` ")" "," `e` ")"
-   e : "rearrange" "(" "(" i "," ...  "," i ")" "," `e` ")"
-   e : "transpose" "(" `e` ")"
-   e : "split" "(" "(" `e` "," ...  "," `e` ")" "," `e` ")"
-   e : "concat" "(" `e` "," ... "," `e` ")"
-   e : "let" variable "=" variable "with"
-     : "[" `e` "," ...  "," `e` "]" "<-" `e`
-     : "in" `e`
-   e : "loop" (`p` "=" `e`) =
-     :   "for" variable "<" `e` "do" `e`
-     : "in" `e`
-   e : "loop" (`p` "=" `e`) =
-     :   "for" `e` "<=" variable "<" `e` "do" `e`
-     : "in" `e`
-   e : "loop" (`p` "=" `e`) =
-     :   "for" `e` ">" variable "do" `e`
-     : "in" `e`
-   e : "loop" (`p` "=" `e`) =
-     :   "for" `e` ">" variable ">=" `e` "do" `e`
-     : "in" `e`
-   e : "loop" (`p` "=" `e`) =
-     :   "while" `e` "do" `e`
-     : "in" `e`
-
 Sequential Loops
 ~~~~~~~~~~~~~~~~
 
@@ -323,30 +256,30 @@ The language presented in the previous section is in some sense
 "sufficient", in that it is Turing-complete, and can express
 imperative-style loops in a natural way with ``do`` and
 ``while``-loops.  However, Futhark is not intended to be used in this
-way - bulk operations on arrays should be expressed via the four
+way - bulk operations on arrays should be expressed via one of the
 *second-order array combinators* (SOACs) shown below, as this
 maximises the amount of parallelism that the compiler is able to take
 advantage of.
 
 .. productionlist::
-   e : "map" "(" `lambda` "," `e` ")"
-   e : "zipWith" "(" `lambda` "," `e` "," ... "," `e` ")"
-   e : "filter" "(" `lambda` "," `e` ")"
-   e : "partition" "(" `lambda` "," ... `lambda` "," `e` ")"
-   e : "reduce" "(" `lambda` "," `e` "," `e` ")"
-   e : "scan" "(" `lambda` "," `e` "," `e` ")"
+   e: "map" "(" `lambda` "," `e` ")"
+    : "zipWith" "(" `lambda` "," `e` "," ... "," `e` ")"
+    : "filter" "(" `lambda` "," `e` ")"
+    : "partition" "(" `lambda` "," ... `lambda` "," `e` ")"
+    : "reduce" "(" `lambda` "," `e` "," `e` ")"
+    : "scan" "(" `lambda` "," `e` "," `e` ")"
 
 A lambda can be an anonymous function, the name of a function (with
 optional curried arguments), or an operator (possibly with one operand
 curried):
 
 .. productionlist::
-   lambda : "fn" `rettype` (`param`...) "=>" `e`
-   lambda : `fname`
-   lambda : `fname` (`e`, ..., `e`)
-   lambda : `op` `e`
-   lambda : `e` `op`
-   lambda : `op`
+   lambda: "fn" `rettype` (`param`...) "=>" `e`
+         : `fname`
+         : `fname` (`e`, ..., `e`)
+         : `op` `e`
+         : `e` `op`
+         : `op`
 
 The semantics of the SOACs is identical to the similarly-named
 higher-order functions found in many functional languages.  For
