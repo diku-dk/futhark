@@ -64,13 +64,7 @@ import Futhark.Util
 letSubExp :: MonadBinder m =>
              String -> Exp (Lore m) -> m SubExp
 letSubExp _ (PrimOp (SubExp se)) = return se
-letSubExp desc e = do
-  n <- length <$> expExtType e
-  vs <- replicateM n $ newVName desc
-  idents <- letBindNames' vs e
-  case idents of
-    [ident] -> return $ Var $ identName ident
-    _       -> fail $ "letSubExp: tuple-typed expression given:\n" ++ pretty e
+letSubExp desc e = Var <$> letExp desc e
 
 letExp :: MonadBinder m =>
           String -> Exp (Lore m) -> m VName
