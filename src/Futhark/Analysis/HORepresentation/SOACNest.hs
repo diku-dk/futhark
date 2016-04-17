@@ -257,7 +257,7 @@ fromSOAC :: (Bindable lore, LocalScope lore m,
              Op lore ~ Futhark.SOAC lore) =>
             SOAC lore -> m (SOACNest lore)
 fromSOAC (SOAC.Map cs w l as) =
-  SOACNest as <$> Map cs w <$> lambdaToBody l
+  SOACNest as . Map cs w <$> lambdaToBody l
 fromSOAC (SOAC.Reduce cs w comm l args) =
   SOACNest (map snd args) <$>
   (Reduce cs w comm <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))

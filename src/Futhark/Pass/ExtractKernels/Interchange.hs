@@ -49,7 +49,7 @@ interchangeLoop
     -- used just as the inital value of a merge parameter.
     ((params', arrs'), pre_copy_bnds) <-
       runBinder $ localScope (scopeOfLParams new_params) $
-      unzip <$> catMaybes <$> mapM copyOrRemoveParam params_and_arrs
+      unzip . catMaybes <$> mapM copyOrRemoveParam params_and_arrs
 
     let lam = Lambda (params'<>new_params) body rettype
         map_bnd = Let loop_pat_expanded () $

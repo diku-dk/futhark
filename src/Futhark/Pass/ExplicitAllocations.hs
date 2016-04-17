@@ -147,8 +147,8 @@ arraySizeInBytesExp t =
 
 arraySizeInBytesExpM :: Allocator m => Type -> m SE.ScalExp
 arraySizeInBytesExpM t =
-  SE.sproduct <$>
-  (primByteSize (elemType t) :) <$>
+  SE.sproduct .
+  (primByteSize (elemType t) :) .
   map (`SE.subExpToScalExp` int32) <$>
   mapM dimAllocationSize (arrayDims t)
 

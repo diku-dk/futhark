@@ -1005,7 +1005,7 @@ patternContext :: Typed attr =>
 patternContext pat rt = do
   (rt', (restpat,_), shapepat) <- runRWST (mapM extract rt) () (pat, HM.empty)
   return (rt', restpat, shapepat)
-  where extract t = setArrayShape t <$> Shape <$>
+  where extract t = setArrayShape t . Shape <$>
                     mapM extract' (extShapeDims $ arrayShape t)
         extract' (Free se) = return se
         extract' (Ext x)   = correspondingVar x

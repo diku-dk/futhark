@@ -292,11 +292,11 @@ inputsToSubExps = mapM inputToExp'
           letExp "reshape" $ PrimOp $ Futhark.Reshape cs shape ia
 
         transform ia (ReshapeOuter cs shape) = do
-          shape' <- reshapeOuter shape 1 <$> arrayShape <$> lookupType ia
+          shape' <- reshapeOuter shape 1 . arrayShape <$> lookupType ia
           letExp "reshape_outer" $ PrimOp $ Futhark.Reshape cs shape' ia
 
         transform ia (ReshapeInner cs shape) = do
-          shape' <- reshapeInner shape 1 <$> arrayShape <$> lookupType ia
+          shape' <- reshapeInner shape 1 . arrayShape <$> lookupType ia
           letExp "reshape_inner" $ PrimOp $ Futhark.Reshape cs shape' ia
 
 -- | Return the array name of the input.
@@ -491,15 +491,15 @@ fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
 fromExp (Op (Futhark.Map cs w l as)) =
-  Right <$> Map cs w l <$> traverse varInput as
+  Right . Map cs w l <$> traverse varInput as
 fromExp (Op (Futhark.Reduce cs w comm l args)) = do
   let (es,as) = unzip args
-  Right <$> Reduce cs w comm l <$> zip es <$> traverse varInput as
+  Right . Reduce cs w comm l . zip es <$> traverse varInput as
 fromExp (Op (Futhark.Scan cs w l args)) = do
   let (es,as) = unzip args
-  Right <$> Scan cs w l <$> zip es <$> traverse varInput as
+  Right . Scan cs w l . zip es <$> traverse varInput as
 fromExp (Op (Futhark.Redomap cs w comm l1 l2 es as)) =
-  Right <$> Redomap cs w comm l1 l2 es <$> traverse varInput as
+  Right . Redomap cs w comm l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Stream cs w form extlam as)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps

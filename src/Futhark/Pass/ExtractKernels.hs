@@ -231,11 +231,11 @@ sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Map _ _ lam _)))
   | unbalancedLambda lam = do
       types <- asksScope scopeForSOACs
-      Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
+      Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ _ lam1 lam2 _ _)))
   | unbalancedLambda lam1 || unbalancedLambda lam2 = do
       types <- asksScope scopeForSOACs
-      Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
+      Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding _ =
   return Nothing
 

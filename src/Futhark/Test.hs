@@ -126,7 +126,7 @@ braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
 
 parseNatural :: Parser Int
-parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 <$>
+parseNatural = lexeme $ foldl' (\acc x -> acc * 10 + x) 0 .
                map num <$> some digit
   where num c = ord c - ord '0'
 
@@ -179,7 +179,7 @@ parseValues = do s <- parseBlock
                  case valuesFromText "input" s of
                    Left err -> fail $ show err
                    Right vs -> return $ Values vs
-              <|> lexstr "@" *> lexeme (InFile <$> T.unpack <$> restOfLine)
+              <|> lexstr "@" *> lexeme (InFile . T.unpack <$> restOfLine)
 
 parseBlock :: Parser T.Text
 parseBlock = lexeme $ braces (T.pack <$> parseBlockBody 0)
@@ -236,9 +236,9 @@ fixPosition err =
 -- Note: will call 'error' on parse errors.
 testSpecFromFile :: FilePath -> IO ProgramTest
 testSpecFromFile path = do
-  s <- T.unlines <$>
-       map (T.drop 2) <$>
-       takeWhile (commentPrefix `T.isPrefixOf`) <$>
+  s <- T.unlines .
+       map (T.drop 2) .
+       takeWhile (commentPrefix `T.isPrefixOf`) .
        T.lines <$>
        T.readFile path
   case readTestSpec path s of
