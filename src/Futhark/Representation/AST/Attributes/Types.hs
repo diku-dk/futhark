@@ -392,7 +392,7 @@ generaliseExtTypes :: [TypeBase ExtShape u]
 generaliseExtTypes rt1 rt2 =
   evalState (zipWithM unifyExtShapes rt1 rt2) (0, HM.empty)
   where unifyExtShapes t1 t2 =
-          setArrayShape t1 <$> ExtShape <$>
+          setArrayShape t1 . ExtShape <$>
           zipWithM unifyExtDims
           (extShapeDims $ arrayShape t1)
           (extShapeDims $ arrayShape t2)

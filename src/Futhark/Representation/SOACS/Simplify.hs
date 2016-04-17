@@ -307,7 +307,7 @@ simplifyStream vtable (Let pat _ lss@(Op (Stream cs outerdim form lam arr))) = d
     else do
     let patels      = patternElements pat
         argpattps   = map patElemType $ drop (length patels - length rtp) patels
-    (newpats,newsubexps) <- unzip <$> reverse <$>
+    (newpats,newsubexps) <- unzip . reverse <$>
                             foldM gatherPat [] (zip3 rtp rtp' argpattps)
     let newexps' = map (PrimOp . SubExp) newsubexps
         rmvdpatels = concatMap patternElements newpats
@@ -368,7 +368,7 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
           refineArrType vtable' bodyenv pars x (Array btp shp u) = do
             let vtab = ST.bindings vtable'
             dsx <- localScope bodyenv $
-                   shapeDims <$> arrayShape <$> subExpType x
+                   shapeDims . arrayShape <$> subExpType x
             let parnms = map paramName pars
                 dsrtpx = extShapeDims shp
                 (resdims,_) =
