@@ -811,16 +811,33 @@ internaliseLambda (E.AnonymFun params body (TypeDecl _ (Info rettype)) _) Nothin
     return (body', shapeparams ++ valparams, rettype')
   return (map (fmap I.fromDecl) params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
+internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
   fun_entry <- lookupFunction fname
   let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
+      diets = map I.diet paramts
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
-  params <- mapM (newParam "not_curried") rowtypes
-  let valargs = curargs' ++ map (I.Var . I.paramName) params
-      valargs_types = curarg_types ++ rowtypes
-      diets = map I.diet paramts
-      shapeargs = argShapes shapes paramts valargs_types
+  (params, valargs, valargs_types) <-
+    case maybe_rowtypes of
+      Just rowtypes -> do
+        params <- mapM (newParam "not_curried") rowtypes
+        let valargs = curargs' ++ map (I.Var . I.paramName) params
+            valargs_types = curarg_types ++ rowtypes
+        return (params, valargs, valargs_types)
+      Nothing -> do
+        let (_, ext_param_ts)                  = externalFun fun_entry
+        ext_params <- forM ext_param_ts $ \param_t -> do
+          name <- newVName "not_curried"
+          return E.Param { E.paramName = name
+                         , E.paramTypeDecl = TypeDecl param_t $ Info param_t
+                         , E.paramSrcLoc = noLoc
+                         }
+        bindingParams ext_params $ \shape_params value_params -> do
+          let params = map (fmap I.fromDecl) $ shape_params ++ value_params
+              valargs = curargs' ++ map (I.Var . I.paramName) value_params
+              valargs_types = curarg_types ++ map I.paramType value_params
+          return (params, valargs, valargs_types)
+  let shapeargs = argShapes shapes paramts valargs_types
       allargs = zip shapeargs (repeat I.Observe) ++
                 zip valargs diets
   case int_rettype_fun $
@@ -834,38 +851,6 @@ internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
                I.Apply fname allargs $ ExtRetType ts
         resultBodyM $ map I.Var res
       return (params, funbody, map I.fromDecl ts)
-
-internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
-  fun_entry <- lookupFunction fname
-  let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
-      (_, ext_param_ts)                  = externalFun fun_entry
-  curargs' <- concat <$> mapM (internaliseExp "curried") curargs
-  curarg_types <- mapM subExpType curargs'
-  ext_params <- forM ext_param_ts $ \param_t -> do
-    name <- newVName "not_curried"
-    return E.Param { E.paramName = name
-                   , E.paramTypeDecl = TypeDecl param_t $ Info param_t
-                   , E.paramSrcLoc = noLoc
-                   }
-  bindingParams ext_params $ \shape_params value_params -> do
-    let params = map (fmap I.fromDecl) $ shape_params ++ value_params
-        valargs = curargs' ++ map (I.Var . I.paramName) value_params
-        valargs_types = curarg_types ++ map I.paramType value_params
-        diets = map I.diet paramts
-        shapeargs = argShapes shapes paramts valargs_types
-        allargs = zip shapeargs (repeat I.Observe) ++
-                  zip valargs diets
-    case int_rettype_fun $
-         map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
-      Nothing ->
-        fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
-        pretty (shapeargs ++ valargs)
-      Just (ExtRetType ts) -> do
-        funbody <- insertBindingsM $ do
-          res <- letTupExp "curried_fun_result" $
-                 I.Apply fname allargs $ ExtRetType ts
-          resultBodyM $ map I.Var res
-        return (params, funbody, map I.fromDecl ts)
 
 internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
