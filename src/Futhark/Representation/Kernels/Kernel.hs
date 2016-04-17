@@ -397,6 +397,7 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
   mapM_ (TC.requireI [Prim Cert]) cs
   TC.require [Prim int32] w
   mapM_ (TC.require [Prim int32]) bounds
+
   index_param <- TC.primLParam index int32
   iparams' <- forM iparams $ \iparam -> TC.primLParam iparam int32
   forM_ returns $ \(t, perm) ->
@@ -439,9 +440,8 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
             "Kernel input " ++ pretty inp ++ " has inconsistent type."
 
 typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
-  mapM_ (TC.requireI [Prim Cert]) cs
-  TC.require [Prim int32] w
-  typeCheckKernelSize kernel_size
+  checkKernelCrud cs w kernel_size
+
   arrargs <- TC.checkSOACArrayArgs w arrexps
 
   let (fold_acc_ret, _) =
@@ -467,9 +467,8 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
           ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
 
 typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
-  mapM_ (TC.requireI [Prim Cert]) cs
-  TC.require [Prim int32] w
-  typeCheckKernelSize kernel_size
+  checkKernelCrud cs w kernel_size
+
   let (nes, arrs) = unzip input
       index_arg = (Prim int32, mempty)
   arrargs <- TC.checkSOACArrayArgs w arrs
@@ -488,9 +487,7 @@ typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
     ", but scan function returns type " ++ prettyTuple funret ++ "."
 
 typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
-  mapM_ (TC.requireI [Prim Cert]) cs
-  TC.require [Prim int32] w
-  typeCheckKernelSize kernel_size
+  checkKernelCrud cs w kernel_size
 
   arrargs <- TC.checkSOACArrayArgs w arrs
 
@@ -533,6 +530,13 @@ typeCheckKernel (WriteKernel cs ts i vs as) = do
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
+
+checkKernelCrud :: TC.Checkable lore =>
+                   [VName] -> SubExp -> KernelSize -> TC.TypeM lore ()
+checkKernelCrud cs w kernel_size = do
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
+  typeCheckKernelSize kernel_size
 
 typeCheckKernelSize :: TC.Checkable lore =>
                        KernelSize -> TC.TypeM lore ()
