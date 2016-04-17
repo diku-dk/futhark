@@ -522,22 +522,20 @@ soacToStream soac = do
       (cs, lam, inps) = (certificates soac, lambda soac, inputs soac)
       w = width soac
   lam'     <- renameLambda lam
+  let arrrtps= mapType w lam
+      -- the chunked-outersize of the array result and input types
+      loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
+      lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
 
+  strm_inpids <- mapM (newParam "inp") lintps
   -- Treat each SOAC case individually:
   case soac of
     -- Map(f,a) => is translated in strem's body to:
     -- let strm_resids = map(f,a_ch) in strm_resids
     Map{}  -> do
-      -- the array and accumulator result types
-      let arrrtps= mapType w lam
-      -- the chunked-outersize of the array result and input types
-          loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
-          lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
-          maplam = lam'
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
-      strm_inpids <- mapM (newParam "inp") lintps
-      let insoac = Futhark.Map cs chvar maplam $ map paramName strm_inpids
+      let insoac = Futhark.Map cs chvar lam' $ map paramName strm_inpids
           insbnd = mkLet' [] strm_resids $ Op insoac
           strmbdy= mkBody [insbnd] $ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:strm_inpids
@@ -555,13 +553,8 @@ soacToStream soac = do
       -- the array and accumulator result types
       let nes = fst $ unzip nesinps
           accrtps= lambdaReturnType lam
-          arrrtps= mapType w lam
-      -- the chunked-outersize of the array result and input types
-          loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
-          lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
       strm_resids <- mapM (newIdent "res") loutps
-      strm_inpids <- mapM (newParam "inp") lintps
 
       scan0_ids  <- mapM (newIdent "resarr0") loutps
       lastel_ids <- mapM (newIdent "lstel")   accrtps
@@ -603,11 +596,7 @@ soacToStream soac = do
       -- the array and accumulator result types
       let nes = fst $ unzip nesinps
           accrtps= lambdaReturnType lam
-      -- the chunked-outersize of the array result and input types
-          lintps = [ arrayOfRow t chvar
-                   | t <- map inputRowType inps ]
       -- array result and input IDs of the stream's lambda
-      strm_inpids <- mapM (newParam "inp") lintps
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let acc0_ids = reduce(+,nes,a_ch) in
@@ -630,15 +619,12 @@ soacToStream soac = do
     Redomap _ _ comm lamin _ nes _ -> do
       -- the array and accumulator result types
       let accrtps= take (length nes) $ lambdaReturnType lam
-          arrrtps= drop (length nes) $ mapType w lam
-      -- the chunked-outersize of the array result and input types
-          loutps = [ arrayOfRow t chvar | t <- map rowType   arrrtps ]
-          lintps = [ arrayOfRow t chvar | t <- map inputRowType inps ]
+          -- the chunked-outersize of the array result and input types
+          loutps' = drop (length nes) loutps
           -- the lambda with proper index
           foldlam = lam'
       -- array result and input IDs of the stream's lambda
-      strm_resids <- mapM (newIdent "res") loutps
-      strm_inpids <- mapM (newParam "inp") lintps
+      strm_resids <- mapM (newIdent "res") loutps'
       inpacc_ids <- mapM (newParam "inpacc")  accrtps
       acc0_ids   <- mapM (newIdent "acc0"  )  accrtps
       -- 1. let (acc0_ids,strm_resids) = redomap(+,lam,nes,a_ch) in
@@ -652,7 +638,7 @@ soacToStream soac = do
           strmbdy= mkBody (insbnd : addaccbnd) $
                           addaccres ++ map (Futhark.Var . identName) strm_resids
           strmpar= chunk_param:inpacc_ids++strm_inpids
-          strmlam= Lambda strmpar strmbdy (accrtps++loutps)
+          strmlam= Lambda strmpar strmbdy (accrtps++loutps')
       lam0 <- renameLambda lamin
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
