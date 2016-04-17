@@ -36,11 +36,8 @@ kernelsToOpenCL prog = do
   let kernel_names = map fst kernels
       opencl_code = pretty $ openClCode kernels
       opencl_prelude = pretty $ genOpenClPrelude requirements
-  return $ ImpOpenCL.Program
-    opencl_code
-    opencl_prelude
-    kernel_names $
-    fmap callKernel $ prog
+  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names $
+    callKernel <$> prog
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -111,7 +108,7 @@ inKernelOperations = GenericC.Operations
 
         copyInKernel :: GenericC.Copy KernelOp UsedFunctions
         copyInKernel _ _ _ _ _ _ _ =
-          fail $ "Cannot bulk copy in kernel."
+          fail "Cannot bulk copy in kernel."
 
         kernelMemoryType space = do
           quals <- pointerQuals space
@@ -224,9 +221,9 @@ openClCode kernels =
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
 genOpenClPrelude (OpenClRequirements used_funs ts) =
-  (if uses_float64
-   then [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
-   else []) ++
+  if uses_float64
+  then [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
+  else [] ++
   [C.cunit|
 typedef char int8_t;
 typedef short int16_t;
@@ -250,7 +247,7 @@ calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
   mapKernelName k
 calledKernelName (AnyKernel k) =
-  maybe "" (++"_") (kernelDesc k) ++ "kernel_" ++ (show $ baseTag $ kernelName k)
+  maybe "" (++"_") (kernelDesc k) ++ "kernel_" ++ show (baseTag $ kernelName k)
 calledKernelName (MapTranspose bt _ _ _ _ _ _ _) =
   "fut_kernel_map_transpose_" ++ pretty bt
 

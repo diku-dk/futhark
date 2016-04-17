@@ -584,7 +584,7 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
           let ty' = primTypeToCType ty
           decl [C.cdecl|$ty:ty' $id:name;|]
 
-        stubParam (MemParam name _ _) = do
+        stubParam (MemParam name _ _) =
           declMem name DefaultSpace
         stubParam (ScalarParam name ty) = do
           let ty' = primTypeToCType ty
@@ -694,7 +694,7 @@ freeResults ret outparams =
 freeResult :: C.Exp -> Param -> CompilerM op s ()
 freeResult _ ScalarParam{} =
   return ()
-freeResult e (MemParam _ _ space) = do
+freeResult e (MemParam _ _ space) =
   unRefMem e space
 
 benchmarkOptions :: [Option]
@@ -837,8 +837,7 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
   args' <- mapM compileInput inputs
   (retval, body') <- blockScope' $ do
     mapM_ compileOutput outputs
-    ret <- compileFunBody outputs body
-    return ret
+    compileFunBody outputs body
   crettype <- typeToCType $ paramsTypes outputs
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
           [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) {

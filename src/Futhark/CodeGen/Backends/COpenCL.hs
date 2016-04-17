@@ -26,7 +26,7 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernel_names prog') -> do
+    Right (Program opencl_code opencl_prelude kernel_names prog') ->
       Right <$> GenericC.compileProg operations ()
                 [Space "device", Space "local", DefaultSpace]
                 (openClDecls transposeBlockDim kernel_names opencl_code opencl_prelude)

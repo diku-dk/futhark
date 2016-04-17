@@ -25,7 +25,7 @@ if [ "$#" = 0 ]; then
 fi
 
 hlintable() {
-    (echo "$1" | egrep -q ".l?hs$") && ! egrep -q '{-# LANGUAGE.*QuasiQuotes' "$1"
+    (echo "$1" | egrep -q ".l?hs$")
 }
 
 hlint_check() {
