@@ -760,7 +760,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simplifyLambda lam (SOAC.width new_soac) Nothing args
+  lam' <- simplifyLambda lam Nothing args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

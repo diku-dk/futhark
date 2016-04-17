@@ -54,13 +54,13 @@ simplifyLambda :: (MonadFreshNames m,
                   SimpleOps (SimpleM lore)
                -> RuleBook (SimpleM lore)
                -> Engine.HoistBlockers (SimpleM lore)
-               -> Lambda lore -> SubExp -> Maybe [SubExp] -> [Maybe VName]
+               -> Lambda lore -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Wise lore))
-simplifyLambda simpl rules blockers lam w nes args = do
+simplifyLambda simpl rules blockers lam nes args = do
   types <- askScope
   let m = Engine.localVtable
           (<> ST.fromScope (addScopeWisdom types)) $
-          Engine.simplifyLambdaNoHoisting lam w nes args
+          Engine.simplifyLambdaNoHoisting lam nes args
   modifyNameSource $ runSimpleM m simpl $
     Engine.emptyEnv rules blockers
 

@@ -69,8 +69,8 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     w' <- Engine.simplify w
     kernel_size' <- Engine.simplify kernel_size
     arrs' <- mapM Engine.simplify arrs
-    parlam' <- Engine.simplifyLambda parlam w' Nothing $ map (const Nothing) arrs
-    seqlam' <- Engine.simplifyLambda seqlam w' Nothing $ map Just arrs
+    parlam' <- Engine.simplifyLambda parlam Nothing $ map (const Nothing) arrs
+    seqlam' <- Engine.simplifyLambda seqlam Nothing $ map Just arrs
     let consumed_in_seq = consumedInBody $ lambdaBody seqlam'
         arr_params = drop 1 $ lambdaParams seqlam'
     forM_ (zip arr_params arrs) $ \(p,arr) ->
@@ -79,20 +79,18 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' arrs'
 
   simplifyOp (ScanKernel cs w kernel_size order lam input) = do
-    w' <- Engine.simplify w
     arrs' <- mapM Engine.simplify arrs
-    ScanKernel <$> Engine.simplify cs <*> pure w' <*>
+    ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
       Engine.simplify kernel_size <*> pure order <*>
-      Engine.simplifyLambda lam w' (Just nes) (map Just arrs') <*>
+      Engine.simplifyLambda lam (Just nes) (map Just arrs') <*>
       (zip <$> mapM Engine.simplify nes <*> pure arrs')
     where (nes, arrs) = unzip input
 
   simplifyOp (ChunkedMapKernel cs w kernel_size o lam arrs) = do
-    w' <- Engine.simplify w
     arrs' <- mapM Engine.simplify arrs
-    ChunkedMapKernel <$> Engine.simplify cs <*> pure w' <*>
+    ChunkedMapKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
       Engine.simplify kernel_size <*> pure o <*>
-      Engine.simplifyLambda lam w' Nothing (map Just arrs') <*>
+      Engine.simplifyLambda lam Nothing (map Just arrs') <*>
       pure arrs'
 
   simplifyOp (WriteKernel cs ts i vs as) = do

@@ -642,21 +642,21 @@ instance Simplifiable (TypeBase Shape u) where
 
 simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)
-               -> SubExp -> Maybe [SubExp] -> [Maybe VName]
+               -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Lore m))
 simplifyLambda = simplifyLambdaMaybeHoist True
 
 simplifyLambdaNoHoisting :: MonadEngine m =>
                             Lambda (InnerLore m)
-                         -> SubExp -> Maybe [SubExp] -> [Maybe VName]
+                         -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
 simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist False
 
 simplifyLambdaMaybeHoist :: MonadEngine m =>
                             Bool -> Lambda (InnerLore m)
-                         -> SubExp -> Maybe [SubExp] -> [Maybe VName]
+                         -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
-simplifyLambdaMaybeHoist hoisting lam@(Lambda params body rettype) _w nes arrs = do
+simplifyLambdaMaybeHoist hoisting lam@(Lambda params body rettype) nes arrs = do
   params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
@@ -685,11 +685,10 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda params body rettype) _w nes arrs =
 
 simplifyExtLambda :: MonadEngine m =>
                      ExtLambda (InnerLore m)
-                  -> SubExp
                   -> [SubExp]
                   -> [(LParam (Lore m), SE.ScalExp, SE.ScalExp)]
                   -> m (ExtLambda (Lore m))
-simplifyExtLambda lam@(ExtLambda params body rettype) _w nes parbnds = do
+simplifyExtLambda lam@(ExtLambda params body rettype) nes parbnds = do
   params' <- mapM (simplifyParam simplify) params
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
