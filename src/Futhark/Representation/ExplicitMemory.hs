@@ -944,7 +944,7 @@ expReturns (DoLoop ctx val _ _) =
               (Array bt shape u, ArrayMem _ _ _ mem ixfun)
                 | isMergeVar mem -> do
                   i <- get
-                  put $ i + 1
+                  modify succ
                   return $ ReturnsArray bt shape u $ Just $ ReturnsNewBlock i Nothing
                 | otherwise ->
                   return (ReturnsArray bt shape u $
