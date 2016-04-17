@@ -427,31 +427,12 @@ internaliseExp desc (E.Map lam arr _) = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Map [] w lam' arrs
 
-internaliseExp desc (E.Reduce comm lam ne arr loc) = do
-  arrs <- internaliseExpToVars "reduce_arr" arr
-  nes <- internaliseExp "reduce_ne" ne
-  nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
-    rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape asserting loc rowtype "reduce_ne_right_shape" ne'
-  nests <- mapM I.subExpType nes'
-  arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
-  let input = zip nes' arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Reduce [] w comm lam' input
+internaliseExp desc (E.Reduce comm lam ne arr loc) =
+  internaliseScanOrReduce desc "reduce"
+    (\cs w -> I.Reduce cs w comm) (lam, ne, arr, loc)
 
-internaliseExp desc (E.Scan lam ne arr loc) = do
-  arrs <- internaliseExpToVars "scan_arr" arr
-  nes <- internaliseExp "scan_ne" ne
-  nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
-    rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape asserting loc rowtype "scan_ne_right_shape" ne'
-  nests <- mapM I.subExpType nes'
-  arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
-  let input = zip nes' arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Scan [] w lam' input
+internaliseExp desc (E.Scan lam ne arr loc) =
+  internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
 
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
@@ -652,6 +633,22 @@ internaliseExp desc (E.Write i v a loc) = do
   let (ts, svs', sas') = unzip3 res
   letTupExp' desc $ I.Op $ I.Write [] ts si svs' sas'
 
+internaliseScanOrReduce :: String -> String
+                        -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
+                        -> (E.Lambda, E.Exp, E.Exp, SrcLoc)
+                        -> InternaliseM [SubExp]
+internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
+  arrs <- internaliseExpToVars (what++"_arr") arr
+  nes <- internaliseExp (what++"_ne") ne
+  nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
+    rowtype <- I.stripArray 1 <$> lookupType arr'
+    ensureShape asserting loc rowtype (what++"_ne_right_shape") ne'
+  nests <- mapM I.subExpType nes'
+  arrts <- mapM lookupType arrs
+  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
+  let input = zip nes' arrs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.Op $ f [] w lam' input
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
