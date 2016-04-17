@@ -557,26 +557,14 @@ compileUnOp op =
     SSignum{} -> "ssignum"
     USignum{} -> "usignum"
 
-compileBinOp :: BinOp -> Imp.Exp -> Imp.Exp -> CompilerM op s PyExp
-compileBinOp op x y = do
+compileBinOpLike :: Monad m =>
+                    Imp.Exp -> Imp.Exp
+                 -> CompilerM op s (PyExp, PyExp, String -> m PyExp)
+compileBinOpLike x y = do
   x' <- compileExp x
   y' <- compileExp y
   let simple s = return $ BinaryOp s x' y'
-  case op of
-    Add{} -> simple "+"
-    Sub{} -> simple "-"
-    Mul{} -> simple "*"
-    FAdd{} -> simple "+"
-    FSub{} -> simple "-"
-    FMul{} -> simple "*"
-    FDiv{} -> simple "/"
-    Xor{} -> simple "^"
-    And{} -> simple "&"
-    Or{} -> simple "|"
-    Shl{} -> simple "<<"
-    LogAnd{} -> simple "and"
-    LogOr{} -> simple "or"
-    _ -> return $ simpleCall (pretty op) [x', y']
+  return (x', y', simple)
 
 compileSizeOfType :: PrimType -> String
 compileSizeOfType t =
@@ -632,17 +620,30 @@ compileExp (Imp.Constant v) = return $ compilePrimValue v
 
 compileExp (Imp.ScalarVar vname) = return (Var $ pretty vname)
 
-compileExp (Imp.BinOp op exp1 exp2) =
-  compileBinOp op exp1 exp2
+compileExp (Imp.BinOp op x y) = do
+  (x', y', simple) <- compileBinOpLike x y
+  case op of
+    Add{} -> simple "+"
+    Sub{} -> simple "-"
+    Mul{} -> simple "*"
+    FAdd{} -> simple "+"
+    FSub{} -> simple "-"
+    FMul{} -> simple "*"
+    FDiv{} -> simple "/"
+    Xor{} -> simple "^"
+    And{} -> simple "&"
+    Or{} -> simple "|"
+    Shl{} -> simple "<<"
+    LogAnd{} -> simple "and"
+    LogOr{} -> simple "or"
+    _ -> return $ simpleCall (pretty op) [x', y']
 
 compileExp (Imp.ConvOp conv x) = do
   x' <- compileExp x
   return $ simpleCall (pretty conv) [x']
 
 compileExp (Imp.CmpOp cmp x y) = do
-  x' <- compileExp x
-  y' <- compileExp y
-  let simple s = return $ BinaryOp s x' y'
+  (x', y', simple) <- compileBinOpLike x y
   case cmp of
     CmpEq{} -> simple "=="
     FCmpLt{} -> simple "<"
