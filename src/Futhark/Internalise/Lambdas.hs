@@ -174,7 +174,7 @@ internaliseStreamLambda internaliseLambda asserting lam accs arrtypes = do
   body' <- insertBindingsM $ do
                 let mkArrType :: (VName, ExtType) -> InternaliseM I.Type
                     mkArrType (x, I.Array btp shp u) = do
-                      dsx <- I.shapeDims <$> I.arrayShape <$> I.lookupType x
+                      dsx <- I.shapeDims . I.arrayShape <$> I.lookupType x
                       let dsrtpx =  I.extShapeDims shp
                           resdims= zipWith (\ dx drtpx ->
                                                   case drtpx of

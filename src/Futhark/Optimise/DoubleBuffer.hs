@@ -96,7 +96,7 @@ optimiseBinding (Let pat () (DoLoop ctx val form body)) = do
            optimiseBody body
   (bnds, ctx', val', body'') <- optimiseLoop ctx val body'
   return $ bnds ++ [Let pat () $ DoLoop ctx' val' form body'']
-optimiseBinding (Let pat () e) = pure <$> Let pat () <$> mapExpM optimise e
+optimiseBinding (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   , mapOnOp = optimiseOp
                                   }

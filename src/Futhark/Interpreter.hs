@@ -565,7 +565,7 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
       bad $ TypeError "Reshape given a non-array argument"
 
 evalPrimOp (Rearrange _ perm arrexp) =
-  single <$> permuteArray perm <$> lookupVar arrexp
+  single . permuteArray perm <$> lookupVar arrexp
 
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt "evalPrimOp Split" <=< evalSubExp) sizeexps

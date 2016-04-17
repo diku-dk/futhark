@@ -445,7 +445,7 @@ defCompileExp dest (If cond tbranch fbranch _) = do
 defCompileExp dest (Apply fname args _) = do
   targets <- funcallTargets dest
   emit =<<
-    (Imp.Call targets fname <$>
+    (Imp.Call targets fname .
      map compileSubExp <$>
      filterM subExpNotArray (map fst args))
 
