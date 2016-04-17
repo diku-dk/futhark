@@ -15,7 +15,7 @@ openClInit :: String -> String
 openClInit assign = T.unpack [text|
 self.ctx = cl.create_some_context(interactive=False)
 self.queue = cl.CommandQueue(self.ctx)
-# XXX: Assuming just a single device here.
+ # XXX: Assuming just a single device here.
 platform_name = self.ctx.get_info(cl.context_info.DEVICES)[0].platform.name
 device_type = self.ctx.get_info(cl.context_info.DEVICES)[0].type
 lockstep_width = 1
