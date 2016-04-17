@@ -533,34 +533,24 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
 
 fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
-  let body = mkBody bnds res
-      rem_bnds = bnd : bnds
   case maybesoac of
     Right soac@(SOAC.Map _ _ lam _) -> do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
       greedyFuse rem_bnds used_lam blres (pat, soac)
 
-    Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) -> do
+    Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) ->
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
-      (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
-      bres  <- bindingFamily pat $ fusionGatherBody lres body
-      bres' <- foldM fusionGatherSubExp bres nes
-      -- addNewKer bres' (patternIdents pat, soac)
-      greedyFuse rem_bnds used_lam bres' (pat, soac)
+      reduceLike soac [outer_red, inner_red] nes
 
-    Right soac@(SOAC.Scan _ _ lam args) -> do
+    Right soac@(SOAC.Scan _ _ lam args) ->
       -- NOT FUSABLE (probably), but still add as kernel, as
       -- optimisations like ISWIM may make it fusable.
-      let nes = map fst args
-      bres  <- bindingFamily pat $ fusionGatherBody fres body
-      (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-      blres' <- foldM fusionGatherSubExp blres nes
-      greedyFuse rem_bnds used_lam blres' (pat, soac)
+      reduceLike soac [lam] $ map fst args
 
     Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -568,14 +558,10 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
-      let nes     = getStreamAccums form
-          lambdas = case form of
+      let lambdas = case form of
                         RedLike _ _ lout _ -> [lout, lam]
                         _                  -> [lam]
-      (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
-      bres  <- bindingFamily pat $ fusionGatherBody lres body
-      bres' <- foldM fusionGatherSubExp bres nes
-      greedyFuse rem_bnds used_lam bres' (pat, soac)
+      reduceLike soac lambdas $ getStreamAccums form
 
     Left (SOAC.InvalidArrayInput inpe) ->
       badFusionGM $ Error
@@ -587,8 +573,16 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
 
     _ -> do
       let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
-      bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
+      bres <- gatherBindingPattern pat $ fusionGatherBody fres body
       foldM fusionGatherExp bres (e:pat_vars)
+  where body = mkBody bnds res
+        rem_bnds = bnd : bnds
+
+        reduceLike soac lambdas nes = do
+          (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
+          bres  <- bindingFamily pat $ fusionGatherBody lres body
+          bres' <- foldM fusionGatherSubExp bres nes
+          greedyFuse rem_bnds used_lam bres' (pat, soac)
 
 fusionGatherBody fres (Body _ [] res) =
   foldM fusionGatherExp fres $ map (PrimOp . SubExp) res
