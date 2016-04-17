@@ -127,11 +127,12 @@ bindParams params =
 renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
 renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
-  bindParams params $ do
-    params' <- mapM declRepl params
-    body' <- renameExp body
-    ret' <- renameDeclType ret
-    return $ FunDef entry fname (TypeDecl ret' NoInfo) params' body' pos
+  bindParams params $
+    FunDef entry fname <$>
+    (TypeDecl <$> renameDeclType ret <*> pure NoInfo) <*>
+    mapM declRepl params <*>
+    renameExp body <*>
+    pure pos
 
 renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
@@ -240,11 +241,9 @@ rename = Mapper {
 renameLambda :: (Eq f, Hashable f, Eq t, Hashable t) =>
                 LambdaBase NoInfo f -> RenameM f t (LambdaBase NoInfo t)
 renameLambda (AnonymFun params body (TypeDecl ret NoInfo) pos) =
-  bindNames (map paramName params) $ do
-    params' <- mapM declRepl params
-    body' <- renameExp body
-    ret' <- renameDeclType ret
-    return (AnonymFun params' body' (TypeDecl ret' NoInfo) pos)
+  bindNames (map paramName params) $
+    AnonymFun <$> mapM declRepl params <*> renameExp body <*>
+    (TypeDecl <$> renameDeclType ret <*> pure NoInfo) <*> pure pos
 renameLambda (CurryFun fname curryargexps NoInfo pos) = do
   curryargexps' <- mapM renameExp curryargexps
   return (CurryFun fname curryargexps' NoInfo pos)
