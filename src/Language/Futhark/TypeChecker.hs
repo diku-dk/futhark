@@ -842,13 +842,13 @@ checkExp (Map fun arrexp pos) = do
 
 checkExp (Reduce comm fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
-  (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
+  (arrexp', arrarg) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [startarg, arrarg]
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  unless (inrowt `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but reduce function returns type " ++ ppType redtype ++ "."
+  unless (argType arrarg `subtypeOf` redtype) $
+    bad $ TypeError pos $ "Array element value is of type " ++ ppType (argType arrarg) ++ ", but reduce function returns type " ++ ppType redtype ++ "."
   return $ Reduce comm fun' startexp' arrexp' pos
 
 checkExp (Scan fun startexp arrexp pos) = do
