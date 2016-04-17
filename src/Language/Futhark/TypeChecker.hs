@@ -1359,31 +1359,30 @@ checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
   checkPolyLambdaOp op [] args loc
 
-checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] = do
-  x' <- checkExp x
-  y <- newIdent "y" (argType arg) loc
-  xvar <- newIdent "x" (typeOf x') loc
-  binding [y, xvar] $ do
-    e <- checkExp $ BinOp binop (Var $ untype xvar) (Var $ untype y) NoInfo loc
-    return $ CurryBinOpLeft binop x' (Info $ argType arg) (Info $ typeOf e) loc
-  where untype (Ident name _ varloc) = Ident name NoInfo varloc
+checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] =
+  checkCurryBinOp CurryBinOpLeft binop x loc arg
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
   bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x _ _ loc) [arg] = do
+checkLambda (CurryBinOpRight binop x _ _ loc) [arg] =
+  checkCurryBinOp CurryBinOpRight binop x loc arg
+
+checkLambda (CurryBinOpRight binop _ _ _ loc) args =
+  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
+  map (toStructural . argType) args
+
+checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> SrcLoc -> b)
+                -> BinOp -> ExpBase NoInfo VName -> SrcLoc -> Arg -> TypeM b
+checkCurryBinOp f binop x loc arg = do
   x' <- checkExp x
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
     e <- checkExp $ BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc
-    return $ CurryBinOpRight binop x' (Info $ argType arg) (Info $ typeOf e) loc
+    return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
-
-checkLambda (CurryBinOpRight binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
-  map (toStructural . argType) args
 
 checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg] -> SrcLoc
                   -> TypeM Lambda
