@@ -165,13 +165,13 @@ runResult _ (ExitFailure code) _ stderr_s =
 getExpectedResult :: (Functor m, MonadIO m) =>
                      FilePath -> ExpectedResult Values
                   -> m (ExpectedResult [Value])
-getExpectedResult dir (Succeeds (Just vals)) = Succeeds <$> Just <$> getValues dir vals
+getExpectedResult dir (Succeeds (Just vals)) = Succeeds . Just <$> getValues dir vals
 getExpectedResult _   (Succeeds Nothing) = return $ Succeeds Nothing
 getExpectedResult _   (RunTimeFailure err) = return $ RunTimeFailure err
 
 interpretTestProgram :: String -> FilePath -> TestRun -> TestM ()
 interpretTestProgram futharki program (TestRun _ inputValues expectedResult) = do
-  input <- T.unlines <$> map prettyText <$> getValues dir inputValues
+  input <- T.unlines . map prettyText <$> getValues dir inputValues
   expectedResult' <- getExpectedResult dir expectedResult
   (code, output, err) <- io $ readProcessWithExitCode futharki [program] input
   case code of

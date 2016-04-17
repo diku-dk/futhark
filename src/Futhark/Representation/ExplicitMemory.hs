@@ -932,7 +932,7 @@ expReturns (AST.PrimOp (Index _ v is)) = do
              (map (`SE.subExpToScalExp` int32) is)]
 
 expReturns (AST.PrimOp op) =
-  extReturns <$> staticShapes <$> primOpType op
+  extReturns . staticShapes <$> primOpType op
 
 expReturns (DoLoop ctx val _ _) =
     return $

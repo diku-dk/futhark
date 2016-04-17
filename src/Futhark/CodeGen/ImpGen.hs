@@ -567,7 +567,7 @@ defCompilePrimOp (Destination dests) (Partition _ n flags value_arrs)
     Just destlocs <- mapM arrDestLoc arrdest = do
   i <- newVName "i"
   declaringLoopVar i $ do
-    outer_dim <- compileSubExp <$> arraySize 0 <$> lookupType flags
+    outer_dim <- compileSubExp . arraySize 0 <$> lookupType flags
     -- We will use 'i' to index the flag array and the value array.
     -- Note that they have the same outer size ('outer_dim').
     read_flags_i <- readFromArray flags [varIndex i]

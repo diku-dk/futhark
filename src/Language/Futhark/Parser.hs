@@ -116,7 +116,7 @@ instance Applicative (ErrorIO e) where
 parseFuthark :: FilePath -> T.Text
                 -> IO (Either ParseError UncheckedProg)
 parseFuthark fp0 s0 =
-  (snd <$>) <$> (evalErrorIO $ parseWithIncludes [fp0] [fp0] (fp0, s0))
+  (snd <$>) <$> evalErrorIO (parseWithIncludes [fp0] [fp0] (fp0, s0))
   where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, T.Text)
                              -> ErrorIO ParseError ([FilePath], UncheckedProg)
         parseWithIncludes alreadyIncluded includeSources (fp, s) = do
@@ -124,7 +124,7 @@ parseFuthark fp0 s0 =
           let newIncludes = mapMaybe headerInclude $ progWHHeaders p
               intersectionSources = includeSources `intersect` newIncludes
 
-          when (not $ null intersectionSources) $ bad
+          unless (null intersectionSources) $ bad
             $ ParseError ("Include cycle with " ++ show intersectionSources ++ ".")
 
           let newIncludes' = newIncludes \\ alreadyIncluded
@@ -137,7 +137,7 @@ parseFuthark fp0 s0 =
 
         includeIncludes :: [FilePath] -> [FilePath] -> [FilePath] -> UncheckedProg
                           -> ErrorIO ParseError ([FilePath], UncheckedProg)
-        includeIncludes alreadyIncluded includeSources newIncludes baseProg = do
+        includeIncludes alreadyIncluded includeSources newIncludes baseProg =
           foldM (\(already, p) new -> do
                     (already', p1) <- includeInclude already includeSources new
                     return (already', mergePrograms p p1))
@@ -154,7 +154,7 @@ parseFuthark fp0 s0 =
 
         headerInclude :: ProgHeader -> Maybe String
         headerInclude (Include strings) =
-          Just $ (foldl (</>) search_dir strings) <.> "fut"
+          Just $ foldl (</>) search_dir strings <.> "fut"
 
         search_dir = takeDirectory fp0
 
