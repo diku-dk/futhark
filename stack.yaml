@@ -2,9 +2,4 @@ flags: {}
 extra-package-dbs: []
 packages:
 - '.'
-extra-deps:
-- exception-mtl-0.4
-- language-c-quote-0.11.5.1
-- mainland-pretty-0.4.1.3
-- symbol-0.2.4
-resolver: lts-5.12
+resolver: nightly-2016-04-17
