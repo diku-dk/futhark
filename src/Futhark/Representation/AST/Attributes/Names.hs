@@ -129,11 +129,7 @@ freeInLambda :: (FreeIn (ExpAttr lore),
                  FreeIn (Op lore)) =>
                 Lambda lore -> Names
 freeInLambda (Lambda params body rettype) =
-  inRet <> inParams <> inBody
-  where inRet = mconcat $ map freeIn rettype
-        inParams = mconcat $ map freeIn params
-        inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = map paramName params
+    freeInLambdaIsh params body rettype
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
@@ -145,6 +141,14 @@ freeInExtLambda :: (FreeIn (ExpAttr lore),
                     FreeIn (Op lore)) =>
                    ExtLambda lore -> Names
 freeInExtLambda (ExtLambda params body rettype) =
+  freeInLambdaIsh params body rettype
+
+freeInLambdaIsh :: (FreeIn attr, FreeIn a, FreeIn (ExpAttr lore),
+                    FreeIn (BodyAttr lore), FreeIn (FParamAttr lore),
+                    FreeIn (LParamAttr lore), FreeIn (LetAttr lore),
+                    FreeIn (Op lore)) =>
+                   [ParamT attr] -> Body lore -> [a] -> Names
+freeInLambdaIsh params body rettype =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
