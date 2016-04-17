@@ -65,18 +65,18 @@ errput = liftIO . hPutStrLn stderr
 commonOptions :: [FunOptDescr cfg] -> [FunOptDescr cfg]
 commonOptions options =
   [ Option "v" ["version"]
-    (NoArg $ Left $ do putStrLn $ "Futhark " ++ versionString
-                       putStrLn "(C) HIPERFIT research centre"
-                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+    (NoArg $ Left $ do header
                        exitSuccess)
     "Print version information and exit."
 
   , Option "h" ["help"]
-    (NoArg $ Left $ do putStrLn $ "Futhark " ++ versionString
-                       putStrLn "(C) HIPERFIT research centre"
-                       putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
+    (NoArg $ Left $ do header
                        putStrLn ""
                        putStrLn =<< usageStr (commonOptions [] ++ options)
                        exitSuccess)
     "Print help and exit."
   ]
+  where header = do
+          putStrLn $ "Futhark " ++ versionString
+          putStrLn "(C) HIPERFIT research centre"
+          putStrLn "Department of Computer Science, University of Copenhagen (DIKU)"
