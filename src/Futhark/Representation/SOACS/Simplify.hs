@@ -93,23 +93,22 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     fun' <- Engine.simplifyLambda fun w Nothing $ map Just arrs'
     return $ Map cs' w' fun' arrs'
 
-  simplifyOp (Reduce cs w comm fun input) = do
-    let (acc, arrs) = unzip input
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w (Just acc) $ map (const Nothing) arrs'
-    return $ Reduce cs' w' comm fun' (zip acc' arrs')
+  simplifyOp (Reduce cs w comm fun input) =
+    Reduce <$> Engine.simplify cs <*>
+      Engine.simplify w <*>
+      pure comm <*>
+      Engine.simplifyLambda fun w (Just acc)
+      (map (const Nothing) arrs)<*>
+      (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
+    where (acc, arrs) = unzip input
 
-  simplifyOp (Scan cs w fun input) = do
-    let (acc, arrs) = unzip input
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun w (Just acc) $ map (const Nothing) arrs'
-    return $ Scan cs' w' fun' (zip acc' arrs')
+  simplifyOp (Scan cs w fun input) =
+    Scan <$> Engine.simplify cs <*>
+      Engine.simplify w <*>
+      Engine.simplifyLambda fun w (Just acc)
+      (map (const Nothing) arrs) <*>
+      (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
+    where (acc, arrs) = unzip input
 
   simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) = do
     cs' <- Engine.simplify cs
