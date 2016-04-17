@@ -608,9 +608,9 @@ simplifyScal (SPlus e1o e2o) = do
     where
       normalPlus :: ScalExp -> ScalExp -> AlgSimplifyM ScalExp
       normalPlus e1 e2 = do
-        let tp = scalExpType e1
         e1' <- toNumSofP e1
         e2' <- toNumSofP e2
+        let tp = scalExpType e1
         let terms = getTerms e1' ++ getTerms e2'
         splittedTerms <- mapM splitTerm terms
         let sortedTerms = sortBy (\(n1,_) (n2,_) -> compare n1 n2) splittedTerms
@@ -738,20 +738,14 @@ simplifyScal (SDiv e1o e2o) = do
         ee2' <- fromNumSofP ee2
         return $ SDiv ee1' ee2'
 
-simplifyScal (SMod e1o e2o) = do
-    e1' <- simplifyScal e1o
-    e2' <- simplifyScal e2o
-    return $ SQuot e1' e2'
+simplifyScal (SMod e1o e2o) =
+    SMod <$> simplifyScal e1o <*> simplifyScal e2o
 
-simplifyScal (SQuot e1o e2o) = do
-    e1' <- simplifyScal e1o
-    e2' <- simplifyScal e2o
-    return $ SQuot e1' e2'
+simplifyScal (SQuot e1o e2o) =
+    SQuot <$> simplifyScal e1o <*> simplifyScal e2o
 
-simplifyScal (SRem e1o e2o) = do
-    e1' <- simplifyScal e1o
-    e2' <- simplifyScal e2o
-    return $ SRem e1' e2'
+simplifyScal (SRem e1o e2o) =
+    SRem <$> simplifyScal e1o <*> simplifyScal e2o
 
 ---------------------------------------------------
 ---------------------------------------------------
