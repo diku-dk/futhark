@@ -625,13 +625,8 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Scan cs w lam input))) acc =
       | Just perm <- res `isPermutationOf` map Var (patternNames pat) -> do
           lam' <- FOT.transformLambda lam
           localScope (typeEnvFromKernelAcc acc') $
-            segmentedScanKernel nest perm cs w lam' input >>= \case
-              Nothing ->
-                addBindingToKernel bnd acc
-              Just bnds -> do
-                addKernels kernels
-                addKernel bnds
-                return acc'
+            segmentedScanKernel nest perm cs w lam' input >>=
+            kernelOrNot bnd acc kernels acc'
     _ ->
       addBindingToKernel bnd acc
 
@@ -646,13 +641,8 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
           localScope (typeEnvFromKernelAcc acc') $ do
           lam' <- FOT.transformLambda lam
-          regularSegmentedReduceKernel nest perm cs w comm lam' input >>= \case
-            Nothing ->
-              addBindingToKernel bnd acc
-            Just bnds -> do
-              addKernels kernels
-              addKernel bnds
-              return acc'
+          regularSegmentedReduceKernel nest perm cs w comm lam' input >>=
+            kernelOrNot bnd acc kernels acc'
     _ ->
       addBindingToKernel bnd acc
 
@@ -832,3 +822,13 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
 
 
     m pat flat_pat nesting_size total_num_elements op_inps'
+
+kernelOrNot :: Binding -> KernelAcc
+            -> PostKernels -> KernelAcc -> Maybe [Out.Binding]
+            -> KernelM KernelAcc
+kernelOrNot bnd acc _ _ Nothing =
+  addBindingToKernel bnd acc
+kernelOrNot _ _ kernels acc' (Just bnds) = do
+  addKernels kernels
+  addKernel bnds
+  return acc'
