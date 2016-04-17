@@ -109,14 +109,7 @@ kernelCompiler
                      ImpGen.compileBindings kernel_bnds $
                       ImpGen.comment "write kernel result" write_result
 
-    group_size <- newVName "group_size"
-    num_groups <- newVName "num_groups"
-    let group_size_var = Imp.ScalarVar group_size
-    ImpGen.emit $ Imp.DeclareScalar group_size int32
-    ImpGen.emit $ Imp.DeclareScalar num_groups int32
-    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
-    ImpGen.emit $ Imp.SetScalar num_groups $
-      kernel_size `quotRoundingUp` group_size_var
+    (group_size, num_groups) <- computeMapKernelGroups kernel_size
 
     -- Compute the variables that we need to pass to and from the
     -- kernel.
@@ -134,8 +127,7 @@ kernelCompiler
 kernelCompiler
   (ImpGen.Destination dest)
   (ChunkedMapKernel _ _ kernel_size o lam _) = do
-    local_id <- newVName "local_id"
-    group_id <- newVName "group_id"
+    (local_id, group_id, _, _) <- kernelSizeNames
 
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
@@ -223,10 +215,7 @@ kernelCompiler
   (ImpGen.Destination dest)
   (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam _) = do
 
-    local_id <- newVName "local_id"
-    group_id <- newVName "group_id"
-    wave_size <- newVName "wave_size"
-    skip_waves <- newVName "skip_waves"
+    (local_id, group_id, wave_size, skip_waves) <- kernelSizeNames
 
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
@@ -419,10 +408,7 @@ kernelCompiler
   (ScanKernel _ _ kernel_size order lam input) = do
     let (nes, arrs) = unzip input
         (arrs_dest, partials_dest) = splitAt (length input) dest
-    local_id <- newVName "local_id"
-    group_id <- newVName "group_id"
-    wave_size <- newVName "wave_size"
-    global_id <- newVName "global_id"
+    (local_id, group_id, wave_size, global_id) <- kernelSizeNames
     thread_chunk_size <- newVName "thread_chunk_size"
 
     renamed_lam <- renameLambda lam
@@ -665,14 +651,7 @@ kernelCompiler
         $ ImpGen.emit $ check_thread_index body_body
 
     -- Calculate the group size and the number of groups.
-    group_size <- newVName "group_size"
-    num_groups <- newVName "num_groups"
-    let group_size_var = Imp.ScalarVar group_size
-    ImpGen.emit $ Imp.DeclareScalar group_size int32
-    ImpGen.emit $ Imp.DeclareScalar num_groups int32
-    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
-    ImpGen.emit $ Imp.SetScalar num_groups $
-      kernel_size `quotRoundingUp` group_size_var
+    (group_size, num_groups) <- computeMapKernelGroups kernel_size
 
     -- Compute the variables that we need to pass to and from the kernel.
     uses <- computeKernelUses dests (kernel_size, kernel_body) []
@@ -733,6 +712,14 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 
 expCompiler _ e =
   return $ ImpGen.CompileExp e
+
+kernelSizeNames :: ImpGen.ImpM Imp.HostOp (VName, VName, VName, VName)
+kernelSizeNames = do
+  local_id <- newVName "local_id"
+  group_id <- newVName "group_id"
+  wave_size <- newVName "wave_size"
+  skip_waves <- newVName "skip_waves"
+  return (local_id, group_id, wave_size, skip_waves)
 
 compileKernelSize :: KernelSize
                   -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize,
@@ -800,15 +787,8 @@ callKernelCopy bt
                   HS.singleton srcmem <>
                   freeIn destIxFun <> freeIn srcIxFun <> freeIn destshape
 
-    group_size <- newVName "group_size"
-    num_groups <- newVName "num_groups"
-    let group_size_var = Imp.ScalarVar group_size
-        kernel_size = Imp.innerExp n * product (drop 1 shape)
-    ImpGen.emit $ Imp.DeclareScalar group_size int32
-    ImpGen.emit $ Imp.DeclareScalar num_groups int32
-    ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
-    ImpGen.emit $ Imp.SetScalar num_groups $
-      kernel_size `quotRoundingUp` group_size_var
+    let kernel_size = Imp.innerExp n * product (drop 1 shape)
+    (group_size, num_groups) <- computeMapKernelGroups kernel_size
 
     let bound_in_kernel = [global_thread_index]
     body_uses <- computeKernelUses [] (kernel_size, body) bound_in_kernel
@@ -921,6 +901,18 @@ writeThreadResult thread_idxs perm
       ImpGen.compileSubExpTo dest se
 writeThreadResult _ _ _ _ =
   fail "Cannot handle kernel that does not return an array."
+
+computeMapKernelGroups :: Imp.Exp -> ImpGen.ImpM Imp.HostOp (VName, VName)
+computeMapKernelGroups kernel_size = do
+  group_size <- newVName "group_size"
+  num_groups <- newVName "num_groups"
+  let group_size_var = Imp.ScalarVar group_size
+  ImpGen.emit $ Imp.DeclareScalar group_size int32
+  ImpGen.emit $ Imp.DeclareScalar num_groups int32
+  ImpGen.emit $ Imp.Op $ Imp.GetGroupSize group_size
+  ImpGen.emit $ Imp.SetScalar num_groups $
+    kernel_size `quotRoundingUp` group_size_var
+  return (group_size, num_groups)
 
 readKernelInput :: KernelInput ExplicitMemory
                 -> InKernelGen ()
