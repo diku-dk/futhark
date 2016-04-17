@@ -130,9 +130,7 @@ transformSOAC pat (Map cs width fun arrs) = do
 
 transformSOAC pat (Reduce cs width _ fun args) = do
   i <- newVName "i"
-  (acc, initacc) <- newFold $ zip accexps accts
-  arrts <- mapM lookupType arrexps
-  inarrs <- mapM (newIdent "reduce_inarr") arrts
+  (acc, initacc, inarrs) <- newFold "reduce" (zip accexps accts) arrexps
   arrexps' <- mapM (copyIfArray . Var) arrexps
   let merge = loopMerge (inarrs++acc) (arrexps'++initacc)
   loopbody <- runBodyBinder $ localScope (scopeOfFParams $ map fst merge) $ do
@@ -147,10 +145,9 @@ transformSOAC pat (Reduce cs width _ fun args) = do
 
 transformSOAC pat (Scan cs width fun args) = do
   i <- newVName "i"
-  (acc, initacc) <- newFold $ zip accexps accts
+  (acc, initacc, arr) <- newFold "scan" (zip accexps accts) arrexps
   arrts <- mapM lookupType arrexps
   initarr <- resultArray arrts
-  arr <- mapM (newIdent "scan_arr" ) arrts
   let arr_names = map identName arr
       merge = loopMerge (acc++arr) (initacc++map Var initarr)
   loopbody <- insertBindingsM $ localScope (scopeOfFParams $ map fst merge) $ do
@@ -642,12 +639,14 @@ transformExtLambda (ExtLambda params body rettype) = do
   return $ ExtLambda params body' rettype
 
 newFold :: Transformer m =>
-           [(SubExp,Type)]
-        -> m ([Ident], [SubExp])
-newFold accexps_and_types = do
+           String -> [(SubExp,Type)] -> [VName]
+        -> m ([Ident], [SubExp], [Ident])
+newFold what accexps_and_types arrexps = do
   initacc <- mapM copyIfArray acc_exps
   acc <- mapM (newIdent "acc") acc_types
-  return (acc, initacc)
+  arrts <- mapM lookupType arrexps
+  inarrs <- mapM (newIdent $ what ++ "_inarr") arrts
+  return (acc, initacc, inarrs)
   where (acc_exps, acc_types) = unzip accexps_and_types
 
 copyIfArray :: Transformer m =>
@@ -727,7 +726,6 @@ doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
                 -> [VName]
                 -> m (AST.Exp (Lore m))
 doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
-  arrts <- mapM lookupType arrexps
   i <- newVName "i"
   -- for the MAP    part
   let acc_num     = length accexps
@@ -738,8 +736,7 @@ doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
   let accts = map paramType $ fst $ splitAt acc_num $ lambdaParams innerfun
   outarrs <- mapM (newIdent "redomap_outarr") res_ts
   -- for the REDUCE part
-  (acc, initacc) <- newFold $ zip accexps accts
-  inarrs <- mapM (newIdent "redomap_inarr") arrts
+  (acc, initacc, inarrs) <- newFold "redomap" (zip accexps accts) arrexps
   let consumed = consumedInBody $ lambdaBody innerfun
       withUniqueness p | identName p `HS.member` consumed = (p, Unique)
                        | p `elem` outarrs = (p, Unique)
