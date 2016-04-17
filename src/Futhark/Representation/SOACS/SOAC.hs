@@ -337,45 +337,6 @@ typeCheckSOAC (Map cs size fun arrexps) = do
   arrargs <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun arrargs
 
-typeCheckSOAC (Reduce ass size _ fun inputs) = do
-  let (startexps, arrexps) = unzip inputs
-  mapM_ (TC.requireI [Prim Cert]) ass
-  TC.require [Prim int32] size
-  startargs <- mapM TC.checkArg startexps
-  arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
-  let startt      = map TC.argType startargs
-      intupletype = map TC.argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    TC.bad $ TC.TypeError $
-    "Accumulator is of type " ++ prettyTuple startt ++
-    ", but reduce function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    TC.bad $ TC.TypeError $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but reduce function returns type " ++ prettyTuple funret ++ "."
-
--- Scan is exactly identical to Reduce.  Duplicate for clarity anyway.
-typeCheckSOAC (Scan ass size fun inputs) = do
-  let (startexps, arrexps) = unzip inputs
-  mapM_ (TC.requireI [Prim Cert]) ass
-  TC.require [Prim int32] size
-  startargs <- mapM TC.checkArg startexps
-  arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
-  let startt      = map TC.argType startargs
-      intupletype = map TC.argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    TC.bad $ TC.TypeError $
-    "Initial value is of type " ++ prettyTuple startt ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    TC.bad $ TC.TypeError $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-
 typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   mapM_ (TC.requireI [Prim Cert]) ass
   TC.require [Prim int32] size
@@ -520,6 +481,36 @@ typeCheckSOAC (Write cs ts i vs as) = do
     unless (iLen == vLen) $
       TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
 
+typeCheckSOAC (Reduce ass size _ fun inputs) =
+  typeCheckScanReduce ass size fun inputs
+
+typeCheckSOAC (Scan ass size fun inputs) =
+  typeCheckScanReduce ass size fun inputs
+
+typeCheckScanReduce :: TC.Checkable lore =>
+                       Certificates
+                    -> SubExp
+                    -> Lambda (Aliases lore)
+                    -> [(SubExp, VName)]
+                    -> TC.TypeM lore ()
+typeCheckScanReduce cs size fun inputs = do
+  let (startexps, arrexps) = unzip inputs
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] size
+  startargs <- mapM TC.checkArg startexps
+  arrargs   <- TC.checkSOACArrayArgs size arrexps
+  TC.checkLambda fun $ startargs ++ arrargs
+  let startt      = map TC.argType startargs
+      intupletype = map TC.argType arrargs
+      funret      = lambdaReturnType fun
+  unless (startt == funret) $
+    TC.bad $ TC.TypeError $
+    "Initial value is of type " ++ prettyTuple startt ++
+    ", but function returns type " ++ prettyTuple funret ++ "."
+  unless (intupletype == funret) $
+    TC.bad $ TC.TypeError $
+    "Array element value is of type " ++ prettyTuple intupletype ++
+    ", but function returns type " ++ prettyTuple funret ++ "."
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
