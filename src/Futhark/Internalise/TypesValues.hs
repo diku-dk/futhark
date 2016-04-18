@@ -175,14 +175,14 @@ internaliseValue (E.ArrayValue arr rt) = do
   zipWithM asarray ts arrayvalues'
   where asarray rt' values =
           let shape = determineShape (I.arrayRank rt') values
-              values' = concatMap flatten values
+              values' = concatMap flat values
               size = product shape
           in if size == length values' then
                Just $ I.ArrayVal (A.listArray (0,size - 1) values')
                (I.elemType rt') shape
              else Nothing
-        flatten (I.PrimVal bv)      = [bv]
-        flatten (I.ArrayVal bvs _ _) = A.elems bvs
+        flat (I.PrimVal bv)      = [bv]
+        flat (I.ArrayVal bvs _ _) = A.elems bvs
 
 internaliseValue (E.TupValue vs) =
   concat <$> mapM internaliseValue vs

@@ -14,7 +14,7 @@ module Futhark.CodeGen.Backends.GenericPython.AST
 
 import Language.Futhark.Core
 import Futhark.Representation.Primitive
-import Text.PrettyPrint.Mainland hiding (space)
+import Futhark.Util.Pretty hiding (space)
 
 
 data UnOp = Not -- ^ Boolean negation.

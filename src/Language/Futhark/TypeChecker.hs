@@ -30,7 +30,6 @@ import Language.Futhark.Renamer
   (tagProg', untagPattern)
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
-import Futhark.Util.Pretty
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -541,7 +540,7 @@ require ts e
 
 rowTypeM :: Exp -> TypeM Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
-  where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
+  where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ pretty (typeOf e) ++ "."
 
 -- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
@@ -665,7 +664,7 @@ checkExp (ArrayLit es _ loc) = do
                   | Just elemt' <- elemt `unifyTypes` typeOf eleme =
                     return elemt'
                   | otherwise =
-                    bad $ TypeError loc $ ppExp eleme ++ " is not of expected type " ++ ppType elemt ++ "."
+                    bad $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (typeOf e) es''
 
   let lit = ArrayLit es' (Info et) loc
@@ -748,7 +747,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
 
   unless (unique $ unInfo $ identType src') $
     bad $ TypeError pos $ "Source '" ++ pretty (baseName $ identName src) ++
-    "' has type " ++ ppType (unInfo $ identType src') ++ ", which is not unique"
+    "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
   case peelArray (length idxes) (unInfo $ identType src') of
     Nothing -> bad $ IndexingError
@@ -780,7 +779,7 @@ checkExp (Size i e pos) = do
       | i >= 0 && i < arrayRank (typeOf e') ->
         return $ Size i e' pos
       | otherwise ->
-        bad $ TypeError pos $ "Type " ++ ppType (typeOf e') ++ " has no dimension " ++ show i ++ "."
+        bad $ TypeError pos $ "Type " ++ pretty (typeOf e') ++ " has no dimension " ++ show i ++ "."
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) = do
@@ -814,7 +813,7 @@ checkExp (Zip arrexps loc) = do
     let arrt = typeOf arrexp
     when (arrayRank arrt < 1) $
       bad $ TypeError (srclocOf arrexp) $
-      "Type of expression is not array, but " ++ ppType arrt ++ "."
+      "Type of expression is not array, but " ++ pretty arrt ++ "."
     return arrt
   return $ Zip (zip arrexps' $ map Info arrts) loc
 
@@ -830,7 +829,7 @@ checkExp (Unzip e _ pos) = do
     t ->
       bad $ TypeError pos $
       "Argument to unzip is not an array of tuples, but " ++
-      ppType t ++ "."
+      pretty t ++ "."
 
 checkExp (Unsafe e loc) =
   Unsafe <$> checkExp e <*> pure loc
@@ -846,9 +845,9 @@ checkExp (Reduce comm fun startexp arrexp pos) = do
   fun' <- checkLambda fun [startarg, arrarg]
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   unless (argType arrarg `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType (argType arrarg) ++ ", but reduce function returns type " ++ ppType redtype ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ pretty (argType arrarg) ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   return $ Reduce comm fun' startexp' arrexp' pos
 
 checkExp (Scan fun startexp arrexp pos) = do
@@ -857,9 +856,9 @@ checkExp (Scan fun startexp arrexp pos) = do
   fun' <- checkLambda fun [startarg, arrarg]
   let scantype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType scantype ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
   unless (inrowt `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but scan function returns type " ++ ppType scantype ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ pretty inrowt ++ ", but scan function returns type " ++ pretty scantype ++ "."
   return $ Scan fun' startexp' arrexp' pos
 
 checkExp (Filter fun arrexp pos) = do
@@ -905,7 +904,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
         let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
         unless (typeOf acc' `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
-                  ppType (typeOf acc') ++ ", but reduce fun returns type "++ppType redtype++"."
+                  pretty (typeOf acc') ++ ", but reduce fun returns type "++pretty redtype++"."
         return (RedLike o comm lam0' acc', Just(acc',accarg))
       Sequential acc -> do
         (acc',accarg) <- checkArg acc
@@ -1113,7 +1112,7 @@ checkExp (Write i v a pos) = do
   if unique at
     then occur $ usageOccurences aflow `seqOccurences` [consumption (aliases at) pos]
     else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
-         "' has type " ++ ppType at ++ ", which is not unique."
+         "' has type " ++ pretty at ++ ", which is not unique."
 
   return (Write i' v' a' pos)
 
@@ -1137,7 +1136,7 @@ checkLiteral loc (TupValue vals) = do
 checkLiteral loc (ArrayValue arr rt) = do
   vals <- mapM (checkLiteral loc) (elems arr)
   case find ((/=rt) . removeNames . valueType) vals of
-    Just wrong -> bad $ TypeError loc $ ppValue wrong ++ " is not of expected type " ++ ppType rt ++ "."
+    Just wrong -> bad $ TypeError loc $ pretty wrong ++ " is not of expected type " ++ pretty rt ++ "."
     _          -> return ()
   return $ ArrayValue (listArray (bounds arr) vals) rt
 
@@ -1353,7 +1352,7 @@ checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameFromString $ pretty unop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
@@ -1363,14 +1362,14 @@ checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] =
   checkCurryBinOp CurryBinOpLeft binop x loc arg
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkLambda (CurryBinOpRight binop x _ _ loc) [arg] =
   checkCurryBinOp CurryBinOpRight binop x loc arg
 
 checkLambda (CurryBinOpRight binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> SrcLoc -> b)
@@ -1411,7 +1410,7 @@ checkPolyLambdaOp op curryargexps args pos = do
     (AnonymFun (map (untype . toParam) params) (BinOp op x y NoInfo pos)
      (TypeDecl (vacuousShapeAnnotations $ toStruct $ typeOf body) NoInfo) pos)
     args
-  where fname = nameFromString $ ppBinOp op
+  where fname = nameFromString $ pretty op
 
 checkRetType :: SrcLoc -> StructType -> TypeM ()
 checkRetType loc (Tuple ts) = mapM_ (checkRetType loc) ts
