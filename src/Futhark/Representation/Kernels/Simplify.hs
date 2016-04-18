@@ -10,6 +10,7 @@ module Futhark.Representation.Kernels.Simplify
        )
 where
 
+import Control.Applicative
 import Control.Monad
 import Data.Either
 import Data.List hiding (any, all)
