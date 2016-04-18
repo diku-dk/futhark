@@ -279,10 +279,11 @@ type CompTypeBase = TypeBase Rank Names
 
 -- || type DeclTypeBase = TypeBase ShapeDecl NoInfo
 
-data UserType shape vn = UserPrim PrimType
-                       | UserArray (UserType shape vn) (shape vn) Uniqueness
-                       | UserTuple [UserType shape vn]
-                       | UserTypeAlias Name
+data UserType vn = UserPrim PrimType
+                 | UserArray (UserType vn) (ShapeDecl vn) Uniqueness
+                 | UserTuple [UserType vn]
+                 | UserTypeAlias Name
+                 | Empty -- suppehack
     deriving (Show)
 --
 -- | type DeclTypeBase = UserType ShapeDecl NoInfo
@@ -292,8 +293,8 @@ data UserType shape vn = UserPrim PrimType
 --   It is my plan to convert UserType ShapeDecl NoInfo into TypeBase ShapeDecl NoInfo during the type check.
 
 
+type StructUserType = UserType
 type StructTypeBase = TypeBase ShapeDecl NoInfo
-type StructUserType = UserType ShapeDecl
 
 
 -- | An array type with shape annotations and no aliasing information,
@@ -306,14 +307,17 @@ type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
-  TypeDecl { declaredType :: StructTypeBase vn
+  TypeDecl { declaredType :: StructUserType vn
                              -- ^ The type declared by the user.
+--         , expandedType :: f (StructTypeBase vn)
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
            }
 deriving instance Showable f vn => Show (TypeDeclBase f vn)
 
-data UserTypeDeclBase vn = UserTypeDecl { userDeclaredType :: StructUserType vn }
+data UserTypeDeclBase f vn = UserTypeDecl { userDeclaredType :: StructUserType vn
+                                          , userExpandedType :: f (StructTypeBase vn)
+                                          }
 -- deriving instance Showable vn => Show (UserTypeDeclBase vn)
 
 -- | Information about which parts of a value/type are consumed.  For
@@ -361,8 +365,8 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 data ParamBase f vn = Param { paramName :: vn
                             , paramTypeDecl :: TypeDeclBase f vn
                             , paramSrcLoc :: SrcLoc
-                            }
-deriving instance Showable f vn => Show (ParamBase f vn)
+                          }
+-- deriving instance Showable f vn => Show (ParamBase f vn)
 
 instance Eq vn => Eq (ParamBase f vn) where
   x == y = paramName x == paramName y
@@ -556,12 +560,12 @@ data ExpBase f vn =
             -- ^ Explore the Danger Zone and elide safety checks on
             -- array operations that are (lexically) within this
             -- expression.  Make really sure the code is correct.
-deriving instance Showable f vn => Show (ExpBase f vn)
+-- deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
                       | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
                       | Sequential (ExpBase f vn)
-deriving instance Showable f vn => Show (StreamForm f vn)
+-- deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc) = locOf loc
@@ -598,7 +602,7 @@ instance Located (ExpBase f vn) where
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (ExpBase f vn) (IdentBase f vn) (ExpBase f vn)
                        | While (ExpBase f vn)
-deriving instance Showable f vn => Show (LoopFormBase f vn)
+-- deriving instance Showable f vn => Show (LoopFormBase f vn)
 
 -- | The iteration order of a @for@-loop.
 data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
@@ -620,7 +624,7 @@ data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f
                         -- ^ @2+@; first type is operand, second is result.
                       | CurryBinOpRight BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
-deriving instance Showable f vn => Show (LambdaBase f vn)
+-- deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
   locOf (AnonymFun _ _ _ loc)         = locOf loc
@@ -650,18 +654,18 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               , funDefBody :: ExpBase f vn
                               , funDefLocation :: SrcLoc
                               }
-deriving instance Showable f vn => Show (FunDefBase f vn)
+--deriving instance Showable f vn => Show (FunDefBase f vn)
 
 -- | Type Declarations
-data TypeDefBase vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
-                              , userType :: UserTypeDeclBase vn -- type-definitionen
-                              , typeDefLocation :: SrcLoc
-                              }
+data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
+                                , userType :: TypeDeclBase f vn -- type-definitionen
+                                , typeDefLocation :: SrcLoc
+                                }
 -- deriving instance Showable vn => Show (TypeDefBase vn)
 
 
 data DecBase f vn = FunDec (FunDefBase f vn)
-                  | TypeDec (TypeDefBase vn)
+                  | TypeDec (TypeDefBase f vn)
 -- | Coming soon  | SigDec ..
 --                | ModDec ..
 
@@ -676,16 +680,16 @@ data DecBase f vn = FunDec (FunDefBase f vn)
 -- deriving instance Showable f vn => Show (ProgBase f vn)
 
 data ProgBase f vn =
-         Prog  { progTypes :: [TypeDefBase vn]
+         Prog  { progTypes :: [TypeDefBase f vn]
                , progFunctions :: [FunDefBase f vn]
                }
 
+data ProgDecs f vn = Decs { progDeclarations :: [DecBase f vn]}
 -- | An entire Futhark program, including headers.
 data ProgBaseWithHeaders f vn =
-  PreProgWithHeaders { progWHHeaders :: [ProgHeader]
-                     , progWHTypes :: [TypeDefBase vn]
-                     , progWHFunctions :: [FunDefBase f vn]
-                     }
+  ProgWithHeaders { progWHHeaders :: [ProgHeader]
+                  , progWHDecs :: [DecBase f vn]
+                  }
 -- deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 
 data ProgHeader = Include String

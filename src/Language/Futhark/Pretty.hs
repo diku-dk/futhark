@@ -125,6 +125,14 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) wh
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
+  ppr (UserPrim et) = ppr et
+  ppr (UserArray at (ShapeDecl sh) uniqueness) = ppr at <> apply (map f sh) <> ppr uniqueness
+    where f (AnyDim) = text ""
+          f (NamedDim v) = ppr v
+          f (ConstDim n) = ppr n
+  ppr (UserTuple ts) = braces $ commasep $ map ppr ts
+
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Prim et) = ppr et
   ppr (Array at) = ppr at

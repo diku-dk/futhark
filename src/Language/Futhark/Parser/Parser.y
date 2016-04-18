@@ -25,7 +25,6 @@ import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
-import Data.Char (ord)
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
 import qualified Data.HashMap.Lazy as HM
@@ -68,6 +67,7 @@ import Language.Futhark.Parser.Lexer
       u32             { L $$ U32 }
       u64             { L $$ U64 }
       bool            { L $$ BOOL }
+      char            { L $$ CHAR }
       f32             { L $$ F32 }
       f64             { L $$ F64 }
 
@@ -119,7 +119,6 @@ import Language.Futhark.Parser.Lexer
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
       fun             { L $$ FUN }
-      entry           { L $$ ENTRY }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
       '<-'            { L $$ SETTO }
@@ -178,30 +177,22 @@ import Language.Futhark.Parser.Lexer
 %%
 
 Prog :: { UncheckedProgWithHeaders }
-     :   Headers TypeAliases Functions { ProgWithHeaders $1 $2 $3 }
-     |   TypeAliases Functions { ProgWithHeaders [] $1 $2 }
+     :   Headers DecStart { ProgWithHeaders $1 $2 }
+     |   DecStart { ProgWithHeaders [] $1 }
 ;
-
-TypeAliases : TypeAlias TypeAliases { $1 : $2 }
-            | TypeAlias { [$1] }
-            | { [] }
-
-Functions : Fun Functions { $1 : $2 }
-          | Fun { [$1] }
 
 DecStart : Decs { $1 }
          | DefaultDec Decs { $2 }
-
-Decs : Defs { $1 }
-     | DefaultDec Defs { $2 }
 ;
 
-Defs : Def Defs { $1 : $2 }
-     | Def { [$1] }
+Decs : Dec Decs { $1 : $2 }
+     | Dec { [$1] }
+;
 
-Def  : fun  Fun { $2 }
-     | type TypeAlias { $2 }
-
+Dec :: { DecBase f vn }
+       : fun Fun { $2 }
+       | type TypeDecl { $2 }
+;
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
@@ -252,75 +243,52 @@ Header :: { ProgHeader }
 Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
 ;
 
-FunDefs : Fun FunDefs   { $1 : $2 }
-        | Fun           { [$1] }
+FunDecs : fun Fun FunDecs   { $2 : $3 }
+        | fun Fun           { [$2] }
 ;
 
-Fun     : fun TypeDecl id '(' Params ')' '=' Exp
-                        { let L pos (ID name) = $3
-                          in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
-        | fun TypeDecl id '(' ')' '=' Exp
-                        { let L pos (ID name) = $3
-                          in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
-        | entry TypeDecl id '(' Params ')' '=' Exp
-                        { let L pos (ID name) = $3
-                          in FunDef True name $2 $5 $8 pos }
-        | entry TypeDecl id '(' ')' '=' Exp
-                        { let L pos (ID name) = $3
-                          in FunDef True name $2 [] $7 pos }
-;
-
-TypeAlias: type id '=' TypeAliasDecl { let L pos (ID name) = $1 in TypeDef name $3 pos) }
+Fun :     UserType id '(' TypeIds ')' '=' Exp
+                        { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
+        | UserType id '(' ')' '=' Exp
+                        { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
 ;
 
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-TypeDecl :: { UncheckedTypeDecl }
-            : Type { TypeDecl $1 NoInfo }
+TypeDecl   : id '=' UserTypeWAlias { let L pos (ID name) = $1 in TypeDef name $3 pos}
+
+
+UserTypeWAlias : PrimType { UserPrim $1 }
+               | UserArrayTypeWAlias { $1 }
+               | '{' UserTypesWAlias '}' { UserTuple $2 }
+               | id { let L _ (ID name) = $1 in UserTypeAlias name}
+
+UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
+                | UserTypeWAlias { [$1] }
+                | {[]}
+
+UserType :: { UncheckedUserType }
+         : PrimType      { UserPrim $1 }
+         | UserArrayType     { $1 }
+         | '{' Types '}' { UserTuple $2 }
+         | id            { let L pos (ID name) = $1 in UserTypeAlias name }
+;
+
+UserArrayType :: { UncheckedType }
+              : Uniqueness '[' UserType DimDecl ']'
+                { let (ds, et) = $3
+                   in UserArray $3 (ShapeDecl ($4:ds)) $1 }
+UserArrayTypeWAlias :: { UncheckedType }
+               : Uniqueness '[' UserTypeWAlias ']'
+                  { let (ds, et) = $3
+                     in UserArray $3 AnyDim $1 }
 
 Type :: { UncheckedType }
-        : PrimType      { UserPrim $1 }
-        | ArrayType     { $1 }
-        | '{' Types '}' { UserTuple $2 }
-        | id            { let L pos (ID name) = $1 in UserTypeAlias (Name name) }
+        : PrimType     { Prim $1 }
+        | ArrayType     { Array $1 }
+        | '{' Types '}' { Tuple $2 }
 ;
-
-ArrayType :: { UncheckedType }
-             : Uniqueness '[' Type DimDecl ']'
-               { let (ds, et) = $3
-                  in UserArray $3 (ShapeDecl ($4:ds)) $1 }
-
-UserType :: { UserType }
-            : PrimType      { UserPrim $1 }
-            | UserArrayType     { UserArray $1 }
-            | '{' UserTypes '}' { UserTuple $2 }
-            | id            { let L pos (ID name) = $1 in UserTypeAlias (Name name) }
-;
-
-UserTypes : UserType ',' UserTypes { $1 : $3 }
-          | UserType           { [$1] }
-          |                { [] }
-;
-
-TypeAliasDecl :: { UncheckedTypeDecl }
-               : AliasType { TypeDecl $1 NoInfo }
-
-AliasType :: { UncheckedType }
-: PrimType      { UserPrim $1 }
-| ArrayTypeAlias     { $1 }
-| '{' AliasTypes '}' { UserTuple $2 }
-| id            { let L pos (ID name) = $1 in UserTypeAlias (Name name) }
-;
-
-AliasTypes : AliasType ',' AliasTypes { $1 : $3 }
-           | AliasType { [$1] }
-
-
-ArrayTypeAlias :: { UncheckedType }
-: Uniqueness '[' TypeAlias  ']'
-{ let (ds, et) = $3
-    in UserArray $3 AnyDim $1 }
 
 DimDecl :: { DimDecl Name }
         : ',' id
@@ -331,36 +299,19 @@ DimDecl :: { DimDecl Name }
             in ConstDim (fromIntegral n) }
         | { AnyDim }
 
---ArrayType :: { UncheckedArrayType }
---             : Uniqueness '[' PrimArrayRowType DimDecl ']'
---               { let (ds, et) = $3
---                  in PrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
---             | Uniqueness '[' TupleArrayRowType DimDecl ']'
---               { let (ds, et) = $3
---                  in TupleArray et (ShapeDecl ($4:ds)) $1 }
+ArrayType :: { UncheckedArrayType }
+          : Uniqueness '[' PrimArrayRowType DimDecl ']'
+            { let (ds, et) = $3
+              in PrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
+          | Uniqueness '[' TupleArrayRowType DimDecl ']'
+            { let (ds, et) = $3
+              in TupleArray et (ShapeDecl ($4:ds)) $1 }
 
-UserArrayType :: { UserArrayType }
-               : Uniqueness '[' PrimArrayRowType DimDecl ']'
-                 { let (ds, et) = $3
-                     in UserPrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
-               | Uniqueness '[' TypeAliasArrayRowType DimDecl ']'
-                 { let (ds, et) = $3
-                    in AliasArray et (ShapeDecl ($4:ds)) $1 }
-               | Uniqueness '[' TupleArrayRowType DimDecl ']'
-                 { let (ds, et) = $3
-                    in UserTupleArray et (ShapeDecl ($4:ds)) $1 }
-
-PrimArrayRowType : PrimType { ([], $1) }
-                 | '[' PrimArrayRowType DimDecl ']'
+PrimArrayRowType : PrimType
+                    { ([], $1) }
+                  | '[' PrimArrayRowType DimDecl ']'
                     { let (ds, et) = $2
-                       in ($3:ds, et) }
-
-TypeAliasArrayRowType : id
-                        { ([], $1)}
-                      | '[' TypeAliasArrayRowType DimDecl ']'
-                        { let (ds, et) = $2
-                          in ($3:ds, et) }
-
+                      in ($3:ds, et) }
 
 TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { ([], $2) }
@@ -374,16 +325,15 @@ TupleArrayElemTypes : { [] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
-TupleArrayElemType : PrimType                    { PrimArrayElem $1 NoInfo }
+TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
-                   | id { let L _ (ID name) = $1
-                           in TypeAliasArrayElem (Name name) }
 
 PrimType : UnsignedType { Unsigned (fst $1) }
          | SignedType   { Signed (fst $1) }
          | FloatType    { FloatType (fst $1) }
          | bool         { Bool }
+         | char         { Char }
 
 SignedType :: { (IntType, SrcLoc) }
            : int { (Int32, $1) }
@@ -408,16 +358,15 @@ Types : Type ',' Types { $1 : $3 }
       |                { [] }
 ;
 
-Params : TypeDecl id ',' Params { let L pos (ID name) = $2 in Param name $1 pos : $4 }
-       | TypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
-
+TypeIds : UserType id ',' TypeIds
+                        { let L pos (ID name) = $2 in Ident name $1 pos : $4 }
+        | UserType id       { let L pos (ID name) = $2 in [Ident name $1 pos] }
+;
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
-     | stringlit      {% let L pos (STRINGLIT s) = $1 in do
-                             s' <- mapM (getIntValue . fromIntegral . ord) s
-                             t <- lift $ gets parserIntType
-                             return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
+     | stringlit      { let L pos (STRINGLIT s) = $1
+                        in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -592,7 +541,7 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '{' Patterns '}' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn TypeDecl '(' Params ')' '=>' Exp
+         : fn UserType '(' TypeIds ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
            { let L pos (ID name) = $1
@@ -625,6 +574,7 @@ FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
 
 Value : IntValue { $1 }
       | FloatValue { $1 }
+      | CharValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
       | ArrayValue { $1 }
@@ -649,22 +599,17 @@ FloatValue :: { Value }
          : FloatLit { PrimValue (FloatValue (fst $1)) }
          | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
 
-StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
-                             s' <- mapM (getIntValue . fromIntegral . ord) s
-                             t <- lift $ gets parserIntType
-                             return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
+CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValue char }
+StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
 BoolValue : true          { PrimValue $ BoolValue True }
          | false          { PrimValue $ BoolValue False }
 
 SignedLit :: { (IntValue, SrcLoc) }
-          : i8lit   { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
-          | i16lit  { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
-          | i32lit  { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
-          | i64lit  { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | intlit  {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
-          | charlit {% let L pos (CHARLIT char) = $1 in do
-                       num <- getIntValue $ fromIntegral $ ord char
-                       return (num, pos) }
+          : i8lit  { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
+          | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
+          | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
+          | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
+          | intlit {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
             : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
@@ -685,8 +630,10 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | true   { (BoolValue True, $1) }
         | false  { (BoolValue False, $1) }
 
+        | charlit { let L pos (CHARLIT char) = $1 in (CharValue char, pos) }
+
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toStruct $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
              }
            |  '[' Value ',' Values ']'
              {% case combArrayTypes (valueType $2) $ map valueType $4 of
