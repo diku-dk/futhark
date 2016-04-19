@@ -7,6 +7,7 @@ import System.FilePath
 import System.Process
 import System.Exit
 import System.Console.GetOpt
+import qualified System.Info
 
 import Futhark.Pipeline
 import Futhark.Passes
@@ -46,9 +47,11 @@ openclCodeAction filepath config =
           let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
           liftIO $ writeFile cpath cprog
+          let args = if (System.Info.os == "darwin")
+                     then [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-framework", "OpenCL"]
+                     else [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"]
           (gccCode, _, gccerr) <-
-            liftIO $ readProcessWithExitCode "gcc"
-            [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"] ""
+            liftIO $ readProcessWithExitCode "gcc" args ""
           case gccCode of
             ExitFailure code -> compileFail $ "gcc failed with code " ++ show code ++ ":\n" ++ gccerr
             ExitSuccess      -> return ()
