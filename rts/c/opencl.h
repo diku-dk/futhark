@@ -1,6 +1,10 @@
 /* The simple OpenCL runtime framework used by Futhark. */
 
-#include <CL/cl.h>
+#ifdef __APPLE__
+  #include <OpenCL/cl.h>
+#else
+  #include <CL/cl.h>
+#endif
 
 #define FUT_KERNEL(s) #s
 #define OPENCL_SUCCEED(e) opencl_succeed(e, #e, __FILE__, __LINE__)
