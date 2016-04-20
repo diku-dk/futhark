@@ -107,7 +107,7 @@ fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2 =
                             Nothing -> Nothing --should not be reached!
         outinsrev = HM.fromList $ mapMaybe getVarParPair $ HM.toList outins
         unfusible outname
-          | outname `elem` unfus_nms =
+          | outname `HS.member` unfus_nms =
             outname `HM.lookup` HM.union outinsrev (HM.fromList out1)
         unfusible _ = Nothing
         unfus_vars= mapMaybe (unfusible . fst) out1
