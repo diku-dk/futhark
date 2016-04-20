@@ -465,7 +465,7 @@ iswim _ nest ots
     Nest.Map cs2 w2 mb <- nn,
     Just es' <- mapM Nest.inputFromTypedSubExp es,
     Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
-    mapM isVarInput mapArrs == Just paramIds = do
+    mapM SOAC.isVarInput mapArrs == Just paramIds = do
     let newInputs :: [SOAC.Input]
         newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
         inputTypes = map SOAC.inputType newInputs
