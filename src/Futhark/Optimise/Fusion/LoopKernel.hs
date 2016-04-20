@@ -217,6 +217,10 @@ mapFusionOK outVars ker = any (`elem` inpIds) outVars
   where inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
+--
+-- FIXME: there are some problems in this function where it converts
+-- the unfusable set to a list, then makes assumptions about the order
+-- of elements.
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 fuseSOACwithKer unfus_set outVars soac1 ker = do
@@ -251,7 +255,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     ------------------------------
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
-      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
           (extra_nms,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                                    zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
@@ -260,7 +264,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
 
     (SOAC.Map {}, SOAC.Redomap _ _ comm1 lam11 _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
-      let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes lam1 inp1_arr
+      let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes lam1 inp1_arr
                                             outPairs lam2 inp2_arr
           unfus_accs  = take (length nes) outVars
           unfus_arrs  = unfus_nms \\ unfus_accs
@@ -269,7 +273,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
 
     (SOAC.Redomap _ _ comm2 lam2r _ nes2 _, SOAC.Redomap _ _ comm1 lam1r _ nes1 _)
       | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
-      let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1 inp1_arr
+      let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes1 lam1 inp1_arr
                                             outPairs lam2 inp2_arr
           unfus_accs  = take (length nes1) outVars
           unfus_arrs  = unfus_nms \\ unfus_accs
@@ -279,8 +283,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
 
     (SOAC.Redomap _ _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
-      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
-          -- Get the lists from soac1 that still need to be returned
+      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
@@ -316,7 +319,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Scanomap _ _ lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       -- Create new inner reduction function
-      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
           -- Get the lists from soac1 that still need to be returned
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
@@ -330,7 +333,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Stream _ _ Sequential{} _ _, SOAC.Stream _ _ form1@Sequential{} _ _)
      | mapFusionOK (drop (length $ getStreamAccums form1) outVars) ker || horizFuse -> do
       -- fuse two SEQUENTIAL streams
-      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_nms outVars outPairs soac2 soac1
+      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac2 soac1
       success res_nms res_stream
 
     (SOAC.Stream _ _ Sequential{} _ _, SOAC.Stream _ _ Sequential{} _ _) ->
@@ -345,7 +348,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Stream{}, SOAC.Stream _ _ form1 _ _)
      | mapFusionOK (drop (length $ getStreamAccums form1) outVars) ker || horizFuse -> do
       -- fuse two PARALLEL streams
-      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_nms outVars outPairs soac2 soac1
+      (res_nms, res_stream) <- fuseStreamHelper (outNames ker) unfus_set outVars outPairs soac2 soac1
       success res_nms res_stream
 
     (SOAC.Stream{}, SOAC.Stream {}) ->
@@ -395,9 +398,9 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     ---------------------------------
     _ -> fail "Cannot fuse"
 
-fuseStreamHelper :: [VName] -> [VName] -> [VName] -> [(VName,Ident)]
+fuseStreamHelper :: [VName] -> Names -> [VName] -> [(VName,Ident)]
                  -> SOAC -> SOAC -> TryFusion ([VName], SOAC)
-fuseStreamHelper out_kernms unfus_nms outVars outPairs
+fuseStreamHelper out_kernms unfus_set outVars outPairs
                  (SOAC.Stream cs2 w2 form2 lam2 inp2_arr)
                  (SOAC.Stream cs1 _ form1 lam1 inp1_arr) =
   if getStreamOrder form2 /= getStreamOrder form1
@@ -413,11 +416,11 @@ fuseStreamHelper out_kernms unfus_nms outVars outPairs
               lam20 = substituteNames hmnms lam2
               lam1' = lam1  { lambdaParams = tail $ lambdaParams lam1  }
               lam2' = lam20 { lambdaParams = tail $ lambdaParams lam20 }
-              (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1'
+              (res_lam', new_inp) = fuseRedomap unfus_set outVars nes1 lam1'
                                                 inp1_arr outPairs lam2' inp2_arr
               res_lam'' = res_lam' { lambdaParams = chunk1 : lambdaParams res_lam' }
               unfus_accs  = take (length nes1) outVars
-              unfus_arrs  = filter (`elem` unfus_nms) outVars
+              unfus_arrs  = filter (`HS.member` unfus_set) outVars
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
                     SOAC.Stream (cs1++cs2) w2 res_form res_lam'' new_inp )
@@ -505,7 +508,7 @@ iswim _ nest ots
     Nest.Map cs2 w2 mb <- nn,
     Just es' <- mapM Nest.inputFromTypedSubExp es,
     Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
-    mapM isVarInput mapArrs == Just paramIds = do
+    mapM SOAC.isVarInput mapArrs == Just paramIds = do
     let newInputs :: [SOAC.Input]
         newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
         inputTypes = map SOAC.inputType newInputs

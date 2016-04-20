@@ -141,6 +141,8 @@ instance Traversable DimChange where
 -- | A list of 'DimChange's, indicating the new dimensions of an array.
 type ShapeChange d = [DimChange d]
 
+-- | A primitive operation that returns something of known size and
+-- does not itself contain any bindings.
 data PrimOp lore
   = SubExp SubExp
     -- ^ Subexpressions, doubling as tuple literals if the
@@ -216,10 +218,9 @@ data PrimOp lore
     -- and no arrays are returned.
   deriving (Eq, Ord, Show)
 
--- | Futhark Expression Language: literals + vars + int binops + array
--- constructors + array combinators (SOAC) + if + function calls +
--- let + tuples (literals & identifiers) TODO: please add float,
--- double, long int, etc.
+-- | The root Futhark expression type.  The 'Op' constructor contains
+-- a lore-specific operation.  Do-loops, branches and function calls
+-- are special.  Everything else is a simple 'PrimOp'.
 data ExpT lore
   = PrimOp (PrimOp lore)
     -- ^ A simple (non-recursive) operation.
