@@ -273,9 +273,9 @@ mkPatternAliases :: (Attributes lore, Aliased lore,
                  -> ([PatElemT (VarAliases, attr)],
                      [PatElemT (VarAliases, attr)])
 mkPatternAliases pat e =
-  -- Some part of the pattern may  be the context.  This does not have
-  -- aliases from expAliases, so we  use a hack to compute some aliases
-  -- from do-loops.  FIXME.  This should be more general.
+  -- Some part of the pattern may be the context.  This does not have
+  -- aliases from expAliases, so we use a hack to compute aliases of
+  -- the context.
   let als = expAliases e ++ repeat mempty -- In case the pattern has
                                           -- more elements (this
                                           -- implies a type error).
@@ -301,12 +301,12 @@ mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
       merge_als = zip mergenames $
                   map ((`HS.difference` mergenames_set) . expand) $
                   bodyAliases body
-  -- FIXME: sometimes loopResultContext will not return the correct number of elements.
   in if length ctx == length (patternContextElements pat)
      then map (fromMaybe mempty . flip lookup merge_als . paramName) ctx
      else map (const mempty) $ patternContextElements pat
   where mergenames = map (paramName . fst) $ ctxmerge ++ valmerge
         mergenames_set = HS.fromList mergenames
+-- FIXME: handle If here as well.
 mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
 
