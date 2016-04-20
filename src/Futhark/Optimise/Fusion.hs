@@ -557,7 +557,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       reduceLike soac [outer_red, inner_red] nes
 
 
-    Right soac@(SOAC.Scanomap _ _ _ outer_red inner_red nes _) -> do
+    Right soac@(SOAC.Scanomap  _ _ outer_red inner_red nes _) -> do
       reduceLike soac [outer_red, inner_red] nes
 
     Right soac@(SOAC.Scan _ _ lam args) -> do
