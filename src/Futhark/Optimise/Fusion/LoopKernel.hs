@@ -188,6 +188,7 @@ removeUnusedParamsFromKer ker =
   case soac of
     SOAC.Map {}     -> ker { fsoac = soac' }
     SOAC.Redomap {} -> ker { fsoac = soac' }
+    SOAC.Scanomap {} -> ker { fsoac = soac' }
     _               -> ker
   where soac = fsoac ker
         l = SOAC.lambda soac
@@ -279,11 +280,50 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Redomap _ _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+          -- Get the lists from soac1 that still need to be returned
           (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ unfus_nms) $
               SOAC.Redomap (cs1++cs2) w comm2 lam21 res_lam' nes new_inp
+
+    ----------------------------
+    -- Scanomap Fusions:      --
+    ----------------------------
+
+    -- Scanomap -> Map/Scanomap Fusion
+    -- Same as with Redomap -> x.
+    -- (SOAC.Map {}, SOAC.Scanomap _ _ lam11 _ nes _)
+    --   | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
+    --   let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes lam1 inp1_arr
+    --                                         outPairs lam2 inp2_arr
+    --       unfus_accs  = take (length nes) outVars
+    --       unfus_arrs  = unfus_nms \\ unfus_accs
+    --   success (unfus_accs ++ outNames ker ++ unfus_arrs) $
+    --           SOAC.Scanomap (cs1++cs2) w lam11 res_lam' nes new_inp
+
+    -- (SOAC.Scanomap _ _ lam2r _ nes2 _, SOAC.Scanomap _ _  lam1r _ nes1 _)
+    --   | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
+    --   let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1 inp1_arr
+    --                                         outPairs lam2 inp2_arr
+    --       unfus_accs  = take (length nes1) outVars
+    --       unfus_arrs  = unfus_nms \\ unfus_accs
+    --       lamr        = mergeReduceOps lam1r lam2r
+    --   success (unfus_accs ++ outNames ker ++ unfus_arrs) $
+    --           SOAC.Scanomap (cs1++cs2) w  lamr res_lam' (nes1++nes2) new_inp
+
+    -- Map -> Scanomap Fusion
+    (SOAC.Scanomap _ _ lam21 _ nes _, SOAC.Map {})
+      | mapFusionOK outVars ker || horizFuse -> do
+      -- Create new inner reduction function
+      let (res_lam, new_inp) = fuseMaps unfus_nms lam1 inp1_arr outPairs lam2 inp2_arr
+          -- Get the lists from soac1 that still need to be returned
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+      success (outNames ker ++ unfus_nms) $
+              SOAC.Scanomap (cs1++cs2) w lam21 res_lam' nes new_inp
+
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------

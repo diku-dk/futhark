@@ -319,8 +319,9 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- Assumption: the free vars in lambda are already in @unfusable res@.
   let out_nms     = patternNames out_idds
       isUnfusable = (`HS.member` unfusable res)
-      is_redomap  = case orig_soac of
+      is_redomap_scanomap  = case orig_soac of
                         SOAC.Redomap{} -> True
+                        SOAC.Scanomap{} -> True
                         --SOAC.Stream {} -> True
                         _              -> False
   --
@@ -330,8 +331,10 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- THEN try applying producer-consumer fusion
   -- ELSE try applying horizontal        fusion
   -- (without duplicating computation in both cases)
+
+  -- Not sure this works without changing anything [Brian]
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
-        if   is_redomap || any isUnfusable out_nms
+        if   is_redomap_scanomap || any isUnfusable out_nms
         then horizontGreedyFuse rem_bnds res (out_idds, soac)
         else prodconsGreedyFuse          res (out_idds, soac)
   --
@@ -394,15 +397,15 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
 prodconsGreedyFuse :: FusedRes -> (Pattern, SOAC)
                    -> FusionGM (Bool, [FusedKer], [KernName], [FusedKer], [KernName])
 prodconsGreedyFuse res (out_idds, soac) = do
-  let out_nms        = patternNames out_idds
-      to_fuse_knmSet = getKersWithInpArrs res out_nms
+  let out_nms        = patternNames out_idds    -- Extract VNames from output patterns
+      to_fuse_knmSet = getKersWithInpArrs res out_nms  -- Find kernels which consume outputs
       to_fuse_knms   = HS.toList to_fuse_knmSet
       lookup_kern k  = case HM.lookup k (kernels res) of
                          Nothing  -> badFusionGM $ Error
                                      ("In Fusion.hs, greedyFuse, comp of to_fuse_kers: "
                                       ++ "kernel name not found in kernels field!")
                          Just ker -> return ker
-  to_fuse_kers <- mapM lookup_kern to_fuse_knms
+  to_fuse_kers <- mapM lookup_kern to_fuse_knms -- Get all consumer kernels
   -- try producer-consumer fusion
   (ok_kers_compat, fused_kers) <- do
       kers <- forM to_fuse_kers $
@@ -421,6 +424,7 @@ horizontGreedyFuse rem_bnds res (out_idds, soac) = do
       out_arr_nms    = case soac of
                         -- the accumulator result cannot be fused!
                         SOAC.Redomap _ _ _ _ _ nes _ -> drop (length nes) out_nms
+                        SOAC.Scanomap _ _ _ _ nes _ -> drop (length nes) out_nms
                         SOAC.Stream  _ _ frm _ _ -> drop (length $ getStreamAccums frm) out_nms
                         _ -> out_nms
       to_fuse_knms1  = HS.toList $ getKersWithInpArrs res (out_arr_nms++inp_nms)
@@ -531,6 +535,11 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
+fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Scan cs w lam args)):bnds) res) = do
+  let (ne, arrs) = unzip args
+      equivsoac = Futhark.Scanomap cs w lam lam ne arrs
+  fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
+
 fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
   case maybesoac of
@@ -547,14 +556,18 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       -- a redomap always starts a new kernel
       reduceLike soac [outer_red, inner_red] nes
 
-    Right soac@(SOAC.Scan _ _ lam args) ->
+
+    Right soac@(SOAC.Scanomap  _ _ outer_red inner_red nes _) -> do
+      reduceLike soac [outer_red, inner_red] nes
+
+    Right soac@(SOAC.Scan _ _ lam args) -> do
       -- NOT FUSABLE (probably), but still add as kernel, as
       -- optimisations like ISWIM may make it fusable.
       reduceLike soac [lam] $ map fst args
 
     Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
-      -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
+      -- @let a= reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
@@ -583,6 +596,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
           bres  <- bindingFamily pat $ fusionGatherBody lres body
           bres' <- foldM fusionGatherSubExp bres nes
           greedyFuse rem_bnds used_lam bres' (pat, soac)
+
 
 fusionGatherBody fres (Body _ [] res) =
   foldM fusionGatherExp fres $ map (PrimOp . SubExp) res
@@ -635,6 +649,7 @@ fusionGatherExp _ (Op Futhark.Map{}) = errorIllegal "map"
 fusionGatherExp _ (Op Futhark.Reduce{}) = errorIllegal "reduce"
 fusionGatherExp _ (Op Futhark.Scan{}) = errorIllegal "scan"
 fusionGatherExp _ (Op Futhark.Redomap{}) = errorIllegal "redomap"
+fusionGatherExp _ (Op Futhark.Scanomap{}) = errorIllegal "scanomap"
 
 -----------------------------------
 ---- Generic Traversal         ----
