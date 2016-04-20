@@ -649,10 +649,8 @@ checkExp :: ExpBase NoInfo VName -> TypeM Exp
 checkExp (Literal val pos) =
   Literal <$> checkLiteral pos val <*> pure pos
 
-checkExp (TupLit es pos) = do
-  es' <- mapM checkExp es
-  let res = TupLit es' pos
-  return $ fromMaybe res (Literal <$> expToValue res <*> pure pos)
+checkExp (TupLit es loc) =
+  TupLit <$> mapM checkExp es <*> pure loc
 
 checkExp (ArrayLit es _ loc) = do
   es' <- mapM checkExp es
@@ -667,8 +665,7 @@ checkExp (ArrayLit es _ loc) = do
                     bad $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (typeOf e) es''
 
-  let lit = ArrayLit es' (Info et) loc
-  return $ fromMaybe lit (Literal <$> expToValue lit <*> pure loc)
+  return $ ArrayLit es' (Info et) loc
 
 checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
@@ -912,7 +909,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
   -- (i) properly check the lambda on its parameter and
   --(ii) make some fake arguments, which do not alias `arr', and
   --     check that aliases of `arr' are not used inside lam.
-  let fakearg = (fromStruct $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
+  let fakearg = (typeOf arr', mempty, srclocOf pos)
       (aas,faas) = case macctup of
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
