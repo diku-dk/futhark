@@ -270,11 +270,8 @@ deepen = local $ \env -> env { topDownDepth = topDownDepth env + 1 }
 areAvailableBefore :: [SubExp] -> VName -> ForwardingM Bool
 areAvailableBefore ses point = do
   pointN <- bindingNumber point
-  nameNs <- mapM bindingNumber names
+  nameNs <- mapM bindingNumber $ subExpVars ses
   return $ all (< pointN) nameNs
-  where names = mapMaybe isVar ses
-        isVar (Var v)    = Just v
-        isVar Constant{} = Nothing
 
 isInCurrentBody :: VName -> ForwardingM Bool
 isInCurrentBody name = do

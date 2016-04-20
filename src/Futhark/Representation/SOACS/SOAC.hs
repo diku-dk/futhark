@@ -216,7 +216,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
-    HS.fromList $ mapMaybe onlyVar $
+    HS.fromList $ subExpVars $
     case form of MapLike{} ->
                    map (consumedArray []) $ HS.toList $ consumedByExtLambda lam
                  Sequential accs ->
@@ -228,8 +228,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
-          onlyVar (Var v) = Just v
-          onlyVar _       = Nothing
   consumedInOp _ =
     mempty
 
