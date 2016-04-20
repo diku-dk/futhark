@@ -34,7 +34,7 @@ import qualified Data.HashMap.Lazy as HM
 import Data.Monoid
 
 import Language.Futhark.Syntax hiding (ID)
-import Language.Futhark.Attributes hiding (arrayValue)
+import Language.Futhark.Attributes
 import Language.Futhark.Parser.Lexer
 
 }
@@ -713,6 +713,10 @@ combArrayTypes t ts = foldM comb t ts
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
+
+emptyArray :: ArrayShape (shape vn) =>
+              TypeBase shape als vn -> Value
+emptyArray = ArrayValue (listArray (0, -1) []) . removeNames . toStruct
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var ident

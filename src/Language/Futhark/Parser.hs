@@ -29,7 +29,7 @@ import System.FilePath (takeDirectory, (</>), (<.>))
 import Prelude
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes hiding (arrayValue)
+import Language.Futhark.Attributes
 import Language.Futhark.Parser.Parser
 import Language.Futhark.Parser.Lexer
 

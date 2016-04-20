@@ -14,7 +14,6 @@ module Language.Futhark.Attributes
   , paramDeclaredType
 
   -- * Queries on expressions
-  , expToValue
   , typeOf
   , commutative
 
@@ -58,18 +57,10 @@ module Language.Futhark.Attributes
   -- ** Removing and adding names
   --
   -- $names
-  , addNames
   , removeNames
 
   -- * Queries on values
-  , primValueType
   , valueType
-
-  -- * Operations on values
-  , arrayValue
-  , emptyArray
-
-  -- * Type aliases
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -89,7 +80,6 @@ module Language.Futhark.Attributes
   where
 
 import Control.Monad.Writer
-import Data.Array
 import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
@@ -577,16 +567,6 @@ valueType (ArrayValue _ (Array (PrimArray et shape _ _))) =
 valueType (ArrayValue _ (Array (TupleArray et shape _))) =
   addNames $ Array $ TupleArray et (Rank $ 1 + shapeRank shape) Nonunique
 
--- | Construct an array value containing the given elements.
-arrayValue :: ArrayShape (shape vn) =>
-            [Value] -> TypeBase shape as vn -> Value
-arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toStruct
-
--- | An empty array with the given row type.
-emptyArray :: ArrayShape (shape vn) =>
-              TypeBase shape as vn -> Value
-emptyArray = arrayValue []
-
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
 typeOf :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
@@ -658,17 +638,6 @@ typeOf (Split splitexps e _) =
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
 typeOf (Write _i _v a _) = typeOf a `setAliases` HS.empty
-
--- | If possible, convert an expression to a value.  This is not a
--- true constant propagator, but a quick way to convert array/tuple
--- literal expressions into literal values instead.
-expToValue :: ExpBase Info vn -> Maybe Value
-expToValue (Literal val _) = Just val
-expToValue (TupLit es _) = do es' <- mapM expToValue es
-                              Just $ TupValue es'
-expToValue (ArrayLit es (Info t) _) = do es' <- mapM expToValue es
-                                         Just $ arrayValue es' t
-expToValue _ = Nothing
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
