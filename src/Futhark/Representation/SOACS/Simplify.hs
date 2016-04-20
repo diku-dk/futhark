@@ -132,9 +132,9 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
     w' <- Engine.simplify w
     acc' <- mapM Engine.simplify acc
     arrs' <- mapM Engine.simplify arrs
-    outerfun' <- Engine.simplifyLambda outerfun w (Just acc) $
+    outerfun' <- Engine.simplifyLambda outerfun (Just acc) $
                  map (const Nothing) arrs'
-    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun w (Just acc) $ map Just arrs
+    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun (Just acc) $ map Just arrs
     (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
     return $ Scanomap cs' w' outerfun' innerfun'' acc' arrs''
     where removeUnusedParams used lam arrinps

@@ -163,12 +163,13 @@ transformSOAC pat (Scan cs width fun args) = do
         accts = map paramType $ take (length accexps) $ lambdaParams fun
 
 transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
+  i <- newVName "i"
   -- Name accumulators, do something with the corresponding expressions
-  (acc, initacc) <- newFold $ zip accexps accts
+  (acc, initacc, arr) <- newFold "scanomap" (zip accexps accts) arrexps
   -- Create output arrays.
   initarr <- resultArray scan_res_ts
   -- Name Outputarrays?
-  arr <- mapM (newIdent "scan_arr" ) scan_res_ts
+  -- arr <- mapM (newIdent "scan_arr" ) scan_res_ts
   -- Create arrays for our map results.
   initmaparrs <- resultArray map_res_ts
   mapoutarrs <- mapM (newIdent "scanomap_map_outarr") map_res_ts
@@ -188,8 +189,7 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
     return $ resultBody $ rowcopies ++ map Var dests ++ map Var mapdests
   pat' <- discardPattern (map identType acc) pat
   letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
-  where i = lambdaIndex fun
-        accts = map paramType $ take (length accexps) $  lambdaParams fun
+  where accts = map paramType $ take (length accexps) $  lambdaParams fun
         scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
                      | t <- (take (length accexps) (lambdaReturnType fun))]
         map_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
@@ -212,7 +212,6 @@ transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
   pat' <- discardPattern arr_ts pat
   letBind_ pat' =<<
     doLoopMapAccumL cs width innerfun' accexps arrexps' maparrs
-    (constant (0::Int32))
 
 
 -- | Translation of STREAM is non-trivial and quite incomplete for the moment!
