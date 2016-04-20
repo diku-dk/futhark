@@ -64,7 +64,7 @@ runCompilerOnProgram config pipeline action file = do
     Right () ->
       return ()
   where compile = do
-          source <- liftIO $ readFile file
+          source <- liftIO $ T.readFile file
           prog <- runPipelineOnSource config pipeline file source
           when (isJust $ futharkVerbose config) $
             liftIO $ hPutStrLn stderr $ "Running action " ++ actionName action
@@ -75,13 +75,13 @@ runPipelineOnProgram :: FutharkConfig
                      -> FilePath
                      -> FutharkM (Prog tolore)
 runPipelineOnProgram config pipeline file = do
-  source <- liftIO $ readFile file
+  source <- liftIO $ T.readFile file
   runPipelineOnSource config pipeline file source
 
 runPipelineOnSource :: FutharkConfig
                     -> Pipeline I.SOACS tolore
                     -> FilePath
-                    -> String
+                    -> T.Text
                     -> FutharkM (Prog tolore)
 runPipelineOnSource config pipeline filename srccode = do
   parsed_prog <- parseSourceProgram filename srccode
@@ -100,7 +100,7 @@ runPipelineOnSource config pipeline filename srccode = do
                          , pipelineValidate = True
                          }
 
-parseSourceProgram :: FilePath -> String
+parseSourceProgram :: FilePath -> T.Text
                    -> FutharkM E.UncheckedProg
 parseSourceProgram filename file_contents = do
   parsed <- liftIO $ parseFuthark filename file_contents
@@ -124,7 +124,7 @@ typeCheckInternalProgram prog =
 interpretAction' :: Action I.SOACS
 interpretAction' =
   interpretAction parseValues'
-  where parseValues' :: FilePath -> String -> Either ParseError [I.Value]
+  where parseValues' :: FilePath -> T.Text -> Either ParseError [I.Value]
         parseValues' path s =
           fmap concat $ mapM internalise =<< parseValues path s
         internalise v =

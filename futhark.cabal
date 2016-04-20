@@ -7,12 +7,19 @@ description:
         efficient execution on GPUs.  This package implements an
         optimising Futhark compiler.
 
-Homepage:            https://github.com/HIPERFIT/futhark
+Homepage:            http://futhark-lang.org
 Category:            Language
 License:             BSD3
 License-file:        LICENSE
 Build-type:          Simple
 Maintainer:          athas@sigkill.dk
+-- Extra Files to include in source distributions
+Extra-source-files:  rts/python/memory.py,
+                     rts/python/reader.py,
+                     rts/python/scalar.py,
+                     rts/c/reader.h,
+                     rts/c/opencl.h
+
 
 -- Constraint on the version of Cabal needed to build this package.
 Cabal-version:       >=1.10
@@ -37,15 +44,11 @@ Library
                  filepath,
                  unordered-containers >= 0.2.3.3,
                  dlist >= 0.6.0.1,
+                 bytestring,
                  text,
-                 constraints >= 0.4,
-                 type-natural >= 0.2,
-                 sized-vector >= 1.4,
-                 singletons >= 0.9,
-                 monomorphic >= 0.0.3,
-                 equational-reasoning >= 0.0.2,
                  raw-strings-qq,
-                 neat-interpolation < 0.3
+                 neat-interpolation >= 0.3,
+                 file-embed
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -64,7 +67,6 @@ Library
                    Futhark.Analysis.Metrics
                    Futhark.Binder
                    Futhark.Binder.Class
-                   Futhark.CodeGen.Backends.CUtils
                    Futhark.CodeGen.Backends.GenericC
                    Futhark.CodeGen.Backends.GenericPython
                    Futhark.CodeGen.Backends.GenericPython.AST
@@ -159,11 +161,7 @@ Library
                    Futhark.Representation.AST.Traversals
                    Futhark.Representation.ExplicitMemory
                    Futhark.Representation.ExplicitMemory.IndexFunction
-                   Futhark.Representation.ExplicitMemory.IndexFunction.Unsafe
-                   Futhark.Representation.ExplicitMemory.Permutation
                    Futhark.Representation.ExplicitMemory.Simplify
-                   Futhark.Representation.ExplicitMemory.SymSet
-                   Futhark.Representation.ExplicitMemory.SymSet.Unsafe
                    Futhark.Representation.Primitive
                    Futhark.Representation.SOACS
                    Futhark.Representation.SOACS.Simplify
@@ -183,7 +181,6 @@ Library
                    Futhark.Util.Options
                    Futhark.Util.Pretty
                    Futhark.Util.Log
-                   Futhark.Util.Truths
                    Futhark.Util.IntegralExp
                    Futhark.Version
                    Language.Futhark
@@ -198,7 +195,6 @@ Library
 
   Other-modules: Language.Futhark.Parser.Parser
                  Language.Futhark.Parser.Lexer
-                 Language.Futhark.Parser.Tokens
                  Paths_futhark
 
 
@@ -338,6 +334,23 @@ Executable futhark-bench
   Default-Language:   Haskell2010
 
   Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
+
+Executable futhark-dataset
+  Main-is: src/futhark-dataset.hs
+
+  -- Packages needed in order to build this package.
+  Build-depends: base >= 4 && < 5,
+                 array >= 0.4,
+                 mtl >= 2.2.1,
+                 containers >= 0.5,
+                 transformers,
+                 random,
+                 text,
+                 futhark
+
+  Default-Language:   Haskell2010
+
+  Ghc-Options:        -Wall
 
 Executable futhark-opencl
   Main-is: src/futhark-opencl.hs

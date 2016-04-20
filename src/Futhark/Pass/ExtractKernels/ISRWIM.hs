@@ -8,7 +8,6 @@ module Futhark.Pass.ExtractKernels.ISRWIM
 import Control.Arrow (first)
 import Control.Monad.State
 import Data.Monoid
-import qualified Data.HashSet as HS
 
 import Prelude
 
@@ -24,15 +23,9 @@ iswim :: (MonadBinder m, Lore m ~ SOACS) =>
       -> [(SubExp, VName)]
       -> Maybe (m ())
 iswim res_pat cs w scan_fun scan_input
-  | Body () [bnd] res <- lambdaBody scan_fun, -- Body has a single binding
-    map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
-    map paramName (lambdaParams scan_fun) == map_arrs = Just $ do
+  | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun = Just $ do
       let (accs, arrs) = unzip scan_input
-      arrs' <- forM arrs $ \arr -> do
-                 t <- lookupType arr
-                 let perm = [1,0] ++ [2..arrayRank t-1]
-                 letExp (baseString arr) $ PrimOp $ Rearrange [] perm arr
+      arrs' <- transposedArrays arrs
       accs' <- mapM (letExp "acc" . PrimOp . SubExp) accs
 
       let map_arrs' = accs' ++ arrs'
@@ -41,18 +34,18 @@ iswim res_pat cs w scan_fun scan_input
           map_params = map removeParamOuterDim scan_acc_params ++
                        map (setParamOuterDimTo w) scan_elem_params
           map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
-          map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
+          map_fun' = Lambda map_params map_body map_rettype
 
           scan_params = lambdaParams map_fun
           scan_body = lambdaBody map_fun
           scan_rettype = lambdaReturnType map_fun
-          scan_fun' = Lambda (lambdaIndex scan_fun) scan_params scan_body scan_rettype
+          scan_fun' = Lambda scan_params scan_body scan_rettype
           scan_input' = map (first Var) $
                         uncurry zip $ splitAt (length arrs') $ map paramName map_params
 
-          map_body = mkBody [Let (setPatternOuterDimTo w $ bindingPattern bnd) () $
-                             Op $ Scan cs w scan_fun' scan_input']
-                            res
+          map_body = mkBody [Let (setPatternOuterDimTo w map_pat) () $
+                             Op $ Scan cs w scan_fun' scan_input'] $
+                            map Var $ patternNames map_pat
 
       res_pat' <- fmap (basicPattern' []) $
                   mapM (newIdent' (<>"_transposed") . transposeIdentType) $
@@ -75,16 +68,9 @@ irwim :: (MonadBinder m, Lore m ~ SOACS, LocalScope SOACS m) =>
       -> [(SubExp, VName)]
       -> Maybe (m ())
 irwim res_pat cs w comm red_fun red_input
-  | Body () [bnd] res <- lambdaBody red_fun, -- Body has a single binding
-    map Var (patternNames $ bindingPattern bnd) == res, -- Returned verbatim
-    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
-    map paramName (lambdaParams red_fun) == map_arrs,
-    not (lambdaIndex red_fun `HS.member` freeInLambda red_fun) = Just $ do
+  | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible red_fun = Just $ do
       let (accs, arrs) = unzip red_input
-      arrs' <- forM arrs $ \arr -> do
-                 t <- lookupType arr
-                 let perm = [1,0] ++ [2..arrayRank t-1]
-                 letExp (baseString arr) $ PrimOp $ Rearrange [] perm arr
+      arrs' <- transposedArrays arrs
       -- FIXME?  Can we reasonably assume that the accumulator is a
       -- replicate?  We also assume that it is non-empty.
       let indexAcc (Var v) = letSubExp "acc" $ PrimOp $ Index [] v [intConst Int32 0]
@@ -99,22 +85,41 @@ irwim res_pat cs w comm red_fun red_input
           red_params = lambdaParams map_fun
           red_body = lambdaBody map_fun
           red_rettype = lambdaReturnType map_fun
-          red_fun' = Lambda (lambdaIndex red_fun) red_params red_body red_rettype
+          red_fun' = Lambda red_params red_body red_rettype
           red_input' = zip accs' $ map paramName map_params
-          red_pat = stripPatternOuterDim $ bindingPattern bnd
+          red_pat = stripPatternOuterDim map_pat
 
       map_body <-
         case irwim red_pat cs w comm red_fun' red_input' of
           Nothing ->
-            return $ mkBody [Let red_pat () $ Op $ Reduce cs w comm red_fun' red_input'] res
+            return $ mkBody [Let red_pat () $ Op $ Reduce cs w comm red_fun' red_input'] $
+            map Var $ patternNames map_pat
           Just m -> localScope (scopeOfLParams map_params) $ do
             map_body_bnds <- collectBindings_ m
-            return $ mkBody map_body_bnds res
+            return $ mkBody map_body_bnds $ map Var $ patternNames map_pat
 
-      let map_fun' = Lambda (lambdaIndex map_fun) map_params map_body map_rettype
+      let map_fun' = Lambda map_params map_body map_rettype
 
       addBinding $ Let res_pat () $ Op $ Map map_cs map_w map_fun' arrs'
   | otherwise = Nothing
+
+rwimPossible :: Lambda
+             -> Maybe (Pattern, Certificates, SubExp, Lambda)
+rwimPossible fun
+  | Body _ [bnd] res <- lambdaBody fun, -- Body has a single binding
+    map_pat <- bindingPattern bnd,
+    map Var (patternNames map_pat) == res, -- Returned verbatim
+    Op (Map map_cs map_w map_fun map_arrs) <- bindingExp bnd,
+    map paramName (lambdaParams fun) == map_arrs =
+      Just (map_pat, map_cs, map_w, map_fun)
+  | otherwise =
+      Nothing
+
+transposedArrays :: MonadBinder m => [VName] -> m [VName]
+transposedArrays arrs = forM arrs $ \arr -> do
+  t <- lookupType arr
+  let perm = [1,0] ++ [2..arrayRank t-1]
+  letExp (baseString arr) $ PrimOp $ Rearrange [] perm arr
 
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =

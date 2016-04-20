@@ -38,7 +38,6 @@ import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
-import qualified Futhark.Analysis.ScalExp as SE
 
 type SOAC = SOAC.SOAC SOACS
 type SOACNest = Nest.SOACNest SOACS
@@ -378,7 +377,7 @@ fuseStreamHelper out_kernms unfus_nms outVars outPairs
                                                 inp1_arr outPairs lam2' inp2_arr
               res_lam'' = res_lam' { lambdaParams = chunk1 : lambdaParams res_lam' }
               unfus_accs  = take (length nes1) outVars
-              unfus_arrs  = unfus_nms \\ unfus_accs
+              unfus_arrs  = filter (`elem` unfus_nms) outVars
           res_form <- mergeForms form2 form1
           return (  unfus_accs ++ out_kernms ++ unfus_arrs,
                     SOAC.Stream (cs1++cs2) w2 res_form res_lam'' new_inp )
@@ -408,8 +407,7 @@ toNestedSeqStream :: SOAC -> TryFusion SOAC
 toNestedSeqStream   (SOAC.Stream cs w form lam arrs) = do
   innerlam      <- renameLambda lam
   instrm_resids <- mapM (newIdent "res_instream") $ lambdaReturnType lam
-  let inner_extlam = ExtLambda (lambdaIndex innerlam)
-                               (lambdaParams innerlam)
+  let inner_extlam = ExtLambda (lambdaParams innerlam)
                                (lambdaBody   innerlam)
                                (staticShapes $ lambdaReturnType innerlam)
       nes      = getStreamAccums form
@@ -466,7 +464,7 @@ iswim _ nest ots
   | Nest.Scan cs1 w1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
     Nest.Map cs2 w2 mb <- nn,
     Just es' <- mapM Nest.inputFromTypedSubExp es,
-    Nest.Nesting i paramIds mapArrs bndIds retTypes <- lvl,
+    Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
     mapM isVarInput mapArrs == Just paramIds = do
     let newInputs :: [SOAC.Input]
         newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
@@ -482,7 +480,6 @@ iswim _ nest ots
                    , Nest.nestingReturnType = zipWith setOuterSize retTypes $
                                               map (arraySize 0) arrsizes
                    , Nest.nestingResult = bndIds
-                   , Nest.nestingIndex = i
                    , Nest.nestingParamNames = paramIds
                    }
         perm = case retTypes of []  -> []
@@ -564,29 +561,16 @@ pushRearrange inpIds nest ots = do
 rearrangeReturnTypes :: MapNest -> [Int] -> MapNest
 rearrangeReturnTypes nest@(MapNest.MapNest cs w body nestings inps) perm =
   MapNest.MapNest cs w
-  (inner_index `Nest.setNestBodyIndex` body)
-  (zipWith setIndex
-   (zipWith setReturnType
-    nestings $
-    drop 1 $ iterate (map rowType) ts)
-   outer_indices)
+  body
+  (zipWith setReturnType
+   nestings $
+   drop 1 $ iterate (map rowType) ts)
   inps
   where origts = MapNest.typeOf nest
         ts =  map (rearrangeType perm) origts
 
-        orig_indices =
-          map MapNest.nestingIndex nestings ++ [Nest.nestBodyIndex body]
-
-        (outer_indices,inner_index) =
-          case reverse $
-               rearrangeShape (take (length orig_indices) perm) orig_indices of
-           i:is -> (reverse is, i)
-           []   -> ([], Nest.nestBodyIndex body)
-
         setReturnType nesting t' =
           nesting { MapNest.nestingReturnType = t' }
-        setIndex nesting index =
-          nesting { MapNest.nestingIndex = index }
 
 fixupInputs :: [VName] -> [SOAC.Input] -> Maybe ([Int], [SOAC.Input])
 fixupInputs inpIds inps =
@@ -617,24 +601,10 @@ pullReshape nest ots
                 Nest.inputs nest
       inputTypes = map SOAC.inputType inputs'
       innermost_input_ts = map (stripArray (length shape - 1)) inputTypes
-  new_index <- newVName "pull_reshape_inner_index"
-  new_indices <- replicateM (length (newDims shape) - 1) $
-                 newVName "pull_reshape_index"
   maplam <- Nest.bodyToLambda innermost_input_ts mapbody
-  let old_index = lambdaIndex maplam
-      indices_scope = HM.fromList $ zip (new_index:new_indices) $ repeat IndexInfo
-      flat_idx = flattenIndex
-                 (map SE.intSubExpToScalExp $ newDims shape)
-                 (map (SE.intSubExpToScalExp . Var) $ new_indices++[new_index])
-  compute_old_index_bnds <- runBinder_ $ localScope indices_scope $
-    letBindNames'_ [old_index] =<< SE.fromScalExp flat_idx
 
-  let mapbody' = Nest.Fun maplam { lambdaIndex = new_index
-                                 , lambdaBody =
-                                     insertBindings compute_old_index_bnds $
-                                     lambdaBody maplam
-                                 }
-      outernest inner (i, w, outershape) = do
+  let mapbody' = Nest.Fun maplam
+      outernest inner (w, outershape) = do
         let addDims t = arrayOf t (Shape outershape) NoUniqueness
             retTypes = map addDims $ Nest.returnType op
 
@@ -646,8 +616,7 @@ pullReshape nest ots
                   newNameFromString "pullReshape_bnd"
 
         let nesting = Nest.Nesting {
-                        Nest.nestingIndex = i
-                      , Nest.nestingParamNames = map identName ps
+                        Nest.nestingParamNames = map identName ps
                       , Nest.nestingInputs = map SOAC.identInput ps
                       , Nest.nestingResult = bnds
                       , Nest.nestingReturnType = retTypes
@@ -657,7 +626,7 @@ pullReshape nest ots
   -- only has the significance of making the generated code look
   -- very slightly neater.
   op' <- foldM outernest (Nest.Map [] mapw' mapbody') $
-         zip3 new_indices (drop 1 $ reverse $ newDims shape) $
+         zip (drop 1 $ reverse $ newDims shape) $
          drop 1 $ reverse $ drop 1 $ tails $ newDims shape
   let nest'   = Nest.SOACNest {
                   Nest.inputs    = inputs'

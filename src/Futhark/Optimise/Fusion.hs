@@ -531,35 +531,26 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
-fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
+fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
-  let body = mkBody bnds res
   case maybesoac of
     Right soac@(SOAC.Map _ _ lam _) -> do
       bres  <- bindingFamily pat $ fusionGatherBody fres body
       (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-      greedyFuse (bodyBindings body) used_lam blres (pat, soac)
+      greedyFuse rem_bnds used_lam blres (pat, soac)
 
-    Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) -> do
+    Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) ->
       -- a redomap does not neccessarily start a new kernel, e.g.,
       -- @let a = reduce(+,0,A) in ... bnds ... in let B = map(f,A)@
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
-      (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) [outer_red, inner_red]
-      bres  <- bindingFamily pat $ fusionGatherBody lres body
-      bres' <- foldM fusionGatherSubExp bres nes
-      -- addNewKer bres' (patternIdents pat, soac)
-      greedyFuse (bodyBindings body) used_lam bres' (pat, soac)
+      reduceLike soac [outer_red, inner_red] nes
 
-    Right soac@(SOAC.Scan _ _ lam args) -> do
+    Right soac@(SOAC.Scan _ _ lam args) ->
       -- NOT FUSABLE (probably), but still add as kernel, as
       -- optimisations like ISWIM may make it fusable.
-      let nes = map fst args
-      bres  <- bindingFamily pat $ fusionGatherBody fres body
-      (used_lam, blres) <- fusionGatherLam (HS.empty, bres) lam
-      blres' <- foldM fusionGatherSubExp blres nes
-      greedyFuse (bodyBindings body) used_lam blres' (pat, soac)
+      reduceLike soac [lam] $ map fst args
 
     Right soac@(SOAC.Stream _ _ form lam _) -> do
       -- a redomap does not neccessarily start a new kernel, e.g.,
@@ -567,14 +558,10 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
       -- can be fused into a redomap that replaces the @map@, if @a@
       -- and @B@ are defined in the same scope and @bnds@ does not uses @a@.
       -- a redomap always starts a new kernel
-      let nes     = getStreamAccums form
-          lambdas = case form of
+      let lambdas = case form of
                         RedLike _ _ lout _ -> [lout, lam]
                         _                  -> [lam]
-      (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
-      bres  <- bindingFamily pat $ fusionGatherBody lres body
-      bres' <- foldM fusionGatherSubExp bres nes
-      greedyFuse (bodyBindings body) used_lam bres' (pat, soac)
+      reduceLike soac lambdas $ getStreamAccums form
 
     Left (SOAC.InvalidArrayInput inpe) ->
       badFusionGM $ Error
@@ -586,8 +573,16 @@ fusionGatherBody fres (Body _ (Let pat _ e:bnds) res) = do
 
     _ -> do
       let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
-      bres <- gatherBindingPattern pat $ fusionGatherBody fres $ mkBody bnds res
+      bres <- gatherBindingPattern pat $ fusionGatherBody fres body
       foldM fusionGatherExp bres (e:pat_vars)
+  where body = mkBody bnds res
+        rem_bnds = bnd : bnds
+
+        reduceLike soac lambdas nes = do
+          (used_lam, lres)  <- foldM fusionGatherLam (HS.empty, fres) lambdas
+          bres  <- bindingFamily pat $ fusionGatherBody lres body
+          bres' <- foldM fusionGatherSubExp bres nes
+          greedyFuse rem_bnds used_lam bres' (pat, soac)
 
 fusionGatherBody fres (Body _ [] res) =
   foldM fusionGatherExp fres $ map (PrimOp . SubExp) res
@@ -603,13 +598,15 @@ fusionGatherExp fres (DoLoop ctx val form loop_body) = do
 
   let pat_vars = map (Var . paramName)  merge_pat
   fres' <- foldM fusionGatherSubExp fres (ini_val++pat_vars)
-  fres'' <- case form of ForLoop _ bound ->
-                           fusionGatherSubExp fres' bound
-                         WhileLoop cond ->
-                           fusionGatherSubExp fres' $ Var cond
+  (fres'', form_idents) <- case form of
+    ForLoop i bound ->
+      (,) <$> fusionGatherSubExp fres' bound <*> pure [Ident i $ Prim int32]
+    WhileLoop cond ->
+      (,) <$> fusionGatherSubExp fres' (Var cond) <*> pure []
 
   let null_res = mkFreshFusionRes
-  new_res <- binding (map paramIdent merge_pat) $ fusionGatherBody null_res loop_body
+  new_res <- binding (form_idents ++ map paramIdent merge_pat) $
+    fusionGatherBody null_res loop_body
   -- make the inpArr unfusable, so that they
   -- cannot be fused from outside the loop:
   let (inp_arrs, _) = unzip $ HM.toList $ inpArr new_res
@@ -664,7 +661,7 @@ addVarToUnfusable fres name = do
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by
 -- adding inp_arrs to the unfusable set.
 fusionGatherLam :: (Names, FusedRes) -> Lambda -> FusionGM (HS.HashSet VName, FusedRes)
-fusionGatherLam (u_set,fres) (Lambda _ idds body _) = do
+fusionGatherLam (u_set,fres) (Lambda idds body _) = do
     let null_res = mkFreshFusionRes
     new_res <- binding (map paramIdent idds) $
                fusionGatherBody null_res body
@@ -706,9 +703,13 @@ fuseInExp :: Exp -> FusionGM Exp
 -- Handle loop specially because we need to bind the types of the
 -- merge variables.
 fuseInExp (DoLoop ctx val form loopbody) =
+  binding form_idents $
   bindingFParams (map fst $ ctx ++ val) $ do
     loopbody' <- fuseInBody loopbody
     return $ DoLoop ctx val form loopbody'
+  where form_idents = case form of
+          WhileLoop{} -> []
+          ForLoop i _ -> [Ident i $ Prim int32]
 
 fuseInExp e = mapExpM fuseIn e
 
@@ -722,16 +723,14 @@ fuseIn = identityMapper {
          }
 
 fuseInLambda :: Lambda -> FusionGM Lambda
-fuseInLambda (Lambda i params body rtp) = do
-  body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
-  return $ Lambda i params body' rtp
-  where i_ident = Ident i $ Prim int32
+fuseInLambda (Lambda params body rtp) = do
+  body' <- binding (map paramIdent params) $ fuseInBody body
+  return $ Lambda params body' rtp
 
 fuseInExtLambda :: ExtLambda -> FusionGM ExtLambda
-fuseInExtLambda (ExtLambda i params body rtp) = do
-  body' <- binding (i_ident : map paramIdent params) $ fuseInBody body
-  return $ ExtLambda i params body' rtp
-  where i_ident = Ident i $ Prim int32
+fuseInExtLambda (ExtLambda params body rtp) = do
+  body' <- binding (map paramIdent params) $ fuseInBody body
+  return $ ExtLambda params body' rtp
 
 replaceSOAC :: Pattern -> SOAC -> Body -> FusionGM Body
 replaceSOAC (Pattern _ []) _ body = return body
@@ -761,7 +760,7 @@ insertKerSOAC names ker body = do
   let new_soac = fsoac ker
       lam = SOAC.lambda new_soac
       args = replicate (length $ lambdaParams lam) Nothing
-  lam' <- simplifyLambda lam (SOAC.width new_soac) Nothing args
+  lam' <- simplifyLambda lam Nothing args
   (_, nfres) <- fusionGatherLam (HS.empty, mkFreshFusionRes) lam'
   let nfres' =  cleanFusionResult nfres
   lam''      <- bindRes nfres' $ fuseInLambda lam'

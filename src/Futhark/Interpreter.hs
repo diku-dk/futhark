@@ -512,13 +512,16 @@ evalPrimOp (Index _ ident idxs) = do
                         bt resshape]
     _ -> bad $ TypeError "evalPrimOp Index: ident is not an array"
 
-evalPrimOp (Iota e x) = do
+evalPrimOp (Iota e x s) = do
   v1 <- evalSubExp e
   v2 <- evalSubExp x
-  case (v1, v2) of
-    (PrimVal (IntValue (Int32Value e')), PrimVal (IntValue (Int32Value x')))
+  v3 <- evalSubExp s
+  case (v1, v2, v3) of
+    (PrimVal (IntValue (Int32Value e')),
+     PrimVal (IntValue (Int32Value x')),
+     PrimVal (IntValue (Int32Value s')))
       | e' >= 0    ->
-        return [ArrayVal (listArray (0,fromIntegral e'-1) $ map value [x'..x'+e'-1])
+        return [ArrayVal (listArray (0,fromIntegral e'-1) $ map value [x',x'+s'..x'+(e'-1)*s'])
                 int32 [fromIntegral e']]
       | otherwise ->
         bad $ NegativeIota $ fromIntegral x'
@@ -562,7 +565,7 @@ evalPrimOp e@(Reshape _ shapeexp arrexp) = do
       bad $ TypeError "Reshape given a non-array argument"
 
 evalPrimOp (Rearrange _ perm arrexp) =
-  single <$> permuteArray perm <$> lookupVar arrexp
+  single . permuteArray perm <$> lookupVar arrexp
 
 evalPrimOp (Split _ sizeexps arrexp) = do
   sizes <- mapM (asInt "evalPrimOp Split" <=< evalSubExp) sizeexps
@@ -637,18 +640,15 @@ evalPrimOp (Partition _ n flags arrs) = do
         divide _ (i,_) =
           bad $ TypeError $ "Partition key " ++ pretty i ++ " is not an integer."
 
+
 evalSOAC :: SOAC SOACS -> FutharkM [Value]
 
 evalSOAC (Stream _ w form elam arrs) = do
   let accs = getStreamAccums form
   accvals <- mapM evalSubExp accs
   arrvals <- mapM lookupVar  arrs
-  let ExtLambda i elam_params elam_body elam_rtp = elam
-      bind_i = (Ident i (Prim int32),
-                BindVar,
-                PrimVal $ IntValue $ Int32Value 0)
-  let fun funargs = binding (bind_i :
-                             zip3 (map paramIdent elam_params)
+  let ExtLambda elam_params elam_body elam_rtp = elam
+  let fun funargs = binding (zip3 (map paramIdent elam_params)
                                   (repeat BindVar)
                                   funargs) $
                     evalBody elam_body
@@ -658,32 +658,32 @@ evalSOAC (Stream _ w form elam arrs) = do
   return $ valueShapeContext elam_rtp vs ++ vs
 
 evalSOAC (Map _ w fun arrexps) = do
-  vss' <- zipWithM (applyLambda fun) [0..] =<< soacArrays w arrexps
+  vss' <- mapM (applyLambda fun) =<< soacArrays w arrexps
   arrays (lambdaReturnType fun) vss'
 
 evalSOAC (Reduce _ w _ fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startaccs <- mapM evalSubExp accexps
-  let foldfun acc (i, x) = applyLambda fun i $ acc ++ x
-  foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
+  let foldfun acc x = applyLambda fun $ acc ++ x
+  foldM foldfun startaccs =<< soacArrays w arrexps
 
 evalSOAC (Scan _ w fun inputs) = do
   let (accexps, arrexps) = unzip inputs
   startvals <- mapM evalSubExp accexps
   (acc, vals') <- foldM scanfun (startvals, []) =<<
-                  (zip [0..] <$> soacArrays w arrexps)
+                  soacArrays w arrexps
   arrays (map valueType acc) $ reverse vals'
-    where scanfun (acc, l) (i,x) = do
-            acc' <- applyLambda fun i $ acc ++ x
+    where scanfun (acc, l) x = do
+            acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
 evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   if res_len == acc_len
-  then foldM foldfun startaccs =<< (zip [0..] <$> soacArrays w arrexps)
+  then foldM foldfun startaccs =<< soacArrays w arrexps
   else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
           (acc_res, arr_res) <- foldM foldfun' startaccs' =<<
-                                (zip [0..] <$> soacArrays w arrexps)
+                                soacArrays w arrexps
           arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
           return $ acc_res ++ arr_res_fut
     where
@@ -691,28 +691,79 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
         res_len        = length lam_ret_tp
         acc_len        = length accexp
         lam_ret_arr_tp = drop acc_len lam_ret_tp
-        foldfun  acc (i,x) = applyLambda innerfun i $ acc ++ x
-        foldfun' (acc,arr) (i,x) = do
-            res_lam <- applyLambda innerfun i $ acc ++ x
+        foldfun  acc x = applyLambda innerfun $ acc ++ x
+        foldfun' (acc,arr) x = do
+            res_lam <- applyLambda innerfun $ acc ++ x
             let res_acc = take acc_len res_lam
                 res_arr = drop acc_len res_lam
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
+
+evalSOAC (Write _cs _ts i vs as) = do
+  i' <- lookupVar i
+  vs' <- mapM lookupVar vs
+  as' <- mapM lookupVar as
+
+  (iArr, iLength) <- case i' of
+    ArrayVal iArr _iPrim [iLength] -> return (iArr, iLength)
+    _ -> bad $ TypeError "evalSOAC Write: Wrong type for indices array"
+
+  (vArrs, vPrimTypes, vShapes) <-
+    unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for values array") vs'
+
+  (aArrs, aPrimTypes, aShapes) <-
+    unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for 'array' array") as'
+
+  let vShapeOuter : _ = head vShapes -- same for all lists
+  let aShapeOuter : _ = head aShapes -- same for all lists
+
+  unless (vPrimTypes == aPrimTypes)
+    $ bad $ TypeError "evalSOAC Write: Inconsistent types"
+
+  unless (iLength == vShapeOuter)
+    $ bad $ TypeError "evalSOAC Write: Wrong shapes"
+
+  let handlePair arrs iter = do
+        let arrIndex = iArr ! iter
+        idx <- case arrIndex of
+          IntValue (Int32Value arrIndex') -> return arrIndex'
+          _ -> bad $ TypeError "evalSOAC Write: Wrong index type"
+
+        if idx < 0 || idx >= fromIntegral aShapeOuter
+          then return arrs
+          else do
+          let updatess = [ [ (iBase + iOffset, vArr ! (iterBase + iOffset))
+                           | iOffset <- [0..prod - 1]
+                           ]
+                         | (vArr, vShape) <- zip vArrs vShapes,
+                           let prod = product $ tail vShape
+                               iterBase = prod * iter
+                               iBase = prod * fromIntegral idx
+                         ]
+          return [ arr // updates
+                 | (arr, updates) <- zip arrs updatess
+                 ]
+
+  ress <- foldM handlePair aArrs [0..iLength - 1]
+  return $ zipWith3 ArrayVal ress aPrimTypes aShapes
+
+toArrayVal :: String -> Value -> FutharkM (Array Int PrimValue, PrimType, [Int])
+toArrayVal err v = case v of
+  ArrayVal a b c -> return (a, b, c)
+  _ -> bad $ TypeError err
+
 
 evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do
   fun <- lookupFun fname
   fun args
 
-applyLambda :: Lambda -> Int32 -> [Value] -> FutharkM [Value]
-applyLambda (Lambda i params body rettype) j args = do
-  v <- binding (bind_i : zip3 (map paramIdent params) (repeat BindVar) args) $
+applyLambda :: Lambda -> [Value] -> FutharkM [Value]
+applyLambda (Lambda params body rettype) args = do
+  v <- binding (zip3 (map paramIdent params) (repeat BindVar) args) $
        evalBody body
   checkReturnShapes (staticShapes rettype) v
   return v
-  where bind_i = (Ident i $ Prim int32,
-                 BindVar,
-                 PrimVal $ value j)
 
 checkReturnShapes :: [TypeBase ExtShape u] -> [Value] -> FutharkM ()
 checkReturnShapes = zipWithM_ checkShape

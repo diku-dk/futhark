@@ -8,7 +8,6 @@ import Control.Monad
 import Data.List
 
 import Prelude
-import NeatInterpolation()
 
 import Futhark.Representation.AST.Attributes.Constants
 import Futhark.Representation.ExplicitMemory (Prog)
@@ -23,38 +22,32 @@ import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 
 --maybe pass the config file rather than multiple arguments
-compileProg :: MonadFreshNames m => Bool -> Prog ->  m (Either String String)
-compileProg as_module prog = do
+compileProg :: MonadFreshNames m => Maybe String -> Prog ->  m (Either String String)
+compileProg module_name prog = do
   res <- ImpGen.compileProg prog
   --could probably be a better why do to this..
-  let initCL = if as_module then [] else [openClInit]
   case res of
     Left err -> return $ Left err
     Right (Imp.Program opencl_code opencl_prelude kernel_names prog')  -> do
       --prepare the strings for assigning the kernels and set them as global
-      let assigned = map (\x -> Assign (Var (x++"_var")) (Var $ "program."++x)) kernel_names
-      let assign_concat = intercalate "\n" $ map pretty assigned
-      let kernel_declare = map (\x -> "global " ++ x ++ "_var") kernel_names
-      let kernel_concat = intercalate "\n" kernel_declare
+      let assign = unlines $ map (\x -> pretty $ Assign (Var ("self."++x++"_var")) (Var $ "program."++x)) kernel_names
 
       let defines =
             [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
-             Assign (Var "ctx") $ Constant $ value (0::Int),
-             Assign (Var "program") $ Constant $ value (0::Int),
-             Assign (Var "queue") $ Constant $ value (0::Int),
-             Assign (Var "synchronise") $ Constant $ value False,
-             Escape pyUtility,
-             Escape pyTestMain,
-             Escape $ openClDecls (opencl_prelude ++ "\n" ++ opencl_code) assign_concat kernel_concat,
-             Escape $ unlines initCL]
+             Assign (Var "cl_group_size") $ Constant $ value (512::Int32),
+             Assign (Var "synchronous") $ Constant $ value False,
+             Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
+             Escape pyTestMain]
       let imports = [Import "sys" Nothing,
                      Import "numpy" $ Just "np",
                      Import "ctypes" $ Just "ct",
                      Import "pyopencl" $ Just "cl",
                      Import "time" Nothing]
 
-      Right <$> Py.compileProg as_module imports defines operations ()
-        [Exp $ Call "queue.finish" []] [] prog'
+      let constructor = Py.Constructor ["self"] [Escape $ openClInit assign]
+
+      Right <$> Py.compileProg module_name constructor imports defines operations ()
+        [Exp $ Call "self.queue.finish" []] [] prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations
                      { Py.opsCompiler = callKernel
@@ -91,11 +84,11 @@ callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
 launchKernel :: String -> [PyExp] -> PyExp -> [Imp.KernelArg] -> Py.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims args = do
   let kernel_dims' = Tuple $ map asLong kernel_dims
-  let kernel_name' = kernel_name ++ "_var"
+  let kernel_name' = "self." ++ kernel_name ++ "_var"
   args' <- mapM processKernelArg args
   Py.stm $ Exp $ Call (kernel_name' ++ ".set_args") $ map Arg args'
   Py.stm $ Exp $ Call "cl.enqueue_nd_range_kernel"
-    [Arg $ Var "queue", Arg $ Var kernel_name',
+    [Arg $ Var "self.queue", Arg $ Var kernel_name',
      Arg kernel_dims', Arg workgroup_dims]
   finishIfSynchronous
   where processKernelArg :: Imp.KernelArg -> Py.CompilerM op s PyExp
@@ -110,10 +103,10 @@ launchKernel kernel_name kernel_dims workgroup_dims args = do
 writeOpenCLScalar :: Py.WriteScalar Imp.OpenCL ()
 writeOpenCLScalar mem i bt "device" val = do
   let mem' = Var $ pretty mem
-  let nparr = Call "array"
+  let nparr = Call "np.array"
               [Arg val, ArgKeyword "dtype" $ Var $ Py.compilePrimType bt]
   Py.stm $ Exp $ Call "cl.enqueue_copy"
-    [Arg $ Var "queue", Arg mem', Arg nparr,
+    [Arg $ Var "self.queue", Arg mem', Arg nparr,
      ArgKeyword "device_offset" $ asLong i,
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
@@ -125,11 +118,11 @@ readOpenCLScalar mem i bt "device" = do
   val <- newVName "read_res"
   let val' = Var $ pretty val
   let mem' = Var $ pretty mem
-  let nparr = Call "empty" [Arg $ Constant $ value (1::Int32),
-                            ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
+  let nparr = Call "np.empty" [Arg $ Constant $ value (1::Int32),
+                               ArgKeyword "dtype" (Var $ Py.compilePrimType bt)]
   Py.stm $ Assign val' nparr
   Py.stm $ Exp $ Call "cl.enqueue_copy"
-    [Arg $ Var "queue", Arg val', Arg mem',
+    [Arg $ Var "self.queue", Arg val', Arg mem',
      ArgKeyword "device_offset" $ asLong i,
      ArgKeyword "is_blocking" $ Constant $ BoolValue True]
   return $ Index val' $ IdxExp $ Constant $ value (0::Int32)
@@ -140,7 +133,7 @@ readOpenCLScalar _ _ _ space =
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
   let cond' = Cond (BinaryOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
-  let call' = Call "cl.Buffer" [Arg $ Var "ctx",
+  let call' = Call "cl.Buffer" [Arg $ Var "self.ctx",
                                 Arg $ Var "cl.mem_flags.READ_WRITE",
                                 Arg $ asLong cond']
   Py.stm $ Assign (Var $ pretty mem) call'
@@ -155,8 +148,9 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
   let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
   let end = BinaryOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
-  Py.stm $ Exp $ Call "cl.enqueue_copy"
-    [Arg $ Var "queue", Arg dest, Arg srcmem',
+  Py.stm $ ifNotZeroSize nbytes $
+    Exp $ Call "cl.enqueue_copy"
+    [Arg $ Var "self.queue", Arg dest, Arg srcmem',
      ArgKeyword "device_offset" $ asLong srcidx,
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
@@ -166,26 +160,30 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultS
   let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
   let end = BinaryOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
-  Py.stm $ Exp $ Call "cl.enqueue_copy"
-    [Arg $ Var "queue", Arg destmem', Arg src,
+  Py.stm $ ifNotZeroSize nbytes $
+    Exp $ Call "cl.enqueue_copy"
+    [Arg $ Var "self.queue", Arg destmem', Arg src,
      ArgKeyword "device_offset" $ asLong destidx,
      ArgKeyword "is_blocking" $ Var "synchronous"]
 
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "device") nbytes _ = do
   let destmem' = Var $ pretty destmem
   let srcmem'  = Var $ pretty srcmem
-  let cond = BinaryOp ">" nbytes (Constant $ value (0::Int32))
-  let tb = Exp $ Call "cl.enqueue_copy"
-           [Arg $ Var "queue", Arg destmem', Arg srcmem',
-            ArgKeyword "dest_offset" $ asLong destidx,
-            ArgKeyword "src_offset" $ asLong srcidx,
-            ArgKeyword "byte_count" $ asLong nbytes]
-  Py.stm $ If cond [tb] []
+  Py.stm $ ifNotZeroSize nbytes $
+    Exp $ Call "cl.enqueue_copy"
+    [Arg $ Var "self.queue", Arg destmem', Arg srcmem',
+     ArgKeyword "dest_offset" $ asLong destidx,
+     ArgKeyword "src_offset" $ asLong srcidx,
+     ArgKeyword "byte_count" $ asLong nbytes]
   finishIfSynchronous
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
+ifNotZeroSize :: PyExp -> PyStmt -> PyStmt
+ifNotZeroSize e s =
+  If (BinaryOp "!=" e (Constant $ value (0::Int32))) [s] []
+
 finishIfSynchronous :: Py.CompilerM op s ()
 finishIfSynchronous =
-  Py.stm $ If (Var "synchronous") [Exp $ Call "queue.finish" []] []
+  Py.stm $ If (Var "synchronous") [Exp $ Call "self.queue.finish" []] []

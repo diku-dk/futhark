@@ -31,7 +31,6 @@ import Language.Futhark.Renamer
   (tagProg', untagPattern)
 import Futhark.FreshNames hiding (newName)
 import qualified Futhark.FreshNames
-import Futhark.Util.Pretty
 
 -- | Information about an error during type checking.  The 'Show'
 -- instance for this type produces a human-readable description.
@@ -507,8 +506,8 @@ unifyTupleArrayElemTypes :: Monoid (as vn) =>
                             TupleArrayElemTypeBase Rank as vn
                          -> TupleArrayElemTypeBase Rank as vn
                          -> Maybe (TupleArrayElemTypeBase Rank as vn)
-unifyTupleArrayElemTypes (PrimArrayElem bt1 als1) (PrimArrayElem bt2 als2)
-  | bt1 == bt2 = Just $ PrimArrayElem bt1 $ als1 <> als2
+unifyTupleArrayElemTypes (PrimArrayElem bt1 als1 u1) (PrimArrayElem bt2 als2 u2)
+  | bt1 == bt2 = Just $ PrimArrayElem bt1 (als1 <> als2) (u1 <> u2)
   | otherwise  = Nothing
 unifyTupleArrayElemTypes (ArrayArrayElem at1) (ArrayArrayElem at2) =
   ArrayArrayElem <$> unifyArrayTypes at1 at2
@@ -556,7 +555,7 @@ require ts e
 
 rowTypeM :: Exp -> TypeM Type
 rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
-  where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ ppType (typeOf e) ++ "."
+  where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ pretty (typeOf e) ++ "."
 
 -- | Type check a program containing arbitrary no information,
 -- yielding either a type error or a program with complete type
@@ -706,7 +705,7 @@ checkExp (ArrayLit es _ loc) ta = do
                   | Just elemt' <- elemt `unifyTypes` typeOf eleme =
                     return elemt'
                   | otherwise =
-                    bad $ TypeError loc $ ppExp eleme ++ " is not of expected type " ++ ppType elemt ++ "."
+                    bad $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (typeOf e) es''
 
   let lit = ArrayLit es' (Info et) loc
@@ -789,7 +788,7 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) ta = do
 
   unless (unique $ unInfo $ identType src') $
     bad $ TypeError pos $ "Source '" ++ pretty (baseName $ identName src) ++
-    "' has type " ++ ppType (unInfo $ identType src') ++ ", which is not unique"
+    "' has type " ++ pretty (unInfo $ identType src') ++ ", which is not unique"
 
   case peelArray (length idxes) (unInfo $ identType src') of
     Nothing -> bad $ IndexingError
@@ -821,7 +820,7 @@ checkExp (Size i e pos) ta = do
       | i >= 0 && i < arrayRank (typeOf e') ->
         return $ Size i e' pos
       | otherwise ->
-        bad $ TypeError pos $ "Type " ++ ppType (typeOf e') ++ " has no dimension " ++ show i ++ "."
+        bad $ TypeError pos $ "Type " ++ pretty (typeOf e') ++ " has no dimension " ++ show i ++ "."
     _        -> bad $ TypeError pos "Argument to size must be array."
 
 checkExp (Replicate countexp valexp pos) ta = do
@@ -855,21 +854,23 @@ checkExp (Zip arrexps loc) ta = do
     let arrt = typeOf arrexp
     when (arrayRank arrt < 1) $
       bad $ TypeError (srclocOf arrexp) $
-      "Type of expression is not array, but " ++ ppType arrt ++ "."
+      "Type of expression is not array, but " ++ pretty arrt ++ "."
     return arrt
   return $ Zip (zip arrexps' $ map Info arrts) loc
 
 checkExp (Unzip e _ pos) ta = do
   e' <- checkExp e ta
   case typeOf e' of
-    Array (TupleArray ets shape u) ->
+    Array (TupleArray ets shape _) ->
       let componentType et =
-            arrayOf (tupleArrayElemToType et) shape u
+            let et' = tupleArrayElemToType et
+                u' = tupleArrayElemUniqueness et
+            in arrayOf et' shape u'
       in return $ Unzip e' (map (Info . componentType) ets) pos
     t ->
       bad $ TypeError pos $
       "Argument to unzip is not an array of tuples, but " ++
-      ppType t ++ "."
+      pretty t ++ "."
 
 checkExp (Unsafe e loc) ta =
   Unsafe <$> checkExp e ta <*> pure loc
@@ -883,11 +884,12 @@ checkExp (Reduce comm fun startexp arrexp pos) ta = do
   (startexp', startarg) <- checkArg startexp ta
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp ta
   fun' <- checkLambda fun [startarg, arrarg] ta
+
   let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but reduce function returns type " ++ ppType redtype ++ "."
-  unless (inrowt `subtypeOf` redtype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but reduce function returns type " ++ ppType redtype ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
+  unless (argType arrarg `subtypeOf` redtype) $
+    bad $ TypeError pos $ "Array element value is of type " ++ pretty (argType arrarg) ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   return $ Reduce comm fun' startexp' arrexp' pos
 
 checkExp (Scan fun startexp arrexp pos) ta = do
@@ -896,9 +898,9 @@ checkExp (Scan fun startexp arrexp pos) ta = do
   fun' <- checkLambda fun [startarg, arrarg] ta
   let scantype = lambdaType fun' [typeOf startexp', typeOf arrexp']
   unless (typeOf startexp' `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Initial value is of type " ++ ppType (typeOf startexp') ++ ", but scan function returns type " ++ ppType scantype ++ "."
+    bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
   unless (inrowt `subtypeOf` scantype) $
-    bad $ TypeError pos $ "Array element value is of type " ++ ppType inrowt ++ ", but scan function returns type " ++ ppType scantype ++ "."
+    bad $ TypeError pos $ "Array element value is of type " ++ pretty inrowt ++ ", but scan function returns type " ++ pretty scantype ++ "."
   return $ Scan fun' startexp' arrexp' pos
 
 checkExp (Filter fun arrexp pos) ta = do
@@ -948,7 +950,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
         let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
         unless (typeOf acc' `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
-                  ppType (typeOf acc') ++ ", but reduce fun returns type "++ppType redtype++"."
+                  pretty (typeOf acc') ++ ", but reduce fun returns type "++pretty redtype++"."
         return (RedLike o comm lam0' acc', Just(acc',accarg))
       Sequential acc -> do
         (acc',accarg) <- checkArg acc ta
@@ -1144,6 +1146,28 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
                     form'
                     loopbody' letbody' loc
 
+checkExp (Write i v a pos) ta = do
+  i' <- checkExp i ta
+  v' <- checkExp v ta
+  (a', aflow) <- collectDataflow $ checkExp a ta
+
+  let it = typeOf i'
+      at = typeOf a'
+  checkWriteIndexes it
+  _ <- unifyExpTypes v' a'
+
+  if unique at
+    then occur $ usageOccurences aflow `seqOccurences` [consumption (aliases at) pos]
+    else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
+         "' has type " ++ pretty at ++ ", which is not unique."
+
+  return (Write i' v' a' pos)
+
+  where checkWriteIndexes it = case it of
+          Array (PrimArray (Signed Int32) (Rank 1) _uniqueness _annotations) ->
+            return ()
+          _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
+
 checkSOACArrayArg :: ExpBase NoInfo VName
                   -> TypeAliasMap
                   -> TypeM (Exp, Arg)
@@ -1161,7 +1185,7 @@ checkLiteral loc (TupValue vals) = do
 checkLiteral loc (ArrayValue arr rt) = do
   vals <- mapM (checkLiteral loc) (elems arr)
   case find ((/=rt) . removeNames . valueType) vals of
-    Just wrong -> bad $ TypeError loc $ ppValue wrong ++ " is not of expected type " ++ ppType rt ++ "."
+    Just wrong -> bad $ TypeError loc $ pretty wrong ++ " is not of expected type " ++ pretty rt ++ "."
     _          -> return ()
   return $ ArrayValue (listArray (bounds arr) vals) rt
 
@@ -1392,41 +1416,39 @@ checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] ta = do
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) args ta =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppUnOp unop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameFromString $ pretty unop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args ta =
   checkPolyLambdaOp op [] args ta loc
 
-checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] ta = do
-  x' <- checkExp x ta
-  y <- newIdent "y" (argType arg) loc
-  xvar <- newIdent "x" (typeOf x') loc
-  binding [y, xvar] $ do
-    e <- checkExp (BinOp binop (Var $ untype xvar) (Var $ untype y) NoInfo loc) ta
-    return $ CurryBinOpLeft binop x' (Info $ argType arg) (Info $ typeOf e) loc
-  where untype (Ident name _ varloc) = Ident name NoInfo varloc
+checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] ta =
+  checkCurryBinOp CurryBinOpLeft binop x loc arg ta
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args ta =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x _ _ loc) [arg] ta = do
+checkLambda (CurryBinOpRight binop x _ _ loc) [arg] ta =
+  checkCurryBinOp CurryBinOpRight binop x loc arg ta
+
+checkLambda (CurryBinOpRight binop _ _ _ loc) args ta =
+  bad $ ParameterMismatch (Just $ nameFromString $ pretty binop) loc (Left 1) $
+  map (toStructural . argType) args
+
+checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> SrcLoc -> b)
+                -> BinOp -> ExpBase NoInfo VName -> SrcLoc -> Arg -> TypeAliasMap -> TypeM b
+checkCurryBinOp f binop x loc arg ta = do
   x' <- checkExp x ta
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
     e <- checkExp (BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc) ta
-    return $ CurryBinOpRight binop x' (Info $ argType arg) (Info $ typeOf e) loc
+    return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
-checkLambda (CurryBinOpRight binop _ _ _ loc) args ta =
-  bad $ ParameterMismatch (Just $ nameFromString $ ppBinOp binop) loc (Left 1) $
-  map (toStructural . argType) args
-
 checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg] -> TypeAliasMap
-                  -> SrcLoc
-                  -> TypeM Lambda
+                  -> SrcLoc -> TypeM Lambda
 checkPolyLambdaOp op curryargexps args ta pos = do
   curryargexpts <- map typeOf <$> mapM (`checkExp` ta) curryargexps
   let argts = [ argt | (argt, _, _) <- args ]
@@ -1453,7 +1475,7 @@ checkPolyLambdaOp op curryargexps args ta pos = do
      (TypeDecl (vacuousShapeAnnotations' $ toStruct $ typeOf body) NoInfo) pos)
     args
     ta
-  where fname = nameFromString $ ppBinOp op
+  where fname = nameFromString $ pretty op
 
 checkRetType :: SrcLoc -> StructType -> TypeM ()
 checkRetType loc (Tuple ts) = mapM_ (checkRetType loc) ts
@@ -1652,7 +1674,7 @@ expandTupleArrayType (UserTypeAlias a) taTable =
     Just (t, _) -> expandTupleArrayType t taTable
     Nothing -> Left $ UndefinedAlias' a
 expandTupleArrayType (UserPrim p) _ =
-  return $ PrimArrayElem p NoInfo
+  return $ PrimArrayElem p NoInfo Nonunique
 expandTupleArrayType (UserArray t shape uni) taTable = do
   t' <- expandArrayType t shape uni taTable
   return $ ArrayArrayElem t'
@@ -1743,7 +1765,7 @@ expandTupleArrayType2 (UserTypeAlias a) taTable =
     Just t -> expandTupleArrayType2' t taTable
     Nothing -> Left $ UndefinedAlias' a
 expandTupleArrayType2 (UserPrim p) _ =
-  return $ PrimArrayElem p NoInfo
+  return $ PrimArrayElem p NoInfo Nonunique
 expandTupleArrayType2 (UserArray t shape uni) taTable = do
   t' <- expandArrayType2 t shape uni taTable
   return $ ArrayArrayElem t'
@@ -1757,7 +1779,7 @@ expandTupleArrayType2' :: TypeBase ShapeDecl NoInfo VName
                        -> TypeAliasMap
                        -> Either TypeError (TupleArrayElemTypeBase ShapeDecl NoInfo VName)
 expandTupleArrayType2' (Prim p) _ =
-  return $ PrimArrayElem p NoInfo
+  return $ PrimArrayElem p NoInfo Nonunique -- Uniqueness is marked in the root TypeBase
 expandTupleArrayType2' (Array t) taTable =
   return $ ArrayArrayElem t
 
@@ -1786,7 +1808,7 @@ contractArrayTypeBase (TupleArray tps _ _) =
 
 contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase ShapeDecl NoInfo VName
                                -> UserType VName
-contractTupleArrayElemTypeBase (PrimArrayElem p _) =
+contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
   UserPrim p
 contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
   contractArrayTypeBase arrtpbase

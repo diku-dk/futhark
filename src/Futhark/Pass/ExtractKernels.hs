@@ -231,11 +231,11 @@ sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Map _ _ lam _)))
   | unbalancedLambda lam = do
       types <- asksScope scopeForSOACs
-      Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
+      Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ _ lam1 lam2 _ _)))
   | unbalancedLambda lam1 || unbalancedLambda lam2 = do
       types <- asksScope scopeForSOACs
-      Just <$> snd <$> runBinderT (FOT.transformSOAC pat soac) types
+      Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding _ =
   return Nothing
 
@@ -350,6 +350,10 @@ transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   transformBindings =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
+transformBinding (Let pat () (Op (Write cs t i v a))) =
+  -- It really is this simple (right now).
+  return [Let pat () (Op (WriteKernel cs t i v a))]
+
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd
 
@@ -365,7 +369,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askScope
   let env = KernelEnv { kernelNest =
                         singleNesting (Nesting mempty $
-                                       MapNesting pat cs w (lambdaIndex lam) $
+                                       MapNesting pat cs w $
                                        zip (lambdaParams lam) arrs)
                       , kernelScope =
                         types <> scopeForKernels (scopeOf lam)
@@ -468,7 +472,7 @@ mapNesting pat cs w lam arrs = local $ \env ->
       , kernelScope = kernelScope env <> scopeForKernels (scopeOf lam)
       }
   where nest = Nesting mempty $
-               MapNesting pat cs w (lambdaIndex lam) $
+               MapNesting pat cs w $
                zip (lambdaParams lam) arrs
 
 unbalancedLambda :: Lambda -> Bool
@@ -495,6 +499,8 @@ unbalancedLambda lam =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Stream _ w _ _ _)) =
           w `subExpBound` bound
+        unbalancedBinding _ (Op Write{}) =
+          False
         unbalancedBinding bound (DoLoop _ merge (ForLoop i iterations) body) =
           iterations `subExpBound` bound ||
           unbalancedBody bound' body
@@ -546,7 +552,6 @@ leavingNesting (MapLoop cs w lam arrs) acc =
              lam' = Lambda { lambdaBody = body
                            , lambdaReturnType = map rowType $ patternTypes pat
                            , lambdaParams = used_params
-                           , lambdaIndex = lambdaIndex lam
                            }
          in addSOACtoKernel pat (Map cs w lam' used_arrs)
             acc' { kernelBindings = [] }
@@ -620,13 +625,8 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Scan cs w lam input))) acc =
       | Just perm <- res `isPermutationOf` map Var (patternNames pat) -> do
           lam' <- FOT.transformLambda lam
           localScope (typeEnvFromKernelAcc acc') $
-            segmentedScanKernel nest perm cs w lam' input >>= \case
-              Nothing ->
-                addBindingToKernel bnd acc
-              Just bnds -> do
-                addKernels kernels
-                addKernel bnds
-                return acc'
+            segmentedScanKernel nest perm cs w lam' input >>=
+            kernelOrNot bnd acc kernels acc'
     _ ->
       addBindingToKernel bnd acc
 
@@ -641,15 +641,25 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Reduce cs w comm lam input))) acc =
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res ->
           localScope (typeEnvFromKernelAcc acc') $ do
           lam' <- FOT.transformLambda lam
-          regularSegmentedReduceKernel nest perm cs w comm lam' input >>= \case
-            Nothing ->
-              addBindingToKernel bnd acc
-            Just bnds -> do
-              addKernels kernels
-              addKernel bnds
-              return acc'
+          regularSegmentedReduceKernel nest perm cs w comm lam' input >>=
+            kernelOrNot bnd acc kernels acc'
     _ ->
       addBindingToKernel bnd acc
+
+maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
+  | [t] <- patternTypes pat = do
+      -- XXX: We need a temporary dummy binding to prevent an empty
+      -- map body.  The kernel extractor does not like empty map
+      -- bodies.
+      tmp <- newVName "tmp"
+      let rowt = rowType t
+          newbnd = Let pat attr $ Op $ Map [] n lam []
+          tmpbnd = Let (Pattern [] [PatElem tmp BindVar rowt]) () $ PrimOp $ SubExp v
+          lam = Lambda { lambdaReturnType = [rowt]
+                       , lambdaParams = []
+                       , lambdaBody = mkBody [tmpbnd] [Var tmp]
+                       }
+      maybeDistributeBinding newbnd acc
 
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc = do
   acc' <- distribute acc
@@ -812,3 +822,13 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
 
 
     m pat flat_pat nesting_size total_num_elements op_inps'
+
+kernelOrNot :: Binding -> KernelAcc
+            -> PostKernels -> KernelAcc -> Maybe [Out.Binding]
+            -> KernelM KernelAcc
+kernelOrNot bnd acc _ _ Nothing =
+  addBindingToKernel bnd acc
+kernelOrNot _ _ kernels acc' (Just bnds) = do
+  addKernels kernels
+  addKernel bnds
+  return acc'

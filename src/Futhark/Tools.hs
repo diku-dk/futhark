@@ -8,9 +8,10 @@ module Futhark.Tools
   , redomapToMapAndReduce
   , sequentialStreamWholeArray
   , singletonChunkRedLikeStreamLambda
-  , partitionChunkedLambdaParameters
   , extLambdaToLambda
   , partitionChunkedFoldParameters
+  , partitionChunkedKernelLambdaParameters
+  , partitionChunkedKernelFoldParameters
 
   , intraproceduralTransformation
   )
@@ -99,8 +100,6 @@ sequentialStreamWholeArrayBindings :: Bindable lore =>
 sequentialStreamWholeArrayBindings width accs lam arrs =
   let (chunk_param, acc_params, arr_params) =
         partitionChunkedFoldParameters (length accs) $ extLambdaParams lam
-      index_bnd = mkLet' [] [Ident (extLambdaIndex lam) $ Prim int32] $
-                  PrimOp $ SubExp $ intConst Int32 0
       chunk_bnd = mkLet' [] [paramIdent chunk_param] $ PrimOp $ SubExp width
       acc_bnds = [ mkLet' [] [paramIdent acc_param] $ PrimOp $ SubExp acc
                  | (acc_param, acc) <- zip acc_params accs ]
@@ -108,8 +107,7 @@ sequentialStreamWholeArrayBindings width accs lam arrs =
                    PrimOp $ Reshape [] (map DimCoercion $ arrayDims $ paramType arr_param) arr
                  | (arr_param, arr) <- zip arr_params arrs ]
 
-  in (index_bnd :
-      chunk_bnd :
+  in (chunk_bnd :
       acc_bnds ++
       arr_bnds ++
       bodyBindings (extLambdaBody lam),
@@ -162,7 +160,6 @@ singletonChunkRedLikeStreamLambda acc_ts lam = do
   return Lambda { lambdaBody = unchunked_body
                 , lambdaParams = acc_params <> unchunked_arr_params
                 , lambdaReturnType = acc_ts
-                , lambdaIndex = extLambdaIndex lam
                 }
 
 -- | Convert an 'ExtLambda' to a 'Lambda' if the return type is
@@ -173,7 +170,6 @@ extLambdaToLambda lam = do
   return Lambda { lambdaReturnType = ret
                 , lambdaBody = extLambdaBody lam
                 , lambdaParams = extLambdaParams lam
-                , lambdaIndex = extLambdaIndex lam
                 }
 
 partitionChunkedFoldParameters :: Int -> [Param attr]
@@ -184,12 +180,20 @@ partitionChunkedFoldParameters num_accs (chunk_param : params) =
   let (acc_params, arr_params) = splitAt num_accs params
   in (chunk_param, acc_params, arr_params)
 
-partitionChunkedLambdaParameters :: [Param attr]
-                               -> (Param attr, [Param attr])
-partitionChunkedLambdaParameters [] =
-  error "partitionChunkedLambdaParameters: lambda takes no parameters"
-partitionChunkedLambdaParameters (chunk_param : params) =
-  (chunk_param, params)
+partitionChunkedKernelFoldParameters :: Int -> [Param attr]
+                                     -> (VName, Param attr, [Param attr], [Param attr])
+partitionChunkedKernelFoldParameters num_accs (i_param : chunk_param : params) =
+  let (acc_params, arr_params) = splitAt num_accs params
+  in (paramName i_param, chunk_param, acc_params, arr_params)
+partitionChunkedKernelFoldParameters _ _ =
+  error "partitionChunkedKernelFoldParameters: lambda takes too few parameters"
+
+partitionChunkedKernelLambdaParameters :: [Param attr]
+                                       -> (VName, Param attr, [Param attr])
+partitionChunkedKernelLambdaParameters (i_param : chunk_param : params) =
+  (paramName i_param, chunk_param, params)
+partitionChunkedKernelLambdaParameters _ =
+  error "partitionChunkedKernelLambdaParameters: lambda takes too few parameters"
 
 intraproceduralTransformation :: MonadFreshNames m =>
                                  (FunDef fromlore -> State VNameSource (FunDef tolore))

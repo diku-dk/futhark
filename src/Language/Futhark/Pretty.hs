@@ -1,33 +1,22 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
--- | Futhark prettyprinter.  This module defines 'Pretty' instances for the
--- AST defined in "Language.Futhark.Syntax", but also a number of
--- convenience functions if you don't want to use the interface from
--- 'Pretty'.
+-- | Futhark prettyprinter.  This module defines 'Pretty' instances
+-- for the AST defined in "Language.Futhark.Syntax" and re-exports
+-- "Futhark.Util.Pretty" for convenience.
 module Language.Futhark.Pretty
-  ( ppType
-  , ppValue
-  , ppUnOp
-  , ppBinOp
-  , ppExp
-  , ppLambda
-  , prettyPrint
+  ( module Futhark.Util.Pretty
   )
   where
 
 import Data.Array
 import Data.Hashable
+import Data.Word
 import qualified Data.HashSet as HS
 
-import Text.PrettyPrint.Mainland
+import Futhark.Util.Pretty
 
 import Language.Futhark.Syntax
 import Language.Futhark.Attributes
-
--- | The document @'apply' ds@ separates @ds@ with commas and encloses them with
--- parentheses.
-apply :: [Doc] -> Doc
-apply = parens . commasep . map align
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -75,10 +64,14 @@ instance Pretty PrimType where
   ppr Bool = text "bool"
 
 instance Pretty PrimValue where
-  ppr (UnsignedValue (Int8Value v)) = text (show v) <> text "u8"
-  ppr (UnsignedValue (Int16Value v)) = text (show v) <> text "u16"
-  ppr (UnsignedValue (Int32Value v)) = text (show v) <> text "u32"
-  ppr (UnsignedValue (Int64Value v)) = text (show v) <> text "u64"
+  ppr (UnsignedValue (Int8Value v)) =
+    text (show (fromIntegral v::Word8)) <> text "u8"
+  ppr (UnsignedValue (Int16Value v)) =
+    text (show (fromIntegral v::Word16)) <> text "u16"
+  ppr (UnsignedValue (Int32Value v)) =
+    text (show (fromIntegral v::Word32)) <> text "u32"
+  ppr (UnsignedValue (Int64Value v)) =
+    text (show (fromIntegral v::Word64)) <> text "u64"
   ppr (SignedValue v) = ppr v
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
@@ -89,15 +82,15 @@ instance Pretty Uniqueness where
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
-  ppr (PrimArrayElem bt _) = ppr bt
-  ppr (ArrayArrayElem at)   = ppr at
-  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
+  ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (ArrayArrayElem at)    = ppr at
+  ppr (TupleArrayElem ts)    = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase Rank as vn) where
-  ppr (PrimArrayElem bt _) = ppr bt
-  ppr (ArrayArrayElem at)   = ppr at
-  ppr (TupleArrayElem ts)   = braces $ commasep $ map ppr ts
+  ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
+  ppr (ArrayArrayElem at)    = ppr at
+  ppr (TupleArrayElem ts)    = braces $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (ArrayTypeBase ShapeDecl as vn) where
@@ -287,6 +280,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
     text "do" </>
     indent 2 (ppr loopbody) <+> text "in" </>
     ppr letbody
+  pprPrec _ (Write i v a _) = text "write" <> parens (commasep [ppr i, ppr v, ppr a])
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopFormBase ty vn) where
   ppr (For FromUpTo lbound i ubound) =
@@ -335,7 +329,7 @@ prettyBinOp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) =>
                Int -> BinOp -> ExpBase ty vn -> ExpBase ty vn -> Doc
 prettyBinOp p bop x y = parensIf (p > precedence bop) $
                         pprPrec (precedence bop) x <+/>
-                        text (ppBinOp bop) <+>
+                        ppr bop <+>
                         pprPrec (rprecedence bop) y
   where precedence LogAnd = 0
         precedence LogOr = 0
@@ -373,34 +367,3 @@ ppList :: (Pretty a) => [a] -> Doc
 ppList as = case map ppr as of
               []     -> empty
               a':as' -> foldl (</>) (a' <> comma) $ map (<> comma) as'
-
-render80 :: Pretty a => a -> String
-render80 = pretty 80 . ppr
-
--- | Prettyprint a value, wrapped to 80 characters.
-ppValue :: Value -> String
-ppValue = render80
-
--- | Prettyprint a type, wrapped to 80 characters.
-ppType :: Pretty (TypeBase shape as vn) => TypeBase shape as vn -> String
-ppType = render80
-
--- | Prettyprint a unary operator, wrapped to 80 characters.
-ppUnOp :: UnOp -> String
-ppUnOp = render80
-
--- | Prettyprint a binary operator, wrapped to 80 characters.
-ppBinOp :: BinOp -> String
-ppBinOp = render80
-
--- | Prettyprint an expression, wrapped to 80 characters.
-ppExp :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => ExpBase ty vn -> String
-ppExp = render80
-
--- | Prettyprint a lambda, wrapped to 80 characters.
-ppLambda :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => LambdaBase ty vn -> String
-ppLambda = render80
-
--- | Prettyprint an entire Futhark program, wrapped to 80 characters.
-prettyPrint :: (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => ProgBase ty vn -> String
-prettyPrint = render80

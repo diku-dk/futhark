@@ -235,10 +235,10 @@ toScalExp _ (PrimOp (SubExp (Constant val)))
     return $ Just $ Val val
 toScalExp look (PrimOp (CmpOp (CmpSlt t) x y))
   | typeIsOK $ IntType t =
-  Just <$> RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
+  Just . RelExp LTH0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (CmpOp (CmpSle t) x y))
   | typeIsOK $ IntType t =
-  Just <$> RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
+  Just . RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (PrimOp (CmpOp (CmpEq t) x y))
   | typeIsOK t = do
   x' <- subExpToScalExp' look x
@@ -246,9 +246,9 @@ toScalExp look (PrimOp (CmpOp (CmpEq t) x y))
   return $ Just $ RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
 toScalExp look (PrimOp (BinOp (Sub t) (Constant x) y))
   | typeIsOK $ IntType t, zeroIsh x =
-  Just <$> SNeg <$> subExpToScalExp' look y
+  Just . SNeg <$> subExpToScalExp' look y
 toScalExp look (PrimOp (UnOp AST.Not e)) =
-  Just <$> SNot <$> subExpToScalExp' look e
+  Just . SNot <$> subExpToScalExp' look e
 toScalExp look (PrimOp (BinOp bop x y))
   | Just f <- binOpScalExp bop =
   Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)

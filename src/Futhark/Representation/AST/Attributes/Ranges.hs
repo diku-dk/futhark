@@ -189,13 +189,16 @@ primOpRanges (BinOp (Mul t) x y) =
 primOpRanges (BinOp (SDiv t) x y) =
   [scalExpRange $ SE.SDiv (SE.subExpToScalExp x $ IntType t) (SE.subExpToScalExp y $ IntType t)]
 
-primOpRanges (Iota n x) =
+primOpRanges (Iota n x s) =
   [(Just $ ScalarBound x',
-    Just $ ScalarBound $ x' + n' - 1)]
+    Just $ ScalarBound $ x' + (n' - 1) * s')]
   where n' = case n of
           Var v        -> SE.Id v $ IntType Int32
           Constant val -> SE.Val val
         x' = case x of
+          Var v        -> SE.Id v $ IntType Int32
+          Constant val -> SE.Val val
+        s' = case s of
           Var v        -> SE.Id v $ IntType Int32
           Constant val -> SE.Val val
 primOpRanges (Replicate _ v) =

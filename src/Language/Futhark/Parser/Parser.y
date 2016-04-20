@@ -11,7 +11,7 @@ module Language.Futhark.Parser.Parser
   , ParserMonad
   , ReadLineMonad(..)
   , getLinesFromIO
-  , getLinesFromStrings
+  , getLinesFromTexts
   , getNoLines
   , newParserEnv
   )
@@ -25,6 +25,9 @@ import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
 import Data.Array
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import Data.Char (ord)
 import Data.Maybe (fromMaybe)
 import Data.Loc hiding (L) -- Lexer has replacements.
 import qualified Data.HashMap.Lazy as HM
@@ -67,7 +70,6 @@ import Language.Futhark.Parser.Lexer
       u32             { L $$ U32 }
       u64             { L $$ U64 }
       bool            { L $$ BOOL }
-      char            { L $$ CHAR }
       f32             { L $$ F32 }
       f64             { L $$ F64 }
 
@@ -118,7 +120,9 @@ import Language.Futhark.Parser.Lexer
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
+      '.'             { L $$ DOT }
       fun             { L $$ FUN }
+      entry           { L $$ ENTRY }
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
       '<-'            { L $$ SETTO }
@@ -159,7 +163,8 @@ import Language.Futhark.Parser.Lexer
       streamRedPer    { L $$ STREAM_REDPER }
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
-      type            { L $$ TYPE }
+      write           { L $$ WRITE }
+      type            { L $$ TYPE}
 
 %nonassoc ifprec letprec
 %left '||'
@@ -181,18 +186,22 @@ Prog :: { UncheckedProgWithHeaders }
      |   DecStart { ProgWithHeaders [] $1 }
 ;
 
-DecStart : Decs { $1 }
-         | DefaultDec Decs { $2 }
+
+DecStart :: { [DecBase f vn] }
+         :  DefaultDec Decs { $2 }
+         |  Decs { $1 }
 ;
 
-Decs : Dec Decs { $1 : $2 }
+Decs :: { [DecBase f vn] }
+     : Dec Decs { $1 : $2 }
      | Dec { [$1] }
 ;
 
 Dec :: { DecBase f vn }
-       : fun Fun { $2 }
-       | type TypeDecl { $2 }
+       : Fun { FunDec $1 }
+       | UserTypeAlias { TypeDec $1 }
 ;
+
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
@@ -240,30 +249,47 @@ Headers :: { [ProgHeader] }
 ;
 
 Header :: { ProgHeader }
-Header : include id { let L pos (ID name) = $2 in Include (nameToString name) }
+Header : include IncludeParts { Include $2 }
 ;
 
-FunDecs : fun Fun FunDecs   { $2 : $3 }
-        | fun Fun           { [$2] }
-;
+IncludeParts :: { [String] }
+IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
+IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
 
-Fun :     UserType id '(' TypeIds ')' '=' Exp
-                        { let L pos (ID name) = $2 in (name, $1, $4, $7, pos) }
-        | UserType id '(' ')' '=' Exp
-                        { let L pos (ID name) = $2 in (name, $1, [], $6, pos) }
+Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
+        | fun UserTypeDecl id '(' ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
+        | entry UserTypeDecl id '(' Params ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef True name $2 $5 $8 pos }
+        | entry UserTypeDecl id '(' ')' '=' Exp
+                        { let L pos (ID name) = $3
+                          in FunDef True name $2 [] $7 pos }
 ;
-
+Uniqueness :: { Uniqueness }
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-TypeDecl   : id '=' UserTypeWAlias { let L pos (ID name) = $1 in TypeDef name $3 pos}
 
+UserTypeDecl :: { TypeDeclBase NoInfo Name }
+              : UserType { TypeDecl $1 NoInfo }
 
+UserTypeAlias :: { TypeDefBase NoInfo Name }
+UserTypeAlias  : type id '=' UserTypeWAliasDecl { let L pos (ID name) = $2 in TypeDef name $4 pos}
+
+UserTypeWAliasDecl :: { UncheckedUserTypeDecl }
+                    : UserTypeWAlias { TypeDecl $1 NoInfo }
+
+UserTypeWAlias :: { UserType Name }
 UserTypeWAlias : PrimType { UserPrim $1 }
                | UserArrayTypeWAlias { $1 }
                | '{' UserTypesWAlias '}' { UserTuple $2 }
                | id { let L _ (ID name) = $1 in UserTypeAlias name}
 
+UserTypesWAlias :: { [ UserType Name ] }
 UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
                 | UserTypeWAlias { [$1] }
                 | {[]}
@@ -271,18 +297,35 @@ UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
 UserType :: { UncheckedUserType }
          : PrimType      { UserPrim $1 }
          | UserArrayType     { $1 }
-         | '{' Types '}' { UserTuple $2 }
+         | '{' UserTypes '}' { UserTuple $2 }
          | id            { let L pos (ID name) = $1 in UserTypeAlias name }
 ;
 
-UserArrayType :: { UncheckedType }
-              : Uniqueness '[' UserType DimDecl ']'
+UserTypes :: { [UncheckedUserType] }
+UserTypes : UserType ',' UserTypes { $1 : $3 }
+          | UserType               { [$1] }
+          | {[]}
+UserArrayType :: { UserType Name }
+UserArrayType  : Uniqueness '[' UserArrayRowType DimDecl ']'
                 { let (ds, et) = $3
-                   in UserArray $3 (ShapeDecl ($4:ds)) $1 }
-UserArrayTypeWAlias :: { UncheckedType }
-               : Uniqueness '[' UserTypeWAlias ']'
-                  { let (ds, et) = $3
-                     in UserArray $3 AnyDim $1 }
+                   in UserArray et (ShapeDecl ($4:ds)) $1 }
+
+UserArrayRowType :: { ([DimDecl Name], UserType Name) }
+UserArrayRowType : UserType { ([], $1) }
+                 | '[' UserArrayRowType DimDecl ']'
+                   { let (ds, et) = $2
+                      in ($3:ds, et) }
+
+UserArrayTypeWAlias :: { UserType Name }
+UserArrayTypeWAlias : Uniqueness '[' UserArrayWAliasRowType ']'
+                    { let (ds, et) = $3
+                        in UserArray et (ShapeDecl $ AnyDim:ds ) $1 }
+
+UserArrayWAliasRowType :: { ([DimDecl Name] , UserType Name ) }
+UserArrayWAliasRowType : UserTypeWAlias { ([], $1) }
+                       | '[' UserArrayWAliasRowType ']'
+                         { let (ds, et) = $2
+                            in ( AnyDim : ds, et) }
 
 Type :: { UncheckedType }
         : PrimType     { Prim $1 }
@@ -309,9 +352,9 @@ ArrayType :: { UncheckedArrayType }
 
 PrimArrayRowType : PrimType
                     { ([], $1) }
-                  | '[' PrimArrayRowType DimDecl ']'
+                 | '[' PrimArrayRowType DimDecl ']'
                     { let (ds, et) = $2
-                      in ($3:ds, et) }
+                       in ($3:ds, et) }
 
 TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { ([], $2) }
@@ -325,7 +368,7 @@ TupleArrayElemTypes : { [] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
-TupleArrayElemType : PrimType                   { PrimArrayElem $1 NoInfo }
+TupleArrayElemType : PrimType                    { PrimArrayElem $1 NoInfo Nonunique }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
@@ -333,7 +376,6 @@ PrimType : UnsignedType { Unsigned (fst $1) }
          | SignedType   { Signed (fst $1) }
          | FloatType    { FloatType (fst $1) }
          | bool         { Bool }
-         | char         { Char }
 
 SignedType :: { (IntType, SrcLoc) }
            : int { (Int32, $1) }
@@ -357,16 +399,16 @@ Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
       |                { [] }
 ;
-
-TypeIds : UserType id ',' TypeIds
-                        { let L pos (ID name) = $2 in Ident name $1 pos : $4 }
-        | UserType id       { let L pos (ID name) = $2 in [Ident name $1 pos] }
-;
+Params :: { [ParamBase NoInfo Name] }
+Params : UserTypeDecl id ',' Params { let L pos (ID name) = $2 in (Param name $1 pos) : $4 }
+       | UserTypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
-     | stringlit      { let L pos (STRINGLIT s) = $1
-                        in Literal (ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char) pos }
+     | stringlit      {% let L pos (STRINGLIT s) = $1 in do
+                             s' <- mapM (getIntValue . fromIntegral . ord) s
+                             t <- lift $ gets parserIntType
+                             return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
      | Id %prec letprec { Var $1 }
      | empty '(' Type ')' { Literal (emptyArray $3) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
@@ -484,6 +526,8 @@ Exp  :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
+     | write           '(' Exp ',' Exp ',' Exp ')'
+                         { Write $3 $5 $7 $1 }
 
 LetExp :: { UncheckedExp }
      : let Id '=' Exp LetBody
@@ -508,7 +552,7 @@ LetExp :: { UncheckedExp }
                       {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
                                (patternExp $3) }
      | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
-                      { DoLoop $3 $5 $8 $10 $11 $1 }
+                  { DoLoop $3 $5 $8 $10 $11 $1 }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
@@ -541,7 +585,7 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '{' Patterns '}' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn UserType '(' TypeIds ')' '=>' Exp
+         : fn UserTypeDecl '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
            { let L pos (ID name) = $1
@@ -574,7 +618,6 @@ FunAbstrsThenExp : FunAbstr ',' Exp              { ([$1], $3) }
 
 Value : IntValue { $1 }
       | FloatValue { $1 }
-      | CharValue { $1 }
       | StringValue { $1 }
       | BoolValue { $1 }
       | ArrayValue { $1 }
@@ -599,17 +642,22 @@ FloatValue :: { Value }
          : FloatLit { PrimValue (FloatValue (fst $1)) }
          | '-' FloatLit { PrimValue (FloatValue (floatNegate (fst $2))) }
 
-CharValue : charlit      { let L pos (CHARLIT char) = $1 in PrimValue $ CharValue char }
-StringValue : stringlit  { let L pos (STRINGLIT s) = $1 in ArrayValue (arrayFromList $ map (PrimValue . CharValue) s) $ Prim Char }
-BoolValue : true          { PrimValue $ BoolValue True }
-         | false          { PrimValue $ BoolValue False }
+StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
+                             s' <- mapM (getIntValue . fromIntegral . ord) s
+                             t <- lift $ gets parserIntType
+                             return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
+BoolValue : true           { PrimValue $ BoolValue True }
+          | false          { PrimValue $ BoolValue False }
 
 SignedLit :: { (IntValue, SrcLoc) }
-          : i8lit  { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
-          | i16lit { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
-          | i32lit { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
-          | i64lit { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
-          | intlit {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
+          : i8lit   { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
+          | i16lit  { let L pos (I16LIT num) = $1 in (Int16Value num, pos) }
+          | i32lit  { let L pos (I32LIT num) = $1 in (Int32Value num, pos) }
+          | i64lit  { let L pos (I64LIT num) = $1 in (Int64Value num, pos) }
+          | intlit  {% let L pos (INTLIT num) = $1 in do num' <- getIntValue num; return (num', pos) }
+          | charlit {% let L pos (CHARLIT char) = $1 in do
+                       num <- getIntValue $ fromIntegral $ ord char
+                       return (num, pos) }
 
 UnsignedLit :: { (IntValue, SrcLoc) }
             : u8lit  { let L pos (U8LIT num)  = $1 in (Int8Value num, pos) }
@@ -630,10 +678,8 @@ PrimLit :: { (PrimValue, SrcLoc) }
         | true   { (BoolValue True, $1) }
         | false  { (BoolValue False, $1) }
 
-        | charlit { let L pos (CHARLIT char) = $1 in (CharValue char, pos) }
-
 ArrayValue :  '[' Value ']'
-             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toDecl $ valueType $2
+             {% return $ ArrayValue (arrayFromList [$2]) $ removeNames $ toStruct $ valueType $2
              }
            |  '[' Value ',' Values ']'
              {% case combArrayTypes (valueType $2) $ map valueType $4 of
@@ -686,9 +732,9 @@ type ParserMonad a =
        StateT [L Token] ReadLineMonad)) a
 
 data ReadLineMonad a = Value a
-                     | GetLine (String -> ReadLineMonad a)
+                     | GetLine (T.Text -> ReadLineMonad a)
 
-readLineFromMonad :: ReadLineMonad String
+readLineFromMonad :: ReadLineMonad T.Text
 readLineFromMonad = GetLine Value
 
 instance Monad ReadLineMonad where
@@ -706,13 +752,13 @@ instance Applicative ReadLineMonad where
 getLinesFromIO :: ReadLineMonad a -> IO a
 getLinesFromIO (Value x) = return x
 getLinesFromIO (GetLine f) = do
-  s <- getLine
+  s <- T.getLine
   getLinesFromIO $ f s
 
-getLinesFromStrings :: [String] -> ReadLineMonad a -> Either String a
-getLinesFromStrings _ (Value x) = Right x
-getLinesFromStrings (x : xs) (GetLine f) = getLinesFromStrings xs $ f x
-getLinesFromStrings [] (GetLine _) = Left "Ran out of input"
+getLinesFromTexts :: [T.Text] -> ReadLineMonad a -> Either String a
+getLinesFromTexts _ (Value x) = Right x
+getLinesFromTexts (x : xs) (GetLine f) = getLinesFromTexts xs $ f x
+getLinesFromTexts [] (GetLine _) = Left "Ran out of input"
 
 getNoLines :: ReadLineMonad a -> Either String a
 getNoLines (Value x) = Right x
@@ -789,7 +835,7 @@ floatNegate :: FloatValue -> FloatValue
 floatNegate (Float32Value v) = Float32Value (-v)
 floatNegate (Float64Value v) = Float64Value (-v)
 
-readLine :: ParserMonad String
+readLine :: ParserMonad T.Text
 readLine = lift $ lift $ lift readLineFromMonad
 
 lexer :: (L Token -> ParserMonad a) -> ParserMonad a
@@ -801,7 +847,7 @@ lexer cont = do
       case ended of
         Right x -> return x
         Left _ -> do
-          ts' <- alexScanTokens <$> getFilename <*> readLine
+          ts' <- scanTokens <$> getFilename <*> readLine
           ts'' <- case ts' of Right x -> return x
                               Left e  -> throwError e
           case ts'' of

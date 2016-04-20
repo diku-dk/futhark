@@ -36,11 +36,8 @@ kernelsToOpenCL prog = do
   let kernel_names = map fst kernels
       opencl_code = pretty $ openClCode kernels
       opencl_prelude = pretty $ genOpenClPrelude requirements
-  return $ ImpOpenCL.Program
-    opencl_code
-    opencl_prelude
-    kernel_names $
-    fmap callKernel $ prog
+  return $ ImpOpenCL.Program opencl_code opencl_prelude kernel_names $
+    callKernel <$> prog
 
 pointerQuals ::  Monad m => String -> m [C.TypeQual]
 pointerQuals "global"     = return [C.ctyquals|__global|]
@@ -74,7 +71,9 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsWriteScalar = GenericC.writeScalarPointerWithQuals pointerQuals
                      , GenericC.opsReadScalar = GenericC.readScalarPointerWithQuals pointerQuals
                      , GenericC.opsAllocate = cannotAllocate
+                     , GenericC.opsDeallocate = cannotDeallocate
                      , GenericC.opsCopy = copyInKernel
+                     , GenericC.opsFatMemory = False
                      }
   where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
         kernelOps (GetGroupId v i) = do
@@ -92,8 +91,8 @@ inKernelOperations = GenericC.Operations
         kernelOps (GetGlobalSize v i) = do
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
           return GenericC.Done
-        kernelOps (GetWaveSize v) = do
-          GenericC.stm [C.cstm|$id:v = WAVE_SIZE;|]
+        kernelOps (GetLockstepWidth v) = do
+          GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
           return GenericC.Done
         kernelOps Barrier = do
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
@@ -103,9 +102,13 @@ inKernelOperations = GenericC.Operations
         cannotAllocate _ =
           fail "Cannot allocate memory in kernel"
 
+        cannotDeallocate :: GenericC.Deallocate KernelOp UsedFunctions
+        cannotDeallocate _ _ =
+          fail "Cannot deallocate memory in kernel"
+
         copyInKernel :: GenericC.Copy KernelOp UsedFunctions
         copyInKernel _ _ _ _ _ _ _ =
-          fail $ "Cannot bulk copy in kernel."
+          fail "Cannot bulk copy in kernel."
 
         kernelMemoryType space = do
           quals <- pointerQuals space
@@ -123,7 +126,7 @@ compileKernel called@(Map kernel) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $ do
           size <- GenericC.compileExp $ mapKernelSize kernel
           let check = [C.citem|if ($id:(mapKernelThreadNum kernel) >= $exp:size) return;|]
-          body <- GenericC.collect $ GenericC.compileCode $ mapKernelBody kernel
+          body <- GenericC.blockScope $ GenericC.compileCode $ mapKernelBody kernel
           return $ check : body
 
       used_funs = GenericC.compUserState s
@@ -143,7 +146,7 @@ compileKernel called@(Map kernel) =
 compileKernel called@(AnyKernel kernel) =
   let (kernel_body, s) =
         GenericC.runCompilerM (Functions []) inKernelOperations blankNameSource mempty $
-        GenericC.collect $ GenericC.compileCode $ kernelBody kernel
+        GenericC.blockScope $ GenericC.compileCode $ kernelBody kernel
 
       used_funs = GenericC.compUserState s
 
@@ -218,9 +221,9 @@ openClCode kernels =
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
 genOpenClPrelude (OpenClRequirements used_funs ts) =
-  (if uses_float64
-   then [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
-   else []) ++
+  if uses_float64
+  then [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
+  else [] ++
   [C.cunit|
 typedef char int8_t;
 typedef short int16_t;
@@ -244,7 +247,7 @@ calledKernelName :: CallKernel -> String
 calledKernelName (Map k) =
   mapKernelName k
 calledKernelName (AnyKernel k) =
-  maybe "" (++"_") (kernelDesc k) ++ "kernel_" ++ (show $ baseTag $ kernelName k)
+  maybe "" (++"_") (kernelDesc k) ++ "kernel_" ++ show (baseTag $ kernelName k)
 calledKernelName (MapTranspose bt _ _ _ _ _ _ _) =
   "fut_kernel_map_transpose_" ++ pretty bt
 

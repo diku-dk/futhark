@@ -180,12 +180,10 @@ scopeOfFParams = HM.fromList . map f
   where f param = (paramName param, FParamInfo $ paramAttr param)
 
 instance Scoped lore (Lambda lore) where
-  scopeOf lam = HM.insert (lambdaIndex lam) IndexInfo $
-                scopeOfLParams $ lambdaParams lam
+  scopeOf lam = scopeOfLParams $ lambdaParams lam
 
 instance Scoped lore (ExtLambda lore) where
-  scopeOf lam = HM.insert (extLambdaIndex lam) IndexInfo $
-                scopeOfLParams $ extLambdaParams lam
+  scopeOf lam = scopeOfLParams $ extLambdaParams lam
 
 -- | A monad transformer that carries around an extended 'Scope'.
 -- Its 'lookupType' method will first look in the extended 'Scope',

@@ -180,28 +180,21 @@ instance (Eq vn, Ord vn) => ArrayShape (ShapeDecl vn) where
 
 -- | Types that can be elements of tuple-arrays.
 data TupleArrayElemTypeBase shape as vn =
-     PrimArrayElem PrimType (as vn)
-   | ArrayArrayElem (ArrayTypeBase shape as vn)
-   | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
-      deriving (Show)
-
- -- |data UserTupleArrayElemTypeBase shape vn =
- -- |    UserPrimArrayElem PrimType
- -- |  | UserArrayArrayElem UserArrayTypeBase shape vn
- -- |  | UserTupleArrayElem [UserTupleArrayElemTypeBase shape vn]
- -- |-- disabled until further notice  | UserTypeAliasArrayElem Name
- -- |  deriving (Show)
+    PrimArrayElem PrimType (as vn) Uniqueness
+  | ArrayArrayElem (ArrayTypeBase shape as vn)
+  | TupleArrayElem [TupleArrayElemTypeBase shape as vn]
+  deriving (Show)
 
 instance Eq (shape vn) =>
          Eq (TupleArrayElemTypeBase shape as vn) where
-  PrimArrayElem bt1 _ == PrimArrayElem bt2 _ = bt1 == bt2
-  ArrayArrayElem at1   == ArrayArrayElem at2   = at1 == at2
-  TupleArrayElem ts1   == TupleArrayElem ts2   = ts1 == ts2
-  _                    == _                    = False
+  PrimArrayElem bt1 _ u1 == PrimArrayElem bt2 _ u2 = bt1 == bt2 && u1 == u2
+  ArrayArrayElem at1     == ArrayArrayElem at2     = at1 == at2
+  TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
+  _                      == _                      = False
 
 instance Ord (shape vn) =>
          Ord (TupleArrayElemTypeBase shape as vn) where
-  PrimArrayElem bt1 _ `compare` PrimArrayElem bt2 _ = bt1 `compare` bt2
+  PrimArrayElem bt1 _ u1 `compare` PrimArrayElem bt2 _ u2 = (bt1,u1) `compare` (bt2,u2)
   ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
   TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
   PrimArrayElem {}    `compare` ArrayArrayElem {}    = LT
@@ -218,16 +211,6 @@ data ArrayTypeBase shape as vn =
   | TupleArray [TupleArrayElemTypeBase shape as vn] (shape vn) Uniqueness
     -- ^ An array whose elements are tuples.
     deriving (Show)
-
- -- data UserArrayTypeBase shape vn =
- --       UserPrimArray PrimType (shape vn) Uniqueness
- --       -- ^ An array whose elements are primitive types.
- --     | UserAliasArray Name (shape vn) Uniqueness
- --       -- ^ An array of some unresolved type. This will
- --       -- be resolved before the type check.
- --     | UserTupleArray [UserTupleArrayElemTypeBase shape vn] (shape vn) Uniqueness
- --       -- ^ An array whose elements are tuples.
- --       deriving (Show)
 
 instance Eq (shape vn) =>
          Eq (ArrayTypeBase shape as vn) where
@@ -277,8 +260,6 @@ type CompTypeBase = TypeBase Rank Names
 -- | A type with shape annotations and no aliasing information, used
 -- for declarations.
 
--- || type DeclTypeBase = TypeBase ShapeDecl NoInfo
-
 data UserType vn = UserPrim PrimType
                  | UserArray (UserType vn) (ShapeDecl vn) Uniqueness
                  | UserTuple [UserType vn]
@@ -286,12 +267,8 @@ data UserType vn = UserPrim PrimType
                  | Empty -- suppehack
     deriving (Show)
 --
--- | type DeclTypeBase = UserType ShapeDecl NoInfo
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
--- | I am changing this from TypeBase to UserType for now.
---   It is my plan to convert UserType ShapeDecl NoInfo into TypeBase ShapeDecl NoInfo during the type check.
-
 
 type StructUserType = UserType
 type StructTypeBase = TypeBase ShapeDecl NoInfo
@@ -309,16 +286,10 @@ type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 data TypeDeclBase f vn =
   TypeDecl { declaredType :: StructUserType vn
                              -- ^ The type declared by the user.
---         , expandedType :: f (StructTypeBase vn)
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
            }
 deriving instance Showable f vn => Show (TypeDeclBase f vn)
-
-data UserTypeDeclBase f vn = UserTypeDecl { userDeclaredType :: StructUserType vn
-                                          , userExpandedType :: f (StructTypeBase vn)
-                                          }
--- deriving instance Showable vn => Show (UserTypeDeclBase vn)
 
 -- | Information about which parts of a value/type are consumed.  For
 -- example, we might say that a function taking an argument of type
@@ -366,7 +337,7 @@ data ParamBase f vn = Param { paramName :: vn
                             , paramTypeDecl :: TypeDeclBase f vn
                             , paramSrcLoc :: SrcLoc
                           }
--- deriving instance Showable f vn => Show (ParamBase f vn)
+deriving instance Showable f vn => Show (ParamBase f vn)
 
 instance Eq vn => Eq (ParamBase f vn) where
   x == y = paramName x == paramName y
@@ -547,6 +518,9 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
+            | Write (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
+
             | Zip [(ExpBase f vn, f (CompTypeBase vn))] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the full type of
@@ -563,9 +537,9 @@ data ExpBase f vn =
 -- deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
-                      | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
-                      | Sequential (ExpBase f vn)
--- deriving instance Showable f vn => Show (StreamForm f vn)
+                     | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
+                     | Sequential (ExpBase f vn)
+deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc) = locOf loc
@@ -598,6 +572,7 @@ instance Located (ExpBase f vn) where
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _  pos) = locOf pos
   locOf (Unsafe _ loc) = locOf loc
+  locOf (Write _ _ _ loc) = locOf loc
 
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (ExpBase f vn) (IdentBase f vn) (ExpBase f vn)
@@ -624,7 +599,7 @@ data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f
                         -- ^ @2+@; first type is operand, second is result.
                       | CurryBinOpRight BinOp (ExpBase f vn) (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @+2@; first type is operand, second is result.
--- deriving instance Showable f vn => Show (LambdaBase f vn)
+deriving instance Showable f vn => Show (LambdaBase f vn)
 
 instance Located (LambdaBase f vn) where
   locOf (AnonymFun _ _ _ loc)         = locOf loc
@@ -661,7 +636,7 @@ data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types 
                                 , userType :: TypeDeclBase f vn -- type-definitionen
                                 , typeDefLocation :: SrcLoc
                                 }
--- deriving instance Showable vn => Show (TypeDefBase vn)
+deriving instance Showable vn => Show (TypeDefBase f vn)
 
 
 data DecBase f vn = FunDec (FunDefBase f vn)
@@ -675,24 +650,22 @@ data DecBase f vn = FunDec (FunDefBase f vn)
 -- newtype ProgBase ty vn = Prog { progDeclarations :: [DecBase ty vn] }
 --  deriving (Show)
 
---  | data ProgBase f vn = Prog { progFunctions :: [FunDefBase f vn]
---  |                           }
--- deriving instance Showable f vn => Show (ProgBase f vn)
-
 data ProgBase f vn =
          Prog  { progTypes :: [TypeDefBase f vn]
                , progFunctions :: [FunDefBase f vn]
                }
+deriving instance Showable f vn => Show (ProgBase f vn)
 
 data ProgDecs f vn = Decs { progDeclarations :: [DecBase f vn]}
 -- | An entire Futhark program, including headers.
+
 data ProgBaseWithHeaders f vn =
   ProgWithHeaders { progWHHeaders :: [ProgHeader]
                   , progWHDecs :: [DecBase f vn]
                   }
--- deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
+deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 
-data ProgHeader = Include String
+data ProgHeader = Include [String]
                 deriving (Show)
 
 -- | A set of names.

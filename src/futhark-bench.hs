@@ -33,10 +33,11 @@ data BenchOptions = BenchOptions
                    { optCompiler :: String
                    , optRuns :: Int
                    , optRawReporting :: Bool
+                   , optExtraOptions :: [String]
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 False
+initialBenchOptions = BenchOptions "futhark-c" 10 False []
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -86,22 +87,22 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesText dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
+  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts-1]
 
-  runtimes <- forM [0..optRuns opts-1] $ \_ -> do
-    -- Explicitly prefixing the current directory is necessary for
-    -- readProcessWithExitCode to find the binary when binOutputf has
-    -- no program component.
-    (progCode, output, progerr) <-
-      liftIO $ readProcessWithExitCode ("." </> binaryName program) ["-t", tmpfile] input
-    case maybe_expected of
-      Nothing ->
-        didNotFail program progCode progerr
-      Just expected ->
-        compareResult program expected =<< runResult program progCode output progerr
-    runtime_result <- readFile tmpfile
-    case reads runtime_result of
-      [(runtime, _)] -> return $ RunResult runtime
-      _ -> fail $ "Runtime file has invalid contents:\n" ++ runtime_result
+  -- Explicitly prefixing the current directory is necessary for
+  -- readProcessWithExitCode to find the binary when binOutputf has
+  -- no program component.
+  (progCode, output, progerr) <-
+    liftIO $ readProcessWithExitCode ("." </> binaryName program) options input
+  case maybe_expected of
+    Nothing ->
+      didNotFail program progCode progerr
+    Just expected ->
+      compareResult program expected =<< runResult program progCode output progerr
+  runtime_result <- readFile tmpfile
+  runtimes <- case mapM readRuntime $ lines runtime_result of
+    Just runtimes -> return $ map RunResult runtimes
+    Nothing -> fail $ "Runtime file has invalid contents:\n" ++ runtime_result
 
   let dataset_desc = case input_spec of
         InFile path -> path
@@ -111,6 +112,11 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   reportResult (optRawReporting opts) runtimes
 
   where dir = takeDirectory program
+
+readRuntime :: String -> Maybe Int
+readRuntime s = case reads s of
+  [(runtime, _)] -> Just runtime
+  _              -> Nothing
 
 didNotFail :: Monad m => FilePath -> ExitCode -> T.Text -> m ()
 didNotFail _ ExitSuccess _ =
@@ -183,6 +189,12 @@ commandLineOptions = [
   , Option [] ["raw"]
     (NoArg $ Right $ \config -> config { optRawReporting = True })
     "Print all runtime numbers, not just the average."
+  , Option "p" ["pass-option"]
+    (ReqArg (\opt ->
+               Right $ \config ->
+               config { optExtraOptions = opt : optExtraOptions config })
+     "OPT")
+    "Pass this option to programs being run."
   ]
 
 main :: IO ()

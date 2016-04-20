@@ -12,8 +12,6 @@ module Futhark.Analysis.HORepresentation.SOACNest
   , returnType
   , typeOf
   , NestBody (..)
-  , nestBodyIndex
-  , setNestBodyIndex
   , nestBodyParams
   , nestBodyReturnType
   , Nesting (..)
@@ -55,8 +53,7 @@ import Futhark.Transform.Substitute
 -- proper nest!  (I think...)
 
 data Nesting lore = Nesting {
-    nestingIndex      :: VName
-  , nestingParamNames :: [VName]
+    nestingParamNames :: [VName]
   , nestingInputs     :: [SOAC.Input]
   , nestingResult     :: [VName]
   , nestingReturnType :: [Type]
@@ -69,16 +66,6 @@ data NestBody lore = Fun (Lambda lore)
 nestBodyReturnType :: NestBody lore -> [Type]
 nestBodyReturnType (Fun lam)           = lambdaReturnType lam
 nestBodyReturnType (NewNest nesting _) = nestingReturnType nesting
-
-nestBodyIndex :: NestBody lore -> VName
-nestBodyIndex (Fun lam) = lambdaIndex lam
-nestBodyIndex (NewNest nesting _) = nestingIndex nesting
-
-setNestBodyIndex :: VName -> NestBody lore -> NestBody lore
-setNestBodyIndex index (Fun lam) =
-  Fun lam { lambdaIndex = index }
-setNestBodyIndex index (NewNest nesting comb) =
-  NewNest nesting { nestingIndex = index } comb
 
 nestBodyParams :: Annotations lore => NestBody lore -> [Ident]
 nestBodyParams (Fun lam) =
@@ -112,13 +99,12 @@ bodyToLambda :: (Bindable lore, MonadFreshNames m, LocalScope lore m,
                  Op lore ~ Futhark.SOAC lore) =>
                 [Type] -> NestBody lore -> m (Lambda lore)
 bodyToLambda _ (Fun l) = return l
-bodyToLambda pts (NewNest (Nesting i ps inps bndIds retTypes) op) =
+bodyToLambda pts (NewNest (Nesting ps inps bndIds retTypes) op) =
   localScope (scopeOfLParams lparams) $ do
     (e,bnds) <- runBinder $ SOAC.toExp =<< toSOAC (SOACNest inps op)
     bnd <- mkLetNames' bndIds e
     return
-      Lambda { lambdaIndex = i
-             , lambdaParams = lparams
+      Lambda { lambdaParams = lparams
              , lambdaReturnType = retTypes
              , lambdaBody = mkBody (bnds++[bnd]) $
                             map Var bndIds
@@ -271,7 +257,7 @@ fromSOAC :: (Bindable lore, LocalScope lore m,
              Op lore ~ Futhark.SOAC lore) =>
             SOAC lore -> m (SOACNest lore)
 fromSOAC (SOAC.Map cs w l as) =
-  SOACNest as <$> Map cs w <$> lambdaToBody l
+  SOACNest as . Map cs w <$> lambdaToBody l
 fromSOAC (SOAC.Reduce cs w comm l args) =
   SOACNest (map snd args) <$>
   (Reduce cs w comm <$> lambdaToBody l <*> pure (accSubExps l $ map fst args))
@@ -307,8 +293,7 @@ nested l
       Right soac -- ...the bindee is a SOAC...
         | res == map Var (patternNames pat) ->
           return $ Just (operation soac,
-                         Nesting { nestingIndex = lambdaIndex l
-                                 , nestingParamNames = map paramName $ lambdaParams l
+                         Nesting { nestingParamNames = map paramName $ lambdaParams l
                                  , nestingInputs = inputs soac
                                  , nestingResult = patternNames pat
                                  , nestingReturnType = lambdaReturnType l

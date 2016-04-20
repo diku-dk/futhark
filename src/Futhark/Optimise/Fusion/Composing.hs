@@ -79,13 +79,11 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
                                 | Ident name t <- lam2redparams ++ HM.keys inputmap ]
                , lambdaBody   = new_body2'
                }
-        let_i_j = mkLet' [] [Ident (lambdaIndex lam1) $ Prim int32] $
-                  PrimOp $ SubExp $ Var $ lambdaIndex lam2
         new_body2 = let bnds res = [ mkLet' [] [p] $ PrimOp $ SubExp e
                                    | (p,e) <- zip pat res]
                         bindLambda res =
                             bnds res `insertBindings` makeCopiesInner (lambdaBody lam2)
-                    in makeCopies $ let_i_j `insertBinding` mapResult bindLambda (lambdaBody lam1)
+                    in makeCopies $ mapResult bindLambda (lambdaBody lam1)
         new_body2_rses = bodyResult new_body2
         new_body2'= new_body2 { bodyResult = new_body2_rses ++
                                              map (Var . identName) unfus_pat  }
@@ -178,8 +176,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
   let acc_len     = length p_nes
-      unfus_accs  = take acc_len outVars
-      unfus_arrs  = unfus_nms \\ unfus_accs
+      unfus_arrs  = filter (`elem` unfus_nms) outVars
       lam1_body   = lambdaBody p_lam
       lam1_accres = take acc_len $ bodyResult lam1_body
       lam1_arrres = drop acc_len $ bodyResult lam1_body
@@ -209,11 +206,10 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   in  (res_lam', new_inp)
 
 mergeReduceOps :: Bindable lore => Lambda lore -> Lambda lore -> Lambda lore
-mergeReduceOps (Lambda i par1 bdy1 rtp1) (Lambda j par2 bdy2 rtp2) =
-  let let_i_j = mkLet' [] [Ident i $ Prim int32] $ PrimOp $ SubExp $ Var j
-      body' = Body (bodyLore bdy1)
-                   (let_i_j : bodyBindings bdy1 ++ bodyBindings bdy2)
+mergeReduceOps (Lambda par1 bdy1 rtp1) (Lambda par2 bdy2 rtp2) =
+  let body' = Body (bodyLore bdy1)
+                   (bodyBindings bdy1 ++ bodyBindings bdy2)
                    (bodyResult   bdy1 ++ bodyResult   bdy2)
       (len1, len2) = (length rtp1, length rtp2)
       par'  = take len1 par1 ++ take len2 par2 ++ drop len1 par1 ++ drop len2 par2
-  in  Lambda j par' body' (rtp1++rtp2)
+  in  Lambda par' body' (rtp1++rtp2)

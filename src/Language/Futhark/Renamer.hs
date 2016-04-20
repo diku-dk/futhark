@@ -131,12 +131,13 @@ bindParams params =
 
 renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
-renameFun (FunDef entry fname (TypeDecl ret _) params body pos) =
-  bindParams params $ do
-    params' <- mapM declRepl params
-    body' <- renameExp body
-    ret' <- renameDeclType' ret
-    return $ FunDef entry fname (TypeDecl ret' NoInfo) params' body' pos
+renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
+  bindParams params $
+    FunDef entry fname <$>
+    (TypeDecl <$> renameDeclType' ret <*> pure NoInfo) <*>
+    mapM declRepl params <*>
+    renameExp body <*>
+    pure pos
 
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
@@ -256,8 +257,8 @@ renameTypeGeneric renameShape renameAliases = renameType'
           et' <- mapM renameTupleArrayElem et
           shape' <- renameShape shape
           return $ TupleArray et' shape' u
-        renameTupleArrayElem (PrimArrayElem bt als) =
-          PrimArrayElem bt <$> renameAliases als
+        renameTupleArrayElem (PrimArrayElem bt als u) =
+          PrimArrayElem bt <$> renameAliases als <*> pure u
         renameTupleArrayElem (ArrayArrayElem at) =
           ArrayArrayElem <$> renameArrayType at
         renameTupleArrayElem (TupleArrayElem ts) =

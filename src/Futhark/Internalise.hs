@@ -427,31 +427,12 @@ internaliseExp desc (E.Map lam arr _) = do
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ I.Map [] w lam' arrs
 
-internaliseExp desc (E.Reduce comm lam ne arr loc) = do
-  arrs <- internaliseExpToVars "reduce_arr" arr
-  nes <- internaliseExp "reduce_ne" ne
-  nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
-    rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape asserting loc rowtype "reduce_ne_right_shape" ne'
-  nests <- mapM I.subExpType nes'
-  arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
-  let input = zip nes' arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Reduce [] w comm lam' input
+internaliseExp desc (E.Reduce comm lam ne arr loc) =
+  internaliseScanOrReduce desc "reduce"
+    (\cs w -> I.Reduce cs w comm) (lam, ne, arr, loc)
 
-internaliseExp desc (E.Scan lam ne arr loc) = do
-  arrs <- internaliseExpToVars "scan_arr" arr
-  nes <- internaliseExp "scan_ne" ne
-  nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
-    rowtype <- I.stripArray 1 <$> lookupType arr'
-    ensureShape asserting loc rowtype "scan_ne_right_shape" ne'
-  nests <- mapM I.subExpType nes'
-  arrts <- mapM lookupType arrs
-  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
-  let input = zip nes' arrs
-  w <- arraysSize 0 <$> mapM lookupType arrs
-  letTupExp' desc $ I.Op $ I.Scan [] w lam' input
+internaliseExp desc (E.Scan lam ne arr loc) =
+  internaliseScanOrReduce desc "scan" I.Scan (lam, ne, arr, loc)
 
 internaliseExp desc (E.Filter lam arr _) = do
   arrs <- internaliseExpToVars "filter_input" arr
@@ -517,7 +498,8 @@ internaliseExp _ E.Stream{} =
 
 internaliseExp desc (E.Iota e _) = do
   e' <- internaliseExp1 "n" e
-  letTupExp' desc $ I.PrimOp $ I.Iota e' $ constant (0::Int32)
+  letTupExp' desc $ I.PrimOp $
+    I.Iota e' (constant (0::Int32)) (constant (1::Int32))
 
 internaliseExp _ (E.Literal v _) =
   case internaliseValue v of
@@ -617,6 +599,56 @@ internaliseExp desc (E.UnOp (E.ToUnsigned int_to) e _) = do
 internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
+
+internaliseExp desc (E.Write i v a loc) = do
+  sis <- internaliseExpToVars "write_arg_i" i
+  svs <- internaliseExpToVars "write_arg_v" v
+  sas <- internaliseExpToVars "write_arg_a" a
+
+  si <- case sis of
+    [si] -> return si
+    _ -> fail "Futhark.Internalise.internaliseExp: write indices array must not consist of tuples"
+
+  when (length svs /= length sas) $
+    fail ("Futhark.Internalise.internaliseExp: size of write svs and sas tuples are not equal"
+          ++ " (svs: " ++ show (length svs) ++ ", sas: " ++ show (length sas) ++ ")")
+
+  res <- forM (zip svs sas) $ \(sv, sa) -> do
+    t <- lookupType sa
+    si_len <- arraySize 0 <$> lookupType si
+    sv_shape <- arrayShape <$> lookupType sv
+    let sv_len = shapeSize 0 sv_shape
+
+    -- Generate an assertion and reshape to ensure that sv is the same size as si.
+    cmp <- letSubExp "write_cmp" $ I.PrimOp $
+      I.CmpOp (I.CmpEq I.int32) si_len sv_len
+    c   <- assertingOne $
+      letExp "write_cert" $ I.PrimOp $
+      I.Assert cmp loc
+    sv' <- letExp (baseString sv ++ "_write_sv") $
+      I.PrimOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
+
+    return (t, sv', sa)
+
+  let (ts, svs', sas') = unzip3 res
+  letTupExp' desc $ I.Op $ I.Write [] ts si svs' sas'
+
+internaliseScanOrReduce :: String -> String
+                        -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
+                        -> (E.Lambda, E.Exp, E.Exp, SrcLoc)
+                        -> InternaliseM [SubExp]
+internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
+  arrs <- internaliseExpToVars (what++"_arr") arr
+  nes <- internaliseExp (what++"_ne") ne
+  nes' <- forM (zip nes arrs) $ \(ne', arr') -> do
+    rowtype <- I.stripArray 1 <$> lookupType arr'
+    ensureShape asserting loc rowtype (what++"_ne_right_shape") ne'
+  nests <- mapM I.subExpType nes'
+  arrts <- mapM lookupType arrs
+  lam' <- internaliseFoldLambda internaliseLambda asserting lam nests arrts
+  let input = zip nes' arrs
+  w <- arraysSize 0 <$> mapM lookupType arrs
+  letTupExp' desc $ I.Op $ f [] w lam' input
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do
@@ -779,16 +811,33 @@ internaliseLambda (E.AnonymFun params body (TypeDecl _ (Info rettype)) _) Nothin
     return (body', shapeparams ++ valparams, rettype')
   return (map (fmap I.fromDecl) params', body', map I.fromDecl rettype')
 
-internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
+internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
   fun_entry <- lookupFunction fname
   let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
+      diets = map I.diet paramts
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
   curarg_types <- mapM subExpType curargs'
-  params <- mapM (newParam "not_curried") rowtypes
-  let valargs = curargs' ++ map (I.Var . I.paramName) params
-      valargs_types = curarg_types ++ rowtypes
-      diets = map I.diet paramts
-      shapeargs = argShapes shapes paramts valargs_types
+  (params, valargs, valargs_types) <-
+    case maybe_rowtypes of
+      Just rowtypes -> do
+        params <- mapM (newParam "not_curried") rowtypes
+        let valargs = curargs' ++ map (I.Var . I.paramName) params
+            valargs_types = curarg_types ++ rowtypes
+        return (params, valargs, valargs_types)
+      Nothing -> do
+        let (_, ext_param_ts) = externalFun fun_entry
+        ext_params <- forM ext_param_ts $ \param_t -> do
+          name <- newVName "not_curried"
+          return E.Param { E.paramName = name
+                         , E.paramTypeDecl = TypeDecl undefined $ Info param_t
+                         , E.paramSrcLoc = noLoc
+                         }
+        bindingParams ext_params $ \shape_params value_params -> do
+          let params = map (fmap I.fromDecl) $ shape_params ++ value_params
+              valargs = curargs' ++ map (I.Var . I.paramName) value_params
+              valargs_types = curarg_types ++ map I.paramType value_params
+          return (params, valargs, valargs_types)
+  let shapeargs = argShapes shapes paramts valargs_types
       allargs = zip shapeargs (repeat I.Observe) ++
                 zip valargs diets
   case int_rettype_fun $
@@ -803,62 +852,30 @@ internaliseLambda (E.CurryFun fname curargs _ _) (Just rowtypes) = do
         resultBodyM $ map I.Var res
       return (params, funbody, map I.fromDecl ts)
 
-internaliseLambda (E.CurryFun fname curargs _ _) Nothing = do
-  fun_entry <- lookupFunction fname
-  let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
-      (_, ext_param_ts)                  = externalFun fun_entry
-  curargs' <- concat <$> mapM (internaliseExp "curried") curargs
-  curarg_types <- mapM subExpType curargs'
-  ext_params <- forM ext_param_ts $ \param_t -> do
-    name <- newVName "not_curried"
-    return E.Param { E.paramName = name
-                   , E.paramTypeDecl = TypeDecl param_t $ Info param_t
-                   , E.paramSrcLoc = noLoc
-                   }
-  bindingParams ext_params $ \shape_params value_params -> do
-    let params = map (fmap I.fromDecl) $ shape_params ++ value_params
-        valargs = curargs' ++ map (I.Var . I.paramName) value_params
-        valargs_types = curarg_types ++ map I.paramType value_params
-        diets = map I.diet paramts
-        shapeargs = argShapes shapes paramts valargs_types
-        allargs = zip shapeargs (repeat I.Observe) ++
-                  zip valargs diets
-    case int_rettype_fun $
-         map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
-      Nothing ->
-        fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
-        pretty (shapeargs ++ valargs)
-      Just (ExtRetType ts) -> do
-        funbody <- insertBindingsM $ do
-          res <- letTupExp "curried_fun_result" $
-                 I.Apply fname allargs $ ExtRetType ts
-          resultBodyM $ map I.Var res
-        return (params, funbody, map I.fromDecl ts)
-
 internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
-  internaliseLambda (E.AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (E.AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info undefined) loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
-  internaliseLambda (AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
 
 unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let t = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = TypeDecl t $ Info t
+      param = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info t
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
@@ -872,12 +889,12 @@ binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
   let xtype' = E.vacuousShapeAnnotations $ E.toStruct xtype
-      param_x = E.Param { E.paramTypeDecl = TypeDecl xtype' $ Info xtype'
+      param_x = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info xtype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = x_name
                         }
       ytype' = E.vacuousShapeAnnotations $ E.toStruct ytype
-      param_y = E.Param { E.paramTypeDecl = TypeDecl ytype' $ Info ytype'
+      param_y = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info ytype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = y_name
                         }
@@ -893,7 +910,7 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let paramtype' = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = TypeDecl paramtype' $ Info paramtype'
+      param = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info paramtype'
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }

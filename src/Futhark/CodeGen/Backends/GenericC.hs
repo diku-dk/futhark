@@ -16,6 +16,7 @@ module Futhark.CodeGen.Backends.GenericC
   , ReadScalar
   , readScalarPointerWithQuals
   , Allocate
+  , Deallocate
   , Copy
   -- * Monadic compiler interface
   , CompilerM
@@ -24,12 +25,13 @@ module Futhark.CodeGen.Backends.GenericC
   , putUserState
   , modifyUserState
   , runCompilerM
-  , collect
+  , blockScope
   , compileFun
   , compileCode
   , compileExp
   , compileExpToName
   , dimSizeToExp
+  , rawMem
   , item
   , stm
   , stms
@@ -46,6 +48,7 @@ import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
 import Data.Char (isAlphaNum, isAscii, isDigit)
+import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
 
@@ -58,9 +61,8 @@ import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Reading
-import qualified Futhark.CodeGen.Backends.CUtils as C
 import Futhark.CodeGen.Backends.GenericC.Options
-import Futhark.Util.Pretty hiding (space)
+import Futhark.Util.Pretty hiding (space, spaces)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 data CompilerState s = CompilerState {
@@ -96,33 +98,44 @@ type MemoryType op s = SpaceId -> CompilerM op s C.Type
 
 -- | Write a scalar to the given memory block with the given index and
 -- in the given memory space.
-type WriteScalar op s = VName -> C.Exp -> C.Type -> SpaceId -> C.Exp
+type WriteScalar op s = C.Exp -> C.Exp -> C.Type -> SpaceId -> C.Exp
                         -> CompilerM op s ()
 
 -- | Read a scalar from the given memory block with the given index and
 -- in the given memory space.
-type ReadScalar op s = VName -> C.Exp -> C.Type -> SpaceId
+type ReadScalar op s = C.Exp -> C.Exp -> C.Type -> SpaceId
                        -> CompilerM op s C.Exp
 
 -- | Allocate a memory block of the given size in the given memory
 -- space, saving a reference in the given variable name.
-type Allocate op s = VName -> C.Exp -> SpaceId
+type Allocate op s = C.Exp -> C.Exp -> SpaceId
                      -> CompilerM op s ()
 
+-- | De-allocate the given memory block which is in the given memory
+-- space.
+type Deallocate op s = C.Exp -> SpaceId -> CompilerM op s ()
+
+
 -- | Copy from one memory block to another.
-type Copy op s = VName -> C.Exp -> Space ->
-                 VName -> C.Exp -> Space ->
+type Copy op s = C.Exp -> C.Exp -> Space ->
+                 C.Exp -> C.Exp -> Space ->
                  C.Exp ->
                  CompilerM op s ()
 
-data Operations op s = Operations { opsWriteScalar :: WriteScalar op s
-                                  , opsReadScalar :: ReadScalar op s
-                                  , opsAllocate :: Allocate op s
-                                  , opsCopy :: Copy op s
+data Operations op s =
+  Operations { opsWriteScalar :: WriteScalar op s
+             , opsReadScalar :: ReadScalar op s
+             , opsAllocate :: Allocate op s
+             , opsDeallocate :: Deallocate op s
+             , opsCopy :: Copy op s
 
-                                  , opsMemoryType :: MemoryType op s
-                                  , opsCompiler :: OpCompiler op s
-                                  }
+             , opsMemoryType :: MemoryType op s
+             , opsCompiler :: OpCompiler op s
+
+             , opsFatMemory :: Bool
+               -- ^ If true, use reference counting.  Otherwise, bare
+               -- pointers.
+             }
 
 -- | A set of operations that fail for every operation involving
 -- non-default memory spaces.  Uses plain pointers and @malloc@ for
@@ -131,9 +144,11 @@ defaultOperations :: Operations op s
 defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsReadScalar = defReadScalar
                                , opsAllocate  = defAllocate
+                               , opsDeallocate  = defDeallocate
                                , opsCopy = defCopy
                                , opsMemoryType = defMemoryType
                                , opsCompiler = defCompiler
+                               , opsFatMemory = True
                                }
   where defWriteScalar _ _ _ _ _ =
           fail "Cannot write to non-default memory space because I am dumb"
@@ -141,6 +156,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           fail "Cannot read from non-default memory space"
         defAllocate _ _ _ =
           fail "Cannot allocate in non-default memory space"
+        defDeallocate _ _ =
+          fail "Cannot deallocate in non-default memory space"
         defCopy _ _ _ _ _ _ _ =
           fail "Cannot copy to or from non-default memory space"
         defMemoryType _ =
@@ -152,6 +169,16 @@ data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
   , envFtable     :: HM.HashMap Name [Type]
   }
+
+data CompilerAcc op s = CompilerAcc {
+    accItems :: DL.DList C.BlockItem
+  , accDeclaredMem :: [(VName,Space)]
+  }
+
+instance Monoid (CompilerAcc op s) where
+  CompilerAcc items1 declared1 `mappend` CompilerAcc items2 declared2 =
+    CompilerAcc (items1<>items2) (declared1<>declared2)
+  mempty = CompilerAcc mempty mempty
 
 envOpCompiler :: CompilerEnv op s -> OpCompiler op s
 envOpCompiler = opsCompiler . envOperations
@@ -168,8 +195,14 @@ envWriteScalar = opsWriteScalar . envOperations
 envAllocate :: CompilerEnv op s -> Allocate op s
 envAllocate = opsAllocate . envOperations
 
+envDeallocate :: CompilerEnv op s -> Deallocate op s
+envDeallocate = opsDeallocate . envOperations
+
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
+
+envFatMemory :: CompilerEnv op s -> Bool
+envFatMemory = opsFatMemory . envOperations
 
 newCompilerEnv :: Functions op -> Operations op s
                -> CompilerEnv op s
@@ -190,11 +223,14 @@ newCompilerEnv (Functions funs) ops =
 typeDefinitions :: CompilerState s -> [C.Definition]
 typeDefinitions = reverse . map (snd . snd) . compTypeStructs
 
-newtype CompilerM op s a = CompilerM (RWS (CompilerEnv op s) [C.BlockItem] (CompilerState s) a)
+newtype CompilerM op s a = CompilerM (RWS
+                                      (CompilerEnv op s)
+                                      (CompilerAcc op s)
+                                      (CompilerState s) a)
   deriving (Functor, Applicative, Monad,
             MonadState (CompilerState s),
             MonadReader (CompilerEnv op s),
-            MonadWriter [C.BlockItem])
+            MonadWriter (CompilerAcc op s))
 
 instance MonadFreshNames (CompilerM op s) where
   getNameSource = gets compNameSrc
@@ -220,12 +256,14 @@ modifyUserState f = modify $ \compstate ->
 collect :: CompilerM op s () -> CompilerM op s [C.BlockItem]
 collect m = pass $ do
   ((), w) <- listen m
-  return (w, const mempty)
+  return (DL.toList $ accItems w,
+          const w { accItems = mempty })
 
 collect' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
 collect' m = pass $ do
   (x, w) <- listen m
-  return ((x, w), const mempty)
+  return ((x, DL.toList $ accItems w),
+          const w { accItems = mempty})
 
 lookupFunction :: Name -> CompilerM op s [Type]
 lookupFunction name = do
@@ -235,7 +273,7 @@ lookupFunction name = do
     Just ts -> return ts
 
 item :: C.BlockItem -> CompilerM op s ()
-item x = tell [x]
+item x = tell $ mempty { accItems = DL.singleton x }
 
 instance C.ToIdent VName where
   toIdent = C.toIdent . prefixIfBad . sanitise . textual
@@ -265,10 +303,133 @@ typeName [t] = valueTypeName t
 typeName ts  = "tuple_" ++ intercalate "_" (map (typeName . pure) ts)
 
 memToCType :: Space -> CompilerM op s C.Type
-memToCType DefaultSpace =
-  return defaultMemBlockType
-memToCType (Space space) =
-  join $ asks envMemoryType <*> pure space
+memToCType space = do
+  refcount <- asks envFatMemory
+  if refcount
+     then return $ fatMemType space
+     else rawMemCType space
+
+rawMemCType :: Space -> CompilerM op s C.Type
+rawMemCType DefaultSpace = return defaultMemBlockType
+rawMemCType (Space sid) = join $ asks envMemoryType <*> pure sid
+
+fatMemType :: Space -> C.Type
+fatMemType space =
+  [C.cty|struct $id:name|]
+  where name = case space of
+          DefaultSpace -> "memblock"
+          Space sid    -> "memblock_" ++ sid
+
+fatMemSet :: Space -> String
+fatMemSet DefaultSpace = "memblock_set"
+fatMemSet (Space sid) = "memblock_set_" ++ sid
+
+fatMemAlloc :: Space -> String
+fatMemAlloc DefaultSpace = "memblock_alloc"
+fatMemAlloc (Space sid) = "memblock_alloc_" ++ sid
+
+fatMemUnRef :: Space -> String
+fatMemUnRef DefaultSpace = "memblock_unref"
+fatMemUnRef (Space sid) = "memblock_unref_" ++ sid
+
+rawMem :: C.ToIdent a => a -> CompilerM op s C.Exp
+rawMem v =
+  rawMem' <$> asks envFatMemory <*> pure (var v)
+
+rawMem' :: Bool -> C.Exp -> C.Exp
+rawMem' True  e = [C.cexp|$exp:e.mem|]
+rawMem' False e = e
+
+defineMemorySpace :: Space -> CompilerM op s [C.Definition]
+defineMemorySpace space = do
+  rm <- rawMemCType space
+  let structdef = [C.cedecl|struct $id:sname { int *references; $ty:rm mem; };|]
+
+  -- Unreferencing a memory block consists of decreasing its reference
+  -- count and freeing the corresponding memory if the count reaches
+  -- zero.
+  free <- case space of
+    Space sid -> do free_mem <- asks envDeallocate
+                    collect $ free_mem [C.cexp|block->mem|] sid
+    DefaultSpace -> return [[C.citem|free(block->mem);|]]
+  let unrefdef = [C.cedecl|static void $id:(fatMemUnRef space) ($ty:mty *block) {
+  if (block->references != NULL) {
+    *(block->references) -= 1;
+    if (*(block->references) == 0) {
+      $items:free
+      free(block->references);
+      block->references = NULL;
+    }
+  }
+}|]
+
+  -- When allocating a memory block we initialise the reference count to 1.
+  alloc <- collect $
+    case space of
+      DefaultSpace ->
+        stm [C.cstm|block->mem = malloc(size);|]
+      Space sid ->
+        join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
+        pure [C.cexp|size|] <*> pure sid
+  let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:mty *block, typename int32_t size) {
+  $id:(fatMemUnRef space)(block);
+  $items:alloc
+  block->references = malloc(sizeof(int));
+  *(block->references) = 1;
+  }|]
+
+  -- Memory setting - unreference the destination and increase the
+  -- count of the source by one.
+  let setdef = [C.cedecl|static void $id:(fatMemSet space) ($ty:mty *lhs, $ty:mty *rhs) {
+  $id:(fatMemUnRef space)(lhs);
+  (*(rhs->references))++;
+  *lhs = *rhs;
+}
+|]
+
+  return [structdef, unrefdef, allocdef, setdef]
+  where mty = fatMemType space
+        sname = case space of
+          DefaultSpace -> "memblock"
+          Space sid    -> "memblock_" ++ sid
+
+declMem :: VName -> Space -> CompilerM op s ()
+declMem name space = do
+  ty <- memToCType space
+  decl [C.cdecl|$ty:ty $id:name;|]
+  resetMem $ var name
+  tell $ mempty { accDeclaredMem = [(name, space)] }
+
+resetMem :: C.Exp -> CompilerM op s ()
+resetMem mem = do
+  refcount <- asks envFatMemory
+  when refcount $
+    stm [C.cstm|$exp:mem.references = NULL;|]
+
+setMem :: C.Exp -> VName -> Space -> CompilerM op s ()
+setMem dest src space = do
+  refcount <- asks envFatMemory
+  if refcount
+    then stm [C.cstm|$id:(fatMemSet space)(&$exp:dest, &$id:src);|]
+    else stm [C.cstm|$exp:dest = $id:src;|]
+
+unRefMem :: C.Exp -> Space -> CompilerM op s ()
+unRefMem mem space =
+  stm [C.cstm|$id:(fatMemUnRef space)(&$exp:mem);|]
+
+allocMem :: C.ToIdent a =>
+            a -> C.Exp -> Space -> CompilerM op s ()
+allocMem name size space = do
+  refcount <- asks envFatMemory
+  if refcount
+    then stm [C.cstm|$id:(fatMemAlloc space)(&$id:name, $exp:size);|]
+    else alloc $ var name
+  where alloc dest = case space of
+          DefaultSpace ->
+            stm [C.cstm|$exp:dest = malloc($exp:size);|]
+          Space sid ->
+            join $ asks envAllocate <*> rawMem name <*>
+            pure size <*> pure sid
 
 typeToCType :: [Type] -> CompilerM op s C.Type
 typeToCType [Scalar bt] = return $ primTypeToCType bt
@@ -301,17 +462,22 @@ printPrimStm _ Cert = [C.cstm|printf("Checked");|]
 -- | Return a statement printing the given value.
 printStm :: ValueDecl -> CompilerM op s C.Stm
 printStm (ScalarValue bt name) =
-  return $ printPrimStm (C.var name) bt
-printStm (ArrayValue mem bt []) =
+  return $ printPrimStm (var name) bt
+printStm (ArrayValue mem bt shape) = do
+  mem' <- rawMem mem
+  printArrayStm mem' bt shape
+
+printArrayStm :: C.Exp -> PrimType -> [DimSize] -> CompilerM op s C.Stm
+printArrayStm mem bt [] =
   return $ printPrimStm val bt
-  where val = [C.cexp|*$id:mem|]
-printStm (ArrayValue mem bt (dim:shape)) = do
+  where val = [C.cexp|*$exp:mem|]
+printArrayStm mem bt (dim:shape) = do
   i <- newVName "print_i"
   v <- newVName "print_elem"
   let dim' = dimSizeToExp dim
-      shape' = C.product $ map dimSizeToExp shape
+      shape' = cproduct $ map dimSizeToExp shape
       bt'  = primTypeToCType bt
-  printelem <- printStm $ ArrayValue v bt shape
+  printelem <- printArrayStm (var v) bt shape
   return [C.cstm|{
                if ($exp:dim' == 0) {
                    printf("empty(%s)", $exp:(ppArrayType bt (length shape)));
@@ -319,7 +485,7 @@ printStm (ArrayValue mem bt (dim:shape)) = do
                    int $id:i;
                    putchar('[');
                    for ($id:i = 0; $id:i < $exp:dim'; $id:i++) {
-                           $ty:bt' *$id:v = (($ty:bt'*) $id:mem) + $id:i * $exp:shape';
+                           $ty:bt' *$id:v = (($ty:bt'*) $exp:mem) + $id:i * $exp:shape';
                            $stm:printelem
                            if ($id:i != $exp:dim'-1) {
                              printf(", ");
@@ -328,6 +494,7 @@ printStm (ArrayValue mem bt (dim:shape)) = do
                putchar(']');
                }
              }|]
+
 
 readFun :: PrimType -> Maybe String
 readFun (IntType Int8) = Just "read_int8"
@@ -358,31 +525,37 @@ readPrimStm _ t =
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
--- ('DefaultSpace-) and copy the result into host memory after the
--- @fut_main()@ function has returned.  We have some ad-hoc frobbery
--- to copy the host-level memory blocks to another memory space if
--- necessary.  This will break if @fut_main@ uses non-trivial index
+-- ('DefaultSpace') and copy the result into host memory after the
+-- @main@ function has returned.  We have some ad-hoc frobbery to copy
+-- the host-level memory blocks to another memory space if necessary.
+-- This will break if the Futhark main function uses non-trivial index
 -- functions for its input or output.
 --
 -- The idea here is to keep the nastyness in main(), whilst not
 -- messing up anything else.
-mainCall :: [C.Stm] -> Name -> Function op -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem])
+mainCall :: [C.Stm] -> Name -> Function op
+         -> CompilerM op s ([C.BlockItem],[C.BlockItem],[C.BlockItem],[C.BlockItem])
 mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
   crettype <- typeToCType $ paramsTypes outputs
   ret <- newVName "main_ret"
-  let readstms = readInputs inputs args
+  refcount <- asks envFatMemory
+  let readstms = readInputs refcount inputs args
   (argexps, prepare) <- collect' $ mapM prepareArg inputs
   -- unpackResults may copy back to DefaultSpace.
   unpackstms <- unpackResults ret outputs
-  -- paramDecl will always create DefaultSpace memory.
-  paramdecls <- liftM2 (++) (mapM paramDecl outputs) (mapM paramDecl inputs)
+  freestms <- freeResults ret outputs
+  -- makeParam will always create DefaultSpace memory.
+  inputdecls <- collect $ mapM_ makeParam inputs
+  outputdecls <- collect $ mapM_ stubParam outputs
+  free_in <- collect $ mapM_ freeParam inputs
   printstms <- printResult results
   return ([C.citems|
                /* Declare and read input. */
-               $decls:paramdecls
+               $items:inputdecls
                $ty:crettype $id:ret;
                $stms:readstms
                $items:prepare
+               $items:outputdecls
              |],
           [C.citems|
                /* Run the program once. */
@@ -398,41 +571,54 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
                }
              |],
           [C.citems|
+               $items:free_in
                /* Print the final result. */
                $items:unpackstms
                $stms:printstms
-             |])
-  where paramDecl (MemParam name _ _) = do
-          ty <- memToCType DefaultSpace
-          return [C.cdecl|$ty:ty $id:name;|]
-        paramDecl (ScalarParam name ty) = do
+             |],
+          freestms)
+  where makeParam (MemParam name _ _) = do
+          declMem name DefaultSpace
+          allocMem name [C.cexp|0|] DefaultSpace
+        makeParam (ScalarParam name ty) = do
           let ty' = primTypeToCType ty
-          return [C.cdecl|$ty:ty' $id:name;|]
+          decl [C.cdecl|$ty:ty' $id:name;|]
+
+        stubParam (MemParam name _ _) =
+          declMem name DefaultSpace
+        stubParam (ScalarParam name ty) = do
+          let ty' = primTypeToCType ty
+          decl [C.cdecl|$ty:ty' $id:name;|]
+
+        freeParam (MemParam name _ _) =
+          unRefMem (var name) DefaultSpace
+        freeParam ScalarParam{} =
+          return ()
 
 prepareArg :: Param -> CompilerM op s C.Exp
-prepareArg (MemParam name size (Space space)) = do
+prepareArg (MemParam name size (Space sid)) = do
   -- Futhark main expects some other memory space than default, so
   -- create a new memory block and copy it there.
-  name' <- newVName $ baseString name <> "_" <> space
-  ty <- memToCType $ Space space
+  name' <- newVName $ baseString name <> "_" <> sid
   copy <- asks envCopy
-  alloc <- asks envAllocate
   let size' = dimSizeToExp size
-  decl [C.cdecl|$ty:ty $id:name';|]
-  alloc name' size' space
-  copy name' [C.cexp|0|] (Space space) name [C.cexp|0|] DefaultSpace size'
+      dest = rawMem' True $ var name'
+      src = rawMem' True $ var name
+  declMem name' $ Space sid
+  allocMem name' size' $ Space sid
+  copy dest [C.cexp|0|] (Space sid) src [C.cexp|0|] DefaultSpace size'
   return [C.cexp|$id:name'|]
 
-prepareArg p = return $ C.var $ paramName p
+prepareArg p = return $ var $ paramName p
 
-readInputs :: [Param] -> [ValueDecl] -> [C.Stm]
-readInputs inputparams = map $ readInput memsizes
+readInputs :: Bool -> [Param] -> [ValueDecl] -> [C.Stm]
+readInputs refcount inputparams = map $ readInput refcount memsizes
   where memsizes = sizeVars inputparams
 
-readInput :: HM.HashMap VName VName -> ValueDecl -> C.Stm
-readInput _ (ScalarValue t name) =
-  readPrimStm (C.var name) t
-readInput memsizes (ArrayValue name t shape)
+readInput :: Bool -> HM.HashMap VName VName -> ValueDecl -> C.Stm
+readInput _ _ (ScalarValue t name) =
+  readPrimStm (var name) t
+readInput refcount memsizes (ArrayValue name t shape)
   | Just f <- readFun t =
   -- We need to create an array for the array parser to put
   -- the shapes.
@@ -443,17 +629,18 @@ readInput memsizes (ArrayValue name t shape)
       maybeCopyDim (VarSize dimname) i =
         Just [C.cstm|$id:dimname = shape[$int:i];|]
       copyshape = catMaybes $ zipWith maybeCopyDim shape [0..rank-1]
-      memsize = C.product $ [C.cexp|sizeof($ty:t')|] :
+      memsize = cproduct $ [C.cexp|sizeof($ty:t')|] :
                              [ [C.cexp|shape[$int:i]|] |
                               i <- [0..rank-1] ]
       copymemsize = case HM.lookup name memsizes of
         Nothing -> []
         Just sizevar -> [[C.cstm|$id:sizevar = $exp:memsize;|]]
+      dest = rawMem' refcount $ var name
   in [C.cstm|{
         typename int64_t shape[$int:rank];
         if (read_array(sizeof($ty:t'),
                        $id:f,
-                       (void**)& $id:name,
+                       (void**)& $exp:dest,
                        shape,
                        $int:(length shape))
             != 0) {
@@ -479,30 +666,36 @@ printResult vs = fmap concat $ forM vs $ \v -> do
 
 unpackResults :: VName -> [Param] -> CompilerM op s [C.BlockItem]
 unpackResults ret [p] =
-  collect $ unpackResult ret p
+  collect $ unpackResult (var ret) p
 unpackResults ret outparams =
   collect $ zipWithM_ assign outparams [0..]
-  where assign param i = do
-          ret_field_tmp <- newVName "ret_field_tmp"
-          field_t <- case param of
-                       ScalarParam _ bt ->
-                         return $ primTypeToCType bt
-                       MemParam _ _ space ->
-                         memToCType space
-          let field_e = tupleFieldExp (C.var ret) i
-          item [C.citem|$ty:field_t $id:ret_field_tmp = $exp:field_e;|]
-          unpackResult ret_field_tmp param
+  where assign param i =
+          unpackResult (tupleFieldExp (var ret) i) param
 
-unpackResult :: VName -> Param -> CompilerM op s ()
+unpackResult :: C.Exp -> Param -> CompilerM op s ()
 unpackResult ret (ScalarParam name _) =
-  stm [C.cstm|$id:name = $id:ret;|]
+  stm [C.cstm|$id:name = $exp:ret;|]
 unpackResult ret (MemParam name _ DefaultSpace) =
-  stm [C.cstm|$id:name = $id:ret;|]
+  stm [C.cstm|$id:name = $exp:ret;|]
 unpackResult ret (MemParam name size (Space srcspace)) = do
   copy <- asks envCopy
   let size' = dimSizeToExp size
-  stm [C.cstm|$id:name = malloc($exp:size');|]
-  copy name [C.cexp|0|] DefaultSpace ret [C.cexp|0|] (Space srcspace) size'
+  allocMem name size' DefaultSpace
+  copy (rawMem' True $ var name) [C.cexp|0|] DefaultSpace
+    (rawMem' True ret) [C.cexp|0|] (Space srcspace) size'
+
+freeResults :: VName -> [Param] -> CompilerM op s [C.BlockItem]
+freeResults ret [p] =
+  collect $ freeResult (var ret) p
+freeResults ret outparams =
+  collect $ zipWithM_ free outparams [0..]
+  where free param i = freeResult (tupleFieldExp (var ret) i) param
+
+freeResult :: C.Exp -> Param -> CompilerM op s ()
+freeResult _ ScalarParam{} =
+  return ()
+freeResult e (MemParam _ _ space) =
+  unRefMem e space
 
 benchmarkOptions :: [Option]
 benchmarkOptions =
@@ -525,6 +718,7 @@ benchmarkOptions =
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
+          perform_warmup = 1;
           if (num_runs <= 0) {
             errx(1, "Need a positive number of runs, not %s", optarg);
           }
@@ -535,13 +729,15 @@ benchmarkOptions =
 compileProg :: MonadFreshNames m =>
                Operations op s
             -> s
+            -> [Space]
             -> [C.Definition] -> [C.Stm] -> [C.Stm] -> [C.BlockItem]
             -> [Option]
             -> Functions op
             -> m String
-compileProg ops userstate decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
+compileProg ops userstate spaces decls pre_main_stms pre_timing post_main_items options prog@(Functions funs) = do
   src <- getNameSource
-  let ((prototypes, definitions, (main_pre, main, main_post)), endstate) =
+  let ((memtypes, prototypes, definitions,
+        (main_pre, main, main_post, free_out)), endstate) =
         runCompilerM prog ops src userstate compileProg'
   return $ pretty [C.cunit|
 $esc:("#include <stdio.h>")
@@ -558,6 +754,8 @@ $esc:("#include <getopt.h>")
 
 $edecls:decls
 
+$edecls:memtypes
+
 $edecls:(typeDefinitions endstate)
 
 $edecls:(compVarDefinitions endstate)
@@ -573,6 +771,7 @@ $edecls:(map funcToDef definitions)
 $edecls:readerFunctions
 
 static typename FILE *runtime_file;
+static int perform_warmup = 0;
 static int num_runs = 1;
 
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
@@ -590,9 +789,10 @@ int main(int argc, char** argv) {
   $stms:pre_main_stms
   $items:main_pre
   /* Warmup run */
-  if (num_runs > 1) {
+  if (perform_warmup) {
     time_runs = 0;
     $items:main
+    $items:free_out
   }
   time_runs = 1;
   /* Proper run. */
@@ -601,9 +801,13 @@ int main(int argc, char** argv) {
       detail_timing = 1;
     }
     $items:main
+    if (run < num_runs-1) {
+      $items:free_out
+    }
   }
   $items:main_post
   $items:post_main_items
+  $items:free_out
   if (runtime_file != NULL) {
     fclose(runtime_file);
   }
@@ -617,7 +821,8 @@ int main(int argc, char** argv) {
           main <- case lookup mainname funs of
                     Nothing   -> fail "GenericC.compileProg: No main function"
                     Just func -> mainCall pre_timing mainname func
-          return (prototypes, definitions, main)
+          memtypes <- concat <$> mapM defineMemorySpace spaces
+          return (memtypes,  prototypes, definitions, main)
         funcToDef func = C.FuncDef func loc
           where loc = case func of
                         C.OldFunc _ _ _ _ _ _ l -> l
@@ -630,12 +835,15 @@ int main(int argc, char** argv) {
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
   args' <- mapM compileInput inputs
-  body' <- collect $ do
-             mapM_ compileOutput outputs
-             compileFunBody outputs body
+  (retval, body') <- blockScope' $ do
+    mapM_ compileOutput outputs
+    compileFunBody outputs body
   crettype <- typeToCType $ paramsTypes outputs
   return ([C.cedecl|static $ty:crettype $id:(funName fname)( $params:args' );|],
-          [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) { $items:body' }|])
+          [C.cfun|static $ty:crettype $id:(funName fname)( $params:args' ) {
+             $items:body'
+             return $id:retval;
+}|])
   where compileInput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           return [C.cparam|$ty:ctp $id:name|]
@@ -646,9 +854,8 @@ compileFun (fname, Function _ outputs inputs body _ _) = do
         compileOutput (ScalarParam name bt) = do
           let ctp = primTypeToCType bt
           decl [C.cdecl|$ty:ctp $id:name;|]
-        compileOutput (MemParam name _ space) = do
-          ty <- memToCType space
-          decl [C.cdecl|$ty:ty $id:name;|]
+        compileOutput (MemParam name _ space) =
+          declMem name space
 
 compilePrimValue :: PrimValue -> C.Exp
 
@@ -672,11 +879,11 @@ compilePrimValue Checked =
 
 dimSizeToExp :: DimSize -> C.Exp
 dimSizeToExp (ConstSize x) = [C.cexp|$int:x|]
-dimSizeToExp (VarSize v)   = C.var v
+dimSizeToExp (VarSize v)   = var v
 
-derefPointer :: VName -> C.Exp -> C.Type -> C.Exp
+derefPointer :: C.Exp -> C.Exp -> C.Type -> C.Exp
 derefPointer ptr i res_t =
-  [C.cexp|*(($ty:res_t)&($id:ptr[$exp:i]))|]
+  [C.cexp|*(($ty:res_t)&($exp:ptr[$exp:i]))|]
 
 writeScalarPointerWithQuals :: PointerQuals op s -> WriteScalar op s
 writeScalarPointerWithQuals quals_f dest i elemtype space v = do
@@ -706,14 +913,15 @@ compileExp (Constant val) = return $ compilePrimValue val
 compileExp (ScalarVar src) =
   return [C.cexp|$id:src|]
 
-compileExp (Index src (Count iexp) restype DefaultSpace) =
-  derefPointer src
-  <$> compileExp iexp
-  <*> pure [C.cty|$ty:(primTypeToCType restype)*|]
+compileExp (Index src (Count iexp) restype DefaultSpace) = do
+  src' <- rawMem src
+  derefPointer src'
+    <$> compileExp iexp
+    <*> pure [C.cty|$ty:(primTypeToCType restype)*|]
 
 compileExp (Index src (Count iexp) restype (Space space)) =
   join $ asks envReadScalar
-    <*> pure src <*> compileExp iexp
+    <*> rawMem src <*> compileExp iexp
     <*> pure (primTypeToCType restype) <*> pure space
 
 compileExp (UnOp Complement{} x) = do
@@ -799,7 +1007,7 @@ compileCode (Op op) = do
 compileCode Skip = return ()
 
 compileCode (Comment s code) = do
-  items <- collect $ compileCode code
+  items <- blockScope $ compileCode code
   stm [C.cstm|$comment:("// " ++ s)
               { $items:items }
              |]
@@ -815,40 +1023,35 @@ compileCode (c1 :>>: c2) = compileCode c1 >> compileCode c2
 
 compileCode (Assert e loc) = do
   e' <- compileExp e
-  stm [C.cstm|{
-            if (!$exp:e') {
+  stm [C.cstm|if (!$exp:e') {
                    fprintf(stderr, "Assertion %s at %s failed.\n",
                                    $string:(pretty e), $string:(locStr loc));
                    abort();
-                 }
-          }|]
+                 }|]
 
-compileCode (Allocate name (Count e) DefaultSpace) = do
-  size' <- compileExp e
-  stm [C.cstm|$id:name = malloc($exp:size');|]
-
-compileCode (Allocate name (Count e) (Space space)) =
-  join $ asks envAllocate <*> pure name <*> compileExp e <*> pure space
+compileCode (Allocate name (Count e) space) = do
+  size <- compileExp e
+  allocMem name size space
 
 compileCode (For i bound body) = do
   let i' = textual i
   bound' <- compileExp bound
-  body'  <- collect $ compileCode body
+  body'  <- blockScope $ compileCode body
   stm [C.cstm|for (int $id:i' = 0; $id:i' < $exp:bound'; $id:i'++) {
             $items:body'
           }|]
 
 compileCode (While cond body) = do
   cond' <- compileExp cond
-  body' <- collect $ compileCode body
+  body' <- blockScope $ compileCode body
   stm [C.cstm|while ($exp:cond') {
             $items:body'
           }|]
 
 compileCode (If cond tbranch fbranch) = do
   cond' <- compileExp cond
-  tbranch' <- collect $ compileCode tbranch
-  fbranch' <- collect $ compileCode fbranch
+  tbranch' <- blockScope $ compileCode tbranch
+  fbranch' <- blockScope $ compileCode fbranch
   stm $ case (tbranch', fbranch') of
     (_, []) ->
       [C.cstm|if ($exp:cond') { $items:tbranch' }|]
@@ -861,19 +1064,22 @@ compileCode (Copy dest (Count destoffset) DefaultSpace src (Count srcoffset) Def
   destoffset' <- compileExp destoffset
   srcoffset' <- compileExp srcoffset
   size' <- compileExp size
-  stm [C.cstm|memmove($id:dest + $exp:destoffset',
-                      $id:src + $exp:srcoffset',
+  dest' <- rawMem dest
+  src' <- rawMem src
+  stm [C.cstm|memmove($exp:dest' + $exp:destoffset',
+                      $exp:src' + $exp:srcoffset',
                       $exp:size');|]
 
 compileCode (Copy dest (Count destoffset) destspace src (Count srcoffset) srcspace (Count size)) = do
   copy <- asks envCopy
   join $ copy
-    <$> pure dest <*> compileExp destoffset <*> pure destspace
-    <*> pure src <*> compileExp srcoffset <*> pure srcspace
+    <$> rawMem dest <*> compileExp destoffset <*> pure destspace
+    <*> rawMem src <*> compileExp srcoffset <*> pure srcspace
     <*> compileExp size
 
 compileCode (Write dest (Count idx) elemtype DefaultSpace elemexp) = do
-  deref <- derefPointer dest
+  dest' <- rawMem dest
+  deref <- derefPointer dest'
            <$> compileExp idx
            <*> pure [C.cty|$ty:(primTypeToCType elemtype)*|]
   elemexp' <- compileExp elemexp
@@ -881,15 +1087,14 @@ compileCode (Write dest (Count idx) elemtype DefaultSpace elemexp) = do
 
 compileCode (Write dest (Count idx) elemtype (Space space) elemexp) =
   join $ asks envWriteScalar
-    <*> pure dest
+    <*> rawMem dest
     <*> compileExp idx
     <*> pure (primTypeToCType elemtype)
     <*> pure space
     <*> compileExp elemexp
 
-compileCode (DeclareMem name space) = do
-  ty <- memToCType space
-  decl [C.cdecl|$ty:ty $id:name;|]
+compileCode (DeclareMem name space) =
+  declMem name space
 
 compileCode (DeclareScalar name t) = do
   let ct = primTypeToCType t
@@ -907,8 +1112,8 @@ compileCode (SetScalar dest src) = do
   src' <- compileExp src
   stm [C.cstm|$id:dest = $exp:src';|]
 
-compileCode (SetMem dest src) =
-  stm [C.cstm|$id:dest = $id:src;|]
+compileCode (SetMem dest src space) =
+  setMem (var dest) src space
 
 compileCode (Call dests fname args) = do
   args' <- mapM compileExp args
@@ -922,20 +1127,36 @@ compileCode (Call dests fname args) = do
       decl [C.cdecl|$ty:crestype $id:ret;|]
       stm [C.cstm|$id:ret = $id:(funName fname)($args:args');|]
       forM_ (zip [0..] dests) $ \(i,dest) ->
-        stm [C.cstm|$id:dest = $exp:(tupleFieldExp (C.var ret) i);|]
+        stm [C.cstm|$id:dest = $exp:(tupleFieldExp (var ret) i);|]
 
-compileFunBody :: [Param] -> Code op -> CompilerM op s ()
+blockScope :: CompilerM op s () -> CompilerM op s [C.BlockItem]
+blockScope = fmap snd . blockScope'
+
+blockScope' :: CompilerM op s a -> CompilerM op s (a, [C.BlockItem])
+blockScope' m = pass $ do
+  (x, w) <- listen m
+  let items = DL.toList $ accItems w
+  releases <- collect $ forM_ (accDeclaredMem w) $ \(mem, space) ->
+    unRefMem (var mem) space
+  return ((x, items ++ releases),
+          const mempty)
+
+compileFunBody :: [Param] -> Code op -> CompilerM op s VName
 compileFunBody outputs code = do
   retval <- newVName "retval"
   bodytype <- typeToCType $ paramsTypes outputs
   compileCode code
   decl [C.cdecl|$ty:bodytype $id:retval;|]
-  let setRetVal' i output =
-        stm [C.cstm|$exp:(tupleFieldExp (C.var retval) i) = $id:(paramName output);|]
+  let setRetVal' i (MemParam name _ space) = do
+        let field = tupleFieldExp (var retval) i
+        resetMem field
+        setMem field name space
+      setRetVal' i (ScalarParam name _) =
+        stm [C.cstm|$exp:(tupleFieldExp (var retval) i) = $id:name;|]
   case outputs of
     [output] -> stm [C.cstm|$id:retval = $id:(paramName output);|]
     _        -> zipWithM_ setRetVal' [0..] outputs
-  stm [C.cstm|return $id:retval;|]
+  return retval
 
 ppArrayType :: PrimType -> Int -> String
 ppArrayType t 0 = pretty t
@@ -953,3 +1174,14 @@ assignmentOperator Add{}  = Just $ \d e -> [C.cexp|$id:d += $exp:e|]
 assignmentOperator Sub{} = Just $ \d e -> [C.cexp|$id:d -= $exp:e|]
 assignmentOperator Mul{} = Just $ \d e -> [C.cexp|$id:d *= $exp:e|]
 assignmentOperator _     = Nothing
+
+-- | Return an expression multiplying together the given expressions.
+-- If an empty list is given, the expression @1@ is returned.
+cproduct :: [C.Exp] -> C.Exp
+cproduct []     = [C.cexp|1|]
+cproduct (e:es) = foldl mult e es
+  where mult x y = [C.cexp|$exp:x * $exp:y|]
+
+-- | Turn a name into a C expression consisting of just that name.
+var :: C.ToIdent a => a -> C.Exp
+var k = [C.cexp|$id:k|]

@@ -26,8 +26,9 @@ compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of
     Left err -> return $ Left err
-    Right (Program opencl_code opencl_prelude kernel_names prog') -> do
+    Right (Program opencl_code opencl_prelude kernel_names prog') ->
       Right <$> GenericC.compileProg operations ()
+                [Space "device", Space "local", DefaultSpace]
                 (openClDecls transposeBlockDim kernel_names opencl_code opencl_prelude)
                 openClInit
                 [[C.cstm|OPENCL_SUCCEED(clFinish(fut_cl_queue));|]]
@@ -39,8 +40,10 @@ compileProg prog = do
                      , GenericC.opsWriteScalar = writeOpenCLScalar
                      , GenericC.opsReadScalar = readOpenCLScalar
                      , GenericC.opsAllocate = allocateOpenCLBuffer
+                     , GenericC.opsDeallocate = deallocateOpenCLBuffer
                      , GenericC.opsCopy = copyOpenCLMemory
                      , GenericC.opsMemoryType = openclMemoryType
+                     , GenericC.opsFatMemory = True
                      }
 
         options = [ Option { optionLongName = "platform"
@@ -56,7 +59,7 @@ compileProg prog = do
                   , Option { optionLongName = "synchronous"
                            , optionShortName = Just 's'
                            , optionArgument = NoArgument
-                           , optionAction = [C.cstm|cl_synchronous = 1;|]
+                           , optionAction = [C.cstm|cl_debug = 1;|]
                            }
                   , Option { optionLongName = "group-size"
                            , optionShortName = Nothing
@@ -76,7 +79,7 @@ writeOpenCLScalar mem i t "device" val = do
   GenericC.stm [C.cstm|{
                    $ty:t $id:val' = $exp:val;
                    OPENCL_SUCCEED(
-                     clEnqueueWriteBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                     clEnqueueWriteBuffer(fut_cl_queue, $exp:mem, CL_TRUE,
                                           $exp:i, sizeof($ty:t),
                                           &$id:val',
                                           0, NULL, NULL));
@@ -90,7 +93,7 @@ readOpenCLScalar mem i t "device" = do
   GenericC.decl [C.cdecl|$ty:t $id:val;|]
   GenericC.stm [C.cstm|
                  OPENCL_SUCCEED(
-                   clEnqueueReadBuffer(fut_cl_queue, $id:mem, CL_TRUE,
+                   clEnqueueReadBuffer(fut_cl_queue, $exp:mem, CL_TRUE,
                                        $exp:i, sizeof($ty:t),
                                        &$id:val,
                                        0, NULL, NULL));
@@ -111,13 +114,24 @@ allocateOpenCLBuffer mem size "device" = do
   -- blow up if we ever passed it to an OpenCL function.
   GenericC.stm [C.cstm|{
     typename cl_int $id:errorname;
-    $id:mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
-                             $exp:size > 0 ? $exp:size : 1, NULL,
-                             &$id:errorname);
+    $exp:mem = clCreateBuffer(fut_cl_context, CL_MEM_READ_WRITE,
+                              $exp:size > 0 ? $exp:size : 1, NULL,
+                              &$id:errorname);
     OPENCL_SUCCEED($id:errorname);
   }|]
+allocateOpenCLBuffer _ _ "local" =
+  return () -- Hack - these memory blocks do not actually exist.
 allocateOpenCLBuffer _ _ space =
   fail $ "Cannot allocate in '" ++ space ++ "' space"
+
+deallocateOpenCLBuffer :: GenericC.Deallocate OpenCL ()
+deallocateOpenCLBuffer mem "device" =
+  GenericC.stm [C.cstm|OPENCL_SUCCEED(clReleaseMemObject($exp:mem));|]
+deallocateOpenCLBuffer _ "local" =
+  return () -- Hack - these memory blocks do not actually exist.
+deallocateOpenCLBuffer _ space =
+  fail $ "Cannot deallocate in '" ++ space ++ "' space"
+
 
 copyOpenCLMemory :: GenericC.Copy OpenCL ()
 -- The read/write/copy-buffer functions fail if the given offset is
@@ -127,9 +141,9 @@ copyOpenCLMemory destmem destidx DefaultSpace srcmem srcidx (Space "device") nby
   GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED(
-        clEnqueueReadBuffer(fut_cl_queue, $id:srcmem, CL_TRUE,
+        clEnqueueReadBuffer(fut_cl_queue, $exp:srcmem, CL_TRUE,
                             $exp:srcidx, $exp:nbytes,
-                            $id:destmem + $exp:destidx,
+                            $exp:destmem + $exp:destidx,
                             0, NULL, NULL));
    }
   |]
@@ -137,9 +151,9 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx DefaultSpace nby
   GenericC.stm [C.cstm|
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED(
-        clEnqueueWriteBuffer(fut_cl_queue, $id:destmem, CL_TRUE,
+        clEnqueueWriteBuffer(fut_cl_queue, $exp:destmem, CL_TRUE,
                              $exp:destidx, $exp:nbytes,
-                             $id:srcmem + $exp:srcidx,
+                             $exp:srcmem + $exp:srcidx,
                              0, NULL, NULL));
     }
   |]
@@ -150,11 +164,11 @@ copyOpenCLMemory destmem destidx (Space "device") srcmem srcidx (Space "device")
     if ($exp:nbytes > 0) {
       OPENCL_SUCCEED(
         clEnqueueCopyBuffer(fut_cl_queue,
-                            $id:srcmem, $id:destmem,
+                            $exp:srcmem, $exp:destmem,
                             $exp:srcidx, $exp:destidx,
                             $exp:nbytes,
                             0, NULL, NULL));
-      if (cl_synchronous) {
+      if (cl_debug) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
       }
     }
@@ -189,9 +203,10 @@ callKernel (LaunchKernel name args kernel_size workgroup_size) = do
             OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
           |]
 
-        setKernelArg i (MemArg v) =
+        setKernelArg i (MemArg v) = do
+          v' <- GenericC.rawMem v
           GenericC.stm [C.cstm|
-            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($id:v), &$id:v));
+            OPENCL_SUCCEED(clSetKernelArg($id:name, $int:i, sizeof($exp:v'), &$exp:v'));
           |]
 
         setKernelArg i (SharedMemoryArg num_bytes) = do
@@ -209,33 +224,34 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
   time_diff <- newVName "time_diff"
   local_work_size <- newVName "local_work_size"
 
-  GenericC.stm [C.cstm|{
+  GenericC.stm [C.cstm|
     if ($exp:total_elements != 0) {
       const size_t $id:global_work_size[$int:kernel_rank] = {$inits:kernel_dims'};
       const size_t $id:local_work_size[$int:kernel_rank] = {$inits:workgroup_dims'};
       struct timeval $id:time_start, $id:time_end;
-      fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
-      $stms:(printKernelSize global_work_size)
-      fprintf(stderr, "].\n");
-      gettimeofday(&$id:time_start, NULL);
+      if (cl_debug) {
+        fprintf(stderr, "Launching %s with global work size [", $string:kernel_name);
+        $stms:(printKernelSize global_work_size)
+        fprintf(stderr, "].\n");
+        gettimeofday(&$id:time_start, NULL);
+      }
       OPENCL_SUCCEED(
         clEnqueueNDRangeKernel(fut_cl_queue, $id:kernel_name, $int:kernel_rank, NULL,
                                $id:global_work_size, $id:local_work_size,
                                0, NULL, NULL));
-      if (cl_synchronous) {
+      if (cl_debug) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
+        gettimeofday(&$id:time_end, NULL);
+        typename suseconds_t $id:time_diff =
+          ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
+          ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
+        if (detail_timing) {
+          $id:(kernelRuntime kernel_name) += $id:time_diff;
+          $id:(kernelRuns kernel_name)++;
+          fprintf(stderr, "kernel %s runtime: %dus\n",
+                  $string:kernel_name, (int)$id:time_diff);
+        }
       }
-      gettimeofday(&$id:time_end, NULL);
-      typename suseconds_t $id:time_diff =
-         ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
-         ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
-      if (detail_timing) {
-        $id:(kernelRuntime kernel_name) += $id:time_diff;
-        $id:(kernelRuns kernel_name)++;
-        fprintf(stderr, "kernel %s runtime: %dus\n",
-                $string:kernel_name, (int)$id:time_diff);
-      }
-    }
     }|]
   where kernel_rank = length kernel_dims
         kernel_dims' = map toInit kernel_dims

@@ -10,6 +10,7 @@ module Futhark.Representation.Kernels.Simplify
        )
 where
 
+import Control.Applicative
 import Control.Monad
 import Data.Either
 import Data.List hiding (any, all)
@@ -26,8 +27,7 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.MonadFreshNames
-import Futhark.Binder.Class
-import Futhark.Construct
+import Futhark.Tools
 import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
 import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
@@ -65,38 +65,42 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       return $ MapKernel cs' w' index ispace' inps' returns' body'
     where bound_here = HS.fromList $ index : map kernelInputName inps ++ map fst ispace
 
-  simplifyOp (ReduceKernel cs w kernel_size comm parlam seqlam nes arrs) = do
+  simplifyOp (ReduceKernel cs w kernel_size comm parlam seqlam arrs) = do
     cs' <- Engine.simplify cs
     w' <- Engine.simplify w
     kernel_size' <- Engine.simplify kernel_size
-    nes' <- mapM Engine.simplify nes
     arrs' <- mapM Engine.simplify arrs
-    parlam' <- Engine.simplifyLambda parlam w' (Just nes) $ map (const Nothing) arrs
-    seqlam' <- Engine.simplifyLambda seqlam w' (Just nes) $ map Just arrs
+    parlam' <- Engine.simplifyLambda parlam Nothing $ map (const Nothing) arrs
+    seqlam' <- Engine.simplifyLambda seqlam Nothing $ map Just arrs
     let consumed_in_seq = consumedInBody $ lambdaBody seqlam'
         arr_params = drop 1 $ lambdaParams seqlam'
     forM_ (zip arr_params arrs) $ \(p,arr) ->
       when (paramName p `HS.member` consumed_in_seq) $
       Engine.consumedName arr
-    return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' nes' arrs'
+    return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' arrs'
 
   simplifyOp (ScanKernel cs w kernel_size order lam input) = do
-    let (nes, arrs) = unzip input
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    kernel_size' <- Engine.simplify kernel_size
-    nes' <- mapM Engine.simplify nes
     arrs' <- mapM Engine.simplify arrs
-    lam' <- Engine.simplifyLambda lam w' (Just nes) $ map Just arrs'
-    return $ ScanKernel cs' w' kernel_size' order lam' $ zip nes' arrs'
+    ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
+      Engine.simplify kernel_size <*> pure order <*>
+      Engine.simplifyLambda lam (Just nes) (map Just arrs') <*>
+      (zip <$> mapM Engine.simplify nes <*> pure arrs')
+    where (nes, arrs) = unzip input
 
   simplifyOp (ChunkedMapKernel cs w kernel_size o lam arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    kernel_size' <- Engine.simplify kernel_size
     arrs' <- mapM Engine.simplify arrs
-    lam' <- Engine.simplifyLambda lam w' Nothing $ map Just arrs'
-    return $ ChunkedMapKernel cs' w' kernel_size' o lam' arrs'
+    ChunkedMapKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
+      Engine.simplify kernel_size <*> pure o <*>
+      Engine.simplifyLambda lam Nothing (map Just arrs') <*>
+      pure arrs'
+
+  simplifyOp (WriteKernel cs ts i vs as) = do
+    cs' <- Engine.simplify cs
+    ts' <- mapM Engine.simplify ts
+    i' <- Engine.simplify i
+    vs' <- mapM Engine.simplify vs
+    as' <- mapM Engine.simplify as
+    return $ WriteKernel cs' ts' i' vs' as'
 
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
@@ -135,6 +139,8 @@ topDownRules :: (MonadBinder m,
 topDownRules = [removeUnusedKernelInputs
                , simplifyKernelInputs
                , removeInvariantKernelOutputs
+               , fuseReduceIota
+               , fuseChunkedMapIota
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -225,3 +231,83 @@ removeDeadKernelOutputs (_, used) (Let pat _ (Op (MapKernel cs w index ispace in
   where pats_rets_and_ses = zip3 (patternValueElements pat) returns $ bodyResult body
         usedOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
 removeDeadKernelOutputs _ _ = cannotSimplify
+
+fuseReduceIota :: (LocalScope (Lore m) m,
+                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                  TopDownRule m
+fuseReduceIota vtable (Let pat _ (Op (ReduceKernel cs w size comm redlam foldlam arrs)))
+  | Just f <- fuseIota vtable size comm foldlam arrs = do
+      (foldlam', arrs') <- f
+      letBind_ pat $ Op $ ReduceKernel cs w size comm redlam foldlam' arrs'
+fuseReduceIota _ _ = cannotSimplify
+
+fuseChunkedMapIota :: (LocalScope (Lore m) m,
+                       MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                      TopDownRule m
+fuseChunkedMapIota vtable (Let pat _ (Op (ChunkedMapKernel cs w size o lam arrs)))
+  | Just f <- fuseIota vtable size comm lam arrs = do
+      (lam', arrs') <- f
+      letBind_ pat $ Op $ ChunkedMapKernel cs w size o lam' arrs'
+  where comm = case o of Disorder -> Commutative
+                         InOrder -> Noncommutative
+fuseChunkedMapIota _ _ = cannotSimplify
+
+fuseIota :: (LocalScope (Lore m) m, MonadBinder m) =>
+            ST.SymbolTable (Lore m)
+         -> KernelSize
+         -> Commutativity
+         -> LambdaT (Lore m)
+         -> [VName]
+         -> Maybe (m (LambdaT (Lore m), [VName]))
+fuseIota vtable size comm lam arrs
+  | null iota_params = Nothing
+  | otherwise = Just $ do
+      fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
+        case comm of
+          Noncommutative -> do
+            start_offset <- letSubExp "iota_start_offset" $
+              PrimOp $ BinOp (Mul Int32) (Var thread_index) elems_per_thread
+            forM_ iota_params $ \(p, x) -> do
+              start <- letSubExp "iota_start" $
+                PrimOp $ BinOp (Add Int32) start_offset x
+              letBindNames'_ [p] $
+                PrimOp $ Iota (Var $ paramName chunk_param) start $
+                constant (1::Int32)
+          Commutative ->
+            forM_ iota_params $ \(p, x) -> do
+              start <- letSubExp "iota_start" $
+                PrimOp $ BinOp (Add Int32) (Var thread_index) x
+              letBindNames'_ [p] $
+                PrimOp $ Iota (Var $ paramName chunk_param) start
+                num_threads
+        mapM_ addBinding $ bodyBindings $ lambdaBody lam
+        return $ bodyResult $ lambdaBody lam
+      let (arr_params', arrs') = unzip params_and_arrs
+          lam' = lam { lambdaBody = fold_body
+                     , lambdaParams = Param thread_index (paramAttr chunk_param) :
+                       chunk_param :
+                       arr_params'
+                     }
+      return (lam', arrs')
+  where elems_per_thread = kernelElementsPerThread size
+        num_threads = kernelNumThreads size
+        (thread_index, chunk_param, params_and_arrs, iota_params) =
+          iotaParams vtable lam arrs
+
+iotaParams :: ST.SymbolTable lore
+           -> LambdaT lore
+           -> [VName]
+           -> (VName,
+               Param (LParamAttr lore),
+               [(ParamT (LParamAttr lore), VName)],
+               [(VName, SubExp)])
+iotaParams vtable lam arrs = (thread_index, chunk_param, params_and_arrs, iota_params)
+  where (thread_index, chunk_param, arr_params) =
+          partitionChunkedKernelLambdaParameters $ lambdaParams lam
+        (params_and_arrs, iota_params) =
+          partitionEithers $ zipWith isIota arr_params arrs
+        isIota p v
+          | Just (Iota _ x (Constant (IntValue (Int32Value 1)))) <- asPrimOp =<< ST.lookupExp v vtable =
+            Right (paramName p, x)
+          | otherwise =
+            Left (p, v)

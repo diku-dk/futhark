@@ -88,7 +88,7 @@ defaultMemBlockType :: C.Type
 defaultMemBlockType = [C.cty|unsigned char*|]
 
 cIntOps :: [C.Definition]
-cIntOps = concatMap (flip map [minBound..maxBound]) ops
+cIntOps = concatMap (`map` [minBound..maxBound]) ops
   where ops = [mkAdd, mkSub, mkMul,
                mkUDiv, mkUMod,
                mkSDiv, mkSMod,

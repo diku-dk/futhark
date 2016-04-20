@@ -12,6 +12,8 @@ where
 import Control.Monad
 import Control.Monad.IO.Class
 import Data.List
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import System.Exit (exitWith, ExitCode(..))
 import System.IO
 
@@ -37,7 +39,7 @@ printAction =
          , actionProcedure = liftIO . putStrLn . pretty . aliasAnalysis
          }
 
-interpretAction :: Show error => (FilePath -> String -> Either error [Value])
+interpretAction :: Show error => (FilePath -> T.Text -> Either error [Value])
                 -> Action SOACS
 interpretAction parser =
   Action { actionName = "Interpret"
@@ -78,14 +80,14 @@ kernelImpCodeGenAction =
          }
 
 interpret :: Show error =>
-             (FilePath -> String -> Either error [Value])
+             (FilePath -> T.Text -> Either error [Value])
           -> Prog SOACS -> IO ()
 interpret parseValues prog =
   case funDefByName defaultEntryPoint prog of
     Nothing -> do hPutStrLn stderr "Interpreter error: no main function."
                   exitWith $ ExitFailure 2
     Just _ -> do
-      parseres <- fmap (parseValues "<stdin>") getContents
+      parseres <- fmap (parseValues "<stdin>") T.getContents
       args <- case parseres of Left e -> do hPutStrLn stderr $ "Read error: " ++ show e
                                             exitWith $ ExitFailure 2
                                Right vs -> return vs

@@ -88,7 +88,7 @@ primOpType (ConvOp conv _) =
 primOpType (Index _ ident idx) =
   result <$> lookupType ident
   where result t = [stripArray (length idx) t]
-primOpType (Iota n _) =
+primOpType (Iota n _ _) =
   pure [arrayOf (Prim $ IntType Int32) (Shape [n]) NoUniqueness]
 primOpType (Replicate ne e) =
   result <$> subExpType e
@@ -118,6 +118,7 @@ primOpType (Assert _ _) =
 primOpType (Partition _ n _ arrays) =
   result <$> traverse lookupType arrays
   where result ts = replicate n (Prim $ IntType Int32) ++ ts
+
 
 -- | The type of an expression.
 expExtType :: (HasScope lore m,
@@ -155,7 +156,7 @@ instance Annotations lore => HasScope lore (FeelBad lore) where
 bodyExtType :: (Annotations lore, HasScope lore m, Monad m) =>
                Body lore -> m [ExtType]
 bodyExtType (Body _ bnds res) =
-  existentialiseExtTypes bound <$> staticShapes <$>
+  existentialiseExtTypes bound . staticShapes <$>
   extendedScope (traverse subExpType res) bndscope
   where bndscope = scopeOf bnds
         boundInLet (Let pat _ _) = patternNames pat

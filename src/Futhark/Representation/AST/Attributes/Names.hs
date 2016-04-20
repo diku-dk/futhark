@@ -128,12 +128,8 @@ freeInLambda :: (FreeIn (ExpAttr lore),
                  FreeIn (LetAttr lore),
                  FreeIn (Op lore)) =>
                 Lambda lore -> Names
-freeInLambda (Lambda index params body rettype) =
-  inRet <> inParams <> inBody
-  where inRet = mconcat $ map freeIn rettype
-        inParams = mconcat $ map freeIn params
-        inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = index : map paramName params
+freeInLambda (Lambda params body rettype) =
+    freeInLambdaIsh params body rettype
 
 -- | Return the set of identifiers that are free in the given
 -- existential lambda, including shape annotations in the parameters.
@@ -144,12 +140,20 @@ freeInExtLambda :: (FreeIn (ExpAttr lore),
                     FreeIn (LetAttr lore),
                     FreeIn (Op lore)) =>
                    ExtLambda lore -> Names
-freeInExtLambda (ExtLambda index params body rettype) =
+freeInExtLambda (ExtLambda params body rettype) =
+  freeInLambdaIsh params body rettype
+
+freeInLambdaIsh :: (FreeIn attr, FreeIn a, FreeIn (ExpAttr lore),
+                    FreeIn (BodyAttr lore), FreeIn (FParamAttr lore),
+                    FreeIn (LParamAttr lore), FreeIn (LetAttr lore),
+                    FreeIn (Op lore)) =>
+                   [ParamT attr] -> Body lore -> [a] -> Names
+freeInLambdaIsh params body rettype =
   inRet <> inParams <> inBody
   where inRet = mconcat $ map freeIn rettype
         inParams = mconcat $ map freeIn params
         inBody = HS.filter (`notElem` paramnames) $ freeInBody body
-        paramnames = index : map paramName params
+        paramnames = map paramName params
 
 -- | A class indicating that we can obtain free variable information
 -- from values of this type.
@@ -238,8 +242,8 @@ boundByBindings = mconcat . map bound
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]
-boundByLambda lam = lambdaIndex lam : map paramName (lambdaParams lam)
+boundByLambda lam = map paramName (lambdaParams lam)
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByExtLambda :: ExtLambda lore -> [VName]
-boundByExtLambda lam = extLambdaIndex lam : map paramName (extLambdaParams lam)
+boundByExtLambda lam = map paramName (extLambdaParams lam)

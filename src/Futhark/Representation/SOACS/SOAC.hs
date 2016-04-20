@@ -35,7 +35,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), ppr, comma, commasep, Doc, Pretty, parens, text)
+  ((</>), ppr, comma, commasep, semisep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
@@ -57,6 +57,8 @@ data SOAC lore =
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
+  | Write Certificates [Type] VName [VName] [VName]
+    -- ^ Not really a SOAC, but gets its own kernel.
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -121,6 +123,20 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
+mapSOACM tv (Write cs ts i vs as) =
+  Write <$> mapOnSOACCertificates tv cs
+  <*> mapM (mapOnSOACType tv) ts
+  <*> mapOnSOACVName tv i
+  <*> mapM (mapOnSOACVName tv) vs
+  <*> mapM (mapOnSOACVName tv) as
+
+-- FIXME: Make this less hacky.
+mapOnSOACType :: (Monad m, Applicative m) =>
+                 SOACMapper flore tlore m -> Type -> m Type
+mapOnSOACType _tv (Prim pt) = pure $ Prim pt
+mapOnSOACType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
+  where f (Shape dims) = Shape <$> mapM (mapOnSOACSubExp tv) dims
+mapOnSOACType _tv (Mem se s) = pure $ Mem se s
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
@@ -166,11 +182,13 @@ soacType (Stream _ outersize form lam _) =
   map (substNamesInExtType substs) rtp
   where nms = map paramName $ take (1 + length accs) params
         substs = HM.fromList $ zip nms (outersize:accs)
-        ExtLambda _ params _ rtp = lam
+        ExtLambda params _ rtp = lam
         accs = case form of
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
+soacType (Write _ ts _ _ _) =
+  staticShapes ts
 
 instance Attributes lore => TypedOp (SOAC lore) where
   opType = pure . soacType
@@ -190,6 +208,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
                Sequential _       -> []
     in  a1 ++ bodyAliases (extLambdaBody lam)
+  opAliases Write{} =
+    [mempty]
 
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
@@ -236,6 +256,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
+  addOpAliases (Write cs ts i vs as) =
+    Write cs ts i vs as
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -291,6 +313,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
+  addOpRanges (Write cs ts i vs as) =
+    Write cs ts i vs as
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -312,45 +336,6 @@ typeCheckSOAC (Map cs size fun arrexps) = do
   TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun arrargs
-
-typeCheckSOAC (Reduce ass size _ fun inputs) = do
-  let (startexps, arrexps) = unzip inputs
-  mapM_ (TC.requireI [Prim Cert]) ass
-  TC.require [Prim int32] size
-  startargs <- mapM TC.checkArg startexps
-  arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
-  let startt      = map TC.argType startargs
-      intupletype = map TC.argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    TC.bad $ TC.TypeError $
-    "Accumulator is of type " ++ prettyTuple startt ++
-    ", but reduce function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    TC.bad $ TC.TypeError $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but reduce function returns type " ++ prettyTuple funret ++ "."
-
--- Scan is exactly identical to Reduce.  Duplicate for clarity anyway.
-typeCheckSOAC (Scan ass size fun inputs) = do
-  let (startexps, arrexps) = unzip inputs
-  mapM_ (TC.requireI [Prim Cert]) ass
-  TC.require [Prim int32] size
-  startargs <- mapM TC.checkArg startexps
-  arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
-  let startt      = map TC.argType startargs
-      intupletype = map TC.argType arrargs
-      funret      = lambdaReturnType fun
-  unless (startt == funret) $
-    TC.bad $ TC.TypeError $
-    "Initial value is of type " ++ prettyTuple startt ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
-    TC.bad $ TC.TypeError $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
 
 typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   mapM_ (TC.requireI [Prim Cert]) ass
@@ -444,6 +429,89 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
+typeCheckSOAC (Write cs ts i vs as) = do
+  -- Requirements:
+  --
+  --   1. @i@ must be an array of i32.
+  --
+  --   2. @v@ and @a@ must have the same type (though not necessarily the same
+  --   length).
+  --
+  --   3. The return type @t@ must be the same type as @a@.
+  --
+  --   4. @a@ must be unique and must not alias @v@, since otherwise
+  --   there might be indeterministic behaviour.
+  --
+  --   5. @a@ is consumed.  But this is not really a check, but more of a
+  --   requirement, so that e.g. the source is not hoisted out of a loop, which
+  --   will mean it cannot be consumed.
+  --
+  --   6. @i@ and @v@ must have the same length.
+  --
+  -- Code:
+
+  -- Check the certificates.
+  mapM_ (TC.requireI [Prim Cert]) cs
+
+  forM_ (zip3 ts vs as) $ \(t, v, a) -> do
+    -- 1.
+    iLen <- arraySize 0 <$> lookupType i
+    vLen <- arraySize 0 <$> lookupType v
+    TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+
+    -- 2.
+    vType <- lookupType v
+    aType <- lookupType a
+    case (vType, aType) of
+      (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
+        return ()
+      _ ->
+        TC.bad $ TC.TypeError
+        "Write values and input arrays do not have the same primitive type"
+
+    -- 3.
+    TC.require [t] (Var a)
+
+    -- 4.
+
+    -- 5.
+    TC.consume =<< TC.lookupAliases a
+
+    -- 6.
+    unless (iLen == vLen) $
+      TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
+
+typeCheckSOAC (Reduce ass size _ fun inputs) =
+  typeCheckScanReduce ass size fun inputs
+
+typeCheckSOAC (Scan ass size fun inputs) =
+  typeCheckScanReduce ass size fun inputs
+
+typeCheckScanReduce :: TC.Checkable lore =>
+                       Certificates
+                    -> SubExp
+                    -> Lambda (Aliases lore)
+                    -> [(SubExp, VName)]
+                    -> TC.TypeM lore ()
+typeCheckScanReduce cs size fun inputs = do
+  let (startexps, arrexps) = unzip inputs
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] size
+  startargs <- mapM TC.checkArg startexps
+  arrargs   <- TC.checkSOACArrayArgs size arrexps
+  TC.checkLambda fun $ startargs ++ arrargs
+  let startt      = map TC.argType startargs
+      intupletype = map TC.argType arrargs
+      funret      = lambdaReturnType fun
+  unless (startt == funret) $
+    TC.bad $ TC.TypeError $
+    "Initial value is of type " ++ prettyTuple startt ++
+    ", but function returns type " ++ prettyTuple funret ++ "."
+  unless (intupletype == funret) $
+    TC.bad $ TC.TypeError $
+    "Array element value is of type " ++ prettyTuple intupletype ++
+    ", but function returns type " ++ prettyTuple funret ++ "."
+
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
 getStreamAccums (MapLike _       ) = []
@@ -466,6 +534,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
+  opMetrics Write{} =
+    inside "Write" $ return ()
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
@@ -507,6 +577,9 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
+  ppr (Write cs _ts i vs as) =
+    PP.ppCertificates' cs <> text "write"
+    <> parens (semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =
