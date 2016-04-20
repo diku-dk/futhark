@@ -36,19 +36,15 @@ module Language.Futhark.Attributes
   , arrayRank
   , arrayDims
   , nestedDims
-  , setArrayShape
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , returnType
-  , lambdaType
   , lambdaReturnType
 
   -- * Operations on types
-  , stripArray
   , peelArray
   , arrayOf
   , arrayType
-  , rowType
   , toStructural
   , toStruct
   , fromStruct
@@ -624,13 +620,10 @@ typeOf (Reshape shape  e _) =
   Rank (length shape) `setArrayShape` typeOf e
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Transpose e _) = typeOf e
-typeOf (Map f arr _) = arrayType 1 et Unique
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-  where et = lambdaType f [rowType $ typeOf arr]
-typeOf (Reduce _ fun start arr _) =
-  removeShapeAnnotations $
-  lambdaType fun [typeOf start, rowType (typeOf arr)]
+typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` HS.empty
+  where et = lambdaReturnType f
+typeOf (Reduce _ fun _ _ _) =
+  lambdaReturnType fun `setAliases` mempty
 typeOf (Zip es _) =
   Array $ TupleArray (zipWith typeToTupleArrayElem es_ts es_us) (Rank 1) u
   where es_ts = map (rowType . unInfo . snd) es
@@ -640,24 +633,24 @@ typeOf (Unzip _ ts _) =
   Tuple $ map unInfo ts
 typeOf (Unsafe e _) =
   typeOf e
-typeOf (Scan fun start arr _) =
+typeOf (Scan fun _ _ _) =
   arrayType 1 et Unique
-    where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
+  where et = lambdaReturnType fun `setAliases` mempty
 typeOf (Filter _ arr _) =
   typeOf arr
 typeOf (Partition funs arr _) =
   Tuple $ replicate (length funs + 1) $ typeOf arr
-typeOf (Stream form lam arr _) =
+typeOf (Stream form lam _ _) =
   case form of
-    MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf arr]
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-    RedLike _ _ _ acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
-                         `setAliases` HS.empty
-                         `setUniqueness` Unique
-    Sequential  acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
+    MapLike{}    -> lambdaReturnType lam
+                    `setAliases` HS.empty
+                    `setUniqueness` Unique
+    RedLike{}    -> lambdaReturnType lam
+                    `setAliases` HS.empty
+                    `setUniqueness` Unique
+    Sequential{} -> lambdaReturnType lam
+                    `setAliases` HS.empty
+                    `setUniqueness` Unique
 typeOf (Concat x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Split splitexps e _) =
@@ -676,13 +669,6 @@ expToValue (TupLit es _) = do es' <- mapM expToValue es
 expToValue (ArrayLit es (Info t) _) = do es' <- mapM expToValue es
                                          Just $ arrayValue es' t
 expToValue _ = Nothing
-
--- | The result of applying the arguments of the given types to the
--- given lambda function.
-lambdaType :: (Ord vn, Hashable vn) =>
-              LambdaBase Info vn -> [CompTypeBase vn]
-           -> TypeBase Rank Names vn
-lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -735,15 +721,6 @@ lambdaReturnType (UnOpFun _ _ (Info t) _) = toStruct t
 lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
-
--- | The parameter 'Diet's of a lambda.
-lambdaParamDiets :: LambdaBase Info vn -> [Diet]
-lambdaParamDiets (AnonymFun params _ _ _) = map (diet . paramType) params
-lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
-lambdaParamDiets UnOpFun{} = [Observe]
-lambdaParamDiets BinOpFun{} = [Observe, Observe]
-lambdaParamDiets CurryBinOpLeft{} = [Observe]
-lambdaParamDiets CurryBinOpRight{} = [Observe]
 
 -- | Is the given binary operator commutative?
 commutative :: BinOp -> Bool
