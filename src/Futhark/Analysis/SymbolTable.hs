@@ -424,9 +424,7 @@ insertLParamWithRange param range vtable =
                                   , lparamBindingDepth = 0
                                   }
         name = AST.paramName param
-        sizevars = mapMaybe isVar $ arrayDims $ AST.paramType param
-        isVar (Var v) = Just v
-        isVar _       = Nothing
+        sizevars = subExpVars $ arrayDims $ AST.paramType param
 
 insertLParam :: Annotations lore =>
                 LParam lore -> SymbolTable lore -> SymbolTable lore
