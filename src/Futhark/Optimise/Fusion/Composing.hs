@@ -19,6 +19,7 @@ module Futhark.Optimise.Fusion.Composing
 
 import Data.List
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 import qualified Data.Map as M
 import Data.Maybe
 
@@ -47,7 +48,7 @@ import Futhark.Construct (mapResult)
 -- The result is the fused function, and a list of the array inputs
 -- expected by the SOAC containing the fused function.
 fuseMaps :: Bindable lore =>
-            [VName]     -- ^ The producer var names that still need to be returned
+            Names     -- ^ The producer var names that still need to be returned
          -> Lambda lore -- ^ Function of SOAC to be fused.
          -> [SOAC.Input] -- ^ Input of SOAC to be fused.
          -> [(VName,Ident)] -- ^ Output of SOAC to be fused.  The
@@ -79,7 +80,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
         --(unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
 
 fuseInputs :: Bindable lore =>
-              [VName]
+              Names
            -> Lambda lore -> [SOAC.Input] -> [(VName,Ident)]
            -> Lambda lore -> [SOAC.Input]
            -> ([Ident], [Ident], [Ident],
@@ -151,7 +152,7 @@ removeDuplicateInputs = fst . HM.foldlWithKey' comb ((HM.empty, id), M.empty)
           `insertBinding` b
 
 fuseRedomap :: Bindable lore =>
-               [VName]  -> [VName]
+               Names  -> [VName]
             -> [SubExp] -> Lambda lore -> [SOAC.Input] -> [(VName,Ident)]
             -> Lambda lore -> [SOAC.Input]
             -> (Lambda lore, [SOAC.Input])
@@ -160,7 +161,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --   (i) we remove the accumulator formal paramter and corresponding
   --       (body) result from from redomap's fold-lambda body
   let acc_len     = length p_nes
-      unfus_arrs  = filter (`elem` unfus_nms) outVars
+      unfus_arrs  = filter (`HS.member` unfus_nms) outVars
       lam1_body   = lambdaBody p_lam
       lam1_accres = take acc_len $ bodyResult lam1_body
       lam1_arrres = drop acc_len $ bodyResult lam1_body
@@ -171,7 +172,7 @@ fuseRedomap unfus_nms outVars p_nes p_lam p_inparr outPairs c_lam c_inparr =
   --       @outPairs@, then ``map o redomap'' fuse the two lambdas
   --       (in the usual way), and construct the extra return types
   --       for the arrays that fall through.
-      (res_lam, new_inp) = fuseMaps unfus_arrs lam1_hacked p_inparr
+      (res_lam, new_inp) = fuseMaps (HS.fromList unfus_arrs) lam1_hacked p_inparr
                                     (drop acc_len outPairs) c_lam c_inparr
       (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_arrs) $
                        zip (drop acc_len outVars) $ drop acc_len $
