@@ -843,7 +843,7 @@ checkExp (Reduce comm fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [startarg, arrarg]
-  let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
+  let redtype = lambdaReturnType fun'
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   unless (argType arrarg `subtypeOf` redtype) $
@@ -854,7 +854,7 @@ checkExp (Scan fun startexp arrexp pos) = do
   (startexp', startarg) <- checkArg startexp
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
   fun' <- checkLambda fun [startarg, arrarg]
-  let scantype = lambdaType fun' [typeOf startexp', typeOf arrexp']
+  let scantype = lambdaReturnType fun'
   unless (typeOf startexp' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
   unless (inrowt `subtypeOf` scantype) $
@@ -866,7 +866,7 @@ checkExp (Filter fun arrexp pos) = do
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
   fun' <- checkLambda fun [nonunique_arg]
-  when (lambdaType fun' [rowelemt] /= Prim Bool) $
+  when (lambdaReturnType fun' /= Prim Bool) $
     bad $ TypeError pos "Filter function does not return bool."
 
   return $ Filter fun' arrexp' pos
@@ -877,7 +877,7 @@ checkExp (Partition funs arrexp pos) = do
                        argflow, argloc)
   funs' <- forM funs $ \fun -> do
     fun' <- checkLambda fun [nonunique_arg]
-    when (lambdaType fun' [rowelemt] /= Prim Bool) $
+    when (lambdaReturnType fun' /= Prim Bool) $
       bad $ TypeError (srclocOf fun') "Partition function does not return bool."
     return fun'
 
@@ -901,7 +901,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
       RedLike o comm lam0 acc -> do
         (acc',accarg) <- checkArg acc
         lam0' <- checkLambda lam0 [accarg, accarg]
-        let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
+        let redtype = lambdaReturnType lam0'
         unless (typeOf acc' `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
                   pretty (typeOf acc') ++ ", but reduce fun returns type "++pretty redtype++"."
@@ -924,14 +924,13 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
      bad $ TypeError pos "Stream with input array used inside lambda."
   -- check that the result type of lambda matches the accumulator part
   _ <- case macctup of
-        Just (acc',_) -> do
-            let rtp' = lambdaType lam' [Prim $ Signed Int32, typeOf acc', typeOf acc']
-            case rtp' of
+        Just (acc',_) ->
+            case lambdaReturnType lam' of
                 Tuple (acctp:_) ->
                      unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
                         bad $ TypeError pos ("Stream with accumulator-type missmatch"++
                                              "or result arrays of non-array type.")
-                _ -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
+                rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
                         bad $ TypeError pos "Stream with accumulator-type missmatch."
         Nothing -> return ()
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
