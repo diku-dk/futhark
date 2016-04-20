@@ -264,18 +264,6 @@ altOccurences occurs1 occurs2 =
               , observed = observed occ `HS.difference` postcons }
         postcons = allConsumed occurs2
 
--- | The 'VarUsage' data structure is used to keep track of which
--- variables have been referenced inside an expression, as well as
--- which variables the resulting expression may possibly alias.
-data Dataflow = Dataflow {
-    usageOccurences :: Occurences
-  } deriving (Show)
-
-instance Monoid Dataflow where
-  mempty = Dataflow mempty
-  Dataflow o1 `mappend` Dataflow o2 =
-    Dataflow (o1 ++ o2)
-
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
 -- only initialised at the very beginning, but the variable table will
@@ -290,13 +278,13 @@ data Scope = Scope { envVtable :: HM.HashMap VName Binding
 -- for error handling.
 newtype TypeM a = TypeM (RWST
                          Scope       -- Reader
-                         Dataflow    -- Writer
+                         Occurences  -- Writer
                          VNameSource -- State
                          (Either TypeError) -- Inner monad
                          a)
   deriving (Monad, Functor, Applicative,
             MonadReader Scope,
-            MonadWriter Dataflow,
+            MonadWriter Occurences,
             MonadState VNameSource)
 
 runTypeM :: Scope -> VNameSource -> TypeM a
@@ -334,7 +322,7 @@ liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
 
 occur :: Occurences -> TypeM ()
-occur occurs = tell Dataflow { usageOccurences = occurs }
+occur = tell
 
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.
@@ -358,13 +346,13 @@ consuming (Ident name (Info t) loc) m = do
   where consume' env =
           env { envVtable = HM.insert name (WasConsumed loc) $ envVtable env }
 
-collectDataflow :: TypeM a -> TypeM (a, Dataflow)
-collectDataflow m = pass $ do
+collectOccurences :: TypeM a -> TypeM (a, Occurences)
+collectOccurences m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
-noDataflow :: TypeM a -> TypeM a
-noDataflow = censor $ const mempty
+noOccurences :: TypeM a -> TypeM a
+noOccurences = censor $ const mempty
 
 maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences us = do
@@ -373,11 +361,11 @@ maybeCheckOccurences us = do
 
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
-  (x, Dataflow occurs1) <- listen m1
-  (y, Dataflow occurs2) <- listen m2
+  (x, occurs1) <- listen m1
+  (y, occurs2) <- listen m2
   maybeCheckOccurences occurs1
   maybeCheckOccurences occurs2
-  let usage = Dataflow $ occurs1 `altOccurences` occurs2
+  let usage = occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
 
 -- | Make all bindings nonunique.
@@ -410,16 +398,16 @@ binding bnds = check . local (`bindVars` bnds)
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
-          (a, usages) <- collectOccurences m
+          (a, usages) <- collectBindingsOccurences m
           maybeCheckOccurences usages
           return a
 
         -- Collect and remove all occurences in @bnds@.  This relies
         -- on the fact that no variables shadow any other.
-        collectOccurences m = pass $ do
+        collectBindingsOccurences m = pass $ do
           (x, usage) <- listen m
-          let (relevant, rest) = split $ usageOccurences usage
-          return ((x, relevant), const $ usage { usageOccurences = rest })
+          let (relevant, rest) = split usage
+          return ((x, relevant), const rest)
           where split = unzip .
                         map (\occ ->
                              let (obs1, obs2) = divide $ observed occ
@@ -553,7 +541,7 @@ checkProg prog = do
                         , envCheckOccurences = True
                         }
   runTypeM typeenv src $
-    Prog <$> mapM (noDataflow . checkFun) (progFunctions prog')
+    Prog <$> mapM (noOccurences . checkFun) (progFunctions prog')
   where
     (prog', src) = tagProg' blankNameSource prog
     -- To build the ftable we loop through the list of function
@@ -703,11 +691,11 @@ checkExp (UnOp (ToUnsigned t) e loc) = do
 
 checkExp (If e1 e2 e3 _ pos) = do
   e1' <- require [Prim Bool] =<< checkExp e1
-  ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 `alternative` checkExp e3
+  ((e2', e3'), dflow) <- collectOccurences $ checkExp e2 `alternative` checkExp e3
   tell dflow
   brancht <- unifyExpTypes e2' e3'
   let t' = addAliases brancht
-           (`HS.difference` allConsumed (usageOccurences dflow))
+           (`HS.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
 checkExp (Var ident) = do
@@ -730,7 +718,7 @@ checkExp (Apply fname args _ loc) = do
       return $ Apply fname (zip args' $ map diet paramtypes) (Info rettype') loc
 
 checkExp (LetPat pat e body pos) = do
-  (e', dataflow) <- collectDataflow $ checkExp e
+  (e', dataflow) <- collectOccurences $ checkExp e
   (scope, pat') <- checkBinding pat (typeOf e') dataflow
   scope $ do
     body' <- checkExp body
@@ -914,9 +902,9 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
   lam' <- checkLambda lam aas
-  (_, dflow)<- collectDataflow $ checkLambda lam faas
+  (_, dflow)<- collectOccurences $ checkLambda lam faas
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'
-  let usages = usageMap $ usageOccurences dflow
+  let usages = usageMap dflow
   when (any (`HM.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
   -- check that the result type of lambda matches the accumulator part
@@ -995,7 +983,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- to check the merge pattern, which requires the (initial) merge
   -- expression.
   ((mergeexp', bindExtra), mergeflow) <-
-    collectDataflow $ do
+    collectOccurences $ do
       mergeexp' <- checkExp mergeexp
       return $
         case form of
@@ -1008,7 +996,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   -- Check the loop body.
   (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
   ((form', loopbody'), bodyflow) <-
-    noUnique $ firstscope $ binding bindExtra $ collectDataflow $
+    noUnique $ firstscope $ binding bindExtra $ collectOccurences $
     case form of
       For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
         lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
@@ -1018,16 +1006,15 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                 loopbody')
       While condexp -> do
         (condexp', condflow) <-
-          collectDataflow $ require [Prim Bool] =<< checkExp condexp
+          collectOccurences $ require [Prim Bool] =<< checkExp condexp
         (loopbody', bodyflow) <-
-          collectDataflow $ checkExp loopbody
-        occur $ usageOccurences condflow `seqOccurences`
-                usageOccurences bodyflow
+          collectOccurences $ checkExp loopbody
+        occur $ condflow `seqOccurences` bodyflow
         return (While condexp',
                 loopbody')
 
   let consumed_merge = patNameSet mergepat' `HS.intersection`
-                       allConsumed (usageOccurences bodyflow)
+                       allConsumed bodyflow
       uniquePat (Wildcard (Info t) wloc) =
         Wildcard (Info $ t `setUniqueness` Nonunique) wloc
       uniquePat (Id (Ident name (Info t) iloc))
@@ -1084,10 +1071,9 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
       consumeMerge _ _ =
         return ()
   ((), merge_consume) <-
-    collectDataflow $ consumeMerge mergepat'' $ typeOf mergeexp'
+    collectOccurences $ consumeMerge mergepat'' $ typeOf mergeexp'
 
-  occur $ usageOccurences mergeflow `seqOccurences`
-          usageOccurences merge_consume
+  occur $ mergeflow `seqOccurences` merge_consume
 
   binding (patIdents mergepat'') $ do
     letbody' <- checkExp letbody
@@ -1098,7 +1084,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 checkExp (Write i v a pos) = do
   i' <- checkExp i
   v' <- checkExp v
-  (a', aflow) <- collectDataflow $ checkExp a
+  (a', aflow) <- collectOccurences $ checkExp a
 
   let it = typeOf i'
       at = typeOf a'
@@ -1106,7 +1092,7 @@ checkExp (Write i v a pos) = do
   _ <- unifyExpTypes v' a'
 
   if unique at
-    then occur $ usageOccurences aflow `seqOccurences` [consumption (aliases at) pos]
+    then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
     else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
          "' has type " ++ pretty at ++ ", which is not unique."
 
@@ -1188,15 +1174,14 @@ checkPolyBinOp op tl e1 e2 pos = do
   t' <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info t') pos
 
-sequentially :: TypeM a -> (a -> Dataflow -> TypeM b) -> TypeM b
+sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
-  (a, m1flow) <- collectDataflow m1
-  (b, m2flow) <- collectDataflow $ m2 a m1flow
-  occur $ usageOccurences m1flow `seqOccurences`
-          usageOccurences m2flow
+  (a, m1flow) <- collectOccurences m1
+  (b, m2flow) <- collectOccurences $ m2 a m1flow
+  occur $ m1flow `seqOccurences` m2flow
   return b
 
-checkBinding :: PatternBase NoInfo VName -> Type -> Dataflow
+checkBinding :: PatternBase NoInfo VName -> Type -> Occurences
              -> TypeM (TypeM a -> TypeM a, Pattern)
 checkBinding pat et dflow = do
   (pat', idds) <-
@@ -1234,13 +1219,13 @@ validApply expected got =
   length got == length expected &&
   and (zipWith subtypeOf (map toStructural got) (map toStructural expected))
 
-type Arg = (Type, Dataflow, SrcLoc)
+type Arg = (Type, Occurences, SrcLoc)
 
 argType :: Arg -> Type
 argType (t, _, _) = t
 
 checkArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
-checkArg arg = do (arg', dflow) <- collectDataflow $ checkExp arg
+checkArg arg = do (arg', dflow) <- collectOccurences $ checkExp arg
                   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe Name -> SrcLoc
@@ -1254,9 +1239,9 @@ checkFuncall fname loc paramtypes _ args = do
           (Right $ map toStructural paramtypes) (map toStructural argts)
 
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
-    maybeCheckOccurences $ usageOccurences  dflow
+    maybeCheckOccurences dflow
     let occurs = consumeArg argloc t d
-    occur $ usageOccurences dflow `seqOccurences` occurs
+    occur $ dflow `seqOccurences` occurs
 
 consumeArg :: SrcLoc -> Type -> Diet -> [Occurence]
 consumeArg loc (Tuple ets) (TupleDiet ds) =
