@@ -909,7 +909,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
   -- (i) properly check the lambda on its parameter and
   --(ii) make some fake arguments, which do not alias `arr', and
   --     check that aliases of `arr' are not used inside lam.
-  let fakearg = (typeOf arr', mempty, srclocOf pos)
+  let fakearg = (typeOf arr' `setAliases` HS.empty, mempty, srclocOf pos)
       (aas,faas) = case macctup of
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
