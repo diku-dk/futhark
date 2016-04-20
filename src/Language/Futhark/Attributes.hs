@@ -25,7 +25,6 @@ module Language.Futhark.Attributes
   , primType
   , uniqueness
   , unique
-  , uniqueOrPrim
   , tupleArrayElemUniqueness
   , aliases
   , diet
@@ -320,11 +319,6 @@ primType :: TypeBase shape as vn -> Bool
 primType (Tuple ts) = all primType ts
 primType (Prim _) = True
 primType (Array _) = False
-
--- | Is the given type either unique (as per 'unique') or prim (as
--- per 'primType')?
-uniqueOrPrim :: TypeBase shape as vn -> Bool
-uniqueOrPrim x = primType x || unique x
 
 -- $names
 --
