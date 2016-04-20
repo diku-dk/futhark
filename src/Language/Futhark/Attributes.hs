@@ -29,7 +29,6 @@ module Language.Futhark.Attributes
   , tupleArrayElemUniqueness
   , aliases
   , diet
-  , dietingAs
   , subtypeOf
   , similarTo
   , arrayRank
@@ -256,17 +255,6 @@ diet (Array (PrimArray _ _ Unique _)) = Consume
 diet (Array (PrimArray _ _ Nonunique _)) = Observe
 diet (Array (TupleArray _ _ Unique)) = Consume
 diet (Array (TupleArray _ _ Nonunique)) = Observe
-
--- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
--- reflect how it is consumed according to @d@ - if it is consumed, it
--- becomes 'Unique'.  Tuples are handled intelligently.
-dietingAs :: TypeBase shape as vn -> Diet -> TypeBase shape as vn
-Tuple ets `dietingAs` TupleDiet ds =
-  Tuple $ zipWith dietingAs ets ds
-t `dietingAs` Consume =
-  t `setUniqueness` Unique
-t `dietingAs` _ =
-  t `setUniqueness` Nonunique
 
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
