@@ -50,7 +50,6 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
-  , unifyUniqueness
 
   , tupleArrayElemToType
 
@@ -519,23 +518,6 @@ addTupleArrayElemAliases (ArrayArrayElem at) f =
   ArrayArrayElem $ addArrayAliases at f
 addTupleArrayElemAliases (TupleArrayElem ts) f =
   TupleArrayElem $ map (`addTupleArrayElemAliases` f) ts
-
--- | Unify the uniqueness attributes and aliasing information of two
--- types.  The two types must otherwise be identical.  The resulting
--- alias set will be the 'mappend' of the two input types aliasing sets,
--- and the uniqueness will be 'Unique' only if both of the input types
--- are unique.
-unifyUniqueness :: Monoid (as vn) =>
-                   TypeBase shape as vn
-                -> TypeBase shape as vn
-                -> TypeBase shape as vn
-unifyUniqueness (Array (PrimArray et dims u1 als1)) (Array (PrimArray _ _ u2 als2)) =
-  Array $ PrimArray et dims (u1 <> u2) (als1 <> als2)
-unifyUniqueness (Array (TupleArray et dims u1)) (Array (TupleArray _ _ u2)) =
-  Array $ TupleArray et dims $ u1 <> u2
-unifyUniqueness (Tuple ets1) (Tuple ets2) =
-  Tuple $ zipWith unifyUniqueness ets1 ets2
-unifyUniqueness t1 _ = t1
 
 intValueType :: IntValue -> IntType
 intValueType Int8Value{} = Int8
