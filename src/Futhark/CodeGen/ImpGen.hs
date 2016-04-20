@@ -290,9 +290,7 @@ data ArrayDecl = ArrayDecl VName PrimType MemLocation
 fparamSizes :: FParam -> HS.HashSet VName
 fparamSizes fparam
   | Mem (Var size) _ <- paramType fparam = HS.singleton size
-  | otherwise = HS.fromList $ mapMaybe name $ arrayDims $ paramType fparam
-  where name (Var v) = Just v
-        name _       = Nothing
+  | otherwise = HS.fromList $ subExpVars $ arrayDims $ paramType fparam
 
 compileInParams :: [FParam]
                 -> ImpM op ([Imp.Param], [ArrayDecl], [Imp.ValueDecl])
