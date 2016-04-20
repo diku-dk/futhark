@@ -19,10 +19,8 @@ module Language.Futhark.Attributes
   , commutative
 
   -- * Queries on patterns
-  , patNames
   , patNameSet
   , patIdents
-  , patIdentSet
 
   -- * Queries on types
   , primType
@@ -772,10 +770,6 @@ paramType = unInfo . expandedType . paramTypeDecl
 paramDeclaredType :: ParamBase f vn
                   -> StructTypeBase vn
 paramDeclaredType = declaredType . paramTypeDecl
-
--- | The list of names bound in the given pattern.
-patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]
-patNames = map identName . patIdents
 
 -- | As 'patNames', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what
