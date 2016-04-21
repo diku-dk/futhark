@@ -576,9 +576,10 @@ allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam arrs)) = do
   red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
   return $ Op $ Inner $ ReduceKernel cs w size comm red_lam' fold_lam' arrs
 
-allocInExp (Op (ScanKernel cs w size order lam input)) = do
-  lam' <- allocInReduceLambda lam (kernelWorkgroupSize size)
-  return $ Op $ Inner $ ScanKernel cs w size order lam' input
+allocInExp (Op (ScanKernel cs w size order lam foldlam nes arrs)) = do
+  lam' <- allocInReduceLambda lam $ kernelWorkgroupSize size
+  foldlam' <- allocInReduceLambda foldlam $ kernelWorkgroupSize size
+  return $ Op $ Inner $ ScanKernel cs w size order lam' foldlam' nes arrs
 
 allocInExp (Op (WriteKernel cs t i v a)) =
   -- We require Write to be in-place, so there is no need to allocate any
