@@ -28,6 +28,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import Futhark.Util.IntegralExp (quotRoundingUp)
+import Futhark.Util
 
 type CallKernelGen = ImpGen.ImpM Imp.HostOp
 type InKernelGen = ImpGen.ImpM Imp.KernelOp
@@ -406,7 +407,8 @@ kernelCompiler
 kernelCompiler
   (ImpGen.Destination dest)
   (ScanKernel _ _ kernel_size order lam foldlam nes arrs) = do
-    let (arrs_dest, partials_dest) = splitAt (length nes) dest
+    let (arrs_dest, partials_dest, mapout_dest) =
+          splitAt3 (length nes) (length nes) dest
     (local_id, group_id, wave_size, global_id) <- kernelSizeNames
     thread_chunk_size <- newVName "thread_chunk_size"
 
@@ -514,15 +516,33 @@ kernelCompiler
             sizeToSubExp (Imp.ConstSize k) = constant k
             sizeToSubExp (Imp.VarSize v)   = Var v
 
+            indexArrayTarget (Prim t) (ImpGen.ArrayDestination
+                                       (ImpGen.CopyIntoMemory dest_loc) _) = do
+              (mem, space, offset) <- ImpGen.fullyIndexArray' dest_loc [ImpGen.varIndex fold_lam_i] t
+              return $ ImpGen.ArrayElemDestination mem t space offset
+            indexArrayTarget _ (ImpGen.ArrayDestination
+                                (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) =
+              return $
+              ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') dest_dims
+              where dest_loc' = ImpGen.sliceArray dest_loc [ImpGen.varIndex fold_lam_i]
+            indexArrayTarget _ _ =
+              throwError "indexArrayTarget: invalid target for scan map-out."
+
+        maparrs_indexed <- zipWithM indexArrayTarget
+          (drop (length nes) $ lambdaReturnType foldlam) mapout_dest
+
         write_arrs <-
           ImpGen.collect $ zipWithM_ writeScanElement arrs_dest fold_x_params
 
-        op_to_x <- ImpGen.collect $ ImpGen.compileBody fold_x_dest $ lambdaBody foldlam
+        op_to_x_and_maparrs <- ImpGen.collect $
+          ImpGen.compileBody
+          (fold_x_dest <> ImpGen.Destination maparrs_indexed)
+          (lambdaBody foldlam)
         ImpGen.emit $
           Imp.Comment "sequentially scan a chunk" $
           Imp.For elements_scanned (Imp.ScalarVar thread_chunk_size) $
             read_params <>
-            op_to_x <>
+            op_to_x_and_maparrs <>
             write_arrs <>
             Imp.SetScalar fold_lam_i
             (Imp.BinOp (Add Int32) (Imp.ScalarVar fold_lam_i) 1)
