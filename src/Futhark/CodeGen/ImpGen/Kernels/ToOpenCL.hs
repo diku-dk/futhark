@@ -221,9 +221,7 @@ openClCode kernels =
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
 genOpenClPrelude (OpenClRequirements used_funs ts) =
-  if uses_float64
-  then [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
-  else [] ++
+  [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
 typedef char int8_t;
 typedef short int16_t;

@@ -79,13 +79,14 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       Engine.consumedName arr
     return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' arrs'
 
-  simplifyOp (ScanKernel cs w kernel_size order lam input) = do
+  simplifyOp (ScanKernel cs w kernel_size order lam foldlam nes arrs) = do
     arrs' <- mapM Engine.simplify arrs
     ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
       Engine.simplify kernel_size <*> pure order <*>
-      Engine.simplifyLambda lam (Just nes) (map Just arrs') <*>
-      (zip <$> mapM Engine.simplify nes <*> pure arrs')
-    where (nes, arrs) = unzip input
+      Engine.simplifyLambda lam Nothing (map (const Nothing) arrs') <*>
+      Engine.simplifyLambda foldlam Nothing (map Just arrs') <*>
+      mapM Engine.simplify nes <*>
+      pure arrs'
 
   simplifyOp (ChunkedMapKernel cs w kernel_size o lam arrs) = do
     arrs' <- mapM Engine.simplify arrs
