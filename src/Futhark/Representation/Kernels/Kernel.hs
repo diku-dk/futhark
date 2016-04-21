@@ -302,7 +302,7 @@ kernelType (ScanKernel _ w size _ lam foldlam nes _) =
   in map (`arrayOfRow` w) (lambdaReturnType lam) ++
      map ((`arrayOfRow` kernelWorkgroups size) .
           (`arrayOfRow` kernelWorkgroupSize size)) (lambdaReturnType lam) ++
-     map (`setOuterSize` kernelTotalElements size) arr_row_tp
+     map (`arrayOfRow` kernelTotalElements size) arr_row_tp
 kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`arrayOfRow` kernelNumThreads size) nonconcat_ret <>
   map (`setOuterSize` kernelTotalElements size) concat_ret

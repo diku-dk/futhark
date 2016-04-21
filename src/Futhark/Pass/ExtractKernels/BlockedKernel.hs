@@ -21,6 +21,7 @@ import Prelude
 import Futhark.Representation.Kernels
 import Futhark.MonadFreshNames
 import Futhark.Tools
+import Futhark.Util
 import Futhark.Transform.Rename
 import Futhark.Transform.FirstOrderTransform (doLoopMapAccumL)
 import Futhark.Representation.AST.Attributes.Aliases
@@ -239,32 +240,50 @@ blockedKernelSize w = do
 blockedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                Pattern
             -> Certificates -> SubExp
-            -> Lambda
-            -> [(SubExp, VName)]
+            -> Lambda -> Lambda
+            -> [SubExp] -> [VName]
             -> m ()
-blockedScan pat cs w lam input = do
+blockedScan pat cs w lam foldlam nes arrs = do
   first_scan_size <- blockedKernelSize w
-  my_index <- newVName "my_index"
-  other_index <- newVName "other_index"
-  let (nes, arrs) = unzip input
-      num_groups = kernelWorkgroups first_scan_size
+
+  let num_groups = kernelWorkgroups first_scan_size
       group_size = kernelWorkgroupSize first_scan_size
       num_threads = kernelNumThreads first_scan_size
       elems_per_thread = kernelElementsPerThread first_scan_size
-      my_index_param = Param my_index (Prim int32)
+
+  my_index <- newVName "my_index"
+  other_index <- newVName "other_index"
+  fold_my_index <- newVName "my_index"
+  fold_other_index <- newVName "other_index"
+
+  let (scan_idents, arr_idents) = splitAt (length nes) $ patternIdents pat
+      final_res_pat = Pattern [] $ take (length nes) $ patternValueElements pat
+  first_scan_pat <- basicPattern' [] <$>
+    (((.).(.)) (++) (++) <$> -- Dammit Haskell
+     mapM (mkIntermediateIdent "seq_scanned" [w]) scan_idents <*>
+     mapM (mkIntermediateIdent "group_sums" [num_groups, group_size]) scan_idents <*>
+     pure arr_idents)
+
+
+  let my_index_param = Param my_index (Prim int32)
       other_index_param = Param other_index (Prim int32)
       first_scan_lam = lam { lambdaParams = my_index_param :
                                             other_index_param :
                                             lambdaParams lam
                            }
-  first_scan_lam_renamed <- renameLambda first_scan_lam
-  sequential_scan_result <-
-    letTupExp "sequentially_scanned" $
-      Op $ ScanKernel cs w first_scan_size ScanFlat
-      first_scan_lam first_scan_lam_renamed nes arrs
 
-  let (sequentially_scanned, all_group_sums) =
-        splitAt (length input) sequential_scan_result
+      fold_my_index_param = Param fold_my_index (Prim int32)
+      fold_other_index_param = Param fold_other_index (Prim int32)
+      foldlam' = foldlam { lambdaParams = fold_my_index_param :
+                                          fold_other_index_param :
+                                          lambdaParams foldlam
+                         }
+  addBinding $ Let first_scan_pat () $
+    Op $ ScanKernel cs w first_scan_size ScanFlat
+    first_scan_lam foldlam' nes arrs
+
+  let (sequentially_scanned, all_group_sums, _) =
+        splitAt3 (length nes) (length nes) $ patternNames first_scan_pat
 
   last_in_preceding_groups <- do
     lasts_map_index <- newVName "lasts_map_index"
@@ -301,7 +320,7 @@ blockedScan pat cs w lam input = do
       Op $ ScanKernel cs num_groups second_scan_size ScanFlat
       second_scan_lam second_scan_lam_renamed
       nes last_in_preceding_groups
-    forM (snd $ splitAt (length input) carry_in_scan_result) $ \arr ->
+    forM (snd $ splitAt (length nes) carry_in_scan_result) $ \arr ->
       letExp "group_carry_in" $
       PrimOp $ Index [] arr [zero]
 
@@ -356,10 +375,14 @@ blockedScan pat cs w lam input = do
     return $ resultBody $ map Var group_lasts
   let result_map_returns = [ (rt, [0..arrayRank rt])
                            | rt <- lambdaReturnType lam ]
-  letBind_ pat $ Op $ MapKernel [] w result_map_index
+  letBind_ final_res_pat $ Op $ MapKernel [] w result_map_index
     [(j, w)] result_inputs result_map_returns result_map_body
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
+
+        mkIntermediateIdent desc shape ident =
+          newIdent (baseString (identName ident) ++ "_" ++ desc) $
+          arrayOf (rowType $ identType ident) (Shape shape) NoUniqueness
 
         mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Kernels
         mkKernelInput indices p arr = KernelInput { kernelInputParam = p
@@ -418,8 +441,9 @@ blockedSegmentedScan segment_size pat cs w lam input = do
                                           (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }
-      input' = (false, flags) : input
-  blockedScan pat' cs w lam' input'
+      (nes, arrs) = unzip input
+  lam_renamed <- renameLambda lam'
+  blockedScan pat' cs w lam' lam_renamed (false:nes) (flags:arrs)
   where zero = constant (0 :: Int32)
         true = constant True
         false = constant False
