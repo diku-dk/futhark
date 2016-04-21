@@ -271,6 +271,11 @@ transformBinding (Let pat () (DoLoop ctx val form body)) =
 transformBinding (Let pat () (Op (Map cs w lam arrs))) =
   distributeMap pat $ MapLoop cs w lam arrs
 
+transformBinding (Let pat () (Op (Scanomap cs w lam1 lam2 nes arrs))) = do
+  lam1_sequential <- FOT.transformLambda lam1
+  lam2_sequential <- FOT.transformLambda lam2
+  runBinder_ $ blockedScan pat cs w lam1_sequential lam2_sequential nes arrs
+
 transformBinding (Let pat () (Op (Redomap cs w comm lam1 lam2 nes arrs))) =
   if sequentialiseRedomapBody then do
     lam1_sequential <- FOT.transformLambda lam1
@@ -300,7 +305,10 @@ transformBinding (Let res_pat () (Op (Scan cs w scan_fun scan_input)))
 
 transformBinding (Let pat () (Op (Scan cs w fun input))) = do
   fun_sequential <- FOT.transformLambda fun
-  runBinder_ $ blockedScan pat cs w fun_sequential input
+  fun_sequential_renamed <- renameLambda fun_sequential
+  runBinder_ $
+    blockedScan pat cs w fun_sequential fun_sequential_renamed nes arrs
+  where (nes, arrs) = unzip input
 
 -- Streams can be handled in two different ways - either we
 -- sequentialise the body or we keep it parallel and distribute.
@@ -496,6 +504,8 @@ unbalancedLambda lam =
         unbalancedBinding bound (Op (Scan _ w _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Redomap _ w _ _ _ _ _)) =
+          w `subExpBound` bound
+        unbalancedBinding bound (Op (Scanomap _ w _ _ _ _)) =
           w `subExpBound` bound
         unbalancedBinding bound (Op (Stream _ w _ _ _)) =
           w `subExpBound` bound

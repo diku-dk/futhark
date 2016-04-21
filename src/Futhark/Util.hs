@@ -9,7 +9,8 @@
 module Futhark.Util
        (mapAccumLM,
         chunk,
-        mapEither
+        mapEither,
+        splitAt3
         )
        where
 
@@ -36,3 +37,10 @@ chunk n xs =
 -- | A combination of 'map' and 'partitionEithers'.
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
+
+-- | Like 'splitAt', but produces three lists.
+splitAt3 :: Int -> Int -> [a] -> ([a], [a], [a])
+splitAt3 n m l =
+  let (xs, l') = splitAt n l
+      (ys, zs) = splitAt m l'
+  in (xs, ys, zs)
