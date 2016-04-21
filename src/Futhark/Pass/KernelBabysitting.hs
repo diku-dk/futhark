@@ -92,7 +92,7 @@ transformBinding expmap (Let pat ()
                          InOrder -> Noncommutative
 
 transformBinding expmap (Let pat ()
-                         (Op (ScanKernel cs w kernel_size ScanFlat lam input)))
+                         (Op (ScanKernel cs w kernel_size ScanFlat lam foldlam nes arrs)))
   | num_groups /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
 
@@ -100,9 +100,10 @@ transformBinding expmap (Let pat ()
     rearrangeScanReduceInputs Noncommutative cs w kernel_size arrs
 
   lam' <- transformLambda lam
+  foldlam' <- transformLambda foldlam
 
   let (seq_pat_elems, group_pat_elems) =
-        splitAt (length input) $ patternElements pat
+        splitAt (length nes) $ patternElements pat
       adjust (PatElem name bindage t) = do
         name' <- newVName (baseString name ++ "_padded")
         return $ PatElem name' bindage $ setOuterSize t w'
@@ -110,7 +111,7 @@ transformBinding expmap (Let pat ()
   let scan_pat = Pattern [] (seq_pat_elems'++group_pat_elems)
 
   addBinding $ Let scan_pat () $ Op $
-    ScanKernel cs w' kernel_size' ScanTransposed lam' $ zip nes arrs'
+    ScanKernel cs w' kernel_size' ScanTransposed lam' foldlam' nes arrs'
   forM_ (zip seq_pat_elems' seq_pat_elems) $ \(padded_pat_elem, dest_pat_elem) -> do
     let perm = [1,0] ++ [2..arrayRank (patElemType padded_pat_elem)]
         dims = shapeDims $ arrayShape $ patElemType padded_pat_elem
@@ -137,7 +138,6 @@ transformBinding expmap (Let pat ()
 
   return expmap
   where num_groups = kernelWorkgroups kernel_size
-        (nes, arrs) = unzip input
 
 transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
   body' <- inScopeOf ((i, IndexInfo) :
