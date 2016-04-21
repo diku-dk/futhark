@@ -15,6 +15,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
 import Futhark.Tools
 import Futhark.Pass
+import Futhark.Util
 
 babysitKernels :: Pass Kernels Kernels
 babysitKernels =
@@ -102,13 +103,13 @@ transformBinding expmap (Let pat ()
   lam' <- transformLambda lam
   foldlam' <- transformLambda foldlam
 
-  let (seq_pat_elems, group_pat_elems) =
-        splitAt (length nes) $ patternElements pat
+  let (seq_pat_elems, group_pat_elems, map_pat_elems) =
+        splitAt3 (length nes) (length nes) $ patternElements pat
       adjust (PatElem name bindage t) = do
         name' <- newVName (baseString name ++ "_padded")
         return $ PatElem name' bindage $ setOuterSize t w'
   seq_pat_elems' <- mapM adjust seq_pat_elems
-  let scan_pat = Pattern [] (seq_pat_elems'++group_pat_elems)
+  let scan_pat = Pattern [] (seq_pat_elems'++group_pat_elems++map_pat_elems)
 
   addBinding $ Let scan_pat () $ Op $
     ScanKernel cs w' kernel_size' ScanTransposed lam' foldlam' nes arrs'
