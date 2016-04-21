@@ -143,7 +143,7 @@ instance Checkable lore => Show (ErrorCase lore) where
     "Variable " ++ textual name ++ " bound twice in pattern."
   show (InvalidPatternError pat t desc) =
     "Pattern " ++ pretty pat ++
-    " cannot match value of type " ++ pretty t ++ end
+    " cannot match value of type " ++ prettyTuple t ++ end
     where end = case desc of Nothing -> "."
                              Just desc' -> ":\n" ++ desc'
   show (UnknownVariableError name) =
