@@ -42,9 +42,10 @@ import Prelude
 import Futhark.Util.Pretty
 
 -- | The uniqueness attribute of a type.  This essentially indicates
--- whether or not in-place modifications are acceptable.
-data Uniqueness = Unique    -- ^ No references outside current function.
-                | Nonunique -- ^ May have references outside current function.
+-- whether or not in-place modifications are acceptable.  With respect
+-- to ordering, 'Unique' is greater than 'Nonunique'.
+data Uniqueness = Nonunique -- ^ May have references outside current function.
+                | Unique    -- ^ No references outside current function.
                   deriving (Eq, Ord, Show)
 
 instance Monoid Uniqueness where
