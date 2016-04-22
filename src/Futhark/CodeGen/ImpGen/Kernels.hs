@@ -752,7 +752,8 @@ callKernelCopy bt
   Imp.MapTranspose bt
   destmem destoffset
   srcmem srcoffset
-  num_arrays size_x size_y
+  num_arrays size_x size_y $
+  Imp.innerExp $ product $ map Imp.dimSizeToExp srcshape
 
   | bt_size <- primByteSize bt,
     Just destoffset <-
