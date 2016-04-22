@@ -165,11 +165,11 @@ transformSOAC pat (Scan cs width fun args) = do
 transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
   i <- newVName "i"
   -- Name accumulators, do something with the corresponding expressions
-  (acc, initacc, arr) <- newFold "scanomap" (zip accexps accts) arrexps
+  (acc, initacc, _) <- newFold "scanomap" (zip accexps accts) arrexps
   -- Create output arrays.
   initarr <- resultArray scan_res_ts
   -- Name Outputarrays?
-  -- arr <- mapM (newIdent "scan_arr" ) scan_res_ts
+  arr <- mapM (newIdent "scan_arr" ) scan_res_ts
   -- Create arrays for our map results.
   initmaparrs <- resultArray map_res_ts
   mapoutarrs <- mapM (newIdent "scanomap_map_outarr") map_res_ts
