@@ -10,7 +10,6 @@ module Futhark.Optimise.Fusion.LoopKernel
   , transformOutput
   , attemptFusion
   , SOAC
-  , SOACNest
   , MapNest
   , toNestedSeqStream --not used!
   )
@@ -40,7 +39,6 @@ import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
 
 type SOAC = SOAC.SOAC SOACS
-type SOACNest = Nest.SOACNest SOACS
 type MapNest = MapNest.MapNest SOACS
 
 -- XXX: This function is very gross.
