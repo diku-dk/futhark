@@ -128,7 +128,7 @@ kernelCompiler
 kernelCompiler
   (ImpGen.Destination dest)
   (ChunkedMapKernel _ _ kernel_size o lam _) = do
-    (local_id, group_id, _, _) <- kernelSizeNames
+    (local_id, group_id, _, _, _) <- kernelSizeNames
 
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
@@ -216,7 +216,7 @@ kernelCompiler
   (ImpGen.Destination dest)
   (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam _) = do
 
-    (local_id, group_id, wave_size, skip_waves) <- kernelSizeNames
+    (local_id, group_id, wave_size, skip_waves, _) <- kernelSizeNames
 
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
@@ -409,7 +409,7 @@ kernelCompiler
   (ScanKernel _ _ kernel_size order lam foldlam nes arrs) = do
     let (arrs_dest, partials_dest, mapout_dest) =
           splitAt3 (length nes) (length nes) dest
-    (local_id, group_id, wave_size, global_id) <- kernelSizeNames
+    (local_id, group_id, wave_size, _, global_id) <- kernelSizeNames
     thread_chunk_size <- newVName "thread_chunk_size"
 
     renamed_lam <- renameLambda lam
@@ -739,13 +739,14 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler _ e =
   return $ ImpGen.CompileExp e
 
-kernelSizeNames :: ImpGen.ImpM Imp.HostOp (VName, VName, VName, VName)
+kernelSizeNames :: ImpGen.ImpM Imp.HostOp (VName, VName, VName, VName, VName)
 kernelSizeNames = do
   local_id <- newVName "local_id"
   group_id <- newVName "group_id"
   wave_size <- newVName "wave_size"
   skip_waves <- newVName "skip_waves"
-  return (local_id, group_id, wave_size, skip_waves)
+  global_id <- newVName "global_id"
+  return (local_id, group_id, wave_size, skip_waves, global_id)
 
 compileKernelSize :: KernelSize
                   -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize,
