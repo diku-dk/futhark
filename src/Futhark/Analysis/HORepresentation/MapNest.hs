@@ -40,18 +40,18 @@ data Nesting lore = Nesting {
   , nestingWidth        :: SubExp
   } deriving (Eq, Ord, Show)
 
-data MapNest lore = MapNest Certificates SubExp (Nest.NestBody lore) [Nesting lore] [SOAC.Input]
+data MapNest lore = MapNest Certificates SubExp (Lambda lore) [Nesting lore] [SOAC.Input]
                   deriving (Show)
 
 typeOf :: MapNest lore -> [Type]
-typeOf (MapNest _ w body nests _) =
+typeOf (MapNest _ w lam nests _) =
   map (`arrayOfRow` w) innersizes
-  where innersizes = case nests of []     -> Nest.nestBodyReturnType body
+  where innersizes = case nests of []     -> lambdaReturnType lam
                                    nest:_ -> nestingReturnType nest
 
 params :: Annotations lore => MapNest lore -> [VName]
-params (MapNest _ _ body [] _)       =
-  map identName $ Nest.nestBodyParams body
+params (MapNest _ _ lam [] _)       =
+  map paramName $ lambdaParams lam
 params (MapNest _ _ _ (nest:_) _) =
   nestingParamNames nest
 
@@ -115,21 +115,21 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
           inps' = map (substituteNames subst) inps ++
                   map (SOAC.addTransform (SOAC.Replicate w) . SOAC.identInput)
                   boundUsedInBody
-          body =
-            Nest.Fun lam { lambdaBody =
-                           substituteNames subst $ lambdaBody lam
-                         , lambdaParams =
-                           lambdaParams lam ++ [ Param name t
-                                               | Ident name t <- newParams ]
-                         }
-      return $ Just $ MapNest cs w body [] inps'
+          lam' =
+            lam { lambdaBody =
+                    substituteNames subst $ lambdaBody lam
+                , lambdaParams =
+                    lambdaParams lam ++ [ Param name t
+                                        | Ident name t <- newParams ]
+                }
+      return $ Just $ MapNest cs w lam' [] inps'
   where bound' = bound <> map paramIdent (lambdaParams lam)
 
 fromSOAC' _ _ = return Nothing
 
 toSOACNest :: MapNest lore -> SOACNest lore
-toSOACNest (MapNest cs w body ns inps) =
-  Nest.SOACNest inps $ toSOACNest' cs w body ns (map SOAC.inputType inps)
+toSOACNest (MapNest cs w lam ns inps) =
+  Nest.SOACNest inps $ toSOACNest' cs w (Nest.Fun lam) ns (map SOAC.inputType inps)
 
 toSOACNest' :: Certificates
             -> SubExp
