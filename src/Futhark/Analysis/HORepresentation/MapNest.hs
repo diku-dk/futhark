@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.Analysis.HORepresentation.MapNest
   ( Nesting (..)
   , MapNest (..)
@@ -7,7 +8,7 @@ module Futhark.Analysis.HORepresentation.MapNest
   , params
   , inputs
   , setInputs
-  , fromSOACNest
+  , fromSOAC
   , toSOACNest
   )
 where
@@ -23,6 +24,7 @@ import qualified Data.HashSet as HS
 import Prelude
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
+import Futhark.Analysis.HORepresentation.SOAC (SOAC)
 import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
@@ -64,75 +66,66 @@ setInputs (inp:inps) (MapNest cs _ body ns _) = MapNest cs w body ns' (inp:inps)
         ns' = zipWith setDepth ns ws
         setDepth n nw = n { nestingWidth = nw }
 
-fromSOACNest :: (Bindable lore, MonadFreshNames m,
-                 LocalScope lore m,
-                 Op lore ~ Futhark.SOAC lore) =>
-                SOACNest lore -> m (Maybe (MapNest lore))
-fromSOACNest = fromSOACNest' mempty
+fromSOAC :: (Bindable lore, MonadFreshNames m,
+             LocalScope lore m,
+             Op lore ~ Futhark.SOAC lore) =>
+            SOAC lore -> m (Maybe (MapNest lore))
+fromSOAC = fromSOAC' mempty
 
-fromSOACNest' :: (Bindable lore, MonadFreshNames m,
-                  LocalScope lore m,
-                 Op lore ~ Futhark.SOAC lore) =>
-                 [Ident]
-              -> SOACNest lore
-              -> m (Maybe (MapNest lore))
+fromSOAC' :: (Bindable lore, MonadFreshNames m,
+              LocalScope lore m,
+              Op lore ~ Futhark.SOAC lore) =>
+             [Ident]
+          -> SOAC lore
+          -> m (Maybe (MapNest lore))
 
-fromSOACNest' bound (Nest.SOACNest inps
-                     (Nest.Map cs w (Nest.NewNest n body@Nest.Map{}))) = do
-  Just mn@(MapNest cs' inner_w body' ns' inps') <-
-    fromSOACNest' bound' (Nest.SOACNest (Nest.nestingInputs n) body)
-  (ps, inps'') <-
-    unzip <$> fixInputs (zip (Nest.nestingParamNames n) inps)
-                        (zip (params mn) inps')
-  let n' = Nesting {
-             nestingParamNames   = ps
-           , nestingResult       = Nest.nestingResult n
-           , nestingReturnType   = Nest.nestingReturnType n
-           , nestingWidth        = inner_w
-           }
-  return $ Just $ MapNest (cs++cs') w body' (n':ns') inps''
-  where bound' = bound <>
-                 zipWith Ident
-                 (Nest.nestingParamNames n)
-                 (map (rowType . SOAC.inputType) inps)
+fromSOAC' bound (SOAC.Map cs w lam inps) = do
 
-fromSOACNest' bound (Nest.SOACNest inps (Nest.Map cs w body)) = do
-  lam <- lambdaBody <$> Nest.bodyToLambda (map SOAC.inputType inps) body
-  let isBound name
-        | Just param <- find ((name==) . identName) bound =
-          Just param
-        | otherwise =
-          Nothing
-      boundUsedInBody =
-        mapMaybe isBound $ HS.toList $ freeInBody lam
-  newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
-  let subst = HM.fromList $ zip (map identName boundUsedInBody) (map identName newParams)
-      inps' = map (substituteNames subst) inps ++
-              map (SOAC.addTransform (SOAC.Replicate w) . SOAC.identInput)
-              boundUsedInBody
-      body' =
-        case body of
-          Nest.NewNest n comb ->
-            let n'    = substituteNames subst
-                        n { Nest.nestingParamNames =
-                               Nest.nestingParamNames n' ++
-                               map identName newParams
-                          }
-                comb' = substituteNames subst comb
-            in Nest.NewNest n' comb'
-          Nest.Fun l ->
-            Nest.Fun l { lambdaBody =
-                            substituteNames subst $ lambdaBody l
-                       , lambdaParams =
-                         lambdaParams l ++ [ Param name t
-                                           | Ident name t <- newParams ]
-                       }
-  return $ Just $
-         if HM.null subst
-         then MapNest cs w body [] inps
-         else MapNest cs w body' [] inps'
+  maybenest <- case lambdaBody lam of
+    Body _ [Let pat _ e] res | res == map Var (patternNames pat) ->
+      either (return . Left) (fmap (Right . fmap (pat,)) . fromSOAC' bound') =<< SOAC.fromExp e
+    _ ->
+      return $ Right Nothing
+  case maybenest of
+    -- Do we have a nested MapNest?
+    Right (Just (pat, mn@(MapNest cs' inner_w body' ns' inps'))) -> do
+      (ps, inps'') <-
+        unzip <$>
+        fixInputs (zip (map paramName $ lambdaParams lam) inps)
+        (zip (params mn) inps')
+      let n' = Nesting {
+            nestingParamNames   = ps
+            , nestingResult     = patternNames pat
+            , nestingReturnType = lambdaReturnType lam
+            , nestingWidth      = inner_w
+            }
+      return $ Just $ MapNest (cs++cs') w body' (n':ns') inps''
+    -- No nested MapNest it seems.
+    _ -> do
+      let isBound name
+            | Just param <- find ((name==) . identName) bound =
+              Just param
+            | otherwise =
+              Nothing
+          boundUsedInBody =
+            mapMaybe isBound $ HS.toList $ freeInLambda lam
+      newParams <- mapM (newIdent' (++"_wasfree")) boundUsedInBody
+      let subst = HM.fromList $
+                  zip (map identName boundUsedInBody) (map identName newParams)
+          inps' = map (substituteNames subst) inps ++
+                  map (SOAC.addTransform (SOAC.Replicate w) . SOAC.identInput)
+                  boundUsedInBody
+          body =
+            Nest.Fun lam { lambdaBody =
+                           substituteNames subst $ lambdaBody lam
+                         , lambdaParams =
+                           lambdaParams lam ++ [ Param name t
+                                               | Ident name t <- newParams ]
+                         }
+      return $ Just $ MapNest cs w body [] inps'
+  where bound' = bound <> map paramIdent (lambdaParams lam)
 
-fromSOACNest' _ _ = return Nothing
+fromSOAC' _ _ = return Nothing
 
 toSOACNest :: MapNest lore -> SOACNest lore
 toSOACNest (MapNest cs w body ns inps) =

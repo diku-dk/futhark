@@ -526,31 +526,29 @@ mapDepth (MapNest.MapNest _ _ body levels _) =
 pullRearrange :: SOAC -> SOAC.ArrayTransforms
               -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pullRearrange soac ots = do
-  nest <- Nest.fromSOAC soac
-  nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
+  nest <- join $ liftMaybe <$> MapNest.fromSOAC soac
   SOAC.Rearrange cs perm SOAC.:< ots' <- return $ SOAC.viewf ots
-  if rearrangeReach perm <= mapDepth nest' then do
+  if rearrangeReach perm <= mapDepth nest then do
     let -- Expand perm to cover the full extent of the input dimensionality
         perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
-        inputs' = map addPerm $ MapNest.inputs nest'
+        inputs' = map addPerm $ MapNest.inputs nest
     soac' <- Nest.toSOAC $ MapNest.toSOACNest $
-      inputs' `MapNest.setInputs` rearrangeReturnTypes nest' perm
+      inputs' `MapNest.setInputs` rearrangeReturnTypes nest perm
     return (soac', ots')
   else fail "Cannot pull transpose"
 
 pushRearrange :: [VName] -> SOAC -> SOAC.ArrayTransforms
               -> TryFusion (SOAC, SOAC.ArrayTransforms)
 pushRearrange inpIds soac ots = do
-  nest <- Nest.fromSOAC soac
-  nest' <- join $ liftMaybe <$> MapNest.fromSOACNest nest
-  (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest'
-  if rearrangeReach perm <= mapDepth nest' then do
+  nest <- join $ liftMaybe <$> MapNest.fromSOAC soac
+  (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest
+  if rearrangeReach perm <= mapDepth nest then do
     let invertRearrange = SOAC.Rearrange [] $ rearrangeInverse perm
     soac' <- Nest.toSOAC $
       MapNest.toSOACNest $
       inputs' `MapNest.setInputs`
-      rearrangeReturnTypes nest' perm
+      rearrangeReturnTypes nest perm
     return (soac', ots SOAC.|> invertRearrange)
   else fail "Cannot push transpose"
 
