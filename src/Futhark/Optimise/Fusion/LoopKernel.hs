@@ -131,7 +131,7 @@ kernelType = SOAC.typeOf . fsoac
 tryOptimizeSOAC :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 tryOptimizeSOAC unfus_nms outVars soac ker = do
-  (soac', ots) <- optimizeSOAC Nothing soac
+  (soac', ots) <- optimizeSOAC Nothing soac mempty
   let ker' = map (SOAC.addTransforms ots) (inputs ker) `setInputs` ker
       outIdents = zipWith Ident outVars $ SOAC.typeOf soac'
       ker'' = fixInputTypes outIdents ker'
@@ -427,24 +427,15 @@ toNestedSeqStream _ = fail "In toNestedSeqStream: Input paramter not a stream"
 
 optimizeKernel :: Maybe [VName] -> FusedKer -> TryFusion FusedKer
 optimizeKernel inp ker = do
-  startNest <- Nest.fromSOAC $ fsoac ker
-  (resNest, resTrans) <- optimizeSOACNest inp startNest startTrans
-  soac <- Nest.toSOAC resNest
+  (soac, resTrans) <- optimizeSOAC inp (fsoac ker) startTrans
   return $ ker { fsoac = soac
                , outputTransform = resTrans
                }
   where startTrans = outputTransform ker
 
-optimizeSOAC :: Maybe [VName] -> SOAC -> TryFusion (SOAC, SOAC.ArrayTransforms)
-optimizeSOAC inp soac = do
-  nest <- Nest.fromSOAC soac
-  (nest', ots) <- optimizeSOACNest inp nest SOAC.noTransforms
-  soac' <- Nest.toSOAC nest'
-  return (soac', ots)
-
-optimizeSOACNest :: Maybe [VName] -> SOACNest -> SOAC.ArrayTransforms
-                 -> TryFusion (SOACNest, SOAC.ArrayTransforms)
-optimizeSOACNest inp soac os = do
+optimizeSOAC :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
+             -> TryFusion (SOAC, SOAC.ArrayTransforms)
+optimizeSOAC inp soac os = do
   res <- foldM comb (False, soac, os) $ reverse optimizations
   case res of
     (False, _, _)      -> fail "No optimisation applied"
@@ -455,45 +446,48 @@ optimizeSOACNest inp soac os = do
           <|> return (changed, soac', os')
 
 type Optimization = Maybe [VName]
-                    -> SOACNest
+                    -> SOAC
                     -> SOAC.ArrayTransforms
-                    -> TryFusion (SOACNest, SOAC.ArrayTransforms)
+                    -> TryFusion (SOAC, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
 optimizations = [iswim]
 
-iswim :: Maybe [VName] -> SOACNest -> SOAC.ArrayTransforms
-      -> TryFusion (SOACNest, SOAC.ArrayTransforms)
-iswim _ nest ots
-  | Nest.Scan cs1 w1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
-    Nest.Map cs2 w2 mb <- nn,
-    Just es' <- mapM Nest.inputFromTypedSubExp es,
-    Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
-    mapM SOAC.isVarInput mapArrs == Just paramIds = do
-    let newInputs :: [SOAC.Input]
-        newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
-        inputTypes = map SOAC.inputType newInputs
-        (accsizes, arrsizes) =
-          splitAt (length es) $ map rowType inputTypes
-        innerAccParams = zipWith Nest.TypedSubExp
-                         (map Var $ take (length es) paramIds) accsizes
-        innerArrParams = zipWith Ident (drop (length es) paramIds) arrsizes
-    let innerScan = Nest.Scan cs2 w1 mb innerAccParams
-        scanNest = Nest.Nesting {
-                     Nest.nestingInputs = map SOAC.identInput innerArrParams
-                   , Nest.nestingReturnType = zipWith setOuterSize retTypes $
-                                              map (arraySize 0) arrsizes
-                   , Nest.nestingResult = bndIds
-                   , Nest.nestingParamNames = paramIds
-                   }
-        perm = case retTypes of []  -> []
-                                t:_ -> transposeIndex 0 1 [0..arrayRank t]
-        nest' = Nest.SOACNest
-                newInputs
-                (Nest.Map cs1 w2 (Nest.NewNest scanNest innerScan))
-    return (nest',
-            ots SOAC.|> SOAC.Rearrange cs2 perm)
-iswim _ _ _ = fail "ISWIM does not apply"
+iswim :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
+      -> TryFusion (SOAC, SOAC.ArrayTransforms)
+iswim _ soac ots = do
+  nest <- Nest.fromSOAC soac
+  case () of
+    _ | Nest.Scan cs1 w1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
+        Nest.Map cs2 w2 mb <- nn,
+        Just es' <- mapM Nest.inputFromTypedSubExp es,
+        Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
+        mapM SOAC.isVarInput mapArrs == Just paramIds -> do
+          let newInputs :: [SOAC.Input]
+              newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
+              inputTypes = map SOAC.inputType newInputs
+              (accsizes, arrsizes) =
+                splitAt (length es) $ map rowType inputTypes
+              innerAccParams = zipWith Nest.TypedSubExp
+                               (map Var $ take (length es) paramIds) accsizes
+              innerArrParams = zipWith Ident (drop (length es) paramIds) arrsizes
+              innerScan = Nest.Scan cs2 w1 mb innerAccParams
+              scanNest = Nest.Nesting {
+                           Nest.nestingInputs = map SOAC.identInput innerArrParams
+                         , Nest.nestingReturnType = zipWith setOuterSize retTypes $
+                                                    map (arraySize 0) arrsizes
+                         , Nest.nestingResult = bndIds
+                         , Nest.nestingParamNames = paramIds
+                         }
+              perm = case retTypes of []  -> []
+                                      t:_ -> transposeIndex 0 1 [0..arrayRank t]
+              nest' = Nest.SOACNest
+                      newInputs
+                      (Nest.Map cs1 w2 (Nest.NewNest scanNest innerScan))
+          soac' <- Nest.toSOAC nest'
+          return (soac',
+                  ots SOAC.|> SOAC.Rearrange cs2 perm)
+      | otherwise -> fail "ISWIM does not apply"
 
 -- Now for fiddling with transpositions...
 
