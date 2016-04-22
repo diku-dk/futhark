@@ -509,16 +509,13 @@ commonTransforms' inps =
         inspect (mot, prev) inp = Just (mot,inp:prev)
 
 mapDepth :: MapNest -> Int
-mapDepth (MapNest.MapNest _ _ body levels _) =
+mapDepth (MapNest.MapNest _ _ lam levels _) =
   -- XXX: The restriction to pure nests is conservative, but we cannot
   -- know whether an arbitrary postbody is dependent on the exact size
   -- of the nesting result.
   min resDims (length levels) + 1
   where resDims = minDim $ case levels of
-                    [] -> case body of Nest.Fun lam ->
-                                         lambdaReturnType lam
-                                       Nest.NewNest nest _ ->
-                                         Nest.nestingReturnType nest
+                    [] -> lambdaReturnType lam
                     nest:_ -> MapNest.nestingReturnType nest
         minDim [] = 0
         minDim (t:ts) = foldl min (arrayRank t) $ map arrayRank ts
