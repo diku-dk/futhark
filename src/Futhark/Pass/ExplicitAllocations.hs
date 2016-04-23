@@ -655,7 +655,7 @@ allocInReduceLambda lam workgroup_size = do
   let (i, other_index_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
-        splitAt (length actual_params `div` 2) actual_params
+        splitAt (length $ lambdaReturnType lam) actual_params
       this_index = SE.Id i int32 `SE.SRem`
                    SE.intSubExpToScalExp workgroup_size
       other_index = SE.Id (paramName other_index_param) int32
