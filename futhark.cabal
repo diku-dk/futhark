@@ -48,7 +48,7 @@ Library
                  text,
                  raw-strings-qq,
                  neat-interpolation >= 0.3,
-                 file-embed
+                 file-embed >= 0.0.9
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
