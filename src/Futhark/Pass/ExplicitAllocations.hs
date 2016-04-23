@@ -573,12 +573,13 @@ allocInExp (Op (ReduceKernel cs w size comm red_lam fold_lam arrs)) = do
                (kernelElementsPerThread size)
                (kernelNumThreads size)
                fold_lam arr_summaries
-  red_lam' <- allocInReduceLambda red_lam (kernelWorkgroupSize size)
+  red_lam' <- allocInReduceLambda red_lam num_accs (kernelWorkgroupSize size)
   return $ Op $ Inner $ ReduceKernel cs w size comm red_lam' fold_lam' arrs
+  where num_accs = length $ lambdaReturnType red_lam
 
 allocInExp (Op (ScanKernel cs w size order lam foldlam nes arrs)) = do
-  lam' <- allocInReduceLambda lam $ kernelWorkgroupSize size
-  foldlam' <- allocInReduceLambda foldlam $ kernelWorkgroupSize size
+  lam' <- allocInReduceLambda lam (length nes) $ kernelWorkgroupSize size
+  foldlam' <- allocInReduceLambda foldlam (length nes) $ kernelWorkgroupSize size
   return $ Op $ Inner $ ScanKernel cs w size order lam' foldlam' nes arrs
 
 allocInExp (Op (WriteKernel cs t i v a)) =
@@ -649,13 +650,14 @@ allocInFoldLambda comm elems_per_thread num_threads lam arr_summaries = do
     (lambdaBody lam) (lambdaReturnType lam)
 
 allocInReduceLambda :: In.Lambda
+                    -> Int
                     -> SubExp
                     -> AllocM Lambda
-allocInReduceLambda lam workgroup_size = do
+allocInReduceLambda lam num_accs workgroup_size = do
   let (i, other_index_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
-        splitAt (length $ lambdaReturnType lam) actual_params
+        splitAt num_accs actual_params
       this_index = SE.Id i int32 `SE.SRem`
                    SE.intSubExpToScalExp workgroup_size
       other_index = SE.Id (paramName other_index_param) int32
