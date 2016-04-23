@@ -34,6 +34,7 @@ import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
+import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Optimise.Fusion.TryFusion
 import Futhark.Optimise.Fusion.Composing
 import Futhark.Construct
@@ -453,39 +454,63 @@ optimizations = [iswim]
 
 iswim :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
       -> TryFusion (SOAC, SOAC.ArrayTransforms)
-iswim _ soac ots = do
-  nest <- Nest.fromSOAC soac
-  case () of
-    _ | Nest.Scan cs1 w1 (Nest.NewNest lvl nn) es <- Nest.operation nest,
-        Nest.Map cs2 w2 mb <- nn,
-        Just es' <- mapM Nest.inputFromTypedSubExp es,
-        Nest.Nesting paramIds mapArrs bndIds retTypes <- lvl,
-        mapM SOAC.isVarInput mapArrs == Just paramIds -> do
-          let newInputs :: [SOAC.Input]
-              newInputs = es' ++ map (SOAC.transposeInput 0 1) (Nest.inputs nest)
-              inputTypes = map SOAC.inputType newInputs
-              (accsizes, arrsizes) =
-                splitAt (length es) $ map rowType inputTypes
-              innerAccParams = zipWith Nest.TypedSubExp
-                               (map Var $ take (length es) paramIds) accsizes
-              innerArrParams = zipWith Ident (drop (length es) paramIds) arrsizes
-              innerScan = Nest.Scan cs2 w1 mb innerAccParams
-              scanNest = Nest.Nesting {
-                           Nest.nestingInputs = map SOAC.identInput innerArrParams
-                         , Nest.nestingReturnType = zipWith setOuterSize retTypes $
-                                                    map (arraySize 0) arrsizes
-                         , Nest.nestingResult = bndIds
-                         , Nest.nestingParamNames = paramIds
-                         }
-              perm = case retTypes of []  -> []
-                                      t:_ -> transposeIndex 0 1 [0..arrayRank t]
-              nest' = Nest.SOACNest
-                      newInputs
-                      (Nest.Map cs1 w2 (Nest.NewNest scanNest innerScan))
-          soac' <- Nest.toSOAC nest'
-          return (soac',
-                  ots SOAC.|> SOAC.Rearrange cs2 perm)
-      | otherwise -> fail "ISWIM does not apply"
+iswim _ (SOAC.Scan cs w scan_fun scan_input) ots
+  | Just (map_pat, map_cs, map_w, map_fun) <- rwimPossible scan_fun,
+    (nes, arrs) <- unzip scan_input,
+    Just nes_names <- mapM subExpVar nes = do
+
+      let nes_idents = zipWith Ident nes_names $ lambdaReturnType scan_fun
+          nes' = map SOAC.identInput nes_idents
+          map_arrs' = nes' ++ map (SOAC.transposeInput 0 1) arrs
+          (scan_acc_params, scan_elem_params) =
+            splitAt (length arrs) $ lambdaParams scan_fun
+          map_params = map removeParamOuterDim scan_acc_params ++
+                       map (setParamOuterDimTo w) scan_elem_params
+          map_rettype = map (setOuterDimTo w) $ lambdaReturnType scan_fun
+          map_fun' = Lambda map_params map_body map_rettype
+
+          scan_params = lambdaParams map_fun
+          scan_body = lambdaBody map_fun
+          scan_rettype = lambdaReturnType map_fun
+          scan_fun' = Lambda scan_params scan_body scan_rettype
+          scan_input' = map (first Var) $
+                        uncurry zip $ splitAt (length nes') $ map paramName map_params
+
+          map_body = mkBody [Let (setPatternOuterDimTo w map_pat) () $
+                             Op $ Futhark.Scan cs w scan_fun' scan_input'] $
+                            map Var $ patternNames map_pat
+
+      let perm = case lambdaReturnType map_fun of
+            []  -> []
+            t:_ -> 1 : 0 : [2..arrayRank t]
+      return (SOAC.Map map_cs map_w map_fun' map_arrs',
+              ots SOAC.|> SOAC.Rearrange map_cs perm)
+
+iswim _ _ _ =
+  fail "ISWIM does not apply."
+
+removeParamOuterDim :: LParam -> LParam
+removeParamOuterDim param =
+  let t = rowType $ paramType param
+  in param { paramAttr = t }
+
+setParamOuterDimTo :: SubExp -> LParam -> LParam
+setParamOuterDimTo w param =
+  let t = setOuterDimTo w $ paramType param
+  in param { paramAttr = t }
+
+setIdentOuterDimTo :: SubExp -> Ident -> Ident
+setIdentOuterDimTo w ident =
+  let t = setOuterDimTo w $ identType ident
+  in ident { identType = t }
+
+setOuterDimTo :: SubExp -> Type -> Type
+setOuterDimTo w t =
+  arrayOfRow (rowType t) w
+
+setPatternOuterDimTo :: SubExp -> Pattern -> Pattern
+setPatternOuterDimTo w pat =
+  basicPattern' [] $ map (setIdentOuterDimTo w) $ patternValueIdents pat
 
 -- Now for fiddling with transpositions...
 
