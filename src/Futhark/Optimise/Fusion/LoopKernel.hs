@@ -32,7 +32,6 @@ import Futhark.Transform.Rename (renameLambda)
 import Futhark.Transform.Substitute
 import Futhark.MonadFreshNames
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
-import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
 import qualified Futhark.Analysis.HORepresentation.MapNest as MapNest
 import Futhark.Pass.ExtractKernels.ISRWIM (rwimPossible)
 import Futhark.Optimise.Fusion.TryFusion
@@ -615,37 +614,28 @@ pullReshape (SOAC.Map mapcs _ maplam inps) ots
       inputs' = map (SOAC.addTransform $ SOAC.ReshapeOuter cs shape) inps
       inputTypes = map SOAC.inputType inputs'
 
-  let mapbody' = Nest.Fun maplam
-      outernest inner (w, outershape) = do
+  let outersoac :: ([SOAC.Input] -> SOAC) -> (SubExp, [SubExp])
+                -> TryFusion ([SOAC.Input] -> SOAC)
+      outersoac inner (w, outershape) = do
         let addDims t = arrayOf t (Shape outershape) NoUniqueness
             retTypes = map addDims $ lambdaReturnType maplam
 
         ps <- forM inputTypes $ \inpt -> do
           let t = rowType (stripArray (length outershape-2) inpt)
-          newIdent "pullReshape_param" t
+          newParam "pullReshape_param" t
 
-        bnds <- forM retTypes $ \_ ->
-                  newNameFromString "pullReshape_bnd"
+        inner_body <- runBodyBinder $
+          eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]
+        let inner_fun = Lambda { lambdaParams = ps
+                               , lambdaReturnType = retTypes
+                               , lambdaBody = inner_body
+                               }
+        return $ SOAC.Map [] w inner_fun
 
-        let nesting = Nest.Nesting {
-                        Nest.nestingParamNames = map identName ps
-                      , Nest.nestingInputs = map SOAC.identInput ps
-                      , Nest.nestingResult = bnds
-                      , Nest.nestingReturnType = retTypes
-                      }
-        return $ Nest.Map [] w (Nest.NewNest nesting inner)
-  -- Only have the certificates on the outermost loop nest.  This
-  -- only has the significance of making the generated code look
-  -- very slightly neater.
-  op' <- foldM outernest (Nest.Map [] mapw' mapbody') $
+  op' <- foldM outersoac (SOAC.Map mapcs mapw' maplam) $
          zip (drop 1 $ reverse $ newDims shape) $
          drop 1 $ reverse $ drop 1 $ tails $ newDims shape
-  soac' <- Nest.toSOAC
-    Nest.SOACNest { Nest.inputs    = inputs'
-                  , Nest.operation =
-                      mapcs `Nest.setCombCertificates` op'
-                  }
-  return (soac', ots')
+  return (op' inputs', ots')
 pullReshape _ _ = fail "Cannot pull reshape"
 
 -- Tie it all together in exposeInputs (for making inputs to a
