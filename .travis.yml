@@ -28,11 +28,6 @@ before_install:
  - travis_retry cabal install happy alex hlint
  - sudo apt-get install python-numpy # For testing futhark-py
 
-cache:
-  directories:
-    - $HOME/.cabal
-    - $HOME/.ghc
-
 install:
  - cabal --version
  - echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo '?')]"
