@@ -25,6 +25,7 @@ module Futhark.Representation.AST.Attributes
   , asPrimOp
   , safeExp
   , subExpVars
+  , subExpVar
   , shapeVars
 
   , IsOp (..)
@@ -123,8 +124,10 @@ safeExp (Op op) = safeOp op
 -- duplicates.
 subExpVars :: [SubExp] -> [VName]
 subExpVars = mapMaybe subExpVar
-  where subExpVar (Var v)    = Just v
-        subExpVar Constant{} = Nothing
+
+subExpVar :: SubExp -> Maybe VName
+subExpVar (Var v)    = Just v
+subExpVar Constant{} = Nothing
 
 -- | Return the variable dimension sizes.  May contain
 -- duplicates.
