@@ -134,7 +134,7 @@ runTestCase (TestCase program testcase progs extra_options) = do
 
     RunCases run_cases ->
       forM_ run_cases $ \run -> do
-        unless (runMode run == CompiledOnly) $
+        unless (runMode run `elem` [CompiledOnly, NoTravis]) $
           forM_ (configInterpreters progs) $ \interpreter ->
             context ("Interpreting with " <> T.pack interpreter) $
               interpretTestProgram interpreter program run
