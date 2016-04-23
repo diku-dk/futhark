@@ -300,7 +300,7 @@ subtypeOf :: (Ord u, ArrayShape shape) =>
           -> TypeBase shape u
           -> Bool
 subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u1 <= u2 &&
+  u2 <= u1 &&
   t1 == t2 &&
   shape1 `subShapeOf` shape2
 subtypeOf (Prim t1) (Prim t2) = t1 == t2

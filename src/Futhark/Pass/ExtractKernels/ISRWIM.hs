@@ -2,7 +2,9 @@
 {-# LANGUAGE TypeFamilies #-}
 module Futhark.Pass.ExtractKernels.ISRWIM
        ( iswim
-       , irwim)
+       , irwim
+       , rwimPossible
+       )
        where
 
 import Control.Arrow (first)

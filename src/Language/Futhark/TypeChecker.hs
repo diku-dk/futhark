@@ -805,10 +805,10 @@ checkExp (Zip arrexps loc) = do
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
   case typeOf e' of
-    Array (TupleArray ets shape _) ->
+    Array (TupleArray ets shape u) ->
       let componentType et =
             let et' = tupleArrayElemToType et
-                u' = tupleArrayElemUniqueness et
+                u' = max u $ tupleArrayElemUniqueness et
             in arrayOf et' shape u'
       in return $ Unzip e' (map (Info . componentType) ets) pos
     t ->
