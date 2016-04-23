@@ -9,7 +9,7 @@ module Futhark.Analysis.HORepresentation.MapNest
   , inputs
   , setInputs
   , fromSOAC
-  , toSOACNest
+  , toSOAC
   )
 where
 
@@ -25,13 +25,12 @@ import Prelude
 
 import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Analysis.HORepresentation.SOAC (SOAC)
-import Futhark.Analysis.HORepresentation.SOACNest (SOACNest)
-import qualified Futhark.Analysis.HORepresentation.SOACNest as Nest
+
 import qualified Futhark.Representation.SOACS.SOAC as Futhark
 import Futhark.Transform.Substitute
 import Futhark.Representation.AST hiding (typeOf)
 import Futhark.MonadFreshNames
-import Futhark.Binder (Bindable)
+import Futhark.Construct
 
 data Nesting lore = Nesting {
     nestingParamNames   :: [VName]
@@ -127,29 +126,21 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
 
 fromSOAC' _ _ = return Nothing
 
-toSOACNest :: MapNest lore -> SOACNest lore
-toSOACNest (MapNest cs w lam ns inps) =
-  Nest.SOACNest inps $ toSOACNest' cs w (Nest.Fun lam) ns (map SOAC.inputType inps)
-
-toSOACNest' :: Certificates
-            -> SubExp
-            -> Nest.NestBody lore
-            -> [Nesting lore]
-            -> [Type]
-            -> Nest.Combinator lore
-toSOACNest' cs w body [] _ =
-  Nest.Map cs w body
-toSOACNest' cs w body (nest:ns) inpts =
-  let body' = toSOACNest' cs (nestingWidth nest) body ns (map rowType inpts)
-  in Nest.Map cs w (Nest.NewNest nest' body')
-  where nest' = Nest.Nesting {
-                  Nest.nestingParamNames = nestingParamNames nest
-                , Nest.nestingResult = nestingResult nest
-                , Nest.nestingReturnType = nestingReturnType nest
-                , Nest.nestingInputs = map SOAC.identInput newparams
-                }
-        newparams = zipWith Ident (nestingParamNames nest) $
-                    map rowType inpts
+toSOAC :: (MonadFreshNames m, HasScope lore m,
+           Bindable lore, Op lore ~ Futhark.SOAC lore) =>
+          MapNest lore -> m (SOAC lore)
+toSOAC (MapNest cs w lam [] inps) =
+  return $ SOAC.Map cs w lam inps
+toSOAC (MapNest cs w lam (Nesting npnames nres nrettype nw:ns) inps) = do
+  let nparams = zipWith Param npnames $ map SOAC.inputRowType inps
+  (e,bnds) <- runBinder $ localScope (scopeOfLParams nparams) $ SOAC.toExp =<<
+    toSOAC (MapNest [] nw lam ns $ map (SOAC.identInput . paramIdent) nparams)
+  bnd <- mkLetNames' nres e
+  let outerlam = Lambda { lambdaParams = nparams
+                        , lambdaBody = mkBody (bnds++[bnd]) $ map Var nres
+                        , lambdaReturnType = nrettype
+                        }
+  return $ SOAC.Map cs w outerlam inps
 
 fixInputs :: MonadFreshNames m =>
              [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]

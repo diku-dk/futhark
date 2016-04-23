@@ -530,7 +530,7 @@ pullRearrange soac ots = do
         perm' inp = perm ++ [length perm..SOAC.inputRank inp-1]
         addPerm inp = SOAC.addTransform (SOAC.Rearrange cs $ perm' inp) inp
         inputs' = map addPerm $ MapNest.inputs nest
-    soac' <- Nest.toSOAC $ MapNest.toSOACNest $
+    soac' <- MapNest.toSOAC $
       inputs' `MapNest.setInputs` rearrangeReturnTypes nest perm
     return (soac', ots')
   else fail "Cannot pull transpose"
@@ -542,8 +542,7 @@ pushRearrange inpIds soac ots = do
   (perm, inputs') <- liftMaybe $ fixupInputs inpIds $ MapNest.inputs nest
   if rearrangeReach perm <= mapDepth nest then do
     let invertRearrange = SOAC.Rearrange [] $ rearrangeInverse perm
-    soac' <- Nest.toSOAC $
-      MapNest.toSOACNest $
+    soac' <- MapNest.toSOAC $
       inputs' `MapNest.setInputs`
       rearrangeReturnTypes nest perm
     return (soac', ots SOAC.|> invertRearrange)
