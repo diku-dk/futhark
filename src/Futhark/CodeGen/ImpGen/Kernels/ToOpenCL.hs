@@ -76,27 +76,20 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsFatMemory = False
                      }
   where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
-        kernelOps (GetGroupId v i) = do
+        kernelOps (GetGroupId v i) =
           GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
-          return GenericC.Done
-        kernelOps (GetLocalId v i) = do
+        kernelOps (GetLocalId v i) =
           GenericC.stm [C.cstm|$id:v = get_local_id($int:i);|]
-          return GenericC.Done
-        kernelOps (GetLocalSize v i) = do
+        kernelOps (GetLocalSize v i) =
           GenericC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-          return GenericC.Done
-        kernelOps (GetGlobalId v i) = do
+        kernelOps (GetGlobalId v i) =
           GenericC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-          return GenericC.Done
-        kernelOps (GetGlobalSize v i) = do
+        kernelOps (GetGlobalSize v i) =
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
-          return GenericC.Done
-        kernelOps (GetLockstepWidth v) = do
+        kernelOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-          return GenericC.Done
-        kernelOps Barrier = do
+        kernelOps Barrier =
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
-          return GenericC.Done
 
         cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
         cannotAllocate _ =
