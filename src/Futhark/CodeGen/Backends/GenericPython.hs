@@ -17,7 +17,6 @@ module Futhark.CodeGen.Backends.GenericPython
 
   , CompilerM (..)
   , OpCompiler
-  , OpCompilerResult(..)
   , WriteScalar
   , ReadScalar
   , Allocate
@@ -60,11 +59,7 @@ import Futhark.Representation.AST.Attributes (builtInFunctions, isBuiltInFunctio
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
-type OpCompiler op s = op -> CompilerM op s (OpCompilerResult op)
-
--- | The result of the substitute expression compiler.
-data OpCompilerResult op = CompileCode (Imp.Code op) -- ^ Equivalent to this code.
-                         | Done -- ^ Code added via monadic interface.
+type OpCompiler op s = op -> CompilerM op s ()
 
 -- | Write a scalar to the given memory block with the given index and
 -- in the given memory space.
@@ -711,11 +706,8 @@ compileExp (Imp.Index src (Imp.Count iexp) restype (Imp.Space space)) =
 
 compileCode :: Imp.Code op -> CompilerM op s ()
 
-compileCode (Imp.Op op) = do
-  opc <- asks envOpCompiler
-  res <- opc op
-  case res of Done             -> return ()
-              CompileCode code -> compileCode code
+compileCode (Imp.Op op) =
+  join $ asks envOpCompiler <*> pure op
 
 compileCode (Imp.If cond tb fb) = do
   cond' <- compileExp cond

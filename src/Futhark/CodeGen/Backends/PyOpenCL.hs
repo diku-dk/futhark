@@ -66,13 +66,11 @@ asLong :: PyExp -> PyExp
 asLong x = Call "long" [Arg x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
-callKernel (Imp.GetNumGroups v) = do
+callKernel (Imp.GetNumGroups v) =
   Py.stm $ Assign (Var (textual v)) $ Constant $ value (128::Int32)
-  return Py.Done
 
-callKernel (Imp.GetGroupSize v) = do
+callKernel (Imp.GetGroupSize v) =
   Py.stm $ Assign (Var (textual v)) $ Constant $ value (512::Int32)
-  return Py.Done
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
@@ -81,7 +79,6 @@ callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   workgroup_size' <- Tuple <$> mapM (fmap asLong . Py.compileExp) workgroup_size
   body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
   Py.stm $ If cond body []
-  return Py.Done
   where mult_exp = BinaryOp "*"
 
 launchKernel :: String -> [PyExp] -> PyExp -> [Imp.KernelArg] -> Py.CompilerM op s ()
