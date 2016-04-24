@@ -75,11 +75,11 @@ callKernel (Imp.GetGroupSize v) =
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
   let total_elements = foldl mult_exp (Constant $ value (1::Int32)) kernel_size'
-  let cond = BinaryOp "!=" total_elements (Constant $ value (0::Int32))
+  let cond = BinOp "!=" total_elements (Constant $ value (0::Int32))
   workgroup_size' <- Tuple <$> mapM (fmap asLong . Py.compileExp) workgroup_size
   body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
   Py.stm $ If cond body []
-  where mult_exp = BinaryOp "*"
+  where mult_exp = BinOp "*"
 
 launchKernel :: String -> [PyExp] -> PyExp -> [Imp.KernelArg] -> Py.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims args = do
@@ -132,7 +132,7 @@ readOpenCLScalar _ _ _ space =
 
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
-  let cond' = Cond (BinaryOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
+  let cond' = Cond (BinOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
   let call' = Call "cl.Buffer" [Arg $ Var "self.ctx",
                                 Arg $ Var "cl.mem_flags.READ_WRITE",
                                 Arg $ asLong cond']
@@ -145,8 +145,8 @@ copyOpenCLMemory :: Py.Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
   let srcmem'  = Var $ pretty srcmem
   let destmem' = Var $ pretty destmem
-  let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
-  let end = BinaryOp "+" destidx divide
+  let divide = BinOp "//" nbytes (Var $ Py.compileSizeOfType bt)
+  let end = BinOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
   Py.stm $ ifNotZeroSize nbytes $
     Exp $ Call "cl.enqueue_copy"
@@ -157,8 +157,8 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
   let destmem' = Var $ pretty destmem
   let srcmem'  = Var $ pretty srcmem
-  let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
-  let end = BinaryOp "+" srcidx divide
+  let divide = BinOp "//" nbytes (Var $ Py.compileSizeOfType bt)
+  let end = BinOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
   Py.stm $ ifNotZeroSize nbytes $
     Exp $ Call "cl.enqueue_copy"
@@ -213,7 +213,7 @@ unpackArrayInput mem memsize "device" _ dims e = do
        Arg e,
        ArgKeyword "is_blocking" $ Var "synchronous"]
 
-  Py.stm $ If (BinaryOp "==" (Py.simpleCall "type" [e]) (Var "cl.array.Array"))
+  Py.stm $ If (BinOp "==" (Py.simpleCall "type" [e]) (Var "cl.array.Array"))
     pyOpenCLArrayCase
     numpyArrayCase
   where mem_dest = Var $ pretty mem
@@ -222,7 +222,7 @@ unpackArrayInput _ _ sid _ _ _ =
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt
 ifNotZeroSize e s =
-  If (BinaryOp "!=" e (Constant $ value (0::Int32))) [s] []
+  If (BinOp "!=" e (Constant $ value (0::Int32))) [s] []
 
 finishIfSynchronous :: Py.CompilerM op s ()
 finishIfSynchronous =

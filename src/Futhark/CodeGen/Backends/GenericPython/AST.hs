@@ -27,7 +27,7 @@ data PyExp = Constant PrimValue
            | StringLiteral String
            | RawStringLiteral String
            | Var String
-           | BinaryOp String PyExp PyExp
+           | BinOp String PyExp PyExp
            | UnOp String PyExp
            | Cond PyExp PyExp PyExp
            | Index PyExp PyIdx
@@ -101,7 +101,7 @@ instance Pretty PyExp where
     ppr (RawStringLiteral s) = text "\"\"\"" <> text s <> text "\"\"\""
     ppr (Var n) = text $ map (\x -> if x == '\'' then 'm' else x) n
     ppr (Field e s) = ppr e <> text "." <> text s
-    ppr (BinaryOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
+    ppr (BinOp s e1 e2) = parens(ppr e1 <+> text s <+> ppr e2)
     ppr (UnOp s e) = text s <> parens (ppr e)
     ppr (Cond e1 e2 e3) = ppr e2 <+> text "if" <+> ppr e1 <+> text "else" <+> ppr e3
     ppr (Cast src bt) = text "ct.cast" <>

@@ -324,7 +324,7 @@ unpackDim arr_name (Imp.ConstSize c) i = do
   let shape_name = Field arr_name "shape"
   let constant_c = Constant $ value c
   let constant_i = Constant $ value i
-  stm $ Assert (BinaryOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "shape dimension is incorrect for the constant dimension"
+  stm $ Assert (BinOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "shape dimension is incorrect for the constant dimension"
 
 unpackDim arr_name (Imp.VarSize var) i = do
   let shape_name = Field arr_name "shape"
@@ -447,7 +447,7 @@ printPrimStm val t =
     FloatType Float64 -> p "%.6ff64"
   where p s =
           Exp $ simpleCall "sys.stdout.write"
-          [BinaryOp "%" (StringLiteral s) val]
+          [BinOp "%" (StringLiteral s) val]
 
 printStm :: EntryPointValue -> PyExp -> CompilerM op s PyStmt
 printStm (ScalarValue bt _) e =
@@ -460,7 +460,7 @@ printStm (ArrayValue mem memsize space bt (outer:shape)) e = do
   let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
   printelem <- printStm (ArrayValue mem memsize space bt shape) $ Var $ pretty v
-  return $ If (BinaryOp "==" size (Constant (value (0::Int32))))
+  return $ If (BinOp "==" size (Constant (value (0::Int32))))
     [puts emptystr]
     [Assign (Var $ pretty first) $ Var "True",
      puts "[",
@@ -568,12 +568,12 @@ addTiming statements =
   where print_runtime =
           [Exp $ simpleCall "runtime_file.write"
            [simpleCall "str"
-            [BinaryOp "-"
+            [BinOp "-"
              (toMicroseconds (Var "time_end"))
              (toMicroseconds (Var "time_start"))]],
            Exp $ simpleCall "runtime_file.write" [StringLiteral "\n"]]
         toMicroseconds x =
-          simpleCall "int" [BinaryOp "*" x $ Constant $ value (1000000::Int32)]
+          simpleCall "int" [BinOp "*" x $ Constant $ value (1000000::Int32)]
 
 compileUnOp :: Imp.UnOp -> String
 compileUnOp op =
@@ -591,7 +591,7 @@ compileBinOpLike :: Monad m =>
 compileBinOpLike x y = do
   x' <- compileExp x
   y' <- compileExp y
-  let simple s = return $ BinaryOp s x' y'
+  let simple s = return $ BinOp s x' y'
   return (x', y', simple)
 
 compileSizeOfType :: PrimType -> String
