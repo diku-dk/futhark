@@ -42,6 +42,7 @@ compileProg module_name prog = do
                      Import "numpy" $ Just "np",
                      Import "ctypes" $ Just "ct",
                      Import "pyopencl" $ Just "cl",
+                     Import "pyopencl.array" Nothing,
                      Import "time" Nothing]
 
       let constructor = Py.Constructor ["self"] [Escape $ openClInit assign]
@@ -55,6 +56,8 @@ compileProg module_name prog = do
                      , Py.opsReadScalar = readOpenCLScalar
                      , Py.opsAllocate = allocateOpenCLBuffer
                      , Py.opsCopy = copyOpenCLMemory
+                     , Py.opsEntryOutput = packArrayOutput
+                     , Py.opsEntryInput = unpackArrayInput
                      }
 
 -- We have many casts to 'long', because PyOpenCL may get confused at
@@ -179,6 +182,46 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
 
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
+
+packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
+packArrayOutput mem "device" bt dims =
+  return $ Call "cl.array.Array"
+  [Arg $ Var "self.queue",
+   Arg $ Tuple $ map Py.compileDim dims,
+   Arg $ Var $ Py.compilePrimType bt,
+   ArgKeyword "data" $ Var $ pretty mem]
+packArrayOutput _ sid _ _ =
+  fail $ "Cannot return array from " ++ sid ++ " space."
+
+unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
+unpackArrayInput mem memsize "device" _ dims e = do
+  zipWithM_ (Py.unpackDim e) dims [0..]
+
+  case memsize of
+    Imp.VarSize sizevar ->
+      Py.stm $ Assign (Var $ pretty sizevar) $
+      Py.simpleCall "np.int32" [Field e "nbytes"]
+    Imp.ConstSize _ ->
+      return ()
+
+  let memsize' = Py.compileDim memsize
+      pyOpenCLArrayCase =
+        [Assign mem_dest $ Field e "data"]
+  numpyArrayCase <- Py.collect $ do
+    allocateOpenCLBuffer mem memsize' "device"
+    Py.stm $ ifNotZeroSize memsize' $
+      Exp $ Call "cl.enqueue_copy"
+      [Arg $ Var "self.queue",
+       Arg $ Var $ pretty mem,
+       Arg e,
+       ArgKeyword "is_blocking" $ Var "synchronous"]
+
+  Py.stm $ If (BinaryOp "==" (Py.simpleCall "type" [e]) (Var "cl.array.Array"))
+    pyOpenCLArrayCase
+    numpyArrayCase
+  where mem_dest = Var $ pretty mem
+unpackArrayInput _ _ sid _ _ _ =
+  fail $ "Cannot accept array from " ++ sid ++ " space."
 
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt
 ifNotZeroSize e s =

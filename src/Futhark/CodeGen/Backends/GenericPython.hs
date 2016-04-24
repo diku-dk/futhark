@@ -4,6 +4,7 @@ module Futhark.CodeGen.Backends.GenericPython
   , Constructor (..)
   , emptyConstructor
 
+  , compileDim
   , compileExp
   , compileCode
   , compilePrimType
@@ -12,6 +13,8 @@ module Futhark.CodeGen.Backends.GenericPython
   , Operations (..)
   , defaultOperations
 
+  , unpackDim
+
   , CompilerM (..)
   , OpCompiler
   , OpCompilerResult(..)
@@ -19,6 +22,8 @@ module Futhark.CodeGen.Backends.GenericPython
   , ReadScalar
   , Allocate
   , Copy
+  , EntryOutput
+  , EntryInput
 
   , CompilerEnv(..)
   , CompilerState(..)
@@ -26,9 +31,10 @@ module Futhark.CodeGen.Backends.GenericPython
   , stms
   , collect'
   , collect
+  , simpleCall
 
   , compileSizeOfType
-    ) where
+  ) where
 
 import Control.Applicative
 import Control.Monad.Identity
@@ -36,6 +42,7 @@ import Control.Monad.State
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
+import Data.Maybe
 
 import qualified Data.HashMap.Lazy as HM
 
@@ -80,11 +87,25 @@ type Copy op s = VName -> PyExp -> Imp.Space ->
                  PyExp -> PrimType ->
                  CompilerM op s ()
 
+-- | Construct the Python array being returned from an entry point.
+type EntryOutput op s = VName -> Imp.SpaceId ->
+                        PrimType -> [Imp.DimSize] ->
+                        CompilerM op s PyExp
+
+-- | Unpack the array being passed to an entry point.
+type EntryInput op s = VName -> Imp.MemSize -> Imp.SpaceId ->
+                       PrimType -> [Imp.DimSize] ->
+                       PyExp ->
+                       CompilerM op s ()
+
+
 data Operations op s = Operations { opsWriteScalar :: WriteScalar op s
                                   , opsReadScalar :: ReadScalar op s
                                   , opsAllocate :: Allocate op s
                                   , opsCopy :: Copy op s
                                   , opsCompiler :: OpCompiler op s
+                                  , opsEntryOutput :: EntryOutput op s
+                                  , opsEntryInput :: EntryInput op s
                                   }
 
 -- | A set of operations that fail for every operation involving
@@ -96,6 +117,8 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
                                , opsAllocate  = defAllocate
                                , opsCopy = defCopy
                                , opsCompiler = defCompiler
+                               , opsEntryOutput = defEntryOutput
+                               , opsEntryInput = defEntryInput
                                }
   where defWriteScalar _ _ _ _ _ =
           fail "Cannot write to non-default memory space because I am dumb"
@@ -107,6 +130,10 @@ defaultOperations = Operations { opsWriteScalar = defWriteScalar
           fail "Cannot copy to or from non-default memory space"
         defCompiler _ =
           fail "The default compiler cannot compile extended operations"
+        defEntryOutput _ _ _ _ =
+          fail "Cannot return array not in default memory space"
+        defEntryInput _ _ _ _ =
+          fail "Cannot accept array not in default memory space"
 
 data CompilerEnv op s = CompilerEnv {
     envOperations :: Operations op s
@@ -127,6 +154,12 @@ envAllocate = opsAllocate . envOperations
 
 envCopy :: CompilerEnv op s -> Copy op s
 envCopy = opsCopy . envOperations
+
+envEntryOutput :: CompilerEnv op s -> EntryOutput op s
+envEntryOutput = opsEntryOutput . envOperations
+
+envEntryInput :: CompilerEnv op s -> EntryInput op s
+envEntryInput = opsEntryInput . envOperations
 
 newCompilerEnv :: Imp.Functions op -> Operations op s -> CompilerEnv op s
 newCompilerEnv (Imp.Functions funs) ops =
@@ -291,15 +324,15 @@ compileDim :: Imp.DimSize -> PyExp
 compileDim (Imp.ConstSize i) = Constant $ value i
 compileDim (Imp.VarSize v) = Var $ pretty v
 
-unpackDim :: String -> Imp.DimSize -> Int32 -> CompilerM op s ()
+unpackDim :: PyExp -> Imp.DimSize -> Int32 -> CompilerM op s ()
 unpackDim arr_name (Imp.ConstSize c) i = do
-  let shape_name = Var $ arr_name  ++ ".shape"
+  let shape_name = Field arr_name "shape"
   let constant_c = Constant $ value c
   let constant_i = Constant $ value i
   stm $ Assert (BinaryOp "==" constant_c (Index shape_name $ IdxExp constant_i)) "shape dimension is incorrect for the constant dimension"
 
 unpackDim arr_name (Imp.VarSize var) i = do
-  let shape_name = Var $ arr_name  ++ ".shape"
+  let shape_name = Field arr_name "shape"
   let src = Index shape_name $ IdxExp $ Constant $ value i
   let dest = Var $ pretty var
   let makeNumpy = simpleCall "np.int32" [src]
@@ -319,77 +352,65 @@ hashSpace = mconcat . map hashSpace'
         hashSpace' _ =
           HM.empty
 
-packArg :: HM.HashMap VName VName
-        -> HM.HashMap VName Imp.Space
-        -> Imp.ValueDecl
-        -> CompilerM op s ()
-packArg _ _ decl@(Imp.ScalarValue bt vname) = do
-  let vname' = Var $ pretty vname
+-- | A description of a value returned by an entry point.
+data EntryPointValue =
+  -- | Return a scalar of the given type stored in the given variable.
+    ScalarValue PrimType VName
+  -- | Return an array, given memory block, size, space, and
+  -- dimensions of the array.
+  | ArrayValue VName Imp.MemSize Space PrimType [Imp.DimSize]
+
+createValue :: HM.HashMap VName VName
+             -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
+             -> CompilerM op s EntryPointValue
+createValue _ _ (Imp.ScalarValue t name) =
+  return $ ScalarValue t name
+createValue sizes spaces (Imp.ArrayValue mem bt dims) = do
+  size <- maybe noMemSize return $ HM.lookup mem sizes
+  space <- maybe noMemSpace return $ HM.lookup mem spaces
+  return $ ArrayValue mem (Imp.VarSize size) space bt dims
+  where noMemSpace = fail $ "createValue: could not find space of memory block " ++ pretty mem
+        noMemSize = fail $ "createValue: could not find size of memory block " ++ pretty mem
+
+entryPointOutput :: EntryPointValue -> CompilerM op s PyExp
+entryPointOutput (ScalarValue _ name) =
+  return $ Var $ pretty name
+entryPointOutput (ArrayValue mem _ Imp.DefaultSpace bt dims) = do
+  let cast = Cast (Var $ pretty mem) (compilePrimType bt)
+  return $ simpleCall "createArray" [cast, Tuple $ map compileDim dims]
+entryPointOutput (ArrayValue mem _ (Imp.Space sid) bt dims) = do
+  pack_output <- asks envEntryOutput
+  pack_output mem sid bt dims
+
+entryPointInput :: EntryPointValue -> PyExp -> CompilerM op s ()
+entryPointInput (ScalarValue bt name) e = do
+  let vname' = Var $ pretty name
       npobject = compilePrimToNp bt
-      call = simpleCall npobject [Var $ extValueDeclName decl]
+      call = simpleCall npobject [e]
   stm $ Assign vname' call
+entryPointInput (ArrayValue mem memsize Imp.DefaultSpace _ dims) e = do
+  zipWithM_ (unpackDim e) dims [0..]
+  let dest = Var $ pretty mem
+      unwrap_call = simpleCall "unwrapArray" [e]
 
-packArg memsizes spacemap decl@(Imp.ArrayValue vname bt dims) = do
-  let extname = extValueDeclName decl
-  zipWithM_ (unpackDim extname) dims [0..]
-  let src_size = Var $ extname ++ ".nbytes"
-      makeNumpy = simpleCall "np.int32" [src_size]
-      dest = Var $ pretty vname
-      unwrap_call = simpleCall "unwrapArray" [Var extname]
+  case memsize of
+    Imp.VarSize sizevar ->
+      stm $ Assign (Var $ pretty sizevar) $
+      simpleCall "np.int32" [Field e "nbytes"]
+    Imp.ConstSize _ ->
+      return ()
 
-  sizevar <- case HM.lookup vname memsizes of
-    Nothing -> error "Param name does not exist in array declarations"
-    Just sizevar -> do stm $ Assign (Var $ pretty sizevar) makeNumpy
-                       return sizevar
+  stm $ Assign dest unwrap_call
 
-  case HM.lookup vname spacemap of
-    Just (Imp.Space space) -> do copy <- asks envCopy
-                                 alloc <- asks envAllocate
-                                 name <- newVName $ baseString vname <> "_" <> space
-                                 alloc name (Var $ pretty sizevar) space
-                                 stm $ Assign dest $ Var $ extValueDeclName decl
-                                 copy
-                                   name (Constant $ value (0 :: Int32)) (Imp.Space $ pretty space)
-                                   vname (Constant $ value (0 :: Int32)) Imp.DefaultSpace src_size bt
-                                 stm $ Assign dest (Var $ pretty name)
-
-    Just Imp.DefaultSpace -> stm $ Assign dest unwrap_call
-    Nothing -> error "Space is not set correctly"
-
-unpackOutput :: HM.HashMap VName VName -> HM.HashMap VName Imp.Space -> Imp.ValueDecl
-             -> CompilerM op s ()
-unpackOutput _ _ Imp.ScalarValue{} =
-  return ()
-
-unpackOutput sizeHash spacemap (Imp.ArrayValue vname bt dims) = do
-  let cast = Cast (Var $ pretty vname) (compilePrimType bt)
-  let funCall = simpleCall "createArray" [cast, Tuple $ map compileDim dims]
-  let dest = Var $ pretty vname
-
-  let size = case HM.lookup vname sizeHash of
-               Nothing -> error "Couldn't find memparam in size hash"
-               Just s -> pretty s
-
-
-  case HM.lookup vname spacemap of
-    Just (Imp.Space space) -> do copy <- asks envCopy
-                                 name <- newVName $ baseString vname <> "_" <> space
-                                 let name' = Var $ pretty name
-                                 let bt'' = compilePrimType bt
-                                 let emptyArray = Call "np.empty"
-                                                  [Arg $ Tuple $ map compileDim dims,
-                                                   ArgKeyword "dtype" (Var bt'')]
-                                 stm $ Assign name' emptyArray
-                                 copy
-                                   name (Constant $ value (0::Int32)) Imp.DefaultSpace
-                                   vname (Constant $ value (0::Int32)) (Space $ pretty space) (Var size)
-                                   bt
-                                 stm $ Assign (Var $ pretty vname) name'
-    Just Imp.DefaultSpace -> stm $ Assign dest funCall
-    Nothing -> error "Space is not set correctly"
+entryPointInput (ArrayValue mem memsize (Imp.Space sid) bt dims) e = do
+  unpack_input <- asks envEntryInput
+  unpack_input mem memsize sid bt dims e
 
 extValueDeclName :: Imp.ValueDecl -> String
-extValueDeclName = (++"_ext") . valueDeclName
+extValueDeclName = extName . valueDeclName
+
+extName :: String -> String
+extName = (++"_ext")
 
 valueDeclName :: Imp.ValueDecl -> String
 valueDeclName (Imp.ScalarValue _ vname) = pretty vname
@@ -433,22 +454,22 @@ printPrimStm val t =
           Exp $ simpleCall "sys.stdout.write"
           [BinaryOp "%" (StringLiteral s) val]
 
-printStm :: Imp.ValueDecl -> CompilerM op s PyStmt
-printStm (Imp.ScalarValue bt name) =
-  return $ printPrimStm (Var $ textual name) bt
-printStm (Imp.ArrayValue name bt []) =
-  return $ printPrimStm (Var $ textual name) bt
-printStm (Imp.ArrayValue mem bt (_:shape)) = do
+printStm :: EntryPointValue -> PyExp -> CompilerM op s PyStmt
+printStm (ScalarValue bt _) e =
+  return $ printPrimStm e bt
+printStm (ArrayValue _ _ _ bt []) e =
+  return $ printPrimStm e bt
+printStm (ArrayValue mem memsize space bt (outer:shape)) e = do
   v <- newVName "print_elem"
   first <- newVName "print_first"
-  let size = simpleCall "np.product" [Var $ pretty mem ++ ".shape"]
+  let size = simpleCall "np.product" [List $ map compileDim $ outer:shape]
       emptystr = "empty(" ++ ppArrayType bt (length shape) ++ ")"
-  printelem <- printStm $ Imp.ArrayValue v bt shape
+  printelem <- printStm (ArrayValue mem memsize space bt shape) $ Var $ pretty v
   return $ If (BinaryOp "==" size (Constant (value (0::Int32))))
     [puts emptystr]
     [Assign (Var $ pretty first) $ Var "True",
      puts "[",
-     For (pretty v) (Var $ pretty mem) [
+     For (pretty v) e [
         If (simpleCall "not" [Var $ pretty first])
         [puts ", "] [],
         printelem,
@@ -461,14 +482,24 @@ printStm (Imp.ArrayValue mem bt (_:shape)) = do
 
           puts s = Exp $ simpleCall "sys.stdout.write" [StringLiteral s]
 
-printResult :: [Imp.ValueDecl] -> CompilerM op s [PyStmt]
-printResult vs = fmap concat $ forM vs $ \v -> do
-  p <- printStm v
-  return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
+printValue :: [(EntryPointValue, PyExp)] -> CompilerM op s [PyStmt]
+printValue = fmap concat . mapM (uncurry printValue')
+  -- We copy non-host arrays to the host before printing.  This is
+  -- done in a hacky way - we assume the value has a .get()-method
+  -- that returns an equivalent Numpy array.  This works for PyOpenCL,
+  -- but we will probably need yet another plugin mechanism here in
+  -- the future.
+  where printValue' (ArrayValue mem memsize (Space _) bt shape) e =
+          printValue' (ArrayValue mem memsize DefaultSpace bt shape) $
+          simpleCall (pretty e ++ ".get") []
+        printValue' r e = do
+          p <- printStm r e
+          return [p, Exp $ simpleCall "sys.stdout.write" [StringLiteral "\n"]]
 
 prepareEntry :: (Name, Imp.Function op)
              -> CompilerM op s
-                (String, [String], [PyStmt], [PyStmt], [PyStmt], [PyExp])
+                (String, [String], [PyStmt], [PyStmt], [PyStmt],
+                 [(EntryPointValue, PyExp)])
 prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = do
   let output_paramNames = map (pretty . Imp.paramName) outputs
       funTuple = tupleOrSingle $ fmap Var output_paramNames
@@ -477,31 +508,33 @@ prepareEntry (fname, Imp.Function _ outputs inputs _ decl_outputs decl_args) = d
       hashSpaceInput = hashSpace inputs
       hashSpaceOutput = hashSpace outputs
 
-  prepareIn <- collect $ mapM_ (packArg hashSizeInput hashSpaceInput) decl_args
-  prepareOut <- collect $ mapM_ (unpackOutput hashSizeOutput hashSpaceOutput) decl_outputs
+  args <- mapM (createValue hashSizeInput hashSpaceInput) decl_args
+  prepareIn <- collect $ zipWithM_ entryPointInput args $
+               map (Var . extValueDeclName) decl_args
+  results <- mapM (createValue hashSizeOutput hashSpaceOutput) decl_outputs
+  (res, prepareOut) <- collect' $ mapM entryPointOutput results
 
   let inputArgs = map (pretty . Imp.paramName) inputs
       fname' = "self." ++ futharkFun (nameToString fname)
       funCall = simpleCall fname' (fmap Var inputArgs)
       call = [Assign funTuple funCall]
-      res = map (Var . valueDeclName) decl_outputs
 
   return (nameToString fname, map extValueDeclName decl_args,
           prepareIn, call, prepareOut,
-          res)
+          zip results res)
 
 compileEntryFun :: (Name, Imp.Function op)
                 -> CompilerM op s PyFunDef
 compileEntryFun entry = do
   (fname', params, prepareIn, body, prepareOut, res) <- prepareEntry entry
-  let ret = Return $ tupleOrSingle res
+  let ret = Return $ tupleOrSingle $ map snd res
   return $ Def fname' ("self" : params) $
     prepareIn ++ body ++ prepareOut ++ [ret]
 
 callEntryFun :: [PyStmt] -> [Option] -> (Name, Imp.Function op)
              -> CompilerM op s [PyStmt]
-callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ decl_outputs decl_args) = do
-  (_, _, prepareIn, body, prepareOut, _) <- prepareEntry entry
+callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ _ decl_args) = do
+  (_, _, prepareIn, body, _, res) <- prepareEntry entry
 
   let str_input = map readInput decl_args
 
@@ -517,12 +550,12 @@ callEntryFun pre_timing options entry@(_, Imp.Function _ _ _ _ decl_outputs decl
         For "i" (simpleCall "range" [simpleCall "int" [Var "num_runs"]])
         do_run_with_timing
 
-  str_output <- printResult decl_outputs
+  str_output <- printValue res
 
   return $ parse_options ++ str_input ++ prepareIn ++
     [Try [do_warmup_run, do_num_runs] [except']] ++
     [close_runtime_file] ++
-    prepareOut ++ str_output
+    str_output
   where parse_options =
           Assign (Var "runtime_file") None :
           Assign (Var "do_warmup_run") (Constant $ value False) :
