@@ -114,6 +114,8 @@ data TypeError =
   -- ^ Type alias is referenced, but not defined. SrcLoc not available.
   | ArrayArrayError String
   | UnusedCase
+  | DebugError String
+
 instance Show TypeError where
   show (TypeError pos msg) =
     "Type error at " ++ locStr pos ++ ":\n" ++ msg
@@ -212,10 +214,9 @@ instance Show TypeError where
     "Type alias '" ++ nameToString name ++ "' reference, but not defined."
   show (DupTypeAlias loc name) =
     "Type alias '" ++ nameToString name ++ "' defined twice at line " ++ show loc
-  show (ArrayArrayError str) =
-    str
-  show UnusedCase =
-    "This case is not actually used."
+  show (ArrayArrayError str) = show str
+  show UnusedCase = "This case is not actually used."
+  show (DebugError str) = show str
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
 
@@ -1597,8 +1598,9 @@ typeBaseFromTypeAlias (name, loc) hashmap unknowns =
        Just (UserTypeAlias someAlias, _)
          -> typeBaseFromUserType (name, UserTypeAlias someAlias, loc) hashmap $ name:unknowns
        Just (Empty, _)
-         -> Left UnusedCase
-       Nothing -> Left $ UndefinedAlias loc name
+         -> Left $ TypeError loc (nameToString name ++ " type tried to refer to a type that doesn't exist.")
+       Nothing
+         -> Left $ UndefinedAlias loc name
 
 typeBasesFromUserTypes :: (Name, [UserType vn], SrcLoc)
                        -> HM.HashMap Name (UserType vn, SrcLoc)
@@ -1645,7 +1647,7 @@ expandType' (UserTypeAlias alias) taTable =
     Nothing
       -> Left $ UndefinedAlias' alias
 
-expandType' Empty _ = Left UnusedCase
+expandType' Empty _ = Left $ DebugError "Tried to expandType' with Empty"
 
 expandArrayType :: UserType vn
                 -> ShapeDecl vn
@@ -1663,7 +1665,7 @@ expandArrayType (UserTuple types) s u taTable =
    in do
     ts' <- checkEitherList ts
     return $ TupleArray ts' s u
-expandArrayType _ _ _ _ = Left UnusedCase
+expandArrayType _ _ _ _ = Left $ DebugError "tried to expandArrayType with empty"
 
 expandTupleArrayType :: UserType vn
                      -> AliasMap vn
@@ -1681,7 +1683,7 @@ expandTupleArrayType (UserTuple types) taTable = do
   let ts = map (`expandTupleArrayType` taTable) types
   ret <- checkEitherList ts
   return $ TupleArrayElem ret
-expandTupleArrayType Empty _ = Left UnusedCase
+expandTupleArrayType Empty _ = Left $ DebugError "tried to expandTupleArrayType with Empty"
 
 
 
@@ -1714,7 +1716,7 @@ expandType2 (UserPrim prim) _ = Right $ Prim prim
 expandType2 (UserArray someType shape uni) taTable = do
   t <- expandArrayType2 someType shape uni taTable
   Right $ Array t
-expandType2 Empty _ = Left UnusedCase
+expandType2 Empty _ = Left $ DebugError "tried to expandType2 with Empty"
 
 expandArrayType2 :: UserType VName
                  -> ShapeDecl VName
@@ -1733,7 +1735,7 @@ expandArrayType2 (UserTuple types) s u taTable =
     ts' <- checkEitherList ts
     return $ TupleArray ts' s u
 expandArrayType2 _ _ _ _ =
-  Left UnusedCase
+  Left $ DebugError "tried to expandArrayType2 with Empty"
 
 expandArrayType2' :: TypeBase ShapeDecl NoInfo VName
                   -> ShapeDecl VName
@@ -1748,7 +1750,7 @@ expandArrayType2' (Tuple types) s u taTable =
     ts' <- checkEitherList ts
     return $ TupleArray ts' s u
 expandArrayType2' _ _ _ _ =
-  Left UnusedCase
+  Left $ DebugError "tried to expandArrayType2' with Empty"
 
 
 
@@ -1769,7 +1771,7 @@ expandTupleArrayType2 (UserTuple types) taTable = do
     ret <- checkEitherList ts
     return $ TupleArrayElem ret
 expandTupleArrayType2 Empty _ =
-  Left UnusedCase
+  Left $ DebugError "tried to expandTupleArrayType2 with Empty"
 
 expandTupleArrayType2' :: TypeBase ShapeDecl NoInfo VName
                        -> TypeAliasMap
@@ -1782,30 +1784,3 @@ expandTupleArrayType2' (Tuple types) taTable = do
   let ts = map (`expandTupleArrayType2'` taTable) types
   ret <- checkEitherList ts
   return $ TupleArrayElem ret
-
-contractTypeBase :: TypeBase ShapeDecl NoInfo VName
-                 -> UserType VName
-contractTypeBase (Prim p) = UserPrim p
-contractTypeBase arrtp@(Array tps) =
-  let dimDecl = nestedDims arrtp
-      uniq = uniqueness arrtp
-      arrtp' = contractArrayTypeBase tps
-  in UserArray arrtp' (ShapeDecl dimDecl) uniq
-contractTypeBase (Tuple types) =
-  UserTuple $ map contractTypeBase types
-
-contractArrayTypeBase :: ArrayTypeBase ShapeDecl NoInfo VName
-                      -> UserType VName
-contractArrayTypeBase (PrimArray p _ _ _) =
-  UserPrim p
-contractArrayTypeBase (TupleArray tps _ _) =
-  UserTuple $ map contractTupleArrayElemTypeBase tps
-
-contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase ShapeDecl NoInfo VName
-                               -> UserType VName
-contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
-  UserPrim p
-contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
-  contractArrayTypeBase arrtpbase
-contractTupleArrayElemTypeBase (TupleArrayElem tps) =
-  UserTuple $ map contractTupleArrayElemTypeBase tps

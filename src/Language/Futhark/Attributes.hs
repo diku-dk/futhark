@@ -52,9 +52,8 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
-
   , tupleArrayElemToType
-
+  , contractTypeBase
   -- ** Removing and adding names
   --
   -- $names
@@ -727,8 +726,10 @@ commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 toParam :: IdentBase Info vn
         -> ParamBase Info vn
 toParam (Ident name (Info t) loc) =
-  Param name (TypeDecl Empty $ Info t') loc
-  where t' = vacuousShapeAnnotations $ toStruct t
+  Param name (TypeDecl t' $ Info t'') loc
+  where
+    t'  = vacuousShapeAnnotations' $ toStruct t
+    t'' = vacuousShapeAnnotations $ toStruct t
 
 -- | Turn a parameter into an identifier.
 fromParam :: Ord vn =>
@@ -786,6 +787,34 @@ builtInFunctions = HM.fromList $ map namify
                    ,("isnan64", (Bool, [FloatType Float64]))
                    ]
   where namify (k,v) = (nameFromString k, v)
+
+
+contractTypeBase :: TypeBase ShapeDecl NoInfo VName
+                 -> UserType VName
+contractTypeBase (Prim p) = UserPrim p
+contractTypeBase arrtp@(Array tps) =
+  let dimDecl = arrayShape arrtp
+      uniq = uniqueness arrtp
+      arrtp' = contractArrayTypeBase tps
+  in UserArray arrtp' dimDecl uniq
+contractTypeBase (Tuple types) =
+  UserTuple $ map contractTypeBase types
+
+contractArrayTypeBase :: ArrayTypeBase ShapeDecl NoInfo VName
+                      -> UserType VName
+contractArrayTypeBase (PrimArray p _ _ _) =
+  UserPrim p
+contractArrayTypeBase (TupleArray tps _ _) =
+  UserTuple $ map contractTupleArrayElemTypeBase tps
+
+contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase ShapeDecl NoInfo VName
+                               -> UserType VName
+contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
+  UserPrim p
+contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
+  contractArrayTypeBase arrtpbase
+contractTupleArrayElemTypeBase (TupleArrayElem tps) =
+  UserTuple $ map contractTupleArrayElemTypeBase tps
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase ShapeDecl NoInfo Name
