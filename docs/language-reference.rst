@@ -105,6 +105,7 @@ as such::
   type airplane = {pilot, passengers, position, velocity, mass}
 
 It is currently not possible to mix array declarations with user declared arrays.
+
 Furthermore, uniqueness must be declared in the type declaration::
 
   -- Does not work:
@@ -129,7 +130,8 @@ However, it is still possible to use arrays of tuples, possibly containing array
 
 To declare dimensions on an array data type using type aliases, the type alias must
 define either a primitive type, or a tuple.
-The dimensions must then be declared during the function declaration.::
+
+The dimensions must then be declared during the function declaration::
 
   type foo = {int, {f32,f32}, [airplane]}
   function bar some_function([foo, n] input_data) = ...
