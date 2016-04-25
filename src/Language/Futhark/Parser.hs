@@ -122,8 +122,8 @@ parseFuthark fp0 s0 =
         parseWithIncludes alreadyIncluded includeSources (fp, s) = do
           p <- liftEither $ parse prog fp s
           let decs = progWHDecs p
-              progFuns = mapMaybe isFun decs
-              progTypes = mapMaybe isType decs
+              progFs = mapMaybe isFun decs
+              progTs = mapMaybe isType decs
 
               isFun (FunDec a) = Just a
               isFun _          = Nothing
@@ -140,7 +140,7 @@ parseFuthark fp0 s0 =
           let newIncludes' = newIncludes \\ alreadyIncluded
               alreadyIncluded' = fp : newIncludes' ++ alreadyIncluded
               includeSources' = fp : includeSources
-              p' = Prog  progTypes progFuns
+              p' = Prog progTs progFs
 
           if null newIncludes'
             then return (alreadyIncluded', p')

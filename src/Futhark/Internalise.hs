@@ -858,7 +858,7 @@ internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = d
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info undefined) loc) rowts
+  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-

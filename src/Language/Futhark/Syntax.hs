@@ -28,7 +28,6 @@ module Language.Futhark.Syntax
   , DeclTupleArrayElemTypeBase
   , Diet(..)
   , TypeDeclBase (..)
-  , UserTypeDeclBase (..)
 
     -- * Values
   , IntValue(..)
@@ -534,7 +533,7 @@ data ExpBase f vn =
             -- ^ Explore the Danger Zone and elide safety checks on
             -- array operations that are (lexically) within this
             -- expression.  Make really sure the code is correct.
--- deriving instance Showable f vn => Show (ExpBase f vn)
+deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
                      | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
@@ -577,7 +576,7 @@ instance Located (ExpBase f vn) where
 -- | Whether the loop is a @for@-loop or a @while@-loop.
 data LoopFormBase f vn = For ForLoopDirection (ExpBase f vn) (IdentBase f vn) (ExpBase f vn)
                        | While (ExpBase f vn)
--- deriving instance Showable f vn => Show (LoopFormBase f vn)
+deriving instance Showable f vn => Show (LoopFormBase f vn)
 
 -- | The iteration order of a @for@-loop.
 data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
@@ -629,35 +628,27 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               , funDefBody :: ExpBase f vn
                               , funDefLocation :: SrcLoc
                               }
---deriving instance Showable f vn => Show (FunDefBase f vn)
+deriving instance Showable f vn => Show (FunDefBase f vn)
 
 -- | Type Declarations
 data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
                                 , userType :: TypeDeclBase f vn -- type-definitionen
                                 , typeDefLocation :: SrcLoc
                                 }
-deriving instance Showable vn => Show (TypeDefBase f vn)
+deriving instance Showable f vn => Show (TypeDefBase f vn)
 
 
 data DecBase f vn = FunDec (FunDefBase f vn)
                   | TypeDec (TypeDefBase f vn)
 -- | Coming soon  | SigDec ..
 --                | ModDec ..
-
-
--- | An entire Futhark program.
--- | newtype ProgBase ty vn = Prog { progFunctions :: [DecBase ty vn] }
--- newtype ProgBase ty vn = Prog { progDeclarations :: [DecBase ty vn] }
---  deriving (Show)
+deriving instance Showable f vn => Show (DecBase f vn)
 
 data ProgBase f vn =
          Prog  { progTypes :: [TypeDefBase f vn]
                , progFunctions :: [FunDefBase f vn]
                }
 deriving instance Showable f vn => Show (ProgBase f vn)
-
-data ProgDecs f vn = Decs { progDeclarations :: [DecBase f vn]}
--- | An entire Futhark program, including headers.
 
 data ProgBaseWithHeaders f vn =
   ProgWithHeaders { progWHHeaders :: [ProgHeader]

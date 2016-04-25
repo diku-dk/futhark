@@ -159,7 +159,7 @@ nestedDims' :: Ord vn => UserType vn -> [DimDecl vn]
 nestedDims' t =
   case t of UserArray _ ds _ -> nub $ shapeDims ds
             UserTuple ts -> nub $ mconcat $ map nestedDims' ts
-            UserPrim{} -> mempty
+            _ -> mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -371,11 +371,6 @@ toStructural = removeNames . removeShapeAnnotations
 toStruct :: TypeBase shape as vn
          -> TypeBase shape NoInfo vn
 toStruct t = t `setAliases` NoInfo
-
-toStruct' :: UserType vn
-          -> UserType vn
-toStruct' t = t
-
 
 -- | Replace no aliasing with an empty alias set.
 fromStruct :: TypeBase shape as vn
@@ -735,76 +730,6 @@ typeOf (Split splitexps e _) =
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
 typeOf (Write _i _v a _) = typeOf a `setAliases` HS.empty
-
-
-
-typeOf' :: (Ord vn, Hashable vn) => ExpBase Info vn -> CompTypeBase vn
-typeOf' (Literal val _) = fromStruct $ valueType val
-typeOf' (TupLit es _) = Tuple $ map typeOf' es
-typeOf' (ArrayLit es (Info t) _) =
-  arrayType 1 t $ mconcat $ map (uniqueness . typeOf') es
-typeOf' (BinOp _ _ _ (Info t) _) = t
-typeOf' (UnOp Not _ _) = Prim Bool
-typeOf' (UnOp Negate e _) = typeOf' e
-typeOf' (UnOp Complement e _) = typeOf' e
-typeOf' (UnOp Abs e _) = typeOf' e
-typeOf' (UnOp Signum e _) = typeOf' e
-typeOf' (UnOp (ToFloat t) _ _) = Prim $ FloatType t
-typeOf' (UnOp (ToSigned t) _ _) = Prim $ Signed t
-typeOf' (UnOp (ToUnsigned t) _ _) = Prim $ Unsigned t
-typeOf' (If _ _ _ (Info t) _) = t
-typeOf' (Var ident) =
-  case unInfo $ identType ident of
-    Tuple ets -> Tuple ets
-    t         -> t `addAliases` HS.insert (identName ident)
-typeOf' (Apply _ _ (Info t) _) = t
-typeOf' (LetPat _ _ body _) = typeOf' body
-typeOf' (LetWith _ _ _ _ body _) = typeOf' body
-typeOf' (Index ident idx _) =
-  stripArray (length idx) (typeOf' ident)
-typeOf' (Iota _ _) = Array $ PrimArray (Signed Int32) (Rank 1) Unique mempty
-typeOf' Size{} = Prim $ Signed Int32
-typeOf' (Replicate _ e _) = arrayType 1 (typeOf' e) Unique
-typeOf' (Reshape shape  e _) =
-  Rank (length shape) `setArrayShape` typeOf' e
-typeOf' (Rearrange _ e _) = typeOf' e
-typeOf' (Transpose e _) = typeOf' e
-typeOf' (Map f arr _) = arrayType 1 et Unique
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-  where et = lambdaType f [rowType $ typeOf' arr]
-typeOf' (Reduce _ fun start arr _) =
-  removeShapeAnnotations $
-  lambdaType fun [typeOf' start, rowType (typeOf' arr)]
-typeOf' (Zip es _) = arrayType 1 (Tuple $ map (rowType . unInfo . snd) es) Nonunique
-typeOf' (Unzip _ ts _) =
-  Tuple $ map unInfo ts
-typeOf' (Unsafe e _) =
-  typeOf' e
-typeOf' (Scan fun start arr _) =
-  arrayType 1 et Unique
-    where et = lambdaType fun [typeOf' start, rowType $ typeOf' arr]
-typeOf' (Filter _ arr _) =
-  typeOf' arr
-typeOf' (Partition funs arr _) =
-  Tuple $ replicate (length funs + 1) $ typeOf' arr
-typeOf' (Stream form lam arr _) =
-  case form of
-    MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf' arr]
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-    RedLike _ _ _ acc -> lambdaType lam [Prim $ Signed Int32, typeOf' acc, typeOf' arr]
-                         `setAliases` HS.empty
-                         `setUniqueness` Unique
-    Sequential  acc -> lambdaType lam [Prim $ Signed Int32, typeOf' acc, typeOf' arr]
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-typeOf' (Concat x _ _) =
-  typeOf' x `setUniqueness` Unique `setAliases` HS.empty
-typeOf' (Split splitexps e _) =
-  Tuple $ replicate (1 + length splitexps) (typeOf' e)
-typeOf' (Copy e _) = typeOf' e `setUniqueness` Unique `setAliases` HS.empty
-typeOf' (DoLoop _ _ _ _ body _) = typeOf' body
 
 -- | If possible, convert an expression to a value.  This is not a
 -- true constant propagator, but a quick way to convert array/tuple

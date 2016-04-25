@@ -141,9 +141,9 @@ renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
 
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
-renameTypeAlias (TypeDef name (TypeDecl t NoInfo) srcloc) = do
+renameTypeAlias (TypeDef name (TypeDecl t NoInfo) loc) = do
   t' <- renameDeclType' t
-  return $ TypeDef name (TypeDecl t' NoInfo) srcloc
+  return $ TypeDef name (TypeDecl t' NoInfo) loc
 
 renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
@@ -226,12 +226,15 @@ renameTypeGeneric' renameShape = renameType'
   where
         renameType' (UserPrim bt) = return $ UserPrim bt
         renameType' (UserTuple ts) = UserTuple <$> mapM renameType' ts
+        renameType' (UserTypeAlias name) = return $ UserTypeAlias name
+        renameType' Empty = return Empty
         renameType' array = renameUserArray array
 
         renameUserArray (UserArray at shape uni) = do
           at'    <- renameType' at
           shape' <- renameShape shape
           return $ UserArray at' shape' uni
+        renameUserArray _ = return Empty
 
 renameCompType :: (Eq f, Hashable f, Eq t, Hashable t) =>
                   CompTypeBase f
