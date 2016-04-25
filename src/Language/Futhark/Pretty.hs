@@ -126,7 +126,6 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
           f (ConstDim n) = ppr n
   ppr (UserTuple ts) = braces $ commasep $ map ppr ts
   ppr (UserTypeAlias name) = ppr name
-  ppr Empty = text ""
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Prim et) = ppr et

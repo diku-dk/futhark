@@ -227,14 +227,13 @@ renameTypeGeneric' renameShape = renameType'
         renameType' (UserPrim bt) = return $ UserPrim bt
         renameType' (UserTuple ts) = UserTuple <$> mapM renameType' ts
         renameType' (UserTypeAlias name) = return $ UserTypeAlias name
-        renameType' Empty = return Empty
         renameType' array = renameUserArray array
 
         renameUserArray (UserArray at shape uni) = do
           at'    <- renameType' at
           shape' <- renameShape shape
           return $ UserArray at' shape' uni
-        renameUserArray _ = return Empty
+        renameUserArray a = renameType' a
 
 renameCompType :: (Eq f, Hashable f, Eq t, Hashable t) =>
                   CompTypeBase f

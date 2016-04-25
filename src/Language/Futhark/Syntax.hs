@@ -228,7 +228,6 @@ data UserType vn = UserPrim PrimType
                  | UserArray (UserType vn) (ShapeDecl vn) Uniqueness
                  | UserTuple [UserType vn]
                  | UserTypeAlias Name
-                 | Empty -- suppehack
     deriving (Show)
 --
 -- | A "structural" type with shape annotations and no aliasing

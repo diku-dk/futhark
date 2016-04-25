@@ -1569,8 +1569,6 @@ typeBaseFromUserType (name, utype, loc) hashmap unknowns =
       -> if someAlias `elem` unknowns
            then Left $ CyclicalTypeDefinition loc name
          else typeBaseFromTypeAlias (someAlias, loc) hashmap unknowns
-    Empty
-      -> Left $ TypeError loc "This case is not reached"
 
 typeBaseFromTypeAlias :: (Name, SrcLoc)
                       -> HM.HashMap Name (UserType vn, SrcLoc)
@@ -1592,8 +1590,6 @@ typeBaseFromTypeAlias (name, loc) hashmap unknowns =
                  Right types -> Right $ UserTuple types
        Just (UserTypeAlias someAlias, _)
          -> typeBaseFromUserType (name, UserTypeAlias someAlias, loc) hashmap $ name:unknowns
-       Just (Empty, _)
-         -> Left $ TypeError loc (nameToString name ++ " type tried to refer to a type that doesn't exist.")
        Nothing
          -> Left $ UndefinedAlias loc name
 
@@ -1642,7 +1638,6 @@ expandType' (UserTypeAlias alias) taTable =
     Nothing
       -> Left $ UndefinedAlias' alias
 
-expandType' Empty _ = Left $ DebugError "Tried to expandType' with Empty"
 
 expandArrayType :: UserType vn
                 -> ShapeDecl vn
@@ -1678,7 +1673,6 @@ expandTupleArrayType (UserTuple types) taTable = do
   let ts = map (`expandTupleArrayType` taTable) types
   ret <- checkEitherList ts
   return $ TupleArrayElem ret
-expandTupleArrayType Empty _ = Left $ DebugError "tried to expandTupleArrayType with Empty"
 
 
 
@@ -1711,7 +1705,6 @@ expandType2 (UserPrim prim) _ = Right $ Prim prim
 expandType2 (UserArray someType shape uni) taTable = do
   t <- expandArrayType2 someType shape uni taTable
   Right $ Array t
-expandType2 Empty _ = Left $ DebugError "tried to expandType2 with Empty"
 
 expandArrayType2 :: UserType VName
                  -> ShapeDecl VName
@@ -1730,7 +1723,7 @@ expandArrayType2 (UserTuple types) s u taTable =
     ts' <- checkEitherList ts
     return $ TupleArray ts' s u
 expandArrayType2 _ _ _ _ =
-  Left $ DebugError "tried to expandArrayType2 with Empty"
+  Left $ DebugError "tried to expandArrayType2' with neither prim nor tuple"
 
 expandArrayType2' :: TypeBase ShapeDecl NoInfo VName
                   -> ShapeDecl VName
@@ -1745,7 +1738,7 @@ expandArrayType2' (Tuple types) s u taTable =
     ts' <- checkEitherList ts
     return $ TupleArray ts' s u
 expandArrayType2' _ _ _ _ =
-  Left $ DebugError "tried to expandArrayType2' with Empty"
+  Left $ DebugError "tried to expandArrayType2' with neither prim nor tuple"
 
 
 
@@ -1765,8 +1758,6 @@ expandTupleArrayType2 (UserTuple types) taTable = do
     let ts = map (`expandTupleArrayType2` taTable) types
     ret <- checkEitherList ts
     return $ TupleArrayElem ret
-expandTupleArrayType2 Empty _ =
-  Left $ DebugError "tried to expandTupleArrayType2 with Empty"
 
 expandTupleArrayType2' :: TypeBase ShapeDecl NoInfo VName
                        -> TypeAliasMap
