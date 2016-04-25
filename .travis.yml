@@ -31,12 +31,8 @@ install:
  - stack --no-terminal test --only-dependencies -j 3
 
 script:
- - echo "travis_fold:start:build Build";
-   stack --no-terminal test --haddock --no-haddock-deps -j 3;
-   echo "travis_fold:end:build Build"
- - echo "travis_fold:start:install Install";
-   stack install;
-   echo "travis_fold:end:install Install"
+ - stack --no-terminal test --haddock --no-haddock-deps -j 3
+ - stack install
 
 # Now for integration testing
  - data/runtests.sh # Run integration test suite.
