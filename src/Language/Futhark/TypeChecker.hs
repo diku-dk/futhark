@@ -1386,7 +1386,7 @@ checkPolyLambdaOp op curryargexps args pos = do
                                    Var $ yident NoInfo,
                                    [yident $ Info tp])
                     (e1:e2:_) -> return (e1, e2, [])
-  body <- binding (map (fromParam . toParam) params) $ checkBinOp op x y pos
+  body <- binding params $ checkBinOp op x y pos
   checkLambda
     (AnonymFun (map (untype . toParam) params) (BinOp op x y NoInfo pos)
      (TypeDecl (vacuousShapeAnnotations $ toStruct $ typeOf body) NoInfo) pos)
