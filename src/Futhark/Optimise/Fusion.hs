@@ -141,16 +141,17 @@ bindingFamily pat m = do
         family = patternNames pat
         bind env = foldl (bindingFamilyVar family) env idents
 
-bindingTransform :: Ident -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
-bindingTransform v srcname trns = local $ \env ->
+bindingTransform :: PatElem -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
+bindingTransform pe srcname trns = local $ \env ->
   case HM.lookup srcname $ varsInScope env of
-    Just (IsArray src' ts attr) ->
+    Just (IsArray src' ts _) ->
       env { varsInScope =
-              HM.insert vname (IsArray src' (ts SOAC.|> trns) attr) $
+              HM.insert vname (IsArray src' (ts SOAC.|> trns) $ LetInfo attr) $
               varsInScope env
           }
-    _ -> bindVar env v
-  where vname = identName v
+    _ -> bindVar env $ patElemIdent pe
+  where vname = patElemName pe
+        attr = patElemAttr pe
 
 -- | Binds the fusion result to the environment.
 bindRes :: FusedRes -> FusionGM a -> FusionGM a
@@ -567,9 +568,9 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
       badFusionGM $ Error
       ("In Fusion.hs, "++pretty inpe++" is not valid array input.")
 
-    _ | [v] <- patternIdents pat,
+    _ | [pe] <- patternValueElements pat,
         Just (src,trns) <- SOAC.transformFromExp e ->
-      bindingTransform v src trns $ fusionGatherBody fres $ mkBody bnds res
+      bindingTransform pe src trns $ fusionGatherBody fres $ mkBody bnds res
 
     _ -> do
       let pat_vars = map (PrimOp . SubExp . Var) $ patternNames pat
