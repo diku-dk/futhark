@@ -1377,7 +1377,6 @@ checkPolyLambdaOp op curryargexps args pos = do
   yname <- newIDFromString "y"
   let xident t = Ident xname t pos
       yident t = Ident yname t pos
-      untype p = p { paramTypeDecl = TypeDecl (paramDeclaredType p) NoInfo }
   (x,y,params) <- case curryargexps of
                     [] -> return (Var $ xident NoInfo,
                                   Var $ yident NoInfo,
@@ -1386,11 +1385,8 @@ checkPolyLambdaOp op curryargexps args pos = do
                                    Var $ yident NoInfo,
                                    [yident $ Info tp])
                     (e1:e2:_) -> return (e1, e2, [])
-  body <- binding params $ checkBinOp op x y pos
-  checkLambda
-    (AnonymFun (map (untype . toParam) params) (BinOp op x y NoInfo pos)
-     (TypeDecl (vacuousShapeAnnotations $ toStruct $ typeOf body) NoInfo) pos)
-    args
+  rettype <- typeOf <$> binding params (checkBinOp op x y pos)
+  return $ BinOpFun op (Info tp) (Info tp) (Info rettype) pos
   where fname = nameFromString $ pretty op
 
 checkRetType :: SrcLoc -> StructType -> TypeM ()
