@@ -14,25 +14,20 @@ module Language.Futhark.Attributes
   , paramDeclaredType
 
   -- * Queries on expressions
-  , expToValue
   , typeOf
   , commutative
 
   -- * Queries on patterns
-  , patNames
   , patNameSet
   , patIdents
-  , patIdentSet
 
   -- * Queries on types
   , primType
   , uniqueness
   , unique
-  , uniqueOrPrim
   , tupleArrayElemUniqueness
   , aliases
   , diet
-  , dietingAs
   , subtypeOf
   , similarTo
   , arrayRank
@@ -45,40 +40,28 @@ module Language.Futhark.Attributes
   , vacuousShapeAnnotations
   , vacuousShapeAnnotations'
   , returnType
-  , lambdaType
   , lambdaReturnType
 
   -- * Operations on types
-  , stripArray
   , peelArray
   , arrayOf
   , arrayType
-  , rowType
   , toStructural
   , toStruct
   , fromStruct
   , setAliases
   , addAliases
   , setUniqueness
-  , unifyUniqueness
 
   , tupleArrayElemToType
 
   -- ** Removing and adding names
   --
   -- $names
-  , addNames
   , removeNames
 
   -- * Queries on values
-  , primValueType
   , valueType
-
-  -- * Operations on values
-  , arrayValue
-  , emptyArray
-
-  -- * Type aliases
 
   -- | Values of these types are produces by the parser.  They use
   -- unadorned names and have no type information, apart from that
@@ -100,7 +83,6 @@ module Language.Futhark.Attributes
   where
 
 import Control.Monad.Writer
-import Data.Array
 import Data.Hashable
 import Data.List
 import qualified Data.HashSet as HS
@@ -332,17 +314,6 @@ diet (Array (PrimArray _ _ Nonunique _)) = Observe
 diet (Array (TupleArray _ _ Unique)) = Consume
 diet (Array (TupleArray _ _ Nonunique)) = Observe
 
--- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
--- reflect how it is consumed according to @d@ - if it is consumed, it
--- becomes 'Unique'.  Tuples are handled intelligently.
-dietingAs :: TypeBase shape as vn -> Diet -> TypeBase shape as vn
-Tuple ets `dietingAs` TupleDiet ds =
-  Tuple $ zipWith dietingAs ets ds
-t `dietingAs` Consume =
-  t `setUniqueness` Unique
-t `dietingAs` _ =
-  t `setUniqueness` Nonunique
-
 -- | @t `maskAliases` d@ removes aliases (sets them to 'mempty') from
 -- the parts of @t@ that are denoted as 'Consumed' by the 'Diet' @d@.
 maskAliases :: Monoid (as vn) =>
@@ -412,11 +383,6 @@ primType :: TypeBase shape as vn -> Bool
 primType (Tuple ts) = all primType ts
 primType (Prim _) = True
 primType (Array _) = False
-
--- | Is the given type either unique (as per 'unique') or prim (as
--- per 'primType')?
-uniqueOrPrim :: TypeBase shape as vn -> Bool
-uniqueOrPrim x = primType x || unique x
 
 -- $names
 --
@@ -599,23 +565,6 @@ addTupleArrayElemAliases (ArrayArrayElem at) f =
 addTupleArrayElemAliases (TupleArrayElem ts) f =
   TupleArrayElem $ map (`addTupleArrayElemAliases` f) ts
 
--- | Unify the uniqueness attributes and aliasing information of two
--- types.  The two types must otherwise be identical.  The resulting
--- alias set will be the 'mappend' of the two input types aliasing sets,
--- and the uniqueness will be 'Unique' only if both of the input types
--- are unique.
-unifyUniqueness :: Monoid (as vn) =>
-                   TypeBase shape as vn
-                -> TypeBase shape as vn
-                -> TypeBase shape as vn
-unifyUniqueness (Array (PrimArray et dims u1 als1)) (Array (PrimArray _ _ u2 als2)) =
-  Array $ PrimArray et dims (u1 <> u2) (als1 <> als2)
-unifyUniqueness (Array (TupleArray et dims u1)) (Array (TupleArray _ _ u2)) =
-  Array $ TupleArray et dims $ u1 <> u2
-unifyUniqueness (Tuple ets1) (Tuple ets2) =
-  Tuple $ zipWith unifyUniqueness ets1 ets2
-unifyUniqueness t1 _ = t1
-
 intValueType :: IntValue -> IntType
 intValueType Int8Value{} = Int8
 intValueType Int16Value{} = Int16
@@ -645,16 +594,6 @@ valueType (ArrayValue _ (Array (PrimArray et shape _ _))) =
   Array $ PrimArray et (Rank $ 1 + shapeRank shape) Nonunique NoInfo
 valueType (ArrayValue _ (Array (TupleArray et shape _))) =
   addNames $ Array $ TupleArray et (Rank $ 1 + shapeRank shape) Nonunique
-
--- | Construct an array value containing the given elements.
-arrayValue :: ArrayShape (shape vn) =>
-            [Value] -> TypeBase shape as vn -> Value
-arrayValue vs = ArrayValue (listArray (0, length vs-1) vs) . removeNames . toStruct
-
--- | An empty array with the given row type.
-emptyArray :: ArrayShape (shape vn) =>
-              TypeBase shape as vn -> Value
-emptyArray = arrayValue []
 
 -- | The type of an Futhark term.  The aliasing will refer to itself, if
 -- the term is a non-tuple-typed variable.
@@ -689,13 +628,10 @@ typeOf (Reshape shape  e _) =
   Rank (length shape) `setArrayShape` typeOf e
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Transpose e _) = typeOf e
-typeOf (Map f arr _) = arrayType 1 et Unique
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-  where et = lambdaType f [rowType $ typeOf arr]
-typeOf (Reduce _ fun start arr _) =
-  removeShapeAnnotations $
-  lambdaType fun [typeOf start, rowType (typeOf arr)]
+typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` HS.empty
+  where et = lambdaReturnType f
+typeOf (Reduce _ fun _ _ _) =
+  lambdaReturnType fun `setAliases` mempty
 typeOf (Zip es _) =
   Array $ TupleArray (zipWith typeToTupleArrayElem es_ts es_us) (Rank 1) u
   where es_ts = map (rowType . unInfo . snd) es
@@ -705,24 +641,24 @@ typeOf (Unzip _ ts _) =
   Tuple $ map unInfo ts
 typeOf (Unsafe e _) =
   typeOf e
-typeOf (Scan fun start arr _) =
+typeOf (Scan fun _ _ _) =
   arrayType 1 et Unique
-    where et = lambdaType fun [typeOf start, rowType $ typeOf arr]
+  where et = lambdaReturnType fun `setAliases` mempty
 typeOf (Filter _ arr _) =
   typeOf arr
 typeOf (Partition funs arr _) =
   Tuple $ replicate (length funs + 1) $ typeOf arr
-typeOf (Stream form lam arr _) =
+typeOf (Stream form lam _ _) =
   case form of
-    MapLike{}       -> lambdaType lam [Prim $ Signed Int32, typeOf arr]
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
-    RedLike _ _ _ acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
-                         `setAliases` HS.empty
-                         `setUniqueness` Unique
-    Sequential  acc -> lambdaType lam [Prim $ Signed Int32, typeOf acc, typeOf arr]
-                       `setAliases` HS.empty
-                       `setUniqueness` Unique
+    MapLike{}    -> lambdaReturnType lam
+                    `setAliases` HS.empty
+                    `setUniqueness` Unique
+    RedLike{}    -> lambdaReturnType lam
+                    `setAliases` HS.empty
+                    `setUniqueness` Unique
+    Sequential{} -> lambdaReturnType lam
+                    `setAliases` HS.empty
+                    `setUniqueness` Unique
 typeOf (Concat x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Split splitexps e _) =
@@ -730,24 +666,6 @@ typeOf (Split splitexps e _) =
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body
 typeOf (Write _i _v a _) = typeOf a `setAliases` HS.empty
-
--- | If possible, convert an expression to a value.  This is not a
--- true constant propagator, but a quick way to convert array/tuple
--- literal expressions into literal values instead.
-expToValue :: ExpBase Info vn -> Maybe Value
-expToValue (Literal val _) = Just val
-expToValue (TupLit es _) = do es' <- mapM expToValue es
-                              Just $ TupValue es'
-expToValue (ArrayLit es (Info t) _) = do es' <- mapM expToValue es
-                                         Just $ arrayValue es' t
-expToValue _ = Nothing
-
--- | The result of applying the arguments of the given types to the
--- given lambda function.
-lambdaType :: (Ord vn, Hashable vn) =>
-              LambdaBase Info vn -> [CompTypeBase vn]
-           -> TypeBase Rank Names vn
-lambdaType lam = returnType (lambdaReturnType lam) (lambdaParamDiets lam)
 
 -- | The result of applying the arguments of the given types to a
 -- function with the given return type, consuming its parameters with
@@ -801,15 +719,6 @@ lambdaReturnType (BinOpFun _ _ _ (Info t) _) = toStruct t
 lambdaReturnType (CurryBinOpLeft _ _ _ (Info t) _) = toStruct t
 lambdaReturnType (CurryBinOpRight _ _ _ (Info t) _) = toStruct t
 
--- | The parameter 'Diet's of a lambda.
-lambdaParamDiets :: LambdaBase Info vn -> [Diet]
-lambdaParamDiets (AnonymFun params _ _ _) = map (diet . paramType) params
-lambdaParamDiets (CurryFun _ args _ _) = map (const Observe) args
-lambdaParamDiets UnOpFun{} = [Observe]
-lambdaParamDiets BinOpFun{} = [Observe, Observe]
-lambdaParamDiets CurryBinOpLeft{} = [Observe]
-lambdaParamDiets CurryBinOpRight{} = [Observe]
-
 -- | Is the given binary operator commutative?
 commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
@@ -835,10 +744,6 @@ paramType = unInfo . expandedType . paramTypeDecl
 paramDeclaredType :: ParamBase f vn
                   -> StructUserType vn
 paramDeclaredType = declaredType . paramTypeDecl
-
--- | The list of names bound in the given pattern.
-patNames :: (Eq vn, Hashable vn) => PatternBase ty vn -> [vn]
-patNames = map identName . patIdents
 
 -- | As 'patNames', but returns a the set of names (which means that
 -- information about ordering is destroyed - make sure this is what

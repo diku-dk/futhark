@@ -191,18 +191,6 @@ instance Eq (shape vn) =>
   TupleArrayElem ts1     == TupleArrayElem ts2     = ts1 == ts2
   _                      == _                      = False
 
-instance Ord (shape vn) =>
-         Ord (TupleArrayElemTypeBase shape as vn) where
-  PrimArrayElem bt1 _ u1 `compare` PrimArrayElem bt2 _ u2 = (bt1,u1) `compare` (bt2,u2)
-  ArrayArrayElem at1   `compare` ArrayArrayElem at2   = at1 `compare` at2
-  TupleArrayElem ts1   `compare` TupleArrayElem ts2   = ts1 `compare` ts2
-  PrimArrayElem {}    `compare` ArrayArrayElem {}    = LT
-  PrimArrayElem {}    `compare` TupleArrayElem {}    = LT
-  ArrayArrayElem {}    `compare` TupleArrayElem {}    = LT
-  ArrayArrayElem {}    `compare` PrimArrayElem {}    = GT
-  TupleArrayElem {}    `compare` PrimArrayElem {}    = GT
-  TupleArrayElem {}    `compare` ArrayArrayElem {}    = GT
-
 -- | An array type.
 data ArrayTypeBase shape as vn =
     PrimArray PrimType (shape vn) Uniqueness (as vn)
@@ -220,36 +208,13 @@ instance Eq (shape vn) =>
   _ == _ =
     False
 
-instance Ord (shape vn) =>
-         Ord (ArrayTypeBase shape as vn) where
-  PrimArray et1 dims1 u1 _ <= PrimArray et2 dims2 u2 _
-    | et1 < et2     = True
-    | et1 > et2     = False
-    | dims1 < dims2 = True
-    | dims1 > dims2 = False
-    | u1 < u2       = True
-    | u1 > u2       = False
-    | otherwise     = True
-  TupleArray ts1 dims1 u1 <= TupleArray ts2 dims2 u2
-    | ts1 < ts2     = True
-    | ts1 > ts2     = False
-    | dims1 < dims2 = True
-    | dims1 > dims2 = False
-    | u1 < u2       = True
-    | u1 > u2       = False
-    | otherwise     = True
-  PrimArray {} <= TupleArray {} =
-    True
-  TupleArray {} <= PrimArray {} =
-    False
-
 -- | An Futhark type is either an array, a prim type, or a tuple.
 -- When comparing types for equality with '==', aliases are ignored,
 -- but dimensions much match.
 data TypeBase shape as vn = Prim PrimType
                           | Array (ArrayTypeBase shape as vn)
                           | Tuple [TypeBase shape as vn]
-                          deriving (Eq, Ord, Show)
+                          deriving (Eq, Show)
 
 
 -- | A type with aliasing information and no shape annotations, used
@@ -307,7 +272,7 @@ data Value = PrimValue !PrimValue
            | ArrayValue !(Array Int Value) (TypeBase Rank NoInfo ())
              -- ^ It is assumed that the array is 0-indexed.  The type
              -- is the row type.
-             deriving (Eq, Ord, Show)
+             deriving (Eq, Show)
 
 -- | An identifier consists of its name and the type of the value
 -- bound to the identifier.
@@ -319,9 +284,6 @@ deriving instance Showable f vn => Show (IdentBase f vn)
 
 instance Eq vn => Eq (IdentBase ty vn) where
   x == y = identName x == identName y
-
-instance Ord vn => Ord (IdentBase ty vn) where
-  x `compare` y = identName x `compare` identName y
 
 instance Located (IdentBase ty vn) where
   locOf = locOf . identSrcLoc
@@ -340,9 +302,6 @@ deriving instance Showable f vn => Show (ParamBase f vn)
 
 instance Eq vn => Eq (ParamBase f vn) where
   x == y = paramName x == paramName y
-
-instance Ord vn => Ord (ParamBase f vn) where
-  x `compare` y = paramName x `compare` paramName y
 
 instance Located (ParamBase f vn) where
   locOf = locOf . paramSrcLoc

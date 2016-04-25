@@ -104,22 +104,32 @@ transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam arr
         bound_in_red_lam = HS.fromList $ HM.keys $ scopeOf red_lam
         bound_in_fold_lam = HS.fromList $ HM.keys $ scopeOf fold_lam
 
-transformExp (Op (Inner (ScanKernel cs w kernel_size order lam input)))
+transformExp (Op (Inner (ScanKernel cs w kernel_size order lam foldlam nes arrs)))
   -- Extract allocations from the lambda.
   | Right (lam_body', lam_thread_allocs) <-
-      extractKernelAllocations bound_in_lam $ lambdaBody lam = do
+      extractKernelAllocations bound_in_lam $ lambdaBody lam,
+   Right (foldlam_body', foldlam_thread_allocs) <-
+      extractKernelAllocations bound_in_foldlam $ lambdaBody foldlam = do
 
   (alloc_bnds, alloc_offsets) <-
     expandedAllocations num_threads thread_id lam_thread_allocs
+  (fold_alloc_bnds, fold_alloc_offsets) <-
+    expandedAllocations num_threads fold_thread_id foldlam_thread_allocs
 
   let lam_body'' = offsetMemoryInBody alloc_offsets lam_body'
       lam' = lam { lambdaBody = lam_body'' }
-  return (alloc_bnds,
-          Op $ Inner $ ScanKernel cs w kernel_size order lam' input)
+      foldlam_body'' = offsetMemoryInBody fold_alloc_offsets foldlam_body'
+      foldlam' = foldlam { lambdaBody = foldlam_body'' }
+  return (alloc_bnds <> fold_alloc_bnds,
+          Op $ Inner $ ScanKernel cs w kernel_size order lam' foldlam' nes arrs)
   where num_threads = kernelNumThreads kernel_size
-        (thread_id, _, _) = partitionChunkedKernelLambdaParameters $ lambdaParams lam
+        (thread_id, _, _) =
+          partitionChunkedKernelLambdaParameters $ lambdaParams lam
+        (fold_thread_id, _, _) =
+          partitionChunkedKernelLambdaParameters $ lambdaParams foldlam
 
         bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
+        bound_in_foldlam = HS.fromList $ HM.keys $ scopeOf foldlam
 
 transformExp e =
   return ([], e)

@@ -79,13 +79,14 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       Engine.consumedName arr
     return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' arrs'
 
-  simplifyOp (ScanKernel cs w kernel_size order lam input) = do
+  simplifyOp (ScanKernel cs w kernel_size order lam foldlam nes arrs) = do
     arrs' <- mapM Engine.simplify arrs
     ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
       Engine.simplify kernel_size <*> pure order <*>
-      Engine.simplifyLambda lam (Just nes) (map Just arrs') <*>
-      (zip <$> mapM Engine.simplify nes <*> pure arrs')
-    where (nes, arrs) = unzip input
+      Engine.simplifyLambda lam Nothing (map (const Nothing) arrs') <*>
+      Engine.simplifyLambda foldlam Nothing (map Just arrs') <*>
+      mapM Engine.simplify nes <*>
+      pure arrs'
 
   simplifyOp (ChunkedMapKernel cs w kernel_size o lam arrs) = do
     arrs' <- mapM Engine.simplify arrs
@@ -140,6 +141,7 @@ topDownRules = [removeUnusedKernelInputs
                , simplifyKernelInputs
                , removeInvariantKernelOutputs
                , fuseReduceIota
+               , fuseScanIota
                , fuseChunkedMapIota
                ]
 
@@ -292,22 +294,53 @@ fuseIota vtable size comm lam arrs
   where elems_per_thread = kernelElementsPerThread size
         num_threads = kernelNumThreads size
         (thread_index, chunk_param, params_and_arrs, iota_params) =
-          iotaParams vtable lam arrs
+          chunkedIotaParams vtable lam arrs
 
-iotaParams :: ST.SymbolTable lore
-           -> LambdaT lore
-           -> [VName]
-           -> (VName,
-               Param (LParamAttr lore),
-               [(ParamT (LParamAttr lore), VName)],
-               [(VName, SubExp)])
-iotaParams vtable lam arrs = (thread_index, chunk_param, params_and_arrs, iota_params)
+chunkedIotaParams :: ST.SymbolTable lore
+                  -> LambdaT lore
+                  -> [VName]
+                  -> (VName,
+                      Param (LParamAttr lore),
+                      [(ParamT (LParamAttr lore), VName)],
+                      [(VName, SubExp)])
+chunkedIotaParams vtable lam arrs = (thread_index, chunk_param, params_and_arrs, iota_params)
   where (thread_index, chunk_param, arr_params) =
           partitionChunkedKernelLambdaParameters $ lambdaParams lam
         (params_and_arrs, iota_params) =
-          partitionEithers $ zipWith isIota arr_params arrs
-        isIota p v
+          iotaParams vtable arr_params arrs
+
+iotaParams :: ST.SymbolTable lore
+           -> [ParamT attr]
+           -> [VName]
+           -> ([(ParamT attr, VName)], [(VName, SubExp)])
+iotaParams vtable arr_params arrs = partitionEithers $ zipWith isIota arr_params arrs
+  where isIota p v
           | Just (Iota _ x (Constant (IntValue (Int32Value 1)))) <- asPrimOp =<< ST.lookupExp v vtable =
             Right (paramName p, x)
           | otherwise =
             Left (p, v)
+
+fuseScanIota :: (LocalScope (Lore m) m,
+                 MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                TopDownRule m
+fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size form lam foldlam nes arrs)))
+  | not $ null iota_params = do
+      fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf foldlam $ do
+        forM_ iota_params $ \(p, x) ->
+          letBindNames'_ [p] $
+          PrimOp $ BinOp (Add Int32) (Var thread_index) x
+        mapM_ addBinding $ bodyBindings $ lambdaBody foldlam
+        return $ bodyResult $ lambdaBody foldlam
+      let (arr_params', arrs') = unzip params_and_arrs
+          foldlam' = foldlam { lambdaBody = fold_body
+                             , lambdaParams =
+                                 Param thread_index (paramAttr other_index_param) :
+                                 other_index_param :
+                                 acc_params ++ arr_params'
+                             }
+      letBind_ pat $ Op $ ScanKernel cs w size form lam foldlam' nes arrs'
+   where (thread_index, other_index_param, acc_params, arr_params) =
+           partitionChunkedKernelFoldParameters (length nes) $ lambdaParams foldlam
+         (params_and_arrs, iota_params) =
+           iotaParams vtable arr_params arrs
+fuseScanIota _ _ = cannotSimplify

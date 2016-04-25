@@ -10,9 +10,10 @@ the focus has mostly been on ensuring high runtime-performance, so the
 source language still lacks many niceties for manual programming - it
 is fairly usable as a target for high-level code generation, however.
 
+For more information, see [the website](http://futhark-lang.org).
+
 The [incomplete documentation is
-here](http://futhark.readthedocs.org).  You can also check our our
-[website](http://futhark-lang.org).
+here](http://futhark.readthedocs.org).
 
 Installation
 ============
@@ -94,10 +95,7 @@ To interpret a Futhark program:
 Hacking
 =======
 
-We try to make use of Github issues, which are further [organised on
-waffle.io](https://waffle.io/HIPERFIT/futhark).
-
-[![Stories in Ready](https://badge.waffle.io/hiperfit/futhark.png?label=ready&title=Ready)](https://waffle.io/hiperfit/futhark)
+We try to make use of Github issues for organising our work.
 
 For every commit, Futhark is automatically built and tested [on
 Travis](https://travis-ci.org/HIPERFIT/futhark).

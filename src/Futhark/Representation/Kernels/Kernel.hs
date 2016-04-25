@@ -70,7 +70,9 @@ data Kernel lore =
     KernelSize
     ScanKernelOrder
     (LambdaT lore)
-    [(SubExp, VName)]
+    (LambdaT lore)
+    [SubExp]
+    [VName]
   | ChunkedMapKernel Certificates SubExp
     KernelSize
     StreamOrd
@@ -160,16 +162,16 @@ mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun arrs) =
   mapOnKernelLambda tv red_fun <*>
   mapOnKernelLambda tv fold_fun <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (ScanKernel cs w kernel_size order fun input) =
+mapKernelM tv (ScanKernel cs w kernel_size order fun fold_fun nes arrs) =
   ScanKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv w <*>
   mapOnKernelSize tv kernel_size <*>
   pure order <*>
   mapOnKernelLambda tv fun <*>
-  (zip <$> mapM (mapOnKernelSubExp tv) nes <*>
-   mapM (mapOnKernelVName tv) arrs)
-  where (nes, arrs) = unzip input
+  mapOnKernelLambda tv fold_fun <*>
+  mapM (mapOnKernelSubExp tv) nes <*>
+  mapM (mapOnKernelVName tv) arrs
 mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   ChunkedMapKernel <$>
   mapOnKernelCertificates tv cs <*>
@@ -295,11 +297,12 @@ kernelType (ReduceKernel _ _ size _ redlam foldlam _) =
       arr_row_tp = drop (length acc_tp) $ lambdaReturnType foldlam
   in acc_tp ++
      map (`setOuterSize` kernelTotalElements size) arr_row_tp
-kernelType (ScanKernel _ w size _ lam _) =
-  map (`arrayOfRow` w) (lambdaReturnType lam) ++
-  map ((`arrayOfRow` kernelWorkgroups size) .
-       (`arrayOfRow` kernelWorkgroupSize size))
-  (lambdaReturnType lam)
+kernelType (ScanKernel _ w size _ lam foldlam nes _) =
+  let arr_row_tp = drop (length nes) $ lambdaReturnType foldlam
+  in map (`arrayOfRow` w) (lambdaReturnType lam) ++
+     map ((`arrayOfRow` kernelWorkgroups size) .
+          (`arrayOfRow` kernelWorkgroupSize size)) (lambdaReturnType lam) ++
+     map (`setOuterSize` kernelTotalElements size) arr_row_tp
 kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`arrayOfRow` kernelNumThreads size) nonconcat_ret <>
   map (`setOuterSize` kernelTotalElements size) concat_ret
@@ -376,9 +379,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ReduceKernel _ _ _ _ _ foldfun arrs) =
     usageInLambda foldfun arrs
-  usageInOp (ScanKernel _ _ _ _ fun input) =
-    usageInLambda fun arrs
-    where arrs = map snd input
+  usageInOp (ScanKernel _ _ _ _ _ foldfun _ arrs) =
+    usageInLambda foldfun arrs
   usageInOp (ChunkedMapKernel _ _ _ _ fun arrs) =
     usageInLambda fun arrs
   usageInOp (MapKernel _ _ _ _ inps _ body) =
@@ -466,25 +468,27 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
     TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple redt ++
           ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
 
-typeCheckKernel (ScanKernel cs w kernel_size _ fun input) = do
+typeCheckKernel (ScanKernel cs w kernel_size _ fun foldfun nes arrs) = do
   checkKernelCrud cs w kernel_size
 
-  let (nes, arrs) = unzip input
-      index_arg = (Prim int32, mempty)
+  let index_arg = (Prim int32, mempty)
   arrargs <- TC.checkSOACArrayArgs w arrs
   accargs <- mapM TC.checkArg nes
-  TC.checkLambda fun $ index_arg : index_arg : accargs ++ arrargs
+  TC.checkLambda foldfun $ index_arg : index_arg : accargs ++ arrargs
+
+  TC.checkLambda fun $ index_arg : index_arg : accargs ++ accargs
   let startt      = map TC.argType accargs
-      intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
+      foldret     = lambdaReturnType foldfun
+      (fold_accret, _fold_arrret) = splitAt (length nes) foldret
   unless (startt == funret) $
     TC.bad $ TC.TypeError $
-    "Initial value is of type " ++ prettyTuple startt ++
+    "Neutral value is of type " ++ prettyTuple startt ++
     ", but scan function returns type " ++ prettyTuple funret ++ "."
-  unless (intupletype == funret) $
+  unless (startt == fold_accret) $
     TC.bad $ TC.TypeError $
-    "Array element value is of type " ++ prettyTuple intupletype ++
-    ", but scan function returns type " ++ prettyTuple funret ++ "."
+    "Neutral value is of type " ++ prettyTuple startt ++
+    ", but scan function returns type " ++ prettyTuple foldret ++ "."
 
 typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
   checkKernelCrud cs w kernel_size
@@ -574,8 +578,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "MapKernel" $ bodyMetrics body
   opMetrics (ReduceKernel _ _ _ _ lam1 lam2 _) =
     inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
-  opMetrics (ScanKernel _ _ _ _ lam _) =
-    inside "ScanKernel" $ lambdaMetrics lam
+  opMetrics (ScanKernel _ _ _ _ lam foldfun _ _) =
+    inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
   opMetrics WriteKernel{} =
@@ -604,15 +608,14 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr as) <> comma </>
             ppr comm </>
             ppr parfun <> comma </> ppr seqfun)
-  ppr (ScanKernel cs w kernel_size order fun input) =
+  ppr (ScanKernel cs w kernel_size order fun foldfun nes arrs) =
     ppCertificates' cs <> text "scanKernel" <>
     parens (ppr w <> comma </>
             ppr kernel_size <> comma </>
             ppr order <> comma </>
-            PP.braces (commasep $ map ppr es) <> comma </>
-            commasep (map ppr as) <> comma </>
-            ppr fun)
-    where (es, as) = unzip input
+            PP.braces (commasep $ map ppr nes) <> comma </>
+            commasep (map ppr arrs) <> comma </>
+            ppr fun <> comma </> ppr foldfun)
   ppr (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
     ppCertificates' cs <> text ("chunkedMapKernel"++ord_str) <>
     parens (ppr w <> comma </>

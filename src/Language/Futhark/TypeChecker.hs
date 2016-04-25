@@ -249,7 +249,7 @@ type Occurences = [Occurence]
 type UsageMap = HM.HashMap VName [Usage]
 
 type TypeAliasMap = HM.HashMap Name (TypeBase ShapeDecl NoInfo VName)
-type AliasMap vn = HM.HashMap Name ((UserType vn), SrcLoc)
+type AliasMap vn = HM.HashMap Name (UserType vn, SrcLoc)
 
 usageMap :: Occurences -> UsageMap
 usageMap = foldl comb HM.empty
@@ -290,18 +290,6 @@ altOccurences occurs1 occurs2 =
               , observed = observed occ `HS.difference` postcons }
         postcons = allConsumed occurs2
 
--- | The 'VarUsage' data structure is used to keep track of which
--- variables have been referenced inside an expression, as well as
--- which variables the resulting expression may possibly alias.
-data Dataflow = Dataflow {
-    usageOccurences :: Occurences
-  } deriving (Show)
-
-instance Monoid Dataflow where
-  mempty = Dataflow mempty
-  Dataflow o1 `mappend` Dataflow o2 =
-    Dataflow (o1 ++ o2)
-
 -- | A pair of a variable table and a function table.  Type checking
 -- happens with access to this environment.  The function table is
 -- only initialised at the very beginning, but the variable table will
@@ -317,13 +305,13 @@ data Scope  = Scope { envVtable :: HM.HashMap VName Binding
 -- for error handling.
 newtype TypeM a = TypeM (RWST
                          Scope       -- Reader
-                         Dataflow    -- Writer
+                         Occurences  -- Writer
                          VNameSource -- State
                          (Either TypeError) -- Inner monad
                          a)
   deriving (Monad, Functor, Applicative,
             MonadReader Scope,
-            MonadWriter Dataflow,
+            MonadWriter Occurences,
             MonadState VNameSource)
 
 runTypeM :: Scope -> VNameSource -> TypeM a
@@ -361,7 +349,7 @@ liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
 
 occur :: Occurences -> TypeM ()
-occur occurs = tell Dataflow { usageOccurences = occurs }
+occur = tell
 
 -- | Proclaim that we have made read-only use of the given variable.
 -- No-op unless the variable is array-typed.
@@ -385,13 +373,13 @@ consuming (Ident name (Info t) loc) m = do
   where consume' env =
           env { envVtable = HM.insert name (WasConsumed loc) $ envVtable env }
 
-collectDataflow :: TypeM a -> TypeM (a, Dataflow)
-collectDataflow m = pass $ do
+collectOccurences :: TypeM a -> TypeM (a, Occurences)
+collectOccurences m = pass $ do
   (x, dataflow) <- listen m
   return ((x, dataflow), const mempty)
 
-noDataflow :: TypeM a -> TypeM a
-noDataflow = censor $ const mempty
+noOccurences :: TypeM a -> TypeM a
+noOccurences = censor $ const mempty
 
 maybeCheckOccurences :: Occurences -> TypeM ()
 maybeCheckOccurences us = do
@@ -400,11 +388,11 @@ maybeCheckOccurences us = do
 
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
-  (x, Dataflow occurs1) <- listen m1
-  (y, Dataflow occurs2) <- listen m2
+  (x, occurs1) <- listen m1
+  (y, occurs2) <- listen m2
   maybeCheckOccurences occurs1
   maybeCheckOccurences occurs2
-  let usage = Dataflow $ occurs1 `altOccurences` occurs2
+  let usage = occurs1 `altOccurences` occurs2
   return ((x, y), const usage)
 
 -- | Make all bindings nonunique.
@@ -437,16 +425,16 @@ binding bnds = check . local (`bindVars` bnds)
         -- Check whether the bound variables have been used correctly
         -- within their scope.
         check m = do
-          (a, usages) <- collectOccurences m
+          (a, usages) <- collectBindingsOccurences m
           maybeCheckOccurences usages
           return a
 
         -- Collect and remove all occurences in @bnds@.  This relies
         -- on the fact that no variables shadow any other.
-        collectOccurences m = pass $ do
+        collectBindingsOccurences m = pass $ do
           (x, usage) <- listen m
-          let (relevant, rest) = split $ usageOccurences usage
-          return ((x, relevant), const $ usage { usageOccurences = rest })
+          let (relevant, rest) = split usage
+          return ((x, relevant), const rest)
           where split = unzip .
                         map (\occ ->
                              let (obs1, obs2) = divide $ observed occ
@@ -583,7 +571,8 @@ checkProg prog = do
                       , envCheckOccurences = True
                       }
   runTypeM typeenv src $
-    Prog [] <$> mapM (noDataflow . (`checkFun` ttable)) (progFunctions prog')
+    Prog [] <$> mapM (noOccurences . (`checkFun` ttable)) (progFunctions prog')
+
   where
 
     (prog', src) = tagProg' blankNameSource prog
@@ -702,10 +691,8 @@ checkExp :: ExpBase NoInfo VName
 checkExp (Literal val pos) _ =
   Literal <$> checkLiteral pos val <*> pure pos
 
-checkExp (TupLit es pos) ta = do
-  es' <- mapM (`checkExp` ta) es
-  let res = TupLit es' pos
-  return $ fromMaybe res (Literal <$> expToValue res <*> pure pos)
+checkExp (TupLit es loc) ta =
+  TupLit <$> mapM (`checkExp` ta) es <*> pure loc
 
 checkExp (ArrayLit es _ loc) ta = do
   es' <- mapM (`checkExp` ta) es
@@ -720,8 +707,7 @@ checkExp (ArrayLit es _ loc) ta = do
                     bad $ TypeError loc $ pretty eleme ++ " is not of expected type " ++ pretty elemt ++ "."
             in foldM check (typeOf e) es''
 
-  let lit = ArrayLit es' (Info et) loc
-  return $ fromMaybe lit (Literal <$> expToValue lit <*> pure loc)
+  return $ ArrayLit es' (Info et) loc
 
 checkExp (BinOp op e1 e2 NoInfo pos) ta = checkBinOp op e1 e2 ta pos
 
@@ -759,11 +745,11 @@ checkExp (UnOp (ToUnsigned t) e loc) ta = do
 
 checkExp (If e1 e2 e3 _ pos) ta = do
   e1' <- require [Prim Bool] =<< checkExp e1 ta
-  ((e2', e3'), dflow) <- collectDataflow $ checkExp e2 ta `alternative` checkExp e3 ta
+  ((e2', e3'), dflow) <- collectOccurences $ checkExp e2 ta `alternative` checkExp e3 ta
   tell dflow
   brancht <- unifyExpTypes e2' e3'
   let t' = addAliases brancht
-           (`HS.difference` allConsumed (usageOccurences dflow))
+           (`HS.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
 checkExp (Var ident) _ = do
@@ -786,7 +772,7 @@ checkExp (Apply fname args _ loc) ta = do
       return $ Apply fname (zip args' $ map diet paramtypes) (Info rettype') loc
 
 checkExp (LetPat pat e body pos) ta = do
-  (e', dataflow) <- collectDataflow $ checkExp e ta
+  (e', dataflow) <- collectOccurences $ checkExp e ta
   (scope, pat') <- checkBinding pat (typeOf e') dataflow
   scope $ do
     body' <- checkExp body ta
@@ -873,10 +859,10 @@ checkExp (Zip arrexps loc) ta = do
 checkExp (Unzip e _ pos) ta = do
   e' <- checkExp e ta
   case typeOf e' of
-    Array (TupleArray ets shape _) ->
+    Array (TupleArray ets shape u) ->
       let componentType et =
             let et' = tupleArrayElemToType et
-                u' = tupleArrayElemUniqueness et
+                u' = max u $ tupleArrayElemUniqueness et
             in arrayOf et' shape u'
       in return $ Unzip e' (map (Info . componentType) ets) pos
     t ->
@@ -896,8 +882,7 @@ checkExp (Reduce comm fun startexp arrexp pos) ta = do
   (startexp', startarg) <- checkArg startexp ta
   (arrexp', arrarg) <- checkSOACArrayArg arrexp ta
   fun' <- checkLambda fun [startarg, arrarg] ta
-
-  let redtype = lambdaType fun' [typeOf startexp', typeOf arrexp']
+  let redtype = lambdaReturnType fun'
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   unless (argType arrarg `subtypeOf` redtype) $
@@ -908,7 +893,7 @@ checkExp (Scan fun startexp arrexp pos) ta = do
   (startexp', startarg) <- checkArg startexp ta
   (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp ta
   fun' <- checkLambda fun [startarg, arrarg] ta
-  let scantype = lambdaType fun' [typeOf startexp', typeOf arrexp']
+  let scantype = lambdaReturnType fun'
   unless (typeOf startexp' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
   unless (inrowt `subtypeOf` scantype) $
@@ -920,7 +905,7 @@ checkExp (Filter fun arrexp pos) ta = do
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
   fun' <- checkLambda fun [nonunique_arg] ta
-  when (lambdaType fun' [rowelemt] /= Prim Bool) $
+  when (lambdaReturnType fun' /= Prim Bool) $
     bad $ TypeError pos "Filter function does not return bool."
 
   return $ Filter fun' arrexp' pos
@@ -931,7 +916,7 @@ checkExp (Partition funs arrexp pos) ta = do
                        argflow, argloc)
   funs' <- forM funs $ \fun -> do
     fun' <- checkLambda fun [nonunique_arg] ta
-    when (lambdaType fun' [rowelemt] /= Prim Bool) $
+    when (lambdaReturnType fun' /= Prim Bool) $
       bad $ TypeError (srclocOf fun') "Partition function does not return bool."
     return fun'
 
@@ -959,7 +944,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
       RedLike o comm lam0 acc -> do
         (acc',accarg) <- checkArg acc ta
         lam0' <- checkLambda lam0 [accarg, accarg] ta
-        let redtype = lambdaType lam0' [typeOf acc', typeOf acc']
+        let redtype = lambdaReturnType lam0'
         unless (typeOf acc' `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
                   pretty (typeOf acc') ++ ", but reduce fun returns type "++pretty redtype++"."
@@ -970,26 +955,26 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
   -- (i) properly check the lambda on its parameter and
   --(ii) make some fake arguments, which do not alias `arr', and
   --     check that aliases of `arr' are not used inside lam.
-  let fakearg = (fromStruct $ addNames $ removeNames $ typeOf arr', mempty, srclocOf pos)
+  let fakearg = (typeOf arr' `setAliases` HS.empty, mempty, srclocOf pos)
       (aas,faas) = case macctup of
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
+
   lam' <- checkLambda lam aas ta
-  (_, dflow)<- collectDataflow $ checkLambda lam faas ta
+  (_, dflow)<- collectOccurences $ checkLambda lam faas ta
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'
-  let usages = usageMap $ usageOccurences dflow
+  let usages = usageMap dflow
   when (any (`HM.member` usages) arr_aliasses) $
      bad $ TypeError pos "Stream with input array used inside lambda."
   -- check that the result type of lambda matches the accumulator part
   _ <- case macctup of
-        Just (acc',_) -> do
-            let rtp' = lambdaType lam' [Prim $ Signed Int32, typeOf acc', typeOf acc']
-            case rtp' of
+        Just (acc',_) ->
+            case lambdaReturnType lam' of
                 Tuple (acctp:_) ->
                      unless (typeOf acc' `subtypeOf` removeShapeAnnotations acctp) $
                         bad $ TypeError pos ("Stream with accumulator-type missmatch"++
                                              "or result arrays of non-array type.")
-                _ -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
+                rtp' -> unless (typeOf acc' `subtypeOf` removeShapeAnnotations rtp') $
                         bad $ TypeError pos "Stream with accumulator-type missmatch."
         Nothing -> return ()
   -- check outerdim of Lambda's streamed-in array params are NOT specified,
@@ -1058,7 +1043,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
   -- to check the merge pattern, which requires the (initial) merge
   -- expression.
   ((mergeexp', bindExtra), mergeflow) <-
-    collectDataflow $ do
+    collectOccurences $ do
       mergeexp' <- checkExp mergeexp ta
       return $
         case form of
@@ -1071,7 +1056,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
   -- Check the loop body.
   (firstscope, mergepat') <- checkBinding mergepat (typeOf mergeexp') mempty
   ((form', loopbody'), bodyflow) <-
-    noUnique $ firstscope $ binding bindExtra $ collectDataflow $
+    noUnique $ firstscope $ binding bindExtra $ collectOccurences $
     case form of
       For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
         lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp ta
@@ -1081,16 +1066,15 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
                 loopbody')
       While condexp -> do
         (condexp', condflow) <-
-          collectDataflow $ require [Prim Bool] =<< checkExp condexp ta
+          collectOccurences $ require [Prim Bool] =<< checkExp condexp ta
         (loopbody', bodyflow) <-
-          collectDataflow $ checkExp loopbody ta
-        occur $ usageOccurences condflow `seqOccurences`
-                usageOccurences bodyflow
+          collectOccurences $ checkExp loopbody ta
+        occur $ condflow `seqOccurences` bodyflow
         return (While condexp',
                 loopbody')
 
   let consumed_merge = patNameSet mergepat' `HS.intersection`
-                       allConsumed (usageOccurences bodyflow)
+                       allConsumed bodyflow
       uniquePat (Wildcard (Info t) wloc) =
         Wildcard (Info $ t `setUniqueness` Nonunique) wloc
       uniquePat (Id (Ident name (Info t) iloc))
@@ -1147,10 +1131,9 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
       consumeMerge _ _ =
         return ()
   ((), merge_consume) <-
-    collectDataflow $ consumeMerge mergepat'' $ typeOf mergeexp'
+    collectOccurences $ consumeMerge mergepat'' $ typeOf mergeexp'
 
-  occur $ usageOccurences mergeflow `seqOccurences`
-          usageOccurences merge_consume
+  occur $ mergeflow `seqOccurences` merge_consume
 
   binding (patIdents mergepat'') $ do
     letbody' <- checkExp letbody ta
@@ -1161,7 +1144,7 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
 checkExp (Write i v a pos) ta = do
   i' <- checkExp i ta
   v' <- checkExp v ta
-  (a', aflow) <- collectDataflow $ checkExp a ta
+  (a', aflow) <- collectOccurences $ checkExp a ta
 
   let it = typeOf i'
       at = typeOf a'
@@ -1169,7 +1152,7 @@ checkExp (Write i v a pos) ta = do
   _ <- unifyExpTypes v' a'
 
   if unique at
-    then occur $ usageOccurences aflow `seqOccurences` [consumption (aliases at) pos]
+    then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
     else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
          "' has type " ++ pretty at ++ ", which is not unique."
 
@@ -1266,15 +1249,14 @@ checkPolyBinOp op tl e1 e2 ta pos = do
   t' <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info t') pos
 
-sequentially :: TypeM a -> (a -> Dataflow -> TypeM b) -> TypeM b
+sequentially :: TypeM a -> (a -> Occurences -> TypeM b) -> TypeM b
 sequentially m1 m2 = do
-  (a, m1flow) <- collectDataflow m1
-  (b, m2flow) <- collectDataflow $ m2 a m1flow
-  occur $ usageOccurences m1flow `seqOccurences`
-          usageOccurences m2flow
+  (a, m1flow) <- collectOccurences m1
+  (b, m2flow) <- collectOccurences $ m2 a m1flow
+  occur $ m1flow `seqOccurences` m2flow
   return b
 
-checkBinding :: PatternBase NoInfo VName -> Type -> Dataflow
+checkBinding :: PatternBase NoInfo VName -> Type -> Occurences
              -> TypeM (TypeM a -> TypeM a, Pattern)
 checkBinding pat et dflow = do
   (pat', idds) <-
@@ -1312,14 +1294,15 @@ validApply expected got =
   length got == length expected &&
   and (zipWith subtypeOf (map toStructural got) (map toStructural expected))
 
-type Arg = (Type, Dataflow, SrcLoc)
+type Arg = (Type, Occurences, SrcLoc)
 
 argType :: Arg -> Type
 argType (t, _, _) = t
 
-checkArg :: ExpBase NoInfo VName -> TypeAliasMap -> TypeM (Exp, Arg)
-checkArg arg ta = do (arg', dflow) <- collectDataflow $ checkExp arg ta
-                     return (arg', (typeOf arg', dflow, srclocOf arg'))
+checkArg :: ExpBase NoInfo VName -> TypeAliasMap ->TypeM (Exp, Arg)
+checkArg arg ta = do
+  (arg', dflow) <- collectOccurences $ checkExp arg ta
+  return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe Name -> SrcLoc
              -> [StructType] -> StructType -> [Arg]
@@ -1332,9 +1315,9 @@ checkFuncall fname loc paramtypes _ args = do
           (Right $ map toStructural paramtypes) (map toStructural argts)
 
   forM_ (zip (map diet paramtypes) args) $ \(d, (t, dflow, argloc)) -> do
-    maybeCheckOccurences $ usageOccurences  dflow
+    maybeCheckOccurences dflow
     let occurs = consumeArg argloc t d
-    occur $ usageOccurences dflow `seqOccurences` occurs
+    occur $ dflow `seqOccurences` occurs
 
 consumeArg :: SrcLoc -> Type -> Diet -> [Occurence]
 consumeArg loc (Tuple ets) (TupleDiet ds) =

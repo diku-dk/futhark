@@ -35,7 +35,6 @@ module Futhark.Representation.AST.Attributes.Types
        , rearrangeType
 
        , diet
-       , dietingAs
 
        , subtypeOf
        , subtypesOf
@@ -294,15 +293,6 @@ diet (Array _ _ Unique) = Consume
 diet (Array _ _ Nonunique) = Observe
 diet Mem{} = Observe
 
--- | @t `dietingAs` d@ modifies the uniqueness attributes of @t@ to
--- reflect how it is consumed according to @d@ - if it is consumed, it
--- becomes 'Unique'.  Tuples are handled intelligently.
-dietingAs :: TypeBase shape Uniqueness -> Diet -> TypeBase shape Uniqueness
-t `dietingAs` Consume =
-  t `setUniqueness` Unique
-t `dietingAs` _ =
-  t `setUniqueness` Nonunique
-
 -- | @x \`subtypeOf\` y@ is true if @x@ is a subtype of @y@ (or equal to
 -- @y@), meaning @x@ is valid whenever @y@ is.
 subtypeOf :: (Ord u, ArrayShape shape) =>
@@ -310,7 +300,7 @@ subtypeOf :: (Ord u, ArrayShape shape) =>
           -> TypeBase shape u
           -> Bool
 subtypeOf (Array t1 shape1 u1) (Array t2 shape2 u2) =
-  u1 <= u2 &&
+  u2 <= u1 &&
   t1 == t2 &&
   shape1 `subShapeOf` shape2
 subtypeOf (Prim t1) (Prim t2) = t1 == t2

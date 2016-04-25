@@ -42,6 +42,7 @@ compileProg module_name prog = do
                      Import "numpy" $ Just "np",
                      Import "ctypes" $ Just "ct",
                      Import "pyopencl" $ Just "cl",
+                     Import "pyopencl.array" Nothing,
                      Import "time" Nothing]
 
       let constructor = Py.Constructor ["self"] [Escape $ openClInit assign]
@@ -55,6 +56,8 @@ compileProg module_name prog = do
                      , Py.opsReadScalar = readOpenCLScalar
                      , Py.opsAllocate = allocateOpenCLBuffer
                      , Py.opsCopy = copyOpenCLMemory
+                     , Py.opsEntryOutput = packArrayOutput
+                     , Py.opsEntryInput = unpackArrayInput
                      }
 
 -- We have many casts to 'long', because PyOpenCL may get confused at
@@ -63,23 +66,20 @@ asLong :: PyExp -> PyExp
 asLong x = Call "long" [Arg x]
 
 callKernel :: Py.OpCompiler Imp.OpenCL ()
-callKernel (Imp.GetNumGroups v) = do
+callKernel (Imp.GetNumGroups v) =
   Py.stm $ Assign (Var (textual v)) $ Constant $ value (128::Int32)
-  return Py.Done
 
-callKernel (Imp.GetGroupSize v) = do
+callKernel (Imp.GetGroupSize v) =
   Py.stm $ Assign (Var (textual v)) $ Constant $ value (512::Int32)
-  return Py.Done
 
 callKernel (Imp.LaunchKernel name args kernel_size workgroup_size) = do
   kernel_size' <- mapM Py.compileExp kernel_size
   let total_elements = foldl mult_exp (Constant $ value (1::Int32)) kernel_size'
-  let cond = BinaryOp "!=" total_elements (Constant $ value (0::Int32))
+  let cond = BinOp "!=" total_elements (Constant $ value (0::Int32))
   workgroup_size' <- Tuple <$> mapM (fmap asLong . Py.compileExp) workgroup_size
   body <- Py.collect $ launchKernel name kernel_size' workgroup_size' args
   Py.stm $ If cond body []
-  return Py.Done
-  where mult_exp = BinaryOp "*"
+  where mult_exp = BinOp "*"
 
 launchKernel :: String -> [PyExp] -> PyExp -> [Imp.KernelArg] -> Py.CompilerM op s ()
 launchKernel kernel_name kernel_dims workgroup_dims args = do
@@ -132,7 +132,7 @@ readOpenCLScalar _ _ _ space =
 
 allocateOpenCLBuffer :: Py.Allocate Imp.OpenCL ()
 allocateOpenCLBuffer mem size "device" = do
-  let cond' = Cond (BinaryOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
+  let cond' = Cond (BinOp ">" size (Constant $ value (0::Int32))) (asLong size) (Constant $ value (1::Int32))
   let call' = Call "cl.Buffer" [Arg $ Var "self.ctx",
                                 Arg $ Var "cl.mem_flags.READ_WRITE",
                                 Arg $ asLong cond']
@@ -145,8 +145,8 @@ copyOpenCLMemory :: Py.Copy Imp.OpenCL ()
 copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "device") nbytes bt = do
   let srcmem'  = Var $ pretty srcmem
   let destmem' = Var $ pretty destmem
-  let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
-  let end = BinaryOp "+" destidx divide
+  let divide = BinOp "//" nbytes (Var $ Py.compileSizeOfType bt)
+  let end = BinOp "+" destidx divide
   let dest = Index destmem' (IdxRange destidx end)
   Py.stm $ ifNotZeroSize nbytes $
     Exp $ Call "cl.enqueue_copy"
@@ -157,8 +157,8 @@ copyOpenCLMemory destmem destidx Imp.DefaultSpace srcmem srcidx (Imp.Space "devi
 copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx Imp.DefaultSpace nbytes bt = do
   let destmem' = Var $ pretty destmem
   let srcmem'  = Var $ pretty srcmem
-  let divide = BinaryOp "//" nbytes (Var $ Py.compileSizeOfType bt)
-  let end = BinaryOp "+" srcidx divide
+  let divide = BinOp "//" nbytes (Var $ Py.compileSizeOfType bt)
+  let end = BinOp "+" srcidx divide
   let src = Index srcmem' (IdxRange srcidx end)
   Py.stm $ ifNotZeroSize nbytes $
     Exp $ Call "cl.enqueue_copy"
@@ -180,9 +180,49 @@ copyOpenCLMemory destmem destidx (Imp.Space "device") srcmem srcidx (Imp.Space "
 copyOpenCLMemory _ _ destspace _ _ srcspace _ _=
   error $ "Cannot copy to " ++ show destspace ++ " from " ++ show srcspace
 
+packArrayOutput :: Py.EntryOutput Imp.OpenCL ()
+packArrayOutput mem "device" bt dims =
+  return $ Call "cl.array.Array"
+  [Arg $ Var "self.queue",
+   Arg $ Tuple $ map Py.compileDim dims,
+   Arg $ Var $ Py.compilePrimType bt,
+   ArgKeyword "data" $ Var $ pretty mem]
+packArrayOutput _ sid _ _ =
+  fail $ "Cannot return array from " ++ sid ++ " space."
+
+unpackArrayInput :: Py.EntryInput Imp.OpenCL ()
+unpackArrayInput mem memsize "device" _ dims e = do
+  zipWithM_ (Py.unpackDim e) dims [0..]
+
+  case memsize of
+    Imp.VarSize sizevar ->
+      Py.stm $ Assign (Var $ pretty sizevar) $
+      Py.simpleCall "np.int32" [Field e "nbytes"]
+    Imp.ConstSize _ ->
+      return ()
+
+  let memsize' = Py.compileDim memsize
+      pyOpenCLArrayCase =
+        [Assign mem_dest $ Field e "data"]
+  numpyArrayCase <- Py.collect $ do
+    allocateOpenCLBuffer mem memsize' "device"
+    Py.stm $ ifNotZeroSize memsize' $
+      Exp $ Call "cl.enqueue_copy"
+      [Arg $ Var "self.queue",
+       Arg $ Var $ pretty mem,
+       Arg e,
+       ArgKeyword "is_blocking" $ Var "synchronous"]
+
+  Py.stm $ If (BinOp "==" (Py.simpleCall "type" [e]) (Var "cl.array.Array"))
+    pyOpenCLArrayCase
+    numpyArrayCase
+  where mem_dest = Var $ pretty mem
+unpackArrayInput _ _ sid _ _ _ =
+  fail $ "Cannot accept array from " ++ sid ++ " space."
+
 ifNotZeroSize :: PyExp -> PyStmt -> PyStmt
 ifNotZeroSize e s =
-  If (BinaryOp "!=" e (Constant $ value (0::Int32))) [s] []
+  If (BinOp "!=" e (Constant $ value (0::Int32))) [s] []
 
 finishIfSynchronous :: Py.CompilerM op s ()
 finishIfSynchronous =

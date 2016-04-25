@@ -76,27 +76,20 @@ inKernelOperations = GenericC.Operations
                      , GenericC.opsFatMemory = False
                      }
   where kernelOps :: GenericC.OpCompiler KernelOp UsedFunctions
-        kernelOps (GetGroupId v i) = do
+        kernelOps (GetGroupId v i) =
           GenericC.stm [C.cstm|$id:v = get_group_id($int:i);|]
-          return GenericC.Done
-        kernelOps (GetLocalId v i) = do
+        kernelOps (GetLocalId v i) =
           GenericC.stm [C.cstm|$id:v = get_local_id($int:i);|]
-          return GenericC.Done
-        kernelOps (GetLocalSize v i) = do
+        kernelOps (GetLocalSize v i) =
           GenericC.stm [C.cstm|$id:v = get_local_size($int:i);|]
-          return GenericC.Done
-        kernelOps (GetGlobalId v i) = do
+        kernelOps (GetGlobalId v i) =
           GenericC.stm [C.cstm|$id:v = get_global_id($int:i);|]
-          return GenericC.Done
-        kernelOps (GetGlobalSize v i) = do
+        kernelOps (GetGlobalSize v i) =
           GenericC.stm [C.cstm|$id:v = get_global_size($int:i);|]
-          return GenericC.Done
-        kernelOps (GetLockstepWidth v) = do
+        kernelOps (GetLockstepWidth v) =
           GenericC.stm [C.cstm|$id:v = LOCKSTEP_WIDTH;|]
-          return GenericC.Done
-        kernelOps Barrier = do
+        kernelOps Barrier =
           GenericC.stm [C.cstm|barrier(CLK_LOCAL_MEM_FENCE);|]
-          return GenericC.Done
 
         cannotAllocate :: GenericC.Allocate KernelOp UsedFunctions
         cannotAllocate _ =
@@ -175,7 +168,7 @@ compileKernel called@(AnyKernel kernel) =
                   [C.citem|__local volatile char* restrict $id:mem = $id:mem_aligned;|])
         name = calledKernelName called
 
-compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _) =
+compileKernel kernel@(MapTranspose bt _ _ _ _ _ _ _ _) =
   Right ([(calledKernelName kernel, Kernels.mapTranspose (calledKernelName kernel) ty)],
          mempty)
   where ty = GenericC.primTypeToCType bt
@@ -221,9 +214,7 @@ openClCode kernels =
 
 genOpenClPrelude :: OpenClRequirements -> [C.Definition]
 genOpenClPrelude (OpenClRequirements used_funs ts) =
-  if uses_float64
-  then [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|]]
-  else [] ++
+  [[C.cedecl|$esc:("#pragma OPENCL EXTENSION cl_khr_fp64 : enable")|] | uses_float64] ++
   [C.cunit|
 typedef char int8_t;
 typedef short int16_t;
@@ -248,7 +239,7 @@ calledKernelName (Map k) =
   mapKernelName k
 calledKernelName (AnyKernel k) =
   maybe "" (++"_") (kernelDesc k) ++ "kernel_" ++ show (baseTag $ kernelName k)
-calledKernelName (MapTranspose bt _ _ _ _ _ _ _) =
+calledKernelName (MapTranspose bt _ _ _ _ _ _ _ _) =
   "fut_kernel_map_transpose_" ++ pretty bt
 
 callKernel :: HostOp -> OpenCL
@@ -269,13 +260,14 @@ kernelArgs (AnyKernel kernel) =
       (kernelLocalMemory kernel) ++
   map useToArg (kernelUses kernel)
   where localMemorySize (_, size, _) = size
-kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems) =
+kernelArgs (MapTranspose bt destmem destoffset srcmem srcoffset _ x_elems y_elems total_elems) =
   [ MemArg destmem
   , ValueArg destoffset int32
   , MemArg srcmem
   , ValueArg srcoffset int32
   , ValueArg x_elems int32
   , ValueArg y_elems int32
+  , ValueArg total_elems int32
   , SharedMemoryArg shared_memory
   ]
   where shared_memory =
@@ -290,7 +282,7 @@ kernelAndWorkgroupSize (AnyKernel kernel) =
   ([sizeToExp (kernelNumGroups kernel) *
     sizeToExp (kernelGroupSize kernel)],
    [sizeToExp $ kernelGroupSize kernel])
-kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems) =
+kernelAndWorkgroupSize (MapTranspose _ _ _ _ _ num_arrays x_elems y_elems _) =
   ([roundedToBlockDim x_elems,
     roundedToBlockDim y_elems,
     num_arrays],

@@ -138,18 +138,18 @@ internaliseExp desc (E.ArrayLit [] (Info et) _) =
           I.PrimOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
-  aes <- mapM (internaliseExpToVars "arr_elem") es
-  let es'@((e':_):_) = aes --- XXX, ugh.
-  Shape rowshape <- arrayShape <$> lookupType e'
-  case internaliseType rowtype of
-    [et] -> letTupExp' desc $ I.PrimOp $
-            I.ArrayLit (map I.Var $ concat es')
-            (et `I.setArrayShape` Shape rowshape)
-    ets   -> do
-      let arraylit ks et =
-            I.PrimOp $ I.ArrayLit (map I.Var ks)
-            (et `I.setArrayShape` Shape rowshape)
-      letSubExps desc (zipWith arraylit (transpose es') ets)
+  es' <- mapM (internaliseExp "arr_elem") es
+  case es' of
+    [] -> do
+      let rowtypes = map zeroDim $ internaliseType rowtype
+          zeroDim t = t `I.setArrayShape`
+                      Shape (replicate (I.arrayRank t) (constant (0::Int32)))
+          arraylit rt = I.PrimOp $ I.ArrayLit [] rt
+      letSubExps desc $ map arraylit rowtypes
+    e' : _ -> do
+      rowtypes <- mapM subExpType e'
+      let arraylit ks rt = I.PrimOp $ I.ArrayLit ks rt
+      letSubExps desc $ zipWith arraylit (transpose es') rowtypes
 
 internaliseExp desc (E.Apply fname args _ _)
   | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do

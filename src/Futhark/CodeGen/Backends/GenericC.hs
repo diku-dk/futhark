@@ -7,7 +7,6 @@ module Futhark.CodeGen.Backends.GenericC
   , Operations (..)
   , defaultOperations
   , OpCompiler
-  , OpCompilerResult(..)
 
   , PointerQuals
   , MemoryType
@@ -83,11 +82,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
-type OpCompiler op s = op -> CompilerM op s (OpCompilerResult op)
-
--- | The result of the substitute expression compiler.
-data OpCompilerResult op = CompileCode (Code op) -- ^ Equivalent to this code.
-                         | Done -- ^ Code added via monadic interface.
+type OpCompiler op s = op -> CompilerM op s ()
 
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
@@ -998,11 +993,8 @@ compileExp (Cond c t f) = do
 
 compileCode :: Code op -> CompilerM op s ()
 
-compileCode (Op op) = do
-  opc <- asks envOpCompiler
-  res <- opc op
-  case res of Done             -> return ()
-              CompileCode code -> compileCode code
+compileCode (Op op) =
+  join $ asks envOpCompiler <*> pure op
 
 compileCode Skip = return ()
 

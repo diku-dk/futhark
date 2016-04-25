@@ -405,9 +405,8 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ScanKernel _ _ kernel_size order lam input) = do
-    let (nes, arrs) = unzip input
-        (arrs_dest, partials_dest) = splitAt (length input) dest
+  (ScanKernel _ _ kernel_size order lam foldlam nes arrs) = do
+    let (arrs_dest, partials_dest) = splitAt (length nes) dest
     (local_id, group_id, wave_size, global_id) <- kernelSizeNames
     thread_chunk_size <- newVName "thread_chunk_size"
 
@@ -417,13 +416,17 @@ kernelCompiler
      num_elements, _offset_multiple, num_threads) <-
       compileKernelSize kernel_size
 
-    let (lam_i, other_index_param, actual_params) =
+    let (fold_lam_i, _, fold_actual_params) =
+          partitionChunkedKernelLambdaParameters $ lambdaParams foldlam
+        (fold_x_params, fold_y_params) =
+          splitAt (length nes) fold_actual_params
+        (lam_i, other_index_param, actual_params) =
           partitionChunkedKernelLambdaParameters $ lambdaParams lam
         (x_params, y_params) =
           splitAt (length nes) actual_params
 
     (acc_mem_params, acc_local_mem) <-
-      unzip <$> mapM (createAccMem local_size) x_params
+      unzip <$> mapM (createAccMem local_size) fold_x_params
 
     let twoDimInput (ImpGen.ArrayEntry (ImpGen.MemLocation mem shape ixfun) bt) =
           let shape' = [num_threads, elements_per_thread] ++ drop 1 shape
@@ -443,6 +446,7 @@ kernelCompiler
       ImpGen.withParams acc_mem_params $
       ImpGen.declaringLParams (lambdaParams lam) $
       ImpGen.declaringLParams (lambdaParams renamed_lam) $
+      ImpGen.declaringLParams (lambdaParams foldlam) $
       ImpGen.modifyingArrays arrs twoDimInput $ do
 
         ImpGen.emit $
@@ -451,16 +455,17 @@ kernelCompiler
           Imp.Op (Imp.GetGlobalId global_id 0) <>
           Imp.Op (Imp.GetLockstepWidth wave_size)
 
-        -- 'lam_i' is the offset of the element that the
+        -- 'fold_lam_i' is the offset of the element that the
         -- current thread is responsible for.  Since a single
         -- workgroup processes more elements than it has threads, this
         -- will change over time.
         ImpGen.emit $
-          Imp.SetScalar lam_i $
+          Imp.SetScalar fold_lam_i $
           Imp.ScalarVar global_id *
           Imp.innerExp (Imp.dimSizeToExp elements_per_thread)
 
-        x_dest <- ImpGen.destinationFromParams x_params
+        fold_x_dest <- ImpGen.destinationFromParams fold_x_params
+
         y_dest <- ImpGen.destinationFromParams y_params
 
         -- The number of elements processed by the thread so far.
@@ -480,10 +485,10 @@ kernelCompiler
           thread_chunk_size
 
         zipWithM_ ImpGen.compileSubExpTo
-          (ImpGen.valueDestinations x_dest) nes
+          (ImpGen.valueDestinations fold_x_dest) nes
 
         read_params <-
-          ImpGen.collect $ zipWithM_ readScanElement y_params arrs
+          ImpGen.collect $ zipWithM_ readScanElement fold_y_params arrs
 
         let (indices, explode_n, explode_m) = case order of
               ScanTransposed -> ([elements_scanned, global_id],
@@ -510,20 +515,20 @@ kernelCompiler
             sizeToSubExp (Imp.VarSize v)   = Var v
 
         write_arrs <-
-          ImpGen.collect $ zipWithM_ writeScanElement arrs_dest x_params
+          ImpGen.collect $ zipWithM_ writeScanElement arrs_dest fold_x_params
 
-        op_to_x <- ImpGen.collect $ ImpGen.compileBody x_dest $ lambdaBody lam
+        op_to_x <- ImpGen.collect $ ImpGen.compileBody fold_x_dest $ lambdaBody foldlam
         ImpGen.emit $
           Imp.Comment "sequentially scan a chunk" $
           Imp.For elements_scanned (Imp.ScalarVar thread_chunk_size) $
             read_params <>
             op_to_x <>
             write_arrs <>
-            Imp.SetScalar lam_i
-            (Imp.BinOp (Add Int32) (Imp.ScalarVar lam_i) 1)
+            Imp.SetScalar fold_lam_i
+            (Imp.BinOp (Add Int32) (Imp.ScalarVar fold_lam_i) 1)
 
         zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
-          acc_local_mem x_params
+          acc_local_mem fold_x_params
 
         let wave_id = Imp.BinOp (SQuot Int32)
                       (Imp.ScalarVar local_id)
@@ -574,6 +579,7 @@ kernelCompiler
 
           let local_mem = map (ensureAlignment $ alignmentMap body) acc_local_mem
               bound_in_kernel = HM.keys (scopeOf lam) ++
+                                HM.keys (scopeOf foldlam) ++
                                 HM.keys (scopeOf renamed_lam) ++
                                 [local_id,
                                  group_id,
@@ -746,7 +752,8 @@ callKernelCopy bt
   Imp.MapTranspose bt
   destmem destoffset
   srcmem srcoffset
-  num_arrays size_x size_y
+  num_arrays size_x size_y $
+  Imp.innerExp $ product $ map Imp.dimSizeToExp srcshape
 
   | bt_size <- primByteSize bt,
     Just destoffset <-
