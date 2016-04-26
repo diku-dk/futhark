@@ -234,6 +234,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       lam2     = SOAC.lambda soac2
       unfus_nms= HS.toList unfus_set
       w        = SOAC.width soac1
+      returned_outvars = filter (`HS.member` unfus_set) outVars
       success res_outnms res_soac = do
         let fusedVars_new = fusedVars ker++outVars
         -- Avoid name duplication, because the producer lambda is not
@@ -253,7 +254,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-          (extra_nms,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+          (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
                                    zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ extra_nms) $
@@ -281,10 +282,10 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Redomap _ _ comm2 lam21 _ nes _, SOAC.Map {})
       | mapFusionOK outVars ker || horizFuse -> do
       let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-          (_,extra_rtps) = unzip $ filter (\(nm,_)->elem nm unfus_nms) $
+          (_,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
                            zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ unfus_nms) $
+      success (outNames ker ++ returned_outvars) $
               SOAC.Redomap (cs1++cs2) w comm2 lam21 res_lam' nes new_inp
     ----------------------------
     -- Stream-Stream Fusions: --
