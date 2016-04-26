@@ -214,10 +214,6 @@ mapFusionOK outVars ker = any (`elem` inpIds) outVars
   where inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
 -- | The brain of this module: Fusing a SOAC with a Kernel.
---
--- FIXME: there are some problems in this function where it converts
--- the unfusable set to a list, then makes assumptions about the order
--- of elements.
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
 fuseSOACwithKer unfus_set outVars soac1 ker = do
@@ -232,7 +228,6 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       inp2_arr = SOAC.inputs soac2
       lam1     = SOAC.lambda soac1
       lam2     = SOAC.lambda soac2
-      unfus_nms= HS.toList unfus_set
       w        = SOAC.width soac1
       returned_outvars = filter (`HS.member` unfus_set) outVars
       success res_outnms res_soac = do
@@ -265,7 +260,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes lam1 inp1_arr
                                             outPairs lam2 inp2_arr
           unfus_accs  = take (length nes) outVars
-          unfus_arrs  = unfus_nms \\ unfus_accs
+          unfus_arrs  = returned_outvars \\ unfus_accs
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
               SOAC.Redomap (cs1++cs2) w comm1 lam11 res_lam' nes new_inp
 
@@ -274,7 +269,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes1 lam1 inp1_arr
                                             outPairs lam2 inp2_arr
           unfus_accs  = take (length nes1) outVars
-          unfus_arrs  = unfus_nms \\ unfus_accs
+          unfus_arrs  = returned_outvars \\ unfus_accs
           lamr        = mergeReduceOps lam1r lam2r
       success (unfus_accs ++ outNames ker ++ unfus_arrs) $
               SOAC.Redomap (cs1++cs2) w (comm1<>comm2) lamr res_lam' (nes1++nes2) new_inp
