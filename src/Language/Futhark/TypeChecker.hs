@@ -607,7 +607,7 @@ initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (Prim t, map Prim ts)
 
 checkFun :: FunDefBase NoInfo VName -> TypeAliasMap -> TypeM FunDef
-checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) ta = do
+checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) ta =
   case rettype' of Left e -> bad e
                    Right rettype'' -> do
                      params' <- checkParams
