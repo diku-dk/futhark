@@ -84,6 +84,58 @@ collides with reality.  Shape declarations matter most when used for
 the input parameters of the ``main`` function and for the return type
 of functions used to ``map``.
 
+Type aliasing
+---------------
+
+Futhark supports simple type aliasing, as to improve readability of the code.
+
+For example, it is possible to describe and use data types for vector calculations
+as such::
+
+  type person_id = int
+  type int_pair  = {int, int}
+  type vec3 = {f32, f32, f32}
+
+  type pilot = person_id
+  type passengers = [person_id]
+  type position = vec3
+  type velocity = vec3
+  type mass     = f32
+
+  type airplane = {pilot, passengers, position, velocity, mass}
+
+It is currently not possible to mix array declarations with user declared arrays.
+
+Furthermore, uniqueness must be declared in the type declaration::
+
+  -- Does not work:
+  type intlist = [int]
+  type matrix =  [intlist]
+
+  fun intlist (matrix *a) = ..
+
+
+  -- Instead do:
+  type intlist = [int]
+  type matrix  = *[[int]]
+
+  fun intlist (matrix a) = ...
+
+However, it is still possible to use arrays of tuples, possibly containing arrays::
+
+  type airplanes = [airplane]
+  fun [int_pair] schedule_airplanes(airplanes plane_list) = ..
+
+*Dimension declarations*
+
+To declare dimensions on an array data type using type aliases, the type alias must
+define either a primitive type, or a tuple.
+
+The dimensions must then be declared during the function declaration::
+
+  type foo = {int, {f32,f32}, [airplane]}
+  function bar some_function([foo, n] input_data) = ...
+
 File inclusions
 ---------------
 

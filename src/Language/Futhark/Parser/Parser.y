@@ -164,6 +164,7 @@ import Language.Futhark.Parser.Lexer
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       write           { L $$ WRITE }
+      type            { L $$ TYPE}
 
 %nonassoc ifprec letprec
 %left '||'
@@ -181,13 +182,26 @@ import Language.Futhark.Parser.Lexer
 %%
 
 Prog :: { UncheckedProgWithHeaders }
-     :   Headers Decs { ProgWithHeaders $1 $2 }
-     |   Decs { ProgWithHeaders [] $1 }
+     :   Headers DecStart { ProgWithHeaders $1 $2 }
+     |   DecStart { ProgWithHeaders [] $1 }
 ;
 
-Decs : FunDefs { $1 }
-     | DefaultDec FunDefs { $2 }
+
+DecStart :: { [DecBase f vn] }
+         :  DefaultDec Decs { $2 }
+         |  Decs { $1 }
 ;
+
+Decs :: { [DecBase f vn] }
+     : Dec Decs { $1 : $2 }
+     | Dec { [$1] }
+;
+
+Dec :: { DecBase f vn }
+       : Fun { FunDec $1 }
+       | UserTypeAlias { TypeDec $1 }
+;
+
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
@@ -242,29 +256,76 @@ IncludeParts :: { [String] }
 IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
 IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
 
-FunDefs : Fun FunDefs   { $1 : $2 }
-        | Fun           { [$1] }
-;
-
-Fun     : fun TypeDecl id '(' Params ')' '=' Exp
+Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
-        | fun TypeDecl id '(' ')' '=' Exp
+        | fun UserTypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
-        | entry TypeDecl id '(' Params ')' '=' Exp
+        | entry UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef True name $2 $5 $8 pos }
-        | entry TypeDecl id '(' ')' '=' Exp
+        | entry UserTypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef True name $2 [] $7 pos }
 ;
-
+Uniqueness :: { Uniqueness }
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-TypeDecl :: { UncheckedTypeDecl }
-            : Type { TypeDecl $1 NoInfo }
+
+UserTypeDecl :: { TypeDeclBase NoInfo Name }
+              : UserType { TypeDecl $1 NoInfo }
+
+UserTypeAlias :: { TypeDefBase NoInfo Name }
+UserTypeAlias  : type id '=' UserTypeWAliasDecl { let L pos (ID name) = $2 in TypeDef name $4 pos}
+
+UserTypeWAliasDecl :: { UncheckedUserTypeDecl }
+                    : UserTypeWAlias { TypeDecl $1 NoInfo }
+
+UserTypeWAlias :: { UserType Name }
+UserTypeWAlias : PrimType { UserPrim $1 }
+               | UserArrayTypeWAlias { $1 }
+               | '{' UserTypesWAlias '}' { UserTuple $2 }
+               | id { let L _ (ID name) = $1 in UserTypeAlias name}
+
+UserTypesWAlias :: { [ UserType Name ] }
+UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
+                | UserTypeWAlias { [$1] }
+                | {[]}
+
+UserType :: { UncheckedUserType }
+         : PrimType      { UserPrim $1 }
+         | UserArrayType     { $1 }
+         | '{' UserTypes '}' { UserTuple $2 }
+         | id            { let L pos (ID name) = $1 in UserTypeAlias name }
+;
+
+UserTypes :: { [UncheckedUserType] }
+UserTypes : UserType ',' UserTypes { $1 : $3 }
+          | UserType               { [$1] }
+          | {[]}
+UserArrayType :: { UserType Name }
+UserArrayType  : Uniqueness '[' UserArrayRowType DimDecl ']'
+                { let (ds, et) = $3
+                   in UserArray et (ShapeDecl ($4:ds)) $1 }
+
+UserArrayRowType :: { ([DimDecl Name], UserType Name) }
+UserArrayRowType : UserType { ([], $1) }
+                 | '[' UserArrayRowType DimDecl ']'
+                   { let (ds, et) = $2
+                      in ($3:ds, et) }
+
+UserArrayTypeWAlias :: { UserType Name }
+UserArrayTypeWAlias : Uniqueness '[' UserArrayWAliasRowType ']'
+                    { let (ds, et) = $3
+                        in UserArray et (ShapeDecl $ AnyDim:ds ) $1 }
+
+UserArrayWAliasRowType :: { ([DimDecl Name] , UserType Name ) }
+UserArrayWAliasRowType : UserTypeWAlias { ([], $1) }
+                       | '[' UserArrayWAliasRowType ']'
+                         { let (ds, et) = $2
+                            in ( AnyDim : ds, et) }
 
 Type :: { UncheckedType }
         : PrimType     { Prim $1 }
@@ -291,9 +352,9 @@ ArrayType :: { UncheckedArrayType }
 
 PrimArrayRowType : PrimType
                     { ([], $1) }
-                  | '[' PrimArrayRowType DimDecl ']'
+                 | '[' PrimArrayRowType DimDecl ']'
                     { let (ds, et) = $2
-                      in ($3:ds, et) }
+                       in ($3:ds, et) }
 
 TupleArrayRowType : '{' TupleArrayElemTypes '}'
                      { ([], $2) }
@@ -338,9 +399,9 @@ Types : Type ',' Types { $1 : $3 }
       | Type           { [$1] }
       |                { [] }
 ;
-
-Params : TypeDecl id ',' Params { let L pos (ID name) = $2 in Param name $1 pos : $4 }
-       | TypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
+Params :: { [ParamBase NoInfo Name] }
+Params : UserTypeDecl id ',' Params { let L pos (ID name) = $2 in (Param name $1 pos) : $4 }
+       | UserTypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -491,7 +552,7 @@ LetExp :: { UncheckedExp }
                       {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
                                (patternExp $3) }
      | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
-                      { DoLoop $3 $5 $8 $10 $11 $1 }
+                  { DoLoop $3 $5 $8 $10 $11 $1 }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
@@ -524,7 +585,7 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '{' Patterns '}' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn TypeDecl '(' Params ')' '=>' Exp
+         : fn UserTypeDecl '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
            { let L pos (ID name) = $1
@@ -585,8 +646,8 @@ StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
-BoolValue : true          { PrimValue $ BoolValue True }
-         | false          { PrimValue $ BoolValue False }
+BoolValue : true           { PrimValue $ BoolValue True }
+          | false          { PrimValue $ BoolValue False }
 
 SignedLit :: { (IntValue, SrcLoc) }
           : i8lit   { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
