@@ -39,7 +39,7 @@ import Futhark.FreshNames
 tagProg :: ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
 tagProg prog = runReader (runStateT f blankNameSource) env
   where env = RenameEnv HM.empty newVNameFromName
-        f = (Prog []) <$> mapM renameFun (progFunctions prog)
+        f = Prog [] <$> mapM renameFun (progFunctions prog)
 
 -- | As 'tagProg', but accepts an initial name source and returns the
 -- resulting one.
@@ -91,7 +91,7 @@ repl (Ident name NoInfo loc) = do
   return $ Ident name' NoInfo loc
 
 declRepl :: (Eq f, Hashable f) =>
-            ParamBase NoInfo f 
+            ParamBase NoInfo f
          -> RenameM f t (ParamBase NoInfo t)
 declRepl (Param name (TypeDecl tp NoInfo) loc) = do
   name' <- replName name
