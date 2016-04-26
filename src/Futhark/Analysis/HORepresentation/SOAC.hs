@@ -47,7 +47,6 @@ module Futhark.Analysis.HORepresentation.SOAC
   , inputType
   , inputRowType
   , transformRows
-  , transformTypeRows
   , transposeInput
   -- ** Converting to and from expressions
   , inputFromSubExp
@@ -347,23 +346,6 @@ transformRows (ArrayTransforms ts) =
              (Rearrange [] (1:0:[2..inputRank inp-1]) `addTransform` inp))
         transformRows' inp nts =
           error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
-
--- | Get the resulting type after transforming the rows.
-transformTypeRows :: ArrayTransforms -> Type -> Type
-transformTypeRows (ArrayTransforms ts) = flip (Foldable.foldl transform) ts
-  where transform t (Rearrange _ perm) =
-          t `setArrayShape` Shape (rearrangeShape (0:map (+1) perm) $ arrayDims t)
-        transform t (Reshape _ shape) =
-          t `setArrayShape` newShape shape
-        transform t (ReshapeOuter _ shape) =
-          let outer:oldshape = arrayDims t
-          in t `setArrayShape` Shape (outer : newDims shape ++ drop 1 oldshape)
-        transform t (ReshapeInner _ shape) =
-          let outer:inner:_ = arrayDims t
-          in t `setArrayShape` Shape (outer : inner : newDims shape)
-        transform t (Replicate n) =
-          let outer:shape = arrayDims t
-          in t `setArrayShape` Shape (outer : n : shape)
 
 -- | Add to the input a 'Rearrange' transform that performs an @(k,n)@
 -- transposition.  The new transform will be at the end of the current
