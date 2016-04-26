@@ -563,7 +563,6 @@ rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
 -- information.
 checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
 checkProg prog = do
--- | Her vil vi gerne checke vores medbragte typer
   ftable <- buildFtable
   ttable <- buildTypeAliasTable
   let typeenv = Scope { envVtable = HM.empty
