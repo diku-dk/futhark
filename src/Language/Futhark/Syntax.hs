@@ -18,10 +18,12 @@ module Language.Futhark.Syntax
   , ShapeDecl (..)
   , Rank (..)
   , TypeBase(..)
+  , UserType(..)
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
   , StructTypeBase
+  , StructUserType
   , DeclArrayTypeBase
   , DeclTupleArrayElemTypeBase
   , Diet(..)
@@ -47,9 +49,11 @@ module Language.Futhark.Syntax
 
   -- * Definitions
   , FunDefBase(..)
+  , TypeDefBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
+  , DecBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -212,13 +216,26 @@ data TypeBase shape as vn = Prim PrimType
                           | Tuple [TypeBase shape as vn]
                           deriving (Eq, Show)
 
+
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
 type CompTypeBase = TypeBase Rank Names
 
+-- | A type with shape annotations and no aliasing information, used
+-- for declarations.
+
+data UserType vn = UserPrim PrimType
+                 | UserArray (UserType vn) (ShapeDecl vn) Uniqueness
+                 | UserTuple [UserType vn]
+                 | UserTypeAlias Name
+    deriving (Show)
+--
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
+
+type StructUserType = UserType
 type StructTypeBase = TypeBase ShapeDecl NoInfo
+
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
@@ -230,7 +247,7 @@ type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
-  TypeDecl { declaredType :: StructTypeBase vn
+  TypeDecl { declaredType :: StructUserType vn
                              -- ^ The type declared by the user.
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
@@ -279,7 +296,7 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 data ParamBase f vn = Param { paramName :: vn
                             , paramTypeDecl :: TypeDeclBase f vn
                             , paramSrcLoc :: SrcLoc
-                            }
+                          }
 deriving instance Showable f vn => Show (ParamBase f vn)
 
 instance Eq vn => Eq (ParamBase f vn) where
@@ -477,8 +494,8 @@ data ExpBase f vn =
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
-                      | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
-                      | Sequential (ExpBase f vn)
+                     | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
+                     | Sequential (ExpBase f vn)
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
@@ -571,14 +588,29 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               }
 deriving instance Showable f vn => Show (FunDefBase f vn)
 
--- | An entire Futhark program.
-newtype ProgBase f vn = Prog { progFunctions :: [FunDefBase f vn] }
+-- | Type Declarations
+data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
+                                , userType :: TypeDeclBase f vn -- type-definitionen
+                                , typeDefLocation :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (TypeDefBase f vn)
+
+
+data DecBase f vn = FunDec (FunDefBase f vn)
+                  | TypeDec (TypeDefBase f vn)
+-- | Coming soon  | SigDec ..
+--                | ModDec ..
+deriving instance Showable f vn => Show (DecBase f vn)
+
+data ProgBase f vn =
+         Prog  { progTypes :: [TypeDefBase f vn]
+               , progFunctions :: [FunDefBase f vn]
+               }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
--- | An entire Futhark program, including headers.
 data ProgBaseWithHeaders f vn =
   ProgWithHeaders { progWHHeaders :: [ProgHeader]
-                  , progWHFunctions :: [FunDefBase f vn]
+                  , progWHDecs :: [DecBase f vn]
                   }
 deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 

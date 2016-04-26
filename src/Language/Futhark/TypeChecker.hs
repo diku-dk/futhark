@@ -19,6 +19,7 @@ import Data.Array
 import Data.List
 import Data.Loc
 import Data.Maybe
+import Data.Either
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -103,6 +104,17 @@ data TypeError =
   -- ^ The permutation is not valid.
   | DimensionNotInteger SrcLoc Name
   -- ^ A dimension annotation was a non-integer variable.
+  | CyclicalTypeDefinition SrcLoc Name
+  -- ^ Type alias has been defined cyclically.
+  | UndefinedAlias SrcLoc Name
+  -- ^ Type alias is referenced, but not defined
+  | DupTypeAlias SrcLoc Name
+  -- ^ Type alias has been defined twice
+  | UndefinedAlias' Name
+  -- ^ Type alias is referenced, but not defined. SrcLoc not available.
+  | ArrayArrayError String
+  | UnusedCase
+  | DebugError String
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -192,7 +204,19 @@ instance Show TypeError where
   show (DimensionNotInteger loc name) =
     "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
     " should be an integer."
-
+  show (CyclicalTypeDefinition loc name) =
+    "Type alias " ++ pretty name ++ " at " ++ locStr loc ++
+    " is cyclically defined."
+  show (UndefinedAlias loc name) =
+    "Type alias '" ++ nameToString name ++ "' referenced at line " ++ show loc
+    ++ ", but not defined."
+  show (UndefinedAlias' name) =
+    "Type alias '" ++ nameToString name ++ "' reference, but not defined."
+  show (DupTypeAlias loc name) =
+    "Type alias '" ++ nameToString name ++ "' defined twice at line " ++ show loc
+  show (ArrayArrayError str) = show str
+  show UnusedCase = "This case is not actually used."
+  show (DebugError str) = show str
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
 
@@ -224,6 +248,9 @@ nullOccurence occ = HS.null (observed occ) && HS.null (consumed occ)
 type Occurences = [Occurence]
 
 type UsageMap = HM.HashMap VName [Usage]
+
+type TypeAliasMap = HM.HashMap Name (TypeBase ShapeDecl NoInfo VName)
+type AliasMap vn = HM.HashMap Name (UserType vn, SrcLoc)
 
 usageMap :: Occurences -> UsageMap
 usageMap = foldl comb HM.empty
@@ -269,10 +296,11 @@ altOccurences occurs1 occurs2 =
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data Scope = Scope { envVtable :: HM.HashMap VName Binding
-                   , envFtable :: HM.HashMap Name FunBinding
-                   , envCheckOccurences :: Bool
-                   }
+data Scope  = Scope { envVtable :: HM.HashMap VName Binding
+                    , envFtable :: HM.HashMap Name FunBinding
+                    , envTAtable :: HM.HashMap Name (TypeBase ShapeDecl NoInfo VName)
+                    , envCheckOccurences :: Bool
+                    }
 
 -- | The type checker runs in this monad.  The 'Either' monad is used
 -- for error handling.
@@ -316,7 +344,7 @@ newIdent s t loc = do
 newParam :: String -> Type -> SrcLoc -> TypeM (ParamBase NoInfo VName)
 newParam s t loc = do
   s' <- newIDFromString s
-  return $ Param s' (TypeDecl (vacuousShapeAnnotations $ toStruct t) NoInfo) loc
+  return $ Param s' (TypeDecl (vacuousShapeAnnotations' $ toStruct t) NoInfo) loc
 
 liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
@@ -424,8 +452,8 @@ bindingParams params m =
   binding (map fromParam params) $
   -- Figure out the not already bound shape annotations.
   binding (concat [ mapMaybe (inspectDim $ srclocOf param) $
-                    nestedDims $ paramDeclaredType param
-                  | param <- params ])
+                    nestedDims' $ paramDeclaredType param
+                  | param <- params])
   m
   where inspectDim _ AnyDim =
           Nothing
@@ -536,29 +564,41 @@ rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
 checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
 checkProg prog = do
   ftable <- buildFtable
+  ttable <- buildTypeAliasTable
   let typeenv = Scope { envVtable = HM.empty
-                        , envFtable = ftable
-                        , envCheckOccurences = True
-                        }
+                      , envFtable = ftable
+                      , envTAtable = ttable
+                      , envCheckOccurences = True
+                      }
   runTypeM typeenv src $
-    Prog <$> mapM (noOccurences . checkFun) (progFunctions prog')
+    Prog [] <$> mapM (noOccurences . (`checkFun` ttable)) (progFunctions prog')
+
   where
+
     (prog', src) = tagProg' blankNameSource prog
+    buildTypeAliasTable = typeAliasTableFromProg prog'
+    taTable = typeAliasTableFromProg prog'
+
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
+
     buildFtable = HM.map rmLoc <$>
                   foldM expand (HM.map addLoc initialFtable)
                   (progFunctions prog')
     expand ftable (FunDef _ name (TypeDecl ret NoInfo) args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
-      | otherwise =
-        let argtypes = map (toStruct . paramDeclaredType) args -- Throw away argument names.
-        in Right $ HM.insert name (ret,argtypes,pos) ftable
+      | otherwise = do
+        taTable' <- taTable
+        let argtypes = map paramDeclaredType args -- Throw away argument names.
+        ret' <- expandType2 ret taTable'
+         -- ret' <- expandType' ret table
+        argtypes' <- checkEitherList $ map (`expandType2` taTable') argtypes
+        return $ HM.insert name (ret' , argtypes' , pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
@@ -566,34 +606,44 @@ initialFtable :: HM.HashMap Name FunBinding
 initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (Prim t, map Prim ts)
 
-checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
-checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
-  params' <- checkParams
-  body' <- bindingParams params' $ do
-    checkRetType loc rettype
-    checkExp body
+checkFun :: FunDefBase NoInfo VName -> TypeAliasMap -> TypeM FunDef
+checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) ta = do
+  case rettype' of Left e -> bad e
+                   Right rettype'' -> do
+                     params' <- checkParams
+                     body' <- bindingParams params' $ do
+                       checkRetType loc rettype''
+                       checkExp body ta
 
-  checkReturnAlias params' $ typeOf body'
+                     checkReturnAlias params' $ typeOf body'
 
-  if toStructural (typeOf body') `subtypeOf` toStructural rettype then
-    return $ FunDef entry fname (TypeDecl rettype $ Info rettype) params' body' loc
-  else bad $ ReturnTypeError loc fname (toStructural rettype) $
-             toStructural $ typeOf body'
+                     if toStructural (typeOf body') `subtypeOf` toStructural rettype'' then
+                       return $ FunDef entry fname (TypeDecl rettype $ Info rettype'') params' body' loc
+                     else bad $ ReturnTypeError loc fname (toStructural rettype'') $
+                       toStructural $ typeOf body'
 
-  where checkParams = do
+  where
+        rettype' = expandType2 rettype ta
+        checkParams = do
           -- First find all normal parameters (checking for duplicates).
-          params' <- foldM checkNormParams [] params
+          params1' <- foldM checkNormParams [] params
           -- Then check shape annotations (where duplicates are OK, as
           -- long as it's not a duplicate of a normal parameter.)
-          mapM_ checkDimDecls params'
-          return $ reverse params'
+          mapM_ checkDimDecls params1'
+          return $ reverse params1'
 
-        checkNormParams knownparams (Param pname (TypeDecl pt NoInfo) ploc)
-          | pname `elem` map paramName knownparams =
-            bad $ DupParamError fname (baseName pname) loc
+        checkNormParams knownparams param
+          | paramName param `elem` map paramName knownparams =
+            bad $ DupParamError fname (baseName $ paramName param) loc
           | otherwise =
             -- For now, the expanded type is the same as the declared type.
-            return $ Param pname (TypeDecl pt $ Info pt) ploc : knownparams
+            do
+              let param' = expandParam param ta
+              case param' of
+                Left e
+                  -> bad e
+                Right param''
+                  -> return $ param'' : knownparams
 
         checkDimDecls param
           | Just name <- find (`elem` map paramName params) boundDims =
@@ -613,8 +663,10 @@ checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
         -- | Check that unique return values do not alias a
         -- non-consumed parameter.
         checkReturnAlias params' =
-          foldM_ (checkReturnAlias' params') HS.empty . returnAliasing rettype
-
+          case expandType2 rettype ta of
+          Right rettp' ->
+            foldM_ (checkReturnAlias' params') HS.empty . returnAliasing rettp'
+          Left e -> return $ bad e
         checkReturnAlias' params' seen (Unique, names)
           | any (`HS.member` HS.map snd seen) $ HS.toList names =
             bad $ UniqueReturnAliased fname loc
@@ -632,16 +684,18 @@ checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
-checkExp :: ExpBase NoInfo VName -> TypeM Exp
+checkExp :: ExpBase NoInfo VName
+         -> TypeAliasMap
+         -> TypeM Exp
 
-checkExp (Literal val pos) =
+checkExp (Literal val pos) _ =
   Literal <$> checkLiteral pos val <*> pure pos
 
-checkExp (TupLit es loc) =
-  TupLit <$> mapM checkExp es <*> pure loc
+checkExp (TupLit es loc) ta =
+  TupLit <$> mapM (`checkExp` ta) es <*> pure loc
 
-checkExp (ArrayLit es _ loc) = do
-  es' <- mapM checkExp es
+checkExp (ArrayLit es _ loc) ta = do
+  es' <- mapM (`checkExp` ta) es
   -- Find the universal type of the array arguments.
   et <- case es' of
           [] -> bad $ TypeError loc "Empty array literal"
@@ -655,60 +709,60 @@ checkExp (ArrayLit es _ loc) = do
 
   return $ ArrayLit es' (Info et) loc
 
-checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
+checkExp (BinOp op e1 e2 NoInfo pos) ta = checkBinOp op e1 e2 ta pos
 
-checkExp (UnOp Not e pos) = do
-  e' <- require [Prim Bool] =<< checkExp e
+checkExp (UnOp Not e pos) ta = do
+  e' <- require [Prim Bool] =<< checkExp e ta
   return $ UnOp Not e' pos
 
-checkExp (UnOp Complement e loc) = do
-  e' <- require anyIntType =<< checkExp e
+checkExp (UnOp Complement e loc) ta = do
+  e' <- require anyIntType =<< checkExp e ta
   return $ UnOp Complement e' loc
 
-checkExp (UnOp Negate e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+checkExp (UnOp Negate e loc) ta = do
+  e' <- require anyNumberType =<< checkExp e ta
   return $ UnOp Negate e' loc
 
-checkExp (UnOp Abs e loc) = do
-  e' <- require anyIntType =<< checkExp e
+checkExp (UnOp Abs e loc) ta = do
+  e' <- require anyIntType =<< checkExp e ta
   return $ UnOp Abs e' loc
 
-checkExp (UnOp Signum e loc) = do
-  e' <- require anyIntType =<< checkExp e
+checkExp (UnOp Signum e loc) ta = do
+  e' <- require anyIntType =<< checkExp e ta
   return $ UnOp Signum e' loc
 
-checkExp (UnOp (ToFloat t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+checkExp (UnOp (ToFloat t) e loc) ta = do
+  e' <- require anyNumberType =<< checkExp e ta
   return $ UnOp (ToFloat t) e' loc
 
-checkExp (UnOp (ToSigned t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+checkExp (UnOp (ToSigned t) e loc) ta = do
+  e' <- require anyNumberType =<< checkExp e ta
   return $ UnOp (ToSigned t) e' loc
 
-checkExp (UnOp (ToUnsigned t) e loc) = do
-  e' <- require anyNumberType =<< checkExp e
+checkExp (UnOp (ToUnsigned t) e loc) ta = do
+  e' <- require anyNumberType =<< checkExp e ta
   return $ UnOp (ToUnsigned t) e' loc
 
-checkExp (If e1 e2 e3 _ pos) = do
-  e1' <- require [Prim Bool] =<< checkExp e1
-  ((e2', e3'), dflow) <- collectOccurences $ checkExp e2 `alternative` checkExp e3
+checkExp (If e1 e2 e3 _ pos) ta = do
+  e1' <- require [Prim Bool] =<< checkExp e1 ta
+  ((e2', e3'), dflow) <- collectOccurences $ checkExp e2 ta `alternative` checkExp e3 ta
   tell dflow
   brancht <- unifyExpTypes e2' e3'
   let t' = addAliases brancht
            (`HS.difference` allConsumed dflow)
   return $ If e1' e2' e3' (Info t') pos
 
-checkExp (Var ident) = do
+checkExp (Var ident) _ = do
   ident' <- checkIdent ident
   observe ident'
   return $ Var ident'
 
-checkExp (Apply fname args _ loc) = do
+checkExp (Apply fname args _ loc) ta = do
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
-      (args', argflows) <- unzip <$> mapM (checkArg . fst) args
+      (args', argflows) <- unzip <$> mapM (\(arg,_) -> (checkArg arg ta)) args
 
       let rettype' = returnType (removeShapeAnnotations ftype)
                      (map diet paramtypes) (map typeOf args')
@@ -717,16 +771,16 @@ checkExp (Apply fname args _ loc) = do
 
       return $ Apply fname (zip args' $ map diet paramtypes) (Info rettype') loc
 
-checkExp (LetPat pat e body pos) = do
-  (e', dataflow) <- collectOccurences $ checkExp e
+checkExp (LetPat pat e body pos) ta = do
+  (e', dataflow) <- collectOccurences $ checkExp e ta
   (scope, pat') <- checkBinding pat (typeOf e') dataflow
   scope $ do
-    body' <- checkExp body
+    body' <- checkExp body ta
     return $ LetPat pat' e' body' pos
 
-checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
+checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) ta = do
   src' <- checkIdent src
-  idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
+  idxes' <- mapM (require [Prim $ Signed Int32] <=< (`checkExp` ta)) idxes
   let destt' = unInfo (identType src') `setAliases` HS.empty
       dest' = Ident dest (Info destt') destpos
 
@@ -738,27 +792,27 @@ checkExp (LetWith d@(Ident dest _ destpos) src idxes ve body pos) = do
     Nothing -> bad $ IndexingError
                      (arrayRank $ unInfo $ identType src') (length idxes) (srclocOf src)
     Just elemt ->
-      sequentially (require [elemt] =<< checkExp ve) $ \ve' _ -> do
+      sequentially (require [elemt] =<< checkExp ve ta) $ \ve' _ -> do
         when (identName src `HS.member` aliases (typeOf ve')) $
           bad $ BadLetWithValue pos
         (scope, _) <- checkBinding (Id d) destt' mempty
-        body' <- consuming src' $ scope $ checkExp body
+        body' <- consuming src' $ scope $ checkExp body ta
         return $ LetWith dest' src' idxes' ve' body' pos
 
-checkExp (Index e idxes pos) = do
-  e' <- checkExp e
+checkExp (Index e idxes pos) ta  = do
+  e' <- checkExp e ta
   let vt = typeOf e'
   when (arrayRank vt < length idxes) $
     bad $ IndexingError (arrayRank vt) (length idxes) pos
-  idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
+  idxes' <- mapM (require [Prim $ Signed Int32] <=< (`checkExp` ta)) idxes
   return $ Index e' idxes' pos
 
-checkExp (Iota e pos) = do
-  e' <- require [Prim $ Signed Int32] =<< checkExp e
+checkExp (Iota e pos) ta = do
+  e' <- require [Prim $ Signed Int32] =<< checkExp e ta
   return $ Iota e' pos
 
-checkExp (Size i e pos) = do
-  e' <- checkExp e
+checkExp (Size i e pos) ta = do
+  e' <- checkExp e ta
   case typeOf e' of
     Array {}
       | i >= 0 && i < arrayRank (typeOf e') ->
@@ -767,18 +821,18 @@ checkExp (Size i e pos) = do
         bad $ TypeError pos $ "Type " ++ pretty (typeOf e') ++ " has no dimension " ++ show i ++ "."
     _        -> bad $ TypeError pos "Argument to size must be array."
 
-checkExp (Replicate countexp valexp pos) = do
-  countexp' <- require [Prim $ Signed Int32] =<< checkExp countexp
-  valexp' <- checkExp valexp
+checkExp (Replicate countexp valexp pos) ta = do
+  countexp' <- require [Prim $ Signed Int32] =<< checkExp countexp ta
+  valexp' <- checkExp valexp ta
   return $ Replicate countexp' valexp' pos
 
-checkExp (Reshape shapeexps arrexp pos) = do
-  shapeexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) shapeexps
-  arrexp' <- checkExp arrexp
+checkExp (Reshape shapeexps arrexp pos) ta = do
+  shapeexps' <- mapM (require [Prim $ Signed Int32] <=< (`checkExp` ta)) shapeexps
+  arrexp' <- checkExp arrexp ta
   return (Reshape shapeexps' arrexp' pos)
 
-checkExp (Rearrange perm arrexp pos) = do
-  arrexp' <- checkExp arrexp
+checkExp (Rearrange perm arrexp pos) ta = do
+  arrexp' <- checkExp arrexp ta
   let rank = arrayRank $ typeOf arrexp'
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError pos perm rank name
@@ -786,14 +840,14 @@ checkExp (Rearrange perm arrexp pos) = do
   where name = case arrexp of Var v -> Just $ baseName $ identName v
                               _     -> Nothing
 
-checkExp (Transpose arrexp pos) = do
-  arrexp' <- checkExp arrexp
+checkExp (Transpose arrexp pos) ta = do
+  arrexp' <- checkExp arrexp ta
   when (arrayRank (typeOf arrexp') /= 2) $
     bad $ TypeError pos "Argument to transpose is not two-dimensional array."
   return $ Transpose arrexp' pos
 
-checkExp (Zip arrexps loc) = do
-  arrexps' <- mapM (checkExp . fst) arrexps
+checkExp (Zip arrexps loc) ta = do
+  arrexps' <- mapM (\arrexp -> checkExp (fst arrexp) ta) arrexps
   arrts <- forM arrexps' $ \arrexp -> do
     let arrt = typeOf arrexp
     when (arrayRank arrt < 1) $
@@ -802,8 +856,8 @@ checkExp (Zip arrexps loc) = do
     return arrt
   return $ Zip (zip arrexps' $ map Info arrts) loc
 
-checkExp (Unzip e _ pos) = do
-  e' <- checkExp e
+checkExp (Unzip e _ pos) ta = do
+  e' <- checkExp e ta
   case typeOf e' of
     Array (TupleArray ets shape u) ->
       let componentType et =
@@ -816,18 +870,18 @@ checkExp (Unzip e _ pos) = do
       "Argument to unzip is not an array of tuples, but " ++
       pretty t ++ "."
 
-checkExp (Unsafe e loc) =
-  Unsafe <$> checkExp e <*> pure loc
+checkExp (Unsafe e loc) ta =
+  Unsafe <$> checkExp e ta <*> pure loc
 
-checkExp (Map fun arrexp pos) = do
-  (arrexp', arg) <- checkSOACArrayArg arrexp
-  fun' <- checkLambda fun [arg]
+checkExp (Map fun arrexp pos) ta = do
+  (arrexp', arg) <- checkSOACArrayArg arrexp ta
+  fun' <- checkLambda fun [arg] ta
   return (Map fun' arrexp' pos)
 
-checkExp (Reduce comm fun startexp arrexp pos) = do
-  (startexp', startarg) <- checkArg startexp
-  (arrexp', arrarg) <- checkSOACArrayArg arrexp
-  fun' <- checkLambda fun [startarg, arrarg]
+checkExp (Reduce comm fun startexp arrexp pos) ta = do
+  (startexp', startarg) <- checkArg startexp ta
+  (arrexp', arrarg) <- checkSOACArrayArg arrexp ta
+  fun' <- checkLambda fun [startarg, arrarg] ta
   let redtype = lambdaReturnType fun'
   unless (typeOf startexp' `subtypeOf` redtype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but reduce function returns type " ++ pretty redtype ++ "."
@@ -835,10 +889,10 @@ checkExp (Reduce comm fun startexp arrexp pos) = do
     bad $ TypeError pos $ "Array element value is of type " ++ pretty (argType arrarg) ++ ", but reduce function returns type " ++ pretty redtype ++ "."
   return $ Reduce comm fun' startexp' arrexp' pos
 
-checkExp (Scan fun startexp arrexp pos) = do
-  (startexp', startarg) <- checkArg startexp
-  (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp
-  fun' <- checkLambda fun [startarg, arrarg]
+checkExp (Scan fun startexp arrexp pos) ta = do
+  (startexp', startarg) <- checkArg startexp ta
+  (arrexp', arrarg@(inrowt, _, _)) <- checkSOACArrayArg arrexp ta
+  fun' <- checkLambda fun [startarg, arrarg] ta
   let scantype = lambdaReturnType fun'
   unless (typeOf startexp' `subtypeOf` scantype) $
     bad $ TypeError pos $ "Initial value is of type " ++ pretty (typeOf startexp') ++ ", but scan function returns type " ++ pretty scantype ++ "."
@@ -846,36 +900,40 @@ checkExp (Scan fun startexp arrexp pos) = do
     bad $ TypeError pos $ "Array element value is of type " ++ pretty inrowt ++ ", but scan function returns type " ++ pretty scantype ++ "."
   return $ Scan fun' startexp' arrexp' pos
 
-checkExp (Filter fun arrexp pos) = do
-  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
+checkExp (Filter fun arrexp pos) ta = do
+  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp ta
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
-  fun' <- checkLambda fun [nonunique_arg]
+  fun' <- checkLambda fun [nonunique_arg] ta
   when (lambdaReturnType fun' /= Prim Bool) $
     bad $ TypeError pos "Filter function does not return bool."
 
   return $ Filter fun' arrexp' pos
 
-checkExp (Partition funs arrexp pos) = do
-  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp
+checkExp (Partition funs arrexp pos) ta = do
+  (arrexp', (rowelemt, argflow, argloc)) <- checkSOACArrayArg arrexp ta
   let nonunique_arg = (rowelemt `setUniqueness` Nonunique,
                        argflow, argloc)
   funs' <- forM funs $ \fun -> do
-    fun' <- checkLambda fun [nonunique_arg]
+    fun' <- checkLambda fun [nonunique_arg] ta
     when (lambdaReturnType fun' /= Prim Bool) $
       bad $ TypeError (srclocOf fun') "Partition function does not return bool."
     return fun'
 
   return $ Partition funs' arrexp' pos
 
-checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr pos) = do
-  lam_ps' <- mapM checkParam lam_ps
+checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr pos) ta = do
+  lam_ps' <- mapM (`checkParam` ta) lam_ps  -- checkParam :: ... -> ParamBase name (TypeDecl t $ Info t') pos
   let isArrayType arrtp =
         case arrtp of
           Array _ -> True
           _       -> False
+  let isArrayType' arrtp =
+        case arrtp of
+          UserArray{} -> True
+          _           -> False
   let lit_int0 = Literal (PrimValue $ SignedValue $ Int32Value 0) pos
-  [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
+  [(_, intarg),(arr',arrarg)] <- mapM (`checkArg` ta) [lit_int0, arr]
   -- arr must have an array type
   unless (isArrayType $ typeOf arr') $
     bad $ TypeError pos "Stream with input array of non-array type."
@@ -884,15 +942,15 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
     case form of
       MapLike o -> return (MapLike o, Nothing)
       RedLike o comm lam0 acc -> do
-        (acc',accarg) <- checkArg acc
-        lam0' <- checkLambda lam0 [accarg, accarg]
+        (acc',accarg) <- checkArg acc ta
+        lam0' <- checkLambda lam0 [accarg, accarg] ta
         let redtype = lambdaReturnType lam0'
         unless (typeOf acc' `subtypeOf` redtype) $
             bad $ TypeError pos $ "Stream's reduce fun: Initial value is of type " ++
                   pretty (typeOf acc') ++ ", but reduce fun returns type "++pretty redtype++"."
         return (RedLike o comm lam0' acc', Just(acc',accarg))
       Sequential acc -> do
-        (acc',accarg) <- checkArg acc
+        (acc',accarg) <- checkArg acc ta
         return (Sequential acc', Just(acc',accarg))
   -- (i) properly check the lambda on its parameter and
   --(ii) make some fake arguments, which do not alias `arr', and
@@ -901,8 +959,9 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
       (aas,faas) = case macctup of
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
-  lam' <- checkLambda lam aas
-  (_, dflow)<- collectOccurences $ checkLambda lam faas
+
+  lam' <- checkLambda lam aas ta
+  (_, dflow)<- collectOccurences $ checkLambda lam faas ta
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'
   let usages = usageMap dflow
   when (any (`HM.member` usages) arr_aliasses) $
@@ -936,12 +995,13 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
         NamedDim _  -> return ()
         ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
                                             " be specified since it is "++pretty chunk++"by default.")
+--  let lam_rtp' = expandType' lam_rtp ta
   _ <- case lam_rtp of
-        Tuple res_tps -> do
+        UserTuple res_tps -> do
             let res_arr_tps = tail res_tps
-            if all isArrayType res_arr_tps
+            if all isArrayType' res_arr_tps
             then do let lam_params = HS.fromList $ map paramName lam_ps'
-                        arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
+                        arr_iner_dims = concatMap (tail . arrayDims') res_arr_tps
                         boundDim (NamedDim name) = return $ Just name
                         boundDim (ConstDim _   ) = return Nothing
                         boundDim _               =
@@ -958,33 +1018,33 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
   -- finally return type-checked stream!
   return $ Stream form' lam' arr' pos
 
-checkExp (Stream _ _ _ pos) =
+checkExp (Stream _ _ _ pos) _ =
   bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
-checkExp (Split splitexps arrexp pos) = do
-  splitexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) splitexps
-  arrexp' <- checkExp arrexp
+checkExp (Split splitexps arrexp pos) ta = do
+  splitexps' <- mapM (require [Prim $ Signed Int32] <=< (`checkExp` ta)) splitexps
+  arrexp' <- checkExp arrexp ta
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Split splitexps' arrexp' pos
 
-checkExp (Concat arr1exp arr2exps pos) = do
-  arr1exp'  <- checkExp arr1exp
-  arr2exps' <- mapM (require [typeOf arr1exp'] <=< checkExp) arr2exps
+checkExp (Concat arr1exp arr2exps pos) ta = do
+  arr1exp'  <- checkExp arr1exp ta
+  arr2exps' <- mapM (require [typeOf arr1exp'] <=< (`checkExp` ta)) arr2exps
   mapM_ rowTypeM arr2exps' -- Just check that it's an array.
   return $ Concat arr1exp' arr2exps' pos
 
-checkExp (Copy e pos) = do
-  e' <- checkExp e
+checkExp (Copy e pos) ta = do
+  e' <- checkExp e ta
   return $ Copy e' pos
 
-checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
+checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) ta = do
   -- First we do a basic check of the loop body to figure out which of
   -- the merge parameters are being consumed.  For this, we first need
   -- to check the merge pattern, which requires the (initial) merge
   -- expression.
   ((mergeexp', bindExtra), mergeflow) <-
     collectOccurences $ do
-      mergeexp' <- checkExp mergeexp
+      mergeexp' <- checkExp mergeexp ta
       return $
         case form of
           For _ _ (Ident loopvar _ _) _ ->
@@ -999,16 +1059,16 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
     noUnique $ firstscope $ binding bindExtra $ collectOccurences $
     case form of
       For dir lboundexp (Ident loopvar _ loopvarloc) uboundexp -> do
-        lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp
-        uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp
-        loopbody' <- checkExp loopbody
+        lboundexp' <- require [Prim $ Signed Int32] =<< checkExp lboundexp ta
+        uboundexp' <- require [Prim $ Signed Int32] =<< checkExp uboundexp ta
+        loopbody' <- checkExp loopbody ta
         return (For dir lboundexp' (Ident loopvar (Info $ Prim $ Signed Int32) loopvarloc) uboundexp',
                 loopbody')
       While condexp -> do
         (condexp', condflow) <-
-          collectOccurences $ require [Prim Bool] =<< checkExp condexp
+          collectOccurences $ require [Prim Bool] =<< checkExp condexp ta
         (loopbody', bodyflow) <-
-          collectOccurences $ checkExp loopbody
+          collectOccurences $ checkExp loopbody ta
         occur $ condflow `seqOccurences` bodyflow
         return (While condexp',
                 loopbody')
@@ -1076,15 +1136,15 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
   occur $ mergeflow `seqOccurences` merge_consume
 
   binding (patIdents mergepat'') $ do
-    letbody' <- checkExp letbody
+    letbody' <- checkExp letbody ta
     return $ DoLoop mergepat'' mergeexp'
                     form'
                     loopbody' letbody' loc
 
-checkExp (Write i v a pos) = do
-  i' <- checkExp i
-  v' <- checkExp v
-  (a', aflow) <- collectOccurences $ checkExp a
+checkExp (Write i v a pos) ta = do
+  i' <- checkExp i ta
+  v' <- checkExp v ta
+  (a', aflow) <- collectOccurences $ checkExp a ta
 
   let it = typeOf i'
       at = typeOf a'
@@ -1103,9 +1163,11 @@ checkExp (Write i v a pos) = do
             return ()
           _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
-checkSOACArrayArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
-checkSOACArrayArg e = do
-  (e', (t, dflow, argloc)) <- checkArg e
+checkSOACArrayArg :: ExpBase NoInfo VName
+                  -> TypeAliasMap
+                  -> TypeM (Exp, Arg)
+checkSOACArrayArg e ta = do
+  (e', (t, dflow, argloc)) <- checkArg e ta
   case peelArray 1 t of
     Nothing -> bad $ TypeError argloc "SOAC argument is not an array"
     Just rt -> return (e', (rt, dflow, argloc))
@@ -1127,50 +1189,63 @@ checkIdent (Ident name _ pos) = do
   vt <- lookupVar name pos
   return $ Ident name (Info vt) pos
 
-checkParam :: ParamBase NoInfo VName -> TypeM Parameter
-checkParam (Param name (TypeDecl t NoInfo) loc) =
-  return $ Param name (TypeDecl t $ Info t) loc
+checkParam :: ParamBase NoInfo VName
+           -> TypeAliasMap
+           -> TypeM Parameter
+checkParam (Param name (TypeDecl t NoInfo) loc) taTable =
+  case expandType2 t taTable of
+    Left e
+      -> bad e
+    Right t'
+      -> return $ Param name (TypeDecl t $ Info t') loc
 
-checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
+-- | checkParam' :: ParamBase NoInfo VName
+-- |            -> TypeAliasMap
+-- |            -> TypeM Parameter
+-- | checkParam' (Param name (TypeDecl t NoInfo) loc) taTable = do
+-- |   t' <- expandType' t taTable
+-- |   return $ Param name (TypeDecl t $ Info t') loc
+
+checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> TypeAliasMap -> SrcLoc
            -> TypeM Exp
-checkBinOp Plus e1 e2 pos = checkPolyBinOp Plus anyNumberType e1 e2 pos
-checkBinOp Minus e1 e2 pos = checkPolyBinOp Minus anyNumberType e1 e2 pos
-checkBinOp Pow e1 e2 pos = checkPolyBinOp Pow anyNumberType e1 e2 pos
-checkBinOp Times e1 e2 pos = checkPolyBinOp Times anyNumberType e1 e2 pos
-checkBinOp Divide e1 e2 pos = checkPolyBinOp Divide anyNumberType e1 e2 pos
-checkBinOp Mod e1 e2 pos = checkPolyBinOp Mod anyIntType e1 e2 pos
-checkBinOp Quot e1 e2 pos = checkPolyBinOp Quot anyIntType e1 e2 pos
-checkBinOp Rem e1 e2 pos = checkPolyBinOp Rem anyIntType e1 e2 pos
-checkBinOp ShiftR e1 e2 pos = checkPolyBinOp ShiftR anyIntType e1 e2 pos
-checkBinOp ZShiftR e1 e2 pos = checkPolyBinOp ZShiftR anyIntType e1 e2 pos
-checkBinOp ShiftL e1 e2 pos = checkPolyBinOp ShiftL anyIntType e1 e2 pos
-checkBinOp Band e1 e2 pos = checkPolyBinOp Band anyIntType e1 e2 pos
-checkBinOp Xor e1 e2 pos = checkPolyBinOp Xor anyIntType e1 e2 pos
-checkBinOp Bor e1 e2 pos = checkPolyBinOp Bor anyIntType e1 e2 pos
-checkBinOp LogAnd e1 e2 pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 pos
-checkBinOp LogOr e1 e2 pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 pos
-checkBinOp Equal e1 e2 pos = checkRelOp Equal anyNumberType e1 e2 pos
-checkBinOp NotEqual e1 e2 pos = checkRelOp NotEqual anyNumberType e1 e2 pos
-checkBinOp Less e1 e2 pos = checkRelOp Less anyNumberType e1 e2 pos
-checkBinOp Leq e1 e2 pos = checkRelOp Leq anyNumberType e1 e2 pos
-checkBinOp Greater e1 e2 pos = checkRelOp Greater anyNumberType e1 e2 pos
-checkBinOp Geq e1 e2 pos = checkRelOp Geq anyNumberType e1 e2 pos
+checkBinOp Plus e1 e2 ta pos = checkPolyBinOp Plus anyNumberType e1 e2 ta pos
+checkBinOp Minus e1 e2 ta pos = checkPolyBinOp Minus anyNumberType e1 e2 ta pos
+checkBinOp Pow e1 e2 ta pos = checkPolyBinOp Pow anyNumberType e1 e2 ta pos
+checkBinOp Times e1 e2 ta pos = checkPolyBinOp Times anyNumberType e1 e2 ta pos
+checkBinOp Divide e1 e2 ta pos = checkPolyBinOp Divide anyNumberType e1 e2 ta pos
+checkBinOp Mod e1 e2 ta pos = checkPolyBinOp Mod anyIntType e1 e2 ta pos
+checkBinOp Quot e1 e2 ta pos = checkPolyBinOp Quot anyIntType e1 e2 ta pos
+checkBinOp Rem e1 e2 ta pos = checkPolyBinOp Rem anyIntType e1 e2 ta pos
+checkBinOp ShiftR e1 e2 ta pos = checkPolyBinOp ShiftR anyIntType e1 e2 ta pos
+checkBinOp ZShiftR e1 e2 ta pos = checkPolyBinOp ZShiftR anyIntType e1 e2 ta pos
+checkBinOp ShiftL e1 e2 ta pos = checkPolyBinOp ShiftL anyIntType e1 e2 ta pos
+checkBinOp Band e1 e2 ta pos = checkPolyBinOp Band anyIntType e1 e2 ta pos
+checkBinOp Xor e1 e2 ta pos = checkPolyBinOp Xor anyIntType e1 e2 ta pos
+checkBinOp Bor e1 e2 ta pos = checkPolyBinOp Bor anyIntType e1 e2 ta pos
+checkBinOp LogAnd e1 e2 ta pos = checkPolyBinOp LogAnd [Prim Bool] e1 e2 ta pos
+checkBinOp LogOr e1 e2 ta pos = checkPolyBinOp LogOr [Prim Bool] e1 e2 ta pos
+checkBinOp Equal e1 e2 ta pos = checkRelOp Equal anyNumberType e1 e2 ta pos
+checkBinOp NotEqual e1 e2 ta pos = checkRelOp NotEqual anyNumberType e1 e2 ta pos
+checkBinOp Less e1 e2 ta pos = checkRelOp Less anyNumberType e1 e2 ta pos
+checkBinOp Leq e1 e2 ta pos = checkRelOp Leq anyNumberType e1 e2 ta pos
+checkBinOp Greater e1 e2 ta pos = checkRelOp Greater anyNumberType e1 e2 ta pos
+checkBinOp Geq e1 e2 ta pos = checkRelOp Geq anyNumberType e1 e2 ta pos
 
 checkRelOp :: BinOp -> [Type]
-           -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
+           -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> TypeAliasMap -> SrcLoc
            -> TypeM Exp
-checkRelOp op tl e1 e2 pos = do
-  e1' <- require tl =<< checkExp e1
-  e2' <- require tl =<< checkExp e2
+checkRelOp op tl e1 e2 ta pos = do
+  e1' <- require tl =<< checkExp e1 ta
+  e2' <- require tl =<< checkExp e2 ta
   _ <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info $ Prim Bool) pos
 
 checkPolyBinOp :: BinOp -> [Type]
-               -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
+               -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> TypeAliasMap -> SrcLoc
                -> TypeM Exp
-checkPolyBinOp op tl e1 e2 pos = do
-  e1' <- require tl =<< checkExp e1
-  e2' <- require tl =<< checkExp e2
+checkPolyBinOp op tl e1 e2 ta pos = do
+  e1' <- require tl =<< checkExp e1 ta
+  e2' <- require tl =<< checkExp e2 ta
   t' <- unifyExpTypes e1' e2'
   return $ BinOp op e1' e2' (Info t') pos
 
@@ -1224,9 +1299,10 @@ type Arg = (Type, Occurences, SrcLoc)
 argType :: Arg -> Type
 argType (t, _, _) = t
 
-checkArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
-checkArg arg = do (arg', dflow) <- collectOccurences $ checkExp arg
-                  return (arg', (typeOf arg', dflow, srclocOf arg'))
+checkArg :: ExpBase NoInfo VName -> TypeAliasMap ->TypeM (Exp, Arg)
+checkArg arg ta = do
+  (arg', dflow) <- collectOccurences $ checkExp arg ta
+  return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe Name -> SrcLoc
              -> [StructType] -> StructType -> [Arg]
@@ -1250,13 +1326,14 @@ consumeArg loc at Consume = [consumption (aliases at) loc]
 consumeArg loc at _       = [observation (aliases at) loc]
 
 checkLambda :: LambdaBase NoInfo VName -> [Arg]
+            -> TypeAliasMap
             -> TypeM Lambda
-checkLambda (AnonymFun params body ret pos) args = do
-  params' <- mapM checkParam params
+checkLambda (AnonymFun params body ret pos) args ta = do
+  params' <- mapM (`checkParam` ta) params
   case () of
     _ | length params == length args -> do
           FunDef _ _ ret' params'' body' _ <-
-            noUnique $ checkFun $ FunDef False (nameFromString "<anonymous>") ret params body pos
+            noUnique $ checkFun (FunDef False (nameFromString "<anonymous>") ret params body pos) ta
           checkFuncall Nothing pos (map paramType params') (unInfo $ expandedType ret') args
           return $ AnonymFun params'' body' ret' pos
       | [(Tuple ets, _, _)] <- args,
@@ -1265,25 +1342,25 @@ checkLambda (AnonymFun params body ret pos) args = do
           -- single N-tuple whose types match the parameters.
           -- Generate a shim to make it fit.
           FunDef _ _ ret' _ body' _ <-
-            noUnique $ checkFun $ FunDef False (nameFromString "<anonymous>") ret params body pos
+            noUnique $ checkFun (FunDef False (nameFromString "<anonymous>") ret params body pos) ta
           tupident <- newIdent "tup_shim"
                       (Tuple $ map (fromStruct .
                                     removeShapeAnnotations .
                                     paramType) params')
                       pos
           let untype ident = ident { identType = NoInfo }
-              paramtype = Tuple $ map paramDeclaredType params
+              paramtype = UserTuple $ map paramDeclaredType params
               tupparam = Param (identName tupident) (TypeDecl paramtype NoInfo) $
                          srclocOf tupident
               tupfun = AnonymFun [tupparam] tuplet ret pos
               tuplet = LetPat (TuplePattern (map (Id . untype . fromParam) params') pos)
                               (Var $ untype tupident) body pos
-          _ <- checkLambda tupfun args
+          _ <- checkLambda tupfun args ta
           return $ AnonymFun params' body' ret' pos
       | otherwise -> bad $ TypeError pos $ "Anonymous function defined with " ++ show (length params') ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
-checkLambda (CurryFun fname curryargexps _ pos) args = do
-  (curryargexps', curryargs) <- unzip <$> mapM checkArg curryargexps
+checkLambda (CurryFun fname curryargexps _ pos) args ta = do
+  (curryargexps', curryargs) <- unzip <$> mapM (`checkArg` ta) curryargexps
   bnd <- asks $ HM.lookup fname . envFtable
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname pos
@@ -1300,15 +1377,16 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
               paramname <- newIDFromString "x"
 
               let paramtype = Tuple paramtypes
-                  tupparam = Param paramname (TypeDecl paramtype NoInfo) pos
+                  paramtype' = contractTypeBase paramtype
+                  tupparam = Param paramname (TypeDecl paramtype' NoInfo) pos
                   tuplet = LetPat (TuplePattern (map (Id . untype) params) pos)
                            (Var $ Ident paramname NoInfo pos) body pos
                   tupfun = AnonymFun [tupparam] tuplet
-                           (TypeDecl (vacuousShapeAnnotations rt) NoInfo) pos
+                           (TypeDecl (vacuousShapeAnnotations' rt) NoInfo) pos
                   body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
                          NoInfo pos
-              checkLambda tupfun args
+              checkLambda tupfun args ta
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
@@ -1318,56 +1396,56 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
               params <- zipWithM mkparam [(0::Int)..] $
                         drop (length curryargs) paramtypes'
               let fun = AnonymFun params body
-                        (TypeDecl (vacuousShapeAnnotations rt) NoInfo) pos
+                        (TypeDecl (vacuousShapeAnnotations' rt) NoInfo) pos
                   body = Apply fname (zip (curryargexps++map (Var . asIdent) params) $
                                       map diet paramtypes)
                          NoInfo pos
-              _ <- checkLambda fun args
+              _ <- checkLambda fun args ta
               return $ CurryFun fname curryargexps' (Info rettype') pos
     where untype ident = ident { identType = NoInfo }
 
-checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
+checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] ta = do
   var <- newIdent "x" (argType arg) loc
   binding [var] $ do
-    e <- checkExp $ UnOp unop (Var var { identType = NoInfo }) loc
+    e <- checkExp (UnOp unop (Var var { identType = NoInfo }) loc) ta
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
-checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
+checkLambda (UnOpFun unop NoInfo NoInfo loc) args _ =
   bad $ ParameterMismatch (Just $ nameFromString $ pretty unop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
-  checkPolyLambdaOp op [] args loc
+checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args ta =
+  checkPolyLambdaOp op [] args ta loc
 
-checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] =
-  checkCurryBinOp CurryBinOpLeft binop x loc arg
+checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] ta =
+  checkCurryBinOp CurryBinOpLeft binop x loc arg ta
 
-checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
+checkLambda (CurryBinOpLeft binop _ _ _ loc) args _ =
   bad $ ParameterMismatch (Just $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
-checkLambda (CurryBinOpRight binop x _ _ loc) [arg] =
-  checkCurryBinOp CurryBinOpRight binop x loc arg
+checkLambda (CurryBinOpRight binop x _ _ loc) [arg] ta =
+  checkCurryBinOp CurryBinOpRight binop x loc arg ta
 
-checkLambda (CurryBinOpRight binop _ _ _ loc) args =
+checkLambda (CurryBinOpRight binop _ _ _ loc) args _ =
   bad $ ParameterMismatch (Just $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> SrcLoc -> b)
-                -> BinOp -> ExpBase NoInfo VName -> SrcLoc -> Arg -> TypeM b
-checkCurryBinOp f binop x loc arg = do
-  x' <- checkExp x
+                -> BinOp -> ExpBase NoInfo VName -> SrcLoc -> Arg -> TypeAliasMap -> TypeM b
+checkCurryBinOp f binop x loc arg ta = do
+  x' <- checkExp x ta
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
-    e <- checkExp $ BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc
+    e <- checkExp (BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc) ta
     return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
-checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg] -> SrcLoc
-                  -> TypeM Lambda
-checkPolyLambdaOp op curryargexps args pos = do
-  curryargexpts <- map typeOf <$> mapM checkExp curryargexps
+checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg] -> TypeAliasMap
+                  -> SrcLoc -> TypeM Lambda
+checkPolyLambdaOp op curryargexps args ta pos = do
+  curryargexpts <- map typeOf <$> mapM (`checkExp` ta) curryargexps
   let argts = [ argt | (argt, _, _) <- args ]
   tp <- case curryargexpts ++ argts of
           [t1, t2] | t1 == t2 -> return t1
@@ -1385,7 +1463,7 @@ checkPolyLambdaOp op curryargexps args pos = do
                                    Var $ yident NoInfo,
                                    [yident $ Info tp])
                     (e1:e2:_) -> return (e1, e2, [])
-  rettype <- typeOf <$> binding params (checkBinOp op x y pos)
+  rettype <- typeOf <$> binding params (checkBinOp op x y ta pos)
   return $ BinOpFun op (Info tp) (Info tp) (Info rettype) pos
   where fname = nameFromString $ pretty op
 
@@ -1429,3 +1507,265 @@ patternType :: Pattern -> Type
 patternType (Wildcard (Info t) _) = t
 patternType (Id ident) = unInfo $ identType ident
 patternType (TuplePattern pats _) = Tuple $ map patternType pats
+
+typeAliasTableFromProg :: ProgBase NoInfo VName
+                       -> Either TypeError TypeAliasMap
+typeAliasTableFromProg prog =
+  let
+    baseMap  = f $ progTypes prog
+    typeList = map g $ progTypes prog
+    f = foldr (\(TypeDef name (TypeDecl usertype _) loc) hashmap
+               -> HM.insert name (usertype, loc) hashmap) HM.empty
+    g (TypeDef name (TypeDecl _ _) loc) = (name, loc)
+  in do
+      taTable <- typeAliasTableFromProg' typeList baseMap HM.empty
+      let tableKeys = HM.keys taTable
+      let expandUserTypes hashmap key =
+            case HM.lookup key taTable of
+              Just (ut,_) -> do
+                ut' <- expandType' ut taTable
+                return $ HM.insert key ut' hashmap
+              Nothing -> Left $ UndefinedAlias' key
+      foldM expandUserTypes HM.empty tableKeys
+
+typeAliasTableFromProg' :: [(Name, SrcLoc)]
+                        -> HM.HashMap Name (UserType vn, SrcLoc)
+                        -> AliasMap vn
+                        -> Either TypeError (AliasMap vn)
+
+typeAliasTableFromProg' [] _ aliasMap = Right aliasMap
+typeAliasTableFromProg' ((name, loc):rest) hashmap aliasMap =
+   case (HM.lookup name hashmap, HM.lookup name aliasMap) of
+     (Just (ut, otherloc) , Nothing)
+       -> do
+       ut' <- typeBaseFromUserType (name, ut, otherloc) hashmap [name]
+       typeAliasTableFromProg' rest hashmap $ HM.insert name (ut', loc) aliasMap
+     (_, Just _)
+       -> Left $ DupTypeAlias loc name
+     (Nothing,_)
+       -> Left $ UndefinedAlias loc name
+
+typeBaseFromUserType :: (Name, UserType vn, SrcLoc)
+                     -> HM.HashMap Name (UserType vn, SrcLoc)
+                     -> [Name]
+                     -> Either TypeError (UserType vn)
+typeBaseFromUserType (name, utype, loc) hashmap unknowns =
+  case utype of
+    UserPrim somePrim
+      -> Right $ UserPrim somePrim
+    UserArray someType shape uniq
+      -> case typeBaseFromUserType (name, someType, loc) hashmap unknowns
+           of Left e
+                -> Left e
+              Right someTypeBase
+                -> let Right res = typeBaseFromUserType (name, someTypeBase, loc) hashmap unknowns
+                    in Right $ UserArray res shape uniq
+    UserTuple someTypes
+      -> case typeBasesFromUserTypes (name, someTypes, loc) hashmap unknowns
+           of Left e -> Left e
+              Right typeBases -> Right $ UserTuple typeBases
+    UserTypeAlias someAlias
+      -> if someAlias `elem` unknowns
+           then Left $ CyclicalTypeDefinition loc name
+         else typeBaseFromTypeAlias (someAlias, loc) hashmap unknowns
+
+typeBaseFromTypeAlias :: (Name, SrcLoc)
+                      -> HM.HashMap Name (UserType vn, SrcLoc)
+                      -> [Name]
+                      -> Either TypeError (UserType vn)
+typeBaseFromTypeAlias (name, loc) hashmap unknowns =
+  case HM.lookup name hashmap
+    of Just (UserPrim somePrim, _)
+         -> Right $ UserPrim somePrim
+       Just (UserArray someType shape uniq, _)
+         -> case typeBaseFromUserType (name, someType, loc) hashmap unknowns of
+              Right someTypes
+                -> Right $ UserArray someTypes shape uniq
+              Left err
+                -> Left err
+       Just (UserTuple someTypes, otherloc)
+         -> case typeBasesFromUserTypes (name, someTypes, otherloc) hashmap unknowns
+              of Left err -> Left err
+                 Right types -> Right $ UserTuple types
+       Just (UserTypeAlias someAlias, _)
+         -> typeBaseFromUserType (name, UserTypeAlias someAlias, loc) hashmap $ name:unknowns
+       Nothing
+         -> Left $ UndefinedAlias loc name
+
+typeBasesFromUserTypes :: (Name, [UserType vn], SrcLoc)
+                       -> HM.HashMap Name (UserType vn, SrcLoc)
+                       -> [Name]
+                       -> Either TypeError [UserType vn]
+typeBasesFromUserTypes (name, userTypes, loc) hashmap unknowns =
+  let
+    f utype = typeBaseFromUserType (name, utype, loc) hashmap unknowns
+    tupleBaseTypes = map f userTypes
+    errors = lefts tupleBaseTypes
+    types = rights tupleBaseTypes
+   in
+     case errors of
+       (err:_) -> Left err
+       []        -> Right types
+
+checkEitherList :: [Either a b] -> Either a [b]
+checkEitherList somelist =
+  let
+    errors = lefts somelist
+    types  = rights somelist
+  in
+  case errors of (x:_) -> Left x
+                 _     -> Right types
+
+expandType' :: UserType vn
+            -> AliasMap vn
+            -> Either TypeError (TypeBase ShapeDecl NoInfo vn)
+expandType' (UserPrim prim) _ = Right $ Prim prim
+expandType' (UserArray someType shape uni) taTable = do
+  t <- expandArrayType someType shape uni taTable
+  return $ Array t
+
+expandType' (UserTuple types) taTable =
+  let ts = map (`expandType'` taTable) types in
+    do
+      ts' <- checkEitherList ts
+      return $ Tuple ts'
+
+expandType' (UserTypeAlias alias) taTable =
+  case HM.lookup alias taTable of
+    Just (t,_)
+      -> expandType' t taTable
+    Nothing
+      -> Left $ UndefinedAlias' alias
+
+
+expandArrayType :: UserType vn
+                -> ShapeDecl vn
+                -> Uniqueness
+                -> AliasMap vn
+                -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo vn)
+expandArrayType (UserTypeAlias a) s u taTable =
+  case HM.lookup a taTable of
+    Just (t, _) -> expandArrayType t s u taTable
+    Nothing -> Left $ UndefinedAlias' a
+expandArrayType (UserPrim prim) s u _ =
+  return $ PrimArray prim s u NoInfo
+expandArrayType (UserTuple types) s u taTable =
+  let ts = map (`expandTupleArrayType` taTable) types
+   in do
+    ts' <- checkEitherList ts
+    return $ TupleArray ts' s u
+expandArrayType _ _ _ _ = Left $ DebugError "tried to expandArrayType with empty"
+
+expandTupleArrayType :: UserType vn
+                     -> AliasMap vn
+                     -> Either TypeError (TupleArrayElemTypeBase ShapeDecl NoInfo vn)
+expandTupleArrayType (UserTypeAlias a) taTable =
+  case HM.lookup a taTable of
+    Just (t, _) -> expandTupleArrayType t taTable
+    Nothing -> Left $ UndefinedAlias' a
+expandTupleArrayType (UserPrim p) _ =
+  return $ PrimArrayElem p NoInfo Nonunique
+expandTupleArrayType (UserArray t shape uni) taTable = do
+  t' <- expandArrayType t shape uni taTable
+  return $ ArrayArrayElem t'
+expandTupleArrayType (UserTuple types) taTable = do
+  let ts = map (`expandTupleArrayType` taTable) types
+  ret <- checkEitherList ts
+  return $ TupleArrayElem ret
+
+
+
+expandParam :: ParamBase f VName
+            -> TypeAliasMap
+            -> Either TypeError (ParamBase Info VName)
+expandParam (Param name (TypeDecl utype _) loc) taTable = do
+  utype' <- expandType2 utype taTable
+  return $ Param name (TypeDecl utype $ Info utype') loc
+
+_expandParams :: [ParamBase f VName]
+             -> TypeAliasMap
+             -> Either TypeError [ParamBase Info VName]
+_expandParams params taTable = do
+  let params' = map (`expandParam` taTable) params
+  checkEitherList params'
+
+expandType2 :: UserType VName
+            -> TypeAliasMap
+            -> Either TypeError (TypeBase ShapeDecl NoInfo VName)
+expandType2 (UserTypeAlias name) taTable =
+  case HM.lookup name taTable of
+    Just t -> Right t
+    Nothing -> Left $ UndefinedAlias' name
+expandType2 (UserTuple ts) taTable = do
+  ts' <- checkEitherList $ map f ts
+  Right $ Tuple ts'
+  where f t = expandType2 t taTable
+expandType2 (UserPrim prim) _ = Right $ Prim prim
+expandType2 (UserArray someType shape uni) taTable = do
+  t <- expandArrayType2 someType shape uni taTable
+  Right $ Array t
+
+expandArrayType2 :: UserType VName
+                 -> ShapeDecl VName
+                 -> Uniqueness
+                 -> TypeAliasMap
+                 -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo VName)
+expandArrayType2 (UserTypeAlias a) s u taTable =
+  case HM.lookup a taTable of
+    Just t -> expandArrayType2' t s u taTable
+    Nothing -> Left $ UndefinedAlias' a
+expandArrayType2 (UserPrim prim) s u _ =
+  return $ PrimArray prim s u NoInfo
+expandArrayType2 (UserTuple types) s u taTable =
+  let ts = map (`expandTupleArrayType2` taTable) types
+   in do
+    ts' <- checkEitherList ts
+    return $ TupleArray ts' s u
+expandArrayType2 _ _ _ _ =
+  Left $ DebugError "tried to expandArrayType2' with neither prim nor tuple"
+
+expandArrayType2' :: TypeBase ShapeDecl NoInfo VName
+                  -> ShapeDecl VName
+                  -> Uniqueness
+                  -> TypeAliasMap
+                  -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo VName)
+expandArrayType2' (Prim p) s u _ =
+  return $ PrimArray p s u NoInfo
+expandArrayType2' (Tuple types) s u taTable =
+  let ts = map (`expandTupleArrayType2'` taTable) types
+   in do
+    ts' <- checkEitherList ts
+    return $ TupleArray ts' s u
+expandArrayType2' _ _ _ _ =
+  Left $ DebugError "tried to expandArrayType2' with neither prim nor tuple"
+
+
+
+expandTupleArrayType2 :: UserType VName
+                      -> TypeAliasMap
+                      -> Either TypeError (TupleArrayElemTypeBase ShapeDecl NoInfo VName)
+expandTupleArrayType2 (UserTypeAlias a) taTable =
+  case HM.lookup a taTable of
+    Just t -> expandTupleArrayType2' t taTable
+    Nothing -> Left $ UndefinedAlias' a
+expandTupleArrayType2 (UserPrim p) _ =
+  return $ PrimArrayElem p NoInfo Nonunique
+expandTupleArrayType2 (UserArray t shape uni) taTable = do
+  t' <- expandArrayType2 t shape uni taTable
+  return $ ArrayArrayElem t'
+expandTupleArrayType2 (UserTuple types) taTable = do
+    let ts = map (`expandTupleArrayType2` taTable) types
+    ret <- checkEitherList ts
+    return $ TupleArrayElem ret
+
+expandTupleArrayType2' :: TypeBase ShapeDecl NoInfo VName
+                       -> TypeAliasMap
+                       -> Either TypeError (TupleArrayElemTypeBase ShapeDecl NoInfo VName)
+expandTupleArrayType2' (Prim p) _ =
+  return $ PrimArrayElem p NoInfo Nonunique -- Uniqueness is marked in the root TypeBase
+expandTupleArrayType2' (Array t) _ =
+  return $ ArrayArrayElem t
+expandTupleArrayType2' (Tuple types) taTable = do
+  let ts = map (`expandTupleArrayType2'` taTable) types
+  ret <- checkEitherList ts
+  return $ TupleArrayElem ret
