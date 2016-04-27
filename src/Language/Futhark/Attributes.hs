@@ -38,7 +38,6 @@ module Language.Futhark.Attributes
   , setArrayShape
   , removeShapeAnnotations
   , vacuousShapeAnnotations
-  , vacuousShapeAnnotations'
   , returnType
   , lambdaReturnType
 
@@ -163,13 +162,6 @@ vacuousShapeAnnotations :: ArrayShape (shape vn) =>
 vacuousShapeAnnotations = modifyShapeAnnotations $ \shape ->
   ShapeDecl (replicate (shapeRank shape) AnyDim)
 
--- | Change the shape of a type to be a 'ShapeDecl' where all
--- dimensions are 'Nothing'.
-vacuousShapeAnnotations' :: ArrayShape (shape vn) =>
-                           TypeBase shape as vn -> UserType vn
-vacuousShapeAnnotations' = modifyShapeAnnotations' $ \shape ->
-  ShapeDecl (replicate (shapeRank shape) AnyDim)
-
 -- | Change the shape of a type.
 modifyShapeAnnotations :: (oldshape vn -> newshape vn)
                        -> TypeBase oldshape as vn
@@ -181,16 +173,6 @@ modifyShapeAnnotations f (Tuple ts) =
 modifyShapeAnnotations _ (Prim t) =
   Prim t
 
--- | Change the shape of a type.
-modifyShapeAnnotations' :: (oldshape vn -> ShapeDecl vn)
-                       -> TypeBase oldshape as vn
-                       -> UserType vn
-modifyShapeAnnotations' f (Array atb) = modifyShapeAnnotationsFromArray' f atb
-modifyShapeAnnotations' f (Tuple ts) =
-  UserTuple $ map (modifyShapeAnnotations' f) ts
-modifyShapeAnnotations' _ (Prim t) =
-  UserPrim t
-
 modifyShapeAnnotationsFromArray :: (oldshape vn -> newshape vn)
                                 -> ArrayTypeBase oldshape as vn
                                 -> ArrayTypeBase newshape as vn
@@ -200,15 +182,6 @@ modifyShapeAnnotationsFromArray f (TupleArray ts shape u) =
   TupleArray
   (map (modifyShapeAnnotationsFromTupleArrayElem f) ts)
   (f shape) u
-
-modifyShapeAnnotationsFromArray' :: (oldshape vn -> ShapeDecl vn)
-                                -> ArrayTypeBase oldshape as vn
-                                -> UserType vn
-modifyShapeAnnotationsFromArray' f (PrimArray et shape u _) =
-  UserArray (UserPrim et) (f shape) u
-modifyShapeAnnotationsFromArray' f (TupleArray ts shape u) =
-  let ts' = map (modifyShapeAnnotationsFromTupleArrayElem' f) ts
-   in UserArray (UserTuple ts') (f shape) u
 
   -- Try saying this one three times fast.
 modifyShapeAnnotationsFromTupleArrayElem :: (oldshape vn -> newshape vn)
@@ -220,17 +193,6 @@ modifyShapeAnnotationsFromTupleArrayElem
   f (ArrayArrayElem at) = ArrayArrayElem $ modifyShapeAnnotationsFromArray f at
 modifyShapeAnnotationsFromTupleArrayElem
   f (TupleArrayElem ts) = TupleArrayElem $ map (modifyShapeAnnotationsFromTupleArrayElem f) ts
-
-  -- Try saying this one three times fast.
-modifyShapeAnnotationsFromTupleArrayElem' :: (oldshape vn -> ShapeDecl vn)
-                                         -> TupleArrayElemTypeBase oldshape as vn
-                                         -> UserType vn
-modifyShapeAnnotationsFromTupleArrayElem'
-  _ (PrimArrayElem bt _ _) = UserPrim bt
-modifyShapeAnnotationsFromTupleArrayElem'
-  f (ArrayArrayElem at) = modifyShapeAnnotationsFromArray' f at
-modifyShapeAnnotationsFromTupleArrayElem'
-  f (TupleArrayElem ts) = UserTuple $ map (modifyShapeAnnotationsFromTupleArrayElem' f) ts
 
 -- | @x `subuniqueOf` y@ is true if @x@ is not less unique than @y@.
 subuniqueOf :: Uniqueness -> Uniqueness -> Bool
@@ -723,12 +685,13 @@ commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
 -- | Turn an identifier into a parameter.
-toParam :: IdentBase Info vn
+toParam :: Ord vn =>
+           IdentBase Info vn
         -> ParamBase Info vn
 toParam (Ident name (Info t) loc) =
   Param name (TypeDecl t' $ Info t'') loc
   where
-    t'  = vacuousShapeAnnotations' $ toStruct t
+    t'  = contractTypeBase t
     t'' = vacuousShapeAnnotations $ toStruct t
 
 -- | Turn a parameter into an identifier.
@@ -789,26 +752,27 @@ builtInFunctions = HM.fromList $ map namify
   where namify (k,v) = (nameFromString k, v)
 
 
-contractTypeBase :: TypeBase ShapeDecl NoInfo VName
-                 -> UserType VName
+contractTypeBase :: (ArrayShape (shape vn), Ord vn) =>
+                    TypeBase shape als vn
+                 -> UserType vn
 contractTypeBase (Prim p) = UserPrim p
 contractTypeBase arrtp@(Array tps) =
-  let dimDecl = arrayShape arrtp
+  let dimDecl = ShapeDecl $ replicate (arrayRank arrtp) AnyDim
       uniq = uniqueness arrtp
       arrtp' = contractArrayTypeBase tps
   in UserArray arrtp' dimDecl uniq
 contractTypeBase (Tuple types) =
   UserTuple $ map contractTypeBase types
 
-contractArrayTypeBase :: ArrayTypeBase ShapeDecl NoInfo VName
-                      -> UserType VName
+contractArrayTypeBase :: ArrayTypeBase shape als vn
+                      -> UserType vn
 contractArrayTypeBase (PrimArray p _ _ _) =
   UserPrim p
 contractArrayTypeBase (TupleArray tps _ _) =
   UserTuple $ map contractTupleArrayElemTypeBase tps
 
-contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase ShapeDecl NoInfo VName
-                               -> UserType VName
+contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase shape als vn
+                               -> UserType vn
 contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
   UserPrim p
 contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
