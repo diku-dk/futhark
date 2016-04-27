@@ -220,14 +220,20 @@ data TypeBase shape as vn = Prim PrimType
 -- for describing the type of a computation.
 type CompTypeBase = TypeBase Rank Names
 
--- | A type with shape annotations and no aliasing information, used
--- for declarations.
-
-data UserType vn = UserPrim PrimType
-                 | UserArray (UserType vn) (ShapeDecl vn) Uniqueness
-                 | UserTuple [UserType vn]
-                 | UserTypeAlias Name
+-- | An unstructured type with type variables and possibly shape
+-- declarations - this is what the user types in the source program.
+data UserType vn = UserPrim PrimType SrcLoc
+                 | UserArray (UserType vn) (ShapeDecl vn) Uniqueness SrcLoc
+                 | UserTuple [UserType vn] SrcLoc
+                 | UserTypeAlias Name SrcLoc
     deriving (Show)
+
+instance Located (UserType vn) where
+  locOf (UserPrim _ loc) = locOf loc
+  locOf (UserArray _ _ _ loc) = locOf loc
+  locOf (UserTuple _ loc) = locOf loc
+  locOf (UserTypeAlias _ loc) = locOf loc
+
 --
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.

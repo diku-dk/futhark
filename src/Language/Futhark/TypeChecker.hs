@@ -110,8 +110,6 @@ data TypeError =
   -- ^ Type alias is referenced, but not defined
   | DupTypeAlias SrcLoc Name
   -- ^ Type alias has been defined twice
-  | UndefinedAlias' Name
-  -- ^ Type alias is referenced, but not defined. SrcLoc not available.
   | ArrayArrayError String
   | UnusedCase
   | DebugError String
@@ -210,8 +208,6 @@ instance Show TypeError where
   show (UndefinedAlias loc name) =
     "Type alias '" ++ nameToString name ++ "' referenced at line " ++ show loc
     ++ ", but not defined."
-  show (UndefinedAlias' name) =
-    "Type alias '" ++ nameToString name ++ "' reference, but not defined."
   show (DupTypeAlias loc name) =
     "Type alias '" ++ nameToString name ++ "' defined twice at line " ++ show loc
   show (ArrayArrayError str) = show str
@@ -993,7 +989,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
                                             " be specified since it is "++pretty chunk++"by default.")
 --  let lam_rtp' = expandType' lam_rtp ta
   _ <- case lam_rtp of
-        UserTuple res_tps -> do
+        UserTuple res_tps _ -> do
             let res_arr_tps = tail res_tps
             if all isArrayType' res_arr_tps
             then do let lam_params = HS.fromList $ map paramName lam_ps'
@@ -1341,7 +1337,7 @@ checkLambda (AnonymFun params body ret pos) args = do
                                     paramType) params')
                       pos
           let untype ident = ident { identType = NoInfo }
-              paramtype = UserTuple $ map paramDeclaredType params
+              paramtype = UserTuple (map paramDeclaredType params) pos
               tupparam = Param (identName tupident) (TypeDecl paramtype NoInfo) $
                          srclocOf tupident
               tupfun = AnonymFun [tupparam] tuplet ret pos
@@ -1509,14 +1505,13 @@ typeAliasTableFromProg prog = do
                  -> HM.insert name (usertype, loc) hashmap) HM.empty
       g (TypeDef name (TypeDecl _ _) loc) = (name, loc)
   taTable <- typeAliasTableFromProg' typeList baseMap HM.empty
-  let tableKeys = HM.keys taTable
-      expandUserTypes hashmap key =
+  let expandUserTypes hashmap (key, (_, loc)) =
         case HM.lookup key taTable of
           Just (ut,_) -> do
             ut' <- expandType' ut taTable
             return $ HM.insert key ut' hashmap
-          Nothing -> Left $ UndefinedAlias' key
-  foldM expandUserTypes HM.empty tableKeys
+          Nothing -> Left $ UndefinedAlias loc key
+  foldM expandUserTypes HM.empty $ HM.toList taTable
 
 typeAliasTableFromProg' :: [(Name, SrcLoc)]
                         -> HM.HashMap Name (UserType vn, SrcLoc)
@@ -1538,19 +1533,19 @@ typeBaseFromUserType :: (Name, UserType vn, SrcLoc)
                      -> Either TypeError (UserType vn)
 typeBaseFromUserType (name, utype, loc) hashmap unknowns =
   case utype of
-    UserPrim somePrim -> Right $ UserPrim somePrim
-    UserArray someType shape uniq ->
+    UserPrim somePrim loc2 -> Right $ UserPrim somePrim loc2
+    UserArray someType shape uniq loc2 ->
       case typeBaseFromUserType (name, someType, loc) hashmap unknowns of
         Left e -> Left e
         Right someTypeBase -> do
           res <- typeBaseFromUserType (name, someTypeBase, loc) hashmap unknowns
-          Right $ UserArray res shape uniq
-    UserTuple someTypes ->
+          Right $ UserArray res shape uniq loc2
+    UserTuple someTypes loc2 ->
       case typeBasesFromUserTypes (name, someTypes, loc) hashmap unknowns of
         Left e -> Left e
-        Right typeBases -> Right $ UserTuple typeBases
-    UserTypeAlias someAlias
-      | someAlias `elem` unknowns -> Left $ CyclicalTypeDefinition loc name
+        Right typeBases -> Right $ UserTuple typeBases loc2
+    UserTypeAlias someAlias loc2
+      | someAlias `elem` unknowns -> Left $ CyclicalTypeDefinition loc2 name
       | otherwise -> typeBaseFromTypeAlias (someAlias, loc) hashmap unknowns
 
 typeBaseFromTypeAlias :: (Name, SrcLoc)
@@ -1559,17 +1554,17 @@ typeBaseFromTypeAlias :: (Name, SrcLoc)
                       -> Either TypeError (UserType vn)
 typeBaseFromTypeAlias (name, loc) hashmap unknowns =
   case HM.lookup name hashmap
-    of Just (UserPrim somePrim, _) -> Right $ UserPrim somePrim
-       Just (UserArray someType shape uniq, _) ->
+    of Just (UserPrim somePrim loc2, _) -> Right $ UserPrim somePrim loc2
+       Just (UserArray someType shape uniq loc2, _) ->
          case typeBaseFromUserType (name, someType, loc) hashmap unknowns of
-           Right someTypes -> Right $ UserArray someTypes shape uniq
+           Right someTypes -> Right $ UserArray someTypes shape uniq loc2
            Left err -> Left err
-       Just (UserTuple someTypes, otherloc) ->
+       Just (UserTuple someTypes loc2, otherloc) ->
          case typeBasesFromUserTypes (name, someTypes, otherloc) hashmap unknowns of
            Left err -> Left err
-           Right types -> Right $ UserTuple types
-       Just (UserTypeAlias someAlias, _) ->
-         typeBaseFromUserType (name, UserTypeAlias someAlias, loc) hashmap $ name:unknowns
+           Right types -> Right $ UserTuple types loc2
+       Just (UserTypeAlias someAlias loc2, _) ->
+         typeBaseFromUserType (name, UserTypeAlias someAlias loc2, loc) hashmap $ name:unknowns
        Nothing -> Left $ UndefinedAlias loc name
 
 typeBasesFromUserTypes :: (Name, [UserType vn], SrcLoc)
@@ -1595,33 +1590,33 @@ checkEitherList somelist =
 expandType' :: UserType vn
             -> AliasMap vn
             -> Either TypeError (TypeBase ShapeDecl NoInfo vn)
-expandType' (UserPrim prim) _ = Right $ Prim prim
-expandType' (UserArray someType shape uni) taTable = do
+expandType' (UserPrim prim _) _ = Right $ Prim prim
+expandType' (UserArray someType shape uni _) taTable = do
   t <- expandArrayType someType shape uni taTable
   return $ Array t
-expandType' (UserTuple types) taTable = do
+expandType' (UserTuple types _) taTable = do
   let ts = map (`expandType'` taTable) types
   ts' <- checkEitherList ts
   return $ Tuple ts'
-expandType' (UserTypeAlias alias) taTable =
+expandType' (UserTypeAlias alias loc) taTable =
   case HM.lookup alias taTable of
     Just (t,_)
       -> expandType' t taTable
     Nothing
-      -> Left $ UndefinedAlias' alias
+      -> Left $ UndefinedAlias loc alias
 
 expandArrayType :: UserType vn
                 -> ShapeDecl vn
                 -> Uniqueness
                 -> AliasMap vn
                 -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo vn)
-expandArrayType (UserTypeAlias a) s u taTable =
+expandArrayType (UserTypeAlias a loc) s u taTable =
   case HM.lookup a taTable of
     Just (t, _) -> expandArrayType t s u taTable
-    Nothing -> Left $ UndefinedAlias' a
-expandArrayType (UserPrim prim) s u _ =
+    Nothing -> Left $ UndefinedAlias loc a
+expandArrayType (UserPrim prim _) s u _ =
   return $ PrimArray prim s u NoInfo
-expandArrayType (UserTuple types) s u taTable = do
+expandArrayType (UserTuple types _) s u taTable = do
   let ts = map (`expandTupleArrayType` taTable) types
   ts' <- checkEitherList ts
   return $ TupleArray ts' s u
@@ -1630,16 +1625,16 @@ expandArrayType _ _ _ _ = Left $ DebugError "tried to expandArrayType with empty
 expandTupleArrayType :: UserType vn
                      -> AliasMap vn
                      -> Either TypeError (TupleArrayElemTypeBase ShapeDecl NoInfo vn)
-expandTupleArrayType (UserTypeAlias a) taTable =
+expandTupleArrayType (UserTypeAlias a loc) taTable =
   case HM.lookup a taTable of
     Just (t, _) -> expandTupleArrayType t taTable
-    Nothing -> Left $ UndefinedAlias' a
-expandTupleArrayType (UserPrim p) _ =
+    Nothing -> Left $ UndefinedAlias loc a
+expandTupleArrayType (UserPrim p _) _ =
   return $ PrimArrayElem p NoInfo Nonunique
-expandTupleArrayType (UserArray t shape uni) taTable = do
+expandTupleArrayType (UserArray t shape uni _) taTable = do
   t' <- expandArrayType t shape uni taTable
   return $ ArrayArrayElem t'
-expandTupleArrayType (UserTuple types) taTable = do
+expandTupleArrayType (UserTuple types _) taTable = do
   let ts = map (`expandTupleArrayType` taTable) types
   ret <- checkEitherList ts
   return $ TupleArrayElem ret
@@ -1656,16 +1651,16 @@ expandParam (Param name (TypeDecl utype _) loc) taTable = do
 expandType2 :: UserType VName
             -> TypeAliasMap
             -> Either TypeError (TypeBase ShapeDecl NoInfo VName)
-expandType2 (UserTypeAlias name) taTable =
+expandType2 (UserTypeAlias name loc) taTable =
   case HM.lookup name taTable of
     Just t -> Right t
-    Nothing -> Left $ UndefinedAlias' name
-expandType2 (UserTuple ts) taTable = do
+    Nothing -> Left $ UndefinedAlias loc name
+expandType2 (UserTuple ts _) taTable = do
   ts' <- checkEitherList $ map f ts
   Right $ Tuple ts'
   where f t = expandType2 t taTable
-expandType2 (UserPrim prim) _ = Right $ Prim prim
-expandType2 (UserArray someType shape uni) taTable = do
+expandType2 (UserPrim prim _) _ = Right $ Prim prim
+expandType2 (UserArray someType shape uni _) taTable = do
   t <- expandArrayType2 someType shape uni taTable
   Right $ Array t
 
@@ -1674,13 +1669,13 @@ expandArrayType2 :: UserType VName
                  -> Uniqueness
                  -> TypeAliasMap
                  -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo VName)
-expandArrayType2 (UserTypeAlias a) s u taTable =
+expandArrayType2 (UserTypeAlias a loc) s u taTable =
   case HM.lookup a taTable of
     Just t -> expandArrayType2' t s u taTable
-    Nothing -> Left $ UndefinedAlias' a
-expandArrayType2 (UserPrim prim) s u _ =
+    Nothing -> Left $ UndefinedAlias loc a
+expandArrayType2 (UserPrim prim _) s u _ =
   return $ PrimArray prim s u NoInfo
-expandArrayType2 (UserTuple types) s u taTable =
+expandArrayType2 (UserTuple types _) s u taTable =
   let ts = map (`expandTupleArrayType2` taTable) types
    in do
     ts' <- checkEitherList ts
@@ -1708,16 +1703,16 @@ expandArrayType2' _ _ _ _ =
 expandTupleArrayType2 :: UserType VName
                       -> TypeAliasMap
                       -> Either TypeError (TupleArrayElemTypeBase ShapeDecl NoInfo VName)
-expandTupleArrayType2 (UserTypeAlias a) taTable =
+expandTupleArrayType2 (UserTypeAlias a loc) taTable =
   case HM.lookup a taTable of
     Just t -> expandTupleArrayType2' t taTable
-    Nothing -> Left $ UndefinedAlias' a
-expandTupleArrayType2 (UserPrim p) _ =
+    Nothing -> Left $ UndefinedAlias loc a
+expandTupleArrayType2 (UserPrim p _) _ =
   return $ PrimArrayElem p NoInfo Nonunique
-expandTupleArrayType2 (UserArray t shape uni) taTable = do
+expandTupleArrayType2 (UserArray t shape uni _) taTable = do
   t' <- expandArrayType2 t shape uni taTable
   return $ ArrayArrayElem t'
-expandTupleArrayType2 (UserTuple types) taTable = do
+expandTupleArrayType2 (UserTuple types _) taTable = do
     let ts = map (`expandTupleArrayType2` taTable) types
     ret <- checkEitherList ts
     return $ TupleArrayElem ret
