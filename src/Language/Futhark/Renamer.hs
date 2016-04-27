@@ -12,9 +12,6 @@ module Language.Futhark.Renamer
   , untagProg
   , untagExp
   , untagPattern
-
-  -- * Renaming
-  , renameDeclType
   )
   where
 
@@ -95,7 +92,7 @@ declRepl :: (Eq f, Hashable f) =>
          -> RenameM f t (ParamBase NoInfo t)
 declRepl (Param name (TypeDecl tp NoInfo) loc) = do
   name' <- replName name
-  tp' <- renameDeclType' tp
+  tp' <- renameUserType tp
   return $ Param name' (TypeDecl tp' NoInfo) loc
 
 replName :: (Eq f, Hashable f) => f -> RenameM f t t
@@ -134,7 +131,7 @@ renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
 renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
   bindParams params $
     FunDef entry fname <$>
-    (TypeDecl <$> renameDeclType' ret <*> pure NoInfo) <*>
+    (TypeDecl <$> renameUserType ret <*> pure NoInfo) <*>
     mapM declRepl params <*>
     renameExp body <*>
     pure pos
@@ -142,7 +139,7 @@ renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
 renameTypeAlias (TypeDef name (TypeDecl t NoInfo) loc) = do
-  t' <- renameDeclType' t
+  t' <- renameUserType t
   return $ TypeDef name (TypeDecl t' NoInfo) loc
 
 renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
@@ -197,43 +194,17 @@ renameExp (Stream form lam arr pos) = do
   return $ Stream form' lam' arr' pos
 renameExp e = mapExpM rename e
 
-
-renameDeclType :: (Eq f, Hashable f) =>
-                  TypeBase ShapeDecl NoInfo f
-               -> RenameM f t (TypeBase ShapeDecl NoInfo t)
-renameDeclType = renameTypeGeneric
-                 (fmap ShapeDecl . mapM renameDim . shapeDims)
-                 (const $ return NoInfo)
-  where renameDim AnyDim       = return AnyDim
-        renameDim (NamedDim v) = NamedDim <$> replName v
-        renameDim (ConstDim n) = return $ ConstDim n
-
-renameDeclType' :: (Eq f, Hashable f) =>
+renameUserType :: (Eq f, Hashable f) =>
                    UserType f
                 -> RenameM f t (UserType t)
-renameDeclType' = renameTypeGeneric'
-                 (fmap ShapeDecl . mapM renameDim . shapeDims)
+renameUserType (UserPrim bt loc) = return $ UserPrim bt loc
+renameUserType (UserTuple ts loc) = UserTuple <$> mapM renameUserType ts <*> pure loc
+renameUserType (UserTypeAlias name loc) = return $ UserTypeAlias name loc
+renameUserType (UserArray at d u loc) =
+  UserArray <$> renameUserType at <*> renameDim d <*> pure u <*> pure loc
   where renameDim AnyDim       = return AnyDim
         renameDim (NamedDim v) = NamedDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n
-
-
-renameTypeGeneric' :: (Eq f, Hashable f) =>
-                     (ShapeDecl f -> RenameM f t (ShapeDecl t))
-                   -> UserType f
-                   -> RenameM f t (UserType t)
-renameTypeGeneric' renameShape = renameType'
-  where
-        renameType' (UserPrim bt loc) = return $ UserPrim bt loc
-        renameType' (UserTuple ts loc) = UserTuple <$> mapM renameType' ts <*> pure loc
-        renameType' (UserTypeAlias name loc) = return $ UserTypeAlias name loc
-        renameType' array = renameUserArray array
-
-        renameUserArray (UserArray at shape uni loc) = do
-          at'    <- renameType' at
-          shape' <- renameShape shape
-          return $ UserArray at' shape' uni loc
-        renameUserArray a = renameType' a
 
 renameCompType :: (Eq f, Hashable f, Eq t, Hashable t) =>
                   CompTypeBase f
@@ -285,7 +256,7 @@ renameLambda (AnonymFun params body (TypeDecl ret NoInfo) pos) =
   bindNames (map paramName params) $ do
     params' <- mapM declRepl params
     body' <- renameExp body
-    ret' <- renameDeclType' ret
+    ret' <- renameUserType ret
     return (AnonymFun params' body' (TypeDecl ret' NoInfo) pos)
 renameLambda (CurryFun fname curryargexps NoInfo pos) = do
   curryargexps' <- mapM renameExp curryargexps

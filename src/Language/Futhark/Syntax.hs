@@ -223,7 +223,7 @@ type CompTypeBase = TypeBase Rank Names
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
 data UserType vn = UserPrim PrimType SrcLoc
-                 | UserArray (UserType vn) (ShapeDecl vn) Uniqueness SrcLoc
+                 | UserArray (UserType vn) (DimDecl vn) Uniqueness SrcLoc
                  | UserTuple [UserType vn] SrcLoc
                  | UserTypeAlias Name SrcLoc
     deriving (Show)

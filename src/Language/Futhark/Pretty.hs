@@ -120,10 +120,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) wh
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserPrim et _) = ppr et
-  ppr (UserArray at (ShapeDecl sh) uniq _) = ppr at <> apply (map f sh) <> ppr uniq
-    where f AnyDim = text ""
-          f (NamedDim v) = ppr v
-          f (ConstDim n) = ppr n
+  ppr (UserArray at d uniq _) = ppr uniq <> brackets (ppr at <> f d)
+    where f AnyDim = mempty
+          f (NamedDim v) = comma <+> ppr v
+          f (ConstDim n) = comma <+> ppr n
   ppr (UserTuple ts _) = braces $ commasep $ map ppr ts
   ppr (UserTypeAlias name _) = ppr name
 

@@ -1591,8 +1591,8 @@ expandType' :: UserType vn
             -> AliasMap vn
             -> Either TypeError (TypeBase ShapeDecl NoInfo vn)
 expandType' (UserPrim prim _) _ = Right $ Prim prim
-expandType' (UserArray someType shape uni _) taTable = do
-  t <- expandArrayType someType shape uni taTable
+expandType' (UserArray someType d uni _) taTable = do
+  t <- expandArrayType someType (ShapeDecl [d]) uni taTable
   return $ Array t
 expandType' (UserTuple types _) taTable = do
   let ts = map (`expandType'` taTable) types
@@ -1631,8 +1631,8 @@ expandTupleArrayType (UserTypeAlias a loc) taTable =
     Nothing -> Left $ UndefinedAlias loc a
 expandTupleArrayType (UserPrim p _) _ =
   return $ PrimArrayElem p NoInfo Nonunique
-expandTupleArrayType (UserArray t shape uni _) taTable = do
-  t' <- expandArrayType t shape uni taTable
+expandTupleArrayType (UserArray t d uni _) taTable = do
+  t' <- expandArrayType t (ShapeDecl [d]) uni taTable
   return $ ArrayArrayElem t'
 expandTupleArrayType (UserTuple types _) taTable = do
   let ts = map (`expandTupleArrayType` taTable) types
@@ -1660,8 +1660,8 @@ expandType2 (UserTuple ts _) taTable = do
   Right $ Tuple ts'
   where f t = expandType2 t taTable
 expandType2 (UserPrim prim _) _ = Right $ Prim prim
-expandType2 (UserArray someType shape uni _) taTable = do
-  t <- expandArrayType2 someType shape uni taTable
+expandType2 (UserArray someType d uni _) taTable = do
+  t <- expandArrayType2 someType (ShapeDecl [d]) uni taTable
   Right $ Array t
 
 expandArrayType2 :: UserType VName
@@ -1709,8 +1709,8 @@ expandTupleArrayType2 (UserTypeAlias a loc) taTable =
     Nothing -> Left $ UndefinedAlias loc a
 expandTupleArrayType2 (UserPrim p _) _ =
   return $ PrimArrayElem p NoInfo Nonunique
-expandTupleArrayType2 (UserArray t shape uni _) taTable = do
-  t' <- expandArrayType2 t shape uni taTable
+expandTupleArrayType2 (UserArray t d uni _) taTable = do
+  t' <- expandArrayType2 t (ShapeDecl [d]) uni taTable
   return $ ArrayArrayElem t'
 expandTupleArrayType2 (UserTuple types _) taTable = do
     let ts = map (`expandTupleArrayType2` taTable) types
