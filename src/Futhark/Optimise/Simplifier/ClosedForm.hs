@@ -28,7 +28,6 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.RuleM
 
 -- | A function that, given a variable name, returns its definition.
--- XXX: This duplicates something in Futhark.Optimise.Simplification.
 type VarLookup lore = VName -> Maybe (Exp lore)
 
 {-
