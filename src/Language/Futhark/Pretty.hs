@@ -9,9 +9,12 @@ module Language.Futhark.Pretty
   where
 
 import Data.Array
+import Data.Monoid
 import Data.Hashable
 import Data.Word
 import qualified Data.HashSet as HS
+
+import Prelude
 
 import Futhark.Util.Pretty
 
