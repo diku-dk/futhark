@@ -15,7 +15,6 @@ import qualified Data.Text as T
 import Prelude
 
 import System.Console.GetOpt
-import System.IO
 import System.Random
 
 import Language.Futhark.Syntax
