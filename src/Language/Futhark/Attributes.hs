@@ -563,6 +563,8 @@ typeOf (Literal val _) = fromStruct $ valueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
+typeOf (Empty _ (Info t) _) =
+  arrayType 1 t Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (UnOp Not _ _) = Prim Bool
 typeOf (UnOp Negate e _) = typeOf e

@@ -4,7 +4,7 @@ module Language.Futhark.Parser.Parser
   ( prog
   , expression
   , lambda
-  , futharktype
+  , futharkType
   , anyValue
   , anyValues
   , ParserEnv (..)
@@ -41,9 +41,9 @@ import Language.Futhark.Parser.Lexer
 }
 
 %name prog Prog
+%name futharkType UserType
 %name expression Exp
 %name lambda FunAbstr
-%name futharktype Type
 %name anyValue Value
 %name anyValues CatValues
 
@@ -295,12 +295,6 @@ UserTypes :: { [UncheckedUserType] }
 UserTypes : UserType ',' UserTypes { $1 : $3 }
           | UserType               { [$1] }
           |                        { [] }
-Type :: { UncheckedType }
-        : PrimType     { Prim (fst $1) }
-        | ArrayType     { Array $1 }
-        | '{' Types '}' { Tuple $2 }
-;
-
 DimDecl :: { DimDecl Name }
         : ',' id
           { let L _ (ID name) = $2
@@ -309,36 +303,6 @@ DimDecl :: { DimDecl Name }
           { let L _ (INTLIT n) = $2
             in ConstDim (fromIntegral n) }
         | { AnyDim }
-
-ArrayType :: { UncheckedArrayType }
-          : Uniqueness '[' PrimArrayRowType DimDecl ']'
-            { let (ds, et) = $3
-              in PrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
-          | Uniqueness '[' TupleArrayRowType DimDecl ']'
-            { let (ds, et) = $3
-              in TupleArray et (ShapeDecl ($4:ds)) $1 }
-
-PrimArrayRowType : PrimType
-                    { ([], (fst $1)) }
-                 | '[' PrimArrayRowType DimDecl ']'
-                    { let (ds, et) = $2
-                       in ($3:ds, et) }
-
-TupleArrayRowType : '{' TupleArrayElemTypes '}'
-                     { ([], $2) }
-                  | '[' TupleArrayRowType DimDecl ']'
-                     { let (ds, et) = $2
-                       in ($3:ds, et) }
-
-TupleArrayElemTypes : { [] }
-                    | TupleArrayElemType
-                      { [$1] }
-                    | TupleArrayElemType ',' TupleArrayElemTypes
-                      { $1 : $3 }
-
-TupleArrayElemType : PrimType                    { PrimArrayElem (fst $1) NoInfo Nonunique }
-                   | ArrayType                   { ArrayArrayElem $1 }
-                   | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
 PrimType :: { (PrimType, SrcLoc) }
          : UnsignedType { first Unsigned $1 }
@@ -364,10 +328,6 @@ FloatType :: { (FloatType, SrcLoc) }
           | f32  { (Float32, $1) }
           | f64  { (Float64, $1) }
 
-Types : Type ',' Types { $1 : $3 }
-      | Type           { [$1] }
-      |                { [] }
-;
 Params :: { [ParamBase NoInfo Name] }
 Params : UserTypeDecl id ',' Params { let L pos (ID name) = $2 in (Param name $1 pos) : $4 }
        | UserTypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
@@ -379,7 +339,7 @@ Exp  :: { UncheckedExp }
                              t <- lift $ gets parserIntType
                              return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
      | Id %prec letprec { Var $1 }
-     | empty '(' Type ')' { Literal (emptyArray $3) $1 }
+     | empty '(' UserType ')' { Empty $3 NoInfo $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | '{' Exps '}'   { TupLit $2 $1 }
      | '{'      '}'   { TupLit [] $1 }
@@ -655,8 +615,8 @@ ArrayValue :  '[' Value ']'
                   Nothing -> throwError "Invalid array value"
                   Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) $ removeNames ts
              }
-           | empty '(' Type ')'
-             { emptyArray $3 }
+           | empty '(' PrimType ')'
+             { ArrayValue (listArray (0,-1) []) (Prim (fst $3)) }
 TupleValue : '{' Values '}' { TupValue $2 }
 
 Values : Value ',' Values { $1 : $3 }
@@ -743,10 +703,6 @@ combArrayTypes t ts = foldM comb t ts
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
-
-emptyArray :: ArrayShape (shape vn) =>
-              TypeBase shape als vn -> Value
-emptyArray = ArrayValue (listArray (0, -1) []) . removeNames . toStruct
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var ident

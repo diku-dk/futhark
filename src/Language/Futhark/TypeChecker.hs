@@ -701,6 +701,12 @@ checkExp (ArrayLit es _ loc) = do
 
   return $ ArrayLit es' (Info et) loc
 
+checkExp (Empty t NoInfo loc) = do
+  ta <- asks envTAtable
+  case expandType2 t ta of
+    Left e -> bad e
+    Right t' -> pure $ Empty t (Info $ removeShapeAnnotations t' `setAliases` mempty) loc
+
 checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
 checkExp (UnOp Not e pos) = do

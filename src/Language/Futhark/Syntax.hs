@@ -367,6 +367,8 @@ data ExpBase f vn =
 
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
 
+            | Empty (UserType vn) (f (CompTypeBase vn)) SrcLoc
+
             | Var    (IdentBase f vn)
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
             -- Second arg is the type of of the rows of the array (not
@@ -506,6 +508,7 @@ instance Located (ExpBase f vn) where
   locOf (Literal _ loc) = locOf loc
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
+  locOf (Empty _ _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
   locOf (UnOp _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos

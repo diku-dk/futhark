@@ -43,6 +43,7 @@ data MapperBase f vnf vnt m = Mapper {
   , mapOnType :: CompTypeBase vnf -> m (CompTypeBase vnt)
   , mapOnPattern :: PatternBase f vnf -> m (PatternBase f vnt)
   , mapOnIdent :: IdentBase f vnf -> m (IdentBase f vnt)
+  , mapOnName :: vnf -> m vnt
   , mapOnValue :: Value -> m Value
   }
 
@@ -60,6 +61,8 @@ mapExpM tv (TupLit els loc) =
   pure TupLit <*> mapM (mapOnExp tv) els <*> pure loc
 mapExpM tv (ArrayLit els elt loc) =
   pure ArrayLit <*> mapM (mapOnExp tv) els <*> mapTypeM tv elt <*> pure loc
+mapExpM tv (Empty ut elt loc) =
+  pure Empty <*> mapUserTypeM tv ut <*> mapTypeM tv elt <*> pure loc
 mapExpM tv (BinOp bop x y t loc) =
   pure (BinOp bop) <*>
          mapOnExp tv x <*> mapOnExp tv y <*>
@@ -158,6 +161,26 @@ mapLoopFormM tv (For FromDownTo lbound i ubound) =
   For FromDownTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
+
+mapUserTypeM :: (Applicative m, Monad m) =>
+                MapperBase f vnf vnt m
+             -> UserType vnf
+             -> m (UserType vnt)
+mapUserTypeM _ (UserPrim bt loc) = pure $ UserPrim bt loc
+mapUserTypeM tv (UserArray t d u loc) =
+  UserArray <$> mapUserTypeM tv t <*> mapDimDecl tv d <*> pure u <*> pure loc
+mapUserTypeM tv (UserTuple ts loc) =
+  UserTuple <$> mapM (mapUserTypeM tv) ts <*> pure loc
+mapUserTypeM _ (UserTypeAlias name loc) =
+  pure $ UserTypeAlias name loc
+
+mapDimDecl :: (Applicative m, Monad m) =>
+              MapperBase f vnf vnt m
+           -> DimDecl vnf
+           -> m (DimDecl vnt)
+mapDimDecl tv (NamedDim vn) = NamedDim <$> mapOnName tv vn
+mapDimDecl _ (ConstDim k) = pure $ ConstDim k
+mapDimDecl _ AnyDim = pure AnyDim
 
 mapTypeM :: (Applicative m, Monad m, Traversable f) =>
             MapperBase f vnf vnt m
