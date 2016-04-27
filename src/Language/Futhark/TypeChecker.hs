@@ -344,7 +344,7 @@ newIdent s t loc = do
 newParam :: String -> Type -> SrcLoc -> TypeM (ParamBase NoInfo VName)
 newParam s t loc = do
   s' <- newIDFromString s
-  return $ Param s' (TypeDecl (vacuousShapeAnnotations' $ toStruct t) NoInfo) loc
+  return $ Param s' (TypeDecl (contractTypeBase t) NoInfo) loc
 
 liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
@@ -1374,7 +1374,7 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
                   tuplet = LetPat (TuplePattern (map (Id . untype) params) pos)
                            (Var $ Ident paramname NoInfo pos) body pos
                   tupfun = AnonymFun [tupparam] tuplet
-                           (TypeDecl (vacuousShapeAnnotations' rt) NoInfo) pos
+                           (TypeDecl (contractTypeBase rt) NoInfo) pos
                   body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
                          NoInfo pos
@@ -1388,7 +1388,7 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
               params <- zipWithM mkparam [(0::Int)..] $
                         drop (length curryargs) paramtypes'
               let fun = AnonymFun params body
-                        (TypeDecl (vacuousShapeAnnotations' rt) NoInfo) pos
+                        (TypeDecl (contractTypeBase rt) NoInfo) pos
                   body = Apply fname (zip (curryargexps++map (Var . asIdent) params) $
                                       map diet paramtypes)
                          NoInfo pos
