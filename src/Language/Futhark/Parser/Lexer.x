@@ -150,6 +150,7 @@ keyword s =
     "streamSeq"    -> STREAM_SEQ
     "write"        -> WRITE
     "include"      -> INCLUDE
+    "type"         -> TYPE
     "entry"        -> ENTRY
     _              -> ID $ nameFromText s
 
@@ -292,7 +293,7 @@ data Token = IF
            | WRITE
            | INCLUDE
            | ENTRY
-
+           | TYPE
            | EOF
              deriving (Show, Eq)
 

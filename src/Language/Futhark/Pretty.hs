@@ -118,6 +118,15 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) wh
   ppr (Array at) = ppr at
   ppr (Tuple ts) = braces $ commasep $ map ppr ts
 
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
+  ppr (UserPrim et) = ppr et
+  ppr (UserArray at (ShapeDecl sh) uniq) = ppr at <> apply (map f sh) <> ppr uniq
+    where f AnyDim = text ""
+          f (NamedDim v) = ppr v
+          f (ConstDim n) = ppr n
+  ppr (UserTuple ts) = braces $ commasep $ map ppr ts
+  ppr (UserTypeAlias name) = ppr name
+
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Prim et) = ppr et
   ppr (Array at) = ppr at
@@ -305,8 +314,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBa
     ppr binop <+> ppr x
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase ty vn) where
-  ppr = stack . punctuate line . map ppFun . progFunctions
-    where ppFun (FunDef entry name rettype args body _) =
+  ppr = stack . punctuate line . map ppDec . progFunctions
+    where ppDec (FunDef entry name rettype args body _) =
             text fun <+> ppr rettype <+>
             text (nameToString name) <//>
             apply (map ppParam args) <+>

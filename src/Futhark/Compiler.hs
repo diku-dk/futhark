@@ -85,6 +85,7 @@ runPipelineOnSource :: FutharkConfig
                     -> FutharkM (Prog tolore)
 runPipelineOnSource config pipeline filename srccode = do
   parsed_prog <- parseSourceProgram filename srccode
+
   (tagged_ext_prog, namesrc) <- typeCheckSourceProgram parsed_prog
   putNameSource namesrc
   res <- internaliseProg tagged_ext_prog
