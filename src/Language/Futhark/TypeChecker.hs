@@ -563,8 +563,8 @@ rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
 -- information.
 checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
 checkProg prog = do
-  ftable <- buildFtable
   ttable <- buildTypeAliasTable
+  ftable <- buildFtable ttable
   let typeenv = Scope { envVtable = HM.empty
                       , envFtable = ftable
                       , envTAtable = ttable
@@ -577,7 +577,6 @@ checkProg prog = do
 
     (prog', src) = tagProg' blankNameSource prog
     buildTypeAliasTable = typeAliasTableFromProg prog'
-    taTable = typeAliasTableFromProg prog'
 
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
@@ -586,18 +585,17 @@ checkProg prog = do
     -- duplicate function definitions.  The position information is
     -- removed at the end.
 
-    buildFtable = HM.map rmLoc <$>
-                  foldM expand (HM.map addLoc initialFtable)
-                  (progFunctions prog')
-    expand ftable (FunDef _ name (TypeDecl ret NoInfo) args _ pos)
+    buildFtable ttable = HM.map rmLoc <$>
+                         foldM (expand ttable) (HM.map addLoc initialFtable)
+                         (progFunctions prog')
+    expand ttable ftable (FunDef _ name (TypeDecl ret NoInfo) args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
       | otherwise = do
-        taTable' <- taTable
         let argtypes = map paramDeclaredType args -- Throw away argument names.
-        ret' <- expandType2 ret taTable'
+        ret' <- expandType2 ret ttable
          -- ret' <- expandType' ret table
-        argtypes' <- checkEitherList $ map (`expandType2` taTable') argtypes
+        argtypes' <- checkEitherList $ map (`expandType2` ttable) argtypes
         return $ HM.insert name (ret' , argtypes' , pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
