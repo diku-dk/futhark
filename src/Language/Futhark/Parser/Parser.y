@@ -279,21 +279,9 @@ UserTypeDecl :: { TypeDeclBase NoInfo Name }
               : UserType { TypeDecl $1 NoInfo }
 
 UserTypeAlias :: { TypeDefBase NoInfo Name }
-UserTypeAlias  : type id '=' UserTypeWAliasDecl { let L pos (ID name) = $2 in TypeDef name $4 pos}
-
-UserTypeWAliasDecl :: { UncheckedUserTypeDecl }
-                    : UserTypeWAlias { TypeDecl $1 NoInfo }
-
-UserTypeWAlias :: { UserType Name }
-UserTypeWAlias : PrimType { let (t,loc) = $1 in UserPrim t loc }
-               | UserArrayTypeWAlias { $1 }
-               | '{' UserTypesWAlias '}' { UserTuple $2 $1 }
-               | id { let L loc (ID name) = $1 in UserTypeAlias name loc }
-
-UserTypesWAlias :: { [ UserType Name ] }
-UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
-                | UserTypeWAlias { [$1] }
-                | {[]}
+UserTypeAlias  : type id '=' UserType { let L loc (ID name) = $2
+                                        in TypeDef name (TypeDecl $4 NoInfo) loc
+                                      }
 
 UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
@@ -305,7 +293,7 @@ UserType :: { UncheckedUserType }
 UserTypes :: { [UncheckedUserType] }
 UserTypes : UserType ',' UserTypes { $1 : $3 }
           | UserType               { [$1] }
-          | {[]}
+          |                        { [] }
 UserArrayType :: { UserType Name }
 UserArrayType  : Uniqueness '[' UserArrayRowType DimDecl ']'
                 { let (ds, et) = $3
@@ -316,17 +304,6 @@ UserArrayRowType : UserType { ([], $1) }
                  | '[' UserArrayRowType DimDecl ']'
                    { let (ds, et) = $2
                       in ($3:ds, et) }
-
-UserArrayTypeWAlias :: { UserType Name }
-UserArrayTypeWAlias : Uniqueness '[' UserArrayWAliasRowType ']'
-                    { let (ds, et) = $3
-                        in UserArray et (ShapeDecl $ AnyDim:ds ) $1 $2 }
-
-UserArrayWAliasRowType :: { ([DimDecl Name] , UserType Name ) }
-UserArrayWAliasRowType : UserTypeWAlias { ([], $1) }
-                       | '[' UserArrayWAliasRowType ']'
-                         { let (ds, et) = $2
-                            in ( AnyDim : ds, et) }
 
 Type :: { UncheckedType }
         : PrimType     { Prim (fst $1) }
