@@ -110,9 +110,6 @@ data TypeError =
   -- ^ Type alias is referenced, but not defined
   | DupTypeAlias SrcLoc Name
   -- ^ Type alias has been defined twice
-  | ArrayArrayError String
-  | UnusedCase
-  | DebugError String
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -210,9 +207,7 @@ instance Show TypeError where
     ++ ", but not defined."
   show (DupTypeAlias loc name) =
     "Type alias '" ++ nameToString name ++ "' defined twice at line " ++ show loc
-  show (ArrayArrayError str) = show str
-  show UnusedCase = "This case is not actually used."
-  show (DebugError str) = show str
+
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
 
