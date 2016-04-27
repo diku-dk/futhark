@@ -36,7 +36,7 @@
 (add-to-list 'auto-mode-alist '("\\.fut\\'" . futhark-mode))
 
 (defconst futhark-keywords
-  '("if" "then" "else" "let" "loop" "in" "with"
+  '("if" "then" "else" "let" "loop" "in" "with" "type"
     "fun" "entry" "fn" "for" "while" "do" "do" "op" "not" "pow"
     "iota" "shape" "replicate" "reshape" "transpose" "map" "reduce" "reduceComm"
     "zip" "unzip" "zipWith"
