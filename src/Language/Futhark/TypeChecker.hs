@@ -1677,7 +1677,16 @@ expandArrayType2 :: UserType VName
                  -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo VName)
 expandArrayType2 (UserTypeAlias a loc) s u taTable =
   case HM.lookup a taTable of
-    Just t -> expandArrayType2' t s u taTable
+    Just (Prim p) ->
+      return $ PrimArray p s u NoInfo
+    Just (Tuple types) -> do
+      let ts = map (`expandTupleArrayType2'` taTable) types
+      ts' <- checkEitherList ts
+      return $ TupleArray ts' s u
+    Just (Array (PrimArray bt shape _ NoInfo)) ->
+      return $ PrimArray bt (s <> shape) u NoInfo
+    Just (Array (TupleArray ts shape _)) ->
+      return $ TupleArray ts (s <> shape) u
     Nothing -> Left $ UndefinedAlias loc a
 expandArrayType2 (UserPrim prim _) s u _ =
   return $ PrimArray prim s u NoInfo
@@ -1693,23 +1702,6 @@ expandArrayType2 (UserArray t d _ _) s u taTable = do
       return $ PrimArray bt (s <> shape) u NoInfo
     TupleArray ts shape _ ->
       return $ TupleArray ts (s <> shape) u
-
-expandArrayType2' :: TypeBase ShapeDecl NoInfo VName
-                  -> ShapeDecl VName
-                  -> Uniqueness
-                  -> TypeAliasMap
-                  -> Either TypeError (ArrayTypeBase ShapeDecl NoInfo VName)
-expandArrayType2' (Prim p) s u _ =
-  return $ PrimArray p s u NoInfo
-expandArrayType2' (Tuple types) s u taTable =
-  let ts = map (`expandTupleArrayType2'` taTable) types
-   in do
-    ts' <- checkEitherList ts
-    return $ TupleArray ts' s u
-expandArrayType2' _ _ _ _ =
-  Left $ DebugError "tried to expandArrayType2' with neither prim nor tuple"
-
-
 
 expandTupleArrayType2 :: UserType VName
                       -> TypeAliasMap
