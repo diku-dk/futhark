@@ -530,9 +530,6 @@ commonTransforms' inps =
 
 mapDepth :: MapNest -> Int
 mapDepth (MapNest.MapNest _ _ lam levels _) =
-  -- XXX: The restriction to pure nests is conservative, but we cannot
-  -- know whether an arbitrary postbody is dependent on the exact size
-  -- of the nesting result.
   min resDims (length levels) + 1
   where resDims = minDim $ case levels of
                     [] -> lambdaReturnType lam
