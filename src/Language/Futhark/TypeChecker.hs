@@ -1606,10 +1606,8 @@ expandType' (UserTuple types _) taTable = do
   return $ Tuple ts'
 expandType' (UserTypeAlias alias loc) taTable =
   case HM.lookup alias taTable of
-    Just (t,_)
-      -> expandType' t taTable
-    Nothing
-      -> Left $ UndefinedAlias loc alias
+    Just (t,_) -> expandType' t taTable
+    Nothing -> Left $ UndefinedAlias loc alias
 
 expandArrayType :: UserType vn
                 -> ShapeDecl vn
@@ -1696,11 +1694,10 @@ expandArrayType2 (UserTypeAlias a loc) s u taTable =
     Nothing -> Left $ UndefinedAlias loc a
 expandArrayType2 (UserPrim prim _) s u _ =
   return $ PrimArray prim s u NoInfo
-expandArrayType2 (UserTuple types _) s u taTable =
+expandArrayType2 (UserTuple types _) s u taTable = do
   let ts = map (`expandTupleArrayType2` taTable) types
-   in do
-    ts' <- checkEitherList ts
-    return $ TupleArray ts' s u
+  ts' <- checkEitherList ts
+  return $ TupleArray ts' s u
 expandArrayType2 (UserArray t d _ _) s u taTable = do
   t' <- expandArrayType2 t (ShapeDecl [d]) u taTable
   case t' of
