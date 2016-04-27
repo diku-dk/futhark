@@ -829,7 +829,7 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
         ext_params <- forM ext_param_ts $ \param_t -> do
           name <- newVName "not_curried"
           return E.Param { E.paramName = name
-                         , E.paramTypeDecl = TypeDecl undefined $ Info param_t
+                         , E.paramTypeDecl = typeToTypeDecl param_t
                          , E.paramSrcLoc = noLoc
                          }
         bindingParams ext_params $ \shape_params value_params -> do
@@ -854,28 +854,28 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
 
 internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
-  internaliseLambda (E.AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
+  internaliseLambda (E.AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
-  internaliseLambda (AnonymFun params body (TypeDecl undefined $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let t = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info t
+      param = E.Param { E.paramTypeDecl = typeToTypeDecl t
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
@@ -889,12 +889,12 @@ binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
   let xtype' = E.vacuousShapeAnnotations $ E.toStruct xtype
-      param_x = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info xtype'
+      param_x = E.Param { E.paramTypeDecl = typeToTypeDecl xtype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = x_name
                         }
       ytype' = E.vacuousShapeAnnotations $ E.toStruct ytype
-      param_y = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info ytype'
+      param_y = E.Param { E.paramTypeDecl = typeToTypeDecl ytype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = y_name
                         }
@@ -910,7 +910,7 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let paramtype' = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = TypeDecl undefined $ Info paramtype'
+      param = E.Param { E.paramTypeDecl = typeToTypeDecl paramtype'
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
@@ -918,6 +918,10 @@ binOpCurriedToLambda op paramtype rettype e swap = do
   return ([param],
           E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
+
+typeToTypeDecl :: E.TypeBase ShapeDecl NoInfo VName
+               -> E.TypeDeclBase Info VName
+typeToTypeDecl t = TypeDecl (E.contractTypeBase t) $ Info t
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.
