@@ -1626,7 +1626,13 @@ expandArrayType (UserTuple types _) s u taTable = do
   let ts = map (`expandTupleArrayType` taTable) types
   ts' <- checkEitherList ts
   return $ TupleArray ts' s u
-expandArrayType _ _ _ _ = Left $ DebugError "tried to expandArrayType with empty"
+expandArrayType (UserArray t d _ _) s u taTable = do
+  t' <- expandArrayType t (ShapeDecl [d]) u taTable
+  case t' of
+    PrimArray bt shape _ NoInfo ->
+      return $ PrimArray bt (s <> shape) u NoInfo
+    TupleArray ts shape _ ->
+      return $ TupleArray ts (s <> shape) u
 
 expandTupleArrayType :: UserType vn
                      -> AliasMap vn
