@@ -107,8 +107,8 @@ arrayShape _                             = mempty
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
 arrayShape' :: UserType vn -> ShapeDecl vn
-arrayShape' (UserArray _ ds _ _) = ds
-arrayShape' _                    = mempty
+arrayShape' (UserArray t d _ _) = ShapeDecl [d] <> arrayShape' t
+arrayShape' _                   = mempty
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
 arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
@@ -137,10 +137,9 @@ nestedDims t =
 
 -- | Return any shape declaration in the type, with duplicates removed.
 nestedDims' :: Ord vn => UserType vn -> [DimDecl vn]
-nestedDims' t =
-  case t of UserArray _ ds _ _ -> nub $ shapeDims ds
-            UserTuple ts _ -> nub $ mconcat $ map nestedDims' ts
-            _ -> mempty
+nestedDims' (UserArray t d _ _) = nub $ d : nestedDims' t
+nestedDims' (UserTuple ts _)    = nub $ mconcat $ map nestedDims' ts
+nestedDims' _                   = mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
@@ -758,10 +757,10 @@ contractTypeBase :: (ArrayShape (shape vn), Ord vn) =>
                  -> UserType vn
 contractTypeBase (Prim p) = UserPrim p noLoc
 contractTypeBase arrtp@(Array tps) =
-  let dimDecl = ShapeDecl $ replicate (arrayRank arrtp) AnyDim
+  let grow t d = UserArray t d uniq noLoc
       uniq = uniqueness arrtp
       arrtp' = contractArrayTypeBase tps
-  in UserArray arrtp' dimDecl uniq noLoc
+  in foldl grow arrtp' $ replicate (arrayRank arrtp) AnyDim
 contractTypeBase (Tuple types) =
   UserTuple (map contractTypeBase types) noLoc
 
