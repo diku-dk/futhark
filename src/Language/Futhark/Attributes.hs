@@ -743,7 +743,7 @@ paramType :: ParamBase Info vn
 paramType = unInfo . expandedType . paramTypeDecl
 
 paramDeclaredType :: ParamBase f vn
-                  -> StructUserType vn
+                  -> UserType vn
 paramDeclaredType = declaredType . paramTypeDecl
 
 -- | As 'patNames', but returns a the set of names (which means that

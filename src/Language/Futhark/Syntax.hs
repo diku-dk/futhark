@@ -23,7 +23,6 @@ module Language.Futhark.Syntax
   , ArrayTypeBase(..)
   , CompTypeBase
   , StructTypeBase
-  , StructUserType
   , DeclArrayTypeBase
   , DeclTupleArrayElemTypeBase
   , Diet(..)
@@ -233,7 +232,6 @@ data UserType vn = UserPrim PrimType
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
 
-type StructUserType = UserType
 type StructTypeBase = TypeBase ShapeDecl NoInfo
 
 
@@ -247,7 +245,7 @@ type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
-  TypeDecl { declaredType :: StructUserType vn
+  TypeDecl { declaredType :: UserType vn
                              -- ^ The type declared by the user.
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
