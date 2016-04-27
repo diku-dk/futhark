@@ -3,6 +3,7 @@
 -- specified type and shape.
 module Main (main) where
 
+import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
@@ -10,6 +11,8 @@ import Data.Maybe
 import Data.List
 import Data.Word
 import qualified Data.Text as T
+
+import Prelude
 
 import System.Console.GetOpt
 import System.IO
@@ -22,8 +25,6 @@ import Language.Futhark.Pretty ()
 
 import Futhark.Util.Options
 import Futhark.Util.Pretty
-
-import Prelude
 
 main :: IO ()
 main = mainWithOptions initialDataOptions commandLineOptions f
