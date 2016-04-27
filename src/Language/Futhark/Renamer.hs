@@ -245,6 +245,7 @@ rename = Mapper {
            mapOnExp = renameExp
          , mapOnPattern = renamePattern
          , mapOnIdent = repl
+         , mapOnName = replName
          , mapOnLambda = renameLambda
          , mapOnType = renameCompType
          , mapOnValue = return

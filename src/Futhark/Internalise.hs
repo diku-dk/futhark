@@ -151,6 +151,9 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
       let arraylit ks rt = I.PrimOp $ I.ArrayLit ks rt
       letSubExps desc $ zipWith arraylit (transpose es') rowtypes
 
+internaliseExp desc (E.Empty _ (Info et) loc) =
+  internaliseExp desc $ E.ArrayLit [] (Info et) loc
+
 internaliseExp desc (E.Apply fname args _ _)
   | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args

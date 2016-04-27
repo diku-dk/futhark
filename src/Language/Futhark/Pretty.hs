@@ -193,6 +193,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (TupLit es _)
     | any hasArrayLit es = braces $ commastack $ map ppr es
     | otherwise          = braces $ commasep $ map ppr es
+  pprPrec _ (Empty t _ _) =
+    text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
