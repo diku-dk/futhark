@@ -1680,8 +1680,13 @@ expandArrayType2 (UserTuple types _) s u taTable =
    in do
     ts' <- checkEitherList ts
     return $ TupleArray ts' s u
-expandArrayType2 _ _ _ _ =
-  Left $ DebugError "tried to expandArrayType2' with neither prim nor tuple"
+expandArrayType2 (UserArray t d _ _) s u taTable = do
+  t' <- expandArrayType2 t (ShapeDecl [d]) u taTable
+  case t' of
+    PrimArray bt shape _ NoInfo ->
+      return $ PrimArray bt (s <> shape) u NoInfo
+    TupleArray ts shape _ ->
+      return $ TupleArray ts (s <> shape) u
 
 expandArrayType2' :: TypeBase ShapeDecl NoInfo VName
                   -> ShapeDecl VName
