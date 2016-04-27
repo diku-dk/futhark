@@ -83,6 +83,7 @@ module Language.Futhark.Attributes
 import Control.Monad.Writer
 import Data.Hashable
 import Data.List
+import Data.Loc
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
@@ -106,8 +107,8 @@ arrayShape _                             = mempty
 
 -- | Return the shape of a type - for non-arrays, this is 'mempty'.
 arrayShape' :: UserType vn -> ShapeDecl vn
-arrayShape' (UserArray _ ds _) = ds
-arrayShape' _                  = mempty
+arrayShape' (UserArray _ ds _ _) = ds
+arrayShape' _                    = mempty
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
 arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
@@ -137,8 +138,8 @@ nestedDims t =
 -- | Return any shape declaration in the type, with duplicates removed.
 nestedDims' :: Ord vn => UserType vn -> [DimDecl vn]
 nestedDims' t =
-  case t of UserArray _ ds _ -> nub $ shapeDims ds
-            UserTuple ts -> nub $ mconcat $ map nestedDims' ts
+  case t of UserArray _ ds _ _ -> nub $ shapeDims ds
+            UserTuple ts _ -> nub $ mconcat $ map nestedDims' ts
             _ -> mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
@@ -755,30 +756,30 @@ builtInFunctions = HM.fromList $ map namify
 contractTypeBase :: (ArrayShape (shape vn), Ord vn) =>
                     TypeBase shape als vn
                  -> UserType vn
-contractTypeBase (Prim p) = UserPrim p
+contractTypeBase (Prim p) = UserPrim p noLoc
 contractTypeBase arrtp@(Array tps) =
   let dimDecl = ShapeDecl $ replicate (arrayRank arrtp) AnyDim
       uniq = uniqueness arrtp
       arrtp' = contractArrayTypeBase tps
-  in UserArray arrtp' dimDecl uniq
+  in UserArray arrtp' dimDecl uniq noLoc
 contractTypeBase (Tuple types) =
-  UserTuple $ map contractTypeBase types
+  UserTuple (map contractTypeBase types) noLoc
 
 contractArrayTypeBase :: ArrayTypeBase shape als vn
                       -> UserType vn
 contractArrayTypeBase (PrimArray p _ _ _) =
-  UserPrim p
+  UserPrim p noLoc
 contractArrayTypeBase (TupleArray tps _ _) =
-  UserTuple $ map contractTupleArrayElemTypeBase tps
+  UserTuple (map contractTupleArrayElemTypeBase tps) noLoc
 
 contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase shape als vn
                                -> UserType vn
 contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
-  UserPrim p
+  UserPrim p noLoc
 contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
   contractArrayTypeBase arrtpbase
 contractTupleArrayElemTypeBase (TupleArrayElem tps) =
-  UserTuple $ map contractTupleArrayElemTypeBase tps
+  UserTuple (map contractTupleArrayElemTypeBase tps) noLoc
 
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase ShapeDecl NoInfo Name

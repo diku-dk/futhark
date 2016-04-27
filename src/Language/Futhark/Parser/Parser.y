@@ -24,6 +24,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
+import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -284,10 +285,10 @@ UserTypeWAliasDecl :: { UncheckedUserTypeDecl }
                     : UserTypeWAlias { TypeDecl $1 NoInfo }
 
 UserTypeWAlias :: { UserType Name }
-UserTypeWAlias : PrimType { UserPrim $1 }
+UserTypeWAlias : PrimType { let (t,loc) = $1 in UserPrim t loc }
                | UserArrayTypeWAlias { $1 }
-               | '{' UserTypesWAlias '}' { UserTuple $2 }
-               | id { let L _ (ID name) = $1 in UserTypeAlias name}
+               | '{' UserTypesWAlias '}' { UserTuple $2 $1 }
+               | id { let L loc (ID name) = $1 in UserTypeAlias name loc }
 
 UserTypesWAlias :: { [ UserType Name ] }
 UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
@@ -295,10 +296,10 @@ UserTypesWAlias : UserTypeWAlias ',' UserTypesWAlias { $1 : $3 }
                 | {[]}
 
 UserType :: { UncheckedUserType }
-         : PrimType      { UserPrim $1 }
+         : PrimType      { let (t,loc) = $1 in UserPrim t loc }
          | UserArrayType     { $1 }
-         | '{' UserTypes '}' { UserTuple $2 }
-         | id            { let L pos (ID name) = $1 in UserTypeAlias name }
+         | '{' UserTypes '}' { UserTuple $2 $1 }
+         | id            { let L loc (ID name) = $1 in UserTypeAlias name loc }
 ;
 
 UserTypes :: { [UncheckedUserType] }
@@ -308,7 +309,7 @@ UserTypes : UserType ',' UserTypes { $1 : $3 }
 UserArrayType :: { UserType Name }
 UserArrayType  : Uniqueness '[' UserArrayRowType DimDecl ']'
                 { let (ds, et) = $3
-                   in UserArray et (ShapeDecl ($4:ds)) $1 }
+                   in UserArray et (ShapeDecl ($4:ds)) $1 $2 }
 
 UserArrayRowType :: { ([DimDecl Name], UserType Name) }
 UserArrayRowType : UserType { ([], $1) }
@@ -319,7 +320,7 @@ UserArrayRowType : UserType { ([], $1) }
 UserArrayTypeWAlias :: { UserType Name }
 UserArrayTypeWAlias : Uniqueness '[' UserArrayWAliasRowType ']'
                     { let (ds, et) = $3
-                        in UserArray et (ShapeDecl $ AnyDim:ds ) $1 }
+                        in UserArray et (ShapeDecl $ AnyDim:ds ) $1 $2 }
 
 UserArrayWAliasRowType :: { ([DimDecl Name] , UserType Name ) }
 UserArrayWAliasRowType : UserTypeWAlias { ([], $1) }
@@ -328,7 +329,7 @@ UserArrayWAliasRowType : UserTypeWAlias { ([], $1) }
                             in ( AnyDim : ds, et) }
 
 Type :: { UncheckedType }
-        : PrimType     { Prim $1 }
+        : PrimType     { Prim (fst $1) }
         | ArrayType     { Array $1 }
         | '{' Types '}' { Tuple $2 }
 ;
@@ -351,7 +352,7 @@ ArrayType :: { UncheckedArrayType }
               in TupleArray et (ShapeDecl ($4:ds)) $1 }
 
 PrimArrayRowType : PrimType
-                    { ([], $1) }
+                    { ([], (fst $1)) }
                  | '[' PrimArrayRowType DimDecl ']'
                     { let (ds, et) = $2
                        in ($3:ds, et) }
@@ -368,14 +369,15 @@ TupleArrayElemTypes : { [] }
                     | TupleArrayElemType ',' TupleArrayElemTypes
                       { $1 : $3 }
 
-TupleArrayElemType : PrimType                    { PrimArrayElem $1 NoInfo Nonunique }
+TupleArrayElemType : PrimType                    { PrimArrayElem (fst $1) NoInfo Nonunique }
                    | ArrayType                   { ArrayArrayElem $1 }
                    | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
 
-PrimType : UnsignedType { Unsigned (fst $1) }
-         | SignedType   { Signed (fst $1) }
-         | FloatType    { FloatType (fst $1) }
-         | bool         { Bool }
+PrimType :: { (PrimType, SrcLoc) }
+         : UnsignedType { first Unsigned $1 }
+         | SignedType   { first Signed $1 }
+         | FloatType    { first FloatType $1 }
+         | bool         { (Bool, $1) }
 
 SignedType :: { (IntType, SrcLoc) }
            : int { (Int32, $1) }

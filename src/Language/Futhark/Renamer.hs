@@ -224,15 +224,15 @@ renameTypeGeneric' :: (Eq f, Hashable f) =>
                    -> RenameM f t (UserType t)
 renameTypeGeneric' renameShape = renameType'
   where
-        renameType' (UserPrim bt) = return $ UserPrim bt
-        renameType' (UserTuple ts) = UserTuple <$> mapM renameType' ts
-        renameType' (UserTypeAlias name) = return $ UserTypeAlias name
+        renameType' (UserPrim bt loc) = return $ UserPrim bt loc
+        renameType' (UserTuple ts loc) = UserTuple <$> mapM renameType' ts <*> pure loc
+        renameType' (UserTypeAlias name loc) = return $ UserTypeAlias name loc
         renameType' array = renameUserArray array
 
-        renameUserArray (UserArray at shape uni) = do
+        renameUserArray (UserArray at shape uni loc) = do
           at'    <- renameType' at
           shape' <- renameShape shape
-          return $ UserArray at' shape' uni
+          return $ UserArray at' shape' uni loc
         renameUserArray a = renameType' a
 
 renameCompType :: (Eq f, Hashable f, Eq t, Hashable t) =>
