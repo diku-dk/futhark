@@ -1,4 +1,4 @@
-language: haskell
+language: c
 
 sudo: false
 
@@ -21,6 +21,7 @@ addons:
     - hlint
     - python
     - python-numpy
+    - libgmp-dev
 
 before_install:
  - export PATH=$HOME/.local/bin:$PATH
