@@ -72,7 +72,6 @@ Library
                    Futhark.CodeGen.Backends.GenericPython.Definitions
                    Futhark.CodeGen.Backends.GenericPython.Options
                    Futhark.CodeGen.Backends.GenericC.Options
-                   Futhark.CodeGen.Backends.GenericC.Reading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.COpenCL.Boilerplate
                    Futhark.CodeGen.Backends.PyOpenCL
