@@ -33,6 +33,7 @@ import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.Transform.Substitute
+import Futhark.Util
 
 import Prelude hiding (all)
 
@@ -522,6 +523,14 @@ simplifyIndexing defOf seType idd inds consuming =
     Just (Reshape cs [_] v2)
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ IndexResult cs v2 inds
+
+    Just (ArrayLit ses _)
+      | Constant (IntValue (Int32Value i)) : inds' <- inds,
+        Just se <- maybeNth i ses ->
+        case inds' of
+          [] -> Just $ SubExpResult se
+          _ | Var v2 <- se  -> Just $ IndexResult [] v2 inds'
+          _ -> Nothing
 
     _ -> Nothing
 

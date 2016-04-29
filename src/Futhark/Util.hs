@@ -9,10 +9,12 @@
 module Futhark.Util
        (mapAccumLM,
         chunk,
-        mapEither
-        )
+        mapEither,
+        maybeNth
+       )
        where
 
+import Data.List
 import Data.Either
 
 -- | Like 'mapAccumL', but monadic.
@@ -36,3 +38,9 @@ chunk n xs =
 -- | A combination of 'map' and 'partitionEithers'.
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
+
+-- | Return the list element at the given index, if the index is valid.
+maybeNth :: Integral int => int -> [a] -> Maybe a
+maybeNth i l
+  | i >= 0, v:_ <- genericDrop i l = Just v
+  | otherwise                      = Nothing
