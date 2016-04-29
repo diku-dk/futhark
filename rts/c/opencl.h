@@ -102,8 +102,8 @@ static void opencl_succeed(unsigned int ret,
                     const char *file,
                     int line) {
   if (ret != CL_SUCCESS) {
-    errx(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
-        file, line, call, ret, opencl_error_string(ret));
+    panic(-1, "%s:%d: OpenCL call\n  %s\nfailed with error code %d (%s)\n",
+          file, line, call, ret, opencl_error_string(ret));
   }
 }
 
@@ -233,7 +233,7 @@ static struct opencl_device_option get_preferred_device() {
     }
   }
 
-  errx(1, "Could not find acceptable OpenCL device.");
+  panic(1, "Could not find acceptable OpenCL device.");
 }
 
 static void describe_device_option(struct opencl_device_option device) {
