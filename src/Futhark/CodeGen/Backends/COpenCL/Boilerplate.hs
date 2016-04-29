@@ -26,7 +26,7 @@ openClDecls block_dim kernel_names opencl_program opencl_prelude =
                          ");")|] :
           concat
           [ [ [C.cedecl|static typename cl_kernel $id:name;|]
-            , [C.cedecl|static typename suseconds_t $id:(kernelRuntime name) = 0;|]
+            , [C.cedecl|static int $id:(kernelRuntime name) = 0;|]
             , [C.cedecl|static int $id:(kernelRuns name) = 0;|]
             ]
           | name <- kernel_names ] ++
@@ -92,8 +92,8 @@ openClReport names =
               [C.citem|total_runtime += $id:total_runtime;|],
               [C.citem|total_runs += $id:runs;|]]
 
-        declares = [[C.citem|typename suseconds_t total_runtime = 0;|],
-                    [C.citem|typename suseconds_t total_runs = 0;|]]
+        declares = [[C.citem|int total_runtime = 0;|],
+                    [C.citem|int total_runs = 0;|]]
         report_total = [C.citem|
                           if (cl_debug) {
                             fprintf(stderr, "Ran %d kernels with cumulative runtime: %6ldus\n",
