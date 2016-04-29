@@ -332,7 +332,6 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
   -- ELSE try applying horizontal        fusion
   -- (without duplicating computation in both cases)
 
-  -- Not sure this works without changing anything [Brian]
   (ok_kers_compat, fused_kers, fused_nms, old_kers, oldker_nms) <-
         if   is_redomap_scanomap || any isUnfusable out_nms
         then horizontGreedyFuse rem_bnds res (out_idds, soac)

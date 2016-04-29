@@ -303,15 +303,14 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     --   success (unfus_accs ++ outNames ker ++ unfus_arrs) $
     --           SOAC.Scanomap (cs1++cs2) w lam11 res_lam' nes new_inp
 
-    -- (SOAC.Scanomap _ _ lam2r _ nes2 _, SOAC.Scanomap _ _  lam1r _ nes1 _)
-    --   | mapFusionOK (drop (length nes1) outVars) ker || horizFuse -> do
-    --   let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes1 lam1 inp1_arr
-    --                                         outPairs lam2 inp2_arr
-    --       unfus_accs  = take (length nes1) outVars
-    --       unfus_arrs  = unfus_nms \\ unfus_accs
-    --       lamr        = mergeReduceOps lam1r lam2r
-    --   success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-    --           SOAC.Scanomap (cs1++cs2) w  lamr res_lam' (nes1++nes2) new_inp
+    (SOAC.Scanomap _ _ lam2r _ nes2 _, SOAC.Scanomap _ _  lam1r _ nes1 _)
+      | horizFuse -> do
+          let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes1 lam1 inp1_arr outPairs lam2 inp2_arr
+              unfus_accs  = take (length nes1) outVars
+              unfus_arrs  = unfus_nms \\ unfus_accs
+              lamr        = mergeReduceOps lam1r lam2r
+          success (unfus_accs ++ outNames ker ++ unfus_arrs) $
+              SOAC.Scanomap (cs1++cs2) w  lamr res_lam' (nes1++nes2) new_inp
 
     -- Map -> Scanomap Fusion
     (SOAC.Scanomap _ _ lam21 _ nes _, SOAC.Map {})
