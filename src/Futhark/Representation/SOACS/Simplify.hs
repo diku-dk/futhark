@@ -152,7 +152,8 @@ topDownRules = [liftIdentityMapping,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
-                simplifyStream
+                simplifyStream,
+                simplifyKnownIterationSOAC
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -387,3 +388,19 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
                           ) ([],0) (zip dsrtpx dsx)
             return $ Array btp (ExtShape resdims) u
           refineArrType _ _ _ _ tp = return tp
+
+-- For now we just remove singleton maps.
+simplifyKnownIterationSOAC :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
+                              TopDownRule m
+simplifyKnownIterationSOAC _ (Let pat _ (Op (Map cs (Constant k) fun arrs)))
+  | oneIsh k = do
+      zipWithM_ bindParam (lambdaParams fun) arrs
+      ses <- bodyBind $ lambdaBody fun
+      zipWithM_ bindResult (patternValueElements pat) ses
+        where bindParam p a =
+                letBindNames'_ [paramName p] $
+                PrimOp $ Index cs a [constant (0::Int32)]
+              bindResult pe se =
+                letBindNames'_ [patElemName pe] $
+                PrimOp $ ArrayLit [se] $ rowType $ patElemType pe
+simplifyKnownIterationSOAC _ _ = cannotSimplify
