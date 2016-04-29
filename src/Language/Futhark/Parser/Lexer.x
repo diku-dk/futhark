@@ -305,7 +305,7 @@ scanTokens file str = runAlex (BS.fromStrict $ T.encodeUtf8 str) $ do
     tok <- alexMonadScan
     case tok of
       (start, end, EOF) ->
-        return [L (pos start end) EOF]
+        return []
       (start, end, t) -> do
         rest <- loop
         return $ L (pos start end) t : rest
