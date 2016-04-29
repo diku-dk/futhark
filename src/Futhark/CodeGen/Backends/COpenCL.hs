@@ -239,7 +239,7 @@ launchKernel kernel_name kernel_dims workgroup_dims = do
       if (cl_debug) {
         OPENCL_SUCCEED(clFinish(fut_cl_queue));
         gettimeofday(&$id:time_end, NULL);
-        typename suseconds_t $id:time_diff =
+        int $id:time_diff =
           ($id:time_end.tv_sec * 1000000 + $id:time_end.tv_usec) -
           ($id:time_start.tv_sec * 1000000 + $id:time_start.tv_usec);
         if (detail_timing) {
