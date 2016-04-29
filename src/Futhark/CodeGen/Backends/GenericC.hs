@@ -363,14 +363,14 @@ defineMemorySpace space = do
   alloc <- collect $
     case space of
       DefaultSpace ->
-        stm [C.cstm|block->mem = malloc(size);|]
+        stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure sid
   let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:mty *block, typename int32_t size) {
   $id:(fatMemUnRef space)(block);
   $items:alloc
-  block->references = malloc(sizeof(int));
+  block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
   }|]
 
@@ -422,7 +422,7 @@ allocMem name size space = do
     else alloc $ var name
   where alloc dest = case space of
           DefaultSpace ->
-            stm [C.cstm|$exp:dest = malloc($exp:size);|]
+            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
             pure size <*> pure sid

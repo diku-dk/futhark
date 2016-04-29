@@ -36,9 +36,8 @@ static int read_elem(struct array_reader *reader) {
   int ret;
   if (reader->n_elems_used == reader->n_elems_space) {
     reader->n_elems_space *= 2;
-    reader->elems=
-      realloc(reader->elems,
-              reader->n_elems_space * reader->elem_size);
+    reader->elems = (char*) realloc(reader->elems,
+                                    reader->n_elems_space * reader->elem_size);
   }
 
   ret = reader->elem_reader(reader->elems + reader->n_elems_used * reader->elem_size);
@@ -54,9 +53,9 @@ static int read_array_elems(struct array_reader *reader, int dims) {
   int c;
   int ret;
   int first = 1;
-  char *knows_dimsize = calloc(dims,sizeof(char));
+  char *knows_dimsize = (char*) calloc(dims,sizeof(char));
   int cur_dim = dims-1;
-  int64_t *elems_read_in_dim = calloc(dims,sizeof(int64_t));
+  int64_t *elems_read_in_dim = (int64_t*) calloc(dims,sizeof(int64_t));
   while (1) {
     skipspaces();
 
@@ -158,7 +157,7 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
   reader.n_elems_used = 0;
   reader.elem_size = elem_size;
   reader.n_elems_space = 16;
-  reader.elems = realloc(*data, elem_size*reader.n_elems_space);
+  reader.elems = (char*) realloc(*data, elem_size*reader.n_elems_space);
   reader.elem_reader = elem_reader;
 
   ret = read_array_elems(&reader, dims);
