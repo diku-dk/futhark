@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
@@ -50,6 +51,7 @@ import Data.Char (isAlphaNum, isAscii, isDigit)
 import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
+import Data.FileEmbed
 
 import Prelude
 
@@ -59,7 +61,6 @@ import qualified Language.C.Quote.OpenCL as C
 import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.Backends.GenericC.Reading
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space, spaces)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
@@ -510,13 +511,13 @@ readPrimStm :: C.Exp -> PrimType -> C.Stm
 readPrimStm place t
   | Just f <- readFun t =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          errx(1, "Syntax error when reading %s.\n", $string:(pretty t));
+          panic(1, "Syntax error when reading %s.\n", $string:(pretty t));
         }|]
 readPrimStm _ Cert =
   [C.cstm|;|]
 readPrimStm _ t =
   [C.cstm|{
-        errx(1, "Cannot read %s.\n", $string:(pretty t));
+        panic(1, "Cannot read %s.\n", $string:(pretty t));
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
@@ -639,13 +640,13 @@ readInput refcount memsizes (ArrayValue name t shape)
                        shape,
                        $int:(length shape))
             != 0) {
-          errx(1, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
+          panic(1, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
         }
         $stms:copyshape
         $stms:copymemsize
       }|]
   | otherwise =
-    [C.cstm|errx(1, "Cannot read %s.\n", $string:(pretty t));|]
+    [C.cstm|panic(1, "Cannot read %s.\n", $string:(pretty t));|]
 
 sizeVars :: [Param] -> HM.HashMap VName VName
 sizeVars = mconcat . map sizeVars'
@@ -708,14 +709,14 @@ benchmarkOptions =
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
           if (runtime_file == NULL) {
-            errx(1, "Cannot open %s: %s", optarg, strerror(errno));
+            panic(1, "Cannot open %s: %s", optarg, strerror(errno));
           }
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
           perform_warmup = 1;
           if (num_runs <= 0) {
-            errx(1, "Need a positive number of runs, not %s", optarg);
+            panic(1, "Need a positive number of runs, not %s", optarg);
           }
         }|]
 
@@ -744,8 +745,9 @@ $esc:("#include <sys/time.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
-$esc:("#include <err.h>")
 $esc:("#include <getopt.h>")
+
+$esc:panic_h
 
 $edecls:decls
 
@@ -763,7 +765,7 @@ static int detail_timing = 0;
 
 $edecls:(map funcToDef definitions)
 
-$edecls:readerFunctions
+$esc:reader_h
 
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
@@ -774,6 +776,8 @@ $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 int main(int argc, char** argv) {
   struct timeval t_start, t_end;
   int time_runs;
+
+  fut_progname = argv[0];
 
   $stms:(compInit endstate)
 
@@ -826,6 +830,9 @@ int main(int argc, char** argv) {
         builtin = map asDecl builtInFunctionDefs ++
                   cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps
           where asDecl fun = [C.cedecl|$func:fun|]
+
+        panic_h = $(embedStringFile "rts/c/panic.h")
+        reader_h = $(embedStringFile "rts/c/reader.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
