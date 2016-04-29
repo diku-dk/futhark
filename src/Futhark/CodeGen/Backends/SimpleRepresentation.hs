@@ -85,7 +85,7 @@ funName' = funName . nameFromString
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
-defaultMemBlockType = [C.cty|unsigned char*|]
+defaultMemBlockType = [C.cty|char*|]
 
 cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
