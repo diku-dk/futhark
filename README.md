@@ -15,6 +15,11 @@ For more information, see [the website](http://futhark-lang.org).
 The [incomplete documentation is
 here](http://futhark.readthedocs.org).
 
+Statistics
+==========
+
+[![Issue Stats](http://issuestats.com/github/HIPERFIT/futhark/badge/pr)](http://issuestats.com/github/HIPERFIT/futhark) [![Issue Stats](http://issuestats.com/github/HIPERFIT/futhark/badge/issue)](http://issuestats.com/github/HIPERFIT/futhark) [![Build Status](https://travis-ci.org/HIPERFIT/futhark.svg?branch=master)](https://travis-ci.org/HIPERFIT/futhark)
+
 Installation
 ============
 
@@ -95,12 +100,10 @@ To interpret a Futhark program:
 Hacking
 =======
 
-We try to make use of Github issues for organising our work.
-
-For every commit, Futhark is automatically built and tested [on
-Travis](https://travis-ci.org/HIPERFIT/futhark).
-
-[![Build Status](https://travis-ci.org/HIPERFIT/futhark.svg?branch=master)](https://travis-ci.org/HIPERFIT/futhark)
+We try to make use of Github issues for organising our work.  Issues
+tagged with
+[newbie-friendly](https://github.com/HIPERFIT/futhark/issues?q=is%3Aissue+is%3Aopen+label%3Anewbie-friendly)
+do not require deep knowledge of the code base.
 
 Testing
 =======
