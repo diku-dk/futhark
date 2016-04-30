@@ -47,9 +47,13 @@ openclCodeAction filepath config =
           let binpath = outputFilePath filepath config
               cpath = binpath `replaceExtension` "c"
           liftIO $ writeFile cpath cprog
-          let args = if System.Info.os == "darwin"
-                     then [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-framework", "OpenCL"]
-                     else [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"]
+          let args
+                | System.Info.os == "darwin" =
+                    [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-framework", "OpenCL"]
+                | System.Info.os == "mingw32" =
+                    [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL64"]
+                | otherwise =
+                    [cpath, "-o", binpath, "-lm", "-O3", "-std=c99", "-lOpenCL"]
           (gccCode, _, gccerr) <-
             liftIO $ readProcessWithExitCode "gcc" args ""
           case gccCode of
