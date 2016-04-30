@@ -555,13 +555,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
              |],
           [C.citems|
                /* Run the program once. */
-               gettimeofday(&t_start, NULL);
+               t_start = get_wall_time();
                $id:ret = $id:(funName fname)($args:argexps);
                $stms:pre_timing
-               gettimeofday(&t_end, NULL);
-               long int elapsed_usec =
-                 (t_end.tv_sec * 1000000 + t_end.tv_usec) -
-                 (t_start.tv_sec * 1000000 + t_start.tv_usec);
+               t_end = get_wall_time();
+               long int elapsed_usec = t_end - t_start;
                if (time_runs && runtime_file != NULL) {
                  fprintf(runtime_file, "%ld\n", elapsed_usec);
                }
@@ -749,6 +747,8 @@ $esc:("#include <getopt.h>")
 
 $esc:panic_h
 
+$esc:timing_h
+
 $edecls:decls
 
 $edecls:memtypes
@@ -774,7 +774,7 @@ static int num_runs = 1;
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 
 int main(int argc, char** argv) {
-  struct timeval t_start, t_end;
+  typename int64_t t_start, t_end;
   int time_runs;
 
   fut_progname = argv[0];
@@ -833,6 +833,7 @@ int main(int argc, char** argv) {
 
         panic_h = $(embedStringFile "rts/c/panic.h")
         reader_h = $(embedStringFile "rts/c/reader.h")
+        timing_h = $(embedStringFile "rts/c/timing.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
