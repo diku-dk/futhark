@@ -56,7 +56,7 @@ The function call ``modify(a,i,x)`` returns ``a``, but where the
 element at index ``i`` has been increased by ``x``.  Note the
 asterisks: in the parameter declaration ``*[int] a``, this means that
 the function ``modify`` has been given "ownership" of the array ``a``,
-meaning that not caller of ``modify`` will reference array ``a`` after
+meaning that the caller of ``modify`` will reference array ``a`` after
 the call.  In particular, ``modify`` can change the element at index
 ``i`` without first copying the array, i.e. ``modify`` is free to do
 an in-place modification.  Furthermore, the return value of ``modify``
