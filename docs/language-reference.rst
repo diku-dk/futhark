@@ -353,9 +353,9 @@ The name ``i`` is bound here and initialised to zero.
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. While ``i < bound``, evaluate ``loopbody``, rebinding ``pat`` to be the
-      value returned by the body, increasing ``i`` by one after each
-      iteration.
+2. While ``i < bound``, evaluate ``loopbody``, rebinding ``pat`` to be
+   the value returned by the body, increasing ``i`` by one after each
+   iteration.
 
 3. Evaluate ``body`` with ``pat`` bound to its final
       value.
@@ -366,10 +366,9 @@ The name ``i`` is bound here and initialised to zero.
 1. Bind ``pat`` to the initial values given in ``initial``.
 
 2. While ``cond`` evaluates to true, evaluate ``loopbody``, rebinding
-      ``pat`` to be the value returned by the body.
+   ``pat`` to be the value returned by the body.
 
-3. Evaluate ``body`` with ``pat`` bound to its final
-      value.
+3. Evaluate ``body`` with ``pat`` bound to its final value.
 
 Parallel Expressions
 --------------------
