@@ -94,8 +94,8 @@ two-dimensional array, the row will alias its source::
   let b = a[0] in
   ... // b is aliased to a (assuming a is not one-dimensional)
 
-:ref:`futhark-sharing` will cover sharing and sharing analysis in
-     greater detail.
+In :ref:`futhark-sharing` we will cover sharing and sharing analysis
+in greater detail.
 
 Let us consider the definition of a function returning a unique array::
 
