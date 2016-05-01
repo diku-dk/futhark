@@ -23,60 +23,7 @@ Statistics
 Installation
 ============
 
-You are *strongly recommended* to use [Stack](http://haskellstack.org)
-for building the Futhark compiler from scratch.  It avoids many of the
-problems usually associated with the older Haskell build tool,
-`cabal-install`.  This section describes how to use Stack.
-
-To get all the prerequisites for building the Futhark compiler
-(including, if necessary, the appropriate version of the Haskell
-compiler), run:
-
-    stack setup
-
-*Note that this will not install anything system-wide and will have no
-effect outside the Futhark build directory*.  Now you can run the
-following command to build the Futhark compiler, including all
-dependencies:
-
-    stack build
-
-The Futhark compiler and its tools will now be built.  You can install
-it to your `$HOME/.local/bin` by running:
-
-    stack install
-
-Make sure this directory is in your `$PATH`.  Alternatively, just copy
-the binaries where you need them.
-
-Installation with `cabal-install`
----------------------------------
-
-*Using Stack, as described in the previous section, is strongly
- recommended.*
-
-You will need GHC 7.8 or newer and a recent version of
-[Alex](https://www.haskell.org/alex/) to compile Futhark.
-
-Just run `cabal install` and executables by the names of `futhark`,
-`futhark-c`, `futhark-opencl` and `futharki` will be installed in your
-Cabal bin directory, most likely $HOME/.cabal/bin.
-
-Otherwise, just run `cabal configure`, followed by `cabal build`, and
-the executable can be found in `dist/build/futhark/futhark`.
-
-You can get a sufficiently new version of Alex by running `cabal
-install alex` if `$HOME/.cabal/bin` is in your `$PATH`.  If you
-accidentally try (and fail) to install Futhark with an older version
-of Alex, you will need to run `cabal clean` to ensure that the broken
-build artifacts will not interfere with the new build.
-
-Make sure that you have a recent Cabal to go with your GHC.  A common
-mistake is to only upgrade GHC, but use an old Cabal (i.e. older than
-1.20; check with cabal --version).  If you compile some of the
-dependencies with an old Cabal by mistake, and then fail later in the
-process, you will have to delete your `~/.ghc` directory to remove the
-broken libraries.
+Please our [installation instructions](https://futhark.readthedocs.io/en/latest/installation.html).
 
 Usage
 =====
