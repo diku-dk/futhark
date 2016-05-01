@@ -1,3 +1,5 @@
+.. _c-porting-guide:
+
 C Porting Guide
 ===============
 

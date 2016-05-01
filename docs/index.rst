@@ -6,17 +6,12 @@
 Futhark User's Guide
 ====================
 
-This document has been prepared as an informal overview of the Futhark
-language.  In time, we hope to develop it into a formal specification,
-with accompanying proofs of correctness, but for now, words will have
-to suffice where formulae would be ideal.
-
-Futhark is an eagerly evaluated, purely functional language with
-built-in arrays and second-order array combinators with a focus
-towards efficient execution on vector hardware (GPUs).  While Futhark
-is not designed to be a pleasant programming experience for humans, it
-does have a textual syntax to facilitate the writing of benchmark
-programs.
+Welcome to the documentation for the Futhark compiler and language.
+For a basic introduction, please see `our website
+<http://futhark-lang.org>`_.  To get started, read the page on
+:ref:`installation`.  Once the compiler has been installed, you might
+want to take a look at :ref:`language-overview` or
+:ref:`c-porting-guide`.
 
 Contents:
 

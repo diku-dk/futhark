@@ -1,5 +1,12 @@
+.. _language-overview:
+
 Language Overview
 =================
+
+This document has been prepared as an informal overview of the Futhark
+language.  In time, we hope to develop it into a formal specification,
+with accompanying proofs of correctness, but for now, words will have
+to suffice where formulae would be ideal.
 
 The Futhark programming language is a purely functional,
 call-by-value, mostly first-order language that permits bulk
