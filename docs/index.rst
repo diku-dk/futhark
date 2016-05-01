@@ -23,6 +23,7 @@ Contents:
 .. toctree::
    :maxdepth: 1
 
+   installation.rst
    language-overview.rst
    uniqueness-types.rst
    language-reference.rst
