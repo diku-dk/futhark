@@ -30,7 +30,7 @@ inrepo() {
     (cd $repodir; "$@")
 }
 
-commit=$(git describe --dirty=-modified --always)
+commit=$(inrepo git describe --dirty=-modified --always)
 
 if echo "$commit" | grep -q modified; then
     echo "Refusing to package a modified repository."
