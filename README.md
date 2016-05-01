@@ -23,7 +23,7 @@ Statistics
 Installation
 ============
 
-Please our [installation instructions](https://futhark.readthedocs.io/en/latest/installation.html).
+Please see our [installation instructions](https://futhark.readthedocs.io/en/latest/installation.html).
 
 Usage
 =====
