@@ -483,7 +483,7 @@ Literal Defaults
 
 By default, Futhark interprets integer literals as ``i32`` values, and decimal
 literals (integer literals containing a decimal point) as ``f64`` values. These
-defaults can be changed using the `Hakell-inspired
+defaults can be changed using the `Haskell-inspired
 <https://wiki.haskell.org/Keywords#default>`_ ``default`` keyword.
 
 To change the ``i32`` default to e.g. ``i64``, type the following at the top of
