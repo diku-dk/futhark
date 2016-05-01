@@ -358,7 +358,12 @@ The name ``i`` is bound here and initialised to zero.
    iteration.
 
 3. Evaluate ``body`` with ``pat`` bound to its final
-      value.
+   value.
+
+The ``= initial`` can be left out, in which case initial values for
+the pattern are taken from equivalently named variables in the
+environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
+= ...``.
 
 ``loop (pat = initial) = while cond do loopbody in body``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
