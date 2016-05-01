@@ -264,8 +264,8 @@ error.
 
 Elide safety checks (such as bounds checking) for operations lexically
 with ``e``.  This is useful if the compiler is otherwise unable to
-avoids bounds checks (e.g. when using indirect indexes), but you
-really do not want them here.
+avoid bounds checks (e.g. when using indirect indexes), but you really
+do not want them here.
 
 ``iota(n)``
 ~~~~~~~~~~~
