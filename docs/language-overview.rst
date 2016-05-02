@@ -178,7 +178,7 @@ optimisation by the Futhark compiler.
 
 Apart from the ``i < n`` form, which loops from zero, Futhark also
 supports the ``v <= i < n`` form which starts at ``v``.  We can also
-invert the order of iteration by writitin ``n > i`` or ``n > i >= v``,
+invert the order of iteration by writing ``n > i`` or ``n > i >= v``,
 which loops down from the upper bound to the lower.
 
 Apart from ``for``-loops, Futhark also supports ``while`` loops.
@@ -193,6 +193,26 @@ given number until it exceeds a given threshold value::
 
 In all respects other than termination criteria, ``while``-loops
 behave identically to ``for``-loops.
+
+For brevity, the initial value expression can be elided, in which case
+an expression equivalent to the pattern is implied.  This is easier to
+understand with an example.  The loop::
+
+  fun int fib(int n) =
+    let x = 1
+    let y = 1
+    loop ({x, y} = {x, y}) = for i < n do {y, x+y}
+    in x
+
+can also be written::
+
+  fun int fib(int n) =
+    let x = 1
+    let y = 1
+    loop ({x, y}) = for i < n do {y, x+y}
+    in x
+
+This can sometimes make imperative code look more natural.
 
 In-Place Updates
 ~~~~~~~~~~~~~~~~
