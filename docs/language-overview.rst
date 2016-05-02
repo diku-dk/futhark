@@ -94,7 +94,22 @@ subexpression::
 
 Recall that Futhark is eagerly evaluated, so the right-hand side of
 the ``let`` is evaluated exactly once, at the time it is first
-encountered.
+encountered.  The ``in`` keyword is optional when it precedes another
+``let``.  This means that instead of writing::
+
+  let a = 0 in
+  let b = 1 in
+  let c = 2 in
+  a + b + c
+
+we can write::
+
+  let a = 0
+  let b = 1
+  let c = 2
+  in a + b + c
+
+The final ``in`` is still necessary.
 
 Two-way ``if-then-else`` is the only branching construct in Futhark.
 Pattern matching is supported in a limited way for taking apart
