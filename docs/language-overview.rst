@@ -18,14 +18,14 @@ is also amenable to aggressive optimisation and parallelisation.
 Unfortunately, as the expressive power of a language grows, the
 difficulty of optimisation often rises likewise.  For example, we
 support nested parallelism, despite the complexities of efficiently
-mapping to the flat parallelism supported by hardware, as a great many
-programs depend on this feature.  On the other hand, we do not support
-non-regular arrays, as they complicate size analysis a great deal.
-The fact that Futhark is purely functional is intended to give an
-optimising compiler more leeway in rearranging the code and performing
-high-level optimisations.  It is also the plan to eventually design a
-rigorous cost model for Futhark, although this work has not yet been
-completed.
+mapping to the flat parallelism supported by hardware, as many
+algorithms are awkward to write without this feature.  On the other
+hand, we do not support non-regular arrays, as they complicate size
+analysis a great deal.  The fact that Futhark is purely functional is
+intended to give an optimising compiler more leeway in rearranging the
+code and performing high-level optimisations.  It is also the plan to
+eventually design a rigorous cost model for Futhark, although this
+work has not yet been completed.
 
 Lexical Syntax
 --------------
