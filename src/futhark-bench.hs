@@ -87,7 +87,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesText dir input_spec
   maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts-1]
+  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
 
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
