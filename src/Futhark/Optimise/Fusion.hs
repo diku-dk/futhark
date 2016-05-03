@@ -534,10 +534,10 @@ fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Reduce cs w comm l
       equivsoac = Futhark.Redomap cs w comm lam lam ne arrs
   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
-fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Scan cs w lam args)):bnds) res) = do
-  let (ne, arrs) = unzip args
-      equivsoac = Futhark.Scanomap cs w lam lam ne arrs
-  fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
+-- fusionGatherBody fres (Body blore (Let pat bndtp (Op (Futhark.Scan cs w lam args)):bnds) res) = do
+--   let (ne, arrs) = unzip args
+--       equivsoac = Futhark.Scanomap cs w lam lam ne arrs
+--   fusionGatherBody fres $ Body blore (Let pat bndtp (Op equivsoac):bnds) res
 
 fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
   maybesoac <- SOAC.fromExp e
