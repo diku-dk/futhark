@@ -472,7 +472,7 @@ optimizeKernel inp ker = do
 optimizeSOAC :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
              -> TryFusion (SOAC, SOAC.ArrayTransforms)
 optimizeSOAC inp soac os = do
-  res <- foldM comb (False, soac, os) $ reverse optimizations
+  res <- foldM comb (False, soac, os) $ optimizations
   case res of
     (False, _, _)      -> fail "No optimisation applied"
     (True, soac', os') -> return (soac', os')
@@ -487,7 +487,7 @@ type Optimization = Maybe [VName]
                     -> TryFusion (SOAC, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
-optimizations = [iswim]
+optimizations = [iswim, scanToScanomap]
 
 iswim :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
       -> TryFusion (SOAC, SOAC.ArrayTransforms)
@@ -522,12 +522,18 @@ iswim _ (SOAC.Scan cs w scan_fun scan_input) ots
             t:_ -> 1 : 0 : [2..arrayRank t]
       return (SOAC.Map map_cs map_w map_fun' map_arrs',
               ots SOAC.|> SOAC.Rearrange map_cs perm)
-  | otherwise = do
-      let (nes, array_inputs) =  unzip scan_input
-      return (SOAC.Scanomap cs w scan_fun scan_fun nes array_inputs, ots)
-
+  
 iswim _ _ _ =
   fail "ISWIM does not apply."
+
+scanToScanomap :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
+               -> TryFusion (SOAC, SOAC.ArrayTransforms)
+scanToScanomap _ (SOAC.Scan cs w scan_fun scan_input) ots = do
+       let (nes, array_inputs) =  unzip scan_input
+       return (SOAC.Scanomap cs w scan_fun scan_fun nes array_inputs, ots)
+scanToScanomap _ _ _ =
+  fail "Only turn scan into scanomaps"
+
 
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =
