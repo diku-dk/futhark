@@ -13,8 +13,8 @@
 -- Our approach: simple sequential counting loop.
 
 fun int main(int bound) =
-  loop ({sum, fib0, fib1} = {0, 1, 1}) = while fib1 < bound do
+  loop ((sum, fib0, fib1) = (0, 1, 1)) = while fib1 < bound do
     let newsum = if fib1 % 2 == 0 then sum + fib1
                                   else sum in
-    {newsum, fib1, fib0 + fib1} in
+    (newsum, fib1, fib0 + fib1) in
   sum

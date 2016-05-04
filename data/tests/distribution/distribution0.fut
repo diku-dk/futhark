@@ -8,7 +8,7 @@
 --
 -- structure distributed { MapKernel 1 DoLoop 2 }
 
-fun [f64] take(int n, [f64] a) = let {first, rest} = unsafe split((n), a) in first
+fun [f64] take(int n, [f64] a) = let (first, rest) = unsafe split((n), a) in first
 
 fun [f64] fftmp(int num_paths, [[f64]] md_c, [f64] zi) =
     map( fn f64 (int j) =>

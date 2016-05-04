@@ -8,5 +8,5 @@
 --   [5, 4, 3, 2, 1, 0, -1]
 -- }
 
-fun {[int],[int]} main([int] a) =
-  {map(- 2, a), map(2 -, a)}
+fun ([int],[int]) main([int] a) =
+  (map(- 2, a), map(2 -, a))
