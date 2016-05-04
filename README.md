@@ -13,7 +13,7 @@ is fairly usable as a target for high-level code generation, however.
 For more information, see [the website](http://futhark-lang.org).
 
 The [incomplete documentation is
-here](http://futhark.readthedocs.org).
+here](http://futhark.readthedocs.io).
 
 Statistics
 ==========
