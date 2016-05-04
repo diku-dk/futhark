@@ -18,7 +18,7 @@
 -- }
 
 fun [f64] take(int n, [f64] a) =
-  let {first, rest} = unsafe split( (n), a) in
+  let (first, rest) = unsafe split( (n), a) in
   first
 
 fun [f64] fftmp([[f64]] md_c) =

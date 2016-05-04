@@ -15,5 +15,5 @@
 --   -1073741824
 -- }
 
-fun {int, int, int, int} main(int a, int b) =
-  {a, a+1, b-1, b>>1}
+fun (int, int, int, int) main(int a, int b) =
+  (a, a+1, b-1, b>>1)

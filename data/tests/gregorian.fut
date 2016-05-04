@@ -8,8 +8,8 @@ fun int minutes_in_dayI () = hours_in_dayI() * 60
 fun int minutes_to_noonI() = (hours_in_dayI() / 2) * 60
 fun f64 minutes_in_day  () = 24.0*60.0
 
-fun int date_of_gregorian( {int,int,int,int,int} date) =
-  let {year, month, day, hour, mins} = date in
+fun int date_of_gregorian( (int,int,int,int,int) date) =
+  let (year, month, day, hour, mins) = date in
   let ym =
       if(month == 1 || month == 2)
       then    ( 1461 * ( year + 4800 - 1 ) ) / 4 +
@@ -22,7 +22,7 @@ fun int date_of_gregorian( {int,int,int,int,int} date) =
 
   in tmp * minutes_in_dayI() + hour * 60 + mins
 
-fun {int,int,int,int,int}
+fun (int,int,int,int,int)
   gregorian_of_date ( int minutes_since_epoch ) =
   let jul = minutes_since_epoch / minutes_in_dayI() in
   let l = jul + 68569 + 2444238 in
@@ -42,10 +42,10 @@ fun {int,int,int,int,int}
   if ( daytime == minutes_to_noonI() )
 
   --then [year = y; month = m; day = d; hour = 12; minute = 0]
-  then {y, m, d, 12, 0}
+  then (y, m, d, 12, 0)
 
   --else [year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
-  else {y, m, d, daytime / 60, MOD(daytime, 60) }
+  else (y, m, d, daytime / 60, MOD(daytime, 60) )
 
 fun int main(int x) =
   date_of_gregorian(gregorian_of_date(x))

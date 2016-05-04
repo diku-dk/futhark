@@ -9,13 +9,13 @@
 -- propagation).
 -- ==
 
-fun {[[f64]], [[f64]]} main(*[[f64]] a, *[[f64]] u) =
+fun ([[f64]], [[f64]]) main(*[[f64]] a, *[[f64]] u) =
   let n = size(0, a) in
-  loop ({a,u}) =
+  loop ((a,u)) =
     for k < n do
       let u[k,k] = a[k,k] in
       loop (a) = for i < n-k do
         a
-      in {a,u}
+      in (a,u)
     in
-  {a,u}
+  (a,u)

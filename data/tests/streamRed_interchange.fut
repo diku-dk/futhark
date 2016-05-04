@@ -127,9 +127,9 @@ fun [[f32,nfeatures],nclusters] main(int nfeatures, int npoints, int nclusters) 
                          acc, elem),
                  fn *[[f32,nfeatures],nclusters] (int chunk,
                                                    *[[f32,nfeatures],nclusters] acc,
-                                                   [{[f32,nfeatures], int}] inp) =>
+                                                   [([f32,nfeatures], int)] inp) =>
                    loop (acc) = for i < chunk do
-                     let {point, c} = inp[i] in
+                     let (point, c) = inp[i] in
                      unsafe let acc[c] = zipWith(+, acc[c], map(/f32(features_in_cluster[c]), point)) in
                      acc in
                    acc,
