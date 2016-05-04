@@ -11,7 +11,7 @@
 
 fun [int] inner([[(int,int)]] a) =
   map(fn int([(int,int)] r1) =>
-        let (r2) = r1 in
+        let r2 = r1 in
         let (x,y) = r2[0] in
         x+y,
       a)
