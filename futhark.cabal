@@ -245,9 +245,9 @@ Executable futhark-py
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 directory,
                  text,
                  filepath,
-                 process,
                  transformers,
                  futhark
 
@@ -262,8 +262,8 @@ Executable futhark-pyopencl
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 directory,
                  filepath,
-                 process,
                  transformers,
                  text,
                  futhark
