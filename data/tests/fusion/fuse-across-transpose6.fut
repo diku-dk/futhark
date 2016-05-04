@@ -39,7 +39,7 @@
 --    [9882.132352013321, 33465.152508625804, 2992.2059021836353]]
 -- }
 
-fun [f64] take(int n, [f64] a) = let {first, rest} = split((n), a) in first
+fun [f64] take(int n, [f64] a) = let (first, rest) = split((n), a) in first
 
 fun [[f64,num_und],num_dates]
   correlateDeltas([[f64,num_und],num_und  ] md_c,

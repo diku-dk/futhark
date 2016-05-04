@@ -62,11 +62,11 @@ Indentation has no syntactical significance in Futhark, but recommended for
 readability.
 
 The syntax for tuple types is a comma-separated list of types or
-values enclosed in braces, so ``{int, real}`` is a pair of an integer
+values enclosed in parenthesis, so ``(int, real)`` is a pair of an integer
 and a floating-point number.  Both single-element and empty tuples are
 permitted.  Array types are written as the element type surrounded by
 brackets, meaning that ``[int]`` is a one-dimensional array of
-integers, and ``[[[{int, real}]]]`` is a three-dimensional array of
+integers, and ``[[[(int, real)]]]`` is a three-dimensional array of
 tuples of integers and floats.  An immediate array is written as a
 sequence of elements enclosed by brackets::
 
@@ -117,12 +117,12 @@ tuples, but this can only be done in ``let``-bindings, and not
 directly in a function argument list.  Specifically, the following
 function definition is not valid::
 
-  fun int sumpair({int, int} {x, y}) = x + y -- WRONG!
+  fun int sumpair((int, int) (x, y)) = x + y -- WRONG!
 
 Instead, we must use a ``let``-binding explicitly, as follows::
 
-  fun int sumpair({int, int} t) =
-    let {x,y} = t in x + y
+  fun int sumpair((int, int) t) =
+    let (x,y) = t in x + y
 
 Pattern-matching in a binding is the only way to access the components
 of a tuple.
@@ -146,8 +146,8 @@ function for computing the Fibonacci numbers::
 We can rewrite this using the ``loop`` construct::
 
   fun int fib(int n) =
-    loop ({x, y} = {1,1}) = for i < n do
-                              {y, x+y}
+    loop ((x, y) = (1,1)) = for i < n do
+                              (y, x+y)
     in x
 
 The semantics of this is precisely as in the tail-recursive function
@@ -216,7 +216,7 @@ understand with an example.  The loop::
   fun int fib(int n) =
     let x = 1
     let y = 1
-    loop ({x, y} = {x, y}) = for i < n do {y, x+y}
+    loop ((x, y) = (x, y)) = for i < n do (y, x+y)
     in x
 
 can also be written::
@@ -224,7 +224,7 @@ can also be written::
   fun int fib(int n) =
     let x = 1
     let y = 1
-    loop ({x, y}) = for i < n do {y, x+y}
+    loop ((x, y)) = for i < n do (y, x+y)
     in x
 
 This can sometimes make imperative code look more natural.

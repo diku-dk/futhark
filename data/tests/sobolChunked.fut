@@ -44,20 +44,20 @@ fun [int] sobolIndI ( [[int]] dir_vs, int n ) =
 ---- STRENGTH-REDUCED FORMULA
 --------------------------------
 fun int index_of_least_significant_0(int num_bits, int n) =
-  let {goon,k} = {True,0} in
-  loop ({goon,k,n}) =
+  let (goon,k) = (True,0) in
+  loop ((goon,k,n)) =
         for i < num_bits do
           if(goon)
           then if (n & 1) == 1
-               then {True, k+1, n>>1}
-               else {False,k,   n   }
-          else      {False,k,   n   }
+               then (True, k+1, n>>1)
+               else (False,k,   n   )
+          else      (False,k,   n   )
   in k
 
 fun [int] sobolRecI([[int,num_bits]] sob_dir_vs, [int] prev, int n) =
   let bit = index_of_least_significant_0(num_bits,n) in
-  map (fn int ({[int],int} vct_prev) =>
-         let {vct_row, prev} = vct_prev in
+  map (fn int (([int],int) vct_prev) =>
+         let (vct_row, prev) = vct_prev in
          vct_row[bit] ^ prev
       , zip(sob_dir_vs,prev))
 

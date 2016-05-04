@@ -116,8 +116,6 @@ import Language.Futhark.Parser.Lexer
       ')'             { L $$ RPAR }
       '['             { L $$ LBRACKET }
       ']'             { L $$ RBRACKET }
-      '{'             { L $$ LCURLY }
-      '}'             { L $$ RCURLY }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
@@ -287,14 +285,13 @@ UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
          | Uniqueness '[' UserType DimDecl ']'
                          { UserArray $3 $4 $1 $2 }
-         | '{' UserTypes '}' { UserTuple $2 $1 }
+         | '(' UserType ',' UserTypes ')' { UserTuple ($2:$4) $1 }
          | id            { let L loc (ID name) = $1 in UserTypeAlias name loc }
 ;
 
 UserTypes :: { [UncheckedUserType] }
 UserTypes : UserType ',' UserTypes { $1 : $3 }
           | UserType               { [$1] }
-          |                        { [] }
 DimDecl :: { DimDecl Name }
         : ',' id
           { let L _ (ID name) = $2
@@ -341,8 +338,8 @@ Exp  :: { UncheckedExp }
      | Id %prec letprec { Var $1 }
      | empty '(' UserType ')' { Empty $3 NoInfo $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
-     | '{' Exps '}'   { TupLit $2 $1 }
-     | '{'      '}'   { TupLit [] $1 }
+     | '(' Exp ',' Exps ')'   { TupLit ($2:$4) $1 }
+     | '('      ')'   { TupLit [] $1 }
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
@@ -465,7 +462,7 @@ LetExp :: { UncheckedExp }
      | let '_' '=' Exp LetBody
                       { LetPat (Wildcard NoInfo $2) $4 $5 $1 }
 
-     | let '{' Patterns '}' '=' Exp LetBody
+     | let '(' Patterns ')' '=' Exp LetBody
                       { LetPat (TuplePattern $3 $1) $6 $7 $1 }
 
      | let Id '=' Id with Index '<-' Exp LetBody
@@ -511,7 +508,7 @@ Patterns : Pattern ',' Patterns  { $1 : $3 }
 
 Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '_' { Wildcard NoInfo $1 }
-      | '{' Patterns '}' { TuplePattern $2 $1 }
+      | '(' Patterns ')' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
          : fn UserTypeDecl '(' Params ')' '=>' Exp
@@ -617,7 +614,7 @@ ArrayValue :  '[' Value ']'
              }
            | empty '(' PrimType ')'
              { ArrayValue (listArray (0,-1) []) (Prim (fst $3)) }
-TupleValue : '{' Values '}' { TupValue $2 }
+TupleValue : '(' Values ')' { TupValue $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }

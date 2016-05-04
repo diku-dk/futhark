@@ -7,4 +7,4 @@
 -- output {
 --   [2, 3, 4]
 -- }
-fun [{int}] main([int] a, int y) = map(fn {int} (int x) => {x+y}, a)
+fun [int] main([int] a, int y) = map(fn int (int x) => (x+y), a)
