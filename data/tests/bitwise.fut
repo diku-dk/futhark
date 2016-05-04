@@ -24,13 +24,13 @@ fun int rotateL (int x, int i) =
   let pre = (x >> i) & (~(0xFFFFFFFF << i)) in
   post | pre
 
-fun {int, int, int, int} frob(int a, int b, int c, int d) =
+fun (int, int, int, int) frob(int a, int b, int c, int d) =
   let w = 0x97989910 in
   let f' = funF(b,c,d) in
   let a' = b + rotateL((a + f' + w + 0xd76aa478), 7) in
-  {d, a', b, c}
+  (d, a', b, c)
 
-fun {int, int, int, int} main(int a, int b, int c, int d, int n) =
-  loop ({a',b',c',d'} = {a,b,c,d}) = for i < n do
+fun (int, int, int, int) main(int a, int b, int c, int d, int n) =
+  loop ((a',b',c',d') = (a,b,c,d)) = for i < n do
     frob(a',b',c',d')
-  in {a', b', c', d'}
+  in (a', b', c', d')

@@ -93,8 +93,8 @@ For example, it is possible to describe and use data types for vector calculatio
 as such::
 
   type person_id = int
-  type int_pair  = {int, int}
-  type vec3 = {f32, f32, f32}
+  type int_pair  = (int, int)
+  type vec3 = (f32, f32, f32)
 
   type pilot = person_id
   type passengers = [person_id]
@@ -102,7 +102,7 @@ as such::
   type velocity = vec3
   type mass     = f32
 
-  type airplane = {pilot, passengers, position, velocity, mass}
+  type airplane = (pilot, passengers, position, velocity, mass)
 
 It is currently not possible to mix array declarations with user declared arrays.
 
@@ -133,7 +133,7 @@ define either a primitive type, or a tuple.
 
 The dimensions must then be declared during the function declaration::
 
-  type foo = {int, {f32,f32}, [airplane]}
+  type foo = (int, (f32,f32), [airplane])
   function bar some_function([foo, n] input_data) = ...
 
 File inclusions
@@ -255,8 +255,8 @@ the tuple components may themselves be arrays).
 ``unzip(a)``
 ~~~~~~~~~~~~
 
-If the type of ``a`` is ``[{t_1, ..., t_n}]``, the result is a tuple
-of *n* arrays, i.e., ``{[t_1], ..., [t_n]}``, and otherwise a type
+If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
+of *n* arrays, i.e., ``([t_1], ..., [t_n])``, and otherwise a type
 error.
 
 ``unsafe e``
@@ -287,10 +287,10 @@ integer constant.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Partitions the given array ``a`` into ``n+1`` disjoint arrays
-``{a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...]}``, returned as a tuple.
+``(a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...])``, returned as a tuple.
 The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
 
-Example: ``split((1,1,3), [5,6,7,8]) == {[5],[],[6,7],[8]}``
+Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
 
 ``concat(a_1, ..., a_n)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -438,7 +438,7 @@ Tuple Shimming
 
 In a SOAC, if the given function expects *n* arguments of types
 ``t_1=, ..., t_n``, but the SOAC will call the function with a
-single argument of type ``{t_1, ..., t_n}`` (that is,
+single argument of type ``(t_1, ..., t_n)`` (that is,
 a tuple), the Futhark compiler will automatically generate an anonymous
 unwrapping function.  This allows the following expression to
 type-check (and run)::
@@ -454,29 +454,29 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[{int, f32}]`` is transformed to ``{[int],
-[f32]}`` during the compilation process, and all code interacting
+arrays.  The type ``[(int, f32)]`` is transformed to ``([int],
+[f32])`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[{[int], [f32]}]``, which is transformed
-into ``{[[int]], [[f32]]}``.  These two types are not
+Consider the type ``[([int], [f32])]``, which is transformed
+into ``([[int]], [[f32]])``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 
   [
-    {[1],   [1.0]},
-    {[2,3], [2.0]}
+    ([1],   [1.0]),
+    ([2,3], [2.0])
   ]
 
 is a value of the former, but the first element of the
 corresponding transformed tuple::
 
-  {
+  (
     [[1],   [2, 3]],
     [[1.0], [2.0]]
-  }
+  )
 
 is not a full array.  Hence, when determining whether a program
 generates full arrays, we must hence look at the *transformed*
