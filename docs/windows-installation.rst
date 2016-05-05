@@ -10,8 +10,15 @@ PyOpenCL backends functional.  This guide was last updated on the 5th
 of May 2016, and is for computers using 64-bit Windows along with
 `CUDA 7.5`_ and Python 2.7 (`Anaconda`_ preferred).
 
+Also `Git for Windows`_ is required for its Linux command line tools. 
+If you have not marked the option to add them to path, there are 
+instructions below how to do so. The GUI alternative to ``git``, `Github Desktop`_ 
+is optional and does not come with the required tools.
+
 .. _`CUDA 7.5`: https://developer.nvidia.com/cuda-downloads
 .. _`Anaconda`: https://www.continuum.io/downloads#_windows
+.. _`Git for Windows`: https://git-scm.com/download/win
+.. _`Github Desktop`: https://desktop.github.com/
 
 Setting up Futhark and OpenCL
 -----------------------------
@@ -138,6 +145,10 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
     ``mingw32-make.exe``. Then simply rename ``mingw32-make –
     Copy.exe`` or similar to ``make.exe``. Now you will be able to run
     the makefiles.
+    
+    Also, if you have not selected to add the optional Linux command line tools to ``PATH``
+    during the ``Git for Windows`` installation, add the ``C:\Program Files\Git\usr\bin``
+    directory to ``PATH`` manually now.
 
 12) This guide has been written off memory, so if you are having
     difficulties - ask on the `issues page`_. There might be errors in
