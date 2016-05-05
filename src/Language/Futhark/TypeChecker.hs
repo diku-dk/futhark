@@ -717,7 +717,7 @@ checkExp (UnOp Negate e loc) = do
   return $ UnOp Negate e' loc
 
 checkExp (UnOp Abs e loc) = do
-  e' <- require anyIntType =<< checkExp e
+  e' <- require anyNumberType =<< checkExp e
   return $ UnOp Abs e' loc
 
 checkExp (UnOp Signum e loc) = do
