@@ -10,10 +10,10 @@ PyOpenCL backends functional.  This guide was last updated on the 5th
 of May 2016, and is for computers using 64-bit Windows along with
 `CUDA 7.5`_ and Python 2.7 (`Anaconda`_ preferred).
 
-Also `Git for Windows`_ is required for its Unix tools. If you have 
-not marked the option to add them to path, there are instructions 
-below how to do so. The GUI alternative to git, `Github Desktop`_ is 
-optional and does not come with the required tools.
+Also `Git for Windows`_ is required for its Linux command line tools. 
+If you have not marked the option to add them to path, there are 
+instructions below how to do so. The GUI alternative to ``git``, `Github Desktop`_ 
+is optional and does not come with the required tools.
 
 .. _`CUDA 7.5`: https://developer.nvidia.com/cuda-downloads
 .. _`Anaconda`: https://www.continuum.io/downloads#_windows
