@@ -48,9 +48,6 @@ module Futhark.Analysis.HORepresentation.SOAC
   , inputRowType
   , transformRows
   , transposeInput
-  -- ** Converting to and from expressions
-  , inputFromSubExp
-  , inputsToSubExps
   -- ** Input transformations
   , ArrayTransforms
   , noTransforms
@@ -267,12 +264,6 @@ addTransform tr (Input trs a t) =
 -- list.
 addTransforms :: ArrayTransforms -> Input -> Input
 addTransforms ts (Input ots a t) = Input (ots <> ts) a t
-
--- | If the given expression represents a normalised SOAC input,
--- return that input.
-inputFromSubExp :: HasScope t f => SubExp -> f (Maybe Input)
-inputFromSubExp (Futhark.Var v) = Just <$> varInput v
-inputFromSubExp _               = pure Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: (MonadBinder m) =>
