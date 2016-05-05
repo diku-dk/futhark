@@ -295,11 +295,11 @@ constituents match each other's indentation."
               (+ (current-column) futhark-indent-level)))
 
        ;; Otherwise, if the line starts with "let" or "loop", align to a
-       ;; previous "let" or "loop".
+       ;; previous "let" or "loop", or even "unsafe".
        (save-excursion
          (and (or (looking-at "let")
                   (looking-at "loop"))
-              (futhark-find-closest-of-keywords-backward '("let" "loop"))
+              (futhark-find-closest-of-keywords-backward '("let" "loop" "unsafe"))
               (current-column)))
 
        ;; Otherwise, if inside a parenthetical structure, align to its
