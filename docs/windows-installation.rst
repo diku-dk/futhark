@@ -146,7 +146,7 @@ Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_
     Copy.exe`` or similar to ``make.exe``. Now you will be able to run
     the makefiles.
     
-    Also, if you have not selected to add the optional Linux tools to ``PATH``
+    Also, if you have not selected to add the optional Linux command line tools to ``PATH``
     during the ``Git for Windows`` installation, add the ``C:\Program Files\Git\usr\bin``
     directory to ``PATH`` manually now.
 
