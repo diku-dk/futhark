@@ -53,18 +53,18 @@ Setting up Futhark and OpenCL
    necessary.
 
 6) The header files and the .dll for OpenCL that comes with the CUDA
-7.5 distribution also need to be installed into MingWpy.  Go to
-``C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v7.5\include``
-and copy the ``CL`` directory into the MingWpy ``include`` directory.
+   7.5 distribution also need to be installed into MingWpy.  Go to
+   ``C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v7.5\include``
+   and copy the ``CL`` directory into the MingWpy ``include`` directory.
 
-Next, go to ``C:\Program Files\NVIDIA Corporation\OpenCL`` and copy
-the ``OpenCL64.dll`` file into the MingWpy ``lib`` directory (it is
-next to ``include``).
+   Next, go to ``C:\Program Files\NVIDIA Corporation\OpenCL`` and copy
+   the ``OpenCL64.dll`` file into the MingWpy ``lib`` directory (it is
+   next to ``include``).
 
-The CUDA distribution also comes with the static ``OpenCL.lib``, but
-trying to use that one instead of the ``OpenCL64.dll`` will cause
-programs compiled with ``futhark-opencl`` to crash, so ignore it
-completely.
+   The CUDA distribution also comes with the static ``OpenCL.lib``, but
+   trying to use that one instead of the ``OpenCL64.dll`` will cause
+   programs compiled with ``futhark-opencl`` to crash, so ignore it
+   completely.
 
 Now you should be able to compile ``futhark-opencl`` and run Futhark
 programs on the GPU.
@@ -85,61 +85,61 @@ First install Mako using ``pip install mako``.
 Also install PyPNG using ``pip install pypng`` (not stricly necessary,
 but some examples make use of it).
 
-8) Clone and fork the `PyOpenCL repository`_ to your hard drive. Do
+7) Clone and fork the `PyOpenCL repository`_ to your hard drive. Do
    this instead of downloading the zip, as the zip will not contain
    some of the other repositories it links to and you will end up with
    missing header files.
 
-9) If you have ignored the instructions and gotten Python 3.x instead
+8) If you have ignored the instructions and gotten Python 3.x instead
    2.7, you will have to do some extra work.
 
-Edit ``.\pyopencl\compyte\ndarray\gen_elemwise.py`` and
-``.\pyopencl\compyte\ndarray\test_gpu_ndarray.py`` and convert most
-Python 2.x style print statements to Python 3 syntax. Basically wrap
-print arguments in brackets "(..)" and ignore any lines containing
-StringIO ``>>`` operator.
+   Edit ``.\pyopencl\compyte\ndarray\gen_elemwise.py`` and
+   ``.\pyopencl\compyte\ndarray\test_gpu_ndarray.py`` and convert most
+   Python 2.x style print statements to Python 3 syntax. Basically wrap
+   print arguments in brackets "(..)" and ignore any lines containing
+   StringIO ``>>`` operator.
 
-Otherwise just go to the next point.
+   Otherwise just go to the next point.
 
-10) Go into the repo directory and from the command line execute
-``python configure.py``.
+9) Go into the repo directory and from the command line execute
+   ``python configure.py``.
 
-Edit ``siteconf.py`` to following::
+   Edit ``siteconf.py`` to following::
 
-    CL_TRACE = False
-    CL_ENABLE_GL = False
-    CL_INC_DIR = ['c:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v7.5\\include']
-    CL_LIB_DIR = ['C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v7.5\\lib\\x64']
-    CL_LIBNAME = ['OpenCL']
-    CXXFLAGS = ['-std=c++0x']
-    LDFLAGS = []
+     CL_TRACE = False
+     CL_ENABLE_GL = False
+     CL_INC_DIR = ['c:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v7.5\\include']
+     CL_LIB_DIR = ['C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v7.5\\lib\\x64']
+     CL_LIBNAME = ['OpenCL']
+     CXXFLAGS = ['-std=c++0x']
+     LDFLAGS = []
 
-Run the following commands::
+   Run the following commands::
 
-    > python setup.py build_ext --compiler = mingw32
-    > python setup.py install
+     > python setup.py build_ext --compiler = mingw32
+     > python setup.py install
 
 If everything went in order, pyOpenCL should be installed on your machine now.
 
-11) Lastly, Pygame needs to be installed.  Again, not stricly
+10) Lastly, Pygame needs to be installed.  Again, not stricly
     necessary, but some examples make use of it.  To do so on Windows,
     download ``pygame-1.9.2a0-cp27-none-win_amd64.whl`` from `here
     <http://www.lfd.uci.edu/~gohlke/pythonlibs/#pygame>`_. ``cp27``
     means Python 2.7 and ``win_amd64`` means 64-bit Windows.
 
-Go to the directory you have downloaded the file and execute ``pip
-install pygame-1.9.2a0-cp27-none-win_amd64.whl`` from the command
-line.
+    Go to the directory you have downloaded the file and execute ``pip
+    install pygame-1.9.2a0-cp27-none-win_amd64.whl`` from the command
+    line.
 
 Now you should be able to run the `Mandelbrot Explorer`_ and and `Game of Life`_ examples.
 
-12) To run the makefiles, first setup ``make`` by going to the ``bin``
+11) To run the makefiles, first setup ``make`` by going to the ``bin``
     directory of MingWpy and making a copy of
     ``mingw32-make.exe``. Then simply rename ``mingw32-make –
     Copy.exe`` or similar to ``make.exe``. Now you will be able to run
     the makefiles.
 
-13) This guide has been written off memory, so if you are having
+12) This guide has been written off memory, so if you are having
     difficulties - ask on the `issues page`_. There might be errors in
     it.
 
