@@ -5,7 +5,8 @@ Installation
 
 There are two ways to install the Futhark compiler: using a
 precompiled tarball or compiling from source.  Both methods are
-discussed below.
+discussed below.  If you are using Windows, you may also want to read
+:ref:`windows-installation`.
 
 Compiling from source
 ---------------------

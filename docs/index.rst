@@ -19,6 +19,7 @@ Contents:
    :maxdepth: 1
 
    installation.rst
+   windows-installation.rst
    language-overview.rst
    uniqueness-types.rst
    language-reference.rst
