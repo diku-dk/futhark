@@ -294,6 +294,14 @@ constituents match each other's indentation."
               (futhark-find-keyword-backward "fn")
               (+ (current-column) futhark-indent-level)))
 
+       ;; Otherwise, if the line starts with "let" or "loop", align to a
+       ;; previous "let" or "loop".
+       (save-excursion
+         (and (or (looking-at "let")
+                  (looking-at "loop"))
+              (futhark-find-closest-of-keywords-backward '("let" "loop"))
+              (current-column)))
+
        ;; Otherwise, if inside a parenthetical structure, align to its
        ;; start element if present, otherwise the parenthesis + 1.
        (save-excursion
@@ -305,14 +313,6 @@ constituents match each other's indentation."
                                          (ignore-errors (backward-sexp) t)
                                          (current-column)))
                     (current-column)))))
-
-       ;; Otherwise, if the line starts with "let" or "loop", align to a
-       ;; previous "let" or "loop".
-       (save-excursion
-         (and (or (looking-at "let")
-                  (looking-at "loop"))
-              (futhark-find-closest-of-keywords-backward '("let" "loop"))
-              (current-column)))
 
        ;; Otherwise, if the previous keyword is "fun", align to a single
        ;; indent level.
