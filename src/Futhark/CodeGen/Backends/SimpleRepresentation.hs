@@ -269,7 +269,7 @@ c_sin32 = [C.cfun|
 
 c_atan2_32 ::C.Func
 c_atan2_32 = [C.cfun|
-    static inline double $id:(funName' "atan2_32")(double x, double y) {
+    static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2(x,y);
     }
   |]
