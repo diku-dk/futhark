@@ -940,7 +940,7 @@ compileExp (UnOp Abs{} x) = do
 
 compileExp (UnOp (FAbs Float32) x) = do
   x' <- compileExp x
-  return [C.cexp|fabsf($exp:x')|]
+  return [C.cexp|(float)fabs($exp:x')|]
 
 compileExp (UnOp (FAbs Float64) x) = do
   x' <- compileExp x
