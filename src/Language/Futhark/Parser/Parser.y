@@ -283,8 +283,8 @@ UserTypeAlias  : type id '=' UserType { let L loc (ID name) = $2
 
 UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
-         | Uniqueness '[' UserType DimDecl ']'
-                         { UserArray $3 $4 $1 $2 }
+         | '*' UserType  { UserUnique $2 $1 }
+         | '[' UserType DimDecl ']' { UserArray $2 $3 $1 }
          | '(' UserType ',' UserTypes ')' { UserTuple ($2:$4) $1 }
          | id            { let L loc (ID name) = $1 in UserTypeAlias name loc }
 ;

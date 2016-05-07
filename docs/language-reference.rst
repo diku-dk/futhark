@@ -112,20 +112,15 @@ Examples::
 The aliases are merely a syntactic convenience.  With respect to type
 checking the ``position`` and ``velocity`` types are identical.  It is
 currently not possible to put shape declarations in type aliases.
-Furthermore, uniqueness must be declared in the type declaration::
+When using uniqueness attributes with type aliases, inner uniqueness
+attributes are overrided by outer ones::
 
-  -- Does not work:
-  type intlist = [int]
-  type matrix =  [intlist]
+  type uniqueInts = *[int]
+  type nonuniqueIntLists = [intlist]
+  type uniqueIntLists = *nonuniqueIntLists
 
-  fun intlist (*matrix a) = ..
-
-
-  -- Instead do:
-  type intlist = [int]
-  type matrix  = *[[int]]
-
-  fun intlist (matrix a) = ...
+  -- Error: using non-unique value for a unique return value.
+  fun uniqueIntLists (nonuniqueIntLists p) = p
 
 *Dimension declarations*
 
