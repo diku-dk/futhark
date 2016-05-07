@@ -111,7 +111,8 @@ data SimpleType = SimpleArray SimpleType Int
 toSimpleType :: UncheckedUserType -> Either String SimpleType
 toSimpleType (UserPrim t _) = Right $ SimplePrim t
 toSimpleType UserTuple{} = Left "Cannot handle tuples yet."
-toSimpleType (UserArray t d _ _) =
+toSimpleType (UserUnique t _) = toSimpleType t
+toSimpleType (UserArray t d _) =
   SimpleArray <$> toSimpleType t <*> constantDim d
   where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."

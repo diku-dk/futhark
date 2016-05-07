@@ -198,10 +198,11 @@ renameUserType :: (Eq f, Hashable f) =>
                    UserType f
                 -> RenameM f t (UserType t)
 renameUserType (UserPrim bt loc) = return $ UserPrim bt loc
+renameUserType (UserUnique bt loc) = UserUnique <$> renameUserType bt <*> pure loc
 renameUserType (UserTuple ts loc) = UserTuple <$> mapM renameUserType ts <*> pure loc
 renameUserType (UserTypeAlias name loc) = return $ UserTypeAlias name loc
-renameUserType (UserArray at d u loc) =
-  UserArray <$> renameUserType at <*> renameDim d <*> pure u <*> pure loc
+renameUserType (UserArray at d loc) =
+  UserArray <$> renameUserType at <*> renameDim d <*> pure loc
   where renameDim AnyDim       = return AnyDim
         renameDim (NamedDim v) = NamedDim <$> replName v
         renameDim (ConstDim n) = return $ ConstDim n

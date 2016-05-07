@@ -167,8 +167,9 @@ mapUserTypeM :: (Applicative m, Monad m) =>
              -> UserType vnf
              -> m (UserType vnt)
 mapUserTypeM _ (UserPrim bt loc) = pure $ UserPrim bt loc
-mapUserTypeM tv (UserArray t d u loc) =
-  UserArray <$> mapUserTypeM tv t <*> mapDimDecl tv d <*> pure u <*> pure loc
+mapUserTypeM tv (UserUnique t loc) = UserUnique <$> mapUserTypeM tv t <*> pure loc
+mapUserTypeM tv (UserArray t d loc) =
+  UserArray <$> mapUserTypeM tv t <*> mapDimDecl tv d <*> pure loc
 mapUserTypeM tv (UserTuple ts loc) =
   UserTuple <$> mapM (mapUserTypeM tv) ts <*> pure loc
 mapUserTypeM _ (UserTypeAlias name loc) =

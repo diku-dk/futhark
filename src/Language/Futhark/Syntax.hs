@@ -223,16 +223,18 @@ type CompTypeBase = TypeBase Rank Names
 -- | An unstructured type with type variables and possibly shape
 -- declarations - this is what the user types in the source program.
 data UserType vn = UserPrim PrimType SrcLoc
-                 | UserArray (UserType vn) (DimDecl vn) Uniqueness SrcLoc
+                 | UserArray (UserType vn) (DimDecl vn) SrcLoc
                  | UserTuple [UserType vn] SrcLoc
                  | UserTypeAlias Name SrcLoc
+                 | UserUnique (UserType vn) SrcLoc
     deriving (Show)
 
 instance Located (UserType vn) where
   locOf (UserPrim _ loc) = locOf loc
-  locOf (UserArray _ _ _ loc) = locOf loc
+  locOf (UserArray _ _ loc) = locOf loc
   locOf (UserTuple _ loc) = locOf loc
   locOf (UserTypeAlias _ loc) = locOf loc
+  locOf (UserUnique _ loc) = locOf loc
 
 --
 -- | A "structural" type with shape annotations and no aliasing
