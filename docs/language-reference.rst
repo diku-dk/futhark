@@ -88,7 +88,8 @@ Apart from declaring a function with the keyword ``fun``, it can also
 be declared with ``entry``.  This means that if the Futhark program is
 compiled as a library instead of an executable program, that function
 will be exposed as an entry point.  Any function named ``main`` will
-always be thus exposed, whether it is declared with ``entry`` or not.
+always be considered an entry point, whether it is declared with
+``entry`` or not.
 
 Type Aliases
 ------------
