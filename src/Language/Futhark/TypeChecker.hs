@@ -11,6 +11,7 @@ module Language.Futhark.TypeChecker
   where
 
 import Control.Applicative
+import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
@@ -303,21 +304,22 @@ newtype TypeM a = TypeM (RWST
                          Scope       -- Reader
                          Occurences  -- Writer
                          VNameSource -- State
-                         (Either TypeError) -- Inner monad
+                         (Except TypeError) -- Inner monad
                          a)
   deriving (Monad, Functor, Applicative,
             MonadReader Scope,
             MonadWriter Occurences,
-            MonadState VNameSource)
+            MonadState VNameSource,
+            MonadError TypeError)
 
 runTypeM :: Scope -> VNameSource -> TypeM a
          -> Either TypeError (a, VNameSource)
 runTypeM env src (TypeM m) = do
-  (x, src', _) <- runRWST m env src
+  (x, src', _) <- runExcept $ runRWST m env src
   return (x, src')
 
 bad :: TypeError -> TypeM a
-bad = TypeM . lift . Left
+bad = throwError
 
 newName :: VName -> TypeM VName
 newName s = do src <- get
