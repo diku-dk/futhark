@@ -241,7 +241,7 @@ renameTypeGeneric renameShape renameAliases = renameType'
 
 
 rename :: (Eq f, Hashable f, Eq t, Hashable t) =>
-          MapperBase NoInfo f t (RenameM f t)
+          MapperBase f t (RenameM f t)
 rename = Mapper {
            mapOnExp = renameExp
          , mapOnPattern = renamePattern
