@@ -336,7 +336,7 @@ Exp  :: { UncheckedExp }
                              t <- lift $ gets parserIntType
                              return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
      | Id %prec letprec { Var $1 }
-     | empty '(' UserType ')' { Empty $3 NoInfo $1 }
+     | empty '(' UserType ')' { Empty (TypeDecl $3 NoInfo) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | '(' Exp ',' Exps ')'   { TupLit ($2:$4) $1 }
      | '('      ')'   { TupLit [] $1 }

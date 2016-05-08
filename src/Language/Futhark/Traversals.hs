@@ -37,12 +37,12 @@ import Language.Futhark.Syntax
 -- | Express a monad mapping operation on a syntax node.  Each element
 -- of this structure expresses the operation to be performed on a
 -- given child.
-data MapperBase f vnf vnt m = Mapper {
-    mapOnExp :: ExpBase f vnf -> m (ExpBase f vnt)
-  , mapOnLambda :: LambdaBase f vnf -> m (LambdaBase f vnt)
+data MapperBase vnf vnt m = Mapper {
+    mapOnExp :: ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
+  , mapOnLambda :: LambdaBase NoInfo vnf -> m (LambdaBase NoInfo vnt)
   , mapOnType :: CompTypeBase vnf -> m (CompTypeBase vnt)
-  , mapOnPattern :: PatternBase f vnf -> m (PatternBase f vnt)
-  , mapOnIdent :: IdentBase f vnf -> m (IdentBase f vnt)
+  , mapOnPattern :: PatternBase NoInfo vnf -> m (PatternBase NoInfo vnt)
+  , mapOnIdent :: IdentBase NoInfo vnf -> m (IdentBase NoInfo vnt)
   , mapOnName :: vnf -> m vnt
   , mapOnValue :: Value -> m Value
   }
@@ -51,8 +51,8 @@ data MapperBase f vnf vnt m = Mapper {
 -- expression.  Importantly, the 'mapOnExp' action is not invoked for
 -- the expression itself, and the mapping does not descend recursively
 -- into subexpressions.  The mapping is done left-to-right.
-mapExpM :: (Traversable f, Applicative m, Monad m) =>
-           MapperBase f vnf vnt m -> ExpBase f vnf -> m (ExpBase f vnt)
+mapExpM :: (Applicative m, Monad m) =>
+           MapperBase vnf vnt m -> ExpBase NoInfo vnf -> m (ExpBase NoInfo vnt)
 mapExpM tv (Var ident) =
   pure Var <*> mapOnIdent tv ident
 mapExpM tv (Literal val loc) =
@@ -61,8 +61,8 @@ mapExpM tv (TupLit els loc) =
   pure TupLit <*> mapM (mapOnExp tv) els <*> pure loc
 mapExpM tv (ArrayLit els elt loc) =
   pure ArrayLit <*> mapM (mapOnExp tv) els <*> mapTypeM tv elt <*> pure loc
-mapExpM tv (Empty ut elt loc) =
-  pure Empty <*> mapUserTypeM tv ut <*> mapTypeM tv elt <*> pure loc
+mapExpM tv (Empty (TypeDecl ut NoInfo) loc) =
+  pure Empty <*> (TypeDecl <$> mapUserTypeM tv ut <*> pure NoInfo) <*> pure loc
 mapExpM tv (BinOp bop x y t loc) =
   pure (BinOp bop) <*>
          mapOnExp tv x <*> mapOnExp tv y <*>
@@ -152,9 +152,9 @@ mapExpM tv (Write i v a loc) =
   Write <$> mapOnExp tv i <*> mapOnExp tv v <*> mapOnExp tv a <*> pure loc
 
 mapLoopFormM :: (Applicative m, Monad m) =>
-                MapperBase f vnf vnt m
-             -> LoopFormBase f vnf
-             -> m (LoopFormBase f vnt)
+                MapperBase vnf vnt m
+             -> LoopFormBase NoInfo vnf
+             -> m (LoopFormBase NoInfo vnt)
 mapLoopFormM tv (For FromUpTo lbound i ubound) =
   For FromUpTo <$> mapOnExp tv lbound <*> mapOnIdent tv i <*> mapOnExp tv ubound
 mapLoopFormM tv (For FromDownTo lbound i ubound) =
@@ -163,7 +163,7 @@ mapLoopFormM tv (While e) =
   While <$> mapOnExp tv e
 
 mapUserTypeM :: (Applicative m, Monad m) =>
-                MapperBase f vnf vnt m
+                MapperBase vnf vnt m
              -> UserType vnf
              -> m (UserType vnt)
 mapUserTypeM _ (UserPrim bt loc) = pure $ UserPrim bt loc
@@ -176,7 +176,7 @@ mapUserTypeM _ (UserTypeAlias name loc) =
   pure $ UserTypeAlias name loc
 
 mapDimDecl :: (Applicative m, Monad m) =>
-              MapperBase f vnf vnt m
+              MapperBase vnf vnt m
            -> DimDecl vnf
            -> m (DimDecl vnt)
 mapDimDecl tv (NamedDim vn) = NamedDim <$> mapOnName tv vn
@@ -184,6 +184,6 @@ mapDimDecl _ (ConstDim k) = pure $ ConstDim k
 mapDimDecl _ AnyDim = pure AnyDim
 
 mapTypeM :: (Applicative m, Monad m, Traversable f) =>
-            MapperBase f vnf vnt m
+            MapperBase vnf vnt m
          -> f (CompTypeBase vnf) -> m (f (CompTypeBase vnt))
 mapTypeM = traverse . mapOnType
