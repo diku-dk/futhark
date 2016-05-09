@@ -84,7 +84,7 @@
   "A regex describing a Futhark variable.")
 
 (defconst futhark-type
-  (concat "\\(?:\\(?:\\[[^]]+\\]\\)\\|\\(?:{[^}]+}\\)\\|" futhark-var "\\)")
+  (concat "\\(?:\\(?:\\[[^]]+\\]\\)\\|\\(?:([^)]+)\\)\\|" futhark-var "\\)")
   "A regex describing a Futhark type, built-in or user-specified.
 Does not recognise nested tuples or nested arrays.")
 
@@ -102,7 +102,7 @@ Does not recognise nested tuples or nested arrays.")
     ;; Variable and tuple declarations
     (,(concat "let[[:space:]\n]+\\(" futhark-var "\\)")
      . '(1 font-lock-variable-name-face))
-    (,(concat "let[[:space:]\n]+{\\([^}]+\\)")
+    (,(concat "let[[:space:]\n]+(\\([^)]+\\)")
      . '(1 font-lock-variable-name-face))
 
     ;; Keywords
