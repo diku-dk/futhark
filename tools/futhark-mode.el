@@ -245,8 +245,8 @@ constituents match each other's indentation."
        ;; "else", align to the starting column plus one indent level.
        (save-excursion
          (and (futhark-backward-part)
-              (or (looking-at "\\<then$")
-                  (looking-at "\\<else$"))
+              (or (looking-at "\\<then[[:space:]]*$")
+                  (looking-at "\\<else[[:space:]]*$"))
               (progn (futhark-beginning-of-line-text) t)
               (+ (current-column) futhark-indent-level)))
 
@@ -262,7 +262,7 @@ constituents match each other's indentation."
        ;; first on the line) plus one indent level.
        (save-excursion
          (and (futhark-backward-part)
-              (looking-at "\\<do$")
+              (looking-at "\\<do[[:space:]]*$")
               (or (and (futhark-find-closest-of-keywords-backward '("for" "while"))
                        (futhark-is-beginning-of-line-text)
                        (+ (current-column) futhark-indent-level))
@@ -282,7 +282,7 @@ constituents match each other's indentation."
        ;; the matching "let" or "loop" column.
        (save-excursion
          (and (futhark-backward-part)
-              (looking-at "\\<in$")
+              (looking-at "\\<in[[:space:]]*$")
               (futhark-find-closest-of-keywords-backward '("let" "loop"))
               (current-column)))
 
@@ -290,7 +290,7 @@ constituents match each other's indentation."
        ;; the matching "fn" column plus one indent level.
        (save-excursion
          (and (futhark-backward-part)
-              (looking-at "=>$")
+              (looking-at "=>[[:space:]]*$")
               (futhark-find-keyword-backward "fn")
               (+ (current-column) futhark-indent-level)))
 
