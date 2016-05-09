@@ -79,10 +79,6 @@ instance Pretty PrimValue where
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
 
-instance Pretty Uniqueness where
-  ppr Unique    = star
-  ppr Nonunique = empty
-
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt

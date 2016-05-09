@@ -54,6 +54,10 @@ instance Monoid Uniqueness where
   Nonunique `mappend` _ = Nonunique
   u `mappend` _         = u
 
+instance Pretty Uniqueness where
+  ppr Unique = star
+  ppr Nonunique = empty
+
 instance Hashable Uniqueness where
   hashWithSalt salt Unique    = salt
   hashWithSalt salt Nonunique = salt * 2

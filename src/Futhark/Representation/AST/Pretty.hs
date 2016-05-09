@@ -42,10 +42,6 @@ class (Annotations lore,
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
 
-instance Pretty Uniqueness where
-  ppr Unique = star
-  ppr Nonunique = empty
-
 instance Pretty NoUniqueness where
   ppr _ = mempty
 
