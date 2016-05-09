@@ -184,7 +184,7 @@ constituents match each other's indentation."
        ;; Align closing parentheses and commas to opening
        ;; parenthesis.
        (save-excursion
-         (and (looking-at (regexp-opt '(")" "]" "}" ",")))
+         (and (looking-at (regexp-opt '(")" "]" ",")))
               (ignore-errors
                 (backward-up-list 1)
                 (current-column))))
