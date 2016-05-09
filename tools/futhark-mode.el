@@ -189,15 +189,6 @@ constituents match each other's indentation."
                 (backward-up-list 1)
                 (current-column))))
 
-       ;; Align "in" to nearest "loop" if there is sign of not being in
-       ;; the body of a let.
-       (save-excursion
-         (and (futhark-looking-at-word "in")
-              (futhark-first-keyword-backward)
-              (futhark-looking-at-word "in")
-              (futhark-find-keyword-backward "loop")
-              (current-column)))
-
        ;; Align "in" to nearest "let" or "loop".
        (save-excursion
          (and (futhark-looking-at-word "in")
@@ -401,6 +392,7 @@ Set mark and return t if found; return nil otherwise."
         (then-else-count 0)
         ;; The same with "let", "loop", and "in".
         (let-in-count 0)
+        (just-had-let nil)
         ;; Only look in the current paren-delimited code.
         (topp (save-excursion (or (ignore-errors
                                     (backward-up-list 1)
@@ -428,11 +420,16 @@ Set mark and return t if found; return nil otherwise."
             ((futhark-looking-at-word "else")
              (incf if-else-count)
              (incf then-else-count))
-            ((or (futhark-looking-at-word "let")
-                 (futhark-looking-at-word "loop"))
+            ((and (or (futhark-looking-at-word "let")
+                      (futhark-looking-at-word "loop"))
+                  (not just-had-let))
+             (setq just-had-let t)
              (setq let-in-count (max 0 (1- let-in-count))))
             ((futhark-looking-at-word "in")
+             (setq just-had-let nil)
              (incf let-in-count))
+            ((futhark-looking-at-word "do")
+             (setq just-had-let nil))
             )
 
       (when (and (futhark-looking-at-word word)
