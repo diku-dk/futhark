@@ -274,7 +274,7 @@ constituents match each other's indentation."
        ;; the matching "let" or "loop" column plus one indent level.
        (save-excursion
          (and (futhark-backward-part)
-              (looking-at "=$")
+              (looking-at "=[[:space:]]*$")
               (futhark-find-closest-of-keywords-backward '("let" "loop"))
               (+ (current-column) futhark-indent-level)))
 
@@ -295,11 +295,19 @@ constituents match each other's indentation."
               (+ (current-column) futhark-indent-level)))
 
        ;; Otherwise, if the line starts with "let" or "loop", align to a
-       ;; previous "let" or "loop", or even "unsafe".
+       ;; previous "let" or "loop".
        (save-excursion
          (and (or (looking-at "let")
                   (looking-at "loop"))
-              (futhark-find-closest-of-keywords-backward '("let" "loop" "unsafe"))
+              (futhark-find-closest-of-keywords-backward '("let" "loop"))
+              (current-column)))
+
+       ;; Otherwise, if the line starts with "let" or "loop", and the above rule
+       ;; did not result in anything, align to a previous "unsafe".
+       (save-excursion
+         (and (or (looking-at "let")
+                  (looking-at "loop"))
+              (futhark-find-keyword-backward "unsafe")
               (current-column)))
 
        ;; Otherwise, if inside a parenthetical structure, align to its
