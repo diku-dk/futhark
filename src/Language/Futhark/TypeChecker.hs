@@ -1361,7 +1361,8 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
                   body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
                          NoInfo pos
-              checkLambda tupfun args
+              void $ checkLambda tupfun args
+              return $ CurryFun fname curryargexps' (Info rettype') pos
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
@@ -1375,7 +1376,7 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
                   body = Apply fname (zip (curryargexps++map (Var . asIdent) params) $
                                       map diet paramtypes)
                          NoInfo pos
-              _ <- checkLambda fun args
+              void $ checkLambda fun args
               return $ CurryFun fname curryargexps' (Info rettype') pos
     where untype ident = ident { identType = NoInfo }
 
