@@ -9,21 +9,16 @@
 -- output {
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
-fun *[[int]] matmultImp([[int]] a, [[int]] b) =
-    let N   = size(0, a)            in
-    let res = replicate(N, iota(N)) in
-    loop (res) = for i < N do
-        loop (res) = for j < N do
-            let partsum =
-                let res = 0 in
-                loop (res) = for k < N do
-                    let res = res + a[i,k] * b[k,j]
-                    in  res
-                in res
-            in let res[i,j] = partsum in res
-        in res
-    in res
-
+fun [[int,n],m] matmult([[int,o],m] a, [[int,n],o] b) =
+  let res = replicate(m, replicate(n,0)) in
+  loop (res) = for i < m do
+      loop (res) = for j < n do
+          loop (partsum = 0) = for k < o do
+            partsum + a[i,k] * b[k,j]
+          let res[i,j] = partsum
+          in res
+      in res
+  in res
 
 fun [[int]] main([[int]] x, [[int]] y) =
-  matmultImp(x, y)
+  matmult(x, y)
