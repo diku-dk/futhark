@@ -261,21 +261,18 @@ as a shortcut.  Note that this has no special semantic meaning, but is
 simply a case of normal name shadowing.
 
 For example, this loop implements the "imperative" version of matrix
-multiplication of two ``N * N`` matrices::
+multiplication of an ``m * o`` with an ``o * n`` matrix::
 
-  fun *[[int]] matmultImp(int N, [[int]] a, [[int]] b) =
-      let res = replicate(N, iota(N)) in
-      loop (res) = for i < N do
-          loop (res) = for j < N do
-              let partsum =
-                  let res = 0 in
-                  loop (res) = for k < N do
-                      let res = res + a[i,k] * b[k,j]
-                      in  res
-                  in res
-              in let res[i,j] = partsum in res
-          in res
-      in res
+  fun [[f32,n],m] matmult([[f32,o],m] a, [[f32,n],o] b) =
+    let res = replicate(m, replicate(n,0f32)) in
+    loop (res) = for i < m do
+        loop (res) = for j < n do
+            loop (partsum = 0f32) = for k < o do
+              partsum + a[i,k] * b[k,j]
+            let res[i,j] = partsum
+            in res
+        in res
+    in res
 
 With the naive implementation based on copying the source array,
 executing the ``let-with`` expression would require memory
