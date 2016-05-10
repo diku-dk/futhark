@@ -29,11 +29,11 @@ import qualified Futhark.Analysis.HORepresentation.SOAC as SOAC
 import Futhark.Transform.Rename
 import Futhark.Pass
 
-data VarEntry = IsArray VName SOAC.ArrayTransforms (NameInfo SOACS)
+data VarEntry = IsArray VName (NameInfo SOACS) SOAC.Input
               | IsNotArray VName (NameInfo SOACS)
 
 varEntryType :: VarEntry -> NameInfo SOACS
-varEntryType (IsArray _ _ attr) =
+varEntryType (IsArray _ attr _) =
   attr
 varEntryType (IsNotArray _ attr) =
   attr
@@ -45,11 +45,11 @@ data FusionGEnv = FusionGEnv {
   , fusedRes   :: FusedRes
   }
 
-arrsInScope :: FusionGEnv -> HM.HashMap VName (VName, Type, SOAC.ArrayTransforms)
+arrsInScope :: FusionGEnv -> HM.HashMap VName SOAC.Input
 arrsInScope = HM.fromList . mapMaybe asArray . HM.toList . varsInScope
-  where asArray (name, IsArray srcname ts attr) =
-          Just (name, (srcname, typeOf attr, ts))
-        asArray (_, IsNotArray _ _) =
+  where asArray (name, IsArray _ _ input) =
+          Just (name, input)
+        asArray (_, IsNotArray{}) =
           Nothing
 
 data Error = Error String
@@ -76,18 +76,12 @@ instance HasScope SOACS FusionGM where
 --- Monadic Helpers: bind/new/runFusionGatherM, etc                      ---
 ------------------------------------------------------------------------
 
-arrayTransforms :: VName -> Type -> FusionGM (VName, Type, SOAC.ArrayTransforms)
-arrayTransforms name t = do
-  v' <- asks $ HM.lookup name . arrsInScope
-  case v' of Just res -> return res
-             Nothing  -> return (name, t, SOAC.noTransforms)
-
 -- | Binds an array name to the set of used-array vars
 bindVar :: FusionGEnv -> Ident -> FusionGEnv
 bindVar env (Ident name t) =
   env { varsInScope = HM.insert name entry $ varsInScope env }
   where entry = case t of
-          Array {} -> IsArray name mempty $ LetInfo t
+          Array {} -> IsArray name (LetInfo t) $ SOAC.identInput $ Ident name t
           _        -> IsNotArray name $ LetInfo t
 
 bindVars :: FusionGEnv -> [Ident] -> FusionGEnv
@@ -111,7 +105,8 @@ bindingFParams = binding  . map paramIdent
 bindingFamilyVar :: [VName] -> FusionGEnv -> Ident -> FusionGEnv
 bindingFamilyVar faml env (Ident nm t) =
   env { soacs       = HM.insert nm faml $ soacs env
-      , varsInScope = HM.insert nm (IsArray nm mempty $ LetInfo t) $
+      , varsInScope = HM.insert nm (IsArray nm (LetInfo t) $
+                                    SOAC.identInput $ Ident nm t) $
                       varsInScope env
       }
 
@@ -143,9 +138,10 @@ bindingFamily pat m = do
 bindingTransform :: PatElem -> VName -> SOAC.ArrayTransform -> FusionGM a -> FusionGM a
 bindingTransform pe srcname trns = local $ \env ->
   case HM.lookup srcname $ varsInScope env of
-    Just (IsArray src' ts _) ->
+    Just (IsArray src' _ input) ->
       env { varsInScope =
-              HM.insert vname (IsArray src' (ts SOAC.|> trns) $ LetInfo attr) $
+              HM.insert vname
+              (IsArray src' (LetInfo attr) $ trns `SOAC.addTransform` input) $
               varsInScope env
           }
     _ -> bindVar env $ patElemIdent pe
@@ -295,10 +291,17 @@ addNewKerWithUnfusable res (idd, soac) ufs = do
   return $ FusedRes (rsucc res) os' is' ufs
            (HM.insert nm_ker new_ker (kernels res))
 
+lookupInput :: VName -> FusionGM (Maybe SOAC.Input)
+lookupInput name = asks $ HM.lookup name . arrsInScope
+
 inlineSOACInput :: SOAC.Input -> FusionGM SOAC.Input
 inlineSOACInput (SOAC.Input ts v t) = do
-  (v2, t2, ts2) <- arrayTransforms v t
-  return $ SOAC.Input (ts2<>ts) v2 t2
+  maybe_inp <- lookupInput v
+  case maybe_inp of
+    Nothing ->
+      return $ SOAC.Input ts v t
+    Just (SOAC.Input ts2 v2 t2) ->
+      return $ SOAC.Input (ts2<>ts) v2 t2
 
 inlineSOACInputs :: SOAC -> FusionGM SOAC
 inlineSOACInputs soac = do
@@ -655,7 +658,7 @@ addVarToUnfusable fres name = do
   trns <- asks $ HM.lookup name . arrsInScope
   let name' = case trns of
         Nothing         -> name
-        Just (orig,_,_) -> orig
+        Just (SOAC.Input _ orig _) -> orig
   return fres { unfusable = HS.insert name' $ unfusable fres }
 
 -- Lambdas create a new scope.  Disallow fusing from outside lambda by

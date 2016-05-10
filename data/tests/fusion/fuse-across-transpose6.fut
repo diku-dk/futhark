@@ -38,6 +38,7 @@
 --    [8744.595950505505, 28090.879539209436, 2563.082633667557],
 --    [9882.132352013321, 33465.152508625804, 2992.2059021836353]]
 -- }
+-- structure { Map/Scan 1 Map 2 }
 
 fun [f64] take(int n, [f64] a) = let (first, rest) = split((n), a) in first
 
@@ -61,9 +62,9 @@ fun [[f64,num_und],num_dates]
            [[f64,num_und],num_dates] md_vols,
            [[f64,num_und],num_dates] md_drifts,
            [[f64,num_und],num_dates] noises) =
-  let c_rows = map( combineVs, zip(noises, md_vols, md_drifts) ) in
-  let e_rows = map( fn [f64] ([f64] x) => map(exp64, x)
-                  , c_rows --map( combineVs, zip(noises, md_vols, md_drifts) )
+  let c_rows = map( combineVs, zip(noises, md_vols, md_drifts) )
+  let e_rows = map( fn [f64,num_und] ([f64] x) => map(exp64, x)
+                  , c_rows
                   )
   in  scan( fn [f64] ([f64] x, [f64] y) => zipWith(*, x, y)
           , md_starts, e_rows )
