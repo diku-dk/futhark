@@ -1,3 +1,4 @@
+-- Matrix multiplication written in a Repa-like style.
 -- ==
 -- input {
 --   [ [1,2], [3,4] ]
