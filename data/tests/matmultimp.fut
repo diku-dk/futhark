@@ -1,3 +1,6 @@
+-- Matrix multiplication written imperatively.  Very slow when using
+-- GPU backends.
+--
 -- ==
 -- input {
 --   [ [1,2], [3,4] ]
