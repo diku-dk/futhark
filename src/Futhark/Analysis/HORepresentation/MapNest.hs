@@ -90,7 +90,7 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
     Right (Just (pat, mn@(MapNest cs' inner_w body' ns' inps'))) -> do
       (ps, inps'') <-
         unzip <$>
-        fixInputs (zip (map paramName $ lambdaParams lam) inps)
+        fixInputs w (zip (map paramName $ lambdaParams lam) inps)
         (zip (params mn) inps')
       let n' = Nesting {
             nestingParamNames   = ps
@@ -143,14 +143,12 @@ toSOAC (MapNest cs w lam (Nesting npnames nres nrettype nw:ns) inps) = do
   return $ SOAC.Map cs w outerlam inps
 
 fixInputs :: MonadFreshNames m =>
-             [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
+             SubExp -> [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
           -> m [(VName, SOAC.Input)]
-fixInputs ourInps childInps =
+fixInputs w ourInps childInps =
   reverse . snd <$> foldM inspect (ourInps, []) childInps
   where
     isParam x (y, _) = x == y
-
-    w = arraysSize 0 $ map (SOAC.inputType . snd) ourInps
 
     findParam :: [(VName, SOAC.Input)]
               -> VName
