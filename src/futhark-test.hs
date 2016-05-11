@@ -1,10 +1,7 @@
 {-# LANGUAGE OverloadedStrings, TupleSections, FlexibleContexts #-}
 -- | This program is a convenience utility for running the Futhark
 -- test suite, and its test programs.
-module Main ( ProgramTest (..)
-            , TestRun (..)
-            , TestCase (..)
-            , main) where
+module Main (main) where
 
 
 import Control.Applicative
