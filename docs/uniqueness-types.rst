@@ -3,7 +3,7 @@
 Uniqueness Types
 ================
 
-While Futhark is through and through a pure functional language, it
+While Futhark is uncomprosingly a pure functional language, it
 may occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
@@ -27,11 +27,11 @@ the *n* iterations of the loop.
 
 To prevent this, we will want to update the array *in-place*,
 that is, with a static guarantee that the operation will not require
-any additional memory allocation, such as copying the array.  With an
+any additional memory allocation, such as copying the entire array.  With an
 in-place modification, a ``let-with`` can modify the array in
 time proportional to the slice being updated (*O(1)* in the case of
 the Fibonacci function), rather than time proportional to the size of
-the final array, as would the case if we perform a copy.  In order to
+the final array, as would the case if we performed a full copy.  In order to
 perform the update without violating referential transparency, we need
 to know that no other references to the array exists, or at least that
 such references will not be used on any execution path following the
@@ -54,10 +54,10 @@ To that end, let us consider the following function definition::
 
 The function call ``modify(a,i,x)`` returns ``a``, but where the
 element at index ``i`` has been increased by ``x``.  Note the
-asterisks: in the parameter declaration ``*[int] a``, this means that
+asterisks in the parameter declaration ``*[int] a``.  This means that
 the function ``modify`` has been given "ownership" of the array ``a``,
-meaning that the caller of ``modify`` will reference array ``a`` after
-the call.  In particular, ``modify`` can change the element at index
+meaning that the caller of ``modify`` will never reference array ``a`` after
+the call.  As a consequence, ``modify`` can change the element at index
 ``i`` without first copying the array, i.e. ``modify`` is free to do
 an in-place modification.  Furthermore, the return value of ``modify``
 is also unique - this means that the result of the call to ``modify``
@@ -73,7 +73,7 @@ Under which circumstances is this call valid?  Two things must hold:
 
 1. The type of ``a`` must be ``*[int]``, of course.
 
-2. Neither ``a`` or any variable that *aliases* `a` may be used on any
+2. Neither ``a`` or any variable that *aliases* ``a`` may be used on any
    execution path following the call to ``modify``.
 
 In general, when a value is passed as a unique-typed argument in a
@@ -148,9 +148,9 @@ rules:
 
 It is worth emphasising that everything in this chapter is employed as
 part of a static analysis.  *All* violations of the uniqueness rules
-will be discovered at compile time (in fact, during type-checking),
-thus leaving the code generator and runtime system at liberty to
-exploit them for low-level optimisation.
+will be discovered at compile time during type-checking, thus leaving
+the code generator and runtime system at liberty to exploit them for
+low-level optimisation.
 
 .. _futhark-sharing:
 

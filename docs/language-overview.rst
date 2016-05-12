@@ -251,9 +251,8 @@ array::
 
   let b = a with [2] <- [1,2,3] in b
 
-Yes, this is the *third* binding construct in the language, ignoring
-function abstraction!  As a convenience, whenever ``dest`` and ``src``
-are the same, we can write::
+As a convenience, whenever ``dest`` and ``src`` are the same, we can
+write::
 
     let dest[indexes] = value in body
 
