@@ -175,8 +175,9 @@ elements.  Therefore, when we store sharing information for a
 tuple-typed expression, we do it for each of its element types, rather
 than the tuple value as a whole.
 
-Many operations that produce arrays alias their array-typed inputs.
-For example, the result of ``concat`` aliases the arrays being
-concatenated.  This may seem counter-intuitive, but gives the compiler
-greater freedom.  The programmer can use ``copy`` to "break" sharing
-by forcing the argument to be manifested uniquely in memory.
+Most operations produce arrays without any aliases.  You can think of
+these as producing fresh arrays.  The exceptions are ``split``,
+``reshape``, ``transpose``, ``rearrange``, ``zip`` and ``unzip``, as
+well as function calls and ``if`` expressions (depending on types).
+You can use ``copy`` to "break" sharing by forcing the argument to be
+manifested freshly in memory.
