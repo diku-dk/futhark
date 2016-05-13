@@ -33,7 +33,7 @@ Setting up Futhark and OpenCL
 
 4) For a Futhark compatible C/C++ compiler, that you will also need to
    install pyOpenCL later, install MingWpy. Do this using the ``pip
-   install - i https ://pypi.anaconda.org/carlkl/simple mingwpy``
+   install -i https://pypi.anaconda.org/carlkl/simple mingwpy``
    command.
 
 5) Assuming you have the latest Anaconda distribution as your primary
