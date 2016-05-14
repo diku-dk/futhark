@@ -57,8 +57,8 @@ data TestResult = Success
 
 data TestCase = TestCase { testCaseProgram :: FilePath
                          , testCaseTest :: ProgramTest
-                         , testCasePrograms :: ProgConfig
-                         , testCaseOptions :: [String]
+                         , _testCasePrograms :: ProgConfig
+                         , _testCaseOptions :: [String]
                          -- ^ Extra options to pass to the program.
                          }
                 deriving (Show)
