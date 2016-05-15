@@ -23,7 +23,7 @@ is optional and does not come with the required tools.
 Setting up Futhark and OpenCL
 -----------------------------
 
-1) Fork and clone the Futhark repository to your hard drive.
+1) Clone the Futhark repository to your hard drive.
 
 2) Install `Stack`_ using the 64-bit installer.  Compile the Futhark
    compiler as described in :ref:`installation`.
@@ -92,7 +92,7 @@ First install Mako using ``pip install mako``.
 Also install PyPNG using ``pip install pypng`` (not stricly necessary,
 but some examples make use of it).
 
-7) Clone and fork the `PyOpenCL repository`_ to your hard drive. Do
+7) Clone the `PyOpenCL repository`_ to your hard drive. Do
    this instead of downloading the zip, as the zip will not contain
    some of the other repositories it links to and you will end up with
    missing header files.
