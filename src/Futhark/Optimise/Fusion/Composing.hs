@@ -6,7 +6,7 @@
 --
 -- Important: this module is \"dumb\" in the sense that it does not
 -- check the validity of its inputs, and does not have any
--- functionality for massaging SOACs to be fusable.  It is assumed
+-- functionality for massaging SOACs to be fusible.  It is assumed
 -- that the given SOACs are immediately compatible.
 --
 -- The module will, however, remove duplicate inputs after fusion.
@@ -74,7 +74,7 @@ fuseMaps unfus_nms lam1 inp1 out1 lam2 inp2 = (lam2', HM.elems inputmap)
         new_body2_rses = bodyResult new_body2
         new_body2'= new_body2 { bodyResult = new_body2_rses ++
                                              map (Var . identName) unfus_pat  }
-        -- unfusable variables are added at the end of the result/pattern/type
+        -- infusible variables are added at the end of the result/pattern/type
         (lam2redparams, unfus_pat, pat, inputmap, makeCopies, makeCopiesInner) =
           fuseInputs unfus_nms lam1 inp1 out1 lam2 inp2
         --(unfus_accpat, unfus_arrpat) = splitAt (length unfus_accs) unfus_pat
