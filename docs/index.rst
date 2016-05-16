@@ -13,10 +13,9 @@ For a basic introduction, please see `our website
 want to take a look at :ref:`language-overview` or
 :ref:`c-porting-guide`.
 
-Contents:
-
 .. toctree::
-   :maxdepth: 1
+   :caption: Table of Contents
+   :maxdepth: 2
 
    installation.rst
    windows-installation.rst
