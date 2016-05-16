@@ -66,9 +66,9 @@ commandLineOptions =
   , Option "V" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
-  , Option [] ["module"]
+  , Option [] ["library"]
     (NoArg $ Right $ \config -> config { compilerModule = True })
-    "Generate the file as a module."
+    "Generate a library instead of an executable."
   ]
 
 data CompilerConfig =
