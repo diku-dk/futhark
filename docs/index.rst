@@ -18,9 +18,7 @@ want to take a look at :ref:`language-overview` or
    :maxdepth: 2
 
    installation.rst
-   windows-installation.rst
    language-overview.rst
-   uniqueness-types.rst
    language-reference.rst
    c-porting-guide.rst
    publications.rst
