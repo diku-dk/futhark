@@ -331,6 +331,8 @@ the neutral element for the function.  These properties are not
 checked by the Futhark compiler, and are the responsibility of the
 programmer.
 
+.. _uniqueness-types:
+
 Uniqueness Types
 ----------------
 
