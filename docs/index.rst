@@ -18,6 +18,7 @@ want to take a look at :ref:`language-overview` or
    :maxdepth: 2
 
    installation.rst
+   usage.rst
    language-overview.rst
    language-reference.rst
    c-porting-guide.rst
