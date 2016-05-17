@@ -35,10 +35,3 @@ our `publications`_.
    man/futharki.rst
    man/futhark-test.rst
    man/futhark-bench.rst
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
