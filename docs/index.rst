@@ -11,7 +11,10 @@ For a basic introduction, please see `our website
 <http://futhark-lang.org>`_.  To get started, read the page on
 :ref:`installation`.  Once the compiler has been installed, you might
 want to take a look at :ref:`language-overview` or
-:ref:`c-porting-guide`.
+:ref:`c-porting-guide`.  Additional documentation can also be found in
+our `publications`_.
+
+.. _`publications`: http://futhark-lang.org/docs.html#publications
 
 .. toctree::
    :caption: Table of Contents
@@ -22,11 +25,9 @@ want to take a look at :ref:`language-overview` or
    language-overview.rst
    language-reference.rst
    c-porting-guide.rst
-   publications.rst
-
-Manual pages:
 
 .. toctree::
+   :caption: Manual Pages
    :maxdepth: 1
 
    man/futhark-c.rst
