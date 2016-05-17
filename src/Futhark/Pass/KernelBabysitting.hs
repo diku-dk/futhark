@@ -92,52 +92,16 @@ transformBinding expmap (Let pat ()
                          InOrder -> Noncommutative
 
 transformBinding expmap (Let pat ()
-                         (Op (ScanKernel cs w kernel_size ScanFlat lam foldlam nes arrs)))
-  | num_groups /= constant (1::Int32) = do
+                         (Op (ScanKernel cs w kernel_size lam foldlam nes arrs)))
+  | kernelWorkgroups kernel_size /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
-
-  (w', kernel_size', arrs') <-
-    rearrangeScanReduceInputs Noncommutative cs w kernel_size arrs
 
   lam' <- transformLambda lam
   foldlam' <- transformLambda foldlam
 
-  let (seq_pat_elems, group_pat_elems) =
-        splitAt (length nes) $ patternElements pat
-      adjust (PatElem name bindage t) = do
-        name' <- newVName (baseString name ++ "_padded")
-        return $ PatElem name' bindage $ setOuterSize t w'
-  seq_pat_elems' <- mapM adjust seq_pat_elems
-  let scan_pat = Pattern [] (seq_pat_elems'++group_pat_elems)
-
-  addBinding $ Let scan_pat () $ Op $
-    ScanKernel cs w' kernel_size' ScanTransposed lam' foldlam' nes arrs'
-  forM_ (zip seq_pat_elems' seq_pat_elems) $ \(padded_pat_elem, dest_pat_elem) -> do
-    let perm = [1,0] ++ [2..arrayRank (patElemType padded_pat_elem)]
-        dims = shapeDims $ arrayShape $ patElemType padded_pat_elem
-        explode_dims = reshapeOuter [DimNew $ kernelElementsPerThread kernel_size',
-                                     DimNew $ kernelNumThreads kernel_size']
-                       1 $ Shape dims
-        implode_dims = reshapeOuter (map DimNew $ take 1 dims)
-                       2 $ Shape exploded_dims
-        exploded_dims = kernelElementsPerThread kernel_size' :
-                        kernelNumThreads kernel_size' :
-                        drop 1 dims
-        mkName = (baseString (patElemName dest_pat_elem)++)
-    exploded <- letExp (mkName "_exploded") $
-                PrimOp $ Reshape [] explode_dims $
-                patElemName padded_pat_elem
-    exploded_tr <- letExp (mkName "_tr") $
-                   PrimOp $ Rearrange [] perm exploded
-    manifest <- letExp (mkName "_manifest") $
-                PrimOp $ Copy exploded_tr
-    imploded <- letExp (mkName "_imploded") $
-                PrimOp $ Reshape [] implode_dims manifest
-    letBindNames'_ [patElemName dest_pat_elem] $
-      PrimOp $ Split [] [kernelTotalElements kernel_size'] imploded
-
+  addBinding $ Let pat () $ Op $
+    ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
-  where num_groups = kernelWorkgroups kernel_size
 
 transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
   body' <- inScopeOf ((i, IndexInfo) :
