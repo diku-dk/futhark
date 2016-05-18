@@ -26,7 +26,8 @@ import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Tools (partitionChunkedKernelLambdaParameters)
+import Futhark.Tools (partitionChunkedKernelLambdaParameters,
+                      partitionChunkedFoldParameters)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot)
 
 type CallKernelGen = ImpGen.ImpM Imp.HostOp
@@ -600,8 +601,10 @@ kernelCompiler
   ts <- mapM lookupType as -- same as _ts
   let as_sizes = map (ImpGen.compileSubExp . arraySize 0) ts
 
-  global_thread_index <- newVName "write_thread_index"
-  let get_thread_index =
+  let (tid_param, [], real_params) =
+        partitionChunkedFoldParameters 0 $ lambdaParams lam
+      global_thread_index = paramName tid_param
+      get_thread_index =
         ImpGen.emit $ Imp.Op $ Imp.GetGlobalId global_thread_index 0
 
       check_thread_index body =
@@ -609,10 +612,10 @@ kernelCompiler
               (Imp.ScalarVar global_thread_index) len'
         in Imp.If cond body Imp.Skip
 
-  let iv_vars = map paramName $ lambdaParams lam
   iv_vars_ress <- mapM (const (newVName "iv_var_result")) ivs
-  let params_dests = zipWith (\p v -> p { paramName = v })
-        (lambdaParams lam) iv_vars_ress
+  let iv_vars = map paramName real_params
+      params_dests =
+        zipWith (\p v -> p { paramName = v }) real_params iv_vars_ress
   body_dests <- ImpGen.destinationFromParams params_dests
 
   let find_indexes_values =
@@ -640,7 +643,7 @@ kernelCompiler
           $ ImpGen.copyDWIMDest dest [ImpGen.varIndex index] (Var val) []
 
         ImpGen.emit $ Imp.If condOutOfBounds Imp.Skip actual_body'
-  
+
   makeAllMemoryGlobal $ do
     body <- ImpGen.subImpM_ inKernelOperations
       $ ImpGen.declaringLParams (lambdaParams lam)
@@ -654,8 +657,7 @@ kernelCompiler
         forM_ (zip4 indexes values as_sizes dests) $ \(index, val, a_size, dest) ->
           ImpGen.comment "write the result"
             $ write_result index val a_size dest
-      
-      ImpGen.emit $ Imp.DeclareScalar global_thread_index int32
+
       ImpGen.comment "get thread index" get_thread_index
       ImpGen.comment "run actual body if thread index is okay"
         $ ImpGen.emit $ check_thread_index body_actual

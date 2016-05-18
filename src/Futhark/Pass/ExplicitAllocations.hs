@@ -585,11 +585,24 @@ allocInExp (Op (ScanKernel cs w size lam foldlam nes arrs)) = do
 allocInExp (Op (WriteKernel cs len kernel_size lam ivs as ts)) = do
   -- We require Write to be in-place, so there is no need to allocate any
   -- memory, except for the parameters.
-  let workgroup_size = kernelWorkgroupSize kernel_size
-  let local_id = 0 -- FIXME: I don't know what this is supposed to do.
-  params' <- mapM (allocInParam workgroup_size local_id) (lambdaParams lam)
-  lam' <- allocInLambda params' (lambdaBody lam) (lambdaReturnType lam)
+  let (tid_param, [], real_params) =
+        partitionChunkedFoldParameters 0 $ lambdaParams lam
+      tid_param' = tid_param { paramAttr = Scalar int32 }
+  params' <- zipWithM (allocInWriteParam $ Var $ paramName tid_param)
+             real_params ivs
+  lam' <- allocInLambda (tid_param' : params') (lambdaBody lam) (lambdaReturnType lam)
   return $ Op $ Inner $ WriteKernel cs len kernel_size lam' ivs as ts
+  where allocInWriteParam tid param arr =
+          case paramType param of
+            Prim bt ->
+              return param { paramAttr = Scalar bt }
+            Array bt shape u -> do
+              (mem, ixfun) <- lookupArraySummary arr
+              let ixfun' = IxFun.applyInd ixfun [SE.intSubExpToScalExp tid]
+                  summary = ArrayMem bt shape u mem ixfun'
+              return param { paramAttr = summary }
+            Mem size shape ->
+              return param { paramAttr = MemMem size shape }
 
 allocInExp (Op GroupSize) =
   return $ Op $ Inner GroupSize
@@ -608,21 +621,6 @@ allocInExp e = mapExpM alloc e
                          , mapOnOp = \op ->
                              fail $ "Unhandled Op in ExplicitAllocations:\n" ++ pretty op
                          }
-
-allocInParam :: SubExp -> SE.ScalExp -> In.LParam -> AllocM LParam
-allocInParam workgroup_size local_id p = case paramType p of
-  Prim bt ->
-    return p { paramAttr = Scalar bt }
-  Mem size space ->
-    return p { paramAttr = MemMem size space }
-  t@(Array bt shape u) -> do
-    (_, shared_mem) <- allocForLocalArray workgroup_size t
-    let ixfun = IxFun.applyInd
-          (IxFun.iota $ map SE.intSubExpToScalExp $
-           workgroup_size : arrayDims t)
-          [local_id]
-    return p { paramAttr = ArrayMem bt shape u shared_mem ixfun }
-
 
 allocInFoldLambda :: Commutativity
                   -> SubExp -> SubExp
