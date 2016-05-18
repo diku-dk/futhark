@@ -1130,27 +1130,35 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
                     form'
                     loopbody' letbody' loc
 
-checkExp (Write i v a pos) = do
-  i' <- checkExp i
-  v' <- checkExp v
-  (a', aflow) <- collectOccurences $ checkExp a
+checkExp (Write is vs as pos) = do
+  is' <- checkExp is
+  vs' <- checkExp vs
+  (as', aflow) <- collectOccurences $ checkExp as
 
-  let it = typeOf i'
-      at = typeOf a'
+  let it = typeOf is'
+      at = typeOf as'
   checkWriteIndexes it
-  _ <- unifyExpTypes v' a'
+  _ <- unifyExpTypes vs' as'
 
   if unique at
     then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
-    else bad $ TypeError pos $ "Write source '" ++ pretty a' ++
+    else bad $ TypeError pos $ "Write source '" ++ pretty as' ++
          "' has type " ++ pretty at ++ ", which is not unique."
 
-  return (Write i' v' a' pos)
+  return (Write is' vs' as' pos)
 
+  -- FIXME: This code is a bit messy.
   where checkWriteIndexes it = case it of
           Array (PrimArray (Signed Int32) (Rank 1) _uniqueness _annotations) ->
             return ()
-          _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
+          Array (TupleArray exps (Rank 1) _uniqueness) ->
+            forM_ exps $ \e -> case e of
+              PrimArrayElem (Signed Int32) _ _ ->
+                return ()
+              _ -> widxbad
+          _ -> widxbad
+
+        widxbad = bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
 checkSOACArrayArg :: ExpBase NoInfo VName
                   -> TypeM (Exp, Arg)

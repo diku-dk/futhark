@@ -128,13 +128,14 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                            arrinps')
             | otherwise = return (lam, arrinps)
 
-  simplifyOp (Write cs ts i vs as) = do
+  simplifyOp (Write cs len lam ivs as ts) = do
     cs' <- Engine.simplify cs
-    ts' <- mapM Engine.simplify ts
-    i' <- Engine.simplify i
-    vs' <- mapM Engine.simplify vs
+    len' <- Engine.simplify len
+    lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
+    ivs' <- mapM Engine.simplify ivs
     as' <- mapM Engine.simplify as
-    return $ Write cs' ts' i' vs' as'
+    ts' <- mapM Engine.simplify ts
+    return $ Write cs' len' lam' ivs' as' ts'
 
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,

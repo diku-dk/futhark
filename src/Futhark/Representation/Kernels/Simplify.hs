@@ -95,13 +95,15 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       Engine.simplifyLambda lam Nothing (map Just arrs') <*>
       pure arrs'
 
-  simplifyOp (WriteKernel cs ts i vs as) = do
+  simplifyOp (WriteKernel cs len kernel_size lam ivs as ts) = do
     cs' <- Engine.simplify cs
-    ts' <- mapM Engine.simplify ts
-    i' <- Engine.simplify i
-    vs' <- mapM Engine.simplify vs
+    len' <- Engine.simplify len
+    kernel_size' <- Engine.simplify kernel_size
+    lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
+    ivs' <- mapM Engine.simplify ivs
     as' <- mapM Engine.simplify as
-    return $ WriteKernel cs' ts' i' vs' as'
+    ts' <- mapM Engine.simplify ts
+    return $ WriteKernel cs' len' kernel_size' lam' ivs' as' ts'
 
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize

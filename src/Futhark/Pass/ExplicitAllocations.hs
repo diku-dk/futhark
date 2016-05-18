@@ -582,10 +582,14 @@ allocInExp (Op (ScanKernel cs w size order lam foldlam nes arrs)) = do
   foldlam' <- allocInReduceLambda foldlam (length nes) $ kernelWorkgroupSize size
   return $ Op $ Inner $ ScanKernel cs w size order lam' foldlam' nes arrs
 
-allocInExp (Op (WriteKernel cs t i v a)) =
+allocInExp (Op (WriteKernel cs len kernel_size lam ivs as ts)) = do
   -- We require Write to be in-place, so there is no need to allocate any
-  -- memory.
-  return $ Op $ Inner $ WriteKernel cs t i v a
+  -- memory, except for the parameters.
+  let workgroup_size = kernelWorkgroupSize kernel_size
+  let local_id = 0 -- FIXME: I don't know what this is supposed to do.
+  params' <- mapM (allocInParam workgroup_size local_id) (lambdaParams lam)
+  lam' <- allocInLambda params' (lambdaBody lam) (lambdaReturnType lam)
+  return $ Op $ Inner $ WriteKernel cs len kernel_size lam' ivs as ts
 
 allocInExp (Op GroupSize) =
   return $ Op $ Inner GroupSize
@@ -604,6 +608,21 @@ allocInExp e = mapExpM alloc e
                          , mapOnOp = \op ->
                              fail $ "Unhandled Op in ExplicitAllocations:\n" ++ pretty op
                          }
+
+allocInParam :: SubExp -> SE.ScalExp -> In.LParam -> AllocM LParam
+allocInParam workgroup_size local_id p = case paramType p of
+  Prim bt ->
+    return p { paramAttr = Scalar bt }
+  Mem size space ->
+    return p { paramAttr = MemMem size space }
+  t@(Array bt shape u) -> do
+    (_, shared_mem) <- allocForLocalArray workgroup_size t
+    let ixfun = IxFun.applyInd
+          (IxFun.iota $ map SE.intSubExpToScalExp $
+           workgroup_size : arrayDims t)
+          [local_id]
+    return p { paramAttr = ArrayMem bt shape u shared_mem ixfun }
+
 
 allocInFoldLambda :: Commutativity
                   -> SubExp -> SubExp
