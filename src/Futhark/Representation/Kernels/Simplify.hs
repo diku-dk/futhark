@@ -79,10 +79,10 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       Engine.consumedName arr
     return $ ReduceKernel cs' w' kernel_size' comm parlam' seqlam' arrs'
 
-  simplifyOp (ScanKernel cs w kernel_size order lam foldlam nes arrs) = do
+  simplifyOp (ScanKernel cs w kernel_size lam foldlam nes arrs) = do
     arrs' <- mapM Engine.simplify arrs
     ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
-      Engine.simplify kernel_size <*> pure order <*>
+      Engine.simplify kernel_size <*>
       Engine.simplifyLambda lam Nothing (map (const Nothing) arrs') <*>
       Engine.simplifyLambda foldlam Nothing (map Just arrs') <*>
       mapM Engine.simplify nes <*>
@@ -323,7 +323,7 @@ iotaParams vtable arr_params arrs = partitionEithers $ zipWith isIota arr_params
 fuseScanIota :: (LocalScope (Lore m) m,
                  MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                 TopDownRule m
-fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size form lam foldlam nes arrs)))
+fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
   | not $ null iota_params = do
       fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf foldlam $ do
         forM_ iota_params $ \(p, x) ->
@@ -338,7 +338,7 @@ fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size form lam foldlam nes ar
                                  other_index_param :
                                  acc_params ++ arr_params'
                              }
-      letBind_ pat $ Op $ ScanKernel cs w size form lam foldlam' nes arrs'
+      letBind_ pat $ Op $ ScanKernel cs w size lam foldlam' nes arrs'
    where (thread_index, other_index_param, acc_params, arr_params) =
            partitionChunkedKernelFoldParameters (length nes) $ lambdaParams foldlam
          (params_and_arrs, iota_params) =
