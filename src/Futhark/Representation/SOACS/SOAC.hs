@@ -63,12 +63,11 @@ data SOAC lore =
     --
     -- <length> is the length of each index array and value array, since they
     -- all must be the same length for any fusion to make sense.  If you have a
-    -- list of index-value array pairs of different sizes, use multiple writes
-    -- instead.
+    -- list of index-value array pairs of different sizes, you need to use
+    -- multiple writes instead.
     --
-    -- The lambda takes the values from the index and value arrays and returns
-    -- the actual values.  This is encoded as a list in this format:
-    -- [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n].
+    -- The lambda takes the the input and returns the output in this format:
+    --   [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
     --
     -- The original index arrays and value arrays are concatenated.
     --
