@@ -528,7 +528,7 @@ typeCheckKernel (WriteKernel cs _len _kernel_size _lam ivs as _ts) = do
   mapM_ (TC.requireI [Prim Cert]) cs
 
   -- 0.
-  let ivsLen = (length ivs) `div` 2
+  let ivsLen = length ivs `div` 2
       is = take ivsLen ivs
       vs = drop ivsLen ivs
 
@@ -554,7 +554,7 @@ typeCheckKernel (WriteKernel cs _len _kernel_size _lam ivs as _ts) = do
     -- 4.
     unless (iLen == vLen) $
       TC.bad $ TC.TypeError "Write value and index array do not have the same length."
-  
+
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 

@@ -598,7 +598,7 @@ transformSOAC pat (Write cs len lam ivs as _ts) = do
 
     let indexes = take ivsLen ivs''
         values = drop ivsLen ivs''
-    
+
     ress <- forM (zip4 indexes values asOuts ts) $ \(indexCur, valueCur, arrayOut, t) -> do
       let lenA = arraySize 0 t
       less_than_zero <- letSubExp "less_than_zero" $

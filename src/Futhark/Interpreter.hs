@@ -705,7 +705,7 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
   let valInt :: Value -> FutharkM Int
       valInt (PrimVal (IntValue (Int32Value l))) = return $ fromIntegral l
       valInt _ = bad $ TypeError "evalSOAC Write: Wrong type for length"
-  
+
   len' <- valInt =<< evalSubExp len
 
   as' <- mapM lookupVar as
@@ -713,7 +713,7 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
   -- Calculate all indexes and values.
   sas' <- soacArrays len ivs
   ivs'' <- mapM (applyLambda lam) sas'
-  
+
   let ivsLen = length (lambdaReturnType lam) `div` 2
       is = transpose $ map (take ivsLen) ivs''
       vs = transpose $ map (drop ivsLen) ivs''

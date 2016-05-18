@@ -466,7 +466,7 @@ typeCheckSOAC (Write cs _len _lam ivs as _ts) = do
   mapM_ (TC.requireI [Prim Cert]) cs
 
   -- 0.
-  let ivsLen = (length ivs) `div` 2
+  let ivsLen = length ivs `div` 2
       is = take ivsLen ivs
       vs = drop ivsLen ivs
 
