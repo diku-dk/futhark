@@ -250,7 +250,6 @@ blockedScan pat cs w lam input = do
       num_groups = kernelWorkgroups first_scan_size
       group_size = kernelWorkgroupSize first_scan_size
       num_threads = kernelNumThreads first_scan_size
-      elems_per_thread = kernelElementsPerThread first_scan_size
       my_index_param = Param my_index (Prim int32)
       other_index_param = Param other_index (Prim int32)
       first_scan_lam = lam { lambdaParams = my_index_param :
@@ -260,104 +259,59 @@ blockedScan pat cs w lam input = do
   first_scan_lam_renamed <- renameLambda first_scan_lam
   sequential_scan_result <-
     letTupExp "sequentially_scanned" $
-      Op $ ScanKernel cs w first_scan_size ScanFlat
+      Op $ ScanKernel cs w first_scan_size
       first_scan_lam first_scan_lam_renamed nes arrs
 
-  let (sequentially_scanned, all_group_sums) =
+  let (sequentially_scanned, group_carry_out) =
         splitAt (length input) sequential_scan_result
 
-  last_in_preceding_groups <- do
-    lasts_map_index <- newVName "lasts_map_index"
-    group_id <- newVName "group_id"
-    lasts_map_body <- runBodyBinder $ do
-      read_lasts <- runBodyBinder $ do
-        last_in_group_index <-
-          letSubExp "last_in_group_index" $
-          PrimOp $ BinOp (Sub Int32) group_size one
-        carry_in_index <-
-          letSubExp "preceding_group" $ PrimOp $ BinOp (Sub Int32) (Var group_id) one
-        let getLastInPrevious sums =
-              return $ PrimOp $ Index [] sums [carry_in_index, last_in_group_index]
-        eBody $ map getLastInPrevious all_group_sums
+  let second_scan_size = KernelSize one num_groups one num_groups one num_groups
+  second_scan_lam <- renameLambda first_scan_lam
+  second_scan_lam_renamed <- renameLambda first_scan_lam
 
-      group_lasts <-
-        letTupExp "group_lasts" =<<
-        eIf (eCmpOp (CmpSlt Int32) (eSubExp zero) (eSubExp $ Var group_id))
-        (pure read_lasts)
-        (eBody $ map eSubExp nes)
-      return $ resultBody $ map Var group_lasts
-    let lasts_map_returns = [ (rt, [0..arrayRank rt])
-                            | rt <- lambdaReturnType lam ]
-    letTupExp "last_in_preceding_groups" $
-      Op $ MapKernel [] num_groups lasts_map_index
-      [(group_id, num_groups)] [] lasts_map_returns lasts_map_body
-
-  group_carry_in <- do
-    let second_scan_size = KernelSize one num_groups one num_groups one num_groups
-    second_scan_lam <- renameLambda first_scan_lam
-    second_scan_lam_renamed <- renameLambda first_scan_lam
-    carry_in_scan_result <-
-      letTupExp "group_carry_in_and_junk" $
-      Op $ ScanKernel cs num_groups second_scan_size ScanFlat
-      second_scan_lam second_scan_lam_renamed
-      nes last_in_preceding_groups
-    forM (snd $ splitAt (length input) carry_in_scan_result) $ \arr ->
-      letExp "group_carry_in" $
-      PrimOp $ Index [] arr [zero]
-
-  chunk_carry_out <- do
-    lam'' <- renameLambda lam
-    chunk_carry_out_index <- newVName "chunk_carry_out_index"
-    group_id <- newVName "group_id"
-    elem_id <- newVName "elem_id"
-    let (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam''
-        chunk_carry_out_inputs =
-          zipWith (mkKernelInput [Var group_id]) acc_params group_carry_in ++
-          zipWith (mkKernelInput [Var group_id, Var elem_id]) arr_params all_group_sums
-
-    let chunk_carry_out_returns = [ (rt, [0..arrayRank rt+1])
-                                 | rt <- lambdaReturnType lam ]
-    letTupExp "chunk_carry_out" $
-      Op $ MapKernel [] num_threads chunk_carry_out_index
-      [(group_id, num_groups),
-       (elem_id, group_size)]
-      chunk_carry_out_inputs chunk_carry_out_returns $ lambdaBody lam''
-
-  chunk_carry_out_flat <- forM chunk_carry_out $ \arr -> do
-    arr_shape <- arrayShape <$> lookupType arr
-    letExp "chunk_carry_out_flat" $
-      PrimOp $ Reshape [] (reshapeOuter [DimNew num_threads] 2 arr_shape) arr
+  group_carry_out_scanned <-
+    letTupExp "group_carry_out_scanned" $
+    Op $ ScanKernel cs num_groups second_scan_size
+    second_scan_lam second_scan_lam_renamed
+    nes group_carry_out
 
   lam''' <- renameLambda lam
   result_map_index <- newVName "result_map_index"
   j <- newVName "j"
-  let (acc_params, arr_params) = splitAt (length nes) $ lambdaParams lam'''
-      result_inputs = zipWith (mkKernelInput [Var j]) arr_params sequentially_scanned
+  let (acc_params, arr_params) =
+        splitAt (length nes) $ lambdaParams lam'''
+      result_map_input =
+        zipWith (mkKernelInput [Var j]) arr_params sequentially_scanned
 
-  result_map_body <- runBodyBinder $ inScopeOf result_inputs $ do
-    thread_id <-
-      letSubExp "thread_id" $
-      PrimOp $ BinOp (SQuot Int32) (Var j) elems_per_thread
+  chunks_per_group <- letSubExp "chunks_per_group" =<<
+    eDivRoundingUp Int32 (eSubExp w) (eSubExp num_threads)
+  elems_per_group <- letSubExp "elements_per_group" $
+    PrimOp $ BinOp (Mul Int32) chunks_per_group group_size
+
+  result_map_body <- runBodyBinder $ inScopeOf result_map_input $ do
+    group_id <-
+      letSubExp "group_id" $
+      PrimOp $ BinOp (SQuot Int32) (Var j) elems_per_group
     let do_nothing =
           pure $ resultBody $ map (Var . paramName) arr_params
         add_carry_in = runBodyBinder $ do
-          forM_ (zip acc_params chunk_carry_out_flat) $ \(p, arr) -> do
+          forM_ (zip acc_params group_carry_out_scanned) $ \(p, arr) -> do
             carry_in_index <-
               letSubExp "carry_in_index" $
-              PrimOp $ BinOp (Sub Int32) thread_id one
+              PrimOp $ BinOp (Sub Int32) group_id one
             letBindNames'_ [paramName p] $
               PrimOp $ Index [] arr [carry_in_index]
           return $ lambdaBody lam'''
     group_lasts <-
       letTupExp "final_result" =<<
-        eIf (eCmpOp (CmpEq int32) (eSubExp zero) (eSubExp thread_id))
+        eIf (eCmpOp (CmpEq int32) (eSubExp zero) (eSubExp group_id))
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
   let result_map_returns = [ (rt, [0..arrayRank rt])
                            | rt <- lambdaReturnType lam ]
   letBind_ pat $ Op $ MapKernel [] w result_map_index
-    [(j, w)] result_inputs result_map_returns result_map_body
+    [(j, w)] result_map_input result_map_returns result_map_body
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
 
