@@ -612,51 +612,43 @@ kernelCompiler
               (Imp.ScalarVar global_thread_index) len'
         in Imp.If cond body Imp.Skip
 
-  iv_vars_ress <- mapM (const (newVName "iv_var_result")) ivs
-  let iv_vars = map paramName real_params
-      params_dests =
-        zipWith (\p v -> p { paramName = v }) real_params iv_vars_ress
-  body_dests <- ImpGen.destinationFromParams params_dests
+      -- Fake kernel inputs.
+      inps = zipWith (makeInput $ Var global_thread_index) real_params ivs
 
-  let find_indexes_values =
-        forM_ (zip ivs iv_vars) $ \(iv, iv_var) ->
-          ImpGen.copyDWIM iv_var [] (Var iv)
-          [SE.intSubExpToScalExp $ Var global_thread_index]
+      read_params = mapM_ readKernelInput inps
 
-      eval_lambda_indexes_values =
-        ImpGen.compileBody body_dests $ lambdaBody lam
+      kernel_bnds = bodyBindings $ lambdaBody lam
 
-  let ivsLen = length (lambdaReturnType lam) `div` 2
-      indexes = take ivsLen iv_vars_ress
-      values = drop ivsLen iv_vars_ress
+      (indexes, values) =
+        splitAt (length ivs `div` 2) $ bodyResult $ lambdaBody lam
 
-  let write_result index val a_size dest = do
-        let condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
-              (Imp.ScalarVar index)
+      writeResult index val a_size dest = do
+        let index' = ImpGen.compileSubExp index
+            condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
+              index'
               (Imp.Constant (IntValue (Int32Value 0)))
             condOutOfBounds1 = Imp.CmpOp (Imp.CmpUle Int32)
               a_size
-              (Imp.ScalarVar index)
+              index'
             condOutOfBounds = Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1
 
         actual_body' <- ImpGen.collect
-          $ ImpGen.copyDWIMDest dest [ImpGen.varIndex index] (Var val) []
+          $ ImpGen.copyDWIMDest dest [SE.subExpToScalExp index int32] val []
 
         ImpGen.emit $ Imp.If condOutOfBounds Imp.Skip actual_body'
 
   makeAllMemoryGlobal $ do
-    body <- ImpGen.subImpM_ inKernelOperations
-      $ ImpGen.declaringLParams (lambdaParams lam)
-      $ ImpGen.declaringLParams params_dests $ do
+    body <- ImpGen.subImpM_ inKernelOperations $
+      ImpGen.declaringLParams (lambdaParams lam) $ do
 
       body_actual <- ImpGen.collect $ do
-        ImpGen.comment "find original indexes and values"
-          find_indexes_values
-        ImpGen.comment "calculate actual indexes and values"
-          eval_lambda_indexes_values
-        forM_ (zip4 indexes values as_sizes dests) $ \(index, val, a_size, dest) ->
-          ImpGen.comment "write the result"
-            $ write_result index val a_size dest
+        ImpGen.comment "read kernel parameters"
+          read_params
+        ImpGen.comment "find indexes and values" $
+          ImpGen.compileBindings kernel_bnds $
+          forM_ (zip4 indexes values as_sizes dests) $ \(index, val, a_size, dest) ->
+            ImpGen.comment "write the result" $
+            writeResult index val a_size dest
 
       ImpGen.comment "get thread index" get_thread_index
       ImpGen.comment "run actual body if thread index is okay"
@@ -680,7 +672,7 @@ kernelCompiler
       , Imp.kernelName = kernel_name
       , Imp.kernelDesc = Just "write"
       }
-
+  where makeInput i p arr = KernelInput p arr [i]
 
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
