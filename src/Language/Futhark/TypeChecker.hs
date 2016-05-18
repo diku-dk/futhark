@@ -206,12 +206,12 @@ instance Show TypeError where
     "Type alias " ++ pretty name ++ " at " ++ locStr loc ++
     " is cyclically defined."
   show (UndefinedAlias loc name) =
-    "Type alias '" ++ nameToString name ++ "' referenced at line " ++ show loc
+    "Type alias '" ++ nameToString name ++ "' referenced at line " ++ locStr loc
     ++ ", but not defined."
   show (DupTypeAlias loc name) =
-    "Type alias '" ++ nameToString name ++ "' defined twice at line " ++ show loc
+    "Duplicate definition of type '" ++ nameToString name ++ "' at line " ++ locStr loc
   show (InvalidUniqueness loc t) =
-    "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ show loc ++ "."
+    "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
@@ -1523,7 +1523,8 @@ type TypeAliasTableM =
 
 typeAliasTableFromProg :: ProgBase NoInfo VName
                        -> Either TypeError TypeAliasMap
-typeAliasTableFromProg prog =
+typeAliasTableFromProg prog = do
+  checkForDuplicateTypes defs
   execStateT (runReaderT (mapM_ process defs) mempty) mempty
   where defs = progTypes prog
         findDefByName name = find ((==name) . typeAlias) defs
@@ -1549,3 +1550,12 @@ typeAliasTableFromProg prog =
                   local (HS.insert name) $ process def
               | otherwise ->
                   throwError $ UndefinedAlias loc name
+
+checkForDuplicateTypes :: [TypeDefBase NoInfo VName] -> Either TypeError ()
+checkForDuplicateTypes = foldM_ check mempty
+  where check seen def
+          | name `HS.member` seen =
+              Left $ DupTypeAlias (srclocOf def) name
+          | otherwise =
+              Right $ name `HS.insert` seen
+              where name = typeAlias def

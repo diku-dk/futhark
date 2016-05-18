@@ -604,6 +604,8 @@ data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types 
                                 }
 deriving instance Showable f vn => Show (TypeDefBase f vn)
 
+instance Located (TypeDefBase f vn) where
+  locOf = locOf . typeDefLocation
 
 data DecBase f vn = FunDec (FunDefBase f vn)
                   | TypeDec (TypeDefBase f vn)
