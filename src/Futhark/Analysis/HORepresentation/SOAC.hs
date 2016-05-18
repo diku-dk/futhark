@@ -216,6 +216,8 @@ transformFromExp (PrimOp (Futhark.Rearrange cs perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp (PrimOp (Futhark.Reshape cs shape v)) =
   Just (v, Reshape cs shape)
+transformFromExp (PrimOp (Futhark.Replicate n (Futhark.Var v))) =
+  Just (v, Replicate n)
 transformFromExp _ = Nothing
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but

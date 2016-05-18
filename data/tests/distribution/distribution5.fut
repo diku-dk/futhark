@@ -15,7 +15,7 @@
 -- ==
 --
 -- structure distributed {
---   MapKernel 8
+--   MapKernel 6
 --   ScanKernel 2
 --   Map 0
 --   Concat 1
