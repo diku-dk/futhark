@@ -636,6 +636,8 @@ soacToStream soac = do
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])
+    -- If the soac is a write, don't try to do anything.
+    Write{} -> return (soac, [])
     -- HELPER FUNCTIONS
     where mkMapPlusAccLam :: (MonadFreshNames m, Bindable lore)
                           => [SubExp] -> Lambda lore -> m (Lambda lore)
