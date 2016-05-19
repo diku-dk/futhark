@@ -19,6 +19,7 @@ our `publications`_.
 .. toctree::
    :caption: Table of Contents
    :maxdepth: 2
+   :numbered:
 
    installation.rst
    usage.rst
