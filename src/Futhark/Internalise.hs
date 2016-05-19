@@ -605,10 +605,11 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write i v a loc) = do
+internaliseExp desc (E.Write i v as loc) = do
   sis <- internaliseExpToVars "write_arg_i" i
   svs <- internaliseExpToVars "write_arg_v" v
-  sas <- internaliseExpToVars "write_arg_a" a
+  sas0 <- forM as $ internaliseExpToVars "write_arg_a"
+  sas <- mapM (ensureSingleElement "Futhark.Internalise.internaliseExp: Every I/O array in 'write' must be a non-tuple.") sas0
 
   when (length sis /= length sas) $
     fail ("Futhark.Internalise.internaliseExp: number of write sis and sas tuples is not the same"
@@ -687,6 +688,10 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ f [] w lam' input
+
+ensureSingleElement :: Monad m => String -> [a] -> m a
+ensureSingleElement _desc [x] = return x
+ensureSingleElement desc _ = fail desc
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do

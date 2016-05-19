@@ -422,13 +422,13 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write(indexes, values, a)``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``write(indexes, values, a_1, ..., a_n)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Set each index of the ``indexes`` array in the ``a`` array to each value of
-the ``values`` array.  If an index is -1, ignore it and its associated value.
+Set each index of each ``indexes`` array in each ``a`` array to each value of
+each ``values`` array.  If an index is -1, ignore it and its associated value.
 Return the modified array.  It is an error if there are duplicate indexes.
-``write`` does its work in-place and consumes ``a``.
+``write`` does its work in-place and consumes all ``a``.
 
 Tuple Shimming
 --------------

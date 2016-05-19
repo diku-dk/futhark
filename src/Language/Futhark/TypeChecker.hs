@@ -1133,17 +1133,31 @@ checkExp (DoLoop mergepat mergeexp form loopbody letbody loc) = do
 checkExp (Write is vs as pos) = do
   is' <- checkExp is
   vs' <- checkExp vs
-  (as', aflow) <- collectOccurences $ checkExp as
+  (as', aflows) <- unzip <$> mapM (collectOccurences . checkExp) as
 
-  let it = typeOf is'
-      at = typeOf as'
-  checkWriteIndexes it
-  _ <- unifyExpTypes vs' as'
+  checkWriteIndexes $ typeOf is'
 
-  if unique at
-    then occur $ aflow `seqOccurences` [consumption (aliases at) pos]
-    else bad $ TypeError pos $ "Write source '" ++ pretty as' ++
-         "' has type " ++ pretty at ++ ", which is not unique."
+  let ats = map typeOf as'
+
+  let avbad = bad $ TypeError pos "Write value arrays and I/O arrays do not have the same type"
+  case as' of
+    [a] -> void $ unifyExpTypes vs' a
+    _ -> case typeOf vs' of
+      Array (TupleArray primElems (Rank rankP) _) ->
+        forM_ (zip ats primElems) $ \(at, p) -> case (at, p) of
+          (Array (PrimArray ptA (Rank rankA) _ _),
+           PrimArrayElem ptP _ _) ->
+            unless (rankP == rankA && ptP == ptA) avbad
+          _ -> avbad
+      _ -> avbad
+
+  if all unique ats
+    then forM_ (zip aflows ats) $ \(aflow, at) ->
+           occur $ aflow `seqOccurences` [consumption (aliases at) pos]
+    else bad $ TypeError pos $ "Write sources '" ++
+         intercalate ", " (map pretty as') ++
+         "' have types " ++ intercalate ", " (map pretty ats) ++
+         ", which are not all unique."
 
   return (Write is' vs' as' pos)
 
