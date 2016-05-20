@@ -244,21 +244,27 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
                      , fusedVars = fusedVars_new
                      , outNames = res_outnms
                      }
+
   outPairs <- forM (zip outVars $ SOAC.typeOf soac1) $ \(outVar, t) -> do
                 outVar' <- newVName $ baseString outVar ++ "_elem"
                 return (outVar, Ident outVar' t)
+
+  let mapLikeFusionCheck =
+        let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
+            (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
+              zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+            res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+        in (extra_nms, res_lam', new_inp)
+
   case (soac2, soac1) of
     ------------------------------
     -- Redomap-Redomap Fusions: --
     ------------------------------
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
-      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-          (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
-                                   zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
-          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ extra_nms) $
-              SOAC.Map (cs1++cs2) w res_lam' new_inp
+          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+          success (outNames ker ++ extra_nms) $
+            SOAC.Map (cs1++cs2) w res_lam' new_inp
 
     (SOAC.Map {}, SOAC.Redomap _ _ comm1 lam11 _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
@@ -297,12 +303,9 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     (SOAC.Write _cs _len _lam _ivs as ts,
      SOAC.Map {})
       | mapWriteFusionOK outVars ker -> do
-      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-          (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
-                                   zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
-          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ extra_nms) $
-              SOAC.Write (cs1++cs2) w res_lam' new_inp as ts
+          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+          success (outNames ker ++ extra_nms) $
+            SOAC.Write (cs1++cs2) w res_lam' new_inp as ts
 
     -- Write-write fusion.
     (SOAC.Write _cs2 _len2 _lam2 ivs2 as2 ts2,
