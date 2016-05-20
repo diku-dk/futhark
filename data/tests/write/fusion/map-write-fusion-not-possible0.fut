@@ -1,5 +1,7 @@
 -- Test that map-write fusion is *not* applied when not all of the map outputs
 -- are used in the write.
+-- ==
+-- structure { Map 1 Write 1 }
 
 fun ([i32, n], [i32, n])
   main([i32, k] indexes,

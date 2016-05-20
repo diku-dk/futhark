@@ -1,6 +1,7 @@
 -- Test that write-write fusion is *not* applied when one write uses the output
 -- of another write.
 -- ==
+-- structure { Write 2 }
 
 fun [i32, k]
   main([i32, k] indexes,
