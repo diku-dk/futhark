@@ -47,7 +47,6 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
-import Data.Char (isAlphaNum, isAscii, isDigit)
 import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
@@ -63,6 +62,7 @@ import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space, spaces)
+import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 data CompilerState s = CompilerState {
@@ -272,11 +272,7 @@ item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . prefixIfBad . sanitise . textual
-    where sanitise = map $ \c -> if isAlphaNum c && isAscii c then c else '_'
-          prefixIfBad (c:cs) | isDigit c = 'f' : c : cs
-          prefixIfBad ('_':cs) = 'f' : '_' : cs
-          prefixIfBad s = s
+  toIdent = C.toIdent . zEncodeString . textual
 
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
