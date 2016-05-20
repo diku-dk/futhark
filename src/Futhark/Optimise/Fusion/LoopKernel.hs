@@ -326,6 +326,10 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
           success (outNames ker ++ returned_outvars) $
             SOAC.Write (cs1 ++ cs2) w lam' (zipW ivs1 ivs2) (as2 ++ as1) (ts2 ++ ts1)
 
+    (SOAC.Write {}, _) ->
+      fail "Cannot fuse a write with anything else than a write or a map"
+    (_, SOAC.Write {}) ->
+      fail "Cannot fuse a write with anything else than a write or a map"
 
     ----------------------------
     -- Stream-Stream Fusions: --
