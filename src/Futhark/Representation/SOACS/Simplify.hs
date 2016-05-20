@@ -150,6 +150,7 @@ topDownRules :: (MonadBinder m,
 topDownRules = [liftIdentityMapping,
                 removeReplicateMapping,
                 removeReplicateRedomap,
+                removeReplicateWrite,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
@@ -216,6 +217,14 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
       mapM_ (uncurry letBindNames') bnds
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
+
+-- | Like 'removeReplicateMapping', but for 'Write'.
+removeReplicateWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as ts)))
+  | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
+      mapM_ (uncurry letBindNames') bnds
+      letBind_ pat $ Op $ Write cs len lam' ivs' as ts
+removeReplicateWrite _ _ = cannotSimplify
 
 removeReplicateInput :: Attributes lore =>
                         ST.SymbolTable lore
