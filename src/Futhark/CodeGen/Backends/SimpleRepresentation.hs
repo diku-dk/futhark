@@ -28,6 +28,7 @@ import qualified Language.C.Quote.C as C
 
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty (pretty)
+import Futhark.Util (zEncodeString)
 
 intTypeToCType :: IntType -> C.Type
 intTypeToCType Int8 = [C.cty|typename int8_t|]
@@ -78,7 +79,7 @@ tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
 funName :: Name -> String
-funName = ("futhark_"++) . nameToString
+funName = ("futhark_"++) . zEncodeString . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
