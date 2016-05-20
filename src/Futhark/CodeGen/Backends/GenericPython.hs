@@ -55,6 +55,7 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.CodeGen.Backends.GenericPython.Options
 import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.Util.Pretty(pretty)
+import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (builtInFunctions, isBuiltInFunction)
 
 -- | A substitute expression compiler, tried before the main
@@ -204,7 +205,7 @@ stms :: [PyStmt] -> CompilerM op s ()
 stms = mapM_ stm
 
 futharkFun :: String -> String
-futharkFun s = "futhark_" ++ s
+futharkFun s = "futhark_" ++ zEncodeString s
 
 paramsTypes :: [Imp.Param] -> [Imp.Type]
 paramsTypes = map paramType
