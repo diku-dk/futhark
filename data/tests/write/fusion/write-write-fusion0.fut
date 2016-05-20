@@ -11,6 +11,7 @@
 --   [2, 8, 30, 40, 50]
 --   [3, 5, 300, 400, 500]
 -- }
+-- structure { Write 1 }
 
 fun ([i32, n], [i32, n])
   main([i32, k] indexes,
