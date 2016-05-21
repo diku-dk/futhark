@@ -12,12 +12,10 @@ environment:
 cache:
 - "%STACK_ROOT%"
 
-before_test:
-- curl -sS -ostack.zip -L --insecure http://www.stackage.org/stack/windows-i386
-- 7z x stack.zip stack.exe
-
 install:
  - set PATH=%CD%\_stack;C:\msys64\usr\bin;%PATH%
+ - curl -sS -ostack.zip -L --insecure http://www.stackage.org/stack/windows-i386
+ - 7z x stack.zip stack.exe
  - stack build alex happy
  - stack --no-terminal test --only-dependencies -j 3
 
