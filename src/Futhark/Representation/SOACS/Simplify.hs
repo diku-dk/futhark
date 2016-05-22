@@ -156,9 +156,7 @@ topDownRules = [liftIdentityMapping,
                 simplifyKnownIterationSOAC
                ]
 
-bottomUpRules :: (MonadBinder m,
-                  LocalScope (Lore m) m,
-                  Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
+bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
                  removeUnnecessaryCopy
                 ]
@@ -216,9 +214,8 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
 
-removeReplicateInput :: Attributes lore =>
-                        ST.SymbolTable lore
-                        -> AST.Lambda lore -> [VName]
+removeReplicateInput :: ST.SymbolTable lore
+                     -> AST.Lambda lore -> [VName]
                      -> Maybe ([([VName], AST.Exp lore)],
                                AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs
