@@ -172,17 +172,21 @@ class Attributes lore => CSEInOp lore op where
 instance Attributes lore => CSEInOp lore () where
   cseInOp () = return ()
 
-instance CSEInOp lore (Op lore) => CSEInOp lore (Kernel.Kernel lore) where
+instance (Attributes lore, CSEInOp lore (Op lore)) => CSEInOp lore (Kernel.Kernel lore) where
   cseInOp = Kernel.mapKernelM $
             Kernel.KernelMapper return cseInLambda cseInBody
             return return return
 
-instance (Attributes lore, CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
+instance (Attributes (Aliases lore),
+          CanBeAliased (Op lore),
+          CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
          CSEInOp (Aliases lore) (ExplicitMemory.MemOp (Aliases lore)) where
   cseInOp o@ExplicitMemory.Alloc{} = return o
   cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> cseInOp k
 
-instance (Attributes lore, CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
+instance (Attributes (Aliases lore),
+          CanBeAliased (Op lore),
+          CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
          CSEInOp (Aliases lore) (SOAC.SOAC (Aliases lore)) where
   cseInOp = SOAC.mapSOACM $
             SOAC.SOACMapper return cseInLambda cseInExtLambda
