@@ -111,7 +111,7 @@ bindNames varnames body = do
 bind :: (Eq f, Hashable f) => [IdentBase x f] -> RenameM f t a -> RenameM f t a
 bind = bindNames . map identName
 
-bindParams :: (Eq f, Ord f, Hashable f) =>
+bindParams :: (Ord f, Hashable f) =>
               [ParamBase NoInfo f]
            -> RenameM f t a
            -> RenameM f t a
@@ -126,7 +126,7 @@ bindParams params =
         inspectDim (NamedDim name) =
           Just name
 
-renameFun :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
+renameFun :: (Ord f, Hashable f, Eq t, Hashable t) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
 renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
   bindParams params $
@@ -214,8 +214,7 @@ renameCompType = renameTypeGeneric
                  (pure . Rank . shapeRank)
                  (fmap HS.fromList . mapM replName . HS.toList)
 
-renameTypeGeneric :: (Eq f, Hashable f) =>
-                     (shape f -> RenameM f t (shape t))
+renameTypeGeneric :: (shape f -> RenameM f t (shape t))
                   -> (als f -> RenameM f t (als t))
                   -> TypeBase shape als f
                   -> RenameM f t (TypeBase shape als t)
