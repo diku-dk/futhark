@@ -16,7 +16,8 @@ DESCRIPTION
 
 This program is used to integration-test the Futhark compiler itself.
 You must have futhark-c(1) and futharki(1) in your ``PATH`` when
-running ``futhark-test``.
+running ``futhark-test``.  If a directory is given, all contained
+files with a ``.fut`` extension are considered.
 
 A Futhark test program is an ordinary Futhark program, with an initial
 comment block describing input/output test cases and possibly other
