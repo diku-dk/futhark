@@ -116,7 +116,7 @@ arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
 
 -- | Return the dimensions of a type with (possibly) known dimensions.
-arrayDims' :: Ord vn => UserType vn -> [DimDecl vn]
+arrayDims' :: UserType vn -> [DimDecl vn]
 arrayDims' = shapeDims . arrayShape'
 
 -- | Return any shape declaration in the type, with duplicates removed.
@@ -145,11 +145,10 @@ nestedDims' _                 = mempty
 
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
-setArrayShape :: ArrayShape (shape vn) =>
-                 shape vn -> TypeBase shape as vn -> TypeBase shape as vn
+setArrayShape :: shape vn -> TypeBase shape as vn -> TypeBase shape as vn
 setArrayShape ds (Array (PrimArray et _ u as)) = Array $ PrimArray et ds u as
-setArrayShape ds (Array (TupleArray et _ u))    = Array $ TupleArray et ds u
-setArrayShape _  (Tuple ts)                     = Tuple ts
+setArrayShape ds (Array (TupleArray et _ u))   = Array $ TupleArray et ds u
+setArrayShape _  (Tuple ts)                    = Tuple ts
 setArrayShape _  (Prim t)                      = Prim t
 
 -- | Change the shape of a type to be just the 'Rank'.
