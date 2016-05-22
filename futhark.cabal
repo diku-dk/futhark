@@ -295,6 +295,7 @@ Executable futhark-test
                  mtl >= 2.2.1,
                  containers >= 0.5,
                  directory,
+                 directory-tree,
                  filepath,
                  process,
                  process-extras,
