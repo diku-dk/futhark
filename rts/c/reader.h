@@ -171,7 +171,14 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
 
 static int read_int8(void* dest) {
   skipspaces();
-  if (scanf("%"SCNi8, (int8_t*)dest) == 1) {
+  /* Some platforms (WINDOWS) does not support scanf %hhd or its
+     cousin, %SCNi8.  Read into int first to avoid corrupting
+     memory.
+
+     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
+  int x;
+  if (scanf("%i", &x) == 1) {
+    *(int8_t*)dest = x;
     scanf("i8");
     return next_is_not_constituent() ? 0 : 1;
   } else {
