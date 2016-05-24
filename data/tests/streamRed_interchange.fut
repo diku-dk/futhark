@@ -111,7 +111,7 @@
 -- -0.000443f32, 0.000283f32, -0.000084f32, 0.000129f32, 0.000419f32,
 -- -0.000178f32, -0.001124f32, -0.001211f32, 0.000297f32, 0.000291f32,
 -- 0.001163f32, 0.001455f32]]}
--- structure distributed { ChunkedMapKernel 1 MapKernel 5 ScanKernel 2 }
+-- structure distributed { ChunkedMapKernel 1 MapKernel 3 ScanKernel 2 }
 
 fun [[f32,nfeatures],nclusters] main(int nfeatures, int npoints, int nclusters) =
   let membership = map(%nclusters, iota(npoints)) in
@@ -127,9 +127,9 @@ fun [[f32,nfeatures],nclusters] main(int nfeatures, int npoints, int nclusters) 
                          acc, elem),
                  fn *[[f32,nfeatures],nclusters] (int chunk,
                                                    *[[f32,nfeatures],nclusters] acc,
-                                                   [{[f32,nfeatures], int}] inp) =>
+                                                   [([f32,nfeatures], int)] inp) =>
                    loop (acc) = for i < chunk do
-                     let {point, c} = inp[i] in
+                     let (point, c) = inp[i] in
                      unsafe let acc[c] = zipWith(+, acc[c], map(/f32(features_in_cluster[c]), point)) in
                      acc in
                    acc,

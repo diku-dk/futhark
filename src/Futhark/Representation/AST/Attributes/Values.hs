@@ -12,10 +12,6 @@ module Futhark.Representation.AST.Attributes.Values
 
          -- * Rearranging
        , permuteArray
-
-         -- * Miscellaneous
-       , zeroIsh
-       , oneIsh
        )
        where
 

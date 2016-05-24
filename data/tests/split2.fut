@@ -8,7 +8,7 @@
 --   [100.000000, 9.000000, 1.000000, 65.000000]
 --   [1, 2, 6, 3]
 -- }
-fun {[f64], [int]} main(int n, [f64] a1, [int] a2) =
+fun ([f64], [int]) main(int n, [f64] a1, [int] a2) =
   let b = zip(a1,a2) in
-  let {first, rest} = split( (n), b) in
+  let (first, rest) = split( (n), b) in
   unzip(first)

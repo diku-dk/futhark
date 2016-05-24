@@ -84,7 +84,56 @@ collides with reality.  Shape declarations matter most when used for
 the input parameters of the ``main`` function and for the return type
 of functions used to ``map``.
 
-File inclusions
+.. _entry-points:
+
+Entry Points
+~~~~~~~~~~~~
+
+Apart from declaring a function with the keyword ``fun``, it can also
+be declared with ``entry``.  When the Futhark program is compiled as a
+library instead of an executable program, any function declared with
+``entry`` will be exposed as an entry point.
+
+Any function named ``main`` will always be considered an entry point,
+whether it is declared with ``entry`` or not.
+
+Type Aliases
+------------
+
+Futhark supports simple type aliases to improve code readability.
+Examples::
+
+  type person_id = int
+  type int_pair  = (int, int)
+  type vec3 = (f32, f32, f32)
+
+  type pilot = person_id
+  type passengers = [person_id]
+  type position = vec3
+  type velocity = vec3
+  type mass     = f32
+
+  type airplane = (pilot, passengers, position, velocity, mass)
+
+The aliases are merely a syntactic convenience.  With respect to type
+checking the ``position`` and ``velocity`` types are identical.  It is
+currently not possible to put shape declarations in type aliases.
+When using uniqueness attributes with type aliases, inner uniqueness
+attributes are overrided by outer ones::
+
+  type uniqueInts = *[int]
+  type nonuniqueIntLists = [intlist]
+  type uniqueIntLists = *nonuniqueIntLists
+
+  -- Error: using non-unique value for a unique return value.
+  fun uniqueIntLists (nonuniqueIntLists p) = p
+
+*Dimension declarations*
+
+To declare dimensions on an array data type using type aliases, the type alias must
+define either a primitive type, or a tuple.
+
+File Inclusions
 ---------------
 
 You can include external Futhark code into a Futhark file like this::
@@ -203,8 +252,8 @@ the tuple components may themselves be arrays).
 ``unzip(a)``
 ~~~~~~~~~~~~
 
-If the type of ``a`` is ``[{t_1, ..., t_n}]``, the result is a tuple
-of *n* arrays, i.e., ``{[t_1], ..., [t_n]}``, and otherwise a type
+If the type of ``a`` is ``[(t_1, ..., t_n)]``, the result is a tuple
+of *n* arrays, i.e., ``([t_1], ..., [t_n])``, and otherwise a type
 error.
 
 ``unsafe e``
@@ -212,8 +261,8 @@ error.
 
 Elide safety checks (such as bounds checking) for operations lexically
 with ``e``.  This is useful if the compiler is otherwise unable to
-avoids bounds checks (e.g. when using indirect indexes), but you
-really do not want them here.
+avoid bounds checks (e.g. when using indirect indexes), but you really
+do not want them here.
 
 ``iota(n)``
 ~~~~~~~~~~~
@@ -235,10 +284,10 @@ integer constant.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Partitions the given array ``a`` into ``n+1`` disjoint arrays
-``{a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...]}``, returned as a tuple.
+``(a[0...i_1-1], a[i_1...i_2-1], ..., a[i_n...])``, returned as a tuple.
 The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
 
-Example: ``split((1,1,3), [5,6,7,8]) == {[5],[],[6,7],[8]}``
+Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
 
 ``concat(a_1, ..., a_n)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -301,12 +350,17 @@ The name ``i`` is bound here and initialised to zero.
 
 1. Bind ``pat`` to the initial values given in ``initial``.
 
-2. While ``i < bound``, evaluate ``loopbody``, rebinding ``pat`` to be the
-      value returned by the body, increasing ``i`` by one after each
-      iteration.
+2. While ``i < bound``, evaluate ``loopbody``, rebinding ``pat`` to be
+   the value returned by the body, increasing ``i`` by one after each
+   iteration.
 
 3. Evaluate ``body`` with ``pat`` bound to its final
-      value.
+   value.
+
+The ``= initial`` can be left out, in which case initial values for
+the pattern are taken from equivalently named variables in the
+environment.  I.e., ``loop (x) = ...`` is equivalent to ``loop (x = x)
+= ...``.
 
 ``loop (pat = initial) = while cond do loopbody in body``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -314,10 +368,9 @@ The name ``i`` is bound here and initialised to zero.
 1. Bind ``pat`` to the initial values given in ``initial``.
 
 2. While ``cond`` evaluates to true, evaluate ``loopbody``, rebinding
-      ``pat`` to be the value returned by the body.
+   ``pat`` to be the value returned by the body.
 
-3. Evaluate ``body`` with ``pat`` bound to its final
-      value.
+3. Evaluate ``body`` with ``pat`` bound to its final value.
 
 Parallel Expressions
 --------------------
@@ -382,7 +435,7 @@ Tuple Shimming
 
 In a SOAC, if the given function expects *n* arguments of types
 ``t_1=, ..., t_n``, but the SOAC will call the function with a
-single argument of type ``{t_1, ..., t_n}`` (that is,
+single argument of type ``(t_1, ..., t_n)`` (that is,
 a tuple), the Futhark compiler will automatically generate an anonymous
 unwrapping function.  This allows the following expression to
 type-check (and run)::
@@ -398,29 +451,29 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[{int, f32}]`` is transformed to ``{[int],
-[f32]}`` during the compilation process, and all code interacting
+arrays.  The type ``[(int, f32)]`` is transformed to ``([int],
+[f32])`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[{[int], [f32]}]``, which is transformed
-into ``{[[int]], [[f32]]}``.  These two types are not
+Consider the type ``[([int], [f32])]``, which is transformed
+into ``([[int]], [[f32]])``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 
   [
-    {[1],   [1.0]},
-    {[2,3], [2.0]}
+    ([1],   [1.0]),
+    ([2,3], [2.0])
   ]
 
 is a value of the former, but the first element of the
 corresponding transformed tuple::
 
-  {
+  (
     [[1],   [2, 3]],
     [[1.0], [2.0]]
-  }
+  )
 
 is not a full array.  Hence, when determining whether a program
 generates full arrays, we must hence look at the *transformed*
@@ -431,7 +484,7 @@ Literal Defaults
 
 By default, Futhark interprets integer literals as ``i32`` values, and decimal
 literals (integer literals containing a decimal point) as ``f64`` values. These
-defaults can be changed using the `Hakell-inspired
+defaults can be changed using the `Haskell-inspired
 <https://wiki.haskell.org/Keywords#default>`_ ``default`` keyword.
 
 To change the ``i32`` default to e.g. ``i64``, type the following at the top of

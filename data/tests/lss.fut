@@ -21,10 +21,10 @@ fun bool pred2(int x, int y) =
 fun int max(int x, int y) =
   if x > y then x else y
 
-fun {int,int,int,int,int,int} redOp({int,int,int,int,int,int} x,
-                                    {int,int,int,int,int,int} y) =
-  let {lssx, lisx, lcsx, tlx, firstx, lastx} = x in
-  let {lssy, lisy, lcsy, tly, firsty, lasty} = y in
+fun (int,int,int,int,int,int) redOp((int,int,int,int,int,int) x,
+                                    (int,int,int,int,int,int) y) =
+  let (lssx, lisx, lcsx, tlx, firstx, lastx) = x in
+  let (lssy, lisy, lcsy, tly, firsty, lasty) = y in
 
   let connect = pred2(lastx, firsty) in
   let newlss = if connect then max(lcsx + lisy,
@@ -35,13 +35,13 @@ fun {int,int,int,int,int,int} redOp({int,int,int,int,int,int} x,
   let first = if tlx == 0 then firsty else firstx in
   let last  = if tly == 0 then lastx else lasty in
 
-  {newlss, newlis, newlcs, tlx+tly, first, last}
+  (newlss, newlis, newlcs, tlx+tly, first, last)
 
-fun {int,int,int,int,int,int} mapOp (int x) =
+fun (int,int,int,int,int,int) mapOp (int x) =
   let xmatch = if pred1(x) then 1 else 0 in
-  {xmatch, xmatch, xmatch, 1, x, x}
+  (xmatch, xmatch, xmatch, 1, x, x)
 
 fun int main([int] xs) =
-  let {x,_,_,_,_,_} =
-    reduce(redOp, {0,0,0,0,0,0}, map(mapOp, xs)) in
+  let (x,_,_,_,_,_) =
+    reduce(redOp, (0,0,0,0,0,0), map(mapOp, xs)) in
   x

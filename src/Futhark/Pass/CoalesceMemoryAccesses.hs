@@ -139,7 +139,7 @@ transformBinding (Let pat () e) = do
 
 scanOrReduce :: Pattern -> Exp
              -> Maybe ([PatElem], [PatElem], KernelSize)
-scanOrReduce (Pattern [] pat_elems) (Op (Inner (ScanKernel _ _ size _ lam _ _ _))) =
+scanOrReduce (Pattern [] pat_elems) (Op (Inner (ScanKernel _ _ size _ lam _ _))) =
   let (scan_pat_elems, map_pat_elems) =
         splitAt (2 * length (lambdaReturnType lam)) pat_elems
   in Just (scan_pat_elems, map_pat_elems, size)

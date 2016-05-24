@@ -34,9 +34,9 @@ $assign'
 lockstepWidthHeuristicsCode :: LockstepWidthHeuristic -> PyStmt
 lockstepWidthHeuristicsCode
   (LockstepWidthHeuristic platform_name device_type width) =
-  If (BinaryOp "and"
-      (BinaryOp "==" (Var "platform_name") (StringLiteral platform_name))
-      (BinaryOp "==" (Var "device_type") (clDeviceType device_type)))
+  If (BinOp "and"
+      (BinOp "==" (Var "platform_name") (StringLiteral platform_name))
+      (BinOp "==" (Var "device_type") (clDeviceType device_type)))
   [Assign (Var "lockstep_width") (Constant (value (fromIntegral width::Int32)))]
   []
   where clDeviceType DeviceGPU = Var "cl.device_type.GPU"

@@ -43,10 +43,10 @@ data MapNest lore = MapNest Certificates SubExp (Lambda lore) [Nesting lore] [SO
                   deriving (Show)
 
 typeOf :: MapNest lore -> [Type]
-typeOf (MapNest _ w lam nests _) =
-  map (`arrayOfRow` w) innersizes
-  where innersizes = case nests of []     -> lambdaReturnType lam
-                                   nest:_ -> nestingReturnType nest
+typeOf (MapNest _ w lam [] _) =
+  map (`arrayOfRow` w) $ lambdaReturnType lam
+typeOf (MapNest _ w _ (nest:_) _) =
+  map (`arrayOfRow` w) $ nestingReturnType nest
 
 params :: Annotations lore => MapNest lore -> [VName]
 params (MapNest _ _ lam [] _)       =
@@ -90,12 +90,12 @@ fromSOAC' bound (SOAC.Map cs w lam inps) = do
     Right (Just (pat, mn@(MapNest cs' inner_w body' ns' inps'))) -> do
       (ps, inps'') <-
         unzip <$>
-        fixInputs (zip (map paramName $ lambdaParams lam) inps)
+        fixInputs w (zip (map paramName $ lambdaParams lam) inps)
         (zip (params mn) inps')
       let n' = Nesting {
             nestingParamNames   = ps
             , nestingResult     = patternNames pat
-            , nestingReturnType = lambdaReturnType lam
+            , nestingReturnType = typeOf mn
             , nestingWidth      = inner_w
             }
       return $ Just $ MapNest (cs++cs') w body' (n':ns') inps''
@@ -143,14 +143,12 @@ toSOAC (MapNest cs w lam (Nesting npnames nres nrettype nw:ns) inps) = do
   return $ SOAC.Map cs w outerlam inps
 
 fixInputs :: MonadFreshNames m =>
-             [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
+             SubExp -> [(VName, SOAC.Input)] -> [(VName, SOAC.Input)]
           -> m [(VName, SOAC.Input)]
-fixInputs ourInps childInps =
+fixInputs w ourInps childInps =
   reverse . snd <$> foldM inspect (ourInps, []) childInps
   where
     isParam x (y, _) = x == y
-
-    ourWidth = arraysSize 0 $ map (SOAC.inputType . snd) ourInps
 
     findParam :: [(VName, SOAC.Input)]
               -> VName
@@ -178,4 +176,4 @@ fixInputs ourInps childInps =
     inspect (remPs, newInps) (param, SOAC.Input ts a t) = do
       param' <- newNameFromString (baseString param ++ "_rep")
       return (remPs, (param',
-                      SOAC.Input (ts SOAC.|> SOAC.Replicate ourWidth) a t) : newInps)
+                      SOAC.Input (ts SOAC.|> SOAC.Replicate w) a t) : newInps)

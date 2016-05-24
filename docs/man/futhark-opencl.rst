@@ -35,13 +35,6 @@ OPTIONS
   error, the result of the last successful compiler step will be
   printed to standard error.
 
---real-as-double
-  Represent values of type ``real`` as 64-bit floating point.  This is the default.
-
---real-as-single
-  Represent values of type ``real`` as 32-bit floating point.
-
-
 -h
   Print help text to standard output and exit.
 

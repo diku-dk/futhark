@@ -1,6 +1,6 @@
 -- ==
 -- input {
---   { 1
+--   ( 1
 --   , 1
 --   , 100
 --   , [ [ 536870912, 268435456, 134217728, 67108864, 33554432, 16777216, 8388608, 4194304, 2097152, 1048576
@@ -8,7 +8,7 @@
 --       , 512,       256,       128,       64,       32,       16,       8,       4,       2,       1
 --       ]
 --     ]
---   }
+--   )
 -- }
 -- output {
 --   49.8203125
@@ -49,14 +49,14 @@ fun [f64] sobolIndR( [[int,num_bits]] dir_vs, int n ) =
 --------------------------------/
 
 fun int index_of_least_significant_0(int num_bits, int n) =
-  let {goon,k} = {True,0} in
-  loop ({goon,k,n}) =
+  let (goon,k) = (True,0) in
+  loop ((goon,k,n)) =
         for i < num_bits do
           if(goon)
           then if (n & 1) == 1
-               then {True, k+1, n>>1}
-               else {False,k,   n   }
-          else      {False,k,   n   }
+               then (True, k+1, n>>1)
+               else (False,k,   n   )
+          else      (False,k,   n   )
   in k
 
 fun [int,len] recM( [[int,num_bits],len] sob_dirs, int i ) =

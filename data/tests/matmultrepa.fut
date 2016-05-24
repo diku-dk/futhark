@@ -1,3 +1,4 @@
+-- Matrix multiplication written in a Repa-like style.
 -- ==
 -- input {
 --   [ [1,2], [3,4] ]
@@ -6,6 +7,7 @@
 -- output {
 --    [  [ 19 , 22  ] ,  [ 43 , 50  ]  ]
 -- }
+-- structure { Map 2 Map/Map/Redomap 1 }
 fun int redplus1([int]  a) = reduce(+, 0, a)
 fun [int,n] redplus2([[int],n] a) = map(redplus1, a)
 

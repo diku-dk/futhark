@@ -7,5 +7,5 @@
 -- input {  1i32 -1i32 } output { False False False }
 -- input { -2i32 -1i32 } output { True False True }
 
-fun {bool, bool, bool} main(i32 x, i32 y) =
-  {x < y, x == y, x <= y}
+fun (bool, bool, bool) main(i32 x, i32 y) =
+  (x < y, x == y, x <= y)

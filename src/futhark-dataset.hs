@@ -3,6 +3,7 @@
 -- specified type and shape.
 module Main (main) where
 
+import Control.Applicative
 import Control.Arrow (first)
 import Control.Monad
 import Control.Monad.State
@@ -11,19 +12,18 @@ import Data.List
 import Data.Word
 import qualified Data.Text as T
 
+import Prelude
+
 import System.Console.GetOpt
-import System.IO
 import System.Random
 
 import Language.Futhark.Syntax
-import Language.Futhark.Attributes (UncheckedType)
+import Language.Futhark.Attributes (UncheckedUserType)
 import Language.Futhark.Parser
 import Language.Futhark.Pretty ()
 
 import Futhark.Util.Options
 import Futhark.Util.Pretty
-
-import Prelude
 
 main :: IO ()
 main = mainWithOptions initialDataOptions commandLineOptions f
@@ -108,16 +108,16 @@ data SimpleType = SimpleArray SimpleType Int
                 | SimplePrim PrimType
                   deriving (Show)
 
-toSimpleType :: UncheckedType -> Either String SimpleType
-toSimpleType (Prim t) = Right $ SimplePrim t
-toSimpleType Tuple{} = Left "Cannot handle tuples yet."
-toSimpleType (Array (PrimArray t shape _ _)) = do
-  dims <- constantDims shape
-  return $ foldr (flip SimpleArray) (SimplePrim t) dims
-  where constantDims = mapM constantDim . shapeDims
-        constantDim (ConstDim k) = Right k
+toSimpleType :: UncheckedUserType -> Either String SimpleType
+toSimpleType (UserPrim t _) = Right $ SimplePrim t
+toSimpleType UserTuple{} = Left "Cannot handle tuples yet."
+toSimpleType (UserUnique t _) = toSimpleType t
+toSimpleType (UserArray t d _) =
+  SimpleArray <$> toSimpleType t <*> constantDim d
+  where constantDim (ConstDim k) = Right k
         constantDim _ = Left "Array has non-constant dimension declaration."
-toSimpleType (Array TupleArray{}) = Left "Cannot handle arrays of tuples yet."
+toSimpleType (UserTypeAlias v _) =
+  Left $ "Unknown type " ++ nameToString v
 
 data SimpleValue = SimpleArrayValue [SimpleValue]
                  | SimplePrimValue PrimValue

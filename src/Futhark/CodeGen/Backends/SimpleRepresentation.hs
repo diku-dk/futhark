@@ -28,6 +28,7 @@ import qualified Language.C.Quote.C as C
 
 import Futhark.CodeGen.ImpCode
 import Futhark.Util.Pretty (pretty)
+import Futhark.Util (zEncodeString)
 
 intTypeToCType :: IntType -> C.Type
 intTypeToCType Int8 = [C.cty|typename int8_t|]
@@ -78,14 +79,14 @@ tupleFieldExp e i = [C.cexp|$exp:e.$id:(tupleField i)|]
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
 funName :: Name -> String
-funName = ("futhark_"++) . nameToString
+funName = ("futhark_"++) . zEncodeString . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
 
 -- | The type of memory blocks in the default memory space.
 defaultMemBlockType :: C.Type
-defaultMemBlockType = [C.cty|unsigned char*|]
+defaultMemBlockType = [C.cty|char*|]
 
 cIntOps :: [C.Definition]
 cIntOps = concatMap (`map` [minBound..maxBound]) ops
@@ -269,7 +270,7 @@ c_sin32 = [C.cfun|
 
 c_atan2_32 ::C.Func
 c_atan2_32 = [C.cfun|
-    static inline double $id:(funName' "atan2_32")(double x, double y) {
+    static inline float $id:(funName' "atan2_32")(float x, float y) {
       return atan2(x,y);
     }
   |]

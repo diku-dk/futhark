@@ -11,6 +11,7 @@ module Language.Futhark.TypeChecker
   where
 
 import Control.Applicative
+import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.State
@@ -19,6 +20,7 @@ import Data.Array
 import Data.List
 import Data.Loc
 import Data.Maybe
+import Data.Either
 
 import qualified Data.HashMap.Strict as HM
 import qualified Data.HashSet as HS
@@ -103,6 +105,14 @@ data TypeError =
   -- ^ The permutation is not valid.
   | DimensionNotInteger SrcLoc Name
   -- ^ A dimension annotation was a non-integer variable.
+  | CyclicalTypeDefinition SrcLoc Name
+  -- ^ Type alias has been defined cyclically.
+  | UndefinedAlias SrcLoc Name
+  -- ^ Type alias is referenced, but not defined
+  | DupTypeAlias SrcLoc Name
+  -- ^ Type alias has been defined twice
+  | InvalidUniqueness SrcLoc (TypeBase Rank NoInfo ())
+  -- ^ Uniqueness attribute applied to non-array.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -192,6 +202,16 @@ instance Show TypeError where
   show (DimensionNotInteger loc name) =
     "Dimension declaration " ++ pretty name ++ " at " ++ locStr loc ++
     " should be an integer."
+  show (CyclicalTypeDefinition loc name) =
+    "Type alias " ++ pretty name ++ " at " ++ locStr loc ++
+    " is cyclically defined."
+  show (UndefinedAlias loc name) =
+    "Type alias '" ++ nameToString name ++ "' referenced at line " ++ locStr loc
+    ++ ", but not defined."
+  show (DupTypeAlias loc name) =
+    "Duplicate definition of type '" ++ nameToString name ++ "' at line " ++ locStr loc
+  show (InvalidUniqueness loc t) =
+    "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (StructTypeBase VName, [StructTypeBase VName])
@@ -224,6 +244,8 @@ nullOccurence occ = HS.null (observed occ) && HS.null (consumed occ)
 type Occurences = [Occurence]
 
 type UsageMap = HM.HashMap VName [Usage]
+
+type TypeAliasMap = HM.HashMap Name (StructTypeBase VName)
 
 usageMap :: Occurences -> UsageMap
 usageMap = foldl comb HM.empty
@@ -269,10 +291,11 @@ altOccurences occurs1 occurs2 =
 -- only initialised at the very beginning, but the variable table will
 -- be extended during type-checking when let-expressions are
 -- encountered.
-data Scope = Scope { envVtable :: HM.HashMap VName Binding
-                   , envFtable :: HM.HashMap Name FunBinding
-                   , envCheckOccurences :: Bool
-                   }
+data Scope  = Scope { envVtable :: HM.HashMap VName Binding
+                    , envFtable :: HM.HashMap Name FunBinding
+                    , envTAtable :: TypeAliasMap
+                    , envCheckOccurences :: Bool
+                    }
 
 -- | The type checker runs in this monad.  The 'Either' monad is used
 -- for error handling.
@@ -280,21 +303,22 @@ newtype TypeM a = TypeM (RWST
                          Scope       -- Reader
                          Occurences  -- Writer
                          VNameSource -- State
-                         (Either TypeError) -- Inner monad
+                         (Except TypeError) -- Inner monad
                          a)
   deriving (Monad, Functor, Applicative,
             MonadReader Scope,
             MonadWriter Occurences,
-            MonadState VNameSource)
+            MonadState VNameSource,
+            MonadError TypeError)
 
 runTypeM :: Scope -> VNameSource -> TypeM a
          -> Either TypeError (a, VNameSource)
 runTypeM env src (TypeM m) = do
-  (x, src', _) <- runRWST m env src
+  (x, src', _) <- runExcept $ runRWST m env src
   return (x, src')
 
 bad :: TypeError -> TypeM a
-bad = TypeM . lift . Left
+bad = throwError
 
 newName :: VName -> TypeM VName
 newName s = do src <- get
@@ -316,7 +340,7 @@ newIdent s t loc = do
 newParam :: String -> Type -> SrcLoc -> TypeM (ParamBase NoInfo VName)
 newParam s t loc = do
   s' <- newIDFromString s
-  return $ Param s' (TypeDecl (vacuousShapeAnnotations $ toStruct t) NoInfo) loc
+  return $ Param s' (TypeDecl (contractTypeBase t) NoInfo) loc
 
 liftEither :: Either TypeError a -> TypeM a
 liftEither = either bad return
@@ -424,8 +448,8 @@ bindingParams params m =
   binding (map fromParam params) $
   -- Figure out the not already bound shape annotations.
   binding (concat [ mapMaybe (inspectDim $ srclocOf param) $
-                    nestedDims $ paramDeclaredType param
-                  | param <- params ])
+                    nestedDims' $ paramDeclaredType param
+                  | param <- params])
   m
   where inspectDim _ AnyDim =
           Nothing
@@ -535,30 +559,42 @@ rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
 -- information.
 checkProg :: UncheckedProg -> Either TypeError (Prog, VNameSource)
 checkProg prog = do
-  ftable <- buildFtable
+  ttable <- buildTypeAliasTable
+  ftable <- buildFtable ttable
   let typeenv = Scope { envVtable = HM.empty
-                        , envFtable = ftable
-                        , envCheckOccurences = True
-                        }
+                      , envFtable = ftable
+                      , envTAtable = ttable
+                      , envCheckOccurences = True
+                      }
   runTypeM typeenv src $
-    Prog <$> mapM (noOccurences . checkFun) (progFunctions prog')
+    Prog [] <$> mapM (noOccurences . checkFun) (progFunctions prog')
+
   where
+
     (prog', src) = tagProg' blankNameSource prog
+    buildTypeAliasTable = typeAliasTableFromProg prog'
+
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
     -- (name, return type, argument types), we also keep track of
     -- position information, in order to report both locations of
     -- duplicate function definitions.  The position information is
     -- removed at the end.
-    buildFtable = HM.map rmLoc <$>
-                  foldM expand (HM.map addLoc initialFtable)
-                  (progFunctions prog')
-    expand ftable (FunDef _ name (TypeDecl ret NoInfo) args _ pos)
+
+    buildFtable ttable = HM.map rmLoc <$>
+                         foldM (expand ttable) (HM.map addLoc initialFtable)
+                         (progFunctions prog')
+    expand ttable ftable (FunDef _ name (TypeDecl ret NoInfo) args _ pos)
       | Just (_,_,pos2) <- HM.lookup name ftable =
         Left $ DupDefinitionError name pos pos2
-      | otherwise =
-        let argtypes = map (toStruct . paramDeclaredType) args -- Throw away argument names.
-        in Right $ HM.insert name (ret,argtypes,pos) ftable
+      | otherwise = do
+        let argtypes = map paramDeclaredType args -- Throw away argument names.
+            look tname tloc =
+              maybe (Left $ UndefinedAlias tloc tname) Right $
+              HM.lookup tname ttable
+        ret' <- expandType look ret
+        argtypes' <- mapM (expandType look) argtypes
+        return $ HM.insert name (ret' , argtypes' , pos) ftable
     rmLoc (ret,args,_) = (ret,args)
     addLoc (t, ts) = (t, ts, noLoc)
 
@@ -567,33 +603,36 @@ initialFtable = HM.map addBuiltin builtInFunctions
   where addBuiltin (t, ts) = (Prim t, map Prim ts)
 
 checkFun :: FunDefBase NoInfo VName -> TypeM FunDef
-checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
+checkFun (FunDef entry fname rettype params body loc) = do
+  rettype' <- checkTypeDecl rettype
+  let rettype_structural = toStructural $ unInfo $ expandedType rettype'
   params' <- checkParams
   body' <- bindingParams params' $ do
-    checkRetType loc rettype
+    checkRetType loc $ unInfo $ expandedType rettype'
     checkExp body
 
-  checkReturnAlias params' $ typeOf body'
+  checkReturnAlias rettype_structural params' $ typeOf body'
 
-  if toStructural (typeOf body') `subtypeOf` toStructural rettype then
-    return $ FunDef entry fname (TypeDecl rettype $ Info rettype) params' body' loc
-  else bad $ ReturnTypeError loc fname (toStructural rettype) $
-             toStructural $ typeOf body'
+  if toStructural (typeOf body') `subtypeOf` rettype_structural then
+    return $ FunDef entry fname rettype' params' body' loc
+  else bad $ ReturnTypeError loc fname rettype_structural $ toStructural $ typeOf body'
 
-  where checkParams = do
+  where
+        checkParams = do
           -- First find all normal parameters (checking for duplicates).
-          params' <- foldM checkNormParams [] params
+          params1' <- foldM checkNormParams [] params
           -- Then check shape annotations (where duplicates are OK, as
           -- long as it's not a duplicate of a normal parameter.)
-          mapM_ checkDimDecls params'
-          return $ reverse params'
+          mapM_ checkDimDecls params1'
+          return $ reverse params1'
 
-        checkNormParams knownparams (Param pname (TypeDecl pt NoInfo) ploc)
-          | pname `elem` map paramName knownparams =
-            bad $ DupParamError fname (baseName pname) loc
-          | otherwise =
-            -- For now, the expanded type is the same as the declared type.
-            return $ Param pname (TypeDecl pt $ Info pt) ploc : knownparams
+        checkNormParams knownparams param
+          | paramName param `elem` map paramName knownparams =
+            bad $ DupParamError fname (baseName $ paramName param) loc
+          | otherwise = do
+              -- For now, the expanded type is the same as the declared type.
+              param' <- checkParam param
+              return $ param' : knownparams
 
         checkDimDecls param
           | Just name <- find (`elem` map paramName params) boundDims =
@@ -612,9 +651,8 @@ checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
 
         -- | Check that unique return values do not alias a
         -- non-consumed parameter.
-        checkReturnAlias params' =
-          foldM_ (checkReturnAlias' params') HS.empty . returnAliasing rettype
-
+        checkReturnAlias rettp params' =
+          foldM_ (checkReturnAlias' params') HS.empty . returnAliasing rettp
         checkReturnAlias' params' seen (Unique, names)
           | any (`HS.member` HS.map snd seen) $ HS.toList names =
             bad $ UniqueReturnAliased fname loc
@@ -632,7 +670,8 @@ checkFun (FunDef entry fname (TypeDecl rettype NoInfo) params body loc) = do
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
 
-checkExp :: ExpBase NoInfo VName -> TypeM Exp
+checkExp :: ExpBase NoInfo VName
+         -> TypeM Exp
 
 checkExp (Literal val pos) =
   Literal <$> checkLiteral pos val <*> pure pos
@@ -655,6 +694,9 @@ checkExp (ArrayLit es _ loc) = do
 
   return $ ArrayLit es' (Info et) loc
 
+checkExp (Empty decl loc) =
+  Empty <$> checkTypeDecl decl <*> pure loc
+
 checkExp (BinOp op e1 e2 NoInfo pos) = checkBinOp op e1 e2 pos
 
 checkExp (UnOp Not e pos) = do
@@ -670,7 +712,7 @@ checkExp (UnOp Negate e loc) = do
   return $ UnOp Negate e' loc
 
 checkExp (UnOp Abs e loc) = do
-  e' <- require anyIntType =<< checkExp e
+  e' <- require anyNumberType =<< checkExp e
   return $ UnOp Abs e' loc
 
 checkExp (UnOp Signum e loc) = do
@@ -708,7 +750,7 @@ checkExp (Apply fname args _ loc) = do
   case bnd of
     Nothing -> bad $ UnknownFunctionError fname loc
     Just (ftype, paramtypes) -> do
-      (args', argflows) <- unzip <$> mapM (checkArg . fst) args
+      (args', argflows) <- unzip <$> mapM (\(arg,_) -> (checkArg arg)) args
 
       let rettype' = returnType (removeShapeAnnotations ftype)
                      (map diet paramtypes) (map typeOf args')
@@ -874,11 +916,16 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
         case arrtp of
           Array _ -> True
           _       -> False
+  let isArrayType' arrtp =
+        case arrtp of
+          UserUnique t _ -> isArrayType' t
+          UserArray{}    -> True
+          _              -> False
   let lit_int0 = Literal (PrimValue $ SignedValue $ Int32Value 0) pos
   [(_, intarg),(arr',arrarg)] <- mapM checkArg [lit_int0, arr]
   -- arr must have an array type
   unless (isArrayType $ typeOf arr') $
-    bad $ TypeError pos "Stream with input array of non-array type."
+    bad $ TypeError pos $ "Stream with input array of non-array type " ++ pretty (typeOf arr') ++ "."
   -- typecheck stream's lambdas
   (form', macctup) <-
     case form of
@@ -901,6 +948,7 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
       (aas,faas) = case macctup of
                     Nothing        -> ([intarg, arrarg],        [intarg,fakearg]         )
                     Just(_,accarg) -> ([intarg, accarg, arrarg],[intarg, accarg, fakearg])
+
   lam' <- checkLambda lam aas
   (_, dflow)<- collectOccurences $ checkLambda lam faas
   let arr_aliasses = HS.toList $ aliases $ typeOf arr'
@@ -936,12 +984,13 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
         NamedDim _  -> return ()
         ConstDim _  -> bad $ TypeError pos ("Stream: outer dimension of stream should NOT"++
                                             " be specified since it is "++pretty chunk++"by default.")
+
   _ <- case lam_rtp of
-        Tuple res_tps -> do
+        UserTuple res_tps _ -> do
             let res_arr_tps = tail res_tps
-            if all isArrayType res_arr_tps
+            if all isArrayType' res_arr_tps
             then do let lam_params = HS.fromList $ map paramName lam_ps'
-                        arr_iner_dims = concatMap (tail . arrayDims) res_arr_tps
+                        arr_iner_dims = concatMap (tail . arrayDims') res_arr_tps
                         boundDim (NamedDim name) = return $ Just name
                         boundDim (ConstDim _   ) = return Nothing
                         boundDim _               =
@@ -1103,7 +1152,8 @@ checkExp (Write i v a pos) = do
             return ()
           _ -> bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
-checkSOACArrayArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
+checkSOACArrayArg :: ExpBase NoInfo VName
+                  -> TypeM (Exp, Arg)
 checkSOACArrayArg e = do
   (e', (t, dflow, argloc)) <- checkArg e
   case peelArray 1 t of
@@ -1127,9 +1177,10 @@ checkIdent (Ident name _ pos) = do
   vt <- lookupVar name pos
   return $ Ident name (Info vt) pos
 
-checkParam :: ParamBase NoInfo VName -> TypeM Parameter
-checkParam (Param name (TypeDecl t NoInfo) loc) =
-  return $ Param name (TypeDecl t $ Info t) loc
+checkParam :: ParamBase NoInfo VName
+           -> TypeM (ParamBase Info VName)
+checkParam (Param name decl loc) =
+  Param name <$> checkTypeDecl decl <*> pure loc
 
 checkBinOp :: BinOp -> ExpBase NoInfo VName -> ExpBase NoInfo VName -> SrcLoc
            -> TypeM Exp
@@ -1225,8 +1276,9 @@ argType :: Arg -> Type
 argType (t, _, _) = t
 
 checkArg :: ExpBase NoInfo VName -> TypeM (Exp, Arg)
-checkArg arg = do (arg', dflow) <- collectOccurences $ checkExp arg
-                  return (arg', (typeOf arg', dflow, srclocOf arg'))
+checkArg arg = do
+  (arg', dflow) <- collectOccurences $ checkExp arg
+  return (arg', (typeOf arg', dflow, srclocOf arg'))
 
 checkFuncall :: Maybe Name -> SrcLoc
              -> [StructType] -> StructType -> [Arg]
@@ -1256,7 +1308,7 @@ checkLambda (AnonymFun params body ret pos) args = do
   case () of
     _ | length params == length args -> do
           FunDef _ _ ret' params'' body' _ <-
-            noUnique $ checkFun $ FunDef False (nameFromString "<anonymous>") ret params body pos
+            noUnique $ checkFun (FunDef False (nameFromString "<anonymous>") ret params body pos)
           checkFuncall Nothing pos (map paramType params') (unInfo $ expandedType ret') args
           return $ AnonymFun params'' body' ret' pos
       | [(Tuple ets, _, _)] <- args,
@@ -1265,14 +1317,14 @@ checkLambda (AnonymFun params body ret pos) args = do
           -- single N-tuple whose types match the parameters.
           -- Generate a shim to make it fit.
           FunDef _ _ ret' _ body' _ <-
-            noUnique $ checkFun $ FunDef False (nameFromString "<anonymous>") ret params body pos
+            noUnique $ checkFun (FunDef False (nameFromString "<anonymous>") ret params body pos)
           tupident <- newIdent "tup_shim"
                       (Tuple $ map (fromStruct .
                                     removeShapeAnnotations .
                                     paramType) params')
                       pos
           let untype ident = ident { identType = NoInfo }
-              paramtype = Tuple $ map paramDeclaredType params
+              paramtype = UserTuple (map paramDeclaredType params) pos
               tupparam = Param (identName tupident) (TypeDecl paramtype NoInfo) $
                          srclocOf tupident
               tupfun = AnonymFun [tupparam] tuplet ret pos
@@ -1300,15 +1352,17 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
               paramname <- newIDFromString "x"
 
               let paramtype = Tuple paramtypes
-                  tupparam = Param paramname (TypeDecl paramtype NoInfo) pos
+                  paramtype' = contractTypeBase paramtype
+                  tupparam = Param paramname (TypeDecl paramtype' NoInfo) pos
                   tuplet = LetPat (TuplePattern (map (Id . untype) params) pos)
                            (Var $ Ident paramname NoInfo pos) body pos
                   tupfun = AnonymFun [tupparam] tuplet
-                           (TypeDecl (vacuousShapeAnnotations rt) NoInfo) pos
+                           (TypeDecl (contractTypeBase rt) NoInfo) pos
                   body = Apply fname [(Var $ untype param, diet paramt) |
                                       (param, paramt) <- zip params paramtypes']
                          NoInfo pos
-              checkLambda tupfun args
+              void $ checkLambda tupfun args
+              return $ CurryFun fname curryargexps' (Info rettype') pos
           | otherwise -> do
               case find (unique . snd) $ zip curryargexps paramtypes of
                 Just (e, _) -> bad $ CurriedConsumption fname $ srclocOf e
@@ -1318,18 +1372,18 @@ checkLambda (CurryFun fname curryargexps _ pos) args = do
               params <- zipWithM mkparam [(0::Int)..] $
                         drop (length curryargs) paramtypes'
               let fun = AnonymFun params body
-                        (TypeDecl (vacuousShapeAnnotations rt) NoInfo) pos
+                        (TypeDecl (contractTypeBase rt) NoInfo) pos
                   body = Apply fname (zip (curryargexps++map (Var . asIdent) params) $
                                       map diet paramtypes)
                          NoInfo pos
-              _ <- checkLambda fun args
+              void $ checkLambda fun args
               return $ CurryFun fname curryargexps' (Info rettype') pos
     where untype ident = ident { identType = NoInfo }
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
   var <- newIdent "x" (argType arg) loc
   binding [var] $ do
-    e <- checkExp $ UnOp unop (Var var { identType = NoInfo }) loc
+    e <- checkExp (UnOp unop (Var var { identType = NoInfo }) loc)
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
@@ -1360,12 +1414,12 @@ checkCurryBinOp f binop x loc arg = do
   y <- newIdent "y" (argType arg) loc
   xvar <- newIdent "x" (typeOf x') loc
   binding [y, xvar] $ do
-    e <- checkExp $ BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc
+    e <- checkExp (BinOp binop (Var $ untype y) (Var $ untype xvar) NoInfo loc)
     return $ f binop x' (Info $ argType arg) (Info $ typeOf e) loc
   where untype (Ident name _ varloc) = Ident name NoInfo varloc
 
-checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg] -> SrcLoc
-                  -> TypeM Lambda
+checkPolyLambdaOp :: BinOp -> [ExpBase NoInfo VName] -> [Arg]
+                  -> SrcLoc -> TypeM Lambda
 checkPolyLambdaOp op curryargexps args pos = do
   curryargexpts <- map typeOf <$> mapM checkExp curryargexps
   let argts = [ argt | (argt, _, _) <- args ]
@@ -1377,7 +1431,6 @@ checkPolyLambdaOp op curryargexps args pos = do
   yname <- newIDFromString "y"
   let xident t = Ident xname t pos
       yident t = Ident yname t pos
-      untype p = p { paramTypeDecl = TypeDecl (paramDeclaredType p) NoInfo }
   (x,y,params) <- case curryargexps of
                     [] -> return (Var $ xident NoInfo,
                                   Var $ yident NoInfo,
@@ -1386,11 +1439,8 @@ checkPolyLambdaOp op curryargexps args pos = do
                                    Var $ yident NoInfo,
                                    [yident $ Info tp])
                     (e1:e2:_) -> return (e1, e2, [])
-  body <- binding (map (fromParam . toParam) params) $ checkBinOp op x y pos
-  checkLambda
-    (AnonymFun (map (untype . toParam) params) (BinOp op x y NoInfo pos)
-     (TypeDecl (vacuousShapeAnnotations $ toStruct $ typeOf body) NoInfo) pos)
-    args
+  rettype <- typeOf <$> binding params (checkBinOp op x y pos)
+  return $ BinOpFun op (Info tp) (Info tp) (Info rettype) pos
   where fname = nameFromString $ pretty op
 
 checkRetType :: SrcLoc -> StructType -> TypeM ()
@@ -1433,3 +1483,79 @@ patternType :: Pattern -> Type
 patternType (Wildcard (Info t) _) = t
 patternType (Id ident) = unInfo $ identType ident
 patternType (TuplePattern pats _) = Tuple $ map patternType pats
+
+expandType :: (Applicative m, MonadError TypeError m) =>
+               (Name -> SrcLoc -> m (StructTypeBase VName))
+            -> UserType VName
+            -> m (StructTypeBase VName)
+expandType look (UserTypeAlias name loc) =
+  look name loc
+expandType _ (UserPrim prim _) =
+  return $ Prim prim
+expandType look (UserTuple ts _) =
+  Tuple <$> mapM (expandType look) ts
+expandType look (UserArray t d _) = do
+  t' <- expandType look t
+  return $ arrayOf t' (ShapeDecl [d]) Nonunique
+expandType look (UserUnique t loc) = do
+  t' <- expandType look t
+  case t' of
+    Array{} -> return $ t' `setUniqueness` Unique
+    _       -> throwError $ InvalidUniqueness loc $ toStructural t'
+
+checkTypeDecl :: TypeDeclBase NoInfo VName -> TypeM (TypeDeclBase Info VName)
+checkTypeDecl (TypeDecl t NoInfo) =
+  TypeDecl t . Info <$> expandType look t
+  where look name loc = do
+          types <- asks envTAtable
+          case HM.lookup name types of
+            Nothing    -> throwError $ UndefinedAlias loc name
+            Just namet -> return namet
+
+-- Creating the initial type alias table is done by maintaining a
+-- table of the type aliases we have processed (initialised to empty),
+-- then initialising every type alias.  This ensures we do not waste
+-- time processing any alias more than once.  The monadic structure is
+-- a Reader and a State on top of an Either.
+
+type TypeAliasTableM =
+  ReaderT (HS.HashSet Name) (StateT TypeAliasMap (Either TypeError))
+
+typeAliasTableFromProg :: ProgBase NoInfo VName
+                       -> Either TypeError TypeAliasMap
+typeAliasTableFromProg prog = do
+  checkForDuplicateTypes defs
+  execStateT (runReaderT (mapM_ process defs) mempty) mempty
+  where defs = progTypes prog
+        findDefByName name = find ((==name) . typeAlias) defs
+
+        process :: TypeDefBase NoInfo VName
+                -> TypeAliasTableM (StructTypeBase VName)
+        process (TypeDef name (TypeDecl ut NoInfo) _) = do
+          t <- expandType typeOfName ut
+          modify $ HM.insert name t
+          return t
+
+        typeOfName :: Name -> SrcLoc
+                   -> TypeAliasTableM (StructTypeBase VName)
+        typeOfName name loc = do
+          inside <- ask
+          known <- get
+          case name `HM.lookup` known of
+            Just t -> return t
+            Nothing
+              | name `HS.member` inside ->
+                  throwError $ CyclicalTypeDefinition loc name
+              | Just def <- findDefByName name ->
+                  local (HS.insert name) $ process def
+              | otherwise ->
+                  throwError $ UndefinedAlias loc name
+
+checkForDuplicateTypes :: [TypeDefBase NoInfo VName] -> Either TypeError ()
+checkForDuplicateTypes = foldM_ check mempty
+  where check seen def
+          | name `HS.member` seen =
+              Left $ DupTypeAlias (srclocOf def) name
+          | otherwise =
+              Right $ name `HS.insert` seen
+              where name = typeAlias def

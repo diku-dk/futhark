@@ -9,7 +9,7 @@
 --
 -- ==
 --
--- structure distributed { Map 0 MapKernel 8 ScanKernel 4 }
+-- structure distributed { Map 0 MapKernel 4 ScanKernel 4 }
 
 fun [[[int]]] main([[[int,m],n]] a) =
   map(fn [[int,n],m] ([[int]] a_row) =>

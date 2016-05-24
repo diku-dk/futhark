@@ -9,9 +9,12 @@ module Language.Futhark.Pretty
   where
 
 import Data.Array
+import Data.Monoid
 import Data.Hashable
 import Data.Word
 import qualified Data.HashSet as HS
+
+import Prelude
 
 import Futhark.Util.Pretty
 
@@ -46,9 +49,9 @@ instance Pretty Value where
   ppr (PrimValue bv) = ppr bv
   ppr (TupValue vs)
     | any (not . primType . valueType) vs =
-      braces $ commastack $ map ppr vs
+      parens $ commastack $ map ppr vs
     | otherwise =
-      braces $ commasep $ map ppr vs
+      parens $ commasep $ map ppr vs
   ppr (ArrayValue a t)
     | [] <- elems a = text "empty" <> parens (ppr t)
     | Array{} <- t = brackets $ commastack $ map ppr $ elems a
@@ -76,21 +79,17 @@ instance Pretty PrimValue where
   ppr (BoolValue b) = text $ show b
   ppr (FloatValue v) = ppr v
 
-instance Pretty Uniqueness where
-  ppr Unique    = star
-  ppr Nonunique = empty
-
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase ShapeDecl as vn) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
-  ppr (TupleArrayElem ts)    = braces $ commasep $ map ppr ts
+  ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (TupleArrayElemTypeBase Rank as vn) where
   ppr (PrimArrayElem bt _ u) = ppr u <> ppr bt
   ppr (ArrayArrayElem at)    = ppr at
-  ppr (TupleArrayElem ts)    = braces $ commasep $ map ppr ts
+  ppr (TupleArrayElem ts)    = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) =>
          Pretty (ArrayTypeBase ShapeDecl as vn) where
@@ -101,7 +100,7 @@ instance (Eq vn, Hashable vn, Pretty vn) =>
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
 
   ppr (TupleArray et (ShapeDecl ds) u) =
-    ppr u <> foldl f (braces $ commasep $ map ppr et) ds
+    ppr u <> foldl f (parens $ commasep $ map ppr et) ds
     where f s AnyDim       = brackets s
           f s (NamedDim v) = brackets $ s <> comma <> ppr v
           f s (ConstDim n) = brackets $ s <> comma <> ppr n
@@ -111,25 +110,35 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ArrayTypeBase Rank as vn) wh
     ppr u <> foldl (.) id (replicate n brackets) (ppr et)
   ppr (TupleArray ts (Rank n) u) =
     ppr u <> foldl (.) id (replicate n brackets)
-    (braces $ commasep $ map ppr ts)
+    (parens $ commasep $ map ppr ts)
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) where
   ppr (Prim et) = ppr et
   ppr (Array at) = ppr at
-  ppr (Tuple ts) = braces $ commasep $ map ppr ts
+  ppr (Tuple ts) = parens $ commasep $ map ppr ts
+
+instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
+  ppr (UserPrim et _) = ppr et
+  ppr (UserUnique t _) = text "*" <> ppr t
+  ppr (UserArray at d _) = brackets (ppr at <> f d)
+    where f AnyDim = mempty
+          f (NamedDim v) = comma <+> ppr v
+          f (ConstDim n) = comma <+> ppr n
+  ppr (UserTuple ts _) = parens $ commasep $ map ppr ts
+  ppr (UserTypeAlias name _) = ppr name
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
   ppr (Prim et) = ppr et
   ppr (Array at) = ppr at
-  ppr (Tuple ts) = braces $ commasep $ map ppr ts
+  ppr (Tuple ts) = parens $ commasep $ map ppr ts
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase f vn) where
+instance Pretty vn => Pretty (ParamBase f vn) where
   ppr = ppr . paramName
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase f vn) where
+instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where
@@ -182,8 +191,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Var v) = ppr v
   pprPrec _ (Literal v _) = ppr v
   pprPrec _ (TupLit es _)
-    | any hasArrayLit es = braces $ commastack $ map ppr es
-    | otherwise          = braces $ commasep $ map ppr es
+    | any hasArrayLit es = parens $ commastack $ map ppr es
+    | otherwise          = parens $ commasep $ map ppr es
+  pprPrec _ (Empty (TypeDecl t _) _) =
+    text "empty" <> parens (ppr t)
   pprPrec _ (ArrayLit es _ _) =
     brackets $ commasep $ map ppr es
   pprPrec p (BinOp bop x y _ _) = prettyBinOp p bop x y
@@ -284,7 +295,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LoopForm
 
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (Id ident)     = ppr ident
-  ppr (TuplePattern pats _) = braces $ commasep $ map ppr pats
+  ppr (TuplePattern pats _) = parens $ commasep $ map ppr pats
   ppr (Wildcard _ _) = text "_"
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBase ty vn) where
@@ -305,8 +316,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBa
     ppr binop <+> ppr x
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase ty vn) where
-  ppr = stack . punctuate line . map ppFun . progFunctions
-    where ppFun (FunDef entry name rettype args body _) =
+  ppr = stack . punctuate line . map ppDec . progFunctions
+    where ppDec (FunDef entry name rettype args body _) =
             text fun <+> ppr rettype <+>
             text (nameToString name) <//>
             apply (map ppParam args) <+>

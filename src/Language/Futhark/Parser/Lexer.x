@@ -150,6 +150,7 @@ keyword s =
     "streamSeq"    -> STREAM_SEQ
     "write"        -> WRITE
     "include"      -> INCLUDE
+    "type"         -> TYPE
     "entry"        -> ENTRY
     _              -> ID $ nameFromText s
 
@@ -292,7 +293,7 @@ data Token = IF
            | WRITE
            | INCLUDE
            | ENTRY
-
+           | TYPE
            | EOF
              deriving (Show, Eq)
 
@@ -304,7 +305,7 @@ scanTokens file str = runAlex (BS.fromStrict $ T.encodeUtf8 str) $ do
     tok <- alexMonadScan
     case tok of
       (start, end, EOF) ->
-        return [L (pos start end) EOF]
+        return []
       (start, end, t) -> do
         rest <- loop
         return $ L (pos start end) t : rest

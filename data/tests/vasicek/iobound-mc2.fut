@@ -27,14 +27,14 @@ fun float seqRedSumP(float lastr, [float] Ws) =
   if (size(0,Ws) == 0)
   then lastr
   else
-    let {W0, Wns} = split((1),Ws) in
+    let (W0, Wns) = split((1),Ws) in
     seqRedSumP(nextrP(lastr, W0[0]), Wns)
 
 fun float seqRedSumQ(float lastr, [float] Ws) =
   if (size(0,Ws) == 0)
   then lastr
   else
-    let {W0, Wns} = split((1),Ws) in
+    let (W0, Wns) = split((1),Ws) in
     lastr + seqRedSumQ(nextrQ(lastr, W0[0]), Wns)
 
 fun [float] MC1([[float]] WPss) =
@@ -44,13 +44,13 @@ fun float MC1step([float] WPs) =
 
 fun [float] MC2([[[float]]] WQsss, [float] r1s) =
   map(MC2sim, zip(WQsss, r1s))
-fun float MC2sim({[[float]], float} arg) =
-  let { WQss, r1 } = arg in
+fun float MC2sim(([[float]], float) arg) =
+  let ( WQss, r1 ) = arg in
   let tn = size(0, WQss) in
   let sum_r = zipWith(MC2step, WQss, replicate(tn, r1)) in
   mean(sum_r)
-fun float MC2step({[float], float} arg) =
-  let { WQs, r1 } = arg in
+fun float MC2step(([float], float) arg) =
+  let ( WQs, r1 ) = arg in
   seqRedSumQ(r1, WQs)
 
 fun [float] main([[float]] WPss, [[[float]]] WQsss) = --MC1(WPss)

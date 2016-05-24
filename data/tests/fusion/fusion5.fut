@@ -12,6 +12,7 @@
 --            False, False, False, False, False, False, False, False, False, False, False,
 --            False, False, False, False, False, False, False, False]]
 -- }
+-- structure { Map 3 Map/Map 1 }
 fun [[bool]] main([int] t_v1, [[int]] t_v3) =
   let n = 3 in
   let t_v6 = map(fn int (int x) => (x + 1),iota(n)) in
