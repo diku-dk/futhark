@@ -13,5 +13,5 @@
 --   [1, 0, 7, 4, 1]
 -- }
 
-fun {[{int,int}], [{int,int}], [{int,int}]} main([int] xs, [int] ys) =
+fun ([(int,int)], [(int,int)], [(int,int)]) main([int] xs, [int] ys) =
   partition(<, ==, zip(xs,ys))

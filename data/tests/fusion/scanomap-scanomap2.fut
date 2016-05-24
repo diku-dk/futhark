@@ -11,9 +11,9 @@
 -- structure {
 --   Scanomap 1
 -- }
-fun {[int], [int], [int], [int]} main([int] inp) =
+fun ([int], [int], [int], [int]) main([int] inp) =
   let a = map(+1, inp)
   let b = scan(+, 0, a) in
   let c = map(+1, a)
   let d = scan(*, 1, c) in
-  {a, b, c, d}
+  (a, b, c, d)

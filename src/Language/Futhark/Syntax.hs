@@ -18,6 +18,7 @@ module Language.Futhark.Syntax
   , ShapeDecl (..)
   , Rank (..)
   , TypeBase(..)
+  , UserType(..)
   , TupleArrayElemTypeBase(..)
   , ArrayTypeBase(..)
   , CompTypeBase
@@ -47,9 +48,11 @@ module Language.Futhark.Syntax
 
   -- * Definitions
   , FunDefBase(..)
+  , TypeDefBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
+  , DecBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -212,13 +215,33 @@ data TypeBase shape as vn = Prim PrimType
                           | Tuple [TypeBase shape as vn]
                           deriving (Eq, Show)
 
+
 -- | A type with aliasing information and no shape annotations, used
 -- for describing the type of a computation.
 type CompTypeBase = TypeBase Rank Names
 
+-- | An unstructured type with type variables and possibly shape
+-- declarations - this is what the user types in the source program.
+data UserType vn = UserPrim PrimType SrcLoc
+                 | UserArray (UserType vn) (DimDecl vn) SrcLoc
+                 | UserTuple [UserType vn] SrcLoc
+                 | UserTypeAlias Name SrcLoc
+                 | UserUnique (UserType vn) SrcLoc
+    deriving (Show)
+
+instance Located (UserType vn) where
+  locOf (UserPrim _ loc) = locOf loc
+  locOf (UserArray _ _ loc) = locOf loc
+  locOf (UserTuple _ loc) = locOf loc
+  locOf (UserTypeAlias _ loc) = locOf loc
+  locOf (UserUnique _ loc) = locOf loc
+
+--
 -- | A "structural" type with shape annotations and no aliasing
 -- information, used for declarations.
+
 type StructTypeBase = TypeBase ShapeDecl NoInfo
+
 
 -- | An array type with shape annotations and no aliasing information,
 -- used for declarations.
@@ -230,7 +253,7 @@ type DeclTupleArrayElemTypeBase = TupleArrayElemTypeBase ShapeDecl NoInfo
 
 -- | A declaration of the type of something.
 data TypeDeclBase f vn =
-  TypeDecl { declaredType :: StructTypeBase vn
+  TypeDecl { declaredType :: UserType vn
                              -- ^ The type declared by the user.
            , expandedType :: f (StructTypeBase vn)
                              -- ^ The type deduced by the type checker.
@@ -279,7 +302,7 @@ instance Hashable vn => Hashable (IdentBase ty vn) where
 data ParamBase f vn = Param { paramName :: vn
                             , paramTypeDecl :: TypeDeclBase f vn
                             , paramSrcLoc :: SrcLoc
-                            }
+                          }
 deriving instance Showable f vn => Show (ParamBase f vn)
 
 instance Eq vn => Eq (ParamBase f vn) where
@@ -345,6 +368,8 @@ data ExpBase f vn =
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+
+            | Empty (TypeDeclBase f vn) SrcLoc
 
             | Var    (IdentBase f vn)
             -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
@@ -477,14 +502,15 @@ data ExpBase f vn =
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
-                      | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
-                      | Sequential (ExpBase f vn)
+                     | RedLike    StreamOrd Commutativity (LambdaBase f vn) (ExpBase f vn)
+                     | Sequential (ExpBase f vn)
 deriving instance Showable f vn => Show (StreamForm f vn)
 
 instance Located (ExpBase f vn) where
   locOf (Literal _ loc) = locOf loc
   locOf (TupLit _ pos) = locOf pos
   locOf (ArrayLit _ _ pos) = locOf pos
+  locOf (Empty _ pos) = locOf pos
   locOf (BinOp _ _ _ _ pos) = locOf pos
   locOf (UnOp _ _ pos) = locOf pos
   locOf (If _ _ _ _ pos) = locOf pos
@@ -571,14 +597,31 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               }
 deriving instance Showable f vn => Show (FunDefBase f vn)
 
--- | An entire Futhark program.
-newtype ProgBase f vn = Prog { progFunctions :: [FunDefBase f vn] }
+-- | Type Declarations
+data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
+                                , userType :: TypeDeclBase f vn -- type-definitionen
+                                , typeDefLocation :: SrcLoc
+                                }
+deriving instance Showable f vn => Show (TypeDefBase f vn)
+
+instance Located (TypeDefBase f vn) where
+  locOf = locOf . typeDefLocation
+
+data DecBase f vn = FunDec (FunDefBase f vn)
+                  | TypeDec (TypeDefBase f vn)
+-- | Coming soon  | SigDec ..
+--                | ModDec ..
+deriving instance Showable f vn => Show (DecBase f vn)
+
+data ProgBase f vn =
+         Prog  { progTypes :: [TypeDefBase f vn]
+               , progFunctions :: [FunDefBase f vn]
+               }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
--- | An entire Futhark program, including headers.
 data ProgBaseWithHeaders f vn =
   ProgWithHeaders { progWHHeaders :: [ProgHeader]
-                  , progWHFunctions :: [FunDefBase f vn]
+                  , progWHDecs :: [DecBase f vn]
                   }
 deriving instance Showable f vn => Show (ProgBaseWithHeaders f vn)
 

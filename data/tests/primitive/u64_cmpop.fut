@@ -6,5 +6,5 @@
 -- input { 18446744073709551615u64 1u64 } output { False False False }
 -- input {  1u64 18446744073709551615u64 } output { True False True }
 
-fun {bool, bool, bool} main(u64 x, u64 y) =
-  {x < y, x == y, x <= y}
+fun (bool, bool, bool) main(u64 x, u64 y) =
+  (x < y, x == y, x <= y)

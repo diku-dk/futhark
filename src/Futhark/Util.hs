@@ -10,10 +10,15 @@ module Futhark.Util
        (mapAccumLM,
         chunk,
         mapEither,
-        splitAt3
-        )
+        maybeNth,
+        splitAt3,
+        zEncodeString
+       )
        where
 
+import Numeric
+import Data.Char
+import Data.List
 import Data.Either
 
 -- | Like 'mapAccumL', but monadic.
@@ -38,9 +43,82 @@ chunk n xs =
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
 
+-- | Return the list element at the given index, if the index is valid.
+maybeNth :: Integral int => int -> [a] -> Maybe a
+maybeNth i l
+  | i >= 0, v:_ <- genericDrop i l = Just v
+  | otherwise                      = Nothing
+
 -- | Like 'splitAt', but produces three lists.
 splitAt3 :: Int -> Int -> [a] -> ([a], [a], [a])
 splitAt3 n m l =
   let (xs, l') = splitAt n l
       (ys, zs) = splitAt m l'
   in (xs, ys, zs)
+
+-- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
+--
+-- Slightly simplified as we do not need it to deal with tuples and
+-- the like.
+--
+-- (c) The University of Glasgow, 1997-2006
+
+
+type UserString = String        -- As the user typed it
+type EncodedString = String     -- Encoded form
+
+zEncodeString :: UserString -> EncodedString
+zEncodeString "" = ""
+zEncodeString (c:cs) = encodeDigitChar c ++ concatMap encodeChar cs
+
+unencodedChar :: Char -> Bool   -- True for chars that don't need encoding
+unencodedChar 'Z' = False
+unencodedChar 'z' = False
+unencodedChar '_' = True
+unencodedChar c   =  isAsciiLower c
+                  || isAsciiUpper c
+                  || isDigit c
+
+-- If a digit is at the start of a symbol then we need to encode it.
+-- Otherwise names like 9pH-0.1 give linker errors.
+encodeDigitChar :: Char -> EncodedString
+encodeDigitChar c | isDigit c = encodeAsUnicodeCharar c
+                  | otherwise = encodeChar c
+
+encodeChar :: Char -> EncodedString
+encodeChar c | unencodedChar c = [c]     -- Common case first
+
+-- Constructors
+encodeChar '('  = "ZL"   -- Needed for things like (,), and (->)
+encodeChar ')'  = "ZR"   -- For symmetry with (
+encodeChar '['  = "ZM"
+encodeChar ']'  = "ZN"
+encodeChar ':'  = "ZC"
+encodeChar 'Z'  = "ZZ"
+
+-- Variables
+encodeChar 'z'  = "zz"
+encodeChar '&'  = "za"
+encodeChar '|'  = "zb"
+encodeChar '^'  = "zc"
+encodeChar '$'  = "zd"
+encodeChar '='  = "ze"
+encodeChar '>'  = "zg"
+encodeChar '#'  = "zh"
+encodeChar '.'  = "zi"
+encodeChar '<'  = "zl"
+encodeChar '-'  = "zm"
+encodeChar '!'  = "zn"
+encodeChar '+'  = "zp"
+encodeChar '\'' = "zq"
+encodeChar '\\' = "zr"
+encodeChar '/'  = "zs"
+encodeChar '*'  = "zt"
+encodeChar '_'  = "zu"
+encodeChar '%'  = "zv"
+encodeChar c    = encodeAsUnicodeCharar c
+
+encodeAsUnicodeCharar :: Char -> EncodedString
+encodeAsUnicodeCharar c = 'z' : if isDigit (head hex_str) then hex_str
+                                                           else '0':hex_str
+  where hex_str = showHex (ord c) "U"

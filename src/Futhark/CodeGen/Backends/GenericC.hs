@@ -1,4 +1,5 @@
 {-# LANGUAGE QuasiQuotes, GeneralizedNewtypeDeriving, TypeSynonymInstances, FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 -- | C code generator framework.
 module Futhark.CodeGen.Backends.GenericC
@@ -7,7 +8,6 @@ module Futhark.CodeGen.Backends.GenericC
   , Operations (..)
   , defaultOperations
   , OpCompiler
-  , OpCompilerResult(..)
 
   , PointerQuals
   , MemoryType
@@ -47,10 +47,10 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 import Control.Monad.RWS
 import qualified Data.HashMap.Lazy as HM
-import Data.Char (isAlphaNum, isAscii, isDigit)
 import qualified Data.DList as DL
 import Data.List
 import Data.Maybe
+import Data.FileEmbed
 
 import Prelude
 
@@ -60,9 +60,9 @@ import qualified Language.C.Quote.OpenCL as C
 import Futhark.CodeGen.ImpCode hiding (dimSizeToExp)
 import Futhark.MonadFreshNames
 import Futhark.CodeGen.Backends.SimpleRepresentation
-import Futhark.CodeGen.Backends.GenericC.Reading
 import Futhark.CodeGen.Backends.GenericC.Options
 import Futhark.Util.Pretty hiding (space, spaces)
+import Futhark.Util (zEncodeString)
 import Futhark.Representation.AST.Attributes (builtInFunctions)
 
 data CompilerState s = CompilerState {
@@ -83,11 +83,7 @@ newCompilerState src s = CompilerState { compTypeStructs = []
 
 -- | A substitute expression compiler, tried before the main
 -- compilation function.
-type OpCompiler op s = op -> CompilerM op s (OpCompilerResult op)
-
--- | The result of the substitute expression compiler.
-data OpCompilerResult op = CompileCode (Code op) -- ^ Equivalent to this code.
-                         | Done -- ^ Code added via monadic interface.
+type OpCompiler op s = op -> CompilerM op s ()
 
 -- | The address space qualifiers for a pointer of the given type with
 -- the given annotation.
@@ -276,11 +272,7 @@ item :: C.BlockItem -> CompilerM op s ()
 item x = tell $ mempty { accItems = DL.singleton x }
 
 instance C.ToIdent VName where
-  toIdent = C.toIdent . prefixIfBad . sanitise . textual
-    where sanitise = map $ \c -> if isAlphaNum c && isAscii c then c else '_'
-          prefixIfBad (c:cs) | isDigit c = 'f' : c : cs
-          prefixIfBad ('_':cs) = 'f' : '_' : cs
-          prefixIfBad s = s
+  toIdent = C.toIdent . zEncodeString . textual
 
 stm :: C.Stm -> CompilerM op s ()
 stm (C.Block items _) = mapM_ item items
@@ -367,14 +359,14 @@ defineMemorySpace space = do
   alloc <- collect $
     case space of
       DefaultSpace ->
-        stm [C.cstm|block->mem = malloc(size);|]
+        stm [C.cstm|block->mem = (char*) malloc(size);|]
       Space sid ->
         join $ asks envAllocate <*> pure [C.cexp|block->mem|] <*>
         pure [C.cexp|size|] <*> pure sid
   let allocdef = [C.cedecl|static void $id:(fatMemAlloc space) ($ty:mty *block, typename int32_t size) {
   $id:(fatMemUnRef space)(block);
   $items:alloc
-  block->references = malloc(sizeof(int));
+  block->references = (int*) malloc(sizeof(int));
   *(block->references) = 1;
   }|]
 
@@ -426,7 +418,7 @@ allocMem name size space = do
     else alloc $ var name
   where alloc dest = case space of
           DefaultSpace ->
-            stm [C.cstm|$exp:dest = malloc($exp:size);|]
+            stm [C.cstm|$exp:dest = (char*) malloc($exp:size);|]
           Space sid ->
             join $ asks envAllocate <*> rawMem name <*>
             pure size <*> pure sid
@@ -515,13 +507,13 @@ readPrimStm :: C.Exp -> PrimType -> C.Stm
 readPrimStm place t
   | Just f <- readFun t =
     [C.cstm|if ($id:f(&$exp:place) != 0) {
-          errx(1, "Syntax error when reading %s.\n", $string:(pretty t));
+          panic(1, "Syntax error when reading %s.\n", $string:(pretty t));
         }|]
 readPrimStm _ Cert =
   [C.cstm|;|]
 readPrimStm _ t =
   [C.cstm|{
-        errx(1, "Cannot read %s.\n", $string:(pretty t));
+        panic(1, "Cannot read %s.\n", $string:(pretty t));
       }|]
 
 -- | Our strategy for main() is to parse everything into host memory
@@ -559,13 +551,11 @@ mainCall pre_timing fname (Function _ outputs inputs _ results args) = do
              |],
           [C.citems|
                /* Run the program once. */
-               gettimeofday(&t_start, NULL);
+               t_start = get_wall_time();
                $id:ret = $id:(funName fname)($args:argexps);
                $stms:pre_timing
-               gettimeofday(&t_end, NULL);
-               long int elapsed_usec =
-                 (t_end.tv_sec * 1000000 + t_end.tv_usec) -
-                 (t_start.tv_sec * 1000000 + t_start.tv_usec);
+               t_end = get_wall_time();
+               long int elapsed_usec = t_end - t_start;
                if (time_runs && runtime_file != NULL) {
                  fprintf(runtime_file, "%ld\n", elapsed_usec);
                }
@@ -644,13 +634,13 @@ readInput refcount memsizes (ArrayValue name t shape)
                        shape,
                        $int:(length shape))
             != 0) {
-          errx(1, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
+          panic(1, "Syntax error when reading %s.\n", $string:(ppArrayType t rank));
         }
         $stms:copyshape
         $stms:copymemsize
       }|]
   | otherwise =
-    [C.cstm|errx(1, "Cannot read %s.\n", $string:(pretty t));|]
+    [C.cstm|panic(1, "Cannot read %s.\n", $string:(pretty t));|]
 
 sizeVars :: [Param] -> HM.HashMap VName VName
 sizeVars = mconcat . map sizeVars'
@@ -713,14 +703,14 @@ benchmarkOptions =
   where set_runtime_file = [C.cstm|{
           runtime_file = fopen(optarg, "w");
           if (runtime_file == NULL) {
-            errx(1, "Cannot open %s: %s", optarg, strerror(errno));
+            panic(1, "Cannot open %s: %s", optarg, strerror(errno));
           }
         }|]
         set_num_runs = [C.cstm|{
           num_runs = atoi(optarg);
           perform_warmup = 1;
           if (num_runs <= 0) {
-            errx(1, "Need a positive number of runs, not %s", optarg);
+            panic(1, "Need a positive number of runs, not %s", optarg);
           }
         }|]
 
@@ -745,12 +735,14 @@ $esc:("#include <stdlib.h>")
 $esc:("#include <string.h>")
 $esc:("#include <stdint.h>")
 $esc:("#include <math.h>")
-$esc:("#include <sys/time.h>")
 $esc:("#include <ctype.h>")
 $esc:("#include <errno.h>")
 $esc:("#include <assert.h>")
-$esc:("#include <err.h>")
 $esc:("#include <getopt.h>")
+
+$esc:panic_h
+
+$esc:timing_h
 
 $edecls:decls
 
@@ -768,7 +760,7 @@ static int detail_timing = 0;
 
 $edecls:(map funcToDef definitions)
 
-$edecls:readerFunctions
+$esc:reader_h
 
 static typename FILE *runtime_file;
 static int perform_warmup = 0;
@@ -777,8 +769,10 @@ static int num_runs = 1;
 $func:(generateOptionParser "parse_options" (benchmarkOptions++options))
 
 int main(int argc, char** argv) {
-  struct timeval t_start, t_end;
+  typename int64_t t_start, t_end;
   int time_runs;
+
+  fut_progname = argv[0];
 
   $stms:(compInit endstate)
 
@@ -831,6 +825,10 @@ int main(int argc, char** argv) {
         builtin = map asDecl builtInFunctionDefs ++
                   cIntOps ++ cFloat32Ops ++ cFloat64Ops ++ cFloatConvOps
           where asDecl fun = [C.cedecl|$func:fun|]
+
+        panic_h = $(embedStringFile "rts/c/panic.h")
+        reader_h = $(embedStringFile "rts/c/reader.h")
+        timing_h = $(embedStringFile "rts/c/timing.h")
 
 compileFun :: (Name, Function op) -> CompilerM op s (C.Definition, C.Func)
 compileFun (fname, Function _ outputs inputs body _ _) = do
@@ -938,7 +936,7 @@ compileExp (UnOp Abs{} x) = do
 
 compileExp (UnOp (FAbs Float32) x) = do
   x' <- compileExp x
-  return [C.cexp|fabsf($exp:x')|]
+  return [C.cexp|(float)fabs($exp:x')|]
 
 compileExp (UnOp (FAbs Float64) x) = do
   x' <- compileExp x
@@ -998,11 +996,8 @@ compileExp (Cond c t f) = do
 
 compileCode :: Code op -> CompilerM op s ()
 
-compileCode (Op op) = do
-  opc <- asks envOpCompiler
-  res <- opc op
-  case res of Done             -> return ()
-              CompileCode code -> compileCode code
+compileCode (Op op) =
+  join $ asks envOpCompiler <*> pure op
 
 compileCode Skip = return ()
 

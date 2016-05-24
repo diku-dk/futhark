@@ -2,6 +2,30 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+-- | This module implements common-subexpression elimination.  This
+-- module does not actually remove the duplicate, but only replaces
+-- one with a diference to the other.  E.g:
+--
+-- @
+--   let a = x + y
+--   let b = x + y
+-- @
+--
+-- becomes:
+--
+-- @
+--   let a = x + y
+--   let b = a
+-- @
+--
+-- After which copy propagation in the simplifier will actually remove
+-- the definition of @b@.
+--
+-- Our CSE is still rather stupid.  No normalisation is performed, so
+-- the expressions @x+y@ and @y+x@ will be considered distinct.
+-- Furthermore, no expression with its own binding will be considered
+-- equal to any other, since the variable names will be distinct.
+-- This affects SOACs in particular.
 module Futhark.Optimise.CSE
        ( performCSE
        , CSEInOp
@@ -28,6 +52,7 @@ import Futhark.Transform.Substitute
 import Futhark.Pass
 import Futhark.Tools
 
+-- | Perform CSE on every functioon in a program.
 performCSE :: (Attributes lore, CanBeAliased (Op lore),
                CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
               Bool -> Pass lore lore
@@ -141,22 +166,27 @@ addExpSubst pat eattr e (CSEState (esubsts, nsubsts) cse_arrays) =
 
 -- | The operations that permit CSE.
 class Attributes lore => CSEInOp lore op where
+  -- | Perform CSE within any nested expressions.
   cseInOp :: Aliased lore => op -> CSEM lore op
 
 instance Attributes lore => CSEInOp lore () where
   cseInOp () = return ()
 
-instance CSEInOp lore (Op lore) => CSEInOp lore (Kernel.Kernel lore) where
+instance (Attributes lore, CSEInOp lore (Op lore)) => CSEInOp lore (Kernel.Kernel lore) where
   cseInOp = Kernel.mapKernelM $
             Kernel.KernelMapper return cseInLambda cseInBody
             return return return
 
-instance (Attributes lore, CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
+instance (Attributes (Aliases lore),
+          CanBeAliased (Op lore),
+          CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
          CSEInOp (Aliases lore) (ExplicitMemory.MemOp (Aliases lore)) where
   cseInOp o@ExplicitMemory.Alloc{} = return o
   cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> cseInOp k
 
-instance (Attributes lore, CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
+instance (Attributes (Aliases lore),
+          CanBeAliased (Op lore),
+          CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
          CSEInOp (Aliases lore) (SOAC.SOAC (Aliases lore)) where
   cseInOp = SOAC.mapSOACM $
             SOAC.SOACMapper return cseInLambda cseInExtLambda

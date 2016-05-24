@@ -48,7 +48,7 @@ Library
                  text,
                  raw-strings-qq,
                  neat-interpolation >= 0.3,
-                 file-embed
+                 file-embed >= 0.0.9
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -72,7 +72,6 @@ Library
                    Futhark.CodeGen.Backends.GenericPython.Definitions
                    Futhark.CodeGen.Backends.GenericPython.Options
                    Futhark.CodeGen.Backends.GenericC.Options
-                   Futhark.CodeGen.Backends.GenericC.Reading
                    Futhark.CodeGen.Backends.COpenCL
                    Futhark.CodeGen.Backends.COpenCL.Boilerplate
                    Futhark.CodeGen.Backends.PyOpenCL
@@ -246,9 +245,9 @@ Executable futhark-py
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 directory,
                  text,
                  filepath,
-                 process,
                  transformers,
                  futhark
 
@@ -263,8 +262,8 @@ Executable futhark-pyopencl
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
                  mtl >= 2.2.1,
+                 directory,
                  filepath,
-                 process,
                  transformers,
                  text,
                  futhark
@@ -296,6 +295,7 @@ Executable futhark-test
                  mtl >= 2.2.1,
                  containers >= 0.5,
                  directory,
+                 directory-tree,
                  filepath,
                  process,
                  process-extras,

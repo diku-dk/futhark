@@ -1,10 +1,11 @@
 module Main (main) where
 
 import Control.Category ((>>>))
+import Control.Monad
 import Control.Monad.IO.Class
 import Data.Maybe
 import System.FilePath
-import System.Process
+import System.Directory
 import System.Console.GetOpt
 
 import Futhark.Pipeline
@@ -50,8 +51,9 @@ pyCodeAction filepath config =
                        then binpath `replaceExtension` "py"
                        else binpath
           liftIO $ writeFile pypath pyprog
-          _ <- liftIO $ createProcess (proc "chmod" ["+x", pypath])
-          return ()
+          unless (compilerModule config) $ do
+            perms <- liftIO $ getPermissions pypath
+            liftIO $ setPermissions pypath $ setOwnerExecutable True perms
 
 type CompilerOption = OptDescr (Either (IO ()) (CompilerConfig -> CompilerConfig))
 
@@ -64,9 +66,9 @@ commandLineOptions =
   , Option "V" ["verbose"]
     (OptArg (\file -> Right $ \config -> config { compilerVerbose = Just file }) "FILE")
     "Print verbose output on standard error; wrong program to FILE."
-  , Option [] ["module"]
+  , Option [] ["library"]
     (NoArg $ Right $ \config -> config { compilerModule = True })
-    "Generate the file as a module."
+    "Generate a library instead of an executable."
   ]
 
 data CompilerConfig =

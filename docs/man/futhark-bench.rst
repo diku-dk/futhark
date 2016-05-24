@@ -2,14 +2,14 @@
 
 .. _futhark-bench(1):
 
-============
+=============
 futhark-bench
-============
+=============
 
 SYNOPSIS
 ========
 
-futhark-bench [--runs=count | --compiler=program | --raw] infile
+futhark-bench [--runs=count | --compiler=program | --raw | --no-validate] infile
 
 DESCRIPTION
 ===========
@@ -33,6 +33,15 @@ OPTIONS
   passed multiple times, resulting in multiple compilers being used
   for each test case.  The specified program must support the same
   interface as ``futhark-c``.
+
+--raw
+
+  Provide numbers for every run instead of a summary.
+
+--no-validate
+
+  Disable validation of test results, except for succesful
+  termination.  Useful when validation would be too slow.
 
 EXAMPLES
 ========

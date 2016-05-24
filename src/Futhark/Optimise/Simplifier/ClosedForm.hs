@@ -28,7 +28,6 @@ import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier.RuleM
 
 -- | A function that, given a variable name, returns its definition.
--- XXX: This duplicates something in Futhark.Optimise.Simplification.
 type VarLookup lore = VName -> Maybe (Exp lore)
 
 {-
@@ -75,22 +74,19 @@ loopClosedForm :: MonadBinder m =>
                -> [(FParam (Lore m),SubExp)]
                -> Names -> SubExp -> Body (Lore m)
                -> RuleM m ()
-loopClosedForm pat merge i bound body
-  | respat == mergenames = do
-    closedBody <- checkResults respat bound i knownBindings
-                  (map identName mergeidents) body mergeexp
-    isEmpty <- newVName "bound_is_zero"
-    letBindNames'_ [isEmpty] $
-      PrimOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
-    letBindNames'_ (patternNames pat) =<<
-      eIf (eSubExp $ Var isEmpty)
-      (resultBodyM mergeexp)
-      (renameBody closedBody)
-  | otherwise = cannotSimplify
-  where respat = map paramName mergepat
-        (mergepat, mergeexp) = unzip merge
+loopClosedForm pat merge i bound body = do
+  closedBody <- checkResults mergenames bound i knownBindings
+                (map identName mergeidents) body mergeexp
+  isEmpty <- newVName "bound_is_zero"
+  letBindNames'_ [isEmpty] $
+    PrimOp $ CmpOp (CmpSlt Int32) bound (intConst Int32 0)
+  letBindNames'_ (patternNames pat) =<<
+    eIf (eSubExp $ Var isEmpty)
+    (resultBodyM mergeexp)
+    (renameBody closedBody)
+  where (mergepat, mergeexp) = unzip merge
         mergeidents = map paramIdent mergepat
-        mergenames = map identName mergeidents
+        mergenames = map paramName mergepat
         knownBindings = HM.fromList $ zip mergenames mergeexp
 
 checkResults :: MonadBinder m =>
@@ -115,8 +111,6 @@ checkResults pat size untouchable knownBindings params body accs = do
                   HS.fromList params <>
                   untouchable
 
-        checkResult (p, e) _
-          | Just e' <- asFreeSubExp e = letBindNames'_ [p] $ PrimOp $ SubExp e'
         checkResult (p, Var v) (accparam, acc) = do
           e@(PrimOp (BinOp bop x y)) <- liftMaybe $ HM.lookup v bndMap
           -- One of x,y must be *this* accumulator, and the other must

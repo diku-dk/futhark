@@ -9,5 +9,5 @@
 --   True
 -- }
 
-fun {bool,bool} main(int x, int y) =
-  {x > y, x >= y}
+fun (bool,bool) main(int x, int y) =
+  (x > y, x >= y)

@@ -32,7 +32,10 @@ module Language.Futhark.Attributes
   , similarTo
   , arrayRank
   , arrayDims
+  , arrayDims'
   , nestedDims
+  , nestedDims'
+  , setArrayShape
   , removeShapeAnnotations
   , vacuousShapeAnnotations
   , returnType
@@ -48,9 +51,8 @@ module Language.Futhark.Attributes
   , setAliases
   , addAliases
   , setUniqueness
-
   , tupleArrayElemToType
-
+  , contractTypeBase
   -- ** Removing and adding names
   --
   -- $names
@@ -64,9 +66,11 @@ module Language.Futhark.Attributes
   -- which is syntactically required.
   , NoInfo(..)
   , UncheckedType
+  , UncheckedUserType
   , UncheckedArrayType
   , UncheckedIdent
   , UncheckedTypeDecl
+  , UncheckedUserTypeDecl
   , UncheckedExp
   , UncheckedLambda
   , UncheckedPattern
@@ -79,6 +83,7 @@ module Language.Futhark.Attributes
 import Control.Monad.Writer
 import Data.Hashable
 import Data.List
+import Data.Loc
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
 
@@ -100,9 +105,19 @@ arrayShape (Array (PrimArray _ ds _ _)) = ds
 arrayShape (Array (TupleArray _ ds _))   = ds
 arrayShape _                             = mempty
 
+-- | Return the shape of a type - for non-arrays, this is 'mempty'.
+arrayShape' :: UserType vn -> ShapeDecl vn
+arrayShape' (UserArray t d _) = ShapeDecl [d] <> arrayShape' t
+arrayShape' (UserUnique t _)  = arrayShape' t
+arrayShape' _                 = mempty
+
 -- | Return the dimensions of a type with (possibly) known dimensions.
 arrayDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
 arrayDims = shapeDims . arrayShape
+
+-- | Return the dimensions of a type with (possibly) known dimensions.
+arrayDims' :: UserType vn -> [DimDecl vn]
+arrayDims' = shapeDims . arrayShape'
 
 -- | Return any shape declaration in the type, with duplicates removed.
 nestedDims :: Ord vn => TypeBase ShapeDecl as vn -> [DimDecl vn]
@@ -121,13 +136,19 @@ nestedDims t =
         tupleArrayElemNestedDims PrimArrayElem{} =
           mempty
 
+-- | Return any shape declaration in the type, with duplicates removed.
+nestedDims' :: Ord vn => UserType vn -> [DimDecl vn]
+nestedDims' (UserArray t d _) = nub $ d : nestedDims' t
+nestedDims' (UserTuple ts _)  = nub $ mconcat $ map nestedDims' ts
+nestedDims' (UserUnique t _)  = nestedDims' t
+nestedDims' _                 = mempty
+
 -- | Set the dimensions of an array.  If the given type is not an
 -- array, return the type unchanged.
-setArrayShape :: ArrayShape (shape vn) =>
-                 shape vn -> TypeBase shape as vn -> TypeBase shape as vn
+setArrayShape :: shape vn -> TypeBase shape as vn -> TypeBase shape as vn
 setArrayShape ds (Array (PrimArray et _ u as)) = Array $ PrimArray et ds u as
-setArrayShape ds (Array (TupleArray et _ u))    = Array $ TupleArray et ds u
-setArrayShape _  (Tuple ts)                     = Tuple ts
+setArrayShape ds (Array (TupleArray et _ u))   = Array $ TupleArray et ds u
+setArrayShape _  (Tuple ts)                    = Tuple ts
 setArrayShape _  (Prim t)                      = Prim t
 
 -- | Change the shape of a type to be just the 'Rank'.
@@ -274,9 +295,14 @@ toStructural :: (ArrayShape (shape vn)) =>
              -> TypeBase Rank NoInfo ()
 toStructural = removeNames . removeShapeAnnotations
 
+-- | -- | Remove aliasing information from a type.
+-- | toStruct :: TypeBase shape as vn
+-- |          -> TypeBase shape NoInfo vn
+-- | toStruct t = t `setAliases` NoInfo
+
 -- | Remove aliasing information from a type.
 toStruct :: TypeBase shape as vn
-       -> TypeBase shape NoInfo vn
+         -> TypeBase shape NoInfo vn
 toStruct t = t `setAliases` NoInfo
 
 -- | Replace no aliasing with an empty alias set.
@@ -538,6 +564,8 @@ typeOf (Literal val _) = fromStruct $ valueType val
 typeOf (TupLit es _) = Tuple $ map typeOf es
 typeOf (ArrayLit es (Info t) _) =
   arrayType 1 t $ mconcat $ map (uniqueness . typeOf) es
+typeOf (Empty (TypeDecl _ (Info t)) _) =
+  arrayType 1 (fromStruct t) Unique
 typeOf (BinOp _ _ _ (Info t) _) = t
 typeOf (UnOp Not _ _) = Prim Bool
 typeOf (UnOp Negate e _) = typeOf e
@@ -660,11 +688,14 @@ commutative :: BinOp -> Bool
 commutative = flip elem [Plus, Pow, Times, Band, Xor, Bor, LogAnd, LogOr, Equal]
 
 -- | Turn an identifier into a parameter.
-toParam :: IdentBase Info vn
+toParam :: Ord vn =>
+           IdentBase Info vn
         -> ParamBase Info vn
 toParam (Ident name (Info t) loc) =
-  Param name (TypeDecl t' $ Info t') loc
-  where t' = vacuousShapeAnnotations $ toStruct t
+  Param name (TypeDecl t' $ Info t'') loc
+  where
+    t'  = contractTypeBase t
+    t'' = vacuousShapeAnnotations $ toStruct t
 
 -- | Turn a parameter into an identifier.
 fromParam :: Ord vn =>
@@ -678,7 +709,7 @@ paramType :: ParamBase Info vn
 paramType = unInfo . expandedType . paramTypeDecl
 
 paramDeclaredType :: ParamBase f vn
-                  -> StructTypeBase vn
+                  -> UserType vn
 paramDeclaredType = declaredType . paramTypeDecl
 
 -- | As 'patNames', but returns a the set of names (which means that
@@ -723,11 +754,47 @@ builtInFunctions = HM.fromList $ map namify
                    ]
   where namify (k,v) = (nameFromString k, v)
 
+
+contractTypeBase :: (ArrayShape (shape vn), Ord vn) =>
+                    TypeBase shape als vn
+                 -> UserType vn
+contractTypeBase (Prim p) = UserPrim p noLoc
+contractTypeBase arrtp@(Array tps) =
+  let grow t d = UserArray t d noLoc
+      roottype = contractArrayTypeBase tps
+      array = foldl grow roottype $ replicate (arrayRank arrtp) AnyDim
+  in case uniqueness arrtp of
+    Unique -> UserUnique array noLoc
+    Nonunique -> array
+contractTypeBase (Tuple types) =
+  UserTuple (map contractTypeBase types) noLoc
+
+contractArrayTypeBase :: ArrayTypeBase shape als vn
+                      -> UserType vn
+contractArrayTypeBase (PrimArray p _ _ _) =
+  UserPrim p noLoc
+contractArrayTypeBase (TupleArray tps _ _) =
+  UserTuple (map contractTupleArrayElemTypeBase tps) noLoc
+
+contractTupleArrayElemTypeBase :: TupleArrayElemTypeBase shape als vn
+                               -> UserType vn
+contractTupleArrayElemTypeBase (PrimArrayElem p _ _) =
+  UserPrim p noLoc
+contractTupleArrayElemTypeBase (ArrayArrayElem arrtpbase) =
+  contractArrayTypeBase arrtpbase
+contractTupleArrayElemTypeBase (TupleArrayElem tps) =
+  UserTuple (map contractTupleArrayElemTypeBase tps) noLoc
+
 -- | A type with no aliasing information but shape annotations.
 type UncheckedType = TypeBase ShapeDecl NoInfo Name
 
+type UncheckedUserType = UserType Name
+
 -- | An array type with no aliasing information.
 type UncheckedArrayType = ArrayTypeBase ShapeDecl NoInfo Name
+
+-- | A type declaration with no expanded type.
+type UncheckedUserTypeDecl = TypeDeclBase NoInfo Name
 
 -- | A type declaration with no expanded type.
 type UncheckedTypeDecl = TypeDeclBase NoInfo Name

@@ -47,11 +47,7 @@ module Futhark.Analysis.HORepresentation.SOAC
   , inputType
   , inputRowType
   , transformRows
-  , transformTypeRows
   , transposeInput
-  -- ** Converting to and from expressions
-  , inputFromSubExp
-  , inputsToSubExps
   -- ** Input transformations
   , ArrayTransforms
   , noTransforms
@@ -220,6 +216,8 @@ transformFromExp (PrimOp (Futhark.Rearrange cs perm v)) =
   Just (v, Rearrange cs perm)
 transformFromExp (PrimOp (Futhark.Reshape cs shape v)) =
   Just (v, Reshape cs shape)
+transformFromExp (PrimOp (Futhark.Replicate n (Futhark.Var v))) =
+  Just (v, Replicate n)
 transformFromExp _ = Nothing
 
 -- | One array input to a SOAC - a SOAC may have multiple inputs, but
@@ -268,12 +266,6 @@ addTransform tr (Input trs a t) =
 -- list.
 addTransforms :: ArrayTransforms -> Input -> Input
 addTransforms ts (Input ots a t) = Input (ots <> ts) a t
-
--- | If the given expression represents a normalised SOAC input,
--- return that input.
-inputFromSubExp :: HasScope t f => SubExp -> f (Maybe Input)
-inputFromSubExp (Futhark.Var v) = Just <$> varInput v
-inputFromSubExp _               = pure Nothing
 
 -- | Convert SOAC inputs to the corresponding expressions.
 inputsToSubExps :: (MonadBinder m) =>
@@ -347,23 +339,6 @@ transformRows (ArrayTransforms ts) =
              (Rearrange [] (1:0:[2..inputRank inp-1]) `addTransform` inp))
         transformRows' inp nts =
           error $ "transformRows: Cannot transform this yet:\n" ++ show nts ++ "\n" ++ show inp
-
--- | Get the resulting type after transforming the rows.
-transformTypeRows :: ArrayTransforms -> Type -> Type
-transformTypeRows (ArrayTransforms ts) = flip (Foldable.foldl transform) ts
-  where transform t (Rearrange _ perm) =
-          t `setArrayShape` Shape (rearrangeShape (0:map (+1) perm) $ arrayDims t)
-        transform t (Reshape _ shape) =
-          t `setArrayShape` newShape shape
-        transform t (ReshapeOuter _ shape) =
-          let outer:oldshape = arrayDims t
-          in t `setArrayShape` Shape (outer : newDims shape ++ drop 1 oldshape)
-        transform t (ReshapeInner _ shape) =
-          let outer:inner:_ = arrayDims t
-          in t `setArrayShape` Shape (outer : inner : newDims shape)
-        transform t (Replicate n) =
-          let outer:shape = arrayDims t
-          in t `setArrayShape` Shape (outer : n : shape)
 
 -- | Add to the input a 'Rearrange' transform that performs an @(k,n)@
 -- transposition.  The new transform will be at the end of the current
@@ -516,7 +491,7 @@ fromExp (Op (Futhark.Scan cs w l args)) = do
 fromExp (Op (Futhark.Redomap cs w comm l1 l2 es as)) =
   Right . Redomap cs w comm l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Scanomap cs w l1 l2 es as)) =
-  Right <$> Scanomap cs w l1 l2 es <$> traverse varInput as
+  Right . Scanomap cs w l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Stream cs w form extlam as)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps

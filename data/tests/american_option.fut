@@ -40,11 +40,11 @@ fun f64 binom(int expiry) =
   let st = map(f64(s0())*, map(*, zip(uPow, dPow))) in
   let finalPut = map(maxF64(f64(0.0)), map(f64(strike())-, st)) in
   loop (put = finalPut) = for n+1 > i >= 1 do
-    let {uPow_start, _} = split((i), uPow) in
-    let {_, dPow_end} = split((n+1-i), dPow) in
+    let (uPow_start, _) = split((i), uPow) in
+    let (_, dPow_end) = split((n+1-i), dPow) in
     let st = map(f64(s0())*, map(*, zip(uPow_start, dPow_end))) in
-    let {_, put_tail} = split((1), put) in
-    let {put_init, _} = split((size(0,put)-1), put) in
+    let (_, put_tail) = split((1), put) in
+    let (put_init, _) = split((size(0,put)-1), put) in
     map(maxF64, zip(map(f64(strike())-, st),
                      map(+,
                          zip(map(qUR*, put_tail),

@@ -14,7 +14,6 @@ module Futhark.Representation.Kernels.Kernel
        , kernelInputType
        , kernelInputIdent
        , KernelSize(..)
-       , ScanKernelOrder(..)
        , chunkedKernelNonconcatOutputs
 
        , typeCheckKernel
@@ -68,7 +67,6 @@ data Kernel lore =
     [VName]
   | ScanKernel Certificates SubExp
     KernelSize
-    ScanKernelOrder
     (LambdaT lore)
     (LambdaT lore)
     [SubExp]
@@ -112,10 +110,6 @@ data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelNumThreads :: SubExp
                              }
                 deriving (Eq, Ord, Show)
-
-data ScanKernelOrder = ScanTransposed
-                     | ScanFlat
-                     deriving (Eq, Ord, Show)
 
 -- | Like 'Mapper', but just for 'Kernel's.
 data KernelMapper flore tlore m = KernelMapper {
@@ -162,12 +156,11 @@ mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun arrs) =
   mapOnKernelLambda tv red_fun <*>
   mapOnKernelLambda tv fold_fun <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (ScanKernel cs w kernel_size order fun fold_fun nes arrs) =
+mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
   ScanKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv w <*>
   mapOnKernelSize tv kernel_size <*>
-  pure order <*>
   mapOnKernelLambda tv fun <*>
   mapOnKernelLambda tv fold_fun <*>
   mapM (mapOnKernelSubExp tv) nes <*>
@@ -297,11 +290,10 @@ kernelType (ReduceKernel _ _ size _ redlam foldlam _) =
       arr_row_tp = drop (length acc_tp) $ lambdaReturnType foldlam
   in acc_tp ++
      map (`setOuterSize` kernelTotalElements size) arr_row_tp
-kernelType (ScanKernel _ w size _ lam foldlam nes _) =
+kernelType (ScanKernel _ w size lam foldlam nes _) =
   let arr_row_tp = drop (length nes) $ lambdaReturnType foldlam
   in map (`arrayOfRow` w) (lambdaReturnType lam) ++
-     map ((`arrayOfRow` kernelWorkgroups size) .
-          (`arrayOfRow` kernelWorkgroupSize size)) (lambdaReturnType lam) ++
+     map (`arrayOfRow` kernelWorkgroups size) (lambdaReturnType lam) ++
      map (`arrayOfRow` kernelTotalElements size) arr_row_tp
 kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`arrayOfRow` kernelNumThreads size) nonconcat_ret <>
@@ -321,7 +313,7 @@ chunkedKernelNonconcatOutputs fun =
   where outerSizeIsChunk = (==Var (paramName chunk)) . arraySize 0
         (_, chunk, _) = partitionChunkedKernelLambdaParameters $ lambdaParams fun
 
-instance Attributes lore => TypedOp (Kernel lore) where
+instance TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType
 
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
@@ -354,7 +346,7 @@ instance (Attributes lore,
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = False
 
-instance (Attributes inner, Ranged inner) => RangedOp (Kernel inner) where
+instance Ranged inner => RangedOp (Kernel inner) where
   opRanges op = replicate (length $ kernelType op) unknownRange
 
 instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) where
@@ -379,7 +371,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ReduceKernel _ _ _ _ _ foldfun arrs) =
     usageInLambda foldfun arrs
-  usageInOp (ScanKernel _ _ _ _ _ foldfun _ arrs) =
+  usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
   usageInOp (ChunkedMapKernel _ _ _ _ fun arrs) =
     usageInLambda fun arrs
@@ -468,7 +460,7 @@ typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
     TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple redt ++
           ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
 
-typeCheckKernel (ScanKernel cs w kernel_size _ fun foldfun nes arrs) = do
+typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
   checkKernelCrud cs w kernel_size
 
   let index_arg = (Prim int32, mempty)
@@ -578,7 +570,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "MapKernel" $ bodyMetrics body
   opMetrics (ReduceKernel _ _ _ _ lam1 lam2 _) =
     inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
-  opMetrics (ScanKernel _ _ _ _ lam foldfun _ _) =
+  opMetrics (ScanKernel _ _ _ lam foldfun _ _) =
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
@@ -608,11 +600,10 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr as) <> comma </>
             ppr comm </>
             ppr parfun <> comma </> ppr seqfun)
-  ppr (ScanKernel cs w kernel_size order fun foldfun nes arrs) =
+  ppr (ScanKernel cs w kernel_size fun foldfun nes arrs) =
     ppCertificates' cs <> text "scanKernel" <>
     parens (ppr w <> comma </>
             ppr kernel_size <> comma </>
-            ppr order <> comma </>
             PP.braces (commasep $ map ppr nes) <> comma </>
             commasep (map ppr arrs) <> comma </>
             ppr fun <> comma </> ppr foldfun)
@@ -640,10 +631,6 @@ instance Pretty KernelSize where
                           ppr offset_multiple,
                           ppr num_threads
                          ]
-
-instance Pretty ScanKernelOrder where
-  ppr ScanFlat = text "flat"
-  ppr ScanTransposed = text "transposed"
 
 instance PrettyLore lore => Pretty (KernelInput lore) where
   ppr inp = ppr (kernelInputType inp) <+>

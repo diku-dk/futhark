@@ -170,12 +170,11 @@ topDownRules = [liftIdentityMapping,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
-                simplifyStream
+                simplifyStream,
+                simplifyKnownIterationSOAC
                ]
 
-bottomUpRules :: (MonadBinder m,
-                  LocalScope (Lore m) m,
-                  Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
+bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
                  removeUnnecessaryCopy
                 ]
@@ -233,9 +232,8 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
 
-removeReplicateInput :: Attributes lore =>
-                        ST.SymbolTable lore
-                        -> AST.Lambda lore -> [VName]
+removeReplicateInput :: ST.SymbolTable lore
+                     -> AST.Lambda lore -> [VName]
                      -> Maybe ([([VName], AST.Exp lore)],
                                AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs
@@ -405,3 +403,19 @@ frobExtLambda vtable (ExtLambda params body rettype) = do
                           ) ([],0) (zip dsrtpx dsx)
             return $ Array btp (ExtShape resdims) u
           refineArrType _ _ _ _ tp = return tp
+
+-- For now we just remove singleton maps.
+simplifyKnownIterationSOAC :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) =>
+                              TopDownRule m
+simplifyKnownIterationSOAC _ (Let pat _ (Op (Map cs (Constant k) fun arrs)))
+  | oneIsh k = do
+      zipWithM_ bindParam (lambdaParams fun) arrs
+      ses <- bodyBind $ lambdaBody fun
+      zipWithM_ bindResult (patternValueElements pat) ses
+        where bindParam p a =
+                letBindNames'_ [paramName p] $
+                PrimOp $ Index cs a [constant (0::Int32)]
+              bindResult pe se =
+                letBindNames'_ [patElemName pe] $
+                PrimOp $ ArrayLit [se] $ rowType $ patElemType pe
+simplifyKnownIterationSOAC _ _ = cannotSimplify

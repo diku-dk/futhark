@@ -187,7 +187,7 @@ instance CanBeAliased (MemOp ExplicitMemory) where
   addOpAliases (Alloc se space) = Alloc se space
   addOpAliases (Inner k) = Inner $ addOpAliases k
 
-instance (Attributes inner, Ranged inner) => RangedOp (MemOp inner) where
+instance Ranged inner => RangedOp (MemOp inner) where
   opRanges (Alloc _ _) =
     [unknownRange]
   opRanges (Inner k) =

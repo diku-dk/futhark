@@ -1,10 +1,7 @@
 {-# LANGUAGE OverloadedStrings, TupleSections, FlexibleContexts #-}
 -- | This program is a convenience utility for running the Futhark
 -- test suite, and its test programs.
-module Main ( ProgramTest (..)
-            , TestRun (..)
-            , TestCase (..)
-            , main) where
+module Main (main) where
 
 
 import Control.Applicative
@@ -24,6 +21,9 @@ import qualified Data.Text.IO as T
 import qualified Data.HashMap.Lazy as HM
 import System.Console.GetOpt
 import System.Directory
+import System.Directory.Tree (readDirectoryWith, flattenDir,
+                              DirTree(File), AnchoredDirTree(..),
+                              FileName)
 import System.Process.Text (readProcessWithExitCode)
 import System.Exit
 import System.IO
@@ -60,8 +60,8 @@ data TestResult = Success
 
 data TestCase = TestCase { testCaseProgram :: FilePath
                          , testCaseTest :: ProgramTest
-                         , testCasePrograms :: ProgConfig
-                         , testCaseOptions :: [String]
+                         , _testCasePrograms :: ProgConfig
+                         , _testCaseOptions :: [String]
                          -- ^ Extra options to pass to the program.
                          }
                 deriving (Show)
@@ -326,7 +326,9 @@ reportText first failed passed remaining =
          show remaining ++ " to go.)\n"
 
 runTests :: TestConfig -> [FilePath] -> IO ()
-runTests config files = do
+runTests config paths = do
+  files <- concat <$> mapM testPrograms paths
+
   let mode = configTestMode config
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
@@ -359,6 +361,17 @@ runTests config files = do
   putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed" ++ excluded_str ++ "."
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
+
+testPrograms :: FilePath -> IO [FileName]
+testPrograms dir = filter isFut <$> directoryContents dir
+  where isFut = (==".fut") . takeExtension
+
+directoryContents :: FilePath -> IO [FileName]
+directoryContents dir = do
+  _ :/ tree <- readDirectoryWith return dir
+  return $ mapMaybe isFile $ flattenDir tree
+  where isFile (File _ path) = Just path
+        isFile _             = Nothing
 
 ---
 --- Configuration and command line parsing

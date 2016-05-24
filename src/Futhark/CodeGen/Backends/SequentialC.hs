@@ -22,5 +22,5 @@ compileProg = traverse (GenericC.compileProg operations () [DefaultSpace] [] [] 
               ImpGen.compileProg
   where operations :: GenericC.Operations Imp.Sequential ()
         operations = GenericC.defaultOperations {
-          GenericC.opsCompiler = const $ return GenericC.Done
+          GenericC.opsCompiler = const $ return ()
           }

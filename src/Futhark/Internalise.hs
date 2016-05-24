@@ -138,18 +138,22 @@ internaliseExp desc (E.ArrayLit [] (Info et) _) =
           I.PrimOp $ I.ArrayLit [] $ et' `annotateArrayShape` []
 
 internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
-  aes <- mapM (internaliseExpToVars "arr_elem") es
-  let es'@((e':_):_) = aes --- XXX, ugh.
-  Shape rowshape <- arrayShape <$> lookupType e'
-  case internaliseType rowtype of
-    [et] -> letTupExp' desc $ I.PrimOp $
-            I.ArrayLit (map I.Var $ concat es')
-            (et `I.setArrayShape` Shape rowshape)
-    ets   -> do
-      let arraylit ks et =
-            I.PrimOp $ I.ArrayLit (map I.Var ks)
-            (et `I.setArrayShape` Shape rowshape)
-      letSubExps desc (zipWith arraylit (transpose es') ets)
+  es' <- mapM (internaliseExp "arr_elem") es
+  case es' of
+    [] -> do
+      let rowtypes = map zeroDim $ internaliseType rowtype
+          zeroDim t = t `I.setArrayShape`
+                      Shape (replicate (I.arrayRank t) (constant (0::Int32)))
+          arraylit rt = I.PrimOp $ I.ArrayLit [] rt
+      letSubExps desc $ map arraylit rowtypes
+    e' : _ -> do
+      rowtypes <- mapM subExpType e'
+      let arraylit ks rt = I.PrimOp $ I.ArrayLit ks rt
+      letSubExps desc $ zipWith arraylit (transpose es') rowtypes
+
+internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) =
+  internaliseExp desc $ E.ArrayLit [] (Info et') loc
+  where et' = E.removeShapeAnnotations $ E.fromStruct et
 
 internaliseExp desc (E.Apply fname args _ _)
   | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do
@@ -825,11 +829,11 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
             valargs_types = curarg_types ++ rowtypes
         return (params, valargs, valargs_types)
       Nothing -> do
-        let (_, ext_param_ts)                  = externalFun fun_entry
+        let (_, ext_param_ts) = externalFun fun_entry
         ext_params <- forM ext_param_ts $ \param_t -> do
           name <- newVName "not_curried"
           return E.Param { E.paramName = name
-                         , E.paramTypeDecl = TypeDecl param_t $ Info param_t
+                         , E.paramTypeDecl = typeToTypeDecl param_t
                          , E.paramSrcLoc = noLoc
                          }
         bindingParams ext_params $ \shape_params value_params -> do
@@ -854,28 +858,28 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
 
 internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype
-  internaliseLambda (E.AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (E.AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 internaliseLambda (E.BinOpFun unop (Info xtype) (Info ytype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- binOpFunToLambda unop xtype ytype rettype
-  internaliseLambda (AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpLeft binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e $ uncurry $ flip (,)
-  internaliseLambda (AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 internaliseLambda (E.CurryBinOpRight binop e (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <-
     binOpCurriedToLambda binop paramtype rettype e id
-  internaliseLambda (AnonymFun params body (TypeDecl rettype' $ Info rettype') loc) rowts
+  internaliseLambda (AnonymFun params body (typeToTypeDecl rettype') loc) rowts
 
 unOpFunToLambda :: E.UnOp -> E.Type -> E.Type
                 -> InternaliseM ([E.Parameter], E.Exp, E.StructType)
 unOpFunToLambda op paramtype rettype = do
   paramname <- newNameFromString "unop_param"
   let t = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = TypeDecl t $ Info t
+      param = E.Param { E.paramTypeDecl = typeToTypeDecl t
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
@@ -889,12 +893,12 @@ binOpFunToLambda op xtype ytype rettype = do
   x_name <- newNameFromString "binop_param_x"
   y_name <- newNameFromString "binop_param_y"
   let xtype' = E.vacuousShapeAnnotations $ E.toStruct xtype
-      param_x = E.Param { E.paramTypeDecl = TypeDecl xtype' $ Info xtype'
+      param_x = E.Param { E.paramTypeDecl = typeToTypeDecl xtype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = x_name
                         }
       ytype' = E.vacuousShapeAnnotations $ E.toStruct ytype
-      param_y = E.Param { E.paramTypeDecl = TypeDecl ytype' $ Info ytype'
+      param_y = E.Param { E.paramTypeDecl = typeToTypeDecl ytype'
                         , E.paramSrcLoc = noLoc
                         , E.paramName = y_name
                         }
@@ -910,7 +914,7 @@ binOpCurriedToLambda :: E.BinOp -> E.Type -> E.Type
 binOpCurriedToLambda op paramtype rettype e swap = do
   paramname <- newNameFromString "binop_param_noncurried"
   let paramtype' = E.vacuousShapeAnnotations $ E.toStruct paramtype
-      param = E.Param { E.paramTypeDecl = TypeDecl paramtype' $ Info paramtype'
+      param = E.Param { E.paramTypeDecl = typeToTypeDecl paramtype'
                       , E.paramSrcLoc = noLoc
                       , E.paramName = paramname
                       }
@@ -918,6 +922,10 @@ binOpCurriedToLambda op paramtype rettype e swap = do
   return ([param],
           E.BinOp op x' y' (Info rettype) noLoc,
           E.vacuousShapeAnnotations $ E.toStruct rettype)
+
+typeToTypeDecl :: E.TypeBase ShapeDecl NoInfo VName
+               -> E.TypeDeclBase Info VName
+typeToTypeDecl t = TypeDecl (E.contractTypeBase t) $ Info t
 
 -- | Execute the given action if 'envDoBoundsChecks' is true, otherwise
 -- just return an empty list.

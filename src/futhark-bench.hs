@@ -34,10 +34,11 @@ data BenchOptions = BenchOptions
                    , optRuns :: Int
                    , optRawReporting :: Bool
                    , optExtraOptions :: [String]
+                   , optValidate :: Bool
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 False []
+initialBenchOptions = BenchOptions "futhark-c" 10 False [] True
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -86,8 +87,10 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesText dir input_spec
-  maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts-1]
+  maybe_expected <- if optValidate opts
+                    then maybe (return Nothing) (fmap Just . getValues dir) expected_spec
+                    else return Nothing
+  let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
 
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
@@ -195,6 +198,9 @@ commandLineOptions = [
                config { optExtraOptions = opt : optExtraOptions config })
      "OPT")
     "Pass this option to programs being run."
+  , Option "n" ["no-validate"]
+    (NoArg $ Right $ \config -> config { optValidate = False })
+    "Do not validate results."
   ]
 
 main :: IO ()

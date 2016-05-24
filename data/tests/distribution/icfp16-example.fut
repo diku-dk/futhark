@@ -25,9 +25,9 @@
 --   ScanKernel 2
 -- }
 
-fun {[[[int,m],m],n], [[int,m],n]} main([[int,m],n] pss) =
-  let {asss, bss} =
-    unzip(map(fn {[[int,m],m], [int,m]} ([int] ps) =>
+fun ([[[int,m],m],n], [[int,m],n]) main([[int,m],n] pss) =
+  let (asss, bss) =
+    unzip(map(fn ([[int,m],m], [int,m]) ([int] ps) =>
                 let ass = map(fn [int,m] (int p) =>
                                 let cs = scan(+, 0, iota(p))
                                 let f = reduce(+, 0, cs)
@@ -42,6 +42,6 @@ fun {[[[int,m],m],n], [[int,m],n]} main([[int,m],n] pss) =
                                   in b',
                                 zip(ass, bs))
                   in bs'
-                in {ass, bs},
+                in (ass, bs),
               pss))
-  in {asss, bss}
+  in (asss, bss)

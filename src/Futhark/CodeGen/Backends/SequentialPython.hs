@@ -31,5 +31,5 @@ compileProg module_name =
         defines = [Escape pyTestMain, Escape pyFunctions]
         operations :: GenericPython.Operations Imp.Sequential ()
         operations = GenericPython.defaultOperations {
-          GenericPython.opsCompiler = const $ return GenericPython.Done
+          GenericPython.opsCompiler = const $ return ()
         }

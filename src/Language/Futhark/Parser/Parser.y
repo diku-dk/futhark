@@ -4,7 +4,7 @@ module Language.Futhark.Parser.Parser
   ( prog
   , expression
   , lambda
-  , futharktype
+  , futharkType
   , anyValue
   , anyValues
   , ParserEnv (..)
@@ -24,6 +24,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Trans.State
 import Control.Applicative ((<$>), (<*>))
+import Control.Arrow
 import Data.Array
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -40,9 +41,9 @@ import Language.Futhark.Parser.Lexer
 }
 
 %name prog Prog
+%name futharkType UserType
 %name expression Exp
 %name lambda FunAbstr
-%name futharktype Type
 %name anyValue Value
 %name anyValues CatValues
 
@@ -115,8 +116,6 @@ import Language.Futhark.Parser.Lexer
       ')'             { L $$ RPAR }
       '['             { L $$ LBRACKET }
       ']'             { L $$ RBRACKET }
-      '{'             { L $$ LCURLY }
-      '}'             { L $$ RCURLY }
       ','             { L $$ COMMA }
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
@@ -164,6 +163,7 @@ import Language.Futhark.Parser.Lexer
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       write           { L $$ WRITE }
+      type            { L $$ TYPE}
 
 %nonassoc ifprec letprec
 %left '||'
@@ -181,13 +181,26 @@ import Language.Futhark.Parser.Lexer
 %%
 
 Prog :: { UncheckedProgWithHeaders }
-     :   Headers Decs { ProgWithHeaders $1 $2 }
-     |   Decs { ProgWithHeaders [] $1 }
+     :   Headers DecStart { ProgWithHeaders $1 $2 }
+     |   DecStart { ProgWithHeaders [] $1 }
 ;
 
-Decs : FunDefs { $1 }
-     | DefaultDec FunDefs { $2 }
+
+DecStart :: { [DecBase f vn] }
+         :  DefaultDec Decs { $2 }
+         |  Decs { $1 }
 ;
+
+Decs :: { [DecBase f vn] }
+     : Dec Decs { $1 : $2 }
+     | Dec { [$1] }
+;
+
+Dec :: { DecBase f vn }
+       : Fun { FunDec $1 }
+       | UserTypeAlias { TypeDec $1 }
+;
+
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
@@ -242,36 +255,43 @@ IncludeParts :: { [String] }
 IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
 IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
 
-FunDefs : Fun FunDefs   { $1 : $2 }
-        | Fun           { [$1] }
-;
-
-Fun     : fun TypeDecl id '(' Params ')' '=' Exp
+Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
-        | fun TypeDecl id '(' ')' '=' Exp
+        | fun UserTypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
-        | entry TypeDecl id '(' Params ')' '=' Exp
+        | entry UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef True name $2 $5 $8 pos }
-        | entry TypeDecl id '(' ')' '=' Exp
+        | entry UserTypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
                           in FunDef True name $2 [] $7 pos }
 ;
-
+Uniqueness :: { Uniqueness }
 Uniqueness : '*' { Unique }
            |     { Nonunique }
 
-TypeDecl :: { UncheckedTypeDecl }
-            : Type { TypeDecl $1 NoInfo }
 
-Type :: { UncheckedType }
-        : PrimType     { Prim $1 }
-        | ArrayType     { Array $1 }
-        | '{' Types '}' { Tuple $2 }
+UserTypeDecl :: { TypeDeclBase NoInfo Name }
+              : UserType { TypeDecl $1 NoInfo }
+
+UserTypeAlias :: { TypeDefBase NoInfo Name }
+UserTypeAlias  : type id '=' UserType { let L loc (ID name) = $2
+                                        in TypeDef name (TypeDecl $4 NoInfo) loc
+                                      }
+
+UserType :: { UncheckedUserType }
+         : PrimType      { let (t,loc) = $1 in UserPrim t loc }
+         | '*' UserType  { UserUnique $2 $1 }
+         | '[' UserType DimDecl ']' { UserArray $2 $3 $1 }
+         | '(' UserType ',' UserTypes ')' { UserTuple ($2:$4) $1 }
+         | id            { let L loc (ID name) = $1 in UserTypeAlias name loc }
 ;
 
+UserTypes :: { [UncheckedUserType] }
+UserTypes : UserType ',' UserTypes { $1 : $3 }
+          | UserType               { [$1] }
 DimDecl :: { DimDecl Name }
         : ',' id
           { let L _ (ID name) = $2
@@ -281,40 +301,11 @@ DimDecl :: { DimDecl Name }
             in ConstDim (fromIntegral n) }
         | { AnyDim }
 
-ArrayType :: { UncheckedArrayType }
-          : Uniqueness '[' PrimArrayRowType DimDecl ']'
-            { let (ds, et) = $3
-              in PrimArray et (ShapeDecl ($4:ds)) $1 NoInfo }
-          | Uniqueness '[' TupleArrayRowType DimDecl ']'
-            { let (ds, et) = $3
-              in TupleArray et (ShapeDecl ($4:ds)) $1 }
-
-PrimArrayRowType : PrimType
-                    { ([], $1) }
-                  | '[' PrimArrayRowType DimDecl ']'
-                    { let (ds, et) = $2
-                      in ($3:ds, et) }
-
-TupleArrayRowType : '{' TupleArrayElemTypes '}'
-                     { ([], $2) }
-                  | '[' TupleArrayRowType DimDecl ']'
-                     { let (ds, et) = $2
-                       in ($3:ds, et) }
-
-TupleArrayElemTypes : { [] }
-                    | TupleArrayElemType
-                      { [$1] }
-                    | TupleArrayElemType ',' TupleArrayElemTypes
-                      { $1 : $3 }
-
-TupleArrayElemType : PrimType                    { PrimArrayElem $1 NoInfo Nonunique }
-                   | ArrayType                   { ArrayArrayElem $1 }
-                   | '{' TupleArrayElemTypes '}' { TupleArrayElem $2 }
-
-PrimType : UnsignedType { Unsigned (fst $1) }
-         | SignedType   { Signed (fst $1) }
-         | FloatType    { FloatType (fst $1) }
-         | bool         { Bool }
+PrimType :: { (PrimType, SrcLoc) }
+         : UnsignedType { first Unsigned $1 }
+         | SignedType   { first Signed $1 }
+         | FloatType    { first FloatType $1 }
+         | bool         { (Bool, $1) }
 
 SignedType :: { (IntType, SrcLoc) }
            : int { (Int32, $1) }
@@ -334,13 +325,9 @@ FloatType :: { (FloatType, SrcLoc) }
           | f32  { (Float32, $1) }
           | f64  { (Float64, $1) }
 
-Types : Type ',' Types { $1 : $3 }
-      | Type           { [$1] }
-      |                { [] }
-;
-
-Params : TypeDecl id ',' Params { let L pos (ID name) = $2 in Param name $1 pos : $4 }
-       | TypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
+Params :: { [ParamBase NoInfo Name] }
+Params : UserTypeDecl id ',' Params { let L pos (ID name) = $2 in (Param name $1 pos) : $4 }
+       | UserTypeDecl id            { let L pos (ID name) = $2 in [Param name $1 pos] }
 
 Exp  :: { UncheckedExp }
      : PrimLit        { Literal (PrimValue (fst $1)) (snd $1) }
@@ -349,10 +336,10 @@ Exp  :: { UncheckedExp }
                              t <- lift $ gets parserIntType
                              return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
      | Id %prec letprec { Var $1 }
-     | empty '(' Type ')' { Literal (emptyArray $3) $1 }
+     | empty '(' UserType ')' { Empty (TypeDecl $3 NoInfo) $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
-     | '{' Exps '}'   { TupLit $2 $1 }
-     | '{'      '}'   { TupLit [] $1 }
+     | '(' Exp ',' Exps ')'   { TupLit ($2:$4) $1 }
+     | '('      ')'   { TupLit [] $1 }
      | Exp '+' Exp    { BinOp Plus $1 $3 NoInfo $2 }
      | Exp '-' Exp    { BinOp Minus $1 $3 NoInfo $2 }
      | Exp '*' Exp    { BinOp Times $1 $3 NoInfo $2 }
@@ -475,7 +462,7 @@ LetExp :: { UncheckedExp }
      | let '_' '=' Exp LetBody
                       { LetPat (Wildcard NoInfo $2) $4 $5 $1 }
 
-     | let '{' Patterns '}' '=' Exp LetBody
+     | let '(' Patterns ')' '=' Exp LetBody
                       { LetPat (TuplePattern $3 $1) $6 $7 $1 }
 
      | let Id '=' Id with Index '<-' Exp LetBody
@@ -491,7 +478,7 @@ LetExp :: { UncheckedExp }
                       {% liftM (\t -> DoLoop $3 t $6 $8 $9 $1)
                                (patternExp $3) }
      | loop '(' Pattern '=' Exp ')' '=' LoopForm do Exp LetBody
-                      { DoLoop $3 $5 $8 $10 $11 $1 }
+                  { DoLoop $3 $5 $8 $10 $11 $1 }
 
 LetBody :: { UncheckedExp }
     : in Exp %prec letprec { $2 }
@@ -521,10 +508,10 @@ Patterns : Pattern ',' Patterns  { $1 : $3 }
 
 Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
       | '_' { Wildcard NoInfo $1 }
-      | '{' Patterns '}' { TuplePattern $2 $1 }
+      | '(' Patterns ')' { TuplePattern $2 $1 }
 
 FunAbstr :: { UncheckedLambda }
-         : fn TypeDecl '(' Params ')' '=>' Exp
+         : fn UserTypeDecl '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
          | id '(' Exps ')'
            { let L pos (ID name) = $1
@@ -585,8 +572,8 @@ StringValue : stringlit  {% let L pos (STRINGLIT s) = $1 in do
                              s' <- mapM (getIntValue . fromIntegral . ord) s
                              t <- lift $ gets parserIntType
                              return $ ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t }
-BoolValue : true          { PrimValue $ BoolValue True }
-         | false          { PrimValue $ BoolValue False }
+BoolValue : true           { PrimValue $ BoolValue True }
+          | false          { PrimValue $ BoolValue False }
 
 SignedLit :: { (IntValue, SrcLoc) }
           : i8lit   { let L pos (I8LIT num)  = $1 in (Int8Value num, pos) }
@@ -625,9 +612,9 @@ ArrayValue :  '[' Value ']'
                   Nothing -> throwError "Invalid array value"
                   Just ts -> return $ ArrayValue (arrayFromList $ $2:$4) $ removeNames ts
              }
-           | empty '(' Type ')'
-             { emptyArray $3 }
-TupleValue : '{' Values '}' { TupValue $2 }
+           | empty '(' PrimType ')'
+             { ArrayValue (listArray (0,-1) []) (Prim (fst $3)) }
+TupleValue : '(' Values ')' { TupValue $2 }
 
 Values : Value ',' Values { $1 : $3 }
        | Value            { [$1] }
@@ -713,10 +700,6 @@ combArrayTypes t ts = foldM comb t ts
 
 arrayFromList :: [a] -> Array Int a
 arrayFromList l = listArray (0, length l-1) l
-
-emptyArray :: ArrayShape (shape vn) =>
-              TypeBase shape als vn -> Value
-emptyArray = ArrayValue (listArray (0, -1) []) . removeNames . toStruct
 
 patternExp :: UncheckedPattern -> ParserMonad UncheckedExp
 patternExp (Id ident) = return $ Var ident
