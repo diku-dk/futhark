@@ -22,3 +22,4 @@ install:
 
 test_script:
 - stack --no-terminal test
+- stack exec futhark-test data/tests
