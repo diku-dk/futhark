@@ -18,7 +18,9 @@ module Futhark.Analysis.Metrics
 import Control.Applicative
 import Control.Monad.Writer
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.String
+import Data.List
 import qualified Data.HashMap.Lazy as HM
 
 import Prelude
@@ -33,27 +35,31 @@ class OpMetrics op where
 instance OpMetrics () where
   opMetrics () = return ()
 
--- | This wrapper is just to define a 'Monoid' instance.
-newtype CountMetrics = CountMetrics { actualMetrics :: AstMetrics }
+newtype CountMetrics = CountMetrics [([Text], Text)]
 
 instance Monoid CountMetrics where
   mempty = CountMetrics mempty
 
-  mappend (CountMetrics x) (CountMetrics y) = CountMetrics $ HM.unionWith (+) x y
+  mappend (CountMetrics x) (CountMetrics y) = CountMetrics $ x <> y
+
+actualMetrics :: CountMetrics -> AstMetrics
+actualMetrics (CountMetrics metrics) =
+  HM.fromListWith (+) $ concatMap expand metrics
+  where expand (ctx, k) =
+          [ (T.intercalate "/" (ctx' ++ [k]), 1)
+          | ctx' <- tails $ "" : ctx ]
 
 newtype MetricsM a = MetricsM { runMetricsM :: Writer CountMetrics a }
                    deriving (Monad, Applicative, Functor, MonadWriter CountMetrics)
 
 seen :: Text -> MetricsM ()
-seen k = tell $ CountMetrics $ HM.singleton k 1
+seen k = tell $ CountMetrics [([], k)]
 
 inside :: Text -> MetricsM () -> MetricsM ()
 inside what m = seen what >> censor addWhat m
   where addWhat (CountMetrics metrics) =
-          CountMetrics metrics <>
-          CountMetrics (HM.foldlWithKey' addWhat' mempty metrics)
-        addWhat' new_metrics k v =
-          HM.insert (what <> "/" <> k) v new_metrics
+          CountMetrics (map addWhat' metrics)
+        addWhat' (ctx, k) = (what : ctx, k)
 
 progMetrics :: OpMetrics (Op lore) => Prog lore -> AstMetrics
 progMetrics = actualMetrics . execWriter . runMetricsM . mapM_ funDefMetrics . progFunctions
@@ -75,7 +81,9 @@ expMetrics (DoLoop _ _ ForLoop{} body) =
 expMetrics (DoLoop _ _ WhileLoop{} body) =
   inside "DoLoop" $ seen "WhileLoop" >> bodyMetrics body
 expMetrics (If _ tb fb _) =
-  inside "If" $ bodyMetrics tb >> bodyMetrics fb
+  inside "If" $ do
+    inside "True" $ bodyMetrics tb
+    inside "False" $ bodyMetrics fb
 expMetrics (Apply fname _ _) =
   seen $ "Apply" <> fromString (nameToString fname)
 expMetrics (Op op) =
