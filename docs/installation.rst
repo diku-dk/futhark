@@ -12,11 +12,11 @@ Compiling from source
 ---------------------
 
 We use the the `Haskell Tool Stack`_ to handle dependencies and
-compilation of the Futhark compiler.  Thus, you will need to install
-the ``stack`` tool.  Fortunately, the ``stack`` developers provide
-ample documentation about `installing Stack`_ on a multitude of
-operating systems.  If you're lucky, it may even be in your local
-package repository.
+compilation of the Futhark compiler, so you will need to install the
+``stack`` tool.  Fortunately, the ``stack`` developers provide ample
+documentation about `installing Stack`_ on a multitude of operating
+systems.  If you're lucky, it may even be in your local package
+repository.
 
 We do not presently issue source releases of Futhark, so the only way
 to compile from source is to perform a checkout of our Git
@@ -42,7 +42,7 @@ dependencies::
   $ stack build
 
 The Futhark compiler and its tools will now be built. You can copy
-tjem to your ``$HOME/.local/bin`` directory by running::
+them to your ``$HOME/.local/bin`` directory by running::
 
   $ stack install
 
