@@ -555,6 +555,9 @@ kernelCompiler
             "The first thread in each workgroup reads the carry-in for the next iteration.  The others reset it to the neutral element." $
             ImpGen.emit $ Imp.If is_first_thread_in_group
             read_global_carry_in set_fold_x_to_ne
+          ImpGen.comment
+            "Make sure every thread is done with this chunk, as we will write to local memory at the beginning of the next iteration." $
+            ImpGen.emit $ Imp.Op Imp.Barrier
 
 
         ImpGen.emit $ Imp.For chunk_index (Imp.ScalarVar chunks_per_group) scan_chunk
