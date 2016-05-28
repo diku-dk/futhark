@@ -12,11 +12,11 @@ Compiling from source
 ---------------------
 
 We use the the `Haskell Tool Stack`_ to handle dependencies and
-compilation of the Futhark compiler.  Thus, you will need to install
-the ``stack`` tool.  Fortunately, the ``stack`` developers provide
-ample documentation about `installing Stack`_ on a multitude of
-operating systems.  If you're lucky, it may even be in your local
-package repository.
+compilation of the Futhark compiler, so you will need to install the
+``stack`` tool.  Fortunately, the ``stack`` developers provide ample
+documentation about `installing Stack`_ on a multitude of operating
+systems.  If you're lucky, it may even be in your local package
+repository.
 
 We do not presently issue source releases of Futhark, so the only way
 to compile from source is to perform a checkout of our Git
@@ -42,7 +42,7 @@ dependencies::
   $ stack build
 
 The Futhark compiler and its tools will now be built. You can copy
-tjem to your ``$HOME/.local/bin`` directory by running::
+them to your ``$HOME/.local/bin`` directory by running::
 
   $ stack install
 
@@ -77,11 +77,11 @@ releases once the language matures.
 Installing Futhark on Windows
 -----------------------------
 
-While the Futhark compiler itself is easily installed on Windows, it
-takes a little more work to make the OpenCL and PyOpenCL backends
-functional.  This guide was last updated on the 5th of May 2016, and
-is for computers using 64-bit Windows along with `CUDA 7.5`_ and
-Python 2.7 (`Anaconda`_ preferred).
+While the Futhark compiler itself is easily installed on Windows via
+``stack`` (see above), it takes a little more work to make the OpenCL
+and PyOpenCL backends functional.  This guide was last updated on the
+5th of May 2016, and is for computers using 64-bit Windows along with
+`CUDA 7.5`_ and Python 2.7 (`Anaconda`_ preferred).
 
 Also `Git for Windows`_ is required for its Linux command line tools.
 If you have not marked the option to add them to path, there are
