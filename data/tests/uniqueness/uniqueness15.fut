@@ -3,6 +3,8 @@
 --
 -- This was due to inconsistencies in how consumption was handled in
 -- the core language.
+--
+-- From issue #191.
 
 fun *[i32, numBins] reduceBins(*[i32,numBins] acc, *[i32,numBins] elm) =
     loop (newVal = acc) = for i < numBins do

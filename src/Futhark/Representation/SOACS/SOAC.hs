@@ -211,15 +211,16 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases Write{} =
     [mempty]
 
-  -- FIXME: also handle the other SOACs.  First, we need to figure out
-  -- what kind of policy we have on consumption of the inputs.  The
-  -- correct rules for Map and Stream seem pretty clear, but what
-  -- about the operands to a reduction?  It's a bit of an ad-hoc hack
-  -- right now.
+  -- Only Map, Redomap and Stream can consume anything.  The operands
+  -- to Scan and Reduce functions are always considered "fresh".
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
+  consumedInOp (Redomap _ _ _ foldlam _ nes arrs) =
+    HS.map consumedArray $ consumedByLambda foldlam
+    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
+          params_to_arrs = zip (map paramName $ drop (length nes) (lambdaParams foldlam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
     HS.fromList $ subExpVars $
     case form of MapLike{} ->
@@ -233,11 +234,6 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
-  consumedInOp (Reduce _ _ _ lam input) =
-    HS.map consumedArray $ consumedByLambda lam
-    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
-          params_to_arrs = zip (map paramName $ drop (length arrs) (lambdaParams lam)) arrs
-          (_nes, arrs) = unzip input
   consumedInOp _ =
     mempty
 
@@ -350,7 +346,7 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   accargs <- mapM TC.checkArg accexps
-  TC.checkLambda innerfun $ accargs ++ arrargs
+  TC.checkLambda innerfun $ map TC.noArgAliases accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
       innerAccType = take (length accexps) innerRetType
       asArg t = (t, mempty)
@@ -507,7 +503,7 @@ typeCheckScanReduce cs size fun inputs = do
   TC.require [Prim int32] size
   startargs <- mapM TC.checkArg startexps
   arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ map noArgAliases startargs ++ arrargs
+  TC.checkLambda fun $ map TC.noArgAliases $ startargs ++ arrargs
   let startt      = map TC.argType startargs
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
@@ -519,7 +515,6 @@ typeCheckScanReduce cs size fun inputs = do
     TC.bad $ TC.TypeError $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but function returns type " ++ prettyTuple funret ++ "."
-  where noArgAliases (t, _als) = (t, mempty)
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
