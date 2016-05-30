@@ -493,9 +493,9 @@ kernelCompiler
 
           let is_in_bounds = Imp.CmpOp (CmpUlt Int32)
                              (Imp.ScalarVar fold_lam_i) (Imp.sizeToExp num_elements)
-          ImpGen.emit $
-            Imp.Comment "Apply the fold function if we are still within bounds" $
-            Imp.If is_in_bounds apply_fold_fun mempty
+          ImpGen.comment
+            "Apply the fold function if we are still within bounds" $
+            ImpGen.emit $ Imp.If is_in_bounds apply_fold_fun mempty
 
           -- Write the fold_x_params to local memory for the parallel step.
           zipWithM_ (writeParamToLocalMemory $ Imp.ScalarVar local_id)
@@ -517,17 +517,17 @@ kernelCompiler
 
           let last_in_wave =
                 Imp.CmpOp (CmpEq int32) in_wave_id $ Imp.ScalarVar wave_size - 1
-          ImpGen.emit $
-            Imp.Comment "last thread of wave 'i' writes its result to offset 'i'" $
-            Imp.If last_in_wave pack_wave_results mempty
+          ImpGen.comment
+            "last thread of wave 'i' writes its result to offset 'i'" $
+            ImpGen.emit $ Imp.If last_in_wave pack_wave_results mempty
 
           ImpGen.emit $ Imp.Op Imp.Barrier
 
           let is_first_wave = Imp.CmpOp (CmpEq int32) wave_id 0
           scan_first_wave <- ImpGen.collect $ doInWaveScan renamed_lam
-          ImpGen.emit $
-            Imp.Comment "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $
-            Imp.If is_first_wave scan_first_wave mempty
+          ImpGen.comment
+            "scan the first wave, after which offset 'i' contains carry-in for warp 'i+1'" $
+            ImpGen.emit $ Imp.If is_first_wave scan_first_wave mempty
 
           ImpGen.emit $ Imp.Op Imp.Barrier
 
@@ -538,34 +538,33 @@ kernelCompiler
             x_params acc_local_mem
 
           op_to_y <- ImpGen.collect $ ImpGen.compileBody y_dest $ lambdaBody lam
-          ImpGen.emit $
-            Imp.Comment "carry-in for every wave except the first" $
-            Imp.If is_first_wave mempty $
+          ImpGen.comment "carry-in for every wave except the first" $
+            ImpGen.emit $ Imp.If is_first_wave mempty $
             Imp.Comment "read operands" read_carry_in <>
             Imp.Comment "perform operation" op_to_y
 
           write_final_elem <- ImpGen.collect $
             zipWithM_ (writeFinalResult [fold_lam_i]) arrs_dest y_params
-          ImpGen.emit $
-            Imp.Comment "Write element result if we are still within bounds" $
-            Imp.If is_in_bounds write_final_elem mempty
+          ImpGen.comment "Write element result if we are still within bounds" $
+            ImpGen.emit $ Imp.If is_in_bounds write_final_elem mempty
 
           read_global_carry_in <-
             ImpGen.collect $
             zipWithM_ (readParamFromLocalMemory fold_lam_i $ num_waves - 1)
             fold_x_params acc_local_mem
-          ImpGen.emit $
-            Imp.Comment "The first thread in each workgroup reads the carry-in for the next iteration.  The others reset it to the neutral element." $
-            Imp.If is_first_thread_in_group read_global_carry_in set_fold_x_to_ne
+          ImpGen.comment
+            "The first thread in each workgroup reads the carry-in for the next iteration.  The others reset it to the neutral element." $
+            ImpGen.emit $ Imp.If is_first_thread_in_group
+            read_global_carry_in set_fold_x_to_ne
 
 
         ImpGen.emit $ Imp.For chunk_index (Imp.ScalarVar chunks_per_group) scan_chunk
 
         write_global_carry_out <- ImpGen.collect $
           zipWithM_ (writeFinalResult [group_id]) partials_dest y_params
-        ImpGen.emit $
-          Imp.Comment "The last thread in each workgroup writes its result as the carry-out of the group." $
-          Imp.If is_last_thread_in_group write_global_carry_out mempty
+        ImpGen.comment "The last thread in each workgroup writes its result as the carry-out of the group." $
+          ImpGen.emit $ Imp.If is_last_thread_in_group
+          write_global_carry_out mempty
 
         return $ \body -> do
 
