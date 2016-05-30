@@ -30,6 +30,7 @@ module Futhark.TypeCheck
   , matchExtPattern
   , matchExtReturnType
   , argType
+  , noArgAliases
   , checkArg
   , checkSOACArrayArgs
   , checkLambda
@@ -1036,8 +1037,12 @@ type Arg = (Type, Names)
 argType :: Arg -> Type
 argType (t, _) = t
 
+-- | Remove all aliases from the 'Arg'.
 argAliases :: Arg -> Names
 argAliases (_, als) = als
+
+noArgAliases :: Arg -> Arg
+noArgAliases (t, _) = (t, mempty)
 
 checkArg :: Checkable lore =>
             SubExp -> TypeM lore Arg
