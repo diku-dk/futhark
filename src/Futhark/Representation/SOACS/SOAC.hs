@@ -211,6 +211,11 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases Write{} =
     [mempty]
 
+  -- FIXME: also handle the other SOACs.  First, we need to figure out
+  -- what kind of policy we have on consumption of the inputs.  The
+  -- correct rules for Map and Stream seem pretty clear, but what
+  -- about the operands to a reduction?  It's a bit of an ad-hoc hack
+  -- right now.
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
@@ -228,6 +233,11 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
           paramsToInput accs = zip
                                (map paramName $ drop 1 $ extLambdaParams lam)
                                (accs++map Var arrs)
+  consumedInOp (Reduce _ _ _ lam input) =
+    HS.map consumedArray $ consumedByLambda lam
+    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
+          params_to_arrs = zip (map paramName $ drop (length arrs) (lambdaParams lam)) arrs
+          (_nes, arrs) = unzip input
   consumedInOp _ =
     mempty
 
@@ -497,7 +507,7 @@ typeCheckScanReduce cs size fun inputs = do
   TC.require [Prim int32] size
   startargs <- mapM TC.checkArg startexps
   arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
+  TC.checkLambda fun $ map noArgAliases startargs ++ arrargs
   let startt      = map TC.argType startargs
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
@@ -509,6 +519,7 @@ typeCheckScanReduce cs size fun inputs = do
     TC.bad $ TC.TypeError $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but function returns type " ++ prettyTuple funret ++ "."
+  where noArgAliases (t, _als) = (t, mempty)
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
