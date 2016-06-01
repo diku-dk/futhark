@@ -439,8 +439,7 @@ instance LocalScope Out.Kernels KernelM where
 instance MonadLogger KernelM where
   addLog msgs = tell mempty { accLog = msgs }
 
-runKernelM :: (HasScope Out.Kernels m,
-               MonadFreshNames m, MonadLogger m) =>
+runKernelM :: (MonadFreshNames m, MonadLogger m) =>
               KernelEnv -> KernelM a -> m (a, PostKernels)
 runKernelM env (KernelM m) = do
   (x, res) <- modifyNameSource $ getKernels . runRWS m env
