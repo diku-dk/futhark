@@ -478,32 +478,49 @@ blockedScan pat cs w lam foldlam nes arrs = do
                                                   , kernelInputIndices = indices
                                                   }
 
+addFlagToLambda :: (MonadBinder m, Lore m ~ Kernels) =>
+                   [SubExp] -> Lambda InKernel -> m (Lambda InKernel)
+addFlagToLambda nes lam = do
+  let num_accs = length nes
+  x_flag <- newVName "x_flag"
+  y_flag <- newVName "y_flag"
+  let x_flag_param = Param x_flag $ Prim Bool
+      y_flag_param = Param y_flag $ Prim Bool
+      (x_params, y_params) = splitAt num_accs $ lambdaParams lam
+      params = [x_flag_param] ++ x_params ++ [y_flag_param] ++ y_params
+
+  body <- runBodyBinder $ localScope (scopeOfLParams params) $ do
+    new_flag <- letSubExp "new_flag" $
+                BasicOp $ BinOp LogOr (Var x_flag) (Var y_flag)
+    lhs <- fmap (map Var) $ letTupExp "seg_lhs" $ If (Var y_flag)
+      (resultBody nes)
+      (resultBody $ map (Var . paramName) x_params)
+      (staticShapes $ map paramType x_params)
+    let rhs = map (Var . paramName) y_params
+
+    lam' <- renameLambda lam -- avoid shadowing
+    res <- eLambda lam' $ lhs ++ rhs
+
+    return $ resultBody $ new_flag : res
+
+  return Lambda { lambdaParams = params
+                , lambdaBody = body
+                , lambdaReturnType = Prim Bool : lambdaReturnType lam
+                }
+
 blockedSegmentedScan :: (MonadBinder m, Lore m ~ Kernels) =>
                         SubExp
                      -> Pattern Kernels
                      -> Certificates
                      -> SubExp
                      -> Lambda InKernel
-                     -> [(SubExp, VName)]
+                     -> Lambda InKernel
+                     -> [SubExp] -> [VName]
                      -> m ()
-blockedSegmentedScan segment_size pat cs w lam input = do
-  x_flag <- newVName "x_flag"
-  y_flag <- newVName "y_flag"
-  let x_flag_param = Param x_flag $ Prim Bool
-      y_flag_param = Param y_flag $ Prim Bool
-      (x_params, y_params) = splitAt (length input) $ lambdaParams lam
-      params = [x_flag_param] ++ x_params ++ [y_flag_param] ++ y_params
-
-  body <- runBodyBinder $ localScope (scopeOfLParams params) $ do
-    new_flag <- letSubExp "new_flag" $
-                BasicOp $ BinOp LogOr (Var x_flag) (Var y_flag)
-    seg_res <- letTupExp "seg_res" $ If (Var y_flag)
-      (resultBody $ map (Var . paramName) y_params)
-      (lambdaBody lam)
-      (staticShapes $ lambdaReturnType lam)
-    return $ resultBody $ new_flag : map Var seg_res
-
+blockedSegmentedScan segment_size pat cs w lam fold_lam nes arrs = do
   flags_i <- newVName "flags_i"
+
+  unused_flag_array <- newVName "unused_flag_array"
   flags_body <-
     runBodyBinder $ localScope (HM.singleton flags_i IndexInfo) $ do
       segment_index <- letSubExp "segment_index" $
@@ -515,21 +532,16 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       return $ resultBody [flag]
   (mapk_bnds, mapk) <- mapKernelFromBody [] w [(flags_i, w)] [] [Prim Bool] flags_body
   mapM_ addBinding mapk_bnds
-  flags <-
-    letExp "flags" $ Op mapk
+  flags <- letExp "flags" $ Op mapk
 
-  unused_flag_array <- newVName "unused_flag_array"
-  let lam' = Lambda { lambdaParams = params
-                    , lambdaBody = body
-                    , lambdaReturnType = Prim Bool : lambdaReturnType lam
-                    }
-      pat' = pat { patternValueElements = PatElem unused_flag_array BindVar
+  lam' <- addFlagToLambda nes lam
+  fold_lam' <- addFlagToLambda nes fold_lam
+
+  let pat' = pat { patternValueElements = PatElem unused_flag_array BindVar
                                           (arrayOf (Prim Bool) (Shape [w]) NoUniqueness) :
                                           patternValueElements pat
                  }
-      (nes, arrs) = unzip input
-  lam_renamed <- renameLambda lam'
-  blockedScan pat' cs w lam' lam_renamed (false:nes) (flags:arrs)
+  blockedScan pat' cs w lam' fold_lam' (false:nes) (flags:arrs)
   where zero = constant (0 :: Int32)
         true = constant True
         false = constant False

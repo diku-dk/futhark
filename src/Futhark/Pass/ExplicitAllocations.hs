@@ -525,6 +525,8 @@ allocInFun (FunDef entry fname rettype params fbody) =
             return $ Inner NumGroups
           handleOp TileSize =
             return $ Inner TileSize
+          handleOp (SufficientParallelism se) =
+            return $ Inner $ SufficientParallelism se
           handleOp (ScanKernel cs w size lam foldlam nes arrs) = do
             lam' <- allocInScanLambda lam (length nes) $ kernelWorkgroupSize size
             foldlam' <- allocInScanLambda foldlam (length nes) $ kernelWorkgroupSize size
