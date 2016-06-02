@@ -6,7 +6,7 @@
 --   map
 --
 -- ==
--- structure distributed { Kernel 2 }
+-- structure distributed { /If/True/Kernel 1 /If/False/Kernel 2 }
 
 fun main(a: [n][an]int, b: [n][bn]int): ([][]int,[][]int) =
   unzip(zipWith (fn (a_row: []int) (b_row: []int): ([an]int,[bn]int)  =>

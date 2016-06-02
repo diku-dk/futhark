@@ -29,7 +29,7 @@
 -- [[-0.15087804f32, -0.3175784f32],
 --  [-0.35215855f32, -0.17525783f32]]]
 -- }
--- structure distributed { Kernel 1 }
+-- structure distributed { If/True/Kernel 1 If/False/Kernel 1 }
 
 fun main(mat: [m][m][b][b]f32): [m][b][b]f32 =
   let mat_rows = map (fn (mat_row: [m][b][b]f32): [b][b]f32  =>

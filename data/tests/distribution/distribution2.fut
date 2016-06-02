@@ -3,10 +3,12 @@
 --
 -- ==
 -- structure distributed {
---   Kernel 2
---   DoLoop 2
---   Reduce 0
---   Redomap 0
+--   /Kernel 0
+--   /If/True/Kernel 2
+--   /If/False/Kernel 1
+--   /If/False/If/True/Kernel 1
+--   /If/False/If/False/Kernel 1
+--   Scan 0
 -- }
 
 fun take(n: int, a: []f64): []f64 = let (first, rest) = unsafe split (n) a in first

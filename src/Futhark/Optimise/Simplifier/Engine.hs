@@ -657,10 +657,9 @@ simplifyExp (DoLoop ctx val form loopbody) = do
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
   (loopres', loopbnds') <-
     enterLoop $
-    bindFParams (ctxparams'++valparams') $
+    bindFParams (ctxparams'++valparams') $ wrapbody $
     blockIf
-    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
-    wrapbody $ do
+    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $ do
       res <- simplifyBody diets loopbody
       isDoLoopResult res
       return res
