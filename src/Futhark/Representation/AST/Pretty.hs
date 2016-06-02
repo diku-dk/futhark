@@ -77,22 +77,22 @@ instance Pretty Space where
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
-    where f e s = brackets $ s <> comma <> ppr e
+  ppr (Array et (Shape ds) u) = ppr u <> ppr et <>
+                                mconcat (map (brackets . ppr) ds)
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
-    where f dim s = brackets $ s <> comma <> ppr dim
+  ppr (Array et (ExtShape ds) u) = ppr u <> ppr et <>
+                                   mconcat (map (brackets . ppr) ds)
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase Rank u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (Rank n) u) = ppr u <> foldl f (ppr et) [1..n]
-    where f s _ = brackets s
+  ppr (Array et (Rank n) u) = ppr u <> ppr et <>
+                              mconcat (replicate n $ brackets mempty)
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
