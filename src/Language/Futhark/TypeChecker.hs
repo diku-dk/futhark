@@ -294,7 +294,6 @@ altOccurences occurs1 occurs2 =
 data Scope  = Scope { envVtable :: HM.HashMap VName Binding
                     , envFtable :: HM.HashMap Name FunBinding
                     , envTAtable :: TypeAliasMap
-                    , envCheckOccurences :: Bool
                     }
 
 -- | The type checker runs in this monad.  The 'Either' monad is used
@@ -379,9 +378,7 @@ noOccurences :: TypeM a -> TypeM a
 noOccurences = censor $ const mempty
 
 maybeCheckOccurences :: Occurences -> TypeM ()
-maybeCheckOccurences us = do
-  check <- asks envCheckOccurences
-  when check $ liftEither $ checkOccurences us
+maybeCheckOccurences = liftEither . checkOccurences
 
 alternative :: TypeM a -> TypeM b -> TypeM (a,b)
 alternative m1 m2 = pass $ do
@@ -564,7 +561,6 @@ checkProg prog = do
   let typeenv = Scope { envVtable = HM.empty
                       , envFtable = ftable
                       , envTAtable = ttable
-                      , envCheckOccurences = True
                       }
   runTypeM typeenv src $
     Prog [] <$> mapM (noOccurences . checkFun) (progFunctions prog')
