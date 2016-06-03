@@ -7,9 +7,6 @@ module Futhark.Representation.AST.Attributes.Values
        , valueShape
        , valueSize
 
-         -- * Extracting
-       , valueInt
-
          -- * Rearranging
        , permuteArray
        , rotateArray
@@ -48,13 +45,6 @@ valueSize t = case valueShape t of
 valueShape :: Value -> [Int]
 valueShape (ArrayVal _ _ shape) = shape
 valueShape _ = []
-
--- | Convert an 'IntValue' to an 'Integer'.
-valueInt :: IntValue -> Integer
-valueInt (Int8Value x) = toInteger x
-valueInt (Int16Value x) = toInteger x
-valueInt (Int32Value x) = toInteger x
-valueInt (Int64Value x) = toInteger x
 
 -- | Permute the dimensions of an array value.  If the given value is
 -- not an array, it is returned unchanged.  The length of the
