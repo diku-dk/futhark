@@ -830,6 +830,16 @@ checkExp (Transpose arrexp pos) = do
     bad $ TypeError pos "Argument to transpose is not two-dimensional array."
   return $ Transpose arrexp' pos
 
+checkExp (Rotate d offexp arrexp loc) = do
+  arrexp' <- checkExp arrexp
+  offexp' <- require [Prim $ Signed Int32] =<< checkExp offexp
+  let rank = arrayRank (typeOf arrexp')
+  when (rank < d) $
+    bad $ TypeError loc $ "Attempting to rotate dimension " ++ show d ++
+    " of array " ++ pretty arrexp ++
+    " which has only " ++ show rank ++ " dimensions."
+  return $ Rotate d offexp' arrexp' loc
+
 checkExp (Zip arrexps loc) = do
   arrexps' <- mapM (checkExp . fst) arrexps
   arrts <- forM arrexps' $ \arrexp -> do
