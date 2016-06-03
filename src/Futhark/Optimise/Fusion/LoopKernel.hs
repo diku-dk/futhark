@@ -173,7 +173,7 @@ applyFusionRules    unfus_nms outVars soac ker =
   tryExposeInputs   unfus_nms outVars soac ker <|>
   fuseSOACwithKer   unfus_nms outVars soac ker
 
-attemptFusion :: (MonadFreshNames m, HasScope SOACS m) =>
+attemptFusion :: MonadFreshNames m =>
                  Names -> [VName] -> SOAC -> FusedKer
               -> m (Maybe FusedKer)
 attemptFusion unfus_nms outVars soac ker =
@@ -665,9 +665,9 @@ pullReshape (SOAC.Map mapcs _ maplam inps) ots
         let addDims t = arrayOf t (Shape outershape) NoUniqueness
             retTypes = map addDims $ lambdaReturnType maplam
 
-        ps <- forM inputTypes $ \inpt -> do
-          let t = rowType (stripArray (length outershape-2) inpt)
-          newParam "pullReshape_param" t
+        ps <- forM inputTypes $ \inpt ->
+          newParam "pullReshape_param" $
+            stripArray (length shape-length outershape) inpt
 
         inner_body <- runBodyBinder $
           eBody [SOAC.toExp $ inner $ map (SOAC.identInput . paramIdent) ps]

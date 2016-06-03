@@ -227,10 +227,16 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases (Write _cs _len lam _ivs _as _ts) =
     map (const mempty) $ lambdaReturnType lam
 
+  -- Only Map, Redomap and Stream can consume anything.  The operands
+  -- to Scan and Reduce functions are always considered "fresh".
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
+  consumedInOp (Redomap _ _ _ foldlam _ nes arrs) =
+    HS.map consumedArray $ consumedByLambda foldlam
+    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
+          params_to_arrs = zip (map paramName $ drop (length nes) (lambdaParams foldlam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
     HS.fromList $ subExpVars $
     case form of MapLike{} ->
@@ -356,7 +362,7 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   accargs <- mapM TC.checkArg accexps
-  TC.checkLambda innerfun $ accargs ++ arrargs
+  TC.checkLambda innerfun $ map TC.noArgAliases accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
       innerAccType = take (length accexps) innerRetType
       asArg t = (t, mempty)
@@ -510,7 +516,7 @@ typeCheckScanReduce cs size fun inputs = do
   TC.require [Prim int32] size
   startargs <- mapM TC.checkArg startexps
   arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
+  TC.checkLambda fun $ map TC.noArgAliases $ startargs ++ arrargs
   let startt      = map TC.argType startargs
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun

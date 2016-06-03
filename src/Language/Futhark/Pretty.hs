@@ -135,10 +135,10 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase Rank as vn) where
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeDeclBase f vn) where
   ppr = ppr . declaredType
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (ParamBase f vn) where
+instance Pretty vn => Pretty (ParamBase f vn) where
   ppr = ppr . paramName
 
-instance (Eq vn, Hashable vn, Pretty vn) => Pretty (IdentBase f vn) where
+instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
 
 instance Pretty UnOp where

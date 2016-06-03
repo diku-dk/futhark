@@ -320,7 +320,7 @@ chunkedKernelNonconcatOutputs fun =
   where outerSizeIsChunk = (==Var (paramName chunk)) . arraySize 0
         (_, chunk, _) = partitionChunkedKernelLambdaParameters $ lambdaParams fun
 
-instance Attributes lore => TypedOp (Kernel lore) where
+instance TypedOp (Kernel lore) where
   opType = pure . staticShapes . kernelType
 
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
@@ -353,7 +353,7 @@ instance (Attributes lore,
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = False
 
-instance (Attributes inner, Ranged inner) => RangedOp (Kernel inner) where
+instance Ranged inner => RangedOp (Kernel inner) where
   opRanges op = replicate (length $ kernelType op) unknownRange
 
 instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) where

@@ -158,9 +158,7 @@ topDownRules = [liftIdentityMapping,
                 simplifyKnownIterationSOAC
                ]
 
-bottomUpRules :: (MonadBinder m,
-                  LocalScope (Lore m) m,
-                  Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
+bottomUpRules :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => BottomUpRules m
 bottomUpRules = [removeDeadMapping,
                  removeUnnecessaryCopy
                 ]
@@ -226,9 +224,8 @@ removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as ts)))
       letBind_ pat $ Op $ Write cs len lam' ivs' as ts
 removeReplicateWrite _ _ = cannotSimplify
 
-removeReplicateInput :: Attributes lore =>
-                        ST.SymbolTable lore
-                        -> AST.Lambda lore -> [VName]
+removeReplicateInput :: ST.SymbolTable lore
+                     -> AST.Lambda lore -> [VName]
                      -> Maybe ([([VName], AST.Exp lore)],
                                AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs

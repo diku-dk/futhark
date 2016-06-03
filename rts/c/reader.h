@@ -1,3 +1,5 @@
+#include <inttypes.h>
+
 struct array_reader {
   char* elems;
   int64_t n_elems_space;
@@ -169,7 +171,14 @@ static int read_array(int64_t elem_size, int (*elem_reader)(void*),
 
 static int read_int8(void* dest) {
   skipspaces();
-  if (scanf("%hhi", (int8_t*)dest) == 1) {
+  /* Some platforms (WINDOWS) does not support scanf %hhd or its
+     cousin, %SCNi8.  Read into int first to avoid corrupting
+     memory.
+
+     https://gcc.gnu.org/bugzilla/show_bug.cgi?id=63417  */
+  int x;
+  if (scanf("%i", &x) == 1) {
+    *(int8_t*)dest = x;
     scanf("i8");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -179,7 +188,7 @@ static int read_int8(void* dest) {
 
 static int read_int16(void* dest) {
   skipspaces();
-  if (scanf("%hi", (int16_t*)dest) == 1) {
+  if (scanf("%"SCNi16, (int16_t*)dest) == 1) {
     scanf("i16");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -189,7 +198,7 @@ static int read_int16(void* dest) {
 
 static int read_int32(void* dest) {
   skipspaces();
-  if (scanf("%i", (int32_t*)dest) == 1) {
+  if (scanf("%"SCNi32, (int32_t*)dest) == 1) {
     scanf("i32");
     return next_is_not_constituent() ? 0 : 1;
   } else {
@@ -199,7 +208,7 @@ static int read_int32(void* dest) {
 
 static int read_int64(void* dest) {
   skipspaces();
-  if (scanf("%Li", (int64_t*)dest) == 1) {
+  if (scanf("%"SCNi64, (int64_t*)dest) == 1) {
     scanf("i64");
     return next_is_not_constituent() ? 0 : 1;
   } else {

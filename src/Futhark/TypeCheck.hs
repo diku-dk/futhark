@@ -3,7 +3,6 @@
 module Futhark.TypeCheck
   ( -- * Interface
     checkProg
-  , checkProgNoUniqueness
   , TypeError (..)
   , ErrorCase (..)
 
@@ -30,6 +29,7 @@ module Futhark.TypeCheck
   , matchExtPattern
   , matchExtReturnType
   , argType
+  , noArgAliases
   , checkArg
   , checkSOACArrayArgs
   , checkLambda
@@ -276,7 +276,6 @@ instance Monoid Consumption where
 data Env lore =
   Env { envVtable :: HM.HashMap VName (VarBinding lore)
       , envFtable :: HM.HashMap Name (FunBinding lore)
-      , envCheckOccurences :: Bool
       , envContext :: [String]
       }
 
@@ -342,27 +341,22 @@ consume als = occur [consumption als]
 collectOccurences :: TypeM lore a -> TypeM lore (a, Occurences)
 collectOccurences m = pass $ do
   (x, c) <- listen m
-  o <- maybeCheckConsumption c
+  o <- checkConsumption c
   return ((x, o), const mempty)
 
 noDataflow :: TypeM lore a -> TypeM lore a
 noDataflow = censor $ const mempty
 
-maybeCheckConsumption :: Consumption -> TypeM lore Occurences
-maybeCheckConsumption (ConsumptionError e) = do
-  check <- asks envCheckOccurences
-  if check
-    then bad $ TypeError e
-    else return mempty
-maybeCheckConsumption (Consumption os) =
-  return os
+checkConsumption :: Consumption -> TypeM lore Occurences
+checkConsumption (ConsumptionError e) = bad $ TypeError e
+checkConsumption (Consumption os)     = return os
 
 alternative :: TypeM lore a -> TypeM lore b -> TypeM lore (a,b)
 alternative m1 m2 = pass $ do
   (x, c1) <- listen m1
   (y, c2) <- listen m2
-  os1 <- maybeCheckConsumption c1
-  os2 <- maybeCheckConsumption c2
+  os1 <- checkConsumption c1
+  os2 <- checkConsumption c2
   let usage = Consumption $ os1 `altOccurences` os2
   return ((x, y), const usage)
 
@@ -516,20 +510,9 @@ checkArrIdent v = do
 -- information.
 checkProg :: Checkable lore =>
              AST.Prog lore -> Either (TypeError lore) ()
-checkProg = checkProg' True
-
--- | As 'checkProg', but don't check whether uniqueness constraints
--- are being upheld.  The uniqueness of types must still be correct.
-checkProgNoUniqueness :: Checkable lore =>
-                         AST.Prog lore -> Either (TypeError lore) ()
-checkProgNoUniqueness = checkProg' False
-
-checkProg' :: Checkable lore =>
-              Bool -> AST.Prog lore -> Either (TypeError lore) ()
-checkProg' checkoccurs prog = do
+checkProg prog = do
   let typeenv = Env { envVtable = HM.empty
                     , envFtable = mempty
-                    , envCheckOccurences = checkoccurs
                     , envContext = []
                     }
 
@@ -1036,8 +1019,12 @@ type Arg = (Type, Names)
 argType :: Arg -> Type
 argType (t, _) = t
 
+-- | Remove all aliases from the 'Arg'.
 argAliases :: Arg -> Names
 argAliases (_, als) = als
+
+noArgAliases :: Arg -> Arg
+noArgAliases (t, _) = (t, mempty)
 
 checkArg :: Checkable lore =>
             SubExp -> TypeM lore Arg

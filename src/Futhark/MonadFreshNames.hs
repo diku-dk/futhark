@@ -158,7 +158,7 @@ instance (MonadFreshNames m, Monoid s) =>
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
 
-instance (MonadFreshNames m =>
-          MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m)) where
+instance MonadFreshNames m =>
+         MonadFreshNames (Control.Monad.Trans.Maybe.MaybeT m) where
   getNameSource = lift getNameSource
   putNameSource = lift . putNameSource
