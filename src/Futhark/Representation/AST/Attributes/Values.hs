@@ -5,7 +5,6 @@ module Futhark.Representation.AST.Attributes.Values
        (
          valueType
        , valueShape
-       , valueSize
 
          -- * Rearranging
        , permuteArray
@@ -29,13 +28,6 @@ valueType (PrimVal v) =
   Prim $ primValueType v
 valueType (ArrayVal _ et shape) =
   Array et (Shape $ map constant shape) NoUniqueness
-
--- | Return the size of the first dimension of an array, or zero for
--- non-arrays.
-valueSize :: Value -> Int
-valueSize t = case valueShape t of
-                []  -> 0
-                n:_ -> n
 
 -- | Return a list of the sizes of an array (the shape, in other
 -- terms).  For non-arrays, this is the empty list.  A two-dimensional
