@@ -212,6 +212,11 @@ data PrimOp lore
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
 
+  | Rotate Certificates [SubExp] VName
+  -- ^ Rotate the dimensions of the input array.  The list of
+  -- subexpressions specify how much each dimension is rotated.  The
+  -- length of this list must be equal to the rank of the array.
+
   | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element
     -- arrays.  If no arrays are given, the returned offsets are zero,

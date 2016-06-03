@@ -556,6 +556,9 @@ defCompilePrimOp (Destination [dest]) (ArrayLit es _) =
 defCompilePrimOp _ Rearrange{} =
   return ()
 
+defCompilePrimOp _ Rotate{} =
+  return ()
+
 defCompilePrimOp _ Reshape{} =
   return ()
 

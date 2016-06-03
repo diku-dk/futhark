@@ -100,6 +100,8 @@ mapExpM tv (Reshape shape arrexp loc) =
                    mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Transpose e loc) =
   Transpose <$> mapOnExp tv e <*> pure loc
+mapExpM tv (Rotate d e a loc) =
+  Rotate d <$> mapOnExp tv e <*> mapOnExp tv a <*> pure loc
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =

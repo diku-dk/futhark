@@ -316,11 +316,18 @@ Permute the dimensions in the array, returning a new array.
 For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
 a[y,z,x]``.
 
+
 ``transpose(a)``
 ~~~~~~~~~~~~~~~~
 
 Return the transpose of ``a``, which must be a two-dimensional array.
 
+``rotate(d, i, a)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rotate dimension ``d`` of the array ``a`` right by ``i`` elements.
+
+For example, if ``b=rotate(1, i, a)``, then ``b[x,y] = a[x,y-i]``.
 
 ``let pat = e in body``
 ~~~~~~~~~~~~~~~~~~~~~~~

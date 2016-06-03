@@ -360,6 +360,14 @@ internaliseExp _ (E.Rearrange perm e _) =
   internaliseOperation "rearrange" e $ \v ->
     return $ I.Rearrange [] perm v
 
+internaliseExp _ (E.Rotate d offset e _) = do
+  offset' <- internaliseExp1 "rotation_offset" offset
+  internaliseOperation "rotate" e $ \v -> do
+    rank <- I.arrayRank <$> lookupType v
+    let zero = constant (0::Int32)
+        offsets = replicate d zero ++ [offset'] ++ replicate (rank-d-1) zero
+    return $ I.Rotate [] offsets v
+
 internaliseExp _ (E.Reshape shape e loc) = do
   shape' <- mapM (internaliseExp1 "shape") shape
   internaliseOperation "reshape" e $ \v -> do

@@ -57,7 +57,7 @@
   "All Futhark keywords.")
 
 (defconst futhark-builtin-functions
-  '("pow" "iota" "shape" "replicate" "reshape" "transpose" "map"
+  '("pow" "iota" "shape" "replicate" "reshape" "rotate" "transpose" "map"
     "reduce" "reduceComm" "zip" "unzip" "zipWith" "scan" "split"
     "concat" "filter" "partition" "redomap" "empty" "copy" "size"
     "write")
