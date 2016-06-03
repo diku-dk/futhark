@@ -133,6 +133,9 @@ mapExpM tv (PrimOp (Reshape cs shape arrexp)) =
 mapExpM tv (PrimOp (Rearrange cs perm e)) =
   PrimOp <$> (pure Rearrange <*> mapOnCertificates tv cs <*>
                  pure perm <*> mapOnVName tv e)
+mapExpM tv (PrimOp (Rotate cs es e)) =
+  PrimOp <$> (pure Rotate <*> mapOnCertificates tv cs <*>
+              mapM (mapOnSubExp tv) es <*> mapOnVName tv e)
 mapExpM tv (PrimOp (Split cs sizeexps arrexp)) =
   PrimOp <$> (pure Split <*> mapOnCertificates tv cs <*>
               mapM (mapOnSubExp tv) sizeexps <*> mapOnVName tv arrexp)

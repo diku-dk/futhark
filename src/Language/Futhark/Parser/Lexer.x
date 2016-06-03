@@ -128,6 +128,7 @@ keyword s =
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
     "transpose"    -> TRANSPOSE
+    "rotate"       -> ROTATE
     "map"          -> MAP
     "reduce"       -> REDUCE
     "reduceComm"   -> REDUCECOMM
@@ -264,6 +265,7 @@ data Token = IF
            | RESHAPE
            | REARRANGE
            | TRANSPOSE
+           | ROTATE
            | ZIPWITH
            | ZIP
            | UNZIP

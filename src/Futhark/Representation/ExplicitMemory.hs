@@ -909,6 +909,13 @@ expReturns (AST.PrimOp (Rearrange _ perm v)) = do
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
+expReturns (AST.PrimOp (Rotate _ offsets v)) = do
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
+  let offsets' = map (`SE.subExpToScalExp` int32) offsets
+      ixfun' = IxFun.rotate ixfun offsets'
+  return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
+          Just $ ReturnsInBlock mem ixfun']
+
 expReturns (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps

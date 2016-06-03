@@ -42,6 +42,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
                , letRule simplifyRearrange
+               , letRule simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyCmpOp
                , letRule simplifyUnOp
@@ -298,6 +299,14 @@ simplifyRearrange defOf _ (Rearrange cs perm v) =
 
 simplifyRearrange _ _ _ = Nothing
 
+simplifyRotate :: LetTopDownRule lore u
+-- A zero-rotation is identity.
+simplifyRotate _ _ (Rotate _ offsets e)
+  | all (==constant (0::Int32)) offsets =
+    Just $ SubExp $ Var e
+
+simplifyRotate _ _ _ = Nothing
+
 simplifyCmpOp :: LetTopDownRule lore u
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
   | e1 == e2 = binOpRes $ BoolValue $
@@ -344,9 +353,12 @@ simplifyBinOp _ _ (BinOp FMul{} e1 e2)
   | isCt1 e1 = Just $ SubExp e2
   | isCt1 e2 = Just $ SubExp e1
 
-simplifyBinOp _ _ (BinOp (SMod t) e1 e2)
+simplifyBinOp look _ (BinOp (SMod t) e1 e2)
   | isCt1 e2 = Just $ SubExp e1
   | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
+  | Var v1 <- e1,
+    Just (PrimOp (BinOp SMod{} e3 e4)) <- look v1,
+    e4 == e2 = Just $ SubExp e3
 
 simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
@@ -443,16 +455,14 @@ simplifyAssert _ _ _ =
   Nothing
 
 simplifyIndex :: MonadBinder m => TopDownRule m
-simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds))) =
-  case simplifyIndexing defOf seType idd inds False of
-    Just (SubExpResult se) ->
-      letBind_ pat $ PrimOp $ SubExp se
-    Just (IndexResult extra_cs idd' inds') ->
-      letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
-    Just (ScalExpResult se) ->
-      letBind_ pat =<< SE.fromScalExp se
-    Nothing ->
-      cannotSimplify
+simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds)))
+  | Just m <- simplifyIndexing defOf seType idd inds False = do
+      res <- m
+      case res of
+        SubExpResult se ->
+          letBind_ pat $ PrimOp $ SubExp se
+        IndexResult extra_cs idd' inds' ->
+          letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
@@ -461,40 +471,51 @@ simplifyIndex _ _ = cannotSimplify
 
 data IndexResult = IndexResult Certificates VName [SubExp]
                  | SubExpResult SubExp
-                 | ScalExpResult SE.ScalExp
 
-simplifyIndexing :: VarLookup lore -> TypeLookup
+simplifyIndexing :: MonadBinder m =>
+                    VarLookup lore -> TypeLookup
                  -> VName -> [SubExp] -> Bool
-                 -> Maybe IndexResult
+                 -> Maybe (m IndexResult)
 simplifyIndexing defOf seType idd inds consuming =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
-    Just (SubExp (Var v)) -> Just $ IndexResult [] v inds
+    Just (SubExp (Var v)) -> Just $ pure $ IndexResult [] v inds
 
     Just (Iota _ (Constant (IntValue (Int32Value 0))) (Constant (IntValue (Int32Value 1))))
       | [ii] <- inds ->
-          Just $ SubExpResult ii
+          Just $ pure $ SubExpResult ii
 
     Just (Iota _ x s)
       | [ii] <- inds ->
-          Just $ ScalExpResult $
-          SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s + SE.intSubExpToScalExp x
+          Just $
+          fmap SubExpResult $ letSubExp "index_iota" <=< SE.fromScalExp $
+          SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s +
+          SE.intSubExpToScalExp x
+
+    Just (Rotate cs offsets a)
+      | length offsets == length inds -> Just $ do
+          dims <- arrayDims <$> lookupType a
+          let adjust (i, o, d) = do
+                i_m_o <- letSubExp "i_m_o" $ PrimOp $ BinOp (Sub Int32) i o
+                letSubExp "rot_i" $ PrimOp $ BinOp (SMod Int32) i_m_o d
+          inds' <- mapM adjust $ zip3 inds offsets dims
+          pure $ IndexResult cs a inds'
 
     Just (Index cs aa ais) ->
-      Just $ IndexResult cs aa (ais ++ inds)
+      Just $ pure $ IndexResult cs aa (ais ++ inds)
 
     Just (Replicate _ (Var vv))
-      | [_]   <- inds, not consuming -> Just $ SubExpResult $ Var vv
-      | _:is' <- inds, not consuming -> Just $ IndexResult [] vv is'
+      | [_]   <- inds, not consuming -> Just $ pure $ SubExpResult $ Var vv
+      | _:is' <- inds, not consuming -> Just $ pure $ IndexResult [] vv is'
 
     Just (Replicate _ val@(Constant _))
-      | [_] <- inds -> Just $ SubExpResult val
+      | [_] <- inds -> Just $ pure $ SubExpResult val
 
     Just (Rearrange cs perm src)
        | rearrangeReach perm <= length inds ->
          let inds' = rearrangeShape (take (length inds) perm) inds
-         in Just $ IndexResult cs src inds'
+         in Just $ pure $ IndexResult cs src inds'
 
     Just (Copy src)
       -- We cannot just remove a copy of a rearrange, because it might
@@ -504,32 +525,32 @@ simplifyIndexing defOf seType idd inds consuming =
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
         not consuming ->
-          Just $ IndexResult [] src inds
+          Just $ pure $ IndexResult [] src inds
 
     Just (Reshape cs newshape src)
       | Just newdims <- shapeCoercion newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         changed_dims <- zipWith (/=) newdims olddims,
         not $ or $ drop (length inds) changed_dims ->
-        Just $ IndexResult cs src inds
+        Just $ pure $ IndexResult cs src inds
 
       | Just newdims <- shapeCoercion newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         length newshape == length inds,
         length olddims == length newdims ->
-        Just $ IndexResult cs src inds
+        Just $ pure $ IndexResult cs src inds
 
 
     Just (Reshape cs [_] v2)
       | Just [_] <- arrayDims <$> seType (Var v2) ->
-        Just $ IndexResult cs v2 inds
+        Just $ pure $ IndexResult cs v2 inds
 
     Just (ArrayLit ses _)
       | Constant (IntValue (Int32Value i)) : inds' <- inds,
         Just se <- maybeNth i ses ->
         case inds' of
-          [] -> Just $ SubExpResult se
-          _ | Var v2 <- se  -> Just $ IndexResult [] v2 inds'
+          [] -> Just $ pure $ SubExpResult se
+          _ | Var v2 <- se  -> Just $ pure $ IndexResult [] v2 inds'
           _ -> Nothing
 
     _ -> Nothing
