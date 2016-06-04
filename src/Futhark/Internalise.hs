@@ -34,6 +34,7 @@ import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
 
+
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
 internaliseProg :: MonadFreshNames m =>
@@ -616,38 +617,73 @@ internaliseExp desc (E.Copy e _) = do
   ses <- internaliseExpToVars "copy_arg" e
   letSubExps desc [I.PrimOp $ I.Copy se | se <- ses]
 
-internaliseExp desc (E.Write i v a loc) = do
+internaliseExp desc (E.Write i v as loc) = do
   sis <- internaliseExpToVars "write_arg_i" i
   svs <- internaliseExpToVars "write_arg_v" v
-  sas <- internaliseExpToVars "write_arg_a" a
+  sas0 <- forM as $ internaliseExpToVars "write_arg_a"
+  sas <- mapM (ensureSingleElement "Futhark.Internalise.internaliseExp: Every I/O array in 'write' must be a non-tuple.") sas0
 
-  si <- case sis of
-    [si] -> return si
-    _ -> fail "Futhark.Internalise.internaliseExp: write indices array must not consist of tuples"
+  when (length sis /= length sas) $
+    fail ("Futhark.Internalise.internaliseExp: number of write sis and sas tuples is not the same"
+          ++ " (sis: " ++ show (length sis) ++ ", sas: " ++ show (length sas) ++ ")")
 
   when (length svs /= length sas) $
-    fail ("Futhark.Internalise.internaliseExp: size of write svs and sas tuples are not equal"
+    fail ("Futhark.Internalise.internaliseExp: number of write svs and sas tuples is not the same"
           ++ " (svs: " ++ show (length svs) ++ ", sas: " ++ show (length sas) ++ ")")
 
-  res <- forM (zip svs sas) $ \(sv, sa) -> do
-    t <- lookupType sa
-    si_len <- arraySize 0 <$> lookupType si
+  resTemp <- forM (zip sis svs) $ \(si, sv) -> do
+    tv <- rowType <$> lookupType sv -- the element type
+    si_shape <- arrayShape <$> lookupType si
+    let si_len = shapeSize 0 si_shape
     sv_shape <- arrayShape <$> lookupType sv
     let sv_len = shapeSize 0 sv_shape
 
-    -- Generate an assertion and reshape to ensure that sv is the same size as si.
+    -- Generate an assertion and reshapes to ensure that sv and si are the same
+    -- size.
     cmp <- letSubExp "write_cmp" $ I.PrimOp $
       I.CmpOp (I.CmpEq I.int32) si_len sv_len
     c   <- assertingOne $
       letExp "write_cert" $ I.PrimOp $
       I.Assert cmp loc
+    si' <- letExp (baseString si ++ "_write_si") $
+      I.PrimOp $ I.SubExp $ I.Var si
     sv' <- letExp (baseString sv ++ "_write_sv") $
       I.PrimOp $ I.Reshape c (reshapeOuter [DimCoercion si_len] 1 sv_shape) sv
 
-    return (t, sv', sa)
+    return (tv, si', sv')
+  let (tvs, sis', svs') = unzip3 resTemp
 
-  let (ts, svs', sas') = unzip3 res
-  letTupExp' desc $ I.Op $ I.Write [] ts si svs' sas'
+  -- Just pick something.  All sis and svs are supposed to be the same size.
+  si_shape <- arrayShape <$> lookupType (head sis)
+  let len = shapeSize 0 si_shape
+
+  let indexTypes = replicate (length tvs) (I.Prim (IntType Int32))
+      valueTypes = tvs
+      bodyTypes = indexTypes ++ valueTypes
+
+  indexNames <- replicateM (length indexTypes) $ newVName "write_index"
+  valueNames <- replicateM (length valueTypes) $ newVName "write_value"
+
+  let bodyNames = indexNames ++ valueNames
+  let bodyParams = zipWith I.Param bodyNames bodyTypes
+
+  -- This body is pretty boring right now, as every input is exactly the output.
+  -- But it can get funky later on if fused with something else.
+  (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
+    results <- forM bodyNames $ \name -> letSubExp "write_res"
+                                         $ I.PrimOp $ I.SubExp $ I.Var name
+    return $ resultBody results
+
+  let lam = Lambda { I.lambdaParams = bodyParams
+                   , I.lambdaReturnType = bodyTypes
+                   , I.lambdaBody = body
+                   }
+      sivs = sis' ++ svs'
+
+  let certs = []
+  ats <- mapM lookupType sas
+  let soac = I.Write certs len lam sivs sas ats
+  letTupExp' desc $ I.Op soac
 
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)
@@ -665,6 +701,10 @@ internaliseScanOrReduce desc what f (lam, ne, arr, loc) = do
   let input = zip nes' arrs
   w <- arraysSize 0 <$> mapM lookupType arrs
   letTupExp' desc $ I.Op $ f [] w lam' input
+
+ensureSingleElement :: Monad m => String -> [a] -> m a
+ensureSingleElement _desc [x] = return x
+ensureSingleElement desc _ = fail desc
 
 internaliseExp1 :: String -> E.Exp -> InternaliseM I.SubExp
 internaliseExp1 desc e = do

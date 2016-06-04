@@ -534,7 +534,7 @@ Exp  :: { UncheckedExp }
                          { Stream (RedLike Disorder Commutative $3 $7) $5 $9 $1 }
      | streamSeq       '(' FunAbstr ',' Exp ',' Exp ')'
                          { Stream (Sequential $5) $3 $7 $1 }
-     | write           '(' Exp ',' Exp ',' Exp ')'
+     | write           '(' Exp ',' Exp ',' Exps ')'
                          { Write $3 $5 $7 $1 }
 
 LetExp :: { UncheckedExp }
