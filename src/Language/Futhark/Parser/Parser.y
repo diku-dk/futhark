@@ -137,6 +137,7 @@ import Language.Futhark.Parser.Lexer
       reshape         { L $$ RESHAPE }
       rearrange       { L $$ REARRANGE }
       transpose       { L $$ TRANSPOSE }
+      rotate          { L $$ ROTATE }
       zipWith         { L $$ ZIPWITH }
       zip             { L $$ ZIP }
       unzip           { L $$ UNZIP }
@@ -396,6 +397,8 @@ Exp  :: { UncheckedExp }
                       { Rearrange $4 $7 $1 }
 
      | transpose '(' Exp ')' { Transpose $3 $1 }
+
+     | rotate '(' NaturalInt ',' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
 
      | split '(' '(' Exps ')' ',' Exp ')'
                       { Split $4 $7 $1 }

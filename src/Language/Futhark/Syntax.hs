@@ -435,6 +435,10 @@ data ExpBase f vn =
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
 
+            | Rotate Int (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ Rotate the given dimension of the given array by the
+            -- given amount.  The last expression is the array.
+
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
             | Map (LambdaBase f vn) (ExpBase f vn) SrcLoc
@@ -525,6 +529,7 @@ instance Located (ExpBase f vn) where
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ pos) = locOf pos
   locOf (Rearrange _ _ pos) = locOf pos
+  locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos

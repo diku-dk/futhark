@@ -592,6 +592,7 @@ typeOf (Reshape shape  e _) =
   Rank (length shape) `setArrayShape` typeOf e
 typeOf (Rearrange _ e _) = typeOf e
 typeOf (Transpose e _) = typeOf e
+typeOf (Rotate _ _ e _) = typeOf e
 typeOf (Map f _ _) = arrayType 1 et Unique `setAliases` HS.empty
   where et = lambdaReturnType f
 typeOf (Reduce _ fun _ _ _) =

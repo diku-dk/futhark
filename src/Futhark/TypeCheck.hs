@@ -760,6 +760,14 @@ checkPrimOp (Rearrange cs perm arr) = do
   when (length perm /= rank || sort perm /= [0..rank-1]) $
     bad $ PermutationError perm rank $ Just arr
 
+checkPrimOp (Rotate cs rots arr) = do
+  arrt <- lookupType arr
+  mapM_ (requireI [Prim Cert]) cs
+  let rank = arrayRank arrt
+  when (length rots /= rank) $
+    bad $ TypeError $ "Cannot rotate " ++ show rank ++
+    "-dimensional array with only " ++ show (length rots) ++ " offsets."
+
 checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (requireI [Prim Cert]) cs
   mapM_ (require [Prim int32]) sizeexps
