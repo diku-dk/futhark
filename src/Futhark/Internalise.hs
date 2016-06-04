@@ -663,7 +663,7 @@ internaliseExp desc (E.Write i v as loc) = do
 
   indexNames <- replicateM (length indexTypes) $ newVName "write_index"
   valueNames <- replicateM (length valueTypes) $ newVName "write_value"
-  
+
   let bodyNames = indexNames ++ valueNames
   let bodyParams = zipWith I.Param bodyNames bodyTypes
 
