@@ -34,22 +34,19 @@ import Futhark.FreshNames
 -- The semantics of the program are unaffected, under the assumption
 -- that the program was correct to begin with.
 tagProg :: ProgBase NoInfo Name -> (ProgBase NoInfo VName, VNameSource)
-tagProg prog = runReader (runStateT f blankNameSource) env
-  where env = RenameEnv HM.empty newVNameFromName
-        f = Prog [] <$> mapM renameFun (progFunctions prog)
+tagProg = tagProg' blankNameSource
 
--- | As 'tagProg', but accepts an initial name source and returns the
--- resulting one.
 tagProg' :: VNameSource -> ProgBase NoInfo Name  -> (ProgBase NoInfo VName, VNameSource)
-tagProg' src prog = let (funs, src') = runReader (runStateT f src) env
-                        (types, src'') = runReader (runStateT g src') env
-                    in (Prog types funs, src'')
+tagProg' src prog = let (decs , src') = runReader (runStateT f src) env
+                    in (Prog decs, src')
+
   where env = RenameEnv HM.empty newVNameFromName
-        f = mapM renameFun $ progFunctions prog
-        g = mapM renameTypeAlias $ progTypes prog
+        f = mapM renameDec $ progDecs prog
 
 untagProg :: ProgBase NoInfo VName -> ProgBase NoInfo Name
-untagProg = untagger $ fmap (Prog []) . mapM renameFun . progFunctions
+untagProg prog =
+  let decs = untagger (mapM renameDec . progDecs) prog
+  in Prog decs
 
 -- | Remove tags from an expression.  The same caveats as with
 -- 'untagProg' apply.
@@ -95,6 +92,7 @@ declRepl (Param name (TypeDecl tp NoInfo) loc) = do
   tp' <- renameUserType tp
   return $ Param name' (TypeDecl tp' NoInfo) loc
 
+
 replName :: (Eq f, Hashable f) => f -> RenameM f t t
 replName name = maybe (new name) return =<<
                 asks (HM.lookup name . envNameMap)
@@ -126,6 +124,26 @@ bindParams params =
         inspectDim (NamedDim name) =
           Just name
 
+renameDec :: (Eq f, Ord f, Hashable f, Eq t, Hashable t) =>
+             DecBase NoInfo f -> RenameM f t (DecBase NoInfo t)
+renameDec (SigDec sig) = do
+  sig' <- renameSignature sig
+  return $ SigDec sig'
+
+
+renameDec (ModDec modd) = do
+  modd' <- renameModule modd
+  return $ ModDec modd'
+
+renameDec (FunOrTypeDec funortype) =
+  case funortype of
+    FunDec fun -> do
+      fun' <- renameFun fun
+      return $ FunOrTypeDec $ FunDec fun'
+    TypeDec tp -> do
+      tp' <- renameTypeAlias tp
+      return $ FunOrTypeDec $ TypeDec tp'
+
 renameFun :: (Ord f, Hashable f, Eq t, Hashable t) =>
              FunDefBase NoInfo f -> RenameM f t (FunDefBase NoInfo t)
 renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
@@ -138,9 +156,28 @@ renameFun (FunDef entry fname (TypeDecl ret NoInfo) params body pos) =
 
 renameTypeAlias :: (Eq f, Hashable f, Eq t, Hashable t) =>
                    TypeDefBase NoInfo f -> RenameM f t (TypeDefBase NoInfo t)
-renameTypeAlias (TypeDef name (TypeDecl t NoInfo) loc) = do
-  t' <- renameUserType t
-  return $ TypeDef name (TypeDecl t' NoInfo) loc
+renameTypeAlias (TypeDef name typedecl loc) = do
+  typedecl' <- renameUserTypeDecl typedecl
+  return $ TypeDef name typedecl' loc
+
+renameUserTypeDecl :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                      TypeDeclBase NoInfo f
+                   -> RenameM f t (TypeDeclBase NoInfo t)
+renameUserTypeDecl (TypeDecl usertype NoInfo) = do
+  usertype' <- renameUserType usertype
+  return $ TypeDecl usertype' NoInfo
+
+renameSignature :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                   SigDefBase NoInfo f -> RenameM f t (SigDefBase NoInfo t)
+renameSignature (SigDef name sigdecs loc) = do
+  sigdecs' <- mapM renameSigDec sigdecs
+  return $ SigDef name sigdecs' loc
+
+renameModule :: (Eq f, Hashable f, Ord f, Eq t, Hashable t) =>
+                ModDefBase NoInfo f -> RenameM f t (ModDefBase NoInfo t)
+renameModule (ModDef name moddecs loc) = do
+  moddecs' <- mapM renameDec moddecs
+  return $ ModDef name moddecs' loc
 
 renameExp :: (Eq f, Hashable f, Eq t, Hashable t) =>
              ExpBase NoInfo f -> RenameM f t (ExpBase NoInfo t)
@@ -193,6 +230,18 @@ renameExp (Stream form lam arr pos) = do
   arr' <- renameExp    arr
   return $ Stream form' lam' arr' pos
 renameExp e = mapExpM rename e
+
+renameSigDec :: (Eq f, Hashable f, Eq t, Hashable t) =>
+                 SigDeclBase NoInfo f
+              -> RenameM f t (SigDeclBase NoInfo t)
+renameSigDec (FunSig name params rettype) = do
+  params' <- mapM renameUserTypeDecl params
+  rettype' <- renameUserTypeDecl rettype
+  return $ FunSig name params' rettype'
+
+renameSigDec (TypeSig usertype) = do
+  usertype' <- renameTypeAlias usertype
+  return $ TypeSig usertype'
 
 renameUserType :: (Eq f, Hashable f) =>
                    UserType f
