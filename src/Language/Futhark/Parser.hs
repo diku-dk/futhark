@@ -118,19 +118,9 @@ parseFuthark :: FilePath -> T.Text
 parseFuthark fp0 s0 =
   (snd <$>) <$> evalErrorIO (parseWithIncludes [fp0] [fp0] (fp0, s0))
   where parseWithIncludes :: [FilePath] -> [FilePath] -> (FilePath, T.Text)
-                             -> ErrorIO ParseError ([FilePath], UncheckedProg)
+                          -> ErrorIO ParseError ([FilePath], UncheckedProg)
         parseWithIncludes alreadyIncluded includeSources (fp, s) = do
           p <- liftEither $ parse prog fp s
-          let decs = progWHDecs p
-              progFs = mapMaybe isFun decs
-              progTs = mapMaybe isType decs
-
-              isFun (FunDec a) = Just a
-              isFun _          = Nothing
-
-              isType (TypeDec t) = Just t
-              isType _           = Nothing
-
           let newIncludes = mapMaybe headerInclude $ progWHHeaders p
               intersectionSources = includeSources `intersect` newIncludes
 
@@ -140,7 +130,7 @@ parseFuthark fp0 s0 =
           let newIncludes' = newIncludes \\ alreadyIncluded
               alreadyIncluded' = fp : newIncludes' ++ alreadyIncluded
               includeSources' = fp : includeSources
-              p' = Prog progTs progFs
+              p' = Prog $ progWHDecs p
 
           if null newIncludes'
             then return (alreadyIncluded', p')
@@ -161,7 +151,7 @@ parseFuthark fp0 s0 =
           parseWithIncludes alreadyIncluded includeSources (newInclude, t)
 
         mergePrograms :: UncheckedProg -> UncheckedProg -> UncheckedProg
-        mergePrograms (Prog ts fs) (Prog ts' gs) = Prog (ts ++ ts') (fs ++ gs)
+        mergePrograms (Prog defs) (Prog defs') = Prog (defs' ++ defs)
 
         headerInclude :: ProgHeader -> Maybe String
         headerInclude (Include strings) =

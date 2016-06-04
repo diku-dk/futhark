@@ -105,12 +105,10 @@ Examples::
 
   type person_id = int
   type int_pair  = (int, int)
-  type vec3 = (f32, f32, f32)
+  type position, velocity, vec3 = (f32, f32, f32)
 
   type pilot = person_id
   type passengers = [person_id]
-  type position = vec3
-  type velocity = vec3
   type mass     = f32
 
   type airplane = (pilot, passengers, position, velocity, mass)
@@ -128,10 +126,77 @@ attributes are overrided by outer ones::
   -- Error: using non-unique value for a unique return value.
   fun uniqueIntLists (nonuniqueIntLists p) = p
 
+
 *Dimension declarations*
 
 To declare dimensions on an array data type using type aliases, the type alias must
 define either a primitive type, or a tuple.
+
+Structures
+----------
+
+Futhark supports structures which can contain type declarations, functions and structures.
+These structures can be included into any other Futhark file.
+
+The syntax is as in the following example::
+  Vec3.fut:
+    structure Vec3 =
+      struct
+        structure F32 =
+          struct
+            type t = ( f32 , f32 , f32 )
+            fun t add(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 + b1, a2 + b2 , a3 + b3)
+        
+            fun t subtract(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 - b1, a2 - b2 , a3 - b3)
+        
+            fun t scale(f32 k , t a) =
+              let (a1, a2, a3) = a in
+              (a1 * k, a2 * k , a3 * k)
+        
+            fun f32 dot(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              a1*b1 + a2*b2 + a3*b3
+          end
+        
+        structure Int =
+          struct
+            type t = ( int , int , int )
+            fun t add(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 + b1, a2 + b2 , a3 + b3)
+        
+            fun t subtract(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 - b1, a2 - b2 , a3 - b3)
+        
+            fun t scale(int k , t a) =
+              let (a1, a2, a3) = a in
+              (a1 * k, a2 * k , a3 * k)
+        
+            fun int dot(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              a1*b1 + a2*b2 + a3*b3
+          end
+      end
+
+Functions and types within these structures can be accessed using common dot notation::
+  
+  some_example.fut
+    include Vec3
+
+    type vector = Vec3.Int.t
+    fun vector double(vector v) = Vec3.Int.plus(v,v)
+
 
 File Inclusions
 ---------------
