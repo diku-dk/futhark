@@ -1171,15 +1171,15 @@ checkExp (Write is vs as pos) = do
             forM_ exps $ \e -> case e of
               PrimArrayElem (Signed Int32) _ _ ->
                 return ()
-              _ -> widxbad it
+              _ -> widxbad
           Tuple exps ->
             forM_ exps $ \e -> case e of
               Array (PrimArray (Signed Int32) (Rank 1) _ _) ->
                 return ()
-              _ -> widxbad it
-          _ -> widxbad it
+              _ -> widxbad
+          _ -> widxbad
 
-        widxbad it = bad $ TypeError pos (show it) --"the indexes array of write must consist only of signed 32-bit ints"
+        widxbad = bad $ TypeError pos "the indexes array of write must consist only of signed 32-bit ints"
 
 checkSOACArrayArg :: ExpBase NoInfo VName
                   -> TypeM (Exp, Arg)

@@ -20,7 +20,6 @@ import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet      as HS
 
 import Prelude hiding (any, all)
-import Debug.Trace
 
 import Futhark.Representation.Kernels
 import Futhark.Representation.AST.Attributes.Aliases
@@ -362,13 +361,12 @@ fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len kernel_size lam ivs as t
             PrimOp $ BinOp (Add Int32) (Var thread_index) x
         mapM_ addBinding $ bodyBindings $ lambdaBody lam
         return $ bodyResult $ lambdaBody lam
-      
+
       let lam' = lam { lambdaBody = body
                      , lambdaParams = thread_index_param : ivs_params'
                      }
-      
-      let s = show (lambdaParams lam) ++ "\n" ++ show ivs_params' ++ "\n" ++ show ivs' ++ "\n" ++ show iota_params
-      trace s $ letBind_ pat $ Op $ WriteKernel cs len kernel_size lam' ivs' as ts
+
+      letBind_ pat $ Op $ WriteKernel cs len kernel_size lam' ivs' as ts
     where (params_and_arrs, iota_params) = iotaParams vtable ivs_params ivs
           (thread_index_param : ivs_params) = lambdaParams lam
           thread_index = paramName thread_index_param

@@ -5,7 +5,7 @@ module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
   )
   where
-import Debug.Trace
+
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Applicative
@@ -622,8 +622,7 @@ kernelCompiler
       kernel_bnds = bodyBindings $ lambdaBody lam
 
       res = bodyResult $ lambdaBody lam
-      (indexes, values) =
-        trace (show lam) $ splitAt (length res `div` 2) res
+      (indexes, values) = splitAt (length res `div` 2) res
 
       writeResult index val a_size dest = do
         let index' = ImpGen.compileSubExp index

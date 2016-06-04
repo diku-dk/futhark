@@ -16,7 +16,7 @@ module Futhark.Interpreter
   , runFunWithShapes
   , InterpreterError(..) )
 where
-import Debug.Trace
+
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -716,7 +716,7 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
   let ivsLen = length (lambdaReturnType lam) `div` 2
       is = transpose $ map (take ivsLen) ivs''
       vs = transpose $ map (drop ivsLen) ivs''
-  is' <- trace (show ivs'') $ mapM (mapM valInt) is
+  is' <- mapM (mapM valInt) is
 
   (aArrs, aPrimTypes, aShapes) <-
     unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for 'array' array") as'
@@ -738,7 +738,7 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
                | (arr, updates) <- zip arrs updatess
                ]
 
-  ress <- trace (show vs ++ " " ++ show is' ++ " " ++ show [0..fromIntegral len' - 1]) $ foldM handleIteration aArrs [0..fromIntegral len' - 1]
+  ress <- foldM handleIteration aArrs [0..fromIntegral len' - 1]
   return $ zipWith3 ArrayVal ress aPrimTypes aShapes
 
 toArrayVal :: String -> Value -> FutharkM (Array Int PrimValue, PrimType, [Int])
