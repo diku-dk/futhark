@@ -11,17 +11,20 @@ module Language.Futhark.Core
 
   -- * Name handling
   , Name
+  , LongName
   , nameToString
   , nameFromString
+  , longnameToString
+  , longnameToName
   , nameToText
   , nameFromText
+  , blankLongname
   , ID(..)
   , baseTag
   , baseName
   , baseString
   , VName
   , textual
-
   -- * Special identifiers
   , defaultEntryPoint
 
@@ -35,6 +38,7 @@ import Data.Monoid
 import Data.Hashable
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Loc
+import Data.List
 import qualified Data.Text as T
 
 import Prelude
@@ -86,6 +90,8 @@ defaultEntryPoint = nameFromString "main"
 newtype Name = Name T.Text
   deriving (Show, Eq, Ord)
 
+type LongName = ([Name], Name)
+
 instance Pretty Name where
   ppr = text . nameToString
 
@@ -100,6 +106,18 @@ instance Monoid Name where
 nameToString :: Name -> String
 nameToString (Name t) = T.unpack t
 
+longnameToString :: LongName -> String
+longnameToString ([], name) = nameToString name
+longnameToString (names, name) = let
+      names' = Data.List.intercalate "." $ map nameToString names
+      name' = nameToString name
+  in  names' ++ "." ++ name'
+
+
+longnameToName :: LongName -> Name
+longnameToName = nameFromString . longnameToString
+
+
 -- | Convert a list of characters to the corresponding name.
 nameFromString :: String -> Name
 nameFromString = Name . T.pack
@@ -111,6 +129,10 @@ nameToText (Name t) = t
 -- | Convert a 'T.Text' to the corresponding name.
 nameFromText :: T.Text -> Name
 nameFromText = Name
+
+blankLongname :: LongName
+blankLongname = ([], nameFromString "")
+
 
 -- | A human-readable location string, of the form
 -- @filename:lineno:columnno@.
