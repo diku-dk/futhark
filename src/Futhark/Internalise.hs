@@ -651,11 +651,12 @@ internaliseExp desc (E.Write i v as loc) = do
 
   indexNames <- replicateM (length indexTypes) $ newVName "write_index"
   valueNames <- replicateM (length valueTypes) $ newVName "write_value"
+  
   let bodyNames = indexNames ++ valueNames
   let bodyParams = zipWith I.Param bodyNames bodyTypes
 
   -- This body is pretty boring right now, as every input is exactly the output.
-  -- But it can funky later on if fused with something else.
+  -- But it can get funky later on if fused with something else.
   (body, _) <- runBinderEmptyEnv $ insertBindingsM $ do
     results <- forM bodyNames $ \name -> letSubExp "write_res"
                                          $ I.PrimOp $ I.SubExp $ I.Var name

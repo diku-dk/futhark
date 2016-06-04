@@ -16,7 +16,7 @@ module Futhark.Interpreter
   , runFunWithShapes
   , InterpreterError(..) )
 where
-
+import Debug.Trace
 import Control.Applicative
 import Control.Monad.Reader
 import Control.Monad.Writer
@@ -701,7 +701,6 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
 
 evalSOAC (Write _cs len lam ivs as _ts) = do
 
-  -- FIXME: I'm sure there's some better way of doing this.
   let valInt :: Value -> FutharkM Int
       valInt (PrimVal (IntValue (Int32Value l))) = return $ fromIntegral l
       valInt _ = bad $ TypeError "evalSOAC Write: Wrong type for length"
@@ -711,13 +710,13 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
   as' <- mapM lookupVar as
 
   -- Calculate all indexes and values.
-  sas' <- soacArrays len ivs
-  ivs'' <- mapM (applyLambda lam) sas'
+  ivs' <- soacArrays len ivs
+  ivs'' <- mapM (applyLambda lam) ivs'
 
   let ivsLen = length (lambdaReturnType lam) `div` 2
       is = transpose $ map (take ivsLen) ivs''
       vs = transpose $ map (drop ivsLen) ivs''
-  is' <- mapM (mapM valInt) is
+  is' <- trace (show ivs'') $ mapM (mapM valInt) is
 
   (aArrs, aPrimTypes, aShapes) <-
     unzip3 <$> mapM (toArrayVal "evalSOAC Write: Wrong type for 'array' array") as'
@@ -739,7 +738,7 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
                | (arr, updates) <- zip arrs updatess
                ]
 
-  ress <- foldM handleIteration aArrs [0..fromIntegral len' - 1]
+  ress <- trace (show vs ++ " " ++ show is' ++ " " ++ show [0..fromIntegral len' - 1]) $ foldM handleIteration aArrs [0..fromIntegral len' - 1]
   return $ zipWith3 ArrayVal ress aPrimTypes aShapes
 
 toArrayVal :: String -> Value -> FutharkM (Array Int PrimValue, PrimType, [Int])

@@ -225,9 +225,9 @@ removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as ts)))
 removeReplicateWrite _ _ = cannotSimplify
 
 removeReplicateInput :: ST.SymbolTable lore
-                     -> AST.Lambda lore -> [VName]
-                     -> Maybe ([([VName], AST.Exp lore)],
-                               AST.Lambda lore, [VName])
+                        -> AST.Lambda lore -> [VName]
+                        -> Maybe ([([VName], AST.Exp lore)],
+                                  AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs
   | not $ null parameterBnds = do
   let (arr_params', arrs') = unzip params_and_arrs
