@@ -21,7 +21,7 @@ fun *[i64, numBins2] doCompute(
     i32 numBins2,
     [f32, numBBins] bin
 ) =
-    let val = map(fn *[i64, numBins2] (f32 x) =>
+    let value = map(fn *[i64, numBins2] (f32 x) =>
             let vals = map(fn *[i64, numBins2] (f32 y) =>
                     let dot = x*y in
                     let dBins = replicate(numBins2, 0i64) in
@@ -31,7 +31,7 @@ fun *[i64, numBins2] doCompute(
                 reduce(reduceBins, replicate(numBins2, 0i64), vals)
         , data1)
     in
-    reduce(reduceBins, replicate(numBins2, 0i64), val)
+    reduce(reduceBins, replicate(numBins2, 0i64), value)
 
 fun *[i64] main(int numBins) =
     let binb = map(fn f32 (f32 k) => k, iota32(numBins + 1))

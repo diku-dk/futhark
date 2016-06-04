@@ -45,7 +45,7 @@ internaliseProg prog = do
       Left err -> return $ Left err
       Right ftable -> do
         funs <- runInternaliseM ftable $
-                mapM internaliseFun $ E.progFunctions prog
+                mapM internaliseFun $ mapMaybe isFun $ E.progDecs prog
         return $ fmap I.Prog funs
   sequence $ fmap I.renameProg res
 
@@ -53,8 +53,9 @@ buildFtable :: MonadFreshNames m => E.Prog
             -> m (Either String FunTable)
 buildFtable = fmap (HM.union builtinFtable<$>) .
               runInternaliseM mempty .
-              fmap HM.fromList . mapM inspect . E.progFunctions
-  where inspect (E.FunDef _ fname (TypeDecl _ (Info rettype)) params _ _) =
+              fmap HM.fromList . mapM inspect . E.funsFromProg
+
+  where inspect (E.FunDef _ (fname, _) (TypeDecl _ (Info rettype)) params _ _) =
           bindingParams params $ \shapes values -> do
             (rettype', _) <- internaliseReturnType rettype
             let shapenames = map I.paramName shapes
@@ -77,7 +78,7 @@ buildFtable = fmap (HM.union builtinFtable<$>) .
           (E.Prim t, map E.Prim paramts)
 
 internaliseFun :: E.FunDef -> InternaliseM I.FunDef
-internaliseFun (E.FunDef entry fname (TypeDecl _ (Info rettype)) params body loc) =
+internaliseFun (E.FunDef entry (fname,_) (TypeDecl _ (Info rettype)) params body loc) =
   bindingParams params $ \shapeparams params' -> do
     (rettype', _) <- internaliseReturnType rettype
     firstbody <- internaliseBody body
@@ -156,25 +157,28 @@ internaliseExp desc (E.Empty (TypeDecl _(Info et)) loc) =
   where et' = E.removeShapeAnnotations $ E.fromStruct et
 
 internaliseExp desc (E.Apply fname args _ _)
-  | Just (rettype, _) <- HM.lookup fname I.builtInFunctions = do
+  | Just (rettype, _) <- HM.lookup fname' I.builtInFunctions = do
   args' <- mapM (internaliseExp "arg" . fst) args
   let args'' = concatMap tag args'
-  letTupExp' desc $ I.Apply fname args'' (ExtRetType [I.Prim rettype])
+  letTupExp' desc $ I.Apply fname' args'' (ExtRetType [I.Prim rettype])
   where tag ses = [ (se, I.Observe) | se <- ses ]
+        fname' = longnameToName fname
 
 internaliseExp desc (E.Apply fname args _ _) = do
   args' <- concat <$> mapM (internaliseExp "arg" . fst) args
-  (shapes, paramts, rettype_fun) <- internalFun <$> lookupFunction fname
+  (shapes, paramts, rettype_fun) <- internalFun <$> lookupFunction fname'
   argts <- mapM subExpType args'
   let diets = map I.diet paramts
       shapeargs = argShapes shapes paramts argts
       args'' = zip shapeargs (repeat I.Observe) ++
                zip args' diets
   case rettype_fun $ map (,I.Prim int32) shapeargs ++ zip args' argts of
-    Nothing -> fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
+    Nothing -> fail $ "Cannot apply " ++ pretty fname' ++ " to arguments " ++
                pretty (shapeargs ++ args')
     Just rettype ->
-      letTupExp' desc $ I.Apply fname args'' rettype
+      letTupExp' desc $ I.Apply fname' args'' rettype
+  where
+    fname' = longnameToName fname
 
 internaliseExp desc (E.LetPat pat e body _) = do
   ses <- internaliseExp desc e
@@ -824,7 +828,7 @@ internaliseLambda (E.AnonymFun params body (TypeDecl _ (Info rettype)) _) Nothin
   return (map (fmap I.fromDecl) params', body', map I.fromDecl rettype')
 
 internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
-  fun_entry <- lookupFunction fname
+  fun_entry <- lookupFunction fname'
   let (shapes, paramts, int_rettype_fun) = internalFun fun_entry
       diets = map I.diet paramts
   curargs' <- concat <$> mapM (internaliseExp "curried") curargs
@@ -855,14 +859,16 @@ internaliseLambda (E.CurryFun fname curargs _ _) maybe_rowtypes = do
   case int_rettype_fun $
        map (,I.Prim int32) shapeargs ++ zip valargs valargs_types of
     Nothing ->
-      fail $ "Cannot apply " ++ pretty fname ++ " to arguments " ++
+      fail $ "Cannot apply " ++ pretty fname' ++ " to arguments " ++
       pretty (shapeargs ++ valargs)
     Just (ExtRetType ts) -> do
       funbody <- insertBindingsM $ do
         res <- letTupExp "curried_fun_result" $
-               I.Apply fname allargs $ ExtRetType ts
+               I.Apply fname' allargs $ ExtRetType ts
         resultBodyM $ map I.Var res
       return (params, funbody, map I.fromDecl ts)
+  where
+        fname' = longnameToName fname
 
 internaliseLambda (E.UnOpFun unop (Info paramtype) (Info rettype) loc) rowts = do
   (params, body, rettype') <- unOpFunToLambda unop paramtype rettype

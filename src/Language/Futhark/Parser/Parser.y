@@ -37,6 +37,7 @@ import Data.Monoid
 import Language.Futhark.Syntax hiding (ID)
 import Language.Futhark.Attributes
 import Language.Futhark.Parser.Lexer
+import Language.Futhark.Core(blankLongname)
 
 }
 
@@ -125,6 +126,8 @@ import Language.Futhark.Parser.Lexer
       fn              { L $$ FN }
       '=>'            { L $$ ARROW }
       '<-'            { L $$ SETTO }
+      '->'            { L $$ TYPE_ARROW }
+      ':'             { L $$ COLON }
       for             { L $$ FOR }
       do              { L $$ DO }
       with            { L $$ WITH }
@@ -164,9 +167,15 @@ import Language.Futhark.Parser.Lexer
       streamSeq       { L $$ STREAM_SEQ }
       include         { L $$ INCLUDE }
       write           { L $$ WRITE }
-      type            { L $$ TYPE}
+      type            { L $$ TYPE }
+      signature       { L $$ SIGNATURE }
+      sig             { L $$ SIG }
+      structure       { L $$ STRUCTURE }
+      struct          { L $$ STRUCT }
+      end             { L $$ END }
+      val             { L $$ VAL }
 
-%nonassoc ifprec letprec
+%nonassoc ifprec letprec curryprec
 %left '||'
 %left '&&'
 %left '&' '^' '|'
@@ -179,7 +188,9 @@ import Language.Futhark.Parser.Lexer
 %left pow
 %nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
+%nonassoc Id
 %%
+
 
 Prog :: { UncheckedProgWithHeaders }
      :   Headers DecStart { ProgWithHeaders $1 $2 }
@@ -194,20 +205,87 @@ DecStart :: { [DecBase f vn] }
 
 Decs :: { [DecBase f vn] }
      : Dec Decs { $1 : $2 }
+     | MultiDec Decs { $1 ++ $2 }
      | Dec { [$1] }
+     | MultiDec { $1 }
 ;
 
 Dec :: { DecBase f vn }
-       : Fun { FunDec $1 }
-       | UserTypeAlias { TypeDec $1 }
+    : FunOrType { FunOrTypeDec $1 }
+    | Signature { SigDec $1 }
+    | Module { ModDec $1 }
 ;
 
+MultiDec :: { [DecBase f vn] }
+         : UserTypeAliases { $1 }
+;
+
+UserTypeAliases : type Aliases '=' UserType
+                  { let aliases = $2
+                      in map (\(name, loc) -> FunOrTypeDec (TypeDec (TypeDef name (TypeDecl $4 NoInfo) loc))) aliases }
+;
+
+Aliases : id ',' Aliases
+            { let L loc (ID name) = $1
+                in (name,loc) : $3 }
+        | id { let L loc (ID name) = $1
+               in [(name,loc)] }
+;
+FunOrType : Fun { FunDec $1 }
+          | UserTypeAlias { TypeDec $1 }
+
+Signature :: { SigDefBase f vn }
+          : signature id '=' sig SigDecs end
+              { let L pos (ID name) = $2
+                 in SigDef name $5 pos }
+
+Module :: { ModDefBase f vn }
+       : structure id '=' struct ModDecs end
+       { let L pos (ID name) = $2
+          in ModDef name $5 pos }
+
+ModDecs : ModDec ModDecs { $1 : $2 }
+        | ModDec { [$1] }
+;
+
+ModDec : FunOrType { FunOrTypeDec $1 }
+       | Module { ModDec $1 }
+;
+
+SigDecs : SigDec SigDecs { $1 : $2 }
+        | SigDec { [$1] }
+
+SigDec : FunSig { $1 }
+       | TypeSig { $1 }
+
+FunSig : fun id ':' FunSigArgs '->' UserTypeDecl
+           { let L _ (ID name) = $2
+              in FunSig name $4 $6 }
+       | fun id ':' UserTypeDecl
+           { let L _ (ID name) = $2
+              in FunSig name [] $4 }
+;
+
+FunSigArgs : UserTypeDecl          { [$1] }
+           | '(' UserTypeDecls ')' {  $2  }
+
+TypeSig : type id ':' UserTypeDecl
+            { let L loc (ID name) = $2
+                in TypeSig (TypeDef name $4 loc) }
+;
 
 DefaultDec :: { () }
            :  default '(' SignedType ')' {% defaultIntType (fst $3)  }
            |  default '(' FloatType ')' {% defaultRealType (fst $3) }
            |  default '(' SignedType ',' FloatType ')'
                 {% defaultIntType (fst $3) >> defaultRealType (fst $5) }
+;
+
+
+LongName :: { (LongName , SrcLoc) }
+         : id '.' LongName { let L loc (ID qual) = $1; ((quals, name), _) = $3
+                             in ((qual:quals, name), loc) }
+         | id { let L loc (ID name) = $1 in (([], name), loc) }
 ;
 
 -- Note that this production does not include Minus.
@@ -258,16 +336,16 @@ IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
 
 Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDef (name==defaultEntryPoint) name $2 $5 $8 pos }
+                            in FunDef (name==defaultEntryPoint) (name, blankLongname) $2 $5 $8 pos }
         | fun UserTypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDef (name==defaultEntryPoint) name $2 [] $7 pos }
+                            in FunDef (name==defaultEntryPoint) (name, blankLongname) $2 [] $7 pos }
         | entry UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDef True name $2 $5 $8 pos }
+                            in FunDef True (name, blankLongname) $2 $5 $8 pos }
         | entry UserTypeDecl id '(' ')' '=' Exp
                         { let L pos (ID name) = $3
-                          in FunDef True name $2 [] $7 pos }
+                            in FunDef True (name, blankLongname) $2 [] $7 pos }
 ;
 Uniqueness :: { Uniqueness }
 Uniqueness : '*' { Unique }
@@ -275,19 +353,22 @@ Uniqueness : '*' { Unique }
 
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
-              : UserType { TypeDecl $1 NoInfo }
+             : UserType { TypeDecl $1 NoInfo }
+
+UserTypeDecls : UserTypeDecl ',' UserTypeDecls { $1 : $3 }
+              | UserTypeDecl { [$1] }
 
 UserTypeAlias :: { TypeDefBase NoInfo Name }
-UserTypeAlias  : type id '=' UserType { let L loc (ID name) = $2
-                                        in TypeDef name (TypeDecl $4 NoInfo) loc
-                                      }
+UserTypeAlias  : type id '=' UserType
+                 { let L loc (ID name) = $2
+                     in TypeDef name (TypeDecl $4 NoInfo) loc }
 
 UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
          | '*' UserType  { UserUnique $2 $1 }
          | '[' UserType DimDecl ']' { UserArray $2 $3 $1 }
          | '(' UserType ',' UserTypes ')' { UserTuple ($2:$4) $1 }
-         | id            { let L loc (ID name) = $1 in UserTypeAlias name loc }
+         | LongName { UserTypeAlias (fst $1) (snd $1) }
 ;
 
 UserTypes :: { [UncheckedUserType] }
@@ -376,12 +457,10 @@ Exp  :: { UncheckedExp }
      | if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
-     | id '(' Exps ')'
-                      { let L pos (ID name) = $1
-                        in Apply name [ (arg, Observe) | arg <- $3 ] NoInfo pos
+     | LongName '(' Exps ')'
+       { Apply (fst $1) [ (arg, Observe) | arg <- $3 ] NoInfo (snd $1)
                       }
-     | id '(' ')'     { let L pos (ID name) = $1
-                        in Apply name [] NoInfo pos }
+     | LongName '(' ')'     { Apply (fst $1) [] NoInfo (snd $1) }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
@@ -502,7 +581,7 @@ Index : '[' Exps ']'                  { $2 }
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
 
-Id : id { let L loc (ID name) = $1 in Ident name NoInfo loc }
+Id : LongName { let (([], name), loc) = $1 in Ident name NoInfo loc }
 
 Patterns : Pattern ',' Patterns  { $1 : $3 }
          | Pattern               { [$1] }
@@ -516,17 +595,15 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
 FunAbstr :: { UncheckedLambda }
          : fn UserTypeDecl '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
-         | id '(' Exps ')'
-           { let L pos (ID name) = $1
-             in CurryFun name $3 NoInfo pos }
-         | id '(' ')'
-           { let L pos (ID name) = $1
-             in CurryFun name [] NoInfo pos }
-         | id
-           { let L pos (ID name) = $1
-             in CurryFun name [] NoInfo pos }
+         | LongName '(' Exps ')'
+           { CurryFun (fst $1) $3 NoInfo (snd $1) }
+         | LongName '(' ')'
+           { CurryFun (fst $1) [] NoInfo (snd $1) }
+         | LongName
+           { CurryFun (fst $1) [] NoInfo (snd $1) }
            -- Minus is handed explicitly here because I could figure
            -- out how to resolve the ambiguity with negation.
+
          | '-' Exp
            { CurryBinOpRight Minus $2 NoInfo NoInfo $1 }
          | '-'
