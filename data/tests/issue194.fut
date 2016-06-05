@@ -1,6 +1,8 @@
 -- Test program for issue #194.
 --
 -- Revealed a bug in in-place-lowering.
+-- ==
+-- tags { no_opencl }
 
 fun [[int, numBins2]] main([f32, numD] points,
                            i32 numBins,
