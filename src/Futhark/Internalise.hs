@@ -679,11 +679,8 @@ internaliseExp desc (E.Write i v as loc) = do
                    , I.lambdaBody = body
                    }
       sivs = sis' ++ svs'
-
-  let certs = []
-  ats <- mapM lookupType sas
-  let soac = I.Write certs len lam sivs sas ats
-  letTupExp' desc $ I.Op soac
+  aws <- mapM (fmap (arraySize 0) . lookupType) sas
+  letTupExp' desc $ I.Op $ I.Write [] len lam sivs $ zip aws sas
 
 internaliseScanOrReduce :: String -> String
                         -> (Certificates -> SubExp -> I.Lambda -> [(SubExp, VName)] -> SOAC SOACS)

@@ -57,9 +57,9 @@ data SOAC lore =
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
-  | Write Certificates SubExp (LambdaT lore) [VName] [VName] [Type]
+  | Write Certificates SubExp (LambdaT lore) [VName] [(SubExp, VName)]
     -- Write <cs> <length> <lambda> <original index and value arrays>
-    -- <input/output arrays> <types of input/output arrays>
+    -- <input/output arrays along with their sizes>
     --
     -- <length> is the length of each index array and value array, since they
     -- all must be the same length for any fusion to make sense.  If you have a
@@ -137,22 +137,13 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
-mapSOACM tv (Write cs len lam ivs as ts) =
+mapSOACM tv (Write cs len lam ivs as) =
   Write
   <$> mapOnSOACCertificates tv cs
   <*> mapOnSOACSubExp tv len
   <*> mapOnSOACLambda tv lam
   <*> mapM (mapOnSOACVName tv) ivs
-  <*> mapM (mapOnSOACVName tv) as
-  <*> mapM (mapOnSOACType tv) ts
-
--- FIXME: Make this less hacky.
-mapOnSOACType :: (Monad m, Applicative m) =>
-                 SOACMapper flore tlore m -> Type -> m Type
-mapOnSOACType _tv (Prim pt) = pure $ Prim pt
-mapOnSOACType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
-  where f (Shape dims) = Shape <$> mapM (mapOnSOACSubExp tv) dims
-mapOnSOACType _tv (Mem se s) = pure $ Mem se s
+  <*> mapM (\(aw,a) -> (,) <$> mapOnSOACSubExp tv aw <*> mapOnSOACVName tv a) as
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
@@ -203,8 +194,11 @@ soacType (Stream _ outersize form lam _) =
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
-soacType (Write _cs _len _lam _ivs _as ts) =
-  staticShapes ts
+soacType (Write _cs _w lam _ivs as) =
+  staticShapes $ zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
+  where lam_ts = lambdaReturnType lam
+        n = length lam_ts
+        ws = map fst as
 
 instance Attributes lore => TypedOp (SOAC lore) where
   opType = pure . soacType
@@ -224,7 +218,7 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
                Sequential _       -> []
     in  a1 ++ bodyAliases (extLambdaBody lam)
-  opAliases (Write _cs _len lam _ivs _as _ts) =
+  opAliases (Write _cs _len lam _ivs _as) =
     map (const mempty) $ lambdaReturnType lam
 
   -- Only Map, Redomap and Stream can consume anything.  The operands
@@ -276,8 +270,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
-  addOpAliases (Write cs len lam ivs as ts) =
-    Write cs len (Alias.analyseLambda lam) ivs as ts
+  addOpAliases (Write cs len lam ivs as) =
+    Write cs len (Alias.analyseLambda lam) ivs as
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -333,8 +327,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
-  addOpRanges (Write cs len lam ivs as ts) =
-    Write cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as ts
+  addOpRanges (Write cs len lam ivs as) =
+    Write cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -449,7 +443,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs _len _lam ivs as _ts) = do
+typeCheckSOAC (Write cs w _lam ivs as) = do
   -- Requirements:
   --
   --   0. @ivs@ must be a list [indexes arrays..., values arrays] == is ++ vs
@@ -467,19 +461,21 @@ typeCheckSOAC (Write cs _len _lam ivs as _ts) = do
   --
   -- Code:
 
-  -- First check the certificates.
+  -- First check the certificates and input size.
   mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
 
   -- 0.
   let ivsLen = length ivs `div` 2
       is = take ivsLen ivs
       vs = drop ivsLen ivs
 
-  forM_ (zip3 is vs as) $ \(i, v, a) -> do
+  forM_ (zip3 is vs as) $ \(i, v, (aw, a)) -> do
     -- 1.
     iLen <- arraySize 0 <$> lookupType i
     vLen <- arraySize 0 <$> lookupType v
     TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+    TC.require [Prim int32] aw
 
     -- 2.
     vType <- lookupType v
@@ -551,7 +547,7 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
-  opMetrics (Write _cs _len lam _ivs _as _ts) =
+  opMetrics (Write _cs _len lam _ivs _as) =
     inside "Write" $ lambdaMetrics lam
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
@@ -594,8 +590,8 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Write cs len lam ivs as _ts) =
-    PP.ppCertificates' cs <> ppSOAC "write" len [lam] (Just (map Var ivs)) as
+  ppr (Write cs len lam ivs as) =
+    PP.ppCertificates' cs <> ppSOAC "write" len [lam] (Just (map Var ivs)) (map snd as)
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =

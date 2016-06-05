@@ -703,7 +703,7 @@ evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
                 acc_arr = zipWith (:) res_arr arr
             return (res_acc, acc_arr)
 
-evalSOAC (Write _cs len lam ivs as _ts) = do
+evalSOAC (Write _cs len lam ivs as) = do
 
   let valInt :: Value -> FutharkM Int
       valInt (PrimVal (IntValue (Int32Value l))) = return $ fromIntegral l
@@ -711,7 +711,7 @@ evalSOAC (Write _cs len lam ivs as _ts) = do
 
   len' <- valInt =<< evalSubExp len
 
-  as' <- mapM lookupVar as
+  as' <- mapM (lookupVar . snd) as
 
   -- Calculate all indexes and values.
   ivs' <- soacArrays len ivs

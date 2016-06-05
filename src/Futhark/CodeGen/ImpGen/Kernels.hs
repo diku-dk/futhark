@@ -596,9 +596,10 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dests)
-  (WriteKernel _cs len kernel_size lam ivs as _ts) = do
+  (WriteKernel _cs len kernel_size lam ivs input) = do
 
   let len' = ImpGen.compileSubExp len
+      (_, as) = unzip input
 
   ts <- mapM lookupType as -- same as _ts
   let as_sizes = map (ImpGen.compileSubExp . arraySize 0) ts

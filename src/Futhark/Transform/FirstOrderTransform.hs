@@ -577,10 +577,10 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs len lam ivs as _ts) = do
+transformSOAC pat (Write cs len lam ivs as) = do
   iter <- newVName "write_iter"
 
-  ts <- mapM lookupType as -- same as _ts
+  ts <- mapM (lookupType . snd) as
   asOuts <- mapM (newIdent "write_out") ts
 
 --  ivs' <- bindLambda lam (map (PrimOp . SubExp . Var) ivs)
@@ -588,7 +588,7 @@ transformSOAC pat (Write cs len lam ivs as _ts) = do
   let ivsLen = length (lambdaReturnType lam) `div` 2
 
   -- Write is in-place, so we use the input array as the output array.
-  let merge = loopMerge asOuts (map Var as)
+  let merge = loopMerge asOuts $ map (Var . snd) as
   loopBody <- runBodyBinder $
     localScope (HM.insert iter IndexInfo $
                 scopeOfFParams $ map fst merge) $ do
@@ -623,11 +623,6 @@ transformSOAC pat (Write cs len lam ivs as _ts) = do
         $ staticShapes [t]
     return $ resultBody (map Var ress)
   letBind_ pat $ DoLoop [] merge (ForLoop iter len) loopBody
-
--- FIXME: Make nicer.
-subExpToVName (Var v) = return v
-subExpToVName (Constant _) = fail "subExpToVName: expecting Var, got Constant"
-
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
