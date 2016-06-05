@@ -599,12 +599,8 @@ kernelCompiler
   (WriteKernel _cs len kernel_size lam ivs input) = do
 
   let len' = ImpGen.compileSubExp len
-      (_, as) = unzip input
-
-  ts <- mapM lookupType as -- same as _ts
-  let as_sizes = map (ImpGen.compileSubExp . arraySize 0) ts
-
-  let (tid_param, [], real_params) =
+      as_sizes = map (ImpGen.compileSubExp . fst) input
+      (tid_param, [], real_params) =
         partitionChunkedFoldParameters 0 $ lambdaParams lam
       global_thread_index = paramName tid_param
       get_thread_index =
