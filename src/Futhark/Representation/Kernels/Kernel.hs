@@ -296,10 +296,11 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
-kernelType (WriteKernel _ w _ lam _ _) =
-  map (`arrayOfRow` w) $ snd $ splitAt (n `div` 2) lam_ts
+kernelType (WriteKernel _ _ _ lam _ input) =
+  zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
+        ws = map fst input
 
 kernelType NumGroups =
   [Prim int32]
