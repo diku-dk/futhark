@@ -35,7 +35,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), ppr, comma, commasep, semisep, Doc, Pretty, parens, text)
+  ((</>), ppr, comma, commasep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
@@ -57,8 +57,22 @@ data SOAC lore =
   | Scan Certificates SubExp (LambdaT lore) [(SubExp, VName)]
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
-  | Write Certificates [Type] VName [VName] [VName]
-    -- ^ Not really a SOAC, but gets its own kernel.
+  | Write Certificates SubExp (LambdaT lore) [VName] [VName] [Type]
+    -- Write <cs> <length> <lambda> <original index and value arrays>
+    -- <input/output arrays> <types of input/output arrays>
+    --
+    -- <length> is the length of each index array and value array, since they
+    -- all must be the same length for any fusion to make sense.  If you have a
+    -- list of index-value array pairs of different sizes, you need to use
+    -- multiple writes instead.
+    --
+    -- The lambda takes the the input and returns the output in this format:
+    --   [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
+    --
+    -- The original index arrays and value arrays are concatenated.
+    --
+    -- FIXME: Don't store the types of the input/output arrays in the
+    -- constructor.  This is wasteful.
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -123,12 +137,14 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
-mapSOACM tv (Write cs ts i vs as) =
-  Write <$> mapOnSOACCertificates tv cs
-  <*> mapM (mapOnSOACType tv) ts
-  <*> mapOnSOACVName tv i
-  <*> mapM (mapOnSOACVName tv) vs
+mapSOACM tv (Write cs len lam ivs as ts) =
+  Write
+  <$> mapOnSOACCertificates tv cs
+  <*> mapOnSOACSubExp tv len
+  <*> mapOnSOACLambda tv lam
+  <*> mapM (mapOnSOACVName tv) ivs
   <*> mapM (mapOnSOACVName tv) as
+  <*> mapM (mapOnSOACType tv) ts
 
 -- FIXME: Make this less hacky.
 mapOnSOACType :: (Monad m, Applicative m) =>
@@ -187,7 +203,7 @@ soacType (Stream _ outersize form lam _) =
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
-soacType (Write _ ts _ _ _) =
+soacType (Write _cs _len _lam _ivs _as ts) =
   staticShapes ts
 
 instance Attributes lore => TypedOp (SOAC lore) where
@@ -208,8 +224,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
                Sequential _       -> []
     in  a1 ++ bodyAliases (extLambdaBody lam)
-  opAliases Write{} =
-    [mempty]
+  opAliases (Write _cs _len lam _ivs _as _ts) =
+    map (const mempty) $ lambdaReturnType lam
 
   -- Only Map, Redomap and Stream can consume anything.  The operands
   -- to Scan and Reduce functions are always considered "fresh".
@@ -260,8 +276,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
-  addOpAliases (Write cs ts i vs as) =
-    Write cs ts i vs as
+  addOpAliases (Write cs len lam ivs as ts) =
+    Write cs len (Alias.analyseLambda lam) ivs as ts
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -317,8 +333,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
-  addOpRanges (Write cs ts i vs as) =
-    Write cs ts i vs as
+  addOpRanges (Write cs len lam ivs as ts) =
+    Write cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as ts
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -433,31 +449,33 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs ts i vs as) = do
+typeCheckSOAC (Write cs _len _lam ivs as _ts) = do
   -- Requirements:
   --
-  --   1. @i@ must be an array of i32.
+  --   0. @ivs@ must be a list [indexes arrays..., values arrays] == is ++ vs
   --
-  --   2. @v@ and @a@ must have the same type (though not necessarily the same
-  --   length).
+  --   1. Each array in @is@ must have the type [i32].
   --
-  --   3. The return type @t@ must be the same type as @a@.
+  --   2. Each array pair in @vs@ and @as@ must have the same type (though not
+  --   necessarily the same length).
   --
-  --   4. @a@ must be unique and must not alias @v@, since otherwise
-  --   there might be indeterministic behaviour.
+  --   3. Each array in @as@ is consumed.  This is not really a check, but more
+  --   of a requirement, so that e.g. the source is not hoisted out of a loop,
+  --   which will mean it cannot be consumed.
   --
-  --   5. @a@ is consumed.  But this is not really a check, but more of a
-  --   requirement, so that e.g. the source is not hoisted out of a loop, which
-  --   will mean it cannot be consumed.
-  --
-  --   6. @i@ and @v@ must have the same length.
+  --   4. @i@ and @v@ must have the same length.
   --
   -- Code:
 
-  -- Check the certificates.
+  -- First check the certificates.
   mapM_ (TC.requireI [Prim Cert]) cs
 
-  forM_ (zip3 ts vs as) $ \(t, v, a) -> do
+  -- 0.
+  let ivsLen = length ivs `div` 2
+      is = take ivsLen ivs
+      vs = drop ivsLen ivs
+
+  forM_ (zip3 is vs as) $ \(i, v, a) -> do
     -- 1.
     iLen <- arraySize 0 <$> lookupType i
     vLen <- arraySize 0 <$> lookupType v
@@ -474,16 +492,11 @@ typeCheckSOAC (Write cs ts i vs as) = do
         "Write values and input arrays do not have the same primitive type"
 
     -- 3.
-    TC.require [t] (Var a)
-
-    -- 4.
-
-    -- 5.
     TC.consume =<< TC.lookupAliases a
 
-    -- 6.
+    -- 4.
     unless (iLen == vLen) $
-      TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
+      TC.bad $ TC.TypeError "Write value and index array do not have the same length."
 
 typeCheckSOAC (Reduce ass size _ fun inputs) =
   typeCheckScanReduce ass size fun inputs
@@ -538,8 +551,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Redomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
-  opMetrics Write{} =
-    inside "Write" $ return ()
+  opMetrics (Write _cs _len lam _ivs _as _ts) =
+    inside "Write" $ lambdaMetrics lam
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
@@ -581,9 +594,8 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
   ppr (Scan cs size lam inputs) =
     PP.ppCertificates' cs <> ppSOAC "scan" size [lam] (Just es) as
     where (es, as) = unzip inputs
-  ppr (Write cs _ts i vs as) =
-    PP.ppCertificates' cs <> text "write"
-    <> parens (semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
+  ppr (Write cs len lam ivs as _ts) =
+    PP.ppCertificates' cs <> ppSOAC "write" len [lam] (Just (map Var ivs)) as
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =
