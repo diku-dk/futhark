@@ -300,16 +300,16 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     ------------------
 
     -- Map-write fusion.
-    (SOAC.Write _cs _len _lam _ivs as ts,
+    (SOAC.Write _cs _len _lam _ivs as,
      SOAC.Map {})
       | mapWriteFusionOK outVars ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
-            SOAC.Write (cs1++cs2) w res_lam' new_inp as ts
+            SOAC.Write (cs1++cs2) w res_lam' new_inp as
 
     -- Write-write fusion.
-    (SOAC.Write _cs2 _len2 _lam2 ivs2 as2 ts2,
-     SOAC.Write _cs1 _len1 _lam1 ivs1 as1 ts1)
+    (SOAC.Write _cs2 _len2 _lam2 ivs2 as2,
+     SOAC.Write _cs1 _len1 _lam1 ivs1 as1)
       | horizFuse -> do
           let zipW xs ys = ys1 ++ xs1 ++ ys2 ++ xs2
                 where len = length xs `div` 2 -- same as with ys
@@ -327,7 +327,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
                             , lambdaReturnType = zipW (lambdaReturnType lam1) (lambdaReturnType lam2)
                             }
           success (outNames ker ++ returned_outvars) $
-            SOAC.Write (cs1 ++ cs2) w lam' (zipW ivs1 ivs2) (as2 ++ as1) (ts2 ++ ts1)
+            SOAC.Write (cs1 ++ cs2) w lam' (zipW ivs1 ivs2) (as2 ++ as1)
 
     (SOAC.Write {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"

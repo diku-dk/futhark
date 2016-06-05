@@ -128,14 +128,13 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                            arrinps')
             | otherwise = return (lam, arrinps)
 
-  simplifyOp (Write cs len lam ivs as ts) = do
+  simplifyOp (Write cs len lam ivs as) = do
     cs' <- Engine.simplify cs
     len' <- Engine.simplify len
     lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
     ivs' <- mapM Engine.simplify ivs
     as' <- mapM Engine.simplify as
-    ts' <- mapM Engine.simplify ts
-    return $ Write cs' len' lam' ivs' as' ts'
+    return $ Write cs' len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
@@ -218,10 +217,10 @@ removeReplicateRedomap _ _ = cannotSimplify
 
 -- | Like 'removeReplicateMapping', but for 'Write'.
 removeReplicateWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
-removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as ts)))
+removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as)))
   | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
       mapM_ (uncurry letBindNames') bnds
-      letBind_ pat $ Op $ Write cs len lam' ivs' as ts
+      letBind_ pat $ Op $ Write cs len lam' ivs' as
 removeReplicateWrite _ _ = cannotSimplify
 
 removeReplicateInput :: ST.SymbolTable lore

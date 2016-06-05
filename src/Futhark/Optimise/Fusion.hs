@@ -540,7 +540,7 @@ fusionGatherBody fres (Body _ (bnd@(Let pat _ e):bnds) res) = do
     Right soac@(SOAC.Map _ _ lam _) ->
       mapLike soac lam
 
-    Right soac@(SOAC.Write _cs _len lam _ivs _as _ts) ->
+    Right soac@(SOAC.Write _cs _len lam _ivs _as) ->
       mapLike soac lam
 
     Right soac@(SOAC.Redomap _ _ _ outer_red inner_red nes _) ->

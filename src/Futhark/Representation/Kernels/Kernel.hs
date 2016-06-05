@@ -80,8 +80,7 @@ data Kernel lore =
     KernelSize
     (LambdaT lore)
     [VName]
-    [VName]
-    [Type]
+    [(SubExp, VName)]
     -- See SOAC.hs for what the different WriteKernel arguments mean.
   | NumGroups
   | GroupSize
@@ -178,26 +177,16 @@ mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (WriteKernel cs len kernel_size lam ivs as ts) =
+mapKernelM tv (WriteKernel cs len kernel_size lam ivs as) =
   WriteKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv len <*>
   mapOnKernelSize tv kernel_size <*>
   mapOnKernelLambda tv lam <*>
   mapM (mapOnKernelVName tv) ivs <*>
-  mapM (mapOnKernelVName tv) as <*>
-  mapM (mapOnKernelType tv) ts
+  mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
-
--- FIXME: Make this less hacky.
-mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
-                   KernelMapper flore tlore m -> Type -> m Type
-mapOnKernelType _tv (Prim pt) = pure $ Prim pt
-mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
-  where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
-mapOnKernelType _tv (Mem se s) = pure $ Mem se s
-
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -307,8 +296,11 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
-kernelType (WriteKernel _ _ _ _ _ _ ts) =
-  ts
+kernelType (WriteKernel _ w _ lam _ _) =
+  map (`arrayOfRow` w) $ snd $ splitAt (n `div` 2) lam_ts
+  where lam_ts = lambdaReturnType lam
+        n = length lam_ts
+
 kernelType NumGroups =
   [Prim int32]
 kernelType GroupSize =
@@ -387,8 +379,8 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     map (UT.consumedUsage . kernelInputArray) $
     filter ((`HS.member` consumed_in_body) . kernelInputName) inps
     where consumed_in_body = consumedInBody body
-  usageInOp (WriteKernel _ _ _ _ _ as _) =
-    mconcat $ map UT.consumedUsage as
+  usageInOp (WriteKernel _ _ _ _ _ as) =
+    mconcat $ map (UT.consumedUsage . snd) as
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
 
@@ -506,7 +498,7 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
-typeCheckKernel (WriteKernel cs _len _kernel_size _lam ivs as _ts) = do
+typeCheckKernel (WriteKernel cs w _kernel_size _lam ivs as) = do
   -- Requirements:
   --
   --   0. @ivs@ must be a list [indexes arrays..., values arrays] == is ++ vs
@@ -524,19 +516,21 @@ typeCheckKernel (WriteKernel cs _len _kernel_size _lam ivs as _ts) = do
   --
   -- Code:
 
-  -- First check the certificates.
+  -- First check the certificates and input size.
   mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
 
   -- 0.
   let ivsLen = length ivs `div` 2
       is = take ivsLen ivs
       vs = drop ivsLen ivs
 
-  forM_ (zip3 is vs as) $ \(i, v, a) -> do
+  forM_ (zip3 is vs as) $ \(i, v, (aw, a)) -> do
     -- 1.
     iLen <- arraySize 0 <$> lookupType i
     vLen <- arraySize 0 <$> lookupType v
     TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+    TC.require [Prim int32] aw
 
     -- 2.
     vType <- lookupType v
@@ -605,7 +599,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
-  opMetrics (WriteKernel _cs _len _kernel_size lam _ivs _as _ts) =
+  opMetrics (WriteKernel _cs _len _kernel_size lam _ivs _as) =
     inside "WriteKernel" $ lambdaMetrics lam
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
@@ -645,7 +639,7 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr arrs) <> comma </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
-  ppr (WriteKernel cs len kernel_size lam ivs as _ts) =
+  ppr (WriteKernel cs len kernel_size lam ivs as) =
     ppCertificates' cs <> text "writeKernel" <>
     parens (ppr len <> comma </>
             ppr kernel_size <> comma </>

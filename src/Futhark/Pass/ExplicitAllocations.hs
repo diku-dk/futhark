@@ -582,7 +582,7 @@ allocInExp (Op (ScanKernel cs w size lam foldlam nes arrs)) = do
   foldlam' <- allocInReduceLambda foldlam (length nes) $ kernelWorkgroupSize size
   return $ Op $ Inner $ ScanKernel cs w size lam' foldlam' nes arrs
 
-allocInExp (Op (WriteKernel cs len kernel_size lam ivs as ts)) = do
+allocInExp (Op (WriteKernel cs len kernel_size lam ivs as)) = do
   -- We require Write to be in-place, so there is no need to allocate any
   -- memory, except for the parameters.
   let (tid_param, [], real_params) =
@@ -591,7 +591,7 @@ allocInExp (Op (WriteKernel cs len kernel_size lam ivs as ts)) = do
   params' <- zipWithM (allocInWriteParam $ Var $ paramName tid_param)
              real_params ivs
   lam' <- allocInLambda (tid_param' : params') (lambdaBody lam) (lambdaReturnType lam)
-  return $ Op $ Inner $ WriteKernel cs len kernel_size lam' ivs as ts
+  return $ Op $ Inner $ WriteKernel cs len kernel_size lam' ivs as
   where allocInWriteParam tid param arr =
           case paramType param of
             Prim bt ->
