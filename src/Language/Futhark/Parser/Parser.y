@@ -257,9 +257,9 @@ FunSig : fun id ':' UserTypeDecls '->' UserTypeDecl
 ;
 
 
-TypeSig : type id ':' UserType
+TypeSig : type id ':' UserTypeDecl
             { let L loc (ID name) = $2
-                in TypeSig (TypeDef name (TypeDecl $4 NoInfo) loc) }
+                in TypeSig (TypeDef name $4 loc) }
 ;
 
 DefaultDec :: { () }
@@ -407,7 +407,7 @@ Exp  :: { UncheckedExp }
                              t <- lift $ gets parserIntType
                              return $ Literal (ArrayValue (arrayFromList $ map (PrimValue . SignedValue) s') $ Prim $ Signed t) pos }
      | Id %prec letprec { Var $1 }
-     | empty '(' UserType ')' { Empty (TypeDecl $3 NoInfo) $1 }
+     | empty '(' UserTypeDecl ')' { Empty $3 $1 }
      | '[' Exps ']'   { ArrayLit $2 NoInfo $1 }
      | '(' Exp ',' Exps ')'   { TupLit ($2:$4) $1 }
      | '('      ')'   { TupLit [] $1 }
