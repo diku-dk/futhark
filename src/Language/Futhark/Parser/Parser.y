@@ -204,26 +204,17 @@ DecStart :: { [DecBase f vn] }
 ;
 
 Decs :: { [DecBase f vn] }
-     : Dec Decs { $1 : $2 }
-     | MultiDec Decs { $1 ++ $2 }
-     | Dec { [$1] }
-     | MultiDec { $1 }
+     : Dec Decs { $1 ++ $2 }
+     | Dec { $1 }
 ;
 
-Dec :: { DecBase f vn }
-    : FunOrType { FunOrTypeDec $1 }
-    | Signature { SigDec $1 }
-    | Module { ModDec $1 }
+Dec :: { [DecBase f vn] }
+    : Fun { map (FunOrTypeDec . FunDec) [$1] }
+    | UserTypeAlias { map (FunOrTypeDec . TypeDec) $1 }
+    | Signature { [ SigDec $1 ] }
+    | Module { [ ModDec $1 ] }
 ;
 
-MultiDec :: { [DecBase f vn] }
-         : UserTypeAliases { $1 }
-;
-
-UserTypeAliases : type Aliases '=' UserType
-                  { let aliases = $2
-                      in map (\(name, loc) -> FunOrTypeDec (TypeDec (TypeDef name (TypeDecl $4 NoInfo) loc))) aliases }
-;
 
 Aliases : id ',' Aliases
             { let L loc (ID name) = $1
@@ -231,8 +222,6 @@ Aliases : id ',' Aliases
         | id { let L loc (ID name) = $1
                in [(name,loc)] }
 ;
-FunOrType : Fun { FunDec $1 }
-          | UserTypeAlias { TypeDec $1 }
 
 Signature :: { SigDefBase f vn }
           : signature id '=' sig SigDecs end
@@ -244,12 +233,13 @@ Module :: { ModDefBase f vn }
        { let L pos (ID name) = $2
           in ModDef name $5 pos }
 
-ModDecs : ModDec ModDecs { $1 : $2 }
-        | ModDec { [$1] }
+ModDecs : ModDec ModDecs { $1 ++ $2 }
+        | ModDec { $1 }
 ;
 
-ModDec : FunOrType { FunOrTypeDec $1 }
-       | Module { ModDec $1 }
+ModDec : UserTypeAlias { map (FunOrTypeDec . TypeDec) $1 }
+       | Fun { map (FunOrTypeDec . FunDec) [$1] }
+       | Module { [ModDec $1] }
 ;
 
 SigDecs : SigDec SigDecs { $1 : $2 }
@@ -258,20 +248,18 @@ SigDecs : SigDec SigDecs { $1 : $2 }
 SigDec : FunSig { $1 }
        | TypeSig { $1 }
 
-FunSig : fun id ':' FunSigArgs '->' UserTypeDecl
+FunSig : fun id ':' UserTypeDecls '->' UserTypeDecl
            { let L _ (ID name) = $2
-              in FunSig name $4 $6 }
+              in FunSig name $4 $6  }
        | fun id ':' UserTypeDecl
            { let L _ (ID name) = $2
               in FunSig name [] $4 }
 ;
 
-FunSigArgs : UserTypeDecl          { [$1] }
-           | '(' UserTypeDecls ')' {  $2  }
 
-TypeSig : type id ':' UserTypeDecl
+TypeSig : type id ':' UserType
             { let L loc (ID name) = $2
-                in TypeSig (TypeDef name $4 loc) }
+                in TypeSig (TypeDef name (TypeDecl $4 NoInfo) loc) }
 ;
 
 DefaultDec :: { () }
@@ -358,16 +346,17 @@ UserTypeDecl :: { TypeDeclBase NoInfo Name }
 UserTypeDecls : UserTypeDecl ',' UserTypeDecls { $1 : $3 }
               | UserTypeDecl { [$1] }
 
-UserTypeAlias :: { TypeDefBase NoInfo Name }
-UserTypeAlias  : type id '=' UserType
-                 { let L loc (ID name) = $2
-                     in TypeDef name (TypeDecl $4 NoInfo) loc }
+UserTypeAlias :: { [TypeDefBase f vn] }
+UserTypeAlias : type Aliases '=' UserTypeDecl
+                  { let aliases = $2
+                      in map (\(name, loc) -> TypeDef name $4 loc) aliases }
+;
 
 UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
          | '*' UserType  { UserUnique $2 $1 }
          | '[' UserType DimDecl ']' { UserArray $2 $3 $1 }
-         | '(' UserType ',' UserTypes ')' { UserTuple ($2:$4) $1 }
+         | '(' UserTypes ')' { UserTuple $2 $1 }
          | LongName { UserTypeAlias (fst $1) (snd $1) }
 ;
 
