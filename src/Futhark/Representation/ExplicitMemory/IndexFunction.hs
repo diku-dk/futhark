@@ -188,7 +188,7 @@ rotate ixfun offsets = Rotate ixfun offsets
 reshape :: (Eq num, IntegralCond num) =>
            IxFun num -> ShapeChange num -> IxFun num
 
-reshape (Direct oldshape) newshape =
+reshape Direct{} newshape =
   Direct $ map newDim newshape
 
 reshape (Reshape ixfun _) newshape =
