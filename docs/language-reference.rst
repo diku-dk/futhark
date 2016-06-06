@@ -137,8 +137,8 @@ Structures
 
 Futhark supports structures which can contain type declarations, functions and structures.
 These structures can be included into any other Futhark file.
-
 The syntax is as in the following example::
+
   Vec3.fut:
     structure Vec3 =
       struct
