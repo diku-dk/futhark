@@ -119,8 +119,8 @@ optimiseBindings (bnd:bnds) m = do
       let updateBindings = map updateBinding updates
       -- Condition (5) and (7) are assumed to be checked by
       -- lowerUpdate.
-      case lowerUpdate (removeBindingAliases bnd') $ map (fmap snd) updates of
-        Just lowering -> do new_bnds <- map analyseBinding <$> lowering
+      case lowerUpdate bnd' updates of
+        Just lowering -> do new_bnds <- lowering
                             new_bnds' <- optimiseBindings new_bnds $
                                          tell bup { forwardThese = [] }
                             return $ new_bnds' ++ bnds'

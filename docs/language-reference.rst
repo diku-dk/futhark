@@ -137,8 +137,8 @@ Structures
 
 Futhark supports structures which can contain type declarations, functions and structures.
 These structures can be included into any other Futhark file.
-
 The syntax is as in the following example::
+
   Vec3.fut:
     structure Vec3 =
       struct
@@ -494,13 +494,24 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write(indexes, values, a)``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``write(iss, vss, as_1, ..., as_n)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Set each index of the ``indexes`` array in the ``a`` array to each value of
-the ``values`` array.  If an index is -1, ignore it and its associated value.
-Return the modified array.  It is an error if there are duplicate indexes.
-``write`` does its work in-place and consumes ``a``.
+The ``write`` expression calculates the equivalent of this imperative
+code::
+
+  for iter in 0..n-1 do
+    is = iss[iter]
+    vs = vss[iter]
+    as = as_iter
+    for index in 0..size(0, is)-1:
+      i = is[index]
+      v = vs[index]
+      as[i] = v
+
+All ``iss`` and ``vss`` arrays must be of the same outer size.  Use
+``zip`` to use several of those arrays as arguments.  ``write`` does
+its work in-place and consumes all ``as`` arrays.
 
 Tuple Shimming
 --------------

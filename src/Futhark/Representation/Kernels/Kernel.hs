@@ -76,8 +76,12 @@ data Kernel lore =
     StreamOrd
     (LambdaT lore)
     [VName]
-  | WriteKernel Certificates [Type] VName [VName] [VName]
-
+  | WriteKernel Certificates SubExp
+    KernelSize
+    (LambdaT lore)
+    [VName]
+    [(SubExp, VName)]
+    -- See SOAC.hs for what the different WriteKernel arguments mean.
   | NumGroups
   | GroupSize
     deriving (Eq, Show, Ord)
@@ -173,24 +177,16 @@ mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (WriteKernel cs ts i vs as) =
+mapKernelM tv (WriteKernel cs len kernel_size lam ivs as) =
   WriteKernel <$>
   mapOnKernelCertificates tv cs <*>
-  mapM (mapOnKernelType tv) ts <*>
-  mapOnKernelVName tv i <*>
-  mapM (mapOnKernelVName tv) vs <*>
-  mapM (mapOnKernelVName tv) as
+  mapOnKernelSubExp tv len <*>
+  mapOnKernelSize tv kernel_size <*>
+  mapOnKernelLambda tv lam <*>
+  mapM (mapOnKernelVName tv) ivs <*>
+  mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
-
--- FIXME: Make this less hacky.
-mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
-                   KernelMapper flore tlore m -> Type -> m Type
-mapOnKernelType _tv (Prim pt) = pure $ Prim pt
-mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
-  where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
-mapOnKernelType _tv (Mem se s) = pure $ Mem se s
-
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -300,8 +296,12 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
-kernelType (WriteKernel _ ts _ _ _) =
-  ts
+kernelType (WriteKernel _ _ _ lam _ input) =
+  zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
+  where lam_ts = lambdaReturnType lam
+        n = length lam_ts
+        ws = map fst input
+
 kernelType NumGroups =
   [Prim int32]
 kernelType GroupSize =
@@ -380,8 +380,8 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     map (UT.consumedUsage . kernelInputArray) $
     filter ((`HS.member` consumed_in_body) . kernelInputName) inps
     where consumed_in_body = consumedInBody body
-  usageInOp (WriteKernel _ _ _ _ as) =
-    mconcat $ map UT.consumedUsage as
+  usageInOp (WriteKernel _ _ _ _ _ as) =
+    mconcat $ map (UT.consumedUsage . snd) as
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
 
@@ -499,18 +499,41 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
-typeCheckKernel (WriteKernel cs ts i vs as) = do
-  mapM_ (TC.requireI [Prim Cert]) cs
+typeCheckKernel (WriteKernel cs w _kernel_size _lam ivs as) = do
+  -- Requirements:
+  --
+  --   0. @ivs@ must be a list [indexes arrays..., values arrays] == is ++ vs
+  --
+  --   1. Each array in @is@ must have the type [i32].
+  --
+  --   2. Each array pair in @vs@ and @as@ must have the same type (though not
+  --   necessarily the same length).
+  --
+  --   3. Each array in @as@ is consumed.  This is not really a check, but more
+  --   of a requirement, so that e.g. the source is not hoisted out of a loop,
+  --   which will mean it cannot be consumed.
+  --
+  --   4. @i@ and @v@ must have the same length.
+  --
+  -- Code:
 
-  forM_ (zip3 ts vs as) $ \(t, v, a) -> do
+  -- First check the certificates and input size.
+  mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
+
+  -- 0.
+  let ivsLen = length ivs `div` 2
+      is = take ivsLen ivs
+      vs = drop ivsLen ivs
+
+  forM_ (zip3 is vs as) $ \(i, v, (aw, a)) -> do
+    -- 1.
     iLen <- arraySize 0 <$> lookupType i
     vLen <- arraySize 0 <$> lookupType v
+    TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+    TC.require [Prim int32] aw
 
-    unless (iLen == vLen) $
-      TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
-
-    TC.require [Array int32 (Shape [iLen]) NoUniqueness] $ Var i
-
+    -- 2.
     vType <- lookupType v
     aType <- lookupType a
     case (vType, aType) of
@@ -520,9 +543,12 @@ typeCheckKernel (WriteKernel cs ts i vs as) = do
         TC.bad $ TC.TypeError
         "Write values and input arrays do not have the same primitive type"
 
-    TC.require [t] $ Var a
-
+    -- 3.
     TC.consume =<< TC.lookupAliases a
+
+    -- 4.
+    unless (iLen == vLen) $
+      TC.bad $ TC.TypeError "Write value and index array do not have the same length."
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
@@ -574,8 +600,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
-  opMetrics WriteKernel{} =
-    inside "WriteKernel" $ return ()
+  opMetrics (WriteKernel _cs _len _kernel_size lam _ivs _as) =
+    inside "WriteKernel" $ lambdaMetrics lam
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
 
@@ -614,9 +640,13 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr arrs) <> comma </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
-  ppr (WriteKernel cs _ts i vs as) =
-    ppCertificates' cs <> text "writeKernel" <+>
-    PP.align (PP.semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
+  ppr (WriteKernel cs len kernel_size lam ivs as) =
+    ppCertificates' cs <> text "writeKernel" <>
+    parens (ppr len <> comma </>
+            ppr kernel_size <> comma </>
+            commasep (map ppr ivs) <> comma </>
+            commasep (map ppr as) <> comma </>
+            ppr lam)
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
 

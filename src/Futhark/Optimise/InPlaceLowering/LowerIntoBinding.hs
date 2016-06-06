@@ -16,6 +16,7 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.MonadFreshNames
@@ -37,34 +38,35 @@ instance Functor DesiredUpdate where
 updateHasValue :: VName -> DesiredUpdate attr -> Bool
 updateHasValue name = (name==) . updateValue
 
-lowerUpdate :: (Bindable lore, MonadFreshNames m, LetAttr lore ~ Type) =>
+lowerUpdate :: (Bindable lore, LetAttr lore ~ (als, Type), Aliased lore,
+                MonadFreshNames m) =>
                Binding lore -> [DesiredUpdate (LetAttr lore)] -> Maybe (m [Binding lore])
 lowerUpdate (Let pat _ (DoLoop ctx val form body)) updates = do
   canDo <- lowerUpdateIntoLoop updates pat ctx val body
   Just $ do
     (prebnds, postbnds, ctxpat, valpat, ctx', val', body') <- canDo
     return $
-      prebnds ++
-      [mkLet' ctxpat valpat $ DoLoop ctx' val' form body'] ++
-      postbnds
+      prebnds ++ [mkLet' ctxpat valpat $ DoLoop ctx' val' form body'] ++ postbnds
 lowerUpdate
   (Let pat _ (PrimOp (SubExp (Var v))))
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
   | patternNames pat == [src] =
-    Just $ return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
-                              BindInPlace cs v is)] $
-                   PrimOp $ SubExp $ Var val]
+    Just $
+      return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
+                         BindInPlace cs v is)] $
+              PrimOp $ SubExp $ Var val]
 lowerUpdate
   (Let (Pattern [] [PatElem v BindVar v_attr]) _ e)
   [DesiredUpdate bindee_nm bindee_attr cs src is val]
   | v == val =
-      Just $ return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
-                                BindInPlace cs src is)] e,
-                     mkLet' [] [Ident v $ typeOf v_attr] $ PrimOp $ Index cs bindee_nm is]
+    Just $ return [mkLet [] [(Ident bindee_nm $ typeOf bindee_attr,
+                              BindInPlace cs src is)] e,
+                   mkLet' [] [Ident v $ typeOf v_attr] $ PrimOp $ Index cs bindee_nm is]
 lowerUpdate _ _ =
   Nothing
 
-lowerUpdateIntoLoop :: (Bindable lore, MonadFreshNames m, LetAttr lore ~ Type) =>
+lowerUpdateIntoLoop :: (Bindable lore, Aliased lore, LetAttr lore ~ (als, Type),
+                        MonadFreshNames m) =>
                        [DesiredUpdate (LetAttr lore)]
                     -> Pattern lore
                     -> [(FParam lore, SubExp)]
@@ -116,8 +118,8 @@ lowerUpdateIntoLoop updates pat ctx val body = do
   where usedInBody = freeInBody body
         resmap = zip (bodyResult body) $ patternValueIdents pat
 
-        mkMerges :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ Type) =>
-                    [LoopResultSummary (LetAttr lore)]
+        mkMerges :: (MonadFreshNames m, Bindable lore) =>
+                    [LoopResultSummary (als, Type)]
                  -> m ([(Param DeclType, SubExp)], [Binding lore], [Binding lore])
         mkMerges summaries = do
           ((origmerge, extramerge), (prebnds, postbnds)) <-
@@ -127,13 +129,13 @@ lowerUpdateIntoLoop updates pat ctx val body = do
         mkMerge summary
           | Just (update, mergename, mergeattr) <- relatedUpdate summary = do
             source <- newVName "modified_source"
-            let updpat = [(Ident source $ updateType update,
+            let updpat = [(Ident source $ snd $ updateType update,
                            BindInPlace
                            (updateCertificates update)
                            (updateSource update)
                            (updateIndices update))]
                 elmident = Ident (updateValue update) $
-                           rowType $ typeOf $ updateType update
+                           rowType $ snd $ updateType update
             tell ([mkLet [] updpat $ PrimOp $ SubExp $ snd $ mergeParam summary],
                   [mkLet' [] [elmident] $ PrimOp $ Index []
                    (updateName update) (updateIndices update)])
@@ -150,16 +152,16 @@ lowerUpdateIntoLoop updates pat ctx val body = do
 
         mkResAndPat' summary
           | Just (update, _, _) <- relatedUpdate summary =
-              Right (Ident (updateName update) (updateType update))
+              Right (Ident (updateName update) (snd $ updateType update))
           | otherwise =
               Left (inPatternAs summary)
 
 summariseLoop :: MonadFreshNames m =>
-                 [DesiredUpdate attr]
+                 [DesiredUpdate (als, Type)]
               -> Names
               -> [(SubExp, Ident)]
               -> [(Param DeclType, SubExp)]
-              -> Maybe (m [LoopResultSummary attr])
+              -> Maybe (m [LoopResultSummary (als, Type)])
 summariseLoop updates usedInBody resmap merge =
   sequence <$> zipWithM summariseLoopResult resmap merge
   where summariseLoopResult (se, v) (fparam, mergeinit)

@@ -353,6 +353,7 @@ data SOAC lore = Map Certificates SubExp (Lambda lore) [Input]
                | Scan Certificates SubExp (Lambda lore) [(SubExp,Input)]
                | Redomap Certificates SubExp Commutativity (Lambda lore) (Lambda lore) [SubExp] [Input]
                | Stream Certificates SubExp (StreamForm lore) (Lambda lore) [Input]
+               | Write Certificates SubExp (Lambda lore) [Input] [(SubExp, VName)]
             deriving (Show)
 
 -- | Returns the inputs used in a SOAC.
@@ -362,6 +363,7 @@ inputs (Reduce  _ _ _ _     args) = map snd args
 inputs (Scan    _ _ _       args) = map snd args
 inputs (Redomap _ _ _ _ _ _ arrs) = arrs
 inputs (Stream  _ _ _ _     arrs) = arrs
+inputs (Write _cs _len _lam ivs _as) = ivs
 
 -- | Set the inputs to a SOAC.
 setInputs :: [Input] -> SOAC lore -> SOAC lore
@@ -375,6 +377,8 @@ setInputs arrs (Redomap cs w comm lam1 lam ne _) =
   Redomap cs w comm lam1 lam ne arrs
 setInputs arrs (Stream cs w form lam _) =
   Stream cs w form lam arrs
+setInputs arrs (Write cs len lam _ivs as) =
+  Write cs len lam arrs as
 
 -- | The lambda used in a given SOAC.
 lambda :: SOAC lore -> Lambda lore
@@ -383,6 +387,7 @@ lambda (Reduce  _ _ _ lam _     ) = lam
 lambda (Scan    _ _ lam _       ) = lam
 lambda (Redomap _ _ _ _ lam2 _ _) = lam2
 lambda (Stream  _ _ _ lam      _) = lam
+lambda (Write _cs _len lam _ivs _as) = lam
 
 -- | Set the lambda used in the SOAC.
 setLambda :: Lambda lore -> SOAC lore -> SOAC lore
@@ -396,6 +401,8 @@ setLambda lam (Redomap cs w comm lam1 _ ne arrs) =
   Redomap cs w comm lam1 lam ne arrs
 setLambda lam (Stream cs w form _ arrs) =
   Stream cs w form lam arrs
+setLambda lam (Write cs len _lam ivs as) =
+  Write cs len lam ivs as
 
 -- | Returns the certificates used in a SOAC.
 certificates :: SOAC lore -> Certificates
@@ -404,6 +411,7 @@ certificates (Reduce cs _ _ _ _) = cs
 certificates (Scan cs _ _ _ ) = cs
 certificates (Redomap cs _ _ _ _ _ _) = cs
 certificates (Stream cs _ _ _ _) = cs
+certificates (Write cs _len _lam _ivs _as) = cs
 
 -- | The return type of a SOAC.
 typeOf :: SOAC lore -> [Type]
@@ -423,6 +431,11 @@ typeOf (Stream _ w form lam _) =
       arrtps  = [ arrayOf (stripArray 1 t) (Shape [w]) NoUniqueness
                   | t <- drop (length nes) (lambdaReturnType lam) ]
   in  accrtps ++ arrtps
+typeOf (Write _cs _w lam _ivs as) =
+  zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) aws
+  where lam_ts = lambdaReturnType lam
+        n = length lam_ts
+        aws = map fst as
 
 width :: SOAC lore -> SubExp
 width (Map _ w _ _) = w
@@ -430,6 +443,7 @@ width (Reduce _ w _ _ _) = w
 width (Scan _ w _ _) = w
 width (Redomap _ w _ _ _ _ _) = w
 width (Stream _ w _ _ _) = w
+width (Write _cs len _lam _ivs _as) = len
 
 -- | Convert a SOAC to the corresponding expression.
 toExp :: (MonadBinder m, Op (Lore m) ~ Futhark.SOAC (Lore m)) =>
@@ -450,6 +464,9 @@ toExp (Stream cs w form lam inps) = Op <$> do
       extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
   inpexp <- inputsToSubExps inps
   return $ Futhark.Stream cs w form extlam inpexp
+toExp (Write cs len lam ivs as) = do
+  ivs' <- inputsToSubExps ivs
+  return $ Op $ Futhark.Write cs len lam ivs' as
 
 -- | The reason why some expression cannot be converted to a 'SOAC'
 -- value.
@@ -462,7 +479,8 @@ data NotSOAC = NotSOAC -- ^ The expression is not a (tuple-)SOAC at all.
 -- | Either convert an expression to the normalised SOAC
 -- representation, or a reason why the expression does not have the
 -- valid form.
-fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f) =>
+fromExp :: (Bindable lore, Op lore ~ Futhark.SOAC lore, HasScope t f,
+            Monad f) =>
            Exp lore -> f (Either NotSOAC (SOAC lore))
 
 fromExp (Op (Futhark.Map cs w l as)) =
@@ -484,6 +502,9 @@ fromExp (Op (Futhark.Stream cs w form extlam as)) = do
                                      rtps
                     Stream cs w form lam <$> traverse varInput as
   else pure $ Left NotSOAC
+fromExp (Op (Futhark.Write cs len lam ivs as)) = do
+  ivs' <- traverse varInput ivs
+  return $ Right $ Write cs len lam ivs' as
 fromExp _ = pure $ Left NotSOAC
 
 -- | To-Stream translation of SOACs.
@@ -618,6 +639,8 @@ soacToStream soac = do
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])
+    -- If the soac is a write, don't try to do anything.
+    Write{} -> return (soac, [])
     -- HELPER FUNCTIONS
     where mkMapPlusAccLam :: (MonadFreshNames m, Bindable lore)
                           => [SubExp] -> Lambda lore -> m (Lambda lore)

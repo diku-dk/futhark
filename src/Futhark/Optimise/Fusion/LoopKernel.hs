@@ -213,6 +213,11 @@ mapFusionOK :: [VName] -> FusedKer -> Bool
 mapFusionOK outVars ker = any (`elem` inpIds) outVars
   where inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
 
+-- | Check that the consumer uses all the outputs of the producer unmodified.
+mapWriteFusionOK :: [VName] -> FusedKer -> Bool
+mapWriteFusionOK outVars ker = all (`elem` inpIds) outVars
+  where inpIds = mapMaybe SOAC.isVarishInput (inputs ker)
+
 -- | The brain of this module: Fusing a SOAC with a Kernel.
 fuseSOACwithKer :: Names -> [VName] -> SOAC -> FusedKer
                 -> TryFusion FusedKer
@@ -239,21 +244,27 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
                      , fusedVars = fusedVars_new
                      , outNames = res_outnms
                      }
+
   outPairs <- forM (zip outVars $ SOAC.typeOf soac1) $ \(outVar, t) -> do
                 outVar' <- newVName $ baseString outVar ++ "_elem"
                 return (outVar, Ident outVar' t)
+
+  let mapLikeFusionCheck =
+        let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
+            (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
+              zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+            res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+        in (extra_nms, res_lam', new_inp)
+
   case (soac2, soac1) of
     ------------------------------
     -- Redomap-Redomap Fusions: --
     ------------------------------
     (SOAC.Map {}, SOAC.Map    {})
       | mapFusionOK outVars ker || horizFuse -> do
-      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
-          (extra_nms,extra_rtps) = unzip $ filter ((`HS.member` unfus_set) . fst) $
-                                   zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
-          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
-      success (outNames ker ++ extra_nms) $
-              SOAC.Map (cs1++cs2) w res_lam' new_inp
+          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+          success (outNames ker ++ extra_nms) $
+            SOAC.Map (cs1++cs2) w res_lam' new_inp
 
     (SOAC.Map {}, SOAC.Redomap _ _ comm1 lam11 _ nes _)
       | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
@@ -282,6 +293,47 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
           res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
       success (outNames ker ++ returned_outvars) $
               SOAC.Redomap (cs1++cs2) w comm2 lam21 res_lam' nes new_inp
+
+
+    ------------------
+    -- Write fusion --
+    ------------------
+
+    -- Map-write fusion.
+    (SOAC.Write _cs _len _lam _ivs as,
+     SOAC.Map {})
+      | mapWriteFusionOK outVars ker -> do
+          let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
+          success (outNames ker ++ extra_nms) $
+            SOAC.Write (cs1++cs2) w res_lam' new_inp as
+
+    -- Write-write fusion.
+    (SOAC.Write _cs2 _len2 _lam2 ivs2 as2,
+     SOAC.Write _cs1 _len1 _lam1 ivs1 as1)
+      | horizFuse -> do
+          let zipW xs ys = ys1 ++ xs1 ++ ys2 ++ xs2
+                where len = length xs `div` 2 -- same as with ys
+                      xs1 = take len xs
+                      xs2 = drop len xs
+                      ys1 = take len ys
+                      ys2 = drop len ys
+          let (body1, body2) = (lambdaBody lam1, lambdaBody lam2)
+          let body' = Body { bodyLore = bodyLore body1 -- body1 and body2 have the same lores
+                           , bodyBindings = zipW (bodyBindings body1) (bodyBindings body2)
+                           , bodyResult = zipW (bodyResult body1) (bodyResult body2)
+                           }
+          let lam' = Lambda { lambdaParams = zipW (lambdaParams lam1) (lambdaParams lam2)
+                            , lambdaBody = body'
+                            , lambdaReturnType = zipW (lambdaReturnType lam1) (lambdaReturnType lam2)
+                            }
+          success (outNames ker ++ returned_outvars) $
+            SOAC.Write (cs1 ++ cs2) w lam' (zipW ivs1 ivs2) (as2 ++ as1)
+
+    (SOAC.Write {}, _) ->
+      fail "Cannot fuse a write with anything else than a write or a map"
+    (_, SOAC.Write {}) ->
+      fail "Cannot fuse a write with anything else than a write or a map"
+
     ----------------------------
     -- Stream-Stream Fusions: --
     ----------------------------
