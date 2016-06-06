@@ -582,10 +582,27 @@ allocInExp (Op (ScanKernel cs w size lam foldlam nes arrs)) = do
   foldlam' <- allocInReduceLambda foldlam (length nes) $ kernelWorkgroupSize size
   return $ Op $ Inner $ ScanKernel cs w size lam' foldlam' nes arrs
 
-allocInExp (Op (WriteKernel cs t i v a)) =
+allocInExp (Op (WriteKernel cs len kernel_size lam ivs as)) = do
   -- We require Write to be in-place, so there is no need to allocate any
-  -- memory.
-  return $ Op $ Inner $ WriteKernel cs t i v a
+  -- memory, except for the parameters.
+  let (tid_param, [], real_params) =
+        partitionChunkedFoldParameters 0 $ lambdaParams lam
+      tid_param' = tid_param { paramAttr = Scalar int32 }
+  params' <- zipWithM (allocInWriteParam $ Var $ paramName tid_param)
+             real_params ivs
+  lam' <- allocInLambda (tid_param' : params') (lambdaBody lam) (lambdaReturnType lam)
+  return $ Op $ Inner $ WriteKernel cs len kernel_size lam' ivs as
+  where allocInWriteParam tid param arr =
+          case paramType param of
+            Prim bt ->
+              return param { paramAttr = Scalar bt }
+            Array bt shape u -> do
+              (mem, ixfun) <- lookupArraySummary arr
+              let ixfun' = IxFun.applyInd ixfun [SE.intSubExpToScalExp tid]
+                  summary = ArrayMem bt shape u mem ixfun'
+              return param { paramAttr = summary }
+            Mem size shape ->
+              return param { paramAttr = MemMem size shape }
 
 allocInExp (Op GroupSize) =
   return $ Op $ Inner GroupSize

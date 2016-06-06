@@ -128,13 +128,13 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
                            arrinps')
             | otherwise = return (lam, arrinps)
 
-  simplifyOp (Write cs ts i vs as) = do
+  simplifyOp (Write cs len lam ivs as) = do
     cs' <- Engine.simplify cs
-    ts' <- mapM Engine.simplify ts
-    i' <- Engine.simplify i
-    vs' <- mapM Engine.simplify vs
+    len' <- Engine.simplify len
+    lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
+    ivs' <- mapM Engine.simplify ivs
     as' <- mapM Engine.simplify as
-    return $ Write cs' ts' i' vs' as'
+    return $ Write cs' len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
@@ -149,6 +149,7 @@ topDownRules :: (MonadBinder m,
 topDownRules = [liftIdentityMapping,
                 removeReplicateMapping,
                 removeReplicateRedomap,
+                removeReplicateWrite,
                 removeUnusedMapInput,
                 simplifyClosedFormRedomap,
                 simplifyClosedFormReduce,
@@ -214,10 +215,18 @@ removeReplicateRedomap vtable (Let pat _ (Op (Redomap cs w comm redfun foldfun n
       letBind_ pat $ Op $ Redomap cs w comm redfun foldfun' nes arrs'
 removeReplicateRedomap _ _ = cannotSimplify
 
+-- | Like 'removeReplicateMapping', but for 'Write'.
+removeReplicateWrite :: (MonadBinder m, Op (Lore m) ~ SOAC (Lore m)) => TopDownRule m
+removeReplicateWrite vtable (Let pat _ (Op (Write cs len lam ivs as)))
+  | Just (bnds, lam', ivs') <- removeReplicateInput vtable lam ivs = do
+      mapM_ (uncurry letBindNames') bnds
+      letBind_ pat $ Op $ Write cs len lam' ivs' as
+removeReplicateWrite _ _ = cannotSimplify
+
 removeReplicateInput :: ST.SymbolTable lore
-                     -> AST.Lambda lore -> [VName]
-                     -> Maybe ([([VName], AST.Exp lore)],
-                               AST.Lambda lore, [VName])
+                        -> AST.Lambda lore -> [VName]
+                        -> Maybe ([([VName], AST.Exp lore)],
+                                  AST.Lambda lore, [VName])
 removeReplicateInput vtable fun arrs
   | not $ null parameterBnds = do
   let (arr_params', arrs') = unzip params_and_arrs
