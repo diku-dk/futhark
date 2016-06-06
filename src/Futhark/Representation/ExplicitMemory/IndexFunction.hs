@@ -176,6 +176,7 @@ permute :: IntegralCond num =>
            IxFun num -> Permutation -> IxFun num
 permute (Permute ixfun oldperm) perm
   | rearrangeInverse oldperm == perm = ixfun
+  | otherwise = permute ixfun (rearrangeCompose perm oldperm)
 permute ixfun perm = Permute ixfun perm
 
 rotate :: IntegralCond num =>
