@@ -223,6 +223,7 @@ instance Show TypeError where
   show (UndefinedLongName loc longname) =
     "Attempt to use undefined " ++ show longname ++ " at " ++ locStr loc ++ "."
 -- | A tuple of a return type and a list of argument types.
+
 type FunBinding = (LongName, StructTypeBase VName, [StructTypeBase VName])
 type TypeBinding = TypeBase ShapeDecl NoInfo VName
 
@@ -582,12 +583,6 @@ buildScopeFromDecs decs = do
   buildFtable scope'
 
   where
-    -- To build the ftable we loop through the list of function
-    -- definitions.  In addition to the normal ftable information
-    -- (name, return type, argument types), we also keep track of
-    -- position information, in order to report both locations of
-    -- duplicate function definitions.  The position information is
-    -- removed at the end.
 
     -- To build the ftable we loop through the list of function
     -- definitions.  In addition to the normal ftable information
@@ -630,14 +625,14 @@ checkProg prog = do
 
 checkProg' :: [DecBase NoInfo VName] -> TypeM [DecBase Info VName]
 checkProg' decs = do
-  (_, decs') <- checkForDuplicateDecs decs
+  _ <- checkForDuplicateDecs decs
+  (_, decs') <- checkDecs decs
   return decs'
 
-checkForDuplicateDecs :: [DecBase NoInfo VName] -> TypeM (Scope, [DecBase Info VName])
+checkForDuplicateDecs :: [DecBase NoInfo VName] -> TypeM ()
 checkForDuplicateDecs decs = do
   _ <- foldM_ f HM.empty decs
-  checkDecs decs
-
+  return ()
   where f known dec@(FunOrTypeDec (FunDec (FunDef _ (name,_) _ _ _ loc))) =
           case HM.lookup name known of
             Just dec'@(FunOrTypeDec (FunDec FunDef{})) ->
@@ -666,7 +661,8 @@ checkForDuplicateDecs decs = do
 checkMod :: ModDefBase NoInfo VName -> TypeM (Scope , ModDefBase Info VName)
 checkMod (ModDef name decs loc) =
   local (`addBreadcrumb` name) $ do
-    (scope, decs') <- checkForDuplicateDecs decs
+    _ <- checkForDuplicateDecs decs
+    (scope, decs') <- checkDecs decs
     return (scope, ModDef name decs' loc)
 
 checkDecs :: [DecBase NoInfo VName] -> TypeM (Scope, [DecBase Info VName])
@@ -678,6 +674,7 @@ checkDecs (ModDec modd:rest) = do
       return (scope, ModDec modd' : rest' )
 
 checkDecs (SigDec _:rest) = checkDecs rest
+
 checkDecs [] = do
   scope <- ask
   return (scope, [])
@@ -690,14 +687,17 @@ checkDecs decs = do
       (scope, rest') <- checkDecs rest
       return (scope , checkedeDecs ++ rest')
 
+
 checkFunOrTypeDec :: [FunOrTypeDecBase NoInfo VName] -> TypeM [DecBase Info VName]
-checkFunOrTypeDec (dec:decs) = case dec of
-  FunDec fundef -> do
+checkFunOrTypeDec (FunDec fundef:decs) = do
     fundef' <- checkFun fundef
     decs' <- checkFunOrTypeDec decs
     return $ FunOrTypeDec (FunDec fundef') : decs'
-  _ -> checkFunOrTypeDec decs
+
+checkFunOrTypeDec (TypeDec _:decs) = checkFunOrTypeDec decs
+
 checkFunOrTypeDec [] = return []
+
 
 initialFtable :: HM.HashMap Name FunBinding
 initialFtable = HM.fromList $ map addBuiltin $ HM.toList builtInFunctions
