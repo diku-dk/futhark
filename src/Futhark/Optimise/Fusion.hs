@@ -324,7 +324,6 @@ greedyFuse rem_bnds lam_used_nms res (out_idds, orig_soac) = do
       isInfusible = (`HS.member` infusible res)
       is_redomap  = case orig_soac of
                         SOAC.Redomap{} -> True
-                        --SOAC.Stream {} -> True
                         _              -> False
   --
   -- Conditions for fusion:
