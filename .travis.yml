@@ -12,7 +12,7 @@ cache:
 matrix:
   include:
     - env: BUILD=stack STACK_YAML=stack.yaml
-
+    - env: BUILD=stack STACK_YAML=stack-lts-6.0.yaml
     - env: BUILD=stack STACK_YAML=stack-lts-1.15.yaml
 
 addons:
