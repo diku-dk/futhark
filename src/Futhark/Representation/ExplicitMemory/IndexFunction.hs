@@ -176,6 +176,7 @@ permute :: IntegralCond num =>
            IxFun num -> Permutation -> IxFun num
 permute (Permute ixfun oldperm) perm
   | rearrangeInverse oldperm == perm = ixfun
+  | otherwise = permute ixfun (rearrangeCompose perm oldperm)
 permute ixfun perm = Permute ixfun perm
 
 rotate :: IntegralCond num =>
@@ -187,9 +188,8 @@ rotate ixfun offsets = Rotate ixfun offsets
 reshape :: (Eq num, IntegralCond num) =>
            IxFun num -> ShapeChange num -> IxFun num
 
-reshape (Direct oldshape) newshape
-  | length oldshape == length newshape =
-      Direct $ map newDim newshape
+reshape Direct{} newshape =
+  Direct $ map newDim newshape
 
 reshape (Reshape ixfun _) newshape =
   reshape ixfun newshape
