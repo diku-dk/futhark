@@ -321,6 +321,9 @@ Executable futhark-test
 
   Ghc-Options:        -Wall -threaded -rtsopts -with-rtsopts=-N
 
+  if impl(ghc >= 8.0)
+     Ghc-Options: -Wall -Wno-redundant-constraints -threaded -rtsopts -with-rtsopts=-N
+
 Executable futhark-bench
   Main-is: src/futhark-bench.hs
 

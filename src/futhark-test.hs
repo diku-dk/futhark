@@ -161,7 +161,7 @@ runResult program ExitSuccess stdout_s _ =
 runResult _ (ExitFailure code) _ stderr_s =
   return $ ErrorResult code stderr_s
 
-getExpectedResult :: MonadIO m =>
+getExpectedResult :: (Functor m, MonadIO m) =>
                      FilePath -> ExpectedResult Values
                   -> m (ExpectedResult [Value])
 getExpectedResult dir (Succeeds (Just vals)) = Succeeds . Just <$> getValues dir vals
