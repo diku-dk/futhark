@@ -41,8 +41,8 @@ topDownRules :: (MonadBinder m, LocalScope (Lore m) m) => TopDownRules m
 topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
-               , letRule simplifyRearrange
-               , letRule simplifyRotate
+               , simplifyRearrange
+               , simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyCmpOp
                , letRule simplifyUnOp
@@ -283,29 +283,43 @@ simplifKnownIterationLoop _ (Let pat _
 simplifKnownIterationLoop _ _ =
   cannotSimplify
 
-simplifyRearrange :: LetTopDownRule lore u
+simplifyRearrange :: MonadBinder m => TopDownRule m
 
 -- Handle identity permutation.
-simplifyRearrange _ seType (Rearrange _ perm e)
-  | Just t <- seType $ Var e,
-    perm == [0..arrayRank t - 1] = Just $ SubExp $ Var e
+simplifyRearrange _ (Let pat _ (PrimOp (Rearrange _ perm v)))
+  | sort perm == perm =
+      letBind_ pat $ PrimOp $ SubExp $ Var v
 
-simplifyRearrange defOf _ (Rearrange cs perm v) =
-  case asPrimOp =<< defOf v of
-    Just (Rearrange cs2 perm2 e) ->
+simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs perm v)))
+  | Just (Rearrange cs2 perm2 e) <- asPrimOp =<< ST.lookupExp v vtable =
       -- Rearranging a rearranging: compose the permutations.
-      Just $ Rearrange (cs++cs2) (perm `rearrangeCompose` perm2) e
-    _ -> Nothing
+      letBind_ pat $ PrimOp $ Rearrange (cs++cs2) (perm `rearrangeCompose` perm2) e
 
-simplifyRearrange _ _ _ = Nothing
+simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs perm v)))
+  | Just (Rotate cs2 offsets v2) <- asPrimOp =<< ST.lookupExp v vtable,
+    Just (Rearrange cs3 perm3 v3) <- asPrimOp =<< ST.lookupExp v2 vtable = do
+      let offsets' = rearrangeShape (rearrangeInverse perm3) offsets
+      rearrange_rotate <- letExp "rearrange_rotate" $ PrimOp $ Rotate cs2 offsets' v3
+      letBind_ pat $ PrimOp $ Rearrange (cs++cs3) (perm `rearrangeCompose` perm3) rearrange_rotate
 
-simplifyRotate :: LetTopDownRule lore u
+simplifyRearrange _ _ = cannotSimplify
+
+simplifyRotate :: MonadBinder m => TopDownRule m
 -- A zero-rotation is identity.
-simplifyRotate _ _ (Rotate _ offsets e)
+simplifyRotate _ (Let pat _ (PrimOp (Rotate _ offsets v)))
   | all (==constant (0::Int32)) offsets =
-    Just $ SubExp $ Var e
+      letBind_ pat $ PrimOp $ SubExp $ Var v
 
-simplifyRotate _ _ _ = Nothing
+simplifyRotate vtable (Let pat _ (PrimOp (Rotate cs offsets v)))
+  | Just (Rearrange cs2 perm v2) <- asPrimOp =<< ST.lookupExp v vtable,
+    Just (Rotate cs3 offsets2 v3) <- asPrimOp =<< ST.lookupExp v2 vtable = do
+      let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
+          addOffsets x y = letSubExp "summed_offset" $ PrimOp $ BinOp (Add Int32) x y
+      offsets' <- zipWithM addOffsets offsets offsets2'
+      rotate_rearrange <- letExp "rotate_rearrange" $ PrimOp $ Rearrange cs2 perm v3
+      letBind_ pat $ PrimOp $ Rotate (cs++cs3) offsets' rotate_rearrange
+
+simplifyRotate _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore u
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
