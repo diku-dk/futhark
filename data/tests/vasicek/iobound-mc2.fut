@@ -1,6 +1,9 @@
 -- An I/O-bound MC2 implementation.
 --
 -- Useful for verification with a "sequential" R implementation.
+--
+-- ==
+-- tags { no_opencl }
 
 default(float)
 
