@@ -570,7 +570,7 @@ rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
 chompDecs :: [DecBase NoInfo VName]
           -> ([FunOrTypeDecBase NoInfo VName], [DecBase NoInfo VName])
 chompDecs decs = f ([], decs)
-  where f (foo , FunOrTypeDec ting : xs ) = f (ting:foo , xs)
+  where f (foo , FunOrTypeDec dec : xs ) = f (dec:foo , xs)
         f (foo , bar) = (foo, bar)
 
 
@@ -598,10 +598,7 @@ buildScopeFromDecs decs = do
 
     buildTAtable = typeAliasTableFromProg (mapMaybe (isType . FunOrTypeDec) decs)
 
-    expandFun scope fntable (FunDef _ (name,_) (TypeDecl ret NoInfo) args _ pos)
-      | Just (_,_,_,pos2) <- HM.lookup name fntable =
-        throwError $ DupDefinitionError name pos pos2
-      | otherwise = do
+    expandFun scope fntable (FunDef _ (name,_) (TypeDecl ret NoInfo) args _ pos) = do
         let argtypes = map paramDeclaredType args
             (prefixes, _) = envBreadcrumb scope
             look tname tloc =
@@ -625,43 +622,42 @@ checkProg prog = do
 
 checkProg' :: [DecBase NoInfo VName] -> TypeM [DecBase Info VName]
 checkProg' decs = do
-  _ <- checkForDuplicateDecs decs
+  checkForDuplicateDecs decs
   (_, decs') <- checkDecs decs
   return decs'
 
 checkForDuplicateDecs :: [DecBase NoInfo VName] -> TypeM ()
-checkForDuplicateDecs decs = do
-  _ <- foldM_ f HM.empty decs
-  return ()
-  where f known dec@(FunOrTypeDec (FunDec (FunDef _ (name,_) _ _ _ loc))) =
-          case HM.lookup name known of
-            Just dec'@(FunOrTypeDec (FunDec FunDef{})) ->
-              throwError $ DupDefinitionError name loc $ decLoc dec'
-            _ -> return $ HM.insert name dec known
+checkForDuplicateDecs =
+  foldM_ f mempty
+  where f known (FunOrTypeDec (FunDec (FunDef _ (name,_) _ _ _ loc))) =
+          case HM.lookup (name, "function") known of
+            Just loc' ->
+              bad $ DupDefinitionError name loc loc'
+            _ -> return $ HM.insert (name, "function") loc known
 
-        f known dec@(FunOrTypeDec (TypeDec (TypeDef name _ loc))) =
-          case HM.lookup name known of
-            Just dec'@(FunOrTypeDec (TypeDec TypeDef{})) ->
-              throwError $ DupDefinitionError name loc $ decLoc dec'
-            _ -> return $ HM.insert name dec known
+        f known (FunOrTypeDec (TypeDec (TypeDef name _ loc))) =
+          case HM.lookup (name, "type") known of
+            Just loc' ->
+              bad $ DupDefinitionError name loc loc'
+            _ -> return $ HM.insert (name, "type") loc known
 
-        f known dec@(SigDec (SigDef name _ loc)) =
-          case HM.lookup name known of
-            Just dec'@(SigDec SigDef{}) ->
-              throwError $ DupDefinitionError name loc $ decLoc dec'
-            _ -> return $ HM.insert name dec known
+        f known (SigDec (SigDef name _ loc)) =
+          case HM.lookup (name, "signature") known of
+            Just loc' ->
+              bad $ DupDefinitionError name loc loc'
+            _ -> return $ HM.insert (name, "signature") loc known
 
-        f known dec@(ModDec (ModDef name _ loc)) =
-          case HM.lookup name known of
-            Just dec'@(ModDec ModDef{}) ->
-              throwError $ DupDefinitionError name loc $ decLoc dec'
-            _ -> return $ HM.insert name dec known
+        f known (ModDec (ModDef name _ loc)) =
+          case HM.lookup (name, "module") known of
+            Just loc' ->
+              bad $ DupDefinitionError name loc loc'
+            _ -> return $ HM.insert (name, "module") loc known
 
 
 checkMod :: ModDefBase NoInfo VName -> TypeM (Scope , ModDefBase Info VName)
 checkMod (ModDef name decs loc) =
   local (`addBreadcrumb` name) $ do
-    _ <- checkForDuplicateDecs decs
+    checkForDuplicateDecs decs
     (scope, decs') <- checkDecs decs
     return (scope, ModDef name decs' loc)
 
@@ -683,7 +679,7 @@ checkDecs decs = do
     let (funOrTypeDecs, rest) = chompDecs decs
     scopeFromFunOrTypeDecs <- buildScopeFromDecs funOrTypeDecs
     local (const scopeFromFunOrTypeDecs) $ do
-      checkedeDecs <- checkFunOrTypeDec funOrTypeDecs        -- check funktioner med checkfun
+      checkedeDecs <- checkFunOrTypeDec funOrTypeDecs
       (scope, rest') <- checkDecs rest
       return (scope , checkedeDecs ++ rest')
 
