@@ -596,7 +596,7 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dests)
-  (WriteKernel _cs len kernel_size lam ivs input) = do
+  (WriteKernel _cs len lam ivs input) = do
 
   let len' = ImpGen.compileSubExp len
       as_sizes = map (ImpGen.compileSubExp . fst) input
@@ -655,11 +655,6 @@ kernelCompiler
 
     -- Compute the variables that we need to pass to and from the kernel.
     uses <- computeKernelUses dests (len', body) []
-
-    -- Get other details.
-    (_num_groups, _local_size, _elements_per_thread,
-     _num_elements, _offset_multiple, _num_threads) <-
-      compileKernelSize kernel_size
 
     (group_size, num_groups) <- computeMapKernelGroups len'
 
