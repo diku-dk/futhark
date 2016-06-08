@@ -302,7 +302,7 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     -- Map-write fusion.
     (SOAC.Write _cs _len _lam _ivs as,
      SOAC.Map {})
-      | mapWriteFusionOK outVars ker -> do
+      | mapWriteFusionOK (outVars ++ map snd as) ker -> do
           let (extra_nms, res_lam', new_inp) = mapLikeFusionCheck
           success (outNames ker ++ extra_nms) $
             SOAC.Write (cs1++cs2) w res_lam' new_inp as
@@ -319,15 +319,15 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
                       ys2 = drop len ys
           let (body1, body2) = (lambdaBody lam1, lambdaBody lam2)
           let body' = Body { bodyLore = bodyLore body1 -- body1 and body2 have the same lores
-                           , bodyBindings = zipW (bodyBindings body1) (bodyBindings body2)
+                           , bodyBindings = bodyBindings body1 ++ bodyBindings body2
                            , bodyResult = zipW (bodyResult body1) (bodyResult body2)
                            }
-          let lam' = Lambda { lambdaParams = zipW (lambdaParams lam1) (lambdaParams lam2)
+          let lam' = Lambda { lambdaParams = lambdaParams lam1 ++ lambdaParams lam2
                             , lambdaBody = body'
                             , lambdaReturnType = zipW (lambdaReturnType lam1) (lambdaReturnType lam2)
                             }
           success (outNames ker ++ returned_outvars) $
-            SOAC.Write (cs1 ++ cs2) w lam' (zipW ivs1 ivs2) (as2 ++ as1)
+            SOAC.Write (cs1 ++ cs2) w lam' (ivs1 ++ ivs2) (as2 ++ as1)
 
     (SOAC.Write {}, _) ->
       fail "Cannot fuse a write with anything else than a write or a map"
