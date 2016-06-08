@@ -657,17 +657,19 @@ kernelCompiler
     uses <- computeKernelUses dests (len', body) []
 
     -- Get other details.
-    (num_groups, local_size, _elements_per_thread,
+    (_num_groups, _local_size, _elements_per_thread,
      _num_elements, _offset_multiple, _num_threads) <-
       compileKernelSize kernel_size
+
+    (group_size, num_groups) <- computeMapKernelGroups len'
 
     kernel_name <- newVName "a_write_kernel"
     ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
       { Imp.kernelBody = body
       , Imp.kernelLocalMemory = mempty
       , Imp.kernelUses = uses
-      , Imp.kernelNumGroups = num_groups
-      , Imp.kernelGroupSize = local_size
+      , Imp.kernelNumGroups = Imp.VarSize num_groups
+      , Imp.kernelGroupSize = Imp.VarSize group_size
       , Imp.kernelName = kernel_name
       , Imp.kernelDesc = Just "write"
       }
