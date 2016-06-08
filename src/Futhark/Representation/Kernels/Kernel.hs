@@ -499,21 +499,23 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
-typeCheckKernel (WriteKernel cs w _kernel_size _lam ivs as) = do
+typeCheckKernel (WriteKernel cs w _kernel_size lam _ivs as) = do
   -- Requirements:
   --
-  --   0. @ivs@ must be a list [indexes arrays..., values arrays] == is ++ vs
+  --   0. @lambdaReturnType@ of @lam@ must be a list
+  --      [index types..., value types].
   --
-  --   1. Each array in @is@ must have the type [i32].
+  --   1. The number of index types must be equal to the number of value types
+  --      and the number of arrays in @as@.
   --
-  --   2. Each array pair in @vs@ and @as@ must have the same type (though not
-  --   necessarily the same length).
+  --   2. Each index type must have the type i32.
   --
-  --   3. Each array in @as@ is consumed.  This is not really a check, but more
-  --   of a requirement, so that e.g. the source is not hoisted out of a loop,
-  --   which will mean it cannot be consumed.
+  --   3. Each array pair in @as@ and the value types must have the same type
+  --      (though not necessarily the same length).
   --
-  --   4. @i@ and @v@ must have the same length.
+  --   4. Each array in @as@ is consumed.  This is not really a check, but more
+  --      of a requirement, so that e.g. the source is not hoisted out of a
+  --      loop, which will mean it cannot be consumed.
   --
   -- Code:
 
@@ -522,33 +524,36 @@ typeCheckKernel (WriteKernel cs w _kernel_size _lam ivs as) = do
   TC.require [Prim int32] w
 
   -- 0.
-  let ivsLen = length ivs `div` 2
-      is = take ivsLen ivs
-      vs = drop ivsLen ivs
+  let rts = lambdaReturnType lam
+      rtsLen = length rts `div` 2
+      rtsI = take rtsLen rts
+      rtsV = drop rtsLen rts
 
-  forM_ (zip3 is vs as) $ \(i, v, (aw, a)) -> do
-    -- 1.
-    iLen <- arraySize 0 <$> lookupType i
-    vLen <- arraySize 0 <$> lookupType v
-    TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+  -- 1.
+  unless (rtsLen == length as)
+    $ TC.bad $ TC.TypeError "Write: Uneven number of index types, value types, and I/O arrays."
+
+  -- 2.
+  forM_ rtsI $ \rtI -> unless (Prim int32 == rtI)
+                       $ TC.bad $ TC.TypeError "Write: Index return type must be i32."
+
+  forM_ (zip rtsV as) $ \(rtV, (aw, a)) -> do
+    -- All lengths must have type i32.
     TC.require [Prim int32] aw
 
-    -- 2.
-    vType <- lookupType v
+    -- 3.
     aType <- lookupType a
-    case (vType, aType) of
+    case (rtV, rowType aType) of
+      (Prim pt0, Prim pt1) | pt0 == pt1 ->
+        return ()
       (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
         return ()
       _ ->
         TC.bad $ TC.TypeError
         "Write values and input arrays do not have the same primitive type"
 
-    -- 3.
-    TC.consume =<< TC.lookupAliases a
-
     -- 4.
-    unless (iLen == vLen) $
-      TC.bad $ TC.TypeError "Write value and index array do not have the same length."
+    TC.consume =<< TC.lookupAliases a
 
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
