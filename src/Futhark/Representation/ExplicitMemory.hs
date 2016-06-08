@@ -978,7 +978,7 @@ expReturns (Op (Alloc size space)) =
   return [ReturnsMemory size space]
 
 -- The result of Write is located exactly where its input is.
-expReturns (Op (Inner (WriteKernel _ _ _ _ _ as))) =
+expReturns (Op (Inner (WriteKernel _ _ _ _ as))) =
   mapM (varReturns . snd) as
 
 expReturns (Op (Inner k)) =

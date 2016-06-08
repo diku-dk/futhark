@@ -97,14 +97,13 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       Engine.simplifyLambda lam Nothing (map Just arrs') <*>
       pure arrs'
 
-  simplifyOp (WriteKernel cs len kernel_size lam ivs as) = do
+  simplifyOp (WriteKernel cs len lam ivs as) = do
     cs' <- Engine.simplify cs
     len' <- Engine.simplify len
-    kernel_size' <- Engine.simplify kernel_size
     lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
     ivs' <- mapM Engine.simplify ivs
     as' <- mapM Engine.simplify as
-    return $ WriteKernel cs' len' kernel_size' lam' ivs' as'
+    return $ WriteKernel cs' len' lam' ivs' as'
 
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
@@ -366,7 +365,7 @@ fuseScanIota _ _ = cannotSimplify
 fuseWriteIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                  TopDownRule m
-fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len kernel_size lam ivs as)))
+fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len lam ivs as)))
   | not $ null iota_params = do
       let (ivs_params', ivs') = unzip params_and_arrs
 
@@ -381,7 +380,7 @@ fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len kernel_size lam ivs as))
                      , lambdaParams = thread_index_param : ivs_params'
                      }
 
-      letBind_ pat $ Op $ WriteKernel cs len kernel_size lam' ivs' as
+      letBind_ pat $ Op $ WriteKernel cs len lam' ivs' as
     where (params_and_arrs, iota_params) = iotaParams vtable ivs_params ivs
           (thread_index_param : ivs_params) = lambdaParams lam
           thread_index = paramName thread_index_param

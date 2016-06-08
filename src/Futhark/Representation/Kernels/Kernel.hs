@@ -77,7 +77,6 @@ data Kernel lore =
     (LambdaT lore)
     [VName]
   | WriteKernel Certificates SubExp
-    KernelSize
     (LambdaT lore)
     [VName]
     [(SubExp, VName)]
@@ -177,11 +176,10 @@ mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
   pure ordering <*>
   mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (WriteKernel cs len kernel_size lam ivs as) =
+mapKernelM tv (WriteKernel cs len lam ivs as) =
   WriteKernel <$>
   mapOnKernelCertificates tv cs <*>
   mapOnKernelSubExp tv len <*>
-  mapOnKernelSize tv kernel_size <*>
   mapOnKernelLambda tv lam <*>
   mapM (mapOnKernelVName tv) ivs <*>
   mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
@@ -296,7 +294,7 @@ kernelType (ChunkedMapKernel _ _ size _ fun _) =
   map (`setOuterSize` kernelTotalElements size) concat_ret
   where (nonconcat_ret, concat_ret) =
           splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
-kernelType (WriteKernel _ _ _ lam _ input) =
+kernelType (WriteKernel _ _ lam _ input) =
   zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
@@ -380,7 +378,7 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     map (UT.consumedUsage . kernelInputArray) $
     filter ((`HS.member` consumed_in_body) . kernelInputName) inps
     where consumed_in_body = consumedInBody body
-  usageInOp (WriteKernel _ _ _ _ _ as) =
+  usageInOp (WriteKernel _ _ _ _ as) =
     mconcat $ map (UT.consumedUsage . snd) as
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
@@ -499,7 +497,7 @@ typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
       | otherwise ->
           TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
-typeCheckKernel (WriteKernel cs w _kernel_size lam _ivs as) = do
+typeCheckKernel (WriteKernel cs w lam _ivs as) = do
   -- Requirements:
   --
   --   0. @lambdaReturnType@ of @lam@ must be a list
@@ -605,7 +603,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
-  opMetrics (WriteKernel _cs _len _kernel_size lam _ivs _as) =
+  opMetrics (WriteKernel _cs _len lam _ivs _as) =
     inside "WriteKernel" $ lambdaMetrics lam
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
@@ -645,10 +643,9 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             commasep (map ppr arrs) <> comma </>
             ppr fun)
     where ord_str = if ordering == Disorder then "Per" else ""
-  ppr (WriteKernel cs len kernel_size lam ivs as) =
+  ppr (WriteKernel cs len lam ivs as) =
     ppCertificates' cs <> text "writeKernel" <>
     parens (ppr len <> comma </>
-            ppr kernel_size <> comma </>
             commasep (map ppr ivs) <> comma </>
             commasep (map ppr as) <> comma </>
             ppr lam)

@@ -351,13 +351,12 @@ transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
 transformBinding (Let pat () (Op (Write cs len lam ivs as))) = runBinder_ $ do
-  kernel_size <- blockedKernelSize len
   lam' <- FOT.transformLambda lam
   thread_index <- newVName "thread_index"
   let lam'' = lam' { lambdaParams =
                        Param thread_index (Prim int32) :
                        lambdaParams lam' }
-  letBind_ pat $ Op $ WriteKernel cs len kernel_size lam'' ivs as
+  letBind_ pat $ Op $ WriteKernel cs len lam'' ivs as
 
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd
