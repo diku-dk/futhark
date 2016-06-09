@@ -6,10 +6,10 @@
 --   31
 -- }
 
-structure IntLib = struct
+struct IntLib  {
     fun int plus(int a, int b) = a + b
     fun int numberFour() = 4
-  end
+  }
 
 fun int localplus(int a, int b) = IntLib.plus (a,b)
 

@@ -115,6 +115,8 @@ import Language.Futhark.Core(blankLongname)
       '^'             { L $$ XOR }
       '('             { L $$ LPAR }
       ')'             { L $$ RPAR }
+      '{'             { L $$ LCURLY }
+      '}'             { L $$ RCURLY }
       '['             { L $$ LBRACKET }
       ']'             { L $$ RBRACKET }
       ','             { L $$ COMMA }
@@ -229,9 +231,9 @@ Signature :: { SigDefBase f vn }
                  in SigDef name $5 pos }
 
 Module :: { ModDefBase f vn }
-       : structure id '=' struct ModDecs end
+       : struct id '{' ModDecs '}'
        { let L pos (ID name) = $2
-          in ModDef name $5 pos }
+          in ModDef name $4 pos }
 
 ModDecs : ModDec ModDecs { $1 ++ $2 }
         | ModDec { $1 }
