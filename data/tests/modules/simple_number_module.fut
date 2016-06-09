@@ -7,15 +7,15 @@
 -- }
 
 type t = int
-structure NumLib = struct
+struct NumLib  {
     fun t plus(t a, t b) = a + b
-  structure BestNumbers = 
-    struct
+  struct BestNumbers  
+    {
       fun t four() = 4
       fun t seven() = 42
       fun t six() = 41
-    end
-  end
+    }
+  }
 
 
 fun int localplus(int a, int b) = NumLib.plus (a,b)
