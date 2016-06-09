@@ -511,7 +511,7 @@ simplifyIndexing defOf seType idd inds consuming =
       | length offsets == length inds -> Just $ do
           dims <- arrayDims <$> lookupType a
           let adjust (i, o, d) = do
-                i_m_o <- letSubExp "i_m_o" $ PrimOp $ BinOp (Sub Int32) i o
+                i_m_o <- letSubExp "i_p_o" $ PrimOp $ BinOp (Add Int32) i o
                 letSubExp "rot_i" $ PrimOp $ BinOp (SMod Int32) i_m_o d
           inds' <- mapM adjust $ zip3 inds offsets dims
           pure $ IndexResult cs a inds'

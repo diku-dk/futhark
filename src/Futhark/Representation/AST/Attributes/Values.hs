@@ -70,7 +70,7 @@ rotate (k:ks) (d:ds) xs =
   let rows = chunk (product ds) xs
       xs_rotated = map (rotate ks ds) rows
       new_rows
-        | k > 0 = drop (d - k) xs_rotated ++ take (d - k) xs_rotated
-        | otherwise = drop (-k) xs_rotated ++ take (-k) xs_rotated
+        | k > 0 = drop k xs_rotated ++ take k xs_rotated
+        | otherwise = drop (d+k) xs_rotated ++ take (d+k) xs_rotated
   in concat new_rows
 rotate _ _ xs = xs
