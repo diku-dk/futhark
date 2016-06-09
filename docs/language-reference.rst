@@ -390,9 +390,11 @@ Return the transpose of ``a``, which must be a two-dimensional array.
 ``rotate(d, i, a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Rotate dimension ``d`` of the array ``a`` right by ``i`` elements.
+Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.
+Intuitively, you can think of it as subtracting ``i`` from every index
+(modulo the size of the array).
 
-For example, if ``b=rotate(1, i, a)``, then ``b[x,y] = a[x,y-i]``.
+For example, if ``b=rotate(1, i, a)``, then ``b[x,y+1] = a[x,y]``.
 
 ``let pat = e in body``
 ~~~~~~~~~~~~~~~~~~~~~~~

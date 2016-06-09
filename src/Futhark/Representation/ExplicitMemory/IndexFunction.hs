@@ -144,7 +144,7 @@ index (Permute fun perm) is_new element_size =
   where is_old = rearrangeShape (rearrangeInverse perm) is_new
 
 index (Rotate fun offsets) is element_size =
-  index fun (zipWith mod (zipWith (-) is offsets) dims) element_size
+  index fun (zipWith mod (zipWith (+) is offsets) dims) element_size
   where dims = shape fun
 
 index (Index fun is1) is2 element_size =
