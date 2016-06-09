@@ -513,7 +513,9 @@ If nil, no sound will be played.")
 (defun futhark-check-unsafe (begin end length)
   "Play a sound if the user has just written the `unsafe' keyword.
 Ignore BEGIN, END, and LENGTH (present to satisfy Emacs)."
-  (if futhark-danger-zone-path
+  (if (and
+       (string= (buffer-mode) "futhark-mode")
+       futhark-danger-zone-path)
       (save-excursion
         (ignore-errors (backward-sexp 1) t)
         (if (looking-at "\\<unsafe\\>")
