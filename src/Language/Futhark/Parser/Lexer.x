@@ -157,7 +157,6 @@ keyword s =
     "type"         -> TYPE
     "entry"        -> ENTRY
     "signature"    -> SIGNATURE
-    "structure"    -> STRUCTURE
     "sig"          -> SIG
     "struct"       -> STRUCT
     "end"          -> END
@@ -308,7 +307,6 @@ data Token = IF
            | EOF
            | SIGNATURE
            | SIG
-           | STRUCTURE
            | STRUCT
            | END
            | VAL

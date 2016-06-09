@@ -172,7 +172,6 @@ import Language.Futhark.Core(blankLongname)
       type            { L $$ TYPE }
       signature       { L $$ SIGNATURE }
       sig             { L $$ SIG }
-      structure       { L $$ STRUCTURE }
       struct          { L $$ STRUCT }
       end             { L $$ END }
       val             { L $$ VAL }
@@ -337,10 +336,6 @@ Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
                             in FunDef True (name, blankLongname) $2 [] $7 pos }
 ;
-Uniqueness :: { Uniqueness }
-Uniqueness : '*' { Unique }
-           |     { Nonunique }
-
 
 UserTypeDecl :: { TypeDeclBase NoInfo Name }
              : UserType { TypeDecl $1 NoInfo }
