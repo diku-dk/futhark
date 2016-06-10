@@ -89,6 +89,8 @@ mapExpM tv (Index arr idxexps loc) =
        mapOnExp tv arr <*>
        mapM (mapOnExp tv) idxexps <*>
        pure loc
+mapExpM tv (TupleIndex e i NoInfo loc) =
+  TupleIndex <$> mapOnExp tv e <*> pure i <*> pure NoInfo <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
 mapExpM tv (Size i e loc) =

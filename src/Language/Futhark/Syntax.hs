@@ -405,6 +405,9 @@ data ExpBase f vn =
                     [ExpBase f vn]
                     SrcLoc
 
+            | TupleIndex (ExpBase f vn) Int (f (CompTypeBase vn)) SrcLoc
+            -- ^ Extract the specified component from a tuple.
+
             | Size Int (ExpBase f vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
@@ -528,6 +531,7 @@ instance Located (ExpBase f vn) where
   locOf (LetPat _ _ _ pos) = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
   locOf (Index _ _ pos) = locOf pos
+  locOf (TupleIndex _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos

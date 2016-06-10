@@ -244,6 +244,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
       text "in" </> ppr body
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
+  pprPrec _ (TupleIndex e i _ _) =
+    pprPrec 9 e <> text "." <> ppr i
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Size i e _) =
     text "size" <> apply [text $ show i, ppr e]

@@ -119,6 +119,7 @@ data TypeError =
   -- ^ Uniqueness attribute applied to non-array.
   | UndefinedQualName SrcLoc QualName
   -- ^ Undefined longname
+  | InvalidField SrcLoc Type String
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -222,8 +223,11 @@ instance Show TypeError where
     "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
   show (UndefinedQualName loc longname) =
     "Attempt to use undefined " ++ show longname ++ " at " ++ locStr loc ++ "."
--- | A tuple of a return type and a list of argument types.
+  show (InvalidField loc t field) =
+    "Attempt to access field '" ++ field ++ "' of value of type " ++
+    pretty t ++ " at " ++ locStr loc ++ "."
 
+-- | A tuple of a return type and a list of argument types.
 type FunBinding = (QualName, StructTypeBase VName, [StructTypeBase VName])
 type TypeBinding = TypeBase ShapeDecl NoInfo VName
 
@@ -891,6 +895,12 @@ checkExp (Index e idxes pos) = do
     bad $ IndexingError (arrayRank vt) (length idxes) pos
   idxes' <- mapM (require [Prim $ Signed Int32] <=< checkExp) idxes
   return $ Index e' idxes' pos
+
+checkExp (TupleIndex e i NoInfo loc) = do
+  e' <- checkExp e
+  case typeOf e' of
+    Tuple ts | t:_ <- drop i ts -> return $ TupleIndex e' i (Info t) loc
+    _ -> bad $ InvalidField loc (typeOf e') (show i)
 
 checkExp (Iota e pos) = do
   e' <- require [Prim $ Signed Int32] =<< checkExp e
