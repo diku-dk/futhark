@@ -20,7 +20,7 @@ import qualified Language.C.Quote.C as C
 --
 -- In the action, the option argument (if any) is stored as in the
 -- @char*@-typed variable @optarg@.
-data Option = Option { optionQualName :: String
+data Option = Option { optionLongName :: String
                      , optionShortName :: Maybe Char
                      , optionArgument :: OptionArgument
                      , optionAction :: C.Stm
@@ -66,7 +66,7 @@ generateOptionParser fname options =
 optionFields :: [Option] -> [C.Initializer]
 optionFields = zipWith field [(1::Int)..]
   where field i option =
-          [C.cinit| { $string:(optionQualName option), $id:arg, NULL, $int:i } |]
+          [C.cinit| { $string:(optionLongName option), $id:arg, NULL, $int:i } |]
           where arg = case optionArgument option of
                         NoArgument       -> "no_argument"
                         RequiredArgument -> "required_argument"

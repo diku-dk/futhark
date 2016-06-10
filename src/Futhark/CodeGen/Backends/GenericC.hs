@@ -689,12 +689,12 @@ freeResult e (MemParam _ _ space) =
 
 benchmarkOptions :: [Option]
 benchmarkOptions =
-   [ Option { optionQualName = "write-runtime-to"
+   [ Option { optionLongName = "write-runtime-to"
             , optionShortName = Just 't'
             , optionArgument = RequiredArgument
             , optionAction = set_runtime_file
             }
-   , Option { optionQualName = "runs"
+   , Option { optionLongName = "runs"
             , optionShortName = Just 'r'
             , optionArgument = RequiredArgument
             , optionAction = set_num_runs
