@@ -1,4 +1,4 @@
--- An I/O-bound MC2 implementation.
+-- An I/O-bound mc2 implementation.
 --
 -- Useful for verification with a "sequential" R implementation.
 --
@@ -7,7 +7,7 @@
 
 default(float)
 
--- Some useful (for MC2) Futhark extensions.
+-- Some useful (for mc2) Futhark extensions.
 fun float sum([float] xs) = reduce(+, 0.0, xs)
 fun float mean([float,n] xs) = sum(map(/float(n), xs))
 
@@ -20,41 +20,41 @@ fun float kappa() = 0.1     -- speed of mean reversion
 fun float sigma() = 0.01    -- interest rate volatility
 
 
-fun float nextrP(float lastr, float WP) =
-  lastr + kappa() * (thetaP() - lastr) + sigma() * WP
+fun float nextrP(float lastr, float wp) =
+  lastr + kappa() * (thetaP() - lastr) + sigma() * wp
 
-fun float nextrQ(float lastr, float WQ) =
-  lastr + kappa() * (thetaQ() - lastr) + sigma() * WQ
+fun float nextrQ(float lastr, float wq) =
+  lastr + kappa() * (thetaQ() - lastr) + sigma() * wq
 
-fun float seqRedSumP(float lastr, [float] Ws) =
-  if (size(0,Ws) == 0)
+fun float seqRedSumP(float lastr, [float] ws) =
+  if (size(0,ws) == 0)
   then lastr
   else
-    let (W0, Wns) = split((1),Ws) in
-    seqRedSumP(nextrP(lastr, W0[0]), Wns)
+    let (w0, wns) = split((1),ws) in
+    seqRedSumP(nextrP(lastr, w0[0]), wns)
 
-fun float seqRedSumQ(float lastr, [float] Ws) =
-  if (size(0,Ws) == 0)
+fun float seqRedSumQ(float lastr, [float] ws) =
+  if (size(0,ws) == 0)
   then lastr
   else
-    let (W0, Wns) = split((1),Ws) in
-    lastr + seqRedSumQ(nextrQ(lastr, W0[0]), Wns)
+    let (w0, wns) = split((1),ws) in
+    lastr + seqRedSumQ(nextrQ(lastr, w0[0]), wns)
 
-fun [float] MC1([[float]] WPss) =
-  map(MC1step, WPss)
-fun float MC1step([float] WPs) =
-  seqRedSumP(r0(), WPs)
+fun [float] mc1([[float]] wpss) =
+  map(mc1step, wpss)
+fun float mc1step([float] wps) =
+  seqRedSumP(r0(), wps)
 
-fun [float] MC2([[[float]]] WQsss, [float] r1s) =
-  map(MC2sim, zip(WQsss, r1s))
-fun float MC2sim(([[float]], float) arg) =
-  let ( WQss, r1 ) = arg in
-  let tn = size(0, WQss) in
-  let sum_r = zipWith(MC2step, WQss, replicate(tn, r1)) in
+fun [float] mc2([[[float]]] wqsss, [float] r1s) =
+  map(mc2sim, zip(wqsss, r1s))
+fun float mc2sim(([[float]], float) arg) =
+  let ( wqss, r1 ) = arg in
+  let tn = size(0, wqss) in
+  let sum_r = zipWith(mc2step, wqss, replicate(tn, r1)) in
   mean(sum_r)
-fun float MC2step(([float], float) arg) =
-  let ( WQs, r1 ) = arg in
-  seqRedSumQ(r1, WQs)
+fun float mc2step(([float], float) arg) =
+  let ( wqs, r1 ) = arg in
+  seqRedSumQ(r1, wqs)
 
-fun [float] main([[float]] WPss, [[[float]]] WQsss) = --MC1(WPss)
-  MC2(WQsss, MC1(WPss))
+fun [float] main([[float]] wpss, [[[float]]] wqsss) = --mc1(wpss)
+  mc2(wqsss, mc1(wpss))

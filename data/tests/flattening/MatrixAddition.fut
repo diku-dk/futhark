@@ -9,8 +9,8 @@
 fun [int] addRows ([int] xs, [int] ys) =
   map(+, zip (xs,ys))
 
-fun [[int]] addMatricies ([[int]] A, [[int]] B) =
-  map (addRows, zip (A,B))
+fun [[int]] addMatricies ([[int]] a, [[int]] b) =
+  map (addRows, zip (a,b))
 
-fun [[int]] main([[int]] A, [[int]] B) =
-  addMatricies(A,B)
+fun [[int]] main([[int]] a, [[int]] b) =
+  addMatricies(a,b)

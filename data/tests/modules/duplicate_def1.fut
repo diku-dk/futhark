@@ -5,14 +5,14 @@
 -- output { (1 , 2.0) }
 
 type foo = int
-struct foo 
+struct Foo
   {
     fun int foo() = 1
-    struct foo 
+    struct Foo
       {
         type foo = float
         fun foo foo() = 2.0
       }
   }
 
-fun (foo, foo.foo.foo) main() = ( foo.foo() , foo.foo.foo())
+fun (foo, Foo.Foo.foo) main() = ( Foo.foo() , Foo.Foo.foo())

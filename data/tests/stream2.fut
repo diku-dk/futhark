@@ -8,11 +8,11 @@
 --   , [9, 7, 19]
 --   )
 -- }
-fun (int,[int]) main(int m, *[int,n] A) =
-  streamSeq( fn (int,*[int]) (int chunk, int acc, *[int] C) =>
-                    let W = filter( >6, C ) in
-                    ( acc, W )
-           , 0, A
+fun (int,[int]) main(int m, *[int,n] a) =
+  streamSeq( fn (int,*[int]) (int chunk, int acc, *[int] c) =>
+                    let w = filter( >6, c ) in
+                    ( acc, w )
+           , 0, a
            )
 
 

@@ -35,16 +35,16 @@ fun *[i64, numBins2] doCompute(
 
 fun *[i64] main(int numBins) =
     let binb = map(fn f32 (f32 k) => k, iota32(numBins + 1))
-    let Datapoints = iota32(10)
-    let Randompoints = replicate(1, Datapoints)
-    let (RRs, DRs) = unzip(map(fn (*[i64], *[i64]) ([f32, numR] random) => (replicate(numBins+2, 0i64), doCompute(Datapoints, random, numBins, numBins+2, binb)), Randompoints))
+    let datapoints = iota32(10)
+    let randompoints = replicate(1, datapoints)
+    let (rrs, drs) = unzip(map(fn (*[i64], *[i64]) ([f32, numR] random) => (replicate(numBins+2, 0i64), doCompute(datapoints, random, numBins, numBins+2, binb)), randompoints))
     in
-    loop ((res, RR, DR) = (replicate(numBins*2, 0i64),
-                               reduce(reduceBins, replicate(numBins+2, 0i64), RRs),
-                               reduce(reduceBins, replicate(numBins+2, 0i64), DRs)
+    loop ((res, rr, dr) = (replicate(numBins*2, 0i64),
+                               reduce(reduceBins, replicate(numBins+2, 0i64), rrs),
+                               reduce(reduceBins, replicate(numBins+2, 0i64), drs)
                                )) = for i < numBins do
-        let res[i*2] = DR[i+1] in
-        let res[i*2+1] = RR[i+1] in
-        (res, RR, DR)
+        let res[i*2] = dr[i+1] in
+        let res[i*2+1] = rr[i+1] in
+        (res, rr, dr)
     in
     res

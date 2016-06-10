@@ -6,57 +6,57 @@
 -- }
 
 --------------------------------------------------
--- SAC VERSION
+-- SAC VERSIOn
 --------------------------------------------------
---inline int[.,.] floydSbs1(int[.,.] D ) [
---    DT = transpose(D);
+--inline int[.,.] floydSbs1(int[.,.] d ) [
+--    dT = transpose(d);
 --    res = with
 --        (. <= [i,j] <= .) :
---            min( D[i,j], minval( D[i] + DT[j]));
---        : modarray(D);
+--            min( d[i,j], minval( d[i] + dT[j]));
+--        : modarray(d);
 --    return( res);
 --]
 
 
 
 --------------------------------------------------
--- C VERSION
+-- C VERSIOn
 --------------------------------------------------
---inline int* floydSbs1( int N, int* D ) [
---    do k = 1, N
---      do i = 1, N
---        do j = 1, N
---          D[i,j] = MIN(D[i,j], D[i,k] + D[k,j])
+--inline int* floydSbs1( int n, int* d ) [
+--    do k = 1, n
+--      do i = 1, n
+--        do j = 1, n
+--          d[i,j] = min(d[i,j], d[i,k] + d[k,j])
 --        enddo
 --      enddo
 --    enddo
 
 --------------------------------------------------
--- C VERSION
+-- C VERSIOn
 --------------------------------------------------
---inline int* floydSbs1( int N, int* D ) [
---    do i = 1, N
---      do j = 1, N
+--inline int* floydSbs1( int n, int* d ) [
+--    do i = 1, n
+--      do j = 1, n
 --        minrow = 0;
---        do k = 1, N
---          minrow = MIN(minrow, D[i,k] + D[k,j])
+--        do k = 1, n
+--          minrow = min(minrow, d[i,k] + d[k,j])
 --        enddo
---        D[i,j] = MIN(D[i,j], minrow)
+--        d[i,j] = min(d[i,j], minrow)
 --      enddo
 --    enddo
 
-fun int MIN(int a, int b) = if(a<b) then a else b
+fun int min(int a, int b) = if(a<b) then a else b
 
-fun [[int]] floydSbsImp(int N, *[[int]] D) =
-    let DT = copy(transpose(D)) in
-    loop (D) = for i < N do
-        loop (D) = for j < N do
-            let sumrow = map(+, zip(D[i], DT[j])) in
-            let minrow = reduce (MIN, 1200, sumrow)    in
-            let minrow = MIN(D[i,j], minrow)        in
-            let D[i,j] = minrow in D
-        in D
-    in D
+fun [[int]] floydSbsImp(int n, *[[int]] d) =
+    let dT = copy(transpose(d)) in
+    loop (d) = for i < n do
+        loop (d) = for j < n do
+            let sumrow = map(+, zip(d[i], dT[j])) in
+            let minrow = reduce (min, 1200, sumrow)    in
+            let minrow = min(d[i,j], minrow)        in
+            let d[i,j] = minrow in d
+        in d
+    in d
 
 fun [[int]] main() =
     let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
