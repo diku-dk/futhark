@@ -88,7 +88,10 @@ tokens :-
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
-  [a-zA-Z] [a-zA-Z0-9_']*  { tokenS keyword }
+  [a-z] [a-zA-Z0-9_']*     { tokenS keyword }
+  "True"                   { tokenS $ const TRUE }
+  "False"                  { tokenS $ const FALSE }
+  [A-Z] [a-zA-Z0-9_']*     { tokenS $ SID . nameFromText }
 
 {
 
@@ -120,8 +123,6 @@ keyword s =
     "fn"           -> FN
     "for"          -> FOR
     "do"           -> DO
-    "True"         -> TRUE
-    "False"        -> FALSE
     "abs"          -> ABS
     "signum"       -> SIGNUM
 
@@ -213,6 +214,7 @@ data Token = IF
            | F32
            | F64
            | ID Name
+           | SID Name
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64

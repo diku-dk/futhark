@@ -16,7 +16,7 @@ import Futhark.CodeGen.Backends.GenericPython.AST
 --
 -- When the statement is being executed, the argument (if any) will be
 -- stored in the variable @optarg@.
-data Option = Option { optionLongName :: String
+data Option = Option { optionQualName :: String
                      , optionShortName :: Maybe Char
                      , optionArgument :: OptionArgument
                      , optionAction :: [PyStmt]
@@ -45,7 +45,7 @@ generateOptionParser options =
           Exp $ Call "parser.add_argument" $
           map (Arg . StringLiteral) name_args ++ argument_args
           where name_args = maybe id ((:) . ('-':) . (:[])) (optionShortName option)
-                            ["--" ++ optionLongName option]
+                            ["--" ++ optionQualName option]
                 argument_args = case optionArgument option of
                   RequiredArgument ->
                     [ArgKeyword "action" (StringLiteral "append"),
@@ -65,6 +65,6 @@ generateOptionParser options =
                         IdxExp $ StringLiteral $ fieldName option) $
             optionAction option
 
-        fieldName = map escape . optionLongName
+        fieldName = map escape . optionQualName
           where escape '-' = '_'
                 escape c = c

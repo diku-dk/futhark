@@ -76,6 +76,7 @@ import Language.Futhark.Core(blankLongname)
       f64             { L $$ F64 }
 
       id              { L _ (ID _) }
+      sid             { L _ (SID _) }
 
       intlit          { L _ (INTLIT _) }
       i8lit           { L _ (I8LIT _) }
@@ -230,8 +231,8 @@ Signature :: { SigDefBase f vn }
                  in SigDef name $5 pos }
 
 Module :: { ModDefBase f vn }
-       : struct id '{' ModDecs '}'
-       { let L pos (ID name) = $2
+       : struct sid '{' ModDecs '}'
+       { let L pos (SID name) = $2
           in ModDef name $4 pos }
 
 ModDecs : ModDec ModDecs { $1 ++ $2 }
@@ -271,8 +272,8 @@ DefaultDec :: { () }
 ;
 
 
-LongName :: { (LongName , SrcLoc) }
-         : id '.' LongName { let L loc (ID qual) = $1; ((quals, name), _) = $3
+QualName :: { (QualName , SrcLoc) }
+         : sid '.' QualName { let L loc (SID qual) = $1; ((quals, name), _) = $3
                              in ((qual:quals, name), loc) }
          | id { let L loc (ID name) = $1 in (([], name), loc) }
 ;
@@ -321,7 +322,9 @@ Header : include IncludeParts { Include $2 }
 
 IncludeParts :: { [String] }
 IncludeParts : id '.' IncludeParts { let L pos (ID name) = $1 in nameToString name : $3 }
-IncludeParts : id { let L pos (ID name) = $1 in [nameToString name] }
+             | id { let L pos (ID name) = $1 in [nameToString name] }
+             | sid '.' IncludeParts { let L pos (SID name) = $1 in nameToString name : $3 }
+             | sid { let L pos (SID name) = $1 in [nameToString name] }
 
 Fun     : fun UserTypeDecl id '(' Params ')' '=' Exp
                         { let L pos (ID name) = $3
@@ -354,7 +357,7 @@ UserType :: { UncheckedUserType }
          | '*' UserType  { UserUnique $2 $1 }
          | '[' UserType DimDecl ']' { UserArray $2 $3 $1 }
          | '(' UserTypes ')' { UserTuple $2 $1 }
-         | LongName { UserTypeAlias (fst $1) (snd $1) }
+         | QualName { UserTypeAlias (fst $1) (snd $1) }
 ;
 
 UserTypes :: { [UncheckedUserType] }
@@ -443,10 +446,10 @@ Exp  :: { UncheckedExp }
      | if Exp then Exp else Exp %prec ifprec
                       { If $2 $4 $6 NoInfo $1 }
 
-     | LongName '(' Exps ')'
+     | QualName '(' Exps ')'
        { Apply (fst $1) [ (arg, Observe) | arg <- $3 ] NoInfo (snd $1)
                       }
-     | LongName '(' ')'     { Apply (fst $1) [] NoInfo (snd $1) }
+     | QualName '(' ')'     { Apply (fst $1) [] NoInfo (snd $1) }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
@@ -567,7 +570,7 @@ Index : '[' Exps ']'                  { $2 }
 Exps : Exp ',' Exps { $1 : $3 }
      | Exp          { [$1] }
 
-Id : LongName { let (([], name), loc) = $1 in Ident name NoInfo loc }
+Id : QualName { let (([], name), loc) = $1 in Ident name NoInfo loc }
 
 Patterns : Pattern ',' Patterns  { $1 : $3 }
          | Pattern               { [$1] }
@@ -581,11 +584,11 @@ Pattern : id { let L pos (ID name) = $1 in Id $ Ident name NoInfo pos }
 FunAbstr :: { UncheckedLambda }
          : fn UserTypeDecl '(' Params ')' '=>' Exp
            { AnonymFun $4 $7 $2 $1 }
-         | LongName '(' Exps ')'
+         | QualName '(' Exps ')'
            { CurryFun (fst $1) $3 NoInfo (snd $1) }
-         | LongName '(' ')'
+         | QualName '(' ')'
            { CurryFun (fst $1) [] NoInfo (snd $1) }
-         | LongName
+         | QualName
            { CurryFun (fst $1) [] NoInfo (snd $1) }
            -- Minus is handed explicitly here because I could figure
            -- out how to resolve the ambiguity with negation.

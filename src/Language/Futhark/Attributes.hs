@@ -57,7 +57,7 @@ module Language.Futhark.Attributes
   --
   -- $names
   , removeNames
-  , nameToLongName
+  , nameToQualName
 
   -- * Queries on values
   , valueType
@@ -834,8 +834,8 @@ isMod :: DecBase f vn -> Maybe (ModDefBase f vn)
 isMod (ModDec modd) = Just modd
 isMod _            = Nothing
 
-nameToLongName :: Name -> LongName
-nameToLongName n = ([], n)
+nameToQualName :: Name -> QualName
+nameToQualName n = ([], n)
 
 decLoc :: DecBase f vn -> SrcLoc
 decLoc (FunOrTypeDec (FunDec (FunDef _ _ _ _ _ loc))) = loc

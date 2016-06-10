@@ -225,7 +225,7 @@ runCompilerM prog ops src userstate (CompilerM m) =
 
 standardOptions :: [Option]
 standardOptions = [
-  Option { optionLongName = "write-runtime-to"
+  Option { optionQualName = "write-runtime-to"
          , optionShortName = Just 't'
          , optionArgument = RequiredArgument
          , optionAction =
@@ -236,7 +236,7 @@ standardOptions = [
              simpleCall "open" [Var "optarg", StringLiteral "w"]
            ]
          },
-  Option { optionLongName = "runs"
+  Option { optionQualName = "runs"
          , optionShortName = Just 'r'
          , optionArgument = RequiredArgument
          , optionAction =
