@@ -228,7 +228,7 @@ type CompTypeBase = TypeBase Rank Names
 data UserType vn = UserPrim PrimType SrcLoc
                  | UserArray (UserType vn) (DimDecl vn) SrcLoc
                  | UserTuple [UserType vn] SrcLoc
-                 | UserTypeAlias LongName SrcLoc
+                 | UserTypeAlias QualName SrcLoc
                  | UserUnique (UserType vn) SrcLoc
 
     deriving (Show)
@@ -383,7 +383,7 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
-            | Apply  LongName [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
+            | Apply  QualName [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
 
             | DoLoop
               (PatternBase f vn) -- Merge variable pattern
@@ -565,7 +565,7 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
 -- | Anonymous Function
 data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun LongName [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+                      | CurryFun QualName [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
                       | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @-@; first type is operand, second is result.
@@ -607,7 +607,7 @@ data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                               }
 deriving instance Showable f vn => Show (FunDefBase f vn)
 
-type FunName = (Name, LongName)
+type FunName = (Name, QualName)
 
 -- | Type Declarations
 data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn

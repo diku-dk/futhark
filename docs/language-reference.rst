@@ -197,6 +197,8 @@ Functions and types within these structures can be accessed using common dot not
     type vector = Vec3.Int.t
     fun vector double(vector v) = Vec3.Int.plus(v,v)
 
+Structures names must begin with a capital letter.
+
 
 File Inclusions
 ---------------

@@ -46,27 +46,27 @@ compileProg prog = do
                      , GenericC.opsFatMemory = True
                      }
 
-        options = [ Option { optionLongName = "platform"
+        options = [ Option { optionQualName = "platform"
                            , optionShortName = Just 'p'
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_preferred_platform = optarg;|]
                            }
-                  , Option { optionLongName = "device"
+                  , Option { optionQualName = "device"
                            , optionShortName = Just 'd'
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_preferred_device = optarg;|]
                            }
-                  , Option { optionLongName = "synchronous"
+                  , Option { optionQualName = "synchronous"
                            , optionShortName = Just 's'
                            , optionArgument = NoArgument
                            , optionAction = [C.cstm|cl_debug = 1;|]
                            }
-                  , Option { optionLongName = "group-size"
+                  , Option { optionQualName = "group-size"
                            , optionShortName = Nothing
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_group_size = atoi(optarg);|]
                            }
-                  , Option { optionLongName = "num-groups"
+                  , Option { optionQualName = "num-groups"
                            , optionShortName = Nothing
                            , optionArgument = RequiredArgument
                            , optionAction = [C.cstm|cl_num_groups = atoi(optarg);|]

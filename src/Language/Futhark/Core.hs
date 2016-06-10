@@ -11,7 +11,7 @@ module Language.Futhark.Core
 
   -- * Name handling
   , Name
-  , LongName
+  , QualName
   , nameToString
   , nameFromString
   , longnameToString
@@ -90,7 +90,7 @@ defaultEntryPoint = nameFromString "main"
 newtype Name = Name T.Text
   deriving (Show, Eq, Ord)
 
-type LongName = ([Name], Name)
+type QualName = ([Name], Name)
 
 instance Pretty Name where
   ppr = text . nameToString
@@ -106,7 +106,7 @@ instance Monoid Name where
 nameToString :: Name -> String
 nameToString (Name t) = T.unpack t
 
-longnameToString :: LongName -> String
+longnameToString :: QualName -> String
 longnameToString ([], name) = nameToString name
 longnameToString (names, name) = let
       names' = Data.List.intercalate "." $ map nameToString names
@@ -114,7 +114,7 @@ longnameToString (names, name) = let
   in  names' ++ "." ++ name'
 
 
-longnameToName :: LongName -> Name
+longnameToName :: QualName -> Name
 longnameToName = nameFromString . longnameToString
 
 
@@ -130,7 +130,7 @@ nameToText (Name t) = t
 nameFromText :: T.Text -> Name
 nameFromText = Name
 
-blankLongname :: LongName
+blankLongname :: QualName
 blankLongname = ([], nameFromString "")
 
 

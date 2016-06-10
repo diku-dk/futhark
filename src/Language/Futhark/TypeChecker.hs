@@ -64,9 +64,9 @@ data TypeError =
   -- inconsistent.
   | UnknownVariableError Name SrcLoc
   -- ^ Unknown variable of the given name referenced at the given spot.
-  | UnknownFunctionError LongName SrcLoc
+  | UnknownFunctionError QualName SrcLoc
   -- ^ Unknown function of the given name called at the given spot.
-  | ParameterMismatch (Maybe LongName) SrcLoc
+  | ParameterMismatch (Maybe QualName) SrcLoc
     (Either Int [TypeBase Rank NoInfo ()]) [TypeBase Rank NoInfo ()]
   -- ^ A function (possibly anonymous) was called with
   -- invalid arguments.  The third argument is either the
@@ -92,7 +92,7 @@ data TypeError =
   -- match with the derived type.  The string is a
   -- description of the role of the type.  The last
   -- type is the elemens of the new derivation.
-  | CurriedConsumption LongName SrcLoc
+  | CurriedConsumption QualName SrcLoc
   -- ^ A function is being curried with an argument to be consumed.
   | BadLetWithValue SrcLoc
   -- ^ The new value for an array slice in let-with is aliased to the source.
@@ -117,7 +117,7 @@ data TypeError =
   -- ^ Signature has been defined twice
   | InvalidUniqueness SrcLoc (TypeBase Rank NoInfo ())
   -- ^ Uniqueness attribute applied to non-array.
-  | UndefinedLongName SrcLoc LongName
+  | UndefinedQualName SrcLoc QualName
   -- ^ Undefined longname
 
 instance Show TypeError where
@@ -220,11 +220,11 @@ instance Show TypeError where
     "Duplicate definition of type '" ++ nameToString name ++ "' at line " ++ locStr loc
   show (InvalidUniqueness loc t) =
     "Attempt to declare unique non-array " ++ pretty t ++ " at " ++ locStr loc ++ "."
-  show (UndefinedLongName loc longname) =
+  show (UndefinedQualName loc longname) =
     "Attempt to use undefined " ++ show longname ++ " at " ++ locStr loc ++ "."
 -- | A tuple of a return type and a list of argument types.
 
-type FunBinding = (LongName, StructTypeBase VName, [StructTypeBase VName])
+type FunBinding = (QualName, StructTypeBase VName, [StructTypeBase VName])
 type TypeBinding = TypeBase ShapeDecl NoInfo VName
 
 data Binding = Bound Type
@@ -304,7 +304,7 @@ data Scope  = Scope { envVtable :: HM.HashMap VName Binding
                     , envFtable :: HM.HashMap Name FunBinding
                     , envTAtable :: HM.HashMap Name TypeBinding
                     , envModTable :: HM.HashMap Name Scope
-                    , envBreadcrumb :: LongName
+                    , envBreadcrumb :: QualName
                     }
 
 initialScope :: Scope
@@ -602,7 +602,7 @@ buildScopeFromDecs decs = do
         let argtypes = map paramDeclaredType args
             (prefixes, _) = envBreadcrumb scope
             look tname tloc =
-              maybe (throwError $ UndefinedLongName tloc tname) return $
+              maybe (throwError $ UndefinedQualName tloc tname) return $
               typeFromScope tname scope
         ret' <- expandType look ret
         argtypes' <- mapM (expandType look) argtypes
@@ -1420,7 +1420,7 @@ checkArg arg = do
   (arg', dflow) <- collectOccurences $ checkExp arg
   return (arg', (typeOf arg', dflow, srclocOf arg'))
 
-checkFuncall :: Maybe LongName -> SrcLoc
+checkFuncall :: Maybe QualName -> SrcLoc
              -> [StructType] -> StructType -> [Arg]
              -> TypeM ()
 checkFuncall fname loc paramtypes _ args = do
@@ -1528,7 +1528,7 @@ checkLambda (UnOpFun unop NoInfo NoInfo loc) [arg] = do
     return $ UnOpFun unop (Info (argType arg)) (Info (typeOf e)) loc
 
 checkLambda (UnOpFun unop NoInfo NoInfo loc) args =
-  bad $ ParameterMismatch (Just $ nameToLongName $ nameFromString $ pretty unop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameToQualName $ nameFromString $ pretty unop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkLambda (BinOpFun op NoInfo NoInfo NoInfo loc) args =
@@ -1538,14 +1538,14 @@ checkLambda (CurryBinOpLeft binop x _ _ loc) [arg] =
   checkCurryBinOp CurryBinOpLeft binop x loc arg
 
 checkLambda (CurryBinOpLeft binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ nameToLongName $ nameFromString $ pretty binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameToQualName $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkLambda (CurryBinOpRight binop x _ _ loc) [arg] =
   checkCurryBinOp CurryBinOpRight binop x loc arg
 
 checkLambda (CurryBinOpRight binop _ _ _ loc) args =
-  bad $ ParameterMismatch (Just $ nameToLongName $ nameFromString $ pretty binop) loc (Left 1) $
+  bad $ ParameterMismatch (Just $ nameToQualName $ nameFromString $ pretty binop) loc (Left 1) $
   map (toStructural . argType) args
 
 checkCurryBinOp :: (BinOp -> Exp -> Info Type -> Info (CompTypeBase VName) -> SrcLoc -> b)
@@ -1582,7 +1582,7 @@ checkPolyLambdaOp op curryargexps args pos = do
                     (e1:e2:_) -> return (e1, e2, [])
   rettype <- typeOf <$> binding params (checkBinOp op x y pos)
   return $ BinOpFun op (Info tp) (Info tp) (Info rettype) pos
-  where fname = nameToLongName $ nameFromString $ pretty op
+  where fname = nameToQualName $ nameFromString $ pretty op
 
 checkRetType :: SrcLoc -> StructType -> TypeM ()
 checkRetType loc (Tuple ts) = mapM_ (checkRetType loc) ts
@@ -1626,7 +1626,7 @@ patternType (Id ident) = unInfo $ identType ident
 patternType (TuplePattern pats _) = Tuple $ map patternType pats
 
 expandType :: (Applicative m, MonadError TypeError m) =>
-               (LongName -> SrcLoc -> m (StructTypeBase VName))
+               (QualName -> SrcLoc -> m (StructTypeBase VName))
             -> UserType VName
             -> m (StructTypeBase VName)
 
@@ -1651,7 +1651,7 @@ checkTypeDecl (TypeDecl t NoInfo) =
   where look longname loc = do
           types <- asks (typeFromScope longname)
           case types of
-            Nothing    -> throwError $ UndefinedLongName loc longname
+            Nothing    -> throwError $ UndefinedQualName loc longname
             Just namet -> return namet
 
 -- Creating the initial type alias table is done by maintaining a
@@ -1661,7 +1661,7 @@ checkTypeDecl (TypeDecl t NoInfo) =
 -- a Reader and a State on top of an Either.
 
 type TypeAliasTableM =
-  ReaderT (HS.HashSet LongName) (StateT Scope TypeM)
+  ReaderT (HS.HashSet QualName) (StateT Scope TypeM)
 
 typeAliasTableFromProg :: [TypeDefBase NoInfo VName]
                        -> Scope
@@ -1679,7 +1679,7 @@ typeAliasTableFromProg defs scope = do
           modify $ addType name t
           return t
 
-        typeOfName :: LongName -> SrcLoc
+        typeOfName :: QualName -> SrcLoc
                    -> TypeAliasTableM (StructTypeBase VName)
         typeOfName (prefixes, name) loc = do
           inside <- ask
@@ -1717,7 +1717,7 @@ envFromScope (x:xs) scope = case HM.lookup x $ envModTable scope
 envFromScope [] scope = Just scope
 
 
-typeFromScope :: LongName -> Scope -> Maybe TypeBinding
+typeFromScope :: QualName -> Scope -> Maybe TypeBinding
 typeFromScope (prefixes, name) scope = do
   scope' <- envFromScope prefixes scope
   let taTable = envTAtable scope'
@@ -1727,7 +1727,7 @@ addType :: Name -> StructTypeBase VName -> Scope -> Scope
 addType name tp scope =
   scope {envTAtable = HM.insert name tp $ envTAtable scope}
 
-funFromScope :: LongName -> Scope -> Maybe FunBinding
+funFromScope :: QualName -> Scope -> Maybe FunBinding
 funFromScope (prefixes, name) scope = do
   scope' <- envFromScope prefixes scope
   let taTable = envFtable scope'
@@ -1751,12 +1751,12 @@ flattenProgFunctions (prog, a) = let
   funs = map (FunOrTypeDec . FunDec) (bottomFuns ++ moduleFuns)
   in (Prog funs , a)
 
-flattenModule :: LongName -> ModDefBase f vn -> [FunDefBase f vn]
+flattenModule :: QualName -> ModDefBase f vn -> [FunDefBase f vn]
 flattenModule longName modd =
-  let appendedName = appendNameToLongName (modName modd) longName
+  let appendedName = appendNameToQualName (modName modd) longName
    in flattenModule' appendedName modd
 
-flattenModule' :: LongName -> ModDefBase f vn -> [FunDefBase f vn]
+flattenModule' :: QualName -> ModDefBase f vn -> [FunDefBase f vn]
 flattenModule' longname moddefbase = let
   functions = mapMaybe isFun $ modDecls moddefbase
   modules = mapMaybe isMod $ modDecls moddefbase
@@ -1764,10 +1764,10 @@ flattenModule' longname moddefbase = let
   modulefunctions = concatMap (flattenModule longname) modules
   in functions' ++ modulefunctions
 
-appendNameToLongName :: Name -> LongName -> LongName
-appendNameToLongName name (prefixes, a) = (prefixes ++ [name] , a)
+appendNameToQualName :: Name -> QualName -> QualName
+appendNameToQualName name (prefixes, a) = (prefixes ++ [name] , a)
 
-giveLongname :: LongName -> FunDefBase f vn -> FunDefBase f vn
+giveLongname :: QualName -> FunDefBase f vn -> FunDefBase f vn
 giveLongname (prefixes, _) fundef =
   let (funname, realizedName) = funDefName fundef in
   fundef { funDefName = (longnameToName (prefixes, funname), realizedName) }
