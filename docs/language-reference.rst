@@ -305,6 +305,13 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
+``e.i``
+~~~~~~~
+
+Access field ``i`` of the expression ``e``, which must be of
+tuple-type.  The fields are indexed from zero.  ``i`` must be a
+literal integer, not an arbitrary expression.
+
 ``zip(x, y, z)``
 ~~~~~~~~~~~~~~~~~~
 

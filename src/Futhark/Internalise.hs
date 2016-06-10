@@ -131,6 +131,9 @@ internaliseExp desc (E.Index e idxs loc) = do
   let index v = I.PrimOp $ I.Index csidx' v idxs'
   letSubExps desc (map index vs)
 
+internaliseExp desc (E.TupleIndex e i _ _) =
+  take 1 . drop i <$> internaliseExp desc e
+
 internaliseExp desc (E.TupLit es _) =
   concat <$> mapM (internaliseExp desc) es
 

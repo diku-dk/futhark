@@ -188,6 +188,7 @@ import Language.Futhark.Core(blankLongname)
 
 %left '*' '/' '%' '//' '%%'
 %left pow
+%nonassoc '.'
 %nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
 %nonassoc '['
 %nonassoc Id
@@ -512,6 +513,8 @@ Exp  :: { UncheckedExp }
 
      | Exp Index
                       { Index $1 $2 (srclocOf $1) }
+
+     | Exp '.' NaturalInt { TupleIndex $1 $3 NoInfo $ srclocOf $1 }
 
      | streamMap       '(' FunAbstr ',' Exp ')'
                          { Stream (MapLike InOrder)  $3 $5 $1 }
