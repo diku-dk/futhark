@@ -72,6 +72,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
 bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
+                , simplifyReplicate
                 ]
 
 standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
@@ -320,6 +321,15 @@ simplifyRotate vtable (Let pat _ (PrimOp (Rotate cs offsets v)))
       letBind_ pat $ PrimOp $ Rotate (cs++cs3) offsets' rotate_rearrange
 
 simplifyRotate _ _ = cannotSimplify
+
+simplifyReplicate :: MonadBinder m => BottomUpRule m
+simplifyReplicate (vtable, used) (Let pat _ (PrimOp (Replicate (Constant n) (Var v))))
+  | oneIsh n,
+    not $ any (`UT.isConsumed` used) $ v : patternNames pat,
+    Just shape <- arrayDims <$> ST.lookupType v vtable,
+    not $ null shape =
+      letBind_ pat $ PrimOp $ Reshape [] (map DimNew $ constant (1::Int32) : shape) v
+simplifyReplicate _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore u
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
