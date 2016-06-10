@@ -3,7 +3,7 @@
 -- error: .*Dup.*
 
 fun int bar() = 1
-struct foo 
+struct Foo
   {
     fun foo foo() = 1
   }

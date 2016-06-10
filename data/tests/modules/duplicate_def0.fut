@@ -6,7 +6,7 @@
 
 type foo = int
 fun foo foo(int a) = a + a
-struct foo 
+struct Foo
   {
     fun int one() = 1
   }

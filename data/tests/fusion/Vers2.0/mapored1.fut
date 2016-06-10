@@ -15,12 +15,12 @@
 -- }
 --
 fun (f64,[f64],[f64],[f64]) main([f64] arr) =
-    let A = map(+3.0, arr)   in
-    let B = map(+7.0, arr)   in
-    let s = reduce(+,0.0, A) in
+    let a = map(+3.0, arr)   in
+    let b = map(+7.0, arr)   in
+    let s = reduce(+,0.0, a) in
 
-    let X1 = map(*3.0, A)    in
-    let X2 = map(*5.0, B)    in
-    let X3 = map(*0.7, arr)  in
+    let x1 = map(*3.0, a)    in
+    let x2 = map(*5.0, b)    in
+    let x3 = map(*0.7, arr)  in
 
-    (s,X1,X2,X3)
+    (s,x1,x2,x3)

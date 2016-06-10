@@ -4,7 +4,7 @@
 
 type foo = int
 
-struct foo 
+struct Foo
   {
     fun foo foo() = 1
   }

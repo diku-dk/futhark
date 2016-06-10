@@ -1,7 +1,7 @@
 -- Date computations.  Some complex scalar expressions and a branch.
 -- Once messed up the simplifier.
 
-fun int MOD(int x, int y) = x - (x/y)*y
+fun int mod(int x, int y) = x - (x/y)*y
 
 fun int hours_in_dayI   () = 24
 fun int minutes_in_dayI () = hours_in_dayI() * 60
@@ -37,7 +37,7 @@ fun (int,int,int,int,int)
   let y = 100 * ( n - 49 ) + i + l in
 
   --let daytime = minutes_since_epoch mod minutes_in_day in
-  let daytime = MOD( minutes_since_epoch, minutes_in_dayI() ) in
+  let daytime = mod( minutes_since_epoch, minutes_in_dayI() ) in
 
   if ( daytime == minutes_to_noonI() )
 
@@ -45,7 +45,7 @@ fun (int,int,int,int,int)
   then (y, m, d, 12, 0)
 
   --else [year = y; month = m; day = d; hour = daytime / 60; minute = daytime mod 60]
-  else (y, m, d, daytime / 60, MOD(daytime, 60) )
+  else (y, m, d, daytime / 60, mod(daytime, 60) )
 
 fun int main(int x) =
   date_of_gregorian(gregorian_of_date(x))
