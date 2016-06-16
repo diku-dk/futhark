@@ -203,6 +203,7 @@ simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps ret
                       letBindNames'_ [name] $ PrimOp $ Index inp_cs arr' is'
                       return (Nothing, inp_cs)
                 SubExpResult se -> do
+                  mapM_ addBinding bnds
                   letBindNames'_ [name] $ PrimOp $ SubExp se
                   return (Nothing, [])
           | otherwise =
