@@ -919,8 +919,7 @@ expReturns (AST.PrimOp (Rotate _ offsets v)) = do
 expReturns (AST.PrimOp (Split _ sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
-      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n int32))
-                0 sizeexps
+      offsets =  0 : scanl1 (+) (map (`SE.subExpToScalExp` int32) sizeexps)
   return $ zipWith (\new_shape offset
                     -> ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
                        NoUniqueness $
