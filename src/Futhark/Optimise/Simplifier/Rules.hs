@@ -564,10 +564,33 @@ simplifyIndexing defOf seType idd inds consuming =
         length olddims == length newdims ->
         Just $ pure $ IndexResult cs src inds
 
-
     Just (Reshape cs [_] v2)
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ pure $ IndexResult cs v2 inds
+
+    Just (Concat cs x xs _) | i : is <- inds -> Just $ do
+      res_t <- stripArray (length inds) <$> lookupType x
+      x_len <- arraySize 0 <$> lookupType x
+      xs_lens <- mapM (fmap (arraySize 0) . lookupType) xs
+
+      let add n m = do
+            added <- letSubExp "index_concat_add" $ PrimOp $ BinOp (Add Int32) n m
+            return (added, n)
+      (_, starts) <- mapAccumLM add x_len xs_lens
+      let xs_and_starts = zip (reverse xs) starts
+
+      let mkBranch [] =
+            letSubExp "index_concat" $ PrimOp $ Index cs x (i:is)
+          mkBranch ((x', start):xs_and_starts') = do
+            cmp <- letSubExp "index_concat_cmp" $ PrimOp $ CmpOp (CmpSle Int32) start i
+            (thisres, thisbnds) <- collectBindings $ do
+              i' <- letSubExp "index_concat_i" $ PrimOp $ BinOp (Sub Int32) i start
+              letSubExp "index_concat" $ PrimOp $ Index cs x' (i':is)
+            thisbody <- mkBodyM thisbnds [thisres]
+            (altres, altbnds) <- collectBindings $ mkBranch xs_and_starts'
+            altbody <- mkBodyM altbnds [altres]
+            letSubExp "index_concat_branch" $ If cmp thisbody altbody $ staticShapes [res_t]
+      SubExpResult <$> mkBranch xs_and_starts
 
     Just (ArrayLit ses _)
       | Constant (IntValue (Int32Value i)) : inds' <- inds,
