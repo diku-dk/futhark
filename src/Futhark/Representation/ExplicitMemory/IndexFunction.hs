@@ -164,9 +164,10 @@ iota :: IntegralCond num =>
         Shape num -> IxFun num
 iota = Direct
 
-offsetIndex :: IntegralCond num =>
+offsetIndex :: (Eq num, IntegralCond num) =>
                IxFun num -> num -> IxFun num
-offsetIndex = Offset
+offsetIndex ixfun i | i == 0 = ixfun
+offsetIndex ixfun i = Offset ixfun i
 
 strideIndex :: IntegralCond num =>
                IxFun num -> num -> IxFun num
