@@ -3,5 +3,5 @@
 -- ==
 -- error: .*unique.*
 
-fun [int] main([int] a) =
+fun []int main([]int a) =
   write([0], [1], a)

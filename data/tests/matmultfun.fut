@@ -9,9 +9,9 @@
 -- }
 -- structure { Map 2 Map/Map/Redomap 1 }
 
-fun [[int,p],n] main([[int,m],n] x, [[int,p],m] y) =
-  map(fn [int,p] ([int,m] xr) =>
-        map(fn int ([int,m] yc) =>
+fun [n][p]int main([n][m]int x, [m][p]int y) =
+  map(fn [p]int ([m]int xr) =>
+        map(fn int ([m]int yc) =>
               reduce(+, 0, zipWith(*, xr, yc)),
             transpose(y)),
       x)

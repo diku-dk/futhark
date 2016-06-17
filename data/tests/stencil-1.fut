@@ -14,7 +14,7 @@
 --    5.444444444444444] }
 
 
-fun [f64] main(int num_iterations, [f64,n] a) =
+fun []f64 main(int num_iterations, [n]f64 a) =
   loop (a) = for i < num_iterations do
     map(fn f64 (int i) =>
           let x = if i == 0 then a[i] else unsafe a[i-1] in

@@ -3,10 +3,10 @@
 -- ==
 -- error:
 
-fun [i32, n]
-  main([i32, k] indexes,
-       [i32, k] values0,
-       [f32, k] values1,
-       *[i32, n] array1,
-       *[i32, n] array2) =
+fun [n]i32
+  main([k]i32 indexes,
+       [k]i32 values0,
+       [k]f32 values1,
+       *[n]i32 array1,
+       *[n]i32 array2) =
   write(indexes, zip(values0, values1), array1, array2)

@@ -7,5 +7,5 @@
 --                                                                           500,
 --                                                                           600]]]
 -- }
-fun [[[int]]] main([[[int]]] a) =
+fun [][][]int main([][][]int a) =
   rearrange((0,2,1),a)

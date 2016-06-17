@@ -1,6 +1,6 @@
 -- ==
 -- error:
-fun int f(*[int] ar, *[[int]] a) =
+fun int f(*[]int ar, *[][]int a) =
   f(a[0], a) -- Should be a type error, as both are supposed to be uniqu
 
 fun int main(int n) =

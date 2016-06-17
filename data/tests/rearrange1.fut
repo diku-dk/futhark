@@ -6,5 +6,5 @@
 -- input { [[1,2,3]] [[4,7],[5,8],[6,9]] [[10,11,12]] }
 -- output { [[1,2,3], [4,5,6],[7,8,9], [10,11,12]] }
 
-fun [[int]] main([[int,n]] a, [[int],n] b, [[int,n]] c) =
+fun [][]int main([][n]int a, [n][]int b, [][n]int c) =
   concat(a, transpose(b), c)

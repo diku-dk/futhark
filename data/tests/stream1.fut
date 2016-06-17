@@ -17,20 +17,20 @@
 --   , [10, 22, 36, 52, 70, 90]
 --   )
 -- }
-fun ((int,[int]),[[int]],[f64],[f64],[int]) main(int m, *[int,n] as) =
+fun ((int,[]int),[][]int,[]f64,[]f64,[]int) main(int m, *[n]int as) =
   let b = map(+10, as) in
-  streamSeq( fn ((int,[int]),[[int,m]],[f64],[f64],[int]) (int chunk, (int, [int,m]) acc2, *[int] c) =>
+  streamSeq( fn ((int,[]int),[][m]int,[]f64,[]f64,[]int) (int chunk, (int, [m]int) acc2, *[]int c) =>
                     let (acc0, acc) = acc2                in
-                    let x = map ( fn [int] (int c) =>
+                    let x = map ( fn []int (int c) =>
                                     map(+c, iota(m))
                                 , c )                     in
-                    let y0= scan( fn [int] ([int] acc, [int] x) =>
+                    let y0= scan( fn []int ([]int acc, []int x) =>
                                     zipWith(+, acc, x)
                                 , replicate(m,0), x )     in
-                    let y = map ( fn [int] ([int] y0) =>
+                    let y = map ( fn []int ([]int y0) =>
                                     zipWith(+, acc, y0)
                                 , y0 )                    in
-                    let z = map ( fn f64 ([int] y) =>
+                    let z = map ( fn f64 ([]int y) =>
                                     let rs = map( fn f64 (int u) =>
                                                     f64(3*u)
                                                 , y )

@@ -47,7 +47,7 @@
 
 fun int min(int a, int b) = if(a<b) then a else b
 
-fun [[int]] floydSbsImp(int n, *[[int]] d) =
+fun [][]int floydSbsImp(int n, *[][]int d) =
     let dT = copy(transpose(d)) in
     loop (d) = for i < n do
         loop (d) = for j < n do
@@ -58,6 +58,6 @@ fun [[int]] floydSbsImp(int n, *[[int]] d) =
         in d
     in d
 
-fun [[int]] main() =
+fun [][]int main() =
     let arr = [[2,4,5], [1,1000,3], [3,7,1]] in
     floydSbsImp(3, copy(arr))

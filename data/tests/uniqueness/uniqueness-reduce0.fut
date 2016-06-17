@@ -9,9 +9,9 @@
 --   [9, 9, 9, 9, 9, 9, 9, 9, 9, 9]
 -- }
 
-fun [int] main(*[int] a,[int] b) =
+fun []int main(*[]int a,[]int b) =
   let (x,y) =
-    reduce(fn (*[int], [int]) ((*[int], [int]) acc, ([int], [int]) i) =>
+    reduce(fn (*[]int, []int) ((*[]int, []int) acc, ([]int, []int) i) =>
              let (a2,b2) = acc in (a2,b2),
            (a,b), zip(copy(replicate(10,iota(10))),
                       replicate(10,iota(10)))) in

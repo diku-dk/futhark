@@ -14,10 +14,10 @@
 --
 -- structure distributed { Map/DoLoop 0 }
 
-fun [([int,k],int),n] main([[[int,k],m],n] a) =
+fun [n]([k]int,int) main([n][m][k]int a) =
   let acc = replicate(k, 0) in
   let accnum = 1 in
-  map(fn ([int,k],int) ([[int,k],m] a_r) =>
+  map(fn ([k]int,int) ([m][k]int a_r) =>
         loop((acc,accnum)) = for i < m do
           (zipWith(+, acc, a_r[i]),
            accnum + accnum) in
@@ -25,11 +25,11 @@ fun [([int,k],int),n] main([[[int,k],m],n] a) =
      , a)
 
 -- Example of what we want - this is dead code.
-fun [([int,k],int),n] main_distributed([[[int,k],m],n] a) =
+fun [n]([k]int,int) main_distributed([n][m][k]int a) =
   let acc_expanded = replicate(n, replicate(k, 0)) in
   let accnum_expanded = replicate(n, 1) in
   loop((acc_expanded,accnum_expanded)) = for i < m do
-    unzip(zipWith(fn ([int,k],int) ([int,k] acc, int accnum, [[int,k],m] a_r) =>
+    unzip(zipWith(fn ([k]int,int) ([k]int acc, int accnum, [m][k]int a_r) =>
                     (zipWith(+, acc, a_r[i]),
                      accnum * accnum)
                  , acc_expanded, accnum_expanded, a))
