@@ -288,9 +288,9 @@ instance Show Mismatch where
   show (PrimValueMismatch i got expected) =
     explainMismatch i "" got expected
   show (ArrayLengthMismatch i got expected) =
-    explainMismatch i "array of length" got expected
+    explainMismatch i "array of length " got expected
   show (TypeMismatch i got expected) =
-    explainMismatch i "value of type" got expected
+    explainMismatch i "value of type " got expected
   show (ValueCountMismatch got expected) =
     "Expected " ++ show expected ++ " values, got " ++ show got
 
