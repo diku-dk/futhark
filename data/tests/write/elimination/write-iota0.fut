@@ -9,7 +9,7 @@
 -- }
 -- structure { Write 1 }
 
-fun [i32, n]
-  main([i32, k] values,
-       *[i32, n] array) =
+fun [n]i32
+  main([k]i32 values,
+       *[n]i32 array) =
   write(iota(k), values, array)

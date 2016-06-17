@@ -9,6 +9,6 @@
 -- }
 -- structure { Write 1 }
 
-fun [i32, n]
-  main(i32 k, *[i32, n] array) =
+fun [n]i32
+  main(i32 k, *[n]i32 array) =
   write(iota(k), iota(k), array)

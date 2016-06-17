@@ -4,8 +4,8 @@
 --
 -- structure distributed { Map/Loop 0 }
 
-fun [[int,k],n] main(int m, [[int,k],n] a) =
-  map(fn [int,k] ([int,k] a_r) =>
+fun [n][k]int main(int m, [n][k]int a) =
+  map(fn [k]int ([k]int a_r) =>
         let acc = a_r in
         loop(acc) = for i < m do
           zipWith(+, acc, a_r) in

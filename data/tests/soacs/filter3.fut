@@ -5,7 +5,7 @@
 -- output {
 --   [(True,1), (True,-2), (True,42)]
 -- }
-fun [(bool,int)] main([(int,bool)] xs) =
+fun [](bool,int) main([](int,bool) xs) =
   let tmp = filter(fn bool ((int,bool) x) =>
                      let (i,b) = x in b
                   , xs) in

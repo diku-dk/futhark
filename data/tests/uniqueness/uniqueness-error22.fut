@@ -2,7 +2,7 @@
 -- ==
 -- error:
 
-fun int f(*[int] a) = a[0]
+fun int f(*[]int a) = a[0]
 
 fun int main(int n) =
   let a = iota(n) in

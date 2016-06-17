@@ -7,7 +7,7 @@ fun int grayCode(int x) =
 fun bool testBit(int n, int ind) =
   let t = (1 << ind) in (n & t) == t
 
-fun int main(int n, [int,num_bits] dir_vs) =
+fun int main(int n, [num_bits]int dir_vs) =
   let reldv_vals = map( fn int (int dv, int i) =>
                           if testBit(grayCode(n),i)
                           then dv else 0

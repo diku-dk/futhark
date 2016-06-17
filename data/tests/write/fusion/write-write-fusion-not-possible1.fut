@@ -3,12 +3,12 @@
 -- ==
 -- structure { Write 2 }
 
-fun [i32, k]
-  main([i32, k] indexes,
-       [i32, k] values1,
-       [i32, k] values2,
-       *[i32, k] array1,
-       *[i32, k] array2) =
+fun [k]i32
+  main([k]i32 indexes,
+       [k]i32 values1,
+       [k]i32 values2,
+       *[k]i32 array1,
+       *[k]i32 array2) =
   let array1' = write(indexes, values1, array1)
   let array2' = write(array1', values2, array2)
   in array2'

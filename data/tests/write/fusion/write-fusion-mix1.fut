@@ -11,10 +11,10 @@
 -- }
 -- structure { Write 1 }
 
-fun ([i32, n], [i32, n])
-  main([i32, k] numbers,
-       *[i32, n] array0,
-       *[i32, n] array1) =
+fun ([n]i32, [n]i32)
+  main([k]i32 numbers,
+       *[n]i32 array0,
+       *[n]i32 array1) =
   let indexes0 = map(+1, numbers)
   let indexes1 = map(+2, numbers)
   let values0 = map(+3, numbers)

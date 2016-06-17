@@ -7,5 +7,5 @@
 -- output {
 --   [(1,4), (2,5), (3,6)]
 -- }
-fun [(int, int)] main([int] a, [int] b) =
+fun [](int,int) main([]int a, []int b) =
   zip(a,b)

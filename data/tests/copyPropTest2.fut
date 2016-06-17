@@ -6,15 +6,15 @@
 --   126
 -- }
 fun int getInt ( ) = 10
-fun [int] plus1([int] x) = map(fn int(int y)=>y+1, x)
+fun []int plus1([]int x) = map(fn int(int y)=>y+1, x)
 
 fun (int,int) main() =
     let n  = getInt()          in   -- Int
-    let x  = iota(n)     in   -- [Int,n]
+    let x  = iota(n)     in   -- [n]Int
     let m  = (n * (5-4))       in
-    let y  = copy(replicate(n,   x)) in   -- [[Int,n],n] copy necessary as y otherwise aliases x.
-    let z  = copy(replicate(n+n, y)) in   -- [[[Int,n],n],m+n]; copy necessary as z otherwise aliases x.
-    let q  = z[n-2]            in   -- [[Int,n],n]
+    let y  = copy(replicate(n,   x)) in   -- [n][n]Int copy necessary as y otherwise aliases x.
+    let z  = copy(replicate(n+n, y)) in   -- [[n][n]Int,m+n]; copy necessary as z otherwise aliases x.
+    let q  = z[n-2]            in   -- [n][n]Int
 
     loop ((m,x)) =
         for i < n-1 do

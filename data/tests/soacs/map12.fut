@@ -8,7 +8,7 @@
 -- output {
 --   [[1,1337,3], [4,1337,6]]
 -- }
-fun *[[int]] main(*[[int]] a, int i, int x) =
-  map(fn *[int] (*[int] r) =>
+fun *[][]int main(*[][]int a, int i, int x) =
+  map(fn *[]int (*[]int r) =>
         let r[i] = x in r,
       a)
