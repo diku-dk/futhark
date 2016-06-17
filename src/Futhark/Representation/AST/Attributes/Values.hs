@@ -9,6 +9,7 @@ module Futhark.Representation.AST.Attributes.Values
          -- * Rearranging
        , permuteArray
        , rotateArray
+       , concatArrays
        )
        where
 
@@ -74,3 +75,22 @@ rotate (k:ks) (d:ds) xs =
         | otherwise = drop (d+k) xs_rotated ++ take (d+k) xs_rotated
   in concat new_rows
 rotate _ _ xs = xs
+
+-- | Concatenate two arrays as per the 'Concat' PrimOp.
+concatArrays :: Int -> Value -> Value -> Value
+concatArrays i (ArrayVal arr1 et shape1) (ArrayVal arr2 _ shape2) =
+  ArrayVal (listArray (0,product shape3-1) $ concatenate xcs xs ycs ys) et shape3
+  where xcs = product $ drop i shape1
+        xs = elems arr1
+        ycs = product $ drop i shape2
+        ys = elems arr2
+        shape3 = zipWith3 update shape1 shape2 [0..]
+        update x y j | i == j    = x + y
+                     | otherwise = x
+concatArrays _ x _ = x
+
+concatenate :: Int -> [a] -> Int -> [a] -> [a]
+concatenate xcs xs ycs ys =
+  let xs' = chunk xcs xs
+      ys' = chunk ycs ys
+  in concat $ zipWith (++) xs' ys'

@@ -1133,11 +1133,18 @@ checkExp (Split splitexps arrexp pos) = do
   _ <- rowTypeM arrexp' -- Just check that it's an array.
   return $ Split splitexps' arrexp' pos
 
-checkExp (Concat arr1exp arr2exps pos) = do
+checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp
   arr2exps' <- mapM (require [typeOf arr1exp'] <=< checkExp) arr2exps
-  mapM_ rowTypeM arr2exps' -- Just check that it's an array.
-  return $ Concat arr1exp' arr2exps' pos
+  mapM_ ofProperRank arr2exps'
+  return $ Concat i arr1exp' arr2exps' loc
+  where ofProperRank e
+          | arrayRank t <= i =
+              bad $ TypeError loc $ "Cannot concat array " ++ pretty e
+              ++ " of type " ++ pretty t
+              ++ " across dimension " ++ pretty i ++ "."
+          | otherwise = return ()
+          where t = typeOf e
 
 checkExp (Copy e pos) = do
   e' <- checkExp e

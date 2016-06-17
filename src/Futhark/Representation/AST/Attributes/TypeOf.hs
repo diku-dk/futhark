@@ -109,10 +109,9 @@ primOpType (Rotate _ _ e) =
 primOpType (Split _ sizeexps e) =
   result <$> lookupType e
   where result t = map (t `setOuterSize`) sizeexps
-primOpType (Concat _ x _ ressize) =
+primOpType (Concat _ i x _ ressize) =
   result <$> lookupType x
-  where result xt =
-          [xt `setOuterSize` ressize]
+  where result xt = [setDimSize i xt ressize]
 primOpType (Copy v) =
   pure <$> lookupType v
 primOpType (Assert _ _) =

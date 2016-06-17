@@ -33,7 +33,7 @@ import Futhark.Internalise.AccurateSizes
 import Futhark.Internalise.TypesValues
 import Futhark.Internalise.Bindings
 import Futhark.Internalise.Lambdas
-
+import Futhark.Util (dropAt)
 
 -- | Convert a program in source Futhark to a program in the Futhark
 -- core language.
@@ -412,29 +412,32 @@ internaliseExp _ (E.Split splitexps arrexp loc) = do
 
   return $ concat $ transpose splitExps
 
-internaliseExp desc (E.Concat x ys loc) = do
+internaliseExp desc (E.Concat i x ys loc) = do
   xs  <- internaliseExpToVars "concat_x" x
   yss <- mapM (internaliseExpToVars "concat_y") ys
-  outer_size <- arraysSize 0 <$> mapM lookupType xs
+  outer_size <- arraysSize i <$> mapM lookupType xs
   ressize <- foldM sumdims outer_size =<<
-             mapM (fmap (arraysSize 0) . mapM lookupType) yss
+             mapM (fmap (arraysSize i) . mapM lookupType) yss
 
   let conc xarr yarrs = do
-        -- The inner sizes must match.
+        -- All dimensions except for dimension 'i' must match.
         xt  <- lookupType xarr
         yts <- mapM lookupType yarrs
         let matches n m =
               letExp "match" =<<
               eAssert (pure $ I.PrimOp $ I.CmpOp (I.CmpEq I.int32) n m) loc
-            x_inner_dims  = drop 1 $ I.arrayDims xt
-            ys_inner_dims = map (drop 1 . I.arrayDims) yts
+            x_inner_dims  = dropAt i 1 $ I.arrayDims xt
+            ys_inner_dims = map (dropAt i 1 . I.arrayDims) yts
+            updims = zipWith3 updims' [0..] (I.arrayDims xt)
+            updims' j xd yd | i == j    = yd
+                            | otherwise = xd
         matchcs <- asserting $
                    concat <$> mapM (zipWithM matches x_inner_dims) ys_inner_dims
         yarrs'  <- forM yarrs $ \yarr -> do
-                        yt <- lookupType yarr
-                        letExp "concat_y_reshaped" $
-                          shapeCoerce matchcs (arraySize 0 yt : x_inner_dims) yarr
-        return $ I.PrimOp $ I.Concat [] xarr yarrs' ressize
+          yt <- lookupType yarr
+          letExp "concat_y_reshaped" $
+            shapeCoerce matchcs (updims $ I.arrayDims yt) yarr
+        return $ I.PrimOp $ I.Concat [] i xarr yarrs' ressize
   letSubExps desc =<< zipWithM conc xs (transpose yss)
 
     where

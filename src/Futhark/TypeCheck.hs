@@ -57,6 +57,7 @@ import Prelude
 import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases
 import Futhark.Analysis.Alias
+import Futhark.Util
 import Futhark.Util.Pretty (Pretty, prettyDoc, indent, ppr, text, (<+>), align)
 
 -- | Information about an error during type checking.  The 'Show'
@@ -773,12 +774,12 @@ checkPrimOp (Split cs sizeexps arrexp) = do
   mapM_ (require [Prim int32]) sizeexps
   void $ checkArrIdent arrexp
 
-checkPrimOp (Concat cs arr1exp arr2exps ressize) = do
+checkPrimOp (Concat cs i arr1exp arr2exps ressize) = do
   mapM_ (requireI [Prim Cert]) cs
   arr1t  <- checkArrIdent arr1exp
   arr2ts <- mapM checkArrIdent arr2exps
-  let success = all (== stripArray 1 arr1t) $
-                map (stripArray 1) arr2ts
+  let success = all (== (dropAt i 1 $ arrayDims arr1t)) $
+                map (dropAt i 1 . arrayDims) arr2ts
   unless success $
     bad $ TypeError $
     "Types of arguments to concat do not match.  Got " ++

@@ -639,7 +639,7 @@ typeOf (Stream form lam _ _) =
     Sequential{} -> lambdaReturnType lam
                     `setAliases` HS.empty
                     `setUniqueness` Unique
-typeOf (Concat x _ _) =
+typeOf (Concat _ x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` HS.empty
 typeOf (Split splitexps e _) =
   Tuple $ replicate (1 + length splitexps) (typeOf e)
