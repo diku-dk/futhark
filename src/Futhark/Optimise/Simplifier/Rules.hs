@@ -54,6 +54,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyIndexIntoSplit
                , removeEmptySplits
                , removeSingletonSplits
+               , simplifyConcat
                , evaluateBranch
                , simplifyBoolBranch
                , hoistBranchInvariant
@@ -667,6 +668,26 @@ removeSingletonSplits _ (Let pat _ (PrimOp (Split _ [n] arr))) = do
     letBind_ pat $ PrimOp $ SubExp $ Var arr
     else cannotSimplify
 removeSingletonSplits _ _ =
+  cannotSimplify
+
+simplifyConcat :: MonadBinder m => TopDownRule m
+
+-- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
+simplifyConcat vtable (Let pat _ (PrimOp (Concat cs i x xs new_d)))
+  | Just r <- arrayRank <$> ST.lookupType x vtable,
+    let perm = [i] ++ [0..i-1] ++ [i+1..r-1],
+    Just (x',x_cs) <- transposedBy perm x,
+    Just (xs',xs_cs) <- unzip <$> mapM (transposedBy perm) xs = do
+      concat_rearrange <-
+        letExp "concat_rearrange" $ PrimOp $
+        Concat (cs++x_cs++concat xs_cs) 0 x' xs' new_d
+      letBind_ pat $ PrimOp $ Rearrange [] perm concat_rearrange
+  where transposedBy perm1 v =
+          case ST.lookupExp v vtable of
+            Just (PrimOp (Rearrange vcs perm2 v'))
+              | perm1 == perm2 -> Just (v', vcs)
+            _ -> Nothing
+simplifyConcat _ _ =
   cannotSimplify
 
 evaluateBranch :: MonadBinder m => TopDownRule m
