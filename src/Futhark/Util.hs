@@ -9,6 +9,7 @@
 module Futhark.Util
        (mapAccumLM,
         chunk,
+        dropAt,
         mapEither,
         maybeNth,
         zEncodeString
@@ -37,6 +38,10 @@ chunk _ [] = []
 chunk n xs =
   let (bef,aft) = splitAt n xs
   in bef : chunk n aft
+
+-- | @dropAt i n@ drops @n@ elements starting at element @i@.
+dropAt :: Int -> Int -> [a] -> [a]
+dropAt i n xs = take i xs ++ drop (i+n) xs
 
 -- | A combination of 'map' and 'partitionEithers'.
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])

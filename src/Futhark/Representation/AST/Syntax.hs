@@ -188,8 +188,8 @@ data PrimOp lore
   -- @a = [1,2,3,4]@
   -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates VName [VName] SubExp
-  -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
+  | Concat Certificates Int VName [VName] SubExp
+  -- ^ @concat@i([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy VName
   -- ^ Copy the given array.  The result will not alias anything.

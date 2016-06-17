@@ -585,25 +585,10 @@ evalPrimOp (Split _ sizeexps arrexp) = do
       | otherwise        -> bad $ SplitOutOfBounds (pretty arrexp) shape sizes
     _ -> bad $ TypeError "evalPrimOp Split"
 
-evalPrimOp (Concat _ arr1exp arr2exps _) = do
+evalPrimOp (Concat _ i arr1exp arr2exps _) = do
   arr1  <- lookupVar arr1exp
   arr2s <- mapM lookupVar arr2exps
-
-  case arr1 of
-    ArrayVal arr1' bt (outerdim1:rowshape1) -> do
-        (res,resouter,resshape) <- foldM concatArrVals (arr1',outerdim1,rowshape1) arr2s
-        return [ArrayVal res bt (resouter:resshape)]
-    _ -> bad $ TypeError "evalPrimOp Concat"
-  where
-    concatArrVals (acc,outerdim,rowshape) (ArrayVal arr2 _ (outerdim2:rowshape2)) =
-        if rowshape == rowshape2
-        then let nelems = (outerdim+outerdim2) * product rowshape
-             in return  ( listArray (0,nelems-1) (elems acc ++ elems arr2)
-                        , outerdim+outerdim2
-                        , rowshape
-                        )
-        else bad $ TypeError "irregular arguments to concat"
-    concatArrVals _ _ = bad $ TypeError "evalPrimOp Concat"
+  return [foldl (concatArrays i) arr1 arr2s]
 
 evalPrimOp (Copy v) = single <$> lookupVar v
 

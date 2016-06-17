@@ -252,7 +252,7 @@ rearrangeScanReduceInput cs num_threads padding w' elements_per_thread arr = do
             letExp (baseString arr <> "_padding") $
             PrimOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
           letExp (baseString arr <> "_padded") $
-            PrimOp $ Concat [] arr [arr_padding] w'
+            PrimOp $ Concat [] 0 arr [arr_padding] w'
 
         rearrange arr_name arr_padded row_type = do
           let row_dims = arrayDims row_type

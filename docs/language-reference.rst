@@ -367,7 +367,15 @@ Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Concatenate the rows/elements of several arrays.  The shape of the
-arrays must be identical in all but the first dimension.
+arrays must be identical in all but the first dimension.  This is
+equivalent to ``concat@0`` (see below).
+
+``concat@i(a_1, ..., a_n)``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Concatenate arrays across dimension ``i``, with the outermost
+dimension being ``0``.  The ``i`` must be a compile-time integer
+constant, i.e. i cannot be a variable.
 
 ``copy(a)``
 ~~~~~~~~~~~

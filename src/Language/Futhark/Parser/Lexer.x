@@ -73,6 +73,7 @@ tokens :-
   "."                      { tokenC DOT }
   "->"                     { tokenC TYPE_ARROW }
   ":"                      { tokenC COLON }
+  "@"                      { tokenC AT }
 
   @intlit i8               { tokenM $ fmap I8LIT . tryRead "i8" . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ fmap I16LIT . tryRead "i16" . T.takeWhile (/='i') }
@@ -313,6 +314,7 @@ data Token = IF
            | END
            | VAL
            | COLON
+           | AT
            | IS
            | TYPE_ARROW
 

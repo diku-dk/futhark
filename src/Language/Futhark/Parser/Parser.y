@@ -124,6 +124,7 @@ import Language.Futhark.Core(blankLongname)
       '_'             { L $$ UNDERSCORE }
       '!'             { L $$ BANG }
       '.'             { L $$ DOT }
+      '@'             { L $$ AT }
       fun             { L $$ FUN }
       entry           { L $$ ENTRY }
       fn              { L $$ FN }
@@ -473,7 +474,11 @@ Exp  :: { UncheckedExp }
                       { Split $4 $7 $1 }
 
      | concat '(' Exp ',' Exps ')'
-                      { Concat $3 $5 $1 }
+                      { Concat 0 $3 $5 $1 }
+
+     | concat '@' NaturalInt '(' Exp ',' Exps ')'
+                      { Concat $3 $5 $7 $1 }
+
 
      | reduce '(' FunAbstr ',' Exp ',' Exp ')'
                       { Reduce (commutativity $3) $3 $5 $7 $1 }

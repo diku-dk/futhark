@@ -143,9 +143,8 @@ mapExpM tv (Split splitexps arrexp loc) =
   pure Split <*>
        mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
        pure loc
-mapExpM tv (Concat x ys loc) =
-  pure Concat <*>
-       mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
+mapExpM tv (Concat i x ys loc) =
+  Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp form loopbody letbody loc) =

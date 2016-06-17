@@ -285,8 +285,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 9 e
   pprPrec _ (Split e a _) =
     text "split" <> apply [ppr e, ppr a]
-  pprPrec _ (Concat x y _) =
-    text "concat" <> apply [ppr x, ppr y]
+  pprPrec _ (Concat i x y _) =
+    text "concat" <> text "@" <> ppr i <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
   pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     aliasComment pat $

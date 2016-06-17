@@ -568,7 +568,7 @@ simplifyIndexing defOf seType idd inds consuming =
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ pure $ IndexResult cs v2 inds
 
-    Just (Concat cs x xs _) | i : is <- inds -> Just $ do
+    Just (Concat cs 0 x xs _) | i : is <- inds -> Just $ do
       res_t <- stripArray (length inds) <$> lookupType x
       x_len <- arraySize 0 <$> lookupType x
       xs_lens <- mapM (fmap (arraySize 0) . lookupType) xs
