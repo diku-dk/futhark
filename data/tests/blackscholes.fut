@@ -287,10 +287,10 @@ fun f64 go ((bool,f64,f64,f64) x) =
    else
      x_expRT * (1.0 - cndD2) - price * (1.0 - cndD1)
 
-fun [f64] blackscholes ([(bool,f64,f64,f64)] xs) =
+fun []f64 blackscholes ([](bool,f64,f64,f64) xs) =
    map (go, xs)
 
-fun [f64] main (int years) =
+fun []f64 main (int years) =
   let days = years*365 in
   let a = map(+1, iota(days)) in
   let a = map(f64, a) in

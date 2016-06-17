@@ -13,10 +13,10 @@
 --   [2, 7]
 -- }
 
-fun ([i32, m], [i32, n])
-  main([i32, k] indexes,
-       [i32, k] valuesA,
-       [i32, k] valuesB,
-       *[i32, m] arrayA,
-       *[i32, n] arrayB) =
+fun ([m]i32, [n]i32)
+  main([k]i32 indexes,
+       [k]i32 valuesA,
+       [k]i32 valuesB,
+       *[m]i32 arrayA,
+       *[n]i32 arrayB) =
   write(zip(indexes, indexes), zip(valuesA, valuesB), arrayA, arrayB)

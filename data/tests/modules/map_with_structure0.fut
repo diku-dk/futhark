@@ -12,4 +12,4 @@ struct F  {
     fun int plus(int a, int b) = a+b
   }
 
-fun int main([int] a) = reduce(F.plus , 0 , a)
+fun int main([]int a) = reduce(F.plus , 0 , a)

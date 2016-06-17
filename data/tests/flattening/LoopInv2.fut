@@ -17,10 +17,10 @@
 --    [[9, 9, 9],
 --     [12, 12, 12]]]
 -- }
-fun [int] addRows ([int] xs, [int] ys) =
+fun []int addRows ([]int xs, []int ys) =
   map(+, zip (xs,ys))
 
-fun [[[int]]] main ([[[int]]] xsss, [int] ys) =
-  map (fn [[int]] ([[int]] xss) =>
-         map(fn [int] ([int] xs) => addRows(xs,ys), xss)
+fun [][][]int main ([][][]int xsss, []int ys) =
+  map (fn [][]int ([][]int xss) =>
+         map(fn []int ([]int xs) => addRows(xs,ys), xss)
       , xsss)

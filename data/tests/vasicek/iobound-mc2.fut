@@ -8,8 +8,8 @@
 default(float)
 
 -- Some useful (for mc2) Futhark extensions.
-fun float sum([float] xs) = reduce(+, 0.0, xs)
-fun float mean([float,n] xs) = sum(map(/float(n), xs))
+fun float sum([]float xs) = reduce(+, 0.0, xs)
+fun float mean([n]float xs) = sum(map(/float(n), xs))
 
 
 -- Vasicek model parameters.
@@ -26,35 +26,35 @@ fun float nextrP(float lastr, float wp) =
 fun float nextrQ(float lastr, float wq) =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * wq
 
-fun float seqRedSumP(float lastr, [float] ws) =
+fun float seqRedSumP(float lastr, []float ws) =
   if (size(0,ws) == 0)
   then lastr
   else
     let (w0, wns) = split((1),ws) in
     seqRedSumP(nextrP(lastr, w0[0]), wns)
 
-fun float seqRedSumQ(float lastr, [float] ws) =
+fun float seqRedSumQ(float lastr, []float ws) =
   if (size(0,ws) == 0)
   then lastr
   else
     let (w0, wns) = split((1),ws) in
     lastr + seqRedSumQ(nextrQ(lastr, w0[0]), wns)
 
-fun [float] mc1([[float]] wpss) =
+fun []float mc1([][]float wpss) =
   map(mc1step, wpss)
-fun float mc1step([float] wps) =
+fun float mc1step([]float wps) =
   seqRedSumP(r0(), wps)
 
-fun [float] mc2([[[float]]] wqsss, [float] r1s) =
+fun []float mc2([][][]float wqsss, []float r1s) =
   map(mc2sim, zip(wqsss, r1s))
-fun float mc2sim(([[float]], float) arg) =
+fun float mc2sim(([][]float, float) arg) =
   let ( wqss, r1 ) = arg in
   let tn = size(0, wqss) in
   let sum_r = zipWith(mc2step, wqss, replicate(tn, r1)) in
   mean(sum_r)
-fun float mc2step(([float], float) arg) =
+fun float mc2step(([]float, float) arg) =
   let ( wqs, r1 ) = arg in
   seqRedSumQ(r1, wqs)
 
-fun [float] main([[float]] wpss, [[[float]]] wqsss) = --mc1(wpss)
+fun []float main([][]float wpss, [][][]float wqsss) = --mc1(wpss)
   mc2(wqsss, mc1(wpss))

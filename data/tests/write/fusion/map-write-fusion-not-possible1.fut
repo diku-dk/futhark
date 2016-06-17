@@ -5,10 +5,10 @@
 -- ==
 -- structure { Map 1 Write 1 }
 
-fun [i32, n]
-  main([i32, k] indexes,
-       [i32, k] values,
-       *[i32, n] array) =
+fun [n]i32
+  main([k]i32 indexes,
+       [k]i32 values,
+       *[n]i32 array) =
   let indexes' = map(fn i32 (i32 i) => unsafe array[i], indexes)
   let array' = write(indexes', values, array)
   in array'

@@ -22,7 +22,7 @@ fun int hash(int x) =
   let x = ((x >> 16) ^ x) in
   x
 
-fun [int,n] rand_array(int n, int lower, int upper) =
+fun [n]int rand_array(int n, int lower, int upper) =
   let max_rounds = 5 in
   map(fn int (int i) =>
         -- We hash i+n to ensure that a random length-n array is not a
@@ -30,5 +30,5 @@ fun [int,n] rand_array(int n, int lower, int upper) =
         hash(i+n) % (upper-lower+1) + lower,
       iota(n))
 
-fun [int] main(int x, int lower, int upper) =
+fun []int main(int x, int lower, int upper) =
   rand_array(x, lower, upper)

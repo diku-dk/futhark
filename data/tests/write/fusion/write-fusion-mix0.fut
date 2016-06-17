@@ -14,13 +14,13 @@
 -- }
 -- structure { Write 1 }
 
-fun ([i32, n], [i32, n])
-  main([i32, k] indexes0,
-       [i32, k] indexes1,
-       [i32, k] values0,
-       [i32, k] values1,
-       *[i32, n] array0,
-       *[i32, n] array1) =
+fun ([n]i32, [n]i32)
+  main([k]i32 indexes0,
+       [k]i32 indexes1,
+       [k]i32 values0,
+       [k]i32 values1,
+       *[n]i32 array0,
+       *[n]i32 array1) =
   let values0' = map(+4, values0)
   let values1' = map(*3, values1)
   let array0' = write(indexes0, values0', array0)

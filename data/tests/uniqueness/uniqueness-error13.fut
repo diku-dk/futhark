@@ -3,9 +3,9 @@
 -- ==
 -- error:
 
-fun [int] f ([int] x) = x
+fun []int f ([]int x) = x
 
-fun [int] g ([int] x) = x
+fun []int g ([]int x) = x
 
 fun int main() =
   let a      = copy(replicate(10, iota(10))) in

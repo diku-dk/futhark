@@ -5,4 +5,4 @@
 -- output {
 --   362880
 -- }
-fun int main([int] a) = reduce(*, 1, a)
+fun int main([]int a) = reduce(*, 1, a)

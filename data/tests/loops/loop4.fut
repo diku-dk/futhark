@@ -8,7 +8,7 @@
 --   [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3]
 -- }
 
-fun [int] main([int] xs, int n) =
+fun []int main([]int xs, int n) =
   loop (xs) = for i < n do
     concat(xs,xs)
   in xs
