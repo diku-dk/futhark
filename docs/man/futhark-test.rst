@@ -111,7 +111,7 @@ The following program tests simple indexing and bounds checking::
   -- }
   -- error: Assertion.*failed
 
-  fun int main([int] a, int i) =
+  fun int main([]int a, int i) =
     a[i]
 
 SEE ALSO

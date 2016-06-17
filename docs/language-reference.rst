@@ -44,7 +44,7 @@ in the return type and parameter types.  These can be used to express
 invariants about the shapes of arrays that are accepted or produced by
 the function, e.g::
 
-  fun [int,n] f([int,n] a) =
+  fun [n]int f([n]int a) =
     map(+1, a)
 
 The above declaration specifies a function that takes an array
@@ -58,12 +58,12 @@ The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun int dotProduct([int,n] a, [int,n] b) =
+  fun int dotProduct([n]int a, [n]int b) =
     reduce(+, 0, zipWith(*, a, b))
 
 Or matrix multiplication::
 
-  fun [[int,n],n] matMult([[int,m],n] x, [[int,n],m] y) =
+  fun [n][n]int matMult([n][m]int x, [m][n]int y) =
     ...
 
 The dimension names bound in a parameter shape declaration can be used
@@ -119,8 +119,8 @@ currently not possible to put shape declarations in type aliases.
 When using uniqueness attributes with type aliases, inner uniqueness
 attributes are overrided by outer ones::
 
-  type uniqueInts = *[int]
-  type nonuniqueIntLists = [intlist]
+  type uniqueInts = *[]int
+  type nonuniqueIntLists = []intlist
   type uniqueIntLists = *nonuniqueIntLists
 
   -- Error: using non-unique value for a unique return value.
@@ -545,14 +545,14 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[(int, f32)]`` is transformed to ``([int],
-[f32])`` during the compilation process, and all code interacting
+arrays.  The type ``[](int,f32)`` is transformed to ``([]int,
+[]f32)`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[([int], [f32])]``, which is transformed
-into ``([[int]], [[f32]])``.  These two types are not
+Consider the type ``[]([]int,[]f32)``, which is transformed
+into ``([][]int, [][]f32)``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 

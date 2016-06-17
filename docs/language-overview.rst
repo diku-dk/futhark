@@ -66,13 +66,13 @@ The syntax for tuple types is a comma-separated list of types or
 values enclosed in parenthesis, so ``(int, real)`` is a pair of an integer
 and a floating-point number.  Both single-element and empty tuples are
 permitted.  Array types are written as the element type surrounded by
-brackets, meaning that ``[int]`` is a one-dimensional array of
-integers, and ``[[[(int, real)]]]`` is a three-dimensional array of
+preceded by brackets, meaning that ``[]int`` is a one-dimensional array of
+integers, and ``[][][](int, real)`` is a three-dimensional array of
 tuples of integers and floats.  An immediate array is written as a
 sequence of elements enclosed by brackets::
 
-  [1, 2, 3]       -- Array of type [int].
-  [[1], [2], [3]] -- Array of type [[int]].
+  [1, 2, 3]       -- Array of type []int.
+  [[1], [2], [3]] -- Array of type [][]int.
 
 All arrays must be *regular* (often termed *full*).  This means that,
 for example, all rows of a two-dimensional array must have the same
@@ -263,7 +263,7 @@ simply a case of normal name shadowing.
 For example, this loop implements the "imperative" version of matrix
 multiplication of an ``m * o`` with an ``o * n`` matrix::
 
-  fun [[f32,n],m] matmult([[f32,o],m] a, [[f32,n],o] b) =
+  fun [m][n]f32 matmult([m][o]f32 a, [o][n]f32 b) =
     let res = replicate(m, replicate(n,0f32)) in
     loop (res) = for i < m do
         loop (res) = for j < n do
@@ -342,7 +342,7 @@ may occasionally prove useful to express certain algorithms in an
 imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
 
-  fun [int] fib(int n) =
+  fun []int fib(int n) =
     // Create "empty" array.
     let arr = iota(n) in
     // Fill array with Fibonacci numbers.
@@ -382,13 +382,13 @@ guaranteed.
 The simplest way to introduce uniqueness types is through examples.
 To that end, let us consider the following function definition::
 
-  fun *[int] modify(*[int] a, int i, int x) =
+  fun *[]int modify(*[]int a, int i, int x) =
     let b = a with [i] <- a[i] + x in
     b
 
 The function call ``modify(a,i,x)`` returns ``a``, but where the
 element at index ``i`` has been increased by ``x``.  Note the
-asterisks in the parameter declaration ``*[int] a``.  This means that
+asterisks in the parameter declaration ``*[]int a``.  This means that
 the function ``modify`` has been given "ownership" of the array ``a``,
 meaning that the caller of ``modify`` will never reference array ``a`` after
 the call.  As a consequence, ``modify`` can change the element at index
@@ -405,7 +405,7 @@ follows::
 
 Under which circumstances is this call valid?  Two things must hold:
 
-1. The type of ``a`` must be ``*[int]``, of course.
+1. The type of ``a`` must be ``*[]int``, of course.
 
 2. Neither ``a`` or any variable that *aliases* ``a`` may be used on any
    execution path following the call to ``modify``.
@@ -433,7 +433,7 @@ analysis in greater detail.
 
 Let us consider the definition of a function returning a unique array::
 
-  fun *[int] f([int] a) = body
+  fun *[]int f([]int a) = body
 
 Note that the argument, ``a``, is non-unique, and hence we cannot
 modify it.  There is another restriction as well: ``a`` must not be
@@ -468,7 +468,7 @@ rules:
     of a call to the function is the only reference to that value.  An
     example violation::
 
-      fun *[int] broken([[int]] a, int i) =
+      fun *[]int broken([][]int a, int i) =
         a[i] // Return value aliased with 'a'.
 
   **Uniqueness Rule 3**
