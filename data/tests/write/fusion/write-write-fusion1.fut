@@ -14,12 +14,12 @@
 -- }
 -- structure { Write 1 }
 
-fun ([i32, n], [i32, n], [i32, n])
-  main([i32, k] indexes,
-       [i32, k] values,
-       *[i32, n] array1,
-       *[i32, n] array2,
-       *[i32, n] array3) =
+fun ([n]i32, [n]i32, [n]i32)
+  main([k]i32 indexes,
+       [k]i32 values,
+       *[n]i32 array1,
+       *[n]i32 array2,
+       *[n]i32 array3) =
   let array1' = write(indexes, values, array1)
   let array2' = write(indexes, values, array2)
   let array3' = write(indexes, values, array3)

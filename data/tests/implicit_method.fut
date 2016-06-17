@@ -43,7 +43,7 @@
 --           [[0.226438, -0.114818], [-0.527942, 0.242899]]]
 -- }
 
-fun *[f64] tridagSeq( [f64] a, *[f64] b, [f64] c, *[f64] y ) =
+fun *[]f64 tridagSeq( []f64 a, *[]f64 b, []f64 c, *[]f64 y ) =
     let n     = size(0, a)            in
     loop ((y, b)) =
       for i < n-1 do
@@ -60,12 +60,12 @@ fun *[f64] tridagSeq( [f64] a, *[f64] b, [f64] c, *[f64] y ) =
                  in  y
     in  y
 
-fun *[[f64,m],n] implicitMethod( [[f64,3],m] myD,  [[f64,3],m] myDD,
-                                  [[f64,m],n] myMu, [[f64,m],n] myVar,
-                                  [[f64,m],n] u,    f64     dtInv  ) =
-  map( fn *[f64] ( ([f64],[f64],*[f64]) tup )  =>
+fun *[n][m]f64 implicitMethod( [m][3]f64 myD,  [m][3]f64 myDD,
+                                  [n][m]f64 myMu, [n][m]f64 myVar,
+                                  [n][m]f64 u,    f64     dtInv  ) =
+  map( fn *[]f64 ( ([]f64,[]f64,*[]f64) tup )  =>
          let (mu_row,var_row,u_row) = tup in
-         let abc = map( fn (f64,f64,f64) ((f64,f64,[f64],[f64]) tup) =>
+         let abc = map( fn (f64,f64,f64) ((f64,f64,[]f64,[]f64) tup) =>
                           let (mu, var, d, dd) = tup in
                           ( 0.0   - 0.5*(mu*d[0] + 0.5*var*dd[0])
                           , dtInv - 0.5*(mu*d[1] + 0.5*var*dd[1])
@@ -78,10 +78,10 @@ fun *[[f64,m],n] implicitMethod( [[f64,3],m] myD,  [[f64,3],m] myDD,
      , zip(myMu,myVar,copy(u))
      )
 
-fun *[[[f64,m],n],num_samples]
-  main( [[f64,3],m] myD,  [[f64,3],m] myDD,
-        [[f64,m],n] myMu, [[f64,m],n] myVar,
-        *[[f64,m],n] u,    f64     dtInv,
+fun *[num_samples][n][m]f64
+  main( [m][3]f64 myD,  [m][3]f64 myDD,
+        [n][m]f64 myMu, [n][m]f64 myVar,
+        *[n][m]f64 u,    f64     dtInv,
         int num_samples) =
   map(implicitMethod(myD, myDD, myMu, myVar, u),
       map (*dtInv, map (/f64(num_samples), map(f64, map(+1, iota(num_samples))))))

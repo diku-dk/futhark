@@ -10,8 +10,8 @@
 --   [3i32, 7i32]]
 -- }
 
-fun ([[f32]], [[int]]) main([[int,m],n] ass, [[f32,m],n] bss) =
-  unzip(zipWith(fn ([f32,m], [int,m]) ([int] as, [f32] bs) =>
+fun ([][]f32, [][]int) main([n][m]int ass, [n][m]f32 bss) =
+  unzip(zipWith(fn ([m]f32, [m]int) ([]int as, []f32 bs) =>
                   let (asum, bsum) =
                     unzip(scan(fn (int, f32) ((int, f32) x, (int, f32) y) =>
                              let (x_a, x_b) = x

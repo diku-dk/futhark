@@ -356,7 +356,7 @@ UserTypeAlias : type Aliases '=' UserTypeDecl
 UserType :: { UncheckedUserType }
          : PrimType      { let (t,loc) = $1 in UserPrim t loc }
          | '*' UserType  { UserUnique $2 $1 }
-         | '[' UserType DimDecl ']' { UserArray $2 $3 $1 }
+         | '[' DimDecl ']' UserType { UserArray $4 $2 $1 }
          | '(' UserTypes ')' { UserTuple $2 $1 }
          | QualName { UserTypeAlias (fst $1) (snd $1) }
 ;
@@ -365,11 +365,11 @@ UserTypes :: { [UncheckedUserType] }
 UserTypes : UserType ',' UserTypes { $1 : $3 }
           | UserType               { [$1] }
 DimDecl :: { DimDecl Name }
-        : ',' id
-          { let L _ (ID name) = $2
+        : id
+          { let L _ (ID name) = $1
             in NamedDim name }
-        | ',' intlit
-          { let L _ (INTLIT n) = $2
+        | intlit
+          { let L _ (INTLIT n) = $1
             in ConstDim (fromIntegral n) }
         | { AnyDim }
 

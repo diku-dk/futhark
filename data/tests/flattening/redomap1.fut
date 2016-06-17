@@ -6,9 +6,9 @@
 -- output {
 --   [12, 27]
 -- }
-fun [int,m] main ([[int,n],m] xss, [[int,n],m] yss) =
+fun [m]int main ([m][n]int xss, [m][n]int yss) =
     let final_res =
-      map(fn int ([int,n] xs, [int,n] ys) =>
+      map(fn int ([n]int xs, [n]int ys) =>
             let tmp =
               map (fn int (int x, int y) => x+y
                   , zip (xs,ys)) in

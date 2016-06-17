@@ -2,7 +2,7 @@
 fun f64 f(f64 a        ) = a + 3.0
 fun f64 g(f64 a, f64 b) = a * b
 
-fun f64 main([f64] arr) =
+fun f64 main([]f64 arr) =
     let n = int(arr[0]) in
     let x = map(f, arr)   in
     loop(arr) = for i < n do

@@ -21,7 +21,7 @@ fun (int,int,int,int) mapOp (int x) =
   , max(x,0)
   , x)
 
-fun int main([int] xs) =
+fun int main([]int xs) =
   let (x, _, _, _) =
     reduce(redOp, (0,0,0,0), map(mapOp, xs)) in
   x

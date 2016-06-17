@@ -9,7 +9,7 @@
 -- propagation).
 -- ==
 
-fun ([[f64]], [[f64]]) main(*[[f64]] a, *[[f64]] u) =
+fun ([][]f64, [][]f64) main(*[][]f64 a, *[][]f64 u) =
   let n = size(0, a) in
   loop ((a,u)) =
     for k < n do

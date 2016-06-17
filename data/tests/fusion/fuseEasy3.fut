@@ -8,7 +8,7 @@ fun f64 h1(f64 a1, f64 a2, f64 a3) = a1 * a2 + a3
 --fun f64 h2((f64,f64) a23) = let (a2,a3) = a23 in a2 * a3
 fun f64 h2(f64 a1, (f64,f64) a23) = let (a2,a3) = a23 in a2 * a3 - a1
 
-fun [f64] main([f64] arr) =
+fun []f64 main([]f64 arr) =
     let x = map(f, arr) in
     let y = map(g, arr) in
     if arr[0] < 0.0

@@ -8,8 +8,8 @@
 -- , [21, 7, 0 ]
 -- ]
 -- }
-fun [[int]] main ([[int,n],m] xss, [int,m] ys) =
-  map( fn [int,n] ([int,n] xs, int y) =>
+fun [][]int main ([m][n]int xss, [m]int ys) =
+  map( fn [n]int ([n]int xs, int y) =>
          map (fn int (int x) =>
                 let tmp1 = iota(x) in
                 let tmp2 = map(*y,tmp1) in

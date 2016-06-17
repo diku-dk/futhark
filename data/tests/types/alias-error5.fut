@@ -3,7 +3,7 @@
 -- ==
 -- error: .*cycl.*
 
-type t0 = [t1]
+type t0 = []t1
 type t1 = (int, float, t2)
 type t2 = t0
 

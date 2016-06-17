@@ -1,6 +1,6 @@
 -- Uniqueness goes outside-in.
 
-type uniqlist = *[int]
+type uniqlist = *[]int
 
-fun [uniqlist] main([[int]] p) =
+fun []uniqlist main([][]int p) =
   p
