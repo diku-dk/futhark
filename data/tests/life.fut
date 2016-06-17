@@ -33,9 +33,9 @@ fun int cell_neighbors(int i, int j, [n][m]bool board) =
   let below = (i + 1) % n in
   let right = (j + 1) % m in
   let left = (j - 1) % m in
-  bint(board[left,above]) + bint(board[j,above]) + bint(board[right,above]) +
+  bint(board[above,left]) + bint(board[above,j]) + bint(board[above,right]) +
   bint(board[i,left]) + bint(board[i,right]) +
-  bint(board[left,below]) + bint(board[j,below]) + bint(board[right,below])
+  bint(board[below,left]) + bint(board[below,j]) + bint(board[below,right])
 
 fun [n][m]int all_neighbours([n][m]bool board) =
   map(fn []int (int i) =>
