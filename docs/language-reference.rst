@@ -363,6 +363,13 @@ The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
 
 Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
 
+``split@i((i_1, ..., i_n), a)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Splits an array across dimension ``i``, with the outermost dimension
+being ``0``.  The ``i`` must be a compile-time integer constant,
+i.e. ``i`` cannot be a variable.
+
 ``concat(a_1, ..., a_n)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -375,7 +382,7 @@ equivalent to ``concat@0`` (see below).
 
 Concatenate arrays across dimension ``i``, with the outermost
 dimension being ``0``.  The ``i`` must be a compile-time integer
-constant, i.e. i cannot be a variable.
+constant, i.e. ``i`` cannot be a variable.
 
 ``copy(a)``
 ~~~~~~~~~~~

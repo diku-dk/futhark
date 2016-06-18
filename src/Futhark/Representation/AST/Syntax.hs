@@ -181,12 +181,12 @@ data PrimOp lore
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates [SubExp] VName
+  | Split Certificates Int [SubExp] VName
   -- ^ 2nd arg is sizes of arrays you back, which is
   -- different from what the external language does.
   -- In the internal langauge,
   -- @a = [1,2,3,4]@
-  -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
+  -- @split@0( (1,0,2) , a ) = {[1], [], [2,3]}@
 
   | Concat Certificates Int VName [VName] SubExp
   -- ^ @concat@i([1],[2, 3, 4]) = [1, 2, 3, 4]@.

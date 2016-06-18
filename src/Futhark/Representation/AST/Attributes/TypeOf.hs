@@ -106,9 +106,9 @@ primOpType (Rearrange _ perm e) =
   where result t = [rearrangeType perm t]
 primOpType (Rotate _ _ e) =
   pure <$> lookupType e
-primOpType (Split _ sizeexps e) =
+primOpType (Split _ i sizeexps e) =
   result <$> lookupType e
-  where result t = map (t `setOuterSize`) sizeexps
+  where result t = map (setDimSize i t) sizeexps
 primOpType (Concat _ i x _ ressize) =
   result <$> lookupType x
   where result xt = [setDimSize i xt ressize]

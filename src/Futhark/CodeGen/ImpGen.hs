@@ -539,7 +539,6 @@ defCompilePrimOp
       emit $ Imp.SetScalar offs_glb 0
       let perm = [i] ++ [0..i-1] ++ [i+1..length destshape-1]
           invperm = rearrangeInverse perm
-          width = product $ map (SE.intSubExpToScalExp . dimSizeToSubExp) $ take 1 $ drop (i+1) destshape
           destloc = MemLocation destmem destshape
                     (IxFun.permute (IxFun.offsetIndex (IxFun.permute destixfun perm) $
                                      SE.Id offs_glb int32)
@@ -960,7 +959,11 @@ copy bt dest src n = do
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler op
 defaultCopy bt dest src n
-  | Just destoffset <-
+  | ixFunMatchesInnerShape
+      (Shape $ map dimSizeToSubExp destshape) destIxFun,
+    ixFunMatchesInnerShape
+      (Shape $ map dimSizeToSubExp srcshape) srcIxFun,
+    Just destoffset <-
       scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
@@ -976,11 +979,11 @@ defaultCopy bt dest src n
       copyElementWise bt dest src n
   where bt_size = primByteSize bt
         row_size = product $ map Imp.dimSizeToExp $ drop 1 srcshape
-        MemLocation destmem _ destIxFun = dest
+        MemLocation destmem destshape destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler op
-copyElementWise bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
+copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     declaringLoopVars is $ do
       let ivars = map varIndex is

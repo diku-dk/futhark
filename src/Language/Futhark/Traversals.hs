@@ -139,10 +139,10 @@ mapExpM tv (Stream form fun arr loc) =
             mapOnExp tv acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapOnExp tv acc
-mapExpM tv (Split splitexps arrexp loc) =
-  pure Split <*>
-       mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
-       pure loc
+mapExpM tv (Split i splitexps arrexp loc) =
+  Split i <$>
+  mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
+  pure loc
 mapExpM tv (Concat i x ys loc) =
   Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =

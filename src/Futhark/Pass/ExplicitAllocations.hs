@@ -391,8 +391,8 @@ ensureDirectArray :: VName -> AllocM (SubExp, VName, SubExp)
 ensureDirectArray v = do
   res <- lookupMemBound v
   case res of
-    ArrayMem _ _ _ mem ixfun
-      | IxFun.isDirect ixfun -> do
+    ArrayMem _ shape _ mem ixfun
+      | fullyDirect shape ixfun -> do
         memt <- lookupType mem
         case memt of
           Mem size _ -> return (size, mem, Var v)

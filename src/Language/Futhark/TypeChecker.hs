@@ -567,10 +567,6 @@ require ts e
                       (toStructural $ typeOf e) $
                       map toStructural ts
 
-rowTypeM :: Exp -> TypeM Type
-rowTypeM e = maybe wrong return $ peelArray 1 $ typeOf e
-  where wrong = bad $ TypeError (srclocOf e) $ "Type of expression is not array, but " ++ pretty (typeOf e) ++ "."
-
 chompDecs :: [DecBase NoInfo VName]
           -> ([FunOrTypeDecBase NoInfo VName], [DecBase NoInfo VName])
 chompDecs decs = f ([], decs)
@@ -1127,11 +1123,15 @@ checkExp (Stream form lam@(AnonymFun lam_ps _ (TypeDecl lam_rtp NoInfo) _) arr p
 checkExp (Stream _ _ _ pos) =
   bad $ TypeError pos "Stream with lambda NOT an anonymous function!!!!"
 
-checkExp (Split splitexps arrexp pos) = do
+checkExp (Split i splitexps arrexp loc) = do
   splitexps' <- mapM (require [Prim $ Signed Int32] <=< checkExp) splitexps
   arrexp' <- checkExp arrexp
-  _ <- rowTypeM arrexp' -- Just check that it's an array.
-  return $ Split splitexps' arrexp' pos
+  let t = typeOf arrexp'
+  when (arrayRank t <= i) $
+    bad $ TypeError loc $ "Cannot split array " ++ pretty arrexp'
+    ++ " of type " ++ pretty t
+    ++ " across dimension " ++ pretty i ++ "."
+  return $ Split i splitexps' arrexp' loc
 
 checkExp (Concat i arr1exp arr2exps loc) = do
   arr1exp'  <- checkExp arr1exp

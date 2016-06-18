@@ -200,8 +200,8 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
   ppr (Rotate cs es e) =
     ppCertificates cs <> text "rotate" <> apply [apply (map ppr es), ppr e]
-  ppr (Split cs sizeexps a) =
-    ppCertificates cs <> text "split" <> apply [apply (map ppr sizeexps), ppr a]
+  ppr (Split cs i sizeexps a) =
+    ppCertificates cs <> text "split" <> text "@" <> ppr i <> apply [apply (map ppr sizeexps), ppr a]
   ppr (Concat cs i x ys _) =
     ppCertificates cs <> text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
