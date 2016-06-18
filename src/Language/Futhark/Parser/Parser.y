@@ -471,7 +471,10 @@ Exp  :: { UncheckedExp }
      | rotate '(' NaturalInt ',' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
 
      | split '(' '(' Exps ')' ',' Exp ')'
-                      { Split $4 $7 $1 }
+                      { Split 0 $4 $7 $1 }
+
+     | split '@' NaturalInt '(' '(' Exps ')' ',' Exp ')'
+                      { Split $3 $6 $9 $1 }
 
      | concat '(' Exp ',' Exps ')'
                       { Concat 0 $3 $5 $1 }

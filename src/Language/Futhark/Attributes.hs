@@ -641,7 +641,7 @@ typeOf (Stream form lam _ _) =
                     `setUniqueness` Unique
 typeOf (Concat _ x _ _) =
   typeOf x `setUniqueness` Unique `setAliases` HS.empty
-typeOf (Split splitexps e _) =
+typeOf (Split _ splitexps e _) =
   Tuple $ replicate (1 + length splitexps) (typeOf e)
 typeOf (Copy e _) = typeOf e `setUniqueness` Unique `setAliases` HS.empty
 typeOf (DoLoop _ _ _ _ body _) = typeOf body

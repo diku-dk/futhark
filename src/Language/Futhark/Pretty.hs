@@ -283,8 +283,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 9 e
-  pprPrec _ (Split e a _) =
-    text "split" <> apply [ppr e, ppr a]
+  pprPrec _ (Split i e a _) =
+    text "split@" <> ppr i <> apply [ppr e, ppr a]
   pprPrec _ (Concat i x y _) =
     text "concat" <> text "@" <> ppr i <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)

@@ -66,6 +66,8 @@ module Futhark.Representation.ExplicitMemory
        , returnsToType
        , lookupMemBound
        , lookupArraySummary
+       , fullyDirect
+       , ixFunMatchesInnerShape
          -- * Syntax types
        , Prog
        , Body
@@ -916,14 +918,20 @@ expReturns (AST.PrimOp (Rotate _ offsets v)) = do
   return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (AST.PrimOp (Split _ sizeexps v)) = do
+expReturns (AST.PrimOp (Split _ i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
       offsets =  0 : scanl1 (+) (map (`SE.subExpToScalExp` int32) sizeexps)
+      r = shapeRank shape
+      perm = [i] ++ [0..i-1] ++ [i+1..r-1]
+      perm_inv = rearrangeInverse perm
   return $ zipWith (\new_shape offset
                     -> ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
                        NoUniqueness $
-                       Just $ ReturnsInBlock mem $ IxFun.offsetIndex ixfun offset)
+                       Just $ ReturnsInBlock mem $
+                       IxFun.permute
+                       (IxFun.offsetIndex (IxFun.permute ixfun perm) offset)
+                       perm_inv)
            newShapes offsets
 
 expReturns (AST.PrimOp (Index _ v is)) = do
@@ -1076,3 +1084,14 @@ applyFunReturns rets params args
           where mem' = case HM.lookup mem parammap of
                   Just (Var v, _) -> v
                   _               -> mem
+
+-- | Is an array of the given shape stored fully flat row-major with
+-- the given index function?
+fullyDirect :: Shape -> IxFun.IxFun SE.ScalExp -> Bool
+fullyDirect shape ixfun =
+  IxFun.isDirect ixfun && ixFunMatchesInnerShape shape ixfun
+
+ixFunMatchesInnerShape :: Shape -> IxFun.IxFun SE.ScalExp -> Bool
+ixFunMatchesInnerShape shape ixfun =
+  drop 1 (IxFun.shape ixfun) == drop 1 shape'
+  where shape' = map SE.intSubExpToScalExp $ shapeDims shape

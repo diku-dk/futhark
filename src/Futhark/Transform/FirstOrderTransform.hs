@@ -361,14 +361,14 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                 id3 <- newIdent (anm++"_chgu") t2
                 id4 <- newIdent "dead" dt4
                 -- (_,a_cg) = split((chunk_glb*i-diff, chunk_glb), inarr)
-                let split1= PrimOp $ Split [] [Var $ identName diff1id, Var chunkglb] inarr
+                let split1= PrimOp $ Split [] 0 [Var $ identName diff1id, Var chunkglb] inarr
                 _ <- letBindNames' [identName id1, identName id2] split1
                 -- a_cg* := copy(a_cg)
                 letBindNames'_ [identName id3] =<<
                   eCopy (pure (PrimOp $ SubExp $ Var $ identName id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
-                let split2= PrimOp $ Split [] [Var $ identName diffid,
-                                               Var $ paramName chunkloc] $
+                let split2= PrimOp $ Split [] 0 [Var $ identName diffid,
+                                                 Var $ paramName chunkloc] $
                                      identName id3
                 letBindNames' [identName id4, paramName param] split2
           mkBodyM (bodyBindings lambody) (bodyResult lambody)
@@ -399,7 +399,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
       (_, Just (_,indvar,_)) ->
         -- array with known upper bound case!
         return $ mkLet' [] [arr] $
-        PrimOp $ Split [] [Var $ identName indvar] $ identName arrl
+        PrimOp $ Split [] 0 [Var $ identName indvar] $ identName arrl
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   lUBexp <- eBinOp (SDiv Int32)

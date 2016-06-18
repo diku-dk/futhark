@@ -625,7 +625,7 @@ simplifyIndexIntoReshape _ _ =
 
 simplifyIndexIntoSplit :: MonadBinder m => TopDownRule m
 simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
-  | Just (Let split_pat _ (PrimOp (Split cs2 ns idd2))) <-
+  | Just (Let split_pat _ (PrimOp (Split cs2 0 ns idd2))) <-
       ST.entryBinding =<< ST.lookup idd vtable,
     first_index : rest_indices <- inds = do
       -- Figure out the extra offset that we should add to the first index.
@@ -649,12 +649,12 @@ simplifyIndexIntoSplit _ _ =
 
 
 removeEmptySplits :: MonadBinder m => TopDownRule m
-removeEmptySplits _ (Let pat _ (PrimOp (Split cs ns arr)))
+removeEmptySplits _ (Let pat _ (PrimOp (Split cs i ns arr)))
   | (pointless,sane) <- partition (isCt0 . snd) $ zip (patternValueElements pat) ns,
     not (null pointless) = do
       rt <- rowType <$> lookupType arr
       letBind_ (Pattern [] $ map fst sane) $
-        PrimOp $ Split cs (map snd sane) arr
+        PrimOp $ Split cs i (map snd sane) arr
       forM_ pointless $ \(patElem,_) ->
         letBindNames' [patElemName patElem] $
         PrimOp $ ArrayLit [] rt
@@ -662,7 +662,7 @@ removeEmptySplits _ _ =
   cannotSimplify
 
 removeSingletonSplits :: MonadBinder m => TopDownRule m
-removeSingletonSplits _ (Let pat _ (PrimOp (Split _ [n] arr))) = do
+removeSingletonSplits _ (Let pat _ (PrimOp (Split _ _ [n] arr))) = do
   size <- arraySize 0 <$> lookupType arr
   if size == n then
     letBind_ pat $ PrimOp $ SubExp $ Var arr

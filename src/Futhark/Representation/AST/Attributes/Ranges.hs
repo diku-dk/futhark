@@ -205,7 +205,7 @@ primOpRanges (Replicate _ v) =
   [rangeOf v]
 primOpRanges (Rearrange _ _ v) =
   [rangeOf $ Var v]
-primOpRanges (Split _ sizeexps v) =
+primOpRanges (Split _ _ sizeexps v) =
   replicate (length sizeexps) $ rangeOf $ Var v
 primOpRanges (Copy se) =
   [rangeOf $ Var se]

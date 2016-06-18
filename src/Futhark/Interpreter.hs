@@ -571,19 +571,10 @@ evalPrimOp (Rotate _ offsets arrexp) = do
   offsets' <- mapM (asInt "evalPrimOp rotate" <=< evalSubExp) offsets
   single . rotateArray offsets' <$> lookupVar arrexp
 
-evalPrimOp (Split _ sizeexps arrexp) = do
+evalPrimOp (Split _ i sizeexps arrexp) = do
   sizes <- mapM (asInt "evalPrimOp Split" <=< evalSubExp) sizeexps
-  arrval <- lookupVar arrexp
-  case arrval of
-    (ArrayVal arr bt shape@(outerdim:rowshape))
-      | all (0<=) sizes && sum sizes <= outerdim ->
-        let rowsize = product rowshape
-        in return $ zipWith (\beg num -> ArrayVal (listArray (0,rowsize*num-1)
-                                                   $ drop (rowsize*beg) (elems arr))
-                                         bt (num:rowshape))
-                    (scanl (+) 0 sizes) sizes
-      | otherwise        -> bad $ SplitOutOfBounds (pretty arrexp) shape sizes
-    _ -> bad $ TypeError "evalPrimOp Split"
+  arr <- lookupVar arrexp
+  return $ splitArray i sizes arr
 
 evalPrimOp (Concat _ i arr1exp arr2exps _) = do
   arr1  <- lookupVar arr1exp

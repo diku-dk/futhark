@@ -769,10 +769,15 @@ checkPrimOp (Rotate cs rots arr) = do
     bad $ TypeError $ "Cannot rotate " ++ show rank ++
     "-dimensional array with only " ++ show (length rots) ++ " offsets."
 
-checkPrimOp (Split cs sizeexps arrexp) = do
+checkPrimOp (Split cs i sizeexps arrexp) = do
   mapM_ (requireI [Prim Cert]) cs
   mapM_ (require [Prim int32]) sizeexps
-  void $ checkArrIdent arrexp
+  t <- checkArrIdent arrexp
+  when (arrayRank t <= i) $
+    bad $ TypeError $ "Cannot split array "
+    ++ pretty arrexp
+    ++ " of type " ++ pretty t
+    ++ " along dimension " ++ pretty i ++ "."
 
 checkPrimOp (Concat cs i arr1exp arr2exps ressize) = do
   mapM_ (requireI [Prim Cert]) cs

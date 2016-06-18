@@ -22,6 +22,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        where
 
 import Data.Monoid
+import Data.List
 
 import Prelude hiding (div, mod, quot, rem)
 
@@ -178,7 +179,9 @@ permute :: IntegralCond num =>
 permute (Permute ixfun oldperm) perm
   | rearrangeInverse oldperm == perm = ixfun
   | otherwise = permute ixfun (rearrangeCompose perm oldperm)
-permute ixfun perm = Permute ixfun perm
+permute ixfun perm
+  | perm == sort perm = ixfun
+  | otherwise = Permute ixfun perm
 
 rotate :: IntegralCond num =>
           IxFun num -> Indices num -> IxFun num

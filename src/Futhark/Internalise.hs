@@ -389,26 +389,26 @@ internaliseExp _ (E.Reshape shape e loc) = do
     return $ I.Reshape shapeOk (DimNew <$> shape') v
   where prod = foldBinOp (I.Mul I.Int32) (constant (1 :: I.Int32))
 
-internaliseExp _ (E.Split splitexps arrexp loc) = do
+internaliseExp _ (E.Split i splitexps arrexp loc) = do
   splits' <- mapM (internaliseExp1 "n") splitexps
   -- Note that @arrs@ is an array, because of array-of-tuples transformation
   arrs <- internaliseExpToVars "split_arr" arrexp
-  arrayOuterdim <- arraysSize 0 <$> mapM lookupType arrs
+  split_dim <- arraysSize i <$> mapM lookupType arrs
 
   -- Assertions
   indexAsserts <- asserting $ do
     let indexConds = zipWith (\beg end -> PrimOp $ I.CmpOp (I.CmpSle I.Int32) beg end)
-                     (I.constant (0 :: I.Int32):splits') (splits'++[arrayOuterdim])
+                     (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
     indexChecks <- mapM (letSubExp "split_index_cnd") indexConds
     forM indexChecks$ \cnd ->
       letExp "split_index_assert" $ PrimOp $ I.Assert cnd loc
 
   -- Calculate diff between each split index
   let sizeExps = zipWith (\beg end -> PrimOp $ I.BinOp (I.Sub I.Int32) end beg)
-                 (I.constant (0 :: I.Int32):splits') (splits'++[arrayOuterdim])
+                 (I.constant (0 :: I.Int32):splits') (splits'++[split_dim])
   sizeVars <- mapM (letSubExp "split_size") sizeExps
   splitExps <- forM arrs $ \arr -> letTupExp' "split_res" $
-                                   PrimOp $ I.Split indexAsserts sizeVars arr
+                                   PrimOp $ I.Split indexAsserts i sizeVars arr
 
   return $ concat $ transpose splitExps
 
@@ -468,7 +468,7 @@ internaliseExp desc (E.Filter lam arr _) = do
     I.PrimOp $ I.Partition [] 1 flags arrs
   forM filter_perms $ \filter_perm ->
     letSubExp desc $
-      I.PrimOp $ I.Split [] [I.Var $ I.identName filter_size] $
+      I.PrimOp $ I.Split [] 0 [I.Var $ I.identName filter_size] $
       I.identName filter_perm
 
 internaliseExp desc (E.Partition lams arr _) = do
@@ -482,7 +482,7 @@ internaliseExp desc (E.Partition lams arr _) = do
     addBinding $ mkLet' [] (partition_sizes++[partition_perm]) $
       I.PrimOp $ I.Partition [] n flags [arr']
     letTupExp desc $
-      I.PrimOp $ I.Split [] (map (I.Var . I.identName) partition_sizes) $
+      I.PrimOp $ I.Split [] 0 (map (I.Var . I.identName) partition_sizes) $
       I.identName partition_perm
   where n = length lams + 1
 
