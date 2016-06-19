@@ -12,6 +12,7 @@ module Futhark.Util
         dropAt,
         mapEither,
         maybeNth,
+        focusNth,
         zEncodeString
        )
        where
@@ -52,6 +53,13 @@ maybeNth :: Integral int => int -> [a] -> Maybe a
 maybeNth i l
   | i >= 0, v:_ <- genericDrop i l = Just v
   | otherwise                      = Nothing
+
+-- | Return the list element at the given index, if the index is
+-- valid, along with the elements before and after.
+focusNth :: Integral int => int -> [a] -> Maybe ([a], a, [a])
+focusNth i xs
+  | (bef, x:aft) <- genericSplitAt i xs = Just (bef, x, aft)
+  | otherwise                           = Nothing
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --
