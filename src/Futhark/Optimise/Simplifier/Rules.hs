@@ -591,10 +591,10 @@ simplifyIndexing defOf seType idd inds consuming =
       | Just [_] <- arrayDims <$> seType (Var v2) ->
         Just $ pure $ IndexResult cs v2 inds
 
-    Just (Concat cs 0 x xs _) | i : is <- inds -> Just $ do
+    Just (Concat cs d x xs _) | Just (ibef, i, iaft) <- focusNth d inds -> Just $ do
       res_t <- stripArray (length inds) <$> lookupType x
-      x_len <- arraySize 0 <$> lookupType x
-      xs_lens <- mapM (fmap (arraySize 0) . lookupType) xs
+      x_len <- arraySize d <$> lookupType x
+      xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
 
       let add n m = do
             added <- letSubExp "index_concat_add" $ PrimOp $ BinOp (Add Int32) n m
@@ -603,12 +603,12 @@ simplifyIndexing defOf seType idd inds consuming =
       let xs_and_starts = zip (reverse xs) starts
 
       let mkBranch [] =
-            letSubExp "index_concat" $ PrimOp $ Index cs x (i:is)
+            letSubExp "index_concat" $ PrimOp $ Index cs x (ibef++i:iaft)
           mkBranch ((x', start):xs_and_starts') = do
             cmp <- letSubExp "index_concat_cmp" $ PrimOp $ CmpOp (CmpSle Int32) start i
             (thisres, thisbnds) <- collectBindings $ do
               i' <- letSubExp "index_concat_i" $ PrimOp $ BinOp (Sub Int32) i start
-              letSubExp "index_concat" $ PrimOp $ Index cs x' (i':is)
+              letSubExp "index_concat" $ PrimOp $ Index cs x' (ibef++i':iaft)
             thisbody <- mkBodyM thisbnds [thisres]
             (altres, altbnds) <- collectBindings $ mkBranch xs_and_starts'
             altbody <- mkBodyM altbnds [altres]
