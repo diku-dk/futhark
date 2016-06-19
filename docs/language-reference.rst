@@ -348,11 +348,12 @@ An array of the integers from ``0`` to ``n-1``.
 
 An array consisting of ``n`` copies of ``a``.
 
-``size(i, a)``
+``size@i(a)``
 ~~~~~~~~~~~~~~
 
 The size of dimension ``i`` of array ``a``, where ``i`` is a static
-integer constant.
+integer constant.  It is often more readable to use shape declaration
+names instead of ``size``.
 
 ``split((i_1, ..., i_n), a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
