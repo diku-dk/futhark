@@ -458,6 +458,9 @@ Exp  :: { UncheckedExp }
      | size '(' NaturalInt ',' Exp ')'
                       { Size $3 $5 $1 }
 
+     | size '@' NaturalInt '(' Exp ')'
+                      { Size $3 $5 $1 }
+
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 
      | reshape '(' '(' Exps ')' ',' Exp ')'
