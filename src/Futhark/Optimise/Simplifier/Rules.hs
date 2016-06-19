@@ -304,7 +304,29 @@ simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs perm v)))
       rearrange_rotate <- letExp "rearrange_rotate" $ PrimOp $ Rotate cs2 offsets' v3
       letBind_ pat $ PrimOp $ Rearrange (cs++cs3) (perm `rearrangeCompose` perm3) rearrange_rotate
 
+simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs1 perm1 v1)))
+  | Just (to_drop, to_take, cs2, 0, v2) <- isDropTake v1 vtable,
+    Just (Rearrange cs3 perm3 v3) <- asPrimOp =<< ST.lookupExp v2 vtable,
+    dim1:_ <- perm1,
+    perm1 == rearrangeInverse perm3 = do
+      to_drop' <- letSubExp "drop" =<< SE.fromScalExp to_drop
+      to_take' <- letSubExp "take" =<< SE.fromScalExp to_take
+      [_, v] <- letTupExp' "simplify_rearrange" $
+        PrimOp $ Split (cs1<>cs2<>cs3) dim1 [to_drop', to_take'] v3
+      letBind_ pat $ PrimOp $ SubExp v
+
 simplifyRearrange _ _ = cannotSimplify
+
+isDropTake :: VName -> ST.SymbolTable lore
+           -> Maybe (SE.ScalExp, SE.ScalExp,
+                     Certificates, Int, VName)
+isDropTake v vtable = do
+  Let pat _ (PrimOp (Split cs dim splits v')) <- ST.entryBinding =<< ST.lookup v vtable
+  i <- elemIndex v $ patternValueNames pat
+  return (prod $ take i splits,
+          prod $ take 1 $ drop i splits,
+          cs, dim, v')
+  where prod = product . map SE.intSubExpToScalExp
 
 simplifyRotate :: MonadBinder m => TopDownRule m
 -- A zero-rotation is identity.
