@@ -189,8 +189,8 @@ import Language.Futhark.Core(blankLongname)
 
 %left '*' '/' '%' '//' '%%'
 %left pow
-%nonassoc '.'
 %nonassoc '~' '!' signum abs float f32 f64 int i8 i16 i32 i64 unsafe default
+%nonassoc '.'
 %nonassoc '['
 %nonassoc Id
 %%
