@@ -1,8 +1,12 @@
-{-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
   ( openClInit
+  , openClPrelude
   ) where
 
+import Data.FileEmbed
 import qualified Data.Text as T
 import NeatInterpolation (text)
 
@@ -11,9 +15,12 @@ import Futhark.CodeGen.OpenCL.Kernels
 import Futhark.CodeGen.Backends.GenericPython.AST
 import Futhark.Util.Pretty (pretty)
 
+openClPrelude :: String
+openClPrelude = $(embedStringFile "rts/python/opencl.py")
+
 openClInit :: String -> String
 openClInit assign = T.unpack [text|
-self.ctx = cl.create_some_context(interactive=False)
+self.ctx = get_prefered_context(interactive, platform_pref, device_pref)
 self.queue = cl.CommandQueue(self.ctx)
  # XXX: Assuming just a single device here.
 platform_name = self.ctx.get_info(cl.context_info.DEVICES)[0].platform.name
