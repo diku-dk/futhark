@@ -109,42 +109,21 @@ instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
       (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
     where (acc, arrs) = unzip input
 
-  simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    outerfun' <- Engine.simplifyLambda outerfun (Just acc) $
-                 map (const Nothing) arrs'
-    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun (Just acc) $ map Just arrs
-    (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-    return $ Redomap cs' w' comm outerfun' innerfun'' acc' arrs''
-    where removeUnusedParams used lam arrinps
-            | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
-                let (arrparams', arrinps') =
-                      unzip $ filter ((`UT.used` used) . paramName . fst) $
-                      zip arrparams arrinps
-                in return (lam { lambdaParams = accparams ++ arrparams' },
-                           arrinps')
-            | otherwise = return (lam, arrinps)
-  simplifyOp (Scanomap cs w outerfun innerfun acc arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    acc' <- mapM Engine.simplify acc
-    arrs' <- mapM Engine.simplify arrs
-    outerfun' <- Engine.simplifyLambda outerfun (Just acc) $
-                 map (const Nothing) arrs'
-    (innerfun', used) <- Engine.tapUsage $ Engine.simplifyLambda innerfun (Just acc) $ map Just arrs
-    (innerfun'', arrs'') <- removeUnusedParams used innerfun' arrs'
-    return $ Scanomap cs' w' outerfun' innerfun'' acc' arrs''
-    where removeUnusedParams used lam arrinps
-            | (accparams, arrparams) <- splitAt (length acc) $ lambdaParams lam =
-                let (arrparams', arrinps') =
-                      unzip $ filter ((`UT.used` used) . paramName . fst) $
-                      zip arrparams arrinps
-                in return (lam { lambdaParams = accparams ++ arrparams' },
-                           arrinps')
-            | otherwise = return (lam, arrinps)
+  simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) =
+    Redomap <$> Engine.simplify cs <*>
+    Engine.simplify w <*> pure comm <*>
+    Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
+    Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
+    mapM Engine.simplify acc <*>
+    mapM Engine.simplify arrs
+
+  simplifyOp (Scanomap cs w outerfun innerfun acc arrs) =
+    Scanomap <$> Engine.simplify cs <*>
+    Engine.simplify w <*>
+    Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
+    Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
+    mapM Engine.simplify acc <*>
+    mapM Engine.simplify arrs
 
   simplifyOp (Write cs len lam ivs as) = do
     cs' <- Engine.simplify cs
