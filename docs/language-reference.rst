@@ -44,7 +44,7 @@ in the return type and parameter types.  These can be used to express
 invariants about the shapes of arrays that are accepted or produced by
 the function, e.g::
 
-  fun [int,n] f([int,n] a) =
+  fun [n]int f([n]int a) =
     map(+1, a)
 
 The above declaration specifies a function that takes an array
@@ -58,12 +58,12 @@ The same name can be used in several dimensions, or even in several
 parameters.  This can be used to give a natural type to a function for
 computing dot products::
 
-  fun int dotProduct([int,n] a, [int,n] b) =
+  fun int dotProduct([n]int a, [n]int b) =
     reduce(+, 0, zipWith(*, a, b))
 
 Or matrix multiplication::
 
-  fun [[int,n],n] matMult([[int,m],n] x, [[int,n],m] y) =
+  fun [n][n]int matMult([n][m]int x, [m][n]int y) =
     ...
 
 The dimension names bound in a parameter shape declaration can be used
@@ -105,12 +105,10 @@ Examples::
 
   type person_id = int
   type int_pair  = (int, int)
-  type vec3 = (f32, f32, f32)
+  type position, velocity, vec3 = (f32, f32, f32)
 
   type pilot = person_id
   type passengers = [person_id]
-  type position = vec3
-  type velocity = vec3
   type mass     = f32
 
   type airplane = (pilot, passengers, position, velocity, mass)
@@ -121,17 +119,86 @@ currently not possible to put shape declarations in type aliases.
 When using uniqueness attributes with type aliases, inner uniqueness
 attributes are overrided by outer ones::
 
-  type uniqueInts = *[int]
-  type nonuniqueIntLists = [intlist]
+  type uniqueInts = *[]int
+  type nonuniqueIntLists = []intlist
   type uniqueIntLists = *nonuniqueIntLists
 
   -- Error: using non-unique value for a unique return value.
   fun uniqueIntLists (nonuniqueIntLists p) = p
 
+
 *Dimension declarations*
 
 To declare dimensions on an array data type using type aliases, the type alias must
 define either a primitive type, or a tuple.
+
+Structures
+----------
+
+Futhark supports structures which can contain type declarations, functions and structures.
+These structures can be included into any other Futhark file.
+The syntax is as in the following example::
+
+  Vec3.fut:
+    struct Vec3
+      {
+        struct F32
+          {
+            type t = ( f32 , f32 , f32 )
+            fun t add(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 + b1, a2 + b2 , a3 + b3)
+        
+            fun t subtract(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 - b1, a2 - b2 , a3 - b3)
+        
+            fun t scale(f32 k , t a) =
+              let (a1, a2, a3) = a in
+              (a1 * k, a2 * k , a3 * k)
+        
+            fun f32 dot(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              a1*b1 + a2*b2 + a3*b3
+          }
+        
+        struct Int
+          {
+            type t = ( int , int , int )
+            fun t add(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 + b1, a2 + b2 , a3 + b3)
+        
+            fun t subtract(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              (a1 - b1, a2 - b2 , a3 - b3)
+        
+            fun t scale(int k , t a) =
+              let (a1, a2, a3) = a in
+              (a1 * k, a2 * k , a3 * k)
+        
+            fun int dot(t a , t b) =
+              let (a1, a2, a3) = a in
+              let (b1, b2, b3) = b in
+              a1*b1 + a2*b2 + a3*b3
+          }
+      }
+
+Functions and types within these structures can be accessed using common dot notation::
+  
+  some_example.fut
+    include Vec3
+
+    type vector = Vec3.Int.t
+    fun vector double(vector v) = Vec3.Int.plus(v,v)
+
+Structures names must begin with a capital letter.
+
 
 File Inclusions
 ---------------
@@ -238,6 +305,13 @@ be a comma-separated list of indexes instead of just a single index.
 If the number of indices given is less than the rank of the array, an
 array is returned.
 
+``e.i``
+~~~~~~~
+
+Access field ``i`` of the expression ``e``, which must be of
+tuple-type.  The fields are indexed from zero.  ``i`` must be a
+literal integer, not an arbitrary expression.
+
 ``zip(x, y, z)``
 ~~~~~~~~~~~~~~~~~~
 
@@ -274,11 +348,12 @@ An array of the integers from ``0`` to ``n-1``.
 
 An array consisting of ``n`` copies of ``a``.
 
-``size(i, a)``
+``size@i(a)``
 ~~~~~~~~~~~~~~
 
 The size of dimension ``i`` of array ``a``, where ``i`` is a static
-integer constant.
+integer constant.  It is often more readable to use shape declaration
+names instead of ``size``.
 
 ``split((i_1, ..., i_n), a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -289,11 +364,26 @@ The split indices must be weakly ascending, ie ``i_1 <= i_2 <= ... <= i_n``.
 
 Example: ``split((1,1,3), [5,6,7,8]) == ([5],[],[6,7],[8])``
 
+``split@i((i_1, ..., i_n), a)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Splits an array across dimension ``i``, with the outermost dimension
+being ``0``.  The ``i`` must be a compile-time integer constant,
+i.e. ``i`` cannot be a variable.
+
 ``concat(a_1, ..., a_n)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Concatenate the rows/elements of several arrays.  The shape of the
-arrays must be identical in all but the first dimension.
+arrays must be identical in all but the first dimension.  This is
+equivalent to ``concat@0`` (see below).
+
+``concat@i(a_1, ..., a_n)``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Concatenate arrays across dimension ``i``, with the outermost
+dimension being ``0``.  The ``i`` must be a compile-time integer
+constant, i.e. ``i`` cannot be a variable.
 
 ``copy(a)``
 ~~~~~~~~~~~
@@ -316,11 +406,20 @@ Permute the dimensions in the array, returning a new array.
 For example, if ``b==rearrange((2,0,1),a)``, then ``b[x,y,z] =
 a[y,z,x]``.
 
+
 ``transpose(a)``
 ~~~~~~~~~~~~~~~~
 
 Return the transpose of ``a``, which must be a two-dimensional array.
 
+``rotate(d, i, a)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.
+Intuitively, you can think of it as subtracting ``i`` from every index
+(modulo the size of the array).
+
+For example, if ``b=rotate(1, i, a)``, then ``b[x,y+1] = a[x,y]``.
 
 ``let pat = e in body``
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -422,13 +521,24 @@ catch-all partition that is returned last.  Always returns a tuple
 with *n+1* components.  The partitioning is stable, meaning that
 elements of the partitions retain their original relative positions.
 
-``write(indexes, values, a)``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``write(iss, vss, as_1, ..., as_n)``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Set each index of the ``indexes`` array in the ``a`` array to each value of
-the ``values`` array.  If an index is -1, ignore it and its associated value.
-Return the modified array.  It is an error if there are duplicate indexes.
-``write`` does its work in-place and consumes ``a``.
+The ``write`` expression calculates the equivalent of this imperative
+code::
+
+  for iter in 0..n-1 do
+    is = iss[iter]
+    vs = vss[iter]
+    as = as_iter
+    for index in 0..size(0, is)-1:
+      i = is[index]
+      v = vs[index]
+      as[i] = v
+
+All ``iss`` and ``vss`` arrays must be of the same outer size.  Use
+``zip`` to use several of those arrays as arguments.  ``write`` does
+its work in-place and consumes all ``as`` arrays.
 
 Tuple Shimming
 --------------
@@ -451,14 +561,14 @@ Arrays of Tuples
 
 For reasons related to code generation and efficient representation,
 arrays of tuples are in a sense merely syntactic sugar for tuples of
-arrays.  The type ``[(int, f32)]`` is transformed to ``([int],
-[f32])`` during the compilation process, and all code interacting
+arrays.  The type ``[](int,f32)`` is transformed to ``([]int,
+[]f32)`` during the compilation process, and all code interacting
 with arrays of tuples is likewise transformed.  In most cases, this is
 fully transparent to the programmer, but there are edge cases where
 the transformation is not trivially an isomorphism.
 
-Consider the type ``[([int], [f32])]``, which is transformed
-into ``([[int]], [[f32]])``.  These two types are not
+Consider the type ``[]([]int,[]f32)``, which is transformed
+into ``([][]int, [][]f32)``.  These two types are not
 isomorphic, as the latter has more stringent demands as to the
 fullness of arrays.  For example::
 

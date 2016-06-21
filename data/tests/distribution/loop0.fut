@@ -20,9 +20,9 @@
 --
 -- structure distributed { Map/DoLoop 0 }
 
-fun [[int,k],n] main([[[int,k],m],n] a) =
+fun [n][k]int main([n][m][k]int a) =
   let acc = replicate(k, 0) in
-  map(fn [int,k] ([[int,k],m] a_r) =>
+  map(fn [k]int ([m][k]int a_r) =>
         loop(acc) = for i < m do
           zipWith(+, acc, a_r[i]) in
         acc

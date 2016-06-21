@@ -181,15 +181,15 @@ data PrimOp lore
   -- checking.  If given (even as an empty list), no
   -- run-time bounds checking is done.
 
-  | Split Certificates [SubExp] VName
+  | Split Certificates Int [SubExp] VName
   -- ^ 2nd arg is sizes of arrays you back, which is
   -- different from what the external language does.
   -- In the internal langauge,
   -- @a = [1,2,3,4]@
-  -- @split( (1,0,2) , a ) = {[1], [], [2,3]}@
+  -- @split@0( (1,0,2) , a ) = {[1], [], [2,3]}@
 
-  | Concat Certificates VName [VName] SubExp
-  -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
+  | Concat Certificates Int VName [VName] SubExp
+  -- ^ @concat@i([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy VName
   -- ^ Copy the given array.  The result will not alias anything.
@@ -211,6 +211,11 @@ data PrimOp lore
   -- of integers is a list of dimensions (0-indexed), which
   -- must be a permutation of @[0,n-1]@, where @n@ is the
   -- number of dimensions in the input array.
+
+  | Rotate Certificates [SubExp] VName
+  -- ^ Rotate the dimensions of the input array.  The list of
+  -- subexpressions specify how much each dimension is rotated.  The
+  -- length of this list must be equal to the rank of the array.
 
   | Partition Certificates Int VName [VName]
     -- ^ First variable is the flag array, second is the element

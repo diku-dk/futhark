@@ -12,11 +12,14 @@ module Futhark.Optimise.InPlaceLowering.SubstituteIndices
        ) where
 
 import Control.Applicative
+import Data.Monoid
 import Control.Monad
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.HashSet as HS
 
 import Prelude
 
+import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST
 import Futhark.Construct
 import Futhark.MonadFreshNames
@@ -31,20 +34,22 @@ typeEnvFromSubstitutions = HM.fromList . map (fromSubstitution . snd)
   where fromSubstitution (_, name, t, _) =
           (name, LetInfo t)
 
-substituteIndices :: (MonadFreshNames m, Bindable lore, LetAttr lore ~ attr) =>
+substituteIndices :: (MonadFreshNames m, Bindable lore, Aliased lore, LetAttr lore ~ attr) =>
                      IndexSubstitutions attr -> [Binding lore]
                   -> m (IndexSubstitutions attr, [Binding lore])
 substituteIndices substs bnds =
   runBinderT (substituteIndicesInBindings substs bnds) types
   where types = typeEnvFromSubstitutions substs
 
-substituteIndicesInBindings :: (MonadBinder m, Bindable (Lore m)) =>
+substituteIndicesInBindings :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
+                                LocalScope (Lore m) m) =>
                                IndexSubstitutions (LetAttr (Lore m))
                             -> [Binding (Lore m)]
                             -> m (IndexSubstitutions (LetAttr (Lore m)))
 substituteIndicesInBindings = foldM substituteIndicesInBinding
 
-substituteIndicesInBinding :: (MonadBinder m, Bindable (Lore m)) =>
+substituteIndicesInBinding :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
+                               LocalScope (Lore m) m) =>
                               IndexSubstitutions (LetAttr (Lore m))
                            -> Binding (Lore m)
                            -> m (IndexSubstitutions (LetAttr (Lore m)))
@@ -55,6 +60,7 @@ substituteIndicesInBinding substs (Let pat lore e) = do
   return substs'
 
 substituteIndicesInPattern :: (MonadBinder m, SetType attr,
+                               Aliased (Lore m),
                                LetAttr (Lore m) ~ attr) =>
                               IndexSubstitutions (LetAttr (Lore m))
                            -> PatternT attr
@@ -71,7 +77,8 @@ substituteIndicesInPattern substs pat = do
         sub substs' patElem =
           return (substs', patElem)
 
-substituteIndicesInExp :: (MonadBinder m, Bindable (Lore m),
+substituteIndicesInExp :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
+                           LocalScope (Lore m) m,
                            LetAttr (Lore m) ~ attr) =>
                           IndexSubstitutions (LetAttr (Lore m))
                        -> Exp (Lore m)
@@ -84,14 +91,9 @@ substituteIndicesInExp substs e = do
                                   }
 
   mapExpM substitute e
-  where -- FIXME: quick and dirty - really, we should use
-        -- 'consumedInExp' to also handle branches and function calls.
-        -- Another approach would be to just copy out the rows instead
-        -- of all this substitute business.
-        copyAnyConsumed (DoLoop _ merge _ _) =
-          let consumingSubst substs' (fparam, Var v)
-                | unique (paramDeclType fparam),
-                  Just (cs2, src2, src2attr, is2) <- lookup v substs = do
+  where copyAnyConsumed =
+          let consumingSubst substs' v
+                | Just (cs2, src2, src2attr, is2) <- lookup v substs = do
                     row <- letExp (baseString v ++ "_row") $
                            PrimOp $ Index cs2 src2 is2
                     row_copy <- letExp (baseString v ++ "_row_copy") $
@@ -103,8 +105,7 @@ substituteIndicesInExp substs e = do
                                          []) substs'
               consumingSubst substs' _ =
                 return substs'
-          in foldM consumingSubst substs merge
-        copyAnyConsumed _ = return substs
+          in foldM consumingSubst substs . HS.toList . consumedInExp
 
 substituteIndicesInSubExp :: MonadBinder m =>
                              IndexSubstitutions (LetAttr (Lore m))
@@ -125,16 +126,18 @@ substituteIndicesInVar substs v
   | otherwise =
     return v
 
-substituteIndicesInBody :: (MonadBinder m, Bindable (Lore m)) =>
+substituteIndicesInBody :: (MonadBinder m, Bindable (Lore m), Aliased (Lore m),
+                            LocalScope (Lore m) m) =>
                            IndexSubstitutions (LetAttr (Lore m))
                         -> Body (Lore m)
                         -> m (Body (Lore m))
 substituteIndicesInBody substs body = do
-  (substs', bnds) <-
-    collectBindings $ substituteIndicesInBindings substs $ bodyBindings body
-  ses <-
-    mapM (substituteIndicesInSubExp substs') $ bodyResult body
-  mkBodyM bnds ses
+  (substs', bnds') <- inScopeOf bnds $
+    collectBindings $ substituteIndicesInBindings substs bnds
+  (ses, ses_bnds) <- inScopeOf bnds' $
+    collectBindings $ mapM (substituteIndicesInSubExp substs') $ bodyResult body
+  mkBodyM (bnds'<>ses_bnds) ses
+  where bnds = bodyBindings body
 
 update :: VName -> VName -> IndexSubstitution attr -> IndexSubstitutions attr
        -> IndexSubstitutions attr

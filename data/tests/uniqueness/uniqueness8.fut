@@ -4,8 +4,8 @@
 -- output {
 --   0
 -- }
-fun int f(*[int] a) = a[0]
-fun int g([int] a) = a[0]
+fun int f(*[]int a) = a[0]
+fun int g([]int a) = a[0]
 
 fun int main() =
     let n = 10 in

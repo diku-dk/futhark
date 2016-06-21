@@ -14,10 +14,10 @@
 --   815730721.000000, 665416609183179904.000000]]
 -- }
 
-fun [[f64]] main([f64,num_dates] gausses) =
+fun [][]f64 main([num_dates]f64 gausses) =
   map(seqloop(num_dates), gausses)
 
-fun [f64,num_dates] seqloop (int num_dates, f64 gauss) =
+fun [num_dates]f64 seqloop (int num_dates, f64 gauss) =
   let bbrow = replicate(num_dates, f64(0.0))   in
   let bbrow[ 0 ] = gauss in
 

@@ -9,9 +9,9 @@
 --   [[1,2], [3,4], [6,7]]
 -- }
 
-fun [int] take(int n, [int] r) =
+fun []int take(int n, []int r) =
   let (part, _) = split( (n), r) in
   part
 
-fun [[int]] main([[int]] rs, int n) =
+fun [][]int main([][]int rs, int n) =
   map(take(n), rs)

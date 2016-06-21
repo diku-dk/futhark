@@ -117,6 +117,7 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (TypeBase ShapeDecl as vn) wh
   ppr (Array at) = ppr at
   ppr (Tuple ts) = parens $ commasep $ map ppr ts
 
+
 instance (Eq vn, Hashable vn, Pretty vn) => Pretty (UserType vn) where
   ppr (UserPrim et _) = ppr et
   ppr (UserUnique t _) = text "*" <> ppr t
@@ -140,6 +141,8 @@ instance Pretty vn => Pretty (ParamBase f vn) where
 
 instance Pretty vn => Pretty (IdentBase f vn) where
   ppr = ppr . identName
+
+
 
 instance Pretty UnOp where
   ppr Not = text "!"
@@ -175,6 +178,8 @@ instance Pretty BinOp where
   ppr Greater = text ">="
   ppr Geq = text ">="
 
+
+
 hasArrayLit :: ExpBase ty vn -> Bool
 hasArrayLit ArrayLit{} = True
 hasArrayLit (TupLit es2 _) = any hasArrayLit es2
@@ -185,6 +190,9 @@ hasArrayVal :: Value -> Bool
 hasArrayVal ArrayValue{} = True
 hasArrayVal (TupValue vs) = any hasArrayVal vs
 hasArrayVal _ = False
+
+
+
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase ty vn) where
   ppr = pprPrec (-1)
@@ -202,7 +210,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (If c t f _ _) = text "if" <+> ppr c </>
                              text "then" <+> align (ppr t) </>
                              text "else" <+> align (ppr f)
-  pprPrec _ (Apply fname args _ _) = text (nameToString fname) <>
+  pprPrec _ (Apply fname args _ _) = text (longnameToString fname) <>
                                      apply (map (align . ppr . fst) args)
   pprPrec p (LetPat pat e body _) =
     aliasComment pat $ mparens $ align $
@@ -236,9 +244,11 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
       text "in" </> ppr body
   pprPrec _ (Index e idxs _) =
     pprPrec 9 e <> brackets (commasep (map ppr idxs))
+  pprPrec _ (TupleIndex e i _ _) =
+    pprPrec 9 e <> text "." <> ppr i
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
   pprPrec _ (Size i e _) =
-    text "size" <> apply [text $ show i, ppr e]
+    text "size@" <> ppr i <> apply [ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =
@@ -247,6 +257,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
     text "rearrange" <> apply [apply (map ppr perm), ppr e]
   pprPrec _ (Transpose e _) =
     text "transpose" <> apply [ppr e]
+  pprPrec _ (Rotate d x e _) =
+    text "rotate" <> apply [ppr d, ppr x, ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]
@@ -271,10 +283,10 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Zip es _) = text "zip" <> apply (map (ppr . fst) es)
   pprPrec _ (Unzip e _ _) = text "unzip" <> parens (ppr e)
   pprPrec _ (Unsafe e _) = text "unsafe" <+> pprPrec 9 e
-  pprPrec _ (Split e a _) =
-    text "split" <> apply [ppr e, ppr a]
-  pprPrec _ (Concat x y _) =
-    text "concat" <> apply [ppr x, ppr y]
+  pprPrec _ (Split i e a _) =
+    text "split@" <> ppr i <> apply [ppr e, ppr a]
+  pprPrec _ (Concat i x y _) =
+    text "concat" <> text "@" <> ppr i <> apply [ppr x, ppr y]
   pprPrec _ (Copy e _) = text "copy" <> parens (ppr e)
   pprPrec _ (DoLoop pat initexp form loopbody letbody _) =
     aliasComment pat $
@@ -299,9 +311,9 @@ instance (Eq vn, Hashable vn, Pretty vn) => Pretty (PatternBase ty vn) where
   ppr (Wildcard _ _) = text "_"
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBase ty vn) where
-  ppr (CurryFun fname [] _ _) = text $ nameToString fname
+  ppr (CurryFun fname [] _ _) = text $ longnameToString fname
   ppr (CurryFun fname curryargs _ _) =
-    text (nameToString fname) <+> apply (map ppr curryargs)
+    text (longnameToString fname) <+> apply (map ppr curryargs)
   ppr (AnonymFun params body rettype _) =
     text "fn" <+> ppr rettype <+>
     apply (map ppParam params) <+>
@@ -316,14 +328,48 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (LambdaBa
     ppr binop <+> ppr x
 
 instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ProgBase ty vn) where
-  ppr = stack . punctuate line . map ppDec . progFunctions
-    where ppDec (FunDef entry name rettype args body _) =
-            text fun <+> ppr rettype <+>
-            text (nameToString name) <//>
-            apply (map ppParam args) <+>
-            equals </> indent 2 (ppr body)
-            where fun | entry     = "entry"
-                      | otherwise = "fun"
+  ppr = stack . punctuate line . map ppr . progDecs
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (DecBase ty vn) where
+  ppr (FunOrTypeDec dec) = ppr dec
+  ppr (SigDec sig) = ppr sig
+  ppr (ModDec modd) = ppr modd
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ModDefBase ty vn) where
+  ppr (ModDef name moddecls _) =
+    ppr name <+> ppList moddecls
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunOrTypeDecBase ty vn) where
+  ppr (FunDec fun) = ppr fun
+  ppr (TypeDec tp) = ppr tp
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (TypeDefBase ty vn) where
+  ppr (TypeDef name usertype _) =
+    text "type" <+> text (nameToString name) <+>
+    equals </> ppr usertype
+
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (FunDefBase ty vn) where
+  ppr (FunDef entry (name, _) rettype args body _) =
+    text fun <+> ppr rettype <+>
+    text (nameToString name) <//>
+    apply (map ppParam args) <+>
+    equals </> indent 2 (ppr body)
+    where fun | entry     = "entry"
+              | otherwise = "fun"
+
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDefBase ty vn) where
+  ppr (SigDef name sigdecls _) =
+    text "sig" <+> text (nameToString name) <+>
+    equals <+> ppList sigdecls
+
+instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (SigDeclBase ty vn) where
+  ppr (TypeSig tpsig) = ppr tpsig
+  ppr (FunSig name params rettype) =
+    text (nameToString name) <+> ppList params <+> ppr rettype
+
+
 
 ppParam :: (Eq vn, Hashable vn, Pretty vn) => ParamBase t vn -> Doc
 ppParam param = ppr (paramDeclaredType param) <+> ppr param

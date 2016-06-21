@@ -35,7 +35,7 @@ import Futhark.Representation.AST
 import qualified Futhark.Analysis.Alias as Alias
 import qualified Futhark.Util.Pretty as PP
 import Futhark.Util.Pretty
-  ((</>), ppr, comma, commasep, semisep, Doc, Pretty, parens, text)
+  ((</>), ppr, comma, commasep, Doc, Pretty, parens, text)
 import qualified Futhark.Representation.AST.Pretty as PP
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Transform.Substitute
@@ -58,8 +58,22 @@ data SOAC lore =
   | Redomap Certificates SubExp Commutativity (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Scanomap Certificates SubExp (LambdaT lore) (LambdaT lore) [SubExp] [VName]
   | Stream Certificates SubExp (StreamForm lore) (ExtLambdaT lore) [VName]
-  | Write Certificates [Type] VName [VName] [VName]
-    -- ^ Not really a SOAC, but gets its own kernel.
+  | Write Certificates SubExp (LambdaT lore) [VName] [(SubExp, VName)]
+    -- Write <cs> <length> <lambda> <original index and value arrays>
+    -- <input/output arrays along with their sizes>
+    --
+    -- <length> is the length of each index array and value array, since they
+    -- all must be the same length for any fusion to make sense.  If you have a
+    -- list of index-value array pairs of different sizes, you need to use
+    -- multiple writes instead.
+    --
+    -- The lambda body returns the output in this manner:
+    --
+    --     [index_0, index_1, ..., index_n, value_0, value_1, ..., value_n]
+    --
+    -- This must be consistent along all Write-related optimisations.
+    --
+    -- The original index arrays and value arrays are concatenated.
     deriving (Eq, Ord, Show)
 
 data StreamForm lore  = MapLike    StreamOrd
@@ -129,20 +143,13 @@ mapSOACM tv (Stream cs size form lam arrs) =
             mapM (mapOnSOACSubExp tv) acc
         mapOnStreamForm (Sequential acc) =
             Sequential <$> mapM (mapOnSOACSubExp tv) acc
-mapSOACM tv (Write cs ts i vs as) =
-  Write <$> mapOnSOACCertificates tv cs
-  <*> mapM (mapOnSOACType tv) ts
-  <*> mapOnSOACVName tv i
-  <*> mapM (mapOnSOACVName tv) vs
-  <*> mapM (mapOnSOACVName tv) as
-
--- FIXME: Make this less hacky.
-mapOnSOACType :: (Monad m, Applicative m) =>
-                 SOACMapper flore tlore m -> Type -> m Type
-mapOnSOACType _tv (Prim pt) = pure $ Prim pt
-mapOnSOACType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
-  where f (Shape dims) = Shape <$> mapM (mapOnSOACSubExp tv) dims
-mapOnSOACType _tv (Mem se s) = pure $ Mem se s
+mapSOACM tv (Write cs len lam ivs as) =
+  Write
+  <$> mapOnSOACCertificates tv cs
+  <*> mapOnSOACSubExp tv len
+  <*> mapOnSOACLambda tv lam
+  <*> mapM (mapOnSOACVName tv) ivs
+  <*> mapM (\(aw,a) -> (,) <$> mapOnSOACSubExp tv aw <*> mapOnSOACVName tv a) as
 
 instance Attributes lore => FreeIn (SOAC lore) where
   freeIn = execWriter . mapSOACM free
@@ -201,8 +208,11 @@ soacType (Stream _ outersize form lam _) =
                 MapLike _ -> []
                 RedLike _ _ _ acc -> acc
                 Sequential  acc -> acc
-soacType (Write _ ts _ _ _) =
-  staticShapes ts
+soacType (Write _cs _w lam _ivs as) =
+  staticShapes $ zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
+  where lam_ts = lambdaReturnType lam
+        n = length lam_ts
+        ws = map fst as
 
 instance Attributes lore => TypedOp (SOAC lore) where
   opType = pure . soacType
@@ -224,13 +234,19 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
                RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
                Sequential _       -> []
     in  a1 ++ bodyAliases (extLambdaBody lam)
-  opAliases Write{} =
-    [mempty]
+  opAliases (Write _cs _len lam _ivs _as) =
+    map (const mempty) $ lambdaReturnType lam
 
+  -- Only Map, Redomap and Stream can consume anything.  The operands
+  -- to Scan and Reduce functions are always considered "fresh".
   consumedInOp (Map _ _ lam arrs) =
     HS.map consumedArray $ consumedByLambda lam
     where consumedArray v = fromMaybe v $ lookup v params_to_arrs
           params_to_arrs = zip (map paramName (lambdaParams lam)) arrs
+  consumedInOp (Redomap _ _ _ foldlam _ nes arrs) =
+    HS.map consumedArray $ consumedByLambda foldlam
+    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
+          params_to_arrs = zip (map paramName $ drop (length nes) (lambdaParams foldlam)) arrs
   consumedInOp (Stream _ _ form lam arrs) =
     HS.fromList $ subExpVars $
     case form of MapLike{} ->
@@ -274,8 +290,8 @@ instance (Attributes lore,
               RedLike o comm (Alias.analyseLambda lam0) acc
           analyseStreamForm (Sequential acc) = Sequential acc
           analyseStreamForm (MapLike    o  ) = MapLike    o
-  addOpAliases (Write cs ts i vs as) =
-    Write cs ts i vs as
+  addOpAliases (Write cs len lam ivs as) =
+    Write cs len (Alias.analyseLambda lam) ivs as
 
   removeOpAliases = runIdentity . mapSOACM remove
     where remove = SOACMapper return (return . removeLambdaAliases)
@@ -336,8 +352,8 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (SOAC lore) whe
           analyseStreamForm (RedLike o comm lam0 acc) = do
               lam0' <- Range.analyseLambda lam0
               return $ RedLike o comm lam0' acc
-  addOpRanges (Write cs ts i vs as) =
-    Write cs ts i vs as
+  addOpRanges (Write cs len lam ivs as) =
+    Write cs len (Range.runRangeM $ Range.analyseLambda lam) ivs as
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (SOAC lore) where
   type OpWithWisdom (SOAC lore) = SOAC (Wise lore)
@@ -365,7 +381,7 @@ typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
   TC.require [Prim int32] size
   arrargs <- TC.checkSOACArrayArgs size arrexps
   accargs <- mapM TC.checkArg accexps
-  TC.checkLambda innerfun $ accargs ++ arrargs
+  TC.checkLambda innerfun $ map TC.noArgAliases accargs ++ arrargs
   let innerRetType = lambdaReturnType innerfun
       innerAccType = take (length accexps) innerRetType
       asArg t = (t, mempty)
@@ -469,57 +485,61 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
                              " cannot specify an inner result shape"
                 _ -> return True
 
-typeCheckSOAC (Write cs ts i vs as) = do
+typeCheckSOAC (Write cs w lam _ivs as) = do
   -- Requirements:
   --
-  --   1. @i@ must be an array of i32.
+  --   0. @lambdaReturnType@ of @lam@ must be a list
+  --      [index types..., value types].
   --
-  --   2. @v@ and @a@ must have the same type (though not necessarily the same
-  --   length).
+  --   1. The number of index types must be equal to the number of value types
+  --      and the number of arrays in @as@.
   --
-  --   3. The return type @t@ must be the same type as @a@.
+  --   2. Each index type must have the type i32.
   --
-  --   4. @a@ must be unique and must not alias @v@, since otherwise
-  --   there might be indeterministic behaviour.
+  --   3. Each array pair in @as@ and the value types must have the same type
+  --      (though not necessarily the same length).
   --
-  --   5. @a@ is consumed.  But this is not really a check, but more of a
-  --   requirement, so that e.g. the source is not hoisted out of a loop, which
-  --   will mean it cannot be consumed.
-  --
-  --   6. @i@ and @v@ must have the same length.
+  --   4. Each array in @as@ is consumed.  This is not really a check, but more
+  --      of a requirement, so that e.g. the source is not hoisted out of a
+  --      loop, which will mean it cannot be consumed.
   --
   -- Code:
 
-  -- Check the certificates.
+  -- First check the certificates and input size.
   mapM_ (TC.requireI [Prim Cert]) cs
+  TC.require [Prim int32] w
 
-  forM_ (zip3 ts vs as) $ \(t, v, a) -> do
-    -- 1.
-    iLen <- arraySize 0 <$> lookupType i
-    vLen <- arraySize 0 <$> lookupType v
-    TC.require [Array int32 (Shape [iLen]) NoUniqueness] (Var i)
+  -- 0.
+  let rts = lambdaReturnType lam
+      rtsLen = length rts `div` 2
+      rtsI = take rtsLen rts
+      rtsV = drop rtsLen rts
 
-    -- 2.
-    vType <- lookupType v
+  -- 1.
+  unless (rtsLen == length as)
+    $ TC.bad $ TC.TypeError "Write: Uneven number of index types, value types, and I/O arrays."
+
+  -- 2.
+  forM_ rtsI $ \rtI -> unless (Prim int32 == rtI)
+                       $ TC.bad $ TC.TypeError "Write: Index return type must be i32."
+
+  forM_ (zip rtsV as) $ \(rtV, (aw, a)) -> do
+    -- All lengths must have type i32.
+    TC.require [Prim int32] aw
+
+    -- 3.
     aType <- lookupType a
-    case (vType, aType) of
+    case (rtV, rowType aType) of
+      (Prim pt0, Prim pt1) | pt0 == pt1 ->
+        return ()
       (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
         return ()
       _ ->
         TC.bad $ TC.TypeError
         "Write values and input arrays do not have the same primitive type"
 
-    -- 3.
-    TC.require [t] (Var a)
-
     -- 4.
-
-    -- 5.
     TC.consume =<< TC.lookupAliases a
-
-    -- 6.
-    unless (iLen == vLen) $
-      TC.bad $ TC.TypeError "Value and index arrays do not have the same length."
 
 typeCheckSOAC (Reduce ass size _ fun inputs) =
   typeCheckScanReduce ass size fun inputs
@@ -539,7 +559,7 @@ typeCheckScanReduce cs size fun inputs = do
   TC.require [Prim int32] size
   startargs <- mapM TC.checkArg startexps
   arrargs   <- TC.checkSOACArrayArgs size arrexps
-  TC.checkLambda fun $ startargs ++ arrargs
+  TC.checkLambda fun $ map TC.noArgAliases $ startargs ++ arrargs
   let startt      = map TC.argType startargs
       intupletype = map TC.argType arrargs
       funret      = lambdaReturnType fun
@@ -576,8 +596,8 @@ instance OpMetrics (Op lore) => OpMetrics (SOAC lore) where
     inside "Scanomap" $ lambdaMetrics fun1 >> lambdaMetrics fun2
   opMetrics (Stream _ _ _ lam _) =
     inside "Stream" $ extLambdaMetrics lam
-  opMetrics Write{} =
-    inside "Write" $ return ()
+  opMetrics (Write _cs _len lam _ivs _as) =
+    inside "Write" $ lambdaMetrics lam
 
 extLambdaMetrics :: OpMetrics (Op lore) => ExtLambda lore -> MetricsM ()
 extLambdaMetrics = bodyMetrics . extLambdaBody
@@ -625,9 +645,8 @@ instance PrettyLore lore => PP.Pretty (SOAC lore) where
                ppr outer <> comma </>
                ppr inner <> comma </>
                commasep (PP.braces (commasep $ map ppr es) : map ppr as))
-  ppr (Write cs _ts i vs as) =
-    PP.ppCertificates' cs <> text "write"
-    <> parens (semisep [ppr i, commasep $ map ppr vs, commasep $ map ppr as])
+  ppr (Write cs len lam ivs as) =
+    PP.ppCertificates' cs <> ppSOAC "write" len [lam] (Just (map Var ivs)) (map snd as)
 
 ppSOAC :: Pretty fn => String -> SubExp -> [fn] -> Maybe [SubExp] -> [VName] -> Doc
 ppSOAC name size funs es as =

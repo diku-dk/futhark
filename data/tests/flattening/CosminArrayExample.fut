@@ -9,7 +9,7 @@
 -- output {
 --   [1, 6, 15, 28]
 -- }
-fun [int] main ([int] xs) =
+fun []int main ([]int xs) =
   map(fn int (int x) =>
         let arr = iota(2 * x) in
         let arr' = reshape( (2,x), arr) in

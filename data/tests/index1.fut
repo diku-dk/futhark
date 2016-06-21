@@ -8,5 +8,5 @@
 --   [3,2]
 -- }
 
-fun [int] main([[int]] a, int i) =
+fun []int main([][]int a, int i) =
   a[i]

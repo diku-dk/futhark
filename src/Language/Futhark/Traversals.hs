@@ -89,6 +89,8 @@ mapExpM tv (Index arr idxexps loc) =
        mapOnExp tv arr <*>
        mapM (mapOnExp tv) idxexps <*>
        pure loc
+mapExpM tv (TupleIndex e i NoInfo loc) =
+  TupleIndex <$> mapOnExp tv e <*> pure i <*> pure NoInfo <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
 mapExpM tv (Size i e loc) =
@@ -100,6 +102,8 @@ mapExpM tv (Reshape shape arrexp loc) =
                    mapOnExp tv arrexp <*> pure loc
 mapExpM tv (Transpose e loc) =
   Transpose <$> mapOnExp tv e <*> pure loc
+mapExpM tv (Rotate d e a loc) =
+  Rotate d <$> mapOnExp tv e <*> mapOnExp tv a <*> pure loc
 mapExpM tv (Rearrange perm e loc) =
   pure Rearrange <*> pure perm <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Map fun e loc) =
@@ -135,21 +139,20 @@ mapExpM tv (Stream form fun arr loc) =
             mapOnExp tv acc
         mapOnStreamForm (Sequential acc) =
             pure Sequential <*> mapOnExp tv acc
-mapExpM tv (Split splitexps arrexp loc) =
-  pure Split <*>
-       mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
-       pure loc
-mapExpM tv (Concat x ys loc) =
-  pure Concat <*>
-       mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
+mapExpM tv (Split i splitexps arrexp loc) =
+  Split i <$>
+  mapM (mapOnExp tv) splitexps <*> mapOnExp tv arrexp <*>
+  pure loc
+mapExpM tv (Concat i x ys loc) =
+  Concat i <$> mapOnExp tv x <*> mapM (mapOnExp tv) ys <*> pure loc
 mapExpM tv (Copy e loc) =
   pure Copy <*> mapOnExp tv e <*> pure loc
 mapExpM tv (DoLoop mergepat mergeexp form loopbody letbody loc) =
   pure DoLoop <*> mapOnPattern tv mergepat <*> mapOnExp tv mergeexp <*>
        mapLoopFormM tv form <*>
        mapOnExp tv loopbody <*> mapOnExp tv letbody <*> pure loc
-mapExpM tv (Write i v a loc) =
-  Write <$> mapOnExp tv i <*> mapOnExp tv v <*> mapOnExp tv a <*> pure loc
+mapExpM tv (Write i v as loc) =
+  Write <$> mapOnExp tv i <*> mapOnExp tv v <*> mapM (mapOnExp tv) as <*> pure loc
 
 mapLoopFormM :: (Applicative m, Monad m) =>
                 MapperBase vnf vnt m

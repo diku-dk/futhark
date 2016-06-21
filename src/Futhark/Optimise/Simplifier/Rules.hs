@@ -41,7 +41,8 @@ topDownRules :: (MonadBinder m, LocalScope (Lore m) m) => TopDownRules m
 topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyClosedFormLoop
                , simplifKnownIterationLoop
-               , letRule simplifyRearrange
+               , simplifyRearrange
+               , simplifyRotate
                , letRule simplifyBinOp
                , letRule simplifyCmpOp
                , letRule simplifyUnOp
@@ -53,6 +54,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , simplifyIndexIntoSplit
                , removeEmptySplits
                , removeSingletonSplits
+               , simplifyConcat
                , evaluateBranch
                , simplifyBoolBranch
                , hoistBranchInvariant
@@ -71,6 +73,7 @@ topDownRules = [ hoistLoopInvariantMergeVariables
 bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
+                , simplifyReplicate
                 ]
 
 standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
@@ -282,21 +285,74 @@ simplifKnownIterationLoop _ (Let pat _
 simplifKnownIterationLoop _ _ =
   cannotSimplify
 
-simplifyRearrange :: LetTopDownRule lore u
+simplifyRearrange :: MonadBinder m => TopDownRule m
 
 -- Handle identity permutation.
-simplifyRearrange _ seType (Rearrange _ perm e)
-  | Just t <- seType $ Var e,
-    perm == [0..arrayRank t - 1] = Just $ SubExp $ Var e
+simplifyRearrange _ (Let pat _ (PrimOp (Rearrange _ perm v)))
+  | sort perm == perm =
+      letBind_ pat $ PrimOp $ SubExp $ Var v
 
-simplifyRearrange defOf _ (Rearrange cs perm v) =
-  case asPrimOp =<< defOf v of
-    Just (Rearrange cs2 perm2 e) ->
+simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs perm v)))
+  | Just (Rearrange cs2 perm2 e) <- asPrimOp =<< ST.lookupExp v vtable =
       -- Rearranging a rearranging: compose the permutations.
-      Just $ Rearrange (cs++cs2) (perm `rearrangeCompose` perm2) e
-    _ -> Nothing
+      letBind_ pat $ PrimOp $ Rearrange (cs++cs2) (perm `rearrangeCompose` perm2) e
 
-simplifyRearrange _ _ _ = Nothing
+simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs perm v)))
+  | Just (Rotate cs2 offsets v2) <- asPrimOp =<< ST.lookupExp v vtable,
+    Just (Rearrange cs3 perm3 v3) <- asPrimOp =<< ST.lookupExp v2 vtable = do
+      let offsets' = rearrangeShape (rearrangeInverse perm3) offsets
+      rearrange_rotate <- letExp "rearrange_rotate" $ PrimOp $ Rotate cs2 offsets' v3
+      letBind_ pat $ PrimOp $ Rearrange (cs++cs3) (perm `rearrangeCompose` perm3) rearrange_rotate
+
+simplifyRearrange vtable (Let pat _ (PrimOp (Rearrange cs1 perm1 v1)))
+  | Just (to_drop, to_take, cs2, 0, v2) <- isDropTake v1 vtable,
+    Just (Rearrange cs3 perm3 v3) <- asPrimOp =<< ST.lookupExp v2 vtable,
+    dim1:_ <- perm1,
+    perm1 == rearrangeInverse perm3 = do
+      to_drop' <- letSubExp "drop" =<< SE.fromScalExp to_drop
+      to_take' <- letSubExp "take" =<< SE.fromScalExp to_take
+      [_, v] <- letTupExp' "simplify_rearrange" $
+        PrimOp $ Split (cs1<>cs2<>cs3) dim1 [to_drop', to_take'] v3
+      letBind_ pat $ PrimOp $ SubExp v
+
+simplifyRearrange _ _ = cannotSimplify
+
+isDropTake :: VName -> ST.SymbolTable lore
+           -> Maybe (SE.ScalExp, SE.ScalExp,
+                     Certificates, Int, VName)
+isDropTake v vtable = do
+  Let pat _ (PrimOp (Split cs dim splits v')) <- ST.entryBinding =<< ST.lookup v vtable
+  i <- elemIndex v $ patternValueNames pat
+  return (prod $ take i splits,
+          prod $ take 1 $ drop i splits,
+          cs, dim, v')
+  where prod = product . map SE.intSubExpToScalExp
+
+simplifyRotate :: MonadBinder m => TopDownRule m
+-- A zero-rotation is identity.
+simplifyRotate _ (Let pat _ (PrimOp (Rotate _ offsets v)))
+  | all (==constant (0::Int32)) offsets =
+      letBind_ pat $ PrimOp $ SubExp $ Var v
+
+simplifyRotate vtable (Let pat _ (PrimOp (Rotate cs offsets v)))
+  | Just (Rearrange cs2 perm v2) <- asPrimOp =<< ST.lookupExp v vtable,
+    Just (Rotate cs3 offsets2 v3) <- asPrimOp =<< ST.lookupExp v2 vtable = do
+      let offsets2' = rearrangeShape (rearrangeInverse perm) offsets2
+          addOffsets x y = letSubExp "summed_offset" $ PrimOp $ BinOp (Add Int32) x y
+      offsets' <- zipWithM addOffsets offsets offsets2'
+      rotate_rearrange <- letExp "rotate_rearrange" $ PrimOp $ Rearrange cs2 perm v3
+      letBind_ pat $ PrimOp $ Rotate (cs++cs3) offsets' rotate_rearrange
+
+simplifyRotate _ _ = cannotSimplify
+
+simplifyReplicate :: MonadBinder m => BottomUpRule m
+simplifyReplicate (vtable, used) (Let pat _ (PrimOp (Replicate (Constant n) (Var v))))
+  | oneIsh n,
+    not $ any (`UT.isConsumed` used) $ v : patternNames pat,
+    Just shape <- arrayDims <$> ST.lookupType v vtable,
+    not $ null shape =
+      letBind_ pat $ PrimOp $ Reshape [] (map DimNew $ constant (1::Int32) : shape) v
+simplifyReplicate _ _ = cannotSimplify
 
 simplifyCmpOp :: LetTopDownRule lore u
 simplifyCmpOp _ _ (CmpOp cmp e1 e2)
@@ -344,9 +400,12 @@ simplifyBinOp _ _ (BinOp FMul{} e1 e2)
   | isCt1 e1 = Just $ SubExp e2
   | isCt1 e2 = Just $ SubExp e1
 
-simplifyBinOp _ _ (BinOp (SMod t) e1 e2)
+simplifyBinOp look _ (BinOp (SMod t) e1 e2)
   | isCt1 e2 = Just $ SubExp e1
   | e1 == e2 = binOpRes $ IntValue $ intValue t (1 :: Int)
+  | Var v1 <- e1,
+    Just (PrimOp (BinOp SMod{} e3 e4)) <- look v1,
+    e4 == e2 = Just $ SubExp e3
 
 simplifyBinOp _ _ (BinOp SDiv{} e1 e2)
   | isCt0 e1 = Just $ SubExp e1
@@ -443,16 +502,14 @@ simplifyAssert _ _ _ =
   Nothing
 
 simplifyIndex :: MonadBinder m => TopDownRule m
-simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds))) =
-  case simplifyIndexing defOf seType idd inds False of
-    Just (SubExpResult se) ->
-      letBind_ pat $ PrimOp $ SubExp se
-    Just (IndexResult extra_cs idd' inds') ->
-      letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
-    Just (ScalExpResult se) ->
-      letBind_ pat =<< SE.fromScalExp se
-    Nothing ->
-      cannotSimplify
+simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds)))
+  | Just m <- simplifyIndexing defOf seType idd inds False = do
+      res <- m
+      case res of
+        SubExpResult se ->
+          letBind_ pat $ PrimOp $ SubExp se
+        IndexResult extra_cs idd' inds' ->
+          letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
@@ -461,40 +518,51 @@ simplifyIndex _ _ = cannotSimplify
 
 data IndexResult = IndexResult Certificates VName [SubExp]
                  | SubExpResult SubExp
-                 | ScalExpResult SE.ScalExp
 
-simplifyIndexing :: VarLookup lore -> TypeLookup
+simplifyIndexing :: MonadBinder m =>
+                    VarLookup lore -> TypeLookup
                  -> VName -> [SubExp] -> Bool
-                 -> Maybe IndexResult
+                 -> Maybe (m IndexResult)
 simplifyIndexing defOf seType idd inds consuming =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
-    Just (SubExp (Var v)) -> Just $ IndexResult [] v inds
+    Just (SubExp (Var v)) -> Just $ pure $ IndexResult [] v inds
 
     Just (Iota _ (Constant (IntValue (Int32Value 0))) (Constant (IntValue (Int32Value 1))))
       | [ii] <- inds ->
-          Just $ SubExpResult ii
+          Just $ pure $ SubExpResult ii
 
     Just (Iota _ x s)
       | [ii] <- inds ->
-          Just $ ScalExpResult $
-          SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s + SE.intSubExpToScalExp x
+          Just $
+          fmap SubExpResult $ letSubExp "index_iota" <=< SE.fromScalExp $
+          SE.intSubExpToScalExp ii * SE.intSubExpToScalExp s +
+          SE.intSubExpToScalExp x
+
+    Just (Rotate cs offsets a)
+      | length offsets == length inds -> Just $ do
+          dims <- arrayDims <$> lookupType a
+          let adjust (i, o, d) = do
+                i_m_o <- letSubExp "i_p_o" $ PrimOp $ BinOp (Add Int32) i o
+                letSubExp "rot_i" $ PrimOp $ BinOp (SMod Int32) i_m_o d
+          inds' <- mapM adjust $ zip3 inds offsets dims
+          pure $ IndexResult cs a inds'
 
     Just (Index cs aa ais) ->
-      Just $ IndexResult cs aa (ais ++ inds)
+      Just $ pure $ IndexResult cs aa (ais ++ inds)
 
     Just (Replicate _ (Var vv))
-      | [_]   <- inds, not consuming -> Just $ SubExpResult $ Var vv
-      | _:is' <- inds, not consuming -> Just $ IndexResult [] vv is'
+      | [_]   <- inds, not consuming -> Just $ pure $ SubExpResult $ Var vv
+      | _:is' <- inds, not consuming -> Just $ pure $ IndexResult [] vv is'
 
     Just (Replicate _ val@(Constant _))
-      | [_] <- inds -> Just $ SubExpResult val
+      | [_] <- inds -> Just $ pure $ SubExpResult val
 
     Just (Rearrange cs perm src)
        | rearrangeReach perm <= length inds ->
          let inds' = rearrangeShape (take (length inds) perm) inds
-         in Just $ IndexResult cs src inds'
+         in Just $ pure $ IndexResult cs src inds'
 
     Just (Copy src)
       -- We cannot just remove a copy of a rearrange, because it might
@@ -504,32 +572,55 @@ simplifyIndexing defOf seType idd inds consuming =
       | Just dims <- arrayDims <$> seType (Var src),
         length inds == length dims,
         not consuming ->
-          Just $ IndexResult [] src inds
+          Just $ pure $ IndexResult [] src inds
 
     Just (Reshape cs newshape src)
       | Just newdims <- shapeCoercion newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         changed_dims <- zipWith (/=) newdims olddims,
         not $ or $ drop (length inds) changed_dims ->
-        Just $ IndexResult cs src inds
+        Just $ pure $ IndexResult cs src inds
 
       | Just newdims <- shapeCoercion newshape,
         Just olddims <- arrayDims <$> seType (Var src),
         length newshape == length inds,
         length olddims == length newdims ->
-        Just $ IndexResult cs src inds
-
+        Just $ pure $ IndexResult cs src inds
 
     Just (Reshape cs [_] v2)
       | Just [_] <- arrayDims <$> seType (Var v2) ->
-        Just $ IndexResult cs v2 inds
+        Just $ pure $ IndexResult cs v2 inds
+
+    Just (Concat cs d x xs _) | Just (ibef, i, iaft) <- focusNth d inds -> Just $ do
+      res_t <- stripArray (length inds) <$> lookupType x
+      x_len <- arraySize d <$> lookupType x
+      xs_lens <- mapM (fmap (arraySize d) . lookupType) xs
+
+      let add n m = do
+            added <- letSubExp "index_concat_add" $ PrimOp $ BinOp (Add Int32) n m
+            return (added, n)
+      (_, starts) <- mapAccumLM add x_len xs_lens
+      let xs_and_starts = zip (reverse xs) starts
+
+      let mkBranch [] =
+            letSubExp "index_concat" $ PrimOp $ Index cs x (ibef++i:iaft)
+          mkBranch ((x', start):xs_and_starts') = do
+            cmp <- letSubExp "index_concat_cmp" $ PrimOp $ CmpOp (CmpSle Int32) start i
+            (thisres, thisbnds) <- collectBindings $ do
+              i' <- letSubExp "index_concat_i" $ PrimOp $ BinOp (Sub Int32) i start
+              letSubExp "index_concat" $ PrimOp $ Index cs x' (ibef++i':iaft)
+            thisbody <- mkBodyM thisbnds [thisres]
+            (altres, altbnds) <- collectBindings $ mkBranch xs_and_starts'
+            altbody <- mkBodyM altbnds [altres]
+            letSubExp "index_concat_branch" $ If cmp thisbody altbody $ staticShapes [res_t]
+      SubExpResult <$> mkBranch xs_and_starts
 
     Just (ArrayLit ses _)
       | Constant (IntValue (Int32Value i)) : inds' <- inds,
         Just se <- maybeNth i ses ->
         case inds' of
-          [] -> Just $ SubExpResult se
-          _ | Var v2 <- se  -> Just $ IndexResult [] v2 inds'
+          [] -> Just $ pure $ SubExpResult se
+          _ | Var v2 <- se  -> Just $ pure $ IndexResult [] v2 inds'
           _ -> Nothing
 
     _ -> Nothing
@@ -556,7 +647,7 @@ simplifyIndexIntoReshape _ _ =
 
 simplifyIndexIntoSplit :: MonadBinder m => TopDownRule m
 simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
-  | Just (Let split_pat _ (PrimOp (Split cs2 ns idd2))) <-
+  | Just (Let split_pat _ (PrimOp (Split cs2 0 ns idd2))) <-
       ST.entryBinding =<< ST.lookup idd vtable,
     first_index : rest_indices <- inds = do
       -- Figure out the extra offset that we should add to the first index.
@@ -580,12 +671,12 @@ simplifyIndexIntoSplit _ _ =
 
 
 removeEmptySplits :: MonadBinder m => TopDownRule m
-removeEmptySplits _ (Let pat _ (PrimOp (Split cs ns arr)))
+removeEmptySplits _ (Let pat _ (PrimOp (Split cs i ns arr)))
   | (pointless,sane) <- partition (isCt0 . snd) $ zip (patternValueElements pat) ns,
     not (null pointless) = do
       rt <- rowType <$> lookupType arr
       letBind_ (Pattern [] $ map fst sane) $
-        PrimOp $ Split cs (map snd sane) arr
+        PrimOp $ Split cs i (map snd sane) arr
       forM_ pointless $ \(patElem,_) ->
         letBindNames' [patElemName patElem] $
         PrimOp $ ArrayLit [] rt
@@ -593,12 +684,32 @@ removeEmptySplits _ _ =
   cannotSimplify
 
 removeSingletonSplits :: MonadBinder m => TopDownRule m
-removeSingletonSplits _ (Let pat _ (PrimOp (Split _ [n] arr))) = do
+removeSingletonSplits _ (Let pat _ (PrimOp (Split _ _ [n] arr))) = do
   size <- arraySize 0 <$> lookupType arr
   if size == n then
     letBind_ pat $ PrimOp $ SubExp $ Var arr
     else cannotSimplify
 removeSingletonSplits _ _ =
+  cannotSimplify
+
+simplifyConcat :: MonadBinder m => TopDownRule m
+
+-- concat@1(transpose(x),transpose(y)) == transpose(concat@0(x,y))
+simplifyConcat vtable (Let pat _ (PrimOp (Concat cs i x xs new_d)))
+  | Just r <- arrayRank <$> ST.lookupType x vtable,
+    let perm = [i] ++ [0..i-1] ++ [i+1..r-1],
+    Just (x',x_cs) <- transposedBy perm x,
+    Just (xs',xs_cs) <- unzip <$> mapM (transposedBy perm) xs = do
+      concat_rearrange <-
+        letExp "concat_rearrange" $ PrimOp $
+        Concat (cs++x_cs++concat xs_cs) 0 x' xs' new_d
+      letBind_ pat $ PrimOp $ Rearrange [] perm concat_rearrange
+  where transposedBy perm1 v =
+          case ST.lookupExp v vtable of
+            Just (PrimOp (Rearrange vcs perm2 v'))
+              | perm1 == perm2 -> Just (v', vcs)
+            _ -> Nothing
+simplifyConcat _ _ =
   cannotSimplify
 
 evaluateBranch :: MonadBinder m => TopDownRule m

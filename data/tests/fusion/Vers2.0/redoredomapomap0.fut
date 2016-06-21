@@ -17,8 +17,8 @@
 --      Redomap 1
 -- }
 --
-fun f64 mul2([f64] x, int i) = x[i]*2.0
-fun (f64,[f64],f64,[f64],f64,[f64]) main([f64] arr) =
+fun f64 mul2([]f64 x, int i) = x[i]*2.0
+fun (f64,[]f64,f64,[]f64,f64,[]f64) main([]f64 arr) =
     let r1 = reduce(+, 0.0, arr) in
     let x  = map   (+1.0,   arr) in
     let r2 = reduce(*, 1.0, x  ) in

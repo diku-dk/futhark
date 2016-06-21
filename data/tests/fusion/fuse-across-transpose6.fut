@@ -40,41 +40,41 @@
 -- }
 -- structure { Map/Scanomap 1 Map 1 }
 
-fun [f64] take(int n, [f64] a) = let (first, rest) = split((n), a) in first
+fun []f64 take(int n, []f64 a) = let (first, rest) = split((n), a) in first
 
-fun [[f64,num_und],num_dates]
-  correlateDeltas([[f64,num_und],num_und  ] md_c,
-                  [[f64,num_und],num_dates] zds) =
-  map( fn [f64,num_und] ([f64,num_und] zi) =>
+fun [num_dates][num_und]f64
+  correlateDeltas([num_und][num_und]f64 md_c,
+                  [num_dates][num_und]f64 zds) =
+  map( fn [num_und]f64 ([num_und]f64 zi) =>
          map( fn f64 (int j) =>
                 let x = zipWith( *, take(j+1,zi), take(j+1,md_c[j]) )
                 in  reduce( +, 0.0, x )
             , iota(num_und) )
      , zds )
 
-fun [f64,num_und] combineVs(  [f64,num_und] n_row,
-                               [f64,num_und] vol_row,
-                               [f64,num_und] dr_row ) =
+fun [num_und]f64 combineVs(  [num_und]f64 n_row,
+                               [num_und]f64 vol_row,
+                               [num_und]f64 dr_row ) =
   map(+, zip(dr_row, map(*, zip(n_row, vol_row ) )))
 
-fun [[f64,num_und],num_dates]
-  mkPrices([f64,num_und]             md_starts,
-           [[f64,num_und],num_dates] md_vols,
-           [[f64,num_und],num_dates] md_drifts,
-           [[f64,num_und],num_dates] noises) =
+fun [num_dates][num_und]f64
+  mkPrices([num_und]f64             md_starts,
+           [num_dates][num_und]f64 md_vols,
+           [num_dates][num_und]f64 md_drifts,
+           [num_dates][num_und]f64 noises) =
   let c_rows = map( combineVs, zip(noises, md_vols, md_drifts) )
-  let e_rows = map( fn [f64,num_und] ([f64] x) => map(exp64, x)
+  let e_rows = map( fn [num_und]f64 ([]f64 x) => map(exp64, x)
                   , c_rows
                   )
-  in  scan( fn [f64] ([f64] x, [f64] y) => zipWith(*, x, y)
+  in  scan( fn []f64 ([]f64 x, []f64 y) => zipWith(*, x, y)
           , md_starts, e_rows )
 
   -- Formerly blackScholes.
-fun [[f64,num_und],num_dates] main([[f64,num_und],num_und  ] md_c,
-                                    [[f64,num_und],num_dates] md_vols,
-                                    [[f64,num_und],num_dates] md_drifts,
-                                    [f64,num_und]            md_starts,
-                                    [[f64,num_dates],num_und] bb_arr) =
+fun [num_dates][num_und]f64 main([num_und][num_und]f64 md_c,
+                                    [num_dates][num_und]f64 md_vols,
+                                    [num_dates][num_und]f64 md_drifts,
+                                    [num_und]f64            md_starts,
+                                    [num_und][num_dates]f64 bb_arr) =
   -- I don't want to include the entire Brownian bridge, so we just
   -- transpose bb_arr.
   let bb_row = transpose(bb_arr) in

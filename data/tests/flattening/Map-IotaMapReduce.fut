@@ -6,7 +6,7 @@
 -- output {
 --   [8,9,12]
 -- }
-fun [int] main ([int,n] xs, [int,n] ys) =
+fun []int main ([n]int xs, [n]int ys) =
   map( fn int (int x, int y) =>
          let tmp1 = iota(x) in
          let tmp2 = map(*y,tmp1) in

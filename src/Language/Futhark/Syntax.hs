@@ -49,10 +49,14 @@ module Language.Futhark.Syntax
   -- * Definitions
   , FunDefBase(..)
   , TypeDefBase(..)
+  , SigDefBase(..)
+  , SigDeclBase(..)
+  , ModDefBase(..)
   , ProgBase(..)
   , ProgBaseWithHeaders(..)
   , ProgHeader(..)
   , DecBase(..)
+  , FunOrTypeDecBase(..)
 
   -- * Miscellaneous
   , NoInfo(..)
@@ -70,7 +74,6 @@ import Data.Monoid
 import Data.Foldable
 import Data.Traversable
 import qualified Data.HashSet as HS
-
 import Prelude
 
 import Futhark.Representation.Primitive
@@ -225,8 +228,9 @@ type CompTypeBase = TypeBase Rank Names
 data UserType vn = UserPrim PrimType SrcLoc
                  | UserArray (UserType vn) (DimDecl vn) SrcLoc
                  | UserTuple [UserType vn] SrcLoc
-                 | UserTypeAlias Name SrcLoc
+                 | UserTypeAlias QualName SrcLoc
                  | UserUnique (UserType vn) SrcLoc
+
     deriving (Show)
 
 instance Located (UserType vn) where
@@ -379,7 +383,7 @@ data ExpBase f vn =
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
 
-            | Apply  Name [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
+            | Apply  QualName [(ExpBase f vn, Diet)] (f (CompTypeBase vn)) SrcLoc
 
             | DoLoop
               (PatternBase f vn) -- Merge variable pattern
@@ -401,15 +405,22 @@ data ExpBase f vn =
                     [ExpBase f vn]
                     SrcLoc
 
+            | TupleIndex (ExpBase f vn) Int (f (CompTypeBase vn)) SrcLoc
+            -- ^ Extract the specified component from a tuple.
+
             | Size Int (ExpBase f vn) SrcLoc
             -- ^ The size of the specified array dimension.
 
-            | Split [ExpBase f vn] (ExpBase f vn) SrcLoc
-            -- ^ @split( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2, 3], [4]}@.
-            -- Note that this is different from the internal representation
+            | Split Int [ExpBase f vn] (ExpBase f vn) SrcLoc
+            -- ^ @split@0( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2,
+            -- 3], [4]}@.  Note that this is different from in the
+            -- core language.  The static integer indicates which
+            -- dimension to concatenate across.
 
-            | Concat (ExpBase f vn) [ExpBase f vn] SrcLoc
-            -- ^ @concat([1],[2, 3, 4]) = [1, 2, 3, 4]@.
+            | Concat Int (ExpBase f vn) [ExpBase f vn] SrcLoc
+            -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.  The
+            -- static integer indicates which dimension to concatenate
+            -- across.
 
             | Copy (ExpBase f vn) SrcLoc
             -- ^ Copy the value return by the expression.  This only
@@ -434,6 +445,10 @@ data ExpBase f vn =
             -- of integers is a list of dimensions (0-indexed), which
             -- must be a permutation of @[0,n-1]@, where @n@ is the
             -- number of dimensions in the input array.
+
+            | Rotate Int (ExpBase f vn) (ExpBase f vn) SrcLoc
+            -- ^ Rotate the given dimension of the given array by the
+            -- given amount.  The last expression is the array.
 
             -- Second-Order Array Combinators accept curried and
             -- anonymous functions as first params.
@@ -483,7 +498,7 @@ data ExpBase f vn =
             -- may choose the maximal chunk size that still satisfies the memory
             -- requirements of the device.
 
-            | Write (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
+            | Write (ExpBase f vn) (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
 
             | Zip [(ExpBase f vn, f (CompTypeBase vn))] SrcLoc
@@ -499,6 +514,7 @@ data ExpBase f vn =
             -- ^ Explore the Danger Zone and elide safety checks on
             -- array operations that are (lexically) within this
             -- expression.  Make really sure the code is correct.
+
 deriving instance Showable f vn => Show (ExpBase f vn)
 
 data StreamForm f vn = MapLike    StreamOrd
@@ -519,12 +535,14 @@ instance Located (ExpBase f vn) where
   locOf (LetPat _ _ _ pos) = locOf pos
   locOf (LetWith _ _ _ _ _ pos) = locOf pos
   locOf (Index _ _ pos) = locOf pos
+  locOf (TupleIndex _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
   locOf (Size _ _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ pos) = locOf pos
   locOf (Rearrange _ _ pos) = locOf pos
+  locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
   locOf (Zip _ pos) = locOf pos
@@ -532,8 +550,8 @@ instance Located (ExpBase f vn) where
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
   locOf (Partition _ _ pos) = locOf pos
-  locOf (Split _ _ pos) = locOf pos
-  locOf (Concat _ _ pos) = locOf pos
+  locOf (Split _ _ _ pos) = locOf pos
+  locOf (Concat _ _ _ pos) = locOf pos
   locOf (Copy _ pos) = locOf pos
   locOf (DoLoop _ _ _ _ _ pos) = locOf pos
   locOf (Stream _ _ _  pos) = locOf pos
@@ -555,7 +573,7 @@ data ForLoopDirection = FromUpTo -- ^ Iterates from the lower bound to
 -- | Anonymous Function
 data LambdaBase f vn = AnonymFun [ParamBase f vn] (ExpBase f vn) (TypeDeclBase f vn) SrcLoc
                       -- ^ @fn int (bool x, char z) => if(x) then ord(z) else ord(z)+1 *)@
-                      | CurryFun Name [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+                      | CurryFun QualName [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
                         -- ^ @f(4)@
                       | UnOpFun UnOp (f (CompTypeBase vn)) (f (CompTypeBase vn)) SrcLoc
                         -- ^ @-@; first type is operand, second is result.
@@ -589,13 +607,15 @@ instance Located (PatternBase f vn) where
 -- | Function Declarations
 data FunDefBase f vn = FunDef { funDefEntryPoint :: Bool
                                 -- ^ True if this function is an entry point.
-                              , funDefName :: Name
+                              , funDefName :: FunName
                               , funDefRetType :: TypeDeclBase f vn
                               , funDefParams :: [ParamBase f vn]
                               , funDefBody :: ExpBase f vn
                               , funDefLocation :: SrcLoc
                               }
 deriving instance Showable f vn => Show (FunDefBase f vn)
+
+type FunName = (Name, QualName)
 
 -- | Type Declarations
 data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
@@ -604,19 +624,46 @@ data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types 
                                 }
 deriving instance Showable f vn => Show (TypeDefBase f vn)
 
+data SigDefBase f vn = SigDef { sigName :: Name
+                              , sigDecls :: [SigDeclBase f vn]
+                              , sigDefLocation :: SrcLoc
+                              }
+deriving instance Showable f vn => Show (SigDefBase f vn)
+
+data SigDeclBase f vn = FunSig  { funSigName :: Name
+                                , funSigParams :: [TypeDeclBase f vn]
+                                , funSigRettype :: TypeDeclBase f vn
+                                }
+                      | TypeSig (TypeDefBase f vn)
+deriving instance Showable f vn => Show (SigDeclBase f vn)
+
 instance Located (TypeDefBase f vn) where
   locOf = locOf . typeDefLocation
 
-data DecBase f vn = FunDec (FunDefBase f vn)
-                  | TypeDec (TypeDefBase f vn)
--- | Coming soon  | SigDec ..
---                | ModDec ..
+data ModDefBase f vn = ModDef { modName :: Name
+                              , modDecls :: [DecBase f vn]
+                              , modDefLocation  :: SrcLoc
+                              }
+deriving instance Showable f vn => Show (ModDefBase f vn)
+
+data FunOrTypeDecBase f vn = FunDec (FunDefBase f vn)
+                           | TypeDec (TypeDefBase f vn)
+deriving instance Showable f vn => Show (FunOrTypeDecBase f vn)
+
+data DecBase f vn = FunOrTypeDec (FunOrTypeDecBase f vn)
+                  | SigDec (SigDefBase f vn)
+                  | ModDec (ModDefBase f vn)
 deriving instance Showable f vn => Show (DecBase f vn)
 
-data ProgBase f vn =
-         Prog  { progTypes :: [TypeDefBase f vn]
-               , progFunctions :: [FunDefBase f vn]
-               }
+-- | data ProgBase f vn =
+-- |          Prog  { progTypes :: [TypeDefBase f vn]
+-- |                , progFunctions :: [FunDefBase f vn]
+-- |                , progSignatures :: [SigDefBase f vn]
+-- |                , progModules :: [ModDefBase f vn]
+-- |                }
+-- | deriving instance Showable f vn => Show (ProgBase f vn)
+
+data ProgBase f vn = Prog { progDecs :: [DecBase f vn] }
 deriving instance Showable f vn => Show (ProgBase f vn)
 
 data ProgBaseWithHeaders f vn =

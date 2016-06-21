@@ -8,6 +8,7 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , offsetIndex
        , strideIndex
        , permute
+       , rotate
        , reshape
        , applyInd
        , base
@@ -21,8 +22,9 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        where
 
 import Data.Monoid
+import Data.List
 
-import Prelude hiding (div, quot)
+import Prelude hiding (div, mod, quot, rem)
 
 import Futhark.Transform.Substitute
 import Futhark.Transform.Rename
@@ -42,6 +44,7 @@ type Permutation = [Int]
 data IxFun num = Direct (Shape num)
                | Offset (IxFun num) num
                | Permute (IxFun num) Permutation
+               | Rotate (IxFun num) (Indices num)
                | Index (IxFun num) (Indices num)
                | Reshape (IxFun num) (ShapeChange num)
                | Stride (IxFun num) num
@@ -55,6 +58,8 @@ instance (IntegralCond num, Eq num) => Eq (IxFun num) where
     ixfun1 == ixfun2 && offset1 == offset2
   Permute ixfun1 perm1 == Permute ixfun2 perm2 =
     ixfun1 == ixfun2 && perm1 == perm2
+  Rotate ixfun1 offsets1 == Rotate ixfun2 offsets2 =
+    ixfun1 == ixfun2 && offsets1 == offsets2
   Index ixfun1 is1 == Index ixfun2 is2 =
     ixfun1 == ixfun2 && is1 == is2
   Reshape ixfun1 shape1 == Reshape ixfun2 shape2 =
@@ -65,6 +70,7 @@ instance Show num => Show (IxFun num) where
   show (Direct n) = "Direct (" ++ show n ++ ")"
   show (Offset fun k) = "Offset (" ++ show fun ++ ", " ++ show k ++ ")"
   show (Permute fun perm) = "Permute (" ++ show fun ++ ", " ++ show perm ++ ")"
+  show (Rotate fun offsets) = "Rotate (" ++ show fun ++ ", " ++ show offsets ++ ")"
   show (Index fun is) = "Index (" ++ show fun ++ ", " ++ show is ++ ")"
   show (Reshape fun newshape) = "Reshape (" ++ show fun ++ ", " ++ show newshape ++ ")"
   show (Stride fun stride) = "Stride (" ++ show fun ++ ", " ++ show stride ++ ")"
@@ -74,6 +80,7 @@ instance Pretty num => Pretty (IxFun num) where
     text "Direct" <> parens (commasep $ map ppr dims)
   ppr (Offset fun k) = ppr fun <+> text "+" <+> ppr k
   ppr (Permute fun perm) = ppr fun <> ppr perm
+  ppr (Rotate fun offsets) = ppr fun <> brackets (commasep $ map ((text "+" <>) . ppr) offsets)
   ppr (Index fun is) = ppr fun <> brackets (commasep $ map ppr is)
   ppr (Reshape fun oldshape) =
     ppr fun <> text "->" <>
@@ -88,6 +95,8 @@ instance (Eq num, IntegralCond num, Substitute num) => Substitute (IxFun num) wh
     Offset (substituteNames subst fun) (substituteNames subst k)
   substituteNames subst (Permute fun perm) =
     Permute (substituteNames subst fun) perm
+  substituteNames subst (Rotate fun offsets) =
+    Rotate (substituteNames subst fun) offsets
   substituteNames subst (Index fun is) =
     Index
     (substituteNames subst fun)
@@ -106,6 +115,7 @@ instance FreeIn num => FreeIn (IxFun num) where
   freeIn (Offset ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Stride ixfun e) = freeIn ixfun <> freeIn e
   freeIn (Permute ixfun _) = freeIn ixfun
+  freeIn (Rotate ixfun offsets) = freeIn ixfun <> freeIn offsets
   freeIn (Index ixfun is) =
     freeIn ixfun <> mconcat (map freeIn is)
   freeIn (Reshape ixfun dims) =
@@ -134,6 +144,10 @@ index (Permute fun perm) is_new element_size =
   index fun is_old element_size
   where is_old = rearrangeShape (rearrangeInverse perm) is_new
 
+index (Rotate fun offsets) is element_size =
+  index fun (zipWith mod (zipWith (+) is offsets) dims) element_size
+  where dims = shape fun
+
 index (Index fun is1) is2 element_size =
   index fun (is1 ++ is2) element_size
 
@@ -151,9 +165,10 @@ iota :: IntegralCond num =>
         Shape num -> IxFun num
 iota = Direct
 
-offsetIndex :: IntegralCond num =>
+offsetIndex :: (Eq num, IntegralCond num) =>
                IxFun num -> num -> IxFun num
-offsetIndex = Offset
+offsetIndex ixfun i | i == 0 = ixfun
+offsetIndex ixfun i = Offset ixfun i
 
 strideIndex :: IntegralCond num =>
                IxFun num -> num -> IxFun num
@@ -163,14 +178,22 @@ permute :: IntegralCond num =>
            IxFun num -> Permutation -> IxFun num
 permute (Permute ixfun oldperm) perm
   | rearrangeInverse oldperm == perm = ixfun
-permute ixfun perm = Permute ixfun perm
+  | otherwise = permute ixfun (rearrangeCompose perm oldperm)
+permute ixfun perm
+  | perm == sort perm = ixfun
+  | otherwise = Permute ixfun perm
+
+rotate :: IntegralCond num =>
+          IxFun num -> Indices num -> IxFun num
+rotate (Rotate ixfun old_offsets) offsets =
+  Rotate ixfun $ zipWith (+) old_offsets offsets
+rotate ixfun offsets = Rotate ixfun offsets
 
 reshape :: (Eq num, IntegralCond num) =>
            IxFun num -> ShapeChange num -> IxFun num
 
-reshape (Direct oldshape) newshape
-  | length oldshape == length newshape =
-      Direct $ map newDim newshape
+reshape Direct{} newshape =
+  Direct $ map newDim newshape
 
 reshape (Reshape ixfun _) newshape =
   reshape ixfun newshape
@@ -189,20 +212,17 @@ reshape ixfun newshape
         Offset ixfun' offset ->
           Offset (reshape ixfun' newshape) offset
 
-        Stride{} ->
-          Reshape ixfun newshape
-
         Index ixfun' is ->
           let unchanged_shape =
                 map DimCoercion $ take (length is) $ shape ixfun'
               newshape' = unchanged_shape ++ newshape
           in applyInd (reshape ixfun' newshape') is
 
-        Reshape _ _ ->
-          Reshape ixfun newshape
-
         Direct _ ->
           Direct $ map newDim newshape
+
+        _ ->
+          Reshape ixfun newshape
   | otherwise =
       Reshape ixfun newshape
 
@@ -215,12 +235,7 @@ applyInd ixfun is = Index ixfun is
 
 rank :: IntegralCond num =>
         IxFun num -> Int
-rank (Direct dims) = length dims
-rank (Offset ixfun _) = rank ixfun
-rank (Permute ixfun _) = rank ixfun
-rank (Index ixfun is) = rank ixfun - length is
-rank (Reshape _ newshape) = length newshape
-rank (Stride ixfun _) = rank ixfun
+rank = length . shape
 
 shape :: IntegralCond num =>
          IxFun num -> Shape num
@@ -228,6 +243,8 @@ shape (Direct dims) =
   dims
 shape (Permute ixfun perm) =
   rearrangeShape perm $ shape ixfun
+shape (Rotate ixfun _) =
+  shape ixfun
 shape (Offset ixfun _) =
   shape ixfun
 shape (Index ixfun indices) =
@@ -243,6 +260,8 @@ base (Direct dims) =
 base (Offset ixfun _) =
   base ixfun
 base (Permute ixfun _) =
+  base ixfun
+base (Rotate ixfun _) =
   base ixfun
 base (Index ixfun _) =
   base ixfun
@@ -263,6 +282,8 @@ rebase new_base (Stride ixfun stride) =
   strideIndex (rebase new_base ixfun) stride
 rebase new_base (Permute ixfun perm) =
   permute (rebase new_base ixfun) perm
+rebase new_base (Rotate ixfun offsets) =
+  rotate (rebase new_base ixfun) offsets
 rebase new_base (Index ixfun is) =
   applyInd (rebase new_base ixfun) is
 rebase new_base (Reshape ixfun new_shape) =

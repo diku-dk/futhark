@@ -5,7 +5,7 @@
 -- output {
 --   [1,2,3]
 -- }
-fun [  int  ] main( [  int  ]  arr) =
+fun []int main( []int  arr) =
   let  newarr  =
        (let notused  = arr in
         let n = size(0, arr) in

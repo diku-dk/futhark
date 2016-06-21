@@ -20,6 +20,7 @@ module Futhark.Representation.AST.Attributes.Types
        , arrayOfRow
        , arrayOfShape
        , setOuterSize
+       , setDimSize
        , setOuterDim
        , setArrayDims
        , peelArray
@@ -204,12 +205,20 @@ setArrayDims t dims = t `setArrayShape` Shape dims
 -- | Replace the size of the outermost dimension of an array.  If the
 -- given type is not an array, it is returned unchanged.
 setOuterSize :: TypeBase Shape u -> SubExp -> TypeBase Shape u
-setOuterSize t e = t `setArrayShape` setOuterDim (arrayShape t) e
+setOuterSize = setDimSize 0
+
+-- | Replace the size of the given dimension of an array.  If the
+-- given type is not an array, it is returned unchanged.
+setDimSize :: Int -> TypeBase Shape u -> SubExp -> TypeBase Shape u
+setDimSize i t e = t `setArrayShape` setDim i (arrayShape t) e
 
 -- | Replace the outermost dimension of an array shape.
 setOuterDim :: Shape -> SubExp -> Shape
-setOuterDim (Shape (_:es)) e = Shape (e : es)
-setOuterDim shape _          = shape
+setOuterDim = setDim 0
+
+-- | Replace the specified dimension of an array shape.
+setDim :: Int -> Shape -> SubExp -> Shape
+setDim i (Shape ds) e = Shape $ take i ds ++ e : drop (i+1) ds
 
 -- | @peelArray n t@ returns the type resulting from peeling the first
 -- @n@ array dimensions from @t@.  Returns @Nothing@ if @t@ has less

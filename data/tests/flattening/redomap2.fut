@@ -6,7 +6,7 @@
 -- output {
 --   27
 -- }
-fun int main ([int,n] xs, [int,n] ys) =
+fun int main ([n]int xs, [n]int ys) =
   let tmp =
     map (fn int (int x, int y) => x+y
         , zip (xs,ys)) in

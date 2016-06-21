@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE LambdaCase #-}
 module Futhark.Representation.Kernels.Simplify
        ( simplifyKernels
        , simplifyFun
@@ -13,6 +14,7 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.Either
+import Data.Foldable (any)
 import Data.List hiding (any, all)
 import Data.Maybe
 import Data.Monoid
@@ -95,13 +97,13 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       Engine.simplifyLambda lam Nothing (map Just arrs') <*>
       pure arrs'
 
-  simplifyOp (WriteKernel cs ts i vs as) = do
+  simplifyOp (WriteKernel cs len lam ivs as) = do
     cs' <- Engine.simplify cs
-    ts' <- mapM Engine.simplify ts
-    i' <- Engine.simplify i
-    vs' <- mapM Engine.simplify vs
+    len' <- Engine.simplify len
+    lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
+    ivs' <- mapM Engine.simplify ivs
     as' <- mapM Engine.simplify as
-    return $ WriteKernel cs' ts' i' vs' as'
+    return $ WriteKernel cs' len' lam' ivs' as'
 
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
@@ -143,6 +145,7 @@ topDownRules = [removeUnusedKernelInputs
                , fuseReduceIota
                , fuseScanIota
                , fuseChunkedMapIota
+               , fuseWriteIota
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -168,31 +171,46 @@ simplifyKernelInputs :: (MonadBinder m,
                          LocalScope (Lore m) m,
                          Op (Lore m) ~ Kernel (Lore m), Aliased (Lore m)) =>
                         TopDownRule m
-simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
-  | (inps', extra_cs, extra_bnds) <- unzip3 $ map simplifyInput inps,
-    inps /= catMaybes inps' = do
-      body' <- localScope index_env $ insertBindingsM $ do
-         forM_ (catMaybes extra_bnds) $ \(name, se) ->
-           letBindNames'_ [name] $ PrimOp $ SubExp se
-         return body
-      letBind_ pat $ Op $
-        MapKernel (cs++concat extra_cs) w index ispace
-        (catMaybes inps') returns body'
+simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body))) = do
+  ((inps', extra_cs), extra_bnds) <- localScope index_env $ collectBindings $
+    unzip <$> mapM simplifyInput inps
+  when (inps == catMaybes inps') cannotSimplify
+
+  body' <- localScope index_env $ insertBindingsM $ do
+    mapM_ addBinding extra_bnds
+    return body
+  letBind_ pat $ Op $
+    MapKernel (cs++concat extra_cs) w index ispace
+    (catMaybes inps') returns body'
   where defOf = (`ST.lookupExp` vtable)
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
-        index_env = HM.fromList $ zip (map fst ispace) $ repeat IndexInfo
+        indices = map fst ispace
+        index_env = HM.fromList $ zip indices $ repeat IndexInfo
         consumed_in_body = consumedInBody body
 
-        simplifyInput inp@(KernelInput param arr is) =
-          case simplifyIndexing defOf seType arr is consumed of
-            Just (IndexResult inp_cs arr' is') ->
-              (Just $ KernelInput param arr' is', inp_cs, Nothing)
-            Just (SubExpResult se) ->
-              (Nothing, [], Just (paramName param, se))
-            _ ->
-              (Just inp, [], Nothing)
-          where consumed = paramName param `HS.member` consumed_in_body
+        simplifyInput inp@(KernelInput param arr is)
+          | Just m <- simplifyIndexing defOf seType arr is consumed = do
+              (res, bnds) <- collectBindings m
+              let free_in_bnds = mconcat $ map freeInBinding bnds
+              case res of
+                IndexResult inp_cs arr' is'
+                  | paramName param `HS.member` consumed_in_body,
+                    any (`HS.member` free_in_bnds) indices ->
+                      return (Just inp, [])
+                  | otherwise -> do
+                      mapM_ addBinding bnds
+                      letBindNames'_ [name] $ PrimOp $ Index inp_cs arr' is'
+                      return (Nothing, inp_cs)
+                SubExpResult se -> do
+                  mapM_ addBinding bnds
+                  letBindNames'_ [name] $ PrimOp $ SubExp se
+                  return (Nothing, [])
+          | otherwise =
+              return (Just inp, [])
+          where name = paramName param
+                consumed = name `HS.member` consumed_in_body
+
 simplifyKernelInputs _ _ = cannotSimplify
 
 removeInvariantKernelOutputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
@@ -344,3 +362,27 @@ fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
          (params_and_arrs, iota_params) =
            iotaParams vtable arr_params arrs
 fuseScanIota _ _ = cannotSimplify
+
+fuseWriteIota :: (LocalScope (Lore m) m,
+                  MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                 TopDownRule m
+fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len lam ivs as)))
+  | not $ null iota_params = do
+      let (ivs_params', ivs') = unzip params_and_arrs
+
+      body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
+        forM_ iota_params $ \(p, x) ->
+          letBindNames'_ [p] $
+            PrimOp $ BinOp (Add Int32) (Var thread_index) x
+        mapM_ addBinding $ bodyBindings $ lambdaBody lam
+        return $ bodyResult $ lambdaBody lam
+
+      let lam' = lam { lambdaBody = body
+                     , lambdaParams = thread_index_param : ivs_params'
+                     }
+
+      letBind_ pat $ Op $ WriteKernel cs len lam' ivs' as
+    where (params_and_arrs, iota_params) = iotaParams vtable ivs_params ivs
+          (thread_index_param : ivs_params) = lambdaParams lam
+          thread_index = paramName thread_index_param
+fuseWriteIota _ _ = cannotSimplify
