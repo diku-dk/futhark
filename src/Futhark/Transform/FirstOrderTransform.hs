@@ -197,12 +197,12 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
 
 
 transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
-  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun 
-  arr_ts <- mapM lookupType arrexps  
-  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness  
+  let map_arr_tps = drop (length accexps) $ lambdaReturnType innerfun
+  arr_ts <- mapM lookupType arrexps
+  maparrs <- resultArray [ arrayOf t (Shape [width]) NoUniqueness
                          | t <- map_arr_tps ]
-  let innerfun' = Alias.analyseLambda innerfun 
-      consumed = consumedInBody $ lambdaBody innerfun' 
+  let innerfun' = Alias.analyseLambda innerfun
+      consumed = consumedInBody $ lambdaBody innerfun'
   arrexps' <- forM (zip
                     (drop (length accexps) (lambdaParams innerfun))
                     arrexps) $ \(p,a) ->
