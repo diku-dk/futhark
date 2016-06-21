@@ -568,7 +568,7 @@ iswim _ (SOAC.Scan cs w scan_fun scan_input) ots
             t:_ -> 1 : 0 : [2..arrayRank t]
       return (SOAC.Map map_cs map_w map_fun' map_arrs',
               ots SOAC.|> SOAC.Rearrange map_cs perm)
-  
+
 iswim _ _ _ =
   fail "ISWIM does not apply."
 
