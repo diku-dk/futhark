@@ -500,17 +500,7 @@ evalPrimOp unop@(UnOp op e) = do
 evalPrimOp (Index _ ident idxs) = do
   v <- lookupVar ident
   idxs' <- mapM (asInt "Index" <=< evalSubExp) idxs
-  case v of
-    ArrayVal arr bt shape -> do
-      flatidx <- indexArray (textual ident) shape idxs'
-      if length idxs' == length shape
-        then return [PrimVal $ arr ! flatidx]
-        else let resshape = drop (length idxs') shape
-                 ressize  = product resshape
-             in return [ArrayVal (listArray (0,ressize-1)
-                                  [ arr ! (flatidx+i) | i <- [0..ressize-1] ])
-                        bt resshape]
-    _ -> bad $ TypeError "evalPrimOp Index: ident is not an array"
+  pure <$> indexArrayValue (textual ident) v idxs'
 
 evalPrimOp (Iota e x s) = do
   v1 <- evalSubExp e
@@ -657,35 +647,23 @@ evalSOAC (Scan _ w fun inputs) = do
             acc' <- applyLambda fun $ acc ++ x
             return (acc', acc' : l)
 
-evalSOAC (Redomap _ w _ _ innerfun accexp arrexps) = do
-  startaccs <- mapM evalSubExp accexp
-  if res_len == acc_len
-  then foldM foldfun startaccs =<< soacArrays w arrexps
-  else do let startaccs'= (startaccs, replicate (res_len - acc_len) [])
-          (acc_res, arr_res) <- foldM foldfun' startaccs' =<<
-                                soacArrays w arrexps
-          arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
-          return $ acc_res ++ arr_res_fut
-    where
-        lam_ret_tp     = lambdaReturnType innerfun
-        res_len        = length lam_ret_tp
-        acc_len        = length accexp
-        lam_ret_arr_tp = drop acc_len lam_ret_tp
-        foldfun  acc x = applyLambda innerfun $ acc ++ x
-        foldfun' (acc,arr) x = do
-            res_lam <- applyLambda innerfun $ acc ++ x
-            let res_acc = take acc_len res_lam
-                res_arr = drop acc_len res_lam
-                acc_arr = zipWith (:) res_arr arr
-            return (res_acc, acc_arr)
+evalSOAC (Redomap cs w _ redfun foldfun accexp arrexps) = do
+  -- SO LAZY: redomap is scanomap, after which we index the last elements.
+  w' <- asInt "evalPrimOp Split" =<< evalSubExp w
+  vs <- evalSOAC $  Scanomap cs w redfun foldfun accexp arrexps
+  let (acc_arrs, arrs) = splitAt (length accexp) vs
+  accs <- forM acc_arrs $ \acc_arr ->
+    indexArrayValue "<redomap result>" acc_arr [w' - 1]
+  return $ accs++arrs
+
 evalSOAC (Scanomap _ w _ innerfun accexp arrexps) = do
   startaccs <- mapM evalSubExp accexp
   if res_len == acc_len
-  then do (acc, vals) <- foldM foldfun (startaccs, []) =<< (soacArrays w arrexps)
+  then do (acc, vals) <- foldM foldfun (startaccs, []) =<< soacArrays w arrexps
           arrays (map valueType acc) $ reverse vals
   else do let startaccs'= (startaccs, [], replicate (res_len - acc_len) [])
           (acc_res, vals,  arr_res) <- foldM foldfun' startaccs' =<<
-                                       (soacArrays w arrexps)
+                                       soacArrays w arrexps
           vals' <- arrays (map valueType acc_res) $ reverse vals
           arr_res_fut <- arrays lam_ret_arr_tp $ transpose $ map reverse arr_res
           return $ vals' ++ arr_res_fut
@@ -751,6 +729,17 @@ toArrayVal err v = case v of
   ArrayVal a b c -> return (a, b, c)
   _ -> bad $ TypeError err
 
+indexArrayValue :: String -> Value -> [Int] -> FutharkM Value
+indexArrayValue ident (ArrayVal arr bt shape) idxs = do
+  flatidx <- indexArray ident shape idxs
+  if length idxs == length shape
+    then return $ PrimVal $ arr ! flatidx
+    else let resshape = drop (length idxs) shape
+             ressize  = product resshape
+         in return $ ArrayVal (listArray (0,ressize-1)
+                               [ arr ! (flatidx+i) | i <- [0..ressize-1] ])
+            bt resshape
+indexArrayValue _ _ _ = bad $ TypeError "indexArrayValue: ident is not an array"
 
 evalFuncall :: Name -> [Value] -> FutharkM [Value]
 evalFuncall fname args = do
