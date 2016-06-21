@@ -299,23 +299,12 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
     -- Scanomap Fusions:      --
     ----------------------------
 
-    -- Scanomap -> Map/Scanomap Fusion
-    -- Same as with Redomap -> x.
-    -- (SOAC.Map {}, SOAC.Scanomap _ _ lam11 _ nes _)
-    --   | mapFusionOK (drop (length nes) outVars) ker || horizFuse -> do
-    --   let (res_lam', new_inp) = fuseRedomap unfus_nms outVars nes lam1 inp1_arr
-    --                                         outPairs lam2 inp2_arr
-    --       unfus_accs  = take (length nes) outVars
-    --       unfus_arrs  = unfus_nms \\ unfus_accs
-    --   success (unfus_accs ++ outNames ker ++ unfus_arrs) $
-    --           SOAC.Scanomap (cs1++cs2) w lam11 res_lam' nes new_inp
-
     (SOAC.Scanomap _ _ lam2r _ nes2 _, SOAC.Scanomap _ _  lam1r _ nes1 _)
       | horizFuse -> do
           let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes1 lam1 inp1_arr outPairs lam2 inp2_arr
-              unfus_accs  = take (length nes1) outVars
-              unfus_arrs  = returned_outvars \\ unfus_accs
               lamr        = mergeReduceOps lam1r lam2r
+              unfus_arrs  = returned_outvars \\ unfus_accs
+              unfus_accs  = take (length nes1) outVars
           success (unfus_accs ++ outNames ker ++ unfus_arrs) $
               SOAC.Scanomap (cs1++cs2) w  lamr res_lam' (nes1++nes2) new_inp
 
@@ -518,7 +507,7 @@ optimizeKernel inp ker = do
 optimizeSOAC :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
              -> TryFusion (SOAC, SOAC.ArrayTransforms)
 optimizeSOAC inp soac os = do
-  res <- foldM comb (False, soac, os) $ optimizations
+  res <- foldM comb (False, soac, os) optimizations
   case res of
     (False, _, _)      -> fail "No optimisation applied"
     (True, soac', os') -> return (soac', os')
