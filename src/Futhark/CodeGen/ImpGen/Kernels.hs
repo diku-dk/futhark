@@ -753,6 +753,10 @@ callKernelCopy bt
   Imp.innerExp $ product $ map Imp.dimSizeToExp srcshape
 
   | bt_size <- primByteSize bt,
+    ixFunMatchesInnerShape
+      (Shape $ map ImpGen.dimSizeToSubExp destshape) destIxFun,
+    ixFunMatchesInnerShape
+      (Shape $ map ImpGen.dimSizeToSubExp srcshape) srcIxFun,
     Just destoffset <-
       ImpGen.scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun bt_size,
