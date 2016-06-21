@@ -6,5 +6,5 @@
 -- output {
 --   [6,8,10,12]
 -- }
-fun [int] main([int] xs, [int] ys) =
+fun []int main([]int xs, []int ys) =
   map(+, zip (xs,ys))

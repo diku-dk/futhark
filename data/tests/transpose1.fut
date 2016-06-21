@@ -5,5 +5,5 @@
 -- output {
 --   [[1, 4], [2, 5], [3, 6]]
 -- }
-fun [[int]] main([[int]] a) =
+fun [][]int main([][]int a) =
   transpose(a)

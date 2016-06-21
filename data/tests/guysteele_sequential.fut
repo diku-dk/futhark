@@ -14,10 +14,10 @@ fun int min(int x, int y) =
 fun int max(int x, int y) =
   if x < y then y else x
 
-fun [int,n] reverse([int,n] a) =
+fun [n]int reverse([n]int a) =
   map(fn int (int i) => a[n-i-1], iota(n))
 
-fun int main([int] a) =
+fun int main([]int a) =
   let highestToTheLeft = scan(max, 0, a) in
   let highestToTheRight = reverse(scan(max, 0, reverse(a))) in
   let waterLevels = zipWith(min, highestToTheLeft, highestToTheRight) in

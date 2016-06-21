@@ -71,6 +71,10 @@ tokens :-
   "_"                      { tokenC UNDERSCORE }
   "!"                      { tokenC BANG }
   "."                      { tokenC DOT }
+  "->"                     { tokenC TYPE_ARROW }
+  ":"                      { tokenC COLON }
+  "@"                      { tokenC AT }
+
   @intlit i8               { tokenM $ fmap I8LIT . tryRead "i8" . T.takeWhile (/='i') }
   @intlit i16              { tokenM $ fmap I16LIT . tryRead "i16" . T.takeWhile (/='i') }
   @intlit i32              { tokenM $ fmap I32LIT . tryRead "i32" . T.takeWhile (/='i') }
@@ -85,7 +89,10 @@ tokens :-
   @reallit                 { tokenM $ fmap REALLIT . tryRead "f64" }
   "'" @charlit "'"         { tokenM $ fmap CHARLIT . tryRead "char" }
   \" @stringcharlit* \"    { tokenM $ fmap STRINGLIT . tryRead "string"  }
-  [a-zA-Z] [a-zA-Z0-9_']*  { tokenS keyword }
+  [a-z] [a-zA-Z0-9_']*     { tokenS keyword }
+  "True"                   { tokenS $ const TRUE }
+  "False"                  { tokenS $ const FALSE }
+  [A-Z] [a-zA-Z0-9_']*     { tokenS $ SID . nameFromText }
 
 {
 
@@ -117,8 +124,6 @@ keyword s =
     "fn"           -> FN
     "for"          -> FOR
     "do"           -> DO
-    "True"         -> TRUE
-    "False"        -> FALSE
     "abs"          -> ABS
     "signum"       -> SIGNUM
 
@@ -128,6 +133,7 @@ keyword s =
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
     "transpose"    -> TRANSPOSE
+    "rotate"       -> ROTATE
     "map"          -> MAP
     "reduce"       -> REDUCE
     "reduceComm"   -> REDUCECOMM
@@ -152,6 +158,11 @@ keyword s =
     "include"      -> INCLUDE
     "type"         -> TYPE
     "entry"        -> ENTRY
+    "signature"    -> SIGNATURE
+    "sig"          -> SIG
+    "struct"       -> STRUCT
+    "end"          -> END
+    "val"          -> VAL
     _              -> ID $ nameFromText s
 
 tryRead :: Read a => String -> T.Text -> Alex a
@@ -204,6 +215,7 @@ data Token = IF
            | F32
            | F64
            | ID Name
+           | SID Name
            | STRINGLIT String
            | DEFAULT
            | INTLIT Int64
@@ -264,6 +276,7 @@ data Token = IF
            | RESHAPE
            | REARRANGE
            | TRANSPOSE
+           | ROTATE
            | ZIPWITH
            | ZIP
            | UNZIP
@@ -295,6 +308,16 @@ data Token = IF
            | ENTRY
            | TYPE
            | EOF
+           | SIGNATURE
+           | SIG
+           | STRUCT
+           | END
+           | VAL
+           | COLON
+           | AT
+           | IS
+           | TYPE_ARROW
+
              deriving (Show, Eq)
 
 -- The Alex wrapper only works on ByteStrings, so we have to encode

@@ -8,5 +8,5 @@
 --   [3i8,2i8]
 -- }
 
-fun [i8] main([[i8]] a, int i) =
+fun []i8 main([][]i8 a, int i) =
   a[i]

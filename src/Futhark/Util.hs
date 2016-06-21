@@ -9,9 +9,11 @@
 module Futhark.Util
        (mapAccumLM,
         chunk,
+        dropAt,
         mapEither,
         maybeNth,
         splitAt3,
+        focusNth,
         zEncodeString
        )
        where
@@ -39,6 +41,10 @@ chunk n xs =
   let (bef,aft) = splitAt n xs
   in bef : chunk n aft
 
+-- | @dropAt i n@ drops @n@ elements starting at element @i@.
+dropAt :: Int -> Int -> [a] -> [a]
+dropAt i n xs = take i xs ++ drop (i+n) xs
+
 -- | A combination of 'map' and 'partitionEithers'.
 mapEither :: (a -> Either b c) -> [a] -> ([b], [c])
 mapEither f l = partitionEithers $ map f l
@@ -55,6 +61,13 @@ splitAt3 n m l =
   let (xs, l') = splitAt n l
       (ys, zs) = splitAt m l'
   in (xs, ys, zs)
+
+-- | Return the list element at the given index, if the index is
+-- valid, along with the elements before and after.
+focusNth :: Integral int => int -> [a] -> Maybe ([a], a, [a])
+focusNth i xs
+  | (bef, x:aft) <- genericSplitAt i xs = Just (bef, x, aft)
+  | otherwise                           = Nothing
 
 -- Z-encoding from https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/SymbolNames
 --

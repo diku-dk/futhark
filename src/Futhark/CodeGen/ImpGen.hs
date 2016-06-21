@@ -535,22 +535,26 @@ defCompilePrimOp _ Split{} =
 
 defCompilePrimOp
   (Destination [ArrayDestination (CopyIntoMemory (MemLocation destmem destshape destixfun)) _])
-  (Concat _ x ys _) = do
-    et <- elemType <$> lookupType x
+  (Concat _ i x ys _) = do
+    xtype <- lookupType x
     offs_glb <- newVName "tmp_offs"
     withPrimVar offs_glb int32 $ do
       emit $ Imp.DeclareScalar offs_glb int32
       emit $ Imp.SetScalar offs_glb 0
-      let destloc = MemLocation destmem destshape
-                    (IxFun.offsetIndex destixfun $ SE.Id offs_glb int32)
+      let perm = [i] ++ [0..i-1] ++ [i+1..length destshape-1]
+          invperm = rearrangeInverse perm
+          destloc = MemLocation destmem destshape
+                    (IxFun.permute (IxFun.offsetIndex (IxFun.permute destixfun perm) $
+                                     SE.Id offs_glb int32)
+                     invperm)
 
       forM_ (x:ys) $ \y -> do
           yentry <- lookupArray y
           let srcloc = entryArrayLocation yentry
-              rows = case entryArrayShape yentry of
+              rows = case drop i $ entryArrayShape yentry of
                       []  -> error $ "defCompilePrimOp Concat: empty array shape for " ++ pretty y
                       r:_ -> innerExp $ Imp.dimSizeToExp r
-          copy et destloc srcloc (arrayOuterSize yentry)
+          copy (elemType xtype) destloc srcloc $ arrayOuterSize yentry
           emit $ Imp.SetScalar offs_glb $ Imp.ScalarVar offs_glb + rows
 
 defCompilePrimOp (Destination [dest]) (ArrayLit es _) =
@@ -558,6 +562,9 @@ defCompilePrimOp (Destination [dest]) (ArrayLit es _) =
   copyDWIMDest dest [constIndex i] e []
 
 defCompilePrimOp _ Rearrange{} =
+  return ()
+
+defCompilePrimOp _ Rotate{} =
   return ()
 
 defCompilePrimOp _ Reshape{} =
@@ -940,8 +947,11 @@ subExpNotArray se = subExpType se >>= \case
   _        -> return True
 
 arrayOuterSize :: ArrayEntry -> Count Elements
-arrayOuterSize =
-  product . map Imp.dimSizeToExp . take 1 . entryArrayShape
+arrayOuterSize = arrayDimSize 0
+
+arrayDimSize :: Int -> ArrayEntry -> Count Elements
+arrayDimSize i =
+  product . map Imp.dimSizeToExp . take 1 . drop i . entryArrayShape
 
 -- More complicated read/write operations that use index functions.
 
@@ -953,7 +963,11 @@ copy bt dest src n = do
 -- | Use an 'Imp.Copy' if possible, otherwise 'copyElementWise'.
 defaultCopy :: CopyCompiler op
 defaultCopy bt dest src n
-  | Just destoffset <-
+  | ixFunMatchesInnerShape
+      (Shape $ map dimSizeToSubExp destshape) destIxFun,
+    ixFunMatchesInnerShape
+      (Shape $ map dimSizeToSubExp srcshape) srcIxFun,
+    Just destoffset <-
       scalExpToImpExp =<<
       IxFun.linearWithOffset destIxFun bt_size,
     Just srcoffset  <-
@@ -969,17 +983,17 @@ defaultCopy bt dest src n
       copyElementWise bt dest src n
   where bt_size = primByteSize bt
         row_size = product $ map Imp.dimSizeToExp $ drop 1 srcshape
-        MemLocation destmem _ destIxFun = dest
+        MemLocation destmem destshape destIxFun = dest
         MemLocation srcmem srcshape srcIxFun = src
 
 copyElementWise :: CopyCompiler op
-copyElementWise bt (MemLocation destmem destshape destIxFun) (MemLocation srcmem _ srcIxFun) n = do
+copyElementWise bt (MemLocation destmem _ destIxFun) (MemLocation srcmem srcshape srcIxFun) n = do
     is <- replicateM (IxFun.rank destIxFun) (newVName "i")
     declaringLoopVars is $ do
       let ivars = map varIndex is
           destidx = simplifyScalExp $ IxFun.index destIxFun ivars bt_size
           srcidx = simplifyScalExp $ IxFun.index srcIxFun ivars bt_size
-          bounds = map innerExp $ n : drop 1 (map Imp.dimSizeToExp destshape)
+          bounds = map innerExp $ n : drop 1 (map Imp.dimSizeToExp srcshape)
       srcspace <- entryMemSpace <$> lookupMemory srcmem
       destspace <- entryMemSpace <$> lookupMemory destmem
       emit $ foldl (.) id (zipWith Imp.For is bounds) $

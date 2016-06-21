@@ -9,5 +9,5 @@
 --   2.000000
 -- }
 
-fun (int,f64) main([(int,f64)] a, int i) =
+fun (int,f64) main([](int,f64) a, int i) =
   a[i]

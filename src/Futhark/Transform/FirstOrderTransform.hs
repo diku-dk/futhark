@@ -396,14 +396,14 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
                 id3 <- newIdent (anm++"_chgu") t2
                 id4 <- newIdent "dead" dt4
                 -- (_,a_cg) = split((chunk_glb*i-diff, chunk_glb), inarr)
-                let split1= PrimOp $ Split [] [Var $ identName diff1id, Var chunkglb] inarr
+                let split1= PrimOp $ Split [] 0 [Var $ identName diff1id, Var chunkglb] inarr
                 _ <- letBindNames' [identName id1, identName id2] split1
                 -- a_cg* := copy(a_cg)
                 letBindNames'_ [identName id3] =<<
                   eCopy (pure (PrimOp $ SubExp $ Var $ identName id2))
                 -- (_,a_cl) = split((diff,cg-diff), a_cg*)
-                let split2= PrimOp $ Split [] [Var $ identName diffid,
-                                               Var $ paramName chunkloc] $
+                let split2= PrimOp $ Split [] 0 [Var $ identName diffid,
+                                                 Var $ paramName chunkloc] $
                                      identName id3
                 letBindNames' [identName id4, paramName param] split2
           mkBodyM (bodyBindings lambody) (bodyResult lambody)
@@ -434,7 +434,7 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
       (_, Just (_,indvar,_)) ->
         -- array with known upper bound case!
         return $ mkLet' [] [arr] $
-        PrimOp $ Split [] [Var $ identName indvar] $ identName arrl
+        PrimOp $ Split [] 0 [Var $ identName indvar] $ identName arrl
       _ -> fail "Stream UNREACHABLE in outarrrshpbnds computation!"
   let allbnds = loopbnd : outarrrshpbnds
   lUBexp <- eBinOp (SDiv Int32)
@@ -612,38 +612,52 @@ transformSOAC respat (Stream cs outersz form lam arrexps) = do
             myLetBind loopres glboutBdId
             return (malloc', mind', glboutBdId)
 
-transformSOAC pat (Write cs arrayIOTypes indexes valuess arrayIOs) = do
+transformSOAC pat (Write cs len lam ivs as) = do
   iter <- newVName "write_iter"
-  arrayOuts <- mapM (newIdent "write_out") arrayIOTypes
-  nMods <- arraySize 0 <$> lookupType indexes
-  w <- arraysSize 0 <$> mapM lookupType arrayIOs -- any arrayIO will do
+
+  ts <- mapM (lookupType . snd) as
+  asOuts <- mapM (newIdent "write_out") ts
+
+--  ivs' <- bindLambda lam (map (PrimOp . SubExp . Var) ivs)
+--  ivs'' <- mapM subExpToVName ivs'
+  let ivsLen = length (lambdaReturnType lam) `div` 2
 
   -- Write is in-place, so we use the input array as the output array.
-  let merge = loopMerge arrayOuts (map Var arrayIOs)
+  let merge = loopMerge asOuts $ map (Var . snd) as
   loopBody <- runBodyBinder $
     localScope (HM.insert iter IndexInfo $
                 scopeOfFParams $ map fst merge) $ do
-    indexCur <- letSubExp "write_index" $ PrimOp $ Index cs indexes [Var iter]
-    less_than_zero <- letSubExp "less_than_zero" $
-      PrimOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
-    greater_than_size <- letSubExp "greater_than_size" $
-      PrimOp $ CmpOp (CmpSlt Int32) w indexCur
-    outside_bounds <- letSubExp "outside_bounds" $
-      PrimOp $ BinOp LogOr less_than_zero greater_than_size
-    in_bounds_branch <- runBodyBinder $ do
-      ress <- forM (zip valuess arrayOuts) $ \(values, arrayOut) -> do
-        valueCur <- letExp "write_value" $ PrimOp $ Index cs values [Var iter]
-        letInPlace "write_out_body" cs (identName arrayOut) [indexCur] $
-          PrimOp $ SubExp $ Var valueCur
-      return $ resultBody (map Var ress)
-    outside_bounds_branch <- runBodyBinder $
-      return $ resultBody (map (Var . identName) arrayOuts)
-    arrayOuts' <- letTupExp' "write_out"
-      $ If outside_bounds outside_bounds_branch in_bounds_branch
-      $ staticShapes arrayIOTypes
-    return $ resultBody arrayOuts'
-  letBind_ pat $ DoLoop [] merge (ForLoop iter nMods) loopBody
+    ivs' <- forM ivs
+      $ \iv -> letSubExp "write_iv" $ PrimOp $ Index cs iv [Var iter]
+    ivs'' <- bindLambda lam (map (PrimOp . SubExp) ivs')
 
+    let indexes = take ivsLen ivs''
+        values = drop ivsLen ivs''
+
+    ress <- forM (zip4 indexes values asOuts ts) $ \(indexCur, valueCur, arrayOut, t) -> do
+      let lenA = arraySize 0 t
+      less_than_zero <- letSubExp "less_than_zero" $
+        PrimOp $ CmpOp (CmpSlt Int32) indexCur (constant (0::Int32))
+      greater_than_size <- letSubExp "greater_than_size" $
+        PrimOp $ CmpOp (CmpSlt Int32) lenA indexCur
+      outside_bounds <- letSubExp "outside_bounds" $
+        PrimOp $ BinOp LogOr less_than_zero greater_than_size
+
+      outside_bounds_branch <- runBodyBinder $ do
+        res <- letExp "write_out_outside_bounds"
+          $ PrimOp $ SubExp $ Var $ identName arrayOut
+        return $ resultBody [Var res]
+
+      in_bounds_branch <- runBodyBinder $ do
+        res <- letInPlace "write_out_inside_bounds" cs (identName arrayOut) [indexCur] $
+          PrimOp $ SubExp valueCur
+        return $ resultBody [Var res]
+
+      letExp "write_out"
+        $ If outside_bounds outside_bounds_branch in_bounds_branch
+        $ staticShapes [t]
+    return $ resultBody (map Var ress)
+  letBind_ pat $ DoLoop [] merge (ForLoop iter len) loopBody
 
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,

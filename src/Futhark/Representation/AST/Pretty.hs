@@ -77,22 +77,22 @@ instance Pretty Space where
 
 instance Pretty u => Pretty (TypeBase Shape u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (Shape ds) u) = ppr u <> foldr f (ppr et) ds
-    where f e s = brackets $ s <> comma <> ppr e
+  ppr (Array et (Shape ds) u) =
+    ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase ExtShape u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (ExtShape ds) u) = ppr u <> foldr f (ppr et) ds
-    where f dim s = brackets $ s <> comma <> ppr dim
+  ppr (Array et (ExtShape ds) u) =
+    ppr u <> mconcat (map (brackets . ppr) ds) <> ppr et
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
 instance Pretty u => Pretty (TypeBase Rank u) where
   ppr (Prim et) = ppr et
-  ppr (Array et (Rank n) u) = ppr u <> foldl f (ppr et) [1..n]
-    where f s _ = brackets s
+  ppr (Array et (Rank n) u) =
+    ppr u <> mconcat (replicate n $ brackets mempty) <> ppr et
   ppr (Mem s DefaultSpace) = text "mem" <> parens (ppr s)
   ppr (Mem s (Space sp)) = text "mem" <> parens (ppr s) <> text "@" <> text sp
 
@@ -198,10 +198,12 @@ instance PrettyLore lore => Pretty (PrimOp lore) where
     ppCertificates cs <> text "reshape" <> apply [apply (map ppr shape), ppr e]
   ppr (Rearrange cs perm e) =
     ppCertificates cs <> text "rearrange" <> apply [apply (map ppr perm), ppr e]
-  ppr (Split cs sizeexps a) =
-    ppCertificates cs <> text "split" <> apply [apply (map ppr sizeexps), ppr a]
-  ppr (Concat cs x ys _) =
-    ppCertificates cs <> text "concat" <> apply (ppr x : map ppr ys)
+  ppr (Rotate cs es e) =
+    ppCertificates cs <> text "rotate" <> apply [apply (map ppr es), ppr e]
+  ppr (Split cs i sizeexps a) =
+    ppCertificates cs <> text "split" <> text "@" <> ppr i <> apply [apply (map ppr sizeexps), ppr a]
+  ppr (Concat cs i x ys _) =
+    ppCertificates cs <> text "concat" <> text "@" <> ppr i <> apply (ppr x : map ppr ys)
   ppr (Copy e) = text "copy" <> parens (ppr e)
   ppr (Assert e _) = text "assert" <> parens (ppr e)
   ppr (Partition cs n flags arrs) =

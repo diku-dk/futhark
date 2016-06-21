@@ -18,7 +18,7 @@ here](http://futhark.readthedocs.io).
 Statistics
 ==========
 
-[![Issue Stats](http://issuestats.com/github/HIPERFIT/futhark/badge/pr)](http://issuestats.com/github/HIPERFIT/futhark) [![Issue Stats](http://issuestats.com/github/HIPERFIT/futhark/badge/issue)](http://issuestats.com/github/HIPERFIT/futhark) [![Build Status](https://travis-ci.org/HIPERFIT/futhark.svg?branch=master)](https://travis-ci.org/HIPERFIT/futhark)[![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
+[![Issue Stats](http://issuestats.com/github/HIPERFIT/futhark/badge/pr)](http://issuestats.com/github/HIPERFIT/futhark) [![Issue Stats](http://issuestats.com/github/HIPERFIT/futhark/badge/issue)](http://issuestats.com/github/HIPERFIT/futhark) [![Build Status](https://travis-ci.org/HIPERFIT/futhark.svg?branch=master)](https://travis-ci.org/HIPERFIT/futhark) [![Project Stats](https://www.openhub.net/p/futharkcompiler/widgets/project_thin_badge.gif)](https://www.openhub.net/p/futharkcompiler)
 
 Installation
 ============

@@ -8,5 +8,5 @@
 -- output {
 --   [4,6,5]
 -- }
-fun [int] main([[[int]]] a, int i, int j) =
+fun []int main([][][]int a, int i, int j) =
   a[i,j]

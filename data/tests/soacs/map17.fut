@@ -10,23 +10,23 @@
 -- }
 -- output { [[[0.000000]], [[0.674490]]] }
 
-fun [f64,num_dates] doInPlaceUpdate([[int, num_dates],3] bb_inds,
-                                     [[f64,num_dates],3] bb_data,
-                                     [f64,num_dates]     gauss) =
+fun [num_dates]f64 doInPlaceUpdate([3][num_dates]int bb_inds,
+                                     [3][num_dates]f64 bb_data,
+                                     [num_dates]f64     gauss) =
     let bbrow = replicate(num_dates, 0.0)   in
     let bbrow[ 0 ] = gauss[0]               in
     bbrow
 
-fun [[f64]] mapInPlaceUpdate([[int, num_dates],3] bb_inds,
-                              [[f64,num_dates],3] bb_data,
-                              [[f64,num_dates],num_und]  gauss2dT) =
+fun [][]f64 mapInPlaceUpdate([3][num_dates]int bb_inds,
+                              [3][num_dates]f64 bb_data,
+                              [num_und][num_dates]f64  gauss2dT) =
   map(doInPlaceUpdate(bb_inds, bb_data), gauss2dT)
 
 ----------------------------------------
 -- MAIN
 ----------------------------------------
 
-fun [[[f64]]] main([[int, num_dates],3]         bb_inds,
-                    [[f64,num_dates],3]         bb_data,
-                    [[[f64,num_dates],num_und]] gauss_mat) =
+fun [][][]f64 main([3][num_dates]int         bb_inds,
+                    [3][num_dates]f64         bb_data,
+                    [][num_und][num_dates]f64 gauss_mat) =
   map ( mapInPlaceUpdate( bb_inds, bb_data ), gauss_mat )

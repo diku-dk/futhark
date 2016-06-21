@@ -66,6 +66,8 @@ module Futhark.Representation.ExplicitMemory
        , returnsToType
        , lookupMemBound
        , lookupArraySummary
+       , fullyDirect
+       , ixFunMatchesInnerShape
          -- * Syntax types
        , Prog
        , Body
@@ -909,15 +911,27 @@ expReturns (AST.PrimOp (Rearrange _ perm v)) = do
   return [ReturnsArray et (ExtShape $ map Free dims') NoUniqueness $
           Just $ ReturnsInBlock mem ixfun']
 
-expReturns (AST.PrimOp (Split _ sizeexps v)) = do
+expReturns (AST.PrimOp (Rotate _ offsets v)) = do
+  (et, Shape dims, mem, ixfun) <- arrayVarReturns v
+  let offsets' = map (`SE.subExpToScalExp` int32) offsets
+      ixfun' = IxFun.rotate ixfun offsets'
+  return [ReturnsArray et (ExtShape $ map Free dims) NoUniqueness $
+          Just $ ReturnsInBlock mem ixfun']
+
+expReturns (AST.PrimOp (Split _ i sizeexps v)) = do
   (et, shape, mem, ixfun) <- arrayVarReturns v
   let newShapes = map (shape `setOuterDim`) sizeexps
-      offsets = scanl (\acc n -> SE.SPlus acc (SE.subExpToScalExp n int32))
-                0 sizeexps
+      offsets =  0 : scanl1 (+) (map (`SE.subExpToScalExp` int32) sizeexps)
+      r = shapeRank shape
+      perm = [i] ++ [0..i-1] ++ [i+1..r-1]
+      perm_inv = rearrangeInverse perm
   return $ zipWith (\new_shape offset
                     -> ReturnsArray et (ExtShape $ map Free $ shapeDims new_shape)
                        NoUniqueness $
-                       Just $ ReturnsInBlock mem $ IxFun.offsetIndex ixfun offset)
+                       Just $ ReturnsInBlock mem $
+                       IxFun.permute
+                       (IxFun.offsetIndex (IxFun.permute ixfun perm) offset)
+                       perm_inv)
            newShapes offsets
 
 expReturns (AST.PrimOp (Index _ v is)) = do
@@ -971,8 +985,8 @@ expReturns (Op (Alloc size space)) =
   return [ReturnsMemory size space]
 
 -- The result of Write is located exactly where its input is.
-expReturns (Op (Inner (WriteKernel _ _ _ _ srcs))) =
-  mapM varReturns srcs
+expReturns (Op (Inner (WriteKernel _ _ _ _ as))) =
+  mapM (varReturns . snd) as
 
 expReturns (Op (Inner k)) =
   extReturns <$> opType k
@@ -1070,3 +1084,14 @@ applyFunReturns rets params args
           where mem' = case HM.lookup mem parammap of
                   Just (Var v, _) -> v
                   _               -> mem
+
+-- | Is an array of the given shape stored fully flat row-major with
+-- the given index function?
+fullyDirect :: Shape -> IxFun.IxFun SE.ScalExp -> Bool
+fullyDirect shape ixfun =
+  IxFun.isDirect ixfun && ixFunMatchesInnerShape shape ixfun
+
+ixFunMatchesInnerShape :: Shape -> IxFun.IxFun SE.ScalExp -> Bool
+ixFunMatchesInnerShape shape ixfun =
+  drop 1 (IxFun.shape ixfun) == drop 1 shape'
+  where shape' = map SE.intSubExpToScalExp $ shapeDims shape

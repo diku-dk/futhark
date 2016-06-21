@@ -61,7 +61,9 @@ primOpAliases (Reshape _ _ e) =
   [vnameAliases e]
 primOpAliases (Rearrange _ _ e) =
   [vnameAliases e]
-primOpAliases (Split _ sizeexps e) =
+primOpAliases (Rotate _ _ e) =
+  [vnameAliases e]
+primOpAliases (Split _ _ sizeexps e) =
   replicate (length sizeexps) (vnameAliases e)
 primOpAliases Concat{} =
   [mempty]

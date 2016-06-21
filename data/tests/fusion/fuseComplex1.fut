@@ -24,7 +24,7 @@ fun (f64,f64,f64,f64,f64)
 
 --fun f64
 fun (f64,f64,f64,f64,f64)
-main([f64] x1, [[f64]] x2) =
+main([]f64 x1, [][]f64 x2) =
     let (y1, y2, y3) = unzip( map( f1, zip(x1, x2[1]  ) ) )  in
     let (z1, z2)     = unzip( map( f2, zip(y1, y2     ) ) )  in
     let (q1, q2)     = unzip( map( g , zip(y3,z1,y2,y3) ) )  in

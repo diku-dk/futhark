@@ -1,6 +1,6 @@
 -- ==
 -- error:
-fun int f(*[int] a, int i, int v) = let a[i]=v in a[i]
+fun int f(*[]int a, int i, int v) = let a[i]=v in a[i]
 
 fun int main() =
     let n = 10 in

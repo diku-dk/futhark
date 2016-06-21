@@ -41,7 +41,7 @@ fun (int,int,int,int,int,int) mapOp (int x) =
   let xmatch = if pred1(x) then 1 else 0 in
   (xmatch, xmatch, xmatch, 1, x, x)
 
-fun int main([int] xs) =
+fun int main([]int xs) =
   let (x,_,_,_,_,_) =
     reduce(redOp, (0,0,0,0,0,0), map(mapOp, xs)) in
   x

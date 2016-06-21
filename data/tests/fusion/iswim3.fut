@@ -7,37 +7,37 @@
 --
 -- structure { Map 1 Redomap 1 Scanomap 1 }
 
-fun [f64] take(int n, [f64] a) = let (first, rest) = split((n), a) in first
+fun []f64 take(int n, []f64 a) = let (first, rest) = split((n), a) in first
 
-fun [[f64,num_und],num_dates]
-correlateDeltas( [[f64,num_und],num_und  ] md_c,
-                 [[f64,num_und],num_dates] zds
+fun [num_dates][num_und]f64
+correlateDeltas( [num_und][num_und]f64 md_c,
+                 [num_dates][num_und]f64 zds
 ) =
-    map( fn [f64,num_und] ([f64,num_und] zi) =>
+    map( fn [num_und]f64 ([num_und]f64 zi) =>
             map( fn f64 (int j) =>
                     let x = zipWith( *, zi, md_c[j] )
                     in  reduce( +, 0.0, x )
                , iota(num_und) )
        , zds )
 
-fun [[f64,num_und],num_dates] blackScholes(
-                [[f64,num_und],num_und  ] md_c,
-                [[f64,num_und],num_dates] md_vols,
-                [[f64,num_und],num_dates] md_drifts,
-                 [f64,num_und]            md_starts,
-                [[f64,num_und],num_dates] bb_arr
+fun [num_dates][num_und]f64 blackScholes(
+                [num_und][num_und]f64 md_c,
+                [num_dates][num_und]f64 md_vols,
+                [num_dates][num_und]f64 md_drifts,
+                 [num_und]f64            md_starts,
+                [num_dates][num_und]f64 bb_arr
            ) =
     let noises = correlateDeltas(md_c, bb_arr) in
-        scan( fn [f64] ([f64] x, [f64] y) => zipWith(*, x, y)
+        scan( fn []f64 ([]f64 x, []f64 y) => zipWith(*, x, y)
             , md_starts, noises )
 
 
-fun [[f64]] main(
-             [[f64,num_und],num_und  ]  md_cs,
-             [[f64,num_und],num_dates]  md_vols,
-             [[f64,num_und],num_dates]  md_drifts,
-             [f64,num_und]              md_sts,
-             [[f64,num_und],num_dates]  bb_row
+fun [][]f64 main(
+             [num_und][num_und]f64  md_cs,
+             [num_dates][num_und]f64  md_vols,
+             [num_dates][num_und]f64  md_drifts,
+             [num_und]f64              md_sts,
+             [num_dates][num_und]f64  bb_row
 ) =
   let bd_row = blackScholes(md_cs, md_vols, md_drifts, md_sts, bb_row)
   in  bd_row

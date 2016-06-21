@@ -1,15 +1,15 @@
--- When distributing, the stream should be removed and the body
+-- when distributing, the stream should be removed and the body
 -- distributed.
 --
 -- ==
 -- structure distributed { MapKernel 2 Map 0 Reduce 0 }
 
-fun [int] main([[int,n]] A) =
-  map(fn int ([int] A_row) =>
-        streamSeq( fn int (int chunk, int acc, [int] C) =>
-                     let W = filter( >6, C ) in
-                     let W_sum = reduce(+, 0, W) in
-                     acc+W_sum
-                 , 0, A_row
+fun []int main([][n]int a) =
+  map(fn int ([]int a_row) =>
+        streamSeq( fn int (int chunk, int acc, []int c) =>
+                     let w = filter( >6, c ) in
+                     let w_sum = reduce(+, 0, w) in
+                     acc+w_sum
+                 , 0, a_row
                  ),
-        A)
+        a)

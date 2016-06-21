@@ -229,11 +229,11 @@ transformBindings (bnd:bnds) =
 
 sequentialisedUnbalancedBinding :: Binding -> DistribM (Maybe [Binding])
 sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Map _ _ lam _)))
-  | unbalancedLambda lam = do
+  | unbalancedLambda lam, lambdaContainsParallelism lam = do
       types <- asksScope scopeForSOACs
       Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
-sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ _ lam1 lam2 _ _)))
-  | unbalancedLambda lam1 || unbalancedLambda lam2 = do
+sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ _ _ lam2 _ _)))
+  | unbalancedLambda lam2, lambdaContainsParallelism lam2 = do
       types <- asksScope scopeForSOACs
       Just . snd <$> runBinderT (FOT.transformSOAC pat soac) types
 sequentialisedUnbalancedBinding _ =
@@ -358,9 +358,13 @@ transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   transformBindings =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
-transformBinding (Let pat () (Op (Write cs t i v a))) =
-  -- It really is this simple (right now).
-  return [Let pat () (Op (WriteKernel cs t i v a))]
+transformBinding (Let pat () (Op (Write cs len lam ivs as))) = runBinder_ $ do
+  lam' <- FOT.transformLambda lam
+  thread_index <- newVName "thread_index"
+  let lam'' = lam' { lambdaParams =
+                       Param thread_index (Prim int32) :
+                       lambdaParams lam' }
+  letBind_ pat $ Op $ WriteKernel cs len lam'' ivs as
 
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd
@@ -447,8 +451,7 @@ instance LocalScope Out.Kernels KernelM where
 instance MonadLogger KernelM where
   addLog msgs = tell mempty { accLog = msgs }
 
-runKernelM :: (HasScope Out.Kernels m,
-               MonadFreshNames m, MonadLogger m) =>
+runKernelM :: (MonadFreshNames m, MonadLogger m) =>
               KernelEnv -> KernelM a -> m (a, PostKernels)
 runKernelM env (KernelM m) = do
   (x, res) <- modifyNameSource $ getKernels . runRWS m env
@@ -527,10 +530,18 @@ unbalancedLambda lam =
         unbalancedBinding _ (Apply fname _ _) =
           not $ isBuiltInFunction fname
 
+bodyContainsParallelism :: Body -> Bool
+bodyContainsParallelism = any (isMap . bindingExp) . bodyBindings
+  where isMap Op{} = True
+        isMap _ = False
+
+lambdaContainsParallelism :: Lambda -> Bool
+lambdaContainsParallelism = bodyContainsParallelism . lambdaBody
+
 distributeInnerMap :: Pattern -> MapLoop -> KernelAcc
                    -> KernelM KernelAcc
 distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
-  | unbalancedLambda lam =
+  | unbalancedLambda lam, lambdaContainsParallelism lam =
       addBindingToKernel (Let pat () $ mapLoopExp maploop) acc
   | otherwise =
       distribute =<<
@@ -598,7 +609,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Map cs w lam arrs))) acc =
     Just acc' -> distribute =<< distributeInnerMap pat (MapLoop cs w lam arrs) acc'
 
 maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
-  | any (isMap . bindingExp) $ bodyBindings body =
+  | bodyContainsParallelism body =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | length res == patternSize pat -> do
@@ -615,8 +626,6 @@ maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
       return acc'
     _ ->
       addBindingToKernel bnd acc
-  where isMap (Op Map{}) = True
-        isMap _          = False
 
 maybeDistributeBinding (Let pat _ (Op (Reduce cs w comm lam input))) acc
   | Just m <- irwim pat cs w comm lam input = do

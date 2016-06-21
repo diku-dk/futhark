@@ -41,11 +41,15 @@ compileProg module_name prog = do
       let imports = [Import "sys" Nothing,
                      Import "numpy" $ Just "np",
                      Import "ctypes" $ Just "ct",
-                     Import "pyopencl" $ Just "cl",
+                     Escape openClPrelude,
                      Import "pyopencl.array" Nothing,
                      Import "time" Nothing]
 
-      let constructor = Py.Constructor ["self"] [Escape $ openClInit assign]
+      let constructor = Py.Constructor [ "self"
+                                       , "interactive=False"
+                                       , "platform_pref=None"
+                                       , "device_pref=None"]
+            [Escape $ openClInit assign]
 
       Right <$> Py.compileProg module_name constructor imports defines operations ()
         [Exp $ Call "self.queue.finish" []] [] prog'

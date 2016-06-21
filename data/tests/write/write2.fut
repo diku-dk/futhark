@@ -16,8 +16,8 @@
 --    [[0.2, 0.3, 0.4], [0.5, 0.6, 0.7]]]
 -- }
 
-fun [[[f64, m], t], n]
-  main([i32, k] indexes,
-       [[[f64, m], t], k] values,
-       *[[[f64, m], t], n] array) =
+fun [n][t][m]f64
+  main([k]i32 indexes,
+       [k][t][m]f64 values,
+       *[n][t][m]f64 array) =
   write(indexes, values, array)
