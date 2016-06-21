@@ -654,6 +654,8 @@ soacToStream soac = do
           strmlam= Lambda strmpar strmbdy (accrtps++loutps')
       lam0 <- renameLambda lamin
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
+    -- FIXME? Scanomaps do not become seqstreams.
+    Scanomap{} -> return (soac,[])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])
     -- If the soac is a write, don't try to do anything.
