@@ -683,15 +683,15 @@ allocInReduceLambda lam num_accs workgroup_size = do
   arr_params' <-
     forM (zip arr_params $ map paramAttr acc_params') $ \(param, attr) ->
     case attr of
-      ArrayMem bt shape u mem _ -> return param {
-        paramAttr = ArrayMem bt shape u mem $
+      ArrayMem _ shape u mem _ -> return param {
+        paramAttr = ArrayMem (elemType $ paramType param) shape u mem $
                     IxFun.applyInd
                     (IxFun.iota $ map SE.intSubExpToScalExp $
                      workgroup_size : arrayDims (paramType param))
                     [this_index + other_index]
         }
       _ ->
-        return param { paramAttr = attr }
+        return param { paramAttr = Scalar $ elemType $ paramType param }
 
   allocInLambda (Param i (Scalar int32) :
                  other_index_param { paramAttr = Scalar int32 } :
