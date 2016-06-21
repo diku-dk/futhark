@@ -191,9 +191,9 @@ transformSOAC pat (Scanomap cs width _ fun accexps arrexps) = do
   letBind_ pat' $ DoLoop [] merge (ForLoop i width) loopbody
   where accts = map paramType $ take (length accexps) $  lambdaParams fun
         scan_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
-                     | t <- (take (length accexps) (lambdaReturnType fun))]
+                     | t <- take (length accexps) (lambdaReturnType fun)]
         map_res_ts = [ arrayOf t (Shape [width]) NoUniqueness
-                     | t <- (drop (length accexps) (lambdaReturnType fun))]
+                     | t <- drop (length accexps) (lambdaReturnType fun)]
 
 
 transformSOAC pat (Redomap cs width _ _ innerfun accexps arrexps) = do
