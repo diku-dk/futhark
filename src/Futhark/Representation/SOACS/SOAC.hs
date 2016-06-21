@@ -376,42 +376,10 @@ typeCheckSOAC (Map cs size fun arrexps) = do
   arrargs <- TC.checkSOACArrayArgs size arrexps
   TC.checkLambda fun arrargs
 
-typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) = do
-  mapM_ (TC.requireI [Prim Cert]) ass
-  TC.require [Prim int32] size
-  arrargs <- TC.checkSOACArrayArgs size arrexps
-  accargs <- mapM TC.checkArg accexps
-  TC.checkLambda innerfun $ map TC.noArgAliases accargs ++ arrargs
-  let innerRetType = lambdaReturnType innerfun
-      innerAccType = take (length accexps) innerRetType
-      asArg t = (t, mempty)
-  TC.checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
-  let acct = map TC.argType accargs
-      outerRetType = lambdaReturnType outerfun
-  unless (acct == innerAccType ) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap inner reduction returns type " ++ prettyTuple innerRetType ++ "."
-  unless (acct == outerRetType) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but redomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
-typeCheckSOAC (Scanomap ass size outerfun innerfun accexps arrexps) = do
-  mapM_ (TC.requireI [Prim Cert]) ass
-  TC.require [Prim int32] size
-  arrargs <- TC.checkSOACArrayArgs size arrexps
-  accargs <- mapM TC.checkArg accexps
-  TC.checkLambda innerfun $ accargs ++ arrargs
-  let innerReturnType = lambdaReturnType innerfun
-      innerAccType = take (length accexps) innerReturnType
-      asArg t = (t, mempty)
-  TC.checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
-  let acct = map TC.argType accargs
-      outerRetType = lambdaReturnType outerfun
-  unless (acct == innerAccType ) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but scanomap inner reduction returns type " ++ prettyTuple innerReturnType ++ "."
-  unless (acct == outerRetType) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
-          ", but scanomap outer reduction returns type " ++ prettyTuple outerRetType ++ "."
+typeCheckSOAC (Redomap ass size _ outerfun innerfun accexps arrexps) =
+  typeCheckScanomapRedomap ass size outerfun innerfun accexps arrexps
+typeCheckSOAC (Scanomap ass size outerfun innerfun accexps arrexps) =
+  typeCheckScanomapRedomap ass size outerfun innerfun accexps arrexps
 typeCheckSOAC (Stream ass size form lam arrexps) = do
   let accexps = getStreamAccums form
   mapM_ (TC.requireI [Prim Cert]) ass
@@ -571,6 +539,33 @@ typeCheckScanReduce cs size fun inputs = do
     TC.bad $ TC.TypeError $
     "Array element value is of type " ++ prettyTuple intupletype ++
     ", but function returns type " ++ prettyTuple funret ++ "."
+
+typeCheckScanomapRedomap :: TC.Checkable lore =>
+                            Certificates
+                         -> SubExp
+                         -> Lambda (Aliases lore)
+                         -> Lambda (Aliases lore)
+                         -> [SubExp]
+                         -> [VName]
+                         -> TC.TypeM lore ()
+typeCheckScanomapRedomap ass size outerfun innerfun accexps arrexps = do
+  mapM_ (TC.requireI [Prim Cert]) ass
+  TC.require [Prim int32] size
+  arrargs <- TC.checkSOACArrayArgs size arrexps
+  accargs <- mapM TC.checkArg accexps
+  TC.checkLambda innerfun $ map TC.noArgAliases accargs ++ arrargs
+  let innerRetType = lambdaReturnType innerfun
+      innerAccType = take (length accexps) innerRetType
+      asArg t = (t, mempty)
+  TC.checkLambda outerfun $ map asArg $ innerAccType ++ innerAccType
+  let acct = map TC.argType accargs
+      outerRetType = lambdaReturnType outerfun
+  unless (acct == innerAccType ) $
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but reduction function returns type " ++ prettyTuple innerRetType ++ "."
+  unless (acct == outerRetType) $
+    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple acct ++
+          ", but fold function returns type " ++ prettyTuple outerRetType ++ "."
 
 -- | Get Stream's accumulators as a sub-expression list
 getStreamAccums :: StreamForm lore -> [SubExp]
