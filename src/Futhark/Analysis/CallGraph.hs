@@ -77,6 +77,8 @@ buildCGexp callees (Op op) =
                buildCGbody callees $ lambdaBody lam
              Redomap _ _ _ lam0 lam1 _ _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
+             Scanomap _ _ lam0 lam1 _ _ ->
+               buildCGbody (buildCGbody callees $ lambdaBody lam0) (lambdaBody lam1)
              Stream _ _ (RedLike _ _ lam0 _) lam _ ->
                buildCGbody (buildCGbody callees $ lambdaBody lam0) (extLambdaBody lam)
              Stream _ _ _ lam _ ->

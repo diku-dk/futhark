@@ -3,9 +3,8 @@
 --
 -- ==
 -- structure distributed {
---   MapKernel 3
---   Map 0
---   DoLoop 3
+--   MapKernel 2
+--   DoLoop 2
 --   Reduce 0
 --   Redomap 0
 -- }

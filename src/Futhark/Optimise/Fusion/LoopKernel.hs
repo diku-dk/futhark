@@ -186,6 +186,7 @@ removeUnusedParamsFromKer ker =
   case soac of
     SOAC.Map {}     -> ker { fsoac = soac' }
     SOAC.Redomap {} -> ker { fsoac = soac' }
+    SOAC.Scanomap {} -> ker { fsoac = soac' }
     _               -> ker
   where soac = fsoac ker
         l = SOAC.lambda soac
@@ -294,6 +295,30 @@ fuseSOACwithKer unfus_set outVars soac1 ker = do
       success (outNames ker ++ returned_outvars) $
               SOAC.Redomap (cs1++cs2) w comm2 lam21 res_lam' nes new_inp
 
+    ----------------------------
+    -- Scanomap Fusions:      --
+    ----------------------------
+
+    (SOAC.Scanomap _ _ lam2r _ nes2 _, SOAC.Scanomap _ _  lam1r _ nes1 _)
+      | horizFuse -> do
+          let (res_lam', new_inp) = fuseRedomap unfus_set outVars nes1 lam1 inp1_arr outPairs lam2 inp2_arr
+              lamr        = mergeReduceOps lam1r lam2r
+              unfus_arrs  = returned_outvars \\ unfus_accs
+              unfus_accs  = take (length nes1) outVars
+          success (unfus_accs ++ outNames ker ++ unfus_arrs) $
+              SOAC.Scanomap (cs1++cs2) w  lamr res_lam' (nes1++nes2) new_inp
+
+    -- Map -> Scanomap Fusion
+    (SOAC.Scanomap _ _ lam21 _ nes _, SOAC.Map {})
+      | mapFusionOK outVars ker || horizFuse -> do
+      -- Create new inner reduction function
+      let (res_lam, new_inp) = fuseMaps unfus_set lam1 inp1_arr outPairs lam2 inp2_arr
+          -- Get the lists from soac1 that still need to be returned
+          (_,extra_rtps) = unzip $ filter (\(nm,_)->nm `HS.member` unfus_set) $
+                           zip outVars $ map (stripArray 1) $ SOAC.typeOf soac1
+          res_lam' = res_lam { lambdaReturnType = lambdaReturnType res_lam ++ extra_rtps }
+      success (outNames ker ++ returned_outvars) $
+              SOAC.Scanomap (cs1++cs2) w lam21 res_lam' nes new_inp
 
     ------------------
     -- Write fusion --
@@ -482,7 +507,7 @@ optimizeKernel inp ker = do
 optimizeSOAC :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
              -> TryFusion (SOAC, SOAC.ArrayTransforms)
 optimizeSOAC inp soac os = do
-  res <- foldM comb (False, soac, os) $ reverse optimizations
+  res <- foldM comb (False, soac, os) optimizations
   case res of
     (False, _, _)      -> fail "No optimisation applied"
     (True, soac', os') -> return (soac', os')
@@ -497,7 +522,7 @@ type Optimization = Maybe [VName]
                     -> TryFusion (SOAC, SOAC.ArrayTransforms)
 
 optimizations :: [Optimization]
-optimizations = [iswim]
+optimizations = [iswim, scanToScanomap]
 
 iswim :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
       -> TryFusion (SOAC, SOAC.ArrayTransforms)
@@ -535,6 +560,15 @@ iswim _ (SOAC.Scan cs w scan_fun scan_input) ots
 
 iswim _ _ _ =
   fail "ISWIM does not apply."
+
+scanToScanomap :: Maybe [VName] -> SOAC -> SOAC.ArrayTransforms
+               -> TryFusion (SOAC, SOAC.ArrayTransforms)
+scanToScanomap _ (SOAC.Scan cs w scan_fun scan_input) ots = do
+       let (nes, array_inputs) =  unzip scan_input
+       return (SOAC.Scanomap cs w scan_fun scan_fun nes array_inputs, ots)
+scanToScanomap _ _ _ =
+  fail "Only turn scan into scanomaps"
+
 
 removeParamOuterDim :: LParam -> LParam
 removeParamOuterDim param =

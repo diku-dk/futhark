@@ -5,7 +5,7 @@
 --
 --==
 --
--- structure { Map 2 Redomap 1 Scan 1 }
+-- structure { Map 1 Redomap 1 Scanomap 1 }
 
 fun []f64 take(int n, []f64 a) = let (first, rest) = split((n), a) in first
 
