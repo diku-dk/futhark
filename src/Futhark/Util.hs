@@ -12,6 +12,7 @@ module Futhark.Util
         dropAt,
         mapEither,
         maybeNth,
+        splitAt3,
         focusNth,
         zEncodeString
        )
@@ -53,6 +54,13 @@ maybeNth :: Integral int => int -> [a] -> Maybe a
 maybeNth i l
   | i >= 0, v:_ <- genericDrop i l = Just v
   | otherwise                      = Nothing
+
+-- | Like 'splitAt', but produces three lists.
+splitAt3 :: Int -> Int -> [a] -> ([a], [a], [a])
+splitAt3 n m l =
+  let (xs, l') = splitAt n l
+      (ys, zs) = splitAt m l'
+  in (xs, ys, zs)
 
 -- | Return the list element at the given index, if the index is
 -- valid, along with the elements before and after.

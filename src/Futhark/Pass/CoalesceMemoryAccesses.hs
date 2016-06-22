@@ -88,17 +88,16 @@ transformBinding (Let (Pattern [] pat_elems) ()
             attr ->
               fail $ "Invalid attribute for let-binding of ChunkedMapKernel return: " ++ pretty attr
 
-transformBinding (Let (Pattern [] pat_elems) ()
-                  e@(Op (Inner (ReduceKernel _ _ size Noncommutative redfun _ _))))
-  | (red_pat_elems, map_pat_elems) <- splitAt (length $ lambdaReturnType redfun) pat_elems,
+transformBinding (Let pat () e)
+  | Just (scanred_pat_elems, map_pat_elems, size) <- scanOrReduce pat e,
     not $ null map_pat_elems = do
       (alloc_bnds, map_pat_elems', tr_bnds) <-
-        unzip3 <$> mapM transposePatElem map_pat_elems
+        unzip3 <$> mapM (transposePatElem size) map_pat_elems
       return $
         alloc_bnds ++
-        [Let (Pattern [] (red_pat_elems ++ map_pat_elems')) () e] ++
+        [Let (Pattern [] (scanred_pat_elems ++ map_pat_elems')) () e] ++
         tr_bnds
-  where transposePatElem pat_elem = do
+  where transposePatElem size pat_elem = do
           name <- newVName (baseString (patElemName pat_elem) ++ "_transposed")
           case patElemAttr pat_elem of
             ArrayMem bt (Shape old_dims) u mem _old_ixfun -> do
@@ -129,13 +128,27 @@ transformBinding (Let (Pattern [] pat_elems) ()
 
                       Let (Pattern [] [pat_elem]) () $ PrimOp $ Copy name)
             attr ->
-              fail $ "Invalid attribute for let-binding of ReduceKernel return: " ++ pretty attr
+              fail $ "Invalid attribute for let-binding of scan or reduce kernel return: " ++ pretty attr
+
 
 transformBinding (Let pat () e) = do
   e' <- mapExpM transform e
   return [Let pat () e']
   where transform = identityMapper { mapOnBody = transformBody
                                    }
+
+scanOrReduce :: Pattern -> Exp
+             -> Maybe ([PatElem], [PatElem], KernelSize)
+scanOrReduce (Pattern [] pat_elems) (Op (Inner (ScanKernel _ _ size _ lam _ _))) =
+  let (scan_pat_elems, map_pat_elems) =
+        splitAt (2 * length (lambdaReturnType lam)) pat_elems
+  in Just (scan_pat_elems, map_pat_elems, size)
+scanOrReduce (Pattern [] pat_elems) (Op (Inner (ReduceKernel _ _ size _ lam _ _))) =
+  let (red_pat_elems, map_pat_elems) =
+        splitAt (length (lambdaReturnType lam)) pat_elems
+  in Just (red_pat_elems, map_pat_elems, size)
+scanOrReduce _ _ =
+  Nothing
 
 lookupMem :: (Monad m, HasScope lore m) => VName -> m (SubExp, Space)
 lookupMem mem = do

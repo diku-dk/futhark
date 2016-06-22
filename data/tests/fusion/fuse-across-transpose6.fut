@@ -38,7 +38,7 @@
 --    [8744.595950505505, 28090.879539209436, 2563.082633667557],
 --    [9882.132352013321, 33465.152508625804, 2992.2059021836353]]
 -- }
--- structure { Map/Scan 1 Map 2 }
+-- structure { Map/Scanomap 1 Map 1 }
 
 fun []f64 take(int n, []f64 a) = let (first, rest) = split((n), a) in first
 

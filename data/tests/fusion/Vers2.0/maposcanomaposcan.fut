@@ -11,10 +11,11 @@
 --   )
 -- }
 -- structure {
---    Stream  1
---    Scan    2
---    Map     1
---    Redomap 1
+--    Stream   0
+--    Scan     1
+--    Scanomap 1
+--    Map      0
+--    Redomap  1
 -- }
 --
 fun (f64,[]f64,[]f64,[]f64,[]f64) main([]f64 arr) =

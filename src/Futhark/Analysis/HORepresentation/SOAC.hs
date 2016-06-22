@@ -352,6 +352,7 @@ data SOAC lore = Map Certificates SubExp (Lambda lore) [Input]
                | Reduce Certificates SubExp Commutativity (Lambda lore) [(SubExp,Input)]
                | Scan Certificates SubExp (Lambda lore) [(SubExp,Input)]
                | Redomap Certificates SubExp Commutativity (Lambda lore) (Lambda lore) [SubExp] [Input]
+               | Scanomap Certificates SubExp (Lambda lore) (Lambda lore) [SubExp] [Input]
                | Stream Certificates SubExp (StreamForm lore) (Lambda lore) [Input]
                | Write Certificates SubExp (Lambda lore) [Input] [(SubExp, VName)]
             deriving (Show)
@@ -362,6 +363,7 @@ inputs (Map     _ _ _       arrs) = arrs
 inputs (Reduce  _ _ _ _     args) = map snd args
 inputs (Scan    _ _ _       args) = map snd args
 inputs (Redomap _ _ _ _ _ _ arrs) = arrs
+inputs (Scanomap _ _ _ _ _  arrs) = arrs
 inputs (Stream  _ _ _ _     arrs) = arrs
 inputs (Write _cs _len _lam ivs _as) = ivs
 
@@ -375,6 +377,8 @@ setInputs arrs (Scan cs w lam args) =
   Scan cs w lam (zip (map fst args) arrs)
 setInputs arrs (Redomap cs w comm lam1 lam ne _) =
   Redomap cs w comm lam1 lam ne arrs
+setInputs arrs (Scanomap cs w lam1 lam ne _) =
+  Scanomap cs w lam1 lam ne arrs
 setInputs arrs (Stream cs w form lam _) =
   Stream cs w form lam arrs
 setInputs arrs (Write cs len lam _ivs as) =
@@ -385,7 +389,8 @@ lambda :: SOAC lore -> Lambda lore
 lambda (Map     _ _ lam _       ) = lam
 lambda (Reduce  _ _ _ lam _     ) = lam
 lambda (Scan    _ _ lam _       ) = lam
-lambda (Redomap _ _ _ _ lam2 _ _) = lam2
+lambda (Redomap  _ _ _ _ lam2 _ _) = lam2
+lambda (Scanomap _ _ _ lam2 _ _) = lam2
 lambda (Stream  _ _ _ lam      _) = lam
 lambda (Write _cs _len lam _ivs _as) = lam
 
@@ -399,6 +404,8 @@ setLambda lam (Scan cs w _ args) =
   Scan cs w lam args
 setLambda lam (Redomap cs w comm lam1 _ ne arrs) =
   Redomap cs w comm lam1 lam ne arrs
+setLambda lam (Scanomap cs w lam1 _ ne arrs) =
+  Scanomap cs w lam1 lam ne arrs
 setLambda lam (Stream cs w form _ arrs) =
   Stream cs w form lam arrs
 setLambda lam (Write cs len _lam ivs as) =
@@ -410,6 +417,7 @@ certificates (Map cs _ _ _) = cs
 certificates (Reduce cs _ _ _ _) = cs
 certificates (Scan cs _ _ _ ) = cs
 certificates (Redomap cs _ _ _ _ _ _) = cs
+certificates (Scanomap cs _ _ _ _ _)  = cs
 certificates (Stream cs _ _ _ _) = cs
 certificates (Write cs _len _lam _ivs _as) = cs
 
@@ -423,6 +431,10 @@ typeOf (Scan _ _ _ input) =
   map (inputType . snd) input
 typeOf (Redomap _ w _ outlam inlam nes _) =
   let accrtps = lambdaReturnType outlam
+      arrrtps = drop (length nes) $ mapType w inlam
+  in  accrtps ++ arrrtps
+typeOf (Scanomap _ w outlam inlam nes _) =
+  let accrtps = mapType w outlam
       arrrtps = drop (length nes) $ mapType w inlam
   in  accrtps ++ arrrtps
 typeOf (Stream _ w form lam _) =
@@ -442,6 +454,7 @@ width (Map _ w _ _) = w
 width (Reduce _ w _ _ _) = w
 width (Scan _ w _ _) = w
 width (Redomap _ w _ _ _ _ _) = w
+width (Scanomap _ w _ _ _ _) = w
 width (Stream _ w _ _ _) = w
 width (Write _cs len _lam _ivs _as) = len
 
@@ -459,6 +472,8 @@ toExp (Scan cs w l args) =
   where (es, as) = unzip args
 toExp (Redomap cs w comm l1 l2 es as) =
   Op <$> (Futhark.Redomap cs w comm l1 l2 es <$> inputsToSubExps as)
+toExp (Scanomap cs w l1 l2 es as) =
+  Op <$> (Futhark.Scanomap cs w l1 l2 es <$> inputsToSubExps as)
 toExp (Stream cs w form lam inps) = Op <$> do
   let extrtp = staticShapes $ lambdaReturnType lam
       extlam = ExtLambda (lambdaParams lam) (lambdaBody lam) extrtp
@@ -493,6 +508,8 @@ fromExp (Op (Futhark.Scan cs w l args)) = do
   Right . Scan cs w l . zip es <$> traverse varInput as
 fromExp (Op (Futhark.Redomap cs w comm l1 l2 es as)) =
   Right . Redomap cs w comm l1 l2 es <$> traverse varInput as
+fromExp (Op (Futhark.Scanomap cs w l1 l2 es as)) =
+  Right . Scanomap cs w l1 l2 es <$> traverse varInput as
 fromExp (Op (Futhark.Stream cs w form extlam as)) = do
   let mrtps = map hasStaticShape $ extLambdaReturnType extlam
       rtps  = catMaybes mrtps
@@ -637,6 +654,8 @@ soacToStream soac = do
           strmlam= Lambda strmpar strmbdy (accrtps++loutps')
       lam0 <- renameLambda lamin
       return (Stream cs w (RedLike InOrder comm lam0 nes) strmlam inps, [])
+    -- FIXME? Scanomaps do not become seqstreams.
+    Scanomap{} -> return (soac,[])
     -- If the soac is a stream then nothing to do, i.e., return it!
     Stream{} -> return (soac,[])
     -- If the soac is a write, don't try to do anything.

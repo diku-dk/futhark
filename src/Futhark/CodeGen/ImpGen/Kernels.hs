@@ -28,6 +28,7 @@ import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters,
                       partitionChunkedFoldParameters)
+import Futhark.Util (splitAt3)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot)
 
 type CallKernelGen = ImpGen.ImpM Imp.HostOp
@@ -128,7 +129,7 @@ kernelCompiler
 kernelCompiler
   (ImpGen.Destination dest)
   (ChunkedMapKernel _ _ kernel_size o lam _) = do
-    (local_id, group_id, _, _) <- kernelSizeNames
+    (local_id, group_id, _, _, _) <- kernelSizeNames
 
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
@@ -216,7 +217,7 @@ kernelCompiler
   (ImpGen.Destination dest)
   (ReduceKernel _ _ kernel_size comm reduce_lam fold_lam _) = do
 
-    (local_id, group_id, wave_size, skip_waves) <- kernelSizeNames
+    (local_id, group_id, wave_size, skip_waves, _) <- kernelSizeNames
 
     (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
       compileKernelSize kernel_size
@@ -407,8 +408,9 @@ kernelCompiler
 kernelCompiler
   (ImpGen.Destination dest)
   (ScanKernel _ _ kernel_size lam foldlam nes arrs) = do
-    let (arrs_dest, partials_dest) = splitAt (length nes) dest
-    (local_id, group_id, wave_size, global_id) <- kernelSizeNames
+    let (arrs_dest, partials_dest, map_dest) =
+          splitAt3 (length nes) (length nes) dest
+    (local_id, group_id, wave_size, skip_waves, global_id) <- kernelSizeNames
     thread_chunk_size <- newVName "thread_chunk_size"
     chunks_per_group <- newVName "chunks_per_group"
     chunk_index <- newVName "chunk_index"
@@ -461,13 +463,23 @@ kernelCompiler
             (Imp.sizeToExp num_elements `quotRoundingUp`
              Imp.sizeToExp num_threads)
 
-        fold_x_dest <- ImpGen.destinationFromParams fold_x_params
+        ImpGen.Destination fold_x_targets <- ImpGen.destinationFromParams fold_x_params
+
+        let indexMapTarget (ImpGen.ArrayDestination
+                              (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
+              let dest_loc' = ImpGen.sliceArray dest_loc [ImpGen.varIndex fold_lam_i]
+              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
+                Nothing : dest_dims
+            indexMapTarget _ =
+              throwError "indexMapTarget: invalid target for map-out."
+
+        mapout_targets <- mapM indexMapTarget map_dest
+        let fold_dest = ImpGen.Destination $ fold_x_targets <> mapout_targets
 
         y_dest <- ImpGen.destinationFromParams y_params
 
         set_fold_x_to_ne <- ImpGen.collect $
-          zipWithM_ ImpGen.compileSubExpTo
-          (ImpGen.valueDestinations fold_x_dest) nes
+          zipWithM_ ImpGen.compileSubExpTo fold_x_targets nes
 
         ImpGen.emit set_fold_x_to_ne
 
@@ -489,7 +501,7 @@ kernelCompiler
 
           apply_fold_fun <- ImpGen.collect $ do
             zipWithM_ readFoldElement fold_y_params arrs
-            ImpGen.compileBody fold_x_dest $ lambdaBody foldlam
+            ImpGen.compileBody fold_dest $ lambdaBody foldlam
 
           let is_in_bounds = Imp.CmpOp (CmpUlt Int32)
                              (Imp.ScalarVar fold_lam_i) (Imp.sizeToExp num_elements)
@@ -716,13 +728,14 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler _ e =
   return $ ImpGen.CompileExp e
 
-kernelSizeNames :: ImpGen.ImpM Imp.HostOp (VName, VName, VName, VName)
+kernelSizeNames :: ImpGen.ImpM Imp.HostOp (VName, VName, VName, VName, VName)
 kernelSizeNames = do
   local_id <- newVName "local_id"
   group_id <- newVName "group_id"
   wave_size <- newVName "wave_size"
   skip_waves <- newVName "skip_waves"
-  return (local_id, group_id, wave_size, skip_waves)
+  global_id <- newVName "global_id"
+  return (local_id, group_id, wave_size, skip_waves, global_id)
 
 compileKernelSize :: KernelSize
                   -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize,
