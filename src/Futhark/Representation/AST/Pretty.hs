@@ -8,6 +8,7 @@
 module Futhark.Representation.AST.Pretty
   ( prettyTuple
   , pretty
+  , PrettyAnnot (..)
   , PrettyLore (..)
   , ppCertificates
   , ppCertificates'
@@ -17,11 +18,26 @@ module Futhark.Representation.AST.Pretty
 
 import Data.Array (elems, listArray)
 import Data.Monoid
+import Data.Maybe (mapMaybe)
 
 import Futhark.Util.Pretty
 
 import Futhark.Representation.AST.Syntax
+import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.Util
+
+-- | Class for values that may have some prettyprinted annotation.
+class PrettyAnnot a where
+  ppAnnot :: a -> Maybe Doc
+
+instance PrettyAnnot (PatElemT (TypeBase shape u)) where
+  ppAnnot = const Nothing
+
+instance PrettyAnnot (ParamT (TypeBase shape u)) where
+  ppAnnot = const Nothing
+
+instance PrettyAnnot () where
+  ppAnnot = const Nothing
 
 -- | The class of lores whose annotations can be prettyprinted.
 class (Annotations lore,
@@ -29,15 +45,12 @@ class (Annotations lore,
        Pretty (ParamT (FParamAttr lore)),
        Pretty (ParamT (LParamAttr lore)),
        Pretty (PatElemT (LetAttr lore)),
+       PrettyAnnot (PatElem (LetAttr lore)),
+       PrettyAnnot (FParam lore),
+       PrettyAnnot (LParam lore),
        Pretty (Op lore)) => PrettyLore lore where
-  ppBindingLore :: Binding lore -> Maybe Doc
-  ppBindingLore = const Nothing
-  ppFunDefLore :: FunDef lore -> Maybe Doc
-  ppFunDefLore = const Nothing
-  ppLambdaLore :: Lambda lore -> Maybe Doc
-  ppLambdaLore = const Nothing
-  ppExpLore :: Exp lore -> Maybe Doc
-  ppExpLore = const Nothing
+  ppExpLore :: ExpAttr lore -> Exp lore -> Maybe Doc
+  ppExpLore = const $ const Nothing
 
 commastack :: [Doc] -> Doc
 commastack = align . stack . punctuate comma
@@ -111,10 +124,10 @@ instance PrettyLore lore => Pretty (Body lore) where
     braces (commasep $ map ppr res)
 
 bindingAnnotation :: PrettyLore lore => Binding lore -> Doc -> Doc
-bindingAnnotation bnd doc =
-  case ppBindingLore bnd of
-    Nothing    -> doc
-    Just annot -> annot </> doc
+bindingAnnotation bnd =
+  case mapMaybe ppAnnot $ patternElements $ bindingPattern bnd of
+    [] -> id
+    annots -> (stack annots </>)
 
 instance Pretty (PatElemT attr) => Pretty (PatternT attr) where
   ppr pat = ppPattern (patternContextElements pat) (patternValueElements pat)
@@ -149,10 +162,10 @@ instance Pretty (ParamT Type) where
     ppr name
 
 instance PrettyLore lore => Pretty (Binding lore) where
-  ppr bnd@(Let pat _ e) =
+  ppr bnd@(Let pat attr e) =
     bindingAnnotation bnd $ align $
     text "let" <+> align (ppr pat) <+>
-    case (linebreak, ppExpLore e) of
+    case (linebreak, ppExpLore attr e) of
       (True, Nothing) -> equals </>
                          indent 2 e'
       (_, Just annot) -> equals </>
@@ -167,7 +180,7 @@ instance PrettyLore lore => Pretty (Binding lore) where
                         PrimOp ArrayLit{} -> False
                         _ -> False
 
-instance PrettyLore lore => Pretty (PrimOp lore) where
+instance Pretty (PrimOp lore) where
   ppr (SubExp se) = ppr se
   ppr (ArrayLit [] rt) =
     text "empty" <> parens (ppr rt)
@@ -220,6 +233,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
                              apply (map (align . ppr . fst) args)
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
+    annotf $
     text "loop" <+> ppPattern ctxparams valparams <+>
     equals <+> ppTuple' (ctxinit++valinit) </>
     (case form of
@@ -231,13 +245,20 @@ instance PrettyLore lore => Pretty (Exp lore) where
     indent 2 (ppr loopbody)
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
+          annotf = case mapMaybe ppAnnot (ctxparams++valparams) of
+                     []     -> id
+                     annots -> (stack annots</>)
+
 
 instance PrettyLore lore => Pretty (Lambda lore) where
-  ppr lambda@(Lambda params body rettype) =
-    maybe id (</>) (ppLambdaLore lambda) $
+  ppr (Lambda params body rettype) =
+    annotf $
     text "fn" <+> ppTuple' rettype <+>
     parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
+    where annotf = case mapMaybe ppAnnot params of
+                     []     -> id
+                     annots -> (stack annots</>)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
   ppr (ExtLambda params body rettype) =
@@ -249,14 +270,17 @@ instance Pretty ExtRetType where
   ppr = ppTuple' . retTypeValues
 
 instance PrettyLore lore => Pretty (FunDef lore) where
-  ppr fundec@(FunDef entry name rettype args body) =
-    maybe id (</>) (ppFunDefLore fundec) $
+  ppr (FunDef entry name rettype fparams body) =
+    annotf $
     text fun <+> ppr rettype <+>
     text (nameToString name) <//>
-    apply (map ppr args) <+>
+    apply (map ppr fparams) <+>
     equals </> indent 2 (ppr body)
     where fun | entry = "entry"
               | otherwise = "fun"
+          annotf = case mapMaybe ppAnnot fparams of
+                     []     -> id
+                     annots -> (stack annots</>)
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions

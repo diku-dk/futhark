@@ -796,24 +796,13 @@ returnsMapping pat bounds returns =
                 HM.singleton (patElemName pat_mem_elem_size_elem) size
         inspect _ _ = mempty
 
+instance PP.Pretty u => PrettyAnnot (PatElemT (MemBound u)) where
+  ppAnnot = bindeeAnnot patElemName patElemAttr
+
+instance PP.Pretty u => PrettyAnnot (ParamT (MemBound u)) where
+  ppAnnot = bindeeAnnot paramName paramAttr
+
 instance PrettyLore ExplicitMemory where
-  ppBindingLore binding =
-    case mapMaybe patElemAnnot $ patternElements $ bindingPattern binding of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppFunDefLore fundec =
-    case mapMaybe fparamAnnot $ funDefParams fundec of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppLambdaLore lam =
-    case mapMaybe lparamAnnot $ lambdaParams lam of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore (DoLoop _ merge _ _) =
-    case mapMaybe (fparamAnnot . fst) merge of
-      []     -> Nothing
-      annots -> Just $ PP.folddoc (PP.</>) annots
-  ppExpLore _ = Nothing
 
 bindeeAnnot :: PP.Pretty u =>
                (a -> VName) -> (a -> MemBound u)
@@ -830,15 +819,6 @@ bindeeAnnot bindeeName bindeeLore bindee =
       Nothing
     Scalar _ ->
       Nothing
-
-fparamAnnot :: FParam -> Maybe PP.Doc
-fparamAnnot = bindeeAnnot paramName paramAttr
-
-lparamAnnot :: LParam -> Maybe PP.Doc
-lparamAnnot = bindeeAnnot paramName paramAttr
-
-patElemAnnot :: PatElem -> Maybe PP.Doc
-patElemAnnot = bindeeAnnot patElemName patElemAttr
 
 -- | Convet a 'Returns' to an 'Type' by throwing away memory
 -- information.
