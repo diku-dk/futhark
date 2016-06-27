@@ -410,6 +410,7 @@ declaredIn (If _ t f) = declaredIn t <> declaredIn f
 declaredIn (x :>>: y) = declaredIn x <> declaredIn y
 declaredIn (For i _ body) = HS.singleton i <> declaredIn body
 declaredIn (While _ body) = declaredIn body
+declaredIn (Comment _ body) = declaredIn body
 declaredIn _ = mempty
 
 instance FreeIn a => FreeIn (Code a) where
