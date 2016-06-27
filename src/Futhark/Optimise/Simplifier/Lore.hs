@@ -101,7 +101,11 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
     types <- asksScope removeScopeWisdom
     runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
 
+instance PrettyAnnot (PatElem attr) => PrettyAnnot (PatElem (VarWisdom, attr)) where
+  ppAnnot = ppAnnot . fmap snd
+
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
+  ppExpLore (_, attr) = ppExpLore attr . removeExpWisdom
 
 instance AliasesOf (VarWisdom, attr) where
   aliasesOf = unNames . varWisdomAliases . fst

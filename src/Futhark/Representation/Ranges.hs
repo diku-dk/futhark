@@ -101,27 +101,23 @@ type ExtLambda lore = AST.ExtLambda (Ranges lore)
 type FunDef lore = AST.FunDef (Ranges lore)
 type RetType lore = AST.RetType (Ranges lore)
 
-instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) where
-  ppBindingLore binding@(Let pat _ _) =
-    case catMaybes [patElemComments,
-                    ppBindingLore $ removeBindingRanges binding] of
-      [] -> Nothing
-      ls -> Just $ PP.folddoc (PP.</>) ls
-    where patElemComments =
-            case mapMaybe patElemComment $ patternElements pat of
-              []    -> Nothing
-              attrs -> Just $ PP.folddoc (PP.</>) attrs
-          patElemComment patelem =
+instance PrettyAnnot (PatElem attr) =>
+  PrettyAnnot (PatElem (Range, attr)) where
+
+  ppAnnot patelem =
+    range_annot <> inner_annot
+    where range_annot =
             case fst . patElemAttr $ patelem of
               (Nothing, Nothing) -> Nothing
               range ->
-                Just $ oneline $
+                Just $ PP.oneLine $
                 PP.text "-- " <> PP.ppr (patElemName patelem) <> PP.text " range: " <>
                 PP.ppr range
-          oneline s = PP.text $ PP.displayS (PP.renderCompact s) ""
+          inner_annot = ppAnnot $ fmap snd patelem
 
-  ppFunDefLore = ppFunDefLore . removeFunDefRanges
-  ppExpLore = ppExpLore . removeExpRanges
+
+instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) where
+  ppExpLore attr = ppExpLore attr . removeExpRanges
 
 removeRanges :: CanBeRanged (Op lore) => Rephraser (Ranges lore) lore
 removeRanges = Rephraser { rephraseExpLore = id

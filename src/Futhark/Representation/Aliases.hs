@@ -152,38 +152,35 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) whe
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
 
+instance PrettyAnnot (PatElem attr) =>
+  PrettyAnnot (PatElem (VarAliases, attr)) where
+
+  ppAnnot (PatElem name bindage (Names' als, attr)) =
+    (PP.oneLine <$> aliasComment name als) <>
+    ppAnnot (PatElem name bindage attr)
+
 instance (Attributes lore, CanBeAliased (Op lore)) => PrettyLore (Aliases lore) where
-  ppBindingLore binding@(Let pat (consumed,_) _) =
-    maybeComment $ catMaybes [patElemComments,
-                              expAttr,
-                              ppBindingLore $ removeBindingAliases binding]
-    where expAttr = case HS.toList $ unNames consumed of
+  ppExpLore (consumed, inner) e =
+    maybeComment $ catMaybes [expAttr,
+                              mergeAttr,
+                              ppExpLore inner $ removeExpAliases e]
+    where mergeAttr =
+            case e of
+              DoLoop _ merge _ body ->
+                let mergeParamAliases fparam als
+                      | primType (paramType fparam) =
+                          Nothing
+                      | otherwise =
+                          resultAliasComment (paramName fparam) als
+                in maybeComment $ catMaybes $
+                   zipWith mergeParamAliases (map fst merge) $
+                   bodyAliases body
+              _ -> Nothing
+
+          expAttr = case HS.toList $ unNames consumed of
             []  -> Nothing
             als -> Just $ PP.oneLine $
                    PP.text "-- Consumes " <> PP.commasep (map PP.ppr als)
-
-          patElemComments =
-            maybeComment $ mapMaybe patElemComment $ patternElements pat
-
-          patElemComment (PatElem name _ (Names' als, _)) =
-            PP.oneLine <$> aliasComment name als
-
-  ppFunDefLore = ppFunDefLore . removeFunDefAliases
-  ppLambdaLore = ppLambdaLore . removeLambdaAliases
-
-  ppExpLore e@(DoLoop _ merge _ body) =
-    maybeComment $ catMaybes [expAttr, mergeAttr]
-    where mergeAttr = let mergeParamAliases fparam als
-                            | primType (paramType fparam) =
-                              Nothing
-                            | otherwise =
-                              resultAliasComment (paramName fparam) als
-                      in maybeComment $ catMaybes $
-                         zipWith mergeParamAliases (map fst merge) $
-                         bodyAliases body
-          expAttr = ppExpLore $ removeExpAliases e
-  ppExpLore e =
-    ppExpLore $ removeExpAliases e
 
 maybeComment :: [PP.Doc] -> Maybe PP.Doc
 maybeComment [] = Nothing
