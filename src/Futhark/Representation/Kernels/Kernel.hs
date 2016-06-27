@@ -6,8 +6,12 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TupleSections #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
+       , KernelBody(..)
+       , KernelStm(..)
+       , KernelResult(..)
 
        , KernelInput(..)
        , kernelInputName
@@ -25,11 +29,12 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
-import Control.Arrow (first)
+import Control.Arrow (first, (&&&))
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
 import qualified Data.HashSet as HS
+import qualified Data.HashMap.Lazy as HM
 import Data.List
 import Data.Maybe
 
@@ -49,7 +54,7 @@ import Futhark.Representation.Ranges
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (Aliases, removeLambdaAliases, removeBodyAliases)
+  (Aliases, removeLambdaAliases, removeBodyAliases, Names'(..))
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
@@ -59,12 +64,6 @@ import qualified Futhark.Analysis.Range as Range
 data Kernel lore =
     MapKernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
     [(Type, [Int])] (Body lore)
-  | ReduceKernel Certificates SubExp
-    KernelSize
-    Commutativity
-    (LambdaT lore)
-    (LambdaT lore)
-    [VName]
   | ScanKernel Certificates SubExp
     KernelSize
     (LambdaT lore)
@@ -83,7 +82,42 @@ data Kernel lore =
     -- See SOAC.hs for what the different WriteKernel arguments mean.
   | NumGroups
   | GroupSize
+
+  | Kernel Certificates
+    (SubExp,SubExp,SubExp) -- #workgroups, group size, #threads
+    [Type]
+    VName -- thread ID (binding position)
+    (KernelBody lore)
+
     deriving (Eq, Show, Ord)
+
+data KernelBody lore = KernelBody { kernelBodyStms :: [KernelStm lore]
+                                  , kernelBodyResult :: [KernelResult]
+                                  }
+                deriving (Eq, Show, Ord)
+
+data KernelResult = AllThreadsReturn SubExp
+                  | ThisThreadReturns
+                    SubExp -- Which one.
+                    SubExp -- What.
+                  | ConcatReturns
+                    StreamOrd -- Permuted?
+                    SubExp -- The final size.
+                    SubExp -- Per-thread (max) chunk size.
+                    VName -- Chunk by this thread.
+                  deriving (Eq, Show, Ord)
+
+data KernelStm lore = SplitArray (VName, [PatElem (LetAttr lore)]) StreamOrd SubExp SubExp [VName]
+                    | Thread [PatElem (LetAttr lore)] (Body lore)
+                    | Combine (PatElem (LetAttr lore)) SubExp
+                    | GroupReduce [PatElem (LetAttr lore)] SubExp (Lambda lore) [(SubExp,VName)]
+
+deriving instance Annotations lore => Eq (KernelStm lore)
+deriving instance Annotations lore => Show (KernelStm lore)
+deriving instance Annotations lore => Ord (KernelStm lore)
+
+boundByKernelStm :: KernelStm lore -> Names
+boundByKernelStm = HS.fromList . HM.keys . scopeOf
 
 data KernelInput lore = KernelInput { kernelInputParam :: LParam lore
                                     , kernelInputArray :: VName
@@ -122,6 +156,7 @@ data KernelMapper flore tlore m = KernelMapper {
   , mapOnKernelVName :: VName -> m VName
   , mapOnKernelCertificates :: Certificates -> m Certificates
   , mapOnKernelLParam :: LParam flore -> m (LParam tlore)
+  , mapOnKernelKernelBody :: KernelBody flore -> m (KernelBody tlore)
   }
 
 -- | A mapper that simply returns the 'Kernel' verbatim.
@@ -132,6 +167,7 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
                                     , mapOnKernelVName = return
                                     , mapOnKernelCertificates = return
                                     , mapOnKernelLParam = return
+                                    , mapOnKernelKernelBody = return
                                     }
 
 -- | Map a monadic action across the immediate children of a
@@ -150,15 +186,6 @@ mapKernelM tv (MapKernel cs w index ispace inps rettype body) =
   mapOnKernelBody tv body
   where (iparams, bounds) = unzip ispace
         (ts, perms) = unzip rettype
-mapKernelM tv (ReduceKernel cs w kernel_size comm red_fun fold_fun arrs) =
-  ReduceKernel <$>
-  mapOnKernelCertificates tv cs <*>
-  mapOnKernelSubExp tv w <*>
-  mapOnKernelSize tv kernel_size <*>
-  pure comm <*>
-  mapOnKernelLambda tv red_fun <*>
-  mapOnKernelLambda tv fold_fun <*>
-  mapM (mapOnKernelVName tv) arrs
 mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
   ScanKernel <$>
   mapOnKernelCertificates tv cs <*>
@@ -185,6 +212,22 @@ mapKernelM tv (WriteKernel cs len lam ivs as) =
   mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
+mapKernelM tv (Kernel cs (num_groups, group_size, num_threads) ts thread_id kernel_body) =
+  Kernel <$> mapOnKernelCertificates tv cs <*>
+  (do num_groups' <- mapOnKernelSubExp tv num_groups
+      group_size' <- mapOnKernelSubExp tv group_size
+      num_threads' <- mapOnKernelSubExp tv num_threads
+      return (num_groups', group_size', num_threads')) <*>
+  mapM (mapOnKernelType tv) ts <*>
+  pure thread_id <*>
+  mapOnKernelKernelBody tv kernel_body
+
+mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
+                   KernelMapper flore tlore m -> Type -> m Type
+mapOnKernelType _tv (Prim pt) = pure $ Prim pt
+mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
+  where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
+mapOnKernelType _tv (Mem se s) = pure $ Mem se s
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -238,7 +281,53 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
                               , mapOnKernelVName = walk freeIn
                               , mapOnKernelCertificates = walk freeIn
                               , mapOnKernelLParam = walk freeIn
+                              , mapOnKernelKernelBody = walk freeIn
                               }
+
+instance Attributes lore => FreeIn (KernelBody lore) where
+  freeIn kernel_body = free_in_stms `HS.difference` bound_in_stms
+    where free_in_stms = mconcat $ map freeIn $ kernelBodyStms kernel_body
+          bound_in_stms = mconcat $ map boundByKernelStm $ kernelBodyStms kernel_body
+
+instance Attributes lore => FreeIn (KernelStm lore) where
+  freeIn (SplitArray (n,chunks) _ w elems_per_thread vs) =
+    freeIn n <> freeIn chunks <> freeIn w <> freeIn elems_per_thread <> freeIn vs
+  freeIn (Thread pes body) =
+    freeIn pes <> freeInBody body
+  freeIn (Combine pe v) =
+    freeIn pe <> freeIn v
+  freeIn (GroupReduce pes w lam input) =
+    freeIn pes <> freeIn w <> freeInLambda lam <> freeIn input
+
+instance Attributes lore => Substitute (KernelBody lore) where
+  substituteNames subst (KernelBody stms res) =
+    KernelBody (substituteNames subst stms) $ substituteNames subst res
+
+instance Substitute KernelResult where
+  substituteNames subst (AllThreadsReturn se) =
+    AllThreadsReturn $ substituteNames subst se
+  substituteNames subst (ThisThreadReturns who what) =
+    ThisThreadReturns (substituteNames subst who) (substituteNames subst what)
+  substituteNames subst (ConcatReturns ord w per_thread_elems v) =
+    ConcatReturns
+    ord
+    (substituteNames subst w)
+    (substituteNames subst per_thread_elems)
+    (substituteNames subst v)
+
+instance Attributes lore => Substitute (KernelStm lore) where
+  substituteNames subst (SplitArray (n,arrs) o w elems_per_thread vs) =
+    SplitArray (n,arrs) o
+    (substituteNames subst w)
+    (substituteNames subst elems_per_thread)
+    (substituteNames subst vs)
+  substituteNames subst (Thread pes body) =
+    Thread (substituteNames subst pes) (substituteNames subst body)
+  substituteNames subst (Combine pe v) =
+    Combine (substituteNames subst pe) (substituteNames subst v)
+  substituteNames subst (GroupReduce pes w lam input) =
+    GroupReduce (substituteNames subst pes) (substituteNames subst w)
+    (substituteNames subst lam) (substituteNames subst input)
 
 instance Attributes lore => Substitute (Kernel lore) where
   substituteNames subst =
@@ -250,7 +339,39 @@ instance Attributes lore => Substitute (Kernel lore) where
                          , mapOnKernelVName = return . substituteNames subst
                          , mapOnKernelCertificates = return . substituteNames subst
                          , mapOnKernelLParam = return . substituteNames subst
+                         , mapOnKernelKernelBody = return . substituteNames subst
                          }
+
+instance Renameable lore => Rename (KernelBody lore) where
+  rename (KernelBody [] res) =
+    KernelBody [] <$> rename res
+  rename (KernelBody (stm:stms) res) =
+    bindingForRename (HS.toList $ boundByKernelStm stm) $ do
+      stm' <- rename stm
+      KernelBody stms' res' <- rename $ KernelBody stms res
+      return $ KernelBody (stm':stms') res'
+
+instance Renameable lore => Rename (KernelStm lore) where
+  rename (SplitArray (n,chunks) o w elems_per_thread vs) =
+    SplitArray <$> ((,) <$> rename n <*> rename chunks)
+    <*> pure o
+    <*> rename w
+    <*> rename elems_per_thread
+    <*> rename vs
+  rename (GroupReduce pes w lam input) =
+    GroupReduce <$> rename pes <*> rename w <*> rename lam <*> rename input
+  rename (Combine pe v) =
+    Combine <$> rename pe <*> rename v
+  rename (Thread pes body) =
+    Thread <$> rename pes <*> rename body
+
+instance Rename KernelResult where
+  rename (AllThreadsReturn se) =
+    AllThreadsReturn <$> rename se
+  rename (ThisThreadReturns who what) =
+    ThisThreadReturns <$> rename who <*> rename what
+  rename (ConcatReturns ord w per_thread_elems v) =
+    ConcatReturns ord <$> rename w <*> rename per_thread_elems <*> rename v
 
 instance Renameable lore => Rename (KernelInput lore) where
   rename (KernelInput param arr is) =
@@ -258,6 +379,18 @@ instance Renameable lore => Rename (KernelInput lore) where
 
 instance Scoped lore (KernelInput lore) where
   scopeOf inp = scopeOfLParams [kernelInputParam inp]
+
+instance Scoped lore (KernelStm lore) where
+  scopeOf (SplitArray (size, chunks) _ _ _ _) =
+    HM.fromList $
+    (size, IndexInfo) : map (patElemName &&& LetInfo . patElemAttr) chunks
+  scopeOf (Thread pes _) =
+    HM.fromList $ map entry pes
+    where entry pe = (patElemName pe, LetInfo $ patElemAttr pe)
+  scopeOf (Combine pe _) = scopeOf pe
+  scopeOf (GroupReduce pes _ _ _) =
+    HM.fromList $ map entry pes
+    where entry pe = (patElemName pe, LetInfo $ patElemAttr pe)
 
 instance Attributes lore => Rename (Kernel lore) where
   rename (MapKernel cs w index ispace inps returns body) = do
@@ -272,18 +405,13 @@ instance Attributes lore => Rename (Kernel lore) where
       rename inps <*> pure returns' <*> rename body
 
   rename e = mapKernelM renamer e
-    where renamer = KernelMapper rename rename rename rename rename rename
+    where renamer = KernelMapper rename rename rename rename rename rename rename
 
 kernelType :: Kernel lore -> [Type]
 kernelType (MapKernel _ _ _ is _ returns _) =
   [ rearrangeType perm (arrayOfShape t outer_shape)
   | (t, perm) <- returns ]
   where outer_shape = Shape $ map snd is
-kernelType (ReduceKernel _ _ size _ redlam foldlam _) =
-  let acc_tp = map (`arrayOfRow` kernelWorkgroups size) $ lambdaReturnType redlam
-      arr_row_tp = drop (length acc_tp) $ lambdaReturnType foldlam
-  in acc_tp ++
-     map (`setOuterSize` kernelTotalElements size) arr_row_tp
 kernelType (ScanKernel _ w size lam foldlam nes _) =
   let arr_row_tp = drop (length nes) $ lambdaReturnType foldlam
   in map (`arrayOfRow` w) (lambdaReturnType lam) ++
@@ -299,6 +427,14 @@ kernelType (WriteKernel _ _ lam _ input) =
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
         ws = map fst input
+kernelType (Kernel _ (num_groups, group_size, _) ts _ body) =
+  zipWith resultShape ts $ kernelBodyResult body
+  where resultShape t AllThreadsReturn{} =
+          (t `arrayOfRow` group_size) `arrayOfRow` num_groups
+        resultShape t ThisThreadReturns{} =
+          t `arrayOfRow` num_groups
+        resultShape t (ConcatReturns _ w _ _) =
+          t `arrayOfRow` w
 
 kernelType NumGroups =
   [Prim int32]
@@ -322,10 +458,8 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     map kernelInputArray $
     filter ((`HS.member` consumed) . kernelInputName) inps
     where consumed = consumedInBody body
-  consumedInOp (ReduceKernel _ _ _ _ _ foldlam arrs) =
-    HS.map consumedArray $ consumedByLambda foldlam
-    where consumedArray v = fromMaybe v $ lookup v params_to_arrs
-          params_to_arrs = zip (map paramName (drop 2 $ lambdaParams foldlam)) arrs
+  consumedInOp (Kernel _ _ _ _ kbody) =
+    consumedInKernelBody kbody
   consumedInOp _ = mempty
 
 instance (Attributes lore,
@@ -336,10 +470,39 @@ instance (Attributes lore,
   addOpAliases = runIdentity . mapKernelM alias
     where alias = KernelMapper return (return . Alias.analyseLambda)
                   (return . Alias.analyseBody) return return return
+                  (return . aliasAnalyseKernelBody)
+          aliasAnalyseKernelBody (KernelBody stms res) =
+            KernelBody (map analyseStm stms) res
+          analyseStm (SplitArray (size, chunks) o w elems_per_thread arrs) =
+            SplitArray (size, chunks') o w elems_per_thread arrs
+            where chunks' = [ fmap (Names' $ HS.singleton arr,) chunk
+                              | (chunk, arr) <- zip chunks arrs ]
+          analyseStm (Thread pes body) =
+            Thread (zipWith annot pes $ bodyAliases body') body'
+            where body' = Alias.analyseBody body
+                  annot pe als = (Names' als,) <$> pe
+          analyseStm (Combine pe v) =
+            Combine ((mempty,) <$> pe) v
+          analyseStm (GroupReduce pes w lam input) =
+            GroupReduce pes' w lam' input
+            where pes' = map (fmap (mempty,)) pes
+                  lam' = Alias.analyseLambda lam
 
   removeOpAliases = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaAliases)
                    (return . removeBodyAliases) return return return
+                   (return . removeKernelBodyAliases)
+          removeKernelBodyAliases (KernelBody stms res) =
+            KernelBody (map removeStmAliases stms) res
+          removeStmAliases (SplitArray (size, chunks) o w elems_per_thread arrs) =
+            SplitArray (size, chunks') o w elems_per_thread arrs
+            where chunks' = map (fmap snd) chunks
+          removeStmAliases (Thread pes body) =
+            Thread (map (fmap snd) pes) (removeBodyAliases body)
+          removeStmAliases (Combine pe v) =
+            Combine (snd <$> pe) v
+          removeStmAliases (GroupReduce pes w lam input) =
+            GroupReduce (map (fmap snd) pes) w (removeLambdaAliases lam) input
 
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = False
@@ -353,9 +516,12 @@ instance (Attributes lore, CanBeRanged (Op lore)) => CanBeRanged (Kernel lore) w
   removeOpRanges = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaRanges)
                    (return . removeBodyRanges) return return return
+                   (return . removeKernelBodyRanges)
+          removeKernelBodyRanges = undefined
   addOpRanges = Range.runRangeM . mapKernelM add
     where add = KernelMapper return Range.analyseLambda
-                Range.analyseBody return return return
+                Range.analyseBody return return return addKernelBodyRanges
+          addKernelBodyRanges = undefined
 
 instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
   type OpWithWisdom (Kernel lore) = Kernel (Wise lore)
@@ -365,10 +531,19 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    (return . removeLambdaWisdom)
                    (return . removeBodyWisdom)
                    return return return
+                   (return . removeKernelBodyWisdom)
+          removeKernelBodyWisdom (KernelBody stms res) =
+            KernelBody (map removeKernelStatementWisdom stms) res
+          removeKernelStatementWisdom (Thread pes body) =
+            Thread (map removePatElemWisdom pes) (removeBodyWisdom body)
+          removeKernelStatementWisdom (Combine pe v) =
+            Combine (removePatElemWisdom pe) v
+          removeKernelStatementWisdom (SplitArray (size,chunks) o w elems_per_thread arrs) =
+            SplitArray (size, map removePatElemWisdom chunks) o w elems_per_thread arrs
+          removeKernelStatementWisdom (GroupReduce pes w lam input) =
+            GroupReduce (map removePatElemWisdom pes) w (removeLambdaWisdom lam) input
 
-instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
-  usageInOp (ReduceKernel _ _ _ _ _ foldfun arrs) =
-    usageInLambda foldfun arrs
+instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
   usageInOp (ChunkedMapKernel _ _ _ _ fun arrs) =
@@ -380,8 +555,39 @@ instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
     where consumed_in_body = consumedInBody body
   usageInOp (WriteKernel _ _ _ _ as) =
     mconcat $ map (UT.consumedUsage . snd) as
+  usageInOp (Kernel _ _ _ _ kbody) =
+    mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
+
+consumedInKernelBody :: (Attributes lore, Aliased lore) =>
+                     KernelBody lore -> Names
+consumedInKernelBody (KernelBody stms _) =
+  -- We need to figure out what is consumed in stms.  We do this by
+  -- moving backwards through the stms, using the alias information to
+  -- update.
+  let consumed = foldr update mempty stms
+  in consumed `HS.difference` bound_in_stms
+  where bound_in_stms = HS.fromList $ HM.keys $ scopeOf stms
+
+        update stm consumed =
+          let aliasmap = HM.map nameAndAliases $ scopeOf stm
+          in aliasClosure aliasmap consumed <> consumedByKernelStm stm
+
+        aliasClosure aliasmap names =
+          names `HS.union` mconcat (map look $ HS.toList names)
+          where look k = HM.lookupDefault mempty k aliasmap
+
+        nameAndAliases (LetInfo attr) = aliasesOf attr
+        nameAndAliases _ = mempty
+
+consumedByKernelStm :: (Attributes lore, Aliased lore) =>
+                       KernelStm lore -> Names
+consumedByKernelStm (Thread _ body) = consumedInBody body
+consumedByKernelStm Combine{} = mempty
+consumedByKernelStm SplitArray{} = mempty
+consumedByKernelStm (GroupReduce _ _ _ input) =
+  HS.fromList $ map snd input
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
@@ -430,33 +636,6 @@ typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
                   kernelInputType inp) $
             TC.bad $ TC.TypeError $
             "Kernel input " ++ pretty inp ++ " has inconsistent type."
-
-typeCheckKernel (ReduceKernel cs w kernel_size _ parfun seqfun arrexps) = do
-  checkKernelCrud cs w kernel_size
-
-  arrargs <- TC.checkSOACArrayArgs w arrexps
-
-  let (fold_acc_ret, _) =
-        splitAt (length $ lambdaReturnType parfun) $ lambdaReturnType seqfun
-
-  case lambdaParams seqfun of
-    [] -> TC.bad $ TC.TypeError "Fold function takes no parameters."
-    chunk_param : _
-      | Prim (IntType Int32) <- paramType chunk_param -> do
-          let seq_args = (Prim int32, mempty) :
-                         (Prim int32, mempty) :
-                         [ (t `arrayOfRow` Var (paramName chunk_param), als)
-                         | (t, als) <- arrargs ]
-          TC.checkLambda seqfun seq_args
-      | otherwise ->
-          TC.bad $ TC.TypeError "First parameter of fold function is not int32-typed."
-
-  let asArg t = (t, mempty)
-      redt = lambdaReturnType parfun
-  TC.checkLambda parfun $ map asArg $ Prim int32 : Prim int32 : fold_acc_ret ++ fold_acc_ret
-  unless (redt == fold_acc_ret) $
-    TC.bad $ TC.TypeError $ "Initial value is of type " ++ prettyTuple redt ++
-          ", but redomap fold function returns type " ++ prettyTuple fold_acc_ret ++ "."
 
 typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
   checkKernelCrud cs w kernel_size
@@ -556,6 +735,62 @@ typeCheckKernel (WriteKernel cs w lam _ivs as) = do
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 
+typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (KernelBody stms res)) = do
+  mapM_ (TC.requireI [Prim Cert]) cs
+  mapM_ (TC.require [Prim int32]) [groups, group_size, num_threads]
+  mapM_ TC.checkType ts
+  TC.binding (HM.singleton thread_id IndexInfo) $ checkKernelStms stms $
+    zipWithM_ checkKernelResult res ts
+  where checkKernelResult (AllThreadsReturn what) t =
+          TC.require [t] what
+        checkKernelResult (ThisThreadReturns who what) t = do
+          TC.require [Prim int32] who
+          TC.require [t] what
+        checkKernelResult (ConcatReturns _ w per_thread_elems v) t = do
+          TC.require [Prim int32] w
+          TC.require [Prim int32] per_thread_elems
+          vt <- lookupType v
+          unless (vt == t `arrayOfRow` arraySize 0 vt) $
+            TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
+
+        checkKernelStms [] m = m
+        checkKernelStms (stm:stms') m = do
+          checkKernelStm stm
+          TC.binding (scopeOf stm) $ checkKernelStms stms' m
+
+        checkKernelStm (Thread pes body) = do
+          TC.checkBody body
+          body_ts <- bodyExtType body
+          let pes_ts = staticShapes $ map patElemType pes
+          unless (body_ts `subtypesOf` pes_ts) $
+            TC.bad $ TC.TypeError $ "Kernel thread statement returns type " ++
+            prettyTuple body_ts ++ ", but pattern has type " ++
+            prettyTuple pes_ts
+        checkKernelStm (SplitArray (size, chunks) _ w elems_per_thread arrs) = do
+          TC.require [Prim int32] elems_per_thread
+          TC.require [Prim int32] w
+          arrts <- map TC.argType <$> TC.checkSOACArrayArgs w arrs
+          forM_ (zip arrts chunks) $ \(arrt, chunk) -> do
+            let chunk_t = arrt `arrayOfRow` Var size
+            unless (chunk_t == patElemType chunk) $
+              TC.bad $ TC.TypeError "Invalid type annotation for splitArray chunk."
+        checkKernelStm (Combine pe arr) = do
+          TC.require [rowType $ patElemType pe] arr
+          unless (arraySize 0 (patElemType pe) == group_size) $
+            TC.bad $ TC.TypeError $ "Outer size of " ++ pretty pe
+            ++ " must be " ++ pretty group_size
+        checkKernelStm (GroupReduce pes w lam input) = do
+          TC.require [Prim int32] w
+          let (nes, arrs) = unzip input
+              asArg t = (t, mempty)
+          neargs <- mapM TC.checkArg nes
+          arrargs <- TC.checkSOACArrayArgs w arrs
+          TC.checkLambda lam $
+            map asArg [Prim int32, Prim int32] ++
+            map TC.noArgAliases (neargs ++ arrargs)
+          unless (lambdaReturnType lam == map patElemType pes) $
+            TC.bad $ TC.TypeError "Invalid type annotation for kernel reduction."
+
 checkKernelCrud :: TC.Checkable lore =>
                    [VName] -> SubExp -> KernelSize -> TC.TypeM lore ()
 checkKernelCrud cs w kernel_size = do
@@ -597,14 +832,23 @@ consumableInputs is = map (first kernelInputName) .
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (MapKernel _ _ _ _ _ _ body) =
     inside "MapKernel" $ bodyMetrics body
-  opMetrics (ReduceKernel _ _ _ _ lam1 lam2 _) =
-    inside "ReduceKernel" $ lambdaMetrics lam1 >> lambdaMetrics lam2
   opMetrics (ScanKernel _ _ _ lam foldfun _ _) =
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
     inside "ChunkedMapKernel" $ lambdaMetrics fun
   opMetrics (WriteKernel _cs _len lam _ivs _as) =
     inside "WriteKernel" $ lambdaMetrics lam
+  opMetrics (Kernel _ _ _ _ kbody) =
+    inside "Kernel" $ kernelBodyMetrics kbody
+    where kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
+          kernelStmMetrics SplitArray{} =
+            seen "SplitArray"
+          kernelStmMetrics (Thread _ body) =
+            inside "Thread" $ bodyMetrics body
+          kernelStmMetrics Combine{} =
+            seen "Combine"
+          kernelStmMetrics (GroupReduce _ _ lam _) =
+            inside "GroupReduce" $ lambdaMetrics lam
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
 
@@ -622,13 +866,6 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr name <+> text "<" <+> ppr bound
           ppRet (t, perm) =
             ppr t <+> text "permuted" <+> PP.apply (map ppr perm)
-  ppr (ReduceKernel cs w kernel_size comm parfun seqfun as) =
-    ppCertificates' cs <> text "reduceKernel" <>
-    parens (ppr w <> comma </>
-            ppr kernel_size </>
-            commasep (map ppr as) <> comma </>
-            ppr comm </>
-            ppr parfun <> comma </> ppr seqfun)
   ppr (ScanKernel cs w kernel_size fun foldfun nes arrs) =
     ppCertificates' cs <> text "scanKernel" <>
     parens (ppr w <> comma </>
@@ -651,6 +888,60 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             ppr lam)
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
+
+  ppr (Kernel cs (num_groups,group_size,num_threads) ts thread_id body) =
+    ppCertificates' cs <>
+    text "kernel" <>
+    parens (commasep [text "num_groups:" <+> ppr num_groups,
+                      text "group_size:" <+> ppr group_size,
+                      text "num_threads:" <+> ppr num_threads,
+                      text "thread id ->" <+> ppr thread_id]) <+>
+    PP.colon <+> ppTuple' ts <+> text "{" </>
+    PP.indent 2 (ppr body) </>
+    text "}"
+
+instance PrettyLore lore => Pretty (KernelBody lore) where
+  ppr (KernelBody stms res) =
+    PP.stack (map ppr stms) </>
+    text "return" <+> PP.braces (PP.commasep $ map ppr res)
+
+instance PrettyLore lore => Pretty (KernelStm lore) where
+  ppr (SplitArray (n,chunks) o w elems_per_thread arrs) =
+    PP.annot (mapMaybe ppAnnot chunks) $
+    text "let" <+> parens (commasep $ ppr n : map ppr chunks) <+> PP.equals <+>
+    text ("splitArray" <> suff) <> parens (commasep $ ppr w : ppr elems_per_thread : map ppr arrs)
+    where suff = case o of InOrder -> ""
+                           Disorder -> "Unordered"
+  ppr (Thread pes body) =
+    PP.annot (mapMaybe ppAnnot pes) $
+    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals <+> text "thread {" </>
+    PP.indent 2 (ppr body) </>
+    text "}"
+  ppr (Combine pe what) =
+    PP.annot (mapMaybe ppAnnot [pe]) $
+    text "let" <+> PP.braces (ppr pe) <+> PP.equals <+>
+    text "combine" <> PP.parens (ppr what)
+  ppr (GroupReduce pes w lam input) =
+    PP.annot (mapMaybe ppAnnot pes) $
+    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals </>
+    PP.indent 2 (text "reduce" <> parens (commasep [ppr w,
+                                                     ppr lam,
+                                                     PP.braces (commasep $ map ppr nes),
+                                                     commasep $ map ppr els]))
+    where (nes,els) = unzip input
+
+instance Pretty KernelResult where
+  ppr (AllThreadsReturn se) =
+    ppr se
+  ppr (ThisThreadReturns who what) =
+    text "thread" <+> ppr who <+> text "returns" <+> ppr what
+  ppr (ConcatReturns o w per_thread_elems v) =
+    text "concat" <> suff <>
+    parens (commasep [ppr w, ppr per_thread_elems]) <+>
+    ppr v
+    where suff = case o of InOrder -> ""
+                           Disorder -> "Permuted"
+
 
 instance Pretty KernelSize where
   ppr (KernelSize

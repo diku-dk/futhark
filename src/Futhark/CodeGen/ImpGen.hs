@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, LambdaCase, TypeSynonymInstances, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.CodeGen.ImpGen
   ( -- * Entry Points
     compileProg
@@ -42,6 +43,7 @@ module Futhark.CodeGen.ImpGen
   , declaringLParams
   , declaringFParams
   , declaringVarEntry
+  , declaringScope
   , withParams
   , declaringPrimVar
   , withPrimVar
@@ -59,6 +61,7 @@ module Futhark.CodeGen.ImpGen
   , dimSizeToSubExp
   , destinationFromParam
   , destinationFromParams
+  , destinationFromPattern
   , funcallTargets
   , copy
   , copyDWIM
@@ -701,13 +704,10 @@ declaringVars :: [PatElem] -> ImpM op a -> ImpM op a
 declaringVars = flip $ foldr declaringVar
 
 declaringFParams :: [FParam] -> ImpM op a -> ImpM op a
-declaringFParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (paramName fparam) BindVar
-                           (const NoUniqueness <$> paramAttr fparam)
+declaringFParams = declaringScope . scopeOfFParams
 
 declaringLParams :: [LParam] -> ImpM op a -> ImpM op a
-declaringLParams = flip $ foldr $ declaringVar . toPatElem
-  where toPatElem fparam = PatElem (paramName fparam) BindVar (paramAttr fparam)
+declaringLParams = declaringScope . scopeOfLParams
 
 declaringVarEntry :: VName -> VarEntry -> ImpM op a -> ImpM op a
 declaringVarEntry name entry m = do
@@ -721,8 +721,15 @@ declaringVarEntry name entry m = do
   local (insertInVtable name entry) m
 
 declaringVar :: PatElem -> ImpM op a -> ImpM op a
-declaringVar patElem m =
-  case patElemAttr patElem of
+declaringVar = declaringScope . scopeOf
+
+declaringPrimVar :: VName -> PrimType -> ImpM op a -> ImpM op a
+declaringPrimVar name bt =
+  declaringVarEntry name $ ScalarVar $ ScalarEntry bt
+
+declaringName :: VName -> NameInfo ExplicitMemory -> ImpM op a -> ImpM op a
+declaringName name info m =
+  case infoAttr info of
     Scalar bt -> do
       let entry = ScalarVar ScalarEntry { entryScalarType    = bt
                                         }
@@ -742,11 +749,13 @@ declaringVar patElem m =
             , entryArrayElemType = bt
             }
       declaringVarEntry name entry m
-  where name = patElemName patElem
+  where infoAttr (LetInfo attr) = attr
+        infoAttr (FParamInfo attr) = const NoUniqueness <$> attr
+        infoAttr (LParamInfo attr) = attr
+        infoAttr IndexInfo = Scalar int32
 
-declaringPrimVar :: VName -> PrimType -> ImpM op a -> ImpM op a
-declaringPrimVar name bt =
-  declaringVarEntry name $ ScalarVar $ ScalarEntry bt
+declaringScope :: Scope ExplicitMemory -> ImpM op a -> ImpM op a
+declaringScope scope m = foldr (uncurry declaringName) m $ HM.toList scope
 
 withPrimVar :: VName -> PrimType -> ImpM op a -> ImpM op a
 withPrimVar name bt =
@@ -823,7 +832,7 @@ lookupArray name = do
   res <- lookupVar name
   case res of
     ArrayVar entry -> return entry
-    _              -> throwError $ "Not an array: " ++ textual name
+    _              -> throwError $ "ImpGen.lookupArray: not an array: " ++ textual name
 
 arrayLocation :: VName -> ImpM op MemLocation
 arrayLocation name = entryArrayLocation <$> lookupArray name
