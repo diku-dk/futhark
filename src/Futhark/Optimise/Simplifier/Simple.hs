@@ -116,7 +116,6 @@ instance (Attributes lore,
   getEngineState   = fst <$> get
   putEngineState x = modify $ \(_, y) -> (x,y)
   passNeed = pass
-  simplifyBody = Engine.defaultSimplifyBody
 
 runSimpleM :: SimpleM lore a
            -> SimpleOps (SimpleM lore)
