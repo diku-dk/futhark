@@ -175,7 +175,11 @@ instance Attributes lore => CSEInOp lore () where
 instance (Attributes lore, CSEInOp lore (Op lore)) => CSEInOp lore (Kernel.Kernel lore) where
   cseInOp = Kernel.mapKernelM $
             Kernel.KernelMapper return cseInLambda cseInBody
-            return return return
+            return return return cseInKernelBody
+
+cseInKernelBody :: (Aliased lore, CSEInOp lore (Op lore)) =>
+                   Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
+cseInKernelBody = return
 
 instance (Attributes (Aliases lore),
           CanBeAliased (Op lore),

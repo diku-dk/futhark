@@ -60,10 +60,13 @@ module Futhark.Representation.ExplicitMemory
        , MemReturn (..)
        , Returns (..)
        , ExpReturns
+       , BodyReturns
        , FunReturns
+       , bodyReturnsToExpReturns
        , expReturns
        , bodyReturns
        , returnsToType
+       , extReturns
        , lookupMemBound
        , lookupArraySummary
        , fullyDirect
@@ -220,7 +223,7 @@ instance Attributes inner => IsOp (MemOp inner) where
   safeOp Alloc{} = True
   safeOp (Inner k) = safeOp k
 
-instance (Aliased lore, UsageInOp (Op lore)) => UsageInOp (MemOp lore) where
+instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (MemOp lore) where
   usageInOp Alloc {} = mempty
   usageInOp (Inner k) = usageInOp k
 

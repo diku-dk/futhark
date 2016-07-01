@@ -143,10 +143,6 @@ scanOrReduce (Pattern [] pat_elems) (Op (Inner (ScanKernel _ _ size _ lam _ _)))
   let (scan_pat_elems, map_pat_elems) =
         splitAt (2 * length (lambdaReturnType lam)) pat_elems
   in Just (scan_pat_elems, map_pat_elems, size)
-scanOrReduce (Pattern [] pat_elems) (Op (Inner (ReduceKernel _ _ size _ lam _ _))) =
-  let (red_pat_elems, map_pat_elems) =
-        splitAt (length (lambdaReturnType lam)) pat_elems
-  in Just (red_pat_elems, map_pat_elems, size)
 scanOrReduce _ _ =
   Nothing
 

@@ -47,17 +47,17 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
                   ((++) <$>
                    mapM (mkIntermediateIdent num_chunks) acc_idents <*>
                    pure arr_idents)
-  let (_fold_chunk_param, fold_acc_params, _fold_inp_params) =
+  let (_fold_chunk_param, _fold_acc_params, _fold_inp_params) =
         partitionChunkedFoldParameters (length nes) $ lambdaParams fold_lam
 
   fold_lam' <- kerneliseLambda nes fold_lam
 
   my_index <- newVName "my_index"
-  other_index <- newVName "other_index"
+  other_offset <- newVName "other_offset"
   let my_index_param = Param my_index (Prim int32)
-      other_index_param = Param other_index (Prim int32)
+      other_offset_param = Param other_offset (Prim int32)
       reduce_lam' = reduce_lam { lambdaParams = my_index_param :
-                                                other_index_param :
+                                                other_offset_param :
                                                 lambdaParams reduce_lam
                                }
       params_to_arrs = zip (map paramName $ drop 1 $ lambdaParams fold_lam') arrs
@@ -70,51 +70,124 @@ blockedReductionStream pat cs w comm reduce_lam fold_lam nes arrs = runBinder_ $
       letExp (baseString arr <> "_copy") $ PrimOp $ Copy arr
     else return arr
 
+  step_one <- chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs_copies
   addBinding =<< renameBinding
-    (Let step_one_pat () $
-     Op $ ReduceKernel cs w step_one_size comm reduce_lam' fold_lam' arrs_copies)
-
-  identity_index <- newVName "identity_index"
-  chunk_size <- newVName "chunk_size"
-  identity_lam_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_acc_params
-
-  elements <- zipWithM newIdent
-              (map (baseString . paramName) identity_lam_params) $
-              lambdaReturnType fold_lam'
-  let identity_index_param = Param identity_index (Prim int32)
-      chunk_size_param = Param chunk_size (Prim int32)
-      read_elements =
-        [ mkLet' [] [element] $
-          PrimOp $ Index [] arr [constant (0 :: Int32)]
-        | (element, arr) <- zip elements $ map paramName identity_lam_params ]
-      identity_body = mkBody read_elements $ map (Var . identName) elements
-      identity_lam = Lambda { lambdaParams = identity_index_param :
-                                             chunk_size_param :
-                                             identity_lam_params
-                            , lambdaReturnType = lambdaReturnType reduce_lam
-                            , lambdaBody = identity_body
-                            }
+    (Let step_one_pat () $ Op step_one)
 
   step_two_pat <- basicPattern' [] <$>
                   mapM (mkIntermediateIdent $ constant (1 :: Int32)) acc_idents
 
   let step_two_size = KernelSize one num_chunks one num_chunks one num_chunks
 
-  addBinding $
-    Let step_two_pat () $
-    Op $ ReduceKernel [] num_chunks step_two_size
-    comm reduce_lam' identity_lam $
-    take (length nes) $ patternNames step_one_pat
+  step_two <- reduceKernel [] step_two_size reduce_lam' nes $ take (length nes) $ patternNames step_one_pat
+
+  addBinding $ Let step_two_pat () $ Op step_two
 
   forM_ (zip (patternNames step_two_pat) (patternIdents pat)) $ \(arr, x) ->
     addBinding $ mkLet' [] [x] $ PrimOp $ Index [] arr [constant (0 :: Int32)]
-  where mkArrChunkParam chunk_size arr_param =
-          newParam (baseString (paramName arr_param) <> "_chunk") $
-            arrayOfRow (paramType arr_param) chunk_size
-
-        mkIntermediateIdent chunk_size ident =
+  where mkIntermediateIdent chunk_size ident =
           newIdent (baseString $ identName ident) $
           arrayOfRow (identType ident) chunk_size
+
+chunkedReduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
+                       Certificates
+                    -> SubExp
+                    -> KernelSize
+                    -> Commutativity
+                    -> Lambda
+                    -> Lambda
+                    -> [SubExp]
+                    -> [VName]
+                    -> m (Kernel Kernels)
+chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
+  let (_, chunk_size, _acc_params, arr_params) =
+        partitionChunkedKernelFoldParameters 0 $ lambdaParams fold_lam'
+      group_size = kernelWorkgroupSize step_one_size
+      ordering = case comm of Commutative -> Disorder
+                              Noncommutative -> InOrder
+
+  split_bound <- forM arr_params $ \arr_param -> do
+    let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunk_size)
+    return $ PatElem (paramName arr_param) BindVar chunk_t
+  let chunk_stm = SplitArray (paramName chunk_size, split_bound)
+                  ordering w (kernelElementsPerThread step_one_size) arrs
+      red_ts = take (length nes) $ lambdaReturnType fold_lam'
+      map_ts = map rowType $ drop (length nes) $ lambdaReturnType fold_lam'
+      ts = red_ts ++ map_ts
+
+  chunk_red_pes <- forM red_ts $ \red_t -> do
+    pe_name <- newVName "chunk_fold_red"
+    return $ PatElem pe_name BindVar red_t
+  chunk_map_pes <- forM map_ts $ \map_t -> do
+    pe_name <- newVName "chunk_fold_map"
+    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
+  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) $ lambdaBody fold_lam'
+
+  chunk_red_pes' <- forM red_ts $ \red_t -> do
+    pe_name <- newVName "chunk_fold_red"
+    return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
+  let combine_reds = zipWith Combine chunk_red_pes' $
+                     map (Var . patElemName) chunk_red_pes
+
+  final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
+    pe_name <- newVName "final_result"
+    return $ PatElem pe_name BindVar t
+  let reduce_chunk = GroupReduce final_red_pes group_size reduce_lam' $
+                     zip nes $ map patElemName chunk_red_pes'
+
+  red_rets <- forM final_red_pes $ \pe ->
+    return $ ThisThreadReturns (constant (0::Int32)) $ Var $ patElemName pe
+  map_rets <- forM chunk_map_pes $ \pe ->
+    return $ ConcatReturns ordering w (kernelElementsPerThread step_one_size) $ patElemName pe
+  let rets = red_rets ++ map_rets
+
+  thread_id <- newVName "thread_id"
+  return $ Kernel cs
+    (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size)
+    ts thread_id $
+    KernelBody (chunk_stm:fold_chunk:combine_reds++[reduce_chunk]) rets
+
+reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
+                Certificates
+             -> KernelSize
+             -> Lambda
+             -> [SubExp]
+             -> [VName]
+             -> m (Kernel Kernels)
+reduceKernel cs step_two_size reduce_lam' nes arrs = do
+  let group_size = kernelWorkgroupSize step_two_size
+      red_ts = lambdaReturnType reduce_lam'
+  thread_id <- newVName "thread_id"
+
+  (copy_input, arrs_index) <-
+    fmap unzip $ forM (zip red_ts arrs) $ \(t, arr) -> do
+      arr_index_thread <- newVName (textual arr ++ "_index_thread")
+      arr_index <- newVName (baseString arr ++ "_index")
+      return (Thread [PatElem arr_index BindVar t] $
+              Body () [Let (Pattern [] [PatElem arr_index_thread BindVar t]) () $
+                       PrimOp $ Index [] arr [Var thread_id]]
+               [Var arr_index_thread],
+               arr_index)
+
+  (combine_arrs, arrs') <-
+    fmap unzip $ forM (zip red_ts arrs_index) $ \(red_t, arr_index) -> do
+      arr' <- newVName $ baseString arr_index ++ "_combined"
+      let pe = PatElem arr' BindVar $ red_t `arrayOfRow` group_size
+      return (Combine pe (Var arr_index),
+              arr')
+
+  final_res_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
+    pe_name <- newVName "final_result"
+    return $ PatElem pe_name BindVar t
+  let reduce = GroupReduce final_res_pes group_size reduce_lam' $ zip nes arrs'
+
+  rets <- forM final_res_pes $ \pe ->
+    return $ ThisThreadReturns (constant (0::Int32)) $ Var $ patElemName pe
+
+  return $ Kernel cs
+    (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size)
+    (lambdaReturnType reduce_lam') thread_id $
+    KernelBody (copy_input++combine_arrs++[reduce]) rets
 
 chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
                Pattern -> [SubExp] -> Lambda -> m Lambda

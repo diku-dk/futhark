@@ -53,7 +53,7 @@ transformBinding (Let pat () e) = do
 transformExp :: Exp -> ExpandM ([Binding], Exp)
 transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
   -- Extract allocations from the body.
-  | Right (body', thread_allocs) <- extractKernelAllocations bound_before_body body = do
+  | Right (body', thread_allocs) <- extractThreadAllocations bound_before_body body = do
 
   (alloc_bnds, alloc_offsets) <- expandedAllocations w thread_num thread_allocs
   let body'' = if null alloc_bnds then body'
@@ -66,7 +66,7 @@ transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
 transformExp (Op (Inner (ChunkedMapKernel cs w kernel_size ordering lam arrs)))
   -- Extract allocations from the lambda.
   | Right (lam_body', lam_thread_allocs) <-
-      extractKernelAllocations bound_in_lam $ lambdaBody lam = do
+      extractThreadAllocations bound_in_lam $ lambdaBody lam = do
 
   (alloc_bnds, alloc_offsets) <-
     expandedAllocations num_threads thread_id lam_thread_allocs
@@ -79,37 +79,12 @@ transformExp (Op (Inner (ChunkedMapKernel cs w kernel_size ordering lam arrs)))
         bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
         (thread_id, _, _) = partitionChunkedKernelLambdaParameters $ lambdaParams lam
 
-transformExp (Op (Inner (ReduceKernel cs w kernel_size comm red_lam fold_lam arrs)))
-  -- Extract allocations from the lambdas.
-  | Right (red_lam_body', red_lam_thread_allocs) <-
-      extractKernelAllocations bound_in_red_lam $ lambdaBody red_lam,
-    Right (fold_lam_body', fold_lam_thread_allocs) <-
-      extractKernelAllocations bound_in_fold_lam $ lambdaBody fold_lam = do
-
-  (red_alloc_bnds, red_alloc_offsets) <-
-    expandedAllocations num_threads red_id red_lam_thread_allocs
-  (fold_alloc_bnds, fold_alloc_offsets) <-
-    expandedAllocations num_threads fold_id fold_lam_thread_allocs
-
-  let red_lam_body'' = offsetMemoryInBody red_alloc_offsets red_lam_body'
-      fold_lam_body'' = offsetMemoryInBody fold_alloc_offsets fold_lam_body'
-      red_lam' = red_lam { lambdaBody = red_lam_body'' }
-      fold_lam' = fold_lam { lambdaBody = fold_lam_body'' }
-  return (red_alloc_bnds <> fold_alloc_bnds,
-          Op $ Inner $ ReduceKernel cs w kernel_size comm red_lam' fold_lam' arrs)
-  where num_threads = kernelNumThreads kernel_size
-        (red_id, _, _) = partitionChunkedKernelLambdaParameters $ lambdaParams red_lam
-        (fold_id, _, _) = partitionChunkedKernelLambdaParameters $ lambdaParams fold_lam
-
-        bound_in_red_lam = HS.fromList $ HM.keys $ scopeOf red_lam
-        bound_in_fold_lam = HS.fromList $ HM.keys $ scopeOf fold_lam
-
 transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   -- Extract allocations from the lambda.
   | Right (lam_body', lam_thread_allocs) <-
-      extractKernelAllocations bound_in_lam $ lambdaBody lam,
+      extractThreadAllocations bound_in_lam $ lambdaBody lam,
    Right (foldlam_body', foldlam_thread_allocs) <-
-      extractKernelAllocations bound_in_foldlam $ lambdaBody foldlam = do
+      extractThreadAllocations bound_in_foldlam $ lambdaBody foldlam = do
 
   (alloc_bnds, alloc_offsets) <-
     expandedAllocations num_threads thread_id lam_thread_allocs
@@ -131,8 +106,44 @@ transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
         bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
         bound_in_foldlam = HS.fromList $ HM.keys $ scopeOf foldlam
 
+transformExp (Op (Inner (Kernel cs size ts global_tid kbody)))
+  | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
+
+      (alloc_bnds, alloc_offsets) <-
+        expandedAllocations num_threads global_tid thread_allocs
+      let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
+
+      return (alloc_bnds,
+              Op $ Inner $ Kernel cs size ts global_tid kbody'')
+
+  where bound_in_kernel =
+          global_tid `HS.insert` HS.fromList (HM.keys $ scopeOf $ kernelBodyStms kbody)
+        (_num_groups, _group_size, num_threads) = size
+
 transformExp e =
   return ([], e)
+
+-- | Extract allocations from 'Thread' statements with
+-- 'extractThreadAllocations'.
+extractKernelBodyAllocations :: Names -> KernelBody ExplicitMemory
+                             -> Either String (KernelBody ExplicitMemory,
+                                               HM.HashMap VName (SubExp, Space))
+extractKernelBodyAllocations bound_before_body kbody = do
+  (allocs, stms) <- mapAccumLM extract HM.empty $ kernelBodyStms kbody
+  return (kbody { kernelBodyStms = stms }, allocs)
+  where extract allocs (Thread pes body) = do
+          let bound_before_body' = boundInBody body <> bound_before_body
+          (body', body_allocs) <- extractThreadAllocations bound_before_body' body
+          return (allocs <> body_allocs, Thread pes body')
+
+        extract allocs (GroupReduce pes w lam input) = do
+          let bound_before_body' = HS.fromList (HM.keys $ scopeOf lam) <> bound_before_body
+          (body', body_allocs) <-
+            extractThreadAllocations bound_before_body' $ lambdaBody lam
+          return (allocs <> body_allocs,
+                  GroupReduce pes w lam { lambdaBody = body' } input)
+
+        extract allocs stm = return (allocs, stm)
 
 -- | Returns a map from memory block names to their size in bytes,
 -- as well as the lambda body where all the allocations have been removed.
@@ -140,9 +151,9 @@ transformExp e =
 -- further down, we will fail later.  If the size of one of the
 -- allocations is not free in the body, we return 'Left' and an
 -- error message.
-extractKernelAllocations :: Names -> Body
+extractThreadAllocations :: Names -> Body
                          -> Either String (Body, HM.HashMap VName (SubExp, Space))
-extractKernelAllocations bound_before_body body = do
+extractThreadAllocations bound_before_body body = do
   (allocs, bnds) <- mapAccumLM isAlloc HM.empty $ bodyBindings body
   return (body { bodyBindings = catMaybes bnds }, allocs)
   where bound_here = bound_before_body `HS.union` boundInBody body
@@ -200,6 +211,16 @@ data RebaseMap = RebaseMap {
 
 lookupNewBase :: VName -> RebaseMap -> Maybe ([SE.ScalExp] -> IxFun.IxFun SE.ScalExp)
 lookupNewBase name = HM.lookup name . rebaseMap
+
+offsetMemoryInKernelBody :: RebaseMap -> KernelBody ExplicitMemory
+                         -> KernelBody ExplicitMemory
+offsetMemoryInKernelBody offsets kbody =
+  kbody { kernelBodyStms = map offset $ kernelBodyStms kbody }
+  where offset (Thread pes body) = Thread pes $ offsetMemoryInBody offsets body
+        offset (GroupReduce pes w lam input) =
+          let body' = offsetMemoryInBody offsets $ lambdaBody lam
+          in GroupReduce pes w lam { lambdaBody = body' } input
+        offset stm = stm
 
 offsetMemoryInBody :: RebaseMap -> Body -> Body
 offsetMemoryInBody offsets (Body attr bnds res) =

@@ -8,6 +8,7 @@ module Futhark.Util.Pretty
 
        , apply
        , oneLine
+       , annot
        )
        where
 
@@ -44,3 +45,10 @@ apply = parens . commasep . map align
 -- | Make sure that the given document is printed on just a single line.
 oneLine :: PP.Doc -> PP.Doc
 oneLine s = PP.text $ PP.displayS (PP.renderCompact s) ""
+
+-- | Stack and prepend a list of 'Doc's to another 'Doc', separated by
+-- a linebreak.  If the list is empty, the second 'Doc' will be
+-- returned without a preceding linebreak.
+annot :: [Doc] -> Doc -> Doc
+annot [] s = s
+annot l s = stack l </> s

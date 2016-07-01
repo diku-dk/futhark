@@ -8,6 +8,7 @@ module Futhark.Analysis.Rephrase
        , rephraseLambda
        , rephraseExtLambda
        , rephrasePattern
+       , rephrasePatElem
        , Rephraser (..)
        )
 where

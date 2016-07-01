@@ -6,6 +6,7 @@
 module Futhark.Optimise.Simplifier.Lore
        (
          Wise
+       , VarWisdom (..)
        , removeBindingWisdom
        , removeLambdaWisdom
        , removeExtLambdaWisdom
@@ -13,6 +14,7 @@ module Futhark.Optimise.Simplifier.Lore
        , removeFunDefWisdom
        , removeExpWisdom
        , removePatternWisdom
+       , removePatElemWisdom
        , removeBodyWisdom
        , removeScopeWisdom
        , addScopeWisdom
@@ -167,6 +169,9 @@ removeExpWisdom = rephraseExp removeWisdom
 
 removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
 removePatternWisdom = rephrasePattern snd
+
+removePatElemWisdom :: PatElemT (VarWisdom, a) -> PatElemT a
+removePatElemWisdom = rephrasePatElem snd
 
 addWisdomToPattern :: (Attributes lore, CanBeWise (Op lore)) =>
                       Pattern lore
