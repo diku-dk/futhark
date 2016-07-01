@@ -165,9 +165,8 @@ import Data.List
 
 import Prelude
 
-import Futhark.Optimise.Simplifier.Simple (bindableSimpleOps)
 import Futhark.Representation.SOACS
-import Futhark.Representation.SOACS.Simplify (simplifyBindings)
+import Futhark.Representation.SOACS.Simplify (simplifyBindings, simpleSOACS)
 import qualified Futhark.Representation.Kernels as Out
 import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
@@ -587,7 +586,7 @@ distributeMapBodyBindings acc
     stream_bnds <-
       snd <$> runBinderT (sequentialStreamWholeArray pat cs w accs lam arrs) types
     stream_bnds' <-
-      runReaderT (copyPropagateInBindings bindableSimpleOps stream_bnds) types
+      runReaderT (copyPropagateInBindings simpleSOACS stream_bnds) types
     distributeMapBodyBindings acc $ stream_bnds' ++ bnds
 
 distributeMapBodyBindings acc (bnd:bnds) =

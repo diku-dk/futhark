@@ -124,7 +124,6 @@ Library
                    Futhark.Optimise.Simplifier.Rule
                    Futhark.Optimise.Simplifier.RuleM
                    Futhark.Optimise.Simplifier.Rules
-                   Futhark.Optimise.Simplifier.Simple
                    Futhark.Optimise.Simplifier.Simplify
                    Futhark.Optimise.TileLoops
                    Futhark.Pass

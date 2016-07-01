@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | Perform copy propagation.  This is done by invoking the
 -- simplifier with no rules, so hoisting and dead-code elimination may
 -- also take place.
@@ -8,15 +9,11 @@ module Futhark.Transform.CopyPropagate
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.AST
-import Futhark.Optimise.Simplifier.Simple
-import Futhark.Optimise.Simplifier.Engine (MonadEngine)
-import Futhark.Optimise.Simplifier
-  (simplifyBindingsWithRules, noExtraHoistBlockers)
+import Futhark.Optimise.Simplifier.Engine
+import Futhark.Optimise.Simplifier (simplifyBindingsWithRules)
 
-copyPropagateInBindings :: (MonadFreshNames m,
-                            HasScope lore m,
-                            MonadEngine (SimpleM lore)) =>
-                           SimpleOps (SimpleM lore)
+copyPropagateInBindings :: (MonadFreshNames m, SimplifiableLore lore, HasScope lore m) =>
+                           SimpleOps lore
                         -> [Binding lore]
                         -> m [Binding lore]
 copyPropagateInBindings simpl =
