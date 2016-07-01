@@ -285,7 +285,8 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
       return $ PatElem name BindVar $ t `arrayOfRow` num_threads
 
   let pat = nonconcat_pat <> concat_pat
-      ts = map patElemType $ chunk_red_pes ++ chunk_map_pes
+      ts = map patElemType chunk_red_pes ++
+           map (rowType . patElemType) chunk_map_pes
 
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
     return $ AllThreadsReturn $ Var $ patElemName pe
