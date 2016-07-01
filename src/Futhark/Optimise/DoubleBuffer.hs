@@ -4,7 +4,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
 -- | The simplification engine is only willing to hoist allocations
 -- out of loops if the memory block resulting from the allocation is
 -- dead at the end of the loop.  If it is not, we may cause data
@@ -51,52 +50,79 @@ doubleBuffer =
        , passFunction = intraproceduralTransformation optimiseFunDef
        }
 
+-- This pass is written in a slightly weird way because we want to
+-- apply essentially the same transformation both outside and inside
+-- kernel bodies, which are different (but similar) representations.
+-- Thus, the environment is parametrised by the lore and contains the
+-- function used to transform 'Op's for the lore.
+
 optimiseFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
 optimiseFunDef fundec = do
   body' <- runReaderT (runDoubleBufferM $ inScopeOf fundec $
                        optimiseBody $ funDefBody fundec) $
-           Env emptyScope False
+           Env emptyScope optimiseKernelOp False
   return fundec { funDefBody = body' }
   where emptyScope :: Scope ExplicitMemory
         emptyScope = mempty
 
-data Env = Env { envScope :: Scope ExplicitMemory
-               , envCopyInit :: Bool
-                 -- ^ If true, copy initial values of merge
-                 -- parameters.  This is necessary to remove
-                 -- existential memory inside kernels, but seems to
-                 -- break C compiler vectorisation in sequential code.
-                 -- We set this to true once we enter kernels.
-               }
+        optimiseKernelOp (Inner k) = do
+          scope <- castScope <$> askScope
+          runReaderT (runDoubleBufferM $ Inner <$> optimiseKernel k) $
+            Env scope optimiseInKernelOp True
+          where optimiseKernel =
+                  mapKernelM identityKernelMapper
+                  { mapOnKernelBody = optimiseBody
+                  , mapOnKernelKernelBody = optimiseKernelBody
+                  , mapOnKernelLambda = optimiseLambda
+                  }
+        optimiseKernelOp op = return op
 
-newtype DoubleBufferM m a = DoubleBufferM { runDoubleBufferM :: ReaderT Env m a }
+        optimiseInKernelOp = return
+
+data Env lore m = Env { envScope :: Scope lore
+                      , envOptimiseOp :: Op lore -> DoubleBufferM lore m (Op lore)
+                      , envCopyInit :: Bool
+                      -- ^ If true, copy initial values of merge
+                      -- parameters.  This is necessary to remove
+                      -- existential memory inside kernels, but seems to
+                      -- break C compiler vectorisation in sequential
+                      -- code.  We set this to true once we enter
+                      -- kernels.
+                      }
+
+newtype DoubleBufferM lore m a = DoubleBufferM { runDoubleBufferM :: ReaderT (Env lore m) m a }
                           deriving (Functor, Applicative, Monad,
-                                    MonadReader Env, MonadFreshNames)
+                                    MonadReader (Env lore m), MonadFreshNames)
 
-instance (Applicative m, Monad m) =>
-         HasScope ExplicitMemory (DoubleBufferM m) where
+instance (Annotations lore, Applicative m, Monad m) =>
+         HasScope lore (DoubleBufferM lore m) where
   askScope = asks envScope
 
-instance (Applicative m, Monad m) =>
-         LocalScope ExplicitMemory (DoubleBufferM m) where
+instance (Annotations lore, Applicative m, Monad m) =>
+         LocalScope lore (DoubleBufferM lore m) where
   localScope scope = local $ \env -> env { envScope = envScope env <> scope }
 
-optimiseBody :: (MonadFreshNames m, OptimiseOp op lore) =>
-                Body lore -> DoubleBufferM m (Body lore)
+-- | Bunch up all the constraints for less typing.
+type LoreConstraints lore inner m =
+  (ExpAttr lore ~ (), BodyAttr lore ~ (),
+   ExplicitMemorish lore, Op lore ~ MemOp inner, MonadFreshNames m)
+
+optimiseBody :: LoreConstraints lore inner m =>
+                Body lore -> DoubleBufferM lore m (Body lore)
 optimiseBody body = do
   bnds' <- optimiseBindings $ bodyBindings body
   return $ body { bodyBindings = bnds' }
 
-optimiseBindings :: (MonadFreshNames m, OptimiseOp op lore) =>
-                    [Binding lore] -> DoubleBufferM m [Binding lore]
+optimiseBindings :: LoreConstraints lore inner m =>
+                    [Binding lore] -> DoubleBufferM lore m [Binding lore]
 optimiseBindings [] = return []
 optimiseBindings (e:es) = do
   e_es <- optimiseBinding e
   es' <- localScope (castScope $ scopeOf e_es) $ optimiseBindings es
   return $ e_es ++ es'
 
-optimiseBinding :: (MonadFreshNames m, OptimiseOp op lore) =>
-                   Binding lore -> DoubleBufferM m [Binding lore]
+optimiseBinding :: LoreConstraints lore inner m =>
+                   Binding lore -> DoubleBufferM lore m [Binding lore]
 optimiseBinding (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfLoopForm form <> scopeOfFParams (map fst $ ctx++val)) $
            optimiseBody body
@@ -107,41 +133,27 @@ optimiseBinding (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
                                   , mapOnOp = optimiseOp
                                   }
 
-class (ExplicitMemorish lore, BodyAttr lore ~ (), ExpAttr lore ~ (),
-       Op lore ~ MemOp op) =>
-      OptimiseOp op lore | op -> lore where
-  optimiseOp :: MonadFreshNames m =>
-                MemOp op -> DoubleBufferM m (MemOp op)
-
-instance OptimiseOp (Kernel InKernel) ExplicitMemory where
-  optimiseOp (Inner k) = Inner <$> optimiseKernel k
-    where optimiseKernel = local (\env -> env { envCopyInit = True }) .
-                           mapKernelM identityKernelMapper
-                           { mapOnKernelBody = optimiseBody
-                           , mapOnKernelKernelBody = optimiseKernelBody
-                           , mapOnKernelLambda = optimiseLambda
-                           }
-  optimiseOp op = return op
-
-instance OptimiseOp (KernelExp InKernel) InKernel where
-  optimiseOp = return
+optimiseOp :: MonadFreshNames m =>
+              Op lore -> DoubleBufferM lore m (Op lore)
+optimiseOp op = do f <- asks envOptimiseOp
+                   f op
 
 optimiseKernelBody :: MonadFreshNames m =>
                       KernelBody InKernel
-                   -> DoubleBufferM m (KernelBody InKernel)
+                   -> DoubleBufferM InKernel m (KernelBody InKernel)
 optimiseKernelBody kbody = do
   stms' <- optimiseBindings $ kernelBodyStms kbody
   return $ kbody { kernelBodyStms = stms' }
 
-optimiseLambda :: (OptimiseOp op lore, MonadFreshNames m) =>
-                  Lambda lore -> DoubleBufferM m (Lambda lore)
+optimiseLambda :: MonadFreshNames m =>
+                  Lambda InKernel -> DoubleBufferM InKernel m (Lambda InKernel)
 optimiseLambda lam = do
   body <- localScope (castScope $ scopeOf lam) $ optimiseBody $ lambdaBody lam
   return lam { lambdaBody = body }
 
-optimiseLoop :: (MonadFreshNames m, OptimiseOp op lore) =>
+optimiseLoop :: LoreConstraints lore inner m =>
                 [(FParam lore, SubExp)] -> [(FParam lore, SubExp)] -> Body lore
-             -> DoubleBufferM m ([Binding lore],
+             -> DoubleBufferM lore m ([Binding lore],
                                  [(FParam lore, SubExp)],
                                  [(FParam lore, SubExp)],
                                  Body lore)
@@ -174,7 +186,7 @@ data DoubleBuffer lore = BufferAlloc VName SubExp Space Bool
 doubleBufferMergeParams :: (ExplicitMemorish lore, MonadFreshNames m) =>
                            [(FParam lore,SubExp)]
                         -> [FParam lore] -> Names
-                        -> DoubleBufferM m [DoubleBuffer lore]
+                        -> DoubleBufferM lore m [DoubleBuffer lore]
 doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
   copy_init <- asks envCopyInit
   evalStateT (mapM (buffer copy_init) val_params) HM.empty
@@ -209,11 +221,10 @@ doubleBufferMergeParams ctx_and_res val_params bound_in_loop = do
                     return NoBuffer
           _ -> return NoBuffer
 
-allocBindings :: (ExplicitMemorish lore, MonadFreshNames m,
-                  Op lore ~ MemOp inner, ExpAttr lore ~ ()) =>
+allocBindings :: LoreConstraints lore inner m =>
                  [(FParam lore,SubExp)] -> [DoubleBuffer lore]
-              -> DoubleBufferM m ([(FParam lore, SubExp)],
-                                   [Binding lore])
+              -> DoubleBufferM lore m ([(FParam lore, SubExp)],
+                                       [Binding lore])
 allocBindings merge = runWriterT . zipWithM allocation merge
   where allocation m@(Param pname _, _) (BufferAlloc name size space b) = do
           tell [Let (Pattern [] [PatElem name BindVar $ MemMem size space]) () $
@@ -234,9 +245,8 @@ allocBindings merge = runWriterT . zipWithM allocation merge
         allocation (f, se) _ =
           return (f, se)
 
-doubleBufferResult :: (ExpAttr lore ~ (),
-                       BodyAttr lore ~ (),
-                       ExplicitMemorish lore) =>
+doubleBufferResult :: (ExplicitMemorish lore,
+                       ExpAttr lore ~ (), BodyAttr lore ~ ()) =>
                       [FParam lore] -> [DoubleBuffer lore]
                    -> Body lore -> Body lore
 doubleBufferResult valparams buffered (Body () bnds res) =

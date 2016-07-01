@@ -9,6 +9,8 @@ module Futhark.Representation.SOACS.Simplify
        , simplifyFun
        , simplifyLambda
        , simplifyBindings
+
+       , simpleSOACS
        )
 where
 
@@ -32,7 +34,6 @@ import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.MonadFreshNames
 import Futhark.Optimise.Simplifier (simplifyProgWithRules)
-import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.ClosedForm
@@ -42,9 +43,12 @@ import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
 
+simpleSOACS :: Simplifier.SimpleOps SOACS
+simpleSOACS = Simplifier.bindableSimpleOps simplifySOAC
+
 simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =
-  simplifyProgWithRules bindableSimpleOps soacRules blockers
+  simplifyProgWithRules simpleSOACS soacRules blockers
   where blockers =
           Engine.HoistBlockers {
             Engine.blockHoistPar = Engine.neverBlocks
@@ -64,91 +68,91 @@ getShapeNames bnd =
 
 simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
-  Simplifier.simplifyFunWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
+  Simplifier.simplifyFunWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyLambda :: (HasScope SOACS m, MonadFreshNames m) =>
                   Lambda -> Maybe [SubExp] -> [Maybe VName] -> m Lambda
 simplifyLambda =
-  Simplifier.simplifyLambdaWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
+  Simplifier.simplifyLambdaWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
 simplifyBindings :: (HasScope SOACS m, MonadFreshNames m) =>
                     [Binding] -> m [Binding]
 simplifyBindings =
-  Simplifier.simplifyBindingsWithRules bindableSimpleOps soacRules Engine.noExtraHoistBlockers
+  Simplifier.simplifyBindingsWithRules simpleSOACS soacRules Engine.noExtraHoistBlockers
 
-instance Engine.SimplifiableOp SOACS (SOAC SOACS) where
-  simplifyOp (Stream cs outerdim form lam arr) = do
-    cs' <- Engine.simplify cs
-    outerdim' <- Engine.simplify outerdim
-    form' <- simplifyStreamForm form
-    arr' <- mapM Engine.simplify arr
-    vtable <- Engine.getVtable
-    let (chunk:_) = extLambdaParams lam
-        se_outer = case outerdim of
-                      Var idd    -> fromMaybe (SE.Id idd int32) (ST.lookupScalExp idd vtable)
-                      Constant c -> SE.Val c
-        -- extension: one may similarly treat iota stream-array case,
-        -- by setting the bounds to [0, se_outer-1]
-        parbnds  = [ (chunk, 1, se_outer) ]
-    lam' <- Engine.simplifyExtLambda lam (getStreamAccums form) parbnds
-    return $ Stream cs' outerdim' form' lam' arr'
-    where simplifyStreamForm (MapLike o) =
-            return $ MapLike o
-          simplifyStreamForm (RedLike o comm lam0 acc) = do
-              acc'  <- mapM Engine.simplify acc
-              lam0' <- Engine.simplifyLambda lam0 (Just acc) $
-                       replicate (length $ lambdaParams lam0) Nothing
-              return $ RedLike o comm lam0' acc'
-          simplifyStreamForm (Sequential acc) = do
-              acc'  <- mapM Engine.simplify acc
-              return $ Sequential acc'
+simplifySOAC :: Simplifier.SimplifyOp SOACS
+simplifySOAC (Stream cs outerdim form lam arr) = do
+  cs' <- Engine.simplify cs
+  outerdim' <- Engine.simplify outerdim
+  form' <- simplifyStreamForm form
+  arr' <- mapM Engine.simplify arr
+  vtable <- Engine.getVtable
+  let (chunk:_) = extLambdaParams lam
+      se_outer = case outerdim of
+                    Var idd    -> fromMaybe (SE.Id idd int32) (ST.lookupScalExp idd vtable)
+                    Constant c -> SE.Val c
+      -- extension: one may similarly treat iota stream-array case,
+      -- by setting the bounds to [0, se_outer-1]
+      parbnds  = [ (chunk, 1, se_outer) ]
+  lam' <- Engine.simplifyExtLambda lam (getStreamAccums form) parbnds
+  return $ Stream cs' outerdim' form' lam' arr'
+  where simplifyStreamForm (MapLike o) =
+          return $ MapLike o
+        simplifyStreamForm (RedLike o comm lam0 acc) = do
+            acc'  <- mapM Engine.simplify acc
+            lam0' <- Engine.simplifyLambda lam0 (Just acc) $
+                     replicate (length $ lambdaParams lam0) Nothing
+            return $ RedLike o comm lam0' acc'
+        simplifyStreamForm (Sequential acc) = do
+            acc'  <- mapM Engine.simplify acc
+            return $ Sequential acc'
 
-  simplifyOp (Map cs w fun arrs) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    arrs' <- mapM Engine.simplify arrs
-    fun' <- Engine.simplifyLambda fun Nothing $ map Just arrs'
-    return $ Map cs' w' fun' arrs'
+simplifySOAC (Map cs w fun arrs) = do
+  cs' <- Engine.simplify cs
+  w' <- Engine.simplify w
+  arrs' <- mapM Engine.simplify arrs
+  fun' <- Engine.simplifyLambda fun Nothing $ map Just arrs'
+  return $ Map cs' w' fun' arrs'
 
-  simplifyOp (Reduce cs w comm fun input) =
-    Reduce <$> Engine.simplify cs <*>
-      Engine.simplify w <*>
-      pure comm <*>
-      Engine.simplifyLambda fun (Just acc) (map (const Nothing) arrs) <*>
-      (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
-    where (acc, arrs) = unzip input
-
-  simplifyOp (Scan cs w fun input) =
-    Scan <$> Engine.simplify cs <*>
-      Engine.simplify w <*>
-      Engine.simplifyLambda fun (Just acc)
-      (map (const Nothing) arrs) <*>
-      (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
-    where (acc, arrs) = unzip input
-
-  simplifyOp (Redomap cs w comm outerfun innerfun acc arrs) =
-    Redomap <$> Engine.simplify cs <*>
-    Engine.simplify w <*> pure comm <*>
-    Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
-    Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
-    mapM Engine.simplify acc <*>
-    mapM Engine.simplify arrs
-
-  simplifyOp (Scanomap cs w outerfun innerfun acc arrs) =
-    Scanomap <$> Engine.simplify cs <*>
+simplifySOAC (Reduce cs w comm fun input) =
+  Reduce <$> Engine.simplify cs <*>
     Engine.simplify w <*>
-    Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
-    Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
-    mapM Engine.simplify acc <*>
-    mapM Engine.simplify arrs
+    pure comm <*>
+    Engine.simplifyLambda fun (Just acc) (map (const Nothing) arrs) <*>
+    (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
+  where (acc, arrs) = unzip input
 
-  simplifyOp (Write cs len lam ivs as) = do
-    cs' <- Engine.simplify cs
-    len' <- Engine.simplify len
-    lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
-    ivs' <- mapM Engine.simplify ivs
-    as' <- mapM Engine.simplify as
-    return $ Write cs' len' lam' ivs' as'
+simplifySOAC (Scan cs w fun input) =
+  Scan <$> Engine.simplify cs <*>
+    Engine.simplify w <*>
+    Engine.simplifyLambda fun (Just acc)
+    (map (const Nothing) arrs) <*>
+    (zip <$> mapM Engine.simplify acc <*> mapM Engine.simplify arrs)
+  where (acc, arrs) = unzip input
+
+simplifySOAC (Redomap cs w comm outerfun innerfun acc arrs) =
+  Redomap <$> Engine.simplify cs <*>
+  Engine.simplify w <*> pure comm <*>
+  Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
+  Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
+  mapM Engine.simplify acc <*>
+  mapM Engine.simplify arrs
+
+simplifySOAC (Scanomap cs w outerfun innerfun acc arrs) =
+  Scanomap <$> Engine.simplify cs <*>
+  Engine.simplify w <*>
+  Engine.simplifyLambda outerfun (Just acc) (map (const Nothing) arrs) <*>
+  Engine.simplifyLambda innerfun (Just acc) (map Just arrs) <*>
+  mapM Engine.simplify acc <*>
+  mapM Engine.simplify arrs
+
+simplifySOAC (Write cs len lam ivs as) = do
+  cs' <- Engine.simplify cs
+  len' <- Engine.simplify len
+  lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
+  ivs' <- mapM Engine.simplify ivs
+  as' <- mapM Engine.simplify as
+  return $ Write cs' len' lam' ivs' as'
 
 soacRules :: (MonadBinder m,
               LocalScope (Lore m) m,
