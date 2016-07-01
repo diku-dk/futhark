@@ -35,8 +35,8 @@ module Futhark.Optimise.Simplifier.Engine
        , getVtable
        , localVtable
        , insertAllBindings
-       , defaultSimplifyBody
-       , defaultInspectBinding
+       , simplifyBody
+       , inspectBinding
          -- * Building blocks
        , SimplifiableOp (..)
        , Simplifiable (..)
@@ -142,11 +142,6 @@ class (MonadBinder m,
   getEngineState :: m (State m)
   putEngineState :: State m -> m ()
   passNeed :: m (a, Need (Lore m) -> Need (Lore m)) -> m a
-
-  simplifyBody :: [Diet] -> Body (InnerLore m) -> m Result
-  simplifyBody = defaultSimplifyBody
-  inspectBinding :: Binding (Lore m) -> m ()
-  inspectBinding = defaultInspectBinding
 
 addBindingEngine :: MonadEngine m =>
                     Binding (Lore m) -> m ()
@@ -436,10 +431,9 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
                      })
 
 -- | Simplify a single 'Body' inside an arbitrary 'MonadEngine'.
-defaultSimplifyBody :: MonadEngine m =>
-                       [Diet] -> Body (InnerLore m) -> m Result
-
-defaultSimplifyBody ds (Body _ bnds res) = do
+simplifyBody :: MonadEngine m =>
+                [Diet] -> Body (InnerLore m) -> m Result
+simplifyBody ds (Body _ bnds res) = do
   mapM_ simplifyBinding bnds
   simplifyResult ds res
 
@@ -471,10 +465,9 @@ simplifyBinding (Let pat _ e) = do
   inspectBinding =<<
     mkLetM (addWisdomToPattern pat' e') e'
 
-defaultInspectBinding :: MonadEngine m =>
-                         Binding (Lore m) -> m ()
-
-defaultInspectBinding bnd = do
+inspectBinding :: MonadEngine m =>
+                  Binding (Lore m) -> m ()
+inspectBinding bnd = do
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   simplified <- topDownSimplifyBinding rules vtable bnd
