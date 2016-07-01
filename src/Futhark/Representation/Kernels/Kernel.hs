@@ -70,11 +70,6 @@ data Kernel lore =
     (LambdaT lore)
     [SubExp]
     [VName]
-  | ChunkedMapKernel Certificates SubExp
-    KernelSize
-    StreamOrd
-    (LambdaT lore)
-    [VName]
   | WriteKernel Certificates SubExp
     (LambdaT lore)
     [VName]
@@ -194,14 +189,6 @@ mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
   mapOnKernelLambda tv fun <*>
   mapOnKernelLambda tv fold_fun <*>
   mapM (mapOnKernelSubExp tv) nes <*>
-  mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
-  ChunkedMapKernel <$>
-  mapOnKernelCertificates tv cs <*>
-  mapOnKernelSubExp tv w <*>
-  mapOnKernelSize tv kernel_size <*>
-  pure ordering <*>
-  mapOnKernelLambda tv fun <*>
   mapM (mapOnKernelVName tv) arrs
 mapKernelM tv (WriteKernel cs len lam ivs as) =
   WriteKernel <$>
@@ -417,20 +404,15 @@ kernelType (ScanKernel _ w size lam foldlam nes _) =
   in map (`arrayOfRow` w) (lambdaReturnType lam) ++
      map (`arrayOfRow` kernelWorkgroups size) (lambdaReturnType lam) ++
      map (`arrayOfRow` kernelTotalElements size) arr_row_tp
-kernelType (ChunkedMapKernel _ _ size _ fun _) =
-  map (`arrayOfRow` kernelNumThreads size) nonconcat_ret <>
-  map (`setOuterSize` kernelTotalElements size) concat_ret
-  where (nonconcat_ret, concat_ret) =
-          splitAt (chunkedKernelNonconcatOutputs fun) $ lambdaReturnType fun
 kernelType (WriteKernel _ _ lam _ input) =
   zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
         ws = map fst input
-kernelType (Kernel _ (num_groups, group_size, _) ts _ body) =
+kernelType (Kernel _ (num_groups, _, num_threads) ts _ body) =
   zipWith resultShape ts $ kernelBodyResult body
   where resultShape t AllThreadsReturn{} =
-          (t `arrayOfRow` group_size) `arrayOfRow` num_groups
+          t `arrayOfRow` num_threads
         resultShape t ThisThreadReturns{} =
           t `arrayOfRow` num_groups
         resultShape t (ConcatReturns _ w _ _) =
@@ -546,8 +528,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
-  usageInOp (ChunkedMapKernel _ _ _ _ fun arrs) =
-    usageInLambda fun arrs
   usageInOp (MapKernel _ _ _ _ inps _ body) =
     mconcat $
     map (UT.consumedUsage . kernelInputArray) $
@@ -658,23 +638,6 @@ typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
     TC.bad $ TC.TypeError $
     "Neutral value is of type " ++ prettyTuple startt ++
     ", but scan function returns type " ++ prettyTuple foldret ++ "."
-
-typeCheckKernel (ChunkedMapKernel cs w kernel_size _ fun arrs) = do
-  checkKernelCrud cs w kernel_size
-
-  arrargs <- TC.checkSOACArrayArgs w arrs
-
-  case lambdaParams fun of
-    [] -> TC.bad $ TC.TypeError "Chunked map function takes no parameters."
-    chunk_param : _
-      | Prim (IntType Int32) <- paramType chunk_param -> do
-          let args = (Prim int32, mempty) :
-                     (Prim int32, mempty) :
-                     [ (t `arrayOfRow` Var (paramName chunk_param), als)
-                     | (t, als) <- arrargs ]
-          TC.checkLambda fun args
-      | otherwise ->
-          TC.bad $ TC.TypeError "First parameter of chunked map function is not int32-typed."
 
 typeCheckKernel (WriteKernel cs w lam _ivs as) = do
   -- Requirements:
@@ -834,8 +797,6 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "MapKernel" $ bodyMetrics body
   opMetrics (ScanKernel _ _ _ lam foldfun _ _) =
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
-  opMetrics (ChunkedMapKernel _ _ _ _ fun _) =
-    inside "ChunkedMapKernel" $ lambdaMetrics fun
   opMetrics (WriteKernel _cs _len lam _ivs _as) =
     inside "WriteKernel" $ lambdaMetrics lam
   opMetrics (Kernel _ _ _ _ kbody) =
@@ -873,13 +834,6 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             PP.braces (commasep $ map ppr nes) <> comma </>
             commasep (map ppr arrs) <> comma </>
             ppr fun <> comma </> ppr foldfun)
-  ppr (ChunkedMapKernel cs w kernel_size ordering fun arrs) =
-    ppCertificates' cs <> text ("chunkedMapKernel"++ord_str) <>
-    parens (ppr w <> comma </>
-            ppr kernel_size <> comma </>
-            commasep (map ppr arrs) <> comma </>
-            ppr fun)
-    where ord_str = if ordering == Disorder then "Per" else ""
   ppr (WriteKernel cs len lam ivs as) =
     ppCertificates' cs <> text "writeKernel" <>
     parens (ppr len <> comma </>
