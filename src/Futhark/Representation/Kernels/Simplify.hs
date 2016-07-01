@@ -80,13 +80,6 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       mapM Engine.simplify nes <*>
       pure arrs'
 
-  simplifyOp (ChunkedMapKernel cs w kernel_size o lam arrs) = do
-    arrs' <- mapM Engine.simplify arrs
-    ChunkedMapKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
-      Engine.simplify kernel_size <*> pure o <*>
-      Engine.simplifyLambda lam Nothing (map Just arrs') <*>
-      pure arrs'
-
   simplifyOp (WriteKernel cs len lam ivs as) = do
     cs' <- Engine.simplify cs
     len' <- Engine.simplify len
@@ -234,7 +227,6 @@ topDownRules = [removeUnusedKernelInputs
                , simplifyKernelInputs
                , removeInvariantKernelOutputs
                , fuseScanIota
-               , fuseChunkedMapIota
                , fuseWriteIota
                , fuseKernelIota
                ]
@@ -342,72 +334,6 @@ removeDeadKernelOutputs (_, used) (Let pat _ (Op (MapKernel cs w index ispace in
   where pats_rets_and_ses = zip3 (patternValueElements pat) returns $ bodyResult body
         usedOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
 removeDeadKernelOutputs _ _ = cannotSimplify
-
-fuseChunkedMapIota :: (LocalScope (Lore m) m,
-                       MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
-                      TopDownRule m
-fuseChunkedMapIota vtable (Let pat _ (Op (ChunkedMapKernel cs w size o lam arrs)))
-  | Just f <- fuseIota vtable size comm lam arrs = do
-      (lam', arrs') <- f
-      letBind_ pat $ Op $ ChunkedMapKernel cs w size o lam' arrs'
-  where comm = case o of Disorder -> Commutative
-                         InOrder -> Noncommutative
-fuseChunkedMapIota _ _ = cannotSimplify
-
-fuseIota :: (LocalScope (Lore m) m, MonadBinder m) =>
-            ST.SymbolTable (Lore m)
-         -> KernelSize
-         -> Commutativity
-         -> LambdaT (Lore m)
-         -> [VName]
-         -> Maybe (m (LambdaT (Lore m), [VName]))
-fuseIota vtable size comm lam arrs
-  | null iota_params = Nothing
-  | otherwise = Just $ do
-      fold_body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
-        case comm of
-          Noncommutative -> do
-            start_offset <- letSubExp "iota_start_offset" $
-              PrimOp $ BinOp (Mul Int32) (Var thread_index) elems_per_thread
-            forM_ iota_params $ \(p, x) -> do
-              start <- letSubExp "iota_start" $
-                PrimOp $ BinOp (Add Int32) start_offset x
-              letBindNames'_ [p] $
-                PrimOp $ Iota (Var $ paramName chunk_param) start $
-                constant (1::Int32)
-          Commutative ->
-            forM_ iota_params $ \(p, x) -> do
-              start <- letSubExp "iota_start" $
-                PrimOp $ BinOp (Add Int32) (Var thread_index) x
-              letBindNames'_ [p] $
-                PrimOp $ Iota (Var $ paramName chunk_param) start
-                num_threads
-        mapM_ addBinding $ bodyBindings $ lambdaBody lam
-        return $ bodyResult $ lambdaBody lam
-      let (arr_params', arrs') = unzip params_and_arrs
-          lam' = lam { lambdaBody = fold_body
-                     , lambdaParams = Param thread_index (paramAttr chunk_param) :
-                       chunk_param :
-                       arr_params'
-                     }
-      return (lam', arrs')
-  where elems_per_thread = kernelElementsPerThread size
-        num_threads = kernelNumThreads size
-        (thread_index, chunk_param, params_and_arrs, iota_params) =
-          chunkedIotaParams vtable lam arrs
-
-chunkedIotaParams :: ST.SymbolTable lore
-                  -> LambdaT lore
-                  -> [VName]
-                  -> (VName,
-                      Param (LParamAttr lore),
-                      [(ParamT (LParamAttr lore), VName)],
-                      [(VName, SubExp)])
-chunkedIotaParams vtable lam arrs = (thread_index, chunk_param, params_and_arrs, iota_params)
-  where (thread_index, chunk_param, arr_params) =
-          partitionChunkedKernelLambdaParameters $ lambdaParams lam
-        (params_and_arrs, iota_params) =
-          iotaParams vtable arr_params arrs
 
 iotaParams :: ST.SymbolTable lore
            -> [ParamT attr]

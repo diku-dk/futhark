@@ -100,28 +100,16 @@ chunkedReduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
                     -> [VName]
                     -> m (Kernel Kernels)
 chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
-  let (_, chunk_size, _acc_params, arr_params) =
-        partitionChunkedKernelFoldParameters 0 $ lambdaParams fold_lam'
-      group_size = kernelWorkgroupSize step_one_size
-      ordering = case comm of Commutative -> Disorder
+  let ordering = case comm of Commutative -> Disorder
                               Noncommutative -> InOrder
+      group_size = kernelWorkgroupSize step_one_size
+      num_nonconcat = length nes
 
-  split_bound <- forM arr_params $ \arr_param -> do
-    let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunk_size)
-    return $ PatElem (paramName arr_param) BindVar chunk_t
-  let chunk_stm = SplitArray (paramName chunk_size, split_bound)
-                  ordering w (kernelElementsPerThread step_one_size) arrs
-      red_ts = take (length nes) $ lambdaReturnType fold_lam'
-      map_ts = map rowType $ drop (length nes) $ lambdaReturnType fold_lam'
+  (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
+    blockedPerThread w step_one_size ordering fold_lam' num_nonconcat arrs
+  let red_ts = map patElemType chunk_red_pes
+      map_ts = map patElemType chunk_map_pes
       ts = red_ts ++ map_ts
-
-  chunk_red_pes <- forM red_ts $ \red_t -> do
-    pe_name <- newVName "chunk_fold_red"
-    return $ PatElem pe_name BindVar red_t
-  chunk_map_pes <- forM map_ts $ \map_t -> do
-    pe_name <- newVName "chunk_fold_map"
-    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
-  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) $ lambdaBody fold_lam'
 
   chunk_red_pes' <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
@@ -145,7 +133,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   return $ Kernel cs
     (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size)
     ts thread_id $
-    KernelBody (chunk_stm:fold_chunk:combine_reds++[reduce_chunk]) rets
+    KernelBody (chunk_and_fold++combine_reds++[reduce_chunk]) rets
 
 reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
                 Certificates
@@ -282,19 +270,58 @@ blockedMap :: (MonadFreshNames m, HasScope Kernels m) =>
            -> m (Binding, [Binding])
 blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
   kernel_size <- blockedKernelSize w
-
   let num_nonconcat = length (lambdaReturnType lam) - patternSize concat_pat
+      num_groups = kernelWorkgroups kernel_size
+      group_size = kernelWorkgroupSize kernel_size
+      num_threads = kernelNumThreads kernel_size
+
+  lam' <- kerneliseLambda nes lam
+  (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
+    blockedPerThread w kernel_size ordering lam' num_nonconcat arrs
 
   nonconcat_pat <-
     fmap (Pattern []) $ forM (take num_nonconcat $ lambdaReturnType lam) $ \t -> do
       name <- newVName "nonconcat"
-      return $ PatElem name BindVar $ t `arrayOfRow` kernelNumThreads kernel_size
+      return $ PatElem name BindVar $ t `arrayOfRow` num_threads
 
   let pat = nonconcat_pat <> concat_pat
+      ts = map patElemType $ chunk_red_pes ++ chunk_map_pes
 
-  lam' <- kerneliseLambda nes lam
+  nonconcat_rets <- forM chunk_red_pes $ \pe ->
+    return $ AllThreadsReturn $ Var $ patElemName pe
+  concat_rets <- forM chunk_map_pes $ \pe ->
+    return $ ConcatReturns ordering w (kernelElementsPerThread kernel_size) $ patElemName pe
 
-  return $ Let pat () $ Op $ ChunkedMapKernel cs w kernel_size ordering lam' arrs
+  thread_id <- newVName "thread_id"
+  return $ Let pat () $ Op $ Kernel cs
+    (num_groups, group_size, num_threads) ts thread_id $
+    KernelBody chunk_and_fold $ nonconcat_rets ++ concat_rets
+
+blockedPerThread :: MonadFreshNames m =>
+                    SubExp -> KernelSize -> StreamOrd -> Lambda
+                 -> Int -> [VName]
+                 -> m ([PatElem], [PatElem], [KernelStm Kernels])
+blockedPerThread w kernel_size ordering lam num_nonconcat arrs = do
+  let (_, chunk_size, [], arr_params) =
+        partitionChunkedKernelFoldParameters 0 $ lambdaParams lam
+
+  split_bound <- forM arr_params $ \arr_param -> do
+    let chunk_t = paramType arr_param `setOuterSize` Var (paramName chunk_size)
+    return $ PatElem (paramName arr_param) BindVar chunk_t
+  let chunk_stm = SplitArray (paramName chunk_size, split_bound)
+                  ordering w (kernelElementsPerThread kernel_size) arrs
+      red_ts = take num_nonconcat $ lambdaReturnType lam
+      map_ts = map rowType $ drop num_nonconcat $ lambdaReturnType lam
+
+  chunk_red_pes <- forM red_ts $ \red_t -> do
+    pe_name <- newVName "chunk_fold_red"
+    return $ PatElem pe_name BindVar red_t
+  chunk_map_pes <- forM map_ts $ \map_t -> do
+    pe_name <- newVName "chunk_fold_map"
+    return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
+  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) $ lambdaBody lam
+
+  return (chunk_red_pes, chunk_map_pes, [chunk_stm,fold_chunk])
 
 blockedKernelSize :: (MonadBinder m, Lore m ~ Kernels) =>
                      SubExp -> m KernelSize

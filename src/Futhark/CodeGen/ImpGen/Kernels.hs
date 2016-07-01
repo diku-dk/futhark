@@ -161,94 +161,6 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (ChunkedMapKernel _ _ kernel_size o lam _) = do
-    (local_id, group_id, _, _, _) <- kernelSizeNames
-
-    (num_groups, group_size, per_thread_chunk, num_elements, _, num_threads) <-
-      compileKernelSize kernel_size
-
-    let num_nonconcat = chunkedKernelNonconcatOutputs lam
-        (nonconcat_targets, concat_targets) = splitAt num_nonconcat dest
-        (global_id, arr_chunk_param, _) =
-          partitionChunkedKernelLambdaParameters $ lambdaParams lam
-
-    (call_with_prologue, prologue) <-
-      makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
-      ImpGen.withPrimVar local_id int32 $
-      ImpGen.declaringPrimVar local_id int32 $
-      ImpGen.declaringPrimVar group_id int32 $
-      ImpGen.declaringLParams (lambdaParams lam) $ do
-
-        ImpGen.emit $
-          Imp.Op (Imp.GetLocalId local_id 0) <>
-          Imp.Op (Imp.GetGroupId group_id 0) <>
-          Imp.Op (Imp.GetGlobalId global_id 0)
-
-        let indexNonconcatTarget (Prim t) (ImpGen.ArrayDestination
-                                           (ImpGen.CopyIntoMemory dest_loc) [_]) = do
-              (mem, space, offset) <-
-                ImpGen.fullyIndexArray' dest_loc [ImpGen.varIndex global_id] t
-              return $ ImpGen.ArrayElemDestination mem t space offset
-            indexNonconcatTarget _ (ImpGen.ArrayDestination
-                                    (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
-              let dest_loc' = ImpGen.sliceArray dest_loc
-                              [ImpGen.varIndex global_id]
-              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') dest_dims
-            indexNonconcatTarget _ _ =
-              throwError "indexNonconcatTarget: invalid target."
-            indexConcatTarget (ImpGen.ArrayDestination
-                               (ImpGen.CopyIntoMemory dest_loc) (_:dest_dims)) = do
-              let dest_loc' = ImpGen.offsetArray dest_loc $
-                              ImpGen.sizeToScalExp per_thread_chunk *
-                              ImpGen.varIndex global_id
-              return $ ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') $
-                Nothing : dest_dims
-            indexConcatTarget _ =
-              throwError "indexConcatTarget: invalid target."
-        nonconcat_elem_targets <-
-          zipWithM indexNonconcatTarget (lambdaReturnType lam) nonconcat_targets
-        concat_elem_targets <- mapM indexConcatTarget concat_targets
-
-        let map_dest =
-              ImpGen.Destination $ nonconcat_elem_targets <> concat_elem_targets
-
-        map_op <-
-          ImpGen.subImpM_ inKernelOperations $ do
-            computeThreadChunkSize
-              comm
-              (Imp.ScalarVar global_id)
-              (Imp.innerExp $ Imp.dimSizeToExp num_threads)
-              (ImpGen.dimSizeToExp per_thread_chunk)
-              (ImpGen.dimSizeToExp num_elements) $
-              paramName arr_chunk_param
-            ImpGen.compileBody map_dest $ lambdaBody lam
-
-        let bound_in_kernel = map paramName (lambdaParams lam) ++
-                              [global_id,
-                               local_id,
-                               group_id]
-
-        return $ \prologue -> do
-          let body = mconcat [prologue, map_op]
-
-          (uses, local_memory) <- computeKernelUses dest (freeIn body) bound_in_kernel
-          let local_memory' = map (ensureAlignment $ alignmentMap body) local_memory
-
-          ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
-            { Imp.kernelBody = body
-            , Imp.kernelLocalMemory = local_memory'
-            , Imp.kernelUses = uses
-            , Imp.kernelNumGroups = num_groups
-            , Imp.kernelGroupSize = group_size
-            , Imp.kernelName = global_id
-            , Imp.kernelDesc = Just "chunkedmap"
-            }
-    call_with_prologue prologue
-    where comm = case o of Disorder -> Commutative
-                           InOrder -> Noncommutative
-
-kernelCompiler
-  (ImpGen.Destination dest)
   (ScanKernel _ _ kernel_size lam foldlam nes arrs) = do
     let (arrs_dest, partials_dest, map_dest) =
           splitAt3 (length nes) (length nes) dest
@@ -1194,12 +1106,8 @@ compileKernelResult _ _ dest (ThisThreadReturns who what) = do
     Imp.If (Imp.CmpOp (CmpEq int32) (Imp.ScalarVar local_id) (ImpGen.compileSubExp who))
     write_result mempty
 
-compileKernelResult _ _ dest (AllThreadsReturn what) = do
-  local_id <- newVName "local_id"
-  group_id <- newVName "group_id"
-  ImpGen.declaringPrimVar local_id int32 $
-    ImpGen.declaringPrimVar group_id int32 $
-    ImpGen.copyDWIMDest dest [ImpGen.varIndex group_id, ImpGen.varIndex local_id] what []
+compileKernelResult global_tid _ dest (AllThreadsReturn what) =
+  ImpGen.copyDWIMDest dest [ImpGen.varIndex global_tid] what []
 
 compileKernelResult global_tid _ dest (ConcatReturns InOrder _ per_thread_elems what) = do
   ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
