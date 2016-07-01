@@ -712,23 +712,26 @@ allocInKernelStms :: (SubExp, SubExp, SubExp)
                   -> [KernelStm In.Kernels]
                   -> ([KernelStm ExplicitMemory] -> AllocM a)
                   -> AllocM a
-allocInKernelStms groups_and_size thread_id origstms m = allocInStms' mempty origstms []
-  where allocInStms' _ [] stms' =
+allocInKernelStms groups_and_size thread_id origstms m = allocInStms' origstms []
+  where allocInStms' [] stms' =
           m stms'
-        allocInStms' size_substs (x:xs) stms' = do
-          (allocstms, size_substs') <- allocInKernelStm groups_and_size size_substs thread_id x
+        allocInStms' (x:xs) stms' = do
+          allocstms <- allocInKernelStm groups_and_size thread_id x
           let summaries = mconcat $ map scopeOf allocstms
-          localScope summaries $
-            allocInStms' size_substs' xs (stms'++allocstms)
+          local (<>mconcat (map sizeSubst allocstms)) $ localScope summaries $
+            allocInStms' xs (stms'++allocstms)
+
+sizeSubst :: KernelStm ExplicitMemory -> ChunkMap
+sizeSubst (SplitArray (size,_) _ _ elems_per_thread _) =
+  HM.singleton size elems_per_thread
+sizeSubst _ = mempty
 
 allocInKernelStm :: (SubExp, SubExp, SubExp)
-                 -> ChunkBounds
                  -> VName
                  -> KernelStm In.Kernels
-                 -> AllocM ([KernelStm ExplicitMemory],
-                            ChunkBounds)
+                 -> AllocM [KernelStm ExplicitMemory]
 allocInKernelStm
-  (_, _, num_threads) size_substs thread_id
+  (_, _, num_threads) thread_id
   (SplitArray (size,chunks) o w elems_per_thread arrs) = do
 
   chunks' <- forM (zip chunks arrs) $ \(chunk, arr) -> do
@@ -760,18 +763,16 @@ allocInKernelStm
                    perm)
                  [SE.Id thread_id int32]
     return chunk { patElemAttr = attr }
-  return ([SplitArray (size, chunks') o w elems_per_thread arrs],
-          HM.insert size elems_per_thread size_substs)
+  return [SplitArray (size, chunks') o w elems_per_thread arrs]
 
-allocInKernelStm (_, _group_size, num_threads) size_substs thread_index (Thread pes body) = do
+allocInKernelStm (_, _group_size, num_threads) thread_index (Thread pes body) = do
   body' <- allocInBodyNoDirect body
   pes' <- mapM threadMemory pes
-  return ([Thread pes' body'], size_substs)
+  return [Thread pes' body']
   where thread_index' = SE.intSubExpToScalExp $ Var thread_index
         threadMemory pe
           | Array bt shape u <- patElemType pe = do
-              let pe_t = substituteBounds size_substs $ patElemType pe
-              (_, mem) <- allocForArray (pe_t `arrayOfRow` num_threads) DefaultSpace
+              (_, mem) <- allocForArray (patElemType pe `arrayOfRow` num_threads) DefaultSpace
               let dims = map SE.intSubExpToScalExp $ shapeDims shape ++ [num_threads]
                   perm = (length dims-1) : [0..length dims-2]
                   root_ixfun = IxFun.iota dims
@@ -783,16 +784,16 @@ allocInKernelStm (_, _group_size, num_threads) size_substs thread_index (Thread 
           | otherwise = fail $ "threadMemory: pattern element " ++
                         pretty pe ++ " not an array or prim."
 
-allocInKernelStm _size size_substs _thread_index (Combine pe v) = do
+allocInKernelStm _size _thread_index (Combine pe v) = do
   let pe_t = patElemType pe
       shape = arrayShape pe_t
       bt = elemType pe_t
   (_, mem) <- allocForArray pe_t $ Space "local"
   let ixfun = IxFun.iota $ map SE.intSubExpToScalExp $ shapeDims shape
       attr = ArrayMem bt shape NoUniqueness mem ixfun
-  return ([Combine pe { patElemAttr = attr} v], size_substs)
+  return [Combine pe { patElemAttr = attr} v]
 
-allocInKernelStm (_, group_size, _) size_substs global_tid (GroupReduce pes w lam input) = do
+allocInKernelStm (_, group_size, _) global_tid (GroupReduce pes w lam input) = do
   summaries <- mapM lookupArraySummary arrs
   lam' <- allocInReduceLambda lam group_size summaries
   let local_tid = SE.Id global_tid int32 `SE.SRem`
@@ -803,7 +804,7 @@ allocInKernelStm (_, group_size, _) size_substs global_tid (GroupReduce pes w la
         let ixfun' = IxFun.applyInd ixfun [local_tid]
         in return pe { patElemAttr = ArrayMem bt shape u mem ixfun' }
       t -> return pe { patElemAttr = Scalar $ elemType t }
-  return ([GroupReduce pes' w lam' input], size_substs)
+  return [GroupReduce pes' w lam' input]
   where arrs = map snd input
 
 simplifiable :: (Engine.MonadEngine m,
@@ -829,11 +830,3 @@ bindPatternWithAllocations types names e = do
   (pat,prebnds) <- runPatAllocM (patternWithAllocations names e) types
   mapM_ bindAllocBinding prebnds
   return pat
-
-type ChunkBounds = HM.HashMap VName SubExp
-
-substituteBounds :: ChunkBounds -> Type -> Type
-substituteBounds substs t = t `setArrayDims` map subst (arrayDims t)
-  where subst (Var v)
-          | Just se <- HM.lookup v substs = se
-        subst d = d
