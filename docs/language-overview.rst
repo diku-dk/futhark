@@ -343,9 +343,9 @@ imperative style.  Consider a function for computing the *n* first
 Fibonacci numbers::
 
   fun []int fib(int n) =
-    // Create "empty" array.
+    -- Create "empty" array.
     let arr = iota(n) in
-    // Fill array with Fibonacci numbers.
+    -- Fill array with Fibonacci numbers.
     loop (arr) = for i < n-2 do
                    let arr[i+2] = arr[i] + arr[i+1]
                    in arr
@@ -426,7 +426,7 @@ the binding ``let b = a``, the variable ``b`` will alias
 two-dimensional array, the row will alias its source::
 
   let b = a[0] in
-  ... // b is aliased to a (assuming a is not one-dimensional)
+  ... -- b is aliased to a (assuming a is not one-dimensional)
 
 In :ref:`futhark-sharing` below, we will cover sharing and sharing
 analysis in greater detail.
@@ -456,7 +456,7 @@ rules:
     violation::
 
       let b = a with [i] <- 2 in
-      f(b,a) // \emp{Error:} a used after being source in a let-with
+      f(b,a) -- Error: a used after being source in a let-with
 
 
   **Uniqueness Rule 2**
@@ -469,7 +469,7 @@ rules:
     example violation::
 
       fun *[]int broken([][]int a, int i) =
-        a[i] // Return value aliased with 'a'.
+        a[i] -- Return value aliased with 'a'.
 
   **Uniqueness Rule 3**
 
