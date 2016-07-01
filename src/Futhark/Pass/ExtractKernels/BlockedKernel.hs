@@ -108,7 +108,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
     blockedPerThread w step_one_size ordering fold_lam' num_nonconcat arrs
   let red_ts = map patElemType chunk_red_pes
-      map_ts = map patElemType chunk_map_pes
+      map_ts = map (rowType . patElemType) chunk_map_pes
       ts = red_ts ++ map_ts
 
   chunk_red_pes' <- forM red_ts $ \red_t -> do
