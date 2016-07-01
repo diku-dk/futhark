@@ -105,11 +105,35 @@ optimiseBinding (Let pat () e) = pure . Let pat () <$> mapExpM optimise e
                 optimiseKernel = local (\env -> env { envCopyInit = True }) .
                                  mapKernelM identityKernelMapper
                                  { mapOnKernelBody = optimiseBody
+                                 , mapOnKernelKernelBody = optimiseKernelBody
                                  , mapOnKernelLambda = optimiseLambda
                                  }
-                optimiseLambda lam = do
-                  body <- inScopeOf lam $ optimiseBody $ lambdaBody lam
-                  return lam { lambdaBody = body }
+
+optimiseKernelBody :: MonadFreshNames m =>
+                      KernelBody ExplicitMemory
+                   -> DoubleBufferM m (KernelBody ExplicitMemory)
+optimiseKernelBody kbody = do
+  stms' <- optimiseKernelStms $ kernelBodyStms kbody
+  return $ kbody { kernelBodyStms = stms' }
+
+  where optimiseKernelStms [] =
+          return []
+        optimiseKernelStms (e:es) = do
+          e' <- optimiseKernelStm e
+          es' <- inScopeOf e' $ optimiseKernelStms es
+          return $ e' : es'
+
+        optimiseKernelStm (Thread pes body) =
+          Thread pes <$> optimiseBody body
+        optimiseKernelStm (GroupReduce pes w lam input) =
+          GroupReduce pes w <$> optimiseLambda lam <*> pure input
+        optimiseKernelStm stm =
+          return stm
+
+optimiseLambda :: MonadFreshNames m => Lambda -> DoubleBufferM m Lambda
+optimiseLambda lam = do
+  body <- inScopeOf lam $ optimiseBody $ lambdaBody lam
+  return lam { lambdaBody = body }
 
 optimiseLoop :: MonadFreshNames m =>
                 [(FParam, SubExp)] -> [(FParam, SubExp)] -> Body

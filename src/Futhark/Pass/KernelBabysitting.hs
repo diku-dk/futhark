@@ -61,32 +61,15 @@ transformBinding expmap (Let pat () (DoLoop ctx val form body)) = do
   return expmap
 
 transformBinding expmap (Let pat ()
-                         (Op (ReduceKernel cs w kernel_size comm parlam seqlam arrs)))
-  | num_groups /= constant (1::Int32) = do
-  -- We want to pad and transpose the input arrays.
-
-  (w', kernel_size', arrs') <-
-    rearrangeScanReduceInputs comm cs w kernel_size arrs
-
-  parlam' <- transformLambda parlam
-  seqlam' <- transformLambda seqlam
-
-  addBinding $ Let pat () $ Op $
-    ReduceKernel cs w' kernel_size' comm parlam' seqlam' arrs'
-  return expmap
-  where num_groups = kernelWorkgroups kernel_size
-
-transformBinding expmap (Let pat ()
                          (Op (ChunkedMapKernel cs w kernel_size o lam arrs))) = do
   -- We want to pad and transpose the input arrays.
 
-  (w', kernel_size', arrs') <-
-    rearrangeScanReduceInputs comm cs w kernel_size arrs
+  arrs' <- rearrangeScanReduceInputs comm cs w kernel_size arrs
 
   lam' <- transformLambda lam
 
   addBinding $ Let pat () $ Op $
-    ChunkedMapKernel cs w' kernel_size' o lam' arrs'
+    ChunkedMapKernel cs w kernel_size o lam' arrs'
   return expmap
   where comm = case o of Disorder -> Commutative
                          InOrder -> Noncommutative
@@ -102,6 +85,12 @@ transformBinding expmap (Let pat ()
   addBinding $ Let pat () $ Op $
     ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
+
+transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id body))) = do
+  body' <- transformKernelBody num_threads cs body
+  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id body'
+  return expmap
+  where (_, _, num_threads) = size
 
 transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
   body' <- inScopeOf ((i, IndexInfo) :
@@ -209,38 +198,29 @@ rearrangeScanReduceInputs :: Commutativity
                           -> SubExp
                           -> KernelSize
                           -> [VName]
-                          -> BabysitM (SubExp, KernelSize, [VName])
-rearrangeScanReduceInputs Commutative _ w kernel_size arrs =
-  return (w, kernel_size, arrs)
+                          -> BabysitM [VName]
+rearrangeScanReduceInputs Commutative _ _ _ arrs =
+  return arrs
 
 rearrangeScanReduceInputs Noncommutative cs w kernel_size arrs = do
-  (kernel_size', w', padding) <- paddedScanReduceInput w kernel_size
-  arrs' <- mapM (rearrangeScanReduceInput cs num_threads padding w' $
-                 kernelElementsPerThread kernel_size) arrs
-  return (w', kernel_size', arrs')
+  (w_padded, padding) <- paddedScanReduceInput w num_threads
+  mapM (rearrangeScanReduceInput cs num_threads padding w w_padded $
+         kernelElementsPerThread kernel_size) arrs
   where num_threads = kernelNumThreads kernel_size
 
-paddedScanReduceInput :: SubExp -> KernelSize
-                      -> BabysitM (KernelSize, SubExp, SubExp)
-paddedScanReduceInput w kernel_size = do
-  w' <- letSubExp "padded_size" =<<
-        eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
-  padding <- letSubExp "padding" $ PrimOp $ BinOp (Sub Int32) w' w
-
-  offset_multiple <-
-    letSubExp "offset_multiple" =<<
-    eDivRoundingUp Int32 (eSubExp w') (eSubExp num_threads)
-
-  let kernel_size' =
-        kernel_size { kernelThreadOffsetMultiple = offset_multiple }
-  return (kernel_size', w', padding)
-  where num_threads = kernelNumThreads kernel_size
+paddedScanReduceInput :: SubExp -> SubExp
+                      -> BabysitM (SubExp, SubExp)
+paddedScanReduceInput w num_threads = do
+  w_padded <- letSubExp "padded_size" =<<
+              eRoundToMultipleOf Int32 (eSubExp w) (eSubExp num_threads)
+  padding <- letSubExp "padding" $ PrimOp $ BinOp (Sub Int32) w_padded w
+  return (w_padded, padding)
 
 rearrangeScanReduceInput :: MonadBinder m =>
                             Certificates
-                         -> SubExp -> SubExp -> SubExp -> SubExp -> VName
+                         -> SubExp -> SubExp -> SubExp -> SubExp -> SubExp -> VName
                          -> m VName
-rearrangeScanReduceInput cs num_threads padding w' elements_per_thread arr = do
+rearrangeScanReduceInput cs num_threads padding w w_padded elements_per_thread arr = do
   arr_t <- lookupType arr
   arr_padded <- padArray arr_t
   rearrange (baseString arr) arr_padded (rowType arr_t)
@@ -252,7 +232,7 @@ rearrangeScanReduceInput cs num_threads padding w' elements_per_thread arr = do
             letExp (baseString arr <> "_padding") $
             PrimOp $ Scratch (elemType arr_t) (shapeDims padding_shape)
           letExp (baseString arr <> "_padded") $
-            PrimOp $ Concat [] 0 arr [arr_padding] w'
+            PrimOp $ Concat [] 0 arr [arr_padding] w_padded
 
         rearrange arr_name arr_padded row_type = do
           let row_dims = arrayDims row_type
@@ -271,6 +251,28 @@ rearrangeScanReduceInput cs num_threads padding w' elements_per_thread arr = do
           arr_extradim_inv_tr <-
             letExp (arr_name <> "_extradim_inv_tr") $
             PrimOp $ Rearrange [] tr_perm_inv arr_extradim_manifested
-          letExp (arr_name <> "_inv_tr") $
-            PrimOp $ Reshape [] (reshapeOuter [DimNew w'] 2 extradim_shape)
+          arr_inv_tr <- letExp (arr_name <> "_inv_tr") $
+            PrimOp $ Reshape [] (reshapeOuter [DimNew w_padded] 2 extradim_shape)
             arr_extradim_inv_tr
+          letExp (arr_name <> "_inv_tr_init") $
+            PrimOp $ Split [] 0 [w] arr_inv_tr
+
+transformKernelBody :: SubExp -> Certificates
+                    -> KernelBody Kernels
+                    -> BabysitM (KernelBody Kernels)
+transformKernelBody num_threads cs (KernelBody stms res) =
+  KernelBody <$> mapM transformKernelStm stms <*> pure res
+  where boundInKernel = (`elem` HM.keys (scopeOf stms))
+
+        transformKernelStm (SplitArray dest InOrder w elems_per_thread arrs) = do
+          (w_padded, padding) <- paddedScanReduceInput w num_threads
+          SplitArray dest InOrder w elems_per_thread <$>
+            mapM (maybeRearrange w w_padded padding elems_per_thread) arrs
+        transformKernelStm stm =
+          return stm
+
+        maybeRearrange w w_padded padding elems_per_thread arr
+          | boundInKernel arr =
+              return arr
+          | otherwise =
+              rearrangeScanReduceInput cs num_threads padding w w_padded elems_per_thread arr

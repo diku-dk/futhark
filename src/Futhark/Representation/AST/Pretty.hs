@@ -168,9 +168,8 @@ instance PrettyLore lore => Pretty (Binding lore) where
     case (linebreak, ppExpLore attr e) of
       (True, Nothing) -> equals </>
                          indent 2 e'
-      (_, Just annot) -> equals </>
-                         indent 2 (annot </>
-                                   e')
+      (_, Just ann) -> equals </>
+                       indent 2 (ann </> e')
       (False, Nothing) -> equals <+> align e'
     where e' = ppr e
           linebreak = case e of
@@ -233,7 +232,7 @@ instance PrettyLore lore => Pretty (Exp lore) where
                              apply (map (align . ppr . fst) args)
   ppr (Op op) = ppr op
   ppr (DoLoop ctx val form loopbody) =
-    annotf $
+    annot (mapMaybe ppAnnot (ctxparams++valparams)) $
     text "loop" <+> ppPattern ctxparams valparams <+>
     equals <+> ppTuple' (ctxinit++valinit) </>
     (case form of
@@ -245,20 +244,13 @@ instance PrettyLore lore => Pretty (Exp lore) where
     indent 2 (ppr loopbody)
     where (ctxparams, ctxinit) = unzip ctx
           (valparams, valinit) = unzip val
-          annotf = case mapMaybe ppAnnot (ctxparams++valparams) of
-                     []     -> id
-                     annots -> (stack annots</>)
-
 
 instance PrettyLore lore => Pretty (Lambda lore) where
   ppr (Lambda params body rettype) =
-    annotf $
+    annot (mapMaybe ppAnnot params) $
     text "fn" <+> ppTuple' rettype <+>
     parens (commasep (map ppr params)) <+>
     text "=>" </> indent 2 (ppr body)
-    where annotf = case mapMaybe ppAnnot params of
-                     []     -> id
-                     annots -> (stack annots</>)
 
 instance PrettyLore lore => Pretty (ExtLambda lore) where
   ppr (ExtLambda params body rettype) =
@@ -271,16 +263,13 @@ instance Pretty ExtRetType where
 
 instance PrettyLore lore => Pretty (FunDef lore) where
   ppr (FunDef entry name rettype fparams body) =
-    annotf $
+    annot (mapMaybe ppAnnot fparams) $
     text fun <+> ppr rettype <+>
     text (nameToString name) <//>
     apply (map ppr fparams) <+>
     equals </> indent 2 (ppr body)
     where fun | entry = "entry"
               | otherwise = "fun"
-          annotf = case mapMaybe ppAnnot fparams of
-                     []     -> id
-                     annots -> (stack annots</>)
 
 instance PrettyLore lore => Pretty (Prog lore) where
   ppr = stack . punctuate line . map ppr . progFunctions

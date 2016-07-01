@@ -39,6 +39,7 @@ module Futhark.TypeCheck
   , checkBody
   , consume
   , consumeOnlyParams
+  , binding
   )
   where
 

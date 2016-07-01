@@ -47,6 +47,7 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyFun
        , simplifyLambda
        , simplifyLambdaNoHoisting
+       , simplifyLambdaNoHoistThese
        , simplifyExtLambda
        , simplifyParam
        , bindLParams
@@ -644,19 +645,26 @@ simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)
                -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Lore m))
-simplifyLambda = simplifyLambdaMaybeHoist True
+simplifyLambda = simplifyLambdaMaybeHoist $ isFalse True
 
 simplifyLambdaNoHoisting :: MonadEngine m =>
                             Lambda (InnerLore m)
                          -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
-simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist False
+simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist $ isFalse False
+
+simplifyLambdaNoHoistThese :: MonadEngine m =>
+                              Names
+                           -> Lambda (InnerLore m)
+                           -> Maybe [SubExp] -> [Maybe VName]
+                           -> m (Lambda (Lore m))
+simplifyLambdaNoHoistThese these = simplifyLambdaMaybeHoist $ hasFree these
 
 simplifyLambdaMaybeHoist :: MonadEngine m =>
-                            Bool -> Lambda (InnerLore m)
+                            BlockPred (Lore m) -> Lambda (InnerLore m)
                          -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
-simplifyLambdaMaybeHoist hoisting lam@(Lambda params body rettype) nes arrs = do
+simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) nes arrs = do
   params' <- mapM (simplifyParam simplify) params
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
@@ -666,7 +674,7 @@ simplifyLambdaMaybeHoist hoisting lam@(Lambda params body rettype) nes arrs = do
     enterLoop $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (isFalse hoisting `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
+    blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
       simplifyBody (map (const Observe) rettype) body
   rettype' <- mapM simplify rettype
   let consumed_in_body = consumedInBody body'

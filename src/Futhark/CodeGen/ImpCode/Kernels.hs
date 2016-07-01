@@ -12,6 +12,7 @@ module Futhark.CodeGen.ImpCode.Kernels
   , CallKernel (..)
   , MapKernel (..)
   , Kernel (..)
+  , LocalMemoryUse
   , KernelUse (..)
   , module Futhark.CodeGen.ImpCode
   -- * Utility functions
@@ -64,9 +65,8 @@ data MapKernel = MapKernel { mapKernelThreadNum :: VName
 
 data Kernel = Kernel
               { kernelBody :: Imp.Code KernelOp
-              , kernelLocalMemory :: [(VName, MemSize, PrimType)]
-                -- ^ In-kernel name, per-workgroup size in bytes, and
-                -- alignment restriction.
+              , kernelLocalMemory :: [LocalMemoryUse]
+              -- ^ The local memory used by this kernel.
 
               , kernelUses :: [KernelUse]
                 -- ^ The host variables referenced by the kernel.
@@ -80,6 +80,10 @@ data Kernel = Kernel
                -- alphanumeric and without spaces.
               }
             deriving (Show)
+
+-- ^ In-kernel name, per-workgroup size in bytes, and
+-- alignment restriction.
+type LocalMemoryUse = (VName, MemSize, PrimType)
 
 data KernelUse = ScalarUse VName PrimType
                | MemoryUse VName Imp.DimSize
