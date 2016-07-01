@@ -231,9 +231,9 @@ instance (Attributes lore, Aliased lore) => AliasedOp (SOAC lore) where
   opAliases (Stream _ _ form lam _) =
     let a1 = case form of
                MapLike _          -> []
-               RedLike _ _ lam0 _ -> bodyAliases $ lambdaBody lam0
+               RedLike _ _ lam0 _ -> map (const mempty) $ lambdaReturnType lam0
                Sequential _       -> []
-    in  a1 ++ bodyAliases (extLambdaBody lam)
+    in a1 ++ map (const mempty) (extLambdaReturnType lam)
   opAliases (Write _cs _len lam _ivs _as) =
     map (const mempty) $ lambdaReturnType lam
 
@@ -401,7 +401,7 @@ typeCheckSOAC (Stream ass size form lam arrexps) = do
         RedLike _ _ lam0 _ -> do
             let acct = map TC.argType accargs
                 outerRetType = lambdaReturnType lam0
-            TC.checkLambda lam0 (accargs ++ accargs)
+            TC.checkLambda lam0 $ map TC.noArgAliases $ accargs ++ accargs
             unless (acct == outerRetType) $
                 TC.bad $ TC.TypeError $
                 "Initial value is of type " ++ prettyTuple acct ++
