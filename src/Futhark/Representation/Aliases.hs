@@ -12,30 +12,11 @@ module Futhark.Representation.Aliases
        , ConsumedInExp
        , BodyAliasing
        , module Futhark.Representation.AST.Attributes.Aliases
-         -- * Syntax types
-       , Prog
-       , Body
-       , Binding
-       , Pattern
-       , PrimOp
-       , Exp
-       , Lambda
-       , ExtLambda
-       , FunDef
-       , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
-       , AST.LambdaT(Lambda)
-       , AST.ExtLambdaT(ExtLambda)
-       , AST.BodyT(Body)
-       , AST.PatternT(Pattern)
-       , AST.ProgT(Prog)
-       , AST.ExpT(PrimOp)
-       , AST.ExpT(DoLoop)
-       , AST.FunDefT(FunDef)
          -- * Adding aliases
        , addAliasesToPattern
        , mkAliasedLetBinding
@@ -64,10 +45,7 @@ import qualified Data.HashSet as HS
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDef, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.AST.Traversals
@@ -126,22 +104,11 @@ instance (Annotations lore, CanBeAliased (Op lore)) =>
   type BodyAttr (Aliases lore) = (BodyAliasing, BodyAttr lore)
   type FParamAttr (Aliases lore) = FParamAttr lore
   type LParamAttr (Aliases lore) = LParamAttr lore
-  type RetType (Aliases lore) = AST.RetType lore
+  type RetType (Aliases lore) = RetType lore
   type Op (Aliases lore) = OpWithAliases (Op lore)
 
 instance AliasesOf (VarAliases, attr) where
   aliasesOf = unNames . fst
-
-type Prog lore = AST.Prog (Aliases lore)
-type PrimOp lore = AST.PrimOp (Aliases lore)
-type Exp lore = AST.Exp (Aliases lore)
-type Body lore = AST.Body (Aliases lore)
-type Binding lore = AST.Binding (Aliases lore)
-type Pattern lore = AST.Pattern (Aliases lore)
-type Lambda lore = AST.Lambda (Aliases lore)
-type ExtLambda lore = AST.ExtLambda (Aliases lore)
-type FunDef lore = AST.FunDef (Aliases lore)
-type RetType lore = AST.RetType (Aliases lore)
 
 instance (Attributes lore, CanBeAliased (Op lore)) => Attributes (Aliases lore) where
   expContext pat e = do
@@ -222,51 +189,51 @@ removeScopeAliases = HM.map unAlias
         unAlias IndexInfo = IndexInfo
 
 removeProgAliases :: CanBeAliased (Op lore) =>
-                     AST.Prog (Aliases lore) -> AST.Prog lore
+                     Prog (Aliases lore) -> Prog lore
 removeProgAliases = rephraseProg removeAliases
 
 removeFunDefAliases :: CanBeAliased (Op lore) =>
-                       AST.FunDef (Aliases lore) -> AST.FunDef lore
+                       FunDef (Aliases lore) -> FunDef lore
 removeFunDefAliases = rephraseFunDef removeAliases
 
 removeExpAliases :: CanBeAliased (Op lore) =>
-                    AST.Exp (Aliases lore) -> AST.Exp lore
+                    Exp (Aliases lore) -> Exp lore
 removeExpAliases = rephraseExp removeAliases
 
 removeBodyAliases :: CanBeAliased (Op lore) =>
-                     AST.Body (Aliases lore) -> AST.Body lore
+                     Body (Aliases lore) -> Body lore
 removeBodyAliases = rephraseBody removeAliases
 
 removeBindingAliases :: CanBeAliased (Op lore) =>
-                        AST.Binding (Aliases lore) -> AST.Binding lore
+                        Binding (Aliases lore) -> Binding lore
 removeBindingAliases = rephraseBinding removeAliases
 
 removeLambdaAliases :: CanBeAliased (Op lore) =>
-                       AST.Lambda (Aliases lore) -> AST.Lambda lore
+                       Lambda (Aliases lore) -> Lambda lore
 removeLambdaAliases = rephraseLambda removeAliases
 
 removeExtLambdaAliases :: CanBeAliased (Op lore) =>
-                          AST.ExtLambda (Aliases lore) -> AST.ExtLambda lore
+                          ExtLambda (Aliases lore) -> ExtLambda lore
 removeExtLambdaAliases = rephraseExtLambda removeAliases
 
-removePatternAliases :: AST.PatternT (Names', a)
-                     -> AST.PatternT a
+removePatternAliases :: PatternT (Names', a)
+                     -> PatternT a
 removePatternAliases = rephrasePattern snd
 
 addAliasesToPattern :: (Attributes lore, CanBeAliased (Op lore), Typed attr) =>
-                       AST.PatternT attr -> Exp lore
-                    -> AST.PatternT (VarAliases, attr)
+                       PatternT attr -> Exp (Aliases lore)
+                    -> PatternT (VarAliases, attr)
 addAliasesToPattern pat e =
-  uncurry AST.Pattern $ mkPatternAliases pat e
+  uncurry Pattern $ mkPatternAliases pat e
 
 mkAliasedBody :: (Attributes lore, CanBeAliased (Op lore)) =>
-                 BodyAttr lore -> [Binding lore] -> Result -> Body lore
+                 BodyAttr lore -> [Binding (Aliases lore)] -> Result -> Body (Aliases lore)
 mkAliasedBody innerlore bnds res =
-  AST.Body (mkBodyAliases bnds res, innerlore) bnds res
+  Body (mkBodyAliases bnds res, innerlore) bnds res
 
 mkPatternAliases :: (Attributes lore, Aliased lore,
                      AliasedOp (Op lore), Typed attr) =>
-                    AST.PatternT attr -> AST.Exp lore
+                    PatternT attr -> Exp lore
                  -> ([PatElemT (VarAliases, attr)],
                      [PatElemT (VarAliases, attr)])
 mkPatternAliases pat e =
@@ -289,7 +256,7 @@ mkPatternAliases pat e =
                     _                   -> mempty
 
 mkContextAliases :: (Attributes lore, Aliased lore) =>
-                    AST.PatternT attr -> AST.Exp lore
+                    PatternT attr -> Exp lore
                  -> [Names]
 mkContextAliases pat (DoLoop ctxmerge valmerge _ body) =
   let ctx = loopResultContext (map fst ctxmerge) (map fst valmerge)
@@ -308,7 +275,7 @@ mkContextAliases pat _ =
   replicate (length $ patternContextElements pat) mempty
 
 mkBodyAliases :: Aliased lore =>
-                 [AST.Binding lore]
+                 [Binding lore]
               -> Result
               -> BodyAliasing
 mkBodyAliases bnds res =
@@ -338,9 +305,9 @@ mkBodyAliases bnds res =
           where look k = HM.lookupDefault mempty k aliasmap
 
 mkAliasedLetBinding :: (Attributes lore, CanBeAliased (Op lore)) =>
-                       AST.Pattern lore
-                    -> ExpAttr lore -> Exp lore
-                    -> Binding lore
+                       Pattern lore
+                    -> ExpAttr lore -> Exp (Aliases lore)
+                    -> Binding (Aliases lore)
 mkAliasedLetBinding pat explore e =
   Let (addAliasesToPattern pat e)
   (Names' $ consumedInPattern pat <> consumedInExp e, explore)
@@ -358,5 +325,5 @@ instance (Bindable lore, CanBeAliased (Op lore)) => Bindable (Aliases lore) wher
       return $ mkAliasedLetBinding pat explore e
 
   mkBody bnds res =
-    let AST.Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res
+    let Body bodylore _ _ = mkBody (map removeBindingAliases bnds) res
     in mkAliasedBody bodylore bnds res

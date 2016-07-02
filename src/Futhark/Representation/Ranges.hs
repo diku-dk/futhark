@@ -9,29 +9,11 @@ module Futhark.Representation.Ranges
        ( -- * The Lore definition
          Ranges
        , module Futhark.Representation.AST.Attributes.Ranges
-         -- * Syntax types
-       , Prog
-       , Body
-       , Binding
-       , Pattern
-       , PrimOp
-       , Exp
-       , Lambda
-       , ExtLambda
-       , FunDef
-       , RetType
          -- * Module re-exports
        , module Futhark.Representation.AST.Attributes
        , module Futhark.Representation.AST.Traversals
        , module Futhark.Representation.AST.Pretty
        , module Futhark.Representation.AST.Syntax
-       , AST.LambdaT(Lambda)
-       , AST.ExtLambdaT(ExtLambda)
-       , AST.BodyT(Body)
-       , AST.PatternT(Pattern)
-       , AST.ProgT(Prog)
-       , AST.ExpT(PrimOp)
-       , AST.FunDefT(FunDef)
          -- * Adding ranges
        , addRangesToPattern
        , mkRangedLetBinding
@@ -57,10 +39,7 @@ import Data.Monoid
 
 import Prelude
 
-import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
-  hiding (Prog, PrimOp, Exp, Body, Binding,
-          Pattern, Lambda, ExtLambda, FunDef, RetType)
 import Futhark.Representation.AST.Attributes
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Traversals
@@ -78,7 +57,7 @@ instance (Annotations lore, CanBeRanged (Op lore)) =>
   type BodyAttr (Ranges lore) = ([Range], BodyAttr lore)
   type FParamAttr (Ranges lore) = FParamAttr lore
   type LParamAttr (Ranges lore) = LParamAttr lore
-  type RetType (Ranges lore) = AST.RetType lore
+  type RetType (Ranges lore) = RetType lore
   type Op (Ranges lore) = OpWithRanges (Op lore)
 
 instance (Attributes lore, CanBeRanged (Op lore)) =>
@@ -89,17 +68,6 @@ instance RangeOf (Range, attr) where
 
 instance RangesOf ([Range], attr) where
   rangesOf = fst
-
-type Prog lore = AST.Prog (Ranges lore)
-type PrimOp lore = AST.PrimOp (Ranges lore)
-type Exp lore = AST.Exp (Ranges lore)
-type Body lore = AST.Body (Ranges lore)
-type Binding lore = AST.Binding (Ranges lore)
-type Pattern lore = AST.Pattern (Ranges lore)
-type Lambda lore = AST.Lambda (Ranges lore)
-type ExtLambda lore = AST.ExtLambda (Ranges lore)
-type FunDef lore = AST.FunDef (Ranges lore)
-type RetType lore = AST.RetType (Ranges lore)
 
 instance PrettyAnnot (PatElem attr) =>
   PrettyAnnot (PatElem (Range, attr)) where
@@ -130,52 +98,52 @@ removeRanges = Rephraser { rephraseExpLore = id
                          }
 
 removeProgRanges :: CanBeRanged (Op lore) =>
-                    AST.Prog (Ranges lore) -> AST.Prog lore
+                    Prog (Ranges lore) -> Prog lore
 removeProgRanges = rephraseProg removeRanges
 
 removeFunDefRanges :: CanBeRanged (Op lore) =>
-                      AST.FunDef (Ranges lore) -> AST.FunDef lore
+                      FunDef (Ranges lore) -> FunDef lore
 removeFunDefRanges = rephraseFunDef removeRanges
 
 removeExpRanges :: CanBeRanged (Op lore) =>
-                   AST.Exp (Ranges lore) -> AST.Exp lore
+                   Exp (Ranges lore) -> Exp lore
 removeExpRanges = rephraseExp removeRanges
 
 removeBodyRanges :: CanBeRanged (Op lore) =>
-                    AST.Body (Ranges lore) -> AST.Body lore
+                    Body (Ranges lore) -> Body lore
 removeBodyRanges = rephraseBody removeRanges
 
 removeBindingRanges :: CanBeRanged (Op lore) =>
-                       AST.Binding (Ranges lore) -> AST.Binding lore
+                       Binding (Ranges lore) -> Binding lore
 removeBindingRanges = rephraseBinding removeRanges
 
 removeLambdaRanges :: CanBeRanged (Op lore) =>
-                      AST.Lambda (Ranges lore) -> AST.Lambda lore
+                      Lambda (Ranges lore) -> Lambda lore
 removeLambdaRanges = rephraseLambda removeRanges
 
 removeExtLambdaRanges :: CanBeRanged (Op lore) =>
-                         AST.ExtLambda (Ranges lore) -> AST.ExtLambda lore
+                         ExtLambda (Ranges lore) -> ExtLambda lore
 removeExtLambdaRanges = rephraseExtLambda removeRanges
 
-removePatternRanges :: AST.PatternT (Range, a)
-                    -> AST.PatternT a
+removePatternRanges :: PatternT (Range, a)
+                    -> PatternT a
 removePatternRanges = rephrasePattern snd
 
 addRangesToPattern :: (Attributes lore, CanBeRanged (Op lore)) =>
-                      AST.Pattern lore -> Exp lore
-                   -> Pattern lore
+                      Pattern lore -> Exp (Ranges lore)
+                   -> Pattern (Ranges lore)
 addRangesToPattern pat e =
-  uncurry AST.Pattern $ mkPatternRanges pat e
+  uncurry Pattern $ mkPatternRanges pat e
 
 mkRangedBody :: (Attributes lore, CanBeRanged (Op lore)) =>
-                BodyAttr lore -> [Binding lore] -> Result
-             -> Body lore
+                BodyAttr lore -> [Binding (Ranges lore)] -> Result
+             -> Body (Ranges lore)
 mkRangedBody innerlore bnds res =
-  AST.Body (mkBodyRanges bnds res, innerlore) bnds res
+  Body (mkBodyRanges bnds res, innerlore) bnds res
 
 mkPatternRanges :: (Attributes lore, CanBeRanged (Op lore)) =>
-                   AST.Pattern lore
-                -> Exp lore
+                   Pattern lore
+                -> Exp (Ranges lore)
                 -> ([PatElem (Range, LetAttr lore)],
                     [PatElem (Range, LetAttr lore)])
 mkPatternRanges pat e =
@@ -187,7 +155,7 @@ mkPatternRanges pat e =
         ranges = expRanges e
 
 mkBodyRanges :: Attributes lore =>
-                [AST.Binding lore]
+                [Binding lore]
              -> Result
              -> [Range]
 mkBodyRanges bnds = map $ removeUnknownBounds . rangeOf
@@ -206,9 +174,9 @@ intersects :: (Eq a, Hashable a) => HS.HashSet a -> HS.HashSet a -> Bool
 intersects a b = not $ HS.null $ a `HS.intersection` b
 
 mkRangedLetBinding :: (Attributes lore, CanBeRanged (Op lore)) =>
-                      AST.Pattern lore
+                      Pattern lore
                    -> ExpAttr lore
-                   -> Exp lore
-                   -> Binding lore
+                   -> Exp (Ranges lore)
+                   -> Binding (Ranges lore)
 mkRangedLetBinding pat explore e =
   Let (addRangesToPattern pat e) explore e

@@ -19,64 +19,63 @@ module Futhark.Analysis.Alias
 
 import Data.Monoid
 
-import Futhark.Representation.AST.Attributes (Attributes)
-import qualified Futhark.Representation.AST.Syntax as In
-import qualified Futhark.Representation.Aliases as Out
+import Futhark.Representation.AST.Syntax
+import Futhark.Representation.Aliases
 
 import Prelude
 
 -- | Perform alias analysis on a Futhark program.
-aliasAnalysis :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
-                 In.Prog lore -> Out.Prog lore
-aliasAnalysis = Out.Prog . map analyseFun . In.progFunctions
+aliasAnalysis :: (Attributes lore, CanBeAliased (Op lore)) =>
+                 Prog lore -> Prog (Aliases lore)
+aliasAnalysis = Prog . map analyseFun . progFunctions
 
-analyseFun :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
-              In.FunDef lore -> Out.FunDef lore
-analyseFun (In.FunDef entry fname restype params body) =
-  Out.FunDef entry fname restype params body'
+analyseFun :: (Attributes lore, CanBeAliased (Op lore)) =>
+              FunDef lore -> FunDef (Aliases lore)
+analyseFun (FunDef entry fname restype params body) =
+  FunDef entry fname restype params body'
   where body' = analyseBody body
 
 analyseBody :: (Attributes lore,
-                Out.CanBeAliased (In.Op lore)) =>
-               In.Body lore -> Out.Body lore
-analyseBody (In.Body lore origbnds result) =
+                CanBeAliased (Op lore)) =>
+               Body lore -> Body (Aliases lore)
+analyseBody (Body lore origbnds result) =
   let bnds' = map analyseBinding origbnds
-  in Out.mkAliasedBody lore bnds' result
+  in mkAliasedBody lore bnds' result
 
 analyseBinding :: (Attributes lore,
-                   Out.CanBeAliased (In.Op lore)) =>
-                  In.Binding lore -> Out.Binding lore
-analyseBinding (In.Let pat lore e) =
+                   CanBeAliased (Op lore)) =>
+                  Binding lore -> Binding (Aliases lore)
+analyseBinding (Let pat lore e) =
   let e' = analyseExp e
-      pat' = Out.addAliasesToPattern pat e'
-      lore' = (Out.Names' $ Out.consumedInPattern pat' <> Out.consumedInExp e',
+      pat' = addAliasesToPattern pat e'
+      lore' = (Names' $ consumedInPattern pat' <> consumedInExp e',
                lore)
-  in Out.Let pat' lore' e'
+  in Let pat' lore' e'
 
-analyseExp :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
-              In.Exp lore -> Out.Exp lore
-analyseExp = Out.mapExp analyse
+analyseExp :: (Attributes lore, CanBeAliased (Op lore)) =>
+              Exp lore -> Exp (Aliases lore)
+analyseExp = mapExp analyse
   where analyse =
-          Out.Mapper { Out.mapOnSubExp = return
-                     , Out.mapOnCertificates = return
-                     , Out.mapOnVName = return
-                     , Out.mapOnBody = return . analyseBody
-                     , Out.mapOnRetType = return
-                     , Out.mapOnFParam = return
-                     , Out.mapOnOp = return . Out.addOpAliases
+          Mapper { mapOnSubExp = return
+                     , mapOnCertificates = return
+                     , mapOnVName = return
+                     , mapOnBody = return . analyseBody
+                     , mapOnRetType = return
+                     , mapOnFParam = return
+                     , mapOnOp = return . addOpAliases
                      }
 
-analyseLambda :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
-                 In.Lambda lore -> Out.Lambda lore
+analyseLambda :: (Attributes lore, CanBeAliased (Op lore)) =>
+                 Lambda lore -> Lambda (Aliases lore)
 analyseLambda lam =
-  let body = analyseBody $ In.lambdaBody lam
-  in lam { Out.lambdaBody = body
-         , Out.lambdaParams = In.lambdaParams lam
+  let body = analyseBody $ lambdaBody lam
+  in lam { lambdaBody = body
+         , lambdaParams = lambdaParams lam
          }
-analyseExtLambda :: (Attributes lore, Out.CanBeAliased (In.Op lore)) =>
-                    In.ExtLambda lore -> Out.ExtLambda lore
+analyseExtLambda :: (Attributes lore, CanBeAliased (Op lore)) =>
+                    ExtLambda lore -> ExtLambda (Aliases lore)
 analyseExtLambda lam =
-  let body = analyseBody $ In.extLambdaBody lam
-  in lam { Out.extLambdaBody = body
-         , Out.extLambdaParams = In.extLambdaParams lam
+  let body = analyseBody $ extLambdaBody lam
+  in lam { extLambdaBody = body
+         , extLambdaParams = extLambdaParams lam
          }
