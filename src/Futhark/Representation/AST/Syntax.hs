@@ -112,6 +112,7 @@ deriving instance Annotations lore => Ord (BodyT lore)
 deriving instance Annotations lore => Show (BodyT lore)
 deriving instance Annotations lore => Eq (BodyT lore)
 
+-- | Type alias for namespace reasons.
 type Body = BodyT
 
 -- | The new dimension in a 'Reshape'-like operation.  This allows us to
@@ -182,14 +183,13 @@ data PrimOp lore
   -- run-time bounds checking is done.
 
   | Split Certificates Int [SubExp] VName
-  -- ^ 2nd arg is sizes of arrays you back, which is
+  -- ^ 3rd arg is sizes of arrays you get back, which is
   -- different from what the external language does.
-  -- In the internal langauge,
-  -- @a = [1,2,3,4]@
-  -- @split@0( (1,0,2) , a ) = {[1], [], [2,3]}@
+  -- In the core language,
+  -- @a = [1,2,3,4]; split@0( (1,0,2) , a ) = {[1], [], [2,3]}@
 
   | Concat Certificates Int VName [VName] SubExp
-  -- ^ @concat@i([1],[2, 3, 4]) = [1, 2, 3, 4]@.
+  -- ^ @concat@0([1],[2, 3, 4]) = [1, 2, 3, 4]@.
 
   | Copy VName
   -- ^ Copy the given array.  The result will not alias anything.
@@ -263,6 +263,7 @@ deriving instance Annotations lore => Eq (LambdaT lore)
 deriving instance Annotations lore => Show (LambdaT lore)
 deriving instance Annotations lore => Ord (LambdaT lore)
 
+-- | Type alias for namespacing reasons.
 type Lambda = LambdaT
 
 -- | Anonymous function for use in a SOAC, with an existential return
@@ -296,10 +297,12 @@ deriving instance Annotations lore => Eq (FunDefT lore)
 deriving instance Annotations lore => Show (FunDefT lore)
 deriving instance Annotations lore => Ord (FunDefT lore)
 
+-- | Type alias for namespace reasons.
 type FunDef = FunDefT
 
 -- | An entire Futhark program.
 newtype ProgT lore = Prog { progFunctions :: [FunDef lore] }
                      deriving (Eq, Ord, Show)
 
+-- | Type alias for namespace reasons.
 type Prog = ProgT

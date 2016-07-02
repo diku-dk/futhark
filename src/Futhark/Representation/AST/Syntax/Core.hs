@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | The most primitive ("core") aspects of the AST.  Split out of
 -- "Futhark.Representation.AST.Syntax" in order for
--- "Futhark.Representation.AST.Lore" to use these definitions.  This
+-- "Futhark.Representation.AST.Annotations" to use these definitions.  This
 -- module is re-exported from "Futhark.Representation.AST.Syntax" and
 -- there should be no reason to include it explicitly.
 module Futhark.Representation.AST.Syntax.Core
