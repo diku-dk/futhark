@@ -4,8 +4,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 -- |
 --
--- This module contains exports a single function, 'substituteNames',
--- for performing name substitution in an Futhark expression.
+-- This module contains facilities for replacing variable names in
+-- syntactic constructs.
 module Futhark.Transform.Substitute
   (Substitutions,
    Substitute(..),
@@ -28,10 +28,7 @@ type Substitutions = HM.HashMap VName VName
 class Substitute a where
   -- | @substituteNames m e@ replaces the variable names in @e@ with
   -- new names, based on the mapping in @m@.  It is assumed that all
-  -- names in @e@ are unique, i.e. there is no shadowing.  Aliasing
-  -- information is also updated, although the resulting information
-  -- may be erroneous if any if the substitute names in @m@ were
-  -- already in use in @e@.
+  -- names in @e@ are unique, i.e. there is no shadowing.
   substituteNames :: HM.HashMap VName VName -> a -> a
 
 instance Substitute a => Substitute [a] where
