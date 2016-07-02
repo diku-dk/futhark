@@ -179,21 +179,6 @@ rearrangeReturns num_is pat_elems returns =
         rearrangeReturn pat_elem (t, perm) =
           return (pat_elem, (t, perm))
 
-rearrangeScanReduceInputs :: Commutativity
-                          -> Certificates
-                          -> SubExp
-                          -> KernelSize
-                          -> [VName]
-                          -> BabysitM [VName]
-rearrangeScanReduceInputs Commutative _ _ _ arrs =
-  return arrs
-
-rearrangeScanReduceInputs Noncommutative cs w kernel_size arrs = do
-  (w_padded, padding) <- paddedScanReduceInput w num_threads
-  mapM (rearrangeScanReduceInput cs num_threads padding w w_padded $
-         kernelElementsPerThread kernel_size) arrs
-  where num_threads = kernelNumThreads kernel_size
-
 paddedScanReduceInput :: SubExp -> SubExp
                       -> BabysitM (SubExp, SubExp)
 paddedScanReduceInput w num_threads = do
