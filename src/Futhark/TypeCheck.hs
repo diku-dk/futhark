@@ -55,7 +55,6 @@ import Data.Maybe
 
 import Prelude
 
-import qualified Futhark.Representation.AST as AST
 import Futhark.Representation.Aliases
 import Futhark.Analysis.Alias
 import Futhark.Util
@@ -80,7 +79,7 @@ data ErrorCase lore =
   -- ^ Two function parameters share the same name.
   | DupPatternError VName
   -- ^ Two pattern variables share the same name.
-  | InvalidPatternError (Pattern lore) [ExtType] (Maybe String)
+  | InvalidPatternError (Pattern (Aliases lore)) [ExtType] (Maybe String)
   -- ^ The pattern is not compatible with the type or is otherwise
   -- inconsistent.
   | UnknownVariableError VName
@@ -194,7 +193,7 @@ instance Checkable lore => Show (TypeError lore) where
 
 -- | A tuple of a return type and a list of parameters, possibly
 -- named.
-type FunBinding lore = (RetType lore, [FParam lore])
+type FunBinding lore = (RetType (Aliases lore), [FParam (Aliases lore)])
 
 data VarBinding lore = Bound (NameInfo (Aliases lore))
 
@@ -511,7 +510,7 @@ checkArrIdent v = do
 -- yielding either a type error or a program with complete type
 -- information.
 checkProg :: Checkable lore =>
-             AST.Prog lore -> Either (TypeError lore) ()
+             Prog lore -> Either (TypeError lore) ()
 checkProg prog = do
   let typeenv = Env { envVtable = HM.empty
                     , envFtable = mempty
@@ -540,7 +539,7 @@ checkProg prog = do
 
 -- The prog argument is just to disambiguate the lore.
 initialFtable :: Checkable lore =>
-                 Prog lore -> TypeM lore (HM.HashMap Name (FunBinding lore))
+                 Prog (Aliases lore) -> TypeM lore (HM.HashMap Name (FunBinding lore))
 initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunctions
   where addBuiltin (fname, (t, ts)) = do
           ps <- mapM (primFParam name) ts
@@ -548,7 +547,7 @@ initialFtable _ = fmap HM.fromList $ mapM addBuiltin $ HM.toList builtInFunction
         name = ID (nameFromString "x", 0)
 
 checkFun :: Checkable lore =>
-            FunDef lore -> TypeM lore ()
+            FunDef (Aliases lore) -> TypeM lore ()
 checkFun (FunDef _ fname rettype params body) =
   context ("In function " ++ nameToString fname) $
     checkFun' (fname,
@@ -636,7 +635,7 @@ checkSubExp (Var ident) = context ("In subexp " ++ pretty ident) $ do
   lookupType ident
 
 checkBindings :: Checkable lore =>
-                 [Binding lore] -> TypeM lore a
+                 [Binding (Aliases lore)] -> TypeM lore a
               -> TypeM lore a
 checkBindings origbnds m = delve origbnds
   where delve (Let pat (_,annot) e:bnds) = do
@@ -655,7 +654,7 @@ checkResult = mapM_ checkSubExp
 checkFunBody :: Checkable lore =>
                 Name
              -> RetType lore
-             -> Body lore
+             -> Body (Aliases lore)
              -> TypeM lore ()
 checkFunBody fname rt (Body (_,lore) bnds res) = do
   checkBindings bnds $ do
@@ -664,7 +663,7 @@ checkFunBody fname rt (Body (_,lore) bnds res) = do
   checkBodyLore lore
 
 checkLambdaBody :: Checkable lore =>
-                   [Type] -> Body lore -> TypeM lore ()
+                   [Type] -> Body (Aliases lore) -> TypeM lore ()
 checkLambdaBody ret (Body (_,lore) bnds res) = do
   checkBindings bnds $ checkLambdaResult ret res
   checkBodyLore lore
@@ -685,13 +684,13 @@ checkLambdaResult ts es
         " but expected " ++ pretty t
 
 checkBody :: Checkable lore =>
-             Body lore -> TypeM lore ()
+             Body (Aliases lore) -> TypeM lore ()
 checkBody (Body (_,lore) bnds res) = do
   checkBindings bnds $ checkResult res
   checkBodyLore lore
 
 checkPrimOp :: Checkable lore =>
-               PrimOp lore -> TypeM lore ()
+               PrimOp (Aliases lore) -> TypeM lore ()
 
 checkPrimOp (SubExp es) =
   void $ checkSubExp es
@@ -811,7 +810,7 @@ checkPrimOp (Partition cs _ flags arrs) = do
       " to partition has type " ++ pretty arrt ++ "."
 
 checkExp :: Checkable lore =>
-            Exp lore -> TypeM lore ()
+            Exp (Aliases lore) -> TypeM lore ()
 
 checkExp (PrimOp op) = checkPrimOp op
 
@@ -960,7 +959,7 @@ checkBindage (BindInPlace cs src is) = do
     Just _  -> return ()
 
 checkBinding :: Checkable lore =>
-                Pattern lore -> Exp lore
+                Pattern (Aliases lore) -> Exp (Aliases lore)
              -> TypeM lore a
              -> TypeM lore a
 checkBinding pat e m = do
@@ -1063,7 +1062,7 @@ checkFuncall fname paramts args = do
         consumeArg _   Observe = mempty
 
 checkLambda :: Checkable lore =>
-               Lambda lore -> [Arg] -> TypeM lore ()
+               Lambda (Aliases lore) -> [Arg] -> TypeM lore ()
 checkLambda (Lambda params body rettype) args = do
   let fname = nameFromString "<anonymous>"
   if length params == length args then do
@@ -1082,7 +1081,7 @@ checkLambda (Lambda params body rettype) args = do
   else bad $ TypeError $ "Anonymous function defined with " ++ show (length params) ++ " parameters, but expected to take " ++ show (length args) ++ " arguments."
 
 checkExtLambda :: Checkable lore =>
-                  ExtLambda lore -> [Arg] -> TypeM lore ()
+                  ExtLambda (Aliases lore) -> [Arg] -> TypeM lore ()
 checkExtLambda (ExtLambda params body rettype) args =
   if length params == length args then do
     checkFuncall Nothing (map ((`toDecl` Nonunique) . paramType) params) args
@@ -1108,9 +1107,9 @@ class (Attributes lore, CanBeAliased (Op lore)) => Checkable lore where
   checkFParamLore :: VName -> FParamAttr lore -> TypeM lore ()
   checkLParamLore :: VName -> LParamAttr lore -> TypeM lore ()
   checkLetBoundLore :: VName -> LetAttr lore -> TypeM lore ()
-  checkRetType :: AST.RetType lore -> TypeM lore ()
+  checkRetType :: RetType lore -> TypeM lore ()
   checkOp :: OpWithAliases (Op lore) -> TypeM lore ()
-  matchPattern :: Pattern lore -> Exp lore -> TypeM lore ()
-  primFParam :: VName -> PrimType -> TypeM lore (AST.FParam (Aliases lore))
-  primLParam :: VName -> PrimType -> TypeM lore (AST.LParam (Aliases lore))
-  matchReturnType :: Name -> RetType lore -> AST.Result -> TypeM lore ()
+  matchPattern :: Pattern (Aliases lore) -> Exp (Aliases lore) -> TypeM lore ()
+  primFParam :: VName -> PrimType -> TypeM lore (FParam (Aliases lore))
+  primLParam :: VName -> PrimType -> TypeM lore (LParam (Aliases lore))
+  matchReturnType :: Name -> RetType lore -> Result -> TypeM lore ()

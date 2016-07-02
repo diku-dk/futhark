@@ -89,14 +89,14 @@ inPlaceLowering = simplePass
                   intraproceduralTransformation optimiseFunDef .
                   aliasAnalysis
 
-optimiseFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
+optimiseFunDef :: MonadFreshNames m => FunDef (Aliases Kernels) -> m (FunDef (Aliases Kernels))
 optimiseFunDef fundec =
   modifyNameSource $ runForwardingM $
   bindingFParams (funDefParams fundec) $ do
     body <- optimiseBody $ funDefBody fundec
     return $ fundec { funDefBody = body }
 
-optimiseBody :: Body Kernels -> ForwardingM (Body Kernels)
+optimiseBody :: Body (Aliases Kernels) -> ForwardingM (Body (Aliases Kernels))
 optimiseBody (Body als bnds res) = do
   bnds' <- deepen $ optimiseBindings bnds $
     mapM_ seen res
@@ -104,9 +104,9 @@ optimiseBody (Body als bnds res) = do
   where seen Constant{} = return ()
         seen (Var v)    = seenVar v
 
-optimiseBindings :: [Binding Kernels]
+optimiseBindings :: [Binding (Aliases Kernels)]
                  -> ForwardingM ()
-                 -> ForwardingM [Binding Kernels]
+                 -> ForwardingM [Binding (Aliases Kernels)]
 optimiseBindings [] m = m >> return []
 
 optimiseBindings (bnd:bnds) m = do
@@ -139,13 +139,13 @@ optimiseBindings (bnd:bnds) m = do
         checkIfForwardableUpdate bnd' bnds' =
           return $ bnd' : bnds'
 
-optimiseInBinding :: Binding Kernels
-                  -> ForwardingM (Binding Kernels)
+optimiseInBinding :: Binding (Aliases Kernels)
+                  -> ForwardingM (Binding (Aliases Kernels))
 optimiseInBinding (Let pat attr e) = do
   e' <- optimiseExp e
   return $ Let pat attr e'
 
-optimiseExp :: Exp Kernels -> ForwardingM (Exp Kernels)
+optimiseExp :: Exp (Aliases Kernels) -> ForwardingM (Exp (Aliases Kernels))
 optimiseExp (DoLoop ctx val form body) =
   bindingIndices (boundInForm form) $
   bindingFParams (map fst $ ctx ++ val) $ do
@@ -185,7 +185,7 @@ instance Monoid BottomUp where
     BottomUp (seen1 `mappend` seen2) (forward1 `mappend` forward2)
   mempty = BottomUp mempty mempty
 
-updateBinding :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Binding Kernels
+updateBinding :: DesiredUpdate (LetAttr (Aliases Kernels)) -> Binding (Aliases Kernels)
 updateBinding fwd =
   mkLet [] [(Ident (updateName fwd) $ typeOf $ updateType fwd,
              BindInPlace
@@ -236,7 +236,7 @@ bindingLParams :: [LParam (Aliases Kernels)]
                -> ForwardingM a
 bindingLParams = bindingParams LParamInfo
 
-bindingBinding :: Binding Kernels
+bindingBinding :: Binding (Aliases Kernels)
                -> ForwardingM a
                -> ForwardingM a
 bindingBinding (Let pat _ _) = local $ \(TopDown n vtable d) ->
