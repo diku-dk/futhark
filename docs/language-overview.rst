@@ -3,29 +3,24 @@
 Language Overview
 =================
 
-This document has been prepared as an informal overview of the Futhark
-language.  In time, we hope to develop it into a formal specification,
-with accompanying proofs of correctness, but for now, words will have
-to suffice where formulae would be ideal.
-
 The Futhark programming language is a purely functional,
 call-by-value, mostly first-order language that permits bulk
 operations on arrays using *second-order array combinators* (SOACs).
 
 The primary idea behind Futhark is to design a language that has
 enough expressive power to conveniently express complex programs, yet
-is also amenable to aggressive optimisation and parallelisation.
-Unfortunately, as the expressive power of a language grows, the
-difficulty of optimisation often rises likewise.  For example, we
-support nested parallelism, despite the complexities of efficiently
-mapping to the flat parallelism supported by hardware, as many
-algorithms are awkward to write without this feature.  On the other
-hand, we do not support non-regular arrays, as they complicate size
-analysis a great deal.  The fact that Futhark is purely functional is
-intended to give an optimising compiler more leeway in rearranging the
-code and performing high-level optimisations.  It is also the plan to
-eventually design a rigorous cost model for Futhark, although this
-work has not yet been completed.
+is also amenable to aggressive optimisation and parallelisation.  The
+tension is that as the expressive power of a language grows, the
+difficulty of efficient compilation rises likewise.  For example,
+Futhark supports nested parallelism, despite the complexities of
+efficiently mapping it to the flat parallelism supported by hardware,
+as many algorithms are awkward to write with just flat parallelism.
+On the other hand, we do not support non-regular arrays, as they
+complicate size analysis a great deal.  The fact that Futhark is
+purely functional is intended to give an optimising compiler more
+leeway in rearranging the code and performing high-level
+optimisations.  It is also the plan to eventually design a rigorous
+cost model for Futhark, although this work has not yet been completed.
 
 Lexical Syntax
 --------------
@@ -63,13 +58,13 @@ Indentation has no syntactical significance in Futhark, but recommended for
 readability.
 
 The syntax for tuple types is a comma-separated list of types or
-values enclosed in parenthesis, so ``(int, real)`` is a pair of an integer
-and a floating-point number.  Both single-element and empty tuples are
-permitted.  Array types are written as the element type surrounded by
-preceded by brackets, meaning that ``[]int`` is a one-dimensional array of
-integers, and ``[][][](int, real)`` is a three-dimensional array of
-tuples of integers and floats.  An immediate array is written as a
-sequence of elements enclosed by brackets::
+values enclosed in parentheses, so ``(int, real)`` is a pair of an
+integer and a floating-point number.  Single-element and empty tuples
+are not permitted.  Array types are written as the element type
+preceded by brackets, meaning that ``[]int`` is a one-dimensional
+array of integers, and ``[][][](int, real)`` is a three-dimensional
+array of tuples of integers and floats.  An array value is written as
+a sequence of elements enclosed by brackets::
 
   [1, 2, 3]       -- Array of type []int.
   [[1], [2], [3]] -- Array of type [][]int.
@@ -81,12 +76,11 @@ number of elements::
   [[1, 2], [3]]      -- Compile-time error.
   [iota(1), iota(2)] -- A run-time error if reached.
 
-The restriction to regular arrays simplifies size analysis and
-optimisation.
+The restriction to regular arrays simplifies compilation.
 
 Arrays are indexed using the common row-major notation, e.g., ``a[i1,
 i2, i3...]``.  An indexing is said to be *full* if the number of given
-indexes is equal to the dimensionality of the array.
+indices is equal to the dimensionality of the array.
 
 A ``let``-expression can be used to refer to the result of a
 subexpression::
@@ -233,8 +227,9 @@ This can sometimes make imperative code look more natural.
 In-Place Updates
 ~~~~~~~~~~~~~~~~
 
-In an array-oriented programming language, a common task is to modify
-some elements of an array.  In a pure language, we cannot permit free
+In an array programming language, we tend to use bulk operations for
+most array manipulation.  However, sometimes it is useful to directly
+replace some element.  In a pure language, we cannot permit free
 mutation, but we can permit the creation of a duplicate array, where
 some elements have been changed.  General modification of array
 elements is done using the ``let-with`` construct.  In its most
