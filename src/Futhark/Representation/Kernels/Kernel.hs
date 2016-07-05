@@ -11,6 +11,7 @@ module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
        , KernelBody(..)
        , KernelStm(..)
+       , WhichThreads(..)
        , KernelResult(..)
 
        , KernelInput(..)
@@ -91,10 +92,7 @@ data KernelBody lore = KernelBody { kernelBodyStms :: [KernelStm lore]
                                   }
                 deriving (Eq, Show, Ord)
 
-data KernelResult = AllThreadsReturn SubExp
-                  | ThisThreadReturns
-                    SubExp -- Which one.
-                    SubExp -- What.
+data KernelResult = ThreadsReturn WhichThreads SubExp
                   | ConcatReturns
                     StreamOrd -- Permuted?
                     SubExp -- The final size.
@@ -102,8 +100,13 @@ data KernelResult = AllThreadsReturn SubExp
                     VName -- Chunk by this thread.
                   deriving (Eq, Show, Ord)
 
+data WhichThreads = AllThreads
+                  | OneThreadPerGroup SubExp -- Which one.
+                  | ThreadsBefore SubExp -- Threads with a global ID less than this.
+                  deriving (Eq, Show, Ord)
+
 data KernelStm lore = SplitArray (VName, [PatElem (LetAttr lore)]) StreamOrd SubExp SubExp [VName]
-                    | Thread [PatElem (LetAttr lore)] (Body lore)
+                    | Thread [PatElem (LetAttr lore)] WhichThreads (Body lore)
                     | Combine (PatElem (LetAttr lore)) SubExp
                     | GroupReduce [PatElem (LetAttr lore)] SubExp (Lambda lore) [(SubExp,VName)]
 
@@ -271,16 +274,28 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
                               , mapOnKernelKernelBody = walk freeIn
                               }
 
+instance FreeIn KernelResult where
+  freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
+  freeIn (ConcatReturns _ w per_thread_elems v) =
+    freeIn w <> freeIn per_thread_elems <> freeIn v
+
+instance FreeIn WhichThreads where
+  freeIn AllThreads = mempty
+  freeIn (OneThreadPerGroup which) = freeIn which
+  freeIn (ThreadsBefore num) = freeIn num
+
 instance Attributes lore => FreeIn (KernelBody lore) where
-  freeIn kernel_body = free_in_stms `HS.difference` bound_in_stms
-    where free_in_stms = mconcat $ map freeIn $ kernelBodyStms kernel_body
-          bound_in_stms = mconcat $ map boundByKernelStm $ kernelBodyStms kernel_body
+  freeIn (KernelBody stms res) =
+    (free_in_stms <> free_in_res) `HS.difference` bound_in_stms
+    where free_in_stms = mconcat $ map freeIn stms
+          free_in_res = freeIn res
+          bound_in_stms = mconcat $ map boundByKernelStm stms
 
 instance Attributes lore => FreeIn (KernelStm lore) where
   freeIn (SplitArray (n,chunks) _ w elems_per_thread vs) =
     freeIn n <> freeIn chunks <> freeIn w <> freeIn elems_per_thread <> freeIn vs
-  freeIn (Thread pes body) =
-    freeIn pes <> freeInBody body
+  freeIn (Thread pes which body) =
+    freeIn pes <> freeIn which <> freeInBody body
   freeIn (Combine pe v) =
     freeIn pe <> freeIn v
   freeIn (GroupReduce pes w lam input) =
@@ -291,10 +306,8 @@ instance Attributes lore => Substitute (KernelBody lore) where
     KernelBody (substituteNames subst stms) $ substituteNames subst res
 
 instance Substitute KernelResult where
-  substituteNames subst (AllThreadsReturn se) =
-    AllThreadsReturn $ substituteNames subst se
-  substituteNames subst (ThisThreadReturns who what) =
-    ThisThreadReturns (substituteNames subst who) (substituteNames subst what)
+  substituteNames subst (ThreadsReturn who se) =
+    ThreadsReturn (substituteNames subst who) (substituteNames subst se)
   substituteNames subst (ConcatReturns ord w per_thread_elems v) =
     ConcatReturns
     ord
@@ -302,14 +315,25 @@ instance Substitute KernelResult where
     (substituteNames subst per_thread_elems)
     (substituteNames subst v)
 
+instance Substitute WhichThreads where
+  substituteNames _ AllThreads =
+    AllThreads
+  substituteNames subst (OneThreadPerGroup which) =
+    OneThreadPerGroup $ substituteNames subst which
+  substituteNames subst (ThreadsBefore num) =
+    ThreadsBefore $ substituteNames subst num
+
 instance Attributes lore => Substitute (KernelStm lore) where
   substituteNames subst (SplitArray (n,arrs) o w elems_per_thread vs) =
     SplitArray (n,arrs) o
     (substituteNames subst w)
     (substituteNames subst elems_per_thread)
     (substituteNames subst vs)
-  substituteNames subst (Thread pes body) =
-    Thread (substituteNames subst pes) (substituteNames subst body)
+  substituteNames subst (Thread pes which body) =
+    Thread
+    (substituteNames subst pes)
+    (substituteNames subst which)
+    (substituteNames subst body)
   substituteNames subst (Combine pe v) =
     Combine (substituteNames subst pe) (substituteNames subst v)
   substituteNames subst (GroupReduce pes w lam input) =
@@ -349,16 +373,22 @@ instance Renameable lore => Rename (KernelStm lore) where
     GroupReduce <$> rename pes <*> rename w <*> rename lam <*> rename input
   rename (Combine pe v) =
     Combine <$> rename pe <*> rename v
-  rename (Thread pes body) =
-    Thread <$> rename pes <*> rename body
+  rename (Thread pes which body) =
+    Thread <$> rename pes <*> rename which <*> rename body
 
 instance Rename KernelResult where
-  rename (AllThreadsReturn se) =
-    AllThreadsReturn <$> rename se
-  rename (ThisThreadReturns who what) =
-    ThisThreadReturns <$> rename who <*> rename what
+  rename (ThreadsReturn who what) =
+    ThreadsReturn <$> rename who <*> rename what
   rename (ConcatReturns ord w per_thread_elems v) =
     ConcatReturns ord <$> rename w <*> rename per_thread_elems <*> rename v
+
+instance Rename WhichThreads where
+  rename AllThreads =
+    pure AllThreads
+  rename (OneThreadPerGroup which) =
+    OneThreadPerGroup <$> rename which
+  rename (ThreadsBefore num) =
+    ThreadsBefore <$> rename num
 
 instance Renameable lore => Rename (KernelInput lore) where
   rename (KernelInput param arr is) =
@@ -371,7 +401,7 @@ instance Scoped lore (KernelStm lore) where
   scopeOf (SplitArray (size, chunks) _ _ _ _) =
     HM.fromList $
     (size, IndexInfo) : map (patElemName &&& LetInfo . patElemAttr) chunks
-  scopeOf (Thread pes _) =
+  scopeOf (Thread pes _ _) =
     HM.fromList $ map entry pes
     where entry pe = (patElemName pe, LetInfo $ patElemAttr pe)
   scopeOf (Combine pe _) = scopeOf pe
@@ -411,10 +441,12 @@ kernelType (WriteKernel _ _ lam _ input) =
         ws = map fst input
 kernelType (Kernel _ (num_groups, _, num_threads) ts _ body) =
   zipWith resultShape ts $ kernelBodyResult body
-  where resultShape t AllThreadsReturn{} =
+  where resultShape t (ThreadsReturn AllThreads _) =
           t `arrayOfRow` num_threads
-        resultShape t ThisThreadReturns{} =
+        resultShape t (ThreadsReturn OneThreadPerGroup{} _) =
           t `arrayOfRow` num_groups
+        resultShape t (ThreadsReturn (ThreadsBefore num) _) =
+          t `arrayOfRow` num
         resultShape t (ConcatReturns _ w _ _) =
           t `arrayOfRow` w
 
@@ -459,8 +491,8 @@ instance (Attributes lore,
             SplitArray (size, chunks') o w elems_per_thread arrs
             where chunks' = [ fmap (Names' $ HS.singleton arr,) chunk
                               | (chunk, arr) <- zip chunks arrs ]
-          analyseStm (Thread pes body) =
-            Thread (zipWith annot pes $ bodyAliases body') body'
+          analyseStm (Thread pes which body) =
+            Thread (zipWith annot pes $ bodyAliases body') which body'
             where body' = Alias.analyseBody body
                   annot pe als = (Names' als,) <$> pe
           analyseStm (Combine pe v) =
@@ -479,8 +511,8 @@ instance (Attributes lore,
           removeStmAliases (SplitArray (size, chunks) o w elems_per_thread arrs) =
             SplitArray (size, chunks') o w elems_per_thread arrs
             where chunks' = map (fmap snd) chunks
-          removeStmAliases (Thread pes body) =
-            Thread (map (fmap snd) pes) (removeBodyAliases body)
+          removeStmAliases (Thread pes which body) =
+            Thread (map (fmap snd) pes) which (removeBodyAliases body)
           removeStmAliases (Combine pe v) =
             Combine (snd <$> pe) v
           removeStmAliases (GroupReduce pes w lam input) =
@@ -516,8 +548,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    (return . removeKernelBodyWisdom)
           removeKernelBodyWisdom (KernelBody stms res) =
             KernelBody (map removeKernelStatementWisdom stms) res
-          removeKernelStatementWisdom (Thread pes body) =
-            Thread (map removePatElemWisdom pes) (removeBodyWisdom body)
+          removeKernelStatementWisdom (Thread pes which body) =
+            Thread (map removePatElemWisdom pes) which (removeBodyWisdom body)
           removeKernelStatementWisdom (Combine pe v) =
             Combine (removePatElemWisdom pe) v
           removeKernelStatementWisdom (SplitArray (size,chunks) o w elems_per_thread arrs) =
@@ -563,7 +595,7 @@ consumedInKernelBody (KernelBody stms _) =
 
 consumedByKernelStm :: (Attributes lore, Aliased lore) =>
                        KernelStm lore -> Names
-consumedByKernelStm (Thread _ body) = consumedInBody body
+consumedByKernelStm (Thread _ _ body) = consumedInBody body
 consumedByKernelStm Combine{} = mempty
 consumedByKernelStm SplitArray{} = mempty
 consumedByKernelStm (GroupReduce _ _ _ input) =
@@ -704,10 +736,8 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (Kerne
   mapM_ TC.checkType ts
   TC.binding (HM.singleton thread_id IndexInfo) $ checkKernelStms stms $
     zipWithM_ checkKernelResult res ts
-  where checkKernelResult (AllThreadsReturn what) t =
-          TC.require [t] what
-        checkKernelResult (ThisThreadReturns who what) t = do
-          TC.require [Prim int32] who
+  where checkKernelResult (ThreadsReturn which what) t = do
+          checkWhich which
           TC.require [t] what
         checkKernelResult (ConcatReturns _ w per_thread_elems v) t = do
           TC.require [Prim int32] w
@@ -716,12 +746,20 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (Kerne
           unless (vt == t `arrayOfRow` arraySize 0 vt) $
             TC.bad $ TC.TypeError $ "Invalid type for ConcatReturns " ++ pretty v
 
+        checkWhich AllThreads =
+          return ()
+        checkWhich (OneThreadPerGroup which) =
+          TC.require [Prim int32] which
+        checkWhich (ThreadsBefore num) =
+          TC.require [Prim int32] num
+
         checkKernelStms [] m = m
         checkKernelStms (stm:stms') m = do
           checkKernelStm stm
           TC.binding (scopeOf stm) $ checkKernelStms stms' m
 
-        checkKernelStm (Thread pes body) = do
+        checkKernelStm (Thread pes which body) = do
+          checkWhich which
           TC.checkBody body
           body_ts <- bodyExtType body
           let pes_ts = staticShapes $ map patElemType pes
@@ -804,7 +842,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     where kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
           kernelStmMetrics SplitArray{} =
             seen "SplitArray"
-          kernelStmMetrics (Thread _ body) =
+          kernelStmMetrics (Thread _ _ body) =
             inside "Thread" $ bodyMetrics body
           kernelStmMetrics Combine{} =
             seen "Combine"
@@ -866,11 +904,16 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
     text ("splitArray" <> suff) <> parens (commasep $ ppr w : ppr elems_per_thread : map ppr arrs)
     where suff = case o of InOrder -> ""
                            Disorder -> "Unordered"
-  ppr (Thread pes body) =
+  ppr (Thread pes threads body) =
     PP.annot (mapMaybe ppAnnot pes) $
-    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals <+> text "thread {" </>
+    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals <+>
+    text "thread" <+> threads' <> text "{" </>
     PP.indent 2 (ppr body) </>
     text "}"
+    where threads' = case threads of
+                       AllThreads -> mempty
+                       OneThreadPerGroup which -> ppr which
+                       ThreadsBefore num -> text "<" <+> ppr num
   ppr (Combine pe what) =
     PP.annot (mapMaybe ppAnnot [pe]) $
     text "let" <+> PP.braces (ppr pe) <+> PP.equals <+>
@@ -885,10 +928,12 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
     where (nes,els) = unzip input
 
 instance Pretty KernelResult where
-  ppr (AllThreadsReturn se) =
-    ppr se
-  ppr (ThisThreadReturns who what) =
+  ppr (ThreadsReturn AllThreads what) =
+    ppr what
+  ppr (ThreadsReturn (OneThreadPerGroup who) what) =
     text "thread" <+> ppr who <+> text "returns" <+> ppr what
+  ppr (ThreadsReturn (ThreadsBefore num) what) =
+    text "thread <" <+> ppr num <+> text "returns" <+> ppr what
   ppr (ConcatReturns o w per_thread_elems v) =
     text "concat" <> suff <>
     parens (commasep [ppr w, ppr per_thread_elems]) <+>

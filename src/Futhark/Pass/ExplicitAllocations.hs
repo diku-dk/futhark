@@ -765,10 +765,10 @@ allocInKernelStm
     return chunk { patElemAttr = attr }
   return [SplitArray (size, chunks') o w elems_per_thread arrs]
 
-allocInKernelStm (_, _group_size, num_threads) thread_index (Thread pes body) = do
+allocInKernelStm (_, _group_size, num_threads) thread_index (Thread pes threads body) = do
   body' <- allocInBodyNoDirect body
   pes' <- mapM threadMemory pes
-  return [Thread pes' body']
+  return [Thread pes' threads body']
   where thread_index' = SE.intSubExpToScalExp $ Var thread_index
         threadMemory pe
           | Array bt shape u <- patElemType pe = do
