@@ -971,6 +971,52 @@ expReturns (Op (Alloc size space)) =
 expReturns (Op (Inner (WriteKernel _ _ _ _ as))) =
   mapM (varReturns . snd) as
 
+-- The Kernel construct has some fairly aggressive returns.  This is
+-- to ensure that we do not need to copy-out at the end of the kernel,
+-- as the arrays will already be located where expected.
+expReturns (Op (Inner k@(Kernel _ _ _ thread_id kbody))) = do
+  ts <- opType k
+  zipWithM returnForResult (extReturns ts) $ kernelBodyResult kbody
+  where kernel_scope = mconcat $ map scopeOf $ kernelBodyStms kbody
+
+        static = ExtShape . map Free . shapeDims
+
+        combineInner ixfun
+          | n : m : dims <- reverse $ IxFun.shape ixfun =
+              IxFun.reshape ixfun $ reverse $ map DimNew $ m*n : dims
+          | otherwise =
+              ixfun
+
+        indexedIxfun _ _ (IxFun.Index ixfun' [idx])
+          | SE.Id idxv (IntType Int32) <- idx,
+            idxv == thread_id = return ixfun'
+        indexedIxfun d v ixfun =
+          fail $ "expReturns Kernel " ++ d ++ ": " ++
+          pretty v ++ " does not have a properly indexed index function (found" ++
+          pretty ixfun ++ ")"
+
+        transposedIxfun _ (IxFun.Permute ixfun' perm)
+          | perm == [1..length perm-1] ++ [0] = return ixfun'
+        transposedIxfun d ixfun =
+          fail $ "expReturns Kernel " ++ d ++
+          ": does not have transposed index function (found" ++ pretty ixfun ++ ")"
+
+        returnForResult _ (AllThreadsReturn (Var v))
+          | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
+              ixfun' <- combineInner <$> indexedIxfun "AllThreadsReturn" v ixfun
+              return $ ReturnsArray bt (static shape) u $ Just $ ReturnsInBlock mem ixfun'
+
+        returnForResult _ (ConcatReturns o _ _ v)
+          | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
+              ixfun' <- indexedIxfun "ConcatReturns" v ixfun
+              ixfun'' <- combineInner <$> case o of
+                           InOrder -> return ixfun'
+                           Disorder -> transposedIxfun "ConcatReturns Disorder" ixfun'
+              return $ ReturnsArray bt (static shape) u $ Just $ ReturnsInBlock mem ixfun''
+
+        returnForResult r _ =
+          return r
+
 expReturns (Op (Inner k)) =
   extReturns <$> opType k
 

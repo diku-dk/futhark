@@ -773,8 +773,9 @@ allocInKernelStm (_, _group_size, num_threads) thread_index (Thread pes body) = 
         threadMemory pe
           | Array bt shape u <- patElemType pe = do
               (_, mem) <- allocForArray (patElemType pe `arrayOfRow` num_threads) DefaultSpace
-              let dims = map SE.intSubExpToScalExp $ shapeDims shape ++ [num_threads]
-                  perm = (length dims-1) : [0..length dims-2]
+              dims <- mapM (fmap SE.intSubExpToScalExp . dimAllocationSize) $
+                      shapeDims shape ++ [num_threads]
+              let perm = (length dims-1) : [0..length dims-2]
                   root_ixfun = IxFun.iota dims
                   permuted_ixfun = IxFun.permute root_ixfun perm
                   fixed_ixfun = IxFun.applyInd permuted_ixfun [thread_index']
