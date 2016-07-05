@@ -974,7 +974,7 @@ expReturns (Op (Inner (WriteKernel _ _ _ _ as))) =
 -- The Kernel construct has some fairly aggressive returns.  This is
 -- to ensure that we do not need to copy-out at the end of the kernel,
 -- as the arrays will already be located where expected.
-expReturns (Op (Inner k@(Kernel _ _ _ thread_id kbody))) = do
+expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
   ts <- opType k
   zipWithM returnForResult (extReturns ts) $ kernelBodyResult kbody
   where kernel_scope = mconcat $ map scopeOf $ kernelBodyStms kbody
@@ -1003,8 +1003,9 @@ expReturns (Op (Inner k@(Kernel _ _ _ thread_id kbody))) = do
 
         returnForResult _ (AllThreadsReturn (Var v))
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
-              ixfun' <- combineInner <$> indexedIxfun "AllThreadsReturn" v ixfun
-              return $ ReturnsArray bt (static shape) u $ Just $ ReturnsInBlock mem ixfun'
+              ixfun' <- indexedIxfun "AllThreadsReturn" v ixfun
+              return $ ReturnsArray bt (static $ Shape [num_threads] <> shape) u $
+                Just $ ReturnsInBlock mem ixfun'
 
         returnForResult _ (ConcatReturns o _ _ v)
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
