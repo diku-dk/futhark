@@ -313,12 +313,7 @@ instance Substitute (MemBound u) where
     Scalar bt
 
 instance Rename (MemBound u) where
-  rename (ArrayMem bt shape u mem f) =
-    ArrayMem bt <$> rename shape <*> pure u <*> rename mem <*> rename f
-  rename (MemMem size space) =
-    MemMem <$> rename size <*> pure space
-  rename (Scalar bt) =
-    return (Scalar bt)
+  rename = substituteRename
 
 instance Engine.Simplifiable (MemBound u) where
   simplify (Scalar bt) =
@@ -363,10 +358,7 @@ instance Ord MemReturn where
   _ `compare` _ = EQ
 
 instance Rename MemReturn where
-  rename (ReturnsInBlock ident ixfun) =
-    ReturnsInBlock <$> rename ident <*> rename ixfun
-  rename (ReturnsNewBlock i size) =
-    ReturnsNewBlock i <$> rename size
+  rename = substituteRename
 
 instance Substitute MemReturn where
   substituteNames substs (ReturnsInBlock ident ixfun) =
@@ -423,13 +415,8 @@ instance FreeIn a => FreeIn (Returns u a) where
   freeIn (ReturnsArray _ shape _ summary) =
     freeIn shape <> freeIn summary
 
-instance Rename a => Rename (Returns u a) where
-  rename (ReturnsScalar bt) =
-    return $ ReturnsScalar bt
-  rename (ReturnsMemory size space) =
-    ReturnsMemory <$> rename size <*> pure space
-  rename (ReturnsArray bt shape u summary) =
-    ReturnsArray bt <$> rename shape <*> pure u <*> rename summary
+instance Substitute a => Rename (Returns u a) where
+  rename = substituteRename
 
 instance Engine.Simplifiable a => Engine.Simplifiable (Returns u a) where
   simplify (ReturnsScalar bt) =

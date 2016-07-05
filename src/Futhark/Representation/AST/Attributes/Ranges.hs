@@ -23,10 +23,10 @@ module Futhark.Representation.AST.Attributes.Ranges
        )
        where
 
-import Control.Applicative
 import Data.Monoid
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
+
 import Prelude
 
 import Futhark.Representation.AST.Attributes
@@ -61,10 +61,7 @@ instance Substitute KnownBound where
     ScalarBound $ substituteNames substs se
 
 instance Rename KnownBound where
-  rename (VarBound v)         = VarBound <$> rename v
-  rename (MinimumBound b1 b2) = MinimumBound <$> rename b1 <*> rename b2
-  rename (MaximumBound b1 b2) = MaximumBound <$> rename b1 <*> rename b2
-  rename (ScalarBound e)      = ScalarBound <$> rename e
+  rename = substituteRename
 
 instance FreeIn KnownBound where
   freeIn (VarBound v)         = freeIn v
