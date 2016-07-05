@@ -992,14 +992,14 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
             idxv == thread_id = return ixfun'
         indexedIxfun d v ixfun =
           fail $ "expReturns Kernel " ++ d ++ ": " ++
-          pretty v ++ " does not have a properly indexed index function (found" ++
+          pretty v ++ " does not have a properly indexed index function (found " ++
           pretty ixfun ++ ")"
 
         transposedIxfun _ (IxFun.Permute ixfun' perm)
-          | perm == [1..length perm-1] ++ [0] = return ixfun'
+          | perm == (length perm - 1) : [0..length perm-2] = return ixfun'
         transposedIxfun d ixfun =
           fail $ "expReturns Kernel " ++ d ++
-          ": does not have transposed index function (found" ++ pretty ixfun ++ ")"
+          ": does not have transposed index function (found " ++ pretty ixfun ++ ")"
 
         returnForResult _ (AllThreadsReturn (Var v))
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
