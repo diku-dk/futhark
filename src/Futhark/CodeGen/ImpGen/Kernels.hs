@@ -1123,19 +1123,7 @@ compileKernelResult _ dest (ThisThreadReturns who what) = do
 compileKernelResult constants dest (AllThreadsReturn what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
 
-compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems what) = do
-  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
-  let dest_loc_offset = ImpGen.offsetArray dest_loc $
-                        SE.intSubExpToScalExp per_thread_elems *
-                        ImpGen.varIndex (kernelGlobalThreadId constants)
-      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
-  ImpGen.copyDWIMDest dest' [] (Var what) []
-
-compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
-  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
-  let dest_loc' = ImpGen.strideArray
-                  (ImpGen.offsetArray dest_loc $
-                    ImpGen.varIndex (kernelGlobalThreadId constants)) $
-                  ImpGen.sizeToScalExp (kernelNumThreads constants)
-      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
-  ImpGen.copyDWIMDest dest' [] (Var what) []
+compileKernelResult _ _ ConcatReturns{} =
+  -- Already in the correct location by virtue of the ExplicitMemory
+  -- type rules.
+  return ()
