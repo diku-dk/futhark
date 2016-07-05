@@ -47,7 +47,7 @@ mapTranspose kernel_name elem_type =
   // to (BLOCK_DIM+1)*BLOCK_DIM.  This pads each row of the 2D block in shared memory
   // so that bank conflicts do not occur when threads address the array column-wise.
   //
-  // Note that total_size may not equal width*height if we are dealing with
+  // Note that input_size/output_size may not equal width*height if we are dealing with
   // a truncated array - this happens sometimes for coalescing optimisations.
   __kernel void $id:kernel_name(__global $ty:elem_type *odata,
                                 uint odata_offset,
@@ -55,7 +55,8 @@ mapTranspose kernel_name elem_type =
                                 uint idata_offset,
                                 uint width,
                                 uint height,
-                                uint total_size,
+                                uint input_size,
+                                uint output_size,
                                 __local $ty:elem_type* block) {
     uint x_index;
     uint y_index;
@@ -76,7 +77,7 @@ mapTranspose kernel_name elem_type =
 
     uint index_in = y_index * width + x_index;
 
-    if(x_index < width && y_index < height && index_in < total_size)
+    if(x_index < width && y_index < height && index_in < input_size)
     {
         block[get_local_id(1)*(FUT_BLOCK_DIM+1)+get_local_id(0)] = idata[index_in];
     }
@@ -89,7 +90,7 @@ mapTranspose kernel_name elem_type =
 
     uint index_out = y_index * height + x_index;
 
-    if(x_index < height && y_index < width && index_out < total_size)
+    if(x_index < height && y_index < width && index_out < output_size)
     {
         odata[index_out] = block[get_local_id(0)*(FUT_BLOCK_DIM+1)+get_local_id(1)];
     }
