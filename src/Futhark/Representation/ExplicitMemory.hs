@@ -981,9 +981,9 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
 
         static = ExtShape . map Free . shapeDims
 
-        combineInner ixfun
-          | n : m : dims <- reverse $ IxFun.shape ixfun =
-              IxFun.reshape ixfun $ reverse $ map DimNew $ m*n : dims
+        replaceOuter w ixfun
+          | _ : _ : dims <- IxFun.shape ixfun =
+              IxFun.reshape ixfun $ map DimNew $ SE.intSubExpToScalExp w : dims
           | otherwise =
               ixfun
 
@@ -1007,13 +1007,14 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
               return $ ReturnsArray bt (static $ Shape [num_threads] <> shape) u $
                 Just $ ReturnsInBlock mem ixfun'
 
-        returnForResult _ (ConcatReturns o _ _ v)
+        returnForResult _ (ConcatReturns o w _ v)
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
               ixfun' <- indexedIxfun "ConcatReturns" v ixfun
-              ixfun'' <- combineInner <$> case o of
+              ixfun'' <- replaceOuter w <$> case o of
                            InOrder -> return ixfun'
                            Disorder -> transposedIxfun "ConcatReturns Disorder" ixfun'
-              return $ ReturnsArray bt (static shape) u $ Just $ ReturnsInBlock mem ixfun''
+              return $ ReturnsArray bt (static $ shape `setOuterDim` w) u $
+                Just $ ReturnsInBlock mem ixfun''
 
         returnForResult r _ =
           return r
