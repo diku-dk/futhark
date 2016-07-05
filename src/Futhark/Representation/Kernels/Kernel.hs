@@ -353,7 +353,14 @@ instance Attributes lore => Substitute (Kernel lore) where
                          , mapOnKernelKernelBody = return . substituteNames subst
                          }
 
-instance Renameable lore => Rename (KernelBody lore) where
+instance Attributes lore => Substitute (KernelInput lore) where
+  substituteNames subst (KernelInput param arr is) =
+    KernelInput
+    (substituteNames subst param)
+    (substituteNames subst arr)
+    (substituteNames subst is)
+
+instance Attributes lore => Rename (KernelBody lore) where
   rename (KernelBody [] res) =
     KernelBody [] <$> rename res
   rename (KernelBody (stm:stms) res) =
@@ -362,37 +369,17 @@ instance Renameable lore => Rename (KernelBody lore) where
       KernelBody stms' res' <- rename $ KernelBody stms res
       return $ KernelBody (stm':stms') res'
 
-instance Renameable lore => Rename (KernelStm lore) where
-  rename (SplitArray (n,chunks) o w elems_per_thread vs) =
-    SplitArray <$> ((,) <$> rename n <*> rename chunks)
-    <*> pure o
-    <*> rename w
-    <*> rename elems_per_thread
-    <*> rename vs
-  rename (GroupReduce pes w lam input) =
-    GroupReduce <$> rename pes <*> rename w <*> rename lam <*> rename input
-  rename (Combine pe v) =
-    Combine <$> rename pe <*> rename v
-  rename (Thread pes which body) =
-    Thread <$> rename pes <*> rename which <*> rename body
+instance Attributes lore => Rename (KernelStm lore) where
+  rename = substituteRename
 
 instance Rename KernelResult where
-  rename (ThreadsReturn who what) =
-    ThreadsReturn <$> rename who <*> rename what
-  rename (ConcatReturns ord w per_thread_elems v) =
-    ConcatReturns ord <$> rename w <*> rename per_thread_elems <*> rename v
+  rename = substituteRename
 
 instance Rename WhichThreads where
-  rename AllThreads =
-    pure AllThreads
-  rename (OneThreadPerGroup which) =
-    OneThreadPerGroup <$> rename which
-  rename (ThreadsBefore num) =
-    ThreadsBefore <$> rename num
+  rename = substituteRename
 
-instance Renameable lore => Rename (KernelInput lore) where
-  rename (KernelInput param arr is) =
-    KernelInput <$> rename param <*> rename arr <*> rename is
+instance Attributes lore => Rename (KernelInput lore) where
+  rename = substituteRename
 
 instance Scoped lore (KernelInput lore) where
   scopeOf inp = scopeOfLParams [kernelInputParam inp]
