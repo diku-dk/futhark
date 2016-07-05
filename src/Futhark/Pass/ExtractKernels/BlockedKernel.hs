@@ -124,7 +124,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
                      zip nes $ map patElemName chunk_red_pes'
 
   red_rets <- forM final_red_pes $ \pe ->
-    return $ ThisThreadReturns (constant (0::Int32)) $ Var $ patElemName pe
+    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
   map_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering w (kernelElementsPerThread step_one_size) $ patElemName pe
   let rets = red_rets ++ map_rets
@@ -151,7 +151,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
     fmap unzip $ forM (zip red_ts arrs) $ \(t, arr) -> do
       arr_index_thread <- newVName (textual arr ++ "_index_thread")
       arr_index <- newVName (baseString arr ++ "_index")
-      return (Thread [PatElem arr_index BindVar t] $
+      return (Thread [PatElem arr_index BindVar t] AllThreads $
               Body () [Let (Pattern [] [PatElem arr_index_thread BindVar t]) () $
                        PrimOp $ Index [] arr [Var thread_id]]
                [Var arr_index_thread],
@@ -170,7 +170,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
   let reduce = GroupReduce final_res_pes group_size reduce_lam' $ zip nes arrs'
 
   rets <- forM final_res_pes $ \pe ->
-    return $ ThisThreadReturns (constant (0::Int32)) $ Var $ patElemName pe
+    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
 
   return $ Kernel cs
     (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size)
@@ -289,7 +289,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
            map (rowType . patElemType) chunk_map_pes
 
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
-    return $ AllThreadsReturn $ Var $ patElemName pe
+    return $ ThreadsReturn AllThreads $ Var $ patElemName pe
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering w (kernelElementsPerThread kernel_size) $ patElemName pe
 
@@ -320,7 +320,7 @@ blockedPerThread w kernel_size ordering lam num_nonconcat arrs = do
   chunk_map_pes <- forM map_ts $ \map_t -> do
     pe_name <- newVName "chunk_fold_map"
     return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
-  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) $ lambdaBody lam
+  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) AllThreads $ lambdaBody lam
 
   return (chunk_red_pes, chunk_map_pes, [chunk_stm,fold_chunk])
 

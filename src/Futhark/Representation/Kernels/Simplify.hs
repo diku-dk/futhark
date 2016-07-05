@@ -108,7 +108,7 @@ simplifyKernelBody :: Engine.MonadEngine m =>
                    -> KernelBody (Engine.InnerLore m) -> m (KernelBody (Lore m))
 simplifyKernelBody scope (KernelBody stms res) =
   simplifyKernelStms scope stms $
-    KernelBody [] <$> mapM simplifyKernelResult res
+    KernelBody [] <$> mapM Engine.simplify res
 
 simplifyKernelStms :: Engine.MonadEngine m =>
                       Scope (Lore m)
@@ -139,7 +139,7 @@ simplifyKernelStm _ (SplitArray (size, chunks) o w elems_per_thread arrs) =
   where inspect chunk arr =
           inspectPatElem chunk (Names' $ HS.singleton arr) range
           where range = (Just $ VarBound arr, Just $ VarBound arr)
-simplifyKernelStm scope (Thread pes body) = do
+simplifyKernelStm scope (Thread pes threads body) = do
   par_blocker <- Engine.asksEngineEnv $
                  Engine.blockHoistPar . Engine.envHoistBlockers
   body' <- Engine.blockIf (Engine.hasFree scope_bound
@@ -147,7 +147,8 @@ simplifyKernelStm scope (Thread pes body) = do
                             `Engine.orIf` Engine.isConsumed) $
            Engine.simplifyBody (map (const Observe) pes) body
   pes' <- inspectPatElems pes $ zip (map Names' $ bodyAliases body') (rangesOf body')
-  return [Thread pes' body']
+  threads' <- Engine.simplify threads
+  return [Thread pes' threads' body']
   where scope_bound = HS.fromList $ HM.keys scope
 simplifyKernelStm _ (Combine pe v) = do
   pe' <- inspectPatElem pe mempty $ rangeOf v
@@ -180,17 +181,23 @@ inspectPatElems :: (Engine.Simplifiable attr, Engine.MonadEngine m) =>
 inspectPatElems = zipWithM inspect
   where inspect pe (als, range) = inspectPatElem pe als range
 
-simplifyKernelResult :: Engine.MonadEngine m =>
-                        KernelResult -> m KernelResult
-simplifyKernelResult (AllThreadsReturn what) =
-  AllThreadsReturn <$> Engine.simplify what
-simplifyKernelResult (ThisThreadReturns who what) =
-  ThisThreadReturns <$> Engine.simplify who <*> Engine.simplify what
-simplifyKernelResult (ConcatReturns o w pte what) =
-  ConcatReturns o
-  <$> Engine.simplify w
-  <*> Engine.simplify pte
-  <*> Engine.simplify what
+
+instance Engine.Simplifiable KernelResult where
+  simplify (ThreadsReturn threads what) =
+    ThreadsReturn <$> Engine.simplify threads <*> Engine.simplify what
+  simplify (ConcatReturns o w pte what) =
+    ConcatReturns o
+    <$> Engine.simplify w
+    <*> Engine.simplify pte
+    <*> Engine.simplify what
+
+instance Engine.Simplifiable WhichThreads where
+  simplify AllThreads =
+    pure AllThreads
+  simplify (OneThreadPerGroup which) =
+    OneThreadPerGroup <$> Engine.simplify which
+  simplify (ThreadsBefore w) =
+    ThreadsBefore <$> Engine.simplify w
 
 simplifyKernelInput :: Engine.MonadEngine m =>
                        KernelInput (Engine.InnerLore m) -> m (KernelInput (Lore m))
@@ -412,7 +419,7 @@ fuseKernelIota vtable (Let pat _ (Op (Kernel cs ksize ts thread_gid kbody)))
         inlineIotaInKernelStm (size, chunk, o, elems_per_thread, x) stm
           | patElemName chunk `HS.member` freeIn stm =
               case stm of
-                Thread pes body -> do
+                Thread pes threads body -> do
                   -- Invent new name, substitute, and insert.
                   iota_chunk_name <- newVName $ baseString $ patElemName chunk
                   let subst = HM.singleton (patElemName chunk) iota_chunk_name
@@ -431,7 +438,7 @@ fuseKernelIota vtable (Let pat _ (Op (Kernel cs ksize ts thread_gid kbody)))
                           letBindNames'_ [iota_chunk_name] $
                             PrimOp $ Iota (Var size) start num_threads
                     bodyBind $ substituteNames subst body
-                  return $ Thread pes body'
+                  return $ Thread pes threads body'
                 _ -> cannotSimplify
         inlineIotaInKernelStm _ stm =
           return stm

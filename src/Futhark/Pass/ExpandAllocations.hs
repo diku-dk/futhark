@@ -115,10 +115,10 @@ extractKernelBodyAllocations :: Names -> KernelBody ExplicitMemory
 extractKernelBodyAllocations bound_before_body kbody = do
   (allocs, stms) <- mapAccumLM extract HM.empty $ kernelBodyStms kbody
   return (kbody { kernelBodyStms = stms }, allocs)
-  where extract allocs (Thread pes body) = do
+  where extract allocs (Thread pes threads body) = do
           let bound_before_body' = boundInBody body <> bound_before_body
           (body', body_allocs) <- extractThreadAllocations bound_before_body' body
-          return (allocs <> body_allocs, Thread pes body')
+          return (allocs <> body_allocs, Thread pes threads body')
 
         extract allocs (GroupReduce pes w lam input) = do
           let bound_before_body' = HS.fromList (HM.keys $ scopeOf lam) <> bound_before_body
@@ -200,7 +200,7 @@ offsetMemoryInKernelBody :: RebaseMap -> KernelBody ExplicitMemory
                          -> KernelBody ExplicitMemory
 offsetMemoryInKernelBody offsets kbody =
   kbody { kernelBodyStms = map offset $ kernelBodyStms kbody }
-  where offset (Thread pes body) = Thread pes $ offsetMemoryInBody offsets body
+  where offset (Thread pes threads body) = Thread pes threads $ offsetMemoryInBody offsets body
         offset (GroupReduce pes w lam input) =
           let body' = offsetMemoryInBody offsets $ lambdaBody lam
           in GroupReduce pes w lam { lambdaBody = body' } input
