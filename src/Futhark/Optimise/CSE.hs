@@ -112,7 +112,7 @@ cseInBinding :: Attributes lore =>
                 Names -> Binding lore
              -> ([Binding lore] -> CSEM lore a)
              -> CSEM lore a
-cseInBinding consumed bnd@(Let pat eattr e) m = do
+cseInBinding consumed (Let pat eattr e) m = do
   CSEState (esubsts, nsubsts) cse_arrays <- ask
   let e' = substituteNames nsubsts e
       pat' = substituteNames nsubsts pat
