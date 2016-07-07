@@ -139,6 +139,9 @@ simplifyKernelStm _ (SplitArray (size, chunks) o w elems_per_thread arrs) =
   where inspect chunk arr =
           inspectPatElem chunk (Names' $ HS.singleton arr) range
           where range = (Just $ VarBound arr, Just $ VarBound arr)
+simplifyKernelStm _ (SplitIndexSpace ispace) =
+  pure <$> (SplitIndexSpace <$>
+            (zip (map fst ispace) <$> mapM (Engine.simplify . snd) ispace))
 simplifyKernelStm scope (Thread pes threads body) = do
   par_blocker <- Engine.asksEngineEnv $
                  Engine.blockHoistPar . Engine.envHoistBlockers
@@ -191,13 +194,16 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify pte
     <*> Engine.simplify what
 
+instance Engine.Simplifiable ThreadSpace where
+  simplify = mapM Engine.simplify
+
 instance Engine.Simplifiable WhichThreads where
   simplify AllThreads =
     pure AllThreads
   simplify (OneThreadPerGroup which) =
     OneThreadPerGroup <$> Engine.simplify which
-  simplify (ThreadsBefore w) =
-    ThreadsBefore <$> Engine.simplify w
+  simplify (ThreadsInSpace w space) =
+    ThreadsInSpace <$> Engine.simplify w <*> Engine.simplify space
 
 simplifyKernelInput :: Engine.MonadEngine m =>
                        KernelInput (Engine.InnerLore m) -> m (KernelInput (Lore m))

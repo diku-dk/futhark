@@ -680,20 +680,39 @@ maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
                        }
       maybeDistributeBinding newbnd acc
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc = do
-  acc' <- distribute acc
-  distribute =<< addBindingToKernel bnd acc'
+maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc =
+  distributeSingleUnaryBinding acc bnd $ \_ outerpat arr ->
+  addKernel [Let outerpat () $ PrimOp $ Copy arr]
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp Rearrange{})) acc = do
-  acc' <- distribute acc
-  distribute =<< addBindingToKernel bnd acc'
+maybeDistributeBinding bnd@(Let _ _ (PrimOp (Rearrange cs perm _))) acc =
+  distributeSingleUnaryBinding acc bnd $ \nest outerpat arr -> do
+    let r = length (snd nest) + 1
+        perm' = [0..r-1] ++ map (+r) perm
+    addKernel [Let outerpat () $ PrimOp $ Rearrange cs perm' arr]
 
-maybeDistributeBinding bnd@(Let _ _ (PrimOp Reshape{})) acc = do
-  acc' <- distribute acc
-  distribute =<< addBindingToKernel bnd acc'
+maybeDistributeBinding bnd@(Let _ _ (PrimOp (Reshape cs reshape _))) acc =
+  distributeSingleUnaryBinding acc bnd $ \nest outerpat arr -> do
+    let reshape' = map DimCoercion (kernelNestWidths nest) ++ reshape
+    addKernel [Let outerpat () $ PrimOp $ Reshape cs reshape' arr]
 
 maybeDistributeBinding bnd acc =
   addBindingToKernel bnd acc
+
+distributeSingleUnaryBinding :: KernelAcc
+                             -> Binding
+                             -> (KernelNest -> Pattern -> VName -> KernelM ())
+                             -> KernelM KernelAcc
+distributeSingleUnaryBinding acc bnd f =
+  distributeSingleBinding acc bnd >>= \case
+    Just (kernels, res, nest, acc')
+      | res == map Var (patternNames $ bindingPattern bnd),
+        (outer, _) <- nest,
+        [(_, arr)] <- loopNestingParamsAndArrs outer -> do
+          addKernels kernels
+          let outerpat = loopNestingPattern $ fst nest
+          f nest outerpat arr
+          return acc'
+    _ -> addBindingToKernel bnd acc
 
 distribute :: KernelAcc -> KernelM KernelAcc
 distribute acc =

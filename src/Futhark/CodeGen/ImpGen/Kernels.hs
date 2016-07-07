@@ -1008,6 +1008,15 @@ compileKernelStm constants (SplitArray (size,_) o w elems_per_thread _arrs) = do
   where comm = case o of Disorder -> Commutative
                          InOrder -> Noncommutative
 
+compileKernelStm constants (SplitIndexSpace ispace) = do
+  let shape = map (ImpGen.compileSubExp . snd) ispace
+      indices = map fst ispace
+
+      index_expressions = unflattenIndex shape $
+                          Imp.ScalarVar $ kernelGlobalThreadId constants
+  forM_ (zip indices index_expressions) $ \(i, x) ->
+    ImpGen.emit $ Imp.SetScalar i x
+
 compileKernelStm constants (Thread pes threads body) = do
   dest <- ImpGen.destinationFromPattern $ Pattern [] pes
   protect threads =<< ImpGen.collect (ImpGen.compileBody dest body)
@@ -1017,7 +1026,7 @@ compileKernelStm constants (Thread pes threads body) = do
               me = Imp.ScalarVar $ kernelLocalThreadId constants
               active = Imp.CmpOp (CmpEq int32) me which'
           ImpGen.emit $ Imp.If active body' mempty
-        protect (ThreadsBefore w) body' = do
+        protect (ThreadsInSpace w _) body' = do
           let w' = ImpGen.compileSubExp w
               me = Imp.ScalarVar $ kernelGlobalThreadId constants
               active = Imp.CmpOp (CmpSlt Int32) me w'
@@ -1139,10 +1148,9 @@ compileKernelResult constants dest (ThreadsReturn (OneThreadPerGroup who) what) 
 compileKernelResult constants dest (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
 
-compileKernelResult constants dest (ThreadsReturn (ThreadsBefore w) what) = do
-  write_result <- ImpGen.collect $
-                  ImpGen.copyDWIMDest dest
-                  [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
+compileKernelResult constants dest (ThreadsReturn (ThreadsInSpace w space) what) = do
+  let is = map (ImpGen.varIndex . fst) space
+  write_result <- ImpGen.collect $ ImpGen.copyDWIMDest dest is what []
   let me = Imp.ScalarVar $ kernelGlobalThreadId constants
       w' = ImpGen.compileSubExp w
   ImpGen.emit $ Imp.If (Imp.CmpOp (CmpSlt Int32) me w') write_result mempty

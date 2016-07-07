@@ -7,6 +7,8 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedScan
        , blockedSegmentedScan
        , blockedKernelSize
+
+       , mapKernel
        )
        where
 
@@ -392,7 +394,6 @@ blockedScan pat cs w lam foldlam nes arrs = do
     nes group_carry_out
 
   lam''' <- renameLambda lam
-  result_map_index <- newVName "result_map_index"
   j <- newVName "j"
   let (acc_params, arr_params) =
         splitAt (length nes) $ lambdaParams lam'''
@@ -424,10 +425,10 @@ blockedScan pat cs w lam foldlam nes arrs = do
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
-  let result_map_returns = [ (rt, [0..arrayRank rt])
-                           | rt <- lambdaReturnType lam ]
-  letBind_ final_res_pat $ Op $ MapKernel [] w result_map_index
-    [(j, w)] result_map_input result_map_returns result_map_body
+  (mapk_bnds, mapk) <- mapKernel [] w [(j, w)] result_map_input
+                       (lambdaReturnType lam) result_map_body
+  mapM_ addBinding mapk_bnds
+  letBind_ final_res_pat $ Op mapk
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
 
@@ -466,7 +467,6 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       (staticShapes $ lambdaReturnType lam)
     return $ resultBody $ new_flag : map Var seg_res
 
-  flags_global_index <- newVName "flags_global_index"
   flags_i <- newVName "flags_i"
   flags_body <-
     runBodyBinder $ localScope (HM.singleton flags_i IndexInfo) $ do
@@ -477,11 +477,10 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       flag <- letSubExp "flag" $
               If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
       return $ resultBody [flag]
+  (mapk_bnds, mapk) <- mapKernel [] w [(flags_i, w)] [] [Prim Bool] flags_body
+  mapM_ addBinding mapk_bnds
   flags <-
-    letExp "flags" $ Op $ MapKernel [] w flags_global_index
-    [(flags_i, w)] []
-    [(Prim Bool, [0])]
-    flags_body
+    letExp "flags" $ Op mapk
 
   unused_flag_array <- newVName "unused_flag_array"
   let lam' = Lambda { lambdaParams = params
@@ -498,3 +497,39 @@ blockedSegmentedScan segment_size pat cs w lam input = do
   where zero = constant (0 :: Int32)
         true = constant True
         false = constant False
+
+mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
+             Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput Kernels]
+          -> [Type] -> Body
+          -> m ([Binding], Kernel Kernels)
+mapKernel cs w ispace inputs rts body = do
+  num_groups_v <- newVName "num_groups"
+  group_size_v <- newVName "group_size"
+  num_threads_v <- newVName "num_threads"
+
+  ksize_bnds <- runBinder_ $ do
+    letBindNames'_ [group_size_v] $ Op GroupSize
+    letBindNames'_ [num_groups_v] =<< eDivRoundingUp Int32
+      (eSubExp w) (eSubExp $ Var group_size_v)
+    letBindNames'_ [num_threads_v] $
+      PrimOp $ BinOp (Mul Int32) (Var num_groups_v) (Var group_size_v)
+
+  let split_ispace_stm = SplitIndexSpace ispace
+
+  read_input_bnds <- forM inputs $ \inp -> do
+    let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
+    return $ Let (Pattern [] [pe]) () $
+      PrimOp $ Index [] (kernelInputArray inp) (kernelInputIndices inp)
+
+  kresult_pes <- forM rts $ \rt -> do
+    kresult <- newVName "kresult"
+    return $ PatElem kresult BindVar rt
+
+  let body_stm = Thread kresult_pes (ThreadsInSpace w ispace) $
+                 insertBindings read_input_bnds body
+
+  index <- newVName "kernel_thread_index"
+  let ksize = (Var num_groups_v, Var group_size_v, Var num_threads_v)
+      krets = map (ThreadsReturn (ThreadsInSpace w ispace) . Var . patElemName) kresult_pes
+      kbody = KernelBody [split_ispace_stm,body_stm] krets
+  return (ksize_bnds, Kernel cs ksize rts index kbody)
