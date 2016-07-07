@@ -33,6 +33,10 @@ module Futhark.Representation.Aliases
        , removeExtLambdaAliases
        , removePatternAliases
        , removeScopeAliases
+       -- * Tracking aliases
+       , AliasesAndConsumed
+       , trackAliases
+       , consumedInBindings
        )
 where
 
@@ -283,26 +287,47 @@ mkBodyAliases bnds res =
   -- and consumption sets.  We do this by computing the transitive
   -- closure of the alias map (within bnds), then removing anything
   -- bound in bnds.
-  let (aliases, consumed) = delve (HM.empty, HS.empty) bnds
+  let (aliases, consumed) = mkBindingsAliases bnds res
       boundNames =
         mconcat $ map (HS.fromList . patternNames . bindingPattern) bnds
       bound = (`HS.member` boundNames)
       aliases' = map (HS.filter (not . bound)) aliases
       consumed' = HS.filter (not . bound) consumed
   in (map Names' aliases', Names' consumed')
+
+mkBindingsAliases :: Aliased lore =>
+                     [Binding lore] -> [SubExp]
+                  -> ([Names], Names)
+mkBindingsAliases bnds res = delve mempty bnds
   where delve (aliasmap, consumed) [] =
           (map (aliasClosure aliasmap . subExpAliases) res,
            consumed)
         delve (aliasmap, consumed) (bnd:bnds') =
-          let pat = bindingPattern bnd
-              als = HM.fromList $
-                    zip (patternNames pat) (patternAliases pat)
-              aliasmap' = als <> aliasmap
-              consumed' = consumed <> aliasClosure aliasmap (consumedInBinding bnd)
-          in delve (aliasmap', consumed') bnds'
+          delve (trackAliases (aliasmap, consumed) bnd) bnds'
         aliasClosure aliasmap names =
           names `HS.union` mconcat (map look $ HS.toList names)
           where look k = HM.lookupDefault mempty k aliasmap
+
+-- | Everything consumed in the given bindings and result (even transitively).
+consumedInBindings :: Aliased lore => [Binding lore] -> [SubExp] -> Names
+consumedInBindings bnds res = snd $ mkBindingsAliases bnds res
+
+type AliasesAndConsumed = (HM.HashMap VName Names,
+                           Names)
+
+trackAliases :: Aliased lore =>
+                AliasesAndConsumed -> Binding lore
+             -> AliasesAndConsumed
+trackAliases (aliasmap, consumed) bnd =
+  let pat = bindingPattern bnd
+      als = HM.fromList $
+            zip (patternNames pat) (map addAliasesOfAliases $ patternAliases pat)
+      aliasmap' = als <> aliasmap
+      consumed' = consumed <> addAliasesOfAliases (consumedInBinding bnd)
+  in (aliasmap', consumed')
+  where addAliasesOfAliases names = names <> aliasesOfAliases names
+        aliasesOfAliases =  mconcat . map look . HS.toList
+        look k = HM.lookupDefault mempty k aliasmap
 
 mkAliasedLetBinding :: (Attributes lore, CanBeAliased (Op lore)) =>
                        Pattern lore

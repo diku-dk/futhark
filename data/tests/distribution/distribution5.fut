@@ -15,11 +15,9 @@
 -- ==
 --
 -- structure distributed {
---   MapKernel 6
+--   Kernel 6
 --   ScanKernel 2
---   Map 0
 --   Concat 1
---   Reduce 0
 -- }
 
 fun []([]int,[]int) main([n][an][]int a, [n][bn]int b) =

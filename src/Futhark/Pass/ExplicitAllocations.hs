@@ -8,6 +8,7 @@ module Futhark.Pass.ExplicitAllocations
 where
 
 import Control.Applicative
+import Control.Arrow (first)
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -765,6 +766,9 @@ allocInKernelStm
     return chunk { patElemAttr = attr }
   return [SplitArray (size, chunks') o w elems_per_thread arrs]
 
+allocInKernelStm _ _ (SplitIndexSpace ispace) =
+  return [SplitIndexSpace ispace]
+
 allocInKernelStm (_, _group_size, num_threads) thread_index (Thread pes threads body) = do
   body' <- allocInBodyNoDirect body
   pes' <- mapM threadMemory pes
@@ -772,13 +776,23 @@ allocInKernelStm (_, _group_size, num_threads) thread_index (Thread pes threads 
   where thread_index' = SE.intSubExpToScalExp $ Var thread_index
         threadMemory pe
           | Array bt shape u <- patElemType pe = do
-              (_, mem) <- allocForArray (patElemType pe `arrayOfRow` num_threads) DefaultSpace
+              let (outer_is, outer_dims) =
+                    unzip $ case threads of
+                              ThreadsInSpace _ space ->
+                                map (first $ SE.intSubExpToScalExp . Var) space
+                              _ ->
+                                [(thread_index', num_threads)]
+                  pet = patElemType pe `arrayOfShape` Shape outer_dims
+              (_, mem) <- allocForArray pet DefaultSpace
               dims <- mapM (fmap SE.intSubExpToScalExp . dimAllocationSize) $
-                      shapeDims shape ++ [num_threads]
-              let perm = (length dims-1) : [0..length dims-2]
+                      shapeDims shape ++ outer_dims
+              let num_dims = length dims
+                  num_outer_dims = length outer_dims
+                  perm = [num_dims-num_outer_dims .. num_dims-1] ++
+                         [0..num_dims-num_outer_dims-1]
                   root_ixfun = IxFun.iota dims
                   permuted_ixfun = IxFun.permute root_ixfun perm
-                  fixed_ixfun = IxFun.applyInd permuted_ixfun [thread_index']
+                  fixed_ixfun = IxFun.applyInd permuted_ixfun outer_is
               return pe { patElemAttr = ArrayMem bt shape u mem fixed_ixfun }
           | Prim bt <- patElemType pe =
               return pe { patElemAttr = Scalar bt }
