@@ -14,7 +14,6 @@ where
 import Control.Applicative
 import Control.Monad
 import Data.Either
-import Data.Foldable (any)
 import Data.List hiding (any, all)
 import Data.Maybe
 import Data.Monoid
@@ -39,7 +38,6 @@ import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
-import qualified Futhark.Analysis.UsageTable as UT
 
 simplifyKernels :: MonadFreshNames m => Prog -> m Prog
 simplifyKernels =
@@ -51,26 +49,6 @@ simplifyFun =
 
 instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
          Engine.SimplifiableOp lore (Kernel lore) where
-  simplifyOp (MapKernel cs w index ispace inps returns body) = do
-    cs' <- Engine.simplify cs
-    w' <- Engine.simplify w
-    ispace' <- forM ispace $ \(i, bound) -> do
-      bound' <- Engine.simplify bound
-      return (i, bound')
-    returns' <- forM returns $ \(t, perm) -> do
-      t' <- Engine.simplify t
-      return (t', perm)
-    par_blocker <- Engine.asksEngineEnv $ Engine.blockHoistPar . Engine.envHoistBlockers
-    Engine.enterLoop $ Engine.bindLoopVars ((index,w) : ispace) $ do
-      inps' <- mapM simplifyKernelInput inps
-      body' <- Engine.bindLParams (map kernelInputParam inps') $
-               Engine.blockIf (Engine.hasFree bound_here `Engine.orIf`
-                               Engine.isConsumed `Engine.orIf`
-                               par_blocker) $
-               Engine.simplifyBody (map (const Observe) returns) body
-      return $ MapKernel cs' w' index ispace' inps' returns' body'
-    where bound_here = HS.fromList $ index : map kernelInputName inps ++ map fst ispace
-
   simplifyOp (ScanKernel cs w kernel_size lam foldlam nes arrs) = do
     arrs' <- mapM Engine.simplify arrs
     ScanKernel <$> Engine.simplify cs <*> Engine.simplify w <*>
@@ -205,14 +183,6 @@ instance Engine.Simplifiable WhichThreads where
   simplify (ThreadsInSpace w space) =
     ThreadsInSpace <$> Engine.simplify w <*> Engine.simplify space
 
-simplifyKernelInput :: Engine.MonadEngine m =>
-                       KernelInput (Engine.InnerLore m) -> m (KernelInput (Lore m))
-simplifyKernelInput (KernelInput param arr is) = do
-  param' <- Engine.simplifyParam Engine.simplify param
-  arr' <- Engine.simplify arr
-  is' <- mapM Engine.simplify is
-  return $ KernelInput param' arr' is'
-
 instance Engine.Simplifiable KernelSize where
   simplify (KernelSize num_groups group_size thread_chunk
             num_elements offset_multiple num_threads) = do
@@ -236,10 +206,7 @@ topDownRules :: (MonadBinder m,
                  LocalScope (Lore m) m,
                  Op (Lore m) ~ Kernel (Lore m),
                  Aliased (Lore m)) => TopDownRules m
-topDownRules = [removeUnusedKernelInputs
-               , simplifyKernelInputs
-               , removeInvariantKernelOutputs
-               , fuseScanIota
+topDownRules = [ fuseScanIota
                , fuseWriteIota
                , fuseKernelIota
                ]
@@ -247,106 +214,8 @@ topDownRules = [removeUnusedKernelInputs
 bottomUpRules :: (MonadBinder m,
                   LocalScope (Lore m) m,
                   Op (Lore m) ~ Kernel (Lore m)) => BottomUpRules m
-bottomUpRules = [ removeDeadKernelOutputs
+bottomUpRules = [
                 ]
-
--- | Remove inputs that are not used inside the @kernel@.
-removeUnusedKernelInputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
-                            TopDownRule m
-removeUnusedKernelInputs _ (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
-  | (used,unused) <- partition usedInput inps,
-    not (null unused) =
-      letBind_ pat $ Op $ MapKernel cs w index ispace used returns body
-  where used_in_body = freeInBody body
-        usedInput inp = kernelInputName inp `HS.member` used_in_body
-removeUnusedKernelInputs _ _ = cannotSimplify
-
--- | Kernel inputs are indexes into arrays.  Based on how those arrays
--- are defined, we may be able to simplify the input.
-simplifyKernelInputs :: (MonadBinder m,
-                         LocalScope (Lore m) m,
-                         Op (Lore m) ~ Kernel (Lore m), Aliased (Lore m)) =>
-                        TopDownRule m
-simplifyKernelInputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body))) = do
-  ((inps', extra_cs), extra_bnds) <- localScope index_env $ collectBindings $
-    unzip <$> mapM simplifyInput inps
-  when (inps == catMaybes inps') cannotSimplify
-
-  body' <- localScope index_env $ insertBindingsM $ do
-    mapM_ addBinding extra_bnds
-    return body
-  letBind_ pat $ Op $
-    MapKernel (cs++concat extra_cs) w index ispace
-    (catMaybes inps') returns body'
-  where defOf = (`ST.lookupExp` vtable)
-        seType (Var v) = ST.lookupType v vtable
-        seType (Constant v) = Just $ Prim $ primValueType v
-        indices = map fst ispace
-        index_env = HM.fromList $ zip indices $ repeat IndexInfo
-        consumed_in_body = consumedInBody body
-
-        simplifyInput inp@(KernelInput param arr is)
-          | Just m <- simplifyIndexing defOf seType arr is consumed = do
-              (res, bnds) <- collectBindings m
-              let free_in_bnds = mconcat $ map freeInBinding bnds
-              case res of
-                IndexResult inp_cs arr' is'
-                  | paramName param `HS.member` consumed_in_body,
-                    any (`HS.member` free_in_bnds) indices ->
-                      return (Just inp, [])
-                  | otherwise -> do
-                      mapM_ addBinding bnds
-                      letBindNames'_ [name] $ PrimOp $ Index inp_cs arr' is'
-                      return (Nothing, inp_cs)
-                SubExpResult se -> do
-                  mapM_ addBinding bnds
-                  letBindNames'_ [name] $ PrimOp $ SubExp se
-                  return (Nothing, [])
-          | otherwise =
-              return (Just inp, [])
-          where name = paramName param
-                consumed = name `HS.member` consumed_in_body
-
-simplifyKernelInputs _ _ = cannotSimplify
-
-removeInvariantKernelOutputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
-                                TopDownRule m
-removeInvariantKernelOutputs vtable (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
-  | (invariant, variant) <-
-      partitionEithers $ zipWith3 isInvariant
-      (patternValueElements pat) returns $ bodyResult body,
-    not $ null invariant = do
-      let (variant_pat_elems, variant_returns, variant_result) =
-            unzip3 variant
-          pat' = Pattern [] variant_pat_elems
-      forM_ invariant $ \(pat_elem, (t, perm), se) ->
-        if perm /= sort perm
-        then cannotSimplify
-        else do
-          flat <- letExp "kernel_invariant_flat" $ PrimOp $ Replicate w se
-          let shape = map DimNew $ map snd ispace ++ arrayDims t
-          letBind_ (Pattern [] [pat_elem]) $ PrimOp $ Reshape cs shape flat
-      letBind_ pat' $ Op $
-        MapKernel cs w index ispace inps variant_returns
-        body { bodyResult = variant_result }
-  where isInvariant pat_elem ret (Var v)
-          | Just _ <- ST.lookupType v vtable = Left (pat_elem, ret, Var v)
-        isInvariant pat_elem ret (Constant v) = Left (pat_elem, ret, Constant v)
-        isInvariant pat_elem ret se = Right (pat_elem, ret, se)
-removeInvariantKernelOutputs _ _ = cannotSimplify
-
-removeDeadKernelOutputs :: (MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) => BottomUpRule m
-removeDeadKernelOutputs (_, used) (Let pat _ (Op (MapKernel cs w index ispace inps returns body)))
-  | (used_pat_elems, used_returns, used_result) <-
-      unzip3 $ filter usedOutput pats_rets_and_ses,
-    used_returns /= returns = do
-      let pat' = pat { patternValueElements = used_pat_elems }
-      letBind_ pat' $ Op $
-        MapKernel cs w index ispace inps used_returns
-        body { bodyResult = used_result }
-  where pats_rets_and_ses = zip3 (patternValueElements pat) returns $ bodyResult body
-        usedOutput (pat_elem, _, _) = patElemName pat_elem `UT.used` used
-removeDeadKernelOutputs _ _ = cannotSimplify
 
 iotaParams :: ST.SymbolTable lore
            -> [ParamT attr]

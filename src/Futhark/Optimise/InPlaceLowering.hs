@@ -71,7 +71,6 @@ import Data.Maybe
 import Futhark.Analysis.Alias
 import Futhark.Representation.Aliases
 import Futhark.Representation.Kernels (Kernels)
-import Futhark.Representation.Kernels.Kernel
 import Futhark.Optimise.InPlaceLowering.LowerIntoBinding
 import Futhark.MonadFreshNames
 import Futhark.Binder
@@ -153,11 +152,7 @@ optimiseExp (DoLoop ctx val form body) =
     return $ DoLoop ctx val form body'
   where boundInForm (ForLoop i _) = [i]
         boundInForm (WhileLoop _) = []
-optimiseExp (Op (MapKernel cs w index ispace inps returns body)) =
-  bindingIndices (index : map fst ispace) $
-  bindingLParams (map kernelInputParam inps) $ do
-    body' <- optimiseBody body
-    return $ Op $ MapKernel cs w index ispace inps returns body'
+-- TODO: handle Kernel here.
 optimiseExp e = mapExpM optimise e
   where optimise = identityMapper { mapOnBody = optimiseBody
                                   }
@@ -230,11 +225,6 @@ bindingFParams :: [FParam (Aliases Kernels)]
                -> ForwardingM a
                -> ForwardingM a
 bindingFParams = bindingParams FParamInfo
-
-bindingLParams :: [LParam (Aliases Kernels)]
-               -> ForwardingM a
-               -> ForwardingM a
-bindingLParams = bindingParams LParamInfo
 
 bindingBinding :: Binding (Aliases Kernels)
                -> ForwardingM a

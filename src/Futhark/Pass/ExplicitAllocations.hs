@@ -540,28 +540,6 @@ allocInExp (DoLoop ctx val form (Body () bodybnds bodyres)) =
         formBinds (WhileLoop _) =
           id
 
-allocInExp (Op (MapKernel cs w index ispace inps returns body)) = do
-  inps' <- mapM allocInKernelInput inps
-  let mem_map = lparamsSummary (map kernelInputParam inps') <> ispace_map
-  localScope mem_map $ do
-    body' <- allocInBindings (bodyBindings body) $ \bnds' ->
-      return $ Body () bnds' $ bodyResult body
-    return $ Op $ Inner $ MapKernel cs w index ispace inps' returns body'
-  where ispace_map = HM.fromList [ (i, IndexInfo)
-                                 | i <- index : map fst ispace ]
-        allocInKernelInput inp =
-          case kernelInputType inp of
-            Prim bt ->
-              return inp { kernelInputParam = Param (kernelInputName inp) $ Scalar bt }
-            Array bt shape u -> do
-              (mem, ixfun) <- lookupArraySummary $ kernelInputArray inp
-              let ixfun' = IxFun.applyInd ixfun $ map SE.intSubExpToScalExp $
-                           kernelInputIndices inp
-                  summary = ArrayMem bt shape u mem ixfun'
-              return inp { kernelInputParam = Param (kernelInputName inp) summary }
-            Mem size shape ->
-              return inp { kernelInputParam = Param (kernelInputName inp) $ MemMem size shape }
-
 allocInExp (Op (ScanKernel cs w size lam foldlam nes arrs)) = do
   lam' <- allocInScanLambda lam (length nes) $ kernelWorkgroupSize size
   foldlam' <- allocInScanLambda foldlam (length nes) $ kernelWorkgroupSize size

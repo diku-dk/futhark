@@ -1,7 +1,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | Do various kernel optimisations - mostly related to coalescing.
 module Futhark.Pass.KernelBabysitting
-       ( babysitKernels )
+       ( babysitKernels
+       , nonlinearInMemory -- FIXME, do not export this.
+       )
        where
 
 import Control.Applicative
@@ -78,33 +80,6 @@ transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id body))) = d
   return expmap
   where (_, _, num_threads) = size
 
-transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
-  body' <- inScopeOf ((i, IndexInfo) :
-                      [ (j, IndexInfo) | (j, _) <- ispace ]) $
-           inScopeOf inps $
-           transformBody body
-  -- For every input that is an array, we transpose the next-outermost
-  -- and outermost dimension.
-  inps' <- rearrangeInputs expmap (map fst ispace) inps
-  -- For every return that is an array, we transpose the
-  -- next-outermost and outermost dimension.
-  let value_elems = patternValueElements pat
-  (value_elems', returns') <- rearrangeReturns num_is value_elems returns
-  let pat' = Pattern [] value_elems'
-  addBinding $ Let pat' () $ Op $ MapKernel cs w i ispace inps' returns' body'
-  mapM_ maybeRearrangeResult $ zip3 value_elems value_elems' returns'
-  return expmap
-  where num_is = length ispace
-
-        maybeRearrangeResult (orig_pat_elem, new_pat_elem, (_, perm))
-          | orig_pat_elem == new_pat_elem =
-            return ()
-          | otherwise =
-            addBinding $
-            mkLet' [] [patElemIdent orig_pat_elem] $
-            PrimOp $ Rearrange [] (rearrangeInverse perm) $
-            patElemName new_pat_elem
-
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
   addBinding $ Let pat () e'
@@ -119,65 +94,6 @@ transformLambda lam = do
   body' <- inScopeOf lam $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }
-
-rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Kernels]
-                -> BabysitM [KernelInput Kernels]
-rearrangeInputs expmap is = mapM maybeRearrangeInput
-  where
-    iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
-                            reverse .
-                            kernelInputIndices
-
-    maybeRearrangeInput inp =
-      case paramType $ kernelInputParam inp of
-        Array {} | not $ iteratesLastDimension inp -> do
-          arr_t <- lookupType arr
-          let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
-          rearrangeInput perm inp
-        Prim {}
-          | Just perm <- map Var is `isPermutationOf` inp_is,
-            perm /= [0..length perm-1] ->
-              rearrangeInput perm inp
-        _ | nonlinearInMemory arr expmap -> do
-              flat <- letExp (baseString arr ++ "_flat") $ PrimOp $ Copy arr
-              return inp { kernelInputArray = flat }
-          | otherwise ->
-              return inp
-      where arr = kernelInputArray inp
-            inp_is = kernelInputIndices inp
-            num_inp_is = length inp_is
-
-    rearrangeInput perm inp = do
-      let inv_perm = rearrangeInverse perm
-      transposed <- letExp (baseString arr ++ "_tr") $
-                    PrimOp $ Rearrange [] perm arr
-      manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                    PrimOp $ Copy transposed
-      inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
-                        PrimOp $ Rearrange [] inv_perm manifested
-      return inp { kernelInputArray = inv_transposed }
-      where arr = kernelInputArray inp
-
-coalescingPermutation :: Int -> Int -> [Int]
-coalescingPermutation num_is rank =
-  [num_is..rank-1] ++ [0..num_is-1]
-
-
-returnsPermutation :: Int -> Int -> [Int]
-returnsPermutation num_is rank =
-  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..rank-1]
-
-rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
-                    BabysitM ([PatElem], [(Type, [Int])])
-rearrangeReturns num_is pat_elems returns =
-  unzip <$> zipWithM rearrangeReturn pat_elems returns
-  where rearrangeReturn (PatElem name BindVar namet) (t@Array{}, perm) = do
-          name_tr <- newVName $ baseString name <> "_tr_res"
-          let perm' = rearrangeShape (returnsPermutation num_is $ num_is + arrayRank t) perm
-              new_pat_elem = PatElem name_tr BindVar $ rearrangeType perm' namet
-          return (new_pat_elem, (t, perm'))
-        rearrangeReturn pat_elem (t, perm) =
-          return (pat_elem, (t, perm))
 
 paddedScanReduceInput :: SubExp -> SubExp
                       -> BabysitM (SubExp, SubExp)

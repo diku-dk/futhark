@@ -110,56 +110,6 @@ kernelCompiler
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (MapKernel _ _ global_thread_index ispace inps returns body) = do
-
-  let kernel_size = product $ map (ImpGen.compileSubExp . snd) ispace
-
-      global_thread_index_param = Imp.ScalarParam global_thread_index int32
-      shape = map (ImpGen.compileSubExp . snd) ispace
-      indices = map fst ispace
-
-      indices_lparams = [ Param index (Scalar int32) | index <- indices ]
-      bound_in_kernel = global_thread_index : indices ++ map kernelInputName inps
-      kernel_bnds = bodyBindings body
-
-      index_expressions = unflattenIndex shape $ Imp.ScalarVar global_thread_index
-      set_indices = forM_ (zip indices index_expressions) $ \(i, x) ->
-        ImpGen.emit $ Imp.SetScalar i x
-
-      read_params = mapM_ readKernelInput inps
-
-      perms = map snd returns
-      write_result =
-        sequence_ $ zipWith3 (writeThreadResult indices) perms dest $ bodyResult body
-
-  makeAllMemoryGlobal $ do
-    kernel_body <- fmap (setBodySpace $ Imp.Space "global") $
-                   ImpGen.subImpM_ inKernelOperations $
-                   ImpGen.withParams [global_thread_index_param] $
-                   ImpGen.declaringLParams (indices_lparams ++ map kernelInputParam inps) $ do
-                     ImpGen.comment "compute thread index" set_indices
-                     ImpGen.comment "read kernel parameters" read_params
-                     ImpGen.compileBindings kernel_bnds $
-                      ImpGen.comment "write kernel result" write_result
-
-    (group_size, num_groups) <- computeMapKernelGroups kernel_size
-
-    -- Compute the variables that we need to pass to and from the
-    -- kernel.
-    (uses, _local_memory) <-
-      computeKernelUses dest (kernel_size, kernel_body) bound_in_kernel
-
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
-        Imp.mapKernelThreadNum = global_thread_index
-      , Imp.mapKernelBody = kernel_body
-      , Imp.mapKernelUses = uses
-      , Imp.mapKernelSize = kernel_size
-      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
-      , Imp.mapKernelGroupSize = Imp.VarSize group_size
-      }
-
-kernelCompiler
-  (ImpGen.Destination dest)
   (ScanKernel _ _ kernel_size lam foldlam nes arrs) = do
     let (arrs_dest, partials_dest, map_dest) =
           splitAt3 (length nes) (length nes) dest
@@ -438,41 +388,63 @@ kernelCompiler
 
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
-expCompiler target (PrimOp (Iota n x s)) = do
-  i <- newVName "i"
-  b <- newVName "b"
-  v <- newVName "v"
-  global_thread_index <- newVName "global_thread_index"
-  let bnd_b = Let (Pattern [] [PatElem b BindVar $ Scalar int32]) () $
-              PrimOp $ BinOp (Mul Int32) s $ Var i
-      bnd_v = Let (Pattern [] [PatElem v BindVar $ Scalar int32]) () $
-              PrimOp $ BinOp (Add Int32) (Var b) x
-  kernelCompiler target $
-    MapKernel [] n global_thread_index [(i,n)] [] [(Prim int32,[0])]
-    (Body () [bnd_b, bnd_v] [Var v])
+expCompiler
+  (ImpGen.Destination
+    [ImpGen.ArrayDestination (ImpGen.CopyIntoMemory destloc) _])
+  (PrimOp (Iota n x s)) = do
+  thread_gid <- newVName "thread_gid"
+
+  makeAllMemoryGlobal $ do
+    (destmem, destspace, destidx) <-
+      ImpGen.fullyIndexArray' destloc [ImpGen.varIndex thread_gid] int32
+
+    let n' = ImpGen.compileSubExp n
+        x' = ImpGen.compileSubExp x
+        s' = ImpGen.compileSubExp s
+
+        body = Imp.Write destmem destidx int32 destspace $
+               Imp.ScalarVar thread_gid * s' + x'
+
+    (group_size, num_groups) <- computeMapKernelGroups n'
+
+    (body_uses, _) <- computeKernelUses []
+                      (freeIn body <> freeIn [n',x',s'])
+                      [thread_gid]
+
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
+        Imp.mapKernelThreadNum = thread_gid
+      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
+      , Imp.mapKernelGroupSize = Imp.VarSize group_size
+      , Imp.mapKernelSize = n'
+      , Imp.mapKernelUses = body_uses
+      , Imp.mapKernelBody = body
+      }
   return ImpGen.Done
 
-expCompiler target (PrimOp (Replicate n se)) = do
-  global_thread_index <- newVName "global_thread_index"
-  t <- subExpType se
-  let row_rank = arrayRank t
-      row_dims = arrayDims t
-  i <- newVName "i"
-  js <- replicateM row_rank $ newVName "j"
-  let indices = (i,n) : zip js row_dims
-  kernelCompiler target =<<
-    case se of
-      Var v | row_rank > 0 -> do
-        input_name <- newVName "input"
-        let input = KernelInput (Param input_name $ Scalar $ elemType t)
-                    v (map Var js)
-        return $
-          MapKernel [] n global_thread_index indices [input]
-          [(t,[0..row_rank])] (Body () [] [Var input_name])
-      _ ->
-        return $
-        MapKernel [] n global_thread_index [(i,n)] []
-        [(t,[0..arrayRank t])] (Body () [] [se])
+expCompiler
+  (ImpGen.Destination [dest]) (PrimOp (Replicate n se)) = do
+  thread_gid <- newVName "thread_gid"
+
+  makeAllMemoryGlobal $ do
+    let n' = ImpGen.compileSubExp n
+
+    body <- ImpGen.subImpM_ inKernelOperations $
+      ImpGen.copyDWIMDest dest [ImpGen.varIndex thread_gid] se []
+
+    (group_size, num_groups) <- computeMapKernelGroups n'
+
+    (body_uses, _) <- computeKernelUses []
+                      (freeIn body <> freeIn [n'])
+                      [thread_gid]
+
+    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.Map Imp.MapKernel {
+        Imp.mapKernelThreadNum = thread_gid
+      , Imp.mapKernelNumGroups = Imp.VarSize num_groups
+      , Imp.mapKernelGroupSize = Imp.VarSize group_size
+      , Imp.mapKernelSize = n'
+      , Imp.mapKernelUses = body_uses
+      , Imp.mapKernelBody = body
+      }
   return ImpGen.Done
 
 -- Allocation in the "local" space is just a placeholder.
@@ -667,32 +639,6 @@ makeAllMemoryGlobal =
               ImpGen.MemVar entry { ImpGen.entryMemSpace = Imp.Space "global" }
         globalMemory entry =
           entry
-
-writeThreadResult :: [VName] -> [Int] -> ImpGen.ValueDestination -> SubExp
-                  -> InKernelGen ()
-writeThreadResult thread_idxs perm
-  (ImpGen.ArrayDestination
-   (ImpGen.CopyIntoMemory
-    (ImpGen.MemLocation mem dims ixfun)) _) se = do
-  set <- subExpType se
-
-  let ixfun' = IxFun.permute ixfun perm
-      destloc' = ImpGen.MemLocation mem (rearrangeShape perm dims) ixfun'
-
-  space <- ImpGen.entryMemSpace <$> ImpGen.lookupMemory mem
-  let is = map ImpGen.varIndex thread_idxs
-  case set of
-    Prim bt -> do
-      (_, _, elemOffset) <-
-        ImpGen.fullyIndexArray' destloc' is bt
-      ImpGen.compileSubExpTo (ImpGen.ArrayElemDestination mem bt space elemOffset) se
-    _ -> do
-      let memloc = ImpGen.sliceArray destloc' is
-      let dest = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory memloc) $
-                 replicate (arrayRank set) Nothing
-      ImpGen.compileSubExpTo dest se
-writeThreadResult _ _ _ _ =
-  fail "Cannot handle kernel that does not return an array."
 
 computeMapKernelGroups :: Imp.Exp -> ImpGen.ImpM Imp.HostOp (VName, VName)
 computeMapKernelGroups kernel_size = do
