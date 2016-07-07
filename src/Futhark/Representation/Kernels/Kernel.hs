@@ -31,7 +31,7 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
-import Control.Arrow (first, (&&&))
+import Control.Arrow ((&&&))
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
@@ -64,9 +64,7 @@ import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import qualified Futhark.Analysis.Range as Range
 
 data Kernel lore =
-    MapKernel Certificates SubExp VName [(VName, SubExp)] [KernelInput lore]
-    [(Type, [Int])] (Body lore)
-  | ScanKernel Certificates SubExp
+    ScanKernel Certificates SubExp
     KernelSize
     (LambdaT lore)
     (LambdaT lore)
@@ -177,17 +175,6 @@ identityKernelMapper = KernelMapper { mapOnKernelSubExp = return
 -- and is done left-to-right.
 mapKernelM :: (Applicative m, Monad m) =>
               KernelMapper flore tlore m -> Kernel flore -> m (Kernel tlore)
-mapKernelM tv (MapKernel cs w index ispace inps rettype body) =
-  MapKernel <$>
-  mapOnKernelCertificates tv cs <*>
-  mapOnKernelSubExp tv w <*>
-  mapOnKernelVName tv index <*>
-  (zip iparams <$> mapM (mapOnKernelSubExp tv) bounds) <*>
-  mapM (mapOnKernelInput tv) inps <*>
-  (zip <$> mapM (mapOnType $ mapOnKernelSubExp tv) ts <*> pure perms) <*>
-  mapOnKernelBody tv body
-  where (iparams, bounds) = unzip ispace
-        (ts, perms) = unzip rettype
 mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
   ScanKernel <$>
   mapOnKernelCertificates tv cs <*>
@@ -235,14 +222,6 @@ mapOnKernelSize tv (KernelSize num_workgroups workgroup_size
   mapOnKernelSubExp tv offset_multiple <*>
   mapOnKernelSubExp tv num_threads
 
-mapOnKernelInput :: (Monad m, Applicative m) =>
-                    KernelMapper flore tlore m -> KernelInput flore
-                 -> m (KernelInput tlore)
-mapOnKernelInput tv (KernelInput param arr is) =
-  KernelInput <$> mapOnKernelLParam tv param <*>
-                  mapOnKernelVName tv arr <*>
-                  mapM (mapOnKernelSubExp tv) is
-
 instance FreeIn KernelSize where
   freeIn (KernelSize num_workgroups workgroup_size elems_per_thread
           num_elems thread_offset num_threads) =
@@ -260,13 +239,6 @@ instance (FreeIn (LParamAttr lore)) =>
 
 instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where
-  freeIn (MapKernel cs w index ispace inps returns body) =
-    freeIn w <> freeIn cs <> freeIn index <> freeIn (map snd ispace) <>
-    freeIn (map fst returns) <>
-    ((freeIn inps <> freeInBody body) `HS.difference` bound)
-    where bound = HS.fromList $
-                  [index] ++ map fst ispace ++ map kernelInputName inps
-
   freeIn e = execWriter $ mapKernelM free e
     where walk f x = tell (f x) >> return x
           free = KernelMapper { mapOnKernelSubExp = walk freeIn
@@ -421,25 +393,10 @@ instance Scoped lore (KernelStm lore) where
     where entry pe = (patElemName pe, LetInfo $ patElemAttr pe)
 
 instance Attributes lore => Rename (Kernel lore) where
-  rename (MapKernel cs w index ispace inps returns body) = do
-    cs' <- rename cs
-    w' <- rename w
-    returns' <- forM returns $ \(t, perm) -> do
-      t' <- rename t
-      return (t', perm)
-    bindingForRename (index : map fst ispace ++ map kernelInputName inps) $
-      MapKernel cs' w' <$>
-      rename index <*> rename ispace <*>
-      rename inps <*> pure returns' <*> rename body
-
-  rename e = mapKernelM renamer e
+  rename = mapKernelM renamer
     where renamer = KernelMapper rename rename rename rename rename rename rename
 
 kernelType :: Kernel lore -> [Type]
-kernelType (MapKernel _ _ _ is _ returns _) =
-  [ rearrangeType perm (arrayOfShape t outer_shape)
-  | (t, perm) <- returns ]
-  where outer_shape = Shape $ map snd is
 kernelType (ScanKernel _ w size lam foldlam nes _) =
   let arr_row_tp = drop (length nes) $ lambdaReturnType foldlam
   in map (`arrayOfRow` w) (lambdaReturnType lam) ++
@@ -478,11 +435,6 @@ instance TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases = map (const mempty) . kernelType
 
-  consumedInOp (MapKernel _ _ _ _ inps _ body) =
-    HS.fromList $
-    map kernelInputArray $
-    filter ((`HS.member` consumed) . kernelInputName) inps
-    where consumed = consumedInBody body
   consumedInOp (Kernel _ _ _ _ kbody) =
     consumedInKernelBody kbody
   consumedInOp _ = mempty
@@ -577,11 +529,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
-  usageInOp (MapKernel _ _ _ _ inps _ body) =
-    mconcat $
-    map (UT.consumedUsage . kernelInputArray) $
-    filter ((`HS.member` consumed_in_body) . kernelInputName) inps
-    where consumed_in_body = consumedInBody body
   usageInOp (WriteKernel _ _ _ _ as) =
     mconcat $ map (UT.consumedUsage . snd) as
   usageInOp (Kernel _ _ _ _ kbody) =
@@ -620,52 +567,6 @@ consumedByKernelStm (GroupReduce _ _ _ input) =
   HS.fromList $ map snd input
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
-
-typeCheckKernel (MapKernel cs w index ispace inps returns body) = do
-  mapM_ (TC.requireI [Prim Cert]) cs
-  TC.require [Prim int32] w
-  mapM_ (TC.require [Prim int32]) bounds
-
-  index_param <- TC.primLParam index int32
-  iparams' <- forM iparams $ \iparam -> TC.primLParam iparam int32
-  forM_ returns $ \(t, perm) ->
-    let return_rank = arrayRank t + rank
-    in unless (sort perm == [0..return_rank - 1]) $
-       TC.bad $ TC.TypeError $
-       "Permutation " ++ pretty perm ++
-       " not valid for returning " ++ pretty t ++
-       " from a rank " ++ pretty rank ++ " kernel."
-
-  inps_als <- mapM (TC.lookupAliases . kernelInputArray) inps
-  let consumable_inps = consumableInputs (map fst ispace) $
-                        zip inps inps_als
-
-  TC.checkFun' (nameFromString "<kernel body>",
-                map (`toDecl` Nonunique) $ staticShapes rettype,
-                lamParamsToNameInfos (index_param : iparams') ++
-                kernelInputsToNameInfos inps,
-                body) consumable_inps $ do
-    TC.checkLambdaParams $ map kernelInputParam inps
-    mapM_ checkKernelInput inps
-    TC.checkBody body
-    bodyt <- bodyExtType body
-    unless (map rankShaped bodyt ==
-            map rankShaped (staticShapes rettype)) $
-      TC.bad $
-      TC.ReturnTypeError (nameFromString "<kernel body>")
-      (staticShapes rettype) bodyt
-  where (iparams, bounds) = unzip ispace
-        rank = length ispace
-        (rettype, _) = unzip returns
-        checkKernelInput inp = do
-          TC.checkExp $ PrimOp $ Index []
-            (kernelInputArray inp) (kernelInputIndices inp)
-
-          arr_t <- lookupType $ kernelInputArray inp
-          unless (stripArray (length $ kernelInputIndices inp) arr_t ==
-                  kernelInputType inp) $
-            TC.bad $ TC.TypeError $
-            "Kernel input " ++ pretty inp ++ " has inconsistent type."
 
 typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
   checkKernelCrud cs w kernel_size
@@ -831,29 +732,7 @@ typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
   TC.require [Prim int32] offset_multiple
   TC.require [Prim int32] num_threads
 
-lamParamsToNameInfos :: [LParam lore]
-                     -> [(VName, NameInfo lore)]
-lamParamsToNameInfos = map nameTypeAndLore
-  where nameTypeAndLore fparam = (paramName fparam,
-                                  LParamInfo $ paramAttr fparam)
-
-kernelInputsToNameInfos :: [KernelInput lore]
-                        -> [(VName, NameInfo lore)]
-kernelInputsToNameInfos = map nameTypeAndLore
-  where nameTypeAndLore input =
-          (kernelInputName input,
-           LParamInfo $ paramAttr $ kernelInputParam input)
-
--- | A kernel input is consumable iff its indexing is a permutation of
--- the full index space.
-consumableInputs :: [VName] -> [(KernelInput lore, Names)] -> [(VName, Names)]
-consumableInputs is = map (first kernelInputName) .
-                      filter ((==is_sorted) . sort . kernelInputIndices . fst)
-  where is_sorted = sort (map Var is)
-
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
-  opMetrics (MapKernel _ _ _ _ _ _ body) =
-    inside "MapKernel" $ bodyMetrics body
   opMetrics (ScanKernel _ _ _ lam foldfun _ _) =
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (WriteKernel _cs _len lam _ivs _as) =
@@ -875,19 +754,6 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics GroupSize = seen "GroupSize"
 
 instance PrettyLore lore => PP.Pretty (Kernel lore) where
-  ppr (MapKernel cs w index ispace inps returns body) =
-    ppCertificates' cs <> text "mapKernel" <+>
-    PP.align (parens (text "width:" <+> ppr w) </>
-           parens (text "index:" <+> ppr index) </>
-           parens (PP.stack $ PP.punctuate PP.semi $ map ppBound ispace) </>
-           parens (PP.stack $ PP.punctuate PP.semi $ map ppr inps) </>
-           parens (PP.stack $ PP.punctuate PP.semi $ map ppRet returns) </>
-           text "do") </>
-    PP.indent 2 (ppr body)
-    where ppBound (name, bound) =
-            ppr name <+> text "<" <+> ppr bound
-          ppRet (t, perm) =
-            ppr t <+> text "permuted" <+> PP.apply (map ppr perm)
   ppr (ScanKernel cs w kernel_size fun foldfun nes arrs) =
     ppCertificates' cs <> text "scanKernel" <>
     parens (ppr w <> comma </>

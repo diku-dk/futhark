@@ -51,17 +51,6 @@ transformBinding (Let pat () e) = do
                                    }
 
 transformExp :: Exp -> ExpandM ([Binding], Exp)
-transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
-  -- Extract allocations from the body.
-  | Right (body', thread_allocs) <- extractThreadAllocations bound_before_body body = do
-
-  (alloc_bnds, alloc_offsets) <- expandedAllocations w thread_num thread_allocs
-  let body'' = if null alloc_bnds then body'
-               else offsetMemoryInBody alloc_offsets body'
-
-  return (alloc_bnds, Op $ Inner $ MapKernel cs w thread_num ispace inps returns body'')
-  where bound_before_body =
-          HS.fromList $ map fst ispace ++ map kernelInputName inps
 
 transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   -- Extract allocations from the lambda.
