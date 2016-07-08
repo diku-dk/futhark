@@ -224,7 +224,7 @@ flatKernel :: MonadFreshNames m =>
                  [KernelInput],
                  [Type])
 flatKernel (MapNesting pat _ nesting_w params_and_arrs, []) = do
-  i <- newVName "i"
+  i <- newVName "gtid"
   let inps = [ KernelInput pname ptype arr [Var i] |
                (Param pname ptype, arr) <- params_and_arrs ]
   return ([], nesting_w, [(i,nesting_w)], inps,
