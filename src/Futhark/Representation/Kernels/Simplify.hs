@@ -209,6 +209,8 @@ topDownRules :: (MonadBinder m,
 topDownRules = [ fuseScanIota
                , fuseWriteIota
                , fuseKernelIota
+
+               , removeInvariantKernelResults
                ]
 
 bottomUpRules :: (MonadBinder m,
@@ -341,3 +343,61 @@ extractSplitIota vtable (stm:stms) = do
   (iota_chunk_info, stms') <- extractSplitIota vtable stms
   return (iota_chunk_info, stm:stms')
 extractSplitIota _ [] = Nothing
+
+-- if a Thread statement produces something invariant to the kernel,
+-- just move it outside the kernel.  If a kernel produces something
+-- invariant to the kernel, turn it into a replicate.
+removeInvariantKernelResults :: (LocalScope (Lore m) m,
+                                 MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
+                                TopDownRule m
+removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
+                                      (Op (Kernel cs size ts thread_id (KernelBody kstms kres)))) = do
+  (kstms', invariant_threads) <-
+    unzip <$> mapM checkForInvarianceStm kstms
+
+  let isInvariant (Var v)
+        | v `elem` concat invariant_threads = True
+      isInvariant se = inVtable se
+
+  (kpes', kres') <-
+    unzip <$> filterM (checkForInvarianceResult isInvariant) (zip kpes kres)
+
+  -- Check if we did anything at all.
+  when (null (concat invariant_threads) && kres == kres')
+    cannotSimplify
+
+  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs size ts thread_id $
+    KernelBody kstms' kres'
+  where inVtable Constant{} = True
+        inVtable (Var v) = isJust $ ST.lookup v vtable
+
+        (_, _, num_threads) = size
+
+        checkForInvarianceStm (Thread pes threads body)
+          | (invariant, variant) <-
+              partition (inVtable . snd) $ zip pes $ bodyResult body,
+            not $ null invariant = do
+              forM_ invariant $ \(pe, se) ->
+                letBindNames'_ [patElemName pe] $ PrimOp $ SubExp se
+              let (pes', variant_res) = unzip variant
+                  body' = body { bodyResult = variant_res }
+              return (Thread pes' threads body',
+                       map (patElemName . fst) invariant)
+        checkForInvarianceStm stm =
+          return (stm, [])
+
+        checkForInvarianceResult isInvariant (pe, ThreadsReturn threads se)
+          | isInvariant se =
+              case threads of
+                AllThreads -> do
+                  letBindNames'_ [patElemName pe] $ PrimOp $ Replicate num_threads se
+                  return False
+                ThreadsInSpace _ space -> do
+                  let rep a d = PrimOp . Replicate d <$> letSubExp "rep" a
+                  letBindNames'_ [patElemName pe] =<<
+                    foldM rep (PrimOp (SubExp se)) (reverse $ map snd space)
+                  return False
+                _ -> return True
+        checkForInvarianceResult _ _ =
+          return True
+removeInvariantKernelResults _ _ = cannotSimplify
