@@ -52,7 +52,7 @@ import Futhark.Util
 import Futhark.Transform.Rename
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util.Log
-import Futhark.Pass.ExtractKernels.BlockedKernel (mapKernel)
+import Futhark.Pass.ExtractKernels.BlockedKernel (mapKernel, KernelInput(..))
 
 import Prelude
 
@@ -221,12 +221,12 @@ flatKernel :: MonadFreshNames m =>
            -> m ([Binding],
                  SubExp,
                  [(VName, SubExp)],
-                 [KernelInput Kernels],
+                 [KernelInput],
                  [Type])
 flatKernel (MapNesting pat _ nesting_w params_and_arrs, []) = do
   i <- newVName "i"
-  let inps = [ KernelInput param arr [Var i] |
-               (param, arr) <- params_and_arrs ]
+  let inps = [ KernelInput pname ptype arr [Var i] |
+               (Param pname ptype, arr) <- params_and_arrs ]
   return ([], nesting_w, [(i,nesting_w)], inps,
           map rowType $ patternTypes pat)
 
@@ -250,8 +250,8 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
 
   return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps i <> inps', returns)
   where extra_inps i =
-          [ KernelInput param arr [Var i] |
-            (param, arr) <- params_and_arrs ]
+          [ KernelInput pname ptype arr [Var i] |
+            (Param pname ptype, arr) <- params_and_arrs ]
 
 -- | Description of distribution to do.
 data DistributionBody = DistributionBody {

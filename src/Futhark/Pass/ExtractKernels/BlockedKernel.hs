@@ -9,6 +9,7 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedKernelSize
 
        , mapKernel
+       , KernelInput(..)
        )
        where
 
@@ -405,7 +406,7 @@ blockedScan pat cs w lam foldlam nes arrs = do
   elems_per_group <- letSubExp "elements_per_group" $
     PrimOp $ BinOp (Mul Int32) chunks_per_group group_size
 
-  result_map_body <- runBodyBinder $ inScopeOf result_map_input $ do
+  result_map_body <- runBodyBinder $ localScope (scopeOfLParams $ map kernelInputParam result_map_input) $ do
     group_id <-
       letSubExp "group_id" $
       PrimOp $ BinOp (SQuot Int32) (Var j) elems_per_group
@@ -436,8 +437,8 @@ blockedScan pat cs w lam foldlam nes arrs = do
           newIdent (baseString (identName ident) ++ "_" ++ desc) $
           arrayOf (rowType $ identType ident) (Shape shape) NoUniqueness
 
-        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Kernels
-        mkKernelInput indices p arr = KernelInput { kernelInputParam = p
+        mkKernelInput indices p arr = KernelInput { kernelInputName = paramName p
+                                                  , kernelInputType = paramType p
                                                   , kernelInputArray = arr
                                                   , kernelInputIndices = indices
                                                   }
@@ -499,7 +500,7 @@ blockedSegmentedScan segment_size pat cs w lam input = do
         false = constant False
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
-             Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput Kernels]
+             Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput]
           -> [Type] -> Body
           -> m ([Binding], Kernel Kernels)
 mapKernel cs w ispace inputs rts body = do
@@ -533,3 +534,12 @@ mapKernel cs w ispace inputs rts body = do
       krets = map (ThreadsReturn (ThreadsInSpace w ispace) . Var . patElemName) kresult_pes
       kbody = KernelBody [split_ispace_stm,body_stm] krets
   return (ksize_bnds, Kernel cs ksize rts index kbody)
+
+data KernelInput = KernelInput { kernelInputName :: VName
+                               , kernelInputType :: Type
+                               , kernelInputArray :: VName
+                               , kernelInputIndices :: [SubExp]
+                               }
+
+kernelInputParam :: KernelInput -> Param Type
+kernelInputParam p = Param (kernelInputName p) (kernelInputType p)
