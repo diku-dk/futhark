@@ -73,8 +73,6 @@ fig, ax = plt.subplots()
 ax.set_ylabel('Speedup')
 # Escape underscores in the labels because they will otherwise be
 # interpreted by TeX.
-ax.set_xticklabels(map(lambda b: b.replace('_', r'\_'), benchmarks), rotation='vertical')
-plt.tick_params(axis='x', which='major', pad=60)
 
 xtics = []
 allrects = []
@@ -97,9 +95,9 @@ for b in benchmarks:
                                speedups, width, color=colours))
         offset += width * (K+1)
 
-        allrects.append(rects)
-
 ax.set_xticks(xtics)
+ax.set_xticklabels(map(lambda b: b.replace('_', r'\_'), benchmarks), rotation='vertical')
+plt.tick_params(axis='x', which='major', pad=20)
 
 plt.grid(b=True, which='minor', color='#777777', linestyle='-')
 ax.yaxis.grid(True, linestyle='-')
