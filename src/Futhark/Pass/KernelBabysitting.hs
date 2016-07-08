@@ -182,7 +182,7 @@ transformKernelBody num_threads cs (KernelBody stms res) =
 
 type ArrayIndexTransform m = VName -> [SubExp] -> m (Maybe (VName, [SubExp]))
 
-traverseKernelBodyArrayIndexes :: Monad f =>
+traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   ArrayIndexTransform f
                                -> KernelBody Kernels
                                -> f (KernelBody Kernels)
