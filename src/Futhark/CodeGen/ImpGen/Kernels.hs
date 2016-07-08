@@ -25,6 +25,7 @@ import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
+import Futhark.Pass.ExtractKernels.BlockedKernel (KernelInput(..)) -- XXX
 import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters,
                       partitionChunkedFoldParameters)
@@ -384,7 +385,7 @@ kernelCompiler
       , Imp.kernelName = kernel_name
       , Imp.kernelDesc = Just "write"
       }
-  where makeInput i p arr = KernelInput p arr [i]
+  where makeInput i p arr = KernelInput (paramName p) (paramType p) arr [i]
 
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
@@ -652,8 +653,7 @@ computeMapKernelGroups kernel_size = do
     kernel_size `quotRoundingUp` group_size_var
   return (group_size, num_groups)
 
-readKernelInput :: KernelInput ExplicitMemory
-                -> InKernelGen ()
+readKernelInput :: KernelInput -> InKernelGen ()
 readKernelInput inp =
   when (primType t) $ do
     (srcmem, space, srcoffset) <-

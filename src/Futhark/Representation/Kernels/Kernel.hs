@@ -15,10 +15,6 @@ module Futhark.Representation.Kernels.Kernel
        , WhichThreads(..)
        , KernelResult(..)
 
-       , KernelInput(..)
-       , kernelInputName
-       , kernelInputType
-       , kernelInputIdent
        , KernelSize(..)
        , chunkedKernelNonconcatOutputs
 
@@ -119,26 +115,6 @@ deriving instance Annotations lore => Ord (KernelStm lore)
 boundByKernelStm :: KernelStm lore -> Names
 boundByKernelStm = HS.fromList . HM.keys . scopeOf
 
-data KernelInput lore = KernelInput { kernelInputParam :: LParam lore
-                                    , kernelInputArray :: VName
-                                    , kernelInputIndices :: [SubExp]
-                                    }
-
-deriving instance Annotations lore => Eq (KernelInput lore)
-deriving instance Annotations lore => Show (KernelInput lore)
-deriving instance Annotations lore => Ord (KernelInput lore)
-
-kernelInputName :: KernelInput lore -> VName
-kernelInputName = paramName . kernelInputParam
-
-kernelInputType :: Typed (LParamAttr lore) =>
-                   KernelInput lore -> Type
-kernelInputType = typeOf . kernelInputParam
-
-kernelInputIdent :: Typed (LParamAttr lore) =>
-                    KernelInput lore -> Ident
-kernelInputIdent = paramIdent . kernelInputParam
-
 data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelWorkgroupSize :: SubExp
                              , kernelElementsPerThread :: SubExp
@@ -231,11 +207,6 @@ instance FreeIn KernelSize where
                           num_elems,
                           thread_offset,
                           num_threads]
-
-instance (FreeIn (LParamAttr lore)) =>
-         FreeIn (KernelInput lore) where
-  freeIn (KernelInput param arr is) =
-    freeIn param <> freeIn arr <> freeIn is
 
 instance (Attributes lore, FreeIn (LParamAttr lore)) =>
          FreeIn (Kernel lore) where
@@ -334,13 +305,6 @@ instance Attributes lore => Substitute (Kernel lore) where
                          , mapOnKernelKernelBody = return . substituteNames subst
                          }
 
-instance Attributes lore => Substitute (KernelInput lore) where
-  substituteNames subst (KernelInput param arr is) =
-    KernelInput
-    (substituteNames subst param)
-    (substituteNames subst arr)
-    (substituteNames subst is)
-
 instance Attributes lore => Rename (KernelBody lore) where
   rename (KernelBody [] res) =
     KernelBody [] <$> rename res
@@ -371,12 +335,6 @@ instance Rename KernelResult where
 
 instance Rename WhichThreads where
   rename = substituteRename
-
-instance Attributes lore => Rename (KernelInput lore) where
-  rename = substituteRename
-
-instance Scoped lore (KernelInput lore) where
-  scopeOf inp = scopeOfLParams [kernelInputParam inp]
 
 instance Scoped lore (KernelStm lore) where
   scopeOf (SplitArray (size, chunks) _ _ _ _) =
@@ -847,10 +805,3 @@ instance Pretty KernelSize where
                           ppr offset_multiple,
                           ppr num_threads
                          ]
-
-instance PrettyLore lore => Pretty (KernelInput lore) where
-  ppr inp = ppr (kernelInputType inp) <+>
-            ppr (kernelInputName inp) <+>
-            text "<-" <+>
-            ppr (kernelInputArray inp) <>
-            PP.brackets (commasep (map ppr $ kernelInputIndices inp))
