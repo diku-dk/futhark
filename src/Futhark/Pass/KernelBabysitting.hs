@@ -9,6 +9,7 @@ module Futhark.Pass.KernelBabysitting
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map as M
 import Data.Monoid
 
 import Prelude
@@ -74,9 +75,25 @@ transformBinding expmap (Let pat ()
     ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
 
-transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id body))) = do
-  body' <- transformKernelBody num_threads cs body
-  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id body'
+transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id kbody))) = do
+  -- First we do the easy stuff, which deals with SplitArray statements.
+  kbody' <- transformKernelBody num_threads cs kbody
+
+  -- Then we go spelunking for accesses to arrays that are defined
+  -- outside the kernel body and where the indices are kernel thread
+  -- indices.
+  scope <- askScope
+  let boundOutside = fmap typeOf . (`HM.lookup` scope)
+      thread_gids = case kernelBodyStms kbody of
+                     SplitIndexSpace space : _ -> map fst space
+                     _                         -> []
+
+  kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
+                         (ensureCoalescedAccess thread_gids boundOutside)
+                         kbody')
+             mempty
+
+  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id kbody''
   return expmap
   where (_, _, num_threads) = size
 
@@ -86,8 +103,7 @@ transformBinding expmap (Let pat () e) = do
   return $ HM.fromList [ (name, e') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper Kernels Kernels BabysitM
-transform = identityMapper { mapOnBody = transformBody
-                           }
+transform = identityMapper { mapOnBody = transformBody }
 
 transformLambda :: Lambda -> BabysitM Lambda
 transformLambda lam = do
@@ -163,3 +179,94 @@ transformKernelBody num_threads cs (KernelBody stms res) =
               return arr
           | otherwise =
               rearrangeScanReduceInput cs num_threads padding w w_padded elems_per_thread arr
+
+type ArrayIndexTransform m = VName -> [SubExp] -> m (Maybe (VName, [SubExp]))
+
+traverseKernelBodyArrayIndexes :: Monad f =>
+                                  ArrayIndexTransform f
+                               -> KernelBody Kernels
+                               -> f (KernelBody Kernels)
+traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
+  KernelBody <$> mapM onStatement kstms <*> pure kres
+  where onStatement (Thread pes threads body) =
+          Thread pes threads <$> onBody body
+        onStatement (GroupReduce pes w lam input) =
+          GroupReduce pes w <$> onLambda lam <*> pure input
+        onStatement stm = pure stm
+
+        onLambda lam =
+          (\body' -> lam { lambdaBody = body' }) <$>
+          onBody (lambdaBody lam)
+
+        onBody (Body battr bnds bres) =
+          Body battr <$> mapM onBinding bnds <*> pure bres
+
+        onBinding (Let pat attr (PrimOp (Index cs arr is))) =
+          Let pat attr . oldOrNew <$> f arr is
+          where oldOrNew Nothing =
+                  PrimOp $ Index cs arr is
+                oldOrNew (Just (arr', is')) =
+                  PrimOp $ Index cs arr' is'
+        onBinding (Let pat attr e) =
+          Let pat attr <$> mapExpM mapper e
+
+        mapper = identityMapper { mapOnBody = onBody }
+
+-- Not a hashmap, as SubExp is not hashable.
+type Replacements = M.Map (VName, [SubExp]) VName
+
+ensureCoalescedAccess :: MonadBinder m =>
+                         [VName]
+                      -> (VName -> Maybe Type)
+                      -> ArrayIndexTransform (StateT Replacements m)
+ensureCoalescedAccess thread_gids boundOutside arr is = do
+  seen <- gets $ M.lookup (arr, is)
+
+  case (seen, boundOutside arr) of
+    -- Already took care of this case elsewhere.
+    (Just arr', _) ->
+      pure $ Just (arr', is)
+
+    (Nothing, Just t)
+      -- We are fully indexing the array, but the indices are in a
+      -- permuted order.
+      | length is == arrayRank t,
+        is' <- coalescedIndexes thread_gids is,
+        Just perm <- is' `isPermutationOf` is,
+        perm /= [0..length perm-1] ->
+          replace =<< lift (rearrangeInput perm arr)
+
+      -- We are not fully indexing the array, so we assume
+      -- (HEURISTIC!) that the remaining dimensions will be traversed
+      -- sequentially.
+      | length is < arrayRank t -> do
+          let perm = coalescingPermutation (length is) $ arrayRank t
+          replace =<< lift (rearrangeInput perm arr)
+
+    _ -> return Nothing
+
+  where replace arr' = do
+          modify $ M.insert (arr, is) arr'
+          return $ Just (arr', is)
+
+coalescedIndexes :: [VName] -> [SubExp] -> [SubExp]
+coalescedIndexes thread_gids is =
+  filter notIndex is ++ map Var (filter isUsed thread_gids)
+  where isUsed gid = Var gid `elem` is
+        notIndex (Var v) = v `notElem` thread_gids
+        notIndex _       = False
+
+coalescingPermutation :: Int -> Int -> [Int]
+coalescingPermutation num_is rank =
+  [num_is..rank-1] ++ [0..num_is-1]
+
+rearrangeInput :: MonadBinder m =>
+                  [Int] -> VName -> m VName
+rearrangeInput perm arr = do
+  let inv_perm = rearrangeInverse perm
+  transposed <- letExp (baseString arr ++ "_tr") $
+                PrimOp $ Rearrange [] perm arr
+  manifested <- letExp (baseString arr ++ "_tr_manifested") $
+                PrimOp $ Copy transposed
+  letExp (baseString arr ++ "_inv_tr") $
+    PrimOp $ Rearrange [] inv_perm manifested
