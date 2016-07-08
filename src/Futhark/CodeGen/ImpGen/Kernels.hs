@@ -105,7 +105,7 @@ kernelCompiler
             , Imp.kernelNumGroups = num_groups'
             , Imp.kernelGroupSize = group_size'
             , Imp.kernelName = thread_id
-            , Imp.kernelDesc = Just "newkernel"
+            , Imp.kernelDesc = Nothing
             }
 
 kernelCompiler
