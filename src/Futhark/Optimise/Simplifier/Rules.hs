@@ -561,7 +561,7 @@ simplifyIndexing defOf seType idd inds consuming =
 
     Just (Rearrange cs perm src)
        | rearrangeReach perm <= length inds ->
-         let inds' = rearrangeShape (take (length inds) perm) inds
+         let inds' = rearrangeShape (take (length inds) $ rearrangeInverse perm) inds
          in Just $ pure $ IndexResult cs src inds'
 
     Just (Copy src)
