@@ -6,7 +6,6 @@
 module Futhark.Optimise.Simplifier.Rules
   ( standardRules
 
-  , simplifyIndexing
   , IndexResult (..)
   )
 where
@@ -48,7 +47,6 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyUnOp
                , letRule simplifyConvOp
                , letRule simplifyAssert
-               , simplifyIndex
                , letRule copyScratchToScratch
                , simplifyIndexIntoReshape
                , simplifyIndexIntoSplit
@@ -74,6 +72,7 @@ bottomUpRules :: MonadBinder m => BottomUpRules m
 bottomUpRules = [ removeRedundantMergeVariables
                 , removeDeadBranchResult
                 , simplifyReplicate
+                , simplifyIndex
                 ]
 
 standardRules :: (MonadBinder m, LocalScope (Lore m) m) => RuleBook m
@@ -501,9 +500,9 @@ simplifyAssert _ _ (Assert (Constant (BoolValue True)) _) =
 simplifyAssert _ _ _ =
   Nothing
 
-simplifyIndex :: MonadBinder m => TopDownRule m
-simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds)))
-  | Just m <- simplifyIndexing defOf seType idd inds False = do
+simplifyIndex :: MonadBinder m => BottomUpRule m
+simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) _ (PrimOp (Index cs idd inds)))
+  | Just m <- simplifyIndexing defOf seType idd inds consumed = do
       res <- m
       case res of
         SubExpResult se ->
@@ -511,6 +510,7 @@ simplifyIndex vtable (Let pat _ (PrimOp (Index cs idd inds)))
         IndexResult extra_cs idd' inds' ->
           letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
   where defOf = (`ST.lookupExp` vtable)
+        consumed = patElemName pe `UT.isConsumed` used
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
 
@@ -557,7 +557,7 @@ simplifyIndexing defOf seType idd inds consuming =
       | _:is' <- inds, not consuming -> Just $ pure $ IndexResult [] vv is'
 
     Just (Replicate _ val@(Constant _))
-      | [_] <- inds -> Just $ pure $ SubExpResult val
+      | [_] <- inds, not consuming -> Just $ pure $ SubExpResult val
 
     Just (Rearrange cs perm src)
        | rearrangeReach perm <= length inds ->
