@@ -10,6 +10,7 @@ import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
+import Data.List
 import Data.Monoid
 
 import Prelude
@@ -18,6 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
 import Futhark.Tools
 import Futhark.Pass
+import Futhark.Util
 
 babysitKernels :: Pass Kernels Kernels
 babysitKernels =
@@ -249,12 +251,30 @@ ensureCoalescedAccess thread_gids boundOutside arr is = do
           modify $ M.insert (arr, is) arr'
           return $ Just (arr', is)
 
+-- Try to move thread indexes into their proper position.
 coalescedIndexes :: [VName] -> [SubExp] -> [SubExp]
-coalescedIndexes thread_gids is =
-  filter notIndex is ++ map Var (filter isUsed thread_gids)
-  where isUsed gid = Var gid `elem` is
-        notIndex (Var v) = v `notElem` thread_gids
-        notIndex _       = False
+coalescedIndexes tgids is =
+  reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
+  where num_is = length is
+
+        move is_rev (i, tgid)
+          -- If tgid is in is_rev anywhere but at position i, and
+          -- position i exists, we move it to position i instead.
+          | Just j <- elemIndex (Var tgid) is_rev, i /= j, i < num_is =
+              swap i j is_rev
+          | otherwise =
+              is_rev
+
+        swap i j l
+          | Just ix <- maybeNth i l,
+            Just jx <- maybeNth j l =
+              update i jx $ update j ix l
+          | otherwise =
+              error $ "coalescedIndexes swap: invalid indices" ++ show (i, j, l)
+
+        update 0 x (_:ys) = x : ys
+        update i x (y:ys) = y : update (i-1) x ys
+        update _ _ []     = error "coalescedIndexes: update"
 
 coalescingPermutation :: Int -> Int -> [Int]
 coalescingPermutation num_is rank =
