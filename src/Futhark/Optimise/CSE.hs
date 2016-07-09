@@ -37,14 +37,14 @@ import Control.Monad.Reader
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.HashSet as HS
 import qualified Data.Map.Lazy as M
-import Data.Monoid
 
 import Prelude
 
 import Futhark.Analysis.Alias
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Aliases
-import Futhark.Representation.Aliases (removeFunDefAliases, Aliases)
+import Futhark.Representation.Aliases
+  (removeFunDefAliases, Aliases, consumedInBindings)
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
@@ -75,7 +75,7 @@ type CSEM lore = Reader (CSEState lore)
 cseInBody :: (Aliased lore, CSEInOp lore (Op lore)) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
-  cseInBindings (mconcat $ map consumedInBinding bnds) bnds $ do
+  cseInBindings (consumedInBindings bnds res) bnds $ do
     CSEState (_, nsubsts) _ <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
@@ -120,8 +120,6 @@ cseInBinding consumed (Let pat eattr e) m = do
     m [Let pat' eattr e']
     else
     case M.lookup (eattr, e') esubsts of
-      Nothing -> local (addExpSubst pat' eattr e') $ m [Let pat' eattr e']
-
       Just subpat ->
         local (addNameSubst pat' subpat) $ do
           let lets =
@@ -130,11 +128,13 @@ cseInBinding consumed (Let pat eattr e) m = do
                   let patElem' = patElem { patElemName = name }
                 ]
           m lets
-  where bad cse_arrays pat_elem
-          | Mem{} <- patElemType pat_elem = True
-          | Array{} <- patElemType pat_elem, not cse_arrays = True
-          | patElemName pat_elem `HS.member` consumed = True
-          | BindInPlace{} <- patElemBindage pat_elem = True
+      _ -> local (addExpSubst pat' eattr e') $ m [Let pat' eattr e']
+
+  where bad cse_arrays pe
+          | Mem{} <- patElemType pe = True
+          | Array{} <- patElemType pe, not cse_arrays = True
+          | patElemName pe `HS.member` consumed = True
+          | BindInPlace{} <- patElemBindage pe = True
           | otherwise = False
 
 type ExpressionSubstitutions lore = M.Map

@@ -1,12 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
 -- | Do various kernel optimisations - mostly related to coalescing.
 module Futhark.Pass.KernelBabysitting
-       ( babysitKernels )
+       ( babysitKernels
+       , nonlinearInMemory -- FIXME, do not export this.
+       )
        where
 
 import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
+import qualified Data.Map as M
+import Data.List
 import Data.Monoid
 
 import Prelude
@@ -15,6 +19,7 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
 import Futhark.Tools
 import Futhark.Pass
+import Futhark.Util
 
 babysitKernels :: Pass Kernels Kernels
 babysitKernels =
@@ -72,38 +77,27 @@ transformBinding expmap (Let pat ()
     ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
 
-transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id body))) = do
-  body' <- transformKernelBody num_threads cs body
-  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id body'
+transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id kbody))) = do
+  -- First we do the easy stuff, which deals with SplitArray statements.
+  kbody' <- transformKernelBody num_threads cs kbody
+
+  -- Then we go spelunking for accesses to arrays that are defined
+  -- outside the kernel body and where the indices are kernel thread
+  -- indices.
+  scope <- askScope
+  let boundOutside = fmap typeOf . (`HM.lookup` scope)
+      thread_gids = case kernelBodyStms kbody of
+                     SplitIndexSpace space : _ -> map fst space
+                     _                         -> []
+
+  kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
+                         (ensureCoalescedAccess thread_gids boundOutside)
+                         kbody')
+             mempty
+
+  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id kbody''
   return expmap
   where (_, _, num_threads) = size
-
-transformBinding expmap (Let pat () (Op (MapKernel cs w i ispace inps returns body))) = do
-  body' <- inScopeOf ((i, IndexInfo) :
-                      [ (j, IndexInfo) | (j, _) <- ispace ]) $
-           inScopeOf inps $
-           transformBody body
-  -- For every input that is an array, we transpose the next-outermost
-  -- and outermost dimension.
-  inps' <- rearrangeInputs expmap (map fst ispace) inps
-  -- For every return that is an array, we transpose the
-  -- next-outermost and outermost dimension.
-  let value_elems = patternValueElements pat
-  (value_elems', returns') <- rearrangeReturns num_is value_elems returns
-  let pat' = Pattern [] value_elems'
-  addBinding $ Let pat' () $ Op $ MapKernel cs w i ispace inps' returns' body'
-  mapM_ maybeRearrangeResult $ zip3 value_elems value_elems' returns'
-  return expmap
-  where num_is = length ispace
-
-        maybeRearrangeResult (orig_pat_elem, new_pat_elem, (_, perm))
-          | orig_pat_elem == new_pat_elem =
-            return ()
-          | otherwise =
-            addBinding $
-            mkLet' [] [patElemIdent orig_pat_elem] $
-            PrimOp $ Rearrange [] (rearrangeInverse perm) $
-            patElemName new_pat_elem
 
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
@@ -111,73 +105,13 @@ transformBinding expmap (Let pat () e) = do
   return $ HM.fromList [ (name, e') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper Kernels Kernels BabysitM
-transform = identityMapper { mapOnBody = transformBody
-                           }
+transform = identityMapper { mapOnBody = transformBody }
 
 transformLambda :: Lambda -> BabysitM Lambda
 transformLambda lam = do
   body' <- inScopeOf lam $
            transformBody $ lambdaBody lam
   return lam { lambdaBody = body' }
-
-rearrangeInputs :: ExpMap -> [VName] -> [KernelInput Kernels]
-                -> BabysitM [KernelInput Kernels]
-rearrangeInputs expmap is = mapM maybeRearrangeInput
-  where
-    iteratesLastDimension = (== map Var (drop 1 $ reverse is)) .
-                            reverse .
-                            kernelInputIndices
-
-    maybeRearrangeInput inp =
-      case paramType $ kernelInputParam inp of
-        Array {} | not $ iteratesLastDimension inp -> do
-          arr_t <- lookupType arr
-          let perm = coalescingPermutation num_inp_is $ arrayRank arr_t
-          rearrangeInput perm inp
-        Prim {}
-          | Just perm <- map Var is `isPermutationOf` inp_is,
-            perm /= [0..length perm-1] ->
-              rearrangeInput perm inp
-        _ | nonlinearInMemory arr expmap -> do
-              flat <- letExp (baseString arr ++ "_flat") $ PrimOp $ Copy arr
-              return inp { kernelInputArray = flat }
-          | otherwise ->
-              return inp
-      where arr = kernelInputArray inp
-            inp_is = kernelInputIndices inp
-            num_inp_is = length inp_is
-
-    rearrangeInput perm inp = do
-      let inv_perm = rearrangeInverse perm
-      transposed <- letExp (baseString arr ++ "_tr") $
-                    PrimOp $ Rearrange [] perm arr
-      manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                    PrimOp $ Copy transposed
-      inv_transposed <- letExp (baseString arr ++ "_inv_tr") $
-                        PrimOp $ Rearrange [] inv_perm manifested
-      return inp { kernelInputArray = inv_transposed }
-      where arr = kernelInputArray inp
-
-coalescingPermutation :: Int -> Int -> [Int]
-coalescingPermutation num_is rank =
-  [num_is..rank-1] ++ [0..num_is-1]
-
-
-returnsPermutation :: Int -> Int -> [Int]
-returnsPermutation num_is rank =
-  [0..num_is-2] ++ [num_is, num_is-1] ++ [num_is+1..rank-1]
-
-rearrangeReturns :: Int -> [PatElem] -> [(Type, [Int])] ->
-                    BabysitM ([PatElem], [(Type, [Int])])
-rearrangeReturns num_is pat_elems returns =
-  unzip <$> zipWithM rearrangeReturn pat_elems returns
-  where rearrangeReturn (PatElem name BindVar namet) (t@Array{}, perm) = do
-          name_tr <- newVName $ baseString name <> "_tr_res"
-          let perm' = rearrangeShape (returnsPermutation num_is $ num_is + arrayRank t) perm
-              new_pat_elem = PatElem name_tr BindVar $ rearrangeType perm' namet
-          return (new_pat_elem, (t, perm'))
-        rearrangeReturn pat_elem (t, perm) =
-          return (pat_elem, (t, perm))
 
 paddedScanReduceInput :: SubExp -> SubExp
                       -> BabysitM (SubExp, SubExp)
@@ -247,3 +181,112 @@ transformKernelBody num_threads cs (KernelBody stms res) =
               return arr
           | otherwise =
               rearrangeScanReduceInput cs num_threads padding w w_padded elems_per_thread arr
+
+type ArrayIndexTransform m = VName -> [SubExp] -> m (Maybe (VName, [SubExp]))
+
+traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
+                                  ArrayIndexTransform f
+                               -> KernelBody Kernels
+                               -> f (KernelBody Kernels)
+traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
+  KernelBody <$> mapM onStatement kstms <*> pure kres
+  where onStatement (Thread pes threads body) =
+          Thread pes threads <$> onBody body
+        onStatement (GroupReduce pes w lam input) =
+          GroupReduce pes w <$> onLambda lam <*> pure input
+        onStatement stm = pure stm
+
+        onLambda lam =
+          (\body' -> lam { lambdaBody = body' }) <$>
+          onBody (lambdaBody lam)
+
+        onBody (Body battr bnds bres) =
+          Body battr <$> mapM onBinding bnds <*> pure bres
+
+        onBinding (Let pat attr (PrimOp (Index cs arr is))) =
+          Let pat attr . oldOrNew <$> f arr is
+          where oldOrNew Nothing =
+                  PrimOp $ Index cs arr is
+                oldOrNew (Just (arr', is')) =
+                  PrimOp $ Index cs arr' is'
+        onBinding (Let pat attr e) =
+          Let pat attr <$> mapExpM mapper e
+
+        mapper = identityMapper { mapOnBody = onBody }
+
+-- Not a hashmap, as SubExp is not hashable.
+type Replacements = M.Map (VName, [SubExp]) VName
+
+ensureCoalescedAccess :: MonadBinder m =>
+                         [VName]
+                      -> (VName -> Maybe Type)
+                      -> ArrayIndexTransform (StateT Replacements m)
+ensureCoalescedAccess thread_gids boundOutside arr is = do
+  seen <- gets $ M.lookup (arr, is)
+
+  case (seen, boundOutside arr) of
+    -- Already took care of this case elsewhere.
+    (Just arr', _) ->
+      pure $ Just (arr', is)
+
+    (Nothing, Just t)
+      -- We are fully indexing the array, but the indices are in a
+      -- permuted order.
+      | length is == arrayRank t,
+        is' <- coalescedIndexes thread_gids is,
+        Just perm <- is' `isPermutationOf` is,
+        perm /= [0..length perm-1] ->
+          replace =<< lift (rearrangeInput perm arr)
+
+      -- We are not fully indexing the array, so we assume
+      -- (HEURISTIC!) that the remaining dimensions will be traversed
+      -- sequentially.
+      | length is < arrayRank t -> do
+          let perm = coalescingPermutation (length is) $ arrayRank t
+          replace =<< lift (rearrangeInput perm arr)
+
+    _ -> return Nothing
+
+  where replace arr' = do
+          modify $ M.insert (arr, is) arr'
+          return $ Just (arr', is)
+
+-- Try to move thread indexes into their proper position.
+coalescedIndexes :: [VName] -> [SubExp] -> [SubExp]
+coalescedIndexes tgids is =
+  reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
+  where num_is = length is
+
+        move is_rev (i, tgid)
+          -- If tgid is in is_rev anywhere but at position i, and
+          -- position i exists, we move it to position i instead.
+          | Just j <- elemIndex (Var tgid) is_rev, i /= j, i < num_is =
+              swap i j is_rev
+          | otherwise =
+              is_rev
+
+        swap i j l
+          | Just ix <- maybeNth i l,
+            Just jx <- maybeNth j l =
+              update i jx $ update j ix l
+          | otherwise =
+              error $ "coalescedIndexes swap: invalid indices" ++ show (i, j, l)
+
+        update 0 x (_:ys) = x : ys
+        update i x (y:ys) = y : update (i-1) x ys
+        update _ _ []     = error "coalescedIndexes: update"
+
+coalescingPermutation :: Int -> Int -> [Int]
+coalescingPermutation num_is rank =
+  [num_is..rank-1] ++ [0..num_is-1]
+
+rearrangeInput :: MonadBinder m =>
+                  [Int] -> VName -> m VName
+rearrangeInput perm arr = do
+  let inv_perm = rearrangeInverse perm
+  transposed <- letExp (baseString arr ++ "_tr") $
+                PrimOp $ Rearrange [] perm arr
+  manifested <- letExp (baseString arr ++ "_tr_manifested") $
+                PrimOp $ Copy transposed
+  letExp (baseString arr ++ "_inv_tr") $
+    PrimOp $ Rearrange [] inv_perm manifested

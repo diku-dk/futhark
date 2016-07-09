@@ -7,6 +7,9 @@ module Futhark.Pass.ExtractKernels.BlockedKernel
        , blockedScan
        , blockedSegmentedScan
        , blockedKernelSize
+
+       , mapKernel
+       , KernelInput(..)
        )
        where
 
@@ -124,7 +127,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
                      zip nes $ map patElemName chunk_red_pes'
 
   red_rets <- forM final_red_pes $ \pe ->
-    return $ ThisThreadReturns (constant (0::Int32)) $ Var $ patElemName pe
+    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
   map_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering w (kernelElementsPerThread step_one_size) $ patElemName pe
   let rets = red_rets ++ map_rets
@@ -151,7 +154,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
     fmap unzip $ forM (zip red_ts arrs) $ \(t, arr) -> do
       arr_index_thread <- newVName (textual arr ++ "_index_thread")
       arr_index <- newVName (baseString arr ++ "_index")
-      return (Thread [PatElem arr_index BindVar t] $
+      return (Thread [PatElem arr_index BindVar t] AllThreads $
               Body () [Let (Pattern [] [PatElem arr_index_thread BindVar t]) () $
                        PrimOp $ Index [] arr [Var thread_id]]
                [Var arr_index_thread],
@@ -170,7 +173,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
   let reduce = GroupReduce final_res_pes group_size reduce_lam' $ zip nes arrs'
 
   rets <- forM final_res_pes $ \pe ->
-    return $ ThisThreadReturns (constant (0::Int32)) $ Var $ patElemName pe
+    return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
 
   return $ Kernel cs
     (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size)
@@ -289,7 +292,7 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
            map (rowType . patElemType) chunk_map_pes
 
   nonconcat_rets <- forM chunk_red_pes $ \pe ->
-    return $ AllThreadsReturn $ Var $ patElemName pe
+    return $ ThreadsReturn AllThreads $ Var $ patElemName pe
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering w (kernelElementsPerThread kernel_size) $ patElemName pe
 
@@ -320,7 +323,7 @@ blockedPerThread w kernel_size ordering lam num_nonconcat arrs = do
   chunk_map_pes <- forM map_ts $ \map_t -> do
     pe_name <- newVName "chunk_fold_map"
     return $ PatElem pe_name BindVar $ map_t `arrayOfRow` Var (paramName chunk_size)
-  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) $ lambdaBody lam
+  let fold_chunk = Thread (chunk_red_pes++chunk_map_pes) AllThreads $ lambdaBody lam
 
   return (chunk_red_pes, chunk_map_pes, [chunk_stm,fold_chunk])
 
@@ -392,7 +395,6 @@ blockedScan pat cs w lam foldlam nes arrs = do
     nes group_carry_out
 
   lam''' <- renameLambda lam
-  result_map_index <- newVName "result_map_index"
   j <- newVName "j"
   let (acc_params, arr_params) =
         splitAt (length nes) $ lambdaParams lam'''
@@ -404,7 +406,7 @@ blockedScan pat cs w lam foldlam nes arrs = do
   elems_per_group <- letSubExp "elements_per_group" $
     PrimOp $ BinOp (Mul Int32) chunks_per_group group_size
 
-  result_map_body <- runBodyBinder $ inScopeOf result_map_input $ do
+  result_map_body <- runBodyBinder $ localScope (scopeOfLParams $ map kernelInputParam result_map_input) $ do
     group_id <-
       letSubExp "group_id" $
       PrimOp $ BinOp (SQuot Int32) (Var j) elems_per_group
@@ -424,10 +426,10 @@ blockedScan pat cs w lam foldlam nes arrs = do
         do_nothing
         add_carry_in
     return $ resultBody $ map Var group_lasts
-  let result_map_returns = [ (rt, [0..arrayRank rt])
-                           | rt <- lambdaReturnType lam ]
-  letBind_ final_res_pat $ Op $ MapKernel [] w result_map_index
-    [(j, w)] result_map_input result_map_returns result_map_body
+  (mapk_bnds, mapk) <- mapKernel [] w [(j, w)] result_map_input
+                       (lambdaReturnType lam) result_map_body
+  mapM_ addBinding mapk_bnds
+  letBind_ final_res_pat $ Op mapk
   where one = constant (1 :: Int32)
         zero = constant (0 :: Int32)
 
@@ -435,8 +437,8 @@ blockedScan pat cs w lam foldlam nes arrs = do
           newIdent (baseString (identName ident) ++ "_" ++ desc) $
           arrayOf (rowType $ identType ident) (Shape shape) NoUniqueness
 
-        mkKernelInput :: [SubExp] -> LParam -> VName -> KernelInput Kernels
-        mkKernelInput indices p arr = KernelInput { kernelInputParam = p
+        mkKernelInput indices p arr = KernelInput { kernelInputName = paramName p
+                                                  , kernelInputType = paramType p
                                                   , kernelInputArray = arr
                                                   , kernelInputIndices = indices
                                                   }
@@ -466,7 +468,6 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       (staticShapes $ lambdaReturnType lam)
     return $ resultBody $ new_flag : map Var seg_res
 
-  flags_global_index <- newVName "flags_global_index"
   flags_i <- newVName "flags_i"
   flags_body <-
     runBodyBinder $ localScope (HM.singleton flags_i IndexInfo) $ do
@@ -477,11 +478,10 @@ blockedSegmentedScan segment_size pat cs w lam input = do
       flag <- letSubExp "flag" $
               If start_of_segment (resultBody [true]) (resultBody [false]) [Prim Bool]
       return $ resultBody [flag]
+  (mapk_bnds, mapk) <- mapKernel [] w [(flags_i, w)] [] [Prim Bool] flags_body
+  mapM_ addBinding mapk_bnds
   flags <-
-    letExp "flags" $ Op $ MapKernel [] w flags_global_index
-    [(flags_i, w)] []
-    [(Prim Bool, [0])]
-    flags_body
+    letExp "flags" $ Op mapk
 
   unused_flag_array <- newVName "unused_flag_array"
   let lam' = Lambda { lambdaParams = params
@@ -498,3 +498,48 @@ blockedSegmentedScan segment_size pat cs w lam input = do
   where zero = constant (0 :: Int32)
         true = constant True
         false = constant False
+
+mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
+             Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput]
+          -> [Type] -> Body
+          -> m ([Binding], Kernel Kernels)
+mapKernel cs w ispace inputs rts body = do
+  num_groups_v <- newVName "num_groups"
+  group_size_v <- newVName "group_size"
+  num_threads_v <- newVName "num_threads"
+
+  ksize_bnds <- runBinder_ $ do
+    letBindNames'_ [group_size_v] $ Op GroupSize
+    letBindNames'_ [num_groups_v] =<< eDivRoundingUp Int32
+      (eSubExp w) (eSubExp $ Var group_size_v)
+    letBindNames'_ [num_threads_v] $
+      PrimOp $ BinOp (Mul Int32) (Var num_groups_v) (Var group_size_v)
+
+  let split_ispace_stm = SplitIndexSpace ispace
+
+  read_input_bnds <- forM inputs $ \inp -> do
+    let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
+    return $ Let (Pattern [] [pe]) () $
+      PrimOp $ Index [] (kernelInputArray inp) (kernelInputIndices inp)
+
+  kresult_pes <- forM rts $ \rt -> do
+    kresult <- newVName "kresult"
+    return $ PatElem kresult BindVar rt
+
+  let body_stm = Thread kresult_pes (ThreadsInSpace w ispace) $
+                 insertBindings read_input_bnds body
+
+  index <- newVName "kernel_thread_index"
+  let ksize = (Var num_groups_v, Var group_size_v, Var num_threads_v)
+      krets = map (ThreadsReturn (ThreadsInSpace w ispace) . Var . patElemName) kresult_pes
+      kbody = KernelBody [split_ispace_stm,body_stm] krets
+  return (ksize_bnds, Kernel cs ksize rts index kbody)
+
+data KernelInput = KernelInput { kernelInputName :: VName
+                               , kernelInputType :: Type
+                               , kernelInputArray :: VName
+                               , kernelInputIndices :: [SubExp]
+                               }
+
+kernelInputParam :: KernelInput -> Param Type
+kernelInputParam p = Param (kernelInputName p) (kernelInputType p)

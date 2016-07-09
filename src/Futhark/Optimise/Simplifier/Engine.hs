@@ -550,6 +550,7 @@ class (CanBeWise op, UsageInOp (OpWithWisdom op)) => SimplifiableOp lore op wher
 instance SimplifiableOp lore () where
   simplifyOp () = return ()
 
+
 class Simplifiable e where
   simplify :: MonadEngine m => e -> m e
 

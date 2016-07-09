@@ -27,7 +27,6 @@ module Futhark.Pass.ExtractKernels.Distribution
        , kernelNestLoops
        , kernelNestWidths
        , boundInKernelNest
-       , constructKernel
        , flatKernel
 
        , tryDistribute
@@ -53,6 +52,7 @@ import Futhark.Util
 import Futhark.Transform.Rename
 import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util.Log
+import Futhark.Pass.ExtractKernels.BlockedKernel (mapKernel, KernelInput(..))
 
 import Prelude
 
@@ -187,17 +187,18 @@ boundInKernelNest = HS.fromList .
 kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops
 
-constructKernel :: MonadFreshNames m =>
+constructKernel :: (MonadFreshNames m, HasScope Kernels m) =>
                    KernelNest -> Body -> m ([Binding], Binding)
 constructKernel kernel_nest inner_body = do
   (w_bnds, w, ispace, inps, rts) <- flatKernel kernel_nest
-  let rank = length ispace
-      returns = [ (rt, [0..rank + arrayRank rt - 1]) | rt <- rts ]
-      used_inps = filter inputIsUsed inps
-  index <- newVName "kernel_thread_index"
-  return (w_bnds,
-          Let (loopNestingPattern first_nest) () $ Op $
-          MapKernel (loopNestingCertificates first_nest) w index ispace used_inps returns inner_body)
+  let used_inps = filter inputIsUsed inps
+      cs = loopNestingCertificates first_nest
+
+  (ksize_bnds, k) <- mapKernel cs w ispace used_inps rts inner_body
+
+  let kbnds = w_bnds ++ ksize_bnds
+  return (kbnds,
+          Let (loopNestingPattern first_nest) () $ Op k)
   where
     first_nest = fst kernel_nest
     inputIsUsed input = kernelInputName input `HS.member`
@@ -220,18 +221,18 @@ flatKernel :: MonadFreshNames m =>
            -> m ([Binding],
                  SubExp,
                  [(VName, SubExp)],
-                 [KernelInput Kernels],
+                 [KernelInput],
                  [Type])
 flatKernel (MapNesting pat _ nesting_w params_and_arrs, []) = do
-  i <- newVName "i"
-  let inps = [ KernelInput param arr [Var i] |
-               (param, arr) <- params_and_arrs ]
+  i <- newVName "gtid"
+  let inps = [ KernelInput pname ptype arr [Var i] |
+               (Param pname ptype, arr) <- params_and_arrs ]
   return ([], nesting_w, [(i,nesting_w)], inps,
           map rowType $ patternTypes pat)
 
 flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
   (w_bnds, w, ispace, inps, returns) <- flatKernel (nest, nests)
-  i <- newVName "i"
+  i <- newVName "gtid"
 
   w' <- newVName "nesting_size"
   let w_bnd = mkLet' [] [Ident w' $ Prim int32] $
@@ -249,8 +250,8 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
 
   return (w_bnds++[w_bnd], Var w', (i, nesting_w) : ispace, extra_inps i <> inps', returns)
   where extra_inps i =
-          [ KernelInput param arr [Var i] |
-            (param, arr) <- params_and_arrs ]
+          [ KernelInput pname ptype arr [Var i] |
+            (Param pname ptype, arr) <- params_and_arrs ]
 
 -- | Description of distribution to do.
 data DistributionBody = DistributionBody {
@@ -459,7 +460,7 @@ removeIdentityMappingFromNesting bound_in_nesting pat res =
         removeIdentityMappingGeneral bound_in_nesting pat res
   in (pat', res', identity_map, expand_target)
 
-tryDistribute :: (MonadFreshNames m, HasScope t m, MonadLogger m) =>
+tryDistribute :: (MonadFreshNames m, HasScope Kernels m, MonadLogger m) =>
                  Nestings -> Targets -> [Binding]
               -> m (Maybe (Targets, [Binding]))
 tryDistribute _ targets [] =
@@ -470,7 +471,7 @@ tryDistribute nest targets bnds =
   \case
     Just (targets', distributed) -> do
       (w_bnds, kernel_bnd) <- constructKernel distributed inner_body
-      distributed' <- optimiseKernel <$> renameBinding kernel_bnd
+      distributed' <- renameBinding kernel_bnd
       logMsg $ "distributing\n" ++
         pretty (mkBody bnds $ snd $ innerTarget targets) ++
         "\nas\n" ++ pretty distributed' ++
@@ -490,66 +491,3 @@ tryDistributeBinding nest targets bnd =
   fmap addRes <$> createKernelNest nest dist_body
   where (dist_body, res) = distributionBodyFromBinding targets bnd
         addRes (targets', kernel_nest) = (res, targets', kernel_nest)
-
-optimiseKernel :: Binding -> Binding
-optimiseKernel bnd = fromMaybe bnd $
-                     tryOptimiseKernel bnd
-
-tryOptimiseKernel :: Binding -> Maybe Binding
-tryOptimiseKernel bnd = kernelIsRearrange bnd <|>
-                        kernelIsReshape bnd <|>
-                        kernelIsCopy bnd
-
-singleBindingBody :: Body -> Maybe Binding
-singleBindingBody (Body _ [bnd] [res])
-  | [res] == map Var (patternNames $ bindingPattern bnd) =
-      Just bnd
-singleBindingBody _ = Nothing
-
-singleExpBody :: Body -> Maybe Exp
-singleExpBody = fmap bindingExp . singleBindingBody
-
-fullIndexInput :: [(VName, SubExp)] -> [KernelInput lore]
-               -> Maybe (KernelInput lore)
-fullIndexInput ispace =
-  find $ (==map (Var . fst) ispace) . kernelInputIndices
-
-kernelIsRearrange :: Binding -> Maybe Binding
-kernelIsRearrange (Let (Pattern [] [outer_patElem]) _
-                   (Op (MapKernel outer_cs _ _ ispace [inp] [_] body)))
-  | Just (PrimOp (Rearrange inner_cs perm arr)) <- singleExpBody body,
-    map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp =
-      let rank = length ispace
-          cs' = outer_cs ++ inner_cs
-          perm' = [0..rank-1] ++ map (rank+) perm
-      in Just $ Let (Pattern [] [outer_patElem]) () $
-         PrimOp $ Rearrange cs' perm' $ kernelInputArray inp
-kernelIsRearrange _ = Nothing
-
-kernelIsReshape :: Binding -> Maybe Binding
-kernelIsReshape (Let (Pattern [] [outer_patElem]) ()
-                 (Op (MapKernel outer_cs _ _ ispace inps [_] body)))
-  | Just (PrimOp (Reshape inner_cs new_inner_shape arr)) <- singleExpBody body,
-    Just inp <- fullIndexInput ispace inps,
-    map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp =
-      let new_outer_shape =
-            take (length new_shape - length new_inner_shape) new_shape
-          cs' = outer_cs ++ inner_cs
-      in Just $ Let (Pattern [] [outer_patElem]) () $
-         PrimOp $ Reshape cs' (map DimCoercion new_outer_shape ++ new_inner_shape) $
-         kernelInputArray inp
-  where new_shape = arrayDims $ patElemType outer_patElem
-kernelIsReshape _ = Nothing
-
-kernelIsCopy :: Binding -> Maybe Binding
-kernelIsCopy (Let pat ()
-              (Op (MapKernel _ _ _ ispace inps [_] body)))
-  | Just (PrimOp (Copy arr)) <- singleExpBody body,
-    Just inp <- fullIndexInput ispace inps,
-    map (Var . fst) ispace == kernelInputIndices inp,
-    arr == kernelInputName inp =
-      Just $ Let pat () $
-      PrimOp $ Copy $ kernelInputArray inp
-kernelIsCopy _ = Nothing

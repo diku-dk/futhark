@@ -176,9 +176,7 @@ instance Substitute ScalExp where
                                      (substituteNames subst f)
 
 instance Rename ScalExp where
-  rename se = do
-    substs <- renamerSubstitutions
-    return $ substituteNames substs se
+  rename = substituteRename
 
 scalExpType :: ScalExp -> PrimType
 scalExpType (Val v) = primValueType v
