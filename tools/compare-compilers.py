@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 import matplotlib
+import re
 
 matplotlib.use('Agg') # For headless use
 
@@ -48,7 +49,6 @@ def parse_bench_output(s):
     return map(parse_line, s.splitlines())
 
 results = {}
-
 for b in benchmarks:
     results[b] = {}
     try:
@@ -65,16 +65,34 @@ for b in benchmarks:
                 results[b][d][c] = r
     except subprocess.CalledProcessError:
         print('Failed.')
-        results[b] = {}
 
 width = 0.2
 
+# From
+# http://stackoverflow.com/questions/16259923/how-can-i-escape-latex-special-characters-inside-django-templates
+def tex_escape(text):
+    conv = {
+        '&': r'\&',
+        '%': r'\%',
+        '$': r'\$',
+        '#': r'\#',
+        '_': r'\_',
+        '{': r'\{',
+        '}': r'\}',
+        '~': r'\textasciitilde{}',
+        '^': r'\^{}',
+        '\\': r'\textbackslash{}',
+        '<': r'\textless',
+        '>': r'\textgreater',
+    }
+    regex = re.compile('|'.join(re.escape(unicode(key)) for key in sorted(conv.keys(), key = lambda item: - len(item))))
+    return regex.sub(lambda match: conv[match.group()], text)
+
 fig, ax = plt.subplots()
 ax.set_ylabel('Speedup')
-# Escape underscores in the labels because they will otherwise be
-# interpreted by TeX.
 
 xtics = []
+xtics_labels = []
 allrects = []
 offset = 0
 for b in benchmarks:
@@ -91,12 +109,15 @@ for b in benchmarks:
 
         rects = []
         xtics.append(offset + (K/2*width))
+        # Escape underscores in the labels because they will otherwise be
+        # interpreted by TeX.
+        xtics_labels.append(tex_escape("%s - %s" % (b,d)))
         allrects.append(ax.bar(offset + np.arange(K)*width,
                                speedups, width, color=colours))
         offset += width * (K+1)
 
 ax.set_xticks(xtics)
-ax.set_xticklabels(map(lambda b: b.replace('_', r'\_'), benchmarks), rotation='vertical')
+ax.set_xticklabels(xtics_labels, rotation='vertical')
 plt.tick_params(axis='x', which='major', pad=20)
 
 plt.grid(b=True, which='minor', color='#777777', linestyle='-')
