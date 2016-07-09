@@ -51,17 +51,6 @@ transformBinding (Let pat () e) = do
                                    }
 
 transformExp :: Exp -> ExpandM ([Binding], Exp)
-transformExp (Op (Inner (MapKernel cs w thread_num ispace inps returns body)))
-  -- Extract allocations from the body.
-  | Right (body', thread_allocs) <- extractThreadAllocations bound_before_body body = do
-
-  (alloc_bnds, alloc_offsets) <- expandedAllocations w thread_num thread_allocs
-  let body'' = if null alloc_bnds then body'
-               else offsetMemoryInBody alloc_offsets body'
-
-  return (alloc_bnds, Op $ Inner $ MapKernel cs w thread_num ispace inps returns body'')
-  where bound_before_body =
-          HS.fromList $ map fst ispace ++ map kernelInputName inps
 
 transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   -- Extract allocations from the lambda.
@@ -115,10 +104,10 @@ extractKernelBodyAllocations :: Names -> KernelBody ExplicitMemory
 extractKernelBodyAllocations bound_before_body kbody = do
   (allocs, stms) <- mapAccumLM extract HM.empty $ kernelBodyStms kbody
   return (kbody { kernelBodyStms = stms }, allocs)
-  where extract allocs (Thread pes body) = do
+  where extract allocs (Thread pes threads body) = do
           let bound_before_body' = boundInBody body <> bound_before_body
           (body', body_allocs) <- extractThreadAllocations bound_before_body' body
-          return (allocs <> body_allocs, Thread pes body')
+          return (allocs <> body_allocs, Thread pes threads body')
 
         extract allocs (GroupReduce pes w lam input) = do
           let bound_before_body' = HS.fromList (HM.keys $ scopeOf lam) <> bound_before_body
@@ -200,7 +189,7 @@ offsetMemoryInKernelBody :: RebaseMap -> KernelBody ExplicitMemory
                          -> KernelBody ExplicitMemory
 offsetMemoryInKernelBody offsets kbody =
   kbody { kernelBodyStms = map offset $ kernelBodyStms kbody }
-  where offset (Thread pes body) = Thread pes $ offsetMemoryInBody offsets body
+  where offset (Thread pes threads body) = Thread pes threads $ offsetMemoryInBody offsets body
         offset (GroupReduce pes w lam input) =
           let body' = offsetMemoryInBody offsets $ lambdaBody lam
           in GroupReduce pes w lam { lambdaBody = body' } input

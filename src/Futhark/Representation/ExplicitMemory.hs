@@ -313,12 +313,7 @@ instance Substitute (MemBound u) where
     Scalar bt
 
 instance Rename (MemBound u) where
-  rename (ArrayMem bt shape u mem f) =
-    ArrayMem bt <$> rename shape <*> pure u <*> rename mem <*> rename f
-  rename (MemMem size space) =
-    MemMem <$> rename size <*> pure space
-  rename (Scalar bt) =
-    return (Scalar bt)
+  rename = substituteRename
 
 instance Engine.Simplifiable (MemBound u) where
   simplify (Scalar bt) =
@@ -363,10 +358,7 @@ instance Ord MemReturn where
   _ `compare` _ = EQ
 
 instance Rename MemReturn where
-  rename (ReturnsInBlock ident ixfun) =
-    ReturnsInBlock <$> rename ident <*> rename ixfun
-  rename (ReturnsNewBlock i size) =
-    ReturnsNewBlock i <$> rename size
+  rename = substituteRename
 
 instance Substitute MemReturn where
   substituteNames substs (ReturnsInBlock ident ixfun) =
@@ -423,13 +415,8 @@ instance FreeIn a => FreeIn (Returns u a) where
   freeIn (ReturnsArray _ shape _ summary) =
     freeIn shape <> freeIn summary
 
-instance Rename a => Rename (Returns u a) where
-  rename (ReturnsScalar bt) =
-    return $ ReturnsScalar bt
-  rename (ReturnsMemory size space) =
-    ReturnsMemory <$> rename size <*> pure space
-  rename (ReturnsArray bt shape u summary) =
-    ReturnsArray bt <$> rename shape <*> pure u <*> rename summary
+instance Substitute a => Rename (Returns u a) where
+  rename = substituteRename
 
 instance Engine.Simplifiable a => Engine.Simplifiable (Returns u a) where
   simplify (ReturnsScalar bt) =
@@ -987,13 +974,12 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
           | otherwise =
               ixfun
 
-        indexedIxfun _ _ (IxFun.Index ixfun' [idx])
-          | SE.Id idxv (IntType Int32) <- idx,
-            idxv == thread_id = return ixfun'
-        indexedIxfun d v ixfun =
+        indexedIxfun _ _ desired_idxs (IxFun.Index ixfun' idxs)
+          | map SE.intSubExpToScalExp desired_idxs == idxs = return ixfun'
+        indexedIxfun d v desired_idxs ixfun =
           fail $ "expReturns Kernel " ++ d ++ ": " ++
           pretty v ++ " does not have a properly indexed index function (found " ++
-          pretty ixfun ++ ")"
+          pretty ixfun ++ ", expecting indices " ++ pretty desired_idxs ++ ")"
 
         transposedIxfun _ (IxFun.Permute ixfun' perm)
           | perm == (length perm - 1) : [0..length perm-2] = return ixfun'
@@ -1001,15 +987,24 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
           fail $ "expReturns Kernel " ++ d ++
           ": does not have transposed index function (found " ++ pretty ixfun ++ ")"
 
-        returnForResult _ (AllThreadsReturn (Var v))
+        returnForResult _ (ThreadsReturn AllThreads (Var v))
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
-              ixfun' <- indexedIxfun "AllThreadsReturn" v ixfun
+              ixfun' <- indexedIxfun "ThreadsReturn AllThreads"
+                        v [Var thread_id] ixfun
               return $ ReturnsArray bt (static $ Shape [num_threads] <> shape) u $
+                Just $ ReturnsInBlock mem ixfun'
+
+        returnForResult _ (ThreadsReturn (ThreadsInSpace _ space) (Var v))
+          | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
+              let (space_is, space_dims) = unzip space
+              ixfun' <- indexedIxfun "ThreadsReturn ThreadsInSpace"
+                        v (map Var space_is) ixfun
+              return $ ReturnsArray bt (static $ Shape space_dims <> shape) u $
                 Just $ ReturnsInBlock mem ixfun'
 
         returnForResult _ (ConcatReturns o w _ v)
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
-              ixfun' <- indexedIxfun "ConcatReturns" v ixfun
+              ixfun' <- indexedIxfun "ConcatReturns" v [Var thread_id] ixfun
               ixfun'' <- replaceOuter w <$> case o of
                            InOrder -> return ixfun'
                            Disorder -> transposedIxfun "ConcatReturns Disorder" ixfun'

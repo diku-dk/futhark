@@ -24,7 +24,7 @@ module Futhark.Transform.Rename
   , renameFun
   -- * Renaming annotations
   , RenameM
-  , renamerSubstitutions
+  , substituteRename
   , bindingForRename
   , Rename (..)
   , Renameable
@@ -47,6 +47,7 @@ import Futhark.Representation.AST.Attributes.Patterns
 import Futhark.FreshNames
 import Futhark.MonadFreshNames (MonadFreshNames(..),
                                 modifyNameSource)
+import Futhark.Transform.Substitute
 
 runRenamer :: RenameM a -> VNameSource -> (a, VNameSource)
 runRenamer m src = runReader (runStateT m src) env
@@ -112,8 +113,16 @@ type RenameM = StateT VNameSource (Reader RenameEnv)
 
 -- | Produce a map of the substitutions that should be performed by
 -- the renamer.
-renamerSubstitutions :: RenameM (HM.HashMap VName VName)
+renamerSubstitutions :: RenameM Substitutions
 renamerSubstitutions = lift $ asks envNameMap
+
+-- | Perform a renaming using the 'Substitute' instance.  This only
+-- works if the argument does not itself perform any name binding, but
+-- it can save on boilerplate for simple types.
+substituteRename :: Substitute a => a -> RenameM a
+substituteRename x = do
+  substs <- renamerSubstitutions
+  return $ substituteNames substs x
 
 -- | Return a fresh, unique name.  The @VName@ is prepended to the
 -- name.

@@ -20,8 +20,8 @@
 --    [662i32, 1090i32, 1728i32]]
 -- }
 -- structure distributed {
---   DoLoop/MapKernel 1
---   MapKernel/DoLoop/DoLoop 2
+--   DoLoop/Kernel 1
+--   Kernel/Thread/DoLoop/DoLoop 2
 --   ScanKernel 2
 -- }
 

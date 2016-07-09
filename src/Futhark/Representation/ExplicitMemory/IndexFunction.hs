@@ -122,13 +122,7 @@ instance FreeIn num => FreeIn (IxFun num) where
     freeIn ixfun <> freeIn dims
 
 instance (Eq num, IntegralCond num, Substitute num, Rename num) => Rename (IxFun num) where
-  -- Because there is no mapM-like function on sized vectors, we
-  -- implement renaming by retrieving the substitution map, then using
-  -- 'substituteNames'.  This is safe as index functions do not
-  -- contain their own bindings.
-  rename ixfun = do
-    subst <- renamerSubstitutions
-    return $ substituteNames subst ixfun
+  rename = substituteRename
 
 index :: (Pretty num, IntegralCond num) =>
          IxFun num -> Indices num -> num -> num

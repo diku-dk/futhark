@@ -123,8 +123,8 @@ optimiseKernelBody kbody = do
           es' <- inScopeOf e' $ optimiseKernelStms es
           return $ e' : es'
 
-        optimiseKernelStm (Thread pes body) =
-          Thread pes <$> optimiseBody body
+        optimiseKernelStm (Thread pes threads body) =
+          Thread pes threads <$> optimiseBody body
         optimiseKernelStm (GroupReduce pes w lam input) =
           GroupReduce pes w <$> optimiseLambda lam <*> pure input
         optimiseKernelStm stm =

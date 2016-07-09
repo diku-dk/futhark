@@ -90,7 +90,6 @@ regularSegmentedReduceAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Ker
 regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat cs w lam reduce_inps = do
   blockedSegmentedScan segment_size flat_pat cs w lam reduce_inps
 
-  global_index <- newVName "global_index"
   is <- replicateM (length nest_sizes) $ newVName "i"
 
   body <- runBodyBinder $ localScope (HM.fromList $ zip is $ repeat IndexInfo) $ do
@@ -103,9 +102,7 @@ regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat c
       letSubExp "v" $ PrimOp $ Index [] arr [j]
     return $ resultBody vals
 
-  let n = length nest_sizes
-      rets = [ (t, [0..n-1] ++ [n..n+arrayRank t-1]) | t <- acct ]
-  letBind_ pat $ Op $ MapKernel [] num_segments global_index
-    (zip is nest_sizes) []
-    rets body
+  (mapk_bnds, mapk) <- mapKernel [] num_segments (zip is nest_sizes) [] acct body
+  mapM_ addBinding mapk_bnds
+  letBind_ pat $ Op mapk
   where acct = lambdaReturnType lam

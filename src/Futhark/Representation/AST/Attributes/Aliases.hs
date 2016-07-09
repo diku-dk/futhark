@@ -91,8 +91,10 @@ expAliases (If _ tb fb _) =
   (bodyAliases fb, consumedInBody fb)
 expAliases (PrimOp op) = primOpAliases op
 expAliases (DoLoop ctxmerge valmerge _ loopbody) =
-  map (`HS.difference` merge_names) $ bodyAliases loopbody
-  where merge_names = HS.fromList $
+  map (`HS.difference` merge_names) val_aliases
+  where (_ctx_aliases, val_aliases) =
+          splitAt (length ctxmerge) $ bodyAliases loopbody
+        merge_names = HS.fromList $
                       map (paramName . fst) $ ctxmerge ++ valmerge
 expAliases (Apply _ args t) =
   funcallAliases args $ retTypeValues t
@@ -153,6 +155,9 @@ class AliasesOf a where
 
 instance AliasesOf Names where
   aliasesOf = id
+
+instance AliasesOf attr => AliasesOf (PatElem attr) where
+  aliasesOf = aliasesOf . patElemAttr
 
 class IsOp op => AliasedOp op where
   opAliases :: op -> [Names]

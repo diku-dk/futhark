@@ -26,10 +26,11 @@ module Futhark.Optimise.Simplifier.Lore
        )
        where
 
-import Control.Applicative
 import Control.Monad.Reader
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
+
+import Prelude
 
 import Futhark.Representation.AST
 import Futhark.Representation.AST.Attributes.Ranges
@@ -43,8 +44,6 @@ import Futhark.Transform.Rename
 import Futhark.Transform.Substitute
 import Futhark.Analysis.Rephrase
 
-import Prelude
-
 data Wise lore
 
 -- | The wisdom of the let-bound variable.
@@ -54,7 +53,7 @@ data VarWisdom = VarWisdom { varWisdomAliases :: VarAliases
                   deriving (Eq, Ord, Show)
 
 instance Rename VarWisdom where
-  rename (VarWisdom als range) = VarWisdom <$> rename als <*> rename range
+  rename = substituteRename
 
 instance Substitute VarWisdom where
   substituteNames substs (VarWisdom als range) =
@@ -74,8 +73,7 @@ data BodyWisdom = BodyWisdom { bodyWisdomAliases :: [VarAliases]
                   deriving (Eq, Ord, Show)
 
 instance Rename BodyWisdom where
-  rename (BodyWisdom als cons rs) =
-    BodyWisdom <$> rename als <*> rename cons <*> rename rs
+  rename = substituteRename
 
 instance Substitute BodyWisdom where
   substituteNames substs (BodyWisdom als cons rs) =
