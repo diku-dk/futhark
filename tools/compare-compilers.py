@@ -66,7 +66,7 @@ for b in benchmarks:
     except subprocess.CalledProcessError:
         print('Failed.')
 
-width = 0.2
+height = 0.2
 
 # From
 # http://stackoverflow.com/questions/16259923/how-can-i-escape-latex-special-characters-inside-django-templates
@@ -89,7 +89,6 @@ def tex_escape(text):
     return regex.sub(lambda match: conv[match.group()], text)
 
 fig, ax = plt.subplots()
-ax.set_ylabel('Speedup')
 
 xtics = []
 xtics_labels = []
@@ -108,22 +107,23 @@ for b in benchmarks:
         K = len(speedups)
 
         rects = []
-        xtics.append(offset + (K/2*width))
+        xtics.append(offset + (K-1)*height/2.0)
         # Escape underscores in the labels because they will otherwise be
         # interpreted by TeX.
         xtics_labels.append(tex_escape("%s - %s" % (b,d)))
-        allrects.append(ax.bar(offset + np.arange(K)*width,
-                               speedups, width, color=colours))
-        offset += width * (K+1)
+        allrects.append(ax.bar(0, height, speedups,
+                               bottom=offset - np.arange(K)*height,
+                               color=colours,
+                               orientation='horizontal'))
+        offset += height * (K+1)
 
-ax.set_xticks(xtics)
-ax.set_xticklabels(xtics_labels, rotation='vertical')
-plt.tick_params(axis='x', which='major', pad=20)
+ax.set_xlabel('Speedup')
+ax.set_yticks(xtics)
+ax.set_yticklabels(xtics_labels)
 
-plt.grid(b=True, which='minor', color='#777777', linestyle='-')
-ax.yaxis.grid(True, linestyle='-')
+plt.gca().xaxis.grid(True)
+plt.grid(which='minor', color='#777777', linestyle='-')
 
-fig.set_size_inches(18.5, 6.5)
 plt.rc('text', usetex=True)
 plt.savefig(plotfile, bbox_inches='tight')
 print('Speedup graph written to %s' % plotfile)
