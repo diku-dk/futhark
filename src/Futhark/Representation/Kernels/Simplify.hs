@@ -82,9 +82,10 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
 
-simplifyKernelBody :: Engine.MonadEngine m =>
+simplifyKernelBody :: (Engine.MonadEngine m, Engine.Simplifiable res) =>
                       Scope (Lore m)
-                   -> KernelBody (Engine.InnerLore m) -> m (KernelBody (Lore m))
+                   -> GenKernelBody res (Engine.InnerLore m)
+                   -> m (GenKernelBody res (Lore m))
 simplifyKernelBody scope (KernelBody stms res) =
   simplifyKernelStms scope stms $
     KernelBody [] <$> mapM Engine.simplify res
@@ -92,8 +93,8 @@ simplifyKernelBody scope (KernelBody stms res) =
 simplifyKernelStms :: Engine.MonadEngine m =>
                       Scope (Lore m)
                    -> [KernelStm (Engine.InnerLore m)]
-                   -> m (KernelBody (Lore m))
-                   -> m (KernelBody (Lore m))
+                   -> m (GenKernelBody res (Lore m))
+                   -> m (GenKernelBody res (Lore m))
 simplifyKernelStms _ [] m = m
 simplifyKernelStms scope (stm:stms) m = do
   stm' <- simplifyKernelStm scope stm
