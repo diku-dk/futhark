@@ -66,17 +66,18 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     as' <- mapM Engine.simplify as
     return $ WriteKernel cs' len' lam' ivs' as'
 
-  simplifyOp (Kernel cs (num_groups, group_size, num_threads) ts thread_id kernel_body) = do
+  simplifyOp (Kernel cs (num_groups, group_size, num_threads) ts space kernel_body) = do
     cs' <- Engine.simplify cs
     num_groups' <- Engine.simplify num_groups
     group_size' <- Engine.simplify group_size
     num_threads' <- Engine.simplify num_threads
     ts' <- mapM Engine.simplify ts
+    space' <- Engine.simplify space
     kernel_body' <- Engine.localVtable (<>scope_vtable) $
       simplifyKernelBody scope kernel_body
-    return $ Kernel cs' (num_groups', group_size', num_threads') ts' thread_id kernel_body'
+    return $ Kernel cs' (num_groups', group_size', num_threads') ts' space' kernel_body'
     where scope_vtable = ST.fromScope scope
-          scope = HM.singleton thread_id IndexInfo
+          scope = scopeOfKernelSpace space
 
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
@@ -107,6 +108,7 @@ simplifyKernelStms scope (stm:stms) m = do
 simplifyKernelStm :: Engine.MonadEngine m =>
                      Scope (Lore m) -> KernelStm (Engine.InnerLore m)
                   -> m [KernelStm (Lore m)]
+
 simplifyKernelStm _ (SplitArray (size, chunks) o w elems_per_thread arrs) =
   pure <$> (SplitArray <$>
             ((,) <$> Engine.simplify size <*> zipWithM inspect chunks arrs)
@@ -117,9 +119,7 @@ simplifyKernelStm _ (SplitArray (size, chunks) o w elems_per_thread arrs) =
   where inspect chunk arr =
           inspectPatElem chunk (Names' $ HS.singleton arr) range
           where range = (Just $ VarBound arr, Just $ VarBound arr)
-simplifyKernelStm _ (SplitIndexSpace ispace) =
-  pure <$> (SplitIndexSpace <$>
-            (zip (map fst ispace) <$> mapM (Engine.simplify . snd) ispace))
+
 simplifyKernelStm scope (Thread pes threads body) = do
   par_blocker <- Engine.asksEngineEnv $
                  Engine.blockHoistPar . Engine.envHoistBlockers
@@ -131,10 +131,13 @@ simplifyKernelStm scope (Thread pes threads body) = do
   threads' <- Engine.simplify threads
   return [Thread pes' threads' body']
   where scope_bound = HS.fromList $ HM.keys scope
-simplifyKernelStm _ (Combine pe v) = do
+
+simplifyKernelStm _ (Combine pe w v) = do
   pe' <- inspectPatElem pe mempty $ rangeOf v
+  w' <- Engine.simplify w
   v' <- Engine.simplify v
-  return [Combine pe' v']
+  return [Combine pe' w' v']
+
 simplifyKernelStm scope (GroupReduce pes w lam input) = do
   w' <- Engine.simplify w
   nes' <- mapM Engine.simplify nes
@@ -144,6 +147,32 @@ simplifyKernelStm scope (GroupReduce pes w lam input) = do
   return [GroupReduce pes' w' lam' $ zip nes' arrs']
   where (nes,arrs) = unzip input
         scope_bound = HS.fromList $ HM.keys scope
+
+simplifyKernelStm _ (GroupStream pes w lam accs arrs) = do
+  w' <- Engine.simplify w
+  accs' <- mapM Engine.simplify accs
+  arrs' <- mapM Engine.simplify arrs
+  lam' <- simplifyGroupStreamLambda lam w
+          w (map (const Nothing) arrs')
+  pes' <- inspectPatElems pes $
+          zip (repeat mempty) $ repeat (Nothing, Nothing)
+  return [GroupStream pes' w' lam' accs' arrs']
+
+simplifyGroupStreamLambda :: Engine.MonadEngine m =>
+                             GroupStreamLambda (Engine.InnerLore m)
+                          -> SubExp -> SubExp -> [Maybe VName]
+                          -> m (GroupStreamLambda (Lore m))
+simplifyGroupStreamLambda lam w max_chunk arrs = do
+  let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
+  body' <- Engine.enterLoop $
+           Engine.bindLParams acc_params $
+           Engine.bindArrayLParams (zip arr_params arrs) $
+           Engine.bindLoopVar block_size max_chunk $
+           Engine.bindLoopVar block_offset w $
+           simplifyKernelBody (scopeOf lam) body
+  acc_params' <- mapM (Engine.simplifyParam Engine.simplify) acc_params
+  arr_params' <- mapM (Engine.simplifyParam Engine.simplify) arr_params
+  return $ GroupStreamLambda block_size block_offset acc_params' arr_params' body'
 
 inspectPatElem :: (Engine.Simplifiable attr, Engine.MonadEngine m) =>
                   PatElemT attr
@@ -172,16 +201,21 @@ instance Engine.Simplifiable KernelResult where
     <*> Engine.simplify pte
     <*> Engine.simplify what
 
-instance Engine.Simplifiable ThreadSpace where
-  simplify = mapM Engine.simplify
+instance Engine.Simplifiable KernelSpace where
+  simplify (KernelSpace global_tid local_tid group_id space) =
+    KernelSpace global_tid local_tid group_id <$>
+    (zip space_is <$> mapM Engine.simplify space_dims)
+    where (space_is, space_dims) = unzip space
 
 instance Engine.Simplifiable WhichThreads where
   simplify AllThreads =
     pure AllThreads
   simplify (OneThreadPerGroup which) =
     OneThreadPerGroup <$> Engine.simplify which
-  simplify (ThreadsInSpace w space) =
-    ThreadsInSpace <$> Engine.simplify w <*> Engine.simplify space
+  simplify (ThreadsPerGroup limit) =
+    ThreadsPerGroup <$> Engine.simplify limit
+  simplify ThreadsInSpace =
+    pure ThreadsInSpace
 
 instance Engine.Simplifiable KernelSize where
   simplify (KernelSize num_groups group_size thread_chunk
@@ -284,15 +318,16 @@ fuseWriteIota _ _ = cannotSimplify
 fuseKernelIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                  TopDownRule m
-fuseKernelIota vtable (Let pat _ (Op (Kernel cs ksize ts thread_gid kbody)))
+fuseKernelIota vtable (Let pat _ (Op (Kernel cs ksize ts space kbody)))
   | Just (iota_chunk_info, stms') <- extractSplitIota vtable $ kernelBodyStms kbody =
-      localScope (HM.singleton thread_gid IndexInfo <>
+      localScope (scopeOfKernelSpace space <>
                   mconcat (map scopeOf stms')) $ do
         stms'' <- mapM (inlineIotaInKernelStm iota_chunk_info) stms'
         let kbody' = kbody { kernelBodyStms = stms'' }
-        letBind_ pat $ Op $ Kernel cs ksize ts thread_gid kbody'
+        letBind_ pat $ Op $ Kernel cs ksize ts space kbody'
 
   where (_, _, num_threads) = ksize
+        thread_gid = spaceGlobalId space
         inlineIotaInKernelStm (size, chunk, o, elems_per_thread, x) stm
           | patElemName chunk `HS.member` freeIn stm =
               case stm of
@@ -351,7 +386,7 @@ removeInvariantKernelResults :: (LocalScope (Lore m) m,
                                  MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                                 TopDownRule m
 removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
-                                      (Op (Kernel cs size ts thread_id (KernelBody kstms kres)))) = do
+                                      (Op (Kernel cs size ts space (KernelBody kstms kres)))) = do
   (kstms', invariant_threads) <-
     unzip <$> mapM checkForInvarianceStm kstms
 
@@ -366,12 +401,13 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
   when (null (concat invariant_threads) && kres == kres')
     cannotSimplify
 
-  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs size ts thread_id $
+  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs size ts space $
     KernelBody kstms' kres'
   where inVtable Constant{} = True
         inVtable (Var v) = isJust $ ST.lookup v vtable
 
         (_, _, num_threads) = size
+        space_dims = map snd $ spaceDimensions space
 
         checkForInvarianceStm (Thread pes threads body)
           | (invariant, variant) <-
@@ -392,10 +428,10 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
                 AllThreads -> do
                   letBindNames'_ [patElemName pe] $ PrimOp $ Replicate num_threads se
                   return False
-                ThreadsInSpace _ space -> do
+                ThreadsInSpace -> do
                   let rep a d = PrimOp . Replicate d <$> letSubExp "rep" a
                   letBindNames'_ [patElemName pe] =<<
-                    foldM rep (PrimOp (SubExp se)) (reverse $ map snd space)
+                    foldM rep (PrimOp (SubExp se)) (reverse space_dims)
                   return False
                 _ -> return True
         checkForInvarianceResult _ _ =

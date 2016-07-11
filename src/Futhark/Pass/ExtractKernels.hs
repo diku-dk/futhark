@@ -680,6 +680,99 @@ maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
                        }
       maybeDistributeBinding newbnd acc
 
+-- Block tiling: a Redomap that can be distributed by itself, and
+-- where the input arrays are invariant to the loop nest, will be
+-- block tiled.
+maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs))) acc =
+  distributeSingleBinding acc bnd >>= \case
+    Just (kernels, res, nest, acc')
+      | Just perm <- map Var (patternNames pat) `isPermutationOf` res,
+        not $ any (`HS.member` boundInKernelNest nest) arrs -> do
+
+          addKernels kernels
+
+          (w_bnds, w, ispace, inps, rts) <- flatKernel nest
+          (ksize_bnds, ksize, read_input_bnds) <- mapKernelSkeleton w inps
+
+          space <- newKernelSpace ispace
+
+          kresult_pes <- forM rts $ \rt -> do
+            kresult <- newVName "kresult"
+            return $ PatElem kresult BindVar rt
+
+          read_input_stm <- do
+            (pes, bnds) <- perThread read_input_bnds
+            return $ Thread pes ThreadsInSpace bnds
+
+          stream_lam <- do
+            foldlam_chunked <- chunkLambda pat nes =<<
+                               FOT.transformLambda foldlam
+            let (chunk_param, acc_params, arr_chunk_params) =
+                  partitionChunkedFoldParameters (length nes) $
+                  lambdaParams foldlam_chunked
+                block_size = Var $ paramName chunk_param
+
+            outer_arr_chunk_params <- forM arr_chunk_params $ \p -> do
+              name <- newVName $ baseString (paramName p) ++ "_outer"
+              return p { paramName = name }
+
+            let local_tid = spaceLocalId space
+            read_elem_bnds <- forM outer_arr_chunk_params $ \p -> do
+              name <- newVName $ baseString (paramName p) ++ "_elem"
+              return $
+                mkLet' [] [Ident name $ rowType $ paramType p] $
+                PrimOp $ Index [] (paramName p) [Var local_tid]
+
+            (block_elem_pes, read_block_body) <- perThread read_elem_bnds
+
+            let block_pes = [ PatElem p_name BindVar $
+                              p_attr `setOuterSize` block_size |
+                              Param p_name p_attr <- arr_chunk_params ]
+                read_block_stm =
+                  Thread block_elem_pes (ThreadsPerGroup block_size) read_block_body
+                write_block_stms =
+                  [ Combine block_pe block_size $
+                    Var $ patElemName block_elem_pe
+                  | (block_pe, block_elem_pe) <-
+                    zip block_pes block_elem_pes ]
+
+            thread_pes <- forM (patternValueElements pat) $ \pe -> do
+              name <- newVName $ baseString (patElemName pe)
+              return pe { patElemName = name }
+
+            let operate_stm = Thread thread_pes ThreadsInSpace $
+                              lambdaBody foldlam_chunked
+                body_rets = [ ThreadsReturn ThreadsInSpace $
+                              Var $ patElemName pe
+                            | pe <- thread_pes ]
+
+                body = KernelBody ([read_block_stm]++
+                                   write_block_stms++
+                                   [operate_stm]) body_rets
+            block_offset <- newVName "block_offset"
+            return $ GroupStreamLambda
+              (paramName chunk_param)
+              block_offset
+              acc_params
+              outer_arr_chunk_params
+              body
+
+          let stream_stm = GroupStream kresult_pes rw
+                           stream_lam nes arrs
+
+          let krets = map (ThreadsReturn ThreadsInSpace .
+                            Var . patElemName) kresult_pes
+              kbody = KernelBody [read_input_stm, stream_stm] krets
+              kpat = Pattern [] $ rearrangeShape perm $
+                     patternValueElements $
+                     loopNestingPattern $ fst nest
+          addKernel $ w_bnds ++ ksize_bnds ++
+            [Let kpat () $ Op $ Kernel cs ksize rts space kbody]
+          return acc'
+    _ ->
+      addBindingToKernel bnd acc
+
+
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc =
   distributeSingleUnaryBinding acc bnd $ \_ outerpat arr ->
   addKernel [Let outerpat () $ PrimOp $ Copy arr]

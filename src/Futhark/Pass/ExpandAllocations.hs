@@ -79,7 +79,7 @@ transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
         bound_in_lam = HS.fromList $ HM.keys $ scopeOf lam
         bound_in_foldlam = HS.fromList $ HM.keys $ scopeOf foldlam
 
-transformExp (Op (Inner (Kernel cs size ts global_tid kbody)))
+transformExp (Op (Inner (Kernel cs size ts space kbody)))
   | Right (kbody', thread_allocs) <- extractKernelBodyAllocations bound_in_kernel kbody = do
 
       (alloc_bnds, alloc_offsets) <-
@@ -87,10 +87,12 @@ transformExp (Op (Inner (Kernel cs size ts global_tid kbody)))
       let kbody'' = offsetMemoryInKernelBody alloc_offsets kbody'
 
       return (alloc_bnds,
-              Op $ Inner $ Kernel cs size ts global_tid kbody'')
+              Op $ Inner $ Kernel cs size ts space kbody'')
 
-  where bound_in_kernel =
-          global_tid `HS.insert` HS.fromList (HM.keys $ scopeOf $ kernelBodyStms kbody)
+  where global_tid = spaceGlobalId space
+        bound_in_kernel =
+          HS.fromList $ HM.keys $ scopeOfKernelSpace space <>
+          scopeOf (kernelBodyStms kbody)
         (_num_groups, _group_size, num_threads) = size
 
 transformExp e =
