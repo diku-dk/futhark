@@ -77,7 +77,7 @@ transformBinding expmap (Let pat ()
     ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
 
-transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id kbody))) = do
+transformBinding expmap (Let pat () (Op (Kernel cs size ts space kbody))) = do
   -- First we do the easy stuff, which deals with SplitArray statements.
   kbody' <- transformKernelBody num_threads cs kbody
 
@@ -86,16 +86,14 @@ transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id kbody))) = 
   -- indices.
   scope <- askScope
   let boundOutside = fmap typeOf . (`HM.lookup` scope)
-      thread_gids = case kernelBodyStms kbody of
-                     SplitIndexSpace space : _ -> map fst space
-                     _                         -> []
+      thread_gids = map fst $ spaceDimensions space
 
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
                          (ensureCoalescedAccess thread_gids boundOutside)
                          kbody')
              mempty
 
-  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id kbody''
+  addBinding $ Let pat () $ Op $ Kernel cs size ts space kbody''
   return expmap
   where (_, _, num_threads) = size
 
