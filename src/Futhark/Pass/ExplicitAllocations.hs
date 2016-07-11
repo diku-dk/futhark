@@ -696,8 +696,8 @@ allocInLambda params body rettype = do
 
 allocInKernelBody :: (SubExp, SubExp, SubExp)
                   -> KernelSpace
-                  -> KernelBody In.Kernels
-                  -> AllocM (KernelBody ExplicitMemory)
+                  -> GenKernelBody res In.Kernels
+                  -> AllocM (GenKernelBody res ExplicitMemory)
 allocInKernelBody size space (KernelBody stms res) =
   allocInKernelStms size space stms $ \stms' ->
     return $ KernelBody stms' res

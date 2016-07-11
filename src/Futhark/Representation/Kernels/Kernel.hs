@@ -7,9 +7,12 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
-       , KernelBody(..)
+       , KernelBody
+       , NestedKernelBody
+       , GenKernelBody(..)
        , KernelStm(..)
        , KernelSpace(..)
        , scopeOfKernelSpace
@@ -90,10 +93,14 @@ data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                }
                  deriving (Eq, Show, Ord)
 
-data KernelBody lore = KernelBody { kernelBodyStms :: [KernelStm lore]
-                                  , kernelBodyResult :: [KernelResult]
-                                  }
-                deriving (Eq, Show, Ord)
+type KernelBody = GenKernelBody KernelResult
+type NestedKernelBody = GenKernelBody SubExp
+
+-- | A kernel body parametrised over its result.
+data GenKernelBody res lore = KernelBody { kernelBodyStms :: [KernelStm lore]
+                                         , kernelBodyResult :: [res]
+                                         }
+                            deriving (Eq, Show, Ord)
 
 data KernelResult = ThreadsReturn WhichThreads SubExp
                   | ConcatReturns
@@ -129,7 +136,7 @@ data GroupStreamLambda lore = GroupStreamLambda
   , groupStreamChunkOffset :: VName
   , groupStreamAccParams :: [LParam lore]
   , groupStreamArrParams :: [LParam lore]
-  , groupStreamLambdaBody :: KernelBody lore
+  , groupStreamLambdaBody :: NestedKernelBody lore
   }
 
 deriving instance Annotations lore => Eq (GroupStreamLambda lore)
@@ -253,7 +260,7 @@ instance FreeIn WhichThreads where
   freeIn (ThreadsPerGroup limit) = freeIn limit
   freeIn ThreadsInSpace = mempty
 
-instance Attributes lore => FreeIn (KernelBody lore) where
+instance (Attributes lore, FreeIn res) => FreeIn (GenKernelBody res lore) where
   freeIn (KernelBody stms res) =
     (free_in_stms <> free_in_res) `HS.difference` bound_in_stms
     where free_in_stms = mconcat $ map freeIn stms
@@ -279,7 +286,7 @@ instance Attributes lore => FreeIn (GroupStreamLambda lore) where
                        chunk_offset : chunk_size :
                        map paramName (acc_params ++ arr_params)
 
-instance Attributes lore => Substitute (KernelBody lore) where
+instance (Attributes lore, Substitute res) => Substitute (GenKernelBody res lore) where
   substituteNames subst (KernelBody stms res) =
     KernelBody (substituteNames subst stms) $ substituteNames subst res
 
@@ -348,7 +355,7 @@ instance Attributes lore => Substitute (Kernel lore) where
                          , mapOnKernelKernelBody = return . substituteNames subst
                          }
 
-instance Attributes lore => Rename (KernelBody lore) where
+instance (Attributes lore, Rename res) => Rename (GenKernelBody res lore) where
   rename (KernelBody [] res) =
     KernelBody [] <$> rename res
   rename (KernelBody (stm:stms) res) =
@@ -475,6 +482,8 @@ instance (Attributes lore,
     where alias = KernelMapper return (return . Alias.analyseLambda)
                   (return . Alias.analyseBody) return return return
                   (return . aliasAnalyseKernelBody)
+          aliasAnalyseKernelBody :: GenKernelBody res lore
+                                 -> GenKernelBody res (Aliases lore)
           aliasAnalyseKernelBody (KernelBody stms res) =
             KernelBody (map analyseStm stms) res
           analyseStm (SplitArray (size, chunks) o w elems_per_thread arrs) =
@@ -504,6 +513,8 @@ instance (Attributes lore,
     where remove = KernelMapper return (return . removeLambdaAliases)
                    (return . removeBodyAliases) return return return
                    (return . removeKernelBodyAliases)
+          removeKernelBodyAliases :: GenKernelBody res (Aliases lore)
+                                  -> GenKernelBody res lore
           removeKernelBodyAliases (KernelBody stms res) =
             KernelBody (map removeStmAliases stms) res
           removeStmAliases (SplitArray (size, chunks) o w elems_per_thread arrs) =
@@ -550,6 +561,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    (return . removeBodyWisdom)
                    return return return
                    (return . removeKernelBodyWisdom)
+          removeKernelBodyWisdom :: GenKernelBody res (Wise lore)
+                                 -> GenKernelBody res lore
           removeKernelBodyWisdom (KernelBody stms res) =
             KernelBody (map removeKernelStatementWisdom stms) res
           removeKernelStatementWisdom (Thread pes which body) =
@@ -578,7 +591,7 @@ instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kern
   usageInOp GroupSize = mempty
 
 consumedInKernelBody :: (Attributes lore, Aliased lore) =>
-                        KernelBody lore -> Names
+                        GenKernelBody res lore -> Names
 consumedInKernelBody (KernelBody stms _) =
   -- We need to figure out what is consumed in stms.  We do this by
   -- moving backwards through the stms, using the alias information to
@@ -705,6 +718,9 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) kts space kbody) = 
   where checkKernelBody ts (KernelBody stms res) =
           checkKernelStms stms $ zipWithM_ checkKernelResult res ts
 
+        checkNestedKernelBody ts (KernelBody stms res) =
+          checkKernelStms stms $ zipWithM_ (TC.require . pure) ts res
+
         checkKernelResult (ThreadsReturn which what) t = do
           checkWhich which
           TC.require [t] what
@@ -797,7 +813,7 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) kts space kbody) = 
           TC.binding (scopeOf lam) $ TC.consumeOnlyParams consumable $ do
             TC.checkLambdaParams acc_params
             TC.checkLambdaParams arr_params
-            checkKernelBody (map TC.argType acc_args) body
+            checkNestedKernelBody (map TC.argType acc_args) body
 
 checkKernelCrud :: TC.Checkable lore =>
                    [VName] -> SubExp -> KernelSize -> TC.TypeM lore ()
@@ -824,7 +840,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "WriteKernel" $ lambdaMetrics lam
   opMetrics (Kernel _ _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
-    where kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
+    where kernelBodyMetrics :: GenKernelBody res lore -> MetricsM ()
+          kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
           kernelStmMetrics SplitArray{} =
             seen "SplitArray"
           kernelStmMetrics (Thread _ _ body) =
@@ -881,6 +898,11 @@ instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody stms res) =
     PP.stack (map ppr stms) </>
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
+
+instance PrettyLore lore => Pretty (NestedKernelBody lore) where
+  ppr (KernelBody stms res) =
+    PP.stack (map ppr stms) </>
+    PP.braces (PP.commasep $ map ppr res)
 
 instance PrettyLore lore => Pretty (KernelStm lore) where
   ppr (SplitArray (n,chunks) o w elems_per_thread arrs) =

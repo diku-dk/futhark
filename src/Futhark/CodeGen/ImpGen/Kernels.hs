@@ -952,30 +952,28 @@ compileKernelBody :: [ImpGen.ValueDestination]
                   -> KernelConstants
                   -> KernelBody ExplicitMemory
                   -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelBody dest constants kernel_body =
-  compileKernelStms (kernelBodyStms kernel_body) $
+compileKernelBody dest constants kbody =
+  compileKernelStms constants (kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) dest $
-  kernelBodyResult kernel_body
-  where compileKernelStms [] m = m
-        compileKernelStms (s:ss) m =
-          ImpGen.declaringScope (scopeOf s) $ do
-          compileKernelStm constants s
-          compileKernelStms ss m
+  kernelBodyResult kbody
 
-compileKernelBodyBadly :: [ImpGen.ValueDestination]
-                  -> KernelConstants
-                  -> KernelBody ExplicitMemory
+compileNestedKernelBody :: [ImpGen.ValueDestination]
+                        -> KernelConstants
+                        -> NestedKernelBody ExplicitMemory
+                        -> ImpGen.ImpM Imp.KernelOp ()
+compileNestedKernelBody dest constants kbody =
+  compileKernelStms constants (kernelBodyStms kbody) $
+  zipWithM_ ImpGen.compileSubExpTo dest $ kernelBodyResult kbody
+
+compileKernelStms :: KernelConstants
+                  -> [KernelStm ExplicitMemory]
                   -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelBodyBadly dest constants kernel_body =
-  compileKernelStms (kernelBodyStms kernel_body) $
-  zipWithM_ (compileKernelResultBadly constants) dest $
-  kernelBodyResult kernel_body
-  where compileKernelStms [] m = m
-        compileKernelStms (s:ss) m =
-          ImpGen.declaringScope (scopeOf s) $ do
-          compileKernelStm constants s
-          compileKernelStms ss m
-
+                  -> ImpGen.ImpM Imp.KernelOp ()
+compileKernelStms _ [] m = m
+compileKernelStms constants (s:ss) m =
+  ImpGen.declaringScope (scopeOf s) $ do
+  compileKernelStm constants s
+  compileKernelStms constants ss m
 
 compileKernelStm :: KernelConstants -> KernelStm ExplicitMemory
                  -> ImpGen.ImpM Imp.KernelOp ()
@@ -1125,7 +1123,7 @@ compileKernelStm constants (GroupStream pes w lam accs _arrs) = do
   ImpGen.declaringLParams (acc_params++arr_params) $
     ImpGen.declaringPrimVar block_size int32 $
     ImpGen.declaringPrimVar block_offset int32 $ do
-    body' <- ImpGen.collect $ compileKernelBodyBadly acc_targets constants body
+    body' <- ImpGen.collect $ compileNestedKernelBody acc_targets constants body
 
     ImpGen.emit $ Imp.SetScalar block_offset 0
     zipWithM_ ImpGen.compileSubExpTo acc_targets accs
@@ -1155,18 +1153,27 @@ compileKernelStm constants (GroupStream pes w lam accs _arrs) = do
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> ImpGen.ImpM Imp.KernelOp ()
 compileKernelResult constants dest (ThreadsReturn (OneThreadPerGroup who) what) = do
-  let me = Imp.ScalarVar $ kernelLocalThreadId constants
-
   write_result <-
     ImpGen.collect $
     ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
 
+  let me = Imp.ScalarVar $ kernelLocalThreadId constants
   ImpGen.emit $
     Imp.If (Imp.CmpOp (CmpEq int32) me (ImpGen.compileSubExp who))
     write_result mempty
 
 compileKernelResult constants dest (ThreadsReturn AllThreads what) =
   ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGlobalThreadId constants] what []
+
+compileKernelResult constants dest (ThreadsReturn (ThreadsPerGroup limit) what) = do
+  write_result <-
+    ImpGen.collect $
+    ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
+
+  let me = Imp.ScalarVar $ kernelLocalThreadId constants
+  ImpGen.emit $
+    Imp.If (Imp.CmpOp (CmpEq int32) me (ImpGen.compileSubExp limit))
+    write_result mempty
 
 compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
@@ -1181,8 +1188,3 @@ compileKernelResult _ _ ConcatReturns{} =
   -- Already in the correct location by virtue of the ExplicitMemory
   -- type rules.
   return ()
-
-compileKernelResultBadly :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
-                         -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelResultBadly constants dest (ThreadsReturn _ what) =
-  ImpGen.copyDWIMDest dest [] what []

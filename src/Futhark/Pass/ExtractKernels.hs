@@ -742,13 +742,11 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs)))
 
             let operate_stm = Thread thread_pes ThreadsInSpace $
                               lambdaBody foldlam_chunked
-                body_rets = [ ThreadsReturn ThreadsInSpace $
-                              Var $ patElemName pe
-                            | pe <- thread_pes ]
 
                 body = KernelBody ([read_block_stm]++
                                    write_block_stms++
-                                   [operate_stm]) body_rets
+                                   [operate_stm]) $
+                       map (Var . patElemName) thread_pes
             block_offset <- newVName "block_offset"
             return $ GroupStreamLambda
               (paramName chunk_param)
