@@ -818,11 +818,10 @@ allocInKernelStm size space (GroupStream pes w lam acc arrs) = do
   arr_summaries <- mapM lookupArraySummary arrs
   lam' <- allocInGroupStreamLambda lam size space arr_summaries
   let local_tid = SE.Id (spaceLocalId space) int32
-  pes' <- forM (zip pes arr_summaries) $ \(pe, (mem, ixfun)) ->
+  pes' <- forM pes $ \pe ->
     case patElemType pe of
-      Array bt shape u ->
-        let ixfun' = IxFun.applyInd ixfun [local_tid]
-        in return pe { patElemAttr = ArrayMem bt shape u mem ixfun' }
+      Array{} ->
+        fail "allocInKernelStm: cannot handle streams returning arrays yet."
       t -> return pe { patElemAttr = Scalar $ elemType t }
   return [GroupStream pes' w lam' acc arrs]
 
