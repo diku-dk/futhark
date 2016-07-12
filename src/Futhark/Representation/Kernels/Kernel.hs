@@ -197,14 +197,14 @@ mapKernelM tv (WriteKernel cs len lam ivs as) =
   mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
-mapKernelM tv (Kernel cs (num_groups, group_size, num_threads) ts thread_id kernel_body) =
+mapKernelM tv (Kernel cs (num_groups, group_size, num_threads) ts space kernel_body) =
   Kernel <$> mapOnKernelCertificates tv cs <*>
   (do num_groups' <- mapOnKernelSubExp tv num_groups
       group_size' <- mapOnKernelSubExp tv group_size
       num_threads' <- mapOnKernelSubExp tv num_threads
       return (num_groups', group_size', num_threads')) <*>
   mapM (mapOnKernelType tv) ts <*>
-  pure thread_id <*>
+  pure space <*>
   mapOnKernelKernelBody tv kernel_body
 
 mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
@@ -342,9 +342,22 @@ instance Attributes lore => Substitute (GroupStreamLambda lore) where
     (substituteNames subst arr_params)
     (substituteNames subst body)
 
+instance Substitute KernelSpace where
+  substituteNames subst (KernelSpace global_tid local_tid group_id space) =
+    KernelSpace (substituteNames subst global_tid)
+    (substituteNames subst local_tid)
+    (substituteNames subst group_id)
+    (substituteNames subst space)
+
 instance Attributes lore => Substitute (Kernel lore) where
-  substituteNames subst =
-    runIdentity . mapKernelM substitute
+  substituteNames subst (Kernel cs size ts space kbody) =
+    Kernel
+    (substituteNames subst cs)
+    (substituteNames subst size)
+    (substituteNames subst ts)
+    (substituteNames subst space)
+    (substituteNames subst kbody)
+  substituteNames subst k = runIdentity $ mapKernelM substitute k
     where substitute =
             KernelMapper { mapOnKernelSubExp = return . substituteNames subst
                          , mapOnKernelLambda = return . substituteNames subst
