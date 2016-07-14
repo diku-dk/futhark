@@ -412,7 +412,7 @@ a[y,z,x]``.
 
 Return the transpose of ``a``, which must be a two-dimensional array.
 
-``rotate(d, i, a)``
+``rotate@d(i, a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Rotate dimension ``d`` of the array ``a`` left by ``i`` elements.

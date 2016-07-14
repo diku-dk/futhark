@@ -258,7 +258,7 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (Transpose e _) =
     text "transpose" <> apply [ppr e]
   pprPrec _ (Rotate d x e _) =
-    text "rotate" <> apply [ppr d, ppr x, ppr e]
+    text "rotate@" <> ppr d <> apply [ppr x, ppr e]
   pprPrec _ (Map lam a _) = ppSOAC "map" [lam] [a]
   pprPrec _ (Reduce Commutative lam e a _) = ppSOAC "reduceComm" [lam] [e, a]
   pprPrec _ (Reduce Noncommutative lam e a _) = ppSOAC "reduce" [lam] [e, a]

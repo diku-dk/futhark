@@ -4,4 +4,4 @@
 
 fun []int main(int i) =
   let a = iota(i) in
-  rotate(0, -1, a)
+  rotate(-1, a)

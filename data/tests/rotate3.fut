@@ -7,4 +7,4 @@
 
 fun [][]int main(int n, int m) =
   let a = replicate(n, iota(m))
-  in rotate(1, 1, a)
+  in rotate@1(1, a)
