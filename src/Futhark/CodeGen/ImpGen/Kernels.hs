@@ -426,11 +426,16 @@ expCompiler
   (ImpGen.Destination [dest]) (PrimOp (Replicate n se)) = do
   thread_gid <- newVName "thread_gid"
 
-  makeAllMemoryGlobal $ do
-    let n' = ImpGen.compileSubExp n
+  t <- subExpType se
+  let row_dims = arrayDims t
+      dims = n : row_dims
+      is' = unflattenIndex (map SE.intSubExpToScalExp dims) $
+            ImpGen.varIndex thread_gid
+      n' = ImpGen.compileSubExp n
 
+  makeAllMemoryGlobal $ do
     body <- ImpGen.subImpM_ inKernelOperations $
-      ImpGen.copyDWIMDest dest [ImpGen.varIndex thread_gid] se []
+      ImpGen.copyDWIMDest dest is' se $ drop 1 is'
 
     (group_size, num_groups) <- computeMapKernelGroups n'
 
@@ -442,7 +447,7 @@ expCompiler
         Imp.mapKernelThreadNum = thread_gid
       , Imp.mapKernelNumGroups = Imp.VarSize num_groups
       , Imp.mapKernelGroupSize = Imp.VarSize group_size
-      , Imp.mapKernelSize = n'
+      , Imp.mapKernelSize = product $ map ImpGen.compileSubExp dims
       , Imp.mapKernelUses = body_uses
       , Imp.mapKernelBody = body
       }
