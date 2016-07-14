@@ -14,4 +14,4 @@
 
 
 fun [][][]int main(int i, [][][]int arr) =
-  rotate(2,i,rearrange((2,1,0), rotate(0,i,arr)))
+  rotate@2(i,rearrange((2,1,0), rotate(i,arr)))
