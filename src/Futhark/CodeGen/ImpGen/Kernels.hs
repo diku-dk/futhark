@@ -995,11 +995,8 @@ compileKernelStm constants (Thread pes threads body) = do
               me = Imp.ScalarVar $ kernelLocalThreadId constants
               active = Imp.CmpOp (CmpEq int32) me which'
           ImpGen.emit $ Imp.If active body' mempty
-        protect (ThreadsPerGroup limit) body' = do
-          let limit' = ImpGen.compileSubExp limit
-              me = Imp.ScalarVar $ kernelLocalThreadId constants
-              active = Imp.CmpOp (CmpSlt Int32) me limit'
-          ImpGen.emit $ Imp.If active body' mempty
+        protect (ThreadsPerGroup limit) body' =
+          ImpGen.emit $ Imp.If (isActive limit) body' mempty
         protect ThreadsInSpace body' =
           case kernelDimensions constants of
             [] -> ImpGen.emit body'
@@ -1007,16 +1004,13 @@ compileKernelStm constants (Thread pes threads body) = do
               Imp.If (Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i) d)
               body' mempty
 
-compileKernelStm constants (Combine pe w v) = do
+compileKernelStm _ (Combine pe cspace v) = do
   copy <- ImpGen.collect $
-          ImpGen.copyDWIM (patElemName pe) [local_tid'] v []
-  ImpGen.emit $ Imp.If active copy mempty
+          ImpGen.copyDWIM (patElemName pe) (map ImpGen.varIndex is) v []
   ImpGen.emit $ Imp.Op Imp.Barrier
-  where local_tid' = ImpGen.varIndex $ kernelLocalThreadId constants
-
-        me = Imp.ScalarVar $ kernelLocalThreadId constants
-        w' = ImpGen.compileSubExp w
-        active = Imp.CmpOp (CmpSlt Int32) me w'
+  ImpGen.emit $ Imp.If (isActive cspace) copy mempty
+  ImpGen.emit $ Imp.Op Imp.Barrier
+  where (is, _) = unzip cspace
 
 compileKernelStm constants (GroupReduce pes _ lam input) = do
   skip_waves <- newVName "skip_waves"
@@ -1113,11 +1107,11 @@ compileKernelStm constants (GroupReduce pes _ lam input) = do
           | otherwise =
               return ()
 
-compileKernelStm constants (GroupStream pes w lam accs _arrs) = do
+compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
       w' = ImpGen.compileSubExp w
       block_offset' = Imp.ScalarVar block_offset
-      group_size = Imp.sizeToExp $ kernelGroupSize constants
+      max_block_size = ImpGen.compileSubExp maxchunk
   ImpGen.Destination acc_targets <- ImpGen.destinationFromParams acc_params
 
   ImpGen.declaringLParams (acc_params++arr_params) $
@@ -1133,19 +1127,19 @@ compileKernelStm constants (GroupStream pes w lam accs _arrs) = do
         set_block_size =
           Imp.If (Imp.CmpOp (CmpSlt Int32)
                    (w' - block_offset')
-                   group_size)
+                   max_block_size)
           (Imp.SetScalar block_size (w' - block_offset'))
-          (Imp.SetScalar block_size group_size)
+          (Imp.SetScalar block_size max_block_size)
         increase_offset =
           Imp.SetScalar block_offset $
-          block_offset' + group_size
+          block_offset' + max_block_size
 
     ImpGen.Destination final_targets <-
       ImpGen.destinationFromPattern $ Pattern [] pes
 
     ImpGen.emit $
       Imp.While not_at_end $
-      set_block_size <> body' <> increase_offset <> Imp.Op Imp.Barrier
+      set_block_size <> body' <> increase_offset
 
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
@@ -1170,10 +1164,7 @@ compileKernelResult constants dest (ThreadsReturn (ThreadsPerGroup limit) what) 
     ImpGen.collect $
     ImpGen.copyDWIMDest dest [ImpGen.varIndex $ kernelGroupId constants] what []
 
-  let me = Imp.ScalarVar $ kernelLocalThreadId constants
-  ImpGen.emit $
-    Imp.If (Imp.CmpOp (CmpEq int32) me (ImpGen.compileSubExp limit))
-    write_result mempty
+  ImpGen.emit $ Imp.If (isActive limit) write_result mempty
 
 compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
@@ -1188,3 +1179,11 @@ compileKernelResult _ _ ConcatReturns{} =
   -- Already in the correct location by virtue of the ExplicitMemory
   -- type rules.
   return ()
+
+isActive :: [(VName, SubExp)] -> Imp.Exp
+isActive limit = case actives of
+                    [] -> Imp.Constant $ BoolValue False
+                    x:xs -> foldl (Imp.BinOp LogAnd) x xs
+  where (is, ws) = unzip limit
+        actives = zipWith isActive is $ map ImpGen.compileSubExp ws
+        isActive i = Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i)

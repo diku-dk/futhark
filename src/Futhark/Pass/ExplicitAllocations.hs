@@ -763,10 +763,17 @@ allocInKernelStm
 
 allocInKernelStm (_, _group_size, num_threads) space (Thread pes threads body) = do
   body' <- allocInBodyNoDirect body
-  pes' <- mapM threadMemory pes
+  body_rets <- bodyReturns (staticShapes $ map patElemType pes) body'
+  pes' <- zipWithM threadMemory pes body_rets
   return [Thread pes' threads body']
   where thread_index' = SE.intSubExpToScalExp $ Var $ spaceGlobalId space
-        threadMemory pe
+        isBoundInBody = flip HS.member $ boundInBody body
+
+        threadMemory pe ret
+          | Array bt shape u <- patElemType pe,
+            ReturnsArray _ _ _ (ReturnsInBlock mem ixfun) <- ret,
+            not $ isBoundInBody mem =
+              return pe { patElemAttr = ArrayMem bt shape u mem ixfun }
           | Array bt shape u <- patElemType pe = do
               let (outer_is, outer_dims) =
                     unzip $ case threads of
@@ -814,23 +821,23 @@ allocInKernelStm (_, group_size, _) space (GroupReduce pes w lam input) = do
   return [GroupReduce pes' w lam' input]
   where arrs = map snd input
 
-allocInKernelStm size space (GroupStream pes w lam acc arrs) = do
+allocInKernelStm size space (GroupStream pes w maxchunk lam acc arrs) = do
   arr_summaries <- mapM lookupArraySummary arrs
-  lam' <- allocInGroupStreamLambda lam size space arr_summaries
-  let local_tid = SE.Id (spaceLocalId space) int32
+  lam' <- allocInGroupStreamLambda maxchunk lam size space arr_summaries
   pes' <- forM pes $ \pe ->
     case patElemType pe of
       Array{} ->
         fail "allocInKernelStm: cannot handle streams returning arrays yet."
       t -> return pe { patElemAttr = Scalar $ elemType t }
-  return [GroupStream pes' w lam' acc arrs]
+  return [GroupStream pes' w maxchunk lam' acc arrs]
 
-allocInGroupStreamLambda :: GroupStreamLambda In.Kernels
+allocInGroupStreamLambda :: SubExp
+                         -> GroupStreamLambda In.Kernels
                          -> (SubExp,SubExp,SubExp)
                          -> KernelSpace
                          -> [(VName, IxFun.IxFun SE.ScalExp)]
                          -> AllocM (GroupStreamLambda ExplicitMemory)
-allocInGroupStreamLambda lam size space input_summaries = do
+allocInGroupStreamLambda maxchunk lam size space input_summaries = do
   let (_, group_size, _) = size
       local_tid = SE.Id (spaceLocalId space) int32
       GroupStreamLambda block_size block_offset acc_params arr_params body = lam
@@ -844,7 +851,7 @@ allocInGroupStreamLambda lam size space input_summaries = do
   body' <- localScope (HM.insert block_size IndexInfo $
                        HM.insert block_offset IndexInfo $
                        scopeOfLParams $ acc_params' ++ arr_params')  $
-           local (HM.insert block_size group_size) $
+           local (HM.insert block_size maxchunk) $
            allocInKernelBody size space body
   return $
     GroupStreamLambda block_size block_offset acc_params' arr_params' body'

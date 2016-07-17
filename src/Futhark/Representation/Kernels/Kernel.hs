@@ -112,16 +112,17 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
 
 data WhichThreads = AllThreads
                   | OneThreadPerGroup SubExp -- Which one.
-                  | ThreadsPerGroup SubExp -- All threads before this one.
+                  | ThreadsPerGroup [(VName,SubExp)] -- All threads before this one.
                   | ThreadsInSpace
                   deriving (Eq, Show, Ord)
 
 data KernelStm lore = SplitArray (VName, [PatElem (LetAttr lore)]) StreamOrd SubExp SubExp [VName]
                     | Thread [PatElem (LetAttr lore)] WhichThreads (Body lore)
-                    | Combine (PatElem (LetAttr lore)) SubExp SubExp
+                    | Combine (PatElem (LetAttr lore)) [(VName,SubExp)] SubExp
                     | GroupReduce [PatElem (LetAttr lore)] SubExp
                       (Lambda lore) [(SubExp,VName)]
-                    | GroupStream [PatElem (LetAttr lore)] SubExp
+                    | GroupStream [PatElem (LetAttr lore)]
+                      SubExp SubExp
                       (GroupStreamLambda lore) [SubExp] [VName]
 
 deriving instance Annotations lore => Eq (KernelStm lore)
@@ -272,12 +273,12 @@ instance Attributes lore => FreeIn (KernelStm lore) where
     freeIn n <> freeIn chunks <> freeIn w <> freeIn elems_per_thread <> freeIn vs
   freeIn (Thread pes which body) =
     freeIn pes <> freeIn which <> freeInBody body
-  freeIn (Combine pe w v) =
-    freeIn pe <> freeIn w <> freeIn v
+  freeIn (Combine pe cspace v) =
+    freeIn pe <> freeIn cspace <> freeIn v
   freeIn (GroupReduce pes w lam input) =
     freeIn pes <> freeIn w <> freeInLambda lam <> freeIn input
-  freeIn (GroupStream pes w lam accs arrs) =
-    freeIn pes <> freeIn w <> freeIn lam <> freeIn accs <> freeIn arrs
+  freeIn (GroupStream pes w  maxchunk lam accs arrs) =
+    freeIn pes <> freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
   freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -321,14 +322,15 @@ instance Attributes lore => Substitute (KernelStm lore) where
     (substituteNames subst pes)
     (substituteNames subst which)
     (substituteNames subst body)
-  substituteNames subst (Combine pe w v) =
+  substituteNames subst (Combine pe cspace v) =
     Combine (substituteNames subst pe)
-    (substituteNames subst w) (substituteNames subst v)
+    (substituteNames subst cspace) (substituteNames subst v)
   substituteNames subst (GroupReduce pes w lam input) =
     GroupReduce (substituteNames subst pes) (substituteNames subst w)
     (substituteNames subst lam) (substituteNames subst input)
-  substituteNames subst (GroupStream pes w lam accs arrs) =
-    GroupStream (substituteNames subst pes) (substituteNames subst w)
+  substituteNames subst (GroupStream pes w maxchunk lam accs arrs) =
+    GroupStream (substituteNames subst pes)
+    (substituteNames subst w) (substituteNames subst maxchunk)
     (substituteNames subst lam)
     (substituteNames subst accs) (substituteNames subst arrs)
 
@@ -386,12 +388,12 @@ instance (Attributes lore, Renameable lore) => Rename (KernelStm lore) where
     <*> rename vs
   rename (GroupReduce pes w lam input) =
     GroupReduce <$> rename pes <*> rename w <*> rename lam <*> rename input
-  rename (Combine pe w v) =
-    Combine <$> rename pe <*> rename w <*> rename v
+  rename (Combine pe cspace v) =
+    Combine <$> rename pe <*> rename cspace <*> rename v
   rename (Thread pes which body) =
     Thread <$> rename pes <*> rename which <*> rename body
-  rename (GroupStream pes w lam accs arrs) =
-    GroupStream <$> rename pes <*> rename w <*>
+  rename (GroupStream pes w maxchunk lam accs arrs) =
+    GroupStream <$> rename pes <*> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
 
 instance (Attributes lore, Renameable lore) => Rename (GroupStreamLambda lore) where
@@ -433,7 +435,7 @@ instance Scoped lore (KernelStm lore) where
   scopeOf (Combine pe _ _) = scopeOf pe
   scopeOf (GroupReduce pes _ _ _) =
     mconcat $ map scopeOf pes
-  scopeOf (GroupStream pes _ _ _ _) =
+  scopeOf (GroupStream pes _ _ _ _ _) =
     mconcat $ map scopeOf pes
 
 instance Attributes lore => Rename (Kernel lore) where
@@ -459,7 +461,7 @@ kernelType (Kernel _ (num_groups, _, num_threads) ts space body) =
         resultShape t (ThreadsReturn OneThreadPerGroup{} _) =
           t `arrayOfRow` num_groups
         resultShape t (ThreadsReturn (ThreadsPerGroup limit) _) =
-          t `arrayOfRow` limit `arrayOfRow` num_groups
+          t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
         resultShape t (ThreadsReturn ThreadsInSpace _) =
           foldr (flip arrayOfRow) t dims
         resultShape t (ConcatReturns _ w _ _) =
@@ -507,14 +509,14 @@ instance (Attributes lore,
             Thread (zipWith annot pes $ bodyAliases body') which body'
             where body' = Alias.analyseBody body
                   annot pe als = (Names' als,) <$> pe
-          analyseStm (Combine pe w v) =
-            Combine ((mempty,) <$> pe) w v
+          analyseStm (Combine pe cspace v) =
+            Combine ((mempty,) <$> pe) cspace v
           analyseStm (GroupReduce pes w lam input) =
             GroupReduce pes' w lam' input
             where pes' = map (fmap (mempty,)) pes
                   lam' = Alias.analyseLambda lam
-          analyseStm (GroupStream pes w lam accs arrs) =
-            GroupStream pes' w lam' accs arrs
+          analyseStm (GroupStream pes w maxchunk lam accs arrs) =
+            GroupStream pes' w maxchunk lam' accs arrs
             where pes' = map (fmap (mempty,)) pes
                   lam' = analyseGroupStreamLambda lam
 
@@ -535,12 +537,12 @@ instance (Attributes lore,
             where chunks' = map (fmap snd) chunks
           removeStmAliases (Thread pes which body) =
             Thread (map (fmap snd) pes) which (removeBodyAliases body)
-          removeStmAliases (Combine pe w v) =
-            Combine (snd <$> pe) w v
+          removeStmAliases (Combine pe cspace v) =
+            Combine (snd <$> pe) cspace v
           removeStmAliases (GroupReduce pes w lam input) =
             GroupReduce (map (fmap snd) pes) w (removeLambdaAliases lam) input
-          removeStmAliases (GroupStream pes w lam accs arrs) =
-            GroupStream (map (fmap snd) pes) w (removeGroupStreamLambdaAliases lam) accs arrs
+          removeStmAliases (GroupStream pes w maxchunk lam accs arrs) =
+            GroupStream (map (fmap snd) pes) w maxchunk (removeGroupStreamLambdaAliases lam) accs arrs
 
           removeGroupStreamLambdaAliases (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
@@ -580,14 +582,14 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             KernelBody (map removeKernelStatementWisdom stms) res
           removeKernelStatementWisdom (Thread pes which body) =
             Thread (map removePatElemWisdom pes) which (removeBodyWisdom body)
-          removeKernelStatementWisdom (Combine pe w v) =
-            Combine (removePatElemWisdom pe) w v
+          removeKernelStatementWisdom (Combine pe cspace v) =
+            Combine (removePatElemWisdom pe) cspace v
           removeKernelStatementWisdom (SplitArray (size,chunks) o w elems_per_thread arrs) =
             SplitArray (size, map removePatElemWisdom chunks) o w elems_per_thread arrs
           removeKernelStatementWisdom (GroupReduce pes w lam input) =
             GroupReduce (map removePatElemWisdom pes) w (removeLambdaWisdom lam) input
-          removeKernelStatementWisdom (GroupStream pes w lam accs arrs) =
-            GroupStream (map removePatElemWisdom pes) w (removeGroupStreamLambdaWisdom lam) accs arrs
+          removeKernelStatementWisdom (GroupStream pes w maxchunk lam accs arrs) =
+            GroupStream (map removePatElemWisdom pes) w maxchunk (removeGroupStreamLambdaWisdom lam) accs arrs
 
           removeGroupStreamLambdaWisdom (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
@@ -631,7 +633,7 @@ consumedByKernelStm Combine{} = mempty
 consumedByKernelStm SplitArray{} = mempty
 consumedByKernelStm (GroupReduce _ _ _ input) =
   HS.fromList $ map snd input
-consumedByKernelStm (GroupStream _ _ lam _ arrs) =
+consumedByKernelStm (GroupStream _ _ _ lam _ arrs) =
   HS.map consumedArray $ consumedInKernelBody body
   where GroupStreamLambda _ _ _ arr_params body = lam
         consumedArray v = fromMaybe v $ lookup v params_to_arrs
@@ -748,8 +750,9 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) kts space kbody) = 
           return ()
         checkWhich (OneThreadPerGroup which) =
           TC.require [Prim int32] which
-        checkWhich (ThreadsPerGroup limit) =
-          TC.require [Prim int32] limit
+        checkWhich (ThreadsPerGroup limit) = do
+          mapM_ (TC.requireI [Prim int32] . fst) limit
+          mapM_ (TC.require [Prim int32] . snd) limit
         checkWhich ThreadsInSpace =
           return ()
 
@@ -777,11 +780,15 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) kts space kbody) = 
             unless (chunk_t == patElemType chunk) $
               TC.bad $ TC.TypeError "Invalid type annotation for splitArray chunk."
 
-        checkKernelStm (Combine pe w arr) = do
-          TC.require [rowType $ patElemType pe] arr
-          unless (arraySize 0 (patElemType pe) == w) $
-            TC.bad $ TC.TypeError $ "Outer size of " ++ pretty pe
-            ++ " must be " ++ pretty w
+        checkKernelStm (Combine pe cspace v) = do
+          mapM_ (TC.requireI [Prim int32]) is
+          mapM_ (TC.require [Prim int32]) ws
+          v_t <- subExpType v
+          let res_t = v_t `arrayOfShape` Shape ws
+          unless (patElemType pe == res_t) $
+            TC.bad $ TC.TypeError $ "Pattern element " ++ pretty pe
+            ++ " must have type " ++ pretty res_t
+            where (is, ws) = unzip cspace
 
         checkKernelStm (GroupReduce pes w lam input) = do
           TC.require [Prim int32] w
@@ -796,8 +803,9 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) kts space kbody) = 
             TC.bad $ TC.TypeError
             "Invalid type annotation for kernel reduction."
 
-        checkKernelStm (GroupStream pes w lam accs arrs) = do
+        checkKernelStm (GroupStream pes w maxchunk lam accs arrs) = do
           TC.require [Prim int32] w
+          TC.require [Prim int32] maxchunk
 
           acc_args <- mapM (fmap TC.noArgAliases . TC.checkArg) accs
           arr_args <- TC.checkSOACArrayArgs w arrs
@@ -863,7 +871,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
             seen "Combine"
           kernelStmMetrics (GroupReduce _ _ lam _) =
             inside "GroupReduce" $ lambdaMetrics lam
-          kernelStmMetrics (GroupStream _ _ lam _ _) =
+          kernelStmMetrics (GroupStream _ _ _ lam _ _) =
             inside "GroupStream" $ groupStreamLambdaMetrics lam
 
           groupStreamLambdaMetrics =
@@ -935,10 +943,11 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
                        OneThreadPerGroup which -> mempty <+> ppr which
                        ThreadsPerGroup limit -> text " <" <+> ppr limit
                        ThreadsInSpace -> text " active"
-  ppr (Combine pe w what) =
+  ppr (Combine pe cspace what) =
     PP.annot (mapMaybe ppAnnot [pe]) $
     text "let" <+> PP.braces (ppr pe) <+> PP.equals <+>
-    text "combine" <> PP.apply [ppr w, ppr what]
+    text "combine" <> PP.apply (map f cspace ++ [ppr what])
+    where f (i, w) = ppr i <+> text "<" <+> ppr w
   ppr (GroupReduce pes w lam input) =
     PP.annot (mapMaybe ppAnnot pes) $
     text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals </>
@@ -947,15 +956,16 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
                                                      PP.braces (commasep $ map ppr nes),
                                                      commasep $ map ppr els]))
     where (nes,els) = unzip input
-  ppr (GroupStream pes w lam accs arrs) =
+  ppr (GroupStream pes w maxchunk lam accs arrs) =
     PP.annot (mapMaybe ppAnnot pes) $
     text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals </>
     PP.indent 2
     (text "stream" <>
       parens (commasep [ppr w,
-                         ppr lam,
-                         PP.braces (commasep $ map ppr accs),
-                         commasep $ map ppr arrs]))
+                        ppr maxchunk,
+                        ppr lam,
+                        PP.braces (commasep $ map ppr accs),
+                        commasep $ map ppr arrs]))
 
 instance PrettyLore lore => Pretty (GroupStreamLambda lore) where
   ppr (GroupStreamLambda block_size block_offset acc_params arr_params body) =
