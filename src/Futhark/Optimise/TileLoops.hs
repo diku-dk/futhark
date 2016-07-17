@@ -5,6 +5,7 @@ module Futhark.Optimise.TileLoops
        ( tileLoops )
        where
 
+import Control.Applicative
 import Control.Monad.State
 import qualified Data.HashSet as HS
 import qualified Data.HashMap.Lazy as HM
