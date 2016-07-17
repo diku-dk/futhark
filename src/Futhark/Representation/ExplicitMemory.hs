@@ -976,7 +976,8 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ space kbody))) = do
               ixfun
 
         indexedIxfun _ _ desired_idxs (IxFun.Index ixfun' idxs)
-          | map SE.intSubExpToScalExp desired_idxs == idxs = return ixfun'
+          | map SE.intSubExpToScalExp desired_idxs `isPrefixOf` idxs =
+              return $ IxFun.applyInd ixfun' $ drop (length desired_idxs) idxs
         indexedIxfun d v desired_idxs ixfun =
           fail $ "expReturns Kernel " ++ d ++ ": " ++
           pretty v ++ " does not have a properly indexed index function (found " ++
