@@ -687,7 +687,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs)))
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
       | Just perm <- map Var (patternNames pat) `isPermutationOf` res,
-        not $ any (`HS.member` boundInKernelNest nest) arrs -> do
+        all (not . (`all` boundInKernelNests nest) . HS.member) arrs -> do
 
           addKernels kernels
 
@@ -711,31 +711,6 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs)))
             let (chunk_param, acc_params, arr_chunk_params) =
                   partitionChunkedFoldParameters (length nes) $
                   lambdaParams foldlam_chunked
-                block_size = Var $ paramName chunk_param
-
-            outer_arr_chunk_params <- forM arr_chunk_params $ \p -> do
-              name <- newVName $ baseString (paramName p) ++ "_outer"
-              return p { paramName = name }
-
-            let local_tid = spaceLocalId space
-            read_elem_bnds <- forM outer_arr_chunk_params $ \p -> do
-              name <- newVName $ baseString (paramName p) ++ "_elem"
-              return $
-                mkLet' [] [Ident name $ rowType $ paramType p] $
-                PrimOp $ Index [] (paramName p) [Var local_tid]
-
-            (block_elem_pes, read_block_body) <- perThread read_elem_bnds
-
-            let block_pes = [ PatElem p_name BindVar $
-                              p_attr `setOuterSize` block_size |
-                              Param p_name p_attr <- arr_chunk_params ]
-                read_block_stm =
-                  Thread block_elem_pes (ThreadsPerGroup block_size) read_block_body
-                write_block_stms =
-                  [ Combine block_pe block_size $
-                    Var $ patElemName block_elem_pe
-                  | (block_pe, block_elem_pe) <-
-                    zip block_pes block_elem_pes ]
 
             thread_pes <- forM (patternValueElements pat) $ \pe -> do
               name <- newVName $ baseString (patElemName pe)
@@ -744,20 +719,17 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs)))
             let operate_stm = Thread thread_pes ThreadsInSpace $
                               lambdaBody foldlam_chunked
 
-                body = KernelBody ([read_block_stm]++
-                                   write_block_stms++
-                                   [operate_stm]) $
+                body = KernelBody [operate_stm] $
                        map (Var . patElemName) thread_pes
             block_offset <- newVName "block_offset"
             return $ GroupStreamLambda
               (paramName chunk_param)
               block_offset
               acc_params
-              outer_arr_chunk_params
+              arr_chunk_params
               body
 
-          let stream_stm = GroupStream kresult_pes rw
-                           stream_lam nes arrs
+          let stream_stm = GroupStream kresult_pes rw rw stream_lam nes arrs
 
           let krets = map (ThreadsReturn ThreadsInSpace .
                             Var . patElemName) kresult_pes

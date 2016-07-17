@@ -117,6 +117,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
 
   (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
     blockedPerThread w step_one_size ordering fold_lam' num_nonconcat arrs
+  space <- newKernelSpace []
   let red_ts = map patElemType chunk_red_pes
       map_ts = map (rowType . patElemType) chunk_map_pes
       ts = red_ts ++ map_ts
@@ -124,7 +125,8 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
   chunk_red_pes' <- forM red_ts $ \red_t -> do
     pe_name <- newVName "chunk_fold_red"
     return $ PatElem pe_name BindVar $ red_t `arrayOfRow` group_size
-  let combine_reds = [Combine pe' group_size $ Var $ patElemName pe
+  let combine_reds = [ Combine pe' [(spaceLocalId space, group_size)] $
+                       Var $ patElemName pe
                      | (pe', pe) <- zip chunk_red_pes' chunk_red_pes ]
 
   final_red_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do
@@ -139,7 +141,6 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
     return $ ConcatReturns ordering w (kernelElementsPerThread step_one_size) $ patElemName pe
   let rets = red_rets ++ map_rets
 
-  space <- newKernelSpace []
   return $ Kernel cs
     (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size)
     ts space $
@@ -172,7 +173,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
     fmap unzip $ forM (zip red_ts arrs_index) $ \(red_t, arr_index) -> do
       arr' <- newVName $ baseString arr_index ++ "_combined"
       let pe = PatElem arr' BindVar $ red_t `arrayOfRow` group_size
-      return (Combine pe group_size (Var arr_index),
+      return (Combine pe [(spaceLocalId space, group_size)] (Var arr_index),
               arr')
 
   final_res_pes <- forM (lambdaReturnType reduce_lam') $ \t -> do

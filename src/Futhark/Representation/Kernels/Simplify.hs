@@ -133,11 +133,11 @@ simplifyKernelStm scope (Thread pes threads body) = do
   return [Thread pes' threads' body']
   where scope_bound = HS.fromList $ HM.keys scope
 
-simplifyKernelStm _ (Combine pe w v) = do
+simplifyKernelStm _ (Combine pe cspace v) = do
   pe' <- inspectPatElem pe mempty $ rangeOf v
-  w' <- Engine.simplify w
+  cspace' <- mapM Engine.simplify cspace
   v' <- Engine.simplify v
-  return [Combine pe' w' v']
+  return [Combine pe' cspace' v']
 
 simplifyKernelStm scope (GroupReduce pes w lam input) = do
   w' <- Engine.simplify w
@@ -149,28 +149,30 @@ simplifyKernelStm scope (GroupReduce pes w lam input) = do
   where (nes,arrs) = unzip input
         scope_bound = HS.fromList $ HM.keys scope
 
-simplifyKernelStm _ (GroupStream pes w lam accs arrs) = do
+simplifyKernelStm scope (GroupStream pes w maxchunk lam accs arrs) = do
   w' <- Engine.simplify w
+  maxchunk' <- Engine.simplify maxchunk
   accs' <- mapM Engine.simplify accs
   arrs' <- mapM Engine.simplify arrs
-  lam' <- simplifyGroupStreamLambda lam w
+  lam' <- simplifyGroupStreamLambda scope lam w
           w (map (const Nothing) arrs')
   pes' <- inspectPatElems pes $
           zip (repeat mempty) $ repeat (Nothing, Nothing)
-  return [GroupStream pes' w' lam' accs' arrs']
+  return [GroupStream pes' w' maxchunk' lam' accs' arrs']
 
 simplifyGroupStreamLambda :: Engine.MonadEngine m =>
-                             GroupStreamLambda (Engine.InnerLore m)
+                             Scope (Lore m)
+                          -> GroupStreamLambda (Engine.InnerLore m)
                           -> SubExp -> SubExp -> [Maybe VName]
                           -> m (GroupStreamLambda (Lore m))
-simplifyGroupStreamLambda lam w max_chunk arrs = do
+simplifyGroupStreamLambda scope lam w max_chunk arrs = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
   body' <- Engine.enterLoop $
            Engine.bindLParams acc_params $
            Engine.bindArrayLParams (zip arr_params arrs) $
            Engine.bindLoopVar block_size max_chunk $
            Engine.bindLoopVar block_offset w $
-           simplifyKernelBody (scopeOf lam) body
+           simplifyKernelBody (scope <> scopeOf lam) body
   acc_params' <- mapM (Engine.simplifyParam Engine.simplify) acc_params
   arr_params' <- mapM (Engine.simplifyParam Engine.simplify) arr_params
   return $ GroupStreamLambda block_size block_offset acc_params' arr_params' body'
@@ -214,7 +216,7 @@ instance Engine.Simplifiable WhichThreads where
   simplify (OneThreadPerGroup which) =
     OneThreadPerGroup <$> Engine.simplify which
   simplify (ThreadsPerGroup limit) =
-    ThreadsPerGroup <$> Engine.simplify limit
+    ThreadsPerGroup <$> mapM Engine.simplify limit
   simplify ThreadsInSpace =
     pure ThreadsInSpace
 
