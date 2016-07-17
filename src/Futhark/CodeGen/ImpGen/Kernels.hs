@@ -1185,5 +1185,5 @@ isActive limit = case actives of
                     [] -> Imp.Constant $ BoolValue False
                     x:xs -> foldl (Imp.BinOp LogAnd) x xs
   where (is, ws) = unzip limit
-        actives = zipWith isActive is $ map ImpGen.compileSubExp ws
-        isActive i = Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i)
+        actives = zipWith active is $ map ImpGen.compileSubExp ws
+        active i = Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i)
