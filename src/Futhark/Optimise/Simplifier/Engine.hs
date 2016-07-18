@@ -23,6 +23,7 @@ module Futhark.Optimise.Simplifier.Engine
        , Env (envHoistBlockers)
        , emptyEnv
        , HoistBlockers(..)
+       , neverBlocks
        , noExtraHoistBlockers
        , BlockPred
        , orIf
@@ -100,10 +101,13 @@ data HoistBlockers m = HoistBlockers
                          -- ^ Blocker for hoisting out of parallel loops.
                        , blockHoistSeq :: BlockPred (Lore m)
                          -- ^ Blocker for hoisting out of sequential loops.
+                       , getArraySizes :: Binding (Lore m) -> Names
+                         -- ^ gets the sizes of arrays from a binding.
+                       , isAllocation  :: Binding (Lore m) -> Bool
                        }
 
 noExtraHoistBlockers :: HoistBlockers m
-noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (\ _ -> HS.empty) (\ _ -> False)
 
 data Env m = Env { envRules         :: RuleBook m
                  , envAliases       :: AliasMap
@@ -410,25 +414,50 @@ hoistCommon :: MonadEngine m =>
 hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
   (body1, needs1) <- listenNeed $ localVtable vtablef1 m1
   (body2, needs2) <- listenNeed $ localVtable vtablef2 m2
-  let block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound
+  is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
+  getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
+  let needs1_bnds = needBindings needs1
+      needs2_bnds = needBindings needs2
+      hoistbl_nms = filterBnds is_alloc_fun getArrSz_fun (needs1_bnds++needs2_bnds)
+      -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
+      -- of the bindings used for allocations and shape computations are if-hoistable.
+      block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`
+                (isNotHoistableBnd hoistbl_nms)
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (body1', safe1, f1) <-
     enterBody $
     localVtable vtablef1 $
-    hoistBindings rules block vtable (usageTable needs1)
-    (needBindings needs1) body1
+    hoistBindings rules block vtable (usageTable needs1) needs1_bnds body1
   (body2', safe2, f2) <-
     enterBody $
     localVtable vtablef2 $
-    hoistBindings rules block vtable (usageTable needs2)
-    (needBindings needs2) body2
+    hoistBindings rules block vtable (usageTable needs2) needs2_bnds body2
   let hoistable = safe1 <> safe2
   putVtable $ foldl (flip ST.insertBinding) vtable hoistable
   return ((body1', body2'),
           const Need { needBindings = hoistable
                      , usageTable = f1 <> f2
                      })
+  where filterBnds is_alloc_fn getArrSz_fn all_bnds =
+          let sz_nms     = HS.fromList $
+                            concatMap (HS.toList . getArrSz_fn) all_bnds
+              sz_needs   = transClosSizes all_bnds sz_nms []
+              alloc_bnds = filter is_alloc_fn all_bnds
+              sel_nms    = HS.fromList $
+                            concatMap (patternNames . bindingPattern)
+                                      (sz_needs ++ alloc_bnds)
+          in  sel_nms
+        transClosSizes all_bnds scal_nms hoist_bnds =
+          let new_bnds = filter (hasPatName scal_nms) all_bnds
+              new_nms  = HS.fromList $ concatMap (HS.toList . freeInExp . bindingExp) new_bnds
+          in  if null new_bnds
+              then hoist_bnds
+              else transClosSizes all_bnds new_nms (new_bnds ++ hoist_bnds)
+        hasPatName nms bnd = not $ HS.null $ HS.intersection nms $
+                               HS.fromList $ patternNames $ bindingPattern bnd
+        isNotHoistableBnd :: Names -> BlockPred m
+        isNotHoistableBnd nms _ bnd = not $ hasPatName nms bnd
 
 -- | Simplify a single 'Body' inside an arbitrary 'MonadEngine'.
 simplifyBody :: MonadEngine m =>

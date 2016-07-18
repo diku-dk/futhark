@@ -31,11 +31,12 @@ import qualified Futhark.Optimise.Simplifier.Engine as Engine
 import qualified Futhark.Optimise.Simplifier as Simplifier
 import Futhark.Optimise.Simplifier.Rules
 import Futhark.MonadFreshNames
-import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
+import Futhark.Optimise.Simplifier (simplifyProgWithRules)
 import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.ClosedForm
+import Futhark.Optimise.Simplifier.Lore
 import Futhark.Tools
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
@@ -43,7 +44,23 @@ import qualified Futhark.Analysis.ScalExp as SE
 
 simplifySOACS :: MonadFreshNames m => Prog -> m Prog
 simplifySOACS =
-  simplifyProgWithRules bindableSimpleOps soacRules noExtraHoistBlockers
+  simplifyProgWithRules bindableSimpleOps soacRules blockers
+  where blockers =
+          Engine.HoistBlockers {
+            Engine.blockHoistPar = Engine.neverBlocks
+          , Engine.blockHoistSeq = Engine.neverBlocks
+          , Engine.getArraySizes = getShapeNames
+          , Engine.isAllocation  = \ _ -> False
+          }
+
+-- | Getting the roots of what to hoist, for now only variable
+-- names that represent shapes/sizes.
+getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) => 
+                 AST.Binding lore -> Names
+getShapeNames bnd =
+  let tps1 = map patElemType $ patternElements $ bindingPattern bnd
+      tps2 = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
+  in  HS.fromList $ subExpVars $ concatMap arrayDims (tps1 ++ tps2)
 
 simplifyFun :: MonadFreshNames m => FunDef -> m FunDef
 simplifyFun =
