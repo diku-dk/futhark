@@ -66,7 +66,7 @@ getShapeNames bnd =
                                  ArrayMem _ _ _ nm _ -> Just nm
                                  _                   -> Nothing
                      ) ats
-  in  HS.fromList $ nms ++ (subExpVars $ concatMap arrayDims tps)
+  in  HS.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
 
 isAlloc0 :: Op lore ~ MemOp lore => AST.Binding lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True

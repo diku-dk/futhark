@@ -50,12 +50,12 @@ simplifySOACS =
             Engine.blockHoistPar = Engine.neverBlocks
           , Engine.blockHoistSeq = Engine.neverBlocks
           , Engine.getArraySizes = getShapeNames
-          , Engine.isAllocation  = \ _ -> False
+          , Engine.isAllocation  = const False
           }
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent shapes/sizes.
-getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) => 
+getShapeNames :: (Attributes lore, LetAttr lore ~ (VarWisdom, Type)) =>
                  AST.Binding lore -> Names
 getShapeNames bnd =
   let tps1 = map patElemType $ patternElements $ bindingPattern bnd
