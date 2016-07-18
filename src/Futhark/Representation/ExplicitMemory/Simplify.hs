@@ -8,6 +8,7 @@ where
 import Control.Monad
 import qualified Data.HashSet as HS
 import Data.Monoid
+import Data.Maybe
 
 import Prelude
 
@@ -39,6 +40,8 @@ simplifyExplicitMemory =
           Engine.HoistBlockers {
             Engine.blockHoistPar = isAlloc
           , Engine.blockHoistSeq = isResultAlloc
+          , Engine.getArraySizes = getShapeNames
+          , Engine.isAllocation  = isAlloc0
           }
 
 isAlloc :: Op lore ~ MemOp lore => Engine.BlockPred lore
@@ -50,6 +53,24 @@ isResultAlloc usage (Let (AST.Pattern [] [bindee]) _
                      (Op Alloc{})) =
   UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ = False
+
+-- | Getting the roots of what to hoist, for now only variable
+-- names that represent array and memory-block sizes.
+getShapeNames :: (Op lore ~ MemOp lore, Attributes lore, LetAttr lore ~ (VarWisdom, MemBound NoUniqueness)) =>
+                 AST.Binding lore -> Names
+getShapeNames bnd =
+  let tps = map patElemType $ patternElements $ bindingPattern bnd
+      ats = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
+      nms = mapMaybe (\attr -> case attr of
+                                 MemMem (Var nm) _   -> Just nm
+                                 ArrayMem _ _ _ nm _ -> Just nm
+                                 _                   -> Nothing
+                     ) ats
+  in  HS.fromList $ nms ++ (subExpVars $ concatMap arrayDims tps)
+
+isAlloc0 :: Op lore ~ MemOp lore => AST.Binding lore -> Bool
+isAlloc0 (Let _ _ (Op Alloc{})) = True
+isAlloc0 _                      = False
 
 explicitMemoryRules :: (MonadBinder m,
                         LocalScope (Lore m) m,
