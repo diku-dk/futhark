@@ -471,7 +471,9 @@ Exp  :: { UncheckedExp }
 
      | transpose '(' Exp ')' { Transpose $3 $1 }
 
-     | rotate '(' NaturalInt ',' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
+     | rotate '@' NaturalInt '(' Exp ',' Exp ')' { Rotate $3 $5 $7 $1 }
+
+     | rotate '(' Exp ',' Exp ')' { Rotate 0 $3 $5 $1 }
 
      | split '(' '(' Exps ')' ',' Exp ')'
                       { Split 0 $4 $7 $1 }
