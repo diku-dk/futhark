@@ -107,7 +107,7 @@ data HoistBlockers m = HoistBlockers
                        }
 
 noExtraHoistBlockers :: HoistBlockers m
-noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (\ _ -> HS.empty) (\ _ -> False)
+noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (const HS.empty) (const False)
 
 data Env m = Env { envRules         :: RuleBook m
                  , envAliases       :: AliasMap
@@ -422,7 +422,7 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
       -- "isNotHoistableBnd hoistbl_nms" ensures that only the (transitive closure)
       -- of the bindings used for allocations and shape computations are if-hoistable.
       block = isNotSafe `orIf` isNotCheap `orIf` isInPlaceBound `orIf`
-                (isNotHoistableBnd hoistbl_nms)
+                isNotHoistableBnd hoistbl_nms
   vtable <- getVtable
   rules <- asksEngineEnv envRules
   (body1', safe1, f1) <-
