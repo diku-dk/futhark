@@ -8,4 +8,4 @@
 
 fun []int main(int i) =
   let a = iota(i)
-  in map(1+, rotate(0, -1, a))
+  in map(1+, rotate(-1, a))

@@ -766,8 +766,8 @@ checkPrimOp (Rotate cs rots arr) = do
   mapM_ (requireI [Prim Cert]) cs
   let rank = arrayRank arrt
   when (length rots /= rank) $
-    bad $ TypeError $ "Cannot rotate " ++ show rank ++
-    "-dimensional array with only " ++ show (length rots) ++ " offsets."
+    bad $ TypeError $ "Cannot rotate " ++ show (length rots) ++
+    " dimensions of " ++ show rank ++ "-dimensional array."
 
 checkPrimOp (Split cs i sizeexps arrexp) = do
   mapM_ (requireI [Prim Cert]) cs

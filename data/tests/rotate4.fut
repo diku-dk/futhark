@@ -37,4 +37,4 @@
 
 fun [][][]int main(int n, int m, int l) =
   let a = replicate(n, replicate(m, iota(l)))
-  in rotate(1, -1, a)
+  in rotate@1(-1, a)
