@@ -694,22 +694,25 @@ allocInLambda params body rettype = do
            return $ Body () bnds' $ bodyResult body
   return $ Lambda params body' rettype
 
-allocInKernelBody :: KernelSpace
+allocInKernelBody :: FreeIn res =>
+                     KernelSpace
                   -> GenKernelBody res In.Kernels
                   -> AllocM (GenKernelBody res ExplicitMemory)
 allocInKernelBody space (KernelBody stms res) =
-  allocInKernelStms space stms $ \stms' ->
+  allocInKernelStms space returned stms $ \stms' ->
     return $ KernelBody stms' res
+  where returned = freeIn res
 
 allocInKernelStms :: KernelSpace
+                  -> Names
                   -> [KernelStm In.Kernels]
                   -> ([KernelStm ExplicitMemory] -> AllocM a)
                   -> AllocM a
-allocInKernelStms space origstms m = allocInStms' origstms []
+allocInKernelStms space returned origstms m = allocInStms' origstms []
   where allocInStms' [] stms' =
           m stms'
         allocInStms' (x:xs) stms' = do
-          allocstms <- allocInKernelStm space x
+          allocstms <- allocInKernelStm space returned x
           let summaries = mconcat $ map scopeOf allocstms
           local (<>mconcat (map sizeSubst allocstms)) $ localScope summaries $
             allocInStms' xs (stms'++allocstms)
@@ -720,9 +723,10 @@ sizeSubst (SplitArray (size,_) _ _ elems_per_thread _) =
 sizeSubst _ = mempty
 
 allocInKernelStm :: KernelSpace
+                 -> Names
                  -> KernelStm In.Kernels
                  -> AllocM [KernelStm ExplicitMemory]
-allocInKernelStm space (SplitArray (size,chunks) o w elems_per_thread arrs) = do
+allocInKernelStm space _ (SplitArray (size,chunks) o w elems_per_thread arrs) = do
   chunks' <- forM (zip chunks arrs) $ \(chunk, arr) -> do
     (mem, ixfun) <- lookupArraySummary arr
     let num_threads' = SE.intSubExpToScalExp num_threads
@@ -756,7 +760,7 @@ allocInKernelStm space (SplitArray (size,chunks) o w elems_per_thread arrs) = do
     return chunk { patElemAttr = attr }
   return [SplitArray (size, chunks') o w elems_per_thread arrs]
 
-allocInKernelStm space (Thread pes threads body) = do
+allocInKernelStm space returned (Thread pes threads body) = do
   body' <- allocInBodyNoDirect body
   body_rets <- bodyReturns (staticShapes $ map patElemType pes) body'
   pes' <- zipWithM threadMemory pes body_rets
@@ -768,7 +772,8 @@ allocInKernelStm space (Thread pes threads body) = do
         threadMemory pe ret
           | Array bt shape u <- patElemType pe,
             ReturnsArray _ _ _ (ReturnsInBlock mem ixfun) <- ret,
-            not $ isBoundInBody mem =
+            not $ isBoundInBody mem,
+            not $ patElemName pe `HS.member` returned =
               return pe { patElemAttr = ArrayMem bt shape u mem ixfun }
           | Array bt shape u <- patElemType pe = do
               let (outer_is, outer_dims) =
@@ -795,7 +800,7 @@ allocInKernelStm space (Thread pes threads body) = do
           | otherwise = fail $ "threadMemory: pattern element " ++
                         pretty pe ++ " not an array or prim."
 
-allocInKernelStm _ (Combine pe w v) = do
+allocInKernelStm _ _ (Combine pe w v) = do
   let pe_t = patElemType pe
       shape = arrayShape pe_t
       bt = elemType pe_t
@@ -814,7 +819,7 @@ allocInKernelStm _ (Combine pe w v) = do
       attr = ArrayMem bt shape NoUniqueness mem ixfun
   return [Combine pe { patElemAttr = attr} w v]
 
-allocInKernelStm space (GroupReduce pes w lam input) = do
+allocInKernelStm space _ (GroupReduce pes w lam input) = do
   summaries <- mapM lookupArraySummary arrs
   lam' <- allocInReduceLambda lam group_size summaries
   let local_tid = SE.Id (spaceLocalId space) int32
@@ -828,7 +833,7 @@ allocInKernelStm space (GroupReduce pes w lam input) = do
   where arrs = map snd input
         group_size = spaceGroupSize space
 
-allocInKernelStm space (GroupStream pes w maxchunk lam acc arrs) = do
+allocInKernelStm space _ (GroupStream pes w maxchunk lam acc arrs) = do
   arr_summaries <- mapM lookupArraySummary arrs
   lam' <- allocInGroupStreamLambda maxchunk lam space arr_summaries
   pes' <- forM pes $ \pe ->
