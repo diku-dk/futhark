@@ -236,10 +236,11 @@ ensureCoalescedAccess thread_gids boundOutside arr is = do
         perm /= [0..length perm-1] ->
           replace =<< lift (rearrangeInput perm arr)
 
-      -- We are not fully indexing the array, so we assume
-      -- (HEURISTIC!) that the remaining dimensions will be traversed
-      -- sequentially.
-      | length is < arrayRank t -> do
+      -- We are not fully indexing the array, and the indices are not
+      -- a prefix of the thread indices, so we assume (HEURISTIC!)
+      -- that the remaining dimensions will be traversed sequentially.
+      | length is < arrayRank t,
+        is /= map Var (take (length is) thread_gids) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput perm arr)
 
