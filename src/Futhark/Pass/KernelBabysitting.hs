@@ -77,7 +77,7 @@ transformBinding expmap (Let pat ()
     ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
 
-transformBinding expmap (Let pat () (Op (Kernel cs size ts space kbody))) = do
+transformBinding expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
   -- First we do the easy stuff, which deals with SplitArray statements.
   kbody' <- transformKernelBody num_threads cs kbody
 
@@ -93,9 +93,9 @@ transformBinding expmap (Let pat () (Op (Kernel cs size ts space kbody))) = do
                          kbody')
              mempty
 
-  addBinding $ Let pat () $ Op $ Kernel cs size ts space kbody''
+  addBinding $ Let pat () $ Op $ Kernel cs space ts kbody''
   return expmap
-  where (_, _, num_threads) = size
+  where num_threads = spaceNumThreads space
 
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e

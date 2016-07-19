@@ -66,16 +66,13 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     as' <- mapM Engine.simplify as
     return $ WriteKernel cs' len' lam' ivs' as'
 
-  simplifyOp (Kernel cs (num_groups, group_size, num_threads) ts space kernel_body) = do
+  simplifyOp (Kernel cs space ts kernel_body) = do
     cs' <- Engine.simplify cs
-    num_groups' <- Engine.simplify num_groups
-    group_size' <- Engine.simplify group_size
-    num_threads' <- Engine.simplify num_threads
-    ts' <- mapM Engine.simplify ts
     space' <- Engine.simplify space
+    ts' <- mapM Engine.simplify ts
     kernel_body' <- Engine.localVtable (<>scope_vtable) $
       simplifyKernelBody scope kernel_body
-    return $ Kernel cs' (num_groups', group_size', num_threads') ts' space' kernel_body'
+    return $ Kernel cs' space' ts' kernel_body'
     where scope_vtable = ST.fromScope scope
           scope = scopeOfKernelSpace space
 
@@ -194,6 +191,25 @@ inspectPatElems :: (Engine.Simplifiable attr, Engine.MonadEngine m) =>
 inspectPatElems = zipWithM inspect
   where inspect pe (als, range) = inspectPatElem pe als range
 
+instance Engine.Simplifiable KernelSpace where
+  simplify (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+    KernelSpace gtid ltid gid
+    <$> Engine.simplify num_threads
+    <*> Engine.simplify num_groups
+    <*> Engine.simplify group_size
+    <*> Engine.simplify structure
+
+instance Engine.Simplifiable SpaceStructure where
+  simplify (FlatSpace dims) =
+    FlatSpace <$> (zip gtids <$> mapM Engine.simplify gdims)
+    where (gtids, gdims) = unzip dims
+  simplify (NestedSpace dims) =
+    NestedSpace
+    <$> (zip4 gtids
+         <$> mapM Engine.simplify gdims
+         <*> pure ltids
+         <*> mapM Engine.simplify ldims)
+    where (gtids, gdims, ltids, ldims) = unzip4 dims
 
 instance Engine.Simplifiable KernelResult where
   simplify (ThreadsReturn threads what) =
@@ -203,12 +219,6 @@ instance Engine.Simplifiable KernelResult where
     <$> Engine.simplify w
     <*> Engine.simplify pte
     <*> Engine.simplify what
-
-instance Engine.Simplifiable KernelSpace where
-  simplify (KernelSpace global_tid local_tid group_id space) =
-    KernelSpace global_tid local_tid group_id <$>
-    (zip space_is <$> mapM Engine.simplify space_dims)
-    where (space_is, space_dims) = unzip space
 
 instance Engine.Simplifiable WhichThreads where
   simplify AllThreads =
@@ -321,15 +331,15 @@ fuseWriteIota _ _ = cannotSimplify
 fuseKernelIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                  TopDownRule m
-fuseKernelIota vtable (Let pat _ (Op (Kernel cs ksize ts space kbody)))
+fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody)))
   | Just (iota_chunk_info, stms') <- extractSplitIota vtable $ kernelBodyStms kbody =
       localScope (scopeOfKernelSpace space <>
                   mconcat (map scopeOf stms')) $ do
         stms'' <- mapM (inlineIotaInKernelStm iota_chunk_info) stms'
         let kbody' = kbody { kernelBodyStms = stms'' }
-        letBind_ pat $ Op $ Kernel cs ksize ts space kbody'
+        letBind_ pat $ Op $ Kernel cs space ts kbody'
 
-  where (_, _, num_threads) = ksize
+  where num_threads = spaceNumThreads space
         thread_gid = spaceGlobalId space
         inlineIotaInKernelStm (size, chunk, o, elems_per_thread, x) stm
           | patElemName chunk `HS.member` freeIn stm =
@@ -389,7 +399,7 @@ removeInvariantKernelResults :: (LocalScope (Lore m) m,
                                  MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                                 TopDownRule m
 removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
-                                      (Op (Kernel cs size ts space (KernelBody kstms kres)))) = do
+                                      (Op (Kernel cs space ts (KernelBody kstms kres)))) = do
   (kstms', invariant_threads) <-
     unzip <$> mapM checkForInvarianceStm kstms
 
@@ -404,12 +414,12 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
   when (null (concat invariant_threads) && kres == kres')
     cannotSimplify
 
-  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs size ts space $
+  addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts $
     KernelBody kstms' kres'
   where inVtable Constant{} = True
         inVtable (Var v) = isJust $ ST.lookup v vtable
 
-        (_, _, num_threads) = size
+        num_threads = spaceNumThreads space
         space_dims = map snd $ spaceDimensions space
 
         checkForInvarianceStm (Thread pes threads body)

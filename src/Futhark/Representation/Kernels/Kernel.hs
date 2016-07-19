@@ -15,6 +15,8 @@ module Futhark.Representation.Kernels.Kernel
        , GenKernelBody(..)
        , KernelStm(..)
        , KernelSpace(..)
+       , spaceDimensions
+       , SpaceStructure(..)
        , scopeOfKernelSpace
        , GroupStreamLambda(..)
        , WhichThreads(..)
@@ -79,9 +81,8 @@ data Kernel lore =
   | GroupSize
 
   | Kernel Certificates
-    (SubExp,SubExp,SubExp) -- #workgroups, group size, #threads
+    KernelSpace
     [Type]
-    KernelSpace -- thread ID (binding position)
     (KernelBody lore)
 
     deriving (Eq, Show, Ord)
@@ -89,9 +90,30 @@ data Kernel lore =
 data KernelSpace = KernelSpace { spaceGlobalId :: VName
                                , spaceLocalId :: VName
                                , spaceGroupId :: VName
-                               , spaceDimensions :: [(VName, SubExp)]
+                               , spaceNumThreads :: SubExp
+                               , spaceNumGroups :: SubExp
+                               , spaceGroupSize :: SubExp -- flat group size
+                               , spaceStructure :: SpaceStructure
                                }
                  deriving (Eq, Show, Ord)
+
+data SpaceStructure = FlatSpace
+                      [(VName, SubExp)] -- gtids and dim sizes
+                    | NestedSpace
+                      [(VName, -- gtid
+                        SubExp, -- global dim size
+                        VName, -- ltid
+                        SubExp -- local dim sizes
+                       )]
+                    deriving (Eq, Show, Ord)
+
+-- | Global thread IDs and their upper bound.
+spaceDimensions :: KernelSpace -> [(VName, SubExp)]
+spaceDimensions = structureDimensions . spaceStructure
+  where structureDimensions (FlatSpace dims) = dims
+        structureDimensions (NestedSpace dims) =
+          let (gtids, gdim_sizes, _, _) = unzip4 dims
+          in zip gtids gdim_sizes
 
 type KernelBody = GenKernelBody KernelResult
 type NestedKernelBody = GenKernelBody SubExp
@@ -198,15 +220,26 @@ mapKernelM tv (WriteKernel cs len lam ivs as) =
   mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
-mapKernelM tv (Kernel cs (num_groups, group_size, num_threads) ts space kernel_body) =
+mapKernelM tv (Kernel cs space ts kernel_body) =
   Kernel <$> mapOnKernelCertificates tv cs <*>
-  (do num_groups' <- mapOnKernelSubExp tv num_groups
-      group_size' <- mapOnKernelSubExp tv group_size
-      num_threads' <- mapOnKernelSubExp tv num_threads
-      return (num_groups', group_size', num_threads')) <*>
+  mapOnKernelSpace space <*>
   mapM (mapOnKernelType tv) ts <*>
-  pure space <*>
   mapOnKernelKernelBody tv kernel_body
+  where mapOnKernelSpace (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+          KernelSpace gtid ltid gid -- all in binding position
+          <$> mapOnKernelSubExp tv num_threads
+          <*> mapOnKernelSubExp tv num_groups
+          <*> mapOnKernelSubExp tv group_size
+          <*> mapOnKernelStructure structure
+        mapOnKernelStructure (FlatSpace dims) =
+          FlatSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
+          where (gtids, gdim_sizes) = unzip dims
+        mapOnKernelStructure (NestedSpace dims) =
+            NestedSpace <$> (zip4 gtids
+                             <$> mapM (mapOnKernelSubExp tv) gdim_sizes
+                             <*> pure ltids
+                             <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
+          where (gtids, gdim_sizes, ltids, ldim_sizes) = unzip4 dims
 
 mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
                    KernelMapper flore tlore m -> Type -> m Type
@@ -214,6 +247,7 @@ mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
 mapOnKernelType _tv (Mem se s) = pure $ Mem se s
+
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -345,19 +379,27 @@ instance Attributes lore => Substitute (GroupStreamLambda lore) where
     (substituteNames subst body)
 
 instance Substitute KernelSpace where
-  substituteNames subst (KernelSpace global_tid local_tid group_id space) =
-    KernelSpace (substituteNames subst global_tid)
-    (substituteNames subst local_tid)
-    (substituteNames subst group_id)
-    (substituteNames subst space)
+  substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+    KernelSpace (substituteNames subst gtid)
+    (substituteNames subst ltid)
+    (substituteNames subst gid)
+    (substituteNames subst num_threads)
+    (substituteNames subst num_groups)
+    (substituteNames subst group_size)
+    (substituteNames subst structure)
+
+instance Substitute SpaceStructure where
+  substituteNames subst (FlatSpace dims) =
+    FlatSpace (map (substituteNames subst) dims)
+  substituteNames subst (NestedSpace dims) =
+    NestedSpace (map (substituteNames subst) dims)
 
 instance Attributes lore => Substitute (Kernel lore) where
-  substituteNames subst (Kernel cs size ts space kbody) =
+  substituteNames subst (Kernel cs space ts kbody) =
     Kernel
     (substituteNames subst cs)
-    (substituteNames subst size)
-    (substituteNames subst ts)
     (substituteNames subst space)
+    (substituteNames subst ts)
     (substituteNames subst kbody)
   substituteNames subst k = runIdentity $ mapKernelM substitute k
     where substitute =
@@ -414,10 +456,13 @@ instance Rename WhichThreads where
   rename = substituteRename
 
 scopeOfKernelSpace :: KernelSpace -> Scope lore
-scopeOfKernelSpace (KernelSpace global_tid local_tid group_id space) =
-  HM.fromList $
-  zip (global_tid : local_tid : group_id : map fst space) $
-  repeat IndexInfo
+scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
+  HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat IndexInfo
+  where structure' = case structure of
+                       FlatSpace dims -> map fst dims
+                       NestedSpace dims ->
+                         let (gtids, _, ltids, _) = unzip4 dims
+                         in gtids ++ ltids
 
 instance LParamAttr lore1 ~ LParamAttr lore2 =>
          Scoped lore1 (GroupStreamLambda lore2) where
@@ -453,9 +498,11 @@ kernelType (WriteKernel _ _ lam _ input) =
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
         ws = map fst input
-kernelType (Kernel _ (num_groups, _, num_threads) ts space body) =
+kernelType (Kernel _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
+        num_groups = spaceNumGroups space
+        num_threads = spaceNumThreads space
         resultShape t (ThreadsReturn AllThreads _) =
           t `arrayOfRow` num_threads
         resultShape t (ThreadsReturn OneThreadPerGroup{} _) =
@@ -484,7 +531,7 @@ instance TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases = map (const mempty) . kernelType
 
-  consumedInOp (Kernel _ _ _ _ kbody) =
+  consumedInOp (Kernel _ _ _ kbody) =
     consumedInKernelBody kbody
   consumedInOp _ = mempty
 
@@ -600,7 +647,7 @@ instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kern
     usageInLambda foldfun arrs
   usageInOp (WriteKernel _ _ _ _ as) =
     mconcat $ map (UT.consumedUsage . snd) as
-  usageInOp (Kernel _ _ _ _ kbody) =
+  usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
@@ -722,15 +769,24 @@ typeCheckKernel (WriteKernel cs w lam _ivs as) = do
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 
-typeCheckKernel (Kernel cs (groups, group_size, num_threads) kts space kbody) = do
+typeCheckKernel (Kernel cs space kts kbody) = do
   mapM_ (TC.requireI [Prim Cert]) cs
-  mapM_ (TC.require [Prim int32]) [groups, group_size, num_threads]
+  checkSpace space
   mapM_ TC.checkType kts
   mapM_ (TC.require [Prim int32] . snd) $ spaceDimensions space
 
   TC.binding (scopeOfKernelSpace space) $
     checkKernelBody kts kbody
-  where checkKernelBody ts (KernelBody stms res) =
+  where checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
+          mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
+          case structure of
+            FlatSpace dims ->
+              mapM_ (TC.require [Prim int32] . snd) dims
+            NestedSpace dims ->
+              let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
+              in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
+
+        checkKernelBody ts (KernelBody stms res) =
           checkKernelStms stms $ zipWithM_ checkKernelResult res ts
 
         checkNestedKernelBody ts (KernelBody stms res) =
@@ -859,7 +915,7 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (WriteKernel _cs _len lam _ivs _as) =
     inside "WriteKernel" $ lambdaMetrics lam
-  opMetrics (Kernel _ _ _ _ kbody) =
+  opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: GenKernelBody res lore -> MetricsM ()
           kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
@@ -896,24 +952,32 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
 
-  ppr (Kernel cs (num_groups,group_size,num_threads) ts space body) =
+  ppr (Kernel cs space ts body) =
     ppCertificates' cs <>
     text "kernel" <>
-    PP.align (parens (commasep [text "num_groups:" <+> ppr num_groups,
-                                text "group_size:" <+> ppr group_size,
-                                text "num_threads:" <+> ppr num_threads]) </>
-              ppr space) <+>
+    PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> text "{" </>
     PP.indent 2 (ppr body) </>
     text "}"
 
 instance Pretty KernelSpace where
-  ppr (KernelSpace global_tid local_tid group_id space) =
-    parens (commasep [text "global TID ->" <+> ppr global_tid,
-                      text "local TID ->" <+> ppr local_tid,
-                      text "group ID ->" <+> ppr group_id]) </>
-    parens (commasep $ do (i,d) <- space
-                          return $ ppr i <+> "<" <+> ppr d)
+  ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =
+    parens (commasep [text "num groups:" <+> ppr num_groups,
+                      text "group size:" <+> ppr group_size,
+                      text "num threads:" <+> ppr num_threads,
+                      text "global TID ->" <+> ppr f_gtid,
+                      text "local TID ->" <+> ppr f_ltid,
+                      text "group ID ->" <+> ppr gid]) </> structure'
+    where structure' =
+            case structure of
+              FlatSpace space ->
+                parens (commasep $ do
+                           (i,d) <- space
+                           return $ ppr i <+> "<" <+> ppr d)
+              NestedSpace space ->
+                parens (commasep $ do
+                           (gtid,gd,ltid,ld) <- space
+                           return $ ppr (gtid,ltid) <+> "<" <+> ppr (gd,ld))
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody stms res) =

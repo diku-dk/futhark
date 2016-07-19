@@ -695,7 +695,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs)))
           (ksize_bnds, ksize, read_input_bnds) <- mapKernelSkeleton w inps
           let rts' = rearrangeShape perm rts
 
-          space <- newKernelSpace ispace
+          space <- newKernelSpace ksize ispace
 
           kresult_pes <- forM rts' $ \rt -> do
             kresult <- newVName "kresult"
@@ -738,7 +738,7 @@ maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs)))
                      patternValueElements $
                      loopNestingPattern $ fst nest
           addKernel $ w_bnds ++ ksize_bnds ++
-            [Let kpat () $ Op $ Kernel cs ksize rts' space kbody]
+            [Let kpat () $ Op $ Kernel cs space rts' kbody]
           return acc'
     _ ->
       addBindingToKernel bnd acc
