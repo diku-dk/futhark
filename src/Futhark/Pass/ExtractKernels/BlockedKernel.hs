@@ -117,7 +117,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
 
   (chunk_red_pes, chunk_map_pes, chunk_and_fold) <-
     blockedPerThread w step_one_size ordering fold_lam' num_nonconcat arrs
-  space <- newKernelSpace []
+  space <- newKernelSpace (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size) []
   let red_ts = map patElemType chunk_red_pes
       map_ts = map (rowType . patElemType) chunk_map_pes
       ts = red_ts ++ map_ts
@@ -141,9 +141,7 @@ chunkedReduceKernel cs w step_one_size comm reduce_lam' fold_lam' nes arrs = do
     return $ ConcatReturns ordering w (kernelElementsPerThread step_one_size) $ patElemName pe
   let rets = red_rets ++ map_rets
 
-  return $ Kernel cs
-    (kernelWorkgroups step_one_size, group_size, kernelNumThreads step_one_size)
-    ts space $
+  return $ Kernel cs space ts $
     KernelBody (chunk_and_fold++combine_reds++[reduce_chunk]) rets
 
 reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
@@ -156,7 +154,7 @@ reduceKernel :: (MonadBinder m, Lore m ~ Kernels) =>
 reduceKernel cs step_two_size reduce_lam' nes arrs = do
   let group_size = kernelWorkgroupSize step_two_size
       red_ts = lambdaReturnType reduce_lam'
-  space <- newKernelSpace []
+  space <- newKernelSpace (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size) []
   let thread_id = spaceGlobalId space
 
   (copy_input, arrs_index) <-
@@ -184,9 +182,7 @@ reduceKernel cs step_two_size reduce_lam' nes arrs = do
   rets <- forM final_res_pes $ \pe ->
     return $ ThreadsReturn (OneThreadPerGroup (constant (0::Int32))) $ Var $ patElemName pe
 
-  return $ Kernel cs
-    (kernelWorkgroups step_two_size, group_size, kernelNumThreads step_two_size)
-    (lambdaReturnType reduce_lam') space $
+  return $ Kernel cs space (lambdaReturnType reduce_lam')  $
     KernelBody (copy_input++combine_arrs++[reduce]) rets
 
 chunkLambda :: (MonadFreshNames m, HasScope Kernels m) =>
@@ -310,9 +306,8 @@ blockedMap concat_pat cs w ordering lam nes arrs = runBinder $ do
   concat_rets <- forM chunk_map_pes $ \pe ->
     return $ ConcatReturns ordering w (kernelElementsPerThread kernel_size) $ patElemName pe
 
-  space <- newKernelSpace []
-  return $ Let pat () $ Op $ Kernel cs
-    (num_groups, group_size, num_threads) ts space $
+  space <- newKernelSpace (num_groups, group_size, num_threads) []
+  return $ Let pat () $ Op $ Kernel cs space ts $
     KernelBody chunk_and_fold $ nonconcat_rets ++ concat_rets
 
 blockedPerThread :: MonadFreshNames m =>
@@ -517,24 +512,30 @@ mapKernelSkeleton :: (HasScope Kernels m, MonadFreshNames m) =>
                      SubExp -> [KernelInput]
                   -> m ([Binding], (SubExp,SubExp,SubExp), [Binding])
 mapKernelSkeleton w inputs = do
-  num_groups_v <- newVName "num_groups"
   group_size_v <- newVName "group_size"
-  num_threads_v <- newVName "num_threads"
 
-  ksize_bnds <- runBinder_ $ do
+  ((num_threads, num_groups), ksize_bnds) <- runBinder $ do
     letBindNames'_ [group_size_v] $ Op GroupSize
-    letBindNames'_ [num_groups_v] =<< eDivRoundingUp Int32
-      (eSubExp w) (eSubExp $ Var group_size_v)
-    letBindNames'_ [num_threads_v] $
-      PrimOp $ BinOp (Mul Int32) (Var num_groups_v) (Var group_size_v)
+    numThreadsAndGroups w $ Var group_size_v
 
   read_input_bnds <- forM inputs $ \inp -> do
     let pe = PatElem (kernelInputName inp) BindVar $ kernelInputType inp
     return $ Let (Pattern [] [pe]) () $
       PrimOp $ Index [] (kernelInputArray inp) (kernelInputIndices inp)
 
-  let ksize = (Var num_groups_v, Var group_size_v, Var num_threads_v)
+  let ksize = (num_groups, Var group_size_v, num_threads)
   return (ksize_bnds, ksize, read_input_bnds)
+
+-- Given the desired minium number of threads and the number of
+-- threads per group, compute the number of groups and total number of
+-- threads.
+numThreadsAndGroups :: MonadBinder m => SubExp -> SubExp -> m (SubExp, SubExp)
+numThreadsAndGroups w group_size = do
+  num_groups <- letSubExp "num_groups" =<< eDivRoundingUp Int32
+    (eSubExp w) (eSubExp group_size)
+  num_threads <- letSubExp "num_threads" $
+    PrimOp $ BinOp (Mul Int32) num_groups group_size
+  return (num_threads, num_groups)
 
 mapKernel :: (HasScope Kernels m, MonadFreshNames m) =>
              Certificates -> SubExp -> [(VName, SubExp)] -> [KernelInput]
@@ -547,14 +548,14 @@ mapKernel cs w ispace inputs rts body = do
     kresult <- newVName "kresult"
     return $ PatElem kresult BindVar rt
 
-  space <- newKernelSpace ispace
+  space <- newKernelSpace ksize ispace
 
   let body_stm = Thread kresult_pes ThreadsInSpace $
                  insertBindings read_input_bnds body
 
   let krets = map (ThreadsReturn ThreadsInSpace . Var . patElemName) kresult_pes
       kbody = KernelBody [body_stm] krets
-  return (ksize_bnds, Kernel cs ksize rts space kbody)
+  return (ksize_bnds, Kernel cs  space rts kbody)
 
 data KernelInput = KernelInput { kernelInputName :: VName
                                , kernelInputType :: Type
@@ -578,10 +579,14 @@ perThread bnds = do
           mkBody bnds' $ map Var $ concatMap boundBy bnds')
   where boundBy = map patElemName . patternValueElements . bindingPattern
 
-newKernelSpace :: MonadFreshNames m => [(VName, SubExp)] -> m KernelSpace
-newKernelSpace dims =
+newKernelSpace :: MonadFreshNames m =>
+                  (SubExp,SubExp,SubExp) -> [(VName, SubExp)] -> m KernelSpace
+newKernelSpace (num_groups, group_size, num_threads) dims =
   KernelSpace
   <$> newVName "global_tid"
   <*> newVName "local_tid"
   <*> newVName "group_id"
-  <*> pure dims
+  <*> pure num_threads
+  <*> pure num_groups
+  <*> pure group_size
+  <*> pure (FlatSpace dims)

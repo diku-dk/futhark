@@ -18,9 +18,9 @@ import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
 import Futhark.Pass.ExtractKernels.BlockedKernel (perThread) -- FIXME
 
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Pass
 import Futhark.Tools
+import Futhark.Util (mapAccumLM)
 
 tileLoops :: Pass Kernels Kernels
 tileLoops =
@@ -42,73 +42,134 @@ optimiseBody (Body () bnds res) =
   Body () <$> (concat <$> mapM optimiseBinding bnds) <*> pure res
 
 optimiseBinding :: Binding -> TileM [Binding]
-optimiseBinding (Let pat () (Op (Kernel cs size ts space body))) = do
-  (extra_bnds, body') <- tileInKernelBody size space body
-  return $ extra_bnds ++ [Let pat () $ Op $ Kernel cs size ts space body']
+optimiseBinding (Let pat () (Op (Kernel cs space ts body))) = do
+  (extra_bnds, space', body') <- tileInKernelBody space body
+  return $ extra_bnds ++ [Let pat () $ Op $ Kernel cs space' ts body']
 optimiseBinding (Let pat () e) =
   pure <$> (Let pat () <$> mapExpM optimise e)
   where optimise = identityMapper { mapOnBody = optimiseBody }
 
-tileInKernelBody :: (SubExp,SubExp,SubExp)
-                 -> KernelSpace -> KernelBody Kernels
-                 -> TileM ([Binding], KernelBody Kernels)
-tileInKernelBody (_, group_size, _) kspace (KernelBody kstms kres) = do
-  (extra_bndss, kstms') <- unzip <$> mapM tileInKernelStatement kstms
-  return (concat extra_bndss,
+tileInKernelBody :: KernelSpace -> KernelBody Kernels
+                 -> TileM ([Binding], KernelSpace, KernelBody Kernels)
+tileInKernelBody initial_kspace (KernelBody kstms kres) = do
+  ((kspace, extra_bndss), kstms') <- mapAccumLM tileInKernelStatement (initial_kspace,[]) kstms
+  return (extra_bndss,
+          kspace,
           KernelBody kstms' kres)
-  where initial_variance = HM.map mempty $ scopeOfKernelSpace kspace
+  where initial_variance = HM.map mempty $ scopeOfKernelSpace initial_kspace
         variance = varianceInKernelStms initial_variance kstms
 
-        tileInKernelStatement (GroupStream pes w _ lam accs arrs)
+        tileInKernelStatement (kspace, extra_bnds) (GroupStream pes w _ lam accs arrs)
           | chunk_size <- Var $ groupStreamChunkSize lam,
+            arr_chunk_params <- groupStreamArrParams lam,
+            Just mk_tilings <-
+              zipWithM (is1dTileable kspace variance chunk_size) arrs arr_chunk_params = do
+
+          (arr_chunk_params', tile_kstms) <- unzip <$> sequence mk_tilings
+
+          let KernelBody lam_kstms lam_res = groupStreamLambdaBody lam
+              lam_kstms' = concat tile_kstms ++ lam_kstms
+              group_size = spaceGroupSize kspace
+              lam' = lam { groupStreamLambdaBody = KernelBody lam_kstms' lam_res
+                         , groupStreamArrParams = arr_chunk_params'
+                         }
+
+          return ((kspace, extra_bnds),
+                  GroupStream pes w group_size lam' accs arrs)
+
+        tileInKernelStatement (kspace, extra_bnds) (GroupStream pes w _ lam accs arrs)
+          | FlatSpace gspace <- spaceStructure kspace,
+            chunk_size <- Var $ groupStreamChunkSize lam,
             arr_chunk_params <- groupStreamArrParams lam,
 
             Just mk_tilings <-
-              zipWithM (isTilingCandidate kspace variance chunk_size)
+              zipWithM (is2dTileable kspace variance chunk_size)
               arrs arr_chunk_params = do
 
           -- We assume that the group size is tile_size*tile_size.
-          let flat_local_id = spaceLocalId kspace
-              dims = map snd $ spaceDimensions kspace
+          let group_size = spaceGroupSize kspace
 
           -- XXX: empty scope here.  Hopefully OK.
-          (tile_size, tile_size_bnds) <- flip runBinderT mempty $ do
+          ((tile_size, tiled_group_size), tile_size_bnds) <- flip runBinderT mempty $ do
             group_size_float <-
               letSubExp "group_size_float" $ PrimOp $ ConvOp (SIToFP Int32 Float32) group_size
             tile_size_float <-
               letSubExp "tile_size_float" $
               Apply (nameFromString "sqrt32") [(group_size_float,Observe)] $
               primRetType $ FloatType Float32
-            letSubExp "tile_size" $ PrimOp $ ConvOp (FPToSI Float32 Int32) tile_size_float
+            tile_size <- letSubExp "tile_size" $
+                         PrimOp $ ConvOp (FPToSI Float32 Int32) tile_size_float
+            tiled_group_size <- letSubExp "tiled_group_size" $
+                                PrimOp $ BinOp (Mul Int32) tile_size tile_size
+            return (tile_size, tiled_group_size)
 
-          (local_ids, local_id_bnds) <- fmap unzip $ forM (spaceDimensions kspace) $ \(gtid,_) -> do
-            local_id <- newVName "ltid"
-            return (local_id,
-                    mkLet' [] [Ident local_id $ Prim int32] $ PrimOp $
-                    BinOp (SRem Int32) (Var gtid) tile_size)
-          (aux_pes, aux_body) <- perThread local_id_bnds
-          let aux_kstm = Thread aux_pes AllThreads aux_body
+          space <- forM gspace $ \(gtid,gdim) -> do
+            ltid <- newVName "ltid"
+            return (gtid,gdim,
+                    ltid,tile_size)
+          -- We have to recalculate number of workgroups and
+          -- number of threads to fit the new workgroup size.
+          ((num_threads, num_groups), num_bnds) <- flip runBinderT mempty $
+            sufficientGroups gspace tile_size tiled_group_size
+
+          let kspace' = kspace { spaceStructure = NestedSpace space
+                               , spaceGroupSize = tiled_group_size
+                               , spaceNumThreads = num_threads
+                               , spaceNumGroups = num_groups
+                               }
+              local_ids = map (\(_, _, ltid, _) -> ltid) space
 
           (arr_chunk_params', tile_kstms) <-
             fmap unzip $ forM mk_tilings $ \mk_tiling ->
               mk_tiling tile_size local_ids
 
           let KernelBody lam_kstms lam_res = groupStreamLambdaBody lam
-              lam_kstms' = aux_kstm : concat tile_kstms ++ lam_kstms
+              lam_kstms' = concat tile_kstms ++ lam_kstms
               lam' = lam { groupStreamLambdaBody = KernelBody lam_kstms' lam_res
                          , groupStreamArrParams = arr_chunk_params'
                          }
 
-          return (tile_size_bnds,
+          return ((kspace', extra_bnds ++ tile_size_bnds ++ num_bnds),
                   GroupStream pes w tile_size lam' accs arrs)
 
-        tileInKernelStatement stm =
-          return ([], stm)
+        tileInKernelStatement acc stm =
+          return (acc, stm)
 
-isTilingCandidate :: MonadFreshNames m =>
-                     KernelSpace -> VarianceTable -> SubExp -> VName -> LParam
-                  -> Maybe (SubExp -> [VName] -> m (LParam, [KernelStm Kernels]))
-isTilingCandidate kspace variance block_size arr block_param = do
+is1dTileable :: MonadFreshNames m =>
+                KernelSpace -> VarianceTable -> SubExp -> VName -> LParam
+             -> Maybe (m (LParam, [KernelStm Kernels]))
+is1dTileable kspace variance block_size arr block_param = do
+  guard $ HS.null $ HM.lookupDefault mempty arr variance
+  return $ do
+    outer_block_param <- do
+      name <- newVName $ baseString (paramName block_param) ++ "_outer"
+      return block_param { paramName = name }
+
+    let ltid = spaceLocalId kspace
+    read_elem_bnd <- do
+      name <- newVName $ baseString (paramName outer_block_param) ++ "_elem"
+      return $
+        mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
+        PrimOp $ Index [] (paramName outer_block_param) [Var ltid]
+
+    (block_elem_pes, read_block_body) <- perThread [read_elem_bnd]
+    let limit = ThreadsPerGroup [(ltid,block_size)]
+        read_block_kstm = Thread block_elem_pes limit read_block_body
+        block_cspace = [(ltid,block_size)]
+
+    let block_pe =
+          PatElem (paramName block_param) BindVar $ paramType outer_block_param
+        write_block_stms =
+          [ Combine block_pe block_cspace $
+            Var $ patElemName block_elem_pe
+          | block_elem_pe <- block_elem_pes ]
+
+    return (outer_block_param, read_block_kstm : write_block_stms)
+
+is2dTileable :: MonadFreshNames m =>
+              KernelSpace -> VarianceTable -> SubExp -> VName -> LParam
+           -> Maybe (SubExp -> [VName] -> m (LParam, [KernelStm Kernels]))
+is2dTileable kspace variance block_size arr block_param = do
   permute <- invariantToAtLeastOneDimension
 
   Just $ \tile_size local_is -> do
@@ -124,12 +185,12 @@ isTilingCandidate kspace variance block_size arr block_param = do
         PrimOp $ Index [] (paramName outer_block_param) [Var invariant_i]
 
     (block_elem_pes, read_block_body) <- perThread [read_elem_bnd]
-    let limit = ThreadsPerGroup [(variant_i,block_size),(invariant_i,block_size)]
+    let limit = ThreadsPerGroup [(variant_i,tile_size),(invariant_i,block_size)]
         read_block_kstm =
           Thread block_elem_pes limit read_block_body
 
-        block_size_2d = Shape [block_size, block_size]
-        block_cspace = [(variant_i,block_size),(invariant_i,block_size)]
+        block_size_2d = Shape [tile_size, block_size]
+        block_cspace = [(variant_i,tile_size),(invariant_i,block_size)]
 
     block_name_2d <- newVName $ baseString (paramName block_param) ++ "_2d"
     let block_pe =
@@ -150,7 +211,7 @@ isTilingCandidate kspace variance block_size arr block_param = do
 
   where invariantToAtLeastOneDimension :: Maybe ([a] -> [a])
         invariantToAtLeastOneDimension = do
-          [(i,iw),(j,jw)] <- Just $ spaceDimensions kspace
+          [(i,_),(j,_)] <- Just $ spaceDimensions kspace
           let variant_to = HM.lookupDefault mempty arr variance
           if i `HS.member` variant_to && not (j `HS.member` variant_to) then
             Just id
@@ -193,3 +254,15 @@ varianceInBody kvariance (Body _ bnds res) =
         resultVariance _ Constant{}     = mempty
         resultVariance variance (Var v) = HM.lookupDefault mempty v variance
                                           `HS.intersection` known
+
+sufficientGroups :: MonadBinder m =>
+                    [(VName,SubExp)] -> SubExp -> SubExp
+                 -> m (SubExp, SubExp)
+sufficientGroups gspace tile_size group_size = do
+  groups_in_dims <- forM gspace $ \(_, d) ->
+    letSubExp "groups_in_dim" =<< eDivRoundingUp Int32 (eSubExp d) (eSubExp tile_size)
+  num_groups <- letSubExp "num_groups" =<<
+                foldBinOp (Mul Int32) (constant (1::Int32)) groups_in_dims
+  num_threads <- letSubExp "num_threads" $
+                 PrimOp $ BinOp (Mul Int32) num_groups group_size
+  return (num_threads, num_groups)

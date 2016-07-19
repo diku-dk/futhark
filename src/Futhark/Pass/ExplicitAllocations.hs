@@ -567,10 +567,10 @@ allocInExp (Op (WriteKernel cs len lam ivs as)) = do
             Mem size shape ->
               return param { paramAttr = MemMem size shape }
 
-allocInExp (Op (Kernel cs size ts space body)) = do
+allocInExp (Op (Kernel cs space ts body)) = do
   body' <- localScope (scopeOfKernelSpace space) $
-    allocInKernelBody size space body
-  return $ Op $ Inner $ Kernel cs size ts space body'
+    allocInKernelBody space body
+  return $ Op $ Inner $ Kernel cs space ts body'
 
 allocInExp (Op GroupSize) =
   return $ Op $ Inner GroupSize
@@ -694,24 +694,22 @@ allocInLambda params body rettype = do
            return $ Body () bnds' $ bodyResult body
   return $ Lambda params body' rettype
 
-allocInKernelBody :: (SubExp, SubExp, SubExp)
-                  -> KernelSpace
+allocInKernelBody :: KernelSpace
                   -> GenKernelBody res In.Kernels
                   -> AllocM (GenKernelBody res ExplicitMemory)
-allocInKernelBody size space (KernelBody stms res) =
-  allocInKernelStms size space stms $ \stms' ->
+allocInKernelBody space (KernelBody stms res) =
+  allocInKernelStms space stms $ \stms' ->
     return $ KernelBody stms' res
 
-allocInKernelStms :: (SubExp, SubExp, SubExp)
-                  -> KernelSpace
+allocInKernelStms :: KernelSpace
                   -> [KernelStm In.Kernels]
                   -> ([KernelStm ExplicitMemory] -> AllocM a)
                   -> AllocM a
-allocInKernelStms groups_and_size space origstms m = allocInStms' origstms []
+allocInKernelStms space origstms m = allocInStms' origstms []
   where allocInStms' [] stms' =
           m stms'
         allocInStms' (x:xs) stms' = do
-          allocstms <- allocInKernelStm groups_and_size space x
+          allocstms <- allocInKernelStm space x
           let summaries = mconcat $ map scopeOf allocstms
           local (<>mconcat (map sizeSubst allocstms)) $ localScope summaries $
             allocInStms' xs (stms'++allocstms)
@@ -721,18 +719,15 @@ sizeSubst (SplitArray (size,_) _ _ elems_per_thread _) =
   HM.singleton size elems_per_thread
 sizeSubst _ = mempty
 
-allocInKernelStm :: (SubExp, SubExp, SubExp)
-                 -> KernelSpace
+allocInKernelStm :: KernelSpace
                  -> KernelStm In.Kernels
                  -> AllocM [KernelStm ExplicitMemory]
-allocInKernelStm
-  (_, _, num_threads) space
-  (SplitArray (size,chunks) o w elems_per_thread arrs) = do
-
+allocInKernelStm space (SplitArray (size,chunks) o w elems_per_thread arrs) = do
   chunks' <- forM (zip chunks arrs) $ \(chunk, arr) -> do
     (mem, ixfun) <- lookupArraySummary arr
     let num_threads' = SE.intSubExpToScalExp num_threads
         elems_per_thread' = SE.intSubExpToScalExp elems_per_thread
+        num_threads = spaceNumThreads space
         thread_id = spaceGlobalId space
         shape = arrayShape $ patElemType chunk
         bt = elemType $ patElemType chunk
@@ -761,12 +756,13 @@ allocInKernelStm
     return chunk { patElemAttr = attr }
   return [SplitArray (size, chunks') o w elems_per_thread arrs]
 
-allocInKernelStm (_, _group_size, num_threads) space (Thread pes threads body) = do
+allocInKernelStm space (Thread pes threads body) = do
   body' <- allocInBodyNoDirect body
   body_rets <- bodyReturns (staticShapes $ map patElemType pes) body'
   pes' <- zipWithM threadMemory pes body_rets
   return [Thread pes' threads body']
   where thread_index' = SE.intSubExpToScalExp $ Var $ spaceGlobalId space
+        num_threads = spaceNumThreads space
         isBoundInBody = flip HS.member $ boundInBody body
 
         threadMemory pe ret
@@ -799,7 +795,7 @@ allocInKernelStm (_, _group_size, num_threads) space (Thread pes threads body) =
           | otherwise = fail $ "threadMemory: pattern element " ++
                         pretty pe ++ " not an array or prim."
 
-allocInKernelStm _size _ (Combine pe w v) = do
+allocInKernelStm _ (Combine pe w v) = do
   let pe_t = patElemType pe
       shape = arrayShape pe_t
       bt = elemType pe_t
@@ -808,7 +804,7 @@ allocInKernelStm _size _ (Combine pe w v) = do
       attr = ArrayMem bt shape NoUniqueness mem ixfun
   return [Combine pe { patElemAttr = attr} w v]
 
-allocInKernelStm (_, group_size, _) space (GroupReduce pes w lam input) = do
+allocInKernelStm space (GroupReduce pes w lam input) = do
   summaries <- mapM lookupArraySummary arrs
   lam' <- allocInReduceLambda lam group_size summaries
   let local_tid = SE.Id (spaceLocalId space) int32
@@ -820,10 +816,11 @@ allocInKernelStm (_, group_size, _) space (GroupReduce pes w lam input) = do
       t -> return pe { patElemAttr = Scalar $ elemType t }
   return [GroupReduce pes' w lam' input]
   where arrs = map snd input
+        group_size = spaceGroupSize space
 
-allocInKernelStm size space (GroupStream pes w maxchunk lam acc arrs) = do
+allocInKernelStm space (GroupStream pes w maxchunk lam acc arrs) = do
   arr_summaries <- mapM lookupArraySummary arrs
-  lam' <- allocInGroupStreamLambda maxchunk lam size space arr_summaries
+  lam' <- allocInGroupStreamLambda maxchunk lam space arr_summaries
   pes' <- forM pes $ \pe ->
     case patElemType pe of
       Array{} ->
@@ -833,12 +830,11 @@ allocInKernelStm size space (GroupStream pes w maxchunk lam acc arrs) = do
 
 allocInGroupStreamLambda :: SubExp
                          -> GroupStreamLambda In.Kernels
-                         -> (SubExp,SubExp,SubExp)
                          -> KernelSpace
                          -> [(VName, IxFun.IxFun SE.ScalExp)]
                          -> AllocM (GroupStreamLambda ExplicitMemory)
-allocInGroupStreamLambda maxchunk lam size space input_summaries = do
-  let (_, group_size, _) = size
+allocInGroupStreamLambda maxchunk lam space input_summaries = do
+  let group_size = spaceGroupSize space
       local_tid = SE.Id (spaceLocalId space) int32
       GroupStreamLambda block_size block_offset acc_params arr_params body = lam
 
@@ -852,7 +848,7 @@ allocInGroupStreamLambda maxchunk lam size space input_summaries = do
                        HM.insert block_offset IndexInfo $
                        scopeOfLParams $ acc_params' ++ arr_params')  $
            local (HM.insert block_size maxchunk) $
-           allocInKernelBody size space body
+           allocInKernelBody space body
   return $
     GroupStreamLambda block_size block_offset acc_params' arr_params' body'
 

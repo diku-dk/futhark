@@ -30,7 +30,7 @@ import Futhark.CodeGen.SetDefaultSpace
 import Futhark.Tools (partitionChunkedKernelLambdaParameters,
                       partitionChunkedFoldParameters)
 import Futhark.Util (splitAt3)
-import Futhark.Util.IntegralExp (quotRoundingUp, quot)
+import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralCond)
 
 type CallKernelGen = ImpGen.ImpM Imp.HostOp
 type InKernelGen = ImpGen.ImpM Imp.KernelOp
@@ -80,11 +80,11 @@ kernelCompiler dest GroupSize = do
 
 kernelCompiler
   (ImpGen.Destination dest)
-  (Kernel _ (num_groups, group_size, num_threads) _ space kernel_body) = do
+  (Kernel _ space _ kernel_body) = do
 
-  num_groups' <- ImpGen.subExpToDimSize num_groups
-  group_size' <- ImpGen.subExpToDimSize group_size
-  num_threads' <- ImpGen.subExpToDimSize num_threads
+  num_groups' <- ImpGen.subExpToDimSize $ spaceNumGroups space
+  group_size' <- ImpGen.subExpToDimSize $ spaceGroupSize space
+  num_threads' <- ImpGen.subExpToDimSize $ spaceNumThreads space
 
   let bound_in_kernel =
         HM.keys $ mconcat $
@@ -96,22 +96,22 @@ kernelCompiler
       group_id = spaceGroupId space
   wave_size <- newVName "wave_size"
   inner_group_size <- newVName "group_size"
+  thread_active <- newVName "thread_active"
 
   let (space_is, space_dims) = unzip $ spaceDimensions space
       space_dims' = map ImpGen.compileSubExp space_dims
       constants = KernelConstants global_tid local_tid group_id
                   (Imp.VarSize inner_group_size) num_threads'
-                  (Imp.VarSize wave_size) $ zip space_is space_dims'
+                  (Imp.VarSize wave_size) (zip space_is space_dims')
+                  (Imp.ScalarVar thread_active)
 
   kernel_body' <-
     makeAllMemoryGlobal $
     ImpGen.subImpM_ inKernelOperations $
     ImpGen.declaringPrimVar wave_size int32 $
     ImpGen.declaringPrimVar inner_group_size int32 $
-    ImpGen.declaringPrimVar global_tid int32 $
-    ImpGen.declaringPrimVar local_tid int32 $
-    ImpGen.declaringPrimVar group_id int32 $
-    ImpGen.declaringPrimVars (zip space_is $ repeat int32) $ do
+    ImpGen.declaringPrimVar thread_active Bool $
+    ImpGen.declaringScope (scopeOfKernelSpace space) $ do
 
     ImpGen.emit $
       Imp.Op (Imp.GetGlobalId global_tid 0) <>
@@ -120,9 +120,9 @@ kernelCompiler
       Imp.Op (Imp.GetLockstepWidth wave_size) <>
       Imp.Op (Imp.GetGroupId group_id 0)
 
-    let index_expressions = unflattenIndex space_dims' $ Imp.ScalarVar global_tid
-    forM_ (zip space_is index_expressions) $ \(i, x) ->
-      ImpGen.emit $ Imp.SetScalar i x
+    setSpaceIndices space
+
+    ImpGen.emit $ Imp.SetScalar thread_active (isActive $ spaceDimensions space)
 
     compileKernelBody dest constants kernel_body
 
@@ -946,6 +946,7 @@ data KernelConstants = KernelConstants
                        , kernelNumThreads :: Imp.DimSize
                        , kernelWaveSize :: Imp.DimSize
                        , kernelDimensions :: [(VName, Imp.Exp)]
+                       , kernelThreadActive :: Imp.Exp
                        }
 
 compileKernelBody :: [ImpGen.ValueDestination]
@@ -998,11 +999,8 @@ compileKernelStm constants (Thread pes threads body) = do
         protect (ThreadsPerGroup limit) body' =
           ImpGen.emit $ Imp.If (isActive limit) body' mempty
         protect ThreadsInSpace body' =
-          case kernelDimensions constants of
-            [] -> ImpGen.emit body'
-            (i,d):_ -> ImpGen.emit $
-              Imp.If (Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i) d)
-              body' mempty
+          ImpGen.emit $ Imp.If (kernelThreadActive constants)
+          body' mempty
 
 compileKernelStm _ (Combine pe cspace v) = do
   copy <- ImpGen.collect $
@@ -1169,11 +1167,8 @@ compileKernelResult constants dest (ThreadsReturn (ThreadsPerGroup limit) what) 
 compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   let is = map (ImpGen.varIndex . fst) $ kernelDimensions constants
   write_result <- ImpGen.collect $ ImpGen.copyDWIMDest dest is what []
-  case kernelDimensions constants of
-    [] -> ImpGen.emit write_result
-    (i,d):_ ->
-      ImpGen.emit $ Imp.If (Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i) d)
-      write_result mempty
+  ImpGen.emit $ Imp.If (kernelThreadActive constants)
+    write_result mempty
 
 compileKernelResult _ _ ConcatReturns{} =
   -- Already in the correct location by virtue of the ExplicitMemory
@@ -1187,3 +1182,36 @@ isActive limit = case actives of
   where (is, ws) = unzip limit
         actives = zipWith active is $ map ImpGen.compileSubExp ws
         active i = Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i)
+
+setSpaceIndices :: KernelSpace -> ImpGen.ImpM Imp.KernelOp ()
+setSpaceIndices space =
+  case spaceStructure space of
+    FlatSpace is_and_dims -> do
+      let (is, dims) = unzip is_and_dims
+          dims' = map ImpGen.compileSubExp dims
+          index_expressions = unflattenIndex dims' $ Imp.ScalarVar global_tid
+      forM_ (zip is index_expressions) $ \(i, x) ->
+        ImpGen.emit $ Imp.SetScalar i x
+    NestedSpace is_and_dims -> do
+      let (gtids, gdims, ltids, ldims) = unzip4 is_and_dims
+          gdims' = map ImpGen.compileSubExp gdims
+          ldims' = map ImpGen.compileSubExp ldims
+          (gtid_es, ltid_es) = unzip $ unflattenNestedIndex gdims' ldims' $
+                               Imp.ScalarVar global_tid
+      forM_ (zip gtids gtid_es) $ \(i,e) ->
+        ImpGen.emit $ Imp.SetScalar i e
+      forM_ (zip ltids ltid_es) $ \(i,e) ->
+        ImpGen.emit $ Imp.SetScalar i e
+  where global_tid = spaceGlobalId space
+
+unflattenNestedIndex :: IntegralCond num => [num] -> [num] -> num -> [(num,num)]
+unflattenNestedIndex global_dims group_dims global_id =
+  zip global_is local_is
+  where num_groups_dims = zipWith quotRoundingUp global_dims group_dims
+        group_size = product group_dims
+        group_id = global_id `Futhark.Util.IntegralExp.quot` group_size
+        local_id = global_id `Futhark.Util.IntegralExp.rem` group_size
+
+        group_is = unflattenIndex num_groups_dims group_id
+        local_is = unflattenIndex group_dims local_id
+        global_is = zipWith (+) local_is $ zipWith (*) group_is group_dims
