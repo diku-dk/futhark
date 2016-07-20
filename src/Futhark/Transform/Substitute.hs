@@ -44,6 +44,13 @@ instance (Substitute a, Substitute b, Substitute c) => Substitute (a,b,c) where
      substituteNames substs y,
      substituteNames substs z)
 
+instance (Substitute a, Substitute b, Substitute c, Substitute d) => Substitute (a,b,c,d) where
+  substituteNames substs (x,y,z,u) =
+    (substituteNames substs x,
+     substituteNames substs y,
+     substituteNames substs z,
+     substituteNames substs u)
+
 instance Substitute a => Substitute (Maybe a) where
   substituteNames substs = fmap $ substituteNames substs
 

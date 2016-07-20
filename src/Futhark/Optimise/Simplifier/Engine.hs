@@ -52,6 +52,8 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyExtLambda
        , simplifyParam
        , bindLParams
+       , bindArrayLParams
+       , bindLoopVar
        , bindLoopVars
        , enterLoop
        , consumedName

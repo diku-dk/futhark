@@ -7,11 +7,18 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Futhark.Representation.Kernels.Kernel
        ( Kernel(..)
-       , KernelBody(..)
+       , KernelBody
+       , NestedKernelBody
+       , GenKernelBody(..)
        , KernelStm(..)
-       , ThreadSpace
+       , KernelSpace(..)
+       , spaceDimensions
+       , SpaceStructure(..)
+       , scopeOfKernelSpace
+       , GroupStreamLambda(..)
        , WhichThreads(..)
        , KernelResult(..)
 
@@ -27,7 +34,6 @@ module Futhark.Representation.Kernels.Kernel
        )
        where
 
-import Control.Arrow ((&&&))
 import Control.Applicative
 import Control.Monad.Writer
 import Control.Monad.Identity
@@ -75,17 +81,48 @@ data Kernel lore =
   | GroupSize
 
   | Kernel Certificates
-    (SubExp,SubExp,SubExp) -- #workgroups, group size, #threads
+    KernelSpace
     [Type]
-    VName -- thread ID (binding position)
     (KernelBody lore)
 
     deriving (Eq, Show, Ord)
 
-data KernelBody lore = KernelBody { kernelBodyStms :: [KernelStm lore]
-                                  , kernelBodyResult :: [KernelResult]
-                                  }
-                deriving (Eq, Show, Ord)
+data KernelSpace = KernelSpace { spaceGlobalId :: VName
+                               , spaceLocalId :: VName
+                               , spaceGroupId :: VName
+                               , spaceNumThreads :: SubExp
+                               , spaceNumGroups :: SubExp
+                               , spaceGroupSize :: SubExp -- flat group size
+                               , spaceStructure :: SpaceStructure
+                               }
+                 deriving (Eq, Show, Ord)
+
+data SpaceStructure = FlatSpace
+                      [(VName, SubExp)] -- gtids and dim sizes
+                    | NestedSpace
+                      [(VName, -- gtid
+                        SubExp, -- global dim size
+                        VName, -- ltid
+                        SubExp -- local dim sizes
+                       )]
+                    deriving (Eq, Show, Ord)
+
+-- | Global thread IDs and their upper bound.
+spaceDimensions :: KernelSpace -> [(VName, SubExp)]
+spaceDimensions = structureDimensions . spaceStructure
+  where structureDimensions (FlatSpace dims) = dims
+        structureDimensions (NestedSpace dims) =
+          let (gtids, gdim_sizes, _, _) = unzip4 dims
+          in zip gtids gdim_sizes
+
+type KernelBody = GenKernelBody KernelResult
+type NestedKernelBody = GenKernelBody SubExp
+
+-- | A kernel body parametrised over its result.
+data GenKernelBody res lore = KernelBody { kernelBodyStms :: [KernelStm lore]
+                                         , kernelBodyResult :: [res]
+                                         }
+                            deriving (Eq, Show, Ord)
 
 data KernelResult = ThreadsReturn WhichThreads SubExp
                   | ConcatReturns
@@ -95,18 +132,20 @@ data KernelResult = ThreadsReturn WhichThreads SubExp
                     VName -- Chunk by this thread.
                   deriving (Eq, Show, Ord)
 
-type ThreadSpace = [(VName,SubExp)]
-
 data WhichThreads = AllThreads
                   | OneThreadPerGroup SubExp -- Which one.
-                  | ThreadsInSpace SubExp ThreadSpace -- Threads with a global ID less than this.
+                  | ThreadsPerGroup [(VName,SubExp)] -- All threads before this one.
+                  | ThreadsInSpace
                   deriving (Eq, Show, Ord)
 
 data KernelStm lore = SplitArray (VName, [PatElem (LetAttr lore)]) StreamOrd SubExp SubExp [VName]
-                    | SplitIndexSpace [(VName, SubExp)]
                     | Thread [PatElem (LetAttr lore)] WhichThreads (Body lore)
-                    | Combine (PatElem (LetAttr lore)) SubExp
-                    | GroupReduce [PatElem (LetAttr lore)] SubExp (Lambda lore) [(SubExp,VName)]
+                    | Combine (PatElem (LetAttr lore)) [(VName,SubExp)] SubExp
+                    | GroupReduce [PatElem (LetAttr lore)] SubExp
+                      (Lambda lore) [(SubExp,VName)]
+                    | GroupStream [PatElem (LetAttr lore)]
+                      SubExp SubExp
+                      (GroupStreamLambda lore) [SubExp] [VName]
 
 deriving instance Annotations lore => Eq (KernelStm lore)
 deriving instance Annotations lore => Show (KernelStm lore)
@@ -114,6 +153,18 @@ deriving instance Annotations lore => Ord (KernelStm lore)
 
 boundByKernelStm :: KernelStm lore -> Names
 boundByKernelStm = HS.fromList . HM.keys . scopeOf
+
+data GroupStreamLambda lore = GroupStreamLambda
+  { groupStreamChunkSize :: VName
+  , groupStreamChunkOffset :: VName
+  , groupStreamAccParams :: [LParam lore]
+  , groupStreamArrParams :: [LParam lore]
+  , groupStreamLambdaBody :: NestedKernelBody lore
+  }
+
+deriving instance Annotations lore => Eq (GroupStreamLambda lore)
+deriving instance Annotations lore => Show (GroupStreamLambda lore)
+deriving instance Annotations lore => Ord (GroupStreamLambda lore)
 
 data KernelSize = KernelSize { kernelWorkgroups :: SubExp
                              , kernelWorkgroupSize :: SubExp
@@ -169,15 +220,26 @@ mapKernelM tv (WriteKernel cs len lam ivs as) =
   mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
-mapKernelM tv (Kernel cs (num_groups, group_size, num_threads) ts thread_id kernel_body) =
+mapKernelM tv (Kernel cs space ts kernel_body) =
   Kernel <$> mapOnKernelCertificates tv cs <*>
-  (do num_groups' <- mapOnKernelSubExp tv num_groups
-      group_size' <- mapOnKernelSubExp tv group_size
-      num_threads' <- mapOnKernelSubExp tv num_threads
-      return (num_groups', group_size', num_threads')) <*>
+  mapOnKernelSpace space <*>
   mapM (mapOnKernelType tv) ts <*>
-  pure thread_id <*>
   mapOnKernelKernelBody tv kernel_body
+  where mapOnKernelSpace (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+          KernelSpace gtid ltid gid -- all in binding position
+          <$> mapOnKernelSubExp tv num_threads
+          <*> mapOnKernelSubExp tv num_groups
+          <*> mapOnKernelSubExp tv group_size
+          <*> mapOnKernelStructure structure
+        mapOnKernelStructure (FlatSpace dims) =
+          FlatSpace <$> (zip gtids <$> mapM (mapOnKernelSubExp tv) gdim_sizes)
+          where (gtids, gdim_sizes) = unzip dims
+        mapOnKernelStructure (NestedSpace dims) =
+            NestedSpace <$> (zip4 gtids
+                             <$> mapM (mapOnKernelSubExp tv) gdim_sizes
+                             <*> pure ltids
+                             <*> mapM (mapOnKernelSubExp tv) ldim_sizes)
+          where (gtids, gdim_sizes, ltids, ldim_sizes) = unzip4 dims
 
 mapOnKernelType :: (Monad m, Applicative m, Functor m) =>
                    KernelMapper flore tlore m -> Type -> m Type
@@ -185,6 +247,7 @@ mapOnKernelType _tv (Prim pt) = pure $ Prim pt
 mapOnKernelType tv (Array pt shape u) = Array pt <$> f shape <*> pure u
   where f (Shape dims) = Shape <$> mapM (mapOnKernelSubExp tv) dims
 mapOnKernelType _tv (Mem se s) = pure $ Mem se s
+
 
 mapOnKernelSize :: (Monad m, Applicative m) =>
                    KernelMapper flore tlore m -> KernelSize -> m KernelSize
@@ -229,9 +292,10 @@ instance FreeIn KernelResult where
 instance FreeIn WhichThreads where
   freeIn AllThreads = mempty
   freeIn (OneThreadPerGroup which) = freeIn which
-  freeIn (ThreadsInSpace w space) = freeIn w <> freeIn space
+  freeIn (ThreadsPerGroup limit) = freeIn limit
+  freeIn ThreadsInSpace = mempty
 
-instance Attributes lore => FreeIn (KernelBody lore) where
+instance (Attributes lore, FreeIn res) => FreeIn (GenKernelBody res lore) where
   freeIn (KernelBody stms res) =
     (free_in_stms <> free_in_res) `HS.difference` bound_in_stms
     where free_in_stms = mconcat $ map freeIn stms
@@ -241,16 +305,23 @@ instance Attributes lore => FreeIn (KernelBody lore) where
 instance Attributes lore => FreeIn (KernelStm lore) where
   freeIn (SplitArray (n,chunks) _ w elems_per_thread vs) =
     freeIn n <> freeIn chunks <> freeIn w <> freeIn elems_per_thread <> freeIn vs
-  freeIn (SplitIndexSpace ispace) =
-    freeIn $ map snd ispace
   freeIn (Thread pes which body) =
     freeIn pes <> freeIn which <> freeInBody body
-  freeIn (Combine pe v) =
-    freeIn pe <> freeIn v
+  freeIn (Combine pe cspace v) =
+    freeIn pe <> freeIn cspace <> freeIn v
   freeIn (GroupReduce pes w lam input) =
     freeIn pes <> freeIn w <> freeInLambda lam <> freeIn input
+  freeIn (GroupStream pes w  maxchunk lam accs arrs) =
+    freeIn pes <> freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
 
-instance Attributes lore => Substitute (KernelBody lore) where
+instance Attributes lore => FreeIn (GroupStreamLambda lore) where
+  freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+    freeIn body `HS.difference` bound_here
+    where bound_here = HS.fromList $
+                       chunk_offset : chunk_size :
+                       map paramName (acc_params ++ arr_params)
+
+instance (Attributes lore, Substitute res) => Substitute (GenKernelBody res lore) where
   substituteNames subst (KernelBody stms res) =
     KernelBody (substituteNames subst stms) $ substituteNames subst res
 
@@ -269,8 +340,10 @@ instance Substitute WhichThreads where
     AllThreads
   substituteNames subst (OneThreadPerGroup which) =
     OneThreadPerGroup $ substituteNames subst which
-  substituteNames subst (ThreadsInSpace w space) =
-    ThreadsInSpace (substituteNames subst w) (substituteNames subst space)
+  substituteNames subst (ThreadsPerGroup limit) =
+    ThreadsPerGroup $ substituteNames subst limit
+  substituteNames _ ThreadsInSpace =
+    ThreadsInSpace
 
 instance Attributes lore => Substitute (KernelStm lore) where
   substituteNames subst (SplitArray (n,arrs) o w elems_per_thread vs) =
@@ -278,23 +351,57 @@ instance Attributes lore => Substitute (KernelStm lore) where
     (substituteNames subst w)
     (substituteNames subst elems_per_thread)
     (substituteNames subst vs)
-  substituteNames subst (SplitIndexSpace ispace) =
-    SplitIndexSpace $ zip (map fst ispace) $
-    substituteNames subst $ map snd ispace
   substituteNames subst (Thread pes which body) =
     Thread
     (substituteNames subst pes)
     (substituteNames subst which)
     (substituteNames subst body)
-  substituteNames subst (Combine pe v) =
-    Combine (substituteNames subst pe) (substituteNames subst v)
+  substituteNames subst (Combine pe cspace v) =
+    Combine (substituteNames subst pe)
+    (substituteNames subst cspace) (substituteNames subst v)
   substituteNames subst (GroupReduce pes w lam input) =
     GroupReduce (substituteNames subst pes) (substituteNames subst w)
     (substituteNames subst lam) (substituteNames subst input)
+  substituteNames subst (GroupStream pes w maxchunk lam accs arrs) =
+    GroupStream (substituteNames subst pes)
+    (substituteNames subst w) (substituteNames subst maxchunk)
+    (substituteNames subst lam)
+    (substituteNames subst accs) (substituteNames subst arrs)
+
+instance Attributes lore => Substitute (GroupStreamLambda lore) where
+  substituteNames
+    subst (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+    GroupStreamLambda
+    (substituteNames subst chunk_size)
+    (substituteNames subst chunk_offset)
+    (substituteNames subst acc_params)
+    (substituteNames subst arr_params)
+    (substituteNames subst body)
+
+instance Substitute KernelSpace where
+  substituteNames subst (KernelSpace gtid ltid gid num_threads num_groups group_size structure) =
+    KernelSpace (substituteNames subst gtid)
+    (substituteNames subst ltid)
+    (substituteNames subst gid)
+    (substituteNames subst num_threads)
+    (substituteNames subst num_groups)
+    (substituteNames subst group_size)
+    (substituteNames subst structure)
+
+instance Substitute SpaceStructure where
+  substituteNames subst (FlatSpace dims) =
+    FlatSpace (map (substituteNames subst) dims)
+  substituteNames subst (NestedSpace dims) =
+    NestedSpace (map (substituteNames subst) dims)
 
 instance Attributes lore => Substitute (Kernel lore) where
-  substituteNames subst =
-    runIdentity . mapKernelM substitute
+  substituteNames subst (Kernel cs space ts kbody) =
+    Kernel
+    (substituteNames subst cs)
+    (substituteNames subst space)
+    (substituteNames subst ts)
+    (substituteNames subst kbody)
+  substituteNames subst k = runIdentity $ mapKernelM substitute k
     where substitute =
             KernelMapper { mapOnKernelSubExp = return . substituteNames subst
                          , mapOnKernelLambda = return . substituteNames subst
@@ -305,7 +412,7 @@ instance Attributes lore => Substitute (Kernel lore) where
                          , mapOnKernelKernelBody = return . substituteNames subst
                          }
 
-instance Attributes lore => Rename (KernelBody lore) where
+instance (Attributes lore, Rename res) => Rename (GenKernelBody res lore) where
   rename (KernelBody [] res) =
     KernelBody [] <$> rename res
   rename (KernelBody (stm:stms) res) =
@@ -314,21 +421,33 @@ instance Attributes lore => Rename (KernelBody lore) where
       KernelBody stms' res' <- rename $ KernelBody stms res
       return $ KernelBody (stm':stms') res'
 
-instance Renameable lore => Rename (KernelStm lore) where
+instance (Attributes lore, Renameable lore) => Rename (KernelStm lore) where
   rename (SplitArray (n,chunks) o w elems_per_thread vs) =
     SplitArray <$> ((,) <$> rename n <*> rename chunks)
     <*> pure o
     <*> rename w
     <*> rename elems_per_thread
     <*> rename vs
-  rename (SplitIndexSpace ispace) =
-    SplitIndexSpace <$> rename ispace
   rename (GroupReduce pes w lam input) =
     GroupReduce <$> rename pes <*> rename w <*> rename lam <*> rename input
-  rename (Combine pe v) =
-    Combine <$> rename pe <*> rename v
+  rename (Combine pe cspace v) =
+    Combine <$> rename pe <*> rename cspace <*> rename v
   rename (Thread pes which body) =
     Thread <$> rename pes <*> rename which <*> rename body
+  rename (GroupStream pes w maxchunk lam accs arrs) =
+    GroupStream <$> rename pes <*> rename w <*> rename maxchunk <*>
+    rename lam <*> rename accs <*> rename arrs
+
+instance (Attributes lore, Renameable lore) => Rename (GroupStreamLambda lore) where
+  rename (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+    bindingForRename (chunk_size : chunk_offset :
+                       map paramName (acc_params++arr_params)) $
+    GroupStreamLambda <$>
+    rename chunk_size <*>
+    rename chunk_offset <*>
+    rename acc_params <*>
+    rename arr_params <*>
+    rename body
 
 instance Rename KernelResult where
   rename = substituteRename
@@ -336,19 +455,33 @@ instance Rename KernelResult where
 instance Rename WhichThreads where
   rename = substituteRename
 
+scopeOfKernelSpace :: KernelSpace -> Scope lore
+scopeOfKernelSpace (KernelSpace gtid ltid gid _ _ _ structure) =
+  HM.fromList $ zip ([gtid, ltid, gid] ++ structure') $ repeat IndexInfo
+  where structure' = case structure of
+                       FlatSpace dims -> map fst dims
+                       NestedSpace dims ->
+                         let (gtids, _, ltids, _) = unzip4 dims
+                         in gtids ++ ltids
+
+instance LParamAttr lore1 ~ LParamAttr lore2 =>
+         Scoped lore1 (GroupStreamLambda lore2) where
+  scopeOf (GroupStreamLambda chunk_size chunk_offset acc_params arr_params _) =
+    HM.insert chunk_size IndexInfo $
+    HM.insert chunk_offset IndexInfo $
+    scopeOfLParams (acc_params ++ arr_params)
+
 instance Scoped lore (KernelStm lore) where
   scopeOf (SplitArray (size, chunks) _ _ _ _) =
-    HM.fromList $
-    (size, IndexInfo) : map (patElemName &&& LetInfo . patElemAttr) chunks
-  scopeOf (SplitIndexSpace ispace) =
-    HM.fromList $ zip (map fst ispace) $ repeat IndexInfo
+    mconcat (map scopeOf chunks) <>
+    HM.singleton size IndexInfo
   scopeOf (Thread pes _ _) =
-    HM.fromList $ map entry pes
-    where entry pe = (patElemName pe, LetInfo $ patElemAttr pe)
-  scopeOf (Combine pe _) = scopeOf pe
+    mconcat $ map scopeOf pes
+  scopeOf (Combine pe _ _) = scopeOf pe
   scopeOf (GroupReduce pes _ _ _) =
-    HM.fromList $ map entry pes
-    where entry pe = (patElemName pe, LetInfo $ patElemAttr pe)
+    mconcat $ map scopeOf pes
+  scopeOf (GroupStream pes _ _ _ _ _) =
+    mconcat $ map scopeOf pes
 
 instance Attributes lore => Rename (Kernel lore) where
   rename = mapKernelM renamer
@@ -365,14 +498,19 @@ kernelType (WriteKernel _ _ lam _ input) =
   where lam_ts = lambdaReturnType lam
         n = length lam_ts
         ws = map fst input
-kernelType (Kernel _ (num_groups, _, num_threads) ts _ body) =
+kernelType (Kernel _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
-  where resultShape t (ThreadsReturn AllThreads _) =
+  where dims = map snd $ spaceDimensions space
+        num_groups = spaceNumGroups space
+        num_threads = spaceNumThreads space
+        resultShape t (ThreadsReturn AllThreads _) =
           t `arrayOfRow` num_threads
         resultShape t (ThreadsReturn OneThreadPerGroup{} _) =
           t `arrayOfRow` num_groups
-        resultShape t (ThreadsReturn (ThreadsInSpace _ space) _) =
-          foldr (flip arrayOfRow . snd) t space
+        resultShape t (ThreadsReturn (ThreadsPerGroup limit) _) =
+          t `arrayOfShape` Shape (map snd limit) `arrayOfRow` num_groups
+        resultShape t (ThreadsReturn ThreadsInSpace _) =
+          foldr (flip arrayOfRow) t dims
         resultShape t (ConcatReturns _ w _ _) =
           t `arrayOfRow` w
 
@@ -393,7 +531,7 @@ instance TypedOp (Kernel lore) where
 instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases = map (const mempty) . kernelType
 
-  consumedInOp (Kernel _ _ _ _ kbody) =
+  consumedInOp (Kernel _ _ _ kbody) =
     consumedInKernelBody kbody
   consumedInOp _ = mempty
 
@@ -406,42 +544,56 @@ instance (Attributes lore,
     where alias = KernelMapper return (return . Alias.analyseLambda)
                   (return . Alias.analyseBody) return return return
                   (return . aliasAnalyseKernelBody)
+          aliasAnalyseKernelBody :: GenKernelBody res lore
+                                 -> GenKernelBody res (Aliases lore)
           aliasAnalyseKernelBody (KernelBody stms res) =
             KernelBody (map analyseStm stms) res
           analyseStm (SplitArray (size, chunks) o w elems_per_thread arrs) =
             SplitArray (size, chunks') o w elems_per_thread arrs
             where chunks' = [ fmap (Names' $ HS.singleton arr,) chunk
                             | (chunk, arr) <- zip chunks arrs ]
-          analyseStm (SplitIndexSpace ispace) =
-            SplitIndexSpace ispace
           analyseStm (Thread pes which body) =
             Thread (zipWith annot pes $ bodyAliases body') which body'
             where body' = Alias.analyseBody body
                   annot pe als = (Names' als,) <$> pe
-          analyseStm (Combine pe v) =
-            Combine ((mempty,) <$> pe) v
+          analyseStm (Combine pe cspace v) =
+            Combine ((mempty,) <$> pe) cspace v
           analyseStm (GroupReduce pes w lam input) =
             GroupReduce pes' w lam' input
             where pes' = map (fmap (mempty,)) pes
                   lam' = Alias.analyseLambda lam
+          analyseStm (GroupStream pes w maxchunk lam accs arrs) =
+            GroupStream pes' w maxchunk lam' accs arrs
+            where pes' = map (fmap (mempty,)) pes
+                  lam' = analyseGroupStreamLambda lam
+
+          analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+            GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
+            aliasAnalyseKernelBody body
 
   removeOpAliases = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaAliases)
                    (return . removeBodyAliases) return return return
                    (return . removeKernelBodyAliases)
+          removeKernelBodyAliases :: GenKernelBody res (Aliases lore)
+                                  -> GenKernelBody res lore
           removeKernelBodyAliases (KernelBody stms res) =
             KernelBody (map removeStmAliases stms) res
           removeStmAliases (SplitArray (size, chunks) o w elems_per_thread arrs) =
             SplitArray (size, chunks') o w elems_per_thread arrs
             where chunks' = map (fmap snd) chunks
-          removeStmAliases (SplitIndexSpace ispace) =
-            SplitIndexSpace ispace
           removeStmAliases (Thread pes which body) =
             Thread (map (fmap snd) pes) which (removeBodyAliases body)
-          removeStmAliases (Combine pe v) =
-            Combine (snd <$> pe) v
+          removeStmAliases (Combine pe cspace v) =
+            Combine (snd <$> pe) cspace v
           removeStmAliases (GroupReduce pes w lam input) =
             GroupReduce (map (fmap snd) pes) w (removeLambdaAliases lam) input
+          removeStmAliases (GroupStream pes w maxchunk lam accs arrs) =
+            GroupStream (map (fmap snd) pes) w maxchunk (removeGroupStreamLambdaAliases lam) accs arrs
+
+          removeGroupStreamLambdaAliases (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+            GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
+            removeKernelBodyAliases body
 
 instance Attributes lore => IsOp (Kernel lore) where
   safeOp _ = False
@@ -471,31 +623,37 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                    (return . removeBodyWisdom)
                    return return return
                    (return . removeKernelBodyWisdom)
+          removeKernelBodyWisdom :: GenKernelBody res (Wise lore)
+                                 -> GenKernelBody res lore
           removeKernelBodyWisdom (KernelBody stms res) =
             KernelBody (map removeKernelStatementWisdom stms) res
           removeKernelStatementWisdom (Thread pes which body) =
             Thread (map removePatElemWisdom pes) which (removeBodyWisdom body)
-          removeKernelStatementWisdom (Combine pe v) =
-            Combine (removePatElemWisdom pe) v
+          removeKernelStatementWisdom (Combine pe cspace v) =
+            Combine (removePatElemWisdom pe) cspace v
           removeKernelStatementWisdom (SplitArray (size,chunks) o w elems_per_thread arrs) =
             SplitArray (size, map removePatElemWisdom chunks) o w elems_per_thread arrs
-          removeKernelStatementWisdom (SplitIndexSpace ispace) =
-            SplitIndexSpace ispace
           removeKernelStatementWisdom (GroupReduce pes w lam input) =
             GroupReduce (map removePatElemWisdom pes) w (removeLambdaWisdom lam) input
+          removeKernelStatementWisdom (GroupStream pes w maxchunk lam accs arrs) =
+            GroupStream (map removePatElemWisdom pes) w maxchunk (removeGroupStreamLambdaWisdom lam) accs arrs
+
+          removeGroupStreamLambdaWisdom (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+            GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
+            removeKernelBodyWisdom body
 
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
   usageInOp (WriteKernel _ _ _ _ as) =
     mconcat $ map (UT.consumedUsage . snd) as
-  usageInOp (Kernel _ _ _ _ kbody) =
+  usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
   usageInOp GroupSize = mempty
 
 consumedInKernelBody :: (Attributes lore, Aliased lore) =>
-                        KernelBody lore -> Names
+                        GenKernelBody res lore -> Names
 consumedInKernelBody (KernelBody stms _) =
   -- We need to figure out what is consumed in stms.  We do this by
   -- moving backwards through the stms, using the alias information to
@@ -520,9 +678,13 @@ consumedByKernelStm :: (Attributes lore, Aliased lore) =>
 consumedByKernelStm (Thread _ _ body) = consumedInBody body
 consumedByKernelStm Combine{} = mempty
 consumedByKernelStm SplitArray{} = mempty
-consumedByKernelStm SplitIndexSpace{} = mempty
 consumedByKernelStm (GroupReduce _ _ _ input) =
   HS.fromList $ map snd input
+consumedByKernelStm (GroupStream _ _ _ lam _ arrs) =
+  HS.map consumedArray $ consumedInKernelBody body
+  where GroupStreamLambda _ _ _ arr_params body = lam
+        consumedArray v = fromMaybe v $ lookup v params_to_arrs
+        params_to_arrs = zip (map paramName arr_params) arrs
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
@@ -607,13 +769,30 @@ typeCheckKernel (WriteKernel cs w lam _ivs as) = do
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 
-typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (KernelBody stms res)) = do
+typeCheckKernel (Kernel cs space kts kbody) = do
   mapM_ (TC.requireI [Prim Cert]) cs
-  mapM_ (TC.require [Prim int32]) [groups, group_size, num_threads]
-  mapM_ TC.checkType ts
-  TC.binding (HM.singleton thread_id IndexInfo) $ checkKernelStms stms $
-    zipWithM_ checkKernelResult res ts
-  where checkKernelResult (ThreadsReturn which what) t = do
+  checkSpace space
+  mapM_ TC.checkType kts
+  mapM_ (TC.require [Prim int32] . snd) $ spaceDimensions space
+
+  TC.binding (scopeOfKernelSpace space) $
+    checkKernelBody kts kbody
+  where checkSpace (KernelSpace _ _ _ num_threads num_groups group_size structure) = do
+          mapM_ (TC.require [Prim int32]) [num_threads,num_groups,group_size]
+          case structure of
+            FlatSpace dims ->
+              mapM_ (TC.require [Prim int32] . snd) dims
+            NestedSpace dims ->
+              let (_, gdim_sizes, _, ldim_sizes) = unzip4 dims
+              in mapM_ (TC.require [Prim int32]) $ gdim_sizes ++ ldim_sizes
+
+        checkKernelBody ts (KernelBody stms res) =
+          checkKernelStms stms $ zipWithM_ checkKernelResult res ts
+
+        checkNestedKernelBody ts (KernelBody stms res) =
+          checkKernelStms stms $ zipWithM_ (TC.require . pure) ts res
+
+        checkKernelResult (ThreadsReturn which what) t = do
           checkWhich which
           TC.require [t] what
         checkKernelResult (ConcatReturns _ w per_thread_elems v) t = do
@@ -627,9 +806,11 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (Kerne
           return ()
         checkWhich (OneThreadPerGroup which) =
           TC.require [Prim int32] which
-        checkWhich (ThreadsInSpace w space) = do
-          mapM_ (TC.require [Prim int32]) $ w : map snd space
-          mapM_ (TC.requireI [Prim int32] . fst) space
+        checkWhich (ThreadsPerGroup limit) = do
+          mapM_ (TC.requireI [Prim int32] . fst) limit
+          mapM_ (TC.require [Prim int32] . snd) limit
+        checkWhich ThreadsInSpace =
+          return ()
 
         checkKernelStms [] m = m
         checkKernelStms (stm:stms') m = do
@@ -645,6 +826,7 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (Kerne
             TC.bad $ TC.TypeError $ "Kernel thread statement returns type " ++
             prettyTuple body_ts ++ ", but pattern has type " ++
             prettyTuple pes_ts
+
         checkKernelStm (SplitArray (size, chunks) _ w elems_per_thread arrs) = do
           TC.require [Prim int32] elems_per_thread
           TC.require [Prim int32] w
@@ -653,13 +835,17 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (Kerne
             let chunk_t = arrt `arrayOfRow` Var size
             unless (chunk_t == patElemType chunk) $
               TC.bad $ TC.TypeError "Invalid type annotation for splitArray chunk."
-        checkKernelStm (SplitIndexSpace ispace) =
-          mapM_ (TC.require [Prim int32] . snd) ispace
-        checkKernelStm (Combine pe arr) = do
-          TC.require [rowType $ patElemType pe] arr
-          unless (arraySize 0 (patElemType pe) == group_size) $
-            TC.bad $ TC.TypeError $ "Outer size of " ++ pretty pe
-            ++ " must be " ++ pretty group_size
+
+        checkKernelStm (Combine pe cspace v) = do
+          mapM_ (TC.requireI [Prim int32]) is
+          mapM_ (TC.require [Prim int32]) ws
+          v_t <- subExpType v
+          let res_t = v_t `arrayOfShape` Shape ws
+          unless (patElemType pe == res_t) $
+            TC.bad $ TC.TypeError $ "Pattern element " ++ pretty pe
+            ++ " must have type " ++ pretty res_t
+            where (is, ws) = unzip cspace
+
         checkKernelStm (GroupReduce pes w lam input) = do
           TC.require [Prim int32] w
           let (nes, arrs) = unzip input
@@ -670,7 +856,41 @@ typeCheckKernel (Kernel cs (groups, group_size, num_threads) ts thread_id (Kerne
             map asArg [Prim int32, Prim int32] ++
             map TC.noArgAliases (neargs ++ arrargs)
           unless (lambdaReturnType lam == map patElemType pes) $
-            TC.bad $ TC.TypeError "Invalid type annotation for kernel reduction."
+            TC.bad $ TC.TypeError
+            "Invalid type annotation for kernel reduction."
+
+        checkKernelStm (GroupStream pes w maxchunk lam accs arrs) = do
+          TC.require [Prim int32] w
+          TC.require [Prim int32] maxchunk
+
+          acc_args <- mapM (fmap TC.noArgAliases . TC.checkArg) accs
+          arr_args <- TC.checkSOACArrayArgs w arrs
+
+          checkGroupStreamLambda lam acc_args arr_args
+          unless (map TC.argType acc_args == map patElemType pes) $
+            TC.bad $ TC.TypeError
+            "Invalid type annotations for kernel group stream pattern."
+
+        checkGroupStreamLambda lam@(GroupStreamLambda block_size _ acc_params arr_params body) acc_args arr_args = do
+          unless (map TC.argType acc_args == map paramType acc_params) $
+            TC.bad $ TC.TypeError
+            "checkGroupStreamLambda: wrong accumulator arguments."
+
+          let arr_block_ts =
+                map ((`arrayOfRow` Var block_size) . TC.argType) arr_args
+          unless (map paramType arr_params == arr_block_ts) $
+            TC.bad $ TC.TypeError
+            "checkGroupStreamLambda: wrong array arguments."
+
+          let acc_consumable =
+                zip (map paramName acc_params) (map TC.argAliases acc_args)
+              arr_consumable =
+                zip (map paramName arr_params) (map TC.argAliases arr_args)
+              consumable = acc_consumable ++ arr_consumable
+          TC.binding (scopeOf lam) $ TC.consumeOnlyParams consumable $ do
+            TC.checkLambdaParams acc_params
+            TC.checkLambdaParams arr_params
+            checkNestedKernelBody (map TC.argType acc_args) body
 
 checkKernelCrud :: TC.Checkable lore =>
                    [VName] -> SubExp -> KernelSize -> TC.TypeM lore ()
@@ -695,19 +915,23 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
   opMetrics (WriteKernel _cs _len lam _ivs _as) =
     inside "WriteKernel" $ lambdaMetrics lam
-  opMetrics (Kernel _ _ _ _ kbody) =
+  opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
-    where kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
+    where kernelBodyMetrics :: GenKernelBody res lore -> MetricsM ()
+          kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
           kernelStmMetrics SplitArray{} =
             seen "SplitArray"
-          kernelStmMetrics SplitIndexSpace{} =
-            seen "SplitIndexSpace"
           kernelStmMetrics (Thread _ _ body) =
             inside "Thread" $ bodyMetrics body
           kernelStmMetrics Combine{} =
             seen "Combine"
           kernelStmMetrics (GroupReduce _ _ lam _) =
             inside "GroupReduce" $ lambdaMetrics lam
+          kernelStmMetrics (GroupStream _ _ _ lam _ _) =
+            inside "GroupStream" $ groupStreamLambdaMetrics lam
+
+          groupStreamLambdaMetrics =
+            kernelBodyMetrics . groupStreamLambdaBody
   opMetrics NumGroups = seen "NumGroups"
   opMetrics GroupSize = seen "GroupSize"
 
@@ -728,21 +952,42 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
 
-  ppr (Kernel cs (num_groups,group_size,num_threads) ts thread_id body) =
+  ppr (Kernel cs space ts body) =
     ppCertificates' cs <>
     text "kernel" <>
-    parens (commasep [text "num_groups:" <+> ppr num_groups,
-                      text "group_size:" <+> ppr group_size,
-                      text "num_threads:" <+> ppr num_threads,
-                      text "thread id ->" <+> ppr thread_id]) <+>
+    PP.align (ppr space) <+>
     PP.colon <+> ppTuple' ts <+> text "{" </>
     PP.indent 2 (ppr body) </>
     text "}"
+
+instance Pretty KernelSpace where
+  ppr (KernelSpace f_gtid f_ltid gid num_threads num_groups group_size structure) =
+    parens (commasep [text "num groups:" <+> ppr num_groups,
+                      text "group size:" <+> ppr group_size,
+                      text "num threads:" <+> ppr num_threads,
+                      text "global TID ->" <+> ppr f_gtid,
+                      text "local TID ->" <+> ppr f_ltid,
+                      text "group ID ->" <+> ppr gid]) </> structure'
+    where structure' =
+            case structure of
+              FlatSpace space ->
+                parens (commasep $ do
+                           (i,d) <- space
+                           return $ ppr i <+> "<" <+> ppr d)
+              NestedSpace space ->
+                parens (commasep $ do
+                           (gtid,gd,ltid,ld) <- space
+                           return $ ppr (gtid,ltid) <+> "<" <+> ppr (gd,ld))
 
 instance PrettyLore lore => Pretty (KernelBody lore) where
   ppr (KernelBody stms res) =
     PP.stack (map ppr stms) </>
     text "return" <+> PP.braces (PP.commasep $ map ppr res)
+
+instance PrettyLore lore => Pretty (NestedKernelBody lore) where
+  ppr (KernelBody stms res) =
+    PP.stack (map ppr stms) </>
+    PP.braces (PP.commasep $ map ppr res)
 
 instance PrettyLore lore => Pretty (KernelStm lore) where
   ppr (SplitArray (n,chunks) o w elems_per_thread arrs) =
@@ -751,9 +996,6 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
     text ("splitArray" <> suff) <> parens (commasep $ ppr w : ppr elems_per_thread : map ppr arrs)
     where suff = case o of InOrder -> ""
                            Disorder -> "Unordered"
-  ppr (SplitIndexSpace ispace) =
-    text "let" <+> parens (commasep $ map (ppr . fst) ispace) <+> PP.equals <+>
-    text "splitIndexSpace" <> PP.apply (map (ppr . snd) ispace)
   ppr (Thread pes threads body) =
     PP.annot (mapMaybe ppAnnot pes) $
     text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals <+>
@@ -763,12 +1005,13 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
     where threads' = case threads of
                        AllThreads -> mempty
                        OneThreadPerGroup which -> mempty <+> ppr which
-                       ThreadsInSpace w space -> text " <" <+> ppr w <>
-                                                 PP.apply (map ppr space)
-  ppr (Combine pe what) =
+                       ThreadsPerGroup limit -> text " <" <+> ppr limit
+                       ThreadsInSpace -> text " active"
+  ppr (Combine pe cspace what) =
     PP.annot (mapMaybe ppAnnot [pe]) $
     text "let" <+> PP.braces (ppr pe) <+> PP.equals <+>
-    text "combine" <> PP.parens (ppr what)
+    text "combine" <> PP.apply (map f cspace ++ [ppr what])
+    where f (i, w) = ppr i <+> text "<" <+> ppr w
   ppr (GroupReduce pes w lam input) =
     PP.annot (mapMaybe ppAnnot pes) $
     text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals </>
@@ -777,22 +1020,42 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
                                                      PP.braces (commasep $ map ppr nes),
                                                      commasep $ map ppr els]))
     where (nes,els) = unzip input
+  ppr (GroupStream pes w maxchunk lam accs arrs) =
+    PP.annot (mapMaybe ppAnnot pes) $
+    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals </>
+    PP.indent 2
+    (text "stream" <>
+      parens (commasep [ppr w,
+                        ppr maxchunk,
+                        ppr lam,
+                        PP.braces (commasep $ map ppr accs),
+                        commasep $ map ppr arrs]))
+
+instance PrettyLore lore => Pretty (GroupStreamLambda lore) where
+  ppr (GroupStreamLambda block_size block_offset acc_params arr_params body) =
+    PP.annot (mapMaybe ppAnnot params) $
+    text "fn" <+>
+    parens (commasep (block_size' : block_offset' : map ppr params)) <+>
+    text "=>" </> PP.indent 2 (ppr body)
+    where params = acc_params ++ arr_params
+          block_size' = text "int" <+> ppr block_size
+          block_offset' = text "int" <+> ppr block_offset
 
 instance Pretty KernelResult where
   ppr (ThreadsReturn AllThreads what) =
     ppr what
   ppr (ThreadsReturn (OneThreadPerGroup who) what) =
     text "thread" <+> ppr who <+> text "returns" <+> ppr what
-  ppr (ThreadsReturn (ThreadsInSpace w space) what) =
-    text "thread <" <+> ppr w <> parens (PP.commasep $ map ppr space) <+>
-    text "returns" <+> ppr what
+  ppr (ThreadsReturn (ThreadsPerGroup limit) what) =
+    text "thread <" <+> ppr limit <+> text "returns" <+> ppr what
+  ppr (ThreadsReturn ThreadsInSpace what) =
+    text "thread in space returns" <+> ppr what
   ppr (ConcatReturns o w per_thread_elems v) =
     text "concat" <> suff <>
     parens (commasep [ppr w, ppr per_thread_elems]) <+>
     ppr v
     where suff = case o of InOrder -> ""
                            Disorder -> "Permuted"
-
 
 instance Pretty KernelSize where
   ppr (KernelSize

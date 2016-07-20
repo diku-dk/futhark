@@ -27,6 +27,7 @@ module Futhark.Pass.ExtractKernels.Distribution
        , kernelNestLoops
        , kernelNestWidths
        , boundInKernelNest
+       , boundInKernelNests
        , flatKernel
 
        , tryDistribute
@@ -179,10 +180,13 @@ kernelNestLoops :: KernelNest -> [LoopNesting]
 kernelNestLoops (loop, loops) = loop : loops
 
 boundInKernelNest :: KernelNest -> Names
-boundInKernelNest = HS.fromList .
-                    map paramName .
-                    concatMap (map fst . loopNestingParamsAndArrs) .
-                    kernelNestLoops
+boundInKernelNest = mconcat . boundInKernelNests
+
+boundInKernelNests :: KernelNest -> [Names]
+boundInKernelNests = map (HS.fromList .
+                          map (paramName . fst) .
+                          loopNestingParamsAndArrs) .
+                     kernelNestLoops
 
 kernelNestWidths :: KernelNest -> [SubExp]
 kernelNestWidths = map loopNestingWidth . kernelNestLoops

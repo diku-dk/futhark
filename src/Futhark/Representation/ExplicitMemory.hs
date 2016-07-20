@@ -961,10 +961,12 @@ expReturns (Op (Inner (WriteKernel _ _ _ _ as))) =
 -- The Kernel construct has some fairly aggressive returns.  This is
 -- to ensure that we do not need to copy-out at the end of the kernel,
 -- as the arrays will already be located where expected.
-expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
+expReturns (Op (Inner k@(Kernel _ space _ kbody))) = do
   ts <- opType k
   zipWithM returnForResult (extReturns ts) $ kernelBodyResult kbody
   where kernel_scope = mconcat $ map scopeOf $ kernelBodyStms kbody
+        thread_id = spaceGlobalId space
+        num_threads = spaceNumThreads space
 
         static = ExtShape . map Free . shapeDims
 
@@ -975,7 +977,8 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
               ixfun
 
         indexedIxfun _ _ desired_idxs (IxFun.Index ixfun' idxs)
-          | map SE.intSubExpToScalExp desired_idxs == idxs = return ixfun'
+          | map SE.intSubExpToScalExp desired_idxs `isPrefixOf` idxs =
+              return $ IxFun.applyInd ixfun' $ drop (length desired_idxs) idxs
         indexedIxfun d v desired_idxs ixfun =
           fail $ "expReturns Kernel " ++ d ++ ": " ++
           pretty v ++ " does not have a properly indexed index function (found " ++
@@ -994,9 +997,9 @@ expReturns (Op (Inner k@(Kernel _ (_,_,num_threads) _ thread_id kbody))) = do
               return $ ReturnsArray bt (static $ Shape [num_threads] <> shape) u $
                 Just $ ReturnsInBlock mem ixfun'
 
-        returnForResult _ (ThreadsReturn (ThreadsInSpace _ space) (Var v))
+        returnForResult _ (ThreadsReturn ThreadsInSpace (Var v))
           | Just (LetInfo (ArrayMem bt shape u mem ixfun)) <- HM.lookup v kernel_scope = do
-              let (space_is, space_dims) = unzip space
+              let (space_is, space_dims) = unzip $ spaceDimensions space
               ixfun' <- indexedIxfun "ThreadsReturn ThreadsInSpace"
                         v (map Var space_is) ixfun
               return $ ReturnsArray bt (static $ Shape space_dims <> shape) u $
