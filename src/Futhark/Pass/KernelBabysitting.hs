@@ -77,7 +77,7 @@ transformBinding expmap (Let pat ()
     ScanKernel cs w kernel_size lam' foldlam' nes arrs
   return expmap
 
-transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id kbody))) = do
+transformBinding expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
   -- First we do the easy stuff, which deals with SplitArray statements.
   kbody' <- transformKernelBody num_threads cs kbody
 
@@ -86,18 +86,16 @@ transformBinding expmap (Let pat () (Op (Kernel cs size ts thread_id kbody))) = 
   -- indices.
   scope <- askScope
   let boundOutside = fmap typeOf . (`HM.lookup` scope)
-      thread_gids = case kernelBodyStms kbody of
-                     SplitIndexSpace space : _ -> map fst space
-                     _                         -> []
+      thread_gids = map fst $ spaceDimensions space
 
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
                          (ensureCoalescedAccess thread_gids boundOutside)
                          kbody')
              mempty
 
-  addBinding $ Let pat () $ Op $ Kernel cs size ts thread_id kbody''
+  addBinding $ Let pat () $ Op $ Kernel cs space ts kbody''
   return expmap
-  where (_, _, num_threads) = size
+  where num_threads = spaceNumThreads space
 
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
@@ -238,10 +236,11 @@ ensureCoalescedAccess thread_gids boundOutside arr is = do
         perm /= [0..length perm-1] ->
           replace =<< lift (rearrangeInput perm arr)
 
-      -- We are not fully indexing the array, so we assume
-      -- (HEURISTIC!) that the remaining dimensions will be traversed
-      -- sequentially.
-      | length is < arrayRank t -> do
+      -- We are not fully indexing the array, and the indices are not
+      -- a prefix of the thread indices, so we assume (HEURISTIC!)
+      -- that the remaining dimensions will be traversed sequentially.
+      | length is < arrayRank t,
+        is /= map Var (take (length is) thread_gids) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput perm arr)
 

@@ -680,6 +680,70 @@ maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
                        }
       maybeDistributeBinding newbnd acc
 
+-- Block tiling: a Redomap that can be distributed by itself, and
+-- where the input arrays are invariant to the loop nest, will be
+-- block tiled.
+maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs))) acc =
+  distributeSingleBinding acc bnd >>= \case
+    Just (kernels, res, nest, acc')
+      | Just perm <- map Var (patternNames pat) `isPermutationOf` res,
+        all (not . (`all` boundInKernelNests nest) . HS.member) arrs -> do
+
+          addKernels kernels
+
+          (w_bnds, w, ispace, inps, rts) <- flatKernel nest
+          (ksize_bnds, ksize, read_input_bnds) <- mapKernelSkeleton w inps
+          let rts' = rearrangeShape perm rts
+
+          space <- newKernelSpace ksize ispace
+
+          kresult_pes <- forM rts' $ \rt -> do
+            kresult <- newVName "kresult"
+            return $ PatElem kresult BindVar rt
+
+          read_input_stm <- do
+            (pes, bnds) <- perThread read_input_bnds
+            return $ Thread pes ThreadsInSpace bnds
+
+          stream_lam <- do
+            foldlam_chunked <- chunkLambda pat nes =<<
+                               FOT.transformLambda foldlam
+            let (chunk_param, acc_params, arr_chunk_params) =
+                  partitionChunkedFoldParameters (length nes) $
+                  lambdaParams foldlam_chunked
+
+            thread_pes <- forM (patternValueElements pat) $ \pe -> do
+              name <- newVName $ baseString (patElemName pe)
+              return pe { patElemName = name }
+
+            let operate_stm = Thread thread_pes ThreadsInSpace $
+                              lambdaBody foldlam_chunked
+
+                body = KernelBody [operate_stm] $
+                       map (Var . patElemName) thread_pes
+            block_offset <- newVName "block_offset"
+            return $ GroupStreamLambda
+              (paramName chunk_param)
+              block_offset
+              acc_params
+              arr_chunk_params
+              body
+
+          let stream_stm = GroupStream kresult_pes rw rw stream_lam nes arrs
+
+          let krets = map (ThreadsReturn ThreadsInSpace .
+                            Var . patElemName) kresult_pes
+              kbody = KernelBody [read_input_stm, stream_stm] krets
+              kpat = Pattern [] $ rearrangeShape perm $
+                     patternValueElements $
+                     loopNestingPattern $ fst nest
+          addKernel $ w_bnds ++ ksize_bnds ++
+            [Let kpat () $ Op $ Kernel cs space rts' kbody]
+          return acc'
+    _ ->
+      addBindingToKernel bnd acc
+
+
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc =
   distributeSingleUnaryBinding acc bnd $ \_ outerpat arr ->
   addKernel [Let outerpat () $ PrimOp $ Copy arr]

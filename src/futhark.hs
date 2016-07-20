@@ -38,6 +38,7 @@ import Futhark.Pass.FirstOrderTransform
 import Futhark.Pass.Simplify
 import Futhark.Optimise.InPlaceLowering
 import Futhark.Optimise.DoubleBuffer
+import Futhark.Optimise.TileLoops
 import Futhark.Pass.KernelBabysitting
 import Futhark.Pass.ExtractKernels
 import Futhark.Pass.ExpandAllocations
@@ -232,6 +233,7 @@ commandLineOptions =
   , soacsPassOption removeDeadFunctions []
   , kernelsPassOption inPlaceLowering []
   , kernelsPassOption babysitKernels []
+  , kernelsPassOption tileLoops []
   , typedPassOption soacsProg Kernels extractKernels []
 
   , typedPassOption kernelsProg ExplicitMemory explicitAllocations "a"

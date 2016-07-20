@@ -29,6 +29,7 @@ module Futhark.TypeCheck
   , matchExtPattern
   , matchExtReturnType
   , argType
+  , argAliases
   , noArgAliases
   , checkArg
   , checkSOACArrayArgs

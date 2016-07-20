@@ -46,6 +46,7 @@ module Futhark.CodeGen.ImpGen
   , declaringScope
   , withParams
   , declaringPrimVar
+  , declaringPrimVars
   , withPrimVar
   , modifyingArrays
   , compileBody
@@ -726,6 +727,9 @@ declaringVar = declaringScope . scopeOf
 declaringPrimVar :: VName -> PrimType -> ImpM op a -> ImpM op a
 declaringPrimVar name bt =
   declaringVarEntry name $ ScalarVar $ ScalarEntry bt
+
+declaringPrimVars :: [(VName,PrimType)] -> ImpM op a -> ImpM op a
+declaringPrimVars = flip $ foldr (uncurry declaringPrimVar)
 
 declaringName :: VName -> NameInfo ExplicitMemory -> ImpM op a -> ImpM op a
 declaringName name info m =
