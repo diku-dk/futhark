@@ -807,7 +807,7 @@ allocInKernelStm _ _ (Combine pe w v) = do
   -- The optimal tile size will frequently cause bank conflicts.  We
   -- increase the innermost dimension by 1 to avoid this.
   alloc_dims <- mapM dimAllocationSize $ shapeDims shape
-  padded_pe_t <- case alloc_dims of
+  padded_pe_t <- case reverse alloc_dims of
                    inner:dims | not $ null dims -> do
                      inner' <- letSubExp "padded_dim" $ PrimOp $
                                BinOp (Add Int32) inner (constant (1::Int32))
