@@ -634,16 +634,14 @@ allocInScanParameters workgroup_size my_id offset = mapM allocInScanParameter
               return p { paramAttr = MemMem size space }
 
 allocInReduceLambda :: In.Lambda
-                    -> SubExp
                     -> [(VName, IxFun.IxFun SE.ScalExp)]
                     -> AllocM Lambda
-allocInReduceLambda lam workgroup_size input_summaries = do
+allocInReduceLambda lam input_summaries = do
   let (i, other_offset_param, actual_params) =
         partitionChunkedKernelLambdaParameters $ lambdaParams lam
       (acc_params, arr_params) =
         splitAt (length input_summaries) actual_params
-      this_index = SE.Id i int32 `SE.SRem`
-                   SE.intSubExpToScalExp workgroup_size
+      this_index = SE.Id i int32
       other_offset = SE.Id (paramName other_offset_param) int32
   acc_params' <-
     allocInReduceParameters this_index 0 $
@@ -821,7 +819,7 @@ allocInKernelStm _ _ (Combine pe w v) = do
 
 allocInKernelStm space _ (GroupReduce pes w lam input) = do
   summaries <- mapM lookupArraySummary arrs
-  lam' <- allocInReduceLambda lam group_size summaries
+  lam' <- allocInReduceLambda lam summaries
   let local_tid = SE.Id (spaceLocalId space) int32
   pes' <- forM (zip pes summaries) $ \(pe, (mem, ixfun)) ->
     case patElemType pe of
@@ -831,7 +829,6 @@ allocInKernelStm space _ (GroupReduce pes w lam input) = do
       t -> return pe { patElemAttr = Scalar $ elemType t }
   return [GroupReduce pes' w lam' input]
   where arrs = map snd input
-        group_size = spaceGroupSize space
 
 allocInKernelStm space _ (GroupStream pes w maxchunk lam acc arrs) = do
   arr_summaries <- mapM lookupArraySummary arrs
