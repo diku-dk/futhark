@@ -357,7 +357,8 @@ The net effect seems to be that it works ok."
 
 (defun futhark-back-actual-line ()
   "Go back to the first non-empty line, or return nil trying."
-  (while (and (forward-line -1)
+  (while (and (not (bobp))
+              (forward-line -1)
               (progn (beginning-of-line)
                      (setq bound (point))
                      (end-of-line)
