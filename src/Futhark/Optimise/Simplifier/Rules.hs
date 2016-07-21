@@ -564,7 +564,7 @@ simplifyIndexing defOf seType idd inds consuming =
          let inds' = rearrangeShape (take (length inds) $ rearrangeInverse perm) inds
          in Just $ pure $ IndexResult cs src inds'
 
-    Just (Copy src) ->
+    Just (Copy src) | not consuming ->
       simplifyIndexing defOf seType src inds consuming
 
     Just (Reshape cs newshape src)
