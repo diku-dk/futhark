@@ -11,6 +11,7 @@ import Control.Monad.State
 import qualified Data.HashMap.Lazy as HM
 import qualified Data.Map as M
 import Data.List
+import Data.Maybe
 import Data.Monoid
 
 import Prelude
@@ -47,14 +48,19 @@ transformBody (Body () bnds res) = insertBindingsM $ do
 -- funky in memory (and we'd prefer it not to be).  If we cannot find
 -- it in the map, we just assume it's all good.  HACK and FIXME, I
 -- suppose.  We really should do this at the memory level.
-type ExpMap = HM.HashMap VName Exp
+type ExpMap = HM.HashMap VName Binding
 
 nonlinearInMemory :: VName -> ExpMap -> Bool
 nonlinearInMemory name m =
   case HM.lookup name m of
-    Just (PrimOp Rearrange{}) -> True
-    Just (PrimOp (Reshape _ _ arr)) -> nonlinearInMemory arr m
+    Just (Let _ _ (PrimOp Rearrange{})) -> True
+    Just (Let _ _ (PrimOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
+    Just (Let pat _ (Op (Kernel _ _ ts _))) ->
+      fromMaybe False $
+      nonlinear <$> find ((==name) . patElemName . fst)
+      (zip (patternElements pat) ts)
     _ -> False
+  where nonlinear (_, t) = arrayRank t > 0
 
 transformBinding :: ExpMap -> Binding -> BabysitM ExpMap
 
@@ -89,18 +95,20 @@ transformBinding expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
       thread_gids = map fst $ spaceDimensions space
 
   kbody'' <- evalStateT (traverseKernelBodyArrayIndexes
-                         (ensureCoalescedAccess thread_gids boundOutside)
+                         (ensureCoalescedAccess expmap thread_gids boundOutside)
                          kbody')
              mempty
 
-  addBinding $ Let pat () $ Op $ Kernel cs space ts kbody''
-  return expmap
+  let bnd' = Let pat () $ Op $ Kernel cs space ts kbody''
+  addBinding bnd'
+  return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
   where num_threads = spaceNumThreads space
 
 transformBinding expmap (Let pat () e) = do
   e' <- mapExpM transform e
-  addBinding $ Let pat () e'
-  return $ HM.fromList [ (name, e') | name <- patternNames pat ] <> expmap
+  let bnd' = Let pat () e'
+  addBinding bnd'
+  return $ HM.fromList [ (name, bnd') | name <- patternNames pat ] <> expmap
 
 transform :: Mapper Kernels Kernels BabysitM
 transform = identityMapper { mapOnBody = transformBody }
@@ -216,10 +224,11 @@ traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
 type Replacements = M.Map (VName, [SubExp]) VName
 
 ensureCoalescedAccess :: MonadBinder m =>
-                         [VName]
+                         ExpMap
+                      -> [VName]
                       -> (VName -> Maybe Type)
                       -> ArrayIndexTransform (StateT Replacements m)
-ensureCoalescedAccess thread_gids boundOutside arr is = do
+ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
   seen <- gets $ M.lookup (arr, is)
 
   case (seen, boundOutside arr) of
@@ -234,7 +243,7 @@ ensureCoalescedAccess thread_gids boundOutside arr is = do
         is' <- coalescedIndexes thread_gids is,
         Just perm <- is' `isPermutationOf` is,
         perm /= [0..length perm-1] ->
-          replace =<< lift (rearrangeInput perm arr)
+          replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
       -- We are not fully indexing the array, and the indices are not
       -- a prefix of the thread indices, so we assume (HEURISTIC!)
@@ -242,12 +251,12 @@ ensureCoalescedAccess thread_gids boundOutside arr is = do
       | length is < arrayRank t,
         is /= map Var (take (length is) thread_gids) -> do
           let perm = coalescingPermutation (length is) $ arrayRank t
-          replace =<< lift (rearrangeInput perm arr)
+          replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
 
       -- Everything is fine... assuming that the array is in row-major
       -- order!  Make sure that is the case.
-      | otherwise ->
-        replace =<< lift (flatInput arr)
+      | nonlinearInMemory arr expmap ->
+          replace =<< lift (flatInput arr)
 
 
     _ -> return Nothing
@@ -286,13 +295,13 @@ coalescingPermutation num_is rank =
   [num_is..rank-1] ++ [0..num_is-1]
 
 rearrangeInput :: MonadBinder m =>
-                  [Int] -> VName -> m VName
-rearrangeInput perm arr = do
+                  Bool -> [Int] -> VName -> m VName
+rearrangeInput manifest perm arr = do
   let inv_perm = rearrangeInverse perm
-  -- We first manifest the array to ensure that it is flat in memory.
-  -- This is sometimes unnecessary, in which case the copy will
-  -- hopefully be removed by the simplifier.
-  manifested <- flatInput arr
+  -- We may first manifest the array to ensure that it is flat in
+  -- memory.  This is sometimes unnecessary, in which case the copy
+  -- will hopefully be removed by the simplifier.
+  manifested <- if manifest then flatInput arr else return arr
   transposed <- letExp (baseString arr ++ "_tr") $
                 PrimOp $ Rearrange [] perm manifested
   tr_manifested <- letExp (baseString arr ++ "_tr_manifested") $
