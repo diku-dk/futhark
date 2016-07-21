@@ -49,7 +49,6 @@ topDownRules = [ hoistLoopInvariantMergeVariables
                , letRule simplifyAssert
                , letRule copyScratchToScratch
                , simplifyIndexIntoReshape
-               , simplifyIndexIntoSplit
                , removeEmptySplits
                , removeSingletonSplits
                , simplifyConcat
@@ -502,15 +501,14 @@ simplifyAssert _ _ _ =
 
 simplifyIndex :: MonadBinder m => BottomUpRule m
 simplifyIndex (vtable, used) (Let pat@(Pattern [] [pe]) _ (PrimOp (Index cs idd inds)))
-  | Just m <- simplifyIndexing defOf seType idd inds consumed = do
+  | Just m <- simplifyIndexing vtable seType idd inds consumed = do
       res <- m
       case res of
         SubExpResult se ->
           letBind_ pat $ PrimOp $ SubExp se
         IndexResult extra_cs idd' inds' ->
           letBind_ pat $ PrimOp $ Index (cs++extra_cs) idd' inds'
-  where defOf = (`ST.lookupExp` vtable)
-        consumed = patElemName pe `UT.isConsumed` used
+  where consumed = patElemName pe `UT.isConsumed` used
         seType (Var v) = ST.lookupType v vtable
         seType (Constant v) = Just $ Prim $ primValueType v
 
@@ -520,10 +518,10 @@ data IndexResult = IndexResult Certificates VName [SubExp]
                  | SubExpResult SubExp
 
 simplifyIndexing :: MonadBinder m =>
-                    VarLookup lore -> TypeLookup
+                    ST.SymbolTable lore -> TypeLookup
                  -> VName -> [SubExp] -> Bool
                  -> Maybe (m IndexResult)
-simplifyIndexing defOf seType idd inds consuming =
+simplifyIndexing vtable seType idd inds consuming =
   case asPrimOp =<< defOf idd of
     Nothing -> Nothing
 
@@ -565,7 +563,7 @@ simplifyIndexing defOf seType idd inds consuming =
          in Just $ pure $ IndexResult cs src inds'
 
     Just (Copy src) | not consuming ->
-      simplifyIndexing defOf seType src inds consuming
+      simplifyIndexing vtable seType src inds consuming
 
     Just (Reshape cs newshape src)
       | Just newdims <- shapeCoercion newshape,
@@ -616,7 +614,28 @@ simplifyIndexing defOf seType idd inds consuming =
           _ | Var v2 <- se  -> Just $ pure $ IndexResult [] v2 inds'
           _ -> Nothing
 
-    _ -> Nothing
+    _ -> case ST.entryBinding =<< ST.lookup idd vtable of
+           Just (Let split_pat _ (PrimOp (Split cs2 0 ns idd2)))
+             | first_index : rest_indices <- inds -> Just $ do
+               -- Figure out the extra offset that we should add to the first index.
+               let plus = eBinOp (Add Int32)
+                   esum [] = return $ PrimOp $ SubExp $ constant (0 :: Int32)
+                   esum (x:xs) = foldl plus x xs
+
+               patElem_and_offset <-
+                 zip (patternValueElements split_pat) <$>
+                 mapM esum (inits $ map eSubExp ns)
+               case find ((==idd) . patElemName . fst) patElem_and_offset of
+                 Nothing ->
+                   fail "simplifyIndexing: could not find pattern element."
+                 Just (_, offset_e) -> do
+                   offset <- letSubExp "offset" offset_e
+                   offset_index <- letSubExp "offset_index" $
+                                   PrimOp $ BinOp (Add Int32) first_index offset
+                   return $ IndexResult cs2 idd2 (offset_index:rest_indices)
+           _ -> Nothing
+
+    where defOf = (`ST.lookupExp` vtable)
 
 simplifyIndexIntoReshape :: MonadBinder m => TopDownRule m
 simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
@@ -637,31 +656,6 @@ simplifyIndexIntoReshape vtable (Let pat _ (PrimOp (Index cs idd inds)))
           letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 new_inds'
 simplifyIndexIntoReshape _ _ =
   cannotSimplify
-
-simplifyIndexIntoSplit :: MonadBinder m => TopDownRule m
-simplifyIndexIntoSplit vtable (Let pat _ (PrimOp (Index cs idd inds)))
-  | Just (Let split_pat _ (PrimOp (Split cs2 0 ns idd2))) <-
-      ST.entryBinding =<< ST.lookup idd vtable,
-    first_index : rest_indices <- inds = do
-      -- Figure out the extra offset that we should add to the first index.
-      let plus = eBinOp (Add Int32)
-          esum [] = return $ PrimOp $ SubExp $ constant (0 :: Int32)
-          esum (x:xs) = foldl plus x xs
-
-      patElem_and_offset <-
-        zip (patternValueElements split_pat) <$>
-        mapM esum (inits $ map eSubExp ns)
-      case find ((==idd) . patElemName . fst) patElem_and_offset of
-        Nothing ->
-          cannotSimplify -- Probably should not happen.
-        Just (_, offset_e) -> do
-          offset <- letSubExp "offset" offset_e
-          offset_index <- letSubExp "offset_index" $
-                          PrimOp $ BinOp (Add Int32) first_index offset
-          letBind_ pat $ PrimOp $ Index (cs++cs2) idd2 (offset_index:rest_indices)
-simplifyIndexIntoSplit _ _ =
-  cannotSimplify
-
 
 removeEmptySplits :: MonadBinder m => TopDownRule m
 removeEmptySplits _ (Let pat _ (PrimOp (Split cs i ns arr)))
