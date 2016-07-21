@@ -564,15 +564,8 @@ simplifyIndexing defOf seType idd inds consuming =
          let inds' = rearrangeShape (take (length inds) $ rearrangeInverse perm) inds
          in Just $ pure $ IndexResult cs src inds'
 
-    Just (Copy src)
-      -- We cannot just remove a copy of a rearrange, because it might
-      -- be important for coalescing.
-      | Just (PrimOp Rearrange{}) <- defOf src ->
-          Nothing
-      | Just dims <- arrayDims <$> seType (Var src),
-        length inds == length dims,
-        not consuming ->
-          Just $ pure $ IndexResult [] src inds
+    Just (Copy src) ->
+      simplifyIndexing defOf seType src inds consuming
 
     Just (Reshape cs newshape src)
       | Just newdims <- shapeCoercion newshape,
