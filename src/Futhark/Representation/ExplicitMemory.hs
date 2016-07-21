@@ -340,9 +340,7 @@ instance PP.Pretty (PatElemT (MemBound NoUniqueness)) where
   ppr = PP.ppr . fmap typeOf
 
 -- | A description of the memory properties of an array being returned
--- by an operation.  Note that the 'Eq' and 'Ord' instances are
--- useless (everything is equal).  This type is merely a building
--- block for 'Returns'.
+-- by an operation.
 data MemReturn = ReturnsInBlock VName (IxFun.IxFun SE.ScalExp)
                  -- ^ The array is located in a memory block that is
                  -- already in scope.
