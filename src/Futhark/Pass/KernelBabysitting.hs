@@ -244,6 +244,12 @@ ensureCoalescedAccess thread_gids boundOutside arr is = do
           let perm = coalescingPermutation (length is) $ arrayRank t
           replace =<< lift (rearrangeInput perm arr)
 
+      -- Everything is fine... assuming that the array is in row-major
+      -- order!  Make sure that is the case.
+      | otherwise ->
+        replace =<< lift (flatInput arr)
+
+
     _ -> return Nothing
 
   where replace arr' = do
@@ -283,9 +289,18 @@ rearrangeInput :: MonadBinder m =>
                   [Int] -> VName -> m VName
 rearrangeInput perm arr = do
   let inv_perm = rearrangeInverse perm
+  -- We first manifest the array to ensure that it is flat in memory.
+  -- This is sometimes unnecessary, in which case the copy will
+  -- hopefully be removed by the simplifier.
+  manifested <- flatInput arr
   transposed <- letExp (baseString arr ++ "_tr") $
-                PrimOp $ Rearrange [] perm arr
-  manifested <- letExp (baseString arr ++ "_tr_manifested") $
-                PrimOp $ Copy transposed
+                PrimOp $ Rearrange [] perm manifested
+  tr_manifested <- letExp (baseString arr ++ "_tr_manifested") $
+                   PrimOp $ Copy transposed
   letExp (baseString arr ++ "_inv_tr") $
-    PrimOp $ Rearrange [] inv_perm manifested
+    PrimOp $ Rearrange [] inv_perm tr_manifested
+
+flatInput :: MonadBinder m =>
+             VName -> m VName
+flatInput arr =
+  letExp (baseString arr ++ "_manifested") $ PrimOp $ Copy arr
