@@ -16,10 +16,11 @@ import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.CodeGen.Backends.GenericPython.AST
+import Futhark.CodeGen.Backends.GenericPython.Options
+import Futhark.CodeGen.Backends.GenericPython.Definitions
 import Futhark.Util.Pretty(pretty)
 import Futhark.MonadFreshNames
 
-import Futhark.CodeGen.Backends.GenericPython.Definitions
 
 --maybe pass the config file rather than multiple arguments
 compileProg :: MonadFreshNames m => Maybe String -> Prog ->  m (Either String String)
@@ -36,6 +37,8 @@ compileProg module_name prog = do
             [Assign (Var "FUT_BLOCK_DIM") $ StringLiteral $ show (Imp.transposeBlockDim :: Int),
              Assign (Var "cl_group_size") $ Constant $ value (512::Int32),
              Assign (Var "synchronous") $ Constant $ value False,
+             Assign (Var "preferred_platform") None,
+             Assign (Var "preferred_device") None,
              Assign (Var "fut_opencl_src") $ RawStringLiteral $ opencl_prelude ++ opencl_code,
              Escape pyTestMain]
       let imports = [Import "sys" Nothing,
@@ -47,12 +50,24 @@ compileProg module_name prog = do
 
       let constructor = Py.Constructor [ "self"
                                        , "interactive=False"
-                                       , "platform_pref=None"
-                                       , "device_pref=None"]
-            [Escape $ openClInit assign]
+                                       , "platform_pref=preferred_platform"
+                                       , "device_pref=preferred_device"]
+                        [Escape $ openClInit assign]
+          options = [ Option { optionLongName = "platform"
+                             , optionShortName = Just 'p'
+                             , optionArgument = RequiredArgument
+                             , optionAction =
+                               [ Assign (Var "preferred_platform") $ Var "optarg" ]
+                             }
+                    , Option { optionLongName = "device"
+                             , optionShortName = Just 'd'
+                             , optionArgument = RequiredArgument
+                             , optionAction =
+                               [ Assign (Var "preferred_device") $ Var "optarg" ]
+                             }]
 
       Right <$> Py.compileProg module_name constructor imports defines operations ()
-        [Exp $ Call "self.queue.finish" []] [] prog'
+        [Exp $ Call "self.queue.finish" []] options prog'
   where operations :: Py.Operations Imp.OpenCL ()
         operations = Py.Operations
                      { Py.opsCompiler = callKernel
