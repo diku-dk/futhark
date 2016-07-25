@@ -84,7 +84,22 @@
   "A regex describing a Futhark variable.")
 
 (defconst futhark-type
-  (concat "\\(?:\\(?:\\[[^]]+\\]\\)\\|\\(?:([^)]+)\\)\\|" futhark-var "\\)")
+  (concat "\\*?" "\\(?:"
+          "\\(?:"
+
+          "\\(?:" "\\[" "\\(?:"
+          ""
+          "\\|"
+          futhark-var
+          "\\)" "\\]" "\\)*" futhark-var
+
+          "\\)" "\\|" "\\(?:"
+
+          "([^)]+)"
+
+          "\\)"
+          "\\)")
+;  (concat "\\(?:\\(?:\\[[^]]+\\]\\)\\|\\(?:([^)]+)\\)\\|" futhark-var "\\)")
   "A regex describing a Futhark type, built-in or user-specified.
 Does not recognise nested tuples or nested arrays.")
 
@@ -100,9 +115,14 @@ Does not recognise nested tuples or nested arrays.")
      . '(1 font-lock-function-name-face))
 
     ;; Variable and tuple declarations
+    ;;; Lets
     (,(concat "let[[:space:]\n]+\\(" futhark-var "\\)")
      . '(1 font-lock-variable-name-face))
     (,(concat "let[[:space:]\n]+(\\([^)]+\\)")
+     . '(1 font-lock-variable-name-face))
+    ;;; Function parameters
+    (,(concat "[(,][[:space:]\n]*" futhark-type "[[:space:]]+\\("
+              futhark-var "\\)")
      . '(1 font-lock-variable-name-face))
 
     ;; Keywords
@@ -110,6 +130,20 @@ Does not recognise nested tuples or nested arrays.")
      . font-lock-keyword-face)
 
     ;; Types
+    ;;; Type aliases
+    (,(concat "type[[:space:]]+\\(" futhark-type "\\)")
+     . '(1 font-lock-type-face))
+    (,(concat "type[[:space:]]+" futhark-type "[[:space:]]*=[[:space:]]*"
+              "\\(" futhark-type "\\)")
+     . '(1 font-lock-type-face))
+    ;;; Function return type
+    (,(concat "fu?n[[:space:]]+\\(" futhark-type "\\)")
+     . '(1 font-lock-type-face))
+    ;;; Function parameters types
+    (,(concat "[(,][[:space:]\n]*\\(" futhark-type "\\)[[:space:]]+"
+              futhark-var)
+     . '(1 font-lock-type-face))
+    ;;; Builtins
     (,(regexp-opt futhark-builtin-types 'words)
      . font-lock-type-face)
 
