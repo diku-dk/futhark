@@ -454,7 +454,7 @@ expCompiler
 
 expCompiler
   (ImpGen.Destination [dest]) (PrimOp (Replicate n se)) = do
-  thread_gid <- newVName "thread_gid"
+  thread_gid <- newVName "replicate_gid"
 
   t <- subExpType se
   let row_dims = arrayDims t
@@ -467,7 +467,8 @@ expCompiler
     body <- ImpGen.subImpM_ inKernelOperations $
       ImpGen.copyDWIMDest dest is' se $ drop 1 is'
 
-    (group_size, num_groups) <- computeMapKernelGroups n'
+    (group_size, num_groups) <- computeMapKernelGroups $
+                                product $ map ImpGen.compileSubExp dims
 
     (body_uses, _) <- computeKernelUses []
                       (freeIn body <> freeIn [n'])
