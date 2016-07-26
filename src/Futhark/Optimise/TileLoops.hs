@@ -170,10 +170,11 @@ is2dTileable :: MonadFreshNames m =>
               KernelSpace -> VarianceTable -> SubExp -> VName -> LParam
            -> Maybe (SubExp -> [VName] -> m (LParam, [KernelStm Kernels]))
 is2dTileable kspace variance block_size arr block_param = do
-  permute <- invariantToAtLeastOneDimension
+  (permute, permute_perm, permute_dims) <- invariantToAtLeastOneDimension
 
   Just $ \tile_size local_is -> do
     let [variant_i, invariant_i] = permute local_is
+        perm = permute_perm [0,1]
     outer_block_param <- do
       name <- newVName $ baseString (paramName block_param) ++ "_outer"
       return block_param { paramName = name }
@@ -189,8 +190,8 @@ is2dTileable kspace variance block_size arr block_param = do
         read_block_kstm =
           Thread block_elem_pes limit read_block_body
 
-        block_size_2d = Shape [tile_size, block_size]
-        block_cspace = [(variant_i,tile_size),(invariant_i,block_size)]
+        block_size_2d = Shape $ permute_dims [tile_size, block_size]
+        block_cspace = zip local_is $ permute_dims [tile_size,block_size]
 
     block_name_2d <- newVName $ baseString (paramName block_param) ++ "_2d"
     let block_pe =
@@ -201,22 +202,27 @@ is2dTileable kspace variance block_size arr block_param = do
             Var $ patElemName block_elem_pe
           | block_elem_pe <- block_elem_pes ]
 
+    block_param_aux_name <- newVName $ baseString $ paramName block_param
+    let block_param_aux = Ident block_param_aux_name $
+                          rearrangeType perm $ patElemType block_pe
+        transpose_bnd = mkLet' [] [block_param_aux] $
+                        PrimOp $ Rearrange [] perm block_name_2d
     (_, index_block_body) <- perThread [mkLet' [] [paramIdent block_param] $
-                                        PrimOp $ Index [] block_name_2d [Var variant_i]]
+                                        PrimOp $ Index [] (identName block_param_aux) [Var variant_i]]
     let index_block_kstm = Thread [PatElem (paramName block_param) BindVar $
                                     paramType block_param]
-                           ThreadsInSpace index_block_body
+                           ThreadsInSpace $ insertBinding transpose_bnd index_block_body
 
     return (outer_block_param, read_block_kstm : write_block_stms ++ [index_block_kstm])
 
-  where invariantToAtLeastOneDimension :: Maybe ([a] -> [a])
+  where invariantToAtLeastOneDimension :: Maybe ([a] -> [a], [b] -> [b], [c] -> [c])
         invariantToAtLeastOneDimension = do
           [(i,_),(j,_)] <- Just $ spaceDimensions kspace
           let variant_to = HM.lookupDefault mempty arr variance
           if i `HS.member` variant_to && not (j `HS.member` variant_to) then
-            Just id
+            Just (id, id, id)
           else if j `HS.member` variant_to && not (i `HS.member` variant_to) then
-            Just reverse
+            Just (reverse, reverse, reverse)
           else
             Nothing
 
