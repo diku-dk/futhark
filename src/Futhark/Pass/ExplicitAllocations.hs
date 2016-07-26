@@ -802,8 +802,9 @@ allocInKernelStm _ _ (Combine pe w v) = do
   let pe_t = patElemType pe
       shape = arrayShape pe_t
       bt = elemType pe_t
+  alloc_dims <- mapM dimAllocationSize $ shapeDims shape
   (_, mem) <- allocForArray pe_t $ Space "local"
-  let ixfun = IxFun.iota $ map SE.intSubExpToScalExp $ shapeDims $ arrayShape pe_t
+  let ixfun = IxFun.iota $ map SE.intSubExpToScalExp alloc_dims
       attr = ArrayMem bt shape NoUniqueness mem ixfun
   return [Combine pe { patElemAttr = attr} w v]
 
