@@ -802,18 +802,8 @@ allocInKernelStm _ _ (Combine pe w v) = do
   let pe_t = patElemType pe
       shape = arrayShape pe_t
       bt = elemType pe_t
-  -- The optimal tile size will frequently cause bank conflicts.  We
-  -- increase the innermost dimension by 1 to avoid this.
-  alloc_dims <- mapM dimAllocationSize $ shapeDims shape
-  padded_pe_t <- case reverse alloc_dims of
-                   inner:dims | not $ null dims -> do
-                     inner' <- letSubExp "padded_dim" $ PrimOp $
-                               BinOp (Add Int32) inner (constant (1::Int32))
-                     return $ pe_t `setArrayDims` reverse (inner' : dims)
-                   _ -> return pe_t
-
-  (_, mem) <- allocForArray padded_pe_t $ Space "local"
-  let ixfun = IxFun.iota $ map SE.intSubExpToScalExp $ shapeDims $ arrayShape padded_pe_t
+  (_, mem) <- allocForArray pe_t $ Space "local"
+  let ixfun = IxFun.iota $ map SE.intSubExpToScalExp $ shapeDims $ arrayShape pe_t
       attr = ArrayMem bt shape NoUniqueness mem ixfun
   return [Combine pe { patElemAttr = attr} w v]
 
