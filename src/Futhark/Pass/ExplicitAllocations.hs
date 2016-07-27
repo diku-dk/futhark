@@ -864,18 +864,24 @@ expHints (Op (Inner (Kernel _ space rets kbody))) =
               dims_perm = rearrangeShape perm dims
               ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp dims_perm
               ixfun_rearranged = IxFun.permute ixfun_base perm_inv
-          in IxFunHint ixfun_rearranged
+          in ixfun_rearranged
 
         hint t (ThreadsReturn threads _)
           | r <- arrayRank t,
             r > 0,
             Just space_dims <- spacy threads = do
             t_dims <- mapM dimAllocationSize $ arrayDims t
-            return $ innermost space_dims t_dims
+            return $ IxFunHint $ innermost space_dims t_dims
 
         hint t (ConcatReturns Disorder w _ _) = do
           t_dims <- mapM dimAllocationSize $ arrayDims t
-          return $ innermost [w] t_dims
+          return $ IxFunHint $ innermost [w] t_dims
+
+        hint (Prim t) (ConcatReturns InOrder w elems_per_thread _) = do
+          let ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp [num_threads,elems_per_thread]
+              ixfun_tr = IxFun.permute ixfun_base [1,0]
+              ixfun = IxFun.reshape ixfun_tr $ map (DimNew . SE.intSubExpToScalExp) [w]
+          return $ IxFunHint ixfun
 
         hint _ _ = return NoHint
 expHints e =
