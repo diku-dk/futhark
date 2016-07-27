@@ -51,6 +51,7 @@ module Futhark.CodeGen.ImpGen
   , modifyingArrays
   , compileBody
   , compileBindings
+  , compileExp
   , sliceArray
   , offsetArray
   , strideArray

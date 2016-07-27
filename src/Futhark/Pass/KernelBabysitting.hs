@@ -196,8 +196,8 @@ traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                -> f (KernelBody Kernels)
 traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
   KernelBody <$> mapM onStatement kstms <*> pure kres
-  where onStatement (Thread pes threads body) =
-          Thread pes threads <$> onBody body
+  where onStatement (Thread threads bnd) =
+          Thread threads <$> onBinding bnd
         onStatement (GroupReduce pes w lam input) =
           GroupReduce pes w <$> onLambda lam <*> pure input
         onStatement stm = pure stm

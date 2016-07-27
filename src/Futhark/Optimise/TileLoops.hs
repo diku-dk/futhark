@@ -16,7 +16,6 @@ import Prelude
 
 import Futhark.MonadFreshNames
 import Futhark.Representation.Kernels
-import Futhark.Pass.ExtractKernels.BlockedKernel (perThread) -- FIXME
 
 import Futhark.Pass
 import Futhark.Tools
@@ -152,17 +151,15 @@ is1dTileable kspace variance block_size arr block_param = do
         mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
         PrimOp $ Index [] (paramName outer_block_param) [Var ltid]
 
-    (block_elem_pes, read_block_body) <- perThread [read_elem_bnd]
     let limit = ThreadsPerGroup [(ltid,block_size)]
-        read_block_kstm = Thread block_elem_pes limit read_block_body
+        read_block_kstm = Thread limit read_elem_bnd
         block_cspace = [(ltid,block_size)]
 
     let block_pe =
           PatElem (paramName block_param) BindVar $ paramType outer_block_param
         write_block_stms =
-          [ Combine block_pe block_cspace $
-            Var $ patElemName block_elem_pe
-          | block_elem_pe <- block_elem_pes ]
+          [ Combine block_pe block_cspace $ Var v
+          | v <- patternNames $ bindingPattern read_elem_bnd ]
 
     return (outer_block_param, read_block_kstm : write_block_stms)
 
@@ -185,10 +182,8 @@ is2dTileable kspace variance block_size arr block_param = do
         mkLet' [] [Ident name $ rowType $ paramType outer_block_param] $
         PrimOp $ Index [] (paramName outer_block_param) [Var invariant_i]
 
-    (block_elem_pes, read_block_body) <- perThread [read_elem_bnd]
     let limit = ThreadsPerGroup [(variant_i,tile_size),(invariant_i,block_size)]
-        read_block_kstm =
-          Thread block_elem_pes limit read_block_body
+        read_elem_kstm = Thread limit read_elem_bnd
 
         block_size_2d = Shape $ permute_dims [tile_size, block_size]
         block_cspace = zip local_is $ permute_dims [tile_size,block_size]
@@ -198,22 +193,20 @@ is2dTileable kspace variance block_size arr block_param = do
           PatElem block_name_2d BindVar $
           rowType (paramType outer_block_param) `arrayOfShape` block_size_2d
         write_block_stms =
-          [ Combine block_pe block_cspace $
-            Var $ patElemName block_elem_pe
-          | block_elem_pe <- block_elem_pes ]
+          [ Combine block_pe block_cspace $ Var v
+          | v <- patternNames $ bindingPattern read_elem_bnd ]
 
     block_param_aux_name <- newVName $ baseString $ paramName block_param
     let block_param_aux = Ident block_param_aux_name $
                           rearrangeType perm $ patElemType block_pe
-        transpose_bnd = mkLet' [] [block_param_aux] $
-                        PrimOp $ Rearrange [] perm block_name_2d
-    (_, index_block_body) <- perThread [mkLet' [] [paramIdent block_param] $
-                                        PrimOp $ Index [] (identName block_param_aux) [Var variant_i]]
-    let index_block_kstm = Thread [PatElem (paramName block_param) BindVar $
-                                    paramType block_param]
-                           ThreadsInSpace $ insertBinding transpose_bnd index_block_body
+    let index_block_kstms =
+          map (Thread ThreadsInSpace)
+          [mkLet' [] [block_param_aux] $
+            PrimOp $ Rearrange [] perm block_name_2d,
+           mkLet' [] [paramIdent block_param] $
+            PrimOp $ Index [] (identName block_param_aux) [Var variant_i]]
 
-    return (outer_block_param, read_block_kstm : write_block_stms ++ [index_block_kstm])
+    return (outer_block_param, read_elem_kstm : write_block_stms ++ index_block_kstms)
 
   where invariantToAtLeastOneDimension :: Maybe ([a] -> [a], [b] -> [b], [c] -> [c])
         invariantToAtLeastOneDimension = do
@@ -235,10 +228,8 @@ type VarianceTable = HM.HashMap VName Names
 
 varianceInKernelStms :: VarianceTable -> [KernelStm Kernels] -> VarianceTable
 varianceInKernelStms = foldl extend
-  where extend variance (Thread pes _ body) =
-          let new_variance = HM.fromList (zip (map patElemName pes) $
-                                          varianceInBody variance body)
-          in variance <> new_variance
+  where extend variance (Thread _ bnd) =
+          varianceInBinding variance bnd
 
         extend variance stm =
           let free_variant = mconcat $
@@ -247,19 +238,10 @@ varianceInKernelStms = foldl extend
               new_variance = HM.map (const free_variant) (scopeOf stm)
           in variance <> new_variance
 
-varianceInBody :: VarianceTable -> Body -> [Names]
-varianceInBody kvariance (Body _ bnds res) =
-  let variance = foldl inspect mempty bnds
-  in map (resultVariance variance) res
-  where known = HS.fromList $ HM.keys kvariance
-
-        inspect variance bnd =
-          foldl' add variance $ patternNames $ bindingPattern bnd
-          where add variance' v = HM.insert v (freeInBinding bnd) variance'
-
-        resultVariance _ Constant{}     = mempty
-        resultVariance variance (Var v) = HM.lookupDefault mempty v variance
-                                          `HS.intersection` known
+varianceInBinding :: VarianceTable -> Binding -> VarianceTable
+varianceInBinding variance bnd =
+  foldl' add variance $ patternNames $ bindingPattern bnd
+  where add variance' v = HM.insert v (freeInBinding bnd) variance'
 
 sufficientGroups :: MonadBinder m =>
                     [(VName,SubExp)] -> SubExp -> SubExp
