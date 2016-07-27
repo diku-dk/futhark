@@ -55,9 +55,9 @@ transformExp :: Exp -> ExpandM ([Binding], Exp)
 transformExp (Op (Inner (ScanKernel cs w kernel_size lam foldlam nes arrs)))
   -- Extract allocations from the lambda.
   | Right (lam_body', lam_thread_allocs) <-
-      extractThreadAllocations bound_in_lam $ lambdaBody lam,
+      extractThreadAllocationsInBody bound_in_lam $ lambdaBody lam,
    Right (foldlam_body', foldlam_thread_allocs) <-
-      extractThreadAllocations bound_in_foldlam $ lambdaBody foldlam = do
+      extractThreadAllocationsInBody bound_in_foldlam $ lambdaBody foldlam = do
 
   (alloc_bnds, alloc_offsets) <-
     expandedAllocations num_threads thread_id lam_thread_allocs
@@ -105,20 +105,19 @@ extractKernelBodyAllocations :: Names -> KernelBody ExplicitMemory
                                                HM.HashMap VName (SubExp, Space))
 extractKernelBodyAllocations bound_before_body kbody = do
   (allocs, stms) <- mapAccumLM extract HM.empty $ kernelBodyStms kbody
-  return (kbody { kernelBodyStms = stms }, allocs)
-  where extract allocs (Thread pes threads body) = do
-          let bound_before_body' = boundInBody body <> bound_before_body
-          (body', body_allocs) <- extractThreadAllocations bound_before_body' body
-          return (allocs <> body_allocs, Thread pes threads body')
+  return (kbody { kernelBodyStms = concat stms }, allocs)
+  where extract allocs (Thread threads bnd) = do
+          (bnds, body_allocs) <- extractThreadAllocations bound_before_body [bnd]
+          return (allocs <> body_allocs, map (Thread threads) bnds)
 
         extract allocs (GroupReduce pes w lam input) = do
           let bound_before_body' = HS.fromList (HM.keys $ scopeOf lam) <> bound_before_body
           (body', body_allocs) <-
-            extractThreadAllocations bound_before_body' $ lambdaBody lam
+            extractThreadAllocationsInBody bound_before_body' $ lambdaBody lam
           return (allocs <> body_allocs,
-                  GroupReduce pes w lam { lambdaBody = body' } input)
+                  [GroupReduce pes w lam { lambdaBody = body' } input])
 
-        extract allocs stm = return (allocs, stm)
+        extract allocs stm = return (allocs, [stm])
 
 -- | Returns a map from memory block names to their size in bytes,
 -- as well as the lambda body where all the allocations have been removed.
@@ -126,12 +125,18 @@ extractKernelBodyAllocations bound_before_body kbody = do
 -- further down, we will fail later.  If the size of one of the
 -- allocations is not free in the body, we return 'Left' and an
 -- error message.
-extractThreadAllocations :: Names -> Body
-                         -> Either String (Body, HM.HashMap VName (SubExp, Space))
-extractThreadAllocations bound_before_body body = do
-  (allocs, bnds) <- mapAccumLM isAlloc HM.empty $ bodyBindings body
-  return (body { bodyBindings = catMaybes bnds }, allocs)
-  where bound_here = bound_before_body `HS.union` boundInBody body
+extractThreadAllocationsInBody :: Names -> Body
+                               -> Either String (Body, HM.HashMap VName (SubExp, Space))
+extractThreadAllocationsInBody bound_before_body body = do
+  (bnds, allocs) <- extractThreadAllocations bound_before_body $ bodyBindings body
+  return (body { bodyBindings = bnds }, allocs)
+
+extractThreadAllocations :: Names -> [Binding]
+                         -> Either String ([Binding], HM.HashMap VName (SubExp, Space))
+extractThreadAllocations bound_before_body bnds = do
+  (allocs, bnds') <- mapAccumLM isAlloc HM.empty bnds
+  return (catMaybes bnds', allocs)
+  where bound_here = bound_before_body `HS.union` boundByBindings bnds
 
         isAlloc _ (Let (Pattern [] [patElem]) () (Op (Alloc (Var v) _)))
           | v `HS.member` bound_here =
@@ -189,13 +194,17 @@ lookupNewBase name = HM.lookup name . rebaseMap
 
 offsetMemoryInKernelBody :: RebaseMap -> KernelBody ExplicitMemory
                          -> KernelBody ExplicitMemory
-offsetMemoryInKernelBody offsets kbody =
-  kbody { kernelBodyStms = map offset $ kernelBodyStms kbody }
-  where offset (Thread pes threads body) = Thread pes threads $ offsetMemoryInBody offsets body
-        offset (GroupReduce pes w lam input) =
+offsetMemoryInKernelBody initial_offsets kbody =
+  kbody { kernelBodyStms = stms' }
+  where stms' = snd $ mapAccumL offset initial_offsets $ kernelBodyStms kbody
+
+        offset offsets (Thread threads bnd) =
+          let (offsets', bnd') = offsetMemoryInBinding offsets bnd
+          in (offsets', Thread threads bnd')
+        offset offsets (GroupReduce pes w lam input) =
           let body' = offsetMemoryInBody offsets $ lambdaBody lam
-          in GroupReduce pes w lam { lambdaBody = body' } input
-        offset stm = stm
+          in (offsets, GroupReduce pes w lam { lambdaBody = body' } input)
+        offset offsets stm = (offsets, stm)
 
 offsetMemoryInBody :: RebaseMap -> Body -> Body
 offsetMemoryInBody offsets (Body attr bnds res) =

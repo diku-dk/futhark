@@ -988,9 +988,9 @@ compileKernelStm constants (SplitArray (size,_) o w elems_per_thread _arrs) = do
   where comm = case o of Disorder -> Commutative
                          InOrder -> Noncommutative
 
-compileKernelStm constants (Thread pes threads body) = do
-  dest <- ImpGen.destinationFromPattern $ Pattern [] pes
-  protect threads =<< ImpGen.collect (ImpGen.compileBody dest body)
+compileKernelStm constants (Thread threads bnd) = do
+  dest <- ImpGen.destinationFromPattern $ bindingPattern bnd
+  protect threads =<< ImpGen.collect (ImpGen.compileExp dest (bindingExp bnd) $ return ())
   where protect AllThreads body' = ImpGen.emit body'
         protect (OneThreadPerGroup which) body' = do
           let which' = ImpGen.compileSubExp which
@@ -1171,10 +1171,22 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   ImpGen.emit $ Imp.If (kernelThreadActive constants)
     write_result mempty
 
-compileKernelResult _ _ ConcatReturns{} =
-  -- Already in the correct location by virtue of the ExplicitMemory
-  -- type rules.
-  return ()
+compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems what) = do
+  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
+  let dest_loc_offset = ImpGen.offsetArray dest_loc $
+                        SE.intSubExpToScalExp per_thread_elems *
+                        ImpGen.varIndex (kernelGlobalThreadId constants)
+      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
+  ImpGen.copyDWIMDest dest' [] (Var what) []
+
+compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
+  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
+  let dest_loc' = ImpGen.strideArray
+                  (ImpGen.offsetArray dest_loc $
+                   ImpGen.varIndex (kernelGlobalThreadId constants)) $
+                  ImpGen.sizeToScalExp (kernelNumThreads constants)
+      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
+  ImpGen.copyDWIMDest dest' [] (Var what) []
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of

@@ -27,6 +27,9 @@ module Futhark.Representation.Kernels.Kernel
 
        , typeCheckKernel
 
+       , aliasAnalyseKernelStm
+       , consumedByKernelStm
+
          -- * Generic traversal
        , KernelMapper(..)
        , identityKernelMapper
@@ -58,7 +61,7 @@ import Futhark.Representation.Ranges
 import Futhark.Representation.AST.Attributes.Ranges
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
-  (Aliases, removeLambdaAliases, removeBodyAliases, Names'(..))
+  (Aliases, removeLambdaAliases, removeBodyAliases, Names'(..), removeBindingAliases)
 import Futhark.Analysis.Usage
 import qualified Futhark.TypeCheck as TC
 import Futhark.Analysis.Metrics
@@ -139,7 +142,7 @@ data WhichThreads = AllThreads
                   deriving (Eq, Show, Ord)
 
 data KernelStm lore = SplitArray (VName, [PatElem (LetAttr lore)]) StreamOrd SubExp SubExp [VName]
-                    | Thread [PatElem (LetAttr lore)] WhichThreads (Body lore)
+                    | Thread WhichThreads (Binding lore)
                     | Combine (PatElem (LetAttr lore)) [(VName,SubExp)] SubExp
                     | GroupReduce [PatElem (LetAttr lore)] SubExp
                       (Lambda lore) [(SubExp,VName)]
@@ -305,8 +308,8 @@ instance (Attributes lore, FreeIn res) => FreeIn (GenKernelBody res lore) where
 instance Attributes lore => FreeIn (KernelStm lore) where
   freeIn (SplitArray (n,chunks) _ w elems_per_thread vs) =
     freeIn n <> freeIn chunks <> freeIn w <> freeIn elems_per_thread <> freeIn vs
-  freeIn (Thread pes which body) =
-    freeIn pes <> freeIn which <> freeInBody body
+  freeIn (Thread which bnd) =
+    freeIn which <> freeInBinding bnd
   freeIn (Combine pe cspace v) =
     freeIn pe <> freeIn cspace <> freeIn v
   freeIn (GroupReduce pes w lam input) =
@@ -351,11 +354,10 @@ instance Attributes lore => Substitute (KernelStm lore) where
     (substituteNames subst w)
     (substituteNames subst elems_per_thread)
     (substituteNames subst vs)
-  substituteNames subst (Thread pes which body) =
+  substituteNames subst (Thread which bnd) =
     Thread
-    (substituteNames subst pes)
     (substituteNames subst which)
-    (substituteNames subst body)
+    (substituteNames subst bnd)
   substituteNames subst (Combine pe cspace v) =
     Combine (substituteNames subst pe)
     (substituteNames subst cspace) (substituteNames subst v)
@@ -432,8 +434,8 @@ instance (Attributes lore, Renameable lore) => Rename (KernelStm lore) where
     GroupReduce <$> rename pes <*> rename w <*> rename lam <*> rename input
   rename (Combine pe cspace v) =
     Combine <$> rename pe <*> rename cspace <*> rename v
-  rename (Thread pes which body) =
-    Thread <$> rename pes <*> rename which <*> rename body
+  rename (Thread which bnd) =
+    Thread <$> rename which <*> rename bnd
   rename (GroupStream pes w maxchunk lam accs arrs) =
     GroupStream <$> rename pes <*> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
@@ -475,8 +477,8 @@ instance Scoped lore (KernelStm lore) where
   scopeOf (SplitArray (size, chunks) _ _ _ _) =
     mconcat (map scopeOf chunks) <>
     HM.singleton size IndexInfo
-  scopeOf (Thread pes _ _) =
-    mconcat $ map scopeOf pes
+  scopeOf (Thread _ bnd) =
+    scopeOf bnd
   scopeOf (Combine pe _ _) = scopeOf pe
   scopeOf (GroupReduce pes _ _ _) =
     mconcat $ map scopeOf pes
@@ -535,6 +537,38 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
     consumedInKernelBody kbody
   consumedInOp _ = mempty
 
+aliasAnalyseKernelBody :: (Attributes lore,
+                           Attributes (Aliases lore),
+                           CanBeAliased (Op lore)) =>
+                          GenKernelBody res lore
+                       -> GenKernelBody res (Aliases lore)
+aliasAnalyseKernelBody (KernelBody stms res) =
+  KernelBody (map aliasAnalyseKernelStm stms) res
+
+aliasAnalyseKernelStm :: (Attributes lore,
+                          Attributes (Aliases lore),
+                          CanBeAliased (Op lore)) =>
+                         KernelStm lore -> KernelStm (Aliases lore)
+aliasAnalyseKernelStm (SplitArray (size, chunks) o w elems_per_thread arrs) =
+  SplitArray (size, chunks') o w elems_per_thread arrs
+  where chunks' = [ fmap (Names' $ HS.singleton arr,) chunk
+                  | (chunk, arr) <- zip chunks arrs ]
+aliasAnalyseKernelStm (Thread which bnd) =
+  Thread which $ Alias.analyseBinding bnd
+aliasAnalyseKernelStm (Combine pe cspace v) =
+  Combine ((mempty,) <$> pe) cspace v
+aliasAnalyseKernelStm (GroupReduce pes w lam input) =
+  GroupReduce pes' w lam' input
+  where pes' = map (fmap (mempty,)) pes
+        lam' = Alias.analyseLambda lam
+aliasAnalyseKernelStm (GroupStream pes w maxchunk lam accs arrs) =
+  GroupStream pes' w maxchunk lam' accs arrs
+  where pes' = map (fmap (mempty,)) pes
+        lam' = analyseGroupStreamLambda lam
+        analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
+          GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
+          aliasAnalyseKernelBody body
+
 instance (Attributes lore,
           Attributes (Aliases lore),
           CanBeAliased (Op lore)) => CanBeAliased (Kernel lore) where
@@ -544,32 +578,6 @@ instance (Attributes lore,
     where alias = KernelMapper return (return . Alias.analyseLambda)
                   (return . Alias.analyseBody) return return return
                   (return . aliasAnalyseKernelBody)
-          aliasAnalyseKernelBody :: GenKernelBody res lore
-                                 -> GenKernelBody res (Aliases lore)
-          aliasAnalyseKernelBody (KernelBody stms res) =
-            KernelBody (map analyseStm stms) res
-          analyseStm (SplitArray (size, chunks) o w elems_per_thread arrs) =
-            SplitArray (size, chunks') o w elems_per_thread arrs
-            where chunks' = [ fmap (Names' $ HS.singleton arr,) chunk
-                            | (chunk, arr) <- zip chunks arrs ]
-          analyseStm (Thread pes which body) =
-            Thread (zipWith annot pes $ bodyAliases body') which body'
-            where body' = Alias.analyseBody body
-                  annot pe als = (Names' als,) <$> pe
-          analyseStm (Combine pe cspace v) =
-            Combine ((mempty,) <$> pe) cspace v
-          analyseStm (GroupReduce pes w lam input) =
-            GroupReduce pes' w lam' input
-            where pes' = map (fmap (mempty,)) pes
-                  lam' = Alias.analyseLambda lam
-          analyseStm (GroupStream pes w maxchunk lam accs arrs) =
-            GroupStream pes' w maxchunk lam' accs arrs
-            where pes' = map (fmap (mempty,)) pes
-                  lam' = analyseGroupStreamLambda lam
-
-          analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
-            GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
-            aliasAnalyseKernelBody body
 
   removeOpAliases = runIdentity . mapKernelM remove
     where remove = KernelMapper return (return . removeLambdaAliases)
@@ -582,8 +590,8 @@ instance (Attributes lore,
           removeStmAliases (SplitArray (size, chunks) o w elems_per_thread arrs) =
             SplitArray (size, chunks') o w elems_per_thread arrs
             where chunks' = map (fmap snd) chunks
-          removeStmAliases (Thread pes which body) =
-            Thread (map (fmap snd) pes) which (removeBodyAliases body)
+          removeStmAliases (Thread which bnd) =
+            Thread which $ removeBindingAliases bnd
           removeStmAliases (Combine pe cspace v) =
             Combine (snd <$> pe) cspace v
           removeStmAliases (GroupReduce pes w lam input) =
@@ -627,8 +635,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
                                  -> GenKernelBody res lore
           removeKernelBodyWisdom (KernelBody stms res) =
             KernelBody (map removeKernelStatementWisdom stms) res
-          removeKernelStatementWisdom (Thread pes which body) =
-            Thread (map removePatElemWisdom pes) which (removeBodyWisdom body)
+          removeKernelStatementWisdom (Thread which bnd) =
+            Thread which $ removeBindingWisdom bnd
           removeKernelStatementWisdom (Combine pe cspace v) =
             Combine (removePatElemWisdom pe) cspace v
           removeKernelStatementWisdom (SplitArray (size,chunks) o w elems_per_thread arrs) =
@@ -675,7 +683,7 @@ consumedInKernelBody (KernelBody stms _) =
 
 consumedByKernelStm :: (Attributes lore, Aliased lore) =>
                        KernelStm lore -> Names
-consumedByKernelStm (Thread _ _ body) = consumedInBody body
+consumedByKernelStm (Thread _ bnd) = consumedInBinding bnd
 consumedByKernelStm Combine{} = mempty
 consumedByKernelStm SplitArray{} = mempty
 consumedByKernelStm (GroupReduce _ _ _ input) =
@@ -817,15 +825,9 @@ typeCheckKernel (Kernel cs space kts kbody) = do
           checkKernelStm stm
           TC.binding (scopeOf stm) $ checkKernelStms stms' m
 
-        checkKernelStm (Thread pes which body) = do
+        checkKernelStm (Thread which bnd) = do
           checkWhich which
-          TC.checkBody body
-          body_ts <- bodyExtType body
-          let pes_ts = staticShapes $ map patElemType pes
-          unless (body_ts `subtypesOf` pes_ts) $
-            TC.bad $ TC.TypeError $ "Kernel thread statement returns type " ++
-            prettyTuple body_ts ++ ", but pattern has type " ++
-            prettyTuple pes_ts
+          TC.checkBinding (bindingPattern bnd) (bindingExp bnd) $ return ()
 
         checkKernelStm (SplitArray (size, chunks) _ w elems_per_thread arrs) = do
           TC.require [Prim int32] elems_per_thread
@@ -921,8 +923,8 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
           kernelBodyMetrics = mapM_ kernelStmMetrics . kernelBodyStms
           kernelStmMetrics SplitArray{} =
             seen "SplitArray"
-          kernelStmMetrics (Thread _ _ body) =
-            inside "Thread" $ bodyMetrics body
+          kernelStmMetrics (Thread _ bnd) =
+            inside "Thread" $ bindingMetrics bnd
           kernelStmMetrics Combine{} =
             seen "Combine"
           kernelStmMetrics (GroupReduce _ _ lam _) =
@@ -996,12 +998,8 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
     text ("splitArray" <> suff) <> parens (commasep $ ppr w : ppr elems_per_thread : map ppr arrs)
     where suff = case o of InOrder -> ""
                            Disorder -> "Unordered"
-  ppr (Thread pes threads body) =
-    PP.annot (mapMaybe ppAnnot pes) $
-    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals <+>
-    text "thread" <> threads' <+> text "{" </>
-    PP.indent 2 (ppr body) </>
-    text "}"
+  ppr (Thread threads bnd) =
+    text "thread" <> threads' <+> text "{" <+> ppr bnd <+> "}"
     where threads' = case threads of
                        AllThreads -> mempty
                        OneThreadPerGroup which -> mempty <+> ppr which

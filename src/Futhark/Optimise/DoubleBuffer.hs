@@ -121,14 +121,14 @@ optimiseKernelBody kbody = do
         optimiseKernelStms (e:es) = do
           e' <- optimiseKernelStm e
           es' <- inScopeOf e' $ optimiseKernelStms es
-          return $ e' : es'
+          return $ e' ++ es'
 
-        optimiseKernelStm (Thread pes threads body) =
-          Thread pes threads <$> optimiseBody body
+        optimiseKernelStm (Thread threads bnd) =
+          map (Thread threads) <$> optimiseBinding bnd
         optimiseKernelStm (GroupReduce pes w lam input) =
-          GroupReduce pes w <$> optimiseLambda lam <*> pure input
+          pure <$> (GroupReduce pes w <$> optimiseLambda lam <*> pure input)
         optimiseKernelStm stm =
-          return stm
+          return [stm]
 
 optimiseLambda :: MonadFreshNames m => Lambda -> DoubleBufferM m Lambda
 optimiseLambda lam = do

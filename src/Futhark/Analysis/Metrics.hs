@@ -12,6 +12,7 @@ module Futhark.Analysis.Metrics
        , inside
        , MetricsM
        , bodyMetrics
+       , bindingMetrics
        , lambdaMetrics
        ) where
 

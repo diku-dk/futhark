@@ -32,12 +32,13 @@ import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.Lore (VarWisdom(..))
 import Futhark.MonadFreshNames
 import Futhark.Tools
-import Futhark.Transform.Substitute
 import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
 import Futhark.Optimise.Simplifier.Simple
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import qualified Futhark.Analysis.SymbolTable as ST
+import qualified Futhark.Analysis.UsageTable as UT
+import Futhark.Analysis.Usage
 
 simplifyKernels :: MonadFreshNames m => Prog -> m Prog
 simplifyKernels =
@@ -79,13 +80,54 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
   simplifyOp NumGroups = return NumGroups
   simplifyOp GroupSize = return GroupSize
 
-simplifyKernelBody :: (Engine.MonadEngine m, Engine.Simplifiable res) =>
+hoistInKernelBody :: (Engine.MonadEngine m, FreeIn res, Engine.Simplifiable res) =>
+                     Scope (Lore m)
+                  -> GenKernelBody res (Lore m)
+                  -> m (GenKernelBody res (Lore m))
+hoistInKernelBody scope (KernelBody initial_stms res) = do
+  par_blocker <- Engine.asksEngineEnv $
+                 Engine.blockHoistPar . Engine.envHoistBlockers
+  stms' <- hoistKernelStms (par_blocker `Engine.orIf` Engine.isConsumed)
+           (HS.fromList $ HM.keys scope) live_stms
+  return $ KernelBody stms' res
+  where hoistKernelStms block not_hoistable (Thread _ bnd : stms)
+          | HS.null $ freeInBinding bnd `HS.intersection` not_hoistable,
+            not $ block usage bnd = do
+              addBinding bnd
+              hoistKernelStms block not_hoistable stms
+        hoistKernelStms block not_hoistable (stm:stms) =
+          (stm:) <$> hoistKernelStms block not_hoistable' stms
+          where not_hoistable' = not_hoistable <> bound_by_stm
+                bound_by_stm = HS.fromList $ HM.keys $ scopeOf stm
+        hoistKernelStms _ _ [] =
+          return []
+
+        (usage, live_stms) = onlyLiveStms initial_stms
+
+        usageInKernelStm (Thread _ bnd) =
+          usageInBinding bnd
+        usageInKernelStm (GroupReduce _ _ _ input) =
+          mconcat $ map (UT.consumedUsage . snd) input
+        usageInKernelStm _ =
+          mempty
+
+        onlyLiveStms [] = (UT.usages $ freeIn res, [])
+        onlyLiveStms (stm : stms) =
+          let (usage', stms') = onlyLiveStms stms
+          in if UT.contains usage' (HM.keys (scopeOf stm))
+             then (usage' <> UT.usages (freeIn stm) <> usageInKernelStm stm,
+                   stm : stms')
+             else (usage',
+                   stms')
+
+simplifyKernelBody :: (Engine.MonadEngine m, FreeIn res, Engine.Simplifiable res) =>
                       Scope (Lore m)
                    -> GenKernelBody res (Engine.InnerLore m)
                    -> m (GenKernelBody res (Lore m))
 simplifyKernelBody scope (KernelBody stms res) =
-  simplifyKernelStms scope stms $
-    KernelBody [] <$> mapM Engine.simplify res
+  hoistInKernelBody scope =<<
+  simplifyKernelStms scope stms
+  (KernelBody [] <$> mapM Engine.simplify res)
 
 simplifyKernelStms :: Engine.MonadEngine m =>
                       Scope (Lore m)
@@ -118,17 +160,10 @@ simplifyKernelStm _ (SplitArray (size, chunks) o w elems_per_thread arrs) =
           inspectPatElem chunk (Names' $ HS.singleton arr) range
           where range = (Just $ VarBound arr, Just $ VarBound arr)
 
-simplifyKernelStm scope (Thread pes threads body) = do
-  par_blocker <- Engine.asksEngineEnv $
-                 Engine.blockHoistPar . Engine.envHoistBlockers
-  body' <- Engine.blockIf (Engine.hasFree scope_bound
-                            `Engine.orIf` par_blocker
-                            `Engine.orIf` Engine.isConsumed) $
-           Engine.simplifyBody (map (const Observe) pes) body
-  pes' <- inspectPatElems pes $ zip (map Names' $ bodyAliases body') (rangesOf body')
+simplifyKernelStm _ (Thread threads bnd) = do
   threads' <- Engine.simplify threads
-  return [Thread pes' threads' body']
-  where scope_bound = HS.fromList $ HM.keys scope
+  bnds <- collectBindings_ $ Engine.simplifyBinding bnd
+  return $ map (Thread threads') bnds
 
 simplifyKernelStm _ (Combine pe cspace v) = do
   pe' <- inspectPatElem pe mempty $ rangeOf v
@@ -326,116 +361,85 @@ fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len lam ivs as)))
           thread_index = paramName thread_index_param
 fuseWriteIota _ _ = cannotSimplify
 
--- | If an 'Iota' is input to a 'SplitArray' which is then used only
--- in 'Thread' bodies, inline the 'Iota' in those bodies.
+-- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
+-- instead.
 fuseKernelIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                  TopDownRule m
-fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody)))
-  | Just (iota_chunk_info, stms') <- extractSplitIota vtable $ kernelBodyStms kbody =
-      localScope (scopeOfKernelSpace space <>
-                  mconcat (map scopeOf stms')) $ do
-        stms'' <- mapM (inlineIotaInKernelStm iota_chunk_info) stms'
-        let kbody' = kbody { kernelBodyStms = stms'' }
-        letBind_ pat $ Op $ Kernel cs space ts kbody'
+fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody))) = do
+  kstms' <- mapM inlineSplitIota $ kernelBodyStms kbody
 
+  when (concat kstms' == kernelBodyStms kbody)
+    cannotSimplify
+
+  letBind_ pat $ Op $ Kernel cs space ts kbody { kernelBodyStms = concat kstms' }
   where num_threads = spaceNumThreads space
         thread_gid = spaceGlobalId space
-        inlineIotaInKernelStm (size, chunk, o, elems_per_thread, x) stm
-          | patElemName chunk `HS.member` freeIn stm =
-              case stm of
-                Thread pes threads body -> do
-                  -- Invent new name, substitute, and insert.
-                  iota_chunk_name <- newVName $ baseString $ patElemName chunk
-                  let subst = HM.singleton (patElemName chunk) iota_chunk_name
-                  body' <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ do
-                    case o of
-                      InOrder -> do
-                        start_offset <- letSubExp "iota_start_offset" $
-                          PrimOp $ BinOp (Mul Int32) (Var thread_gid) elems_per_thread
-                        start <- letSubExp "iota_start" $
-                          PrimOp $ BinOp (Add Int32) start_offset x
-                        letBindNames'_ [iota_chunk_name] $
-                          PrimOp $ Iota (Var size) start $ constant (1::Int32)
-                      Disorder -> do
-                          start <- letSubExp "iota_start" $
-                            PrimOp $ BinOp (Add Int32) (Var thread_gid) x
-                          letBindNames'_ [iota_chunk_name] $
-                            PrimOp $ Iota (Var size) start num_threads
-                    bodyBind $ substituteNames subst body
-                  return $ Thread pes threads body'
-                _ -> cannotSimplify
-        inlineIotaInKernelStm _ stm =
-          return stm
-
+        inlineSplitIota stm
+          | Just ((size, chunk, o, elems_per_thread, x), stm') <- extractSplitIota vtable stm = do
+              let iota_chunk_name = patElemName chunk
+              bnds <- collectBindings_ $
+                case o of
+                  InOrder -> do
+                    start_offset <- letSubExp "iota_start_offset" $
+                      PrimOp $ BinOp (Mul Int32) (Var thread_gid) elems_per_thread
+                    start <- letSubExp "iota_start" $
+                      PrimOp $ BinOp (Add Int32) start_offset x
+                    letBindNames'_ [iota_chunk_name] $
+                      PrimOp $ Iota (Var size) start $ constant (1::Int32)
+                  Disorder -> do
+                      start <- letSubExp "iota_start" $
+                        PrimOp $ BinOp (Add Int32) (Var thread_gid) x
+                      letBindNames'_ [iota_chunk_name] $
+                        PrimOp $ Iota (Var size) start num_threads
+              return $ stm' : map (Thread ThreadsInSpace) bnds
+        inlineSplitIota stm =
+          return [stm]
 fuseKernelIota _ _ = cannotSimplify
 
 extractSplitIota :: ST.SymbolTable lore
-                 -> [KernelStm lore]
+                 -> KernelStm lore
                  -> Maybe ((VName, PatElemT (LetAttr lore), StreamOrd,
                             SubExp, SubExp),
-                            [KernelStm lore])
-extractSplitIota vtable (SplitArray (size,chunks) o w per_thread_elems arrs : stms)
+                            KernelStm lore)
+extractSplitIota vtable (SplitArray (size,chunks) o w per_thread_elems arrs)
   | ([iota_chunk_info], chunks_and_arrs) <- partitionEithers $
                                             zipWith isIota chunks arrs =
       let (chunks', arrs') = unzip chunks_and_arrs
       in Just (iota_chunk_info,
-               SplitArray (size, chunks') o w per_thread_elems arrs' : stms)
+               SplitArray (size, chunks') o w per_thread_elems arrs')
   where isIota chunk arr
           | Just (PrimOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
             oneIsh s =
               Left (size, chunk, o, per_thread_elems, x)
           | otherwise =
               Right (chunk, arr)
-extractSplitIota vtable (stm:stms) = do
-  (iota_chunk_info, stms') <- extractSplitIota vtable stms
-  return (iota_chunk_info, stm:stms')
-extractSplitIota _ [] = Nothing
+extractSplitIota _ _ = Nothing
 
--- if a Thread statement produces something invariant to the kernel,
--- just move it outside the kernel.  If a kernel produces something
--- invariant to the kernel, turn it into a replicate.
+-- If a kernel produces something invariant to the kernel, turn it
+-- into a replicate.
 removeInvariantKernelResults :: (LocalScope (Lore m) m,
                                  MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                                 TopDownRule m
+
 removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
                                       (Op (Kernel cs space ts (KernelBody kstms kres)))) = do
-  (kstms', invariant_threads) <-
-    unzip <$> mapM checkForInvarianceStm kstms
-
-  let isInvariant (Var v)
-        | v `elem` concat invariant_threads = True
-      isInvariant se = inVtable se
-
   (kpes', kres') <-
-    unzip <$> filterM (checkForInvarianceResult isInvariant) (zip kpes kres)
+    unzip <$> filterM checkForInvarianceResult (zip kpes kres)
 
   -- Check if we did anything at all.
-  when (null (concat invariant_threads) && kres == kres')
+  when (kres == kres')
     cannotSimplify
 
   addBinding $ Let (Pattern [] kpes') attr $ Op $ Kernel cs space ts $
-    KernelBody kstms' kres'
-  where inVtable Constant{} = True
-        inVtable (Var v) = isJust $ ST.lookup v vtable
+    KernelBody kstms kres'
+  where isInvariant Constant{} = True
+        isInvariant (Var v) = isJust $ ST.lookup v vtable
 
         num_threads = spaceNumThreads space
         space_dims = map snd $ spaceDimensions space
 
-        checkForInvarianceStm (Thread pes threads body)
-          | (invariant, variant) <-
-              partition (inVtable . snd) $ zip pes $ bodyResult body,
-            not $ null invariant = do
-              forM_ invariant $ \(pe, se) ->
-                letBindNames'_ [patElemName pe] $ PrimOp $ SubExp se
-              let (pes', variant_res) = unzip variant
-                  body' = body { bodyResult = variant_res }
-              return (Thread pes' threads body',
-                       map (patElemName . fst) invariant)
-        checkForInvarianceStm stm =
-          return (stm, [])
-
-        checkForInvarianceResult isInvariant (pe, ThreadsReturn threads se)
+        checkForInvarianceResult (pe, ThreadsReturn threads se)
           | isInvariant se =
               case threads of
                 AllThreads -> do
@@ -447,6 +451,6 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
                     foldM rep (PrimOp (SubExp se)) (reverse space_dims)
                   return False
                 _ -> return True
-        checkForInvarianceResult _ _ =
+        checkForInvarianceResult _ =
           return True
 removeInvariantKernelResults _ _ = cannotSimplify

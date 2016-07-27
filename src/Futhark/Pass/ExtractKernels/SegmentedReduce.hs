@@ -102,7 +102,7 @@ regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat c
       letSubExp "v" $ PrimOp $ Index [] arr [j]
     return $ resultBody vals
 
-  (mapk_bnds, mapk) <- mapKernel [] num_segments (zip is nest_sizes) [] acct body
+  (mapk_bnds, mapk) <- mapKernelFromBody [] num_segments (zip is nest_sizes) [] acct body
   mapM_ addBinding mapk_bnds
   letBind_ pat $ Op mapk
   where acct = lambdaReturnType lam

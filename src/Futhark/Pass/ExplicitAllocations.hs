@@ -8,7 +8,6 @@ module Futhark.Pass.ExplicitAllocations
 where
 
 import Control.Applicative
-import Control.Arrow (first)
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -178,7 +177,8 @@ allocsForBinding :: Allocator m =>
                  -> m (Binding, [AllocBinding])
 allocsForBinding sizeidents validents e = do
   rts <- expReturns e
-  (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts
+  hints <- expHints e
+  (ctxElems, valElems, postbnds) <- allocsForPattern sizeidents validents rts hints
   return (Let (Pattern ctxElems valElems) () e,
           postbnds)
 
@@ -201,16 +201,16 @@ patternWithAllocations names e = do
     _  -> fail $ "Cannot make allocations for pattern of " ++ pretty e
 
 allocsForPattern :: Allocator m =>
-                    [Ident] -> [(Ident,Bindage)] -> [ExpReturns]
+                    [Ident] -> [(Ident,Bindage)] -> [ExpReturns] -> [ExpHint]
                  -> m ([PatElem], [PatElem], [AllocBinding])
-allocsForPattern sizeidents validents rts = do
+allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size BindVar $ Scalar int32 | size <- map identName sizeidents ]
   (vals,(memsizes, mems, postbnds)) <-
-    runWriterT $ forM (zip validents rts) $ \((ident,bindage), rt) -> do
+    runWriterT $ forM (zip3 validents rts hints) $ \((ident,bindage), rt, hint) -> do
       let shape = arrayShape $ identType ident
       case rt of
         ReturnsScalar _ -> do
-          summary <- lift $ summaryForBindage (identType ident) bindage
+          summary <- lift $ summaryForBindage (identType ident) bindage hint
           return $ PatElem (identName ident) bindage summary
 
         ReturnsMemory size space ->
@@ -243,7 +243,7 @@ allocsForPattern sizeidents validents rts = do
 
         ReturnsArray _ extshape _ Nothing
           | Just _ <- knownShape extshape -> do
-            summary <- lift $ summaryForBindage (identType ident) bindage
+            summary <- lift $ summaryForBindage (identType ident) bindage hint
             return $ PatElem (identName ident) bindage summary
 
         ReturnsArray bt _ u (Just ReturnsNewBlock{})
@@ -280,16 +280,21 @@ allocsForPattern sizeidents validents rts = do
         known Ext{} = Nothing
 
 summaryForBindage :: Allocator m =>
-                     Type -> Bindage
+                     Type -> Bindage -> ExpHint
                   -> m (MemBound NoUniqueness)
-summaryForBindage (Prim bt) BindVar =
+summaryForBindage (Prim bt) BindVar _ =
   return $ Scalar bt
-summaryForBindage (Mem size space) BindVar =
+summaryForBindage (Mem size space) BindVar _ =
   return $ MemMem size space
-summaryForBindage t@(Array bt shape u) BindVar = do
+summaryForBindage t@(Array bt shape u) BindVar NoHint = do
   (_, m) <- allocForArray t DefaultSpace
   return $ directIndexFunction bt shape u m t
-summaryForBindage _ (BindInPlace _ src _) =
+summaryForBindage t BindVar (IxFunHint ixfun) = do
+  let bt = elemType t
+  bytes <- computeSize "bytes" $ product $ primByteSize bt : IxFun.base ixfun
+  m <- allocateMemory "mem" bytes DefaultSpace
+  return $ ArrayMem bt (arrayShape t) NoUniqueness m ixfun
+summaryForBindage _ (BindInPlace _ src _) _ =
   lookupMemBound src
 
 memForBindee :: (MonadFreshNames m) =>
@@ -484,11 +489,6 @@ allocInBody (Body _ bnds res) =
             then return $ Var v
             else do (_, _, v') <- ensureDirectArray v
                     return v'
-
-allocInBodyNoDirect :: In.Body -> AllocM Body
-allocInBodyNoDirect (Body _ bnds res) =
-  allocInBindings bnds $ \bnds' ->
-    return $ Body () bnds' res
 
 allocInBindings :: [In.Binding] -> ([Binding] -> AllocM a)
                 -> AllocM a
@@ -758,45 +758,9 @@ allocInKernelStm space _ (SplitArray (size,chunks) o w elems_per_thread arrs) = 
     return chunk { patElemAttr = attr }
   return [SplitArray (size, chunks') o w elems_per_thread arrs]
 
-allocInKernelStm space returned (Thread pes threads body) = do
-  body' <- allocInBodyNoDirect body
-  body_rets <- bodyReturns (staticShapes $ map patElemType pes) body'
-  pes' <- zipWithM threadMemory pes body_rets
-  return [Thread pes' threads body']
-  where thread_index' = SE.intSubExpToScalExp $ Var $ spaceGlobalId space
-        num_threads = spaceNumThreads space
-        isBoundInBody = flip HS.member $ boundInBody body
-
-        threadMemory pe ret
-          | Array bt shape u <- patElemType pe,
-            ReturnsArray _ _ _ (ReturnsInBlock mem ixfun) <- ret,
-            not $ isBoundInBody mem,
-            not $ patElemName pe `HS.member` returned =
-              return pe { patElemAttr = ArrayMem bt shape u mem ixfun }
-          | Array bt shape u <- patElemType pe = do
-              let (outer_is, outer_dims) =
-                    unzip $ case threads of
-                              ThreadsInSpace ->
-                                map (first $ SE.intSubExpToScalExp . Var) $
-                                spaceDimensions space
-                              _ ->
-                                [(thread_index', num_threads)]
-                  pet = patElemType pe `arrayOfShape` Shape outer_dims
-              (_, mem) <- allocForArray pet DefaultSpace
-              dims <- mapM (fmap SE.intSubExpToScalExp . dimAllocationSize) $
-                      shapeDims shape ++ outer_dims
-              let num_dims = length dims
-                  num_outer_dims = length outer_dims
-                  perm = [num_dims-num_outer_dims .. num_dims-1] ++
-                         [0..num_dims-num_outer_dims-1]
-                  root_ixfun = IxFun.iota dims
-                  permuted_ixfun = IxFun.permute root_ixfun perm
-                  fixed_ixfun = IxFun.applyInd permuted_ixfun outer_is
-              return pe { patElemAttr = ArrayMem bt shape u mem fixed_ixfun }
-          | Prim bt <- patElemType pe =
-              return pe { patElemAttr = Scalar bt }
-          | otherwise = fail $ "threadMemory: pattern element " ++
-                        pretty pe ++ " not an array or prim."
+allocInKernelStm _ _ (Thread threads bnd) = do
+  bnds <- collectBindings_ $ allocInBinding bnd
+  return $ map (Thread threads) bnds
 
 allocInKernelStm _ _ (Combine pe w v) = do
   let pe_t = patElemType pe
@@ -878,3 +842,41 @@ bindPatternWithAllocations types names e = do
   (pat,prebnds) <- runPatAllocM (patternWithAllocations names e) types
   mapM_ bindAllocBinding prebnds
   return pat
+
+data ExpHint = NoHint
+             | IxFunHint (IxFun.IxFun SE.ScalExp)
+
+expHints :: Allocator m => Exp -> m [ExpHint]
+expHints (Op (Inner (Kernel _ space rets kbody))) =
+  zipWithM hint rets $ kernelBodyResult kbody
+  where num_threads = spaceNumThreads space
+
+        spacy AllThreads = Just [num_threads]
+        spacy ThreadsInSpace = Just $ map snd $ spaceDimensions space
+        spacy _ = Nothing
+
+        innermost space_dims t_dims =
+          let r = length t_dims
+              dims = space_dims ++ t_dims
+              perm = [length space_dims..length space_dims+r-1] ++
+                     [0..length space_dims-1]
+              perm_inv = rearrangeInverse perm
+              dims_perm = rearrangeShape perm dims
+              ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp dims_perm
+              ixfun_rearranged = IxFun.permute ixfun_base perm_inv
+          in IxFunHint ixfun_rearranged
+
+        hint t (ThreadsReturn threads _)
+          | r <- arrayRank t,
+            r > 0,
+            Just space_dims <- spacy threads = do
+            t_dims <- mapM dimAllocationSize $ arrayDims t
+            return $ innermost space_dims t_dims
+
+        hint t (ConcatReturns Disorder w _ _) = do
+          t_dims <- mapM dimAllocationSize $ arrayDims t
+          return $ innermost [w] t_dims
+
+        hint _ _ = return NoHint
+expHints e =
+  return $ replicate (expExtTypeSize e) NoHint

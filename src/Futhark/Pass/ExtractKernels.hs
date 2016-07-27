@@ -389,7 +389,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
   fmap (postKernelBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
-                          , kernelBindings = mempty
+                          , kernelStms = mempty
                           }
 
 data KernelEnv = KernelEnv { kernelNest :: Nestings
@@ -397,7 +397,7 @@ data KernelEnv = KernelEnv { kernelNest :: Nestings
                            }
 
 data KernelAcc = KernelAcc { kernelTargets :: Targets
-                           , kernelBindings :: [Out.Binding]
+                           , kernelStms :: [Out.KernelStm Out.Kernels]
                            }
 
 data KernelRes = KernelRes { accPostKernels :: PostKernels
@@ -427,13 +427,18 @@ addSOACtoKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                    Out.Pattern -> SOAC Out.Kernels -> KernelAcc -> m KernelAcc
 addSOACtoKernel pat soac acc = do
   bnds <- runBinder_ $ FOT.transformSOAC pat soac
-  return acc { kernelBindings = bnds <> kernelBindings acc }
+  return acc { kernelStms = map (Thread ThreadsInSpace) bnds <> kernelStms acc }
+
+addStmToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
+                  KernelStm Out.Kernels -> KernelAcc -> m KernelAcc
+addStmToKernel stm acc =
+  return acc { kernelStms = [stm] <> kernelStms acc }
 
 addBindingToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
 addBindingToKernel bnd acc = do
   bnds <- runBinder_ $ FOT.transformBindingRecursively bnd
-  return acc { kernelBindings = bnds <> kernelBindings acc }
+  return acc { kernelStms = map (Thread ThreadsInSpace) bnds <> kernelStms acc }
 
 newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
   deriving (Functor, Applicative, Monad,
@@ -551,7 +556,7 @@ distributeInnerMap pat maploop@(MapLoop cs w lam arrs) acc
       where acc' = KernelAcc { kernelTargets = pushInnerTarget
                                                (pat, bodyResult $ lambdaBody lam) $
                                                kernelTargets acc
-                             , kernelBindings = mempty
+                             , kernelStms = mempty
                              }
 
 leavingNesting :: MapLoop -> KernelAcc -> KernelM KernelAcc
@@ -561,10 +566,10 @@ leavingNesting (MapLoop cs w lam arrs) acc =
      fail "The kernel targets list is unexpectedly small"
    ((pat,res), x:xs) -> do
      let acc' = acc { kernelTargets = (x, reverse xs) }
-     case kernelBindings acc' of
+     case kernelStms acc' of
        []      -> return acc'
        remnant ->
-         let body = mkBody remnant res
+         let body = mkBody (undefined remnant) res
              used_in_body = freeInBody body
              (used_params, used_arrs) =
                unzip $
@@ -575,7 +580,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                            , lambdaParams = used_params
                            }
          in addSOACtoKernel pat (Map cs w lam' used_arrs)
-            acc' { kernelBindings = [] }
+            acc' { kernelStms = [] }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
 
@@ -680,69 +685,29 @@ maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
                        }
       maybeDistributeBinding newbnd acc
 
--- Block tiling: a Redomap that can be distributed by itself, and
--- where the input arrays are invariant to the loop nest, will be
--- block tiled.
-maybeDistributeBinding bnd@(Let pat _ (Op (Redomap cs rw _ _ foldlam nes arrs))) acc =
-  distributeSingleBinding acc bnd >>= \case
-    Just (kernels, res, nest, acc')
-      | Just perm <- map Var (patternNames pat) `isPermutationOf` res,
-        all (not . (`all` boundInKernelNests nest) . HS.member) arrs -> do
+maybeDistributeBinding (Let pat _ (Op (Redomap _ rw _ _ foldlam nes arrs))) acc = do
+  stream_lam <- do
+    foldlam_chunked <- chunkLambda pat nes =<<
+                       FOT.transformLambda foldlam
+    let (chunk_param, acc_params, arr_chunk_params) =
+          partitionChunkedFoldParameters (length nes) $
+          lambdaParams foldlam_chunked
 
-          addKernels kernels
+    let operate_stms = map (Thread ThreadsInSpace) $
+                       bodyBindings $ lambdaBody foldlam_chunked
 
-          (w_bnds, w, ispace, inps, rts) <- flatKernel nest
-          (ksize_bnds, ksize, read_input_bnds) <- mapKernelSkeleton w inps
-          let rts' = rearrangeShape perm rts
+        body = KernelBody operate_stms $
+               bodyResult $ lambdaBody foldlam_chunked
+    block_offset <- newVName "block_offset"
+    return $ GroupStreamLambda
+      (paramName chunk_param)
+      block_offset
+      acc_params
+      arr_chunk_params
+      body
 
-          space <- newKernelSpace ksize ispace
-
-          kresult_pes <- forM rts' $ \rt -> do
-            kresult <- newVName "kresult"
-            return $ PatElem kresult BindVar rt
-
-          read_input_stm <- do
-            (pes, bnds) <- perThread read_input_bnds
-            return $ Thread pes ThreadsInSpace bnds
-
-          stream_lam <- do
-            foldlam_chunked <- chunkLambda pat nes =<<
-                               FOT.transformLambda foldlam
-            let (chunk_param, acc_params, arr_chunk_params) =
-                  partitionChunkedFoldParameters (length nes) $
-                  lambdaParams foldlam_chunked
-
-            thread_pes <- forM (patternValueElements pat) $ \pe -> do
-              name <- newVName $ baseString (patElemName pe)
-              return pe { patElemName = name }
-
-            let operate_stm = Thread thread_pes ThreadsInSpace $
-                              lambdaBody foldlam_chunked
-
-                body = KernelBody [operate_stm] $
-                       map (Var . patElemName) thread_pes
-            block_offset <- newVName "block_offset"
-            return $ GroupStreamLambda
-              (paramName chunk_param)
-              block_offset
-              acc_params
-              arr_chunk_params
-              body
-
-          let stream_stm = GroupStream kresult_pes rw rw stream_lam nes arrs
-
-          let krets = map (ThreadsReturn ThreadsInSpace .
-                            Var . patElemName) kresult_pes
-              kbody = KernelBody [read_input_stm, stream_stm] krets
-              kpat = Pattern [] $ rearrangeShape perm $
-                     patternValueElements $
-                     loopNestingPattern $ fst nest
-          addKernel $ w_bnds ++ ksize_bnds ++
-            [Let kpat () $ Op $ Kernel cs space rts' kbody]
-          return acc'
-    _ ->
-      addBindingToKernel bnd acc
-
+  let stream_stm = GroupStream (patternValueElements pat) rw rw stream_lam nes arrs
+  addStmToKernel stream_stm acc
 
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc =
   distributeSingleUnaryBinding acc bnd $ \_ outerpat arr ->
@@ -785,29 +750,29 @@ distribute acc =
 distributeIfPossible :: KernelAcc -> KernelM (Maybe KernelAcc)
 distributeIfPossible acc = do
   nest <- asks kernelNest
-  tryDistribute nest (kernelTargets acc) (kernelBindings acc) >>= \case
+  tryDistribute nest (kernelTargets acc) (kernelStms acc) >>= \case
     Nothing -> return Nothing
     Just (targets, kernel) -> do
       addKernel kernel
       return $ Just KernelAcc { kernelTargets = targets
-                              , kernelBindings = []
+                              , kernelStms = []
                               }
 
 distributeSingleBinding :: KernelAcc -> Binding
                         -> KernelM (Maybe (PostKernels, Result, KernelNest, KernelAcc))
 distributeSingleBinding acc bnd = do
   nest <- asks kernelNest
-  tryDistribute nest (kernelTargets acc) (kernelBindings acc) >>= \case
+  tryDistribute nest (kernelTargets acc) (kernelStms acc) >>= \case
     Nothing -> return Nothing
     Just (targets, distributed_bnds) ->
-      tryDistributeBinding nest targets bnd >>= \case
+      tryDistributeBinding nest targets (Thread ThreadsInSpace bnd) >>= \case
         Nothing -> return Nothing
         Just (res, targets', new_kernel_nest) ->
           return $ Just (PostKernels [PostKernel distributed_bnds],
                          res,
                          new_kernel_nest,
                          KernelAcc { kernelTargets = targets'
-                                   , kernelBindings = []
+                                   , kernelStms = []
                                    })
 
 segmentedScanKernel :: KernelNest
