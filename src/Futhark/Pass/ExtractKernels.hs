@@ -414,10 +414,10 @@ postKernelBindings (PostKernels kernels) = concatMap unPostKernel kernels
 typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
 typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
 
-addStmToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                  KernelStm Out.Kernels -> KernelAcc -> m KernelAcc
-addStmToKernel stm acc =
-  return acc { kernelStms = [stm] <> kernelStms acc }
+addStmsToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
+                   [KernelStm Out.Kernels] -> KernelAcc -> m KernelAcc
+addStmsToKernel stms acc =
+  return acc { kernelStms = stms <> kernelStms acc }
 
 addBindingToKernel :: (LocalScope Out.Kernels m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
@@ -553,19 +553,15 @@ leavingNesting (MapLoop cs w lam arrs) acc =
      let acc' = acc { kernelTargets = (x, reverse xs) }
      case kernelStms acc' of
        []      -> return acc'
-       remnant ->
-         let body = mkBody (undefined remnant) res
-             used_in_body = freeInBody body
+       remnant -> do
+         let kbody = KernelBody remnant res
+             used_in_body = freeIn kbody
              (used_params, used_arrs) =
                unzip $
                filter ((`HS.member` used_in_body) . paramName . fst) $
                zip (lambdaParams lam) arrs
-             lam' = Lambda { lambdaBody = body
-                           , lambdaReturnType = map rowType $ patternTypes pat
-                           , lambdaParams = used_params
-                           }
-         in addBindingToKernel (Let pat () $ Op $ Map cs w lam' used_arrs)
-            acc' { kernelStms = [] }
+         stms <- Kernelise.mapIsh pat cs w used_params kbody used_arrs
+         addStmsToKernel stms acc' { kernelStms = [] }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
 
