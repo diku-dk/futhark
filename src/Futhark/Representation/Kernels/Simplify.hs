@@ -73,7 +73,7 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
     space' <- Engine.simplify space
     ts' <- mapM Engine.simplify ts
     kernel_body' <- Engine.localVtable (<>scope_vtable) $
-      simplifyKernelBody scope kernel_body
+      simplifyKernelBody True scope kernel_body
     return $ Kernel cs' space' ts' kernel_body'
     where scope_vtable = ST.fromScope scope
           scope = scopeOfKernelSpace space
@@ -82,12 +82,13 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
   simplifyOp GroupSize = return GroupSize
 
 hoistInKernelBody :: (Engine.MonadEngine m, FreeIn res, Engine.Simplifiable res) =>
-                     Scope (Lore m)
+                     Bool -> Scope (Lore m)
                   -> GenKernelBody res (Lore m)
                   -> m (GenKernelBody res (Lore m))
-hoistInKernelBody scope (KernelBody initial_stms res) = do
-  par_blocker <- Engine.asksEngineEnv $
-                 Engine.blockHoistPar . Engine.envHoistBlockers
+hoistInKernelBody par scope (KernelBody initial_stms res) = do
+  par_blocker <- if par then Engine.asksEngineEnv $
+                             Engine.blockHoistPar . Engine.envHoistBlockers
+                             else return $ Engine.isFalse True
   stms' <- hoistKernelStms (par_blocker `Engine.orIf` Engine.isConsumed)
            (HS.fromList $ HM.keys scope) live_stms
   return $ KernelBody stms' res
@@ -122,11 +123,11 @@ hoistInKernelBody scope (KernelBody initial_stms res) = do
                    stms')
 
 simplifyKernelBody :: (Engine.MonadEngine m, FreeIn res, Engine.Simplifiable res) =>
-                      Scope (Lore m)
+                      Bool -> Scope (Lore m)
                    -> GenKernelBody res (Engine.InnerLore m)
                    -> m (GenKernelBody res (Lore m))
-simplifyKernelBody scope (KernelBody stms res) =
-  hoistInKernelBody scope =<<
+simplifyKernelBody par scope (KernelBody stms res) =
+  hoistInKernelBody par scope =<<
   simplifyKernelStms scope stms
   (KernelBody [] <$> mapM Engine.simplify res)
 
@@ -205,7 +206,7 @@ simplifyGroupStreamLambda scope lam w max_chunk arrs = do
            Engine.bindArrayLParams (zip arr_params arrs) $
            Engine.bindLoopVar block_size max_chunk $
            Engine.bindLoopVar block_offset w $
-           simplifyKernelBody (scope <> scopeOf lam) body
+           simplifyKernelBody False (scope <> scopeOf lam) body
   acc_params' <- mapM (Engine.simplifyParam Engine.simplify) acc_params
   arr_params' <- mapM (Engine.simplifyParam Engine.simplify) arr_params
   return $ GroupStreamLambda block_size block_offset acc_params' arr_params' body'
@@ -409,10 +410,10 @@ fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody))) = do
               iota_bnds <- collectBindings_ $
                 zipWithM_ makeIotaBnd iota_arr_params iotas
               let lam_kbody = groupStreamLambdaBody lam
-                  lam_kbody' = kbody { kernelBodyStms =
-                                       map (Thread ThreadsInSpace) iota_bnds ++
-                                       kernelBodyStms lam_kbody
-                                 }
+                  lam_kbody' = lam_kbody { kernelBodyStms =
+                                           map (Thread ThreadsInSpace) iota_bnds ++
+                                           kernelBodyStms lam_kbody
+                                         }
                   lam' = lam { groupStreamLambdaBody = lam_kbody'
                              , groupStreamArrParams = arr_params
                              }

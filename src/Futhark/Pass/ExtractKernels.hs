@@ -181,6 +181,7 @@ import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.SegmentedReduce
 import Futhark.Pass.ExtractKernels.Interchange
+import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Util.Log
 
 extractKernels :: Pass SOACS Out.Kernels
@@ -239,17 +240,7 @@ sequentialisedUnbalancedBinding (Let pat _ (Op soac@(Redomap _ _ _ _ lam2 _ _)))
 sequentialisedUnbalancedBinding _ =
   return Nothing
 
-castScope :: (LetAttr fromlore ~ LetAttr tolore,
-              FParamAttr fromlore ~ FParamAttr tolore,
-              LParamAttr fromlore ~ LParamAttr tolore) =>
-             Scope fromlore -> Scope tolore
-castScope = HM.map soacs
-  where soacs (LetInfo attr) = LetInfo attr
-        soacs (FParamInfo attr) = FParamInfo attr
-        soacs (LParamInfo attr) = LParamInfo attr
-        soacs IndexInfo = IndexInfo
-
-scopeForSOACs ::Scope Out.Kernels -> Scope SOACS
+scopeForSOACs :: Scope Out.Kernels -> Scope SOACS
 scopeForSOACs = castScope
 
 scopeForKernels :: Scope SOACS -> Scope Out.Kernels
@@ -423,22 +414,16 @@ postKernelBindings (PostKernels kernels) = concatMap unPostKernel kernels
 typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
 typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
 
-addSOACtoKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                   Out.Pattern -> SOAC Out.Kernels -> KernelAcc -> m KernelAcc
-addSOACtoKernel pat soac acc = do
-  bnds <- runBinder_ $ FOT.transformSOAC pat soac
-  return acc { kernelStms = map (Thread ThreadsInSpace) bnds <> kernelStms acc }
-
 addStmToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
                   KernelStm Out.Kernels -> KernelAcc -> m KernelAcc
 addStmToKernel stm acc =
   return acc { kernelStms = [stm] <> kernelStms acc }
 
-addBindingToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
+addBindingToKernel :: (LocalScope Out.Kernels m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
 addBindingToKernel bnd acc = do
-  bnds <- runBinder_ $ FOT.transformBindingRecursively bnd
-  return acc { kernelStms = map (Thread ThreadsInSpace) bnds <> kernelStms acc }
+  stms <- Kernelise.transformBinding bnd
+  return acc { kernelStms = stms <> kernelStms acc }
 
 newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
   deriving (Functor, Applicative, Monad,
@@ -579,7 +564,7 @@ leavingNesting (MapLoop cs w lam arrs) acc =
                            , lambdaReturnType = map rowType $ patternTypes pat
                            , lambdaParams = used_params
                            }
-         in addSOACtoKernel pat (Map cs w lam' used_arrs)
+         in addBindingToKernel (Let pat () $ Op $ Map cs w lam' used_arrs)
             acc' { kernelStms = [] }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
@@ -684,30 +669,6 @@ maybeDistributeBinding (Let pat attr (PrimOp (Replicate n v))) acc
                        , lambdaBody = mkBody [tmpbnd] [Var tmp]
                        }
       maybeDistributeBinding newbnd acc
-
-maybeDistributeBinding (Let pat _ (Op (Redomap _ rw _ _ foldlam nes arrs))) acc = do
-  stream_lam <- do
-    foldlam_chunked <- chunkLambda pat nes =<<
-                       FOT.transformLambda foldlam
-    let (chunk_param, acc_params, arr_chunk_params) =
-          partitionChunkedFoldParameters (length nes) $
-          lambdaParams foldlam_chunked
-
-    let operate_stms = map (Thread ThreadsInSpace) $
-                       bodyBindings $ lambdaBody foldlam_chunked
-
-        body = KernelBody operate_stms $
-               bodyResult $ lambdaBody foldlam_chunked
-    block_offset <- newVName "block_offset"
-    return $ GroupStreamLambda
-      (paramName chunk_param)
-      block_offset
-      acc_params
-      arr_chunk_params
-      body
-
-  let stream_stm = GroupStream (patternValueElements pat) rw rw stream_lam nes arrs
-  addStmToKernel stream_stm acc
 
 maybeDistributeBinding bnd@(Let _ _ (PrimOp Copy{})) acc =
   distributeSingleUnaryBinding acc bnd $ \_ outerpat arr ->

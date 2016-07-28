@@ -16,6 +16,7 @@ module Futhark.Transform.FirstOrderTransform
 
   -- * Utility
   , doLoopMapAccumL
+  , doLoopMapAccumL'
   )
   where
 
@@ -775,6 +776,21 @@ doLoopMapAccumL :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
                 -> [VName]
                 -> m (AST.Exp (Lore m))
 doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
+  (merge, i, loopbody) <-
+    doLoopMapAccumL' cs width innerfun accexps arrexps maparrs
+  return $ DoLoop [] merge (ForLoop i width) loopbody
+
+doLoopMapAccumL' :: (LocalScope (Lore m) m, MonadBinder m, Bindable (Lore m),
+                    LetAttr (Lore m) ~ Type,
+                    CanBeAliased (Op (Lore m))) =>
+                   Certificates
+                -> SubExp
+                -> AST.Lambda (Aliases (Lore m))
+                -> [SubExp]
+                -> [VName]
+                -> [VName]
+                -> m ([(AST.FParam (Lore m), SubExp)], VName, AST.Body (Lore m))
+doLoopMapAccumL' cs width innerfun accexps arrexps maparrs = do
   i <- newVName "i"
   -- for the MAP    part
   let acc_num     = length accexps
@@ -800,4 +816,4 @@ doLoopMapAccumL cs width innerfun accexps arrexps maparrs = do
     dests <- letwith cs (map identName outarrs) (pexp (Var i)) $
              map (PrimOp . SubExp) xis
     return $ resultBody (map (Var . identName) inarrs ++ acc' ++ map Var dests)
-  return $ DoLoop [] merge (ForLoop i width) loopbody
+  return (merge, i, loopbody)

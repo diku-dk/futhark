@@ -29,6 +29,7 @@ module Futhark.Optimise.Simplifier.Engine
        , orIf
        , hasFree
        , isConsumed
+       , isFalse
        , State
        , emptyState
        , Need
