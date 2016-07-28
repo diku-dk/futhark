@@ -5,6 +5,8 @@ module Futhark.Pass.ExtractKernels.Kernelise
        ( transformBinding
        , transformBindings
        , transformBody
+
+       , mapIsh
        )
        where
 
@@ -38,7 +40,6 @@ transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs))) = do
   let arr_idents = drop (length nes) $ patternIdents pat
       (fold_acc_params, fold_elem_params) =
         splitAt (length nes) $ lambdaParams fold_lam
-      chunk_size_param = Param chunk_size (Prim int32)
   arr_chunk_params <- mapM (mkArrChunkParam $ Var chunk_size) fold_elem_params
 
   map_arr_params <- forM arr_idents $ \arr ->
@@ -131,3 +132,57 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
 resultArray :: MonadBinder m => [Type] -> m [VName]
 resultArray = mapM oneArray
   where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
+
+-- | Turn what is morally a map with a lambda containing kernel
+-- statements into a sequential kernel statement loop.
+mapIsh :: Transformer m =>
+          Pattern
+       -> Certificates
+       -> SubExp
+       -> [LParam]
+       -> Out.NestedKernelBody Out.Kernels
+       -> [VName]
+       -> m [Out.KernelStm Out.Kernels]
+mapIsh pat cs w params (Out.KernelBody kstms kres) arrs = do
+  soacs_scope <- asksScope scopeForSOACs
+  i <- newVName "i"
+
+  (outarrs, bnds) <-
+    flip runBinderT soacs_scope $ resultArray $ patternTypes pat
+
+  outarr_params <- forM (patternElements pat) $ \pe ->
+    newParam (baseString (patElemName pe) <> "_out") $
+    patElemType pe
+
+  dummy_chunk_size <- newVName "dummy_chunk_size"
+  params_chunked <- forM params $ \param ->
+    newParam (baseString (paramName param) <> "_chunked") $
+    paramType param `arrayOfRow` Var dummy_chunk_size
+
+  (outarr_params_new, write_elems) <-
+    fmap unzip $ forM (zip outarr_params kres) $ \(outarr_param, se) -> do
+      outarr_param_new <- newParam' (<>"_new") outarr_param
+      return (outarr_param_new,
+               Out.Thread Out.ThreadsInSpace $
+               mkLet [] [(paramIdent outarr_param_new,
+                          BindInPlace [] (paramName outarr_param) [Var i])] $
+               PrimOp $ SubExp se)
+
+  let index_stms = do (p, arr) <- zip params $ map paramName params_chunked
+                      return $ Out.Thread Out.ThreadsInSpace $
+                        mkLet' [] [paramIdent p] $
+                        PrimOp $ Index cs arr [constant (0::Int32)]
+      kbody' = Out.KernelBody (index_stms++kstms++write_elems) $
+               map (Var . paramName) outarr_params_new
+
+  let stream_lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
+                                         , Out.groupStreamChunkOffset = i
+                                         , Out.groupStreamAccParams = outarr_params
+                                         , Out.groupStreamArrParams = params_chunked
+                                         , Out.groupStreamLambdaBody = kbody'
+                                         }
+      stream_kstm = Out.GroupStream (patternElements pat) w (constant (1::Int32))
+                    stream_lam (map Var outarrs) arrs
+
+  bnds_kstms <- transformBindings bnds
+  return $ bnds_kstms ++ [stream_kstm]

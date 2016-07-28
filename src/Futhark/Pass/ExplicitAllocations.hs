@@ -788,11 +788,8 @@ allocInKernelStm space _ (GroupReduce pes w lam input) = do
 allocInKernelStm space _ (GroupStream pes w maxchunk lam acc arrs) = do
   arr_summaries <- mapM lookupArraySummary arrs
   lam' <- allocInGroupStreamLambda maxchunk lam space arr_summaries
-  pes' <- forM pes $ \pe ->
-    case patElemType pe of
-      Array{} ->
-        fail "allocInKernelStm: cannot handle streams returning arrays yet."
-      t -> return pe { patElemAttr = Scalar $ elemType t }
+  pes' <- forM (zip pes $ groupStreamAccParams lam') $ \(pe, p) ->
+    return pe { patElemAttr = paramAttr p }
   return [GroupStream pes' w maxchunk lam' acc arrs]
 
 allocInGroupStreamLambda :: SubExp
