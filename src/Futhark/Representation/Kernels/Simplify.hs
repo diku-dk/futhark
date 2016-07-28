@@ -12,6 +12,7 @@ module Futhark.Representation.Kernels.Simplify
 where
 
 import Control.Applicative
+import Control.Arrow ((***))
 import Control.Monad
 import Data.Either
 import Data.List hiding (any, all)
@@ -362,12 +363,13 @@ fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len lam ivs as)))
 fuseWriteIota _ _ = cannotSimplify
 
 -- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
--- instead.
+-- instead.  If it is input to a stream, inline the 'Iota' inside the
+-- stream.
 fuseKernelIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                  TopDownRule m
 fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody))) = do
-  kstms' <- mapM inlineSplitIota $ kernelBodyStms kbody
+  kstms' <- mapM inlineIota $ kernelBodyStms kbody
 
   when (concat kstms' == kernelBodyStms kbody)
     cannotSimplify
@@ -375,7 +377,7 @@ fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody))) = do
   letBind_ pat $ Op $ Kernel cs space ts kbody { kernelBodyStms = concat kstms' }
   where num_threads = spaceNumThreads space
         thread_gid = spaceGlobalId space
-        inlineSplitIota stm
+        inlineIota stm
           | Just ((size, chunk, o, elems_per_thread, x), stm') <- extractSplitIota vtable stm = do
               let iota_chunk_name = patElemName chunk
               bnds <- collectBindings_ $
@@ -393,7 +395,30 @@ fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody))) = do
                       letBindNames'_ [iota_chunk_name] $
                         PrimOp $ Iota (Var size) start num_threads
               return $ stm' : map (Thread ThreadsInSpace) bnds
-        inlineSplitIota stm =
+
+        inlineIota (GroupStream pes w maxchunk lam accs arrs)
+          | ((arr_params, arrs'), (iota_arr_params, iotas)) <-
+              extractStreamIota vtable (groupStreamArrParams lam) arrs,
+            not $ null iota_arr_params = do
+              let makeIotaBnd p x = do
+                    start <- letSubExp "iota_start" $
+                      PrimOp $ BinOp (Add Int32) (Var $ groupStreamChunkOffset lam) x
+                    letBindNames'_ [paramName p] $
+                      PrimOp $ Iota (Var $ groupStreamChunkSize lam) start $
+                      constant (1::Int32)
+              iota_bnds <- collectBindings_ $
+                zipWithM_ makeIotaBnd iota_arr_params iotas
+              let lam_kbody = groupStreamLambdaBody lam
+                  lam_kbody' = kbody { kernelBodyStms =
+                                       map (Thread ThreadsInSpace) iota_bnds ++
+                                       kernelBodyStms lam_kbody
+                                 }
+                  lam' = lam { groupStreamLambdaBody = lam_kbody'
+                             , groupStreamArrParams = arr_params
+                             }
+              return [GroupStream pes w maxchunk lam' accs arrs']
+
+        inlineIota stm =
           return [stm]
 fuseKernelIota _ _ = cannotSimplify
 
@@ -415,6 +440,18 @@ extractSplitIota vtable (SplitArray (size,chunks) o w per_thread_elems arrs)
           | otherwise =
               Right (chunk, arr)
 extractSplitIota _ _ = Nothing
+
+extractStreamIota :: ST.SymbolTable lore -> [Param attr] -> [VName]
+                  -> (([Param attr], [VName]),
+                      ([Param attr], [SubExp]))
+extractStreamIota vtable arr_params arrs =
+  (unzip *** unzip) $ partitionEithers $ zipWith isIotaParam arr_params arrs
+  where isIotaParam p arr
+          | Just (PrimOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
+            oneIsh s =
+             Right (p, x)
+          | otherwise =
+             Left (p, arr)
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
