@@ -35,8 +35,8 @@ import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Optimise.Simplifier (simplifyProgWithRules, noExtraHoistBlockers)
 import Futhark.Optimise.Simplifier.Simple
-import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
+import Futhark.Optimise.Simplifier.RuleM
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import Futhark.Analysis.Usage
@@ -85,22 +85,34 @@ hoistInKernelBody :: (Engine.MonadEngine m, FreeIn res, Engine.Simplifiable res)
                      Bool -> Scope (Lore m)
                   -> GenKernelBody res (Lore m)
                   -> m (GenKernelBody res (Lore m))
-hoistInKernelBody par scope (KernelBody initial_stms res) = do
+hoistInKernelBody par scope (KernelBody initial_stms kres) = do
   par_blocker <- if par then Engine.asksEngineEnv $
                              Engine.blockHoistPar . Engine.envHoistBlockers
                              else return $ Engine.isFalse True
   stms' <- hoistKernelStms (par_blocker `Engine.orIf` Engine.isConsumed)
            (HS.fromList $ HM.keys scope) live_stms
-  return $ KernelBody stms' res
+  return $ KernelBody stms' kres
   where hoistKernelStms block not_hoistable (Thread _ bnd : stms)
           | HS.null $ freeInBinding bnd `HS.intersection` not_hoistable,
             not $ block usage bnd = do
               addBinding bnd
               hoistKernelStms block not_hoistable stms
-        hoistKernelStms block not_hoistable (stm:stms) =
-          (stm:) <$> hoistKernelStms block not_hoistable' stms
-          where not_hoistable' = not_hoistable <> bound_by_stm
-                bound_by_stm = HS.fromList $ HM.keys $ scopeOf stm
+        hoistKernelStms block not_hoistable (stm:stms) = do
+          rules <- Engine.asksEngineEnv Engine.envRules
+
+          stm' <- case stm of
+                    Thread threads bnd -> do
+                      vtable <- Engine.getVtable
+                      res <- bottomUpSimplifyBinding rules (vtable, usage) bnd
+                      case res of Nothing -> return [stm]
+                                  Just stm' -> return $ map (Thread threads) stm'
+                    _ -> return [stm]
+
+          let bound_by_stm = HS.fromList $ HM.keys $ scopeOf stm'
+              not_hoistable' = not_hoistable <> bound_by_stm
+          (stm'++) <$>
+            Engine.localVtable (extendVtableWithStms [stm])
+            (hoistKernelStms block not_hoistable' stms)
         hoistKernelStms _ _ [] =
           return []
 
@@ -113,7 +125,7 @@ hoistInKernelBody par scope (KernelBody initial_stms res) = do
         usageInKernelStm _ =
           mempty
 
-        onlyLiveStms [] = (UT.usages $ freeIn res, [])
+        onlyLiveStms [] = (UT.usages $ freeIn kres, [])
         onlyLiveStms (stm : stms) =
           let (usage', stms') = onlyLiveStms stms
           in if UT.contains usage' (HM.keys (scopeOf stm))
@@ -138,14 +150,21 @@ simplifyKernelStms :: Engine.MonadEngine m =>
                    -> m (GenKernelBody res (Lore m))
 simplifyKernelStms _ [] m = m
 simplifyKernelStms scope (stm:stms) m = do
-  stm' <- simplifyKernelStm scope stm
-  let stm_scope = mconcat $ map scopeOf stm'
-      scope' = scope<>stm_scope
-      scope_vtable = ST.fromScope scope'
+  stm' <- concat <$> (mapM furtherSimplifyKernelStm =<< simplifyKernelStm scope stm)
+  let scope' = scope <> scopeOf stm'
   KernelBody stms' res <-
-    Engine.localVtable (<>scope_vtable) $
+    Engine.localVtable (extendVtableWithStms stm') $
     simplifyKernelStms scope' stms m
   return $ KernelBody (stm'<>stms') res
+
+extendVtableWithStms :: Ranged lore =>
+                        [KernelStm lore]
+                     -> ST.SymbolTable lore -> ST.SymbolTable lore
+extendVtableWithStms = flip $ foldl extendVtableWithStm
+  where extendVtableWithStm vtable (Thread _ bnd) =
+          ST.insertBinding bnd vtable
+        extendVtableWithStm vtable stm =
+          vtable <> ST.fromScope (scopeOf stm)
 
 simplifyKernelStm :: Engine.MonadEngine m =>
                      Scope (Lore m) -> KernelStm (Engine.InnerLore m)
@@ -364,8 +383,7 @@ fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len lam ivs as)))
 fuseWriteIota _ _ = cannotSimplify
 
 -- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
--- instead.  If it is input to a stream, inline the 'Iota' inside the
--- stream.
+-- instead.
 fuseKernelIota :: (LocalScope (Lore m) m,
                   MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
                  TopDownRule m
@@ -397,28 +415,6 @@ fuseKernelIota vtable (Let pat _ (Op (Kernel cs space ts kbody))) = do
                         PrimOp $ Iota (Var size) start num_threads
               return $ stm' : map (Thread ThreadsInSpace) bnds
 
-        inlineIota (GroupStream pes w maxchunk lam accs arrs)
-          | ((arr_params, arrs'), (iota_arr_params, iotas)) <-
-              extractStreamIota vtable (groupStreamArrParams lam) arrs,
-            not $ null iota_arr_params = do
-              let makeIotaBnd p x = do
-                    start <- letSubExp "iota_start" $
-                      PrimOp $ BinOp (Add Int32) (Var $ groupStreamChunkOffset lam) x
-                    letBindNames'_ [paramName p] $
-                      PrimOp $ Iota (Var $ groupStreamChunkSize lam) start $
-                      constant (1::Int32)
-              iota_bnds <- collectBindings_ $
-                zipWithM_ makeIotaBnd iota_arr_params iotas
-              let lam_kbody = groupStreamLambdaBody lam
-                  lam_kbody' = lam_kbody { kernelBodyStms =
-                                           map (Thread ThreadsInSpace) iota_bnds ++
-                                           kernelBodyStms lam_kbody
-                                         }
-                  lam' = lam { groupStreamLambdaBody = lam_kbody'
-                             , groupStreamArrParams = arr_params
-                             }
-              return [GroupStream pes w maxchunk lam' accs arrs']
-
         inlineIota stm =
           return [stm]
 fuseKernelIota _ _ = cannotSimplify
@@ -441,18 +437,6 @@ extractSplitIota vtable (SplitArray (size,chunks) o w per_thread_elems arrs)
           | otherwise =
               Right (chunk, arr)
 extractSplitIota _ _ = Nothing
-
-extractStreamIota :: ST.SymbolTable lore -> [Param attr] -> [VName]
-                  -> (([Param attr], [VName]),
-                      ([Param attr], [SubExp]))
-extractStreamIota vtable arr_params arrs =
-  (unzip *** unzip) $ partitionEithers $ zipWith isIotaParam arr_params arrs
-  where isIotaParam p arr
-          | Just (PrimOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
-            oneIsh s =
-             Right (p, x)
-          | otherwise =
-             Left (p, arr)
 
 -- If a kernel produces something invariant to the kernel, turn it
 -- into a replicate.
@@ -492,3 +476,56 @@ removeInvariantKernelResults vtable (Let (Pattern [] kpes) attr
         checkForInvarianceResult _ =
           return True
 removeInvariantKernelResults _ _ = cannotSimplify
+
+-- We cannot apply simplification rules in the usual sense, so here's
+-- a hack...
+furtherSimplifyKernelStm :: Engine.MonadEngine m =>
+                            KernelStm (Lore m)
+                         -> m [KernelStm (Lore m)]
+furtherSimplifyKernelStm stm = do
+  vtable <- Engine.getVtable
+  (stms, bnds) <- collectBindings $ tryFutherSimplifyKernelStm vtable stm
+  if stms == [stm]
+    then return [stm]
+    else (map (Thread ThreadsInSpace) bnds++) <$>
+         (concat <$> mapM furtherSimplifyKernelStm stms)
+
+tryFutherSimplifyKernelStm :: Engine.MonadEngine m =>
+                              ST.SymbolTable (Lore m)
+                           -> KernelStm (Lore m)
+                           -> m [KernelStm (Lore m)]
+tryFutherSimplifyKernelStm vtable (GroupStream pes w maxchunk lam accs arrs)
+  | ((arr_params, arrs'), (iota_arr_params, iotas)) <-
+      extractStreamIota vtable (groupStreamArrParams lam) arrs,
+    not $ null iota_arr_params = do
+      let makeIotaBnd p x = do
+            start <- letSubExp "iota_start" $
+              PrimOp $ BinOp (Add Int32) (Var $ groupStreamChunkOffset lam) x
+            letBindNames'_ [paramName p] $
+              PrimOp $ Iota (Var $ groupStreamChunkSize lam) start $
+              constant (1::Int32)
+      iota_bnds <- collectBindings_ $
+        zipWithM_ makeIotaBnd iota_arr_params iotas
+      let lam_kbody = groupStreamLambdaBody lam
+          lam_kbody' = lam_kbody { kernelBodyStms =
+                                   map (Thread ThreadsInSpace) iota_bnds ++
+                                   kernelBodyStms lam_kbody
+                                 }
+          lam' = lam { groupStreamLambdaBody = lam_kbody'
+                     , groupStreamArrParams = arr_params
+                     }
+      return [GroupStream pes w maxchunk lam' accs arrs']
+
+tryFutherSimplifyKernelStm _ stm = return [stm]
+
+extractStreamIota :: ST.SymbolTable lore -> [Param attr] -> [VName]
+                  -> (([Param attr], [VName]),
+                      ([Param attr], [SubExp]))
+extractStreamIota vtable arr_params arrs =
+  (unzip *** unzip) $ partitionEithers $ zipWith isIotaParam arr_params arrs
+  where isIotaParam p arr
+          | Just (PrimOp (Iota _ x (Constant s))) <- ST.lookupExp arr vtable,
+            oneIsh s =
+             Right (p, x)
+          | otherwise =
+             Left (p, arr)
