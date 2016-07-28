@@ -20,7 +20,7 @@ module Futhark.Optimise.Simplifier.Engine
          MonadEngine(..)
        , addBindingEngine
        , collectBindingsEngine
-       , Env (envHoistBlockers)
+       , Env (envHoistBlockers, envRules)
        , emptyEnv
        , HoistBlockers(..)
        , neverBlocks
