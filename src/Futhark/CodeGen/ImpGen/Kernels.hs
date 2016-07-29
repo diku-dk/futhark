@@ -1139,7 +1139,16 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
   ImpGen.declaringLParams (acc_params++arr_params) $
     ImpGen.declaringPrimVar block_size int32 $
     ImpGen.declaringPrimVar block_offset int32 $ do
-    body' <- ImpGen.collect $ compileNestedKernelBody acc_targets constants body
+
+    -- If the GroupStream is morally just a do-loop, move the
+    -- active-threads check outside the loop.
+    let (around_loop, body') =
+          case mapM isSimpleThreadInSpace $ kernelBodyStms body of
+            Just stms' -> (flip (Imp.If (kernelThreadActive constants)) mempty,
+                           body { kernelBodyStms = stms' })
+            Nothing -> (id, body)
+
+    body'' <- ImpGen.collect $ compileNestedKernelBody acc_targets constants body'
 
     ImpGen.emit $ Imp.SetScalar block_offset 0
     zipWithM_ ImpGen.compileSubExpTo acc_targets accs
@@ -1160,11 +1169,23 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
       ImpGen.destinationFromPattern $ Pattern [] pes
 
     ImpGen.emit $
+      around_loop $
       Imp.While not_at_end $
-      set_block_size <> body' <> increase_offset
+      set_block_size <> body'' <> increase_offset
 
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
+
+      where isSimpleThreadInSpace (Thread ThreadsInSpace bnd) = Just $ Thread AllThreads bnd
+            isSimpleThreadInSpace Thread{}                    = Nothing
+            isSimpleThreadInSpace stm                         = Just stm
+
+compileKernelStm constants (GroupIf pes cond tb fb) = do
+  ImpGen.Destination dest <- ImpGen.destinationFromPattern $ Pattern [] pes
+
+  tb' <- ImpGen.collect $ compileNestedKernelBody dest constants tb
+  fb' <- ImpGen.collect $ compileNestedKernelBody dest constants fb
+  ImpGen.emit $ Imp.If (ImpGen.compileSubExp cond) tb' fb'
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> ImpGen.ImpM Imp.KernelOp ()

@@ -149,6 +149,7 @@ data KernelStm lore = SplitArray (VName, [PatElem (LetAttr lore)]) StreamOrd Sub
                     | GroupStream [PatElem (LetAttr lore)]
                       SubExp SubExp
                       (GroupStreamLambda lore) [SubExp] [VName]
+                    | GroupIf [PatElem (LetAttr lore)] SubExp (NestedKernelBody lore) (NestedKernelBody lore)
 
 deriving instance Annotations lore => Eq (KernelStm lore)
 deriving instance Annotations lore => Show (KernelStm lore)
@@ -316,6 +317,8 @@ instance Attributes lore => FreeIn (KernelStm lore) where
     freeIn pes <> freeIn w <> freeInLambda lam <> freeIn input
   freeIn (GroupStream pes w  maxchunk lam accs arrs) =
     freeIn pes <> freeIn w <> freeIn maxchunk <> freeIn lam <> freeIn accs <> freeIn arrs
+  freeIn (GroupIf pes cond tb fb) =
+    freeIn pes <> freeIn cond <> freeIn [tb,fb]
 
 instance Attributes lore => FreeIn (GroupStreamLambda lore) where
   freeIn (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -369,6 +372,12 @@ instance Attributes lore => Substitute (KernelStm lore) where
     (substituteNames subst w) (substituteNames subst maxchunk)
     (substituteNames subst lam)
     (substituteNames subst accs) (substituteNames subst arrs)
+  substituteNames subst (GroupIf pes cond tb fb) =
+    GroupIf
+    (substituteNames subst pes)
+    (substituteNames subst cond)
+    (substituteNames subst tb)
+    (substituteNames subst fb)
 
 instance Attributes lore => Substitute (GroupStreamLambda lore) where
   substituteNames
@@ -439,6 +448,8 @@ instance (Attributes lore, Renameable lore) => Rename (KernelStm lore) where
   rename (GroupStream pes w maxchunk lam accs arrs) =
     GroupStream <$> rename pes <*> rename w <*> rename maxchunk <*>
     rename lam <*> rename accs <*> rename arrs
+  rename (GroupIf pes cond tb fb) =
+    GroupIf <$> rename pes <*> rename cond <*> rename tb <*> rename fb
 
 instance (Attributes lore, Renameable lore) => Rename (GroupStreamLambda lore) where
   rename (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
@@ -484,6 +495,8 @@ instance Scoped lore (KernelStm lore) where
     mconcat $ map scopeOf pes
   scopeOf (GroupStream pes _ _ _ _ _) =
     mconcat $ map scopeOf pes
+  scopeOf (GroupIf pes _ _ _) =
+    scopeOf pes
 
 instance Attributes lore => Rename (Kernel lore) where
   rename = mapKernelM renamer
@@ -568,6 +581,11 @@ aliasAnalyseKernelStm (GroupStream pes w maxchunk lam accs arrs) =
         analyseGroupStreamLambda (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
           GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
           aliasAnalyseKernelBody body
+aliasAnalyseKernelStm (GroupIf pes cond tb fb) =
+  GroupIf pes' cond tb' fb'
+  where pes' = map (fmap (mempty,)) pes
+        tb' = aliasAnalyseKernelBody tb
+        fb' = aliasAnalyseKernelBody fb
 
 instance (Attributes lore,
           Attributes (Aliases lore),
@@ -598,6 +616,8 @@ instance (Attributes lore,
             GroupReduce (map (fmap snd) pes) w (removeLambdaAliases lam) input
           removeStmAliases (GroupStream pes w maxchunk lam accs arrs) =
             GroupStream (map (fmap snd) pes) w maxchunk (removeGroupStreamLambdaAliases lam) accs arrs
+          removeStmAliases (GroupIf pes cond tb fb) =
+            GroupIf (map (fmap snd) pes) cond (removeKernelBodyAliases tb) (removeKernelBodyAliases fb)
 
           removeGroupStreamLambdaAliases (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
@@ -645,6 +665,8 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
             GroupReduce (map removePatElemWisdom pes) w (removeLambdaWisdom lam) input
           removeKernelStatementWisdom (GroupStream pes w maxchunk lam accs arrs) =
             GroupStream (map removePatElemWisdom pes) w maxchunk (removeGroupStreamLambdaWisdom lam) accs arrs
+          removeKernelStatementWisdom (GroupIf pes cond tb fb) =
+            GroupIf (map removePatElemWisdom pes) cond (removeKernelBodyWisdom tb) (removeKernelBodyWisdom fb)
 
           removeGroupStreamLambdaWisdom (GroupStreamLambda chunk_size chunk_offset acc_params arr_params body) =
             GroupStreamLambda chunk_size chunk_offset acc_params arr_params $
@@ -693,6 +715,8 @@ consumedByKernelStm (GroupStream _ _ _ lam _ arrs) =
   where GroupStreamLambda _ _ _ arr_params body = lam
         consumedArray v = fromMaybe v $ lookup v params_to_arrs
         params_to_arrs = zip (map paramName arr_params) arrs
+consumedByKernelStm (GroupIf _ _ tb fb) =
+  consumedInKernelBody tb <> consumedInKernelBody fb
 
 typeCheckKernel :: TC.Checkable lore => Kernel (Aliases lore) -> TC.TypeM lore ()
 
@@ -873,6 +897,11 @@ typeCheckKernel (Kernel cs space kts kbody) = do
             TC.bad $ TC.TypeError
             "Invalid type annotations for kernel group stream pattern."
 
+        checkKernelStm (GroupIf pes cond tb fb) = do
+          TC.require [Prim Bool] cond
+          checkNestedKernelBody (map patElemType pes) tb
+          checkNestedKernelBody (map patElemType pes) fb
+
         checkGroupStreamLambda lam@(GroupStreamLambda block_size _ acc_params arr_params body) acc_args arr_args = do
           unless (map TC.argType acc_args == map paramType acc_params) $
             TC.bad $ TC.TypeError
@@ -931,6 +960,10 @@ instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
             inside "GroupReduce" $ lambdaMetrics lam
           kernelStmMetrics (GroupStream _ _ _ lam _ _) =
             inside "GroupStream" $ groupStreamLambdaMetrics lam
+          kernelStmMetrics (GroupIf _ _ tb fb) =
+            inside "GroupIf" $ do
+              kernelBodyMetrics tb
+              kernelBodyMetrics fb
 
           groupStreamLambdaMetrics =
             kernelBodyMetrics . groupStreamLambdaBody
@@ -1028,6 +1061,13 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
                         ppr lam,
                         PP.braces (commasep $ map ppr accs),
                         commasep $ map ppr arrs]))
+  ppr (GroupIf pes cond tb fb) =
+    PP.annot (mapMaybe ppAnnot pes) $
+    text "let" <+> PP.braces (PP.commasep $ map ppr pes) <+> PP.equals </>
+    PP.indent 2
+    (text "if" <+> ppr cond </>
+     text "then" <+> PP.align (ppr tb) </>
+     text "else" <+> PP.align (ppr fb))
 
 instance PrettyLore lore => Pretty (GroupStreamLambda lore) where
   ppr (GroupStreamLambda block_size block_offset acc_params arr_params body) =
