@@ -874,7 +874,7 @@ expHints (Op (Inner (Kernel _ space rets kbody))) =
           t_dims <- mapM dimAllocationSize $ arrayDims t
           return $ IxFunHint $ innermost [w] t_dims
 
-        hint (Prim t) (ConcatReturns InOrder w elems_per_thread _) = do
+        hint Prim{} (ConcatReturns InOrder w elems_per_thread _) = do
           let ixfun_base = IxFun.iota $ map SE.intSubExpToScalExp [num_threads,elems_per_thread]
               ixfun_tr = IxFun.permute ixfun_base [1,0]
               ixfun = IxFun.reshape ixfun_tr $ map (DimNew . SE.intSubExpToScalExp) [w]
