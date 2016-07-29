@@ -792,6 +792,15 @@ allocInKernelStm space _ (GroupStream pes w maxchunk lam acc arrs) = do
     return pe { patElemAttr = paramAttr p }
   return [GroupStream pes' w maxchunk lam' acc arrs]
 
+allocInKernelStm space _ (GroupIf pes cond tb fb) = do
+  tb' <- allocInKernelBody space tb
+  fb' <- allocInKernelBody space fb
+  pes' <- forM pes $ \pe ->
+    case patElemType pe of
+      Prim bt -> return pe { patElemAttr = Scalar bt }
+      _ -> fail "GroupIf can only return scalars for now."
+  return [GroupIf pes' cond tb' fb']
+
 allocInGroupStreamLambda :: SubExp
                          -> GroupStreamLambda In.Kernels
                          -> KernelSpace

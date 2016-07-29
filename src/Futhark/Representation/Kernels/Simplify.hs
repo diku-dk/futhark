@@ -214,6 +214,14 @@ simplifyKernelStm scope (GroupStream pes w maxchunk lam accs arrs) = do
           zip (repeat mempty) $ repeat (Nothing, Nothing)
   return [GroupStream pes' w' maxchunk' lam' accs' arrs']
 
+simplifyKernelStm scope (GroupIf pes cond tb fb) = do
+  pes' <- inspectPatElems pes $
+          zip (repeat mempty) $ repeat (Nothing, Nothing)
+  cond' <- Engine.simplify cond
+  tb' <- simplifyKernelBody False scope tb
+  fb' <- simplifyKernelBody False scope fb
+  return [GroupIf pes' cond' tb' fb']
+
 simplifyGroupStreamLambda :: Engine.MonadEngine m =>
                              Scope (Lore m)
                           -> GroupStreamLambda (Engine.InnerLore m)

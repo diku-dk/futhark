@@ -77,6 +77,21 @@ transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs))) = do
           newParam (baseString (paramName arr_param) <> "_chunk") $
             arrayOfRow (paramType arr_param) chunk_size
 
+transformBinding (Let pat _ (DoLoop [] val (ForLoop i bound) body)) = do
+  dummy_chunk_size <- newVName "dummy_chunk_size"
+  body' <- localScope (scopeOfFParams (map fst val)) $ transformBody body
+  let lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
+                                  , Out.groupStreamChunkOffset = i
+                                  , Out.groupStreamAccParams = map (fmap fromDecl . fst) val
+                                  , Out.groupStreamArrParams = []
+                                  , Out.groupStreamLambdaBody = body' }
+  return [Out.GroupStream (patternValueElements pat)
+          bound (constant (1::Int32)) lam (map snd val) []]
+
+transformBinding (Let pat _ (If cond tb fb _)) = do
+  tb' <- transformBody tb
+  fb' <- transformBody fb
+  return [Out.GroupIf (patternValueElements pat) cond tb' fb']
 
 transformBinding bnd =
   map (Out.Thread Out.ThreadsInSpace) <$> runBinder_ (FOT.transformBindingRecursively bnd)
