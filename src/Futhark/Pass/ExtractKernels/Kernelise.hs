@@ -30,7 +30,10 @@ scopeForSOACs :: Scope Out.Kernels -> Scope SOACS
 scopeForSOACs = castScope
 
 transformBindings :: Transformer m => [Binding] -> m [Out.KernelStm Out.Kernels]
-transformBindings = fmap concat . mapM transformBinding
+transformBindings [] = return []
+transformBindings (bnd:bnds) = do
+  bnd_stms <- transformBinding bnd
+  inScopeOf bnd_stms $ (bnd_stms++) <$> transformBindings bnds
 
 transformBinding :: Transformer m => Binding -> m [Out.KernelStm Out.Kernels]
 
