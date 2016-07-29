@@ -598,7 +598,8 @@ maybeDistributeBinding bnd@(Let pat _ (DoLoop [] val form body)) acc
   | bodyContainsParallelism body =
   distributeSingleBinding acc bnd >>= \case
     Just (kernels, res, nest, acc')
-      | length res == patternSize pat -> do
+      | length res == patternSize pat,
+        HS.null $ freeIn form `HS.intersection` boundInKernelNest nest -> do
       addKernels kernels
       localScope (typeEnvFromKernelAcc acc') $ do
         types <- asksScope scopeForSOACs
