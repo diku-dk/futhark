@@ -971,11 +971,45 @@ compileKernelStms :: KernelConstants
                   -> [KernelStm ExplicitMemory]
                   -> ImpGen.ImpM Imp.KernelOp ()
                   -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelStms _ [] m = m
-compileKernelStms constants (s:ss) m =
-  ImpGen.declaringScope (scopeOf s) $ do
-  compileKernelStm constants s
-  compileKernelStms constants ss m
+compileKernelStms constants ungrouped_stms m =
+  compileGroupedKernelStms' $ groupStmsByGuard constants ungrouped_stms
+  where compileGroupedKernelStms' [] = m
+        compileGroupedKernelStms' ((g, stms):rest_stms) =
+          ImpGen.declaringScope (scopeOf stms) $ do
+            protect g =<< ImpGen.collect (mapM_ (compileKernelStm constants) stms)
+            compileGroupedKernelStms' rest_stms
+
+        protect Nothing body =
+          ImpGen.emit body
+        protect (Just g) body =
+          ImpGen.emit $ Imp.If g body mempty
+
+groupStmsByGuard :: KernelConstants
+                 -> [KernelStm ExplicitMemory]
+                 -> [(Maybe Imp.Exp, [KernelStm ExplicitMemory])]
+groupStmsByGuard constants stms =
+  map collapse $ groupBy sameGuard $ map addGuard stms
+  where addGuard stm@(Thread threads _) =
+          (protect threads, stm)
+        addGuard stm =
+          (Nothing, stm)
+
+        sameGuard (g1, _) (g2, _) = g1 == g2
+
+        collapse [] =
+          (Nothing, [])
+        collapse l@((g,_):_) =
+          (g, map snd l)
+
+        protect AllThreads = Nothing
+        protect (OneThreadPerGroup which) =
+          let which' = ImpGen.compileSubExp which
+              me = Imp.ScalarVar $ kernelLocalThreadId constants
+          in Just $ Imp.CmpOp (CmpEq int32) me which'
+        protect (ThreadsPerGroup limit) =
+          Just $ isActive limit
+        protect ThreadsInSpace =
+          Just $ kernelThreadActive constants
 
 compileKernelStm :: KernelConstants -> KernelStm ExplicitMemory
                  -> ImpGen.ImpM Imp.KernelOp ()
@@ -988,20 +1022,9 @@ compileKernelStm constants (SplitArray (size,_) o w elems_per_thread _arrs) = do
   where comm = case o of Disorder -> Commutative
                          InOrder -> Noncommutative
 
-compileKernelStm constants (Thread pes threads body) = do
-  dest <- ImpGen.destinationFromPattern $ Pattern [] pes
-  protect threads =<< ImpGen.collect (ImpGen.compileBody dest body)
-  where protect AllThreads body' = ImpGen.emit body'
-        protect (OneThreadPerGroup which) body' = do
-          let which' = ImpGen.compileSubExp which
-              me = Imp.ScalarVar $ kernelLocalThreadId constants
-              active = Imp.CmpOp (CmpEq int32) me which'
-          ImpGen.emit $ Imp.If active body' mempty
-        protect (ThreadsPerGroup limit) body' =
-          ImpGen.emit $ Imp.If (isActive limit) body' mempty
-        protect ThreadsInSpace body' =
-          ImpGen.emit $ Imp.If (kernelThreadActive constants)
-          body' mempty
+compileKernelStm _ (Thread _ bnd) = do
+  dest <- ImpGen.destinationFromPattern $ bindingPattern bnd
+  ImpGen.compileExp dest (bindingExp bnd) $ return ()
 
 compileKernelStm _ (Combine pe cspace v) = do
   copy <- ImpGen.collect $
@@ -1116,7 +1139,16 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
   ImpGen.declaringLParams (acc_params++arr_params) $
     ImpGen.declaringPrimVar block_size int32 $
     ImpGen.declaringPrimVar block_offset int32 $ do
-    body' <- ImpGen.collect $ compileNestedKernelBody acc_targets constants body
+
+    -- If the GroupStream is morally just a do-loop, move the
+    -- active-threads check outside the loop.
+    let (around_loop, body') =
+          case mapM isSimpleThreadInSpace $ kernelBodyStms body of
+            Just stms' -> (flip (Imp.If (kernelThreadActive constants)) mempty,
+                           body { kernelBodyStms = stms' })
+            Nothing -> (id, body)
+
+    body'' <- ImpGen.collect $ compileNestedKernelBody acc_targets constants body'
 
     ImpGen.emit $ Imp.SetScalar block_offset 0
     zipWithM_ ImpGen.compileSubExpTo acc_targets accs
@@ -1137,11 +1169,23 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
       ImpGen.destinationFromPattern $ Pattern [] pes
 
     ImpGen.emit $
+      around_loop $
       Imp.While not_at_end $
-      set_block_size <> body' <> increase_offset
+      set_block_size <> body'' <> increase_offset
 
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
+
+      where isSimpleThreadInSpace (Thread ThreadsInSpace bnd) = Just $ Thread AllThreads bnd
+            isSimpleThreadInSpace Thread{}                    = Nothing
+            isSimpleThreadInSpace stm                         = Just stm
+
+compileKernelStm constants (GroupIf pes cond tb fb) = do
+  ImpGen.Destination dest <- ImpGen.destinationFromPattern $ Pattern [] pes
+
+  tb' <- ImpGen.collect $ compileNestedKernelBody dest constants tb
+  fb' <- ImpGen.collect $ compileNestedKernelBody dest constants fb
+  ImpGen.emit $ Imp.If (ImpGen.compileSubExp cond) tb' fb'
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
                     -> ImpGen.ImpM Imp.KernelOp ()
@@ -1171,10 +1215,22 @@ compileKernelResult constants dest (ThreadsReturn ThreadsInSpace what) = do
   ImpGen.emit $ Imp.If (kernelThreadActive constants)
     write_result mempty
 
-compileKernelResult _ _ ConcatReturns{} =
-  -- Already in the correct location by virtue of the ExplicitMemory
-  -- type rules.
-  return ()
+compileKernelResult constants dest (ConcatReturns InOrder _ per_thread_elems what) = do
+  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
+  let dest_loc_offset = ImpGen.offsetArray dest_loc $
+                        SE.intSubExpToScalExp per_thread_elems *
+                        ImpGen.varIndex (kernelGlobalThreadId constants)
+      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc_offset) x
+  ImpGen.copyDWIMDest dest' [] (Var what) []
+
+compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
+  ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc) x <- return dest
+  let dest_loc' = ImpGen.strideArray
+                  (ImpGen.offsetArray dest_loc $
+                   ImpGen.varIndex (kernelGlobalThreadId constants)) $
+                  ImpGen.sizeToScalExp (kernelNumThreads constants)
+      dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
+  ImpGen.copyDWIMDest dest' [] (Var what) []
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of

@@ -24,6 +24,7 @@ module Futhark.TypeCheck
   , requireI
   , checkSubExp
   , checkExp
+  , checkBinding
   , checkType
   , checkExtType
   , matchExtPattern
