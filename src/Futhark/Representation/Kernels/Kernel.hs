@@ -28,7 +28,6 @@ module Futhark.Representation.Kernels.Kernel
        , typeCheckKernel
 
        , aliasAnalyseKernelStm
-       , consumedByKernelStm
 
          -- * Generic traversal
        , KernelMapper(..)
