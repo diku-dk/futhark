@@ -13,6 +13,7 @@ module Futhark.Representation.AST.Pretty
   , ppCertificates
   , ppCertificates'
   , ppTuple'
+  , bindingAnnotation
   )
   where
 
