@@ -214,13 +214,14 @@ instance Rename Bindage where
 instance Renameable lore => Rename (Body lore) where
   rename (Body lore [] res) =
     Body <$> rename lore <*> pure [] <*> rename res
-  rename (Body blore (Let pat elore e:bnds) res) = do
-    e1' <- rename e
-    elore' <- rename elore
-    bind (patternNames pat) $ do
-      pat' <- rename pat
+  rename (Body blore (bnd:bnds) res) =
+    bind (patternNames $ bindingPattern bnd) $ do
+      bnd' <- rename bnd
       Body blore' bnds' res' <- rename $ Body blore bnds res
-      return $ Body blore' (Let pat' elore' e1':bnds') res'
+      return $ Body blore' (bnd':bnds') res'
+
+instance Renameable lore => Rename (Binding lore) where
+  rename (Let pat elore e) = Let <$> rename pat <*> rename elore <*> rename e
 
 instance Renameable lore => Rename (Exp lore) where
   rename (DoLoop ctx val form loopbody) = do

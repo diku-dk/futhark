@@ -21,6 +21,9 @@ module Futhark.Representation.AST.Attributes.Scope
        , scopeOfLParams
        , scopeOfFParams
        , scopeOfLoopForm
+
+       , castScope
+
          -- * Extended type environment
        , ExtendedScope
        , extendedScope
@@ -184,6 +187,18 @@ instance Scoped lore (Lambda lore) where
 
 instance Scoped lore (ExtLambda lore) where
   scopeOf lam = scopeOfLParams $ extLambdaParams lam
+
+-- | If two scopes are really the same, then you can convert one to
+-- the other.
+castScope :: (LetAttr fromlore ~ LetAttr tolore,
+              FParamAttr fromlore ~ FParamAttr tolore,
+              LParamAttr fromlore ~ LParamAttr tolore) =>
+             Scope fromlore -> Scope tolore
+castScope = HM.map soacs
+  where soacs (LetInfo attr) = LetInfo attr
+        soacs (FParamInfo attr) = FParamInfo attr
+        soacs (LParamInfo attr) = LParamInfo attr
+        soacs IndexInfo = IndexInfo
 
 -- | A monad transformer that carries around an extended 'Scope'.
 -- Its 'lookupType' method will first look in the extended 'Scope',
