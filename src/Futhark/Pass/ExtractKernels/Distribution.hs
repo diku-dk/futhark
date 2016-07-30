@@ -46,12 +46,10 @@ import Data.Ord
 
 import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Kernels
-import qualified Futhark.Representation.AST as AST
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import Futhark.Util
 import Futhark.Transform.Rename
-import qualified Futhark.Analysis.Alias as Alias
 import Futhark.Util.Log
 import Futhark.Pass.ExtractKernels.BlockedKernel (mapKernel, KernelInput(..))
 
@@ -109,11 +107,6 @@ instance FreeIn LoopNesting where
     freeIn cs <>
     freeIn w <>
     freeIn params_and_arrs
-
-consumedIn :: LoopNesting -> Names
-consumedIn (MapNesting pat _ _ params_and_arrs) =
-  consumedInPattern pat <>
-  mconcat (map (vnameAliases . snd) params_and_arrs)
 
 data Nesting = Nesting { nestingLetBound :: Names
                        , nestingLoop :: LoopNesting
@@ -262,7 +255,6 @@ flatKernel (MapNesting _ _ nesting_w params_and_arrs, nest : nests) = do
 data DistributionBody = DistributionBody {
     distributionTarget :: Targets
   , distributionFreeInBody :: Names
-  , distributionConsumedInBody :: Names
   , distributionIdentityMap :: HM.HashMap VName Ident
   , distributionExpandTarget :: Target -> Target
     -- ^ Also related to avoiding identity mapping.
@@ -281,9 +273,6 @@ distributionBodyFromStms ((inner_pat, inner_res), targets) stms =
       { distributionTarget = ((inner_pat', inner_res'), targets)
       , distributionFreeInBody = mconcat (map freeIn stms)
                                  `HS.difference` bound_by_stms
-      , distributionConsumedInBody =
-        mconcat (map (consumedByKernelStm . aliasAnalyseKernelStm) stms)
-        `HS.difference` bound_by_stms
       , distributionIdentityMap = inner_identity_map
       , distributionExpandTarget = inner_expand_target
       },
@@ -306,7 +295,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
     "\ntargets:" ++ ppTargets (target, targets)
   runMaybeT $ fmap prepare $ recurse $ zip nests targets
 
-  where prepare (x, _, _, z) = (z, x)
+  where prepare (x, _, z) = (z, x)
         bound_in_nest =
           mconcat $ map boundInNesting $ inner_nest : nests
         -- | Can something of this type be taken outside the nest?
@@ -317,15 +306,15 @@ createKernelNest (inner_nest, nests) distrib_body = do
         distributeAtNesting :: (HasScope t m, MonadFreshNames m) =>
                                Nesting
                             -> Pattern
-                            -> (LoopNesting -> KernelNest, Names, Names)
+                            -> (LoopNesting -> KernelNest, Names)
                             -> HM.HashMap VName Ident
                             -> [Ident]
                             -> (Target -> Targets)
-                            -> MaybeT m (KernelNest, Names, Names, Targets)
+                            -> MaybeT m (KernelNest, Names, Targets)
         distributeAtNesting
           (Nesting nest_let_bound nest)
           pat
-          (add_to_kernel, free_in_kernel, consumed_in_kernel)
+          (add_to_kernel, free_in_kernel)
           identity_map
           inner_returned_arrs
           addTarget = do
@@ -378,9 +367,6 @@ createKernelNest (inner_nest, nests) distrib_body = do
               free_in_kernel'' =
                 (freeIn nest'' <> free_in_kernel) `HS.difference` actual_param_names
 
-              consumed_in_kernel' =
-                (consumedIn nest'' <> consumed_in_kernel) `HS.difference` actual_param_names
-
           unless (all (distributableType . paramType) $
                   loopNestingParams nest'') $
             fail "Would induce irregular array"
@@ -388,26 +374,23 @@ createKernelNest (inner_nest, nests) distrib_body = do
 
                   free_in_kernel'',
 
-                  consumed_in_kernel',
-
                   addTarget (free_arrs_pat, map (Var . paramName) free_params_pat))
 
         recurse :: (HasScope t m, MonadFreshNames m) =>
                    [(Nesting,Target)]
-                -> MaybeT m (KernelNest, Names, Names, Targets)
+                -> MaybeT m (KernelNest, Names, Targets)
         recurse [] =
           distributeAtNesting
           inner_nest
           (distributionInnerPattern distrib_body)
           (newKernel,
-           distributionFreeInBody distrib_body `HS.intersection` bound_in_nest,
-           distributionConsumedInBody distrib_body `HS.intersection` bound_in_nest)
+           distributionFreeInBody distrib_body `HS.intersection` bound_in_nest)
           (distributionIdentityMap distrib_body)
           [] $
           singleTarget . distributionExpandTarget distrib_body
 
         recurse ((nest, (pat,res)) : nests') = do
-          (kernel@(outer, _), kernel_free, kernel_consumed, kernel_targets) <- recurse nests'
+          (kernel@(outer, _), kernel_free, kernel_targets) <- recurse nests'
 
           let (pat', res', identity_map, expand_target) =
                 removeIdentityMappingFromNesting
@@ -417,8 +400,7 @@ createKernelNest (inner_nest, nests) distrib_body = do
             nest
             pat'
             (\k -> pushKernelNesting (pat',res') k kernel,
-             kernel_free,
-             kernel_consumed)
+             kernel_free)
             identity_map
             (patternIdents $ fst $ outerTarget kernel_targets)
             ((`pushOuterTarget` kernel_targets) . expand_target)
