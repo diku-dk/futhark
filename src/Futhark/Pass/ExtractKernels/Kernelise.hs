@@ -88,7 +88,7 @@ transformBinding (Let pat _ (DoLoop [] val (ForLoop i bound) body)) = do
   return [Out.GroupStream (patternValueElements pat)
           bound (constant (1::Int32)) lam (map snd val) []]
 
-transformBinding (Let pat _ (If cond tb fb _)) = do
+transformBinding (Let pat _ (If cond tb fb ts)) | all primType ts = do
   tb' <- transformBody tb
   fb' <- transformBody fb
   return [Out.GroupIf (patternValueElements pat) cond tb' fb']
