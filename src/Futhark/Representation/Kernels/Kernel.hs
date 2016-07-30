@@ -1031,13 +1031,27 @@ instance PrettyLore lore => Pretty (KernelStm lore) where
     text ("splitArray" <> suff) <> parens (commasep $ ppr w : ppr elems_per_thread : map ppr arrs)
     where suff = case o of InOrder -> ""
                            Disorder -> "Unordered"
-  ppr (Thread threads bnd) =
-    text "thread" <> threads' <+> text "{" <+> ppr bnd <+> "}"
-    where threads' = case threads of
+  ppr (Thread threads bnd@(Let pat attr e)) =
+    bindingAnnotation bnd $ PP.align $
+    text "let" <+> threads' <> PP.align (ppr pat) <+>
+    case (linebreak, ppExpLore attr e) of
+      (True, Nothing) -> PP.equals </>
+                         PP.indent 2 e'
+      (_, Just ann) -> PP.equals </>
+                       PP.indent 2 (ann </> e')
+      (False, Nothing) -> PP.equals <+> PP.align e'
+    where e' = ppr e
+          linebreak = case e of
+                        DoLoop{} -> True
+                        Op{} -> True
+                        If{} -> True
+                        PrimOp ArrayLit{} -> False
+                        _ -> False
+          threads' = case threads of
                        AllThreads -> mempty
                        OneThreadPerGroup which -> mempty <+> ppr which
                        ThreadsPerGroup limit -> text " <" <+> ppr limit
-                       ThreadsInSpace -> text " active"
+                       ThreadsInSpace -> text "active "
   ppr (Combine pe cspace what) =
     PP.annot (mapMaybe ppAnnot [pe]) $
     text "let" <+> PP.braces (ppr pe) <+> PP.equals <+>
