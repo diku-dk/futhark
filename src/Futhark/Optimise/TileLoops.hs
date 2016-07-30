@@ -71,16 +71,20 @@ tileInKernelBody branch_variant initial_variance initial_kspace (KernelBody kstm
             Just mk_tilings <-
               zipWithM (<|>) maybe_1d_tiles maybe_1_5d_tiles = do
 
-          (arr_chunk_params', tile_kstms) <- unzip <$> sequence mk_tilings
+          (kspaces, arr_chunk_params', tile_kstms) <- unzip3 <$> sequence mk_tilings
 
-          let KernelBody lam_kstms lam_res = groupStreamLambdaBody lam
+          let (kspace', kspace_bnds) =
+                case kspaces of
+                  [] -> (kspace, [])
+                  new_kspace : _ -> new_kspace
+              KernelBody lam_kstms lam_res = groupStreamLambdaBody lam
               lam_kstms' = concat tile_kstms ++ lam_kstms
               group_size = spaceGroupSize kspace
               lam' = lam { groupStreamLambdaBody = KernelBody lam_kstms' lam_res
                          , groupStreamArrParams = arr_chunk_params'
                          }
 
-          return ((kspace, extra_bnds),
+          return ((kspace', extra_bnds <> kspace_bnds),
                   GroupStream pes w group_size lam' accs arrs)
 
         tileInKernelStatement (kspace, extra_bnds) (GroupStream pes w _ lam accs arrs)
@@ -170,18 +174,69 @@ tileInStreamLambda branch_variant variance kspace lam = do
 
 is1dTileable :: MonadFreshNames m =>
                 Names -> KernelSpace -> VarianceTable -> SubExp -> VName -> LParam
-             -> Maybe (m (LParam, [KernelStm Kernels]))
+             -> Maybe (m ((KernelSpace, [Binding]), LParam, [KernelStm Kernels]))
 is1dTileable branch_variant kspace variance block_size arr block_param = do
   guard $ HS.null $ HM.lookupDefault mempty arr variance
   guard $ HS.null branch_variant
-  return $ tile1d kspace block_size block_param
+  return $ do
+    (outer_block_param, kstms) <- tile1d kspace block_size block_param
+    return ((kspace, []), outer_block_param, kstms)
 
 is1_5dTileable :: MonadFreshNames m =>
-                  Names -> KernelSpace -> VarianceTable -> SubExp -> VName -> LParam
-               -> Maybe (m (LParam, [KernelStm Kernels]))
+                  Names -> KernelSpace -> VarianceTable
+               -> SubExp -> VName -> LParam
+               -> Maybe (m ((KernelSpace, [Binding]), LParam, [KernelStm Kernels]))
 is1_5dTileable branch_variant kspace variance block_size arr block_param = do
-  (_i, _d) <- invariantToInnermostDimension
-  return $ tile1d kspace block_size block_param
+  (inner_gtid, inner_gdim) <- invariantToInnermostDimension
+  mk_structure <-
+    case spaceStructure kspace of
+      NestedSpace{} -> Nothing
+      FlatSpace gtids_and_gdims ->
+        return $ do
+          -- Force a functioning group size. XXX: not pretty.
+          let n_dims = length gtids_and_gdims
+          outer <- forM (take (n_dims-1) gtids_and_gdims) $ \(gtid, gdim) -> do
+            ltid <- newVName "ltid"
+            return (gtid, gdim, ltid, gdim)
+
+          inner_ltid <- newVName "inner_ltid"
+          smaller <- newVName "group_size_is_smaller"
+          inner_ldim <- newVName "inner_ldim"
+          let is_group_size_smaller =
+                mkLet' [] [Ident smaller $ Prim Bool] $
+                PrimOp $ CmpOp (CmpSlt Int32) (spaceGroupSize kspace) inner_gdim
+              smaller_body = Body () [] [spaceGroupSize kspace]
+              not_smaller_body = Body () [] [inner_gdim]
+              compute_tiled_group_size =
+                mkLet' [] [Ident inner_ldim $ Prim int32] $
+                If (Var smaller) smaller_body not_smaller_body [Prim int32]
+
+              structure = NestedSpace $ outer ++ [(inner_gtid, inner_gdim,
+                                                   inner_ltid, Var inner_ldim)]
+          ((num_threads, num_groups), num_bnds) <- flip runBinderT mempty $ do
+            threads_necessary <-
+              letSubExp "threads_necessary" =<<
+              foldBinOp (Mul Int32)
+              (constant (1::Int32)) (map snd gtids_and_gdims)
+            groups_necessary <-
+              letSubExp "groups_necessary" =<<
+              eDivRoundingUp Int32 (eSubExp threads_necessary) (eSubExp $ Var inner_ldim)
+            num_threads <-
+              letSubExp "num_threads" $
+              PrimOp $ BinOp (Mul Int32) groups_necessary (Var inner_ldim)
+            return (num_threads, groups_necessary)
+
+          let kspace' = kspace { spaceGroupSize = Var inner_ldim
+                               , spaceNumGroups = num_groups
+                               , spaceNumThreads = num_threads
+                               , spaceStructure = structure
+                               }
+          return ([is_group_size_smaller, compute_tiled_group_size] ++ num_bnds,
+                  kspace')
+  return $ do
+    (outer_block_param, kstms) <- tile1d kspace block_size block_param
+    (structure_bnds, kspace') <- mk_structure
+    return ((kspace', structure_bnds), outer_block_param, kstms)
   where invariantToInnermostDimension :: Maybe (VName, SubExp)
         invariantToInnermostDimension =
           case reverse $ spaceDimensions kspace of
