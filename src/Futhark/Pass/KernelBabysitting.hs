@@ -2,7 +2,7 @@
 -- | Do various kernel optimisations - mostly related to coalescing.
 module Futhark.Pass.KernelBabysitting
        ( babysitKernels
-       , nonlinearInMemory -- FIXME, do not export this.
+       , nonlinearInMemory
        )
        where
 
@@ -50,17 +50,20 @@ transformBody (Body () bnds res) = insertBindingsM $ do
 -- suppose.  We really should do this at the memory level.
 type ExpMap = HM.HashMap VName Binding
 
-nonlinearInMemory :: VName -> ExpMap -> Bool
+nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case HM.lookup name m of
-    Just (Let _ _ (PrimOp Rearrange{})) -> True
+    Just (Let _ _ (PrimOp Rearrange{})) -> Just Nothing
     Just (Let _ _ (PrimOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
     Just (Let pat _ (Op (Kernel _ _ ts _))) ->
-      fromMaybe False $
-      nonlinear <$> find ((==name) . patElemName . fst)
+      nonlinear =<< find ((==name) . patElemName . fst)
       (zip (patternElements pat) ts)
-    _ -> False
-  where nonlinear (_, t) = arrayRank t > 0
+    _ -> Nothing
+  where nonlinear (pe, t)
+          | inner_r <- arrayRank t, inner_r > 0 = do
+              let outer_r = arrayRank (patElemType pe) - inner_r
+              return $ Just $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
+          | otherwise = Nothing
 
 transformBinding :: ExpMap -> Binding -> BabysitM ExpMap
 
@@ -255,7 +258,7 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
 
       -- Everything is fine... assuming that the array is in row-major
       -- order!  Make sure that is the case.
-      | nonlinearInMemory arr expmap ->
+      | Just{} <- nonlinearInMemory arr expmap ->
           replace =<< lift (flatInput arr)
 
 
@@ -295,13 +298,15 @@ coalescingPermutation num_is rank =
   [num_is..rank-1] ++ [0..num_is-1]
 
 rearrangeInput :: MonadBinder m =>
-                  Bool -> [Int] -> VName -> m VName
+                  Maybe (Maybe [Int]) -> [Int] -> VName -> m VName
+rearrangeInput (Just (Just current_perm)) perm arr
+  | current_perm == perm = return arr
 rearrangeInput manifest perm arr = do
   let inv_perm = rearrangeInverse perm
   -- We may first manifest the array to ensure that it is flat in
   -- memory.  This is sometimes unnecessary, in which case the copy
   -- will hopefully be removed by the simplifier.
-  manifested <- if manifest then flatInput arr else return arr
+  manifested <- if isJust manifest then flatInput arr else return arr
   transposed <- letExp (baseString arr ++ "_tr") $
                 PrimOp $ Rearrange [] perm manifested
   tr_manifested <- letExp (baseString arr ++ "_tr_manifested") $
