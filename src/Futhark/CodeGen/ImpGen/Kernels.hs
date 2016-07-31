@@ -1234,7 +1234,7 @@ compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of
-                    [] -> Imp.Constant $ BoolValue False
+                    [] -> Imp.Constant $ BoolValue True
                     x:xs -> foldl (Imp.BinOp LogAnd) x xs
   where (is, ws) = unzip limit
         actives = zipWith active is $ map ImpGen.compileSubExp ws
