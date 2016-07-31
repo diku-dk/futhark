@@ -381,14 +381,6 @@ allocInMergeParams variant merge m = do
 
   localScope summary $ m (memsizeparams<>memparams) valparams mk_loop_res
   where variant_names = variant ++ map (paramName . fst) merge
-        loopInvariantShape =
-          not . any (`elem` variant_names) . subExpVars . arrayDims . paramType
-        allocInMergeParam (mergeparam, Var v)
-          | Array bt shape Unique <- paramDeclType mergeparam,
-            loopInvariantShape mergeparam = do
-              (mem, ixfun) <- lift $ lookupArraySummary v
-              return (mergeparam { paramAttr = ArrayMem bt shape Unique mem ixfun },
-                      lift . ensureArrayIn (paramType mergeparam) mem ixfun)
         allocInMergeParam (mergeparam, _) = do
           mergeparam' <- allocInFParam mergeparam
           return (mergeparam', linearFuncallArg $ paramType mergeparam)
