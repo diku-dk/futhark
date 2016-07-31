@@ -785,12 +785,15 @@ allocInKernelStm space _ (GroupReduce pes w lam input) = do
   return [GroupReduce pes' w lam' input]
   where arrs = map snd input
 
-allocInKernelStm space _ (GroupStream pes w maxchunk lam acc arrs) = do
+allocInKernelStm space _ (GroupStream pes w maxchunk lam accs arrs) = do
+  acc_summaries <- mapM accSummary accs
   arr_summaries <- mapM lookupArraySummary arrs
-  lam' <- allocInGroupStreamLambda maxchunk lam space arr_summaries
+  lam' <- allocInGroupStreamLambda maxchunk lam space acc_summaries arr_summaries
   pes' <- forM (zip pes $ groupStreamAccParams lam') $ \(pe, p) ->
     return pe { patElemAttr = paramAttr p }
-  return [GroupStream pes' w maxchunk lam' acc arrs]
+  return [GroupStream pes' w maxchunk lam' accs arrs]
+  where accSummary (Constant v) = return $ Scalar $ primValueType v
+        accSummary (Var v) = lookupMemBound v
 
 allocInKernelStm space _ (GroupIf pes cond tb fb) = do
   tb' <- allocInKernelBody space tb
@@ -804,18 +807,17 @@ allocInKernelStm space _ (GroupIf pes cond tb fb) = do
 allocInGroupStreamLambda :: SubExp
                          -> GroupStreamLambda In.Kernels
                          -> KernelSpace
+                         -> [MemBound NoUniqueness]
                          -> [(VName, IxFun.IxFun SE.ScalExp)]
                          -> AllocM (GroupStreamLambda ExplicitMemory)
-allocInGroupStreamLambda maxchunk lam space input_summaries = do
-  let group_size = spaceGroupSize space
-      local_tid = SE.Id (spaceLocalId space) int32
-      GroupStreamLambda block_size block_offset acc_params arr_params body = lam
+allocInGroupStreamLambda maxchunk lam space acc_summaries arr_summaries = do
+  let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
 
   acc_params' <-
-    allocInScanParameters group_size local_tid 0 acc_params
+    allocInAccParameters acc_params acc_summaries
   arr_params' <-
     allocInChunkedParameters (SE.Id block_offset int32) $
-    zip arr_params input_summaries
+    zip arr_params arr_summaries
 
   body' <- localScope (HM.insert block_size IndexInfo $
                        HM.insert block_offset IndexInfo $
@@ -824,6 +826,12 @@ allocInGroupStreamLambda maxchunk lam space input_summaries = do
            allocInKernelBody space body
   return $
     GroupStreamLambda block_size block_offset acc_params' arr_params' body'
+
+allocInAccParameters :: [In.LParam]
+                     -> [MemBound NoUniqueness]
+                     -> AllocM [LParam]
+allocInAccParameters = zipWithM allocInAccParameter
+  where allocInAccParameter p attr = return p { paramAttr = attr }
 
 simplifiable :: (Engine.MonadEngine m,
                  Engine.InnerLore m ~ ExplicitMemory) =>
