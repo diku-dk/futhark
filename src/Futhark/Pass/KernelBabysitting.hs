@@ -251,7 +251,7 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
       -- We are fully indexing the array, but the indices are in a
       -- permuted order.
       | length is == arrayRank t,
-        is' <- coalescedIndexes thread_gids is,
+        is' <- coalescedIndexes (map Var thread_gids) is,
         Just perm <- is' `isPermutationOf` is,
         perm /= [0..length perm-1] ->
           replace =<< lift (rearrangeInput (nonlinearInMemory arr expmap) perm arr)
@@ -276,7 +276,7 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
           return $ Just (arr', is)
 
 -- Try to move thread indexes into their proper position.
-coalescedIndexes :: [VName] -> [SubExp] -> [SubExp]
+coalescedIndexes :: (Eq a, Show a) => [a] -> [a] -> [a]
 coalescedIndexes tgids is =
   reverse $ foldl move (reverse is) $ zip [0..] (reverse tgids)
   where num_is = length is
@@ -284,7 +284,7 @@ coalescedIndexes tgids is =
         move is_rev (i, tgid)
           -- If tgid is in is_rev anywhere but at position i, and
           -- position i exists, we move it to position i instead.
-          | Just j <- elemIndex (Var tgid) is_rev, i /= j, i < num_is =
+          | Just j <- elemIndex tgid is_rev, i /= j, i < num_is =
               swap i j is_rev
           | otherwise =
               is_rev
