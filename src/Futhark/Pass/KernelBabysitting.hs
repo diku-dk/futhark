@@ -195,22 +195,30 @@ type ArrayIndexTransform m = VName -> [SubExp] -> m (Maybe (VName, [SubExp]))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   ArrayIndexTransform f
-                               -> KernelBody Kernels
-                               -> f (KernelBody Kernels)
+                               -> GenKernelBody res Kernels
+                               -> f (GenKernelBody res Kernels)
 traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
   KernelBody <$> mapM onStatement kstms <*> pure kres
   where onStatement (Thread threads bnd) =
           Thread threads <$> onBinding bnd
         onStatement (GroupReduce pes w lam input) =
           GroupReduce pes w <$> onLambda lam <*> pure input
+        onStatement (GroupStream pes w maxchunk lam accs arrs) =
+          GroupStream pes w maxchunk <$> onStreamLambda lam <*> pure accs <*> pure arrs
         onStatement stm = pure stm
 
         onLambda lam =
           (\body' -> lam { lambdaBody = body' }) <$>
           onBody (lambdaBody lam)
 
+        onStreamLambda lam =
+          (\body' -> lam { groupStreamLambdaBody = body' }) <$>
+          onKernelBody (groupStreamLambdaBody lam)
+
         onBody (Body battr bnds bres) =
           Body battr <$> mapM onBinding bnds <*> pure bres
+
+        onKernelBody = traverseKernelBodyArrayIndexes f
 
         onBinding (Let pat attr (PrimOp (Index cs arr is))) =
           Let pat attr . oldOrNew <$> f arr is
