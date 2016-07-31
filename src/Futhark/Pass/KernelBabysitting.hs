@@ -53,7 +53,7 @@ type ExpMap = HM.HashMap VName Binding
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
   case HM.lookup name m of
-    Just (Let _ _ (PrimOp Rearrange{})) -> Just Nothing
+    Just (Let _ _ (PrimOp (Rearrange _ perm _))) -> Just $ Just perm
     Just (Let _ _ (PrimOp (Reshape _ _ arr))) -> nonlinearInMemory arr m
     Just (Let pat _ (Op (Kernel _ _ ts _))) ->
       nonlinear =<< find ((==name) . patElemName . fst)
@@ -205,6 +205,8 @@ traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
           GroupReduce pes w <$> onLambda lam <*> pure input
         onStatement (GroupStream pes w maxchunk lam accs arrs) =
           GroupStream pes w maxchunk <$> onStreamLambda lam <*> pure accs <*> pure arrs
+        onStatement (GroupIf pes cond tb fb) =
+          GroupIf pes cond <$> onKernelBody tb <*> onKernelBody fb
         onStatement stm = pure stm
 
         onLambda lam =
@@ -248,8 +250,8 @@ ensureCoalescedAccess expmap thread_gids boundOutside arr is = do
       pure $ Just (arr', is)
 
     (Nothing, Just t)
-      -- We are fully indexing the array, but the indices are in a
-      -- permuted order.
+      -- We are fully indexing the array with thread IDs, but the
+      -- indices are in a permuted order.
       | length is == arrayRank t,
         is' <- coalescedIndexes (map Var thread_gids) is,
         Just perm <- is' `isPermutationOf` is,
