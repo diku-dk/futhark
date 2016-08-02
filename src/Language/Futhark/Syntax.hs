@@ -372,13 +372,13 @@ data ExpBase f vn =
             -- ^ Tuple literals, e.g., @{1+3, {x, y+z}}@.
 
             | ArrayLit  [ExpBase f vn] (f (CompTypeBase vn)) SrcLoc
+            -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
+            -- Second arg is the row type of the rows of the array.
 
             | Empty (TypeDeclBase f vn) SrcLoc
 
             | Var    (IdentBase f vn)
-            -- ^ Array literals, e.g., @[ [1+x, 3], [2, 1+4] ]@.
-            -- Second arg is the type of of the rows of the array (not
-            -- the element type).
+
             | LetPat (PatternBase f vn) (ExpBase f vn) (ExpBase f vn) SrcLoc
 
             | If     (ExpBase f vn) (ExpBase f vn) (ExpBase f vn) (f (CompTypeBase vn)) SrcLoc
