@@ -150,7 +150,7 @@ newtype ID vn = ID (vn, Int)
   deriving (Show)
 
 -- | Alias for a tagged 'Name'.  This is used as the name
--- representation in most the compiler.
+-- representation in most of the compiler.
 type VName = ID Name
 
 -- | Return the tag contained in the 'ID'.

@@ -281,8 +281,8 @@ data BinOp = Add IntType -- ^ Integer addition.
            | Or IntType -- ^ Bitwise or.
            | Xor IntType -- ^ Bitwise exclusive-or.
 
-           | Pow IntType -- ^ Integer exponentatation.
-           | FPow FloatType -- ^ Floating-point exponentatation.
+           | Pow IntType -- ^ Integer exponentiation.
+           | FPow FloatType -- ^ Floating-point exponentiation.
 
            | LogAnd -- ^ Boolean and - not short-circuiting.
            | LogOr -- ^ Boolean or - not short-circuiting.
