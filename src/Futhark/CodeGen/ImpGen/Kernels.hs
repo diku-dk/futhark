@@ -25,15 +25,12 @@ import Futhark.CodeGen.ImpCode.Kernels (bytes)
 import qualified Futhark.CodeGen.ImpGen as ImpGen
 import qualified Futhark.Analysis.ScalExp as SE
 import qualified Futhark.Representation.ExplicitMemory.IndexFunction as IxFun
-import Futhark.Pass.ExtractKernels.BlockedKernel (KernelInput(..)) -- XXX
 import Futhark.CodeGen.SetDefaultSpace
-import Futhark.Tools (partitionChunkedKernelLambdaParameters,
-                      partitionChunkedFoldParameters)
+import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import Futhark.Util (splitAt3)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralCond)
 
 type CallKernelGen = ImpGen.ImpM Imp.HostOp
-type InKernelGen = ImpGen.ImpM Imp.KernelOp
 
 callKernelOperations :: ImpGen.Operations Imp.HostOp
 callKernelOperations =
@@ -341,82 +338,6 @@ kernelCompiler
 
     call_with_body body
 
-kernelCompiler
-  (ImpGen.Destination dests)
-  (WriteKernel _cs len lam ivs input) = do
-
-  let len' = ImpGen.compileSubExp len
-      as_sizes = map (ImpGen.compileSubExp . fst) input
-      (tid_param, [], real_params) =
-        partitionChunkedFoldParameters 0 $ lambdaParams lam
-      global_thread_index = paramName tid_param
-      get_thread_index =
-        ImpGen.emit $ Imp.Op $ Imp.GetGlobalId global_thread_index 0
-
-      check_thread_index body =
-        let cond = Imp.CmpOp (CmpSlt Int32)
-              (Imp.ScalarVar global_thread_index) len'
-        in Imp.If cond body Imp.Skip
-
-      -- Fake kernel inputs.
-      inps = zipWith (makeInput $ Var global_thread_index) real_params ivs
-
-      read_params = mapM_ readKernelInput inps
-
-      kernel_bnds = bodyBindings $ lambdaBody lam
-
-      res = bodyResult $ lambdaBody lam
-      (indexes, values) = splitAt (length res `div` 2) res
-
-      writeResult index val a_size dest = do
-        let index' = ImpGen.compileSubExp index
-            condOutOfBounds0 = Imp.CmpOp (Imp.CmpUlt Int32)
-              index'
-              (Imp.Constant (IntValue (Int32Value 0)))
-            condOutOfBounds1 = Imp.CmpOp (Imp.CmpUle Int32)
-              a_size
-              index'
-            condOutOfBounds = Imp.BinOp LogOr condOutOfBounds0 condOutOfBounds1
-
-        actual_body' <- ImpGen.collect
-          $ ImpGen.copyDWIMDest dest [SE.subExpToScalExp index int32] val []
-
-        ImpGen.emit $ Imp.If condOutOfBounds Imp.Skip actual_body'
-
-  makeAllMemoryGlobal $ do
-    body <- ImpGen.subImpM_ inKernelOperations $
-      ImpGen.declaringLParams (lambdaParams lam) $ do
-
-      body_actual <- ImpGen.collect $ do
-        ImpGen.comment "read kernel parameters"
-          read_params
-        ImpGen.comment "find indexes and values" $
-          ImpGen.compileBindings kernel_bnds $
-          forM_ (zip4 indexes values as_sizes dests) $ \(index, val, a_size, dest) ->
-            ImpGen.comment "write the result" $
-            writeResult index val a_size dest
-
-      ImpGen.comment "get thread index" get_thread_index
-      ImpGen.comment "run actual body if thread index is okay"
-        $ ImpGen.emit $ check_thread_index body_actual
-
-    -- Compute the variables that we need to pass to and from the kernel.
-    (uses, _) <- computeKernelUses dests (len', body) []
-
-    (group_size, num_groups) <- computeMapKernelGroups len'
-
-    kernel_name <- newVName "a_write_kernel"
-    ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
-      { Imp.kernelBody = body
-      , Imp.kernelLocalMemory = mempty
-      , Imp.kernelUses = uses
-      , Imp.kernelNumGroups = Imp.VarSize num_groups
-      , Imp.kernelGroupSize = Imp.VarSize group_size
-      , Imp.kernelName = kernel_name
-      , Imp.kernelDesc = Just "write"
-      }
-  where makeInput i p arr = KernelInput (paramName p) (paramType p) arr [i]
-
 expCompiler :: ImpGen.ExpCompiler Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler
@@ -688,18 +609,6 @@ computeMapKernelGroups kernel_size = do
   ImpGen.emit $ Imp.SetScalar num_groups $
     kernel_size `quotRoundingUp` group_size_var
   return (group_size, num_groups)
-
-readKernelInput :: KernelInput -> InKernelGen ()
-readKernelInput inp =
-  when (primType t) $ do
-    (srcmem, space, srcoffset) <-
-      ImpGen.fullyIndexArray arr $ map SE.intSubExpToScalExp is
-    ImpGen.emit $ Imp.SetScalar name $
-      Imp.Index srcmem srcoffset (elemType t) space
-  where arr = kernelInputArray inp
-        name = kernelInputName inp
-        t = kernelInputType inp
-        is = kernelInputIndices inp
 
 isMapTransposeKernel :: PrimType -> ImpGen.MemLocation -> ImpGen.MemLocation
                      -> Maybe (Imp.Exp, Imp.Exp,
@@ -1231,6 +1140,22 @@ compileKernelResult constants dest (ConcatReturns Disorder _ _ what) = do
                   ImpGen.sizeToScalExp (kernelNumThreads constants)
       dest' = ImpGen.ArrayDestination (ImpGen.CopyIntoMemory dest_loc') x
   ImpGen.copyDWIMDest dest' [] (Var what) []
+
+compileKernelResult constants dest (WriteReturn rw _arr i e) = do
+  let i' = ImpGen.compileSubExp i
+      rw' = ImpGen.compileSubExp rw
+      condInBounds0 = Imp.CmpOp (Imp.CmpSle Int32)
+                      (Imp.Constant (IntValue (Int32Value 0)))
+                      i'
+      condInBounds1 = Imp.CmpOp (Imp.CmpSlt Int32)
+                      i'
+                      rw'
+      condInBounds = Imp.BinOp LogAnd condInBounds0 condInBounds1
+      write = Imp.BinOp LogAnd (kernelThreadActive constants) condInBounds
+
+  actual_body' <- ImpGen.collect $
+    ImpGen.copyDWIMDest dest [SE.subExpToScalExp i int32] e []
+  ImpGen.emit $ Imp.If write actual_body' Imp.Skip
 
 isActive :: [(VName, SubExp)] -> Imp.Exp
 isActive limit = case actives of

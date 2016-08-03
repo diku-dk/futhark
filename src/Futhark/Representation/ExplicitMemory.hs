@@ -952,9 +952,10 @@ expReturns (If _ b1 b2 ts) = do
 expReturns (Op (Alloc size space)) =
   return [ReturnsMemory size space]
 
--- The result of Write is located exactly where its input is.
-expReturns (Op (Inner (WriteKernel _ _ _ _ as))) =
-  mapM (varReturns . snd) as
+expReturns (Op k@(Inner (Kernel _ _ _ body))) =
+  zipWithM correct (kernelBodyResult body) =<< (extReturns <$> opType k)
+  where correct (WriteReturn _ arr _ _) _ = varReturns arr
+        correct _ ret = return ret
 
 expReturns (Op (Inner k)) =
   extReturns <$> opType k
