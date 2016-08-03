@@ -128,7 +128,7 @@ keyword s =
     "signum"       -> SIGNUM
 
     "iota"         -> IOTA
-    "size"         -> SIZE
+    "shape"        -> SHAPE
     "replicate"    -> REPLICATE
     "reshape"      -> RESHAPE
     "rearrange"    -> REARRANGE
@@ -267,7 +267,7 @@ data Token = IF
            | FOR
            | DO
            | WITH
-           | SIZE
+           | SHAPE
            | IOTA
            | REPLICATE
            | MAP

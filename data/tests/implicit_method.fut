@@ -43,8 +43,7 @@
 --           [[0.226438, -0.114818], [-0.527942, 0.242899]]]
 -- }
 
-fun *[]f64 tridagSeq( []f64 a, *[]f64 b, []f64 c, *[]f64 y ) =
-    let n     = size(0, a)            in
+fun *[]f64 tridagSeq( [n]f64 a, *[]f64 b, []f64 c, *[]f64 y ) =
     loop ((y, b)) =
       for i < n-1 do
         let i    = i + 1              in

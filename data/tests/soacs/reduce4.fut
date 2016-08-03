@@ -2,8 +2,8 @@
 -- ==
 -- input { [[1,2],[3,4],[5,6]] }
 -- output { [9, 12] }
-fun []int main([][]int as) =
+fun []int main([][m]int as) =
   reduceComm(fn []int ([]int acc, []int r) =>
                zipWith(+, acc, r),
-             replicate(size(1,as), 0),
+             replicate(m, 0),
              as)

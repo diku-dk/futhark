@@ -26,15 +26,15 @@ fun float nextrP(float lastr, float wp) =
 fun float nextrQ(float lastr, float wq) =
   lastr + kappa() * (thetaQ() - lastr) + sigma() * wq
 
-fun float seqRedSumP(float lastr, []float ws) =
-  if (size(0,ws) == 0)
+fun float seqRedSumP(float lastr, [n]float ws) =
+  if n == 0
   then lastr
   else
     let (w0, wns) = split((1),ws) in
     seqRedSumP(nextrP(lastr, w0[0]), wns)
 
-fun float seqRedSumQ(float lastr, []float ws) =
-  if (size(0,ws) == 0)
+fun float seqRedSumQ(float lastr, [n]float ws) =
+  if n == 0
   then lastr
   else
     let (w0, wns) = split((1),ws) in
@@ -47,9 +47,8 @@ fun float mc1step([]float wps) =
 
 fun []float mc2([][][]float wqsss, []float r1s) =
   map(mc2sim, zip(wqsss, r1s))
-fun float mc2sim(([][]float, float) arg) =
+fun float mc2sim(([tn][]float, float) arg) =
   let ( wqss, r1 ) = arg in
-  let tn = size(0, wqss) in
   let sum_r = zipWith(mc2step, wqss, replicate(tn, r1)) in
   mean(sum_r)
 fun float mc2step(([]float, float) arg) =

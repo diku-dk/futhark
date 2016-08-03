@@ -93,8 +93,8 @@ mapExpM tv (TupleIndex e i NoInfo loc) =
   TupleIndex <$> mapOnExp tv e <*> pure i <*> pure NoInfo <*> pure loc
 mapExpM tv (Iota nexp loc) =
   pure Iota <*> mapOnExp tv nexp <*> pure loc
-mapExpM tv (Size i e loc) =
-  pure Size <*> pure i <*> mapOnExp tv e <*> pure loc
+mapExpM tv (Shape e loc) =
+  pure Shape <*> mapOnExp tv e <*> pure loc
 mapExpM tv (Replicate nexp vexp loc) =
   pure Replicate <*> mapOnExp tv nexp <*> mapOnExp tv vexp <*> pure loc
 mapExpM tv (Reshape shape arrexp loc) =

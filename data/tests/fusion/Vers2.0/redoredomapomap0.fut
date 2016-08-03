@@ -18,11 +18,11 @@
 -- }
 --
 fun f64 mul2([]f64 x, int i) = x[i]*2.0
-fun (f64,[]f64,f64,[]f64,f64,[]f64) main([]f64 arr) =
+fun (f64,[]f64,f64,[]f64,f64,[]f64) main([n]f64 arr) =
     let r1 = reduce(+, 0.0, arr) in
     let x  = map   (+1.0,   arr) in
     let r2 = reduce(*, 1.0, x  ) in
-    let y  = map(mul2(x),   iota(size(0,x  ))) in
-    let z  = map(f64, iota(size(0,arr))) in
+    let y  = map(mul2(x),   iota(n)) in
+    let z  = map(f64, iota(n)) in
     let r3 = reduce(+, 0.0, z) in
     (r1,x,r2,y,r3,z)

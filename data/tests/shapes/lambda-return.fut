@@ -18,8 +18,8 @@
 fun []int multiply([]int a, int n) =
   if n == 1 then a else multiply(concat(a,a), n-1)
 
-fun [][]int main([][]int a, int x) =
-  let n = size(0,a) * (2 ** (x-1))
+fun [][]int main([m][]int a, int x) =
+  let n = m * (2 ** (x-1))
   in map(fn [n]int ([]int r) =>
            multiply(r,x),
          a)

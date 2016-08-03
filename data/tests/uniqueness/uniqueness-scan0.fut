@@ -15,5 +15,5 @@ fun int main(*[]int a,[]int b) =
              let (a2,b2) = acc in (a2,b2),
            (a,b), zip(replicate(10,iota(10)),
                       replicate(10,iota(10)))) in
-  size(0,c) + size(0,b) -- Should be OK, because only a has been
-                        -- consumed.
+  shape(c)[0] + shape(b)[0] -- Should be OK, because only a has been
+                            -- consumed.

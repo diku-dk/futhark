@@ -17,7 +17,6 @@ fun [n][m]int mul2([n][m]int a, [n][m]int b) = zipWith(mul1, a, b)
 fun [n][m]int  replin(int n, [m]int a) = replicate(n, a)
 
 fun [n][n]int matmultFun([n][m]int a, [m][n]int b ) =
-    let n   = size(0, a)                   in
     let br  = replicate( n, transpose(b) ) in
     let ar  = map      ( replin(n),    a ) in
     let abr = map  (mul2, zip(ar, br))     in
