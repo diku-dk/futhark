@@ -10,8 +10,7 @@
 --    [0.000000, -1.500000]]
 -- }
 
-fun (*[][]f64, *[][]f64) lu_inplace(*[][]f64 a) =
-  let n = size(0, a) in
+fun (*[][]f64, *[][]f64) lu_inplace(*[n][]f64 a) =
   loop ((a,l,u) = (a,
                    replicate(n,replicate(n,0.0)),
                    replicate(n,replicate(n,0.0)))) =

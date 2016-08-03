@@ -247,8 +247,8 @@ instance (Eq vn, Hashable vn, Pretty vn, AliasAnnotation ty) => Pretty (ExpBase 
   pprPrec _ (TupleIndex e i _ _) =
     pprPrec 9 e <> text "." <> ppr i
   pprPrec _ (Iota e _) = text "iota" <> parens (ppr e)
-  pprPrec _ (Size i e _) =
-    text "size@" <> ppr i <> apply [ppr e]
+  pprPrec _ (Shape e _) =
+    text "shape" <> apply [ppr e]
   pprPrec _ (Replicate ne ve _) =
     text "replicate" <> apply [ppr ne, align (ppr ve)]
   pprPrec _ (Reshape shape e _) =

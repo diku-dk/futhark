@@ -5,9 +5,7 @@
 -- output {
 --   [[0, 1, 2], [0, 2, 4], [0, 3, 6]]
 -- }
-fun [][]int main([][]int a) =
-  let n = size(0,a) in
-  let m = size(1,a) in
+fun [][]int main([n][m]int a) =
   let foo = replicate(m, iota(n)) in
   let bar = replicate(m, iota(n)) in
   let b = replicate(n, iota(m)) in

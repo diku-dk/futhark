@@ -8,6 +8,5 @@
 fun int intsqrt(int x) =
     int(sqrt32(f32(x)))
 
-fun [][]int main ([]int a) =
-    let n = size(0, a) in
+fun [][]int main ([n]int a) =
     reshape((intsqrt(n), intsqrt(n)), a)

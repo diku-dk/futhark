@@ -5,8 +5,7 @@
 -- output {
 --    [ 0 , 1 , 1 , 2 , 3 , 5 , 8 , 13 , 21 , 34  ]
 -- }
-fun *[]int computefibs(*[]int arr) =
-    let n = size(0, arr) in
+fun *[]int computefibs(*[n]int arr) =
     let arr[0] = 0 in
     let arr[1] = 1 in
     loop (arr) = for i < n-2 do

@@ -348,12 +348,11 @@ An array of the integers from ``0`` to ``n-1``.
 
 An array consisting of ``n`` copies of ``a``.
 
-``size@i(a)``
+``shape(a)``
 ~~~~~~~~~~~~~~
 
-The size of dimension ``i`` of array ``a``, where ``i`` is a static
-integer constant.  It is often more readable to use shape declaration
-names instead of ``size``.
+The shape array ``a`` as an integer array.  It is often more readable
+to use shape declaration names instead of ``shape``.
 
 ``split((i_1, ..., i_n), a)``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -531,7 +530,7 @@ code::
     is = iss[iter]
     vs = vss[iter]
     as = as_iter
-    for index in 0..size(0, is)-1:
+    for index in 0..shape(is)[0]-1:
       i = is[index]
       v = vs[index]
       as[i] = v

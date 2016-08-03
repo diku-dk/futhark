@@ -148,7 +148,7 @@ internaliseExp desc (E.ArrayLit es (Info rowtype) _) = do
     [] -> do
       let rowtypes = map zeroDim $ internaliseType rowtype
           zeroDim t = t `I.setArrayShape`
-                      Shape (replicate (I.arrayRank t) (constant (0::Int32)))
+                      I.Shape (replicate (I.arrayRank t) (constant (0::Int32)))
           arraylit rt = I.PrimOp $ I.ArrayLit [] rt
       letSubExps desc $ map arraylit rowtypes
     e' : _ -> do
@@ -317,11 +317,11 @@ internaliseExp desc (E.Replicate ne ve _) = do
   ves <- internaliseExp "replicate_v" ve
   letSubExps desc [I.PrimOp $ I.Replicate ne' ve' | ve' <- ves ]
 
-internaliseExp desc (E.Size i e _) = do
-  ks <- internaliseExp desc e
+internaliseExp desc (E.Shape e _) = do
+  ks <- internaliseExp (desc<>"_shape") e
   case ks of
     (k:_) -> do kt <- I.subExpType k
-                return [I.arraySize i kt]
+                letSubExps desc [I.PrimOp $ I.ArrayLit (I.arrayDims kt) $ I.Prim int32]
     _     -> return [I.constant (0 :: I.Int32)] -- Will this ever happen?
 
 internaliseExp desc (E.Unzip e _ _) =
@@ -495,7 +495,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
   lam'  <- bindingParams [chunk] $ \_ [chunk'] -> do
              rowts <- mapM (fmap (I.stripArray 1) . lookupType) arrs'
              let lam_arrs' = [ I.arrayOf t
-                              (Shape [I.Var $ I.paramName chunk'])
+                              (I.Shape [I.Var $ I.paramName chunk'])
                               NoUniqueness
                               | t <- rowts
                              ]
@@ -507,7 +507,7 @@ internaliseExp desc (E.Stream form (AnonymFun (chunk:remparams) body lamrtp pos)
              E.RedLike o comm lam0 _ -> do
                  acctps <- mapM I.subExpType accs'
                  outsz  <- arraysSize 0 <$> mapM lookupType arrs'
-                 let acc_arr_tps = [ I.arrayOf t (Shape [outsz]) NoUniqueness | t <- acctps ]
+                 let acc_arr_tps = [ I.arrayOf t (I.Shape [outsz]) NoUniqueness | t <- acctps ]
                  lam0'  <- internaliseFoldLambda internaliseLambda asserting lam0 acctps acc_arr_tps
                  return $ I.RedLike o comm lam0' accs'
              E.Sequential _ -> return $ I.Sequential accs'

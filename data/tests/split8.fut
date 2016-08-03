@@ -7,7 +7,7 @@
 -- output {
 --   [[1,2,3], [6,5,4], [7,8,9]]
 -- }
-fun [][]int main(*[][]int a, []int b, int i) =
-  let (br, _) = split( (size(1,a)), b) in
+fun [][]int main(*[][n]int a, []int b, int i) =
+  let (br, _) = split( (n), b) in
   let a[i] = br in
   a

@@ -21,11 +21,11 @@ fun []f64 take(int n, []f64 a) =
   let (first, rest) = unsafe split( (n), a) in
   first
 
-fun []f64 fftmp([][]f64 md_c) =
+fun []f64 fftmp([n][]f64 md_c) =
   map( fn f64 (int j) =>
          let x = take(j,md_c[j])
          in  reduce(+, 0.0, x),
-       iota(size(0, md_c))
+       iota(n)
      )
 
 fun []f64 main([][][]f64 all_md_c) =

@@ -2,9 +2,7 @@
 -- ==
 -- tags { no_opencl }
 
-fun [][]f64 main(*[]int xs, *[][]f64 as) =
-  let m = size(0,as) in
-  let n = size(1,as) in
+fun [][]f64 main(*[]int xs, *[m][n]f64 as) =
   map (fn *[]f64 ((int, *[]f64) e) =>
          let (i, a) = e in
          loop(a) = for j < n do

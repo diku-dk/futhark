@@ -902,15 +902,13 @@ checkExp (Iota e pos) = do
   e' <- require [Prim $ Signed Int32] =<< checkExp e
   return $ Iota e' pos
 
-checkExp (Size i e pos) = do
+checkExp (Shape e loc) = do
   e' <- checkExp e
   case typeOf e' of
-    Array {}
-      | i >= 0 && i < arrayRank (typeOf e') ->
-        return $ Size i e' pos
+    t | arrayRank t > 0 -> return $ Shape e' loc
       | otherwise ->
-        bad $ TypeError pos $ "Type " ++ pretty (typeOf e') ++ " has no dimension " ++ show i ++ "."
-    _        -> bad $ TypeError pos "Argument to size must be array."
+          bad $ TypeError loc
+          $ "Argument to shape must be an array, not of type " ++ pretty (typeOf e') ++ "."
 
 checkExp (Replicate countexp valexp pos) = do
   countexp' <- require [Prim $ Signed Int32] =<< checkExp countexp

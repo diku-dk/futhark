@@ -408,8 +408,8 @@ data ExpBase f vn =
             | TupleIndex (ExpBase f vn) Int (f (CompTypeBase vn)) SrcLoc
             -- ^ Extract the specified component from a tuple.
 
-            | Size Int (ExpBase f vn) SrcLoc
-            -- ^ The size of the specified array dimension.
+            | Shape (ExpBase f vn) SrcLoc
+            -- ^ The shape of the argument.
 
             | Split Int [ExpBase f vn] (ExpBase f vn) SrcLoc
             -- ^ @split@0( (1,1,3), [ 1, 2, 3, 4 ]) = {[1], [], [2,
@@ -537,7 +537,7 @@ instance Located (ExpBase f vn) where
   locOf (Index _ _ pos) = locOf pos
   locOf (TupleIndex _ _ _ pos) = locOf pos
   locOf (Iota _ pos) = locOf pos
-  locOf (Size _ _ pos) = locOf pos
+  locOf (Shape _ pos) = locOf pos
   locOf (Replicate _ _ pos) = locOf pos
   locOf (Reshape _ _ pos) = locOf pos
   locOf (Transpose _ pos) = locOf pos
@@ -618,8 +618,8 @@ deriving instance Showable f vn => Show (FunDefBase f vn)
 type FunName = (Name, QualName)
 
 -- | Type Declarations
-data TypeDefBase f vn = TypeDef { typeAlias :: Name -- Den selverklærede types navn
-                                , userType :: TypeDeclBase f vn -- type-definitionen
+data TypeDefBase f vn = TypeDef { typeAlias :: Name -- ^ Name of the declared type.
+                                , userType :: TypeDeclBase f vn -- ^ Its definition.
                                 , typeDefLocation :: SrcLoc
                                 }
 deriving instance Showable f vn => Show (TypeDefBase f vn)

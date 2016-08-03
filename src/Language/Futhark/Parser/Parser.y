@@ -136,7 +136,7 @@ import Language.Futhark.Core(blankLongname)
       do              { L $$ DO }
       with            { L $$ WITH }
       iota            { L $$ IOTA }
-      size            { L $$ SIZE }
+      shape           { L $$ SHAPE }
       replicate       { L $$ REPLICATE }
       map             { L $$ MAP }
       reduce          { L $$ REDUCE }
@@ -455,11 +455,8 @@ Exp  :: { UncheckedExp }
 
      | iota '(' Exp ')' { Iota $3 $1 }
 
-     | size '(' NaturalInt ',' Exp ')'
-                      { Size $3 $5 $1 }
-
-     | size '@' NaturalInt '(' Exp ')'
-                      { Size $3 $5 $1 }
+     | shape '(' Exp ')'
+                      { Shape $3 $1 }
 
      | replicate '(' Exp ',' Exp ')' { Replicate $3 $5 $1 }
 

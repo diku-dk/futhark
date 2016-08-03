@@ -5,9 +5,8 @@
 fun []f64 tridagSeq( []f64 a, []f64 b, []f64 c, []f64 y ) =
   copy(concat(a,b,c,y))
 
-fun [][]f64 explicitMethod( [][]f64 myD,  [][]f64 myDD,
+fun [][]f64 explicitMethod( [][m]f64 myD,  [][]f64 myDD,
                               [][]f64 myMu, [][]f64 myVar, [][]f64 result ) =
-  let m = size(0,myD) in
   copy( map( fn []f64 ( ([]f64,[]f64,[]f64) tup ) =>
                let (mu_row, var_row, result_row) = tup in
                map( fn f64 (([]f64, []f64, f64, f64, int) tup) =>
