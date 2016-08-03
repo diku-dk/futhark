@@ -74,11 +74,6 @@ data Kernel lore =
     (LambdaT lore)
     [SubExp]
     [VName]
-  | WriteKernel Certificates SubExp
-    (LambdaT lore)
-    [VName]
-    [(SubExp, VName)]
-    -- See SOAC.hs for what the different WriteKernel arguments mean.
   | NumGroups
   | GroupSize
 
@@ -127,6 +122,11 @@ data GenKernelBody res lore = KernelBody { kernelBodyStms :: [KernelStm lore]
                             deriving (Eq, Show, Ord)
 
 data KernelResult = ThreadsReturn WhichThreads SubExp
+                  | WriteReturn
+                    SubExp -- Size of array
+                    VName -- Which array
+                    SubExp -- The index
+                    SubExp -- The value
                   | ConcatReturns
                     StreamOrd -- Permuted?
                     SubExp -- The final size.
@@ -214,13 +214,6 @@ mapKernelM tv (ScanKernel cs w kernel_size fun fold_fun nes arrs) =
   mapOnKernelLambda tv fold_fun <*>
   mapM (mapOnKernelSubExp tv) nes <*>
   mapM (mapOnKernelVName tv) arrs
-mapKernelM tv (WriteKernel cs len lam ivs as) =
-  WriteKernel <$>
-  mapOnKernelCertificates tv cs <*>
-  mapOnKernelSubExp tv len <*>
-  mapOnKernelLambda tv lam <*>
-  mapM (mapOnKernelVName tv) ivs <*>
-  mapM (\(aw,a) -> (,) <$> mapOnKernelSubExp tv aw <*> mapOnKernelVName tv a) as
 mapKernelM _ NumGroups = pure NumGroups
 mapKernelM _ GroupSize = pure GroupSize
 mapKernelM tv (Kernel cs space ts kernel_body) =
@@ -289,6 +282,7 @@ instance (Attributes lore, FreeIn (LParamAttr lore)) =>
 
 instance FreeIn KernelResult where
   freeIn (ThreadsReturn which what) = freeIn which <> freeIn what
+  freeIn (WriteReturn rw arr i e) = freeIn rw <> freeIn arr <> freeIn i <> freeIn e
   freeIn (ConcatReturns _ w per_thread_elems v) =
     freeIn w <> freeIn per_thread_elems <> freeIn v
 
@@ -333,6 +327,10 @@ instance (Attributes lore, Substitute res) => Substitute (GenKernelBody res lore
 instance Substitute KernelResult where
   substituteNames subst (ThreadsReturn who se) =
     ThreadsReturn (substituteNames subst who) (substituteNames subst se)
+  substituteNames subst (WriteReturn rw arr i e) =
+    WriteReturn
+    (substituteNames subst rw) (substituteNames subst arr)
+    (substituteNames subst i) (substituteNames subst e)
   substituteNames subst (ConcatReturns ord w per_thread_elems v) =
     ConcatReturns
     ord
@@ -507,16 +505,13 @@ kernelType (ScanKernel _ w size lam foldlam nes _) =
   in map (`arrayOfRow` w) (lambdaReturnType lam) ++
      map (`arrayOfRow` kernelWorkgroups size) (lambdaReturnType lam) ++
      map (`arrayOfRow` kernelTotalElements size) arr_row_tp
-kernelType (WriteKernel _ _ lam _ input) =
-  zipWith arrayOfRow (snd $ splitAt (n `div` 2) lam_ts) ws
-  where lam_ts = lambdaReturnType lam
-        n = length lam_ts
-        ws = map fst input
 kernelType (Kernel _ space ts body) =
   zipWith resultShape ts $ kernelBodyResult body
   where dims = map snd $ spaceDimensions space
         num_groups = spaceNumGroups space
         num_threads = spaceNumThreads space
+        resultShape t (WriteReturn rw _ _ _) =
+          t `arrayOfRow` rw
         resultShape t (ThreadsReturn AllThreads _) =
           t `arrayOfRow` num_threads
         resultShape t (ThreadsReturn OneThreadPerGroup{} _) =
@@ -546,7 +541,10 @@ instance (Attributes lore, Aliased lore) => AliasedOp (Kernel lore) where
   opAliases = map (const mempty) . kernelType
 
   consumedInOp (Kernel _ _ _ kbody) =
-    consumedInKernelBody kbody
+    consumedInKernelBody kbody <>
+    mconcat (map consumedByReturn (kernelBodyResult kbody))
+    where consumedByReturn (WriteReturn _ a _ _) = HS.singleton a
+          consumedByReturn _                     = mempty
   consumedInOp _ = mempty
 
 aliasAnalyseKernelBody :: (Attributes lore,
@@ -674,8 +672,6 @@ instance (Attributes lore, CanBeWise (Op lore)) => CanBeWise (Kernel lore) where
 instance (Attributes lore, Aliased lore, UsageInOp (Op lore)) => UsageInOp (Kernel lore) where
   usageInOp (ScanKernel _ _ _ _ foldfun _ arrs) =
     usageInLambda foldfun arrs
-  usageInOp (WriteKernel _ _ _ _ as) =
-    mconcat $ map (UT.consumedUsage . snd) as
   usageInOp (Kernel _ _ _ kbody) =
     mconcat $ map UT.consumedUsage $ HS.toList $ consumedInKernelBody kbody
   usageInOp NumGroups = mempty
@@ -687,11 +683,11 @@ consumedInKernelBody (KernelBody stms _) =
   -- We need to figure out what is consumed in stms.  We do this by
   -- moving backwards through the stms, using the alias information to
   -- update.
-  let consumed = foldr update mempty stms
+  let consumed = foldr updateFromStm mempty stms
   in consumed `HS.difference` bound_in_stms
   where bound_in_stms = HS.fromList $ HM.keys $ scopeOf stms
 
-        update stm consumed =
+        updateFromStm stm consumed =
           let aliasmap = HM.map nameAndAliases $ scopeOf stm
           in aliasClosure aliasmap consumed <> consumedByKernelStm stm
 
@@ -741,62 +737,6 @@ typeCheckKernel (ScanKernel cs w kernel_size fun foldfun nes arrs) = do
     "Neutral value is of type " ++ prettyTuple startt ++
     ", but scan function returns type " ++ prettyTuple foldret ++ "."
 
-typeCheckKernel (WriteKernel cs w lam _ivs as) = do
-  -- Requirements:
-  --
-  --   0. @lambdaReturnType@ of @lam@ must be a list
-  --      [index types..., value types].
-  --
-  --   1. The number of index types must be equal to the number of value types
-  --      and the number of arrays in @as@.
-  --
-  --   2. Each index type must have the type i32.
-  --
-  --   3. Each array pair in @as@ and the value types must have the same type
-  --      (though not necessarily the same length).
-  --
-  --   4. Each array in @as@ is consumed.  This is not really a check, but more
-  --      of a requirement, so that e.g. the source is not hoisted out of a
-  --      loop, which will mean it cannot be consumed.
-  --
-  -- Code:
-
-  -- First check the certificates and input size.
-  mapM_ (TC.requireI [Prim Cert]) cs
-  TC.require [Prim int32] w
-
-  -- 0.
-  let rts = lambdaReturnType lam
-      rtsLen = length rts `div` 2
-      rtsI = take rtsLen rts
-      rtsV = drop rtsLen rts
-
-  -- 1.
-  unless (rtsLen == length as)
-    $ TC.bad $ TC.TypeError "Write: Uneven number of index types, value types, and I/O arrays."
-
-  -- 2.
-  forM_ rtsI $ \rtI -> unless (Prim int32 == rtI)
-                       $ TC.bad $ TC.TypeError "Write: Index return type must be i32."
-
-  forM_ (zip rtsV as) $ \(rtV, (aw, a)) -> do
-    -- All lengths must have type i32.
-    TC.require [Prim int32] aw
-
-    -- 3.
-    aType <- lookupType a
-    case (rtV, rowType aType) of
-      (Prim pt0, Prim pt1) | pt0 == pt1 ->
-        return ()
-      (Array pt0 _ _, Array pt1 _ _) | pt0 == pt1 ->
-        return ()
-      _ ->
-        TC.bad $ TC.TypeError
-        "Write values and input arrays do not have the same primitive type"
-
-    -- 4.
-    TC.consume =<< TC.lookupAliases a
-
 typeCheckKernel NumGroups = return ()
 typeCheckKernel GroupSize = return ()
 
@@ -826,6 +766,14 @@ typeCheckKernel (Kernel cs space kts kbody) = do
         checkKernelResult (ThreadsReturn which what) t = do
           checkWhich which
           TC.require [t] what
+        checkKernelResult (WriteReturn rw arr i e) t = do
+          TC.require [Prim int32] rw
+          TC.require [Prim int32] i
+          TC.require [t] e
+          arr_t <- lookupType arr
+          unless (arr_t == t `arrayOfRow` rw) $
+            TC.bad $ TC.TypeError "Invalid type of array destination for WriteReturn."
+          TC.consume =<< TC.lookupAliases arr
         checkKernelResult (ConcatReturns _ w per_thread_elems v) t = do
           TC.require [Prim int32] w
           TC.require [Prim int32] per_thread_elems
@@ -943,8 +891,6 @@ typeCheckKernelSize (KernelSize num_groups workgroup_size per_thread_elements
 instance OpMetrics (Op lore) => OpMetrics (Kernel lore) where
   opMetrics (ScanKernel _ _ _ lam foldfun _ _) =
     inside "ScanKernel" $ lambdaMetrics lam >> lambdaMetrics foldfun
-  opMetrics (WriteKernel _cs _len lam _ivs _as) =
-    inside "WriteKernel" $ lambdaMetrics lam
   opMetrics (Kernel _ _ _ kbody) =
     inside "Kernel" $ kernelBodyMetrics kbody
     where kernelBodyMetrics :: GenKernelBody res lore -> MetricsM ()
@@ -977,12 +923,6 @@ instance PrettyLore lore => PP.Pretty (Kernel lore) where
             PP.braces (commasep $ map ppr nes) <> comma </>
             commasep (map ppr arrs) <> comma </>
             ppr fun <> comma </> ppr foldfun)
-  ppr (WriteKernel cs len lam ivs as) =
-    ppCertificates' cs <> text "writeKernel" <>
-    parens (ppr len <> comma </>
-            commasep (map ppr ivs) <> comma </>
-            commasep (map ppr as) <> comma </>
-            ppr lam)
   ppr NumGroups = text "$num_groups()"
   ppr GroupSize = text "$group_size()"
 
@@ -1101,6 +1041,9 @@ instance Pretty KernelResult where
     text "thread <" <+> ppr limit <+> text "returns" <+> ppr what
   ppr (ThreadsReturn ThreadsInSpace what) =
     text "thread in space returns" <+> ppr what
+  ppr (WriteReturn rw arr i e) =
+    ppr arr <+> text "with" <+>
+    PP.brackets (ppr i <+> text "<" <+> ppr rw) <+> text "<-" <+> ppr e
   ppr (ConcatReturns o w per_thread_elems v) =
     text "concat" <> suff <>
     parens (commasep [ppr w, ppr per_thread_elems]) <+>

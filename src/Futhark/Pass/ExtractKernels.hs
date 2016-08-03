@@ -349,13 +349,20 @@ transformBinding (Let pat () (Op (Stream cs w (MapLike _) map_fun arrs))) = do
   transformBindings =<<
     (snd <$> runBinderT (sequentialStreamWholeArray pat cs w [] map_fun arrs) types)
 
-transformBinding (Let pat () (Op (Write cs len lam ivs as))) = runBinder_ $ do
+transformBinding (Let pat () (Op (Write cs w lam ivs as))) = runBinder_ $ do
   lam' <- FOT.transformLambda lam
-  thread_index <- newVName "thread_index"
-  let lam'' = lam' { lambdaParams =
-                       Param thread_index (Prim int32) :
-                       lambdaParams lam' }
-  letBind_ pat $ Op $ WriteKernel cs len lam'' ivs as
+  write_i <- newVName "write_i"
+  let (i_res, v_res) = splitAt (length as) $ bodyResult $ lambdaBody lam'
+      kstms = map (Thread ThreadsInSpace) $ bodyBindings $ lambdaBody lam'
+      krets = do (i, v, (a_w, a)) <- zip3 i_res v_res as
+                 return $ WriteReturn a_w a i v
+      body = KernelBody kstms krets
+      inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
+                  return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
+  (bnds, kernel) <-
+    mapKernel cs w [(write_i,w)] inputs (map rowType $ patternTypes pat) body
+  mapM_ addBinding bnds
+  letBind_ pat $ Op kernel
 
 transformBinding bnd =
   runBinder_ $ FOT.transformBindingRecursively bnd

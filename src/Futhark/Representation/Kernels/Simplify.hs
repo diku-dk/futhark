@@ -61,14 +61,6 @@ instance (Attributes lore, Engine.SimplifiableOp lore (Op lore)) =>
       mapM Engine.simplify nes <*>
       pure arrs'
 
-  simplifyOp (WriteKernel cs len lam ivs as) = do
-    cs' <- Engine.simplify cs
-    len' <- Engine.simplify len
-    lam' <- Engine.simplifyLambda lam Nothing [] -- FIXME: Is this okay?
-    ivs' <- mapM Engine.simplify ivs
-    as' <- mapM Engine.simplify as
-    return $ WriteKernel cs' len' lam' ivs' as'
-
   simplifyOp (Kernel cs space ts kernel_body) = do
     cs' <- Engine.simplify cs
     space' <- Engine.simplify space
@@ -279,6 +271,12 @@ instance Engine.Simplifiable SpaceStructure where
 instance Engine.Simplifiable KernelResult where
   simplify (ThreadsReturn threads what) =
     ThreadsReturn <$> Engine.simplify threads <*> Engine.simplify what
+  simplify (WriteReturn w a i v) =
+    WriteReturn <$>
+    Engine.simplify w <*>
+    Engine.simplify a <*>
+    Engine.simplify i <*>
+    Engine.simplify v
   simplify (ConcatReturns o w pte what) =
     ConcatReturns o
     <$> Engine.simplify w
@@ -319,7 +317,6 @@ topDownRules :: (MonadBinder m,
                  Op (Lore m) ~ Kernel (Lore m),
                  Aliased (Lore m)) => TopDownRules m
 topDownRules = [ fuseScanIota
-               , fuseWriteIota
                , fuseKernelIota
 
                , removeInvariantKernelResults
@@ -366,30 +363,6 @@ fuseScanIota vtable (Let pat _ (Op (ScanKernel cs w size lam foldlam nes arrs)))
          (params_and_arrs, iota_params) =
            iotaParams vtable arr_params arrs
 fuseScanIota _ _ = cannotSimplify
-
-fuseWriteIota :: (LocalScope (Lore m) m,
-                  MonadBinder m, Op (Lore m) ~ Kernel (Lore m)) =>
-                 TopDownRule m
-fuseWriteIota vtable (Let pat _ (Op (WriteKernel cs len lam ivs as)))
-  | not $ null iota_params = do
-      let (ivs_params', ivs') = unzip params_and_arrs
-
-      body <- (uncurry (flip mkBodyM) =<<) $ collectBindings $ inScopeOf lam $ do
-        forM_ iota_params $ \(p, x) ->
-          letBindNames'_ [p] $
-            PrimOp $ BinOp (Add Int32) (Var thread_index) x
-        mapM_ addBinding $ bodyBindings $ lambdaBody lam
-        return $ bodyResult $ lambdaBody lam
-
-      let lam' = lam { lambdaBody = body
-                     , lambdaParams = thread_index_param : ivs_params'
-                     }
-
-      letBind_ pat $ Op $ WriteKernel cs len lam' ivs' as
-    where (params_and_arrs, iota_params) = iotaParams vtable ivs_params ivs
-          (thread_index_param : ivs_params) = lambdaParams lam
-          thread_index = paramName thread_index_param
-fuseWriteIota _ _ = cannotSimplify
 
 -- | If an 'Iota' is input to a 'SplitArray', just inline the 'Iota'
 -- instead.
