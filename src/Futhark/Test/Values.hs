@@ -18,6 +18,7 @@ module Futhark.Test.Values
        )
        where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.ST
 import qualified Data.Array as A
@@ -167,12 +168,12 @@ closeArray r j (i, shape, arr, t) = do
 readRankedArrayOf :: UMVec.Unbox v =>
                      Int -> ReadValue v -> T.Text -> Maybe (Vector Int, Vector v, T.Text)
 readRankedArrayOf r rv t = runST $ do
-  empty <- UMVec.new 1024
-  ms <- readRankedArrayOfST r rv (0, UVec.replicate r (-1), empty, t)
+  arr <- UMVec.new 1024
+  ms <- readRankedArrayOfST r rv (0, UVec.replicate r (-1), arr, t)
   case ms of
-    Just (i, shape, arr, t') -> do
-      arr' <- freeze (UMVec.slice 0 i arr)
-      return $ Just (shape, arr', t')
+    Just (i, shape, arr', t') -> do
+      arr'' <- freeze (UMVec.slice 0 i arr')
+      return $ Just (shape, arr'', t')
     Nothing ->
       return Nothing
 
