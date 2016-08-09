@@ -5,7 +5,7 @@
 -- input {
 -- }
 -- output {
---  (6.0, 6, 6) 
+--  6.0 6 6
 -- }
 
 type best_type = float

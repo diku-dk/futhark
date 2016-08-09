@@ -4,7 +4,7 @@
 -- the parser permits them.
 --
 -- ==
--- input { 3.14 } output { 3.0 }
+-- input { 3.14f64 } output { 3.0f32 }
 
 fun f32 main(f64 x) =
   f32(int(x))

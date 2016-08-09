@@ -2,7 +2,7 @@
 -- in a previous scope.
 -- ==
 -- input { }
--- output { (1 , 2.0) }
+-- output { 1 2.0 }
 
 type foo = int
 struct Foo

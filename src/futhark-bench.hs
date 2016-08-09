@@ -23,7 +23,6 @@ import System.Exit
 import Text.Printf
 
 import Futhark.Test
-import Futhark.Representation.AST.Syntax (Value)
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Options
 

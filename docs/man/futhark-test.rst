@@ -59,6 +59,11 @@ By default, both the interpreter and compiler is run on all test cases
 (except those that have specified ``compiled``), although this can be
 changed with command-line options to ``futhark-test``.
 
+Tuple syntax is not supported when specifying input and output values.
+Instead, you can write an N-tuple as its constituent N values.  Beware
+of syntax errors in the values - the errors reported by
+``futhark-test`` are very poor.
+
 For many usage examples, see the ``data/tests`` directory in the
 Futhark source directory.  A simple example can be found in
 ``EXAMPLES`` below.
