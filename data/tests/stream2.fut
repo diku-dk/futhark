@@ -4,9 +4,8 @@
 --   [3,9,4,7,19]
 -- }
 -- output {
---   ( 0
---   , [9, 7, 19]
---   )
+--   0
+--   [9, 7, 19]
 -- }
 fun (int,[]int) main(int m, *[n]int a) =
   streamSeq( fn (int,*[]int) (int chunk, int acc, *[]int c) =>

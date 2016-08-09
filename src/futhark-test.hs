@@ -33,7 +33,6 @@ import Text.Regex.TDFA
 import Prelude
 
 import Futhark.Util.Pretty (prettyText)
-import Futhark.Representation.AST.Syntax.Core hiding (Prim)
 import Futhark.Analysis.Metrics
 import Futhark.Pipeline
 import Futhark.Compiler

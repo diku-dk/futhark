@@ -18,6 +18,7 @@ module Futhark.Test
        , RunMode (..)
        , ExpectedResult (..)
        , Values (..)
+       , Value
        )
        where
 
@@ -25,7 +26,6 @@ import Control.Category ((>>>))
 import Control.Applicative
 import Control.Monad hiding (forM_)
 import Control.Monad.IO.Class
-import qualified Data.Array as A
 import qualified Data.HashMap.Lazy as HM
 import Data.Char
 import Data.Maybe
@@ -44,10 +44,6 @@ import Text.Regex.TDFA
 
 import Prelude
 
-import Futhark.Representation.AST.Attributes.Values (valueType)
-import Futhark.Representation.AST.Syntax.Core hiding (Prim)
-import Futhark.Internalise.TypesValues (internaliseValue)
-import qualified Language.Futhark.Parser as F
 import Futhark.Representation.SOACS (SOACS)
 import Futhark.Representation.Kernels (Kernels)
 import Futhark.Analysis.Metrics
@@ -55,7 +51,8 @@ import Futhark.Pipeline
 import Futhark.Pass.Simplify
 import Futhark.Pass.ExtractKernels
 import Futhark.Passes
-import Futhark.Util.Pretty (Pretty, pretty, prettyText)
+import Futhark.Util.Pretty (prettyText)
+import Futhark.Test.Values
 
 -- | Description of a test to be carried out on a Futhark program.
 -- The Futhark program is stored separately.
@@ -245,19 +242,10 @@ testSpecFromFile path = do
     Left err -> error $ show $ fixPosition err
     Right v  -> return v
 
--- | Try to parse a several core Futhark values from a string.  The
--- 'SourceName' parameter is used for error messages.
-valuesFromString :: SourceName -> String -> Either F.ParseError [Value]
-valuesFromString srcname s =
-  fmap concat $ mapM internalise =<< F.parseValues srcname (T.pack s)
-  where internalise v =
-          maybe (Left $ F.ParseError $ "Invalid input value: " ++ pretty v) Right $
-          internaliseValue v
-
--- | Try to parse a several core Futhark values from a text.  The
--- 'SourceName' parameter is used for error messages.
-valuesFromText :: SourceName -> T.Text -> Either F.ParseError [Value]
-valuesFromText srcname = valuesFromString srcname . T.unpack
+-- | Try to parse a several values from a text.  The 'SourceName'
+-- parameter is used for error messages.
+valuesFromText :: SourceName -> T.Text -> Either String [Value]
+valuesFromText srcname = maybe (Left srcname) Right . readValues
 
 -- | Get the actual core Futhark values corresponding to a 'Values'
 -- specification.  The 'FilePath' is the directory which file paths
@@ -278,78 +266,3 @@ getValuesText _ (Values vs) =
 getValuesText dir (InFile file) =
   liftIO $ T.readFile file'
   where file' = dir </> file
-
-data Mismatch = PrimValueMismatch Int PrimValue PrimValue
-              | ArrayLengthMismatch Int Int Int
-              | TypeMismatch Int Type Type
-              | ValueCountMismatch Int Int
-
-instance Show Mismatch where
-  show (PrimValueMismatch i got expected) =
-    explainMismatch i "" got expected
-  show (ArrayLengthMismatch i got expected) =
-    explainMismatch i "array of length " got expected
-  show (TypeMismatch i got expected) =
-    explainMismatch i "value of type " got expected
-  show (ValueCountMismatch got expected) =
-    "Expected " ++ show expected ++ " values, got " ++ show got
-
-explainMismatch :: Pretty a => Int -> String -> a -> a -> String
-explainMismatch i what got expected =
-  "Value " ++ show i ++ " expected " ++ what ++ pretty expected ++ ", got " ++ pretty got
-
-compareValues :: [Value] -> [Value] -> Maybe Mismatch
-compareValues got expected
-  | n /= m = Just $ ValueCountMismatch n m
-  | otherwise = case catMaybes $ zipWith3 compareValue [0..] got expected of
-    e : _ -> Just e
-    []    -> Nothing
-  where n = length got
-        m = length expected
-
-compareValue :: Int -> Value -> Value -> Maybe Mismatch
-compareValue i (PrimVal got) (PrimVal expected)
-  | comparePrimValue minTolerance got expected = Nothing
-  | otherwise = Just $ PrimValueMismatch i got expected
-compareValue i (ArrayVal got _ _) (ArrayVal expected _ _)
-  | A.bounds got == A.bounds expected =
-      uncurry (PrimValueMismatch i) <$>
-        find (not . uncurry (comparePrimValue tol)) (zip (A.elems got) (A.elems expected))
-  | otherwise =
-      Just $ ArrayLengthMismatch i (snd $ A.bounds got) (snd $ A.bounds expected)
-  where tol = tolerance expected
-compareValue i got expected =
-  Just $ TypeMismatch i (valueType got) (valueType expected)
-
-comparePrimValue :: Double -> PrimValue -> PrimValue -> Bool
-comparePrimValue tol (FloatValue (Float32Value x)) (FloatValue (Float32Value y)) =
-  compareFractional tol x y
-comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float64Value y)) =
-  compareFractional tol x y
-comparePrimValue tol  (FloatValue (Float64Value x)) (FloatValue (Float32Value y)) =
-  compareFractional tol x (floatToDouble y)
-comparePrimValue tol  (FloatValue (Float32Value x)) (FloatValue (Float64Value y)) =
-  compareFractional tol (floatToDouble x) y
-comparePrimValue _ x y =
-  x == y
-
-compareFractional :: (Show num, Ord num, Fractional num, Show tol, Real tol) =>
-                     tol -> num -> num -> Bool
-compareFractional tol x y =
-  diff < tol'
-  where diff = abs $ x - y
-        tol' = fromRational $ toRational tol
-
-minTolerance :: Fractional a => a
-minTolerance = 0.002 -- 0.2%
-
-tolerance :: A.Array Int PrimValue -> Double
-tolerance = foldl' tolerance' minTolerance
-  where tolerance' t (FloatValue (Float32Value v)) = max t $ minTolerance * floatToDouble v
-        tolerance' t (FloatValue (Float64Value v)) = max t $ minTolerance * v
-        tolerance' t _                             = t
-
-floatToDouble :: Float -> Double
-floatToDouble x =
-  let (m,n) = decodeFloat x
-  in encodeFloat m n

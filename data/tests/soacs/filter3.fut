@@ -1,9 +1,11 @@
 -- ==
 -- input {
---   [(0,False), (1,True), (-2,True), (5,False), (42,True)]
+--   [0, 1, -2, 5, 42]
+--   [False, True, True, False, True]
 -- }
 -- output {
---   [(True,1), (True,-2), (True,42)]
+--   [True, True, True]
+--   [1, -2, 42]
 -- }
 fun [](bool,int) main([](int,bool) xs) =
   let tmp = filter(fn bool ((int,bool) x) =>

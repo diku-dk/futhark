@@ -32,6 +32,7 @@ Library
   -- Packages needed in order to build this package.
   Build-depends: base >= 4 && < 5,
                  array >= 0.4,
+                 vector,
                  containers >= 0.5,
                  mtl >= 2.2.1,
                  transformers >= 0.3,
@@ -170,6 +171,7 @@ Library
                    Futhark.Representation.Kernels.Simplify
                    Futhark.Representation.Kernels.Kernel
                    Futhark.Representation.Ranges
+                   Futhark.Test.Values
                    Futhark.Test
                    Futhark.Tools
                    Futhark.Transform.CopyPropagate

@@ -2,7 +2,7 @@
 --
 -- ==
 -- input { 2 }
--- output { [0, 1] }
+-- output { [[0], [1]] }
 
 fun [][]int main(int chunk) =
   map( fn [1]int (int k) =>
