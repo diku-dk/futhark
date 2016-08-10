@@ -43,7 +43,7 @@ for prog,a_prog in a_json.items():
                 print('In %s but not %s: program %s dataset %s' % (a_file, b_file, prog, dataset))
             else:
                 b_dataset_results = b_prog_datasets[dataset]
-                speedups[prog][dataset] = mean(b_dataset_results['runtimes'])/mean(a_dataset_results['runtimes'])
+                speedups[prog][dataset] = mean(a_dataset_results['runtimes'])/mean(b_dataset_results['runtimes'])
 
 for prog,b_prog in b_json.items():
     if not prog in a_json:
