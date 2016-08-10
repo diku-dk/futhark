@@ -21,9 +21,6 @@ import qualified Data.Text.IO as T
 import qualified Data.HashMap.Lazy as HM
 import System.Console.GetOpt
 import System.Directory
-import System.Directory.Tree (readDirectoryWith, flattenDir,
-                              DirTree(File), AnchoredDirTree(..),
-                              FileName)
 import System.Process.Text (readProcessWithExitCode)
 import System.Exit
 import System.IO
@@ -267,10 +264,9 @@ catching m = m `catch` save
 doTest :: TestCase -> IO TestResult
 doTest = catching . runTestM . runTestCase
 
-makeTestCase :: TestConfig -> TestMode -> FilePath -> IO TestCase
-makeTestCase config mode file = do
-  spec <- applyMode mode <$> testSpecFromFile file
-  return $ TestCase file spec (configPrograms config) (configExtraOptions config)
+makeTestCase :: TestConfig -> TestMode -> (FilePath, ProgramTest) -> TestCase
+makeTestCase config mode (file, spec) =
+  TestCase file (applyMode mode spec) (configPrograms config) (configExtraOptions config)
 
 applyMode :: TestMode -> ProgramTest -> ProgramTest
 applyMode mode test =
@@ -326,14 +322,14 @@ reportText first failed passed remaining =
 
 runTests :: TestConfig -> [FilePath] -> IO ()
 runTests config paths = do
-  files <- concat <$> mapM testPrograms paths
-
   let mode = configTestMode config
+  all_tests <- map (makeTestCase config mode) <$> testSpecsFromPaths paths
+
   testmvar <- newEmptyMVar
   resmvar <- newEmptyMVar
   concurrency <- getNumCapabilities
   replicateM_ concurrency $ forkIO $ runTest testmvar resmvar
-  all_tests <- mapM (makeTestCase config mode) files
+
   let (excluded, included) = partition (excludedTest config) all_tests
   _ <- forkIO $ mapM_ (putMVar testmvar) included
   isTTY <- (&& mode /= OnTravis) <$> hIsTerminalDevice stdout
@@ -360,17 +356,6 @@ runTests config paths = do
   putStrLn $ show failed ++ " failed, " ++ show passed ++ " passed" ++ excluded_str ++ "."
   exitWith $ case failed of 0 -> ExitSuccess
                             _ -> ExitFailure 1
-
-testPrograms :: FilePath -> IO [FileName]
-testPrograms dir = filter isFut <$> directoryContents dir
-  where isFut = (==".fut") . takeExtension
-
-directoryContents :: FilePath -> IO [FileName]
-directoryContents dir = do
-  _ :/ tree <- readDirectoryWith return dir
-  return $ mapMaybe isFile $ flattenDir tree
-  where isFile (File _ path) = Just path
-        isFile _             = Nothing
 
 ---
 --- Configuration and command line parsing

@@ -9,13 +9,13 @@ futhark-bench
 SYNOPSIS
 ========
 
-futhark-bench [--runs=count | --compiler=program | --raw | --no-validate] infile
+futhark-bench [--runs=count | --compiler=program | --raw | --no-validate] programs...
 
 DESCRIPTION
 ===========
 
-This program is used to benchmark the same kind of Futhark test
-programs that are taken as input by ``futhark-test(1)``.  The program
+This program is used to benchmark Futhark programs.  See
+``futhark-test(1)`` for how to indicate the data sets.  The programs
 will be compiled using the specified compiler (``futhark-c`` by
 default), then run a number of times for each data set, and the
 average runtime printed on standard output.

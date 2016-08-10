@@ -43,9 +43,14 @@ initialBenchOptions = BenchOptions "futhark-c" 10 False [] True
 binaryName :: FilePath -> FilePath
 binaryName = (`replaceExtension` "bin")
 
-runBenchmark :: BenchOptions -> FilePath -> IO ()
-runBenchmark opts program = do
-  spec <- testSpecFromFile program
+runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
+runBenchmarks opts paths = do
+  benchmarks <- testSpecsFromPaths paths
+  mapM_ (uncurry $ runBenchmark opts) benchmarks
+
+runBenchmark :: BenchOptions -> FilePath -> ProgramTest -> IO ()
+runBenchmark opts program spec = do
+  putStrLn $ program ++ ":"
   case testAction spec of
     RunCases cases -> do
       (futcode, _, futerr) <-
@@ -204,9 +209,7 @@ commandLineOptions = [
 
 main :: IO ()
 main = mainWithOptions initialBenchOptions commandLineOptions $ \progs config ->
-  case progs of
-    [prog] -> Just $ runBenchmark config prog
-    _      -> Nothing
+  Just $ runBenchmarks config progs
 
 --- The following extracted from hstats package by Marshall Beddoe:
 --- https://hackage.haskell.org/package/hstats-0.3

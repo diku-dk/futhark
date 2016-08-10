@@ -46,7 +46,7 @@ def parse_bench_output(s):
         dataset = words[1][:-1]
         runtime = float(words[2][:-2])
         return (dataset, runtime)
-    return map(parse_line, s.splitlines())
+    return map(parse_line, s.splitlines()[1:])
 
 results = {}
 for b in benchmarks:
