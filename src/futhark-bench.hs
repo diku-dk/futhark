@@ -80,7 +80,7 @@ runBenchmark :: BenchOptions -> FilePath -> ProgramTest -> IO BenchResult
 runBenchmark opts program spec = do
   putStrLn $ program ++ ":"
   case testAction spec of
-    RunCases cases -> do
+    RunCases cases | "nobench" `notElem` testTags spec -> do
       (futcode, _, futerr) <-
         liftIO $ readProcessWithExitCode compiler
         [program, "-o", binaryName program] ""
