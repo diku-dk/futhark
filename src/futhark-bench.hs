@@ -7,7 +7,7 @@
 module Main (main) where
 
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.Except hiding (forM_)
 import Data.Maybe
 import Data.Monoid
 import Data.List
@@ -20,6 +20,7 @@ import System.IO
 import System.IO.Temp
 import System.Process.Text (readProcessWithExitCode)
 import System.Exit
+import qualified Text.JSON as JSON
 import Text.Printf
 
 import Futhark.Test
@@ -34,21 +35,48 @@ data BenchOptions = BenchOptions
                    , optRawReporting :: Bool
                    , optExtraOptions :: [String]
                    , optValidate :: Bool
+                   , optJSON :: Maybe FilePath
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 False [] True
+initialBenchOptions = BenchOptions "futhark-c" 10 False [] True Nothing
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
 binaryName = (`replaceExtension` "bin")
 
+data RunResult = RunResult { runMicroseconds :: Int }
+
+data DataResult = DataResult String (Either T.Text [RunResult])
+data BenchResult = BenchResult FilePath [DataResult]
+
+resultsToJSON :: [BenchResult] -> JSON.JSValue
+resultsToJSON = JSON.JSObject . JSON.toJSObject . map benchResultToJSObject
+  where benchResultToJSObject
+          :: BenchResult
+          -> (String, JSON.JSValue)
+        benchResultToJSObject (BenchResult prog rs) =
+          (prog, JSON.JSObject $ JSON.toJSObject
+                 [("datasets", JSON.JSObject $ JSON.toJSObject $
+                               map dataResultToJSObject rs)])
+        dataResultToJSObject
+          :: DataResult
+          -> (String, JSON.JSValue)
+        dataResultToJSObject (DataResult desc (Left err)) =
+          (desc, JSON.showJSON err)
+        dataResultToJSObject (DataResult desc (Right runtimes)) =
+          (desc, JSON.JSObject $ JSON.toJSObject
+                 [("runtimes", JSON.showJSON $ map runMicroseconds runtimes)])
+
 runBenchmarks :: BenchOptions -> [FilePath] -> IO ()
 runBenchmarks opts paths = do
   benchmarks <- testSpecsFromPaths paths
-  mapM_ (uncurry $ runBenchmark opts) benchmarks
+  results <- mapM (uncurry $ runBenchmark opts) benchmarks
+  case optJSON opts of
+    Nothing -> return ()
+    Just file -> writeFile file $ JSON.encode $ resultsToJSON results
 
-runBenchmark :: BenchOptions -> FilePath -> ProgramTest -> IO ()
+runBenchmark :: BenchOptions -> FilePath -> ProgramTest -> IO BenchResult
 runBenchmark opts program spec = do
   putStrLn $ program ++ ":"
   case testAction spec of
@@ -61,12 +89,11 @@ runBenchmark opts program spec = do
         ExitFailure _   -> fail $ T.unpack futerr
         ExitSuccess     -> return ()
 
-      zipWithM_ (runBenchmarkCase opts program) [0..] cases
+      BenchResult program . catMaybes <$>
+        zipWithM (runBenchmarkCase opts program) [0..] cases
     _ ->
-      return ()
+      return $ BenchResult program []
   where compiler = optCompiler opts
-
-data RunResult = RunResult { runMicroseconds :: Int }
 
 reportResult :: Bool -> [RunResult] -> IO ()
 reportResult True runtimes =
@@ -83,51 +110,61 @@ reportResult False results = do
 progNotFound :: String -> String
 progNotFound s = s ++ ": command not found"
 
-runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO ()
+type BenchM = ExceptT T.Text IO
+
+runBenchM :: BenchM a -> IO (Either T.Text a)
+runBenchM = runExceptT
+
+io :: IO a -> BenchM a
+io = liftIO
+
+runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO (Maybe DataResult)
 runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{}) =
-  return () -- Not our concern, we are not a testing tool.
+  return Nothing -- Not our concern, we are not a testing tool.
 runBenchmarkCase _ _ _ (TestRun NoBench _ _) =
-  return () -- Too small to bother benchmarking.
+  return Nothing -- Too small to bother benchmarking.
 runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesText dir input_spec
-  maybe_expected <- if optValidate opts
-                    then maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-                    else return Nothing
+  maybe_expected <-
+    if optValidate opts
+    then maybe (return Nothing) (fmap Just . getValues dir) expected_spec
+    else return Nothing
   let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
 
   -- Explicitly prefixing the current directory is necessary for
   -- readProcessWithExitCode to find the binary when binOutputf has
   -- no program component.
   (progCode, output, progerr) <-
-    liftIO $ readProcessWithExitCode ("." </> binaryName program) options input
-  case maybe_expected of
-    Nothing ->
-      didNotFail program progCode progerr
-    Just expected ->
-      compareResult program expected =<< runResult program progCode output progerr
-  runtime_result <- readFile tmpfile
-  runtimes <- case mapM readRuntime $ lines runtime_result of
-    Just runtimes -> return $ map RunResult runtimes
-    Nothing -> fail $ "Runtime file has invalid contents:\n" ++ runtime_result
+    readProcessWithExitCode ("." </> binaryName program) options input
+  fmap (Just .  DataResult dataset_desc) $ runBenchM $ do
+    case maybe_expected of
+      Nothing ->
+        didNotFail program progCode progerr
+      Just expected ->
+        compareResult program expected =<< runResult program progCode output progerr
+    runtime_result <- io $ T.readFile tmpfile
+    runtimes <- case mapM readRuntime $ T.lines runtime_result of
+      Just runtimes -> return $ map RunResult runtimes
+      Nothing -> throwError $ "Runtime file has invalid contents:\n" <> runtime_result
 
-  let dataset_desc = case input_spec of
-        InFile path -> path
-        Values{} -> "#" ++ show i
-  putStr $ "dataset " ++ dataset_desc ++ ": "
-
-  reportResult (optRawReporting opts) runtimes
+    io $ putStr $ "dataset " ++ dataset_desc ++ ": "
+    io $ reportResult (optRawReporting opts) runtimes
+    return runtimes
 
   where dir = takeDirectory program
+        dataset_desc = case input_spec of
+                         InFile path -> path
+                         Values{} -> "#" ++ show i
 
-readRuntime :: String -> Maybe Int
-readRuntime s = case reads s of
+readRuntime :: T.Text -> Maybe Int
+readRuntime s = case reads $ T.unpack s of
   [(runtime, _)] -> Just runtime
   _              -> Nothing
 
-didNotFail :: Monad m => FilePath -> ExitCode -> T.Text -> m ()
+didNotFail :: FilePath -> ExitCode -> T.Text -> BenchM ()
 didNotFail _ ExitSuccess _ =
   return ()
 didNotFail program (ExitFailure code) stderr_s =
@@ -207,6 +244,11 @@ commandLineOptions = [
   , Option "n" ["no-validate"]
     (NoArg $ Right $ \config -> config { optValidate = False })
     "Do not validate results."
+  , Option [] ["json"]
+    (ReqArg (\file ->
+               Right $ \config -> config { optJSON = Just file})
+    "FILE")
+    "Write results in JSON format here."
   ]
 
 main :: IO ()

@@ -333,6 +333,7 @@ Executable futhark-bench
                  unordered-containers,
                  text,
                  temporary,
+                 json,
                  futhark
 
   Default-Language:   Haskell2010
