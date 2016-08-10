@@ -86,6 +86,8 @@ progNotFound s = s ++ ": command not found"
 runBenchmarkCase :: BenchOptions -> FilePath -> Int -> TestRun -> IO ()
 runBenchmarkCase _ _ _ (TestRun _ _ RunTimeFailure{}) =
   return () -- Not our concern, we are not a testing tool.
+runBenchmarkCase _ _ _ (TestRun NoBench _ _) =
+  return () -- Too small to bother benchmarking.
 runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) =
   -- We store the runtime in a temporary file.
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
