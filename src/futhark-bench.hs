@@ -1,9 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
--- | Simple tool for benchmarking Futhark programs.  Supports raw
--- output if you want to do your own analysis, but will normally print
--- the average runtime.
-
+-- | Simple tool for benchmarking Futhark programs.  Use the @--json@
+-- flag for machine-readable output.
 module Main (main) where
 
 import Control.Monad
@@ -32,14 +30,13 @@ import Prelude
 data BenchOptions = BenchOptions
                    { optCompiler :: String
                    , optRuns :: Int
-                   , optRawReporting :: Bool
                    , optExtraOptions :: [String]
                    , optValidate :: Bool
                    , optJSON :: Maybe FilePath
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 False [] True Nothing
+initialBenchOptions = BenchOptions "futhark-c" 10 [] True Nothing
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -96,12 +93,10 @@ runBenchmark opts program spec = do
       return $ BenchResult program []
   where compiler = optCompiler opts
 
-reportResult :: Bool -> [RunResult] -> IO ()
-reportResult True runtimes =
-  putStrLn $ unwords $ map (show . runMicroseconds) runtimes
-reportResult False [] =
+reportResult :: [RunResult] -> IO ()
+reportResult [] =
   print (0::Int)
-reportResult False results = do
+reportResult results = do
   let runtimes = map (fromIntegral . runMicroseconds) results
       avg = sum runtimes / genericLength runtimes
       rel_dev = stddevp runtimes / mean runtimes :: Double
@@ -152,7 +147,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
       Nothing -> throwError $ "Runtime file has invalid contents:\n" <> runtime_result
 
     io $ putStr $ "dataset " ++ dataset_desc ++ ": "
-    io $ reportResult (optRawReporting opts) runtimes
+    io $ reportResult runtimes
     return runtimes
 
   where dir = takeDirectory program
@@ -233,9 +228,6 @@ commandLineOptions = [
               Right $ \config -> config { optCompiler = prog })
      "PROGRAM")
     "The compiler used (defaults to 'futhark-c')."
-  , Option [] ["raw"]
-    (NoArg $ Right $ \config -> config { optRawReporting = True })
-    "Print all runtime numbers, not just the average."
   , Option "p" ["pass-option"]
     (ReqArg (\opt ->
                Right $ \config ->
