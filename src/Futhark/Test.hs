@@ -97,6 +97,7 @@ data RunMode
   = CompiledOnly -- ^ Cannot run with interpreter.
   | InterpretedOnly -- ^ Only run with interpreter.
   | NoTravis -- ^ Requires a lot of memory, do not run in Travis.
+  | NoBench -- ^ When benchmarking, don't run this.
   | InterpretedAndCompiled -- ^ Can be interpreted or compiled.
   deriving (Eq, Show)
 
@@ -151,6 +152,7 @@ parseAction = CompileTimeFailure <$> (lexstr "error:" *> parseExpectedError) <|>
 
 parseRunMode :: Parser RunMode
 parseRunMode = (lexstr "compiled" *> pure CompiledOnly) <|>
+               (lexstr "nobench" *> pure NoBench) <|>
                (lexstr "notravis" *> pure NoTravis) <|>
                pure InterpretedAndCompiled
 

@@ -14,9 +14,13 @@ futhark-bench [--runs=count | --compiler=program | --raw | --no-validate] progra
 DESCRIPTION
 ===========
 
-This program is used to benchmark Futhark programs.  See
-``futhark-test(1)`` for how to indicate the data sets.  The programs
-will be compiled using the specified compiler (``futhark-c`` by
+This program is used to benchmark Futhark programs.  In addition to
+the notation used by ``futhark-test(1)``, this program also supports
+the dataset keyword ``nobench``.  This is used to indicate datasets
+that are worthwhile for testing, but too small to be worth
+benchmarking.
+
+Programs are compiled using the specified compiler (``futhark-c`` by
 default), then run a number of times for each data set, and the
 average runtime printed on standard output.
 
