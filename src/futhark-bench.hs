@@ -4,6 +4,7 @@
 -- flag for machine-readable output.
 module Main (main) where
 
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Except hiding (forM_)
 import Data.Maybe
@@ -21,11 +22,11 @@ import System.Exit
 import qualified Text.JSON as JSON
 import Text.Printf
 
+import Prelude
+
 import Futhark.Test
 import Futhark.Util.Pretty (prettyText)
 import Futhark.Util.Options
-
-import Prelude
 
 data BenchOptions = BenchOptions
                    { optCompiler :: String
