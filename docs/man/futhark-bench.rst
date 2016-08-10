@@ -9,7 +9,7 @@ futhark-bench
 SYNOPSIS
 ========
 
-futhark-bench [--runs=count | --compiler=program | --raw | --no-validate] programs...
+futhark-bench [--runs=count | --compiler=program | --json | --no-validate] programs...
 
 DESCRIPTION
 ===========
@@ -38,14 +38,14 @@ OPTIONS
   for each test case.  The specified program must support the same
   interface as ``futhark-c``.
 
---raw
-
-  Provide numbers for every run instead of a summary.
-
 --no-validate
 
   Disable validation of test results, except for succesful
   termination.  Useful when validation would be too slow.
+
+--json=file
+
+  Write raw results in JSON format to the specified file.
 
 EXAMPLES
 ========
