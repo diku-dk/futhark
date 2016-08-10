@@ -32,12 +32,11 @@ data BenchOptions = BenchOptions
                    { optCompiler :: String
                    , optRuns :: Int
                    , optExtraOptions :: [String]
-                   , optValidate :: Bool
                    , optJSON :: Maybe FilePath
                    }
 
 initialBenchOptions :: BenchOptions
-initialBenchOptions = BenchOptions "futhark-c" 10 [] True Nothing
+initialBenchOptions = BenchOptions "futhark-c" 10 [] Nothing
 
 -- | The name we use for compiled programs.
 binaryName :: FilePath -> FilePath
@@ -125,10 +124,7 @@ runBenchmarkCase opts program i (TestRun _ input_spec (Succeeds expected_spec)) 
   withSystemTempFile "futhark-bench" $ \tmpfile h -> do
   hClose h -- We will be writing and reading this ourselves.
   input <- getValuesText dir input_spec
-  maybe_expected <-
-    if optValidate opts
-    then maybe (return Nothing) (fmap Just . getValues dir) expected_spec
-    else return Nothing
+  maybe_expected <- maybe (return Nothing) (fmap Just . getValues dir) expected_spec
   let options = optExtraOptions opts++["-t", tmpfile, "-r", show $ optRuns opts]
 
   -- Explicitly prefixing the current directory is necessary for
@@ -235,9 +231,6 @@ commandLineOptions = [
                config { optExtraOptions = opt : optExtraOptions config })
      "OPT")
     "Pass this option to programs being run."
-  , Option "n" ["no-validate"]
-    (NoArg $ Right $ \config -> config { optValidate = False })
-    "Do not validate results."
   , Option [] ["json"]
     (ReqArg (\file ->
                Right $ \config -> config { optJSON = Just file})

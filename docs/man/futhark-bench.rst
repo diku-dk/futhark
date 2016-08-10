@@ -38,11 +38,6 @@ OPTIONS
   for each test case.  The specified program must support the same
   interface as ``futhark-c``.
 
---no-validate
-
-  Disable validation of test results, except for succesful
-  termination.  Useful when validation would be too slow.
-
 --json=file
 
   Write raw results in JSON format to the specified file.
