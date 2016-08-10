@@ -3,6 +3,7 @@
 -- block specifies input- and output-sets.
 module Futhark.Test
        ( testSpecFromFile
+       , testSpecsFromPaths
        , valuesFromText
        , getValues
        , getValuesText
@@ -34,6 +35,9 @@ import Data.List hiding (foldl')
 import Data.Foldable (foldl')
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import System.Directory.Tree (readDirectoryWith, flattenDir,
+                              DirTree(File), AnchoredDirTree(..),
+                              FileName)
 import System.IO
 import System.FilePath
 
@@ -241,6 +245,31 @@ testSpecFromFile path = do
   case readTestSpec path s of
     Left err -> error $ show $ fixPosition err
     Right v  -> return v
+
+-- | Read test specifications from the given path, which can be a file
+-- or directory containing @.fut@ files and further directories.
+-- Calls 'error' on parse errors.
+testSpecsFromPath :: FilePath -> IO [(FilePath, ProgramTest)]
+testSpecsFromPath path = do
+  programs <- testPrograms path
+  zip programs <$> mapM testSpecFromFile programs
+
+-- | Read test specifications from the given paths, which can be a files
+-- or directories containing @.fut@ files and further directories.
+-- Calls 'error' on parse errors.
+testSpecsFromPaths :: [FilePath] -> IO [(FilePath, ProgramTest)]
+testSpecsFromPaths = fmap concat . mapM testSpecsFromPath
+
+testPrograms :: FilePath -> IO [FileName]
+testPrograms dir = filter isFut <$> directoryContents dir
+  where isFut = (==".fut") . takeExtension
+
+directoryContents :: FilePath -> IO [FileName]
+directoryContents dir = do
+  _ :/ tree <- readDirectoryWith return dir
+  return $ mapMaybe isFile $ flattenDir tree
+  where isFile (File _ path) = Just path
+        isFile _             = Nothing
 
 -- | Try to parse a several values from a text.  The 'SourceName'
 -- parameter is used for error messages.

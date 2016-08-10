@@ -49,7 +49,9 @@ Library
                  text,
                  raw-strings-qq,
                  neat-interpolation >= 0.3,
-                 file-embed >= 0.0.9
+                 file-embed >= 0.0.9,
+                 directory,
+                 directory-tree
 
   Exposed-modules: Futhark.Actions
                    Futhark.Analysis.AlgSimplify
@@ -299,7 +301,6 @@ Executable futhark-test
                  mtl >= 2.2.1,
                  containers >= 0.5,
                  directory,
-                 directory-tree,
                  filepath,
                  process,
                  process-extras,
