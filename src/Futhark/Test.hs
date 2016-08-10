@@ -122,7 +122,7 @@ lexeme :: Parser a -> Parser a
 lexeme p = p <* spaces
 
 lexstr :: String -> Parser ()
-lexstr = void . lexeme . string
+lexstr = void . try . lexeme . string
 
 braces :: Parser a -> Parser a
 braces p = lexstr "{" *> p <* lexstr "}"
