@@ -37,8 +37,7 @@ module Futhark.Representation.AST.Syntax.Core
          , ParamT (..)
          , Param
          , Bindage (..)
-         , PatElemT (..),
-           PatElem
+         , PatElemT (..)
 
          -- * Miscellaneous
          , Names
@@ -251,9 +250,6 @@ data PatElemT attr = PatElem { patElemName :: VName
                                -- ^ Pattern element attribute.
                              }
                    deriving (Ord, Show, Eq)
-
--- | A type alias for namespace control.
-type PatElem = PatElemT
 
 instance Functor PatElemT where
   fmap f (PatElem name bindage attr) = PatElem name bindage (f attr)

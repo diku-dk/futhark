@@ -22,10 +22,10 @@ import Futhark.Pass.ExtractKernels.BlockedKernel
 regularSegmentedReduce :: (HasScope Kernels m, MonadBinder m, Lore m ~ Kernels) =>
                           SubExp
                        -> SubExp
-                       -> Pattern
+                       -> Pattern Kernels
                        -> Certificates
                        -> Commutativity
-                       -> LambdaT Kernels
+                       -> LambdaT InKernel
                        -> [(SubExp, VName)]
                        -> m ()
 regularSegmentedReduce segment_size num_segments pat cs comm lam reduce_inps = do
@@ -80,11 +80,11 @@ regularSegmentedReduceAsScan :: (HasScope Kernels m, MonadBinder m, Lore m ~ Ker
                                 SubExp
                              -> SubExp
                              -> [SubExp]
-                             -> Pattern
-                             -> Pattern
+                             -> Pattern Kernels
+                             -> Pattern Kernels
                              -> Certificates
                              -> SubExp
-                             -> LambdaT Kernels
+                             -> Lambda InKernel
                              -> [(SubExp, VName)]
                              -> m ()
 regularSegmentedReduceAsScan segment_size num_segments nest_sizes flat_pat pat cs w lam reduce_inps = do

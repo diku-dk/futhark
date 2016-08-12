@@ -33,14 +33,10 @@ module Futhark.Representation.SOACS
        , AST.ExpT(PrimOp)
        , AST.FunDefT(FunDef)
        , AST.ParamT(Param)
-         -- Removing lore
-       , removeProgLore
-       , removeFunDefLore
-       , removeBodyLore
        )
 where
 
-import Control.Monad
+import Prelude
 
 import qualified Futhark.Representation.AST.Syntax as AST
 import Futhark.Representation.AST.Syntax
@@ -54,7 +50,6 @@ import Futhark.Representation.AST.Pretty
 import Futhark.Binder
 import Futhark.Construct
 import qualified Futhark.TypeCheck as TypeCheck
-import Futhark.Analysis.Rephrase
 
 -- This module could be written much nicer if Haskell had functors
 -- like Standard ML.  Instead, we have to abuse the namespace/module
@@ -80,7 +75,7 @@ type FunDef = AST.FunDefT SOACS
 type FParam = AST.FParam SOACS
 type LParam = AST.LParam SOACS
 type RetType = AST.RetType SOACS
-type PatElem = AST.PatElem Type
+type PatElem = AST.PatElem SOACS
 
 instance TypeCheck.Checkable SOACS where
   checkExpLore = return
@@ -102,43 +97,7 @@ instance TypeCheck.Checkable SOACS where
 
 instance Bindable SOACS where
   mkBody = AST.Body ()
-  mkLet context values =
-    AST.Let (basicPattern context values) ()
-  mkLetNames names e = do
-    et <- expExtType e
-    (ts, shapes) <- instantiateShapes' et
-    let shapeElems = [ AST.PatElem shape BindVar shapet
-                     | Ident shape shapet <- shapes
-                     ]
-        mkValElem (name, BindVar) t =
-          return $ AST.PatElem name BindVar t
-        mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
-          srct <- lookupType src
-          return $ AST.PatElem name bindage srct
-    valElems <- zipWithM mkValElem names ts
-    return $ AST.Let (AST.Pattern shapeElems valElems) () e
+  mkLet context values = AST.Let (basicPattern context values) ()
+  mkLetNames = simpleMkLetNames
 
 instance PrettyLore SOACS where
-
-removeLore :: (Attributes lore, Op lore ~ Op SOACS) => Rephraser lore SOACS
-removeLore =
-  Rephraser { rephraseExpLore = const ()
-            , rephraseLetBoundLore = typeOf
-            , rephraseBodyLore = const ()
-            , rephraseFParamLore = declTypeOf
-            , rephraseLParamLore = typeOf
-            , rephraseRetType = removeRetTypeLore
-            , rephraseOp = id
-            }
-
-removeProgLore :: (Attributes lore, Op lore ~ Op SOACS) => AST.Prog lore -> Prog
-removeProgLore = rephraseProg removeLore
-
-removeFunDefLore :: (Attributes lore, Op lore ~ Op SOACS) => AST.FunDef lore -> FunDef
-removeFunDefLore = rephraseFunDef removeLore
-
-removeBodyLore :: (Attributes lore, Op lore ~ Op SOACS) => AST.Body lore -> Body
-removeBodyLore = rephraseBody removeLore
-
-removeRetTypeLore :: IsRetType rt => rt -> RetType
-removeRetTypeLore = ExtRetType . retTypeValues

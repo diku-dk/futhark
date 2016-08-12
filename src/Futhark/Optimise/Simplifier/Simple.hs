@@ -4,11 +4,13 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Optimise.Simplifier.Simple
        ( SimpleOps (..)
        , SimpleM
        , bindableSimpleOps
        , runSimpleM
+       , subSimpleM
        , Wise
        )
   where
@@ -125,3 +127,22 @@ runSimpleM :: SimpleM lore a
 runSimpleM (SimpleM m) simpl env src =
   let (x, (_, src'), _) = runRWS m (simpl, env) (Engine.emptyState, src)
   in (x, src')
+
+subSimpleM :: (MonadFreshNames m,
+               Engine.MonadEngine (SimpleM lore),
+               SameScope outerlore lore,
+               ExpAttr outerlore ~ ExpAttr lore,
+               BodyAttr outerlore ~ BodyAttr lore,
+               RetType outerlore ~ RetType lore) =>
+              SimpleOps (SimpleM lore)
+           -> Engine.Env (SimpleM lore)
+           -> ST.SymbolTable (Wise outerlore)
+           -> SimpleM lore a
+           -> m (a, [Binding (Wise lore)])
+subSimpleM simpl env outer_vtable m = do
+  let inner_vtable = ST.castSymbolTable outer_vtable
+  modifyNameSource $ \src ->
+    let SimpleM m' = Engine.localVtable (<>inner_vtable) m
+        (x, (_, src'), need) =
+          runRWS m' (simpl, env) (Engine.emptyState, src)
+    in ((x, Engine.needBindings need), src')

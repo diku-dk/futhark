@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | Do various kernel optimisations - mostly related to coalescing.
 module Futhark.Pass.KernelBabysitting
        ( babysitKernels
@@ -17,7 +18,10 @@ import Data.Monoid
 import Prelude
 
 import Futhark.MonadFreshNames
+import Futhark.Representation.AST
 import Futhark.Representation.Kernels
+       hiding (Prog, Body, Binding, Pattern, PatElem,
+               PrimOp, Exp, Lambda, ExtLambda, FunDef, FParam, LParam, RetType)
 import Futhark.Tools
 import Futhark.Pass
 import Futhark.Util
@@ -29,7 +33,7 @@ babysitKernels =
        , passFunction = intraproceduralTransformation transformFunDef
        }
 
-transformFunDef :: MonadFreshNames m => FunDef -> m FunDef
+transformFunDef :: MonadFreshNames m => FunDef Kernels -> m (FunDef Kernels)
 transformFunDef fundec = do
   (body', _) <- modifyNameSource $ runState (runBinderT m HM.empty)
   return fundec { funDefBody = body' }
@@ -38,7 +42,7 @@ transformFunDef fundec = do
 
 type BabysitM = Binder Kernels
 
-transformBody :: Body -> BabysitM Body
+transformBody :: Body Kernels -> BabysitM (Body Kernels)
 transformBody (Body () bnds res) = insertBindingsM $ do
   foldM_ transformBinding HM.empty bnds
   return $ resultBody res
@@ -48,7 +52,7 @@ transformBody (Body () bnds res) = insertBindingsM $ do
 -- funky in memory (and we'd prefer it not to be).  If we cannot find
 -- it in the map, we just assume it's all good.  HACK and FIXME, I
 -- suppose.  We really should do this at the memory level.
-type ExpMap = HM.HashMap VName Binding
+type ExpMap = HM.HashMap VName (Binding Kernels)
 
 nonlinearInMemory :: VName -> ExpMap -> Maybe (Maybe [Int])
 nonlinearInMemory name m =
@@ -65,7 +69,7 @@ nonlinearInMemory name m =
               return $ Just $ [inner_r..inner_r+outer_r-1] ++ [0..inner_r-1]
           | otherwise = Nothing
 
-transformBinding :: ExpMap -> Binding -> BabysitM ExpMap
+transformBinding :: ExpMap -> Binding Kernels -> BabysitM ExpMap
 
 transformBinding expmap (Let pat () (DoLoop ctx val form body)) = do
   body' <- localScope (scopeOfFParams $ map fst $ ctx ++ val) $
@@ -79,11 +83,8 @@ transformBinding expmap (Let pat ()
   | kernelWorkgroups kernel_size /= constant (1::Int32) = do
   -- We want to pad and transpose the input arrays.
 
-  lam' <- transformLambda lam
-  foldlam' <- transformLambda foldlam
-
   addBinding $ Let pat () $ Op $
-    ScanKernel cs w kernel_size lam' foldlam' nes arrs
+    ScanKernel cs w kernel_size lam foldlam nes arrs
   return expmap
 
 transformBinding expmap (Let pat () (Op (Kernel cs space ts kbody))) = do
@@ -115,12 +116,6 @@ transformBinding expmap (Let pat () e) = do
 
 transform :: Mapper Kernels Kernels BabysitM
 transform = identityMapper { mapOnBody = transformBody }
-
-transformLambda :: Lambda -> BabysitM Lambda
-transformLambda lam = do
-  body' <- inScopeOf lam $
-           transformBody $ lambdaBody lam
-  return lam { lambdaBody = body' }
 
 paddedScanReduceInput :: SubExp -> SubExp
                       -> BabysitM (SubExp, SubExp)
@@ -172,16 +167,17 @@ rearrangeScanReduceInput cs num_threads padding w w_padded elements_per_thread a
             PrimOp $ Split [] 0 [w] arr_inv_tr
 
 transformKernelBody :: SubExp -> Certificates
-                    -> KernelBody Kernels
-                    -> BabysitM (KernelBody Kernels)
-transformKernelBody num_threads cs (KernelBody stms res) =
-  KernelBody <$> mapM transformKernelStm stms <*> pure res
+                    -> KernelBody InKernel
+                    -> BabysitM (KernelBody InKernel)
+transformKernelBody num_threads cs (KernelBody () stms res) =
+  KernelBody () <$> mapM transformKernelStm stms <*> pure res
   where boundInKernel = (`elem` HM.keys (scopeOf stms))
 
-        transformKernelStm (SplitArray dest InOrder w elems_per_thread arrs) = do
+        transformKernelStm (Let pat () (Op (SplitArray InOrder w i num_is elems_per_thread arrs))) = do
           (w_padded, padding) <- paddedScanReduceInput w num_threads
-          SplitArray dest InOrder w elems_per_thread <$>
+          Let pat () . Op . SplitArray InOrder w i num_is elems_per_thread <$>
             mapM (maybeRearrange w w_padded padding elems_per_thread) arrs
+
         transformKernelStm stm =
           return stm
 
@@ -195,32 +191,20 @@ type ArrayIndexTransform m = VName -> [SubExp] -> m (Maybe (VName, [SubExp]))
 
 traverseKernelBodyArrayIndexes :: (Applicative f, Monad f) =>
                                   ArrayIndexTransform f
-                               -> GenKernelBody res Kernels
-                               -> f (GenKernelBody res Kernels)
-traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
-  KernelBody <$> mapM onStatement kstms <*> pure kres
-  where onStatement (Thread threads bnd) =
-          Thread threads <$> onBinding bnd
-        onStatement (GroupReduce pes w lam input) =
-          GroupReduce pes w <$> onLambda lam <*> pure input
-        onStatement (GroupStream pes w maxchunk lam accs arrs) =
-          GroupStream pes w maxchunk <$> onStreamLambda lam <*> pure accs <*> pure arrs
-        onStatement (GroupIf pes cond tb fb) =
-          GroupIf pes cond <$> onKernelBody tb <*> onKernelBody fb
-        onStatement stm = pure stm
-
-        onLambda lam =
+                               -> KernelBody InKernel
+                               -> f (KernelBody InKernel)
+traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
+  KernelBody () <$> mapM onBinding kstms <*> pure kres
+  where onLambda lam =
           (\body' -> lam { lambdaBody = body' }) <$>
           onBody (lambdaBody lam)
 
         onStreamLambda lam =
           (\body' -> lam { groupStreamLambdaBody = body' }) <$>
-          onKernelBody (groupStreamLambdaBody lam)
+          onBody (groupStreamLambdaBody lam)
 
         onBody (Body battr bnds bres) =
           Body battr <$> mapM onBinding bnds <*> pure bres
-
-        onKernelBody = traverseKernelBodyArrayIndexes f
 
         onBinding (Let pat attr (PrimOp (Index cs arr is))) =
           Let pat attr . oldOrNew <$> f arr is
@@ -231,7 +215,18 @@ traverseKernelBodyArrayIndexes f (KernelBody kstms kres) =
         onBinding (Let pat attr e) =
           Let pat attr <$> mapExpM mapper e
 
-        mapper = identityMapper { mapOnBody = onBody }
+        mapper = identityMapper { mapOnBody = onBody
+                                , mapOnOp = onOp
+                                }
+
+        onOp (GroupReduce w lam input) =
+          GroupReduce w <$> onLambda lam <*> pure input
+        -- onOp (Thread threads bnd) =
+        --   Thread threads <$> onBinding bnd
+        onOp (GroupStream w maxchunk lam accs arrs) =
+           GroupStream w maxchunk <$> onStreamLambda lam <*> pure accs <*> pure arrs
+        onOp stm = pure stm
+
 
 -- Not a hashmap, as SubExp is not hashable.
 type Replacements = M.Map (VName, [SubExp]) VName

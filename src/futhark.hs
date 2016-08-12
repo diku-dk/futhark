@@ -52,9 +52,9 @@ data Config = Config { futharkConfig :: FutharkConfig
                      , futharkAction :: UntypedAction
                      }
 
-data UntypedPassState = SOACS SOACS.Prog
-                      | Kernels Kernels.Prog
-                      | ExplicitMemory ExplicitMemory.Prog
+data UntypedPassState = SOACS (Prog SOACS.SOACS)
+                      | Kernels (Prog Kernels.Kernels)
+                      | ExplicitMemory (Prog ExplicitMemory.ExplicitMemory)
 
 class Representation s where
   -- | A human-readable description of the representation expected or
@@ -108,7 +108,7 @@ passOption desc pass short long =
    cfg { futharkPipeline = futharkPipeline cfg ++ [pass] })
   desc
 
-explicitMemoryProg :: String -> UntypedPassState -> FutharkM ExplicitMemory.Prog
+explicitMemoryProg :: String -> UntypedPassState -> FutharkM (Prog ExplicitMemory.ExplicitMemory)
 explicitMemoryProg _ (ExplicitMemory prog) =
   return prog
 explicitMemoryProg name rep =
@@ -117,7 +117,7 @@ explicitMemoryProg name rep =
                 " expects ExplicitMemory representation, but got " ++ representation rep) $
   pretty rep
 
-soacsProg :: String -> UntypedPassState -> FutharkM SOACS.Prog
+soacsProg :: String -> UntypedPassState -> FutharkM (Prog SOACS.SOACS)
 soacsProg _ (SOACS prog) =
   return prog
 soacsProg name rep =
@@ -126,7 +126,7 @@ soacsProg name rep =
                 " expects SOACS representation, but got " ++ representation rep) $
   pretty rep
 
-kernelsProg :: String -> UntypedPassState -> FutharkM Kernels.Prog
+kernelsProg :: String -> UntypedPassState -> FutharkM (Prog Kernels.Kernels)
 kernelsProg _ (Kernels prog) =
   return prog
 kernelsProg name rep =

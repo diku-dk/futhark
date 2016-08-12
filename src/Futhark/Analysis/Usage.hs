@@ -44,7 +44,7 @@ usageInExp (DoLoop _ merge _ _) =
             HS.toList $ subExpAliases se
           | (v,se) <- merge, unique $ paramDeclType v ]
 usageInExp (Op op) =
-  usageInOp op
+  mconcat $ usageInOp op : map UT.consumedUsage (HS.toList $ consumedInOp op)
 usageInExp _ = UT.empty
 
 class UsageInOp op where

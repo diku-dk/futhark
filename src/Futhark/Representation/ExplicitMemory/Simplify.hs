@@ -1,5 +1,9 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.Representation.ExplicitMemory.Simplify
        ( simplifyExplicitMemory
        )
@@ -17,10 +21,11 @@ import Futhark.Representation.AST.Syntax
   hiding (Prog, PrimOp, Exp, Body, Binding,
           Pattern, PatElem, Lambda, ExtLambda, FunDef, FParam, LParam,
           RetType)
-import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.ExplicitMemory
-import Futhark.Representation.Kernels.Simplify()
-import Futhark.Pass.ExplicitAllocations (simplifiable, arraySizeInBytesExp)
+import Futhark.Representation.Kernels.Simplify
+  (simplifyKernelOp)
+import Futhark.Pass.ExplicitAllocations
+  (simplifiable, arraySizeInBytesExp)
 import qualified Futhark.Analysis.SymbolTable as ST
 import qualified Futhark.Analysis.UsageTable as UT
 import qualified Futhark.Analysis.ScalExp as SE
@@ -31,33 +36,26 @@ import Futhark.Optimise.Simplifier.Rules
 import Futhark.Optimise.Simplifier.RuleM
 import Futhark.Optimise.Simplifier.Rule
 import Futhark.Optimise.Simplifier.Lore
+import Futhark.Optimise.Simplifier.Simple
 import Futhark.MonadFreshNames
 
-simplifyExplicitMemory :: MonadFreshNames m => Prog -> m Prog
+simplifyExplicitMemory :: MonadFreshNames m => Prog ExplicitMemory -> m (Prog ExplicitMemory)
 simplifyExplicitMemory =
   Simplifier.simplifyProgWithRules simplifiable explicitMemoryRules blockers
-  where blockers =
-          Engine.HoistBlockers {
-            Engine.blockHoistPar = isAlloc
-          , Engine.blockHoistSeq = isResultAlloc
-          , Engine.getArraySizes = getShapeNames
-          , Engine.isAllocation  = isAlloc0
-          }
 
-isAlloc :: Op lore ~ MemOp lore => Engine.BlockPred lore
+isAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
 isAlloc _ (Let _ _ (Op Alloc{})) = True
 isAlloc _ _                      = False
 
-isResultAlloc :: Op lore ~ MemOp lore => Engine.BlockPred lore
-isResultAlloc usage (Let (AST.Pattern [] [bindee]) _
-                     (Op Alloc{})) =
+isResultAlloc :: Op lore ~ MemOp op => Engine.BlockPred lore
+isResultAlloc usage (Let (AST.Pattern [] [bindee]) _ (Op Alloc{})) =
   UT.isInResult (patElemName bindee) usage
 isResultAlloc _ _ = False
 
 -- | Getting the roots of what to hoist, for now only variable
 -- names that represent array and memory-block sizes.
-getShapeNames :: (Op lore ~ MemOp lore, Attributes lore, LetAttr lore ~ (VarWisdom, MemBound NoUniqueness)) =>
-                 AST.Binding lore -> Names
+getShapeNames :: ExplicitMemorish lore =>
+                 Binding (Wise lore) -> HS.HashSet VName
 getShapeNames bnd =
   let tps = map patElemType $ patternElements $ bindingPattern bnd
       ats = map (snd . patElemAttr) $ patternElements $ bindingPattern bnd
@@ -68,38 +66,45 @@ getShapeNames bnd =
                      ) ats
   in  HS.fromList $ nms ++ subExpVars (concatMap arrayDims tps)
 
-isAlloc0 :: Op lore ~ MemOp lore => AST.Binding lore -> Bool
+isAlloc0 :: Op lore ~ MemOp op => AST.Binding lore -> Bool
 isAlloc0 (Let _ _ (Op Alloc{})) = True
 isAlloc0 _                      = False
 
+instance Engine.SimplifiableOp ExplicitMemory (Kernel InKernel) where
+  simplifyOp = simplifyKernelOp simplifiable inKernelEnv
+
+inKernelEnv :: Engine.Env (SimpleM InKernel)
+inKernelEnv = Engine.emptyEnv explicitMemoryRules blockers
+
+blockers ::  (ExplicitMemorish lore, Op lore ~ MemOp op) =>
+             Simplifier.HoistBlockers (SimpleM lore)
+blockers = Engine.HoistBlockers {
+    Engine.blockHoistPar = isAlloc
+  , Engine.blockHoistSeq = isResultAlloc
+  , Engine.getArraySizes = getShapeNames
+  , Engine.isAllocation  = isAlloc0
+  }
+
+
 explicitMemoryRules :: (MonadBinder m,
-                        LocalScope (Lore m) m,
-                        (Lore m) ~ Wise ExplicitMemory,
-                        Aliased (Lore m)) => RuleBook m
-explicitMemoryRules = (std_td_rules <> topDownRules,
-                       std_bu_rules <> bottomUpRules)
+                        Op (Lore m) ~ MemOp inner,
+                        LetAttr (Lore m) ~ (VarWisdom, MemBound u),
+                        Lore m ~ Wise lore,
+                        LocalScope (Wise lore) m,
+                        ExplicitMemorish lore) => RuleBook m
+explicitMemoryRules = (std_td_rules <> [ unExistentialiseMemory
+                                       , copyCopyToCopy
+                                       ],
+                       std_bu_rules <> [])
   where (std_td_rules, std_bu_rules) = standardRules
-
-topDownRules :: (MonadBinder m,
-                 LocalScope (Lore m) m,
-                 (Lore m) ~ Wise ExplicitMemory,
-                 Aliased (Lore m)) => TopDownRules m
-topDownRules = [ unExistentialiseMemory
-               , copyCopyToCopy
-               ]
-
-bottomUpRules :: (MonadBinder m,
-                  LocalScope (Lore m) m,
-                  Op (Lore m) ~ MemOp (Lore m)) => BottomUpRules m
-bottomUpRules = [
-                ]
-
-unExistentialiseMemory :: (MonadBinder m, (Lore m) ~ Wise ExplicitMemory) =>
-                          TopDownRule m
 
 -- | If a branch is returning some existential memory, but we know the
 -- size of the corresponding array non-existentially, then we can
 -- create a block of the proper size and always return there.
+unExistentialiseMemory :: (MonadBinder m,
+                           Op (Lore m) ~ MemOp inner,
+                           LetAttr (Lore m) ~ (VarWisdom, MemBound u)) =>
+                          TopDownRule m
 unExistentialiseMemory _ (Let pat _ (If cond tbranch fbranch ret))
   | (remaining_ctx, concretised) <-
       foldl hasConcretisableMemory
@@ -174,7 +179,8 @@ unExistentialiseMemory _ _ = cannotSimplify
 
 -- | If we are copying something that is itself a copy, just copy the
 -- original one instead.
-copyCopyToCopy :: (MonadBinder m, (Lore m) ~ Wise ExplicitMemory) =>
+copyCopyToCopy :: (MonadBinder m,
+                   LetAttr (Lore m) ~ (VarWisdom, MemBound u)) =>
                   TopDownRule m
 copyCopyToCopy vtable (Let pat@(Pattern [] [pat_elem]) _ (PrimOp (Copy v1)))
   | Just (PrimOp (Copy v2)) <- ST.lookupExp v1 vtable,

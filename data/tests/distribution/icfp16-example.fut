@@ -21,7 +21,6 @@
 -- }
 -- structure distributed {
 --   DoLoop/Kernel 1
---   Kernel/Thread/DoLoop/DoLoop 2
 --   ScanKernel 2
 -- }
 

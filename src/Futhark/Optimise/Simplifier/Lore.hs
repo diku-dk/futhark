@@ -26,6 +26,7 @@ module Futhark.Optimise.Simplifier.Lore
        )
        where
 
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Monoid
 import qualified Data.HashMap.Lazy as HM
@@ -101,7 +102,7 @@ instance (Attributes lore, CanBeWise (Op lore)) => Attributes (Wise lore) where
     types <- asksScope removeScopeWisdom
     runReaderT (expContext (removePatternWisdom pat) (removeExpWisdom e)) types
 
-instance PrettyAnnot (PatElem attr) => PrettyAnnot (PatElem (VarWisdom, attr)) where
+instance PrettyAnnot (PatElemT attr) => PrettyAnnot (PatElemT (VarWisdom, attr)) where
   ppAnnot = ppAnnot . fmap snd
 
 instance (PrettyLore lore, CanBeWise (Op lore)) => PrettyLore (Wise lore) where
@@ -120,14 +121,14 @@ instance (Attributes lore, CanBeWise (Op lore)) => Aliased (Wise lore) where
   bodyAliases = map unNames . bodyWisdomAliases . fst . bodyLore
   consumedInBody = unNames . bodyWisdomConsumed . fst . bodyLore
 
-removeWisdom :: CanBeWise (Op lore) => Rephraser (Wise lore) lore
-removeWisdom = Rephraser { rephraseExpLore = snd
-                         , rephraseLetBoundLore = snd
-                         , rephraseBodyLore = snd
-                         , rephraseFParamLore = id
-                         , rephraseLParamLore = id
-                         , rephraseRetType = id
-                         , rephraseOp = removeOpWisdom
+removeWisdom :: CanBeWise (Op lore) => Rephraser Identity (Wise lore) lore
+removeWisdom = Rephraser { rephraseExpLore = return . snd
+                         , rephraseLetBoundLore = return . snd
+                         , rephraseBodyLore = return . snd
+                         , rephraseFParamLore = return
+                         , rephraseLParamLore = return
+                         , rephraseRetType = return
+                         , rephraseOp = return . removeOpWisdom
                          }
 
 removeScopeWisdom :: Scope (Wise lore) -> Scope lore
@@ -145,31 +146,31 @@ addScopeWisdom = HM.map alias
         alias IndexInfo = IndexInfo
 
 removeProgWisdom :: CanBeWise (Op lore) => Prog (Wise lore) -> Prog lore
-removeProgWisdom = rephraseProg removeWisdom
+removeProgWisdom = runIdentity . rephraseProg removeWisdom
 
 removeFunDefWisdom :: CanBeWise (Op lore) => FunDef (Wise lore) -> FunDef lore
-removeFunDefWisdom = rephraseFunDef removeWisdom
+removeFunDefWisdom = runIdentity . rephraseFunDef removeWisdom
 
 removeBindingWisdom :: CanBeWise (Op lore) => Binding (Wise lore) -> Binding lore
-removeBindingWisdom = rephraseBinding removeWisdom
+removeBindingWisdom = runIdentity . rephraseBinding removeWisdom
 
 removeLambdaWisdom :: CanBeWise (Op lore) => Lambda (Wise lore) -> Lambda lore
-removeLambdaWisdom = rephraseLambda removeWisdom
+removeLambdaWisdom = runIdentity . rephraseLambda removeWisdom
 
 removeExtLambdaWisdom :: CanBeWise (Op lore) => ExtLambda (Wise lore) -> ExtLambda lore
-removeExtLambdaWisdom = rephraseExtLambda removeWisdom
+removeExtLambdaWisdom = runIdentity . rephraseExtLambda removeWisdom
 
 removeBodyWisdom :: CanBeWise (Op lore) => Body (Wise lore) -> Body lore
-removeBodyWisdom = rephraseBody removeWisdom
+removeBodyWisdom = runIdentity . rephraseBody removeWisdom
 
 removeExpWisdom :: CanBeWise (Op lore) => Exp (Wise lore) -> Exp lore
-removeExpWisdom = rephraseExp removeWisdom
+removeExpWisdom = runIdentity . rephraseExp removeWisdom
 
 removePatternWisdom :: PatternT (VarWisdom, a) -> PatternT a
-removePatternWisdom = rephrasePattern snd
+removePatternWisdom = runIdentity . rephrasePattern (return . snd)
 
 removePatElemWisdom :: PatElemT (VarWisdom, a) -> PatElemT a
-removePatElemWisdom = rephrasePatElem snd
+removePatElemWisdom = runIdentity . rephrasePatElem (return . snd)
 
 addWisdomToPattern :: (Attributes lore, CanBeWise (Op lore)) =>
                       Pattern lore

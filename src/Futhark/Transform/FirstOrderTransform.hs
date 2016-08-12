@@ -663,7 +663,8 @@ transformSOAC pat (Write cs len lam ivs as) = do
 -- | Recursively first-order-transform a lambda.
 transformLambda :: (MonadFreshNames m,
                     Bindable lore,
-                    LocalScope lore m,
+                    LocalScope somelore m,
+                    SameScope somelore lore,
                     LetAttr SOACS ~ LetAttr lore,
                     LParamAttr SOACS ~ LParamAttr lore,
                     CanBeAliased (Op lore)) =>

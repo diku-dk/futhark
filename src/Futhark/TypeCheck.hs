@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, TypeFamilies, ScopedTypeVariables #-}
 -- | The type checker checks whether the program is type-consistent.
 module Futhark.TypeCheck
   ( -- * Interface
@@ -18,12 +18,14 @@ module Futhark.TypeCheck
   , UsageMap
   , usageMap
   , collectOccurences
+  , subCheck
 
     -- * Checkers
   , require
   , requireI
   , checkSubExp
   , checkExp
+  , checkBindings
   , checkBinding
   , checkType
   , checkExtType
@@ -39,6 +41,7 @@ module Futhark.TypeCheck
   , checkFun'
   , checkLambdaParams
   , checkBody
+  , checkLambdaBody
   , consume
   , consumeOnlyParams
   , binding
@@ -197,7 +200,7 @@ instance Checkable lore => Show (TypeError lore) where
 -- named.
 type FunBinding lore = (RetType (Aliases lore), [FParam (Aliases lore)])
 
-data VarBinding lore = Bound (NameInfo (Aliases lore))
+type VarBinding lore = NameInfo (Aliases lore)
 
 data Usage = Consumed
            | Observed
@@ -297,7 +300,7 @@ instance Checkable lore =>
          HasScope (Aliases lore) (TypeM lore) where
   lookupType = fmap typeOf . lookupVar
   askScope = asks $ HM.fromList . mapMaybe varType . HM.toList . envVtable
-    where varType (name, Bound attr) = Just (name, attr)
+    where varType (name, attr) = Just (name, attr)
 
 runTypeM :: Env lore -> TypeM lore a
          -> Either (TypeError lore) a
@@ -390,8 +393,8 @@ expandAliases :: Names -> Env lore -> Names
 expandAliases names env = names `HS.union` aliasesOfAliases
   where aliasesOfAliases =  mconcat . map look . HS.toList $ names
         look k = case HM.lookup k $ envVtable env of
-          Just (Bound (LetInfo (als, _))) -> unNames als
-          _                               -> mempty
+          Just (LetInfo (als, _)) -> unNames als
+          _                       -> mempty
 
 binding :: Checkable lore =>
            Scope (Aliases lore)
@@ -405,16 +408,16 @@ binding bnds = check . local (`bindVars` bnds)
         bindVar env name (LetInfo (Names' als, attr)) =
           let als' = expandAliases als env
               inedges = HS.toList als'
-              update (Bound (LetInfo (Names' thesenames, thisattr))) =
-                Bound $ LetInfo (Names' $ HS.insert name thesenames, thisattr)
+              update (LetInfo (Names' thesenames, thisattr)) =
+                LetInfo (Names' $ HS.insert name thesenames, thisattr)
               update b = b
           in env { envVtable =
-                      HM.insert name (Bound $ LetInfo (Names' als', attr)) $
+                      HM.insert name (LetInfo (Names' als', attr)) $
                       adjustSeveral update inedges $
                       envVtable env
                  }
         bindVar env name attr =
-          env { envVtable = HM.insert name (Bound attr) $ envVtable env }
+          env { envVtable = HM.insert name attr $ envVtable env }
 
         adjustSeveral f = flip $ foldl $ flip $ HM.adjust f
 
@@ -435,7 +438,7 @@ lookupVar name = do
   bnd <- asks $ HM.lookup name . envVtable
   case bnd of
     Nothing -> bad $ UnknownVariableError name
-    Just (Bound attr) -> return attr
+    Just attr -> return attr
 
 lookupAliases :: VName -> TypeM lore Names
 lookupAliases name = do
@@ -628,6 +631,27 @@ checkFun' (fname, rettype, params, body) consumable check = do
         returnAliasing expected got =
           [ (uniqueness p, names) |
             (p,names) <- zip expected got ]
+
+subCheck :: forall lore newlore a.
+            (Checkable newlore,
+             RetType lore ~ RetType newlore,
+             LetAttr lore ~ LetAttr newlore,
+             FParamAttr lore ~ FParamAttr newlore,
+             LParamAttr lore ~ LParamAttr newlore) =>
+            TypeM newlore a ->
+            TypeM lore a
+subCheck m = do
+  typeenv <- newEnv <$> ask
+  case runTypeM typeenv m of
+    Left err -> bad $ TypeError $ show err
+    Right x -> return x
+    where newEnv :: Env lore -> Env newlore
+          newEnv (Env vtable ftable ctx) =
+            Env (HM.map coerceVar vtable) ftable ctx
+          coerceVar (LetInfo x) = LetInfo x
+          coerceVar (FParamInfo x) = FParamInfo x
+          coerceVar (LParamInfo x) = LParamInfo x
+          coerceVar IndexInfo = IndexInfo
 
 checkSubExp :: Checkable lore => SubExp -> TypeM lore Type
 checkSubExp (Constant val) =
@@ -939,7 +963,7 @@ checkBinOpArgs t e1 e2 = do
   require [Prim t] e2
 
 checkPatElem :: Checkable lore =>
-                PatElem (LetAttr lore) -> TypeM lore ()
+                PatElemT (LetAttr lore) -> TypeM lore ()
 checkPatElem (PatElem name bindage attr) = do
   checkBindage bindage
   checkLetBoundLore name attr
@@ -972,7 +996,7 @@ checkBinding pat e m = do
     m
 
 matchExtPattern :: Checkable lore =>
-                   [PatElem (LetAttr (Aliases lore))]
+                   [PatElem (Aliases lore)]
                 -> [ExtType] -> TypeM lore ()
 matchExtPattern pat ts = do
   (ts', restpat, _) <- liftEitherS $ patternContext pat ts

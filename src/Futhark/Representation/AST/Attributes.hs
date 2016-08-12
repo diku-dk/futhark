@@ -29,7 +29,6 @@ module Futhark.Representation.AST.Attributes
   , shapeVars
 
   , IsOp (..)
-
   , Attributes (..)
   )
   where

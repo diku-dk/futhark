@@ -13,7 +13,7 @@ import Prelude hiding (mapM)
 import qualified Language.C.Syntax as C
 import qualified Language.C.Quote.OpenCL as C
 
-import Futhark.Representation.ExplicitMemory (Prog)
+import Futhark.Representation.ExplicitMemory
 import Futhark.CodeGen.Backends.COpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericC as GenericC
 import Futhark.CodeGen.Backends.GenericC.Options
@@ -21,7 +21,7 @@ import Futhark.CodeGen.ImpCode.OpenCL
 import qualified Futhark.CodeGen.ImpGen.OpenCL as ImpGen
 import Futhark.MonadFreshNames
 
-compileProg :: MonadFreshNames m => Prog -> m (Either String String)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either String String)
 compileProg prog = do
   res <- ImpGen.compileProg prog
   case res of

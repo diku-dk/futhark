@@ -15,7 +15,7 @@ import Futhark.MonadFreshNames
 
 import Prelude
 
-compileProg :: MonadFreshNames m => Maybe String -> Prog -> m (Either String String)
+compileProg :: MonadFreshNames m => Maybe String -> Prog ExplicitMemory -> m (Either String String)
 compileProg module_name =
   ImpGen.compileProg >=>
   traverse (GenericPython.compileProg

@@ -46,7 +46,7 @@ class (Annotations lore,
        Pretty (ParamT (FParamAttr lore)),
        Pretty (ParamT (LParamAttr lore)),
        Pretty (PatElemT (LetAttr lore)),
-       PrettyAnnot (PatElem (LetAttr lore)),
+       PrettyAnnot (PatElem lore),
        PrettyAnnot (FParam lore),
        PrettyAnnot (LParam lore),
        Pretty (Op lore)) => PrettyLore lore where

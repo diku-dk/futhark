@@ -156,7 +156,7 @@ class AliasesOf a where
 instance AliasesOf Names where
   aliasesOf = id
 
-instance AliasesOf attr => AliasesOf (PatElem attr) where
+instance AliasesOf attr => AliasesOf (PatElemT attr) where
   aliasesOf = aliasesOf . patElemAttr
 
 class IsOp op => AliasedOp op where
