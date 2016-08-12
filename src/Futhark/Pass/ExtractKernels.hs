@@ -173,6 +173,7 @@ import Futhark.Representation.Kernels.Kernel
 import Futhark.MonadFreshNames
 import Futhark.Tools
 import qualified Futhark.Transform.FirstOrderTransform as FOT
+import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Transform.Rename
 import Futhark.Pass
 import Futhark.Transform.CopyPropagate
@@ -181,8 +182,11 @@ import Futhark.Pass.ExtractKernels.ISRWIM
 import Futhark.Pass.ExtractKernels.BlockedKernel
 import Futhark.Pass.ExtractKernels.SegmentedReduce
 import Futhark.Pass.ExtractKernels.Interchange
-import qualified Futhark.Pass.ExtractKernels.Kernelise as Kernelise
 import Futhark.Util.Log
+
+type KernelsBinding = Out.Binding Out.Kernels
+type InKernelBinding = Out.Binding Out.InKernel
+type InKernelLambda = Out.Lambda Out.InKernel
 
 extractKernels :: Pass SOACS Out.Kernels
 extractKernels =
@@ -206,17 +210,17 @@ runDistribM (DistribM m) = do
   return x
   where positionNameSource (x, src, msgs) = ((x, msgs), src)
 
-transformFunDef :: FunDef -> DistribM Out.FunDef
+transformFunDef :: FunDef -> DistribM (Out.FunDef Out.Kernels)
 transformFunDef (FunDef entry name rettype params body) = do
   body' <- localScope (scopeOfFParams params) $
            transformBody body
   return $ FunDef entry name rettype params body'
 
-transformBody :: Body -> DistribM Out.Body
+transformBody :: Body -> DistribM (Out.Body Out.Kernels)
 transformBody body = do bnds <- transformBindings $ bodyBindings body
                         return $ mkBody bnds $ bodyResult body
 
-transformBindings :: [Binding] -> DistribM [Out.Binding]
+transformBindings :: [Binding] -> DistribM [KernelsBinding]
 transformBindings [] =
   return []
 transformBindings (bnd:bnds) =
@@ -246,7 +250,7 @@ scopeForSOACs = castScope
 scopeForKernels :: Scope SOACS -> Scope Out.Kernels
 scopeForKernels = castScope
 
-transformBinding :: Binding -> DistribM [Out.Binding]
+transformBinding :: Binding -> DistribM [KernelsBinding]
 
 transformBinding (Let pat () (If c tb fb rt)) = do
   tb' <- transformBody tb
@@ -353,10 +357,10 @@ transformBinding (Let pat () (Op (Write cs w lam ivs as))) = runBinder_ $ do
   lam' <- FOT.transformLambda lam
   write_i <- newVName "write_i"
   let (i_res, v_res) = splitAt (length as) $ bodyResult $ lambdaBody lam'
-      kstms = map (Thread ThreadsInSpace) $ bodyBindings $ lambdaBody lam'
+      kstms = bodyBindings $ lambdaBody lam'
       krets = do (i, v, (a_w, a)) <- zip3 i_res v_res as
                  return $ WriteReturn a_w a i v
-      body = KernelBody kstms krets
+      body = KernelBody () kstms krets
       inputs = do (p, p_a) <- zip (lambdaParams lam') ivs
                   return $ KernelInput (paramName p) (paramType p) p_a [Var write_i]
   (bnds, kernel) <-
@@ -374,7 +378,7 @@ mapLoopExp (MapLoop cs w lam arrs) = Op $ Map cs w lam arrs
 
 distributeMap :: (HasScope Out.Kernels m,
                   MonadFreshNames m, MonadLogger m) =>
-                 Pattern -> MapLoop -> m [Out.Binding]
+                 Pattern -> MapLoop -> m [KernelsBinding]
 distributeMap pat (MapLoop cs w lam arrs) = do
   types <- askScope
   let env = KernelEnv { kernelNest =
@@ -384,7 +388,7 @@ distributeMap pat (MapLoop cs w lam arrs) = do
                       , kernelScope =
                         types <> scopeForKernels (scopeOf lam)
                       }
-  fmap (postKernelBindings . snd) $ runKernelM env $
+  fmap (postKernelsBindings . snd) $ runKernelM env $
     distribute =<< distributeMapBodyBindings acc (bodyBindings $ lambdaBody lam)
     where acc = KernelAcc { kernelTargets = singleTarget (pat, bodyResult $ lambdaBody lam)
                           , kernelStms = mempty
@@ -395,7 +399,7 @@ data KernelEnv = KernelEnv { kernelNest :: Nestings
                            }
 
 data KernelAcc = KernelAcc { kernelTargets :: Targets
-                           , kernelStms :: [Out.KernelStm Out.Kernels]
+                           , kernelStms :: [InKernelBinding]
                            }
 
 data KernelRes = KernelRes { accPostKernels :: PostKernels
@@ -407,7 +411,7 @@ instance Monoid KernelRes where
     KernelRes (ks1 <> ks2) (log1 <> log2)
   mempty = KernelRes mempty mempty
 
-newtype PostKernel = PostKernel { unPostKernel :: [Out.Binding] }
+newtype PostKernel = PostKernel { unPostKernel :: [KernelsBinding] }
 
 newtype PostKernels = PostKernels [PostKernel]
 
@@ -415,21 +419,21 @@ instance Monoid PostKernels where
   mempty = PostKernels mempty
   PostKernels xs `mappend` PostKernels ys = PostKernels $ ys ++ xs
 
-postKernelBindings :: PostKernels -> [Out.Binding]
-postKernelBindings (PostKernels kernels) = concatMap unPostKernel kernels
+postKernelsBindings :: PostKernels -> [KernelsBinding]
+postKernelsBindings (PostKernels kernels) = concatMap unPostKernel kernels
 
 typeEnvFromKernelAcc :: KernelAcc -> Scope Out.Kernels
 typeEnvFromKernelAcc = scopeOf . fst . outerTarget . kernelTargets
 
 addStmsToKernel :: (HasScope Out.Kernels m, MonadFreshNames m) =>
-                   [KernelStm Out.Kernels] -> KernelAcc -> m KernelAcc
+                   [InKernelBinding] -> KernelAcc -> m KernelAcc
 addStmsToKernel stms acc =
   return acc { kernelStms = stms <> kernelStms acc }
 
 addBindingToKernel :: (LocalScope Out.Kernels m, MonadFreshNames m) =>
                       Binding -> KernelAcc -> m KernelAcc
 addBindingToKernel bnd acc = do
-  stms <- Kernelise.transformBinding bnd
+  stms <- runBinder_ $ Kernelise.transformBinding bnd
   return acc { kernelStms = stms <> kernelStms acc }
 
 newtype KernelM a = KernelM (RWS KernelEnv KernelRes VNameSource a)
@@ -459,7 +463,7 @@ runKernelM env (KernelM m) = do
 addKernels :: PostKernels -> KernelM ()
 addKernels ks = tell $ mempty { accPostKernels = ks }
 
-addKernel :: [Out.Binding] -> KernelM ()
+addKernel :: [KernelsBinding] -> KernelM ()
 addKernel bnds = addKernels $ PostKernels [PostKernel bnds]
 
 withBinding :: Binding -> KernelM a -> KernelM a
@@ -561,13 +565,13 @@ leavingNesting (MapLoop cs w lam arrs) acc =
      case kernelStms acc' of
        []      -> return acc'
        remnant -> do
-         let kbody = KernelBody remnant res
-             used_in_body = freeIn kbody
+         let kbody = Body () remnant res
+             used_in_body = freeInBody kbody
              (used_params, used_arrs) =
                unzip $
                filter ((`HS.member` used_in_body) . paramName . fst) $
                zip (lambdaParams lam) arrs
-         stms <- Kernelise.mapIsh pat cs w used_params kbody used_arrs
+         stms <- runBinder_ $ Kernelise.mapIsh pat cs w used_params kbody used_arrs
          addStmsToKernel stms acc' { kernelStms = [] }
 
 distributeMapBodyBindings :: KernelAcc -> [Binding] -> KernelM KernelAcc
@@ -730,7 +734,7 @@ distributeSingleBinding acc bnd = do
   tryDistribute nest (kernelTargets acc) (kernelStms acc) >>= \case
     Nothing -> return Nothing
     Just (targets, distributed_bnds) ->
-      tryDistributeBinding nest targets (Thread ThreadsInSpace bnd) >>= \case
+      tryDistributeBinding nest targets bnd >>= \case
         Nothing -> return Nothing
         Just (res, targets', new_kernel_nest) ->
           return $ Just (PostKernels [PostKernel distributed_bnds],
@@ -742,8 +746,8 @@ distributeSingleBinding acc bnd = do
 
 segmentedScanKernel :: KernelNest
                     -> [Int]
-                    -> Certificates -> SubExp -> Out.Lambda -> [(SubExp, VName)]
-                    -> KernelM (Maybe [Out.Binding])
+                    -> Certificates -> SubExp -> InKernelLambda -> [(SubExp, VName)]
+                    -> KernelM (Maybe [KernelsBinding])
 segmentedScanKernel nest perm cs segment_size lam scan_inps =
   isSegmentedOp nest perm segment_size lam scan_inps $
   \pat flat_pat _num_segments total_num_elements scan_inps' -> do
@@ -759,8 +763,8 @@ segmentedScanKernel nest perm cs segment_size lam scan_inps =
 
 regularSegmentedReduceKernel :: KernelNest
                              -> [Int]
-                             -> Certificates -> SubExp -> Commutativity -> Out.Lambda -> [(SubExp, VName)]
-                             -> KernelM (Maybe [Out.Binding])
+                             -> Certificates -> SubExp -> Commutativity -> InKernelLambda -> [(SubExp, VName)]
+                             -> KernelM (Maybe [KernelsBinding])
 regularSegmentedReduceKernel nest perm cs segment_size comm lam reduce_inps =
   isSegmentedOp nest perm segment_size lam reduce_inps $
   \pat flat_pat num_segments total_num_elements reduce_inps' ->
@@ -774,7 +778,7 @@ regularSegmentedReduceKernel nest perm cs segment_size comm lam reduce_inps =
 isSegmentedOp :: KernelNest
               -> [Int]
               -> SubExp
-              -> Out.Lambda
+              -> InKernelLambda
               -> [(SubExp, VName)]
               -> (Pattern
                   -> Pattern
@@ -782,7 +786,7 @@ isSegmentedOp :: KernelNest
                   -> SubExp
                   -> [(SubExp, VName)]
                   -> Binder Out.Kernels ())
-              -> KernelM (Maybe [Out.Binding])
+              -> KernelM (Maybe [KernelsBinding])
 isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
   -- We must verify that array inputs to the operation are inputs to
   -- the outermost loop nesting or free in the loop nest, and that
@@ -856,7 +860,7 @@ isSegmentedOp nest perm segment_size lam scan_inps m = runMaybeT $ do
     m pat flat_pat nesting_size total_num_elements op_inps'
 
 kernelOrNot :: Binding -> KernelAcc
-            -> PostKernels -> KernelAcc -> Maybe [Out.Binding]
+            -> PostKernels -> KernelAcc -> Maybe [KernelsBinding]
             -> KernelM KernelAcc
 kernelOrNot bnd acc _ _ Nothing =
   addBindingToKernel bnd acc

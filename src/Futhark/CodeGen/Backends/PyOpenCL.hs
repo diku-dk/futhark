@@ -10,7 +10,7 @@ import Data.List
 import Prelude
 
 import Futhark.Representation.AST.Attributes.Constants
-import Futhark.Representation.ExplicitMemory (Prog)
+import Futhark.Representation.ExplicitMemory (Prog, ExplicitMemory)
 import Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
 import qualified Futhark.CodeGen.Backends.GenericPython as Py
 import qualified Futhark.CodeGen.ImpCode.OpenCL as Imp
@@ -23,7 +23,7 @@ import Futhark.MonadFreshNames
 
 
 --maybe pass the config file rather than multiple arguments
-compileProg :: MonadFreshNames m => Maybe String -> Prog ->  m (Either String String)
+compileProg :: MonadFreshNames m => Maybe String -> Prog ExplicitMemory ->  m (Either String String)
 compileProg module_name prog = do
   res <- ImpGen.compileProg prog
   --could probably be a better why do to this..

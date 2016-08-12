@@ -135,8 +135,8 @@ Library
                    Futhark.Pass.ExtractKernels.Distribution
                    Futhark.Pass.ExtractKernels.ISRWIM
                    Futhark.Pass.ExtractKernels.Interchange
-                   Futhark.Pass.ExtractKernels.SegmentedReduce
                    Futhark.Pass.ExtractKernels.Kernelise
+                   Futhark.Pass.ExtractKernels.SegmentedReduce
                    Futhark.Pass.FirstOrderTransform
                    Futhark.Pass.KernelBabysitting
                    Futhark.Pass.Simplify
@@ -172,6 +172,7 @@ Library
                    Futhark.Representation.Kernels
                    Futhark.Representation.Kernels.Simplify
                    Futhark.Representation.Kernels.Kernel
+                   Futhark.Representation.Kernels.KernelExp
                    Futhark.Representation.Ranges
                    Futhark.Test.Values
                    Futhark.Test

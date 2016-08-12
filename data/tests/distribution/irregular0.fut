@@ -8,7 +8,7 @@
 --   Kernel/GroupReduce 2
 --   Map 0
 --   Kernel/Reduce 0
---   Kernel/DoLoop 0
+--   Kernel/DoLoop 1
 -- }
 
 fun []int main([]int a) =

@@ -41,6 +41,7 @@ module Futhark.Representation.Aliases
 where
 
 import Control.Applicative
+import Control.Monad.Identity
 import Control.Monad.Reader
 import Data.Maybe
 import Data.Monoid
@@ -123,8 +124,8 @@ instance (Attributes lore, CanBeAliased (Op lore)) => Aliased (Aliases lore) whe
   bodyAliases = map unNames . fst . fst . bodyLore
   consumedInBody = unNames . snd . fst . bodyLore
 
-instance PrettyAnnot (PatElem attr) =>
-  PrettyAnnot (PatElem (VarAliases, attr)) where
+instance PrettyAnnot (PatElemT attr) =>
+  PrettyAnnot (PatElemT (VarAliases, attr)) where
 
   ppAnnot (PatElem name bindage (Names' als, attr)) =
     (PP.oneLine <$> aliasComment name als) <>
@@ -175,14 +176,14 @@ resultAliasComment name als =
             PP.text "-- Result of " <> PP.ppr name <> PP.text " aliases " <>
             PP.commasep (map PP.ppr als')
 
-removeAliases :: CanBeAliased (Op lore) => Rephraser (Aliases lore) lore
-removeAliases = Rephraser { rephraseExpLore = snd
-                          , rephraseLetBoundLore = snd
-                          , rephraseBodyLore = snd
-                          , rephraseFParamLore = id
-                          , rephraseLParamLore = id
-                          , rephraseRetType = id
-                          , rephraseOp = removeOpAliases
+removeAliases :: CanBeAliased (Op lore) => Rephraser Identity (Aliases lore) lore
+removeAliases = Rephraser { rephraseExpLore = return . snd
+                          , rephraseLetBoundLore = return . snd
+                          , rephraseBodyLore = return . snd
+                          , rephraseFParamLore = return
+                          , rephraseLParamLore = return
+                          , rephraseRetType = return
+                          , rephraseOp = return . removeOpAliases
                           }
 
 removeScopeAliases :: Scope (Aliases lore) -> Scope lore
@@ -194,35 +195,35 @@ removeScopeAliases = HM.map unAlias
 
 removeProgAliases :: CanBeAliased (Op lore) =>
                      Prog (Aliases lore) -> Prog lore
-removeProgAliases = rephraseProg removeAliases
+removeProgAliases = runIdentity . rephraseProg removeAliases
 
 removeFunDefAliases :: CanBeAliased (Op lore) =>
                        FunDef (Aliases lore) -> FunDef lore
-removeFunDefAliases = rephraseFunDef removeAliases
+removeFunDefAliases = runIdentity . rephraseFunDef removeAliases
 
 removeExpAliases :: CanBeAliased (Op lore) =>
                     Exp (Aliases lore) -> Exp lore
-removeExpAliases = rephraseExp removeAliases
+removeExpAliases = runIdentity . rephraseExp removeAliases
 
 removeBodyAliases :: CanBeAliased (Op lore) =>
                      Body (Aliases lore) -> Body lore
-removeBodyAliases = rephraseBody removeAliases
+removeBodyAliases = runIdentity . rephraseBody removeAliases
 
 removeBindingAliases :: CanBeAliased (Op lore) =>
                         Binding (Aliases lore) -> Binding lore
-removeBindingAliases = rephraseBinding removeAliases
+removeBindingAliases = runIdentity . rephraseBinding removeAliases
 
 removeLambdaAliases :: CanBeAliased (Op lore) =>
                        Lambda (Aliases lore) -> Lambda lore
-removeLambdaAliases = rephraseLambda removeAliases
+removeLambdaAliases = runIdentity . rephraseLambda removeAliases
 
 removeExtLambdaAliases :: CanBeAliased (Op lore) =>
                           ExtLambda (Aliases lore) -> ExtLambda lore
-removeExtLambdaAliases = rephraseExtLambda removeAliases
+removeExtLambdaAliases = runIdentity . rephraseExtLambda removeAliases
 
 removePatternAliases :: PatternT (Names', a)
                      -> PatternT a
-removePatternAliases = rephrasePattern snd
+removePatternAliases = runIdentity . rephrasePattern (return . snd)
 
 addAliasesToPattern :: (Attributes lore, CanBeAliased (Op lore), Typed attr) =>
                        PatternT attr -> Exp (Aliases lore)

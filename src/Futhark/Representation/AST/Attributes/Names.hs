@@ -16,6 +16,7 @@ module Futhark.Representation.AST.Attributes.Names
          , freeInExtLambda
          -- * Bound Names
          , boundInBody
+         , boundByBinding
          , boundByBindings
          , boundByLambda
          , boundByExtLambda
@@ -235,10 +236,13 @@ instance FreeIn attr => FreeIn (PatternT attr) where
 boundInBody :: Body lore -> Names
 boundInBody = boundByBindings . bodyBindings
 
+-- | The names bound by a binding.
+boundByBinding :: Binding lore -> Names
+boundByBinding = HS.fromList . patternNames . bindingPattern
+
 -- | The names bound by the bindings.
 boundByBindings :: [Binding lore] -> Names
-boundByBindings = mconcat . map bound
-  where bound (Let pat _ _) = HS.fromList $ patternNames pat
+boundByBindings = mconcat . map boundByBinding
 
 -- | The names of the lambda parameters plus the index parameter.
 boundByLambda :: Lambda lore -> [VName]

@@ -29,6 +29,7 @@ module Futhark.Representation.AST.Syntax
   , Ident (..)
   , SubExp(..)
   , Bindage (..)
+  , PatElem
   , PatElemT (..)
   , PatternT (..)
   , Pattern
@@ -74,10 +75,13 @@ import Language.Futhark.Core
 import Futhark.Representation.AST.Annotations
 import Futhark.Representation.AST.Syntax.Core
 
+-- | A type alias for namespace control.
+type PatElem lore = PatElemT (LetAttr lore)
+
 -- | A pattern is conceptually just a list of names and their types.
 data PatternT attr =
-  Pattern { patternContextElements :: [PatElem attr]
-          , patternValueElements   :: [PatElem attr]
+  Pattern { patternContextElements :: [PatElemT attr]
+          , patternValueElements   :: [PatElemT attr]
           }
   deriving (Ord, Show, Eq)
 

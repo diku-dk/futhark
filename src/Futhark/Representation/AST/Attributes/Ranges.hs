@@ -138,7 +138,7 @@ class RangeOf a where
 instance RangeOf Range where
   rangeOf = id
 
-instance RangeOf attr => RangeOf (PatElem attr) where
+instance RangeOf attr => RangeOf (PatElemT attr) where
   rangeOf = rangeOf . patElemAttr
 
 instance RangeOf SubExp where

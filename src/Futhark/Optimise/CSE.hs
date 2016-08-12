@@ -46,6 +46,7 @@ import Futhark.Representation.AST.Attributes.Aliases
 import Futhark.Representation.Aliases
   (removeFunDefAliases, Aliases, consumedInBindings)
 import qualified Futhark.Representation.Kernels.Kernel as Kernel
+import qualified Futhark.Representation.Kernels.KernelExp as KernelExp
 import qualified Futhark.Representation.SOACS.SOAC as SOAC
 import qualified Futhark.Representation.ExplicitMemory as ExplicitMemory
 import Futhark.Transform.Substitute
@@ -54,7 +55,7 @@ import Futhark.Tools
 
 -- | Perform CSE on every functioon in a program.
 performCSE :: (Attributes lore, CanBeAliased (Op lore),
-               CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
+               CSEInOp (OpWithAliases (Op lore))) =>
               Bool -> Pass lore lore
 performCSE cse_arrays =
   simplePass
@@ -63,7 +64,7 @@ performCSE cse_arrays =
   intraproceduralTransformation $
   return . removeFunDefAliases . cseInFunDef cse_arrays . analyseFun
 
-cseInFunDef :: (Aliased lore, CSEInOp lore (Op lore)) =>
+cseInFunDef :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                Bool -> FunDef lore -> FunDef lore
 cseInFunDef cse_arrays fundec =
   fundec { funDefBody =
@@ -72,26 +73,26 @@ cseInFunDef cse_arrays fundec =
 
 type CSEM lore = Reader (CSEState lore)
 
-cseInBody :: (Aliased lore, CSEInOp lore (Op lore)) =>
+cseInBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
              Body lore -> CSEM lore (Body lore)
 cseInBody (Body bodyattr bnds res) =
   cseInBindings (consumedInBindings bnds res) bnds $ do
     CSEState (_, nsubsts) _ <- ask
     return $ Body bodyattr [] $ substituteNames nsubsts res
 
-cseInLambda :: (Aliased lore, CSEInOp lore (Op lore)) =>
+cseInLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                Lambda lore -> CSEM lore (Lambda lore)
 cseInLambda lam = do
   body' <- cseInBody $ lambdaBody lam
   return lam { lambdaBody = body' }
 
-cseInExtLambda :: (Aliased lore, CSEInOp lore (Op lore)) =>
+cseInExtLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                   ExtLambda lore -> CSEM lore (ExtLambda lore)
 cseInExtLambda lam = do
   body' <- cseInBody $ extLambdaBody lam
   return lam { extLambdaBody = body' }
 
-cseInBindings :: (Aliased lore, CSEInOp lore (Op lore)) =>
+cseInBindings :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                  Names -> [Binding lore]
               -> CSEM lore (Body lore)
               -> CSEM lore (Body lore)
@@ -165,33 +166,54 @@ addExpSubst pat eattr e (CSEState (esubsts, nsubsts) cse_arrays) =
   CSEState (M.insert (eattr,e) pat esubsts, nsubsts) cse_arrays
 
 -- | The operations that permit CSE.
-class Attributes lore => CSEInOp lore op where
+class CSEInOp op where
   -- | Perform CSE within any nested expressions.
-  cseInOp :: Aliased lore => op -> CSEM lore op
+  cseInOp :: op -> CSEM lore op
 
-instance Attributes lore => CSEInOp lore () where
+instance CSEInOp () where
   cseInOp () = return ()
 
-instance (Attributes lore, CSEInOp lore (Op lore)) => CSEInOp lore (Kernel.Kernel lore) where
-  cseInOp = Kernel.mapKernelM $
-            Kernel.KernelMapper return cseInLambda cseInBody
-            return return return cseInKernelBody
+subCSE :: CSEM lore r -> CSEM otherlore r
+subCSE m = do
+  CSEState _ cse_arrays <- ask
+  return $ runReader m $ newCSEState cse_arrays
 
-cseInKernelBody :: (Aliased lore, CSEInOp lore (Op lore)) =>
+instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (Kernel.Kernel lore) where
+  cseInOp = subCSE .
+            Kernel.mapKernelM
+            (Kernel.KernelMapper return cseInLambda cseInBody
+             return return return cseInKernelBody)
+
+cseInKernelBody :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
                    Kernel.KernelBody lore -> CSEM lore (Kernel.KernelBody lore)
-cseInKernelBody = return
+cseInKernelBody (Kernel.KernelBody bodyattr bnds res) = do
+  Body _ bnds' _ <- cseInBody $ Body bodyattr bnds []
+  return $ Kernel.KernelBody bodyattr bnds' res
 
-instance (Attributes (Aliases lore),
-          CanBeAliased (Op lore),
-          CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
-         CSEInOp (Aliases lore) (ExplicitMemory.MemOp (Aliases lore)) where
+instance (Attributes lore, Aliased lore, CSEInOp (Op lore)) => CSEInOp (KernelExp.KernelExp lore) where
+  cseInOp (KernelExp.Combine cspace ts body) =
+    subCSE $ KernelExp.Combine cspace ts <$> cseInBody body
+  cseInOp (KernelExp.GroupReduce w lam input) =
+    subCSE $ KernelExp.GroupReduce w <$> cseInLambda lam <*> pure input
+  cseInOp (KernelExp.GroupStream w max_chunk lam nes arrs) =
+    subCSE $ KernelExp.GroupStream w max_chunk <$> cseInGroupStreamLambda lam <*> pure nes <*> pure arrs
+  cseInOp op = return op
+
+cseInGroupStreamLambda :: (Attributes lore, Aliased lore, CSEInOp (Op lore)) =>
+                          KernelExp.GroupStreamLambda lore
+                       -> CSEM lore (KernelExp.GroupStreamLambda lore)
+cseInGroupStreamLambda lam = do
+  body' <- cseInBody $ KernelExp.groupStreamLambdaBody lam
+  return lam { KernelExp.groupStreamLambdaBody = body' }
+
+
+instance CSEInOp op => CSEInOp (ExplicitMemory.MemOp op) where
   cseInOp o@ExplicitMemory.Alloc{} = return o
-  cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> cseInOp k
+  cseInOp (ExplicitMemory.Inner k) = ExplicitMemory.Inner <$> subCSE (cseInOp k)
 
-instance (Attributes (Aliases lore),
+instance (Attributes lore,
           CanBeAliased (Op lore),
-          CSEInOp (Aliases lore) (OpWithAliases (Op lore))) =>
-         CSEInOp (Aliases lore) (SOAC.SOAC (Aliases lore)) where
-  cseInOp = SOAC.mapSOACM $
-            SOAC.SOACMapper return cseInLambda cseInExtLambda
-            return return
+          CSEInOp (OpWithAliases (Op lore))) =>
+         CSEInOp (SOAC.SOAC (Aliases lore)) where
+  cseInOp = subCSE . SOAC.mapSOACM
+            (SOAC.SOACMapper return cseInLambda cseInExtLambda return return)

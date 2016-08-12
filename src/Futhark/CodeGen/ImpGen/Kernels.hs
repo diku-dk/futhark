@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeFamilies, LambdaCase #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ConstraintKinds #-}
 module Futhark.CodeGen.ImpGen.Kernels
   ( compileProg
   )
@@ -30,42 +32,46 @@ import Futhark.Tools (partitionChunkedKernelLambdaParameters)
 import Futhark.Util (splitAt3)
 import Futhark.Util.IntegralExp (quotRoundingUp, quot, rem, IntegralCond)
 
-type CallKernelGen = ImpGen.ImpM Imp.HostOp
+type CallKernelGen = ImpGen.ImpM ExplicitMemory Imp.HostOp
+type InKernelGen = ImpGen.ImpM InKernel Imp.KernelOp
 
-callKernelOperations :: ImpGen.Operations Imp.HostOp
+callKernelOperations :: ImpGen.Operations ExplicitMemory Imp.HostOp
 callKernelOperations =
   ImpGen.Operations { ImpGen.opsExpCompiler = expCompiler
                     , ImpGen.opsCopyCompiler = callKernelCopy
                     , ImpGen.opsOpCompiler = opCompiler
+                    , ImpGen.opsBodyCompiler = ImpGen.defCompileBody
                     }
 
+inKernelOperations :: KernelConstants -> ImpGen.Operations InKernel Imp.KernelOp
+inKernelOperations constants = (ImpGen.defaultOperations $ compileInKernelOp constants)
+                               { ImpGen.opsCopyCompiler = inKernelCopy
+                               , ImpGen.opsExpCompiler = inKernelExpCompiler
+                               , ImpGen.opsBodyCompiler = compileNestedKernelBody constants
+                               }
 
-inKernelOperations :: ImpGen.Operations Imp.KernelOp
-inKernelOperations = (ImpGen.defaultOperations cannotAllocInKernel)
-                     { ImpGen.opsCopyCompiler = inKernelCopy
-                     , ImpGen.opsExpCompiler = inKernelExpCompiler
-                     }
-
-compileProg :: MonadFreshNames m => Prog -> m (Either String Imp.Program)
+compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m (Either String Imp.Program)
 compileProg prog =
   fmap (setDefaultSpace (Imp.Space "device")) <$>
   ImpGen.compileProg callKernelOperations (Imp.Space "device") prog
 
 opCompiler :: ImpGen.Destination -> Op ExplicitMemory
-              -> ImpGen.ImpM Imp.HostOp ()
+           -> CallKernelGen ()
 opCompiler dest (Alloc e space) =
   ImpGen.compileAlloc dest e space
 opCompiler dest (Inner kernel) =
   kernelCompiler dest kernel
 
-cannotAllocInKernel :: ImpGen.Destination -> Op ExplicitMemory
-                    -> ImpGen.ImpM Imp.KernelOp ()
-cannotAllocInKernel _ _ =
+compileInKernelOp :: KernelConstants -> ImpGen.Destination -> Op InKernel
+                  -> InKernelGen ()
+compileInKernelOp _ _ Alloc{} =
   throwError "Cannot allocate memory in kernel."
+compileInKernelOp constants dest (Inner op) =
+  compileKernelExp constants dest op
 
 -- | Recognise kernels (maps), give everything else back.
-kernelCompiler :: ImpGen.Destination -> Kernel ExplicitMemory
-               -> ImpGen.ImpM Imp.HostOp ()
+kernelCompiler :: ImpGen.Destination -> Kernel InKernel
+               -> CallKernelGen ()
 
 kernelCompiler dest NumGroups = do
   [v] <- ImpGen.funcallTargets dest
@@ -75,9 +81,7 @@ kernelCompiler dest GroupSize = do
   [v] <- ImpGen.funcallTargets dest
   ImpGen.emit $ Imp.Op $ Imp.GetGroupSize v
 
-kernelCompiler
-  (ImpGen.Destination dest)
-  (Kernel _ space _ kernel_body) = do
+kernelCompiler dest (Kernel _ space _ kernel_body) = do
 
   num_groups' <- ImpGen.subExpToDimSize $ spaceNumGroups space
   group_size' <- ImpGen.subExpToDimSize $ spaceGroupSize space
@@ -104,7 +108,7 @@ kernelCompiler
 
   kernel_body' <-
     makeAllMemoryGlobal $
-    ImpGen.subImpM_ inKernelOperations $
+    ImpGen.subImpM_ (inKernelOperations constants) $
     ImpGen.declaringPrimVar wave_size int32 $
     ImpGen.declaringPrimVar inner_group_size int32 $
     ImpGen.declaringPrimVar thread_active Bool $
@@ -123,7 +127,7 @@ kernelCompiler
 
     compileKernelBody dest constants kernel_body
 
-  (uses, local_memory) <- computeKernelUses dest kernel_body' bound_in_kernel
+  (uses, local_memory) <- computeKernelUses (ImpGen.valueDestinations dest) kernel_body' bound_in_kernel
   let local_memory_aligned = map (ensureAlignment $ alignmentMap kernel_body') local_memory
 
   ImpGen.emit $ Imp.Op $ Imp.CallKernel $ Imp.AnyKernel Imp.Kernel
@@ -169,11 +173,16 @@ kernelCompiler
         num_waves = Imp.sizeToExp local_size `quot`
                     Imp.ScalarVar wave_size
 
+        constants = KernelConstants global_id local_id group_id
+                    local_size num_threads
+                    (Imp.VarSize wave_size) []
+                    (Imp.Constant $ BoolValue True)
+
     (acc_mem_params, acc_local_mem) <-
       unzip <$> mapM (createAccMem local_size) fold_x_params
 
     (call_with_body, body) <-
-      makeAllMemoryGlobal $ ImpGen.subImpM inKernelOperations $
+      makeAllMemoryGlobal $ ImpGen.subImpM (inKernelOperations constants) $
       ImpGen.declaringPrimVar local_id int32 $
       ImpGen.declaringPrimVar group_id int32 $
       ImpGen.declaringPrimVar wave_size int32 $
@@ -338,7 +347,7 @@ kernelCompiler
 
     call_with_body body
 
-expCompiler :: ImpGen.ExpCompiler Imp.HostOp
+expCompiler :: ImpGen.ExpCompiler ExplicitMemory Imp.HostOp
 -- We generate a simple kernel for itoa and replicate.
 expCompiler
   (ImpGen.Destination
@@ -375,17 +384,18 @@ expCompiler
 
 expCompiler
   (ImpGen.Destination [dest]) (PrimOp (Replicate n se)) = do
-  thread_gid <- newVName "replicate_gid"
+  constants <- simpleKernelConstants "replicate"
 
   t <- subExpType se
-  let row_dims = arrayDims t
+  let thread_gid = kernelGlobalThreadId constants
+      row_dims = arrayDims t
       dims = n : row_dims
       is' = unflattenIndex (map SE.intSubExpToScalExp dims) $
             ImpGen.varIndex thread_gid
       n' = ImpGen.compileSubExp n
 
   makeAllMemoryGlobal $ do
-    body <- ImpGen.subImpM_ inKernelOperations $
+    body <- ImpGen.subImpM_ (inKernelOperations constants) $
       ImpGen.copyDWIMDest dest is' se $ drop 1 is'
 
     (group_size, num_groups) <- computeMapKernelGroups $
@@ -412,7 +422,7 @@ expCompiler _ (Op (Alloc _ (Space "local"))) =
 expCompiler _ e =
   return $ ImpGen.CompileExp e
 
-kernelSizeNames :: ImpGen.ImpM op (VName, VName, VName, VName, VName)
+kernelSizeNames :: ImpGen.ImpM lore op (VName, VName, VName, VName, VName)
 kernelSizeNames = do
   local_id <- newVName "local_id"
   group_id <- newVName "group_id"
@@ -422,8 +432,8 @@ kernelSizeNames = do
   return (local_id, group_id, wave_size, skip_waves, global_id)
 
 compileKernelSize :: KernelSize
-                  -> ImpGen.ImpM op (Imp.DimSize, Imp.DimSize, Imp.DimSize,
-                                     Imp.DimSize, Imp.DimSize, Imp.DimSize)
+                  -> ImpGen.ImpM lore op (Imp.DimSize, Imp.DimSize, Imp.DimSize,
+                                          Imp.DimSize, Imp.DimSize, Imp.DimSize)
 compileKernelSize (KernelSize num_groups local_size per_thread_elements
                    num_elements offset_multiple num_threads) = do
   num_groups' <- ImpGen.subExpToDimSize num_groups
@@ -435,7 +445,7 @@ compileKernelSize (KernelSize num_groups local_size per_thread_elements
   return (num_groups', local_size', per_thread_elements',
           num_elements', offset_multiple', num_threads')
 
-callKernelCopy :: ImpGen.CopyCompiler Imp.HostOp
+callKernelCopy :: ImpGen.CopyCompiler ExplicitMemory Imp.HostOp
 callKernelCopy bt
   destloc@(ImpGen.MemLocation destmem destshape destIxFun)
   srcloc@(ImpGen.MemLocation srcmem srcshape srcIxFun)
@@ -510,10 +520,10 @@ callKernelCopy bt
 
 -- | We have no bulk copy operation (e.g. memmove) inside kernels, so
 -- turn any copy into a loop.
-inKernelCopy :: ImpGen.CopyCompiler Imp.KernelOp
+inKernelCopy :: ImpGen.CopyCompiler InKernel Imp.KernelOp
 inKernelCopy = ImpGen.copyElementWise
 
-inKernelExpCompiler :: ImpGen.ExpCompiler Imp.KernelOp
+inKernelExpCompiler :: ImpGen.ExpCompiler InKernel Imp.KernelOp
 inKernelExpCompiler _ (PrimOp (Assert _ loc)) =
   fail $ "Cannot compile assertion at " ++ locStr loc ++ " inside parallel kernel."
 inKernelExpCompiler _ e =
@@ -522,7 +532,7 @@ inKernelExpCompiler _ e =
 computeKernelUses :: FreeIn a =>
                      [ImpGen.ValueDestination]
                   -> a -> [VName]
-                  -> ImpGen.ImpM op ([Imp.KernelUse], [(VName, Imp.Size)])
+                  -> ImpGen.ImpM lore op ([Imp.KernelUse], [(VName, Imp.Size)])
 computeKernelUses dest kernel_body bound_in_kernel = do
     -- Find the memory blocks containing the output arrays.
     let dest_mems = mapMaybe destMem dest
@@ -555,7 +565,7 @@ computeKernelUses dest kernel_body bound_in_kernel = do
     return (nub $ reads_from ++ writes_to,
             nub local_memory)
 
-readsFromSet :: Names -> ImpGen.ImpM op [Imp.KernelUse]
+readsFromSet :: Names -> ImpGen.ImpM lore op [Imp.KernelUse]
 readsFromSet free =
   fmap catMaybes $
   forM (HS.toList free) $ \var -> do
@@ -570,7 +580,7 @@ readsFromSet free =
         then return Nothing
         else return $ Just $ Imp.ScalarUse var bt
 
-localMemoryUse :: Names -> ImpGen.ImpM op [(VName, Imp.Size)]
+localMemoryUse :: Names -> ImpGen.ImpM lore op [(VName, Imp.Size)]
 localMemoryUse free =
   fmap catMaybes $
   forM (HS.toList free) $ \var -> do
@@ -598,7 +608,7 @@ makeAllMemoryGlobal =
         globalMemory entry =
           entry
 
-computeMapKernelGroups :: Imp.Exp -> ImpGen.ImpM Imp.HostOp (VName, VName)
+computeMapKernelGroups :: Imp.Exp -> CallKernelGen (VName, VName)
 computeMapKernelGroups kernel_size = do
   group_size <- newVName "group_size"
   num_groups <- newVName "num_groups"
@@ -650,8 +660,8 @@ isMapTransposeKernel bt
           in (product mapped, product pretrans, product posttrans)
 
 createAccMem :: Imp.DimSize
-             -> LParam
-             -> ImpGen.ImpM op (Imp.Param, (VName, Imp.Size))
+             -> Param (MemBound NoUniqueness)
+             -> ImpGen.ImpM lore op (Imp.Param, (VName, Imp.Size))
 createAccMem local_size param
   | Prim bt <- paramType param = do
       mem_shared <- newVName (baseString (paramName param) <> "_mem_local")
@@ -674,7 +684,7 @@ createAccMem local_size param
 
 writeParamToLocalMemory :: Typed (MemBound u) =>
                            Imp.Exp -> (VName, t) -> Param (MemBound u)
-                        -> ImpGen.ImpM op ()
+                        -> ImpGen.ImpM lore op ()
 writeParamToLocalMemory i (mem, _) param
   | Prim _ <- paramType param =
       ImpGen.emit $
@@ -687,7 +697,7 @@ writeParamToLocalMemory i (mem, _) param
 
 readParamFromLocalMemory :: Typed (MemBound u) =>
                             VName -> Imp.Exp -> Param (MemBound u) -> (VName, t)
-                         -> ImpGen.ImpM op ()
+                         -> ImpGen.ImpM lore op ()
 readParamFromLocalMemory index i param (l_mem, _)
   | Prim _ <- paramType param =
       ImpGen.emit $
@@ -703,7 +713,7 @@ writeFinalResult :: Typed (MemBound u) =>
                     [VName]
                  -> ImpGen.ValueDestination
                  -> Param (MemBound u)
-                 -> ImpGen.ImpM op ()
+                 -> ImpGen.ImpM lore op ()
 writeFinalResult is (ImpGen.ArrayDestination memdest _) acc_param
   | ImpGen.CopyIntoMemory
     memloc@(ImpGen.MemLocation out_arr_mem out_shape ixfun) <- memdest = do
@@ -731,7 +741,7 @@ computeThreadChunkSize :: Commutativity
                        -> Imp.Count Imp.Elements
                        -> Imp.Count Imp.Elements
                        -> VName
-                       -> ImpGen.ImpM op ()
+                       -> ImpGen.ImpM lore op ()
 computeThreadChunkSize Commutative thread_index num_threads elements_per_thread num_elements chunk_var = do
   remaining_elements <- newVName "remaining_elements"
   ImpGen.emit $
@@ -786,8 +796,8 @@ computeThreadChunkSize Noncommutative thread_index _ elements_per_thread num_ele
 inWaveScan :: Imp.Exp
            -> VName
            -> [(VName, t)]
-           -> Lambda
-           -> ImpGen.ImpM op ()
+           -> Lambda InKernel
+           -> InKernelGen ()
 inWaveScan wave_size local_id acc_local_mem scan_lam = do
   skip_threads <- newVName "skip_threads"
   let in_wave_thread_active =
@@ -859,49 +869,64 @@ data KernelConstants = KernelConstants
                        , kernelThreadActive :: Imp.Exp
                        }
 
-compileKernelBody :: [ImpGen.ValueDestination]
+-- FIXME: wing a KernelConstants structure for use in Replicate
+-- compilation.  This cannot be the best way to do this...
+simpleKernelConstants :: MonadFreshNames m =>
+                         String
+                      -> m KernelConstants
+simpleKernelConstants desc = do
+  thread_gtid <- newVName $ desc ++ "_gtid"
+  thread_ltid <- newVName $ desc ++ "_ltid"
+  thread_gid <- newVName $ desc ++ "_gid"
+  return $ KernelConstants
+    thread_gtid thread_ltid thread_gid
+    (Imp.ConstSize 0) (Imp.ConstSize 0) (Imp.ConstSize 0)
+    [] (Imp.Constant $ BoolValue True)
+
+compileKernelBody :: ImpGen.Destination
                   -> KernelConstants
-                  -> KernelBody ExplicitMemory
-                  -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelBody dest constants kbody =
-  compileKernelStms constants (kernelBodyStms kbody) $
+                  -> KernelBody InKernel
+                  -> InKernelGen ()
+compileKernelBody (ImpGen.Destination dest) constants kbody =
+  compileKernelBindings constants (kernelBodyStms kbody) $
   zipWithM_ (compileKernelResult constants) dest $
   kernelBodyResult kbody
 
-compileNestedKernelBody :: [ImpGen.ValueDestination]
-                        -> KernelConstants
-                        -> NestedKernelBody ExplicitMemory
-                        -> ImpGen.ImpM Imp.KernelOp ()
-compileNestedKernelBody dest constants kbody =
-  compileKernelStms constants (kernelBodyStms kbody) $
-  zipWithM_ ImpGen.compileSubExpTo dest $ kernelBodyResult kbody
+compileNestedKernelBody :: KernelConstants
+                        -> ImpGen.Destination
+                        -> Body InKernel
+                        -> InKernelGen ()
+compileNestedKernelBody constants (ImpGen.Destination dest) kbody =
+  compileKernelBindings constants (bodyBindings kbody) $
+  zipWithM_ ImpGen.compileSubExpTo dest $ bodyResult kbody
 
-compileKernelStms :: KernelConstants
-                  -> [KernelStm ExplicitMemory]
-                  -> ImpGen.ImpM Imp.KernelOp ()
-                  -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelStms constants ungrouped_stms m =
-  compileGroupedKernelStms' $ groupStmsByGuard constants ungrouped_stms
-  where compileGroupedKernelStms' [] = m
-        compileGroupedKernelStms' ((g, stms):rest_stms) =
-          ImpGen.declaringScope (scopeOf stms) $ do
-            protect g =<< ImpGen.collect (mapM_ (compileKernelStm constants) stms)
-            compileGroupedKernelStms' rest_stms
+compileKernelBindings :: KernelConstants -> [Binding InKernel]
+                      -> InKernelGen a
+                      -> InKernelGen a
+compileKernelBindings constants ungrouped_bnds m =
+  compileGroupedKernelBindings' $ groupBindingsByGuard constants ungrouped_bnds
+  where compileGroupedKernelBindings' [] = m
+        compileGroupedKernelBindings' ((g, bnds):rest_bnds) =
+          ImpGen.declaringScope (castScope $ scopeOf bnds) $ do
+            protect g =<< ImpGen.collect (mapM_ compileKernelBinding bnds)
+            compileGroupedKernelBindings' rest_bnds
 
         protect Nothing body =
           ImpGen.emit body
         protect (Just g) body =
           ImpGen.emit $ Imp.If g body mempty
 
-groupStmsByGuard :: KernelConstants
-                 -> [KernelStm ExplicitMemory]
-                 -> [(Maybe Imp.Exp, [KernelStm ExplicitMemory])]
-groupStmsByGuard constants stms =
-  map collapse $ groupBy sameGuard $ map addGuard stms
-  where addGuard stm@(Thread threads _) =
-          (protect threads, stm)
-        addGuard stm =
-          (Nothing, stm)
+        compileKernelBinding (Let pat _ e) = do
+          dest <- ImpGen.destinationFromPattern pat
+          ImpGen.compileExp dest e $ return ()
+
+groupBindingsByGuard :: KernelConstants
+                     -> [Binding InKernel]
+                     -> [(Maybe Imp.Exp, [Binding InKernel])]
+groupBindingsByGuard constants bnds =
+  map collapse $ groupBy sameGuard $ zip (map bindingGuard bnds) bnds
+  where bindingGuard (Let _ _ Op{}) = Nothing
+        bindingGuard _ = Just $ kernelThreadActive constants
 
         sameGuard (g1, _) (g2, _) = g1 == g2
 
@@ -910,40 +935,42 @@ groupStmsByGuard constants stms =
         collapse l@((g,_):_) =
           (g, map snd l)
 
-        protect AllThreads = Nothing
-        protect (OneThreadPerGroup which) =
-          let which' = ImpGen.compileSubExp which
-              me = Imp.ScalarVar $ kernelLocalThreadId constants
-          in Just $ Imp.CmpOp (CmpEq int32) me which'
-        protect (ThreadsPerGroup limit) =
-          Just $ isActive limit
-        protect ThreadsInSpace =
-          Just $ kernelThreadActive constants
+compileKernelExp :: KernelConstants -> ImpGen.Destination -> KernelExp InKernel
+                 -> InKernelGen ()
 
-compileKernelStm :: KernelConstants -> KernelStm ExplicitMemory
-                 -> ImpGen.ImpM Imp.KernelOp ()
-compileKernelStm constants (SplitArray (size,_) o w elems_per_thread _arrs) = do
-  let num_elements = Imp.elements $ ImpGen.compileSubExp w
-      elems_per_thread' = Imp.elements $ ImpGen.compileSubExp elems_per_thread
-      thread_index' = Imp.ScalarVar $ kernelGlobalThreadId constants
-      num_threads' = Imp.sizeToExp $ kernelNumThreads constants
-  computeThreadChunkSize comm thread_index' num_threads' elems_per_thread' num_elements size
-  where comm = case o of Disorder -> Commutative
-                         InOrder -> Noncommutative
+compileKernelExp constants dest (SplitArray o w i max_is elems_per_thread _arrs)
+  | ImpGen.Destination (ImpGen.ArrayDestination _ (Just size:_):_) <- dest =
+      compileKernelExp constants (ImpGen.Destination [ImpGen.ScalarDestination size]) $
+      SplitSpace o w i max_is elems_per_thread
 
-compileKernelStm _ (Thread _ bnd) = do
-  dest <- ImpGen.destinationFromPattern $ bindingPattern bnd
-  ImpGen.compileExp dest (bindingExp bnd) $ return ()
+compileKernelExp _ dest (SplitSpace o w i max_is elems_per_thread)
+  | ImpGen.Destination [ImpGen.ScalarDestination size] <- dest = do
+      let num_elements = Imp.elements $ ImpGen.compileSubExp w
+          i' = ImpGen.compileSubExp i
+          max_is' = ImpGen.compileSubExp max_is
+          elems_per_thread' = Imp.elements $ ImpGen.compileSubExp elems_per_thread
+      computeThreadChunkSize comm i' max_is' elems_per_thread' num_elements size
+        where comm = case o of Disorder -> Commutative
+                               InOrder -> Noncommutative
 
-compileKernelStm _ (Combine pe cspace v) = do
-  copy <- ImpGen.collect $
-          ImpGen.copyDWIM (patElemName pe) (map ImpGen.varIndex is) v []
-  ImpGen.emit $ Imp.Op Imp.Barrier
-  ImpGen.emit $ Imp.If (isActive cspace) copy mempty
-  ImpGen.emit $ Imp.Op Imp.Barrier
-  where (is, _) = unzip cspace
+compileKernelExp constants dest (Combine cspace _ body)
+  | Just dest' <- ImpGen.Destination <$> mapM index (ImpGen.valueDestinations dest) = do
+      copy <- ImpGen.subImpM_ (inKernelOperations constants') $
+              ImpGen.compileBody dest' body
+      ImpGen.emit $ Imp.Op Imp.Barrier
+      ImpGen.emit $ Imp.If (isActive cspace) copy mempty
+      ImpGen.emit $ Imp.Op Imp.Barrier
+        where constants' =
+                constants { kernelThreadActive = Imp.Constant (BoolValue True) }
 
-compileKernelStm constants (GroupReduce pes _ lam input) = do
+              index (ImpGen.ArrayDestination (ImpGen.CopyIntoMemory loc) shape) =
+                Just $ ImpGen.ArrayDestination
+                (ImpGen.CopyIntoMemory
+                  (ImpGen.sliceArray loc $ map (ImpGen.varIndex . fst) cspace))
+                shape
+              index _ = Nothing
+
+compileKernelExp constants (ImpGen.Destination dests) (GroupReduce _ lam input) = do
   skip_waves <- newVName "skip_waves"
 
   let local_tid = kernelLocalThreadId constants
@@ -1023,8 +1050,8 @@ compileKernelStm constants (GroupReduce pes _ lam input) = do
     ImpGen.emit $
       in_wave_reductions <> cross_wave_reductions
 
-    forM_ (zip pes reduce_acc_params) $ \(pe, reduce_acc_param) ->
-      ImpGen.copyDWIM (patElemName pe) [] (Var $ paramName reduce_acc_param) []
+    forM_ (zip dests reduce_acc_params) $ \(dest, reduce_acc_param) ->
+      ImpGen.copyDWIMDest dest [] (Var $ paramName reduce_acc_param) []
   where readReduceArgument offset param arr
           | Prim _ <- paramType param =
               ImpGen.copyDWIM (paramName param) [] (Var arr) [i]
@@ -1038,12 +1065,12 @@ compileKernelStm constants (GroupReduce pes _ lam input) = do
           | otherwise =
               return ()
 
-compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
+compileKernelExp constants (ImpGen.Destination final_targets) (GroupStream w maxchunk lam accs _arrs) = do
   let GroupStreamLambda block_size block_offset acc_params arr_params body = lam
       w' = ImpGen.compileSubExp w
       block_offset' = Imp.ScalarVar block_offset
       max_block_size = ImpGen.compileSubExp maxchunk
-  ImpGen.Destination acc_targets <- ImpGen.destinationFromParams acc_params
+  acc_dest <- ImpGen.destinationFromParams acc_params
 
   ImpGen.declaringLParams (acc_params++arr_params) $
     ImpGen.declaringPrimVar block_size int32 $
@@ -1052,15 +1079,15 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
     -- If the GroupStream is morally just a do-loop, move the
     -- active-threads check outside the loop.
     let (around_loop, body') =
-          case mapM isSimpleThreadInSpace $ kernelBodyStms body of
+          case mapM isSimpleThreadInSpace $ bodyBindings body of
             Just stms' -> (flip (Imp.If (kernelThreadActive constants)) mempty,
-                           body { kernelBodyStms = stms' })
+                           body { bodyBindings = stms' })
             Nothing -> (id, body)
 
-    body'' <- ImpGen.collect $ compileNestedKernelBody acc_targets constants body'
+    body'' <- ImpGen.collect $ ImpGen.compileBody acc_dest body'
 
     ImpGen.emit $ Imp.SetScalar block_offset 0
-    zipWithM_ ImpGen.compileSubExpTo acc_targets accs
+    zipWithM_ ImpGen.compileSubExpTo (ImpGen.valueDestinations acc_dest) accs
 
     let not_at_end =
           Imp.CmpOp (CmpSlt Int32) block_offset' w'
@@ -1074,9 +1101,6 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
           Imp.SetScalar block_offset $
           block_offset' + max_block_size
 
-    ImpGen.Destination final_targets <-
-      ImpGen.destinationFromPattern $ Pattern [] pes
-
     ImpGen.emit $
       around_loop $
       Imp.While not_at_end $
@@ -1085,19 +1109,17 @@ compileKernelStm constants (GroupStream pes w maxchunk lam accs _arrs) = do
     zipWithM_ ImpGen.compileSubExpTo final_targets $
       map (Var . paramName) acc_params
 
-      where isSimpleThreadInSpace (Thread ThreadsInSpace bnd) = Just $ Thread AllThreads bnd
-            isSimpleThreadInSpace Thread{}                    = Nothing
-            isSimpleThreadInSpace stm                         = Just stm
+      where isSimpleThreadInSpace (Let _ _ Op{}) = Nothing
+            isSimpleThreadInSpace bnd = Just bnd
 
-compileKernelStm constants (GroupIf pes cond tb fb) = do
-  ImpGen.Destination dest <- ImpGen.destinationFromPattern $ Pattern [] pes
-
-  tb' <- ImpGen.collect $ compileNestedKernelBody dest constants tb
-  fb' <- ImpGen.collect $ compileNestedKernelBody dest constants fb
-  ImpGen.emit $ Imp.If (ImpGen.compileSubExp cond) tb' fb'
+compileKernelExp _ dest e =
+  throwError $ unlines ["Invalid target",
+                         "  " ++ show dest,
+                         "for kernel expression",
+                         "  " ++ pretty e]
 
 compileKernelResult :: KernelConstants -> ImpGen.ValueDestination -> KernelResult
-                    -> ImpGen.ImpM Imp.KernelOp ()
+                    -> InKernelGen ()
 compileKernelResult constants dest (ThreadsReturn (OneThreadPerGroup who) what) = do
   write_result <-
     ImpGen.collect $
@@ -1165,7 +1187,7 @@ isActive limit = case actives of
         actives = zipWith active is $ map ImpGen.compileSubExp ws
         active i = Imp.CmpOp (CmpSlt Int32) (Imp.ScalarVar i)
 
-setSpaceIndices :: KernelSpace -> ImpGen.ImpM Imp.KernelOp ()
+setSpaceIndices :: KernelSpace -> InKernelGen ()
 setSpaceIndices space =
   case spaceStructure space of
     FlatSpace is_and_dims -> do

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 module Futhark.Construct
   ( letSubExp
   , letSubExps
@@ -42,6 +43,9 @@ module Futhark.Construct
   , instantiateShapesFromIdentList
   , instantiateExtTypes
   , instantiateIdents
+
+  -- * Convenience
+  , simpleMkLetNames
   )
 where
 
@@ -382,3 +386,22 @@ instantiateIdents names ts
       runStateT (instantiateShapes nextShape ts) ([],context)
     return (context', zipWith Ident vals ts')
   | otherwise = Nothing
+
+-- | Can be used as the definition of 'mkLetNames' for a 'Bindable'
+-- instance for simple representations.
+simpleMkLetNames :: (ExpAttr lore ~ (), LetAttr lore ~ Type,
+                     MonadFreshNames m, TypedOp (Op lore), HasScope lore m) =>
+                    [(VName, Bindage)] -> Exp lore -> m (Binding lore)
+simpleMkLetNames names e = do
+  et <- expExtType e
+  (ts, shapes) <- instantiateShapes' et
+  let shapeElems = [ PatElem shape BindVar shapet
+                   | Ident shape shapet <- shapes
+                   ]
+      mkValElem (name, BindVar) t =
+        return $ PatElem name BindVar t
+      mkValElem (name, bindage@(BindInPlace _ src _)) _ = do
+        srct <- lookupType src
+        return $ PatElem name bindage srct
+  valElems <- zipWithM mkValElem names ts
+  return $ Let (Pattern shapeElems valElems) () e

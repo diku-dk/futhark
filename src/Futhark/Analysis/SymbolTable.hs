@@ -6,6 +6,7 @@ module Futhark.Analysis.SymbolTable
   ( SymbolTable (bindings)
   , empty
   , fromScope
+  , castSymbolTable
     -- * Entries
   , Entry
   , deepen
@@ -61,6 +62,7 @@ import Futhark.Representation.AST hiding (FParam, ParamT (..), paramType, lookup
 import qualified Futhark.Representation.AST as AST
 import Futhark.Analysis.ScalExp
 import Futhark.Transform.Substitute
+import Futhark.Analysis.Rephrase
 import qualified Futhark.Analysis.AlgSimplify as AS
 import Futhark.Representation.AST.Attributes.Ranges
   (Range, ScalExpRange, Ranged)
@@ -84,6 +86,46 @@ empty = SymbolTable 0 HM.empty
 fromScope :: Annotations lore => Scope lore -> SymbolTable lore
 fromScope = HM.foldlWithKey' insertFreeVar' empty
   where insertFreeVar' m k attr = insertFreeVar k attr m
+
+-- | Try to convert a symbol table for one representation into a
+-- symbol table for another.  The two symbol tables will have the same
+-- keys, but some entries may be diferent (i.e. some expression
+-- entries will have been turned into free variable entries).
+castSymbolTable :: (SameScope from to,
+                    ExpAttr from ~ ExpAttr to,
+                    BodyAttr from ~ BodyAttr to,
+                    RetType from ~ RetType to) =>
+                   SymbolTable from -> SymbolTable to
+castSymbolTable = genCastSymbolTable loopVar letBound fParam lParam freeVar
+  where loopVar (LoopVarEntry r d) = LoopVar $ LoopVarEntry r d
+        letBound e
+          | Just e' <- castBinding $ letBoundBinding e =
+              LetBound e { letBoundBinding = e'
+                         , letBoundAttr = letBoundAttr e
+                         }
+          | otherwise =
+              FreeVar FreeVarEntry { freeVarAttr = LetInfo $ letBoundAttr e
+                                   , freeVarBindingDepth = letBoundBindingDepth e
+                                   , freeVarRange = letBoundRange e
+                                   }
+        fParam e = FParam e { fparamAttr = fparamAttr e }
+        lParam e = LParam e { lparamAttr = lparamAttr e }
+        freeVar e = FreeVar e { freeVarAttr = castNameInfo $ freeVarAttr e }
+
+genCastSymbolTable :: (LoopVarEntry fromlore -> Entry tolore)
+                   -> (LetBoundEntry fromlore -> Entry tolore)
+                   -> (FParamEntry fromlore -> Entry tolore)
+                   -> (LParamEntry fromlore -> Entry tolore)
+                   -> (FreeVarEntry fromlore -> Entry tolore)
+                   -> SymbolTable fromlore
+                   -> SymbolTable tolore
+genCastSymbolTable loopVar letBound fParam lParam freeVar (SymbolTable depth entries) =
+  SymbolTable depth $ HM.map onEntry entries
+  where onEntry (LoopVar entry) = loopVar entry
+        onEntry (LetBound entry) = letBound entry
+        onEntry (FParam entry) = fParam entry
+        onEntry (LParam entry) = lParam entry
+        onEntry (FreeVar entry) = freeVar entry
 
 deepen :: SymbolTable lore -> SymbolTable lore
 deepen vtable = vtable { loopDepth = loopDepth vtable + 1 }
@@ -315,7 +357,7 @@ typeEnv = HM.map nameType . bindings
 
 defBndEntry :: Annotations lore =>
                SymbolTable lore
-            -> PatElem (LetAttr lore)
+            -> PatElem lore
             -> Range
             -> Binding lore
             -> LetBoundEntry lore

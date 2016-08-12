@@ -32,6 +32,7 @@ module Futhark.Representation.Ranges
        )
 where
 
+import Control.Monad.Identity
 import qualified Data.HashSet as HS
 import Data.Hashable
 import Data.Maybe
@@ -69,8 +70,8 @@ instance RangeOf (Range, attr) where
 instance RangesOf ([Range], attr) where
   rangesOf = fst
 
-instance PrettyAnnot (PatElem attr) =>
-  PrettyAnnot (PatElem (Range, attr)) where
+instance PrettyAnnot (PatElemT attr) =>
+  PrettyAnnot (PatElemT (Range, attr)) where
 
   ppAnnot patelem =
     range_annot <> inner_annot
@@ -87,47 +88,47 @@ instance PrettyAnnot (PatElem attr) =>
 instance (PrettyLore lore, CanBeRanged (Op lore)) => PrettyLore (Ranges lore) where
   ppExpLore attr = ppExpLore attr . removeExpRanges
 
-removeRanges :: CanBeRanged (Op lore) => Rephraser (Ranges lore) lore
-removeRanges = Rephraser { rephraseExpLore = id
-                         , rephraseLetBoundLore = snd
-                         , rephraseBodyLore = snd
-                         , rephraseFParamLore = id
-                         , rephraseLParamLore = id
-                         , rephraseRetType = id
-                         , rephraseOp = removeOpRanges
+removeRanges :: CanBeRanged (Op lore) => Rephraser Identity (Ranges lore) lore
+removeRanges = Rephraser { rephraseExpLore = return
+                         , rephraseLetBoundLore = return . snd
+                         , rephraseBodyLore = return . snd
+                         , rephraseFParamLore = return
+                         , rephraseLParamLore = return
+                         , rephraseRetType = return
+                         , rephraseOp = return . removeOpRanges
                          }
 
 removeProgRanges :: CanBeRanged (Op lore) =>
                     Prog (Ranges lore) -> Prog lore
-removeProgRanges = rephraseProg removeRanges
+removeProgRanges = runIdentity . rephraseProg removeRanges
 
 removeFunDefRanges :: CanBeRanged (Op lore) =>
                       FunDef (Ranges lore) -> FunDef lore
-removeFunDefRanges = rephraseFunDef removeRanges
+removeFunDefRanges = runIdentity . rephraseFunDef removeRanges
 
 removeExpRanges :: CanBeRanged (Op lore) =>
                    Exp (Ranges lore) -> Exp lore
-removeExpRanges = rephraseExp removeRanges
+removeExpRanges = runIdentity . rephraseExp removeRanges
 
 removeBodyRanges :: CanBeRanged (Op lore) =>
                     Body (Ranges lore) -> Body lore
-removeBodyRanges = rephraseBody removeRanges
+removeBodyRanges = runIdentity . rephraseBody removeRanges
 
 removeBindingRanges :: CanBeRanged (Op lore) =>
                        Binding (Ranges lore) -> Binding lore
-removeBindingRanges = rephraseBinding removeRanges
+removeBindingRanges = runIdentity . rephraseBinding removeRanges
 
 removeLambdaRanges :: CanBeRanged (Op lore) =>
                       Lambda (Ranges lore) -> Lambda lore
-removeLambdaRanges = rephraseLambda removeRanges
+removeLambdaRanges = runIdentity . rephraseLambda removeRanges
 
 removeExtLambdaRanges :: CanBeRanged (Op lore) =>
                          ExtLambda (Ranges lore) -> ExtLambda lore
-removeExtLambdaRanges = rephraseExtLambda removeRanges
+removeExtLambdaRanges = runIdentity . rephraseExtLambda removeRanges
 
 removePatternRanges :: PatternT (Range, a)
                     -> PatternT a
-removePatternRanges = rephrasePattern snd
+removePatternRanges = runIdentity . rephrasePattern (return . snd)
 
 addRangesToPattern :: (Attributes lore, CanBeRanged (Op lore)) =>
                       Pattern lore -> Exp (Ranges lore)
@@ -144,8 +145,8 @@ mkRangedBody innerlore bnds res =
 mkPatternRanges :: (Attributes lore, CanBeRanged (Op lore)) =>
                    Pattern lore
                 -> Exp (Ranges lore)
-                -> ([PatElem (Range, LetAttr lore)],
-                    [PatElem (Range, LetAttr lore)])
+                -> ([PatElemT (Range, LetAttr lore)],
+                    [PatElemT (Range, LetAttr lore)])
 mkPatternRanges pat e =
   (map (`addRanges` unknownRange) $ patternContextElements pat,
    zipWith addRanges (patternValueElements pat) ranges)

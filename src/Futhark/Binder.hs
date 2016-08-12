@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts, GeneralizedNewtypeDeriving, TypeFamilies, FlexibleInstances, MultiParamTypeClasses, UndecidableInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
 -- | This module defines a convenience monad/typeclass for creating
 -- normalised programs.
 module Futhark.Binder
@@ -93,16 +94,16 @@ runBinderT (BinderT m) types = do
   (x, bnds) <- runWriterT $ evalStateT m types
   return (x, DL.toList bnds)
 
-runBinder :: (MonadFreshNames m, HasScope lore m) =>
+runBinder :: (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
               Binder lore a
            -> m (a, [Binding lore])
 runBinder m = do
   types <- askScope
-  modifyNameSource $ runState $ runBinderT m types
+  modifyNameSource $ runState $ runBinderT m $ castScope types
 
 -- | Like 'runBinder', but throw away the result and just return the
 -- added bindings.
-runBinder_ :: (MonadFreshNames m, HasScope lore m) =>
+runBinder_ :: (MonadFreshNames m, HasScope somelore m, SameScope somelore lore) =>
               Binder lore a
            -> m [Binding lore]
 runBinder_ = fmap snd . runBinder
@@ -117,7 +118,7 @@ joinBinder m = do (x, bnds) <- runBinder m
                   return x
 
 runBodyBinder :: (Bindable lore, MonadFreshNames m,
-                  HasScope lore m) =>
+                  HasScope somelore m, SameScope somelore lore) =>
                  Binder lore (Body lore) -> m (Body lore)
 runBodyBinder = fmap (uncurry $ flip insertBindings) . runBinder
 

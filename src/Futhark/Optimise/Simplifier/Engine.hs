@@ -30,9 +30,11 @@ module Futhark.Optimise.Simplifier.Engine
        , hasFree
        , isConsumed
        , isFalse
+       , isOp
+       , isNotSafe
        , State
        , emptyState
-       , Need
+       , Need (needBindings)
        , asksEngineEnv
        , getVtable
        , localVtable
@@ -48,8 +50,8 @@ module Futhark.Optimise.Simplifier.Engine
        , simplifyPattern
        , simplifyFun
        , simplifyLambda
+       , simplifyLambdaSeq
        , simplifyLambdaNoHoisting
-       , simplifyLambdaNoHoistThese
        , simplifyExtLambda
        , simplifyParam
        , bindLParams
@@ -71,7 +73,7 @@ import Data.Either
 import Data.Hashable
 import Data.List
 import Data.Maybe
-import qualified Data.HashMap.Lazy as HM
+
 import qualified Data.HashSet as HS
 import Data.Foldable (traverse_)
 
@@ -97,8 +99,6 @@ instance Monoid (Need lore) where
   Need b1 f1 `mappend` Need b2 f2 = Need (b1 <> b2) (f1 <> f2)
   mempty = Need [] UT.empty
 
-type AliasMap = HM.HashMap VName Names
-
 data HoistBlockers m = HoistBlockers
                        { blockHoistPar :: BlockPred (Lore m)
                          -- ^ Blocker for hoisting out of parallel loops.
@@ -113,7 +113,6 @@ noExtraHoistBlockers :: HoistBlockers m
 noExtraHoistBlockers = HoistBlockers neverBlocks neverBlocks (const HS.empty) (const False)
 
 data Env m = Env { envRules         :: RuleBook m
-                 , envAliases       :: AliasMap
                  , envHoistBlockers :: HoistBlockers m
                  }
 
@@ -123,9 +122,9 @@ emptyEnv :: MonadEngine m =>
          -> Env m
 emptyEnv rules blockers =
   Env { envRules = rules
-      , envAliases = mempty
       , envHoistBlockers = blockers
       }
+
 data State m = State { stateVtable :: ST.SymbolTable (Lore m)
                      }
 
@@ -281,15 +280,14 @@ bindLoopVars ((var,bound):lvars) m =
 hoistBindings :: MonadEngine m =>
                  RuleBook m -> BlockPred (Lore m)
               -> ST.SymbolTable (Lore m) -> UT.UsageTable
-              -> [Binding (Lore m)] -> Result
-              -> m (Body (Lore m),
+              -> [Binding (Lore m)]
+              -> m ([Binding (Lore m)],
                     [Binding (Lore m)],
                     UT.UsageTable)
-hoistBindings rules block vtable uses needs result = do
+hoistBindings rules block vtable uses needs = do
   (uses', blocked, hoisted) <- simplifyBindings vtable uses needs
   mapM_ addBinding blocked
-  body <- mkBodyM blocked result
-  return (body, hoisted, uses')
+  return (blocked, hoisted, uses')
   where simplifyBindings vtable' uses' bnds = do
           (uses'', bnds') <- simplifyBindings' vtable' uses' bnds
           -- We need to do a final pass to ensure that nothing is
@@ -367,23 +365,27 @@ orIf p1 p2 body need = p1 body need || p2 body need
 isConsumed :: BlockPred lore
 isConsumed utable = any (`UT.isConsumed` utable) . patternNames . bindingPattern
 
+isOp :: BlockPred lore
+isOp _ (Let _ _ Op{}) = True
+isOp _ _ = False
+
 blockIf :: MonadEngine m =>
            BlockPred (Lore m)
-        -> m Result -> m (Body (Lore m))
+        -> m a -> m (a, [Binding (Lore m)])
 blockIf block m = passNeed $ do
-  (body, needs) <- listenNeed m
+  (x, needs) <- listenNeed m
   vtable <- getVtable
   rules <- asksEngineEnv envRules
-  (e, hoistable, usages) <-
-    hoistBindings rules block vtable (usageTable needs) (needBindings needs) body
+  (hoisted, hoistable, usages) <-
+    hoistBindings rules block vtable (usageTable needs) (needBindings needs)
   putVtable $ foldl (flip ST.insertBinding) vtable hoistable
-  return (e,
+  return ((x, hoisted),
           const Need { needBindings = hoistable
                      , usageTable  = usages
                      })
 
 insertAllBindings :: MonadEngine m => m Result -> m (Body (Lore m))
-insertAllBindings = blockIf $ \_ _ -> True
+insertAllBindings = uncurry (flip mkBodyM) <=< blockIf (isFalse False)
 
 hasFree :: Attributes lore => Names -> BlockPred lore
 hasFree ks _ need = ks `intersects` requires need
@@ -415,8 +417,8 @@ hoistCommon :: MonadEngine m =>
                 -> ST.SymbolTable (Lore m))
             -> m (Body (Lore m), Body (Lore m))
 hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
-  (body1, needs1) <- listenNeed $ localVtable vtablef1 m1
-  (body2, needs2) <- listenNeed $ localVtable vtablef2 m2
+  (res1, needs1) <- listenNeed $ localVtable vtablef1 m1
+  (res2, needs2) <- listenNeed $ localVtable vtablef2 m2
   is_alloc_fun <- asksEngineEnv $ isAllocation  . envHoistBlockers
   getArrSz_fun <- asksEngineEnv $ getArraySizes . envHoistBlockers
   let needs1_bnds = needBindings needs1
@@ -428,16 +430,18 @@ hoistCommon m1 vtablef1 m2 vtablef2 = passNeed $ do
                 isNotHoistableBnd hoistbl_nms
   vtable <- getVtable
   rules <- asksEngineEnv envRules
-  (body1', safe1, f1) <-
+  (body1_bnds', safe1, f1) <-
     enterBody $
     localVtable vtablef1 $
-    hoistBindings rules block vtable (usageTable needs1) needs1_bnds body1
-  (body2', safe2, f2) <-
+    hoistBindings rules block vtable (usageTable needs1) needs1_bnds
+  (body2_bnds', safe2, f2) <-
     enterBody $
     localVtable vtablef2 $
-    hoistBindings rules block vtable (usageTable needs2) needs2_bnds body2
+    hoistBindings rules block vtable (usageTable needs2) needs2_bnds
   let hoistable = safe1 <> safe2
   putVtable $ foldl (flip ST.insertBinding) vtable hoistable
+  body1' <- mkBodyM body1_bnds' res1
+  body2' <- mkBodyM body2_bnds' res2
   return ((body1', body2'),
           const Need { needBindings = hoistable
                      , usageTable = f1 <> f2
@@ -543,14 +547,16 @@ simplifyExp (DoLoop ctx val form loopbody) = do
               fparamnames,
               id)
   seq_blocker <- asksEngineEnv $ blockHoistSeq . envHoistBlockers
-  loopbody' <- enterLoop $
-               bindFParams (ctxparams'++valparams') $
-               blockIf
-               (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
-               wrapbody $ do
-                 res <- simplifyBody diets loopbody
-                 isDoLoopResult res
-                 return res
+  (loopres', loopbnds') <-
+    enterLoop $
+    bindFParams (ctxparams'++valparams') $
+    blockIf
+    (hasFree boundnames `orIf` isConsumed `orIf` seq_blocker) $
+    wrapbody $ do
+      res <- simplifyBody diets loopbody
+      isDoLoopResult res
+      return res
+  loopbody' <- mkBodyM loopbnds' loopres'
   consumeResult $ zip diets $ ctxinit' ++ valinit'
   return $ DoLoop ctx' val' form' loopbody'
   where fparamnames = HS.fromList (map (paramName . fst) $ ctx++val)
@@ -671,20 +677,21 @@ simplifyLambda :: MonadEngine m =>
                   Lambda (InnerLore m)
                -> Maybe [SubExp] -> [Maybe VName]
                -> m (Lambda (Lore m))
-simplifyLambda = simplifyLambdaMaybeHoist $ isFalse True
+simplifyLambda lam nes arrs = do
+  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
+  simplifyLambdaMaybeHoist par_blocker lam nes arrs
+
+simplifyLambdaSeq :: MonadEngine m =>
+                  Lambda (InnerLore m)
+               -> Maybe [SubExp] -> [Maybe VName]
+               -> m (Lambda (Lore m))
+simplifyLambdaSeq = simplifyLambdaMaybeHoist neverBlocks
 
 simplifyLambdaNoHoisting :: MonadEngine m =>
                             Lambda (InnerLore m)
                          -> Maybe [SubExp] -> [Maybe VName]
                          -> m (Lambda (Lore m))
 simplifyLambdaNoHoisting = simplifyLambdaMaybeHoist $ isFalse False
-
-simplifyLambdaNoHoistThese :: MonadEngine m =>
-                              Names
-                           -> Lambda (InnerLore m)
-                           -> Maybe [SubExp] -> [Maybe VName]
-                           -> m (Lambda (Lore m))
-simplifyLambdaNoHoistThese these = simplifyLambdaMaybeHoist $ hasFree these
 
 simplifyLambdaMaybeHoist :: MonadEngine m =>
                             BlockPred (Lore m) -> Lambda (InnerLore m)
@@ -695,13 +702,13 @@ simplifyLambdaMaybeHoist blocked lam@(Lambda params body rettype) nes arrs = do
   let (nonarrayparams, arrayparams) =
         splitAt (length params' - length arrs) params'
       paramnames = HS.fromList $ boundByLambda lam
-  par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  body' <-
+  (body_res', body_bnds') <-
     enterLoop $
     bindLParams nonarrayparams $
     bindArrayLParams (zip arrayparams arrs) $
-    blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
+    blockIf (blocked `orIf` hasFree paramnames `orIf` isConsumed) $
       simplifyBody (map (const Observe) rettype) body
+  body' <- mkBodyM body_bnds' body_res'
   rettype' <- mapM simplify rettype
   let consumed_in_body = consumedInBody body'
       paramWasConsumed p (Just (Var arr))
@@ -727,11 +734,13 @@ simplifyExtLambda lam@(ExtLambda params body rettype) nes parbnds = do
   let paramnames = HS.fromList $ boundByExtLambda lam
   rettype' <- mapM simplify rettype
   par_blocker <- asksEngineEnv $ blockHoistPar . envHoistBlockers
-  body' <- enterLoop $
-           bindLParams params' $
-           localVtable extendSymTab $
-           blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
-           simplifyBody (map (const Observe) rettype) body
+  (body_res', body_bnds') <-
+    enterLoop $
+    bindLParams params' $
+    localVtable extendSymTab $
+    blockIf (hasFree paramnames `orIf` isConsumed `orIf` par_blocker) $
+    simplifyBody (map (const Observe) rettype) body
+  body' <- mkBodyM body_bnds' body_res'
   let consumed_in_body = consumedInBody body'
       paramWasConsumed p (Var arr)
         | p `HS.member` consumed_in_body = consumedName arr

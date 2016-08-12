@@ -1,11 +1,11 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 -- | Sequentialise to kernel statements.
 module Futhark.Pass.ExtractKernels.Kernelise
        ( transformBinding
        , transformBindings
        , transformBody
-
        , mapIsh
        )
        where
@@ -23,19 +23,14 @@ import qualified Futhark.Representation.Kernels as Out
 import Futhark.MonadFreshNames
 import Futhark.Tools
 
-type Transformer m = (MonadFreshNames m,
-                      LocalScope Out.Kernels m)
+type Transformer m = (MonadBinder m,
+                      Lore m ~ Out.InKernel,
+                      LocalScope (Lore m) m)
 
-scopeForSOACs :: Scope Out.Kernels -> Scope SOACS
-scopeForSOACs = castScope
+transformBindings :: Transformer m => [Binding] -> m ()
+transformBindings = mapM_ transformBinding
 
-transformBindings :: Transformer m => [Binding] -> m [Out.KernelStm Out.Kernels]
-transformBindings [] = return []
-transformBindings (bnd:bnds) = do
-  bnd_stms <- transformBinding bnd
-  inScopeOf bnd_stms $ (bnd_stms++) <$> transformBindings bnds
-
-transformBinding :: Transformer m => Binding -> m [Out.KernelStm Out.Kernels]
+transformBinding :: Transformer m => Binding -> m ()
 
 transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs))) = do
   chunk_size <- newVName "chunk_size"
@@ -63,7 +58,7 @@ transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs))) = do
     groupStreamMapAccumL redomap_pes cs (Var chunk_size) fold_lam
     (map (Var . paramName) fold_acc_params') (map paramName arr_chunk_params)
 
-  let stream_kbody = Out.KernelBody redomap_kstms $
+  let stream_kbody = Out.Body () redomap_kstms $
                      map (Var . patElemName) redomap_pes
       stream_lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = chunk_size
                                          , Out.groupStreamChunkOffset = chunk_offset
@@ -71,7 +66,7 @@ transformBinding (Let pat _ (Op (Redomap cs w _ _ fold_lam nes arrs))) = do
                                          , Out.groupStreamArrParams = arr_chunk_params
                                          , Out.groupStreamLambdaBody = stream_kbody
                                          }
-  return [Out.GroupStream (patternValueElements pat) w w stream_lam nes arrs]
+  addBinding $ Let pat () $ Op $ Out.GroupStream w w stream_lam nes arrs
 
   where mkArrChunkParam chunk_size arr_param =
           newParam (baseString (paramName arr_param) <> "_chunk") $
@@ -85,36 +80,36 @@ transformBinding (Let pat _ (DoLoop [] val (ForLoop i bound) body)) = do
                                   , Out.groupStreamAccParams = map (fmap fromDecl . fst) val
                                   , Out.groupStreamArrParams = []
                                   , Out.groupStreamLambdaBody = body' }
-  return [Out.GroupStream (patternValueElements pat)
-          bound (constant (1::Int32)) lam (map snd val) []]
+  addBinding $ Let pat () $ Op $ Out.GroupStream
+    bound (constant (1::Int32)) lam (map snd val) []
 
-transformBinding (Let pat _ (If cond tb fb ts)) | all primType ts = do
+transformBinding (Let pat _ (If cond tb fb ts)) = do
   tb' <- transformBody tb
   fb' <- transformBody fb
-  return [Out.GroupIf (patternValueElements pat) cond tb' fb']
+  addBinding $ Let pat () $ If cond tb' fb' ts
 
 transformBinding bnd =
-  map (Out.Thread Out.ThreadsInSpace) <$> runBinder_ (FOT.transformBindingRecursively bnd)
+  FOT.transformBindingRecursively bnd
 
-transformBody :: Transformer m => Body -> m (Out.NestedKernelBody Out.Kernels)
-transformBody (Body _ bnds res) = do
-  stms <- transformBindings bnds
-  return $ Out.KernelBody stms res
+transformBody :: Transformer m => Body -> m (Out.Body Out.InKernel)
+transformBody (Body attr bnds res) = do
+  stms <- collectBindings_ $ transformBindings bnds
+  return $ Out.Body attr stms res
 
 groupStreamMapAccumL :: Transformer m =>
-                        [Out.PatElem]
+                        [Out.PatElem Out.InKernel]
                      -> Certificates
                      -> SubExp
                      -> Lambda
                      -> [SubExp]
                      -> [VName]
-                     -> m [Out.KernelStm Out.Kernels]
+                     -> m [Out.Binding Out.InKernel]
 groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
   let acc_num     = length accexps
       res_tps     = lambdaReturnType fold_lam
       map_arr_tps = drop acc_num res_tps
 
-  soacs_scope <- asksScope scopeForSOACs
+  soacs_scope <- asksScope castScope
 
   let fold_lam' = fold_lam { lambdaParams = take acc_num $ lambdaParams fold_lam }
   ((merge, i, redomap_loop), bnds) <- flip runBinderT soacs_scope $ do
@@ -141,9 +136,10 @@ groupStreamMapAccumL pes cs w fold_lam accexps arrexps = do
                                          , Out.groupStreamArrParams = arr_params_chunked
                                          , Out.groupStreamLambdaBody = redomap_kbody
                                          }
-      stream_kstm = Out.GroupStream pes w (constant (1::Int32)) stream_lam accexps arrexps
+      stream_kstm = Let (Pattern [] pes) () $ Op $
+                    Out.GroupStream w (constant (1::Int32)) stream_lam accexps arrexps
 
-  bnds_kstms <- transformBindings bnds
+  bnds_kstms <- collectBindings_ $ transformBindings bnds
 
   return $ bnds_kstms ++ [stream_kstm]
 
@@ -151,22 +147,18 @@ resultArray :: MonadBinder m => [Type] -> m [VName]
 resultArray = mapM oneArray
   where oneArray t = letExp "result" $ PrimOp $ Scratch (elemType t) (arrayDims t)
 
--- | Turn what is morally a map with a lambda containing kernel
--- statements into a sequential kernel statement loop.
 mapIsh :: Transformer m =>
           Pattern
        -> Certificates
        -> SubExp
        -> [LParam]
-       -> Out.NestedKernelBody Out.Kernels
+       -> Out.Body Out.InKernel
        -> [VName]
-       -> m [Out.KernelStm Out.Kernels]
-mapIsh pat cs w params (Out.KernelBody kstms kres) arrs = do
-  soacs_scope <- asksScope scopeForSOACs
+       -> m ()
+mapIsh pat cs w params (Out.Body () kstms kres) arrs = do
   i <- newVName "i"
 
-  (outarrs, bnds) <-
-    flip runBinderT soacs_scope $ resultArray $ patternTypes pat
+  outarrs <- resultArray $ patternTypes pat
 
   outarr_params <- forM (patternElements pat) $ \pe ->
     newParam (baseString (patElemName pe) <> "_out") $
@@ -181,16 +173,14 @@ mapIsh pat cs w params (Out.KernelBody kstms kres) arrs = do
     fmap unzip $ forM (zip outarr_params kres) $ \(outarr_param, se) -> do
       outarr_param_new <- newParam' (<>"_new") outarr_param
       return (outarr_param_new,
-               Out.Thread Out.ThreadsInSpace $
-               mkLet [] [(paramIdent outarr_param_new,
-                          BindInPlace [] (paramName outarr_param) [Var i])] $
-               PrimOp $ SubExp se)
+              mkLet [] [(paramIdent outarr_param_new,
+                         BindInPlace [] (paramName outarr_param) [Var i])] $
+              PrimOp $ SubExp se)
 
   let index_stms = do (p, arr) <- zip params $ map paramName params_chunked
-                      return $ Out.Thread Out.ThreadsInSpace $
-                        mkLet' [] [paramIdent p] $
+                      return $ mkLet' [] [paramIdent p] $
                         PrimOp $ Index cs arr [constant (0::Int32)]
-      kbody' = Out.KernelBody (index_stms++kstms++write_elems) $
+      kbody' = Out.Body () (index_stms++kstms++write_elems) $
                map (Var . paramName) outarr_params_new
 
   let stream_lam = Out.GroupStreamLambda { Out.groupStreamChunkSize = dummy_chunk_size
@@ -199,8 +189,5 @@ mapIsh pat cs w params (Out.KernelBody kstms kres) arrs = do
                                          , Out.groupStreamArrParams = params_chunked
                                          , Out.groupStreamLambdaBody = kbody'
                                          }
-      stream_kstm = Out.GroupStream (patternElements pat) w (constant (1::Int32))
-                    stream_lam (map Var outarrs) arrs
-
-  bnds_kstms <- transformBindings bnds
-  return $ bnds_kstms ++ [stream_kstm]
+  addBinding $ Let pat () $ Op $ Out.GroupStream w (constant (1::Int32))
+    stream_lam (map Var outarrs) arrs

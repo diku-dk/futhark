@@ -39,7 +39,7 @@ coalesceMemoryAccesses =
   "Coalesce memory accesses" $
   intraproceduralTransformation transformFunDef
 
-transformFunDef :: MonadFreshNames m => FunDef -> m FunDef
+transformFunDef :: MonadFreshNames m => FunDef ExplicitMemory -> m (FunDef ExplicitMemory)
 transformFunDef fundec = do
   body' <- modifyNameSource $ runState (runReaderT m $ scopeOf fundec)
   return fundec { funDefBody = body' }
@@ -47,12 +47,12 @@ transformFunDef fundec = do
 
 type ExpandM = ReaderT (Scope ExplicitMemory) (State VNameSource)
 
-transformBody :: Body -> ExpandM Body
+transformBody :: Body ExplicitMemory -> ExpandM (Body ExplicitMemory)
 transformBody (Body () bnds res) = inScopeOf bnds $ do
   bnds' <- concat <$> mapM transformBinding bnds
   return $ Body () bnds' res
 
-transformBinding :: Binding -> ExpandM [Binding]
+transformBinding :: Binding ExplicitMemory -> ExpandM [Binding ExplicitMemory]
 
 transformBinding (Let pat () e)
   | Just (scanred_pat_elems, map_pat_elems, size) <- scanOrReduce pat e,
@@ -103,8 +103,10 @@ transformBinding (Let pat () e) = do
   where transform = identityMapper { mapOnBody = transformBody
                                    }
 
-scanOrReduce :: Pattern -> Exp
-             -> Maybe ([PatElem], [PatElem], KernelSize)
+scanOrReduce :: Pattern ExplicitMemory -> Exp ExplicitMemory
+             -> Maybe ([PatElem ExplicitMemory],
+                       [PatElem ExplicitMemory],
+                       KernelSize)
 scanOrReduce (Pattern [] pat_elems) (Op (Inner (ScanKernel _ _ size _ lam _ _))) =
   let (scan_pat_elems, map_pat_elems) =
         splitAt (2 * length (lambdaReturnType lam)) pat_elems
