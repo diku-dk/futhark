@@ -4,9 +4,7 @@
 
 import json
 import sys
-
-def mean(numbers):
-    return float(sum(numbers)) / max(len(numbers), 1)
+import numpy as np
 
 class bcolors:
     HEADER = '\033[95m'
@@ -43,7 +41,14 @@ for prog,a_prog in a_json.items():
                 print('In %s but not %s: program %s dataset %s' % (a_file, b_file, prog, dataset))
             else:
                 b_dataset_results = b_prog_datasets[dataset]
-                speedups[prog][dataset] = mean(a_dataset_results['runtimes'])/mean(b_dataset_results['runtimes'])
+                a_runtimes = a_dataset_results['runtimes']
+                b_runtimes = b_dataset_results['runtimes']
+                speedup = np.mean(a_runtimes)/np.mean(b_runtimes)
+                diff = abs(np.mean(a_runtimes)-np.mean(b_runtimes))
+                significant = diff > np.std(a_runtimes)/2 + np.std(a_runtimes)/2
+                # Apart from speedups, we also calculate whether the
+                # change is statistically significant.
+                speedups[prog][dataset] = (speedup, significant)
 
 for prog,b_prog in b_json.items():
     if not prog in a_json:
@@ -60,10 +65,10 @@ for prog,b_prog in b_json.items():
 for prog,prog_speedups in speedups.items():
     if len(prog_speedups) > 0:
         print('\n%s%s%s' % (bcolors.HEADER+bcolors.BOLD, prog, bcolors.ENDC))
-        for dataset,dataset_speedup in prog_speedups.items():
-            if dataset_speedup > 1.01:
+        for dataset,(dataset_speedup,significant) in prog_speedups.items():
+            if significant and dataset_speedup > 1.01:
                 color = bcolors.OKGREEN
-            elif dataset_speedup < 0.99:
+            elif significant and dataset_speedup < 0.99:
                 color = bcolors.FAIL
             else:
                 color = ''
