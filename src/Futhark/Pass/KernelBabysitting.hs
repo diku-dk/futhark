@@ -221,8 +221,6 @@ traverseKernelBodyArrayIndexes f (KernelBody () kstms kres) =
 
         onOp (GroupReduce w lam input) =
           GroupReduce w <$> onLambda lam <*> pure input
-        -- onOp (Thread threads bnd) =
-        --   Thread threads <$> onBinding bnd
         onOp (GroupStream w maxchunk lam accs arrs) =
            GroupStream w maxchunk <$> onStreamLambda lam <*> pure accs <*> pure arrs
         onOp stm = pure stm
