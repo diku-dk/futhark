@@ -1,4 +1,6 @@
 -- A better name would be 'take'...
 -- ==
-fun ([](f64,f64), [](f64,f64)) main(int n, [](f64,f64) a) =
-  split( (n), a)
+-- input { 2 [1,2,3,4,5] }
+-- output { [1,2] }
+fun []int main(int n, []int a) =
+  split( (n), a).0

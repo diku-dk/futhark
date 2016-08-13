@@ -8,5 +8,5 @@
 --   [1, 2, 3]
 --   [4, 5, 6]
 -- }
-fun [](int,int) main([]int a, []int b) =
-  zip(a,b)
+fun ([]int,[]int) main([]int a, []int b) =
+  unzip(zip(a,b))

@@ -13,5 +13,9 @@
 --   [1, 0, 7, 4, 1]
 -- }
 
-fun ([](int,int), [](int,int), [](int,int)) main([]int xs, []int ys) =
-  partition(<, ==, zip(xs,ys))
+fun ([]int, []int, []int, []int, []int, []int) main([]int xs, []int ys) =
+  let (x,y,z) = partition(<, ==, zip(xs,ys))
+  let (x1,x2) = unzip(x)
+  let (y1,y2) = unzip(y)
+  let (z1,z2) = unzip(z)
+  in (x1, x2, y1, y2, z1, z2)

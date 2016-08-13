@@ -499,7 +499,10 @@ Exp  :: { UncheckedExp }
                       { Scan $3 $5 $7 $1 }
 
      | zip '(' Exps ')'
-                      { Zip (map (\x -> (x, NoInfo)) $3) $1 }
+                      { Zip 0 (map (\x -> (x, NoInfo)) $3) $1 }
+
+     | zip '@' NaturalInt '(' Exps ')'
+                      { Zip $3 (map (\x -> (x, NoInfo)) $5) $1 }
 
      | unzip '(' Exp ')'
                       { Unzip $3 [] $1 }
@@ -513,7 +516,7 @@ Exp  :: { UncheckedExp }
                       { Partition (fst $3) (snd $3) $1 }
 
      | zipWith '(' FunAbstr ',' Exps ')'
-                      { Map $3 (Zip (map (\x -> (x, NoInfo)) $5) $1) $1 }
+                      { Map $3 (Zip 0 (map (\x -> (x, NoInfo)) $5) $1) $1 }
 
      | copy '(' Exp ')' { Copy $3 $1 }
 

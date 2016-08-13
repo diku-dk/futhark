@@ -120,6 +120,10 @@ data TypeError =
   | UndefinedQualName SrcLoc QualName
   -- ^ Undefined longname
   | InvalidField SrcLoc Type String
+  | InvalidEntryPointReturnType SrcLoc Name
+  -- ^ Invalid entry point return type.
+  | InvalidEntryPointParamType SrcLoc Name Name
+  -- ^ Invalid entry point return type.
 
 instance Show TypeError where
   show (TypeError pos msg) =
@@ -226,6 +230,14 @@ instance Show TypeError where
   show (InvalidField loc t field) =
     "Attempt to access field '" ++ field ++ "' of value of type " ++
     pretty t ++ " at " ++ locStr loc ++ "."
+  show (InvalidEntryPointReturnType loc fname) =
+    "Entry point '" ++ nameToString fname ++ "' at " ++ locStr loc ++
+     " has invalid return type.\n" ++
+    "Entry points may not return nested tuples.  Sorry."
+  show (InvalidEntryPointParamType loc fname pname) =
+    "Entry point '" ++ nameToString fname ++ "' parameter '" ++ nameToString pname ++
+    "' at " ++ locStr loc ++ " has has invalid type.\n" ++
+    "Entry point parameters may not be tuples.  Sorry."
 
 -- | A tuple of a return type and a list of argument types.
 type FunBinding = (QualName, StructTypeBase VName, [StructTypeBase VName])
@@ -710,6 +722,14 @@ checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
 
   checkReturnAlias rettype_structural params' $ typeOf body'
 
+  when entry $ do
+    unless (okEntryPointReturnType (unInfo $ expandedType rettype')) $
+      bad $ InvalidEntryPointReturnType loc fname
+
+    forM_ params' $ \param ->
+      unless (okEntryPointParamType (paramType param)) $
+        bad $ InvalidEntryPointParamType (srclocOf param) fname (baseName $ paramName param)
+
   if toStructural (typeOf body') `subtypeOf` rettype_structural then
     return $ FunDef entry fullname rettype' params' body' loc
   else bad $ ReturnTypeError loc fname rettype_structural $ toStructural $ typeOf body'
@@ -766,6 +786,15 @@ checkFun (FunDef entry fullname@(fname,_) rettype params body loc) = do
         returnAliasing (Tuple ets1) (Tuple ets2) =
           concat $ zipWith returnAliasing ets1 ets2
         returnAliasing expected got = [(uniqueness expected, aliases got)]
+
+        okEntryPointReturnType (Tuple ts) = all okEntryPointParamType ts
+        okEntryPointReturnType t = okEntryPointParamType t
+
+        okEntryPointParamType Tuple{} = False
+        okEntryPointParamType (Prim _) = True
+        okEntryPointParamType (Array TupleArray{}) = False
+        okEntryPointParamType (Array _) = True
+
 
 checkExp :: ExpBase NoInfo VName
          -> TypeM Exp
@@ -945,15 +974,16 @@ checkExp (Rotate d offexp arrexp loc) = do
     " which has only " ++ show rank ++ " dimensions."
   return $ Rotate d offexp' arrexp' loc
 
-checkExp (Zip arrexps loc) = do
+checkExp (Zip i arrexps loc) = do
   arrexps' <- mapM (checkExp . fst) arrexps
   arrts <- forM arrexps' $ \arrexp -> do
     let arrt = typeOf arrexp
-    when (arrayRank arrt < 1) $
+    when (arrayRank arrt < 1+i) $
       bad $ TypeError (srclocOf arrexp) $
-      "Type of expression is not array, but " ++ pretty arrt ++ "."
+      "Type of expression is not array with at least " ++ show (1+i) ++
+      " dimensions, but " ++ pretty arrt ++ "."
     return arrt
-  return $ Zip (zip arrexps' $ map Info arrts) loc
+  return $ Zip i (zip arrexps' $ map Info arrts) loc
 
 checkExp (Unzip e _ pos) = do
   e' <- checkExp e
