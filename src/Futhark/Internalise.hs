@@ -336,10 +336,10 @@ internaliseExp desc (E.Unsafe e _) =
   local (\env -> env { envDoBoundsChecks = False }) $
   internaliseExp desc e
 
-internaliseExp _ (E.Zip [] _) =
+internaliseExp _ (E.Zip _ [] _) =
   return []
 
-internaliseExp _ (E.Zip (e:es) loc) = do
+internaliseExp _ (E.Zip _ (e:es) loc) = do
   e' <- internaliseExpToVars "zip_arg" $ fst e
   es_unchecked' <- mapM (internaliseExpToVars "zip_arg" . fst) es
   -- Now we will reshape all of es_unchecked' to have the same outer

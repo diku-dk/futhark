@@ -323,6 +323,13 @@ number of arrays may be passed to ``unzip``.  If *n* arrays are given,
 the result will be a single-dimensional array of *n*-tuples (where the
 the tuple components may themselves be arrays).
 
+``zip@i(x, y, z)``
+~~~~~~~~~~~~~~~~~~
+
+Like ``zip``, but operates within ``i+1`` dimensions.  Thus, ``zip@0``
+is equivalent to unadorned ``zip``.  This form is useful when zipping
+multidimensional arrays along the innermost dimensions.
+
 ``unzip(a)``
 ~~~~~~~~~~~~
 

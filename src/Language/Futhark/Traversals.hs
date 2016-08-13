@@ -111,12 +111,12 @@ mapExpM tv (Map fun e loc) =
 mapExpM tv (Reduce comm fun startexp arrexp loc) =
   Reduce comm <$> mapOnLambda tv fun <*>
        mapOnExp tv startexp <*> mapOnExp tv arrexp <*> pure loc
-mapExpM tv (Zip args loc) = do
+mapExpM tv (Zip i args loc) = do
   args' <- forM args $ \(argexp, argt) -> do
                               argexp' <- mapOnExp tv argexp
                               argt' <- mapTypeM tv argt
                               pure (argexp', argt')
-  pure $ Zip args' loc
+  pure $ Zip i args' loc
 mapExpM tv (Unzip e ts loc) =
   pure Unzip <*> mapOnExp tv e <*> mapM (mapTypeM tv) ts <*> pure loc
 mapExpM tv (Unsafe e loc) =

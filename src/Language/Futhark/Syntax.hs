@@ -501,7 +501,7 @@ data ExpBase f vn =
             | Write (ExpBase f vn) (ExpBase f vn) [ExpBase f vn] SrcLoc
             -- ^ @write([0, 2, -1], [9, 7, 0], [3, 4, 5]) = [9, 4, 7]@.
 
-            | Zip [(ExpBase f vn, f (CompTypeBase vn))] SrcLoc
+            | Zip Int [(ExpBase f vn, f (CompTypeBase vn))] SrcLoc
             -- ^ Normal zip supporting variable number of arguments.
             -- The type paired to each expression is the full type of
             -- the array returned by that expression.
@@ -545,7 +545,7 @@ instance Located (ExpBase f vn) where
   locOf (Rotate _ _ _ pos) = locOf pos
   locOf (Map _ _ pos) = locOf pos
   locOf (Reduce _ _ _ _ pos) = locOf pos
-  locOf (Zip _ pos) = locOf pos
+  locOf (Zip _ _ pos) = locOf pos
   locOf (Unzip _ _ pos) = locOf pos
   locOf (Scan _ _ _ pos) = locOf pos
   locOf (Filter _ _ pos) = locOf pos
