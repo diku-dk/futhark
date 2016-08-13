@@ -9,7 +9,7 @@ description:
 
 Homepage:            http://futhark-lang.org
 Category:            Language
-License:             BSD3
+License:             ISC
 License-file:        LICENSE
 Build-type:          Simple
 Maintainer:          athas@sigkill.dk
